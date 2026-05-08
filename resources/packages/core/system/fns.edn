@@ -5,17 +5,91 @@
 {:namespace "core.system"
  :description "System primitives — Ring response shape, JSON, JVM info, timing, env, resources."
  :fns
- [{:name :ring-response
-   :description "Build a Ring response map: {:status :headers :body}. Consumed directly by http-kit."
-   :args {:status {:type :int :description "HTTP status code (e.g. 200, 404)."}
-          :headers {:type :jsonb :description "Header map; keys must be strings (http-kit convention)."}
-          :body {:type :text :description "Response body — a string the client receives verbatim."}}
-   :return-type :jsonb}
+ [;; ---------------------------------------------------------------------
+  ;; Record-type declarations (formerly aliases.edn). Open-record
+  ;; subtyping (`{a:int b:text} ⊆ {a:int}`) means handlers that produce
+  ;; a SUPERSET of the named fields still satisfy the type — matches
+  ;; how http-kit consumes the response map.
+  ;; ---------------------------------------------------------------------
 
+  {:name :ring-response-shape
+   :type {:status :http-status
+          :headers :jsonb
+          :body :text}}
+
+  {:name :jvm-version-shape
+   :type {:name :text
+          :version :text
+          :uptime-ms :int}}
+
+  {:name :heap-memory-shape
+   :type {:heap-used :int
+          :heap-max :int
+          :heap-committed :int
+          :free :int
+          :total :int
+          :max :int}}
+
+  {:name :os-info-shape
+   :type {:name :text
+          :arch :text
+          :processors :int
+          :load-average :numeric}}
+
+  ;; ring-response — pure-declaration constructor for `:ring-response-shape`.
+  ;; Built as an :assoc chain: each step adds one field to a growing
+  ;; record, threading the lifted free args (`:status` `:headers` `:body`)
+  ;; through. No defbase needed — the type-system's `:assoc` rule
+  ;; computes the record shape, which `:return-type :ring-response-shape`
+  ;; pins (computed ⊆ declared check at sync time).
+  ;;
+  ;; Headers must reach http-kit with string keys; JSONB roundtrip
+  ;; keywordizes literal-map keys, so the headers slot threads through
+  ;; `:stringify-map-keys` before being assoc'd in.
+  ;;
+  ;; NOTE: a "direct" `:parent :ring-response-shape` form does NOT work
+  ;; here — binding `:headers` to the stringify fn-ref at this level
+  ;; would close that slot to children's overrides (graphden's rule:
+  ;; once a slot is value/ref-bound, descendants can't rebind). The
+  ;; `:assoc` chain keeps `:headers` lifted as a free arg at the
+  ;; consumer surface so callers like `:default-auth-fail-response`
+  ;; remain free to bind it.
+
+  {:name :_ring-response--stringified-headers
+   :parent :stringify-map-keys
+   :args {:m {:as :headers :type :jsonb}}}
+
+  {:name :_ring-response--w-status
+   :parent :assoc
+   :args {:map {}
+          :key {:value :status :literal? true}
+          :value {:as :status :type :http-status}}}
+
+  {:name :_ring-response--w-headers
+   :parent :assoc
+   :args {:map :_ring-response--w-status
+          :key {:value :headers :literal? true}
+          :value :_ring-response--stringified-headers}}
+
+  {:name :ring-response
+   :description "Build a Ring response: `{:status :headers :body}`. Free args: `:status` (refined `:http-status`), `:headers` (jsonb, stringified), `:body` (text)."
+   :parent :assoc
+   :args {:map :_ring-response--w-headers
+          :key {:value :body :literal? true}
+          :value {:as :body :type :text}}
+   :return-type :ring-response-shape}
+
+  ;; Ring-handler shape over `:constantly` — the result is a one-arg
+  ;; callable that returns `:response` for any request, ignoring the
+  ;; input. Used for reitit's default-handler trio (`:not-found`,
+  ;; `:method-not-allowed`, `:not-acceptable`) where the slot expects a
+  ;; raw Clojure callable; per-route handlers use `:assoc-fn` instead.
+  ;; Pure rename of `:constantly`'s `:value` arg to `:response` — no
+  ;; new impl, just a semantic alias.
   {:name :make-handler
-   :description "Wrap a constant value as a Ring callable `(fn [_request] response)`. Used for reitit's default-handler trio (:not-found etc.) where the slot is :any-typed and needs a real Clojure callable; per-route handlers use :assoc-fn instead."
-   :args {:response {:type :jsonb :description "The fixed Ring response to return for every call."}}
-   :return-type :fn}
+   :description "Ring-handler shape over `:constantly` — binds `:response` so the resulting callable returns it for every request, ignoring the input."
+   :parent :constantly
+   :args {:value {:as :response}}}
 
   {:name :to-json-string
    :description "Serialize a Clojure value to a JSON string."
@@ -32,22 +106,26 @@
   {:name :jvm-version
    :description "Java runtime version string (`java.version` system property)."
    :args {}
-   :return-type :jsonb}
+   :return-type :jvm-version-shape
+   :effects #{:io}}                 ; system-property read
 
   {:name :heap-memory
-   :description "JVM heap usage snapshot — `{:used :committed :max}` in bytes."
+   :description "JVM heap usage snapshot — `{:heap-used :heap-max :heap-committed :free :total :max}` in bytes."
    :args {}
-   :return-type :jsonb}
+   :return-type :heap-memory-shape
+   :effects #{:io}}                 ; live runtime state — varies per call
 
   {:name :thread-count
    :description "Live thread count from the JVM ThreadMXBean."
    :args {}
-   :return-type :int}
+   :return-type :int
+   :effects #{:io}}                 ; live runtime state — varies per call
 
   {:name :os-info
-   :description "Host operating-system info — name, arch, version."
+   :description "Host operating-system info — name, arch, processors, load-average."
    :args {}
-   :return-type :jsonb}
+   :return-type :os-info-shape
+   :effects #{:io}}                 ; system-property read
 
   ;; jvm-info composed from atomic base-fns via assoc chain
   {:name :jvm-info
@@ -70,12 +148,14 @@
   {:name :current-time-ms
    :description "Wall-clock milliseconds since Unix epoch."
    :args {}
-   :return-type :int}
+   :return-type :int
+   :effects #{:time}}
 
   {:name :env
    :description "Read an OS environment variable. Returns nil if unset."
    :args {:name {:type :text :description "Environment variable name."}}
-   :return-type :text}
+   :return-type :text
+   :effects #{:env}}
 
   ;; Construct an ExceptionInfo. Paired with :throw to raise from
   ;; graph code; also usable as a plain value if something wants a
@@ -86,12 +166,15 @@
           :data {:type :jsonb :description "Structured `:data` payload attached to the exception."}}
    :return-type :any}
 
-  ;; Raise the given exception. :return-type is :any because control
-  ;; flow never returns, but the graph-level caller needs a placeholder.
+  ;; Raise the given exception. Control flow never returns, so the
+  ;; result type is unconstrained — the type-var `'a` lets the consumer
+  ;; pin it to whatever the surrounding context expects (the bottom-type
+  ;; pattern). E.g. `(:if cond :then "ok" :else (:throw …))` infers
+  ;; `:text` because `:throw`'s `'a` unifies with `:then`'s `:text`.
   {:name :throw
-   :description "Raise an exception from graph code. Control flow never returns; `:return-type :any` is a placeholder so callers can wire it where any value would do."
+   :description "Raise an exception from graph code. Control flow never returns; `:return-type` is a free type-var so the throwing branch unifies with whatever the surrounding context expects."
    :args {:exception {:type :any :description "Exception to raise (typically built via `:ex-info`)."}}
-   :return-type :any}
+   :return-type a}
 
   ;; `:env-required` is now a fn-def (see below) composing :env with
   ;; :if + :throw + :ex-info — kept here as a forward declaration so
@@ -130,7 +213,8 @@
   {:name :read-resource-or-nil
    :description "Read a classpath resource as a string, or return nil if the path doesn't resolve. Building block for `:read-resource` (which throws on miss)."
    :args {:path {:type :text :description "Resource path relative to the classpath root."}}
-   :return-type :text}
+   :return-type :text
+   :effects #{:io}}
 
   ;; Read file from classpath resources, or throw with a clear message
   ;; if the path doesn't resolve. fn-def composition on top of
@@ -240,11 +324,21 @@
   ;; `:func :any` — the value is deref'd and used as-is. Use this when
   ;; :func is a fn-graph that PRODUCES a callable (e.g. :_router
   ;; returns a reitit ring-handler).
+  ;;
+  ;; NOTE: the slot's `:any` type is load-bearing for the executor's
+  ;; runtime dispatch — `:fn`-typed slots trigger `hof-wrap` (treat
+  ;; the bound fn-graph as something to wrap into a callable);
+  ;; `:any`-typed slots pass the value through as-is. Type-system
+  ;; polymorphism on this slot would require splitting the slot's
+  ;; runtime-dispatch tag from its type-check shape (separate task).
+  ;; Type-check still gets call-site narrowing via the rich-types
+  ;; ref re-firing mechanism (`effective-ref-return`).
   {:name :invoke
-   :description "Invoke a value that's already a Clojure callable with one argument. The `:func` slot is `:any` so the value flows through as-is — use this when `:func` is a fn-graph that PRODUCES a callable. For fn-graphs that ARE callables, use `:call`."
-   :args {:func {:type :any :description "Already-built Clojure callable (e.g. produced by another fn-graph). Used as-is — no hof-wrap."}
-          :arg {:type :any :description "Single argument passed to the callable."}}
-   :return-type :any}
+   :description "Invoke a value that's already a Clojure callable with one argument. Polymorphic via type-vars `a`/`b`: a fn-graph whose `:return-type` is itself a fn-type produces the callable; type-checker unifies and propagates `b` from the produced fn's return through to consumers. Runtime detects callable-producer via `:produces-callable?` and uses thunk semantics."
+   :args {:func {:type [:fn {:arg a} b]
+                 :description "Bound fn-graph whose `:return-type` is a fn-type — its evaluation produces a Clojure callable."}
+          :arg {:type a :description "Single argument passed to the callable."}}
+   :return-type b}
 
   ;; Call a fn-graph-as-callable with one arg. `:func :fn` — the ref is
   ;; hof-wrap'd into a callable (the fn-graph's leftover free-arg

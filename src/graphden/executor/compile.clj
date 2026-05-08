@@ -48,20 +48,50 @@
 (def ^:dynamic ^{:private true} *call-cache* nil)
 
 
+;; Set of fn-ids that must ALWAYS fire fresh, bypassing the per-top-level
+;; *call-cache* even when one is bound. Refreshed on every `compile-all`
+;; from the registry: any fn whose `:effects` intersects
+;; #{:time :random} lands here.
+;;
+;; Other effectful categories (`:env`, `:io`, `:db`, `:network`,
+;; `:effect` legacy) ARE cacheable within one top-level invocation —
+;; env values don't change mid-request, DB rows are consistent under
+;; one txn, etc. — so e.g. `:ring-body`'s single-use InputStream slurp
+;; gets shared across sibling consumers as before. Wall-clock and rng
+;; are the only categories where two adjacent reads in the same
+;; request must see different values.
+(def ^:private always-fresh-fn-ids (atom #{}))
+
+
+(defn set-always-fresh-fn-ids!
+  "Replace the set of always-fresh (cache-bypass) fn-ids. Called by
+   `compile-all` after collecting `:effects` from the registry —
+   anything tagged `:time` / `:random`. Idempotent."
+  [ids]
+  (reset! always-fresh-fn-ids (set ids)))
+
+
 (defn- call-with-cache
-  "Look up `(callee all-fns free-args)` in the current `*call-cache*` if
-   bound; populate + return otherwise. Without a cache in scope, just
-   invoke directly."
+  "Look up `(callee all-fns free-args)` in the current `*call-cache*`
+   if one is bound and the target isn't always-fresh; populate +
+   return otherwise. Time / random fns ALWAYS fire fresh — see
+   `always-fresh-fn-ids`."
   [fn-id callee all-fns free-args]
-  (if-let [cache *call-cache*]
-    (let [k [fn-id free-args]
+  (cond
+    (contains? @always-fresh-fn-ids fn-id)
+    (callee all-fns free-args)
+
+    (some? *call-cache*)
+    (let [cache *call-cache*
+          k [fn-id free-args]
           cached (get @cache k ::miss)]
       (if (identical? cached ::miss)
         (let [v (callee all-fns free-args)]
           (swap! cache assoc k v)
           v)
         cached))
-    (callee all-fns free-args)))
+
+    :else (callee all-fns free-args)))
 
 
 ;; =============================================================================
@@ -100,17 +130,30 @@
 
 
 (defn- resolve-seq-item
-  "Resolve a single item-arg from a sequence chain into a runtime value.
-   Literal items return their :value; ref items call the compiled ref
-   with the caller's free-args (memoized via `*call-cache*`); named
-   free-slot items (`{:as :name}` syntax — no value, no ref) read the
-   value from `free-args` by name."
+  "Resolve a single binding-list-item into a runtime value:
+   - `{:value v :literal true}` → literal v (codec keyword pass-through).
+   - `{:value {:as :name} :literal nil}` → POSITIONAL FREE SLOT —
+     read `name` from free-args, substituting the caller-supplied
+     value at this position. Used by `:route :args {:items [{:as :path}
+     :method-map]}` so descendants binding `:path \"/health\"` flow
+     into the list.
+   - `:ref-fn-id` → execute the ref via call-cache.
+   - Plain `:value` → literal."
   [item all-fns free-args]
   (cond
+    ;; Positional rename: free-arg substitution.
+    (and (map? (:value item)) (:as (:value item)) (not (:literal item)))
+    (let [k (some-> (:as (:value item)) keyword)
+          v (get free-args k)]
+      (cond
+        (graphden.executor.runtime/thunk? v) (v)
+        (instance? clojure.lang.IDeref v) @v
+        :else v))
+
     (some? (:value item)) (:value item)
 
-    (:ref-id item)
-    (let [ref-id (:ref-id item)
+    (:ref-fn-id item)
+    (let [ref-id (:ref-fn-id item)
           callee (get all-fns ref-id)]
       (when-not callee
         (throw (ex-info "Sequence item ref target not found in all-fns"
@@ -118,33 +161,35 @@
                          :ref-id ref-id})))
       (call-with-cache ref-id callee all-fns free-args))
 
-    (:name item)
-    (let [v (get free-args (keyword (:name item)))]
-      ;; Captured value may be a ref-thunk (when caller bound the
-      ;; named slot to a fn-ref); deref so the impl receives the
-      ;; computed value, matching the identity-wrapper pattern this
-      ;; replaces.
-      (cond
-        (rt/thunk? v) (v)
-        (instance? clojure.lang.IDeref v) @v
-        :else v))
-
     :else nil))
 
 
 (defn- make-ref-entry
-  "Runtime value for a `:ref` binding. HOF refs (`is-fn=true`) get
-   `hof-wrap`'d immediately against the env snapshot. Non-HOF refs
-   become thunks: each invocation resolves env via `env-fn`, applies
-   `ref-renames` (R's free-arg names → F's), and calls the compiled
-   ref via the shared call-cache."
-  [{:keys [ref-id is-fn hof-lambda-params ref-renames]} all-fns env-fn]
+  "Runtime value for a `:ref` binding. Three cases:
+
+   - `:produces-callable?` — the bound fn-graph's `:return-type` is
+     itself a fn-type, so EVALUATING the graph produces a Clojure
+     callable. Thunk it: each invocation resolves env, runs the
+     fn-graph, and the result IS the callable the consumer needs.
+     `:_router` → reitit ring-handler is the canonical case. Skip
+     `hof-wrap` (it would double-wrap a value that's already a
+     positional callable).
+
+   - HOF ref (`:is-fn=true`, not callable-producer) — the fn-graph
+     IS the callable; wrap it into the positional shape Clojure
+     consumers expect via `hof-wrap`.
+
+   - Plain ref — thunk: each invocation resolves env, applies
+     `ref-renames` (R's free-arg names → F's), calls the compiled
+     ref via the shared call-cache."
+  [{:keys [ref-id is-fn produces-callable? hof-lambda-params ref-renames]}
+   all-fns env-fn]
   (let [callee (get all-fns ref-id)]
     (when-not callee
       (throw (ex-info "Ref target not found in all-fns"
                       {:type :runtime-error/missing-ref
                        :ref-id ref-id})))
-    (if is-fn
+    (if (and is-fn (not produces-callable?))
       (hof-wrap callee hof-lambda-params all-fns (env-fn))
       (rt/thunk
         #(let [fa (env-fn)
@@ -199,12 +244,26 @@
                     acc))
 
           :ref (let [entry (make-ref-entry b all-fns env-fn)]
+                 ;; Don't add :ref bindings to `aug`. The aug map's job
+                 ;; is to expose KNOWN VALUES under their renamed names
+                 ;; so inner ref-chains see them as free-args. A :ref
+                 ;; binding is a deferred call — putting its thunk in
+                 ;; aug under ext-name makes downstream consumers
+                 ;; resolve `ext-name` by re-invoking the same ref,
+                 ;; which then re-reads `ext-name` from free-args, and
+                 ;; cycles. (`:method-map :value {:as :handler :ref
+                 ;; :assoc-handler}` was the canonical bug.)
                  {:args (assoc args base-name entry)
-                  :aug (assoc aug ext-name entry)})
+                  :aug aug})
 
           :seq (let [entry (make-seq-entry items all-fns env-fn)]
+                 ;; Same reasoning as :ref — `:seq` items resolve
+                 ;; through their own thunks; exposing the same thunk
+                 ;; under ext-name in free-args is just an alias that
+                 ;; doesn't help any consumer that needs an evaluated
+                 ;; sequence value.
                  {:args (assoc args base-name entry)
-                  :aug (assoc aug ext-name entry)})))
+                  :aug aug})))
       {:args {} :aug {}}
       bindings)))
 
@@ -239,14 +298,21 @@
 
 
 (defn- augment-env
-  "Merge env-bindings into `free-args`. Ref bindings become thunks
-   captured over the OUTER (pre-augmentation) env. `:is-fn` refs are
-   `hof-wrap`'d into callables so deeper consumers that see the
-   binding through their `:fn`-typed primary can invoke it with a
-   single arg (matching what inner `build-args-and-aug` would do for
-   a directly-reached `:is-fn` primary binding)."
-  [env-bindings all-fns free-args]
-  (let [env-fn (constantly free-args)]
+  "Merge env-bindings into `free-args`. Ref/seq bindings become thunks
+   that read free-args via `env-fn` at fire time — passing `fa-ref`
+   here (rather than a `(constantly free-args)` snapshot) lets every
+   env-binding's thunk see SIBLING env-bindings that landed in the
+   same augment pass. Without that, thunks captured by `augment-env`
+   only see the pre-augmentation slice, so e.g. an inner `:_action-
+   status` looking up `:result` on a sibling env-binding would read
+   nil and fall back to its `:default 200` instead of seeing the
+   process-update-entity result.
+
+   `:is-fn` refs are `hof-wrap`'d immediately against the live env
+   snapshot — that callable is then stable for descendants that
+   invoke it through their `:fn`-typed primary slot."
+  [env-bindings all-fns free-args fa-ref]
+  (let [env-fn #(deref fa-ref)]
     (reduce
       (fn [acc {:keys [kind env-name value items] :as b}]
         (case kind
@@ -258,16 +324,32 @@
 
 
 (defn- resolve-impl
-  "Look up the base-fn impl for `fn-id`; throw with context on miss."
+  "Look up the impl for `fn-id`'s root. The root is either a base-fn
+   (impl-hash set) or a type-row (record / refinement / list) with a
+   synthesised impl registered under the same name."
   [fn-id {:keys [fn-map base-fns]}]
-  (let [base (l/base-fn-of fn-id fn-map)
-        base-name-kw (keyword (:name base))]
-    (if-let [impl (get base-fns base-name-kw)]
-      impl
-      (throw (ex-info (str "No impl registered for base fn " base-name-kw)
-                      {:type :compile-error/missing-impl
-                       :base-fn base-name-kw
-                       :fn-id fn-id})))))
+  (let [root (l/root-fn fn-id fn-map)
+        root-name (some-> (:name root) keyword)]
+    (cond
+      (nil? root)
+      (throw (ex-info (str "No root fn reachable from " fn-id)
+                      {:type :compile-error/missing-root
+                       :fn-id fn-id}))
+
+      (nil? root-name)
+      (throw (ex-info (str "Root fn for " fn-id " has no name — anonymous "
+                           "type-rows aren't directly executable")
+                      {:type :compile-error/anonymous-root
+                       :fn-id fn-id
+                       :root-id (:id root)}))
+
+      :else
+      (if-let [impl (get base-fns root-name)]
+        impl
+        (throw (ex-info (str "No impl registered for " root-name)
+                        {:type :compile-error/missing-impl
+                         :base-fn root-name
+                         :fn-id fn-id}))))))
 
 
 (defn- wrap-top-level
@@ -302,10 +384,11 @@
   [impl bindings env-bindings ctx]
   (wrap-top-level
     (fn [all-fns free-args]
-      (let [fa-base (if (seq env-bindings)
-                      (augment-env env-bindings all-fns free-args)
+      (let [fa-ref (volatile! free-args)
+            fa-base (if (seq env-bindings)
+                      (augment-env env-bindings all-fns free-args fa-ref)
                       free-args)
-            fa-ref (volatile! fa-base)
+            _ (vreset! fa-ref fa-base)
             {:keys [args aug]} (build-args-and-aug bindings all-fns fa-ref)
             ;; Primary bindings go into aug keyed by ext-name so inner
             ;; refs that reference a parameter by its external name see
@@ -350,13 +433,113 @@
 ;; =============================================================================
 
 (defn compile-all
-  "Compile every fn in `fns` into a map `{fn-id → compiled-closure}`.
+  "Compile every fn into a map `{fn-id → compiled-closure}`.
 
-   `base-fns` is a registry `{fn-name-keyword → impl-fn}` (from
-   exec-context). `ctx` is the execution-context the impls will receive."
-  [{:keys [fns args base-fns]} ctx]
-  (let [lookups (assoc (l/build-lookups fns args) :base-fns base-fns)]
+   Input: `{:fns :slots :fn-slots :bindings :list-items :base-fns}` —
+   the slot/fn-slot/binding model entities plus the impl registry.
+   `ctx` is the execution-context impls will receive.
+
+   Skips fns whose root has no impl (anonymous types, primitives) —
+   those aren't directly executable. They still get stored as data in
+   the graph for type-checking and editor display."
+  [{:keys [fns base-fns] :as graph} ctx]
+  (let [lookups (assoc (l/build-lookups graph) :base-fns base-fns)
+        compilable? (fn [f]
+                      (let [root (l/root-fn (:id f) (:fn-map lookups))
+                            root-name (some-> (:name root) keyword)]
+                        (and root-name (contains? base-fns root-name))))]
     (into {}
-          (map (fn [f]
-                 [(:id f) (compile-fn (:id f) lookups ctx)]))
+          (keep (fn [f]
+                  (when (compilable? f)
+                    [(:id f) (compile-fn (:id f) lookups ctx)])))
           fns)))
+
+
+;; =============================================================================
+;; Forward / reverse dependency index — foundation for delta-invalidation.
+;; =============================================================================
+;;
+;; A fn F's compiled closure becomes stale when ANY of these change:
+;;   - F's own row fields the compiler reads (`parent-ids`, `base-fn-id`,
+;;     `element-fn-id`, `return-type-fn-id`).
+;;   - F's bindings + binding-list-items.
+;;   - The same data on any ancestor of F (inheritance flows in at
+;;     compile time via `inheritance-chain`).
+;;   - The rich-type/return-type metadata of any ref target F binds
+;;     (the `:produces-callable?` flag is baked in at compile time).
+;;
+;; Each item above is reachable from F via at most one of:
+;;   - parent-ids (junction)
+;;   - fn FK columns (base/element/return-type)
+;;   - bindings whose `fn-id = F`           → ref-fn-id, type-override-fn-id
+;;   - binding-list-items under those       → ref-fn-id
+;;
+;; `forward-deps-of` returns this raw edge set for a single fn (not the
+;; inheritance closure — `transitive-blast` handles that walk by
+;; following the index). `build-reverse-deps` inverts it so a mutation
+;; on X can find every F that mentions X.
+;;
+;; The reverse index is recomputed on every `rebuild!` and replaces the
+;; legacy "drop the whole compiled-registry on every invalidation"
+;; behaviour: `delta-recompile!` walks the inverse closure of the
+;; changed fn-ids and rebuilds ONLY those entries.
+
+(defn- bindings-of
+  [fn-id bindings]
+  (filter #(= fn-id (:fn-id %)) bindings))
+
+
+(defn- items-of
+  [binding-ids list-items]
+  (filter #(contains? binding-ids (:binding-id %)) list-items))
+
+
+(defn forward-deps-of
+  "Set of fn-ids whose mutation invalidates `fn-id`'s closure. Edge
+   sources mirror what `compile-fn` reads at compile time. Conservative
+   — better to recompile a few extras than to ship a stale closure."
+  [fn-id {:keys [fns bindings list-items]}]
+  (let [f (get fns fn-id)
+        bs (bindings-of fn-id bindings)
+        binding-ids (into #{} (map :id) bs)
+        items (items-of binding-ids list-items)]
+    (into #{}
+          (comp cat (filter some?))
+          [(:parent-ids f)
+           (keep f [:base-fn-id :element-fn-id :return-type-fn-id])
+           (keep :ref-fn-id bs)
+           (keep :type-override-fn-id bs)
+           (keep :ref-fn-id items)])))
+
+
+(defn build-reverse-deps
+  "Produce `{fn-id → #{ids that depend on it}}` over the whole graph.
+   Inverts `forward-deps-of` once so delta-invalidation can answer
+   \"who needs to recompile when X changes?\" in `O(degree)` per
+   level. Recomputed on every full rebuild."
+  [{:keys [fns] :as graph}]
+  (let [fns-map (if (map? fns) fns (into {} (map (juxt :id identity)) fns))
+        graph' (assoc graph :fns fns-map)]
+    (reduce
+      (fn [acc f]
+        (reduce (fn [a dep] (update a dep (fnil conj #{}) (:id f)))
+                acc
+                (forward-deps-of (:id f) graph')))
+      {}
+      (vals fns-map))))
+
+
+(defn transitive-blast
+  "Inverse-closure walk over `reverse-deps`. Returns every fn-id that
+   transitively depends on at least one of `seed-ids`. The seeds are
+   included in the result — their own closures need recompile too."
+  [reverse-deps seed-ids]
+  (loop [seen #{}
+         q (vec seed-ids)]
+    (if (empty? q)
+      seen
+      (let [x (peek q), q' (pop q)]
+        (if (contains? seen x)
+          (recur seen q')
+          (recur (conj seen x)
+                 (into q' (get reverse-deps x #{}))))))))

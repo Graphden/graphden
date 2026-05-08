@@ -9,11 +9,18 @@
  * Initialize the graph editor
  */
 async function initGraph() {
-  // Load entities for sidebar list only
-  // Graph data will be fetched on-demand via layout endpoint
-  const response = await fetch('/api/graph/entities');
-  graphData = await response.json();
+  // Load entities + the rich-type registry in parallel. Types feed
+  // the in-place edit popovers' "Expected: <type>" hints, so they
+  // need to be ready before the user opens any editor.
+  const [entResp, typeResp] = await Promise.all([
+    fetch('/api/graph/entities'),
+    fetch('/api/types').catch(() => null)
+  ]);
+  graphData = await entResp.json();
   lookups = buildLookups(graphData);
+  if (typeResp?.ok) {
+    try { richTypes = await typeResp.json(); } catch (_) { richTypes = {}; }
+  }
   updateEntityList(graphData);
 
   const hash = window.location.hash.slice(1);

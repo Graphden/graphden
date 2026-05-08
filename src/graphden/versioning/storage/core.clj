@@ -2,17 +2,15 @@
   "Storage decorator that adds Git-like versioning with branch support.
 
    Wraps any storage implementation with branch-aware CRUD:
-   - Versioned entities (fn, arg) are intercepted: reads resolve versions
-     on the current branch, writes append version records
-   - Non-versioned entities (branch, branch-merge, all version tables)
-     delegate directly to base storage
+   - Versioned entities (fn, fn-slot, binding, binding-list-item) are
+     intercepted: reads resolve versions on the current branch, writes
+     append version records
+   - Non-versioned entities (slot, namespace, branch, branch-merge,
+     all version tables) delegate directly to base storage
    - ExecutionGraph resolution works transparently via CRUD interception
 
-   ## 2-Entity Schema
-
-   Only two entities are versioned:
-   - fn: function entity (parent-ids for inheritance)
-   - arg: argument entity (source-id for inheritance, value/ref-id for data)
+   The authoritative versioned-entity list lives in
+   `graphden.versioning.storage.resolution/entity-config`.
 
    ## Usage
 
@@ -52,17 +50,26 @@
   (Instant/now))
 
 
+(defn- prepare-version-record
+  "Build a row for the version table from a versioned-entity payload:
+   pull the version-data fields off `data`, stamp identity (`:id`,
+   `<version-id-field>`, `:branch-id`, `:created-at`). Used by both
+   single-entity and batch write paths."
+  [version-config entity-id branch-id timestamp data]
+  (let [{:keys [version-id-field version-data-fields]} version-config]
+    (-> (select-keys data version-data-fields)
+        (assoc :id (random-uuid)
+               version-id-field entity-id
+               :branch-id branch-id
+               :created-at timestamp))))
+
+
 (defn- create-version-record!
   "Creates a version record in the version table for a versioned entity."
   [base-storage entity-name entity-id branch-id data]
-  (let [{:keys [version-entity version-id-field version-data-fields]}
-        (get res/entity-config entity-name)
-        version-data (-> (select-keys data version-data-fields)
-                         (assoc :id (random-uuid)
-                                version-id-field entity-id
-                                :branch-id branch-id
-                                :created-at (now)))]
-    (sp/create-entity base-storage version-entity version-data)))
+  (let [config (get res/entity-config entity-name)
+        version-data (prepare-version-record config entity-id branch-id (now) data)]
+    (sp/create-entity base-storage (:version-entity config) version-data)))
 
 
 ;; === VersionedStorage Record ===
@@ -115,18 +122,25 @@
     [_ entity-name data]
     (if-not (res/versioned-entity? entity-name)
       (sp/create-entity base-storage entity-name data)
-      ;; Versioned: create full record in base table + version record
+      ;; Versioned: create full record in base table + version record.
+      ;; When the identity row already exists (deterministic UUID re-sync),
+      ;; resolve the current version directly from `existing` instead of
+      ;; calling `resolve-entity` (which would re-fetch identity).
       (let [id (or (:id data) (random-uuid))
             full-data (assoc data :id id)
             existing (sp/read-entity base-storage entity-name id)]
-        ;; Create base record if it doesn't exist (idempotent for deterministic UUIDs)
         (when-not existing
           (sp/create-entity base-storage entity-name full-data))
-        ;; Only create version if no current version or data changed
-        (let [current-version (when existing
-                                (res/resolve-entity base-storage entity-name id branch-id))
-              {:keys [version-data-fields]} (get res/entity-config entity-name)
-              current-data (when current-version (select-keys current-version version-data-fields))
+        (let [{:keys [version-id-field version-data-fields]}
+              (get res/entity-config entity-name)
+              current-version (when existing
+                                (res/resolve-version base-storage entity-name id branch-id))
+              current-data (when current-version
+                             (select-keys (merge existing
+                                                 (dissoc current-version
+                                                         :id :branch-id :created-at
+                                                         version-id-field))
+                                          version-data-fields))
               new-data (select-keys full-data version-data-fields)]
           (when (or (nil? current-version) (not= current-data new-data))
             (create-version-record! base-storage entity-name id branch-id data)))
@@ -216,16 +230,12 @@
             _ (when (seq new-base-records)
                 (sp/create-entities base-storage entity-name new-base-records))
             ;; Prepare and batch create version records
-            {:keys [version-entity version-id-field version-data-fields]}
-            (get res/entity-config entity-name)
-            version-records (mapv (fn [data]
-                                    (-> (select-keys data version-data-fields)
-                                        (assoc :id (random-uuid)
-                                               version-id-field (:id data)
-                                               :branch-id branch-id
-                                               :created-at (now))))
+            config (get res/entity-config entity-name)
+            timestamp (now)
+            version-records (mapv #(prepare-version-record config (:id %) branch-id
+                                                           timestamp %)
                                   data-with-ids)]
-        (sp/create-entities base-storage version-entity version-records)
+        (sp/create-entities base-storage (:version-entity config) version-records)
         data-with-ids)))
 
 
@@ -257,33 +267,25 @@
                            :entity-name entity-name
                            :missing-ids (vec missing-ids)})))
         ;; Compute merged versions and filter to only changed ones
-        (let [{:keys [version-entity version-id-field version-data-fields]}
+        (let [{:keys [version-entity version-data-fields] :as config}
               (get res/entity-config entity-name)
               timestamp (now)
               ;; Build version records only for changed entities
               version-records
               (into []
-                    (comp
-                      (map (fn [data]
-                             (let [id (:id data)
-                                   current (get current-by-id id)
-                                   merged (merge current data)
-                                   current-data (select-keys current version-data-fields)
-                                   merged-data (select-keys merged version-data-fields)]
-                               (when (not= current-data merged-data)
-                                 {:version-record
-                                  (-> merged-data
-                                      (assoc :id (random-uuid)
-                                             version-id-field id
-                                             :branch-id branch-id
-                                             :created-at timestamp))
-                                  :merged merged}))))
-                      (keep identity))
+                    (keep (fn [data]
+                            (let [id (:id data)
+                                  current (get current-by-id id)
+                                  merged (merge current data)
+                                  current-data (select-keys current version-data-fields)
+                                  merged-data (select-keys merged version-data-fields)]
+                              (when (not= current-data merged-data)
+                                (prepare-version-record config id branch-id
+                                                        timestamp merged)))))
                     data-seq)]
           ;; Batch create all version records
           (when (seq version-records)
-            (sp/create-entities base-storage version-entity
-                                (mapv :version-record version-records)))
+            (sp/create-entities base-storage version-entity version-records))
           ;; Return merged data for all records (including unchanged)
           (mapv (fn [data]
                   (merge (get current-by-id (:id data)) data))
@@ -540,13 +542,18 @@
 
 
 (defn query-all-graph-entities
-  "Loads all fns and args in a single operation with shared branch-chain cache.
-   More efficient than calling query-entities twice.
+  "Loads every entity of the slot/fn-slot/binding model with a shared
+   branch-chain cache. More efficient than calling `query-entities`
+   five times sequentially.
 
-   Returns {:fns [...] :args [...]}"
+   Returns {:fns [...] :slots [...] :fn-slots [...] :bindings [...]
+            :list-items [...]}."
   [versioned-storage]
   (let [{:keys [base-storage branch-id]} versioned-storage]
-    ;; Share branch-chain cache across both entity type queries
     (binding [res/*branch-chain-cache* (atom {})]
-      {:fns (vec (res/resolve-all-entities base-storage :fn branch-id {}))
-       :args (vec (res/resolve-all-entities base-storage :arg branch-id {}))})))
+      {:fns        (vec (res/resolve-all-entities base-storage :fn branch-id {}))
+       :slots      (vec (sp/query-entities base-storage :slot {}))
+       :fn-slots   (vec (res/resolve-all-entities base-storage :fn-slot branch-id {}))
+       :bindings   (vec (res/resolve-all-entities base-storage :binding branch-id {}))
+       :list-items (vec (res/resolve-all-entities base-storage :binding-list-item
+                                                  branch-id {}))})))

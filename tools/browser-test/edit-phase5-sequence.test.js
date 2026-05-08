@@ -6,7 +6,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const { chromium } = require('playwright');
-const { assert, newContext, api, getEntities, deleteFnByName } =
+const { assert, newContext, api, getEntities, synthArgs, deleteFnByName } =
   require('./edit-test-helpers');
 
 const TEST_NAME = 'test-edit-phase5';
@@ -19,16 +19,16 @@ const TEST_NAME = 'test-edit-phase5';
 
     const ents = await getEntities(page);
     const add = ents.fns.find(f => f.name === 'add');
-    const addNums = ents.args.find(a => a['fn-id'] === add.id && !a['source-id']);
+    const addNums = synthArgs(ents).find(a => a['fn-id'] === add.id && !a['source-id']);
     assert(add && addNums, 'baseline ids resolved');
 
-    // 1. Create test fn with empty sequence anchor.
+    // 1. Create test fn — the :nums sequence slot is inherited
+    //    automatically; the empty anchor placeholder appears in the
+    //    layout because no own binding overrides it yet.
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TEST_NAME + '&parent-ids=' + add.id);
     const created = (await getEntities(page)).fns.find(f => f.name === TEST_NAME);
     assert(created, 'test fn created');
-    await api(page, 'POST', '/api/entities/arg',
-              'fn-id=' + created.id + '&source-id=' + addNums.id + '&type=sequence');
 
     await page.goto('about:blank');
     await page.goto('http://localhost:9002/#' + TEST_NAME);
@@ -63,9 +63,15 @@ const TEST_NAME = 'test-edit-phase5';
     });
     await page.waitForTimeout(2000);
 
-    let chain = (await getEntities(page)).args
-      .filter(a => a['fn-id'] === created.id && a.value !== null)
-      .map(a => a.value);
+    function chainOf(ents) {
+      const fnBindings = (ents.bindings || []).filter(b => b['fn-id'] === created.id);
+      const ids = new Set(fnBindings.map(b => b.id));
+      return (ents['list-items'] || [])
+              .filter(it => ids.has(it['binding-id']) && it.value !== null)
+              .sort((a, b) => (a.position || 0) - (b.position || 0))
+              .map(it => it.value);
+    }
+    let chain = chainOf(await getEntities(page));
     assert(JSON.stringify(chain) === '[1]', 'first item appended as value=1');
 
     // 4. Append a second item via the tail `+` button.
@@ -88,9 +94,7 @@ const TEST_NAME = 'test-edit-phase5';
     });
     await page.waitForTimeout(2000);
 
-    chain = (await getEntities(page)).args
-      .filter(a => a['fn-id'] === created.id && a.value !== null)
-      .map(a => a.value).sort();
+    chain = chainOf(await getEntities(page)).slice().sort();
     assert(JSON.stringify(chain) === '[1,2]', 'tail-append added value=2');
 
     // 5. Remove one item via `×`. Either 1 or 2 may go (DOM order is
@@ -100,9 +104,7 @@ const TEST_NAME = 'test-edit-phase5';
     });
     await page.waitForTimeout(2000);
 
-    chain = (await getEntities(page)).args
-      .filter(a => a['fn-id'] === created.id && a.value !== null)
-      .map(a => a.value);
+    chain = chainOf(await getEntities(page));
     assert(chain.length === 1, '× button removed exactly one item');
 
     // 6. namespace-move smoke — pick first non-root namespace and back.

@@ -1,178 +1,154 @@
 (ns graphden.storage.postgres.graph
-  "ExecutionGraph resolution for PostgreSQL storage.
-   Uses recursive CTE for O(1) round-trip graph traversal.
+  "ExecutionGraph resolution for PostgreSQL — recursive-CTE seed, then
+   bulk-load.
 
-   ## Performance
+   The generic BFS in `storage.protocol.generic-graph` issues 4
+   queries per fn-node visited (fn / fn-slot / binding / per-binding
+   items), so a graph of N reachable fns costs ~4N round-trips. For
+   anything but tiny graphs this dominates `read-graph` latency, and
+   `read-graph` runs on every `invalidate-graph-cache!` (every
+   mutation through CRUD).
 
-   This implementation uses a single recursive CTE to discover all fn-ids
-   in the dependency graph, then batch-loads all related data.
+   Strategy here:
 
-   Total queries: 2-3 (constant) regardless of graph depth.
-   - 1 CTE query for graph discovery
-   - 1 query for fns
-   - 1 query for args
+     1. ONE recursive CTE walks every outgoing edge from the root in
+        a single SQL statement and returns the set of reachable
+        `fn.id`s. The traversal mirrors `process-fn-node`'s BFS:
+          - `fn_parent_ids` junction               (parent inheritance)
+          - `fn.base_fn_id`                        (refinement)
+          - `fn.element_fn_id`                     (list-type)
+          - `fn.return_type_fn_id`                 (declared return)
+          - `binding.ref_fn_id`                    (call-site refs)
+          - `binding.type_override_fn_id`          (per-binding type)
+          - `binding_list_item.ref_fn_id`          (sequence refs)
+        Slot.type-fn-id is intentionally NOT chased here — the
+        generic BFS doesn't either; both backends compensate by
+        bulk-loading all slot rows at the end.
 
-   ## Schema Design
+     2. With the reachable id-set in hand, every entity table is
+        loaded with a single `WHERE id IN (…)` (or `fn_id IN (…)` /
+        `binding_id IN (…)`) query — five queries total instead of
+        ~4N. Decoding goes through `sp/query-entities` so codec /
+        junction / field-spec handling stays identical to the rest
+        of CRUD.
 
-   Simplified 2-entity model:
-   - fn: function entity (base or composed via parent-ids JSONB array)
-   - arg: argument entity (owns value or references fn via ref-id)
-
-   Dependencies are found via:
-   - arg.ref-id: direct fn reference (execute and use result)
-   - fn.parent-ids: inheritance from parent fns (JSONB array of UUIDs)
-   - arg.value with UUID: fn-id passed as value (for HOF)"
+   Net: O(1) round-trips against the database for any graph size,
+   plus one round-trip per ref-many junction (fn.parent-ids only)."
   (:require
-    [clojure.string :as str]
-    [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
-    [honey.sql :as sql]
+    [graphden.storage.protocol.generic-graph :as generic]
+    [graphden.storage.protocol.graph :as graph]
     [next.jdbc :as jdbc]))
 
 
-;; =============================================================================
-;; Recursive CTE for graph traversal
-;; =============================================================================
-;;
-;; Complexity: O(1) round-trips (2-3 queries total) instead of O(depth)
+(def ^:private reachable-fns-sql
+  "Recursive CTE that, given a seed fn-id, returns every fn-id
+   reachable through the execution-graph edges. The recursive term
+   uses a `LATERAL` subquery so each iteration of the recursion
+   evaluates ALL outgoing-edge sources for the row it expanded —
+   the alternative (one UNION arm per source, each rejoining
+   `reachable`) is harder to read and Postgres plans it the same.
 
-(defn- build-graph-discovery-sql
-  "Builds raw SQL for recursive CTE graph discovery.
-
-   Structure:
-   1. fn_graph: recursively find all fn-ids via arg.ref-id and fn.parent-ids
-
-   Three paths to find dependent fns:
-   - arg.ref-id: FK to fn (for computed values)
-   - fn.parent-ids: JSONB array of parent fn UUIDs (for multiple inheritance)
-   - arg.value with UUID: extract UUID from value JSONB (for HOF references)
-
-   Uses LATERAL UNION to generate multiple rows when a fn has multiple
-   references (ref-id, multiple parents, or UUID value), ensuring all paths are followed."
-  [root-fn-id max-depth]
-  [(str "WITH RECURSIVE fn_graph AS ("
-        ;; Base case: root function
-        "  SELECT id, 0 AS depth FROM fn WHERE id = ?"
-        "  UNION ALL"
-        ;; Recursive term: LATERAL collects all refs from args + parent_ids junction table
-        "  SELECT DISTINCT refs.ref_id, g.depth + 1"
-        "  FROM fn_graph g"
-        "  LEFT JOIN arg a ON a.fn_id = g.id,"
-        "  LATERAL ("
-        ;;   arg.ref_id
-        "    SELECT a.ref_id AS ref_id"
-        "    UNION ALL"
-        ;;   UUID-valued args (for HOF references)
-        "    SELECT CASE WHEN a.value IS NOT NULL"
-        "                AND jsonb_typeof(a.value) = 'string'"
-        "                AND (a.value #>> '{}') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'"
-        "                THEN CAST(a.value #>> '{}' AS uuid)"
-        "                ELSE NULL END"
-        "    UNION ALL"
-        ;;   parent_ids junction table (multiple inheritance)
-        "    SELECT fp.target_id"
-        "    FROM fn_parent_ids fp"
-        "    WHERE fp.owner_id = g.id"
-        "  ) AS refs"
-        "  WHERE g.depth < ? AND refs.ref_id IS NOT NULL"
-        ") SELECT DISTINCT id FROM fn_graph")
-   root-fn-id max-depth])
-
-
-(defn- discover-graph-cte
-  "Discovers all fn-ids in the dependency graph using recursive CTE.
-   Returns set of fn-ids.
-
-   This is a SINGLE database query that traverses the entire graph.
-   The CTE follows:
-   - arg.ref-id FK references
-   - fn.parent-ids JSONB array (multiple inheritance)
-   - UUID values in arg.value"
-  [ds root-fn-id]
-  (let [query (build-graph-discovery-sql root-fn-id sp/*max-graph-iterations*)]
-    (util/with-sql-error-handling "Database error" :discover-graph-cte {:fn-id root-fn-id}
-                                  (let [rows (jdbc/execute! ds query (util/query-opts))]
-                                    (into #{} (map :id) rows)))))
+   `?::uuid` is the seed parameter. `DISTINCT` at the end collapses
+   the multi-source duplicates the recursion produces (e.g. the
+   same fn reached via parent and via a ref binding)."
+  (str
+    "WITH RECURSIVE reachable(fn_id) AS ("
+    "  SELECT ?::uuid"
+    "  UNION"
+    "  SELECT child.fn_id"
+    "  FROM reachable r"
+    "  CROSS JOIN LATERAL ("
+    ;;     parent-ids junction
+    "    SELECT j.target_id AS fn_id"
+    "      FROM fn_parent_ids j WHERE j.owner_id = r.fn_id"
+    "    UNION ALL"
+    ;;     fn-row scalar FKs
+    "    SELECT f.base_fn_id"
+    "      FROM fn f WHERE f.id = r.fn_id AND f.base_fn_id IS NOT NULL"
+    "    UNION ALL"
+    "    SELECT f.element_fn_id"
+    "      FROM fn f WHERE f.id = r.fn_id AND f.element_fn_id IS NOT NULL"
+    "    UNION ALL"
+    "    SELECT f.return_type_fn_id"
+    "      FROM fn f WHERE f.id = r.fn_id AND f.return_type_fn_id IS NOT NULL"
+    "    UNION ALL"
+    ;;     binding outgoing refs (ref + type-override)
+    "    SELECT b.ref_fn_id"
+    "      FROM binding b"
+    "      WHERE b.fn_id = r.fn_id AND b.ref_fn_id IS NOT NULL"
+    "    UNION ALL"
+    "    SELECT b.type_override_fn_id"
+    "      FROM binding b"
+    "      WHERE b.fn_id = r.fn_id AND b.type_override_fn_id IS NOT NULL"
+    "    UNION ALL"
+    ;;     binding-list-item refs (sequence elements)
+    "    SELECT bli.ref_fn_id"
+    "      FROM binding_list_item bli"
+    "      JOIN binding b ON bli.binding_id = b.id"
+    "      WHERE b.fn_id = r.fn_id AND bli.ref_fn_id IS NOT NULL"
+    "  ) child"
+    "  WHERE child.fn_id IS NOT NULL"
+    ")"
+    " SELECT DISTINCT fn_id FROM reachable"))
 
 
-(defn- load-entities-batch
-  "Generic batch loader. Loads entities from table where key-column matches values.
-   Returns {id -> record} map keyed by :id field of each record."
-  [ds table key-column values]
-  (if (empty? values)
-    {}
-    (let [query (sql/format {:select [:*]
-                             :from [table]
-                             :where [:in key-column (vec values)]}
-                            {:quoted true})]
-      (util/with-sql-error-handling "Database error" :load-entities-batch {:table table :count (count values)}
-                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
-                                      ;; Single pass: decode + build map in one traversal
-                                      (into {} (map #(let [e (codec/row->entity %)] [(:id e) e])) rows))))))
-
-
-(defn- load-fns-batch
-  "Loads multiple fns by id. Returns {fn-id -> fn-record}.
-   Also loads parent-ids from the fn_parent_ids junction table."
-  [ds fn-ids]
-  (let [fns (load-entities-batch ds :fn :id fn-ids)]
-    (if (empty? fns)
-      fns
-      ;; Batch load parent-ids junction rows for all fns
-      (let [owner-ids (vec (keys fns))
-            placeholders (str/join "," (repeat (count owner-ids) "?"))
-            query (into [(str "SELECT owner_id, target_id FROM fn_parent_ids "
-                              "WHERE owner_id IN (" placeholders ") "
-                              "ORDER BY owner_id, ord")]
-                        owner-ids)
-            rows (util/with-sql-error-handling "Database error" :load-parent-ids-batch
-                                               {:count (count owner-ids)}
-                                               (jdbc/execute! ds query (util/query-opts)))
-            parent-ids-by-owner (reduce (fn [acc row]
-                                          (update acc (:owner_id row) (fnil conj []) (:target_id row)))
-                                        {}
-                                        rows)]
-        (into {}
-              (map (fn [[fid frec]]
-                     [fid (assoc frec :parent-ids (get parent-ids-by-owner fid []))]))
-              fns)))))
-
-
-(defn- load-args-for-fns-batch
-  "Loads all args for multiple fn-ids in a single query.
-   Returns vector of arg records."
-  [ds fn-ids]
-  (if (empty? fn-ids)
-    []
-    (let [fn-ids-vec (vec fn-ids)
-          query (sql/format {:select [:*]
-                             :from [:arg]
-                             :where [:in :fn_id fn-ids-vec]})]
-      (util/with-sql-error-handling "Database error" :load-args-batch {:fn-count (count fn-ids)}
-                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
-                                      (mapv codec/row->entity rows))))))
+(defn- reachable-fn-ids
+  "Run the recursive CTE and return the set of UUIDs reachable from
+   `seed-id`. `seed-id` is required to exist in the `fn` table —
+   the caller guards via `read-entity` first to keep the not-found
+   error path identical to `generic/resolve-execution-graph`."
+  [ds seed-id]
+  (let [rows (util/with-sql-error-handling
+               "Database error" :resolve-execution-graph
+               {:fn-id seed-id}
+               (jdbc/execute! ds [reachable-fns-sql seed-id]
+                              (util/query-opts)))]
+    (into #{} (keep :fn_id) rows)))
 
 
 (defn resolve-execution-graph
-  "Resolves complete execution graph for a function.
-   Uses recursive CTE for O(1) round-trip graph traversal.
+  "PostgreSQL-optimised resolver. Two phases:
 
-   Query strategy:
-   1. Single CTE query discovers all fn-ids in the graph
-   2. Batch load: fns, args
-
-   Total: 2-3 queries regardless of graph depth."
-  [ds fn-id]
-  ;; Phase 1: Discover all fn-ids using recursive CTE (1 query)
-  (let [fn-ids (discover-graph-cte ds fn-id)]
-    (when (empty? fn-ids)
-      (throw (ex-info "Function not found"
-                      {:type :not-found
-                       :fn-id fn-id})))
-    ;; Phase 2: Batch load all data (2 queries)
-    (let [fns (load-fns-batch ds fn-ids)
-          args (load-args-for-fns-batch ds fn-ids)]
-      (sp/->execution-graph
-        {:fns fns
-         :args args}))))
+     1. CTE walk → set of reachable fn-ids.
+     2. Bulk-load fn / fn-slot / binding / binding-list-item via
+        `sp/query-entities` with `{:id [...]}` (or `{:fn-id [...]}` /
+        `{:binding-id [...]}`) IN-clauses. Slot rows are loaded in
+        bulk too — matches the generic resolver's behaviour. Codec /
+        junction / field-spec handling all flow through the standard
+        CRUD path so the returned `ExecutionGraphResult` is
+        bit-identical to the generic version."
+  [ds storage fn-id]
+  (when-not (sp/read-entity storage :fn fn-id)
+    (throw (ex-info "Function not found"
+                    {:type :not-found
+                     :fn-id fn-id})))
+  (let [fn-ids (reachable-fn-ids ds fn-id)]
+    (if (empty? fn-ids)
+      ;; Defensive — the CTE always emits at least the seed; an
+      ;; empty result implies the seed row vanished between the
+      ;; existence check above and the CTE run. Fall through to the
+      ;; generic resolver so the user sees the same not-found error
+      ;; shape rather than an empty graph.
+      (generic/resolve-execution-graph storage fn-id)
+      (let [fns          (sp/query-entities storage :fn        {:id fn-ids})
+            fn-slots     (sp/query-entities storage :fn-slot   {:fn-id fn-ids})
+            bindings     (sp/query-entities storage :binding   {:fn-id fn-ids})
+            binding-ids  (into #{} (map :id) bindings)
+            list-items   (if (seq binding-ids)
+                           (sp/query-entities storage :binding-list-item
+                                              {:binding-id binding-ids})
+                           [])
+            ;; Match generic resolver: ALL slot rows. Slot.type-fn-id
+            ;; references aren't followed in the CTE (parity with
+            ;; the generic BFS), so the bulk-load is the safety net
+            ;; that keeps the type-checker's slot lookups complete.
+            slots        (sp/query-entities storage :slot {})
+            fns-map      (into {} (map (juxt :id identity)) fns)]
+        (graph/->execution-graph
+          {:fns fns-map
+           :slots slots
+           :fn-slots fn-slots
+           :bindings bindings
+           :list-items list-items})))))

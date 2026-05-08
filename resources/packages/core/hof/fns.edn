@@ -7,65 +7,112 @@
  :fns
  [{:name :map
    :description "Apply a callable to each item in a collection (Clojure's `map`). When `:coll` is omitted, returns a transducer."
-   :args {:func {:type :fn :description "Callable applied to each item."}
-          :coll {:type :jsonb :required false :description "Collection to map over. When omitted, returns a transducer."}}
-   :return-type :any}
+   ;; Type vars `a` (input element) and `b` (output element):
+   ;;   :func ≡ a → b,  :coll ≡ [list a],  return ≡ [list b].
+   ;; `#{}` effect constraint — element-wise transforms should be
+   ;; pure (same input → same output) so the result is cacheable
+   ;; and order-independent. An effectful per-element callable
+   ;; (`:env`-reading, `:db`-writing) implies the result depends on
+   ;; iteration timing, breaking determinism.
+   ;; When :coll is omitted (:required false) :map returns a
+   ;; transducer instead — that overload is not yet expressible in
+   ;; the type system; the structured types here cover the with-coll
+   ;; path which is the common case.
+   :args {:func {:type [:fn {:item a} b #{}]
+                 :description "Pure callable applied to each item."}
+          :coll {:type [:list a] :required false
+                 :description "Collection to map over. When omitted, returns a transducer."}}
+   :return-type [:list b]}
 
   {:name :filter
    :description "Keep items where `(pred item)` is truthy (Clojure's `filter`). When `:coll` is omitted, returns a transducer."
-   :args {:pred {:type :fn :description "Predicate callable; items where `(pred item)` is truthy are kept."}
-          :coll {:type :jsonb :required false :description "Collection to filter. When omitted, returns a transducer."}}
-   :return-type :any}
+   ;; :pred must return :bool, element type `a` flows in and out
+   ;; unchanged. The `#{}` effect constraint demands a PURE
+   ;; predicate — `:filter` is element-wise and is meant to be
+   ;; cacheable + idempotent. Allowing :io / :db / :env predicates
+   ;; would mean the filter result depends on external state which
+   ;; breaks both the semantic contract (idempotency) and caching
+   ;; (per-call freshness). This catches `:filter :add-10`
+   ;; (return-type mismatch) AND `:filter :env-reading-pred`
+   ;; (effect-constraint violation) at save time.
+   :args {:pred {:type [:fn {:item a} :bool #{}]
+                 :description "Pure predicate callable; items where `(pred item)` is truthy are kept."}
+          :coll {:type [:list a] :required false
+                 :description "Collection to filter. When omitted, returns a transducer."}}
+   :return-type [:list a]}
 
   {:name :reduce
-   :description "Left fold over a collection (Clojure's `reduce`). `(func acc item)` is invoked for each item, starting from `init`."
-   :args {:func {:type :fn :description "Reducing callable `(acc, item) → acc`."}
-          :init {:type :any :description "Seed accumulator."}
-          :coll {:type :jsonb :description "Collection to fold."}}
-   :return-type :any}
+   :description "Left fold over a collection (Clojure's `reduce`). `(func [acc item])` — graphden's `:reduce` impl packs `acc` and `item` into a single vector before calling the user fn, so the reducer is a 1-arg callable receiving `[acc item]`."
+   ;; The reducer sees a SINGLE arg holding the [acc item] pair — not
+   ;; a 2-arg call. This matches `:reduce`'s impl: `(func [acc item])`.
+   ;; Type var `a` pins the accumulator (and the return); `b` the
+   ;; element. The pair is `[:list :any]` because the items have two
+   ;; different types (`a` and `b`) — graphden's list type is
+   ;; homogeneous, so we widen.
+   ;; `#{}` constraint: a fold's reducer must be pure so the result
+   ;; depends only on (init, coll) — replays / caching / parallelism
+   ;; all rely on this.
+   :args {:func {:type [:fn {:pair [:list :any]} a #{}]
+                 :description "Pure reducing callable receiving `[acc item]` as a single vector."}
+          :init {:type a :description "Seed accumulator."}
+          :coll {:type [:list b] :description "Collection to fold."}}
+   :return-type a}
 
   {:name :some
    :description "First truthy result of `(pred item)` over the collection, else nil (Clojure's `some`)."
-   :args {:pred {:type :fn :description "Predicate callable."}
-          :coll {:type :jsonb :description "Collection to scan."}}
+   ;; Pure-predicate constraint — same rationale as :filter.
+   :args {:pred {:type [:fn {:item a} :any #{}]
+                 :description "Pure predicate callable."}
+          :coll {:type [:list a]
+                 :description "Collection to scan."}}
    :return-type :any}
 
   {:name :every?
    :description "True iff `(pred item)` is truthy for every item (Clojure's `every?`). True for empty input."
-   :args {:pred {:type :fn :description "Predicate callable."}
-          :coll {:type :jsonb :description "Collection to scan."}}
+   :args {:pred {:type [:fn {:item a} :any #{}]
+                 :description "Pure predicate callable."}
+          :coll {:type [:list a]
+                 :description "Collection to scan."}}
    :return-type :bool}
 
   {:name :find-first
    :description "First item where `(pred item)` is truthy, else nil. Like Clojure's `(first (filter pred coll))` but eager-shortcut."
-   :args {:pred {:type :fn :description "Predicate callable."}
-          :coll {:type :jsonb :description "Collection to scan."}}
-   :return-type :any}
+   :args {:pred {:type [:fn {:item a} :any #{}]
+                 :description "Pure predicate callable."}
+          :coll {:type [:list a]
+                 :description "Collection to scan."}}
+   :return-type a}
 
   {:name :group-by
    :description "Group items by the result of `(key-fn item)` (Clojure's `group-by`). Returns `{key [items …]}`."
-   :args {:key-fn {:type :fn :description "Callable producing the grouping key per item."}
-          :coll {:type :jsonb :description "Collection to group."}}
+   ;; key-fn must be pure — bucketing depends purely on the key, so
+   ;; an effectful key-fn would mean the same item lands in different
+   ;; buckets across runs.
+   :args {:key-fn {:type [:fn {:item a} b #{}]
+                   :description "Pure callable producing the grouping key per item."}
+          :coll {:type [:list a]
+                 :description "Collection to group."}}
    :return-type :jsonb}
 
   {:name :sort-by
    :description "Sort by the result of `(key-fn item)` in natural order (Clojure's `sort-by`)."
-   :args {:key-fn {:type :fn :description "Callable producing the sort key per item."}
-          :coll {:type :jsonb :description "Collection to sort."}}
-   :return-type :jsonb}
+   ;; Sorting requires a stable, deterministic key function — same
+   ;; item must produce the same key every time the comparator
+   ;; consults it. An effectful key-fn breaks the sort invariant.
+   :args {:key-fn {:type [:fn {:item a} b #{}]
+                   :description "Pure callable producing the sort key per item."}
+          :coll {:type [:list a]
+                 :description "Collection to sort."}}
+   :return-type [:list a]}
 
-  {:name :apply
-   :description "Call a fn with a vector of args (Clojure's `apply`). Equivalent to `(func arg1 arg2 …)`."
-   :args {:func {:type :fn :description "Callable to invoke."}
-          :args {:type :sequence :of :any :description "Positional arguments — each item may be a literal or a fn-ref."}}
-   :return-type :any}
-
-  ;; Returns value, ignoring _item — usable as HOF argument
+  ;; Returns value, ignoring _item — usable as HOF argument.
+  ;; Type-var `a` flows from :value to the return so children narrow:
+  ;; binding :value to a typed value pins the return to that type.
   {:name :constantly
    :description "Return `:value` unchanged regardless of input (Clojure's `constantly`). Shaped as a HOF callable."
-   :args {:value {:type :any :description "Constant value to return."}
+   :args {:value {:type a :description "Constant value to return."}
           :_item {:type :any :required false :description "Ignored input slot — present so the fn-graph satisfies a HOF callable signature."}}
-   :return-type :any}
+   :return-type a}
 
   {:name :comp
    :description "Right-to-left composition of functions/transducers (Clojure's `comp`)."
@@ -74,8 +121,10 @@
 
   {:name :transduce
    :description "Single-pass transducer pipeline with a reducing fn (Clojure's `transduce`). `transducer` typically comes from `:comp`-ing `:filter`/`:map` without `:coll`."
+   ;; Same pure-fold rationale as `:reduce`.
    :args {:transducer {:type :any :description "Composed transducer."}
-          :reducer {:type :fn :description "Final reducing callable `(acc, item) → acc`."}
-          :init {:type :any :description "Seed accumulator."}
-          :coll {:type :jsonb :description "Collection to consume."}}
-   :return-type :any}]}
+          :reducer {:type [:fn {:acc a :item b} a #{}]
+                    :description "Pure reducing callable `(acc, item) → acc`."}
+          :init {:type a :description "Seed accumulator."}
+          :coll {:type [:list b] :description "Collection to consume."}}
+   :return-type a}]}

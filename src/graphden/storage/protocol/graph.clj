@@ -24,12 +24,19 @@
 
    ## ExecutionGraphResult Structure
 
-   The record contains all data needed to execute a function:
-   - :fns - Map of fn-id -> fn record
-   - :args - Map of fn-id -> [arg records with resolved inheritance]
+   The record contains all data needed to execute a function under
+   the slot/binding model:
+   - :fns        - Map of fn-id -> fn record
+   - :slots      - vector of slot rows reachable from the target
+   - :fn-slots   - vector of (fn-id, slot-id, position) junction rows
+   - :bindings   - vector of binding rows (per-fn slot customizations)
+   - :list-items - vector of binding-list-item rows
+   plus by-key convenience indexes (`fn-slots-by-fn`,
+   `bindings-by-fn`, `items-by-binding`).
 
-   Note: This namespace does NOT define protocols to avoid circular deps.
-   The ExecutionGraphReader extension is done in interface.clj."
+   Note: This namespace does NOT define protocols to avoid circular
+   deps. Protocol surface lives alongside `StorageCRUD` /
+   `ExecutionGraph` in this package's `core` ns."
   (:require
     [clojure.set :as set]
     [clojure.tools.logging :as log]
@@ -174,77 +181,41 @@
 
 
 ;; === ExecutionGraphResult record ===
+;;
+;; Slot/fn-slot/binding model: each field carries the corresponding
+;; entity collection plus convenience indexes. The legacy `:args`
+;; field is dropped — there is no `arg` table anymore.
 
 (defrecord ExecutionGraphResult
-  [fns args args-by-fn args-by-id arg-roots])
+  [fns slots fn-slots bindings list-items
+   fn-slots-by-fn bindings-by-fn items-by-binding])
 
 
-(defn- build-args-by-fn-index
-  "Builds index of fn-id -> [args].
-   Provides O(1) lookup by fn-id instead of O(n) filter."
-  [args]
-  (reduce
-    (fn [acc arg]
-      (update acc (:fn-id arg) (fnil conj []) arg))
-    {}
-    args))
-
-
-(defn- build-args-by-id-index
-  "Builds index of arg-id -> arg.
-   Provides O(1) lookup by arg-id for pass-through args resolution."
-  [args]
-  (into {} (map (fn [a] [(:id a) a])) args))
-
-
-(defn- find-root-arg-id
-  "Follows source-id chain to find the root arg (the one with name).
-   Returns the root arg's id. Uses args-by-id for O(1) lookups."
-  [args-by-id arg-id max-depth]
-  (loop [current-id arg-id
-         depth 0]
-    (when (> depth max-depth)
-      (throw (ex-info "Source-id chain exceeds maximum depth"
-                      {:type :graph-error/source-chain-too-deep
-                       :arg-id arg-id
-                       :max-depth max-depth})))
-    (let [arg (get args-by-id current-id)]
-      (if-let [source-id (:source-id arg)]
-        (recur source-id (inc depth))
-        current-id))))
-
-
-(defn- build-arg-roots-index
-  "Builds index of arg-id -> root-arg-id.
-   Root arg is the one at the end of source-id chain (has :name, no :source-id).
-   Provides O(1) lookup for resolving arg names at runtime."
-  [args-by-id]
-  (let [max-depth 100]
-    (reduce-kv
-      (fn [acc arg-id _arg]
-        (assoc acc arg-id (find-root-arg-id args-by-id arg-id max-depth)))
-      {}
-      args-by-id)))
+(defn- index-by-key
+  [k coll]
+  (reduce (fn [acc r] (update acc (get r k) (fnil conj []) r)) {} coll))
 
 
 (defn ->execution-graph
-  "Creates an ExecutionGraphResult record from a map.
-   Validates that all required keys are present and non-empty.
-   Builds indexes for O(1) lookup."
-  [{:keys [fns args]
-    :or {args []}}]
+  "Creates an ExecutionGraphResult record from a map carrying the
+   slot/fn-slot/binding entities. Builds convenience indexes."
+  [{:keys [fns slots fn-slots bindings list-items]
+    :or {slots [] fn-slots [] bindings [] list-items []}}]
   (when-not (map? fns)
     (throw (ex-info "ExecutionGraphResult requires :fns map"
                     {:type :invalid-data :received (type fns)})))
   (when (empty? fns)
-    (throw (ex-info "ExecutionGraphResult :fns must contain at least target function"
+    (throw (ex-info "ExecutionGraphResult :fns must contain at least the target fn"
                     {:type :invalid-data :hint "Check that fn-id exists in storage"})))
-  (when-not (sequential? args)
-    (throw (ex-info "ExecutionGraphResult requires :args sequence"
-                    {:type :invalid-data :received (type args)})))
-  (let [args-by-id (build-args-by-id-index args)
-        arg-roots (build-arg-roots-index args-by-id)]
-    (->ExecutionGraphResult fns args (build-args-by-fn-index args) args-by-id arg-roots)))
+  (->ExecutionGraphResult
+    fns
+    (vec slots)
+    (vec fn-slots)
+    (vec bindings)
+    (vec list-items)
+    (index-by-key :fn-id fn-slots)
+    (index-by-key :fn-id bindings)
+    (index-by-key :binding-id list-items)))
 
 
 (defn execution-graph?
@@ -265,29 +236,42 @@
   (:fns graph))
 
 
-(defn get-graph-args
-  "Returns all args from an execution graph.
-   Prefer this over direct :args access for forward compatibility."
+(defn get-graph-slots
   [graph]
-  (:args graph))
+  (:slots graph))
 
 
-(defn get-graph-args-for-fn
-  "Returns args for a specific fn-id from an execution graph.
-   Uses pre-built index for O(1) lookup."
+(defn get-graph-fn-slots
+  [graph]
+  (:fn-slots graph))
+
+
+(defn get-graph-bindings
+  [graph]
+  (:bindings graph))
+
+
+(defn get-graph-list-items
+  [graph]
+  (:list-items graph))
+
+
+(defn get-bindings-for-fn
+  "Returns bindings for a specific fn-id. O(1) via the index."
   [graph fn-id]
-  (get (:args-by-fn graph) fn-id []))
+  (get (:bindings-by-fn graph) fn-id []))
 
 
-(defn get-root-arg-name
-  "Returns the name of the root arg for a given arg.
-   Uses pre-built arg-roots index for O(1) lookup.
-   Root arg is at the end of source-id chain (base-fn arg with :name)."
-  [graph arg]
-  (let [arg-id (:id arg)
-        root-id (get (:arg-roots graph) arg-id arg-id)
-        root-arg (get (:args-by-id graph) root-id)]
-    (:name root-arg)))
+(defn get-fn-slots-for-fn
+  "Returns fn-slot junction rows for a specific fn-id. O(1)."
+  [graph fn-id]
+  (get (:fn-slots-by-fn graph) fn-id []))
+
+
+(defn get-items-for-binding
+  "Returns the binding-list-item rows for a binding-id. O(1)."
+  [graph binding-id]
+  (get (:items-by-binding graph) binding-id []))
 
 
 ;; === Graph Resolution BFS Algorithm ===
@@ -295,73 +279,73 @@
 ;; These functions take loader-specific functions as parameters to avoid
 ;; protocol dependencies. Storage backends provide the loader functions.
 
-(defn extract-fn-refs-from-args
-  "Extracts fn-ids referenced in args.
-   Returns set of fn-ids that need to be loaded.
-
-   Two reference types:
-   1. ref-id: direct fn reference (execute and use result)
-   2. value with UUID: fn-id passed as value (for HOF)"
-  [args]
-  ;; cond-> only adds non-nil values, so no need for (remove nil?)
+(defn- extract-fn-refs-from-bindings
+  [bindings]
   (into #{}
-        (mapcat (fn [arg]
+        (mapcat (fn [b]
                   (cond-> []
-                    (some? (:ref-id arg)) (conj (:ref-id arg))
-                    (and (some? (:value arg)) (uuid? (:value arg))) (conj (:value arg)))))
-        args))
+                    (some? (:ref-fn-id b)) (conj (:ref-fn-id b))
+                    (some? (:type-override-fn-id b)) (conj (:type-override-fn-id b)))))
+        bindings))
+
+
+(defn- extract-fn-refs-from-items
+  [items]
+  (into #{} (keep :ref-fn-id) items))
 
 
 (defn process-fn-node
-  "Processes a single fn node during graph resolution.
-   Returns {:fns updated-fns :args updated-args :new-fn-refs #{fn-ids-to-visit}}.
-
-   Arguments:
-   - load-fn-record: (fn [fn-id] -> fn-record)
-   - load-args-for-fn: (fn [fn-id] -> [arg-records])
-   - current-fn-id: UUID of fn to process
-   - fns: current accumulated fns map
-   - args: current accumulated args vector"
-  [load-fn-record load-args-for-fn current-fn-id fns args]
-  (if-let [fn-rec (load-fn-record current-fn-id)]
-    (let [fn-args (load-args-for-fn current-fn-id)
-          new-fn-refs (extract-fn-refs-from-args fn-args)
-          ;; parent-ids is :ref-many (vector of UUIDs from junction table)
-          parent-refs (into #{} (remove nil?) (:parent-ids fn-rec))]
-      {:fns (assoc fns current-fn-id fn-rec)
-       :args (into args fn-args)
-       :new-fn-refs (set/union new-fn-refs parent-refs)})
-    {:fns fns :args args :new-fn-refs #{}}))
+  "Process one fn during BFS. Loaders return: fn record, fn-slot
+   junctions, bindings, and per-binding items. Returns
+   {:fns :fn-slots :bindings :list-items :new-fn-refs}."
+  [{:keys [load-fn-record load-fn-slots-for-fn
+           load-bindings-for-fn load-items-for-binding]}
+   current-fn-id state]
+  (let [{:keys [fns fn-slots bindings list-items]} state]
+    (if-let [fn-rec (load-fn-record current-fn-id)]
+      (let [fs   (load-fn-slots-for-fn current-fn-id)
+            bs   (load-bindings-for-fn current-fn-id)
+            items (mapcat (fn [b] (load-items-for-binding (:id b))) bs)
+            ref-from-bs (extract-fn-refs-from-bindings bs)
+            ref-from-items (extract-fn-refs-from-items items)
+            parent-refs (into #{} (remove nil?) (:parent-ids fn-rec))
+            type-refs (into #{}
+                            (keep #(get fn-rec %))
+                            [:base-fn-id :element-fn-id :return-type-fn-id])]
+        {:fns        (assoc fns current-fn-id fn-rec)
+         :fn-slots   (into fn-slots fs)
+         :bindings   (into bindings bs)
+         :list-items (into list-items items)
+         :new-fn-refs (reduce into #{}
+                              [ref-from-bs ref-from-items parent-refs type-refs])})
+      (assoc state :new-fn-refs #{}))))
 
 
 (defn resolve-execution-graph-bfs
-  "Shared BFS algorithm for execution graph resolution.
-   Takes loader functions as parameters for backend-specific data access.
+  "Shared BFS resolution for the slot/fn-slot/binding model. Loaders:
+     :load-fn-record         (fn [fn-id] → fn-row)
+     :load-fn-slots-for-fn   (fn [fn-id] → [fn-slot-row …])
+     :load-bindings-for-fn   (fn [fn-id] → [binding-row …])
+     :load-items-for-binding (fn [binding-id] → [item-row …])
+     :load-all-slots         (fn [] → [slot-row …])
 
-   Arguments:
-   - load-fn-record: (fn [fn-id] -> fn-record)
-   - load-args-for-fn: (fn [fn-id] -> [arg-records])
-   - fn-id: starting function UUID
-
-   Returns ExecutionGraphResult record."
-  [load-fn-record load-args-for-fn fn-id]
+   Slots are pulled in bulk (no per-fn lookup) since they're a small
+   immutable set that's shared across fns via fn-slot junctions."
+  [{:keys [load-all-slots] :as loaders} fn-id]
   (loop [to-visit #{fn-id}
          visited #{fn-id}
-         fns {}
-         args []
+         state {:fns {} :fn-slots [] :bindings [] :list-items []}
          iter-count 0]
     (check-graph-iteration-limit! iter-count fn-id)
     (if (empty? to-visit)
-      (->execution-graph {:fns fns :args args})
-      (let [current-fn-id (first to-visit)
-            rest-to-visit (disj to-visit current-fn-id)
-            {:keys [fns args new-fn-refs]}
-            (process-fn-node load-fn-record load-args-for-fn
-                             current-fn-id fns args)
+      (->execution-graph (assoc state :slots (load-all-slots)))
+      (let [current-id (first to-visit)
+            rest-to-visit (disj to-visit current-id)
+            {:keys [new-fn-refs] :as state'}
+            (process-fn-node loaders current-id state)
             new-to-visit (set/difference new-fn-refs visited)
             new-visited (set/union visited new-to-visit)]
         (recur (set/union rest-to-visit new-to-visit)
                new-visited
-               fns
-               args
+               (dissoc state' :new-fn-refs)
                (inc iter-count))))))

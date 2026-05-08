@@ -8,9 +8,13 @@
     [clojure.string :as str]
     [clojure.tools.build.api :as b])
   (:import
-    (java.io File)
-    (java.nio.file Files Path)
-    (java.security MessageDigest)))
+    (java.io
+      File)
+    (java.nio.file
+      Files
+      Path)
+    (java.security
+      MessageDigest)))
 
 
 (def lib 'graphden/executor-server)
@@ -126,8 +130,8 @@
     (spit (str class-dir "/" build-hashes-file)
           (str "{"
                (str/join ","
-                 (for [[k v] hashes]
-                   (str \" (name k) "\":\"" v \")))
+                         (for [[k v] hashes]
+                           (str \" (name k) "\":\"" v \")))
                "}")))
   (b/compile-clj {:basis basis
                   :ns-compile '[graphden.executor-runtime.core]

@@ -52,7 +52,7 @@ function isAuthenticated() {
 async function authFetch(url, opts = {}) {
   const pw = getAuthPassword();
   const headers = Object.assign({}, opts.headers || {});
-  if (pw) headers['Authorization'] = 'Bearer ' + pw;
+  if (pw) headers.Authorization = 'Bearer ' + pw;
   const merged = Object.assign({}, opts, { headers });
   const response = await fetch(url, merged);
   if (response.status === 401 && pw) {
@@ -60,6 +60,29 @@ async function authFetch(url, opts = {}) {
     openAuthPopover('Password rejected — please re-enter.');
   }
   return response;
+}
+
+// Convenience wrapper for the typical mutating call shape: form-urlencoded
+// body, server returns 2xx/4xx. `fields` is either an object that gets
+// URL-encoded (skipping nullish/empty values), a pre-encoded string, or
+// undefined for body-less requests (DELETE).
+async function authMutate(method, url, fields) {
+  const opts = { method };
+  if (fields !== undefined && fields !== null) {
+    let body;
+    if (typeof fields === 'string') {
+      body = fields;
+    } else {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null && v !== '') params.set(k, v);
+      }
+      body = params.toString();
+    }
+    opts.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    opts.body = body;
+  }
+  return authFetch(url, opts);
 }
 
 // Mount the lock icon + popover skeleton into #auth-mount.
@@ -252,4 +275,5 @@ async function submitAuth() {
 // Bootstrapped from editor-main.js after DOMContentLoaded.
 window.initAuthLock = initAuthLock;
 window.authFetch = authFetch;
+window.authMutate = authMutate;
 window.isAuthenticated = isAuthenticated;

@@ -1,18 +1,17 @@
 (ns graphden.versioning.storage.resolution
-  "Version resolution algorithm for branch-aware entity reads.
+  "Version resolution for branch-aware entity reads in the
+   slot/fn-slot/binding model.
 
-   Implements the version resolution algorithm:
-   1. Find latest own version on this branch
-   2. Check branch-merge records for incoming merges
-   3. For each merge, find latest version in source branch
-   4. Pick candidate with greatest effective timestamp
-   5. If nothing found, recurse to parent branch (base-branch-id)
+   Versioned entities (mutable):
+     fn → fn-version
+     fn-slot → fn-slot-version
+     binding → binding-version
+     binding-list-item → binding-list-item-version
 
-   ## 2-Entity Schema
+   `slot` is intentionally NOT versioned (immutable post-create).
 
-   Only two entities are versioned:
-   - fn: function entity (parent-ids for inheritance)
-   - arg: argument entity (source-id for inheritance, value/ref-id for data)"
+   Algorithm: find own latest version on the branch, fall back through
+   branch-merge records, then recurse to the parent branch."
   (:require
     [clojure.set :as set]
     [graphden.storage.protocol.core :as sp]))
@@ -40,20 +39,35 @@
 ;; Everything else (minus :id) stays in the identity table (immutable).
 
 (def entity-config
-  "Configuration for versioned entities.
-   Maps base entity name to version table metadata.
+  "Configuration for versioned entities. Maps base entity name to
+   version table metadata.
 
-   Note: :parent-ids is NOT in fn version-data-fields because it is a
-   :ref-many field stored in a junction table (fn_parent_ids), not as a
-   column on the fn entity. Junction rows are not versioned currently."
+   Notes:
+   - `:parent-ids` is NOT in fn version-data-fields — it's a :ref-many
+     stored in a junction table, not versioned.
+   - `:slot` is intentionally absent: slots are immutable post-create
+     (changing the (name, type-fn-id) pair = creating a new slot)."
   {:fn {:version-entity :fn-version
         :version-id-field :fn-id
-        :version-data-fields #{:name :return-type :impl-hash :description}}
+        :version-data-fields #{:name :impl-hash :description :constraint
+                               :base-fn-id :element-fn-id :return-type-fn-id
+                               :anonymous-hash}}
 
-   :arg {:version-entity :arg-version
-         :version-id-field :arg-id
-         :version-data-fields #{:fn-id :name :type :source-id :value :ref-id :is-fn :required
-                                :next-arg-id :prev-arg-id :description}}})
+   :fn-slot {:version-entity :fn-slot-version
+             :version-id-field :fn-slot-id
+             :version-data-fields #{:fn-id :slot-id :position}}
+
+   :binding {:version-entity :binding-version
+             :version-id-field :binding-id
+             :version-data-fields #{:fn-id :slot-id :value :ref-fn-id
+                                    :override-kind
+                                    :type-override-fn-id :description
+                                    :terminal :list-append :list-closed}}
+
+   :binding-list-item {:version-entity :binding-list-item-version
+                       :version-id-field :item-id
+                       :version-data-fields #{:binding-id :position :value
+                                              :ref-fn-id :literal}}})
 
 
 (defn versioned-entity?
@@ -82,6 +96,64 @@
 
 ;; === Core Resolution Algorithm ===
 
+(defn- own-latest-version
+  "Latest version record this branch wrote directly for the entity, or nil."
+  [base-storage version-entity version-id-field entity-id branch-id]
+  (latest-by-created-at
+    (sp/query-entities base-storage version-entity
+                       {version-id-field entity-id :branch-id branch-id})))
+
+
+(defn- merge-candidates
+  "For each branch-merge that lands on `branch-id`, return a
+   `{:version :effective-ts}` candidate carrying the source branch's
+   latest version that's still ≤ source-timestamp AND landed AFTER
+   our own latest. Empty when no merges match."
+  [base-storage version-entity version-id-field entity-id own-latest merges]
+  (when (seq merges)
+    (let [source-branch-ids (mapv :source-branch-id merges)
+          ;; Single batch query for all source branches.
+          all-src-versions (sp/query-entities base-storage version-entity
+                                              {version-id-field entity-id
+                                               :branch-id source-branch-ids})
+          src-versions-by-branch (group-by :branch-id all-src-versions)]
+      (for [m merges
+            :let [branch-versions (get src-versions-by-branch
+                                       (:source-branch-id m) [])
+                  ;; Only versions created at or before source-timestamp.
+                  eligible (filter #(not (pos? (compare (:created-at %)
+                                                        (:source-timestamp m))))
+                                   branch-versions)
+                  best (latest-by-created-at eligible)]
+            :when best
+            ;; Only consider merge if it happened after our own latest.
+            :when (or (nil? own-latest)
+                      (pos? (compare (:target-timestamp m)
+                                     (:created-at own-latest))))]
+        {:version best :effective-ts (:target-timestamp m)}))))
+
+
+(defn- pick-latest-candidate
+  "Return the `:version` whose `:effective-ts` is greatest, or nil
+   when the candidate seq is empty."
+  [candidates]
+  (when-let [candidates (seq candidates)]
+    (:version (reduce (fn [a b]
+                        (if (pos? (compare (:effective-ts b)
+                                           (:effective-ts a)))
+                          b
+                          a))
+                      (first candidates)
+                      (rest candidates)))))
+
+
+(defn- parent-branch-id
+  "The base-branch-id of `branch-id`, or nil at the root."
+  [base-storage branch-id]
+  (some-> (sp/read-entity base-storage :branch branch-id)
+          :base-branch-id))
+
+
 (defn resolve-version
   "Resolves the current version of an entity on a branch.
 
@@ -95,60 +167,22 @@
    Returns the version record or nil."
   [base-storage entity-name entity-id branch-id]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-
-        ;; Step 1: Find latest own version on this branch
-        own-versions (sp/query-entities base-storage version-entity
-                                        {version-id-field entity-id :branch-id branch-id})
-        own-latest (latest-by-created-at own-versions)
-
-        ;; Step 2: Find merges into this branch
+        own-latest (own-latest-version base-storage version-entity
+                                       version-id-field entity-id branch-id)
         merges (sp/query-entities base-storage :branch-merge
                                   {:target-branch-id branch-id})
-
-        ;; Step 3: Batch load versions from ALL source branches in single query
-        merge-candidates
-        (when (seq merges)
-          (let [source-branch-ids (mapv :source-branch-id merges)
-                ;; Single batch query for all source branches
-                all-src-versions (sp/query-entities base-storage version-entity
-                                                    {version-id-field entity-id
-                                                     :branch-id source-branch-ids})
-                ;; Index by branch-id for O(1) lookup
-                src-versions-by-branch (group-by :branch-id all-src-versions)]
-            (for [m merges
-                  :let [branch-versions (get src-versions-by-branch (:source-branch-id m) [])
-                        ;; Only versions created at or before source-timestamp
-                        eligible (filter #(not (pos? (compare (:created-at %)
-                                                              (:source-timestamp m))))
-                                         branch-versions)
-                        best (latest-by-created-at eligible)]
-                  :when best
-                  ;; Only consider merge if it happened after our own latest version
-                  :when (or (nil? own-latest)
-                            (pos? (compare (:target-timestamp m)
-                                           (:created-at own-latest))))]
-              {:version best :effective-ts (:target-timestamp m)})))
-
-        ;; Step 4: Pick best candidate overall
+        merge-cands (merge-candidates base-storage version-entity
+                                      version-id-field entity-id
+                                      own-latest merges)
         all-candidates (cond-> []
                          own-latest
                          (conj {:version own-latest
                                 :effective-ts (:created-at own-latest)})
-                         (seq merge-candidates)
-                         (into merge-candidates))
-        best (when (seq all-candidates)
-               (:version (reduce (fn [a b]
-                                   (if (pos? (compare (:effective-ts b)
-                                                      (:effective-ts a)))
-                                     b a))
-                                 (first all-candidates)
-                                 (rest all-candidates))))]
-
-    (or best
-        ;; Step 5: Recurse to parent branch
-        (when-let [branch (sp/read-entity base-storage :branch branch-id)]
-          (when-let [parent-id (:base-branch-id branch)]
-            (resolve-version base-storage entity-name entity-id parent-id))))))
+                         (seq merge-cands)
+                         (into merge-cands))]
+    (or (pick-latest-candidate all-candidates)
+        (when-let [parent-id (parent-branch-id base-storage branch-id)]
+          (resolve-version base-storage entity-name entity-id parent-id)))))
 
 
 ;; === High-Level Resolution Functions ===
@@ -279,7 +313,7 @@
 
    Arguments:
    - base-storage: Base storage (not versioned)
-   - entity-name: :fn or :arg
+   - entity-name: any versioned entity (see `entity-config`)
    - identity-records: Collection of identity records (from base-storage)
    - branch-id: Current branch id
 
@@ -312,19 +346,16 @@
 ;; Optimized algorithm that loads ALL data in 4 queries, then does BFS in memory.
 ;; This avoids the N+1 query problem of generic BFS.
 
-(defn- load-all-resolved-fns
-  "Loads all fn records and resolves versions in memory.
-   Returns map {fn-id -> resolved-fn-record}.
-
-   Optimized: uses WHERE IN for branch-chain instead of full scan + filter."
-  [base-storage branch-id]
-  (let [all-identities (sp/query-entities base-storage :fn {})
+(defn- load-all-resolved
+  "Loads all identity rows of `entity-name` and overlays the latest
+   version on each. Returns a map `{id → resolved-row}`."
+  [base-storage entity-name branch-id]
+  (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
+        all-identities (sp/query-entities base-storage entity-name {})
         branch-chain (collect-branch-chain base-storage branch-id)
-        {:keys [version-id-field]} (get entity-config :fn)
-        ;; Use WHERE IN for branch-chain instead of full table scan
-        relevant-versions (sp/query-entities base-storage :fn-version
+        relevant-versions (sp/query-entities base-storage version-entity
                                              {:branch-id (vec branch-chain)})
-        versions-by-id (group-by :fn-id relevant-versions)]
+        versions-by-id (group-by version-id-field relevant-versions)]
     (into {}
           (map (fn [identity-rec]
                  (let [eid (:id identity-rec)]
@@ -335,104 +366,101 @@
           all-identities)))
 
 
-(defn- load-all-resolved-args
-  "Loads all arg records and resolves versions in memory.
-   Returns map {arg-id -> resolved-arg-record}.
-
-   Optimized: uses WHERE IN for branch-chain instead of full scan + filter."
-  [base-storage branch-id]
-  (let [all-identities (sp/query-entities base-storage :arg {})
-        branch-chain (collect-branch-chain base-storage branch-id)
-        {:keys [version-id-field]} (get entity-config :arg)
-        ;; Use WHERE IN for branch-chain instead of full table scan
-        relevant-versions (sp/query-entities base-storage :arg-version
-                                             {:branch-id (vec branch-chain)})
-        versions-by-id (group-by :arg-id relevant-versions)]
-    (into {}
-          (map (fn [identity-rec]
-                 (let [eid (:id identity-rec)]
-                   (if-let [version (resolve-version-from-cache versions-by-id eid branch-chain)]
-                     [eid (merge identity-rec
-                                 (extract-version-data version version-id-field))]
-                     [eid identity-rec]))))
-          all-identities)))
-
-
-(defn- extract-fn-refs-from-args
-  "Extracts fn-ids referenced in args.
-   Returns set of fn-ids."
-  [args]
-  (->> args
-       (mapcat (fn [arg]
+(defn- extract-fn-refs-from-bindings
+  "Extracts fn-ids referenced via binding rows."
+  [bindings]
+  (->> bindings
+       (mapcat (fn [b]
                  (cond-> []
-                   (some? (:ref-id arg)) (conj (:ref-id arg))
-                   (and (some? (:value arg)) (uuid? (:value arg))) (conj (:value arg)))))
+                   (some? (:ref-fn-id b)) (conj (:ref-fn-id b))
+                   (some? (:type-override-fn-id b)) (conj (:type-override-fn-id b)))))
        (remove nil?)
-       (set)))
+       set))
 
 
-(defn- build-args-index
-  "Builds index of fn-id -> [args] from resolved args map."
-  [resolved-args-map]
-  (reduce-kv
-    (fn [acc _arg-id arg]
-      (update acc (:fn-id arg) (fnil conj []) arg))
-    {}
-    resolved-args-map))
+(defn- extract-fn-refs-from-list-items
+  [items]
+  (->> items
+       (keep :ref-fn-id)
+       set))
+
+
+(defn- index-by
+  [k coll]
+  (reduce (fn [acc r]
+            (update acc (get r k) (fnil conj []) r))
+          {}
+          coll))
 
 
 (defn resolve-execution-graph-batch
-  "Batch resolves execution graph using in-memory BFS.
+  "Batch resolves execution graph using in-memory BFS over the
+   slot/fn-slot/binding model. Loads fn / fn-slot / binding /
+   binding-list-item identities + their version overlays in a
+   constant number of queries, then walks the parent-ids and
+   ref-fn-id graph from `fn-id`.
 
-   Algorithm:
-   1. Load ALL fn identity + versions (2 queries)
-   2. Load ALL arg identity + versions (2 queries)
-   3. Resolve versions in memory
-   4. BFS traversal on resolved data
-
-   This reduces ~400 queries to 4 queries.
-
-   Arguments:
-   - base-storage: Base storage (not VersionedStorage)
-   - fn-id: Starting function UUID
-   - branch-id: Current branch id
-
-   Returns: ExecutionGraphResult record (from graph.clj)."
+   Returns
+     {:fns        {fn-id → fn-row}
+      :slots      [slot-row …]            — all slots (small set)
+      :fn-slots   [fn-slot-row …]         — junctions for visited fns
+      :bindings   [binding-row …]         — bindings for visited fns
+      :list-items [item-row …]            — items of visited bindings}"
   [base-storage fn-id branch-id]
-  (let [;; Load all resolved data (4 queries total)
-        all-fns (load-all-resolved-fns base-storage branch-id)
-        all-args-map (load-all-resolved-args base-storage branch-id)
-        args-by-fn (build-args-index all-args-map)
-
-        ;; BFS traversal in memory
-        result (loop [to-visit #{fn-id}
-                      visited #{fn-id}
-                      fns {}
-                      args []
-                      iter-count 0]
-                 (when (> iter-count 10000)
-                   (throw (ex-info "Execution graph resolution exceeded maximum iterations"
-                                   {:type :execution-error/graph-too-large
-                                    :fn-id fn-id
-                                    :iteration-count iter-count})))
-                 (if (empty? to-visit)
-                   {:fns fns :args args}
-                   (let [current-fn-id (first to-visit)
-                         rest-to-visit (disj to-visit current-fn-id)]
-                     (if-let [fn-rec (get all-fns current-fn-id)]
-                       (let [fn-args (get args-by-fn current-fn-id [])
-                             new-fn-refs (extract-fn-refs-from-args fn-args)
-                             parent-refs (when-let [parent-ids (seq (:parent-ids fn-rec))]
-                                           (set parent-ids))
-                             all-refs (set/union new-fn-refs (or parent-refs #{}))
-                             new-to-visit (set/difference all-refs visited)
-                             new-visited (set/union visited new-to-visit)]
-                         (recur (set/union rest-to-visit new-to-visit)
-                                new-visited
-                                (assoc fns current-fn-id fn-rec)
-                                (into args fn-args)
-                                (inc iter-count)))
-                       ;; fn not found - skip
-                       (recur rest-to-visit visited fns args (inc iter-count))))))]
-    ;; Return ExecutionGraphResult-compatible structure
-    result))
+  (let [all-fns        (load-all-resolved base-storage :fn branch-id)
+        all-fn-slots   (load-all-resolved base-storage :fn-slot branch-id)
+        all-bindings   (load-all-resolved base-storage :binding branch-id)
+        all-items      (load-all-resolved base-storage :binding-list-item branch-id)
+        ;; Slots are immutable so they're not versioned — query directly.
+        slots          (sp/query-entities base-storage :slot {})
+        fn-slots-by-fn (index-by :fn-id (vals all-fn-slots))
+        bindings-by-fn (index-by :fn-id (vals all-bindings))
+        items-by-binding (index-by :binding-id (vals all-items))
+        slot-by-id     (into {} (map (juxt :id identity)) slots)
+        collect-fn-refs
+        (fn [fn-rec fn-fs fn-bs fn-items]
+          (reduce into #{}
+                  [(extract-fn-refs-from-bindings fn-bs)
+                   (extract-fn-refs-from-list-items fn-items)
+                   (set (remove nil? (:parent-ids fn-rec)))
+                   (into #{} (keep #(get fn-rec %))
+                         [:base-fn-id :element-fn-id :return-type-fn-id])
+                   ;; Slots themselves reference fn-rows via :type-fn-id —
+                   ;; pull those in too so type-checker / editor see the
+                   ;; complete sub-graph.
+                   (into #{} (keep #(:type-fn-id (slot-by-id (:slot-id %))))
+                         fn-fs)]))]
+    (loop [to-visit #{fn-id}
+           visited #{fn-id}
+           fns {}
+           fn-slots-acc []
+           bindings-acc []
+           items-acc []
+           iter-count 0]
+      (when (> iter-count 10000)
+        (throw (ex-info "Execution graph resolution exceeded maximum iterations"
+                        {:type :execution-error/graph-too-large
+                         :fn-id fn-id
+                         :iteration-count iter-count})))
+      (if (empty? to-visit)
+        {:fns fns :slots slots :fn-slots fn-slots-acc
+         :bindings bindings-acc :list-items items-acc}
+        (let [current (first to-visit)
+              rest-to-visit (disj to-visit current)]
+          (if-let [fn-rec (get all-fns current)]
+            (let [fn-fs (get fn-slots-by-fn current [])
+                  fn-bs (get bindings-by-fn current [])
+                  fn-binding-ids (set (map :id fn-bs))
+                  fn-items (mapcat #(get items-by-binding % []) fn-binding-ids)
+                  new-to-visit (set/difference
+                                 (collect-fn-refs fn-rec fn-fs fn-bs fn-items)
+                                 visited)]
+              (recur (set/union rest-to-visit new-to-visit)
+                     (set/union visited new-to-visit)
+                     (assoc fns current fn-rec)
+                     (into fn-slots-acc fn-fs)
+                     (into bindings-acc fn-bs)
+                     (into items-acc fn-items)
+                     (inc iter-count)))
+            (recur rest-to-visit visited fns fn-slots-acc bindings-acc
+                   items-acc (inc iter-count))))))))

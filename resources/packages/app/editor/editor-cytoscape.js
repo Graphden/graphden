@@ -372,7 +372,7 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   // register a few graph units off the pixel-precise line, and SEGMENT_TOL
   // for mouse would miss the overlap. Lifting the finger clears.
   function isTouchEvent(evt) {
-    const oe = evt && evt.originalEvent;
+    const oe = evt?.originalEvent;
     return !!(oe && (oe.touches !== undefined || oe.pointerType === 'touch'));
   }
   cy.on('tapstart', 'edge', function (evt) {

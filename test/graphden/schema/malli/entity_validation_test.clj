@@ -61,14 +61,13 @@
                                      :type :int
                                      :ref-id valid-fn-id}))))
 
-    (testing "valid arg with is-fn true (HOF)"
+    (testing "valid arg with :type :fn (HOF — `is-fn` was retired in #15b)"
       ;; For HOF, fn-id goes in ref-id (not value - value is for literals)
       (is (nil? (ds/validate-entity example-schema :arg
                                     {:id (random-uuid)
                                      :fn-id valid-fn-id
                                      :name "f"
                                      :type :fn
-                                     :is-fn true
                                      :ref-id valid-fn-id}))))
 
     (testing "valid arg with all nullable fields nil"
@@ -80,7 +79,6 @@
                                      :value nil
                                      :ref-id nil
                                      :source-id nil
-                                     :is-fn nil
                                      :required nil}))))
 
     (testing "unknown entity validation"

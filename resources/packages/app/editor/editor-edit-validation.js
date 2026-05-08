@@ -27,7 +27,7 @@ function wouldCycle(fnId, candidateParentId, _lookups) {
     if (visited.has(cur)) continue;
     visited.add(cur);
     const f = lk.fnMap.get(cur);
-    const pids = (f && f['parent-ids']) || [];
+    const pids = (f?.['parent-ids']) || [];
     for (const p of pids) stack.push(p);
   }
   return { ok: true };
@@ -36,20 +36,24 @@ function wouldCycle(fnId, candidateParentId, _lookups) {
 // MI arg-name collision check (used by Phase 4 — included here so the
 // validation module is one place for all structural pre-checks).
 // For each candidate parent, walk its full ancestor closure to gather
-// the terminal source-ids it inherits as primary args, plus the names
-// at those terminals. If two parents share a terminal source-id, that
-// is the SAME slot — fine. If they share an arg-NAME but at different
-// terminals, that's a collision (the merged interface would have a
-// duplicate name and the executor wouldn't know which value to forward).
+// the slot-ids it exposes (own + inherited) and their effective names.
+// If two parents share a slot-id, that's the SAME slot — fine. If they
+// share an arg-NAME but at different slot-ids, that's a collision (the
+// merged interface would have a duplicate name and the executor
+// wouldn't know which value to forward).
 function miCollisionCheck(parentIds, _lookups) {
   const lk = _lookups || (typeof lookups !== 'undefined' ? lookups : null);
-  if (!lk || !lk.fnMap || !lk.argMap || !lk.argsByFn) {
+  if (!lk || !lk.fnMap || !lk.fnSlotsByFn || !lk.slotMap) {
     return { ok: false, reason: 'lookups unavailable' };
   }
   if (!parentIds || parentIds.length < 2) return { ok: true };
 
-  // For each parent, collect a Map<terminalArgId, name>.
-  function terminalArgs(fnId) {
+  // For each parent fn, collect a Map<slotId, effectiveName> reflecting
+  // every slot the fn exposes through its own fn-slots PLUS the closure
+  // of inherited slots up the parent chain. The slot-id is the terminal
+  // identity; sharing a slot-id across parents is fine, sharing a name
+  // at distinct slot-ids is the collision.
+  function visibleSlots(fnId) {
     const out = new Map();
     const visited = new Set();
     const walk = (id) => {
@@ -57,14 +61,14 @@ function miCollisionCheck(parentIds, _lookups) {
       visited.add(id);
       const f = lk.fnMap.get(id);
       if (!f) return;
-      // Walk this fn's args, follow source-id to terminal.
-      const args = lk.argsByFn.get(id) || [];
-      for (const a of args) {
-        let cur = a;
-        while (cur && cur['source-id']) cur = lk.argMap.get(cur['source-id']);
-        if (cur && !cur['source-id']) {
-          out.set(cur.id, cur.name || '(unnamed)');
-        }
+      const fss = lk.fnSlotsByFn.get(id) || [];
+      for (const fs of fss) {
+        const slotId = fs['slot-id'];
+        if (!slotId || out.has(slotId)) continue;
+        const slot = lk.slotMap.get(slotId);
+        const effName = (typeof getEffectiveSlotName === 'function')
+                        ? getEffectiveSlotName(fnId, slotId) : null;
+        out.set(slotId, effName || (slot?.name) || '(unnamed)');
       }
       for (const p of (f['parent-ids'] || [])) walk(p);
     };
@@ -72,7 +76,7 @@ function miCollisionCheck(parentIds, _lookups) {
     return out;
   }
 
-  const perParent = parentIds.map(pid => terminalArgs(pid));
+  const perParent = parentIds.map(pid => visibleSlots(pid));
   // Group terminals by name across all parents.
   const byName = new Map();  // name -> Set<terminalId>
   perParent.forEach(m => {

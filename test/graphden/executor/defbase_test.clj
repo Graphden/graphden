@@ -1,8 +1,5 @@
-(ns ^{:clj-kondo/config (quote {:linters {:shadowed-var {:level :off}, :unused-binding {:level :off}}})} graphden.executor.defbase-test
-  "Tests for the `defbase` macro. Shadowed-var and unused-binding are
-   disabled here because sample impls use arg names matching core vars
-   (`test`, `key`) by design — that's what the macro is supposed to
-   support — and shadow tests define args intentionally unused."
+(ns graphden.executor.defbase-test
+  "Tests for the `defbase` macro."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.defbase :refer [defbase]]
@@ -17,8 +14,8 @@
   (+ a b))
 
 
-(defbase if-fn [test then else]
-  (if test then else))
+(defbase if-fn [pred then else]
+  (if pred then else))
 
 
 (defbase map-fn [func coll]
@@ -27,8 +24,8 @@
 
 (defbase ctx-aware
   "Impl that uses the execution context."
-  [key]
-  (get ctx key))
+  [k]
+  (get ctx k))
 
 
 (defbase shadowed
@@ -64,11 +61,11 @@
           then-thunk (rt/thunk (fn [] (swap! then-calls inc) :then-value))
           else-thunk (rt/thunk (fn [] (swap! else-calls inc) :else-value))]
 
-      (is (= :then-value (if-fn {:test true :then then-thunk :else else-thunk} nil)))
+      (is (= :then-value (if-fn {:pred true :then then-thunk :else else-thunk} nil)))
       (is (= 1 @then-calls))
       (is (zero? @else-calls))
 
-      (is (= :else-value (if-fn {:test false :then then-thunk :else else-thunk} nil)))
+      (is (= :else-value (if-fn {:pred false :then then-thunk :else else-thunk} nil)))
       (is (= 1 @then-calls) "then not called again")
       (is (= 1 @else-calls)))))
 
@@ -82,7 +79,7 @@
 
 (deftest ctx-available-in-body
   (testing "ctx symbol bound to second parameter"
-    (is (= "hello" (ctx-aware {:key :greeting} {:greeting "hello"})))))
+    (is (= "hello" (ctx-aware {:k :greeting} {:greeting "hello"})))))
 
 
 (deftest lexical-shadowing

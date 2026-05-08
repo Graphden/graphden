@@ -375,7 +375,7 @@
             ;; Should have: result, left, right, base, add, const (6 total)
             (is (>= (count (:fns graph)) 4)))
 
-          (testing "execution graph contains args"
-            (is (seq (:args graph)))))
+          (testing "execution graph carries slot/binding tables"
+            (is (seq (:bindings graph)))))
         (finally
           (sp/close storage))))))

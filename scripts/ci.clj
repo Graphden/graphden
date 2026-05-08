@@ -33,14 +33,23 @@
     "cljstyle" (str/includes? output "formatted incorrectly")
     ;; outdated: check if antq found any outdated deps (shows :upgrade in table)
     "outdated" (str/includes? output ":upgrade")
+    ;; biome: warning-level findings — informational, doesn't block CI.
+    ;; "Found N warnings." line shows up only when there ARE warnings.
+    "biome" (str/includes? output "warnings.")
     false))
 
 
 (defn soft-check?
   "Returns true for checks that are informational and shouldn't fail CI.
-   These checks provide useful info but failures don't block the build."
+   These checks provide useful info but failures don't block the build.
+
+   biome is soft because the legacy editor JS has ~80 pre-existing
+   warnings (mostly cross-file `let` that biome can't see is reassigned,
+   and optional-chain modernisations). Biome still catches NEW errors
+   (exit ≠ 0) — those WILL block, since the soft path only swallows the
+   warning-status branch."
   [check-name]
-  (contains? #{"outdated" "security"} check-name))
+  (contains? #{"outdated" "security" "biome"} check-name))
 
 
 (defn status-char
@@ -73,12 +82,16 @@
                   "--ns-exclude-regex" ".*test-mocks"]
         outdated-cmd ["clojure" "-M:outdated"]
         security-cmd ["clojure" "-M:watson" "-p" "deps.edn"]
+        biome-cmd ["npx" "biome" "check" "resources/packages/app/editor"]
+        stylelint-cmd ["npx" "stylelint" "resources/packages/app/editor/**/*.css"]
 
         ;; Define checks
         ;; NOTE: security check disabled - requires NVD API key, run manually with bb security
         checks [{:name "clj-kondo" :cmd kondo-cmd}
                 {:name "splint" :cmd splint-cmd}
                 {:name "cljstyle" :cmd cljstyle-cmd}
+                {:name "biome" :cmd biome-cmd}
+                {:name "stylelint" :cmd stylelint-cmd}
                 {:name "tests+coverage" :cmd test-cmd}
                 {:name "outdated" :cmd outdated-cmd}]
 

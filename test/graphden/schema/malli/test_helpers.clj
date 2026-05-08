@@ -61,7 +61,7 @@
                       :source-id {:uuid (uuid) :type :ref :ref-entity :arg :nullable? true}
                       :value {:uuid (uuid) :type :jsonb :nullable? true}
                       :ref-id {:uuid (uuid) :type :ref :ref-entity :fn :nullable? true}
-                      :is-fn {:uuid (uuid) :type :bool :nullable? true}
+                      ;; #15b: `:is-fn` retired — type=:fn IS the HOF marker.
                       :required {:uuid (uuid) :type :bool :nullable? true}})
 
       (ds/build)))

@@ -71,20 +71,27 @@
 (defn validate-no-dependency-cycle-impl
   "Shared implementation of no-dependency-cycle validation.
 
+   Self-reference (`owner = ref`) IS allowed by design — the docs
+   (`CONSTRAINTS.md § Self-reference`, CLAUDE.md constraint list)
+   explicitly carve it out so recursion stays expressible. The
+   executor's `*max-depth*` / `*max-graph-iterations*` bound the
+   recursion at runtime; the storage protocol doesn't second-guess
+   it. Without this, you couldn't write a recursive fn-def at all.
+
+   Cycles longer than 1 (`A → B → A`) are still rejected — those
+   would be infinite-recursion-with-no-base-case at the storage
+   level since two distinct fn-rows pointing at each other have no
+   case-analysis primitive to terminate.
+
    Arguments:
    - collect-dependency-chain-fn: function (fn [helpers fn-id] -> #{dep-fn-ids})
    - helpers: ConstraintHelpers implementation
    - owner-fn-id: UUID of the fn that owns this arg
    - ref-fn-id: UUID of the fn being referenced via ref-id"
   [collect-dependency-chain-fn helpers owner-fn-id ref-fn-id]
-  (when ref-fn-id
-    ;; Early check for self-reference (avoids expensive dependency chain query)
-    (when (= owner-fn-id ref-fn-id)
-      (throw (ex-info "Reference would create dependency cycle"
-                      {:type :constraint-violation/dependency-cycle
-                       :owner-fn-id owner-fn-id
-                       :ref-fn-id ref-fn-id})))
-    ;; Check if owner-fn-id is in the dependency chain of ref-fn-id
+  (when (and ref-fn-id (not= owner-fn-id ref-fn-id))
+    ;; Check if owner-fn-id is in the dependency chain of ref-fn-id.
+    ;; If yes, the new edge would close a cycle of length ≥ 2.
     (let [ref-deps (collect-dependency-chain-fn helpers ref-fn-id)]
       (when (contains? ref-deps owner-fn-id)
         (throw (ex-info "Reference would create dependency cycle"
@@ -93,27 +100,7 @@
                          :ref-fn-id ref-fn-id}))))))
 
 
-;; === Arg Descendant Constraints ===
-
-(defn validate-no-arg-descendants-impl
-  "Validates that an arg has no descendants before update/delete.
-   Descendants are args that have source-id pointing to this arg's id.
-
-   Arguments:
-   - query-descendants-fn: function (fn [arg-id] -> seq of descendant args)
-     Should query for args where source-id = arg-id
-   - arg-id: UUID of the arg being modified/deleted
-   - operation: :update or :delete (for error message)
-
-   Throws if arg has descendants."
-  [query-descendants-fn arg-id operation]
-  (let [desc-args (query-descendants-fn arg-id)]
-    (when (seq desc-args)
-      (throw (ex-info (str "Cannot " (name operation) " arg: it has "
-                           (count desc-args) " descendant(s). "
-                           "Delete descendants first.")
-                      {:type :constraint-violation/has-descendants
-                       :arg-id arg-id
-                       :operation operation
-                       :descendant-count (count desc-args)
-                       :descendant-ids (mapv :id desc-args)})))))
+;; The legacy `validate-no-arg-descendants-impl` (source-id chain
+;; protection on the deleted `:arg` table) has been removed. Slots in
+;; the new model are immutable post-create, and bindings carry no
+;; descendant chain — there is no analogous constraint to enforce.

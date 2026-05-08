@@ -5,13 +5,11 @@
    - Testcontainer fixture functions
    - Dynamic var for container binding
    - Helper function for creating test storage
-   - Common test schemas (make-graph-schema)
-
-   ## 2-Entity Schema
-
-   Uses simplified schema:
-   - fn: parent-id=nil for base-fn, parent-id set for composed fn
-   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+   - Production-shape graph schema (`make-graph-schema` returns the
+     fn / slot / fn-slot / binding / binding-list-item schema)
+   - CRUD helpers (`create-base-fn!`, `create-composed-fn!`,
+     `create-slot!`, `create-fn-slot!`, `create-binding!`,
+     `create-list-item!`)
 
    Usage in test namespaces:
    ```clojure
@@ -23,11 +21,27 @@
      ...)
    ```"
   (:require
+    [graphden.packages.records :as records]
+    [graphden.schema.graph.schema :as graph-schema]
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]))
+
+
+(def primitive-fn-ids
+  "Map keyword → uuid for the 14 primitive type-rows. Helpers accept
+   primitive keywords as type-fn-id refs and look them up here."
+  (records/primitive-fn-ids))
+
+
+(defn seed-primitives!
+  "Inserts the 14 primitive fn-rows so slot.type-fn-id refs resolve.
+   Idempotent — uses upsert."
+  [storage]
+  (sp/upsert-entities storage :fn
+                      (mapv #(dissoc % :kind) (records/boot-primitive-records)))
+  storage)
 
 
 (def ^:dynamic *container*
@@ -65,89 +79,125 @@
 
 
 (defn make-graph-schema
-  "Creates schema with fn + arg entities.
-   This is the standard 2-entity graph schema used by executor and constraint tests.
-
-   - fn: parent-id=nil for base-fn, parent-id set for composed fn
-   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
+  "Builds the production graph schema (fn / slot / fn-slot / binding /
+   binding-list-item) plus the namespace entity. Suitable for any
+   integration test that needs the live storage shape."
   []
-  (-> (mds/create-builder)
-      ;; fn entity
-      (ds/add-entity :fn #uuid "00000000-0000-0000-0001-000000000001"
-                     {:name {:uuid #uuid "00000000-0000-0000-0001-000000000002"
-                             :type :text}
-                      :parent-ids {:uuid #uuid "00000000-0000-0000-0001-000000000003"
-                                   :type :ref-many
-                                   :ref-entity :fn
-                                   :nullable? true}
-                      :return-type {:uuid #uuid "00000000-0000-0000-0001-000000000004"
-                                    :type :text
-                                    :nullable? true}})
-      (ds/add-constraint :fn {:type :unique :fields [:name]})
-      ;; arg entity
-      (ds/add-entity :arg #uuid "00000000-0000-0000-0002-000000000001"
-                     {:fn-id {:uuid #uuid "00000000-0000-0000-0002-000000000002"
-                              :type :uuid}
-                      :name {:uuid #uuid "00000000-0000-0000-0002-000000000003"
-                             :type :text}
-                      :type {:uuid #uuid "00000000-0000-0000-0002-000000000004"
-                             :type :text}
-                      :required {:uuid #uuid "00000000-0000-0000-0002-000000000005"
-                                 :type :bool}
-                      :is-fn {:uuid #uuid "00000000-0000-0000-0002-000000000006"
-                              :type :bool}
-                      :source-id {:uuid #uuid "00000000-0000-0000-0002-000000000007"
-                                  :type :uuid
-                                  :nullable? true}
-                      :value {:uuid #uuid "00000000-0000-0000-0002-000000000008"
-                              :type :jsonb
-                              :nullable? true}
-                      :ref-id {:uuid #uuid "00000000-0000-0000-0002-000000000009"
-                               :type :uuid
-                               :nullable? true}})
-      (ds/add-constraint :arg {:type :unique :fields [:fn-id :name]})
-      ds/build))
+  (graph-schema/build-schema (mds/create-builder)))
 
 
 (defn create-base-fn!
-  "Creates a base fn entity. Returns the fn record.
-   Base fns have parent-id=nil. The name field is used for registry lookup."
-  [storage entity-name return-type]
-  (sp/create-entity storage :fn
-                    {:name entity-name
-                     :parent-ids nil
-                     :return-type (clojure.core/name return-type)}))
+  "Creates a base fn (no parents, has impl-hash). Returns the row.
+
+   Use the 2-arity to seed `:impl-hash` from a string; the 3-arity
+   accepts an explicit hash."
+  ([storage entity-name]
+   (create-base-fn! storage entity-name (str "test-impl-hash-" entity-name)))
+  ([storage entity-name impl-hash]
+   (sp/create-entity storage :fn
+                     {:name entity-name
+                      :parent-ids []
+                      :impl-hash impl-hash})))
 
 
 (defn create-composed-fn!
-  "Creates a composed fn entity. Returns the fn record.
-   Composed fns have parent-id set to their base fn."
-  [storage entity-name parent-id]
+  "Creates a composed fn (has parent-fn-ids). Returns the row.
+
+   Either pass a single parent uuid via the 3-arity or a vector via
+   the 3-arity (vector form covers the MI case)."
+  [storage entity-name parent-spec]
   (sp/create-entity storage :fn
                     {:name entity-name
-                     :parent-ids [parent-id]}))
+                     :parent-ids (cond
+                                   (sequential? parent-spec) (vec parent-spec)
+                                   (some? parent-spec) [parent-spec]
+                                   :else [])}))
+
+
+(defn- resolve-type-ref
+  "Coerces a type-ref (UUID or primitive keyword) into a fn-id UUID."
+  [type-ref]
+  (cond
+    (uuid? type-ref) type-ref
+    (keyword? type-ref) (or (get primitive-fn-ids type-ref)
+                            (throw (ex-info (str "Unknown primitive type: " type-ref)
+                                            {:type-ref type-ref
+                                             :known (keys primitive-fn-ids)})))
+    :else type-ref))
+
+
+(defn create-slot!
+  "Creates a slot row with the given name and type-fn-id. `type-ref`
+   may be a UUID or a primitive keyword (`:int`, `:text`, …)."
+  [storage slot-name type-ref & {:keys [required description]
+                                 :or {required true}}]
+  (sp/create-entity storage :slot
+                    (cond-> {:name slot-name
+                             :type-fn-id (resolve-type-ref type-ref)
+                             :required required}
+                      description (assoc :description description))))
+
+
+(defn create-fn-slot!
+  "Wires `slot-id` onto `fn-id` at `position` (0-based)."
+  [storage fn-id slot-id position]
+  (sp/create-entity storage :fn-slot
+                    {:fn-id fn-id
+                     :slot-id slot-id
+                     :position position}))
+
+
+(defn create-binding!
+  "Creates a binding row at `(fn-id, slot-id)`. Pass any combination of
+   `:value`, `:ref-fn-id`, `:rename-to`, `:type-override-fn-id`,
+   `:terminal`, `:list-append`, `:list-closed`, `:description`."
+  [storage fn-id slot-id & {:as fields}]
+  (sp/create-entity storage :binding
+                    (merge {:fn-id fn-id :slot-id slot-id} fields)))
+
+
+(defn create-list-item!
+  "Creates a binding-list-item row under `binding-id` at `position`."
+  [storage binding-id position & {:keys [value ref-fn-id literal]}]
+  (sp/create-entity storage :binding-list-item
+                    (cond-> {:binding-id binding-id :position position}
+                      (some? value) (assoc :value value)
+                      ref-fn-id (assoc :ref-fn-id ref-fn-id)
+                      (some? literal) (assoc :literal literal))))
 
 
 (defn create-arg!
-  "Creates an arg entity. Returns the arg record.
+  "Compatibility helper that bridges legacy `arg`-table call sites to
+   the slot/binding model. Two flavours:
 
-   Required:
-   - fn-id: the fn this arg belongs to
-   - opts map with :name, :type, :required, :is-fn
+   1. **Primary form** (no `:source-id`): creates a slot owned by
+      `fn-id` and attaches it via fn-slot. Returns the slot record.
 
-   Optional in opts:
-   - :source-id - parent arg this inherits from
-   - :value - literal value (mutually exclusive with ref-id)
-   - :ref-id - reference to another fn (mutually exclusive with value)"
-  [storage fn-id {:keys [required is-fn source-id value ref-id]
-                  arg-name :name
-                  arg-type :type}]
-  (sp/create-entity storage :arg
-                    {:fn-id fn-id
-                     :name arg-name
-                     :type (clojure.core/name arg-type)
-                     :required required
-                     :is-fn is-fn
-                     :source-id source-id
-                     :value value
-                     :ref-id ref-id}))
+   2. **Inherited form** (`:source-id` set, slot record/id passed as
+      the source): emits a binding row at `(fn-id, source-slot-id)`
+      with `:value` or `:ref-id` as supplied.
+
+   New tests should call `create-slot!` / `create-fn-slot!` /
+   `create-binding!` directly; this shim only exists so existing
+   integration tests can link against the new helpers without
+   wholesale rewrite."
+  ([storage fn-id opts]
+   (create-arg! storage fn-id opts 0))
+  ([storage fn-id
+    {arg-name :name arg-type :type
+     :keys [source-id value ref-id]} position]
+   (cond
+     source-id
+     (let [;; `:source-id` carries the slot record / slot-id directly
+           ;; in the new model — primary args (form 1 above) return the
+           ;; slot row, so callers thread `(:id slot)` here.
+           slot-id source-id]
+       (cond
+         (some? value) (create-binding! storage fn-id slot-id :value value)
+         (some? ref-id) (create-binding! storage fn-id slot-id :ref-fn-id ref-id)
+         :else nil))
+
+     :else
+     (let [slot (create-slot! storage arg-name (or arg-type :any))]
+       (create-fn-slot! storage fn-id (:id slot) position)
+       slot))))

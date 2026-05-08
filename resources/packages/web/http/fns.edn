@@ -4,19 +4,37 @@
 {:namespace "web.http"
  :description "HTTP server primitive (http-kit) and the slurp helper for request bodies."
  :fns
- [;; Starts http-kit server. `:handler` is `:fn`-typed — compile's
-  ;; `hof-wrap` runs at the call-site, turning the bound fn-graph into
-  ;; a Ring callable based on its leftover free-args (one leftover →
-  ;; `(fn [request] …)`). No adapter fn needed in between.
+ [;; Type-alias for the http-kit stop-callable. http-kit's
+  ;; `run-server` returns a 0-arg fn whose only effect is to stop
+  ;; the running server — `(server)` shuts it down. Typing it as
+  ;; `[:fn {} :null]` documents the contract AND lets type-check
+  ;; reject any non-callable argument to `:http-stop`.
+  {:name :http-server-handle
+   :description "Handle of a running http-kit server — a 0-arg callable that stops the server when invoked. Returned by `:http-server`, consumed by `:http-stop`."
+   :fn-type [{} :null]}
+
+  ;; Starts http-kit server. `:handler` is structurally typed —
+  ;; `[:fn {:request :ring-request-shape} :ring-response-shape]`
+  ;; declares only the SINGLE arg http-kit will pass per call.
+  ;; The consuming fn-graph (`:_app-ring-response` etc.) typically
+  ;; lists more compile-time free args; graphden's fn-subtype rule
+  ;; recognises that hof-wrap captures the rest from the environment,
+  ;; so `extra args on the callee are fine`. The `:request` key and
+  ;; the return shape ARE checked structurally — passing `:add` (an
+  ;; arithmetic fn-def whose return is `:numeric`) gets rejected at
+  ;; sync time instead of crashing on the first request.
   {:name :http-server
-   :description "Start an http-kit HTTP server. `:handler` is :fn-typed — the executor's hof-wrap turns the bound fn-graph into a single-arg Ring callable per request."
-   :args {:handler {:type :fn
+   :description "Start an http-kit HTTP server. The `:handler` is a Ring-style fn `(fn [request] response)`; the executor's hof-wrap turns the bound fn-graph into a single-arg Ring callable per request."
+   :args {:handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
                     :description "Ring-style handler — receives the request map, returns the response map."}
-          :port {:type :int
-                 :description "TCP port to listen on (e.g., 8080)."}}
-   :return-type :any}
+          :port {:type :port
+                 :description "TCP port to listen on (e.g., 8080) — refinement narrows :int to 1..65535."}}
+   :return-type :http-server-handle
+   :effects #{:network}}
 
   {:name :http-stop
    :description "Stop a running http-kit server returned by `:http-server`."
-   :args {:server {:type :any :description "Server handle returned by `:http-server`."}}
-   :return-type :any}]}
+   :args {:server {:type :http-server-handle
+                   :description "Server handle returned by `:http-server`."}}
+   :return-type :null
+   :effects #{:network}}]}

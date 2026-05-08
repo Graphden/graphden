@@ -106,10 +106,10 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          parent (sp/create-entity storage :fn {:name "parent" :return-type "custom-type"})
+          parent (sp/create-entity storage :fn {:name "parent" :impl-hash "test-hash"})
           child (sp/create-entity storage :fn {:name "child"
                                                :parent-ids [(:id parent)]
-                                               :return-type "custom-type"})]
+                                               :impl-hash "test-hash"})]
       (try
         (is (= [(:id parent)] (:parent-ids child)))
         (let [read-back (sp/read-entity storage :fn (:id child))]
@@ -122,12 +122,12 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          p1 (sp/create-entity storage :fn {:name "parent-1" :return-type "custom-type"})
-          p2 (sp/create-entity storage :fn {:name "parent-2" :return-type "custom-type"})
-          p3 (sp/create-entity storage :fn {:name "parent-3" :return-type "custom-type"})
+          p1 (sp/create-entity storage :fn {:name "parent-1" :impl-hash "test-hash"})
+          p2 (sp/create-entity storage :fn {:name "parent-2" :impl-hash "test-hash"})
+          p3 (sp/create-entity storage :fn {:name "parent-3" :impl-hash "test-hash"})
           child (sp/create-entity storage :fn {:name "child"
                                                :parent-ids [(:id p1) (:id p2) (:id p3)]
-                                               :return-type "custom-type"})]
+                                               :impl-hash "test-hash"})]
       (try
         ;; Order must be preserved
         (is (= [(:id p1) (:id p2) (:id p3)] (:parent-ids child)))
@@ -141,7 +141,7 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          base-fn (sp/create-entity storage :fn {:name "base" :return-type "custom-type"})]
+          base-fn (sp/create-entity storage :fn {:name "base" :impl-hash "test-hash"})]
       (try
         ;; read-back populates :parent-ids from junction (empty for base-fn)
         (let [read-back (sp/read-entity storage :fn (:id base-fn))]
@@ -154,12 +154,12 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          p1 (sp/create-entity storage :fn {:name "p1" :return-type "custom-type"})
-          p2 (sp/create-entity storage :fn {:name "p2" :return-type "custom-type"})
-          p3 (sp/create-entity storage :fn {:name "p3" :return-type "custom-type"})
+          p1 (sp/create-entity storage :fn {:name "p1" :impl-hash "test-hash"})
+          p2 (sp/create-entity storage :fn {:name "p2" :impl-hash "test-hash"})
+          p3 (sp/create-entity storage :fn {:name "p3" :impl-hash "test-hash"})
           child (sp/create-entity storage :fn {:name "child"
                                                :parent-ids [(:id p1) (:id p2)]
-                                               :return-type "custom-type"})]
+                                               :impl-hash "test-hash"})]
       (try
         (is (= [(:id p1) (:id p2)] (:parent-ids child)))
         ;; Replace with single parent
@@ -176,10 +176,10 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          parent (sp/create-entity storage :fn {:name "parent" :return-type "custom-type"})
+          parent (sp/create-entity storage :fn {:name "parent" :impl-hash "test-hash"})
           child (sp/create-entity storage :fn {:name "child"
                                                :parent-ids [(:id parent)]
-                                               :return-type "custom-type"})]
+                                               :impl-hash "test-hash"})]
       (try
         (sp/delete-entity storage :fn (:id child))
         (is (nil? (sp/read-entity storage :fn (:id child))))
@@ -193,14 +193,14 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          p1 (sp/create-entity storage :fn {:name "p1" :return-type "custom-type"})
-          p2 (sp/create-entity storage :fn {:name "p2" :return-type "custom-type"})
+          p1 (sp/create-entity storage :fn {:name "p1" :impl-hash "test-hash"})
+          p2 (sp/create-entity storage :fn {:name "p2" :impl-hash "test-hash"})
           c1 (sp/create-entity storage :fn {:name "c1"
                                             :parent-ids [(:id p1)]
-                                            :return-type "custom-type"})
+                                            :impl-hash "test-hash"})
           c2 (sp/create-entity storage :fn {:name "c2"
                                             :parent-ids [(:id p1) (:id p2)]
-                                            :return-type "custom-type"})]
+                                            :impl-hash "test-hash"})]
       (try
         (let [all-fns (sp/query-entities storage :fn {})
               by-id (into {} (map (juxt :id identity)) all-fns)]
@@ -216,11 +216,11 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          parent (sp/create-entity storage :fn {:name "parent" :return-type "custom-type"})
+          parent (sp/create-entity storage :fn {:name "parent" :impl-hash "test-hash"})
           children (sp/create-entities storage :fn
-                                       [{:name "c1" :parent-ids [(:id parent)] :return-type "custom-type"}
-                                        {:name "c2" :parent-ids [(:id parent)] :return-type "custom-type"}
-                                        {:name "c3" :return-type "custom-type"}])]
+                                       [{:name "c1" :parent-ids [(:id parent)] :impl-hash "test-hash"}
+                                        {:name "c2" :parent-ids [(:id parent)] :impl-hash "test-hash"}
+                                        {:name "c3" :impl-hash "test-hash"}])]
       (try
         (is (= 3 (count children)))
         (let [c1 (first (filter #(= "c1" (:name %)) children))
@@ -236,3 +236,70 @@
   (testing "generates correct junction table name"
     (is (= "fn_parent_ids" (ddl/junction-table-name :fn :parent-ids)))
     (is (= "user_tags" (ddl/junction-table-name :user :tags)))))
+
+
+;; ============================================================================
+;; Direct calls into the lower-level junction fns that the Storage
+;; protocol normally hides — drives them with a primed connection so
+;; coverage accounts for the SQL execution branches (batch, empty
+;; targets / empty owner-ids fast paths, etc.).
+;; ============================================================================
+
+(deftest insert-and-read-junction-rows-direct
+  (testing "insert + read round-trip via the low-level fns"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)
+          ;; Create real fn rows so the foreign-key targets exist.
+          parent1 (sp/create-entity storage :fn
+                                    {:name "j-parent-1" :impl-hash "test-hash"})
+          parent2 (sp/create-entity storage :fn
+                                    {:name "j-parent-2" :impl-hash "test-hash"})
+          owner   (sp/create-entity storage :fn
+                                    {:name "j-owner"    :impl-hash "test-hash"})
+          ds      (:pool storage)]
+      (try
+        (junction/insert-junction-rows!
+          ds :fn :parent-ids (:id owner) [(:id parent1) (:id parent2)])
+        (is (= [(:id parent1) (:id parent2)]
+               (junction/read-junction-rows ds :fn :parent-ids (:id owner)))
+            "rows come back in insertion order")
+
+        (testing "insert with empty targets is a no-op"
+          (let [snapshot (junction/read-junction-rows ds :fn :parent-ids (:id owner))]
+            (junction/insert-junction-rows! ds :fn :parent-ids (:id owner) [])
+            (is (= snapshot
+                   (junction/read-junction-rows ds :fn :parent-ids (:id owner))))))
+
+        (testing "delete clears all rows for one owner"
+          (junction/delete-junction-rows! ds :fn :parent-ids (:id owner))
+          (is (empty?
+                (junction/read-junction-rows ds :fn :parent-ids (:id owner)))))
+        (finally (sp/close storage))))))
+
+
+(deftest read-junction-rows-batch-direct
+  (testing "batch read returns {owner-id [target-ids]} for many owners"
+    (let [storage (setup/create-test-storage)
+          schema  (setup/make-graph-schema)
+          _ (sp/initialize storage schema)
+          parent  (sp/create-entity storage :fn {:name "b-parent" :impl-hash "test-hash"})
+          owner1  (sp/create-entity storage :fn {:name "b-owner-1" :impl-hash "test-hash"})
+          owner2  (sp/create-entity storage :fn {:name "b-owner-2" :impl-hash "test-hash"})
+          owner3  (sp/create-entity storage :fn {:name "b-owner-3" :impl-hash "test-hash"})
+          ds      (:pool storage)]
+      (try
+        (junction/insert-junction-rows! ds :fn :parent-ids (:id owner1) [(:id parent)])
+        (junction/insert-junction-rows! ds :fn :parent-ids (:id owner2) [(:id parent)])
+        ;; owner3 intentionally has no junction rows — should be absent.
+        (let [batch (junction/read-junction-rows-batch
+                      ds :fn :parent-ids
+                      [(:id owner1) (:id owner2) (:id owner3)])]
+          (is (= [(:id parent)] (get batch (:id owner1))))
+          (is (= [(:id parent)] (get batch (:id owner2))))
+          (is (nil? (get batch (:id owner3)))
+              "owner with no rows is absent from the batch result"))
+
+        (testing "empty owner-id list short-circuits to {} (no SQL)"
+          (is (= {} (junction/read-junction-rows-batch ds :fn :parent-ids []))))
+        (finally (sp/close storage))))))

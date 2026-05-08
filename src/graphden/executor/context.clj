@@ -14,19 +14,84 @@
    compiled-registry ; Atom: {fn-id → compiled-closure} or nil. Populated
    ;; by the compile system at startup; `execute` reads from it on the hot
    ;; path.
-   graph-cache])    ; Atom holding `{:fns [...] :args [...]}` loaded from
-;; storage. Populated lazily by read-heavy consumers (e.g. the layout API).
-;; Invalidated by CRUD mutations that change fn/arg entities via
-;; `invalidate-graph-cache!`. Nil before first load.
+   graph-cache      ; Atom holding `{:fns [...] :slots […] …}` loaded from
+   ;; storage. Populated lazily by read-heavy consumers (e.g. the layout
+   ;; API). Invalidated by CRUD mutations via `invalidate-graph-cache!`.
+   ;; Nil before first load.
+   compile-deps])   ; Atom: `{fn-id → #{depender-fn-ids}}` reverse-dependency
+;; index. Built alongside `:compiled-registry` by `compile-runtime/rebuild!`,
+;; consumed by the delta-invalidation path so a single-fn mutation doesn't
+;; force re-compilation of the whole registry. Nil when registry is cold.
 
 
 (defn invalidate-graph-cache!
-  "Clear the raw graph-entities cache on `ctx`. Call after any mutation
-   that writes/deletes fn or arg entities so read paths reload on next
-   request."
+  "Drop derived caches on `ctx` and refresh type-aliases from storage.
+
+   Two arities:
+
+   - `[ctx]` — full invalidation. Used when the caller doesn't know
+     which fns changed (mass updates, schema migrations). Clears
+     `:graph-cache` AND `:compiled-registry`; the next `execute`
+     triggers a full `rebuild!` via the lazy fallback in
+     `compile-runtime/registry`.
+
+   - `[ctx changed-fn-ids]` — delta invalidation. Hands a set of
+     fn-ids that just mutated; the `:compile-deps` reverse-index
+     determines the blast radius (the changed fns + everything that
+     transitively depends on them) and ONLY those entries get
+     recompiled. The rest of the registry stays warm. `:graph-cache`
+     is still cleared because callers expect a fresh read on the
+     next access. Falls back to a full rebuild when the reverse-
+     index isn't yet populated (cold start) or when `changed-fn-ids`
+     is empty.
+
+   Both paths re-register type-aliases from storage so newly-created
+   types are resolvable to the type-checker without a server
+   restart. The lazy `requiring-resolve` avoids the cycle
+   context ← compile-runtime ← context."
+  ([ctx] (invalidate-graph-cache! ctx nil))
+  ([ctx changed-fn-ids]
+   (when-let [c (:graph-cache ctx)]
+     (reset! c nil))
+   (cond
+     ;; Storage isn't wired (stripped test ctx) — nothing to refresh.
+     (or (nil? (:storage ctx))
+         (nil? (:compiled-registry ctx)))
+     (when-let [c (:compiled-registry ctx)]
+       (reset! c nil))
+
+     ;; Delta path — caller named the changed fns AND we have a
+     ;; reverse-deps index from a prior compile.
+     (and (seq changed-fn-ids)
+          (some-> (:compile-deps ctx) deref some?)
+          (some-> (:compiled-registry ctx) deref some?))
+     (when-let [recompile (requiring-resolve
+                            'graphden.executor.compile-runtime/delta-recompile!)]
+       (recompile ctx changed-fn-ids))
+
+     :else
+     (do
+       (reset! (:compiled-registry ctx) nil)
+       (when-let [refresh (requiring-resolve
+                            'graphden.executor.compile-runtime/refresh-type-registries-from-storage!)]
+         (refresh ctx))))))
+
+
+(defn cached-graph
+  "Return the cached `{:fns :slots :fn-slots :bindings :list-items}`
+   snapshot, or nil on miss. Read-path consumers (layout, /api/graph/
+   entities, /api/types) call this first, then fall back to their
+   preferred loader on miss and call `fill-graph-cache!` afterwards."
   [ctx]
+  (some-> (:graph-cache ctx) deref))
+
+
+(defn fill-graph-cache!
+  "Populate the graph-cache atom with `data`. No-op when `:graph-cache`
+   isn't present (test contexts that skip the cache atom)."
+  [ctx data]
   (when-let [c (:graph-cache ctx)]
-    (reset! c nil)))
+    (reset! c data)))
 
 
 ;; === Context Validation ===
@@ -62,6 +127,7 @@
   (->ExecutionContext storage
                       (or base-fns (registry/get-default-registry))
                       (or clock #(System/currentTimeMillis))
+                      (atom nil)
                       (atom nil)
                       (atom nil)))
 

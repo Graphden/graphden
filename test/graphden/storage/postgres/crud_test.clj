@@ -864,78 +864,10 @@
 
 ;; === Arg descendant validation on update/delete ===
 
-(deftest arg-descendant-validation-test
-  (testing "update-entity on arg with descendants throws constraint-violation"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)]
-      (try
-        ;; Create base fn and arg
-        (let [base-fn (setup/create-base-fn! storage "base-fn" :int)
-              parent-arg (setup/create-arg! storage (:id base-fn)
-                                            {:name "x" :type :integer :required true :is-fn false
-                                             :value 10})
-              composed-fn (setup/create-composed-fn! storage "composed" (:id base-fn))
-              _child-arg (setup/create-arg! storage (:id composed-fn)
-                                            {:name "x" :type :integer :required true :is-fn false
-                                             :source-id (:id parent-arg)
-                                             :value 42})
-              ex (try
-                   (sp/update-entity storage :arg (:id parent-arg) {:value 999})
-                   nil
-                   (catch clojure.lang.ExceptionInfo e e))]
-          (is (some? ex))
-          (is (= :constraint-violation/has-descendants (:type (ex-data ex)))))
-        (finally
-          (sp/close storage)))))
-
-  (testing "delete-entity on arg with descendants throws constraint-violation"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)]
-      (try
-        (let [base-fn (setup/create-base-fn! storage "base-fn2" :int)
-              parent-arg (setup/create-arg! storage (:id base-fn)
-                                            {:name "x" :type :integer :required true :is-fn false
-                                             :value 10})
-              composed-fn (setup/create-composed-fn! storage "composed2" (:id base-fn))
-              _child-arg (setup/create-arg! storage (:id composed-fn)
-                                            {:name "x" :type :integer :required true :is-fn false
-                                             :source-id (:id parent-arg)
-                                             :value 42})
-              ex (try
-                   (sp/delete-entity storage :arg (:id parent-arg))
-                   nil
-                   (catch clojure.lang.ExceptionInfo e e))]
-          (is (some? ex))
-          (is (= :constraint-violation/has-descendants (:type (ex-data ex)))))
-        (finally
-          (sp/close storage)))))
-
-  (testing "update-entity on arg without descendants succeeds"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)]
-      (try
-        (let [base-fn (setup/create-base-fn! storage "base-fn3" :int)
-              arg (setup/create-arg! storage (:id base-fn)
-                                     {:name "x" :type :integer :required true :is-fn false
-                                      :value 42})
-              updated (sp/update-entity storage :arg (:id arg) {:value 99})]
-          (is (= 99 (:value updated))))
-        (finally
-          (sp/close storage)))))
-
-  (testing "delete-entity on non-arg entity skips descendant validation"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)]
-      (try
-        (let [base-fn (setup/create-base-fn! storage "deletable-fn" :int)
-              result (sp/delete-entity storage :fn (:id base-fn))]
-          (is (true? result)))
-        (finally
-          (sp/close storage))))))
+^:integration
+;; The legacy `arg-descendant-validation-test` was deleted alongside
+;; the `:arg` table — slots are immutable post-create, so there's no
+;; analogous "block update/delete with descendants" constraint to test.
 
 
 ;; === Create-entities with heterogeneous fields (different records have different fields) ===

@@ -1,0 +1,131 @@
+;; A tiny end-to-end recipe — multiple primitives composed into one
+;; meaningful flow. Demonstrates how the patterns from individual
+;; example modules combine in a real-ish scenario.
+;;
+;; Flow: take a free :age :int, validate it (positive AND under 150),
+;; classify into a band ("infant" / "child" / "adult" / "senior"),
+;; format a greeting that includes the band.
+;;
+;; Features touched:
+;;   - free-args propagation (the caller's :age flows down)
+;;   - cond-pattern (multi-branch dispatch on numeric ranges)
+;;   - error-handling (refuse out-of-range with throw + ex-info)
+;;   - inheritance (sub-fns built by partial-binding the comparison ops)
+;;   - composition (str-build the final greeting from the band + name)
+;;
+;; The intent is "see how the moving parts fit together" — none of the
+;; primitives are new, just their combination.
+
+
+{:namespace "examples.recipe-mini-app"
+ :description "End-to-end recipe combining free-args, cond, error-handling, inheritance, and string composition into a single age-greeting flow."
+ :fns
+ [;; ROOT: take :age and :name from the caller, validate, classify,
+  ;; greet. Composition layers from the outside in:
+  ;;   1. :ex-recipe-greeting — top-level string template
+  ;;   2.   formats {:name " is a/an " :band "."}
+  ;;   3.     :band lookup runs the classifier on the validated age
+  ;;     :name flows through verbatim
+  ;;   4.       classifier runs :cond over four pre-built pairs
+  {:name :ex-recipe-greeting
+   :description "Top-level entry point. Free args: `:age` (int, validated 0..149) and `:name` (string). Returns `\"<NAME> is a/an <BAND>.\"`. The `:age` value flows through `:_ex-band` (classifier) which itself runs the validator, so an out-of-range age throws BEFORE the string is built."
+   :parent :str
+   :args {:parts [{:as :name}
+                  {:value " is a/an "}
+                  :_ex-band
+                  {:value "."}]}}
+
+  ;; CLASSIFIER LAYER — runs :cond on a validated :age. Each cond
+  ;; pair carries a comparison test and the corresponding band label.
+  ;; The `:_ex-validate` step at the top of the chain ensures :age
+  ;; is in [0, 150).
+  {:name :_ex-band
+   :description "Classify the validated :age into one of four band labels. The :cond clauses use `:_ex-age-validated` (= the input post-check) so the validation throws before any branch is evaluated."
+   :parent :cond
+   :args {:clauses [:_ex-band-infant-pair
+                    :_ex-band-child-pair
+                    :_ex-band-adult-pair
+                    :_ex-band-senior-pair]}}
+
+  ;; --- band classification pairs ---
+  ;;
+  ;; Each pair: [test result-string]. The test is a comparison
+  ;; against the validated :age; the result is the band label.
+
+  {:name :_ex-band-infant-pair
+   :description "Pair `[(< age 2) \"infant\"]`."
+   :parent :list
+   :args {:items [:_ex-age-lt-2 {:value "infant"}]}}
+
+  {:name :_ex-band-child-pair
+   :description "Pair `[(< age 13) \"child\"]`."
+   :parent :list
+   :args {:items [:_ex-age-lt-13 {:value "child"}]}}
+
+  {:name :_ex-band-adult-pair
+   :description "Pair `[(< age 65) \"adult\"]`."
+   :parent :list
+   :args {:items [:_ex-age-lt-65 {:value "adult"}]}}
+
+  {:name :_ex-band-senior-pair
+   :description "Default branch: matches anything not yet matched (including 65+). `:test` is the literal `true` so the dispatch always picks this if no earlier clause fired."
+   :parent :list
+   :args {:items [{:value true} {:value "senior"}]}}
+
+  ;; --- comparison helpers (each shares the validated :age) ---
+  ;;
+  ;; All three reference `:_ex-age-validated`, so the same age
+  ;; flows through every comparison. Validation runs once.
+
+  {:name :_ex-age-lt-2
+   :parent :lt
+   :args {:nums [:_ex-age-validated {:value 2}]}}
+
+  {:name :_ex-age-lt-13
+   :parent :lt
+   :args {:nums [:_ex-age-validated {:value 13}]}}
+
+  {:name :_ex-age-lt-65
+   :parent :lt
+   :args {:nums [:_ex-age-validated {:value 65}]}}
+
+  ;; --- validation layer ---
+  ;;
+  ;; :if test → throw : pass-through. The :else branch threads
+  ;; the original :age out so all comparisons see it.
+  {:name :_ex-age-validated
+   :description "Validate :age in [0, 150) using two :if checks (negative and >= 150) — throw `examples/age-out-of-range` if either fires; otherwise echo :age. This is the single-source-of-truth for the input."
+   :parent :if
+   :args {:test :_ex-age-out-of-range?
+          :then :_ex-recipe-age-throw
+          :else {:as :age}}}
+
+  {:name :_ex-age-out-of-range?
+   :description "True iff :age < 0 OR :age >= 150. The two halves are tested independently; the OR is composed below."
+   :parent :or
+   :args {:values [:_ex-recipe-age-negative?
+                   :_ex-age-too-old?]}}
+
+  {:name :_ex-recipe-age-negative?
+   :parent :lt
+   :args {:nums [{:as :age} {:value 0}]}}
+
+  {:name :_ex-age-too-old?
+   :parent :gte
+   :args {:nums [{:as :age} {:value 150}]}}
+
+  {:name :_ex-recipe-age-throw
+   :parent :throw
+   :args {:exception :_ex-recipe-age-error}}
+
+  {:name :_ex-recipe-age-error
+   :parent :ex-info
+   :args {:message :_ex-recipe-age-error-message
+          :data {"type" "examples/age-out-of-range"
+                 "max-exclusive" 150
+                 "min-inclusive" 0}}}
+
+  {:name :_ex-recipe-age-error-message
+   :parent :str
+   :args {:parts [{:value "Age must be in [0, 150), got: "}
+                  {:as :age}]}}]}

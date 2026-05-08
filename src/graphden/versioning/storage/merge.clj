@@ -9,11 +9,9 @@
    the source and target branches after the fork point (branch creation time or
    last merge between the two).
 
-   ## 2-Entity Schema
-
-   Detects conflicts in versioned entities:
-   - fn: function entity (parent-ids for inheritance)
-   - arg: argument entity (source-id for inheritance, value/ref-id for data)"
+   Detects conflicts in any versioned entity — see
+   `graphden.versioning.storage.resolution/entity-config` for the
+   authoritative list (fn / fn-slot / binding / binding-list-item)."
   (:require
     [clojure.set :as set]
     [graphden.storage.protocol.core :as sp]
@@ -72,6 +70,26 @@
     res/entity-config))
 
 
+(defn- batch-resolve
+  "Resolve every `entity-id` of every `entity-name` on `branch-id` in
+   one query per type. Returns `{[entity-name entity-id] resolved}`."
+  [base-storage entity-name->ids branch-id]
+  (binding [res/*branch-chain-cache* (atom {})]
+    (reduce-kv
+      (fn [acc entity-name ids]
+        (if (empty? ids)
+          acc
+          (let [identity-records (vals (sp/read-entities base-storage
+                                                         entity-name (vec ids)))
+                resolved (res/resolve-entities-batch base-storage entity-name
+                                                     identity-records branch-id)]
+            (reduce-kv (fn [m eid r] (assoc m [entity-name eid] r))
+                       acc
+                       resolved))))
+      {}
+      entity-name->ids)))
+
+
 (defn detect-conflicts
   "Finds entities modified in both source and target branches after fork point.
 
@@ -85,20 +103,96 @@
   (let [fp (fork-point base-storage source-branch-id target-branch-id)
         source-modified (modified-entities-after base-storage source-branch-id fp)
         target-modified (modified-entities-after base-storage target-branch-id fp)
-        ;; Find intersection: entities modified on both branches
-        conflicts
-        (for [[entity-name source-ids] source-modified
-              :let [target-ids (get target-modified entity-name #{})]
-              entity-id source-ids
-              :when (contains? target-ids entity-id)]
-          {:entity-name entity-name
-           :entity-id entity-id
-           :source-version (res/resolve-entity base-storage entity-name
-                                               entity-id source-branch-id)
-           :target-version (res/resolve-entity base-storage entity-name
-                                               entity-id target-branch-id)})]
+        ;; Conflicting entity-ids per type — modified on BOTH branches.
+        conflict-ids (reduce-kv
+                       (fn [acc entity-name source-ids]
+                         (let [target-ids (get target-modified entity-name #{})
+                               common (set/intersection source-ids target-ids)]
+                           (cond-> acc
+                             (seq common) (assoc entity-name common))))
+                       {}
+                       source-modified)
+        ;; Two branch resolutions, batched per entity type.
+        source-resolved (batch-resolve base-storage conflict-ids source-branch-id)
+        target-resolved (batch-resolve base-storage conflict-ids target-branch-id)
+        conflicts (for [[entity-name ids] conflict-ids
+                        entity-id ids]
+                    {:entity-name entity-name
+                     :entity-id entity-id
+                     :source-version (get source-resolved [entity-name entity-id])
+                     :target-version (get target-resolved [entity-name entity-id])})]
     {:conflicts (vec conflicts)
      :fork-point fp}))
+
+
+(defn- assert-resolutions-cover-conflicts!
+  "Throws `:merge-conflict` if any detected conflict has no entry in
+   `conflict-resolutions`. No-op when there are no conflicts."
+  [conflicts conflict-resolutions]
+  (when (seq conflicts)
+    (let [resolved-keys (set (keys (or conflict-resolutions {})))
+          conflict-keys (set (map (juxt :entity-name :entity-id) conflicts))
+          unresolved (set/difference conflict-keys resolved-keys)]
+      (when (seq unresolved)
+        (throw (ex-info "Unresolved merge conflicts"
+                        {:type :merge-conflict
+                         :conflicts conflicts
+                         :unresolved (vec unresolved)}))))))
+
+
+(defn- create-merge-record!
+  "Insert the branch-merge row that lets resolution surface source
+   branch versions on target. Returns the inserted record."
+  [base-storage source-branch-id target-branch-id ts]
+  (let [merge-record {:id (random-uuid)
+                      :source-branch-id source-branch-id
+                      :source-timestamp ts
+                      :target-branch-id target-branch-id
+                      :target-timestamp ts
+                      :created-at ts}]
+    (sp/create-entity base-storage :branch-merge merge-record)
+    merge-record))
+
+
+(defn- conflict-resolution->version-record
+  "Build the version record for a single resolution. Same shape as
+   `prepare-version-record` in the versioning storage core, but
+   inlined here so the merge module stays decoupled."
+  [entity-name entity-id chosen-data target-branch-id ts]
+  (let [{:keys [version-id-field version-data-fields]}
+        (get res/entity-config entity-name)]
+    (-> (select-keys chosen-data version-data-fields)
+        (assoc :id (random-uuid)
+               version-id-field entity-id
+               :branch-id target-branch-id
+               :created-at ts))))
+
+
+(defn- apply-resolutions!
+  "For each conflict whose resolution is `:source` or `:target`, create
+   a fresh version record on target branch with the chosen data.
+   `nil` resolutions silently skip. Records are grouped by version
+   entity and inserted in one batch per type. Single timestamp shared
+   so per-type ordering is deterministic; the merge record's timestamp
+   is strictly earlier so resolutions win."
+  [base-storage conflicts conflict-resolutions target-branch-id]
+  (let [ts (now)
+        by-version-entity
+        (reduce
+          (fn [acc {:keys [entity-name entity-id source-version target-version]}]
+            (if-let [chosen (case (get conflict-resolutions [entity-name entity-id])
+                              :source source-version
+                              :target target-version
+                              nil)]
+              (let [{:keys [version-entity]} (get res/entity-config entity-name)
+                    record (conflict-resolution->version-record
+                             entity-name entity-id chosen target-branch-id ts)]
+                (update acc version-entity (fnil conj []) record))
+              acc))
+          {}
+          conflicts)]
+    (doseq [[version-entity records] by-version-entity]
+      (sp/create-entities base-storage version-entity records))))
 
 
 (defn merge-branch!
@@ -127,47 +221,9 @@
          target-branch-id (:branch-id versioned-storage)
          {:keys [conflicts]} (detect-conflicts base-storage source-branch-id
                                                target-branch-id)]
-
-     ;; Check for unresolved conflicts
-     (when (seq conflicts)
-       (let [resolved-keys (set (keys (or conflict-resolutions {})))
-             conflict-keys (set (map (juxt :entity-name :entity-id) conflicts))
-             unresolved (set/difference conflict-keys resolved-keys)]
-         (when (seq unresolved)
-           (throw (ex-info "Unresolved merge conflicts"
-                           {:type :merge-conflict
-                            :conflicts conflicts
-                            :unresolved (vec unresolved)})))))
-
-     ;; Create the branch-merge record FIRST
-     (let [ts (now)
-           merge-record {:id (random-uuid)
-                         :source-branch-id source-branch-id
-                         :source-timestamp ts
-                         :target-branch-id target-branch-id
-                         :target-timestamp ts
-                         :created-at ts}]
-       (sp/create-entity base-storage :branch-merge merge-record)
-
-       ;; Apply conflict resolutions AFTER the merge record
-       ;; Both :source and :target create a new version record on target branch
-       ;; with a timestamp newer than the merge record, ensuring the chosen
-       ;; version wins over any version brought in via the merge
-       (doseq [{:keys [entity-name entity-id source-version target-version]} conflicts
-               :let [resolution (get conflict-resolutions
-                                     [entity-name entity-id])
-                     chosen-data (case resolution
-                                   :source source-version
-                                   :target target-version
-                                   nil)]
-               :when chosen-data]
-         (let [{:keys [version-entity version-id-field version-data-fields]}
-               (get res/entity-config entity-name)
-               version-data (-> (select-keys chosen-data version-data-fields)
-                                (assoc :id (random-uuid)
-                                       version-id-field entity-id
-                                       :branch-id target-branch-id
-                                       :created-at (now)))]
-           (sp/create-entity base-storage version-entity version-data)))
-
+     (assert-resolutions-cover-conflicts! conflicts conflict-resolutions)
+     (let [merge-record (create-merge-record! base-storage source-branch-id
+                                              target-branch-id (now))]
+       (apply-resolutions! base-storage conflicts conflict-resolutions
+                           target-branch-id)
        merge-record))))

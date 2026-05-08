@@ -27,7 +27,8 @@
    :timestamptz inst?
    :jsonb       jsonb-schema
    :bytes       bytes?
-   :sequence    sequential?})
+   :sequence    sequential?
+   :keyword     :keyword})
 
 
 (def known-field-types

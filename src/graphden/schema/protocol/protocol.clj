@@ -110,7 +110,17 @@
      Currently supported constraint types: :unique
 
      Example: [{:type :unique :fields [:email]}
-               {:type :unique :fields [:tenant-id :name]}]"))
+               {:type :unique :fields [:tenant-id :name]}]")
+
+  (retired-fields
+    [this]
+    "Returns a map of `{entity-name {field-name field-uuid}}` for fields
+     marked via `retire-field` on the builder. The migration framework
+     treats these as intentional removals — the field's UUID is excluded
+     from the destructive-change rejection set and `:on-delete-field!`
+     is invoked instead.
+
+     Returns `{}` if no fields are retired."))
 
 
 (defprotocol DataSchemaBuilder
@@ -145,6 +155,22 @@
     "Adds a constraint to an entity. Returns updated schema builder.
      Constraint must have :type (e.g., :unique) and :fields (vector of field names).
      Example: {:type :unique :fields [:tenant-id :name]}")
+
+  (retire-field
+    [this entity-name field-name field-uuid]
+    "Marks a previously-declared field as intentionally removed from the
+     schema. Returns updated schema builder. The field is NOT included
+     in `entity-fields` (callers must drop the entry first); retire-field
+     just records the UUID so the migration framework distinguishes a
+     deliberate drop from an accidental schema regression.
+
+     The migration runs `:on-delete-field!` for every retired field
+     (postgres → DROP COLUMN). Fresh installs ignore retired entries —
+     they exist only to bridge data living in older deployments.
+
+     Example: (-> builder
+                  (add-entity :user uuid {:name {...} :bio {...}})
+                  (retire-field :user :legacy-flag #uuid \"...\"))")
 
   (build
     [this]

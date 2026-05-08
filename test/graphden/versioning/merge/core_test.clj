@@ -1,12 +1,10 @@
 (ns ^:integration graphden.versioning.merge.core-test
-  "Tests for merge protection with 2-entity schema.
+  "Tests for `graphden.versioning.merge.core` — merge protection traits.
 
-   ## 2-Entity Schema
-
-   Uses simplified schema:
-   - fn: parent-id=nil for base-fn, parent-id set for composed fn
-   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
-   - arg-trait: assigns trait to arg (not to old arg-value entity)"
+   Storage stack: PostgreSQL via testcontainer + graph + versioning +
+   traits schema. The trait-based protection requires a real binding
+   row to attach to, so every test seeds a base-fn + slot + binding
+   before exercising the protection API."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]
@@ -21,7 +19,6 @@
     [graphden.versioning.storage.core :as vs]))
 
 
-;; Container for PostgreSQL tests
 (def ^:dynamic *container* nil)
 
 
@@ -30,281 +27,224 @@
 
 
 (defn- create-test-storage
-  "Creates a versioned storage with graph, versioned, and traits schemas.
-   Relies on the :each fixture to have cleaned the schema already."
+  "Returns `{:storage versioned-storage :base base-storage :fn-id … :slot-id …}`
+   with graph + versioning + traits schema and a single fn / slot
+   pair already seeded. Tests create binding rows themselves on the
+   branch that needs them (a binding's branch-membership is what
+   merge-protection cares about)."
   []
+  (th/clean-database-fast! *container*)
   (let [schema (-> (mds/create-builder)
                    (gds/extend-builder)
                    (vds/extend-builder)
                    (vts/extend-builder)
                    (ds/build))
         base (-> (pg/create-storage (th/get-container-config *container*))
-                 (sp/initialize-with-cleanup! schema))]
-    (vts/seed-traits! base)
-    (vs/wrap-with-versioning base)))
+                 (sp/initialize-with-cleanup! schema))
+        versioned (vs/wrap-with-versioning base)
+        f (sp/create-entity versioned :fn
+                            {:name "test-fn"
+                             :parent-ids []
+                             :impl-hash "test-hash"})
+        s (sp/create-entity versioned :slot
+                            {:name "x"
+                             :type-fn-id (:id f)})]
+    {:storage versioned :base base :fn-id (:id f) :slot-id (:id s)}))
 
 
-;; === Basic Trait Operations ===
+(defn- create-binding-on-current!
+  "Helper: write a binding via the versioned wrapper so a version
+   row lands on the storage's current branch."
+  [versioned fn-id slot-id value]
+  (sp/create-entity versioned :binding
+                    {:fn-id fn-id :slot-id slot-id :value value}))
+
+
+;; === Trait CRUD ===
 
 (deftest add-merge-protection-test
-  (testing "can add merge-protected trait to arg"
-    (let [storage (create-test-storage)
-          ;; Create base fn (parent-id=nil)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "schema"
-                                     :parent-ids nil
-                                     :return-type :int})
-          ;; Create arg directly on fn
-          arg (sp/create-entity storage :arg
-                                {:fn-id (:id base-fn)
-                                 :name "x"
-                                 :type :int
-                                 :value 42
-                                 :required true})]
-      (mp/add-merge-protection! storage (:id arg))
-      (is (true? (mp/has-merge-protected-trait? storage (:id arg)))))))
+  (testing "add-merge-protection! attaches the trait, has-merge-protected-trait? sees it"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          b (create-binding-on-current! storage fn-id slot-id "secret")]
+      (is (false? (mp/has-merge-protected-trait? storage (:id b))))
+      (mp/add-merge-protection! storage (:id b))
+      (is (true? (mp/has-merge-protected-trait? storage (:id b))))
+      (sp/close storage))))
 
 
 (deftest add-merge-protection-idempotent-test
-  (testing "adding protection twice is idempotent"
-    (let [storage (create-test-storage)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "schema"
-                                     :parent-ids nil
-                                     :return-type :int})
-          arg (sp/create-entity storage :arg
-                                {:fn-id (:id base-fn)
-                                 :name "x"
-                                 :type :int
-                                 :value 42
-                                 :required true})]
-      (mp/add-merge-protection! storage (:id arg))
-      (mp/add-merge-protection! storage (:id arg))
-      (is (true? (mp/has-merge-protected-trait? storage (:id arg))))
-      ;; Should have only one arg-trait record
-      (let [base (vs/unwrap storage)
-            traits (sp/query-entities base :arg-trait
-                                      {:arg-id (:id arg)
-                                       :trait-id vts/merge-protected-trait-uuid})]
-        (is (= 1 (count traits)))))))
+  (testing "calling add-merge-protection! twice doesn't double-create binding-trait rows"
+    (let [{:keys [storage base fn-id slot-id]} (create-test-storage)
+          b (create-binding-on-current! storage fn-id slot-id "secret")]
+      (mp/add-merge-protection! storage (:id b))
+      (mp/add-merge-protection! storage (:id b))
+      (let [rows (sp/query-entities base :binding-trait
+                                    {:binding-id (:id b)
+                                     :trait-id vts/merge-protected-trait-uuid})]
+        (is (= 1 (count rows))
+            "second add-merge-protection! must be a no-op"))
+      (sp/close storage))))
 
 
 (deftest remove-merge-protection-test
-  (testing "can remove merge-protected trait"
-    (let [storage (create-test-storage)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "schema"
-                                     :parent-ids nil
-                                     :return-type :int})
-          arg (sp/create-entity storage :arg
-                                {:fn-id (:id base-fn)
-                                 :name "x"
-                                 :type :int
-                                 :value 42
-                                 :required true})]
-      (mp/add-merge-protection! storage (:id arg))
-      (is (true? (mp/has-merge-protected-trait? storage (:id arg))))
-      (mp/remove-merge-protection! storage (:id arg))
-      (is (false? (mp/has-merge-protected-trait? storage (:id arg)))))))
+  (testing "remove-merge-protection! drops the trait and returns true"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          b (create-binding-on-current! storage fn-id slot-id "secret")]
+      (mp/add-merge-protection! storage (:id b))
+      (is (true? (mp/has-merge-protected-trait? storage (:id b))))
+      (is (true? (mp/remove-merge-protection! storage (:id b))))
+      (is (false? (mp/has-merge-protected-trait? storage (:id b))))
+      (sp/close storage))))
 
 
-;; === Merge Protection Detection ===
+(deftest remove-merge-protection-when-absent-test
+  (testing "remove-merge-protection! on an unprotected binding returns false (no-op)"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          b (create-binding-on-current! storage fn-id slot-id "secret")]
+      (is (false? (mp/remove-merge-protection! storage (:id b))))
+      (sp/close storage))))
 
-(deftest detect-no-protected-transfers-test
-  (testing "detect-protected-transfers returns empty when no protected args"
-    (let [storage (create-test-storage)
-          ;; Create base fn and composed fn on main
-          base-fn (sp/create-entity storage :fn
-                                    {:name "base"
-                                     :parent-ids nil
-                                     :return-type :int})
-          main-fn (sp/create-entity storage :fn
-                                    {:name "main-fn"
-                                     :parent-ids [(:id base-fn)]})
-          _main-arg (sp/create-entity storage :arg
-                                      {:fn-id (:id main-fn)
-                                       :name "x"
-                                       :type :int
-                                       :value 42})
-          ;; Create feature branch with new fn
-          branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          feat-fn (sp/create-entity feature :fn
-                                    {:name "feat-fn"
-                                     :parent-ids [(:id base-fn)]})
-          _feat-arg (sp/create-entity feature :arg
-                                      {:fn-id (:id feat-fn)
-                                       :name "y"
-                                       :type :int
-                                       :value 99})
+
+;; === Detection ===
+;;
+;; `detect-protected-transfers` flags bindings that would BECOME
+;; visible on the target after merge — i.e. exist on source but not
+;; on target. The test inverts the typical write order: feature
+;; branch creates the binding row, main has none → transfer.
+
+(deftest detect-protected-transfers-empty-test
+  (testing "no traits in DB → empty result, not blocked"
+    (let [{:keys [storage]} (create-test-storage)
+          source (vs/create-branch! storage "feature")
           {:keys [protected-transfers blocked?]}
-          (mp/detect-protected-transfers storage (:id branch))]
+          (mp/detect-protected-transfers storage (:id source))]
       (is (empty? protected-transfers))
-      (is (false? blocked?)))))
+      (is (false? blocked?))
+      (sp/close storage))))
 
 
-(deftest detect-protected-transfer-arg-test
-  (testing "detects protected arg in transfer"
-    (let [storage (create-test-storage)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "base"
-                                     :parent-ids nil
-                                     :return-type :int})
-          ;; Create feature branch
-          branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          ;; Create protected arg on feature branch
-          feat-fn (sp/create-entity feature :fn
-                                    {:name "feat-fn"
-                                     :parent-ids [(:id base-fn)]})
-          secret-arg (sp/create-entity feature :arg
-                                       {:fn-id (:id feat-fn)
-                                        :name "password"
-                                        :type :text
-                                        :value "secret"})]
-      ;; Mark arg as protected
-      (mp/add-merge-protection! feature (:id secret-arg))
-
+(deftest detect-protected-transfers-blocked-test
+  (testing "protected binding exists on source only → blocked"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          source (vs/create-branch! storage "feature")
+          feature-storage (vs/switch-branch storage (:id source))
+          ;; Create the binding ON FEATURE so the binding-version row
+          ;; lives only on the source branch.
+          b (create-binding-on-current! feature-storage fn-id slot-id "feature-secret")]
+      (mp/add-merge-protection! feature-storage (:id b))
       (let [{:keys [protected-transfers blocked?]}
-            (mp/detect-protected-transfers storage (:id branch))]
-        (is (seq protected-transfers))
+            (mp/detect-protected-transfers storage (:id source))]
         (is (true? blocked?))
-        (is (= (:id secret-arg) (:arg-id (first protected-transfers))))
-        (is (= :arg (:entity-type (first protected-transfers))))))))
+        (is (= 1 (count protected-transfers)))
+        (is (= (:id b) (:binding-id (first protected-transfers))))
+        (is (= :binding (:entity-type (first protected-transfers)))))
+      (sp/close storage))))
 
 
-(deftest validate-merge-throws-test
-  (testing "validate-merge! throws when protected args would transfer"
-    (let [storage (create-test-storage)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "base"
-                                     :parent-ids nil
-                                     :return-type :int})
-          ;; Create feature branch with protected arg
-          branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          feat-fn (sp/create-entity feature :fn
-                                    {:name "feat-fn"
-                                     :parent-ids [(:id base-fn)]})
-          arg (sp/create-entity feature :arg
-                                {:fn-id (:id feat-fn)
-                                 :name "creds"
-                                 :type :text
-                                 :value "prod-creds"})]
-      (mp/add-merge-protection! feature (:id arg))
-
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Merge blocked: protected args would be transferred"
-            (mp/validate-merge! storage (:id branch)))))))
+(deftest detect-protected-transfers-also-on-target-test
+  (testing "protected binding present on BOTH branches → not transferred → not blocked"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          ;; First create on main (target) so a target version exists.
+          b (create-binding-on-current! storage fn-id slot-id "main-secret")]
+      (mp/add-merge-protection! storage (:id b))
+      (let [source (vs/create-branch! storage "feature")
+            feature-storage (vs/switch-branch storage (:id source))]
+        ;; Write a new version on feature — binding-id IS on target,
+        ;; so it's an overwrite-not-transfer.
+        (sp/update-entity feature-storage :binding (:id b) {:value "feature-secret"})
+        (let [{:keys [blocked?]}
+              (mp/detect-protected-transfers storage (:id source))]
+          (is (false? blocked?)
+              "shared binding-id present on target is overwrite-not-transfer")))
+      (sp/close storage))))
 
 
-;; === Safe Merge ===
+;; === safe-merge-branch! integration ===
 
-(deftest safe-merge-blocks-protected-test
-  (testing "safe-merge-branch! blocks merge with protected args"
-    (let [storage (create-test-storage)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "base"
-                                     :parent-ids nil
-                                     :return-type :int})
-          branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          feat-fn (sp/create-entity feature :fn
-                                    {:name "feat-fn"
-                                     :parent-ids [(:id base-fn)]})
-          arg (sp/create-entity feature :arg
-                                {:fn-id (:id feat-fn)
-                                 :name "secret"
-                                 :type :text
-                                 :value "secret"})]
-      (mp/add-merge-protection! feature (:id arg))
-
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"protected args would be transferred"
-            (mp/safe-merge-branch! storage (:id branch)))))))
+(deftest safe-merge-branch-blocks-on-protection-test
+  (testing "safe-merge-branch! throws :merge-protection-violation when transfer would happen"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          source (vs/create-branch! storage "feature")
+          feature-storage (vs/switch-branch storage (:id source))
+          b (create-binding-on-current! feature-storage fn-id slot-id "leaked-secret")]
+      (mp/add-merge-protection! feature-storage (:id b))
+      (try
+        (mp/safe-merge-branch! storage (:id source))
+        (is false "safe-merge-branch! should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :merge-protection-violation (:type (ex-data e))))
+          (is (seq (:protected-transfers (ex-data e))))))
+      (sp/close storage))))
 
 
-(deftest safe-merge-skip-protection-test
-  (testing "safe-merge-branch! with skip-protection-check allows merge"
-    (let [storage (create-test-storage)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "base"
-                                     :parent-ids nil
-                                     :return-type :int})
-          branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          feat-fn (sp/create-entity feature :fn
-                                    {:name "feat-fn"
-                                     :parent-ids [(:id base-fn)]})
-          arg (sp/create-entity feature :arg
-                                {:fn-id (:id feat-fn)
-                                 :name "secret"
-                                 :type :text
-                                 :value "secret"})]
-      (mp/add-merge-protection! feature (:id arg))
-
-      ;; With skip-protection-check, merge should succeed
-      (let [merge-rec (mp/safe-merge-branch! storage (:id branch)
-                                             {:skip-protection-check true})]
-        (is (some? merge-rec))
-        (is (uuid? (:id merge-rec)))))))
+(deftest safe-merge-branch-skip-flag-test
+  (testing ":skip-protection-check skips the gate even with violations present"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          source (vs/create-branch! storage "feature")
+          feature-storage (vs/switch-branch storage (:id source))
+          b (create-binding-on-current! feature-storage fn-id slot-id "leaked")]
+      (mp/add-merge-protection! feature-storage (:id b))
+      ;; Should NOT throw — the flag bypasses validate-merge!.
+      (mp/safe-merge-branch! storage (:id source) {:skip-protection-check true})
+      (is true "merge proceeded under skip-protection-check")
+      (sp/close storage))))
 
 
-(deftest safe-merge-allows-unprotected-test
-  (testing "safe-merge-branch! allows merge without protected args"
-    (let [storage (create-test-storage)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "base"
-                                     :parent-ids nil
-                                     :return-type :int})
-          branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          feat-fn (sp/create-entity feature :fn
-                                    {:name "feat-fn"
-                                     :parent-ids [(:id base-fn)]})
-          _arg (sp/create-entity feature :arg
-                                 {:fn-id (:id feat-fn)
-                                  :name "normal"
-                                  :type :text
-                                  :value "normal-value"})
-          ;; No protection added - merge should succeed
-          merge-rec (mp/safe-merge-branch! storage (:id branch))]
-      (is (some? merge-rec))
-      (is (uuid? (:id merge-rec)))
-      ;; Entity now visible on main
-      (is (some? (sp/read-entity storage :fn (:id feat-fn)))))))
+(deftest safe-merge-branch-passes-without-violations-test
+  (testing "safe-merge-branch! delegates to vs/merge-branch! when nothing is protected"
+    (let [{:keys [storage]} (create-test-storage)
+          source (vs/create-branch! storage "feature")]
+      ;; No traits in DB — should be a clean pass-through.
+      (mp/safe-merge-branch! storage (:id source))
+      (is true "merge succeeded with no protected bindings")
+      (sp/close storage))))
 
 
-;; === Edge Cases ===
+;; === Conflict resolution apply path ===
+;;
+;; Exercises `versioning.storage.merge/apply-resolutions!` — the
+;; batched create-entities call I switched to in the perf pass.
+;; e2e-conflict-detection-test in e2e_test.clj only covers the
+;; detection side; this test verifies the WRITE side too.
 
-(deftest protected-arg-on-target-not-blocked-test
-  (testing "protected arg already on target doesn't block merge"
-    (let [storage (create-test-storage)
-          base-fn (sp/create-entity storage :fn
-                                    {:name "base"
-                                     :parent-ids nil
-                                     :return-type :int})
-          ;; Create protected arg on main
-          main-fn (sp/create-entity storage :fn
-                                    {:name "main-fn"
-                                     :parent-ids [(:id base-fn)]})
-          protected-arg (sp/create-entity storage :arg
-                                          {:fn-id (:id main-fn)
-                                           :name "main-secret"
-                                           :type :text
-                                           :value "main-secret"})
-          _ (mp/add-merge-protection! storage (:id protected-arg))
-          ;; Create feature branch with unrelated entity
-          branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          feat-fn (sp/create-entity feature :fn
-                                    {:name "feat-fn"
-                                     :parent-ids [(:id base-fn)]})
-          _feat-arg (sp/create-entity feature :arg
-                                      {:fn-id (:id feat-fn)
-                                       :name "feat-value"
-                                       :type :text
-                                       :value "feat-value"})
-          ;; Merge should succeed - protected arg stays on main
-          merge-rec (mp/safe-merge-branch! storage (:id branch))]
-      (is (some? merge-rec)))))
+(deftest merge-with-source-resolution-applies-version-test
+  (testing "vs/merge-branch! with :source resolution writes a new version on target"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          ;; main: binding value=10
+          b (create-binding-on-current! storage fn-id slot-id 10)
+          source (vs/create-branch! storage "feature")
+          feature (vs/switch-branch storage (:id source))]
+      ;; feature: binding value=20
+      (sp/update-entity feature :binding (:id b) {:value 20})
+      ;; main: binding value=11 (creates conflict — both branches modified
+      ;; after fork point).
+      (sp/update-entity storage :binding (:id b) {:value 11})
+      (let [{:keys [conflicts]} (vs/detect-conflicts storage (:id source))]
+        (is (seq conflicts) "expected a conflict on the binding"))
+      ;; Merge with explicit :source resolution — apply-resolutions!
+      ;; should batch-write a new binding-version row carrying
+      ;; feature's value onto main.
+      (vs/merge-branch! storage (:id source)
+                        {:conflict-resolutions {[:binding (:id b)] :source}})
+      ;; Main should now resolve to feature's value (20).
+      (let [resolved (sp/read-entity storage :binding (:id b))]
+        (is (= 20 (:value resolved))
+            "main now sees feature's value after :source resolution"))
+      (sp/close storage))))
+
+
+(deftest merge-without-resolutions-throws-on-conflict-test
+  (testing "vs/merge-branch! throws :merge-conflict when conflicts exist and no resolutions provided"
+    (let [{:keys [storage fn-id slot-id]} (create-test-storage)
+          b (create-binding-on-current! storage fn-id slot-id 10)
+          source (vs/create-branch! storage "feature")
+          feature (vs/switch-branch storage (:id source))]
+      (sp/update-entity feature :binding (:id b) {:value 20})
+      (sp/update-entity storage :binding (:id b) {:value 11})
+      (try
+        (vs/merge-branch! storage (:id source))
+        (is false "merge-branch! should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :merge-conflict (:type (ex-data e))))
+          (is (seq (:unresolved (ex-data e))))))
+      (sp/close storage))))

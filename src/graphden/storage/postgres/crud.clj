@@ -8,7 +8,6 @@
     [graphden.storage.postgres.errors :as errors]
     [graphden.storage.postgres.junction :as junction]
     [graphden.storage.postgres.util :as util]
-    [graphden.storage.protocol.constraints :as constraints]
     [graphden.storage.protocol.core :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]))
@@ -19,26 +18,52 @@
   (codec/encode-row entity fields))
 
 
-(defn- query-arg-descendants
-  "Queries for arg entities that have source-id pointing to the given arg-id.
-   Returns a sequence of descendant arg entities."
-  [ds arg-id]
-  (let [query (sql/format {:select [:id :fn_id :source_id :name]
-                           :from [:arg]
-                           :where [:= :source_id arg-id]}
-                          {:quoted true})]
-    (util/with-sql-error-handling "Database error" :query-arg-descendants {:arg-id arg-id}
-                                  (let [rows (jdbc/execute! ds query (util/query-opts))]
-                                    (map codec/row->entity rows)))))
+(defn- split-ref-many-batch
+  "Pull ref-many junction data off each record. Returns
+   `[columnar-records ref-many-records]` (parallel vectors)."
+  [records fields]
+  (let [split (mapv #(junction/extract-ref-many-data % fields) records)]
+    [(mapv first split) (mapv second split)]))
 
 
-(defn- validate-no-arg-descendants!
-  "Validates that an arg has no descendants before update/delete."
-  [ds arg-id operation]
-  (constraints/validate-no-arg-descendants-impl
-    (fn [id] (query-arg-descendants ds id))
-    arg-id
-    operation))
+(defn- collect-batch-columns
+  "Union of every key across `rows` — different records may carry
+   different fields (e.g. some have `:name`, some don't). Using just
+   the first row's keys would silently drop columns present only
+   later."
+  [rows]
+  (vec (into #{} (mapcat keys) rows)))
+
+
+(defn- batch-row-values
+  "Extract `[v1 v2 …]` for every row, in `columns` order."
+  [rows columns]
+  (mapv (fn [row] (mapv #(get row %) columns)) rows))
+
+
+(defn- merge-back-ref-many
+  "Pair `result-rows` from JDBC back with the `ref-many-records` we
+   stripped off before persistence, so the returned records reflect
+   the full shape we wrote."
+  [result-rows ref-many-records]
+  (mapv (fn [row rm-data] (merge (codec/row->entity row) rm-data))
+        result-rows
+        ref-many-records))
+
+
+(defn- write-junction-rows!
+  "Write ref-many junction rows for every record in the batch in
+   ONE INSERT per (entity, field). `replace?` controls whether the
+   owner's existing rows are deleted first (update / upsert) or
+   inserted fresh (create)."
+  [ds entity-name batch-ids ref-many-records fields replace?]
+  (when (junction/has-ref-many? fields)
+    (let [pairs (filterv #(seq (second %))
+                         (map vector batch-ids ref-many-records))]
+      (when (seq pairs)
+        (if replace?
+          (junction/replace-ref-many-fields-batch! ds entity-name pairs fields)
+          (junction/write-ref-many-fields-batch! ds entity-name pairs))))))
 
 
 (defn create-entity
@@ -112,9 +137,6 @@
                       {:type :not-found
                        :entity entity-name
                        :id id})))
-    ;; Validate arg has no descendants before update
-    (when (= entity-name :arg)
-      (validate-no-arg-descendants! ds id :update))
     (let [updated (merge existing data {:id id})]
       (when fields
         (sp/validate-required-fields! entity-name fields updated))
@@ -144,9 +166,6 @@
    Throws :foreign-key-violation if entity is referenced by other records.
    Throws :constraint-violation/has-descendants if arg has descendants."
   [ds entity-name id]
-  ;; Validate arg has no descendants before delete
-  (when (= entity-name :arg)
-    (validate-no-arg-descendants! ds id :delete))
   (let [table-name (keyword (util/kw->snake-case entity-name))
         query (sql/format {:delete-from table-name
                            :where [:= :id id]}
@@ -229,20 +248,10 @@
                           data-seq)
             batch-size (count records)
             batch-ids (mapv :id records)
-            ;; Split off ref-many fields for junction inserts
-            split-records (mapv #(junction/extract-ref-many-data % fields) records)
-            columnar-records (mapv first split-records)
-            ref-many-records (mapv second split-records)
-            ;; Convert columnar parts to rows using codec
+            [columnar-records ref-many-records] (split-ref-many-batch records fields)
             rows (mapv #(entity->row % fields) columnar-records)
-            ;; Get ALL unique columns from ALL rows - different records may have different fields
-            ;; (e.g., some args have :name set, others don't). Using only first row's keys
-            ;; would silently drop fields present only in other rows.
-            columns (vec (into #{} (mapcat keys) rows))
-            ;; Extract values in column order
-            values (mapv (fn [row]
-                           (mapv #(get row %) columns))
-                         rows)
+            columns (collect-batch-columns rows)
+            values (batch-row-values rows columns)
             query (sql/format {:insert-into table-name
                                :columns columns
                                :values values
@@ -269,15 +278,8 @@
                            :entity-name entity-name
                            :expected-count expected-count
                            :actual-count actual-count})))
-        ;; Insert junction rows for :ref-many fields
-        (when (junction/has-ref-many? fields)
-          (doseq [[id rm-data] (map vector batch-ids ref-many-records)
-                  :when (seq rm-data)]
-            (junction/write-ref-many-fields! ds entity-name id rm-data)))
-        (mapv (fn [row rm-data]
-                (merge (codec/row->entity row) rm-data))
-              result-rows
-              ref-many-records)))))
+        (write-junction-rows! ds entity-name batch-ids ref-many-records fields false)
+        (merge-back-ref-many result-rows ref-many-records)))))
 
 
 (defn read-entities
@@ -327,14 +329,9 @@
         (let [records (vec data-seq)
               batch-size (count records)
               batch-ids (mapv :id records)
-              ;; Split off ref-many fields (junction tables)
-              split-records (mapv #(junction/extract-ref-many-data % fields) records)
-              columnar-records (mapv first split-records)
-              ref-many-records (mapv second split-records)
-              ;; Convert columnar parts to rows
+              [columnar-records ref-many-records] (split-ref-many-batch records fields)
               rows (mapv #(entity->row % fields) columnar-records)
-              ;; Get ALL unique columns from ALL rows (including :id for matching)
-              columns (vec (into #{} (mapcat keys) rows))
+              columns (collect-batch-columns rows)
               update-columns (vec (remove #{:id} columns))]
           ;; If no columns to update (only :id provided), just verify existence and return
           (if (empty? update-columns)
@@ -347,10 +344,7 @@
                                  :missing-ids missing})))
               (map #(get existing (:id %)) records))
             ;; Normal case: have columns to update
-            (let [;; Extract values in column order
-                  values (mapv (fn [row]
-                                 (mapv #(get row %) columns))
-                               rows)
+            (let [values (batch-row-values rows columns)
                   ;; Build column type casts for VALUES clause
                   ;; PostgreSQL needs explicit type casts for UUID and other types
                   column-types (mapv (fn [col]
@@ -419,15 +413,8 @@
                                    :missing-ids missing
                                    :expected-count batch-size
                                    :actual-count actual-count}))))
-              ;; Replace junction rows for :ref-many fields
-              (when (junction/has-ref-many? fields)
-                (doseq [[id rm-data] (map vector batch-ids ref-many-records)
-                        :when (seq rm-data)]
-                  (junction/replace-ref-many-fields! ds entity-name id rm-data fields)))
-              (mapv (fn [row rm-data]
-                      (merge (codec/row->entity row) rm-data))
-                    result-rows
-                    ref-many-records))))))))
+              (write-junction-rows! ds entity-name batch-ids ref-many-records fields true)
+              (merge-back-ref-many result-rows ref-many-records))))))))
 
 
 (defn upsert-entities
@@ -451,20 +438,10 @@
             records (vec data-seq)
             batch-size (count records)
             batch-ids (mapv :id records)
-            ;; Split off ref-many fields (junction tables)
-            split-records (mapv #(junction/extract-ref-many-data % fields) records)
-            columnar-records (mapv first split-records)
-            ref-many-records (mapv second split-records)
-            ;; Convert columnar parts to rows using codec
+            [columnar-records ref-many-records] (split-ref-many-batch records fields)
             rows (mapv #(entity->row % fields) columnar-records)
-            ;; Get ALL unique columns from ALL rows - different records may have different fields
-            ;; (e.g., some args have :name set, others don't). Using only first row's keys
-            ;; would silently drop fields present only in other rows.
-            columns (vec (into #{} (mapcat keys) rows))
-            ;; Extract values in column order
-            values (mapv (fn [row]
-                           (mapv #(get row %) columns))
-                         rows)
+            columns (collect-batch-columns rows)
+            values (batch-row-values rows columns)
             ;; Build ON CONFLICT DO UPDATE SET for all columns except :id
             ;; HoneySQL auto-generates SET col = EXCLUDED.col when given a vector
             update-columns (vec (remove #{:id} columns))
@@ -493,15 +470,8 @@
                            :entity-name entity-name
                            :expected-count expected-count
                            :actual-count actual-count})))
-        ;; Replace junction rows for :ref-many fields
-        (when (junction/has-ref-many? fields)
-          (doseq [[id rm-data] (map vector batch-ids ref-many-records)
-                  :when (seq rm-data)]
-            (junction/replace-ref-many-fields! ds entity-name id rm-data fields)))
-        (mapv (fn [row rm-data]
-                (merge (codec/row->entity row) rm-data))
-              result-rows
-              ref-many-records)))))
+        (write-junction-rows! ds entity-name batch-ids ref-many-records fields true)
+        (merge-back-ref-many result-rows ref-many-records)))))
 
 
 (defn delete-entities

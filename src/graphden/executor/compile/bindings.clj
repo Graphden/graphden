@@ -1,201 +1,303 @@
 (ns graphden.executor.compile.bindings
-  "Static binding analysis: inspect a fn F's inheritance chain and
-   classify each primary arg slot as `:value` | `:ref` | `:seq` | `:free`.
+  "Static binding analysis: classify each root slot of a fn F as
+   `:value | :ref | :seq | :free`.
 
-   Two public entry points:
-
-   - `collect-bindings` — one entry per base-fn primary, in declaration
-     order. Feeds `compile-fn`'s impl call.
-
-   - `collect-env-bindings` — bindings whose terminal primary lies
-     outside F's base, or whose source chain crosses into a ref-target
-     fn. Feeds the augmented free-args map that reaches deep free args
-     through `hof-wrap` call sites."
+   In the slot/fn-slot/binding model:
+   - F's root has fn-slot rows that define the impl's parameter list.
+   - F itself plus every ancestor in F.parent-ids (BFS) may carry
+     binding rows for those slots.
+   - Closest-first wins (override semantics): a binding on F shadows the
+     same slot bound by an ancestor.
+   - A renamed-view slot (own slot row whose `:source-slot-id` FK
+     points at an inherited slot) exposes the source slot under a
+     new external name without consuming it; the slot stays free
+     under the new name. Phase 6c switched from the legacy
+     `binding.rename-to` text encoding to this FK link."
   (:require
-    [graphden.executor.compile.lookups :as l]))
+    [graphden.executor.compile.lookups :as l]
+    [graphden.types.core :as types]))
 
 
-(defn- fn-chain-args-for-primary
-  "For every fn in F's inheritance chain, find the arg (if any) whose
-   source-chain terminates at `primary-id` AND whose chain stays within
-   F's inheritance chain (excludes propagation pass-throughs — those are
-   args on F-chain fns whose source-id crosses into a ref-target fn and
-   shouldn't be treated as F's own bindings for its base primaries).
-
-   Each match is {:fn-id …, :arg <arg-entity>}, ordered from F (closest,
-   top of vector) to base (farthest)."
-  [primary-id fn-chain fn-chain-set args-by-fn arg-map]
-  (vec
-    (keep (fn [fid]
-            (some (fn [arg]
-                    (when (and (= primary-id (l/terminal-primary-id (:id arg) arg-map))
-                               (l/source-chain-stays-within? (:id arg) fn-chain-set arg-map))
-                      {:fn-id fid :arg arg}))
-                  (get args-by-fn fid [])))
-          fn-chain)))
+;; The registry is part of the executor but its loading transitively
+;; pulls compile/bindings; avoid the cycle by resolving lazily.
+(def ^:private rich-type-of-fn (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of)))
 
 
-(defn- closest-binding
-  "Among the chain matches, return the first (closest to F) arg that has
-   a :value or :ref-id set. `nil` if none — meaning the slot is free."
-  [matches]
-  (some (fn [{:keys [arg]}]
-          (when (or (some? (:value arg))
-                    (some? (:ref-id arg)))
-            arg))
-        matches))
+(defn- value-binding?
+  [b]
+  (and b (some? (:value b)) (nil? (:ref-fn-id b))))
 
 
-(defn- sequence-anchor
-  "If `matches` contains a sequence-anchor arg (own arg on F or ancestor
-   whose source-id chain terminates at `primary-id`, with `type=:sequence`
-   and no value/ref of its own), return it. Such an arg signals that the
-   slot is populated via a linked list of item-args walked through
-   `:next-arg-id`."
-  [matches]
-  (some (fn [{:keys [arg]}]
-          (when (and (= :sequence (:type arg))
-                     (nil? (:value arg))
-                     (nil? (:ref-id arg)))
-            arg))
-        matches))
+(defn- ref-binding?
+  [b]
+  (and b (some? (:ref-fn-id b))))
 
 
-(defn- walk-anchor-chain
-  "Walk a sequence-anchor's `:next-arg-id` chain and return the list of
-   item args in order. Each item has either `:value` (literal) or
-   `:ref-id` (reference) set, and its own `:next-arg-id` pointer."
-  [anchor arg-map]
-  (loop [acc []
-         id (:next-arg-id anchor)]
-    (if-let [item (and id (get arg-map id))]
-      (recur (conj acc item) (:next-arg-id item))
-      acc)))
+(defn- list-binding?
+  [b]
+  (and b (true? (:list-append b))))
 
 
-(defn- classify-binding
-  "For a primary arg `P` of the base-fn, inspect F's inheritance chain and
-   classify the slot.
+(defn- list-items-for
+  "Walk parent chain to collect effective list items for `slot-id`. With
+   `:list-append true` on a binding, items come AFTER the parent's
+   effective items. Without append, the binding REPLACES (no parent
+   items inherited). Stops at the first non-append binding (the parent
+   list is its replacement)."
+  [fn-id slot-id {:keys [binding-by-fn-slot items-by-binding] :as lookups}]
+  (let [chain (l/inheritance-chain* fn-id lookups)
+        ;; Walk from root (farthest) to F (closest), accumulating
+        ;; items. Reverse the chain so root is first.
+        farthest-first (reverse chain)
+        result (reduce (fn [acc fid]
+                         (if-let [b (get binding-by-fn-slot [fid slot-id])]
+                           (let [own (vec (get items-by-binding (:id b) []))]
+                             (if (true? (:list-append b))
+                               (into acc own)
+                               own))                ; replace
+                           acc))
+                       []
+                       farthest-first)]
+    result))
 
-   Returns a map:
-     {:kind       :value | :ref | :seq | :free
-      :base-name  keyword, what impl expects as the arg-name
-      :ext-name   keyword, what F's caller provides in free-args
-      :value      the literal (when :kind = :value)
-      :ref-id     the target fn-id (when :kind = :ref)
-      :is-fn      bool (HOF arg — only relevant for :ref)
-      :items      item args (when :kind = :seq) — each has :value or :ref-id}"
-  [primary-arg fn-chain fn-chain-set args-by-fn arg-map]
-  (let [matches (fn-chain-args-for-primary (:id primary-arg) fn-chain fn-chain-set args-by-fn arg-map)
-        bnd (closest-binding matches)
-        anchor (sequence-anchor matches)
-        base-name (keyword (:name primary-arg))
-        ;; Ext-name for the slot: the closest chain-arg's own ext-name
-        ;; (walking its source-id chain). Falls back to the base-fn's
-        ;; primary name when there is no chain arg.
-        closest-chain-arg (some :arg matches)
-        ext-name (or (when closest-chain-arg
-                       (l/arg-ext-name (:id closest-chain-arg) arg-map))
-                     base-name)]
+
+(defn- fn-typed-slot?
+  "True iff the slot's effective type resolves to the `:fn` primitive.
+   Checks the binding's `:type-override-fn-id` first, then walks the
+   inheritance chain looking for any binding on the same slot with a
+   type-override that pins :fn (this is how `:assoc-fn`'s no-op rename
+   `{:value {:as :value :type :fn}}` propagates HOF-ness to
+   descendants). Falls back to the slot's own `:type-fn-id`."
+  [slot b-row fn-typed-fn-ids fn-id
+   {:keys [binding-by-fn-slot] :as lookups}]
+  (let [override (or (:type-override-fn-id b-row)
+                     (some (fn [fid]
+                             (when-let [b (get binding-by-fn-slot
+                                               [fid (:id slot)])]
+                               (:type-override-fn-id b)))
+                           (l/inheritance-chain* fn-id lookups)))
+        t-id (or override (:type-fn-id slot))]
+    (boolean (and t-id (contains? fn-typed-fn-ids t-id)))))
+
+
+(defn- find-rename-slot
+  "Find the rename slot owned by `owner-fn-id` that is a renamed view
+   of `source-slot-id`. Returns the slot row, or nil.
+
+   Phase 6c: lookup is now O(1) via `:slot-by-fn-source-slot` —
+   the renamed slot's `:source-slot-id` FK points back at the slot
+   it renames. Pre-Phase-6 callers passed a string `rename-name`;
+   the new contract takes the FK directly so the helper can answer
+   without scanning fn-slots."
+  [owner-fn-id source-slot-id {:keys [slot-by-fn-source-slot]}]
+  (get slot-by-fn-source-slot [owner-fn-id source-slot-id]))
+
+
+(defn- effective-required?
+  "Effective `:required` for `slot-id` at `fn-id`. Slot's own
+   `:required` (default true) is the BASELINE; any binding along the
+   inheritance chain with `:required true` clamps it to required.
+
+   Narrowing is monotonic — once any ancestor declared required, no
+   descendant can widen back. We don't need a chain-direction walk
+   here: `(true? own-required)` for ANY binding on the chain ⇒ true.
+   The sync-time guard rejects `:required false` writes, so we never
+   see a downgrade."
+  [slot fn-id {:keys [binding-by-fn-slot] :as lookups}]
+  (let [slot-default (if (false? (:required slot)) false true)
+        chain (l/inheritance-chain* fn-id lookups)
+        binding-says-required?
+        (some (fn [fid]
+                (true? (:required (get binding-by-fn-slot [fid (:id slot)]))))
+              chain)]
+    (or slot-default (boolean binding-says-required?))))
+
+
+(defn- effective-binding
+  "When the closest binding for `slot-id` belongs to a fn that ALSO
+   owns a renamed-view slot for the same source (i.e. a rename),
+   look for a descendant's value / ref binding on the rename slot —
+   that binding wins. The rename's own value/ref serves as a
+   DEFAULT; descendants who bind the renamed name override it.
+
+   Phase 6c: the rename relationship is now read via
+   `slot.source-slot-id` (FK) rather than `binding.rename-to`
+   (text). Both sources currently agree (parser + Phase 6b ensure-
+   rename-slot! emit them in lock-step); switching to the FK lets
+   the helper drop a name→slot lookup."
+  [fn-id slot-id {:keys [binding-by-fn-slot] :as lookups}]
+  (let [primary (l/closest-binding-for-slot fn-id slot-id lookups)
+        rename-slot (when primary
+                      (find-rename-slot (:fn-id primary) slot-id lookups))]
+    (if-not rename-slot
+      primary
+      (let [override (some (fn [fid]
+                             (get binding-by-fn-slot [fid (:id rename-slot)]))
+                           (l/inheritance-chain* fn-id lookups))]
+        (if (and override
+                 (or (some? (:value override))
+                     (some? (:ref-fn-id override))
+                     (true? (:list-append override))))
+          override
+          primary)))))
+
+
+(defn- ref-produces-callable?
+  "True iff the bound ref-fn's `:return-type` is itself a fn-type —
+   i.e. evaluating the fn-graph produces a callable VALUE rather than
+   the fn-graph BEING the callable. `:_router` (returns reitit ring-
+   handler) is the canonical case. When the slot is fn-typed AND the
+   ref produces a callable, the runtime thunks (evaluate to get the
+   callable) instead of `hof-wrap`'ping (which would double-wrap)."
+  [ref-fn-id {:keys [fn-map]}]
+  (when-let [fn-name (some-> (get fn-map ref-fn-id) :name)]
+    (when-let [info (@rich-type-of-fn (keyword fn-name))]
+      (types/fn-type? (:return info)))))
+
+
+(defn- classify-slot
+  "Classify one root slot. Returns one of:
+     {:kind :value :base-name K :ext-name K :value V}
+     {:kind :ref   :base-name K :ext-name K :ref-id UUID :is-fn BOOL
+                   :produces-callable? BOOL}
+     {:kind :seq   :base-name K :ext-name K :items [...]}
+     {:kind :free  :base-name K :ext-name K :required true}"
+  [slot fn-id lookups fn-typed-fn-ids]
+  (let [base-name (keyword (:name slot))
+        slot-id (:id slot)
+        ext-name (l/rename-for-slot fn-id slot-id lookups)
+        b (effective-binding fn-id slot-id lookups)]
     (cond
-      (and bnd (some? (:value bnd)))
-      {:kind :value :base-name base-name :ext-name ext-name
-       :value (:value bnd)}
+      (value-binding? b)
+      {:kind :value :base-name base-name :ext-name ext-name :value (:value b)}
 
-      (and bnd (:ref-id bnd))
+      (ref-binding? b)
       {:kind :ref :base-name base-name :ext-name ext-name
-       :ref-id (:ref-id bnd)
-       :is-fn (boolean (:is-fn bnd))}
+       :ref-id (:ref-fn-id b)
+       :is-fn (fn-typed-slot? slot b fn-typed-fn-ids fn-id lookups)
+       :produces-callable? (ref-produces-callable? (:ref-fn-id b) lookups)}
 
-      anchor
-      (let [items (walk-anchor-chain anchor arg-map)]
-        (if (and (empty? items) (:name anchor))
-          ;; Empty anchor with a rename — `{:as :new-name}` whole-arg
-          ;; binding for a sequence-typed slot. Treat as :free keyed by
-          ;; the rename: the caller passes the whole vector under
-          ;; the new name, and it flows verbatim into the impl.
-          {:kind :free :base-name base-name :ext-name (keyword (:name anchor))
-           :required (not (false? (:required primary-arg)))}
-          {:kind :seq :base-name base-name :ext-name ext-name
-           :items items}))
+      (list-binding? b)
+      {:kind :seq :base-name base-name :ext-name ext-name
+       :items (list-items-for fn-id slot-id lookups)}
 
       :else
       {:kind :free :base-name base-name :ext-name ext-name
-       ;; Treat NULL `:required` as required (the default in production
-       ;; data — only base-fns with `{:type ... :required false}` get
-       ;; explicit `false`). Optional free args don't have to be
-       ;; supplied by the HOF call site.
-       :required (not (false? (:required primary-arg)))})))
+       ;; Effective required = slot's own :required (default true)
+       ;; OR'd with any binding `:required true` along the inheritance
+       ;; chain. Lets a descendant fn-def narrow an inherited optional
+       ;; slot to required for itself and its descendants — a one-way
+       ;; ratchet enforced by the sync-time check on `:required false`.
+       :required (effective-required? slot fn-id lookups)
+       :is-fn (fn-typed-slot? slot b fn-typed-fn-ids fn-id lookups)})))
+
+
+(defn- compute-fn-typed-fn-ids
+  "Set of fn-ids whose row identifies a HOF-callable slot. Two flavours:
+
+   1. The bare-keyword primitive `:fn` row — its `:name` is literally
+      `\"fn\"` / `:fn` (text-column codec roundtrip preserves both
+      shapes, match either).
+   2. Structural fn-type rows that came from EDN's `[:fn args ret]`
+      declarations. Their `:constraint` is `[:fn …]`. Named ones
+      (`:fn-type`) plus anonymous-by-shape rows both qualify — the
+      executor treats either as a HOF marker.
+
+   Pre-fix the only path was (1), so `[:fn args ret]` slots silently
+   fell back to plain value-binding semantics — bindings to them
+   weren't hof-wrapped, and the bound fn-graph was eagerly executed
+   as a value. The compiled closure then tripped over the resulting
+   Clojure value (e.g. a Ring response map) when it expected a
+   callable."
+  [{:keys [fn-map]}]
+  (into #{}
+        (keep (fn [[id f]]
+                (when (or (#{"fn" :fn} (:name f))
+                          (and (vector? (:constraint f))
+                               (= :fn (first (:constraint f)))))
+                  id)))
+        fn-map))
 
 
 (defn collect-bindings
-  "For fn F, resolve every primary slot of its base-fn. Returns a vector of
-   classified binding entries (see `classify-binding`), in the order of the
-   base's primary args (stable for testing)."
-  [fn-id {:keys [fn-map args-by-fn arg-map]}]
-  (let [base (l/base-fn-of fn-id fn-map)
-        base-primaries (filterv l/primary-arg? (get args-by-fn (:id base) []))
-        chain (l/inheritance-chain fn-id fn-map)
-        chain-set (set chain)]
-    (mapv #(classify-binding % chain chain-set args-by-fn arg-map) base-primaries)))
+  "For F, classify every root slot. Returns a vector of binding entries
+   in fn-slot position order."
+  [fn-id lookups]
+  (let [slots (l/root-slots fn-id lookups)
+        fn-typed-fn-ids (compute-fn-typed-fn-ids lookups)]
+    (mapv #(classify-slot % fn-id lookups fn-typed-fn-ids) slots)))
+
+
+(defn- own-fn-of-slot
+  "Return the fn-id that OWNS `slot-id` via fn-slot junction, or nil."
+  [slot-id {:keys [fn-slots-by-fn]}]
+  (some (fn [[fid junctions]]
+          (when (some #(= slot-id (:slot-id %)) junctions)
+            fid))
+        fn-slots-by-fn))
 
 
 (defn collect-env-bindings
-  "Collect bindings on F (or any ancestor in its inheritance chain) that
-   aren't already consumed by F's base-fn primaries — these bindings feed
-   ref-target subtrees via the augmented free-args map. Two patterns:
+  "Bindings on F or its ancestors that target a slot which ISN'T one
+   of the root's direct slots — at runtime the executor merges these
+   into the free-args map so the ref tree sees the override.
 
-   1. Bindings on a propagated free slot. E.g. `:health-route` binds
-      `:path \"/health\"` — that arg's source chain crosses out of
-      `:health-route`'s inheritance chain (into the `:pair-1` ref
-      propagation path), so it doesn't bind `:conj.item` directly; instead
-      it needs to reach `:pair-1` via the call-site free-args rename.
+   This covers two distinct patterns:
+   1. Bindings on slots owned by fns outside F's inheritance chain
+      (slots living on ref-targets, accessed via the data-flow tree).
+   2. Bindings on RENAME slots owned by ancestors that ARE in F's
+      inheritance chain — the rename slot exposes a free-arg name
+      that propagates to inner sequence-items (`{:as :path}`), HOF
+      lambda-params, etc. These never appear as root slots, so
+      `collect-bindings` doesn't see them, but the runtime needs them
+      in free-args.
 
-   2. Bindings on a slot whose terminal primary lies outside F's base.
-      E.g. a child of `:router-ring-response` binding `:func :_router` —
-      `:ring-response` (the base) has no `:func` primary; the binding
-      instead augments free-args so the deep `:invoke.func` slot picks
-      it up at runtime.
-
-   Dedup by ext-name (each unique external name shows up once). The arg
-   whose source chain *stays within F's chain AND terminates at a base
-   primary* is handled by `classify-binding`, not here — so we skip it.
-
-   Returns a vector of maps:
-     {:kind    :value | :ref | :seq
-      :env-name keyword — ext-name at the binding level
-      :value/:ref-id/:is-fn/:items — as in classify-binding}"
-  [fn-id {:keys [fn-map args-by-fn arg-map]}]
-  (let [base (l/base-fn-of fn-id fn-map)
-        base-primary-ids (into #{} (map :id) (filterv l/primary-arg? (get args-by-fn (:id base) [])))
-        chain (l/inheritance-chain fn-id fn-map)
-        chain-set (set chain)
-        seen-ext-names (atom #{})
-        out (atom [])]
-    (doseq [fid chain
-            arg (get args-by-fn fid [])]
-      (let [term-id (l/terminal-primary-id (:id arg) arg-map)
-            ext-name (l/arg-ext-name (:id arg) arg-map)
-            in-chain? (l/source-chain-stays-within? (:id arg) chain-set arg-map)
-            consumed-by-classify? (and in-chain? (contains? base-primary-ids term-id))]
-        (when (and ext-name
-                   (not consumed-by-classify?)
-                   (not (contains? @seen-ext-names ext-name))
-                   (or (some? (:value arg))
-                       (:ref-id arg)
-                       (and (= :sequence (:type arg))
-                            (:next-arg-id arg))))
-          (swap! seen-ext-names conj ext-name)
-          (swap! out conj
-                 (cond
-                   (some? (:value arg))
-                   {:kind :value :env-name ext-name :value (:value arg)}
-
-                   (:ref-id arg)
-                   {:kind :ref :env-name ext-name :ref-id (:ref-id arg)
-                    :is-fn (boolean (:is-fn arg))}
-
-                   :else
-                   {:kind :seq :env-name ext-name
-                    :items (walk-anchor-chain arg arg-map)})))))
-    @out))
+   `:is-fn` for ref-bindings is derived by walking the slot-owner's
+   chain for type-overrides."
+  [fn-id {:keys [slot-map bindings-by-fn binding-by-fn-slot] :as lookups}]
+  (let [chain (l/inheritance-chain* fn-id lookups)
+        root-slot-ids (into #{}
+                            (map :id)
+                            (or (l/root-slots fn-id lookups) []))
+        fn-typed-fn-ids (compute-fn-typed-fn-ids lookups)
+        is-fn-for-slot
+        (fn [slot-id slot b-row]
+          (let [owner (own-fn-of-slot slot-id lookups)
+                owner-chain (when owner (l/inheritance-chain* owner lookups))
+                override (or (:type-override-fn-id b-row)
+                             (some (fn [fid]
+                                     (when-let [b (get binding-by-fn-slot
+                                                       [fid slot-id])]
+                                       (:type-override-fn-id b)))
+                                   owner-chain))
+                t-id (or override (:type-fn-id slot))]
+            (boolean (and t-id (contains? fn-typed-fn-ids t-id)))))
+        ;; Iterate the chain × this-fn's bindings, accumulate first
+        ;; binding per env-name (ancestor-closer wins, mirroring how
+        ;; `inheritance-chain` orders results). Pure reduce — no atoms.
+        binding->entry
+        (fn [b]
+          (let [slot-id (:slot-id b)
+                slot (get slot-map slot-id)
+                env-name (some-> (:name slot) keyword)]
+            (when (and env-name
+                       (not (contains? root-slot-ids slot-id))
+                       (or (some? (:value b)) (some? (:ref-fn-id b))))
+              (cond
+                (some? (:value b))
+                [env-name {:kind :value :env-name env-name :value (:value b)}]
+                (some? (:ref-fn-id b))
+                [env-name {:kind :ref :env-name env-name
+                           :ref-id (:ref-fn-id b)
+                           :is-fn (is-fn-for-slot slot-id slot b)
+                           :produces-callable? (ref-produces-callable?
+                                                 (:ref-fn-id b) lookups)}]))))]
+    (->> chain
+         (mapcat #(get bindings-by-fn % []))
+         (keep binding->entry)
+         (reduce (fn [{:keys [seen out] :as acc} [env-name entry]]
+                   (if (contains? seen env-name)
+                     acc
+                     {:seen (conj seen env-name) :out (conj out entry)}))
+                 {:seen #{} :out []})
+         :out)))

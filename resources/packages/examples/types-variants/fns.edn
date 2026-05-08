@@ -1,0 +1,182 @@
+;; Tagged variants — Result-style discriminated unions.
+;;
+;; A variant alias like
+;;   {:name :result-text :variant [:ok :text :err :text]}
+;; desugars to the union of two records:
+;;   [:union {:tag [:refine :keyword [:= :ok]]  :value :text}
+;;           {:tag [:refine :keyword [:= :err]] :value :text}]
+;;
+;; Runtime form is a plain map: {:tag :ok :value "..."} with KEYWORD
+;; keys (the JSONB roundtrip + the codec's `normalize-parsed-json`
+;; step keep them as keywords). Discriminate at runtime with
+;; `:variant-is?`, extract via `:variant-tag` / `:variant-value`.
+;;
+;; ESCAPE NOTE: when carrying a literal MAP that itself contains a
+;; `:value` key (every variant does), you MUST wrap the bind with
+;; `:literal? true` at the OUTER level. Otherwise the loader sees
+;; the inner `:value` and treats the whole thing as an arg-spec —
+;; silently extracting just the inner value and dropping the tag.
+;;
+;; This module shows OK/ERR construction, accessors, predicates,
+;; and end-to-end discrimination via `:cond` on a closed (no free
+;; args) variant.
+;;
+;; Verified by direct exec/execute against the dev system on
+;; 2026-04-29:
+;;   ex-tag-of-ok    → :ok
+;;   ex-value-of-ok  → "computed!"
+;;   ex-ok?          → true
+;;   ex-err?         → false
+;;   ex-format-ok    → "OK: computed!"
+;;   ex-format-err   → "ERR: division by zero"
+
+
+{:namespace "examples.types-variants"
+ :description "Discriminated unions (tagged variants) — Result-style {:tag :ok|:err :value …} maps with predicate + accessor sugar from core.variants."
+ :fns
+ [;; --- constructors ---
+  ;;
+  ;; Literal variants. `:const` carries the whole map as :value.
+  ;; The OUTER `{:literal? true :value <map>}` is required because
+  ;; the inner map has its own `:value` key (the variant's payload),
+  ;; which would otherwise be picked up by the loader's arg-spec
+  ;; parser. With `:literal? true` the loader treats the whole map
+  ;; as an opaque literal — nested keywords stay as data.
+  {:name :ex-result-ok
+   :description "An OK variant carrying the string \"computed!\". Shape: `{:tag :ok :value \"computed!\"}`. The outer `:literal? true` keeps the whole map opaque so the inner `:value` key isn't mistaken for an arg-spec."
+   :parent :const
+   :args {:value {:literal? true
+                  :value {:tag :ok :value "computed!"}}}}
+
+  {:name :ex-result-err
+   :description "An ERR variant carrying a human-readable error message. Same shape, different :tag. Discrimination at the :cond branch later picks this branch on `:tag = :err`."
+   :parent :const
+   :args {:value {:literal? true
+                  :value {:tag :err :value "division by zero"}}}}
+
+  ;; --- accessors ---
+  ;;
+  ;; The :variant-tag accessor reads the :tag key from the variant
+  ;; and returns the keyword (`:ok` / `:err`). Caller flows the
+  ;; variant in via `:coll` (free, propagated from :variant-tag's
+  ;; parent `:get`).
+  {:name :ex-tag-of-ok
+   :description "Read the :tag of `:ex-result-ok` — produces the keyword `:ok` at runtime. Demonstrates the :variant-tag sugar over `(:get coll v :key :tag)`."
+   :parent :variant-tag
+   :args {:coll :ex-result-ok}}
+
+  {:name :ex-value-of-ok
+   :description "Read the :value of `:ex-result-ok` — produces the string \"computed!\". Mirrors :ex-tag-of-ok but for the payload."
+   :parent :variant-value
+   :args {:coll :ex-result-ok}}
+
+  ;; --- predicate ---
+  ;;
+  ;; `:variant-is?` compares the variant's tag against a target.
+  ;; `:tag` is the renamed second arg of the underlying `:equal?`.
+  {:name :ex-ok?
+   :description "Is `:ex-result-ok` tagged :ok? Runtime: `true`. Same accessor under the hood as :variant-tag, lifted into a boolean via :equal?."
+   :parent :variant-is?
+   :args {:coll :ex-result-ok
+          :tag {:value :ok :literal? true}}}
+
+  {:name :ex-err?
+   :description "Is `:ex-result-ok` tagged :err? Runtime: `false`. Demonstrates that :variant-is? returns the bool directly — no need to wrap in :not for the negative case."
+   :parent :variant-is?
+   :args {:coll :ex-result-ok
+          :tag {:value :err :literal? true}}}
+
+  ;; --- end-to-end discrimination via :cond ---
+  ;;
+  ;; The canonical Result-handling pattern: branch on the tag,
+  ;; return either the value-as-string or the error-as-string.
+  ;;
+  ;; `:cond/:clauses` expects a sequence of PAIRS — each clause is
+  ;; itself a 2-element vector `[test result]`. We build each pair
+  ;; via a `:list`-helper (per the cond-pattern module's idiom);
+  ;; the helpers here close over a CONCRETE variant (`:ex-result-ok`
+  ;; below), so there are no free args, and `cond` discriminates
+  ;; against a fixed input.
+  {:name :ex-format-ok
+   :description "Pattern-match `:ex-result-ok`: returns `\"OK: computed!\"`. The :cond clauses are pairs `[(:variant-is? v :ok) (str \"OK: \" (:variant-value v)) ...]`."
+   :parent :cond
+   :args {:clauses [:_ex-fmt-ok-pair
+                    :_ex-fmt-err-pair-on-ok]}}
+
+  {:name :ex-format-err
+   :description "Same shape as `:ex-format-ok` but discriminates against `:ex-result-err`: returns `\"ERR: division by zero\"`. Demonstrates that the cond machinery picks the :err branch when :variant-is? :ok fails."
+   :parent :cond
+   :args {:clauses [:_ex-fmt-ok-pair-on-err
+                    :_ex-fmt-err-pair]}}
+
+  ;; --- pair builders for ex-format-ok (variant = :ex-result-ok) ---
+
+  {:name :_ex-fmt-ok-pair
+   :description "Pair `[(:variant-is? :ex-result-ok :ok) (str \"OK: \" (:variant-value :ex-result-ok))]` — the :ok branch of the OK-format pipeline."
+   :parent :list
+   :args {:items [:_ex-fmt-is-ok-on-ok
+                  :_ex-fmt-ok-msg-on-ok]}}
+
+  {:name :_ex-fmt-err-pair-on-ok
+   :description "Fallback pair (never fires here because :ok matches first). Same shape as the :err pair but with :ex-result-ok wired in — included so the :cond has at least two clauses."
+   :parent :list
+   :args {:items [:_ex-fmt-is-err-on-ok
+                  :_ex-fmt-err-msg-on-ok]}}
+
+  {:name :_ex-fmt-is-ok-on-ok
+   :parent :variant-is?
+   :args {:coll :ex-result-ok
+          :tag {:value :ok :literal? true}}}
+
+  {:name :_ex-fmt-is-err-on-ok
+   :parent :variant-is?
+   :args {:coll :ex-result-ok
+          :tag {:value :err :literal? true}}}
+
+  {:name :_ex-fmt-ok-msg-on-ok
+   :parent :str
+   :args {:parts [{:value "OK: "} :_ex-fmt-extract-value-on-ok]}}
+
+  {:name :_ex-fmt-err-msg-on-ok
+   :parent :str
+   :args {:parts [{:value "ERR: "} :_ex-fmt-extract-value-on-ok]}}
+
+  {:name :_ex-fmt-extract-value-on-ok
+   :parent :variant-value
+   :args {:coll :ex-result-ok}}
+
+  ;; --- pair builders for ex-format-err (variant = :ex-result-err) ---
+
+  {:name :_ex-fmt-ok-pair-on-err
+   :description "Fallback pair (never fires here because :err matches the second clause)."
+   :parent :list
+   :args {:items [:_ex-fmt-is-ok-on-err
+                  :_ex-fmt-ok-msg-on-err]}}
+
+  {:name :_ex-fmt-err-pair
+   :description "Pair `[(:variant-is? :ex-result-err :err) (str \"ERR: \" (:variant-value :ex-result-err))]` — the :err branch of the ERR-format pipeline."
+   :parent :list
+   :args {:items [:_ex-fmt-is-err-on-err
+                  :_ex-fmt-err-msg-on-err]}}
+
+  {:name :_ex-fmt-is-ok-on-err
+   :parent :variant-is?
+   :args {:coll :ex-result-err
+          :tag {:value :ok :literal? true}}}
+
+  {:name :_ex-fmt-is-err-on-err
+   :parent :variant-is?
+   :args {:coll :ex-result-err
+          :tag {:value :err :literal? true}}}
+
+  {:name :_ex-fmt-ok-msg-on-err
+   :parent :str
+   :args {:parts [{:value "OK: "} :_ex-fmt-extract-value-on-err]}}
+
+  {:name :_ex-fmt-err-msg-on-err
+   :parent :str
+   :args {:parts [{:value "ERR: "} :_ex-fmt-extract-value-on-err]}}
+
+  {:name :_ex-fmt-extract-value-on-err
+   :parent :variant-value
+   :args {:coll :ex-result-err}}]}

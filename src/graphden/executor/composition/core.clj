@@ -1,340 +1,209 @@
 (ns graphden.executor.composition.core
-  "Data-driven fn definitions and storage sync.
+  "Sync layer for the slot/fn-slot/binding model.
 
-   ## 2-Entity Schema
+   `sync-fns-to-storage!` takes a vector of fn-def EDN maps (the
+   loader's `:fn-defs` output), translates them via
+   `graphden.packages.records/parse-module` into typed records, then
+   batch-upserts each entity-kind to storage in dependency order:
 
-   Composed functions are stored as:
-   - fn entity with parent-ids set (inherits from one or more parent fns)
-   - arg entities with source-id set (inherits from parent's arg) + value/ref-id
+     fn → slot → fn-slot → binding → binding-list-item
 
-   ## Format
+   Returns `{fn-name → fn-id}` for named fn rows. The old composition
+   layer (records.clj, source-chain.clj — both stubbed) translated
+   `:args` into `arg`-rows; this is replaced by the new parser
+   producing records directly.
 
-   Fn definitions are a vector of maps (order matters for validation):
-
-   ```clojure
-   [{:name :router-handler
-     :parent :default-router-handler}
-
-    {:name :web-server
-     :parent :http-server
-     :args {:handler :router-handler   ; ref to fn
-            :port 8080}}]              ; literal value
-   ```
-
-   ## Arg Value Syntax
-
-   - `:fn-name` - reference to fn (creates ref-id)
-
-   Behavior (execute vs pass fn-id) is determined by is-fn field on parent arg,
-   which is inherited via source-id. The executor checks is-fn to decide.
-
-   ## Name Resolution
-
-   Names in :parent and :args are resolved in this order:
-   1. fn from this definition set (by name)
-   2. fn already in storage (by name)"
+   This module also has `sync-defs-to-storage!` for primitives and
+   `:base-fn` entries — same pipeline, just driven by a different
+   record source."
   (:require
     [graphden.executor.composition.deps :as deps]
-    [graphden.executor.composition.records :as records]
-    [graphden.executor.composition.source-chain :as sc]
     [graphden.executor.composition.validation :as validation]
+    [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]))
 
 
-(defn- preload-all-args
-  "Loads arg entities for given fn-ids using WHERE IN clause.
-   Returns map with three indexes:
-   - :by-fn {fn-id -> [args]} for fn-based lookup
-   - :by-id {arg-id -> arg} for O(1) arg lookup by id
-   - :by-fn-source {[fn-id source-id] -> arg} for O(1) lookup by fn+source"
-  [storage fn-ids]
-  (if (empty? fn-ids)
-    {:by-fn {} :by-id {} :by-fn-source {}}
-    ;; Use WHERE IN clause instead of full table scan + filter
-    (let [matching-args (sp/query-entities storage :arg {:fn-id (vec fn-ids)})]
-      {:by-fn (group-by :fn-id matching-args)
-       :by-id (into {} (map (fn [a] [(:id a) a])) matching-args)
-       :by-fn-source (into {} (keep (fn [a]
-                                      (when-let [sid (:source-id a)]
-                                        [[(:fn-id a) sid] a])))
-                           matching-args)})))
+;; =============================================================================
+;; Namespace resolution
+;; =============================================================================
+
+(defn- resolve-namespace-id
+  "ns-id-map maps namespace-path strings to ns-row ids. fn-def's
+   `:namespace-id` field carries the path string (set by the loader);
+   here we swap it for the actual UUID."
+  [record ns-id-map]
+  (if-let [ns-path (:namespace-id record)]
+    (assoc record :namespace-id (get ns-id-map ns-path))
+    record))
+
+
+;; =============================================================================
+;; impl-hash
+;; =============================================================================
+
+(defn- compute-impl-hash
+  "Placeholder. Real impl-hashing reads the Clojure source and SHA-256s
+   the canonical args+return+impl-source — see the old
+   `graphden.executor.registry.core/compute-impl-hash`. Until the
+   registry layer is rewritten to feed the records-parser, sync uses
+   `nil` for impl-hash on every fn (records' `:impl-hash` field is set
+   to a sentinel that we just clear here)."
+  [_fn-record]
+  nil)
+
+
+;; =============================================================================
+;; Sync — single entry point for any record bundle
+;; =============================================================================
+
+(defn- group-records-by-kind
+  [records]
+  (reduce (fn [acc r] (update acc (:kind r) (fnil conj []) r))
+          {} records))
+
+
+(defn- prep-fn-rows
+  "Strip `:kind` and resolve namespace-id; convert record-shape to
+   storage-shape for upsert."
+  [fn-records ns-id-map]
+  (mapv (fn [r]
+          (let [resolved-ns (resolve-namespace-id r ns-id-map)
+                impl-hash (when (= :sentinel/impl-hash (:impl-hash r))
+                            (compute-impl-hash r))]
+            (-> resolved-ns
+                (dissoc :kind)
+                (assoc :impl-hash (or impl-hash
+                                      (when-not (= :sentinel/impl-hash (:impl-hash r))
+                                        (:impl-hash r)))))))
+        fn-records))
+
+
+(defn- strip-kind
+  "Drop the `:kind` discriminator before sending records to storage.
+   Used for every entity except `:fn`, which needs extra ns / impl-hash
+   massaging via `prep-fn-rows`."
+  [records]
+  (mapv #(dissoc % :kind) records))
+
+
+(defn write-records!
+  "Batch-upsert records of all kinds to storage in dependency order.
+   `records` is a flat vector of tagged maps (output of
+   `records/parse-module` or `records/boot-primitive-records`).
+   Returns `{fn-name → fn-id}` for named fn rows."
+  [storage records ns-id-map]
+  (let [{fns       :fn
+         slots     :slot
+         fn-slots  :fn-slot
+         bindings  :binding
+         items     :binding-list-item} (group-records-by-kind records)]
+    ;; Order matters because of FK constraints:
+    ;; fn → slot (slot.type-fn-id FK)
+    ;;    → fn-slot (FKs to fn + slot)
+    ;;    → binding (FKs to fn + slot)
+    ;;       → binding-list-item (FK to binding)
+    (when (seq fns)
+      (sp/upsert-entities storage :fn (prep-fn-rows fns ns-id-map)))
+    (when (seq slots)
+      (sp/upsert-entities storage :slot (strip-kind slots)))
+    (when (seq fn-slots)
+      (sp/upsert-entities storage :fn-slot (strip-kind fn-slots)))
+    (when (seq bindings)
+      (sp/upsert-entities storage :binding (strip-kind bindings)))
+    (when (seq items)
+      (sp/upsert-entities storage :binding-list-item (strip-kind items)))
+    ;; Build the name→id return map.
+    (into {}
+          (keep (fn [fr]
+                  (when-let [n (:name fr)]
+                    [(keyword n) (:id fr)])))
+          fns)))
+
+
+;; =============================================================================
+;; Top-level entry points
+;; =============================================================================
+
+(defn sync-primitives!
+  "Pre-seed the 14 primitive fn-rows. Idempotent (deterministic UUIDs).
+   Should run once at storage init, before any other sync."
+  [storage]
+  (write-records! storage (records/boot-primitive-records) {}))
+
+
+(defn- existing-name->id
+  "Discover the name→id map for fn-rows already in storage. Lets
+   `sync-fns-to-storage!` resolve cross-module references without
+   the caller threading them in by hand."
+  [storage]
+  (into {}
+        (keep (fn [f]
+                (when-let [n (:name f)]
+                  [(keyword n) (:id f)])))
+        (sp/query-entities storage :fn {})))
+
+
+(defn- existing-defs-by-name
+  "Reconstruct minimal fn-def shapes for every fn-row already in
+   storage so the records-parser's slot resolver can reach base-fn
+   args. We only need the `:args`-map (set of slot names) so the
+   `type-row-arg-names` check fires on inheritance walks; everything
+   else can stay nil."
+  [storage]
+  (let [fns (sp/query-entities storage :fn {})
+        slots (sp/query-entities storage :slot {})
+        fn-slots (sp/query-entities storage :fn-slot {})
+        slot-by-id (into {} (map (juxt :id identity)) slots)
+        slots-by-fn (reduce (fn [acc fs]
+                              (if-let [s (get slot-by-id (:slot-id fs))]
+                                (update acc (:fn-id fs) (fnil conj #{}) (keyword (:name s)))
+                                acc))
+                            {}
+                            fn-slots)]
+    (into {}
+          (keep (fn [f]
+                  (let [n (some-> (:name f) keyword)
+                        args (when (seq (get slots-by-fn (:id f)))
+                               (into {}
+                                     (map (fn [a] [a :any]))
+                                     (get slots-by-fn (:id f))))
+                        ;; Treat fn-rows with no parent and no impl as
+                        ;; type-rows whose `:args` keys are their slot
+                        ;; names; that's enough for the slot resolver
+                        ;; to recognise the fn as declaring those slots.
+                        is-type-row? (and (empty? (:parent-ids f))
+                                          (or args (:base-fn-id f)
+                                              (:element-fn-id f) (:constraint f)))]
+                    (when (and n is-type-row? args)
+                      [n {:name n :args args
+                          ;; Best-effort: we don't have the ns-path
+                          ;; here. Leave nil; UUIDs for fn-id were
+                          ;; threaded via extra-name->id already.
+                          :namespace nil}]))))
+          fns)))
 
 
 (defn sync-fns-to-storage!
-  "Syncs fn definitions to storage using batch operations.
+  "Top-level sync for a list of fn-defs. See arity-5 for full
+   signature; convenience arities auto-discover `extra-name->id` from
+   the existing `:fn` table.
 
-   Arguments:
-   - storage: initialized storage with base-fn schemas already synced
-   - fn-defs: vector of fn definition maps
-
-   Process:
-   1. Validates all definitions
-   2. Topologically sorts by dependencies
-   3. Pre-loads existing fns and args (2 queries instead of N*M)
-   4. Batch upserts all fn entities
-   5. Batch upserts all arg entities
-
-   Returns map of {fn-name -> fn-id} for created fns.
-
-   Throws on:
-   - Invalid definitions
-   - Unresolved references (parent or arg)
-   - Circular dependencies"
-  ([storage fn-defs] (sync-fns-to-storage! storage fn-defs {}))
+   `extra-defs-by-name` (5-arity) carries fn-def shapes from a prior
+   sync (base-fns, type-rows declared inline) so the records-parser's
+   slot resolver can find their slots. Without it, a composed fn
+   binding `:m` on a slot owned by a base-fn synced earlier won't
+   resolve."
+  ([storage fn-defs]
+   (sync-fns-to-storage! storage fn-defs {} (existing-name->id storage)
+                         (existing-defs-by-name storage)))
   ([storage fn-defs ns-id-map]
-   (if (empty? fn-defs)
-     {}
-     (do
-       (validation/validate-all-defs! fn-defs)
-       (let [sorted-defs (deps/topological-sort fn-defs)
-             _ (deps/check-order-and-warn fn-defs sorted-defs)
-
-             ;; Phase 1: Pre-load existing data (single pass over all-fns)
-             all-fns (sp/query-entities storage :fn {})
-
-             ;; Invert ns-id-map for qualified name resolution: {ns-uuid → ns-path}
-             ns-path-by-id (into {} (map (fn [[path id]] [id path]) ns-id-map))
-
-             ;; Build caches in a single pass.
-             ;; fn-name-cache: simple name → entity (backward compat)
-             ;; qualified-fn-cache: "ns.path.name" → entity (for dot-refs)
-             {:keys [fn-id-cache fn-name-cache all-fn-ids]}
-             (reduce (fn [acc fn-entity]
-                       (let [acc (-> acc
-                                     (assoc-in [:fn-id-cache (:id fn-entity)] fn-entity)
-                                     (assoc-in [:fn-name-cache (:name fn-entity)] fn-entity)
-                                     (update :all-fn-ids conj (:id fn-entity)))]
-                         ;; Also add qualified entry if fn has namespace
-                         (if-let [ns-path (get ns-path-by-id (:namespace-id fn-entity))]
-                           (let [qualified (str ns-path "." (:name fn-entity))]
-                             (assoc-in acc [:fn-name-cache qualified] fn-entity))
-                           acc)))
-                     {:fn-id-cache {}
-                      :fn-name-cache {}
-                      :all-fn-ids []}
-                     all-fns)
-
-             ;; Pre-load all args using WHERE IN
-             args-cache (preload-all-args storage all-fn-ids)
-
-             ;; Phase 2: Prepare and create fns in topological order
-             ;; We need to do this sequentially due to dependencies
-             ;; created-fns: {fn-name -> fn-id}
-             ;; created-fn-entities: {fn-id -> fn-entity} - needed for parent chain lookup
-             {:keys [created-fns created-fn-entities]}
-             (loop [remaining sorted-defs
-                    created {}
-                    created-entities {}
-                    new-fns []
-                    fn-name-cache' fn-name-cache]
-               (if (empty? remaining)
-                 ;; Batch upsert new fns
-                 (do
-                   (when (seq new-fns)
-                     (sp/upsert-entities storage :fn new-fns))
-                   {:created-fns created
-                    :created-fn-entities created-entities})
-                 (let [fn-def (first remaining)
-                       result (records/prepare-fn-record fn-name-cache' fn-id-cache created fn-def ns-id-map)
-                       ;; Pick the fn-entity to track downstream — for
-                       ;; description-only updates we use the updated
-                       ;; record so the in-memory cache reflects the
-                       ;; new description immediately.
-                       fn-entity (or (:update result) (:existing result) (:new result))
-                       fn-id (:id fn-entity)
-                       new-created (assoc created (:name fn-def) fn-id)
-                       new-created-entities (assoc created-entities fn-id fn-entity)
-                       ;; New rows go into the upsert batch as before.
-                       ;; Updates (description drift on existing fns) ride
-                       ;; the same upsert — same id → INSERT-ON-CONFLICT
-                       ;; resolves to UPDATE.
-                       new-fns' (cond
-                                  (:new result) (conj new-fns (:new result))
-                                  (:update result) (conj new-fns (:update result))
-                                  :else new-fns)
-                       fn-name-cache'' (if (or (:new result) (:update result))
-                                         (assoc fn-name-cache' (name (:name fn-def)) fn-entity)
-                                         fn-name-cache')]
-                   (recur (rest remaining) new-created new-created-entities new-fns' fn-name-cache''))))
-
-             ;; Update caches with newly created fns (simple + qualified names)
-             fn-name-cache-final
-             (reduce (fn [cache [kw-name fn-id]]
-                       (let [n (name kw-name)
-                             entry {:id fn-id :name n}
-                             ;; Find namespace from the fn-def
-                             fn-def (first (filter #(= (:name %) kw-name) sorted-defs))
-                             ns-path (:namespace fn-def)]
-                         (cond-> (assoc cache n entry)
-                           ns-path (assoc (str ns-path "." n) entry))))
-                     fn-name-cache
-                     created-fns)
-             ;; Include full fn-entities with parent-ids for parent chain lookup
-             fn-id-cache-final (merge fn-id-cache created-fn-entities)
-
-             ;; Phase 3: Process each fn-def's args sequentially, updating cache as we go
-             ;; This allows later fn-defs to see propagated args from earlier ones
-             ;;
-             ;; We still collect all records for batch upsert at the end for efficiency.
-             ;; args-data contains {:by-fn {fn-id -> [args]}, :by-id {arg-id -> arg}}
-             {:keys [all-new-args all-update-args all-delete-items]}
-             (loop [remaining sorted-defs
-                    args-data args-cache  ; mutable view of args, updated after each fn-def
-                    new-args []
-                    update-args []
-                    delete-items []]
-               (if (empty? remaining)
-                 {:all-new-args new-args
-                  :all-update-args update-args
-                  :all-delete-items delete-items}
-                 (let [fn-def (first remaining)
-                       fn-name (:name fn-def)
-                       fn-id (get created-fns fn-name)
-                       parent-names (records/fn-def-parent-names fn-def)
-                       parent-fn-ids (mapv #(records/resolve-parent-fn-id-cached
-                                              fn-name-cache-final fn-id-cache-final created-fns %)
-                                           parent-names)
-
-                       ;; 3a: Explicit args from fn-def :args
-                       ;; Single pass: collect source-id CHAINS, new args, update args,
-                       ;; and sequence-chain deletions (items orphaned by re-sync).
-                       {:keys [explicit-source-ids explicit-new-args explicit-update-args
-                               explicit-arg-names explicit-delete-items]}
-                       (reduce (fn [acc [arg-name arg-value]]
-                                 (if-let [record (records/prepare-arg-record
-                                                   fn-id-cache-final args-data fn-name-cache-final
-                                                   created-fns fn-id parent-fn-ids arg-name arg-value)]
-                                   (let [source-id (or (:source-id (:new record))
-                                                       (:source-id (:update record))
-                                                       (:source-id record))
-                                         ;; Collect FULL source-id chain to shadow transitive args
-                                         source-chain (when source-id
-                                                        (sc/collect-source-id-chain (:by-id args-data) source-id))]
-                                     (cond-> acc
-                                       ;; Add explicit arg name (as string) to filter free args
-                                       true
-                                       (update :explicit-arg-names conj (name arg-name))
-                                       source-chain
-                                       (update :explicit-source-ids into source-chain)
-                                       (:new record)
-                                       (update :explicit-new-args conj (:new record))
-                                       (:update record)
-                                       (update :explicit-update-args conj (:update record))
-                                       (:new-chain record)
-                                       (update :explicit-new-args into (:new-chain record))
-                                       (seq (:delete-items record))
-                                       (update :explicit-delete-items into (:delete-items record))))
-                                   acc))
-                               {:explicit-source-ids #{}
-                                :explicit-new-args []
-                                :explicit-update-args []
-                                :explicit-arg-names #{}
-                                :explicit-delete-items []}
-                               (:args fn-def {}))
-
-                       ;; 3b: Propagated free args from parent fns
-                       ;; NOTE: We don't recursively collect from refs in explicit args (removed step 3c).
-                       ;; The executor handles transitive arg propagation at runtime via trace-source-to-fn.
-                       ;; This prevents internal free args (like html-response.status) from leaking
-                       ;; through bound refs (like editor-route.handler).
-                       ;; Propagation pass — DON'T walk through is-fn refs,
-                       ;; so lambda-param names of HOF targets stay sealed
-                       ;; inside the lambda. Cross-HOF captures still get
-                       ;; resolved at explicit-binding time via
-                       ;; find-available-arg (which defaults walk-hof?=true).
-                       parent-free-args (sc/collect-parent-free-args
-                                          fn-id-cache-final args-data parent-fn-ids 0 false)
-
-                       ;; Use parent-free-args directly (no combination with explicit-ref-free-args)
-                       all-free-args parent-free-args
-
-                       ;; Helper to get root name of a free arg
-                       args-by-id (:by-id args-data)
-                       get-root-name (fn [arg] (sc/resolve-arg-name-cached args-by-id arg 0))
-
-                       propagated-new-args
-                       (into []
-                             (comp
-                               ;; Filter 1: Remove args whose id is in explicit source chain
-                               (remove #(contains? explicit-source-ids (:id %)))
-                               ;; Filter 2: Remove args whose ROOT NAME matches an explicit arg name
-                               ;; This handles cases like editor-routes setting item1-10 should
-                               ;; prevent free args from route refs (which also resolve to "item")
-                               ;; from being propagated
-                               (remove (fn [arg]
-                                         (when-let [root-name (get-root-name arg)]
-                                           (contains? explicit-arg-names root-name))))
-                               ;; Filter 3: Skip args that live inside a parent's sequence-arg
-                               ;; chain. The anchor (with :next-arg-id set) is bound, not free —
-                               ;; copying it onto the child loses the chain link. Chain items
-                               ;; (with :prev-arg-id set) are reachable via classify-binding's
-                               ;; parent-chain walk and don't need a standalone child copy.
-                               (remove sc/in-sequence-chain?)
-                               (keep #(when-let [rec (records/prepare-propagated-arg-record args-data fn-id %)]
-                                        (:new rec))))
-                             all-free-args)
-
-                       ;; Combine explicit and propagated new args
-                       fn-new-args (into explicit-new-args propagated-new-args)
-                       fn-update-args explicit-update-args
-
-                       ;; Update args-data with new args so next fn-def can see them
-                       ;; Update all three indexes: :by-fn, :by-id, :by-fn-source
-                       args-data' (reduce (fn [data arg]
-                                            (cond-> data
-                                              true
-                                              (update-in [:by-fn (:fn-id arg)]
-                                                         (fnil conj []) arg)
-                                              true
-                                              (assoc-in [:by-id (:id arg)] arg)
-                                              ;; Add to by-fn-source index if has source-id
-                                              (:source-id arg)
-                                              (assoc-in [:by-fn-source [(:fn-id arg) (:source-id arg)]] arg)))
-                                          args-data
-                                          fn-new-args)]
-                   (recur (rest remaining)
-                          args-data'
-                          (into new-args fn-new-args)
-                          (into update-args fn-update-args)
-                          (into delete-items explicit-delete-items)))))]
-
-         ;; Reap orphaned sequence items from prior syncs before writing new chain.
-         (when (seq all-delete-items)
-           (sp/delete-entities storage :arg all-delete-items))
-
-         ;; Batch upsert new args
-         (when (seq all-new-args)
-           (sp/upsert-entities storage :arg all-new-args))
-
-         ;; Batch update existing args (if any changed)
-         (when (seq all-update-args)
-           (sp/upsert-entities storage :arg all-update-args))
-
-         ;; Reap ORPHAN fn-def entities: composed fns (no :impl-hash —
-         ;; base-fns keep theirs and are out of scope here) previously
-         ;; synced under one of the namespaces we're syncing NOW, whose
-         ;; name no longer appears in the incoming fn-defs. Without this,
-         ;; removing a fn-def from `fns.edn` leaves a dead entity
-         ;; lingering in storage — visible in the editor as a zombie node.
-         ;;
-         ;; Scope is limited to the current sync's namespaces so user-
-         ;; created fns living in other (or no) namespaces are untouched.
-         ;; Anonymous fn entities (name=nil) created by composition as
-         ;; `_app-*`/intermediate wrappers are skipped here — they're
-         ;; re-created with fresh ids on every sync and would need a
-         ;; separate invariant to prune (tracked by the write-hook layer
-         ;; when it exists).
-         (let [ns-ids-synced (set (vals ns-id-map))
-               synced-fn-names (set (map #(name (:name %)) sorted-defs))
-               orphan-fns (filter (fn [e]
-                                    (and (:namespace-id e)
-                                         (contains? ns-ids-synced (:namespace-id e))
-                                         (:name e)
-                                         (nil? (:impl-hash e))
-                                         (not (contains? synced-fn-names (name (:name e))))))
-                                  all-fns)]
-           (when (seq orphan-fns)
-             (doseq [orphan orphan-fns]
-               (sp/delete-entity storage :fn (:id orphan)))))
-
-         created-fns)))))
+   (sync-fns-to-storage! storage fn-defs ns-id-map (existing-name->id storage)
+                         (existing-defs-by-name storage)))
+  ([storage fn-defs ns-id-map extra-name->id]
+   (sync-fns-to-storage! storage fn-defs ns-id-map extra-name->id
+                         (existing-defs-by-name storage)))
+  ([storage fn-defs ns-id-map extra-name->id extra-defs-by-name]
+   (validation/validate-all-defs! fn-defs)
+   (let [sorted (deps/topological-sort fn-defs)
+         records (records/parse-module sorted extra-name->id extra-defs-by-name)]
+     (write-records! storage records ns-id-map))))

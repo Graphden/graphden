@@ -26,10 +26,7 @@
 
 
 (defbase some-fn [pred coll]
-  (some (fn [item]
-          (when-let [result (pred item)]
-            result))
-        coll))
+  (some pred coll))
 
 
 (defbase every?-fn [pred coll]
@@ -46,10 +43,6 @@
 
 (defbase sort-by-fn [key-fn coll]
   (vec (sort-by key-fn coll)))
-
-
-(defbase apply-fn [func args]
-  (func args))
 
 
 (defbase constantly-fn [value _item]
@@ -79,7 +72,6 @@
    :find-first find-first
    :group-by group-by-fn
    :sort-by sort-by-fn
-   :apply apply-fn
    :constantly constantly-fn
    :comp comp-fn
    :transduce transduce-fn})

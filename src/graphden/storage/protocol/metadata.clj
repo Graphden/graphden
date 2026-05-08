@@ -247,17 +247,34 @@
    :enum-values {:created (collect-created-enum-values schema)}})
 
 
+(defn collect-retired-field-uuids
+  "Set of UUIDs the schema marked as intentionally removed via
+   `retire-field`. The migration framework excludes these from the
+   destructive-change rejection set and runs `:on-delete-field!`
+   for each instead. Empty set when the schema has nothing retired."
+  [schema]
+  (into #{}
+        (mapcat (fn [[_ field-map]] (vals field-map)))
+        (ds/retired-fields schema)))
+
+
 (defn check-all-removals!
   "Checks for any destructive removals (entities, fields, enums, enum-values).
-   Throws on first removal found."
+   Throws on first removal found.
+
+   Field-level retirements declared via `retire-field` on the schema
+   builder are EXEMPT from the rejection — their UUIDs are filtered
+   out before the diff is computed, since the schema author already
+   acknowledged the loss and the migration will issue a DROP COLUMN."
   [old-metadata schema]
   ;; Check entities
   (let [old-entity-uuids (set (keys (:entities old-metadata)))
         new-entity-uuids (into #{} (map #(ds/entity-uuid schema %)) (ds/entities schema))]
     (check-removed! "entities" old-entity-uuids new-entity-uuids
                     #(get (:entities old-metadata) %)))
-  ;; Check fields
-  (let [old-field-uuids (set (keys (:fields old-metadata)))
+  ;; Check fields — minus declared retirements.
+  (let [retired (collect-retired-field-uuids schema)
+        old-field-uuids (set/difference (set (keys (:fields old-metadata))) retired)
         new-field-uuids (collect-field-uuids schema)]
     (check-removed! "fields" old-field-uuids new-field-uuids
                     #(get (:fields old-metadata) %)))

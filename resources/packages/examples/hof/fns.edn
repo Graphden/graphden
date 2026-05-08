@@ -22,7 +22,7 @@
    :description "`(map str-upper [\"a\" \"b\" \"c\"])` — eager. The `:func` is a fn-ref; the executor hof-wraps it as a one-arg callable around `:str-upper/:string`."
    :parent :map
    :args {:func :str-upper
-          :coll {:value ["alpha" "beta" "gamma"]}}}
+          :coll ["alpha" "beta" "gamma"]}}
 
   ;; Transducer form — :coll omitted.
   {:name :ex-upper-xf
@@ -35,14 +35,14 @@
    :description "Drop nils from a vector. `:some?` is the predicate; hof-wrapped over its single `:value` arg."
    :parent :filter
    :args {:pred :some?
-          :coll {:value [1 nil 2 nil 3]}}}
+          :coll [1 nil 2 nil 3]}}
 
   ;; :filter with a custom predicate built by partial-binding :str-starts-with?.
   {:name :ex-starts-with-a
    :description "Keep strings starting with \"a\". The predicate `:_ex-starts-with-a` is a fn-graph with `:prefix` already bound, leaving `:string` free — exactly the shape needed for `:filter`'s 1-arg predicate."
    :parent :filter
    :args {:pred :_ex-starts-with-a
-          :coll {:value ["alpha" "beta" "apple" "cherry"]}}}
+          :coll ["alpha" "beta" "apple" "cherry"]}}
 
   {:name :_ex-starts-with-a
    :description "Predicate template — `:str-starts-with?` with `:prefix` fixed to \"a\". Free arg `:string` becomes the call-site input when hof-wrapped."

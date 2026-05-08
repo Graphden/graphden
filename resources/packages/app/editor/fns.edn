@@ -22,18 +22,28 @@
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
+                  "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"
                   "packages/app/editor/editor-auth.js"
                   "packages/app/editor/editor-create.js"
                   "packages/app/editor/editor-data.js"
                   "packages/app/editor/editor-layout.js"
+                  "packages/app/editor/editor-literal-types.js"
                   "packages/app/editor/editor-tooltips.js"
                   "packages/app/editor/editor-icons.js"
                   "packages/app/editor/editor-drag.js"
                   "packages/app/editor/editor-fn-picker.js"
                   "packages/app/editor/editor-namespace-picker.js"
                   "packages/app/editor/editor-edit-validation.js"
+                  "packages/app/editor/editor-edit-modes.js"
+                  "packages/app/editor/editor-edit-reparent.js"
+                  "packages/app/editor/editor-mismatch-explainer.js"
+                  "packages/app/editor/editor-type-explainer.js"
+                  "packages/app/editor/editor-overlay-arg.js"
+                  "packages/app/editor/editor-overlay-edge-label.js"
                   "packages/app/editor/editor-overlays.js"
+                  "packages/app/editor/editor-sidebar.js"
+                  "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
                   "packages/app/editor/editor-cytoscape.js"
                   "packages/app/editor/editor-main.js"]}}
@@ -65,10 +75,16 @@
    :description "Hiccup constant for the editor's `<body>` content — sidebar (filter input + entity list), graph container, and zoom/home/reset nav controls."
    :parent :const
    :args {:value
+          ;; Semantic landmarks \u2014 <aside> for the namespace tree,
+          ;; <main> for the graph canvas. axe-core's `region` rule
+          ;; requires every page element be inside a landmark; without
+          ;; this, screen-readers see flat content with no structure.
           [:div {:id "app"}
            [:div {:id "main-container"}
-            ;; Side menu
-            [:div {:id "side-menu"}
+            ;; Side menu \u2014 semantic <aside> + ARIA label since the
+            ;; visible <h2>"Graphden" doubles as the app title rather
+            ;; than the sidebar's heading.
+            [:aside {:id "side-menu" :aria-label "Function browser"}
              [:div {:class "menu-header"}
               [:h2 "Graphden"]
               ;; Right-side header buttons. `editor-prefs.js` mounts
@@ -79,26 +95,35 @@
               [:div {:class "menu-header-actions"}
                [:div {:id "prefs-mount"}]
                [:div {:id "auth-mount"}]]]
-             [:div {:id "search-bar"}
+             [:div {:id "search-bar" :role "search"}
+              [:label {:for "search-input" :class "visually-hidden"} "Filter functions"]
               [:input {:id "search-input" :type "text" :placeholder "Filter..."
+                       :aria-label "Filter functions"
                        :oninput "onSearchInput(this.value)"}]
-              [:button {:id "search-clear" :onclick "clearSearch()"} "\u00D7"]]
-             [:div {:id "entity-list"}]]
-            ;; Graph container
-            [:div {:id "graph-container"}
-             [:div {:id "cy"}]
-             ;; Navigation controls
-             [:div {:id "nav-controls"}
+              [:button {:id "search-clear" :onclick "clearSearch()" :aria-label "Clear filter"} "\u00D7"]]
+             [:nav {:id "entity-list" :aria-label "Namespace tree"}]]
+            ;; Graph container \u2014 <main> landmark
+            [:main {:id "graph-container" :aria-label "Function graph"}
+             [:div {:id "cy" :role "img" :aria-label "Composition graph"}]
+             ;; Navigation controls \u2014 group with role="toolbar" so
+             ;; screen readers announce the buttons as a related set.
+             [:div {:id "nav-controls" :role "toolbar" :aria-label "Graph navigation"}
               [:div {:class "nav-zoom-col"}
-               [:button {:class "nav-btn" :onclick "navZoom(1)" :title "Zoom in"} "+"]
+               [:button {:class "nav-btn" :onclick "navZoom(1)"
+                         :aria-label "Zoom in" :title "Zoom in"} "+"]
                [:input {:id "zoom-slider" :type "range" :min "10" :max "300" :value "100"
                         :orient "vertical"
+                        :aria-label "Zoom level"
                         :oninput "navZoomTo(this.value/100)" :title "Zoom"}]
-               [:button {:class "nav-btn" :onclick "navZoom(-1)" :title "Zoom out"} "\u2212"]]
+               [:button {:class "nav-btn" :onclick "navZoom(-1)"
+                         :aria-label "Zoom out" :title "Zoom out"} "\u2212"]]
               [:div {:class "nav-bottom-row"}
-               [:button {:class "nav-btn" :onclick "navGoToRoot()" :title "Go to root node"} "\u2302"]
-               [:button {:class "nav-btn" :onclick "navResetPositions()" :title "Reset all node positions"} "\u27F2"]
-               [:button {:class "nav-btn" :onclick "navResetZoom()" :title "Reset zoom"} "\u2299"]]]]]]}}
+               [:button {:class "nav-btn" :onclick "navGoToRoot()"
+                         :aria-label "Go to root node" :title "Go to root node"} "\u2302"]
+               [:button {:class "nav-btn" :onclick "navResetPositions()"
+                         :aria-label "Reset node positions" :title "Reset all node positions"} "\u27F2"]
+               [:button {:class "nav-btn" :onclick "navResetZoom()"
+                         :aria-label "Reset zoom" :title "Reset zoom"} "\u2299"]]]]]]}}
 
   ;; Wrapped elements — fn-defs using wrap-style/wrap-script
   {:name :style-element
@@ -138,8 +163,8 @@
   ;; Complete HTML page
   ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)
   {:name :_editor-scripts
-   :parent :conj-empty
-   :args {:item :script-element}}
+   :parent :list
+   :args {:items [:script-element]}}
 
   {:name :page
    :description "Full editor HTML page — title, head (styles + CDN scripts), body (sidebar + graph), and the editor JS bundle as a `<script>` at end of body. Rendered by `:_editor-handler` on `GET /`."

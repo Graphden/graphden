@@ -35,6 +35,63 @@ function computeFnOverlayHeight(label, _width) {
 // handle: 1px top border + italic text at 10px with 2px vertical padding.
 const OPTIONAL_STRIP_HEIGHT = 17;
 
+// Metadata strips appended below ancestor rows by
+// `appendFnMetadataStrips` (editor-overlays.js):
+//   - return-type   ("→ <type>")     — render condition mirrored below
+//   - effects       chips of categories
+//   - "set parent…" (rtEditable AND fn has no parents)
+// Each strip is ~17px tall. The use-site header for non-root non-local
+// cards is one full ancestor-line worth (~21px). Without these
+// additions row-height computation underestimates fn-card height and
+// taller cards bleed into the row below.
+//
+// Namespace surface moved into a left-pinned `ns` badge on every
+// fn-name row, so it no longer occupies a dedicated strip.
+const METADATA_STRIP_HEIGHT = 17;
+const USE_SITE_HEADER_HEIGHT = 21;
+
+// Mirror appendFnMetadataStrips' decisions for the height-only side:
+// return whether each strip will render. Conservative — when a check
+// would need data not on `nodeData`, we assume the strip CAN render
+// (over-reserves a few px rather than under-reserving and overlapping).
+function metadataStripsHeight(nodeData) {
+  const fnId = nodeData.originalFnId;
+  if (!fnId) return 0;
+  const fn = (typeof lookups !== 'undefined' && lookups && lookups.fnMap)
+    ? lookups.fnMap.get(fnId) : null;
+  if (!fn) return 0;
+  let total = 0;
+  // The return-type strip renders when EITHER the row is editable
+  // (always shown to expose an "add return-type" affordance), OR when
+  // there's an explicit `:return-type` on the entity, OR when
+  // `richTypes` carries a computed entry for this name.
+  const hasRtEntry = !!fn.name
+    && typeof richTypes === 'object' && richTypes
+    && richTypes[fn.name] && richTypes[fn.name].return != null;
+  const isNavRoot = !nodeData.isPlaceholder && nodeData.isRoot;
+  const rtEditable = isNavRoot
+    && (typeof isFnEditable === 'function' && isFnEditable(fnId))
+    && (typeof isAuthenticated === 'function' && isAuthenticated());
+  if (fn['return-type'] || rtEditable || hasRtEntry) {
+    total += METADATA_STRIP_HEIGHT;
+  }
+  // Effects strip — present iff the rich-type registry knows of either
+  // computed or declared effects for this fn.
+  if (fn.name && typeof richTypes === 'object' && richTypes) {
+    const re = richTypes[fn.name];
+    const eff = (re && Array.isArray(re.effects)) ? re.effects : [];
+    const decl = (re && Array.isArray(re['expects-effects'])) ? re['expects-effects'] : [];
+    if (eff.length || decl.length) total += METADATA_STRIP_HEIGHT;
+  }
+  // "set parent…" strip — only when the editable nav root has zero
+  // parents (otherwise the depth-1 ancestor row already exposes a ✎).
+  if (rtEditable) {
+    const pids = fn['parent-ids'] || [];
+    if (pids.length === 0) total += METADATA_STRIP_HEIGHT;
+  }
+  return total;
+}
+
 function calculateNodeSize(nodeData) {
   const label = nodeData.label || '';
   const type = nodeData.type;
@@ -72,12 +129,31 @@ function calculateNodeSize(nodeData) {
       return l.split(', ').length * MIN_MI_CELL;
     }));
     // Slack budget = inner padding + room for the right-pinned action
-    // icons (i + ↗ ≈ 42px) so the longest full name actually fits and
-    // doesn't get prematurely ellipsised.
-    const width = Math.max(80, maxLen * 7 + 60, widthFromOptional, widthFromMI);
-    const extra = optionalText ? OPTIONAL_STRIP_HEIGHT : 0;
+    // icons (i + ↗ ≈ 42px) + left-pinned `ns` badge (≈ 20px). Every
+    // named fn row carries an `ns` badge on the left, so non-root
+    // cards now need ~80px of chrome around the longest name, not 60.
+    //
+    // The nav-root card additionally pins TWO right-edge action icons
+    // (Extend +, Delete ✕) on its depth-0 row when the user is signed
+    // in and the fn is editable, claiming four right slots instead of
+    // two. Bump to ~120px in that case so the full name still fits.
+    const iconBudget = nodeData.isRoot ? 120 : 80;
+    const width = Math.max(80, maxLen * 7 + iconBudget, widthFromOptional, widthFromMI);
+    // `appendUseSiteHeader` prepends one extra row to non-nav-root
+    // overlays whose fn has a global name (it skips local / anonymous
+    // fns). Mirror the condition so row-height accounts for it.
+    const ownFn = (typeof lookups !== 'undefined' && lookups
+                   && lookups.fnMap && nodeData.originalFnId)
+                  ? lookups.fnMap.get(nodeData.originalFnId) : null;
+    const isLocalFn = !(ownFn?.name);
+    const useSiteRow = (!nodeData.isRoot && !isLocalFn) ? USE_SITE_HEADER_HEIGHT : 0;
+    const optionalExtra = optionalText ? OPTIONAL_STRIP_HEIGHT : 0;
+    const stripsExtra = isPlaceholder ? 0 : metadataStripsHeight(nodeData);
     const height = Math.max(30 + DRAG_HANDLE_HEIGHT,
-                            computeFnOverlayHeight(label, width) + extra);
+                            computeFnOverlayHeight(label, width)
+                            + useSiteRow
+                            + optionalExtra
+                            + stripsExtra);
     return { width, height };
   }
 }
@@ -179,28 +255,24 @@ async function fetchBackendLayout() {
 
     // Calculate per-column gap based on:
     // 1. Longest edge label crossing each column boundary, INCLUDING the
-    //    type-chip / is-fn-chip / sequence buttons / description badge
-    //    that the frontend overlays render alongside the label text.
-    //    Without this the column gap is sized for the bare argName and
-    //    the chips spill into the next column (`handler` + `fn` chip +
-    //    `λ` chip + `i` badge does not fit in 7 chars × 9px + 30px).
+    //    type-chip / sequence buttons / description badge that the
+    //    overlays render alongside the label text. Without this the
+    //    column gap is sized for the bare argName and the chips spill
+    //    into the next column.
     // 2. Width spread in the column (max - min): wide nodes extend past
     //    narrow ones, so edges from narrow nodes start further left,
     //    needing more gap for labels.
     const colGaps = new Map();
     const CHAR_WIDTH = 9;
     const LABEL_PADDING = 30;
-    // Chip widths must stay in lock-step with editor-styles.css values:
-    //   .arg-type-chip / .arg-isfn-chip — 4px padding each side, 1px
-    //   border each side, ~9px font; longest chip text is "timestamptz"
-    //   (~11 chars × 6px ≈ 66px) but in practice the type rendered on
-    //   edges is the EFFECTIVE type which tends to be short. The
-    //   description-badge is a fixed 15px square. Each chip carries
-    //   4px margin-left.
-    const TYPE_CHIP_WIDTH      = 38;  // covers "sequence" comfortably
-    const ISFN_CHIP_WIDTH      = 22;  // λ / ()
-    const SEQ_BTN_WIDTH        = 18;  // × or +
-    const DESC_BADGE_WIDTH     = 19;  // 15 + 4 margin
+    // Chip widths stay in lock-step with editor-styles.css. The
+    // description badge is always rendered; the type chip + sequence
+    // buttons depend on whether the arg is editable. The is-fn `λ/()`
+    // chip was retired in #15b — `type=:fn` IS the HOF marker now and
+    // the type-chip already shows it.
+    const TYPE_CHIP_WIDTH  = 38;  // covers "sequence" comfortably
+    const SEQ_BTN_WIDTH    = 18;  // × or +
+    const DESC_BADGE_WIDTH = 19;  // 15 + 4 margin
     edges.forEach(e => {
       const srcPos = gridPos[e.data.source];
       const tgtPos = gridPos[e.data.target];
@@ -208,13 +280,9 @@ async function fetchBackendLayout() {
         const labelCol = Math.min(srcPos.col, tgtPos.col);
         const widestLine = e.data.argName.split('\n').reduce(
           (max, line) => Math.max(max, line.length), 0);
-        let chipOverhead = DESC_BADGE_WIDTH;  // always rendered
-        // Mirror the chip-emit predicates from createEdgeLabelOverlay
-        // so the layout reserves space for the same elements that get
-        // rendered. Look up the source arg directly from `lookups`.
-        const sourceArgId = e.data.sourceArgId;
-        const editArg = sourceArgId && lookups && lookups.argMap
-                        ? lookups.argMap.get(sourceArgId) : null;
+        let chipOverhead = DESC_BADGE_WIDTH;
+        const editArg = (typeof argRowFromNode === 'function')
+                        ? argRowFromNode(e.data) : null;
         const editable = editArg
                       && typeof implementationFnIds !== 'undefined'
                       && implementationFnIds.has(editArg['fn-id'])
@@ -222,19 +290,9 @@ async function fetchBackendLayout() {
                           ? isAuthenticated() : true);
         if (editable) {
           chipOverhead += TYPE_CHIP_WIDTH;
-          // Walk source-id chain to determine effective type (mirrors
-          // resolveArgType in editor-overlays.js).
-          let cur = editArg;
-          let effType = null;
-          for (let i = 0; i < 100 && cur; i++) {
-            if (cur.type) { effType = String(cur.type).replace(/^:/, ''); break; }
-            if (!cur['source-id']) break;
-            cur = lookups.argMap.get(cur['source-id']);
-          }
-          if (effType === 'fn') chipOverhead += ISFN_CHIP_WIDTH;
-          if (editArg['prev-arg-id']) {
+          if (e.data.sourcePrevArgId) {
             chipOverhead += SEQ_BTN_WIDTH;                              // ×
-            if (!editArg['next-arg-id']) chipOverhead += SEQ_BTN_WIDTH; // tail +
+            if (!e.data.sourceNextArgId) chipOverhead += SEQ_BTN_WIDTH; // tail +
           }
         }
         const labelWidth = widestLine * CHAR_WIDTH + LABEL_PADDING + chipOverhead;

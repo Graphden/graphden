@@ -1,0 +1,66 @@
+;; Multi-parent inheritance — `:parents [a b]` instead of `:parent`.
+;;
+;; A fn-def can list MORE THAN ONE parent. The child inherits the
+;; UNION of parents' bindings. The constraint, enforced at sync time:
+;; the parents' bound args must NOT collide. Two parents binding the
+;; SAME arg of a common ancestor is rejected with a `:mi-collision`
+;; error.
+;;
+;; Diamond inheritance from a common ancestor is fine — what matters
+;; is that each parent fixes a DIFFERENT slot of the shared chain.
+;; Order of `:parents` is set-like over disjoint bindings: reversing
+;; produces the same fn.
+;;
+;; Real-world example in production: see `app.common/json-ok-response`,
+;; which uses `:parents [:json-content-type :ok-response]` to combine
+;; status × content-type axes.
+
+
+{:namespace "examples.multi-inheritance"
+ :description "Multi-parent inheritance — :parents [a b]. Two parents binding different args of a common ancestor; child inherits both bindings."
+ :fns
+ [;; Two single-purpose parents, each binding ONE arg of `:assoc`.
+  ;; Both inherit from the same base-fn — they're the diamond's two
+  ;; sides.
+
+  {:name :ex-with-key-status
+   :description "Inherits :assoc, binds :key to \"status\". Free args: :map, :value. One axis of the eventual matrix."
+   :parent :assoc
+   :args {:key "status"}}
+
+  {:name :ex-with-value-ok
+   :description "Inherits :assoc, binds :value to \"ok\". Free args: :map, :key. The other axis."
+   :parent :assoc
+   :args {:value "ok"}}
+
+  ;; MULTI-INHERITANCE: combine both. Child inherits BOTH bindings,
+  ;; leaving only :map as the free arg. Diamond merge is OK because
+  ;; each parent bound a DIFFERENT slot.
+  {:name :ex-mi-status-ok
+   :description "Combines `:ex-with-key-status` and `:ex-with-value-ok` via :parents. Diamond inheritance from :assoc; the two parents bound disjoint slots so MI accepts. Free arg remaining: :map."
+   :parents [:ex-with-key-status :ex-with-value-ok]}
+
+  ;; Apply to a concrete map. No free args left.
+  {:name :ex-mi-status-ok-on-empty
+   :description "(`:ex-mi-status-ok` {}) — three-arg :assoc fully bound through MI + one final binding. Effectively `(assoc {} \"status\" \"ok\")` ⇒ `{\"status\" \"ok\"}`."
+   :parent :ex-mi-status-ok
+   :args {:map {}}}
+
+  ;; ORDER independence: reverse the parent list — same effective fn.
+  ;; (Order would matter only if the same arg name appeared in both
+  ;; parents' chains, which is exactly what the MI-collision check
+  ;; rejects at sync. Disjoint = order doesn't matter.)
+  {:name :ex-mi-status-ok-reversed
+   :description "Same composition as `:ex-mi-status-ok` but :parents listed in the opposite order. Identical bindings, identical free-args interface — MI is set-like over disjoint bindings."
+   :parents [:ex-with-value-ok :ex-with-key-status]}
+
+  ;; A bigger example: 3-way MI binding three different :assoc args.
+  ;; (Yes, you can list more than two parents. Same disjoint rule.)
+  {:name :ex-with-map-empty
+   :description "Inherits :assoc, binds :map to `{}`."
+   :parent :assoc
+   :args {:map {}}}
+
+  {:name :ex-mi-status-ok-on-empty-via-3mi
+   :description "Three-way MI — combines key-binding, value-binding, AND map-binding parents into one fully-saturated `:assoc`. Equivalent to `:ex-mi-status-ok-on-empty` above; demonstrates MI scales beyond two parents."
+   :parents [:ex-with-key-status :ex-with-value-ok :ex-with-map-empty]}]}

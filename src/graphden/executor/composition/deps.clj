@@ -10,35 +10,84 @@
     [graphden.executor.composition.parsing :as parsing]))
 
 
-(defn- arg-value-fn-ref
-  "Extracts a fn-name keyword from an arg value spec, if it's a fn ref.
-   Handles both simple keyword refs and map syntax with :ref or :value.
-   Returns the fn-name keyword or nil."
+(defn- arg-value-fn-refs
+  "Extracts the SET of fn-name keywords this arg value depends on.
+   Sequence-typed slots can carry a vector of refs (`[:a :b {:ref :c}]`),
+   so this returns a SET — single bindings yield a singleton.
+   Handles:
+
+     - keyword          → that ref
+     - {:ref X}/{:value X}  → X if it's a fn-ref
+     - vector of items  → union of item refs (each via the rules above)"
   [arg-value]
   (cond
     (keyword? arg-value)
-    (parsing/parse-fn-ref arg-value)
+    (some-> (parsing/parse-fn-ref arg-value) hash-set)
+
+    (vector? arg-value)
+    (into #{} (mapcat arg-value-fn-refs) arg-value)
 
     (map? arg-value)
     ;; {:as :name :ref :fn-name} or {:as :name :value :fn-name}
-    (or (parsing/parse-fn-ref (:ref arg-value))
-        (parsing/parse-fn-ref (:value arg-value)))))
+    (let [r (parsing/parse-fn-ref (:ref arg-value))
+          v (parsing/parse-fn-ref (:value arg-value))]
+      (cond-> #{}
+        r (conj r)
+        v (conj v)))
+
+    :else #{}))
+
+
+(defn- type-ref-deps
+  "Pulls fn-name keywords referenced by a `:type` / `:refine` / `:list`
+   declaration or a `:return-type` annotation. Inline composite maps
+   (`{:k T}`) recurse so each field's type is collected.
+
+   Primitives and unknown keywords pass through; the caller filters
+   them against the in-module fn-name set."
+  [t]
+  (cond
+    (keyword? t)  #{t}
+    (map? t)      (into #{} (mapcat type-ref-deps) (vals t))
+    (vector? t)   (case (first t)
+                    :refine (into #{} (mapcat type-ref-deps) (rest t))
+                    :list   (recur (second t))
+                    :fn     (set (concat (mapcat type-ref-deps (vals (or (second t) {})))
+                                         (type-ref-deps (last t))))
+                    :union  (into #{} (mapcat type-ref-deps) (rest t))
+                    #{})
+    :else         #{}))
 
 
 (defn- extract-dependencies
-  "Extracts fn names that this fn-def depends on (from args and parents).
-   Returns set of keywords."
+  "Extracts fn names that this fn-def depends on (parents, arg refs,
+   type-row references, return-type). Returns set of keywords filtered
+   to only those that name an in-module fn."
   [fn-def fn-names-in-set]
   (let [args (:args fn-def {})
         parent-names (concat (when-let [p (:parent fn-def)] [p])
                              (:parents fn-def))
         arg-deps (->> (vals args)
-                      (keep arg-value-fn-ref)
+                      (mapcat arg-value-fn-refs)
                       (filter fn-names-in-set)
                       set)
-        ;; Parents that are composed fns in our set are dependencies
-        parent-deps (into #{} (filter fn-names-in-set) parent-names)]
-    (into arg-deps parent-deps)))
+        parent-deps (into #{} (filter fn-names-in-set) parent-names)
+        ;; Type-row references — :type / :refine / :list / :return-type.
+        ;; Each may name another fn-def in the same module.
+        type-deps (cond-> #{}
+                    (:type fn-def)        (into (type-ref-deps (:type fn-def)))
+                    (:refine fn-def)      (into (type-ref-deps (:base (:refine fn-def))))
+                    (:list fn-def)        (into (type-ref-deps (:list fn-def)))
+                    (:return-type fn-def) (into (type-ref-deps (:return-type fn-def)))
+                    ;; Base-fn `:args` shape — values may be `{:type T}` maps
+                    ;; or bare type keywords; collect those too.
+                    true                  (into (mapcat (fn [v]
+                                                          (cond
+                                                            (keyword? v) [v]
+                                                            (and (map? v) (:type v)) (type-ref-deps (:type v))
+                                                            :else nil))
+                                                        (vals args))))]
+    (into arg-deps (concat parent-deps (filter fn-names-in-set type-deps)))))
 
 
 (defn- build-dependency-graph

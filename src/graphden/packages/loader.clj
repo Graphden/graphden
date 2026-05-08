@@ -47,6 +47,8 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [clojure.tools.reader :as treader]
+    [clojure.tools.reader.reader-types :as treader-types]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -62,6 +64,20 @@
       (edn/read rdr))))
 
 
+(defn- read-resource-edn-with-meta
+  "Reads EDN from a classpath resource with line/column metadata
+   attached to every collection. Used for `fns.edn` so each fn-def
+   knows where it was declared — that surfaces in type-error
+   messages so users see `file:line` instead of just `:my-fn`.
+
+   Slightly slower than `clojure.edn/read` because tools.reader
+   tracks source positions; called only at startup so it's fine."
+  [path]
+  (when-let [resource (io/resource path)]
+    (let [rdr (treader-types/source-logging-push-back-reader (slurp resource))]
+      (treader/read {:eof nil} rdr))))
+
+
 (defn- load-package-meta
   "Loads package.edn metadata for a package."
   [package-name]
@@ -74,6 +90,22 @@
                        :path path})))))
 
 
+(defn- attach-source-meta
+  "Lift line metadata from each fn-def map onto the map itself as
+   plain `:source-file` / `:source-line` keys. tools.reader puts the
+   info on the metadata map; we copy it into the value so downstream
+   consumers (sync, type-check) can read it without juggling
+   metadata. fn-defs without metadata pass through unchanged."
+  [fn-defs path]
+  (mapv (fn [fd]
+          (let [m (meta fd)]
+            (cond-> fd
+              (and (map? fd) (:line m))
+              (assoc :source-file path
+                     :source-line (:line m)))))
+        fn-defs))
+
+
 (defn- load-module-fns
   "Loads fns.edn for a module. Expected shape:
 
@@ -81,13 +113,18 @@
       :description \"Arithmetic primitives — add/sub/mul/div/mod\"
       :fns [{:name :add :args {...}} ...]}
 
-   Returns {:ns-path string :ns-description string-or-nil :fns [fn-defs]}."
+   Returns {:ns-path string :ns-description string-or-nil :fns [fn-defs]}.
+
+   Every fn-def carries `:source-file` (the resource path) and
+   `:source-line` (where the fn-def's opening `{` sat in the EDN).
+   Type-check errors and other diagnostics include those so users see
+   `file:line` instead of just `:my-fn`."
   [package-name module-name]
   (let [path (str "packages/" package-name "/" module-name "/fns.edn")]
-    (if-let [raw (read-resource-edn path)]
+    (if-let [raw (read-resource-edn-with-meta path)]
       {:ns-path (:namespace raw)
        :ns-description (:description raw)
-       :fns (vec (:fns raw))}
+       :fns (attach-source-meta (vec (:fns raw)) path)}
       (throw (ex-info (str "Module fns not found: " package-name "/" module-name)
                       {:type :package-error/module-not-found
                        :package package-name
@@ -161,11 +198,28 @@
 ;; Function Definition Processing
 ;; =============================================================================
 
+(defn- type-row?
+  "True iff `fn-def` is a type-row declaration (record / refinement /
+   list / union / variant / fn-type). Type-rows have no impl and live
+   in `:fn-defs` alongside composed defs — the records-parser routes
+   them by their role marker. `:fn-type` declarations don't actually
+   produce a fn-row (they're pure type-aliases) but they still flow
+   through this path so they get registered as aliases by
+   system/core's `register-type-aliases!`."
+  [fn-def]
+  (boolean (or (:type fn-def) (:refine fn-def) (:list fn-def)
+               (:union fn-def) (:variant fn-def) (:fn-type fn-def))))
+
+
 (defn- base-fn?
-  "Returns true if this is a base function (no :parent / :parents key)."
+  "Returns true if this is a base function — no role markers and no
+   parent. Type-rows (`:type` / `:refine` / `:list` / `:union` /
+   `:variant`) and composed defs (`:parent` / `:parents`) flow through
+   `:fn-defs` instead."
   [fn-def]
   (and (not (contains? fn-def :parent))
-       (not (contains? fn-def :parents))))
+       (not (contains? fn-def :parents))
+       (not (type-row? fn-def))))
 
 
 (defn- fn-def->base-fn-def
@@ -184,13 +238,39 @@
   (cond-> {:args (normalize-args (:args fn-def))
            :return-type (:return-type fn-def)
            :impl impl-fn}
-    (:description fn-def) (assoc :description (:description fn-def))))
+    (:description fn-def) (assoc :description (:description fn-def))
+    ;; Forward `:effects` (set of category tags) and the legacy
+    ;; `:effectful?` boolean — both shapes get normalised inside
+    ;; `record-rich-types!` so the registry stores a single canonical
+    ;; `:effects` set.
+    (:effects fn-def)     (assoc :effects (set (:effects fn-def)))
+    (:effectful? fn-def)  (assoc :effectful? true)))
+
+
+;; Type-rows are first-class fn-rows declared in `fns.edn` alongside
+;; fn-defs:
+;;
+;;   {:name :ring-response-shape
+;;    :type {:status :http-status :headers :jsonb :body :text}}
+;;
+;;   {:name :positive-int
+;;    :refine {:base :int :constraint [:> 0]}}
+;;
+;;   {:name :int-list
+;;    :list :int}
+;;
+;; Parsing flows through `type-row?` here and the records-parser in
+;; `graphden.packages.records`.
 
 
 (defn- process-module
   "Processes a single module, returning base-fn-defs and fn-defs.
-   Each fn-def and base-fn-def receives a :namespace key from the module's
-   fns.edn declaration (nil if no namespace declared)."
+   Each fn-def and base-fn-def receives a :namespace key from the
+   module's fns.edn declaration (nil if no namespace declared).
+
+   Type-rows (`:type` / `:refine` / `:list` / `:union` / `:variant`)
+   ride along in the `fn-defs` slot — `composition/sync-fns-to-storage!`
+   routes them to slot / fn-slot / binding rows by role marker."
   [package-name module-name]
   (let [{ns-path :ns-path ns-description :ns-description fns :fns}
         (load-module-fns package-name module-name)

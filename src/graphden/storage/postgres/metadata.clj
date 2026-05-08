@@ -80,71 +80,81 @@
 
 ;; === Metadata parsing ===
 
+(defn- handle-orphan
+  "Either throw on strict mode or count + debug-log on lenient. Used
+   by both `:field` and `:enum-value` rows whose `parent_uuid`
+   doesn't resolve to a row in the same batch."
+  [strict? counter description data]
+  (if strict?
+    (throw (ex-info (str "Orphaned " description " entry in metadata")
+                    (assoc data :type :metadata-error/corrupted)))
+    (do (swap! counter inc)
+        (log/debug (str "Orphaned " description " entry in metadata, skipping") data)
+        nil)))
+
+
+(defn- field-entry
+  "`{:entity :field [optional :type :nullable? :enum-name]}` from a row."
+  [parent-row field-name extra]
+  (merge {:entity (keyword (:name parent-row))
+          :field  field-name}
+         (when extra
+           (cond-> {:type (:type extra) :nullable? (:nullable? extra)}
+             (:enum-name extra)
+             (assoc :enum-name (:enum-name extra))))))
+
+
+(defn- absorb-row
+  "Fold one metadata row into the accumulator. Returns the new acc;
+   orphan handling for `:field` / `:enum-value` either throws (strict)
+   or skips with a debug log."
+  [acc row uuid->row strict? orphan-counter]
+  (let [uuid (:uuid row)
+        kind (keyword (:kind row))
+        n (keyword (:name row))
+        parent-uuid (:parent_uuid row)
+        parent-row (get uuid->row parent-uuid)
+        extra (parse-extra (:extra row))]
+    (case kind
+      :entity     (assoc-in acc [:entities uuid] n)
+      :enum       (assoc-in acc [:enums uuid] n)
+
+      :field
+      (if parent-row
+        (assoc-in acc [:fields uuid] (field-entry parent-row n extra))
+        (or (handle-orphan strict? orphan-counter "field"
+                           {:field-uuid uuid :field-name n
+                            :missing-parent-uuid parent-uuid})
+            acc))
+
+      :enum-value
+      (if parent-row
+        (assoc-in acc [:enum-values uuid]
+                  {:enum (keyword (:name parent-row)) :value n})
+        (or (handle-orphan strict? orphan-counter "enum-value"
+                           {:enum-value-uuid uuid :value-name n
+                            :missing-parent-uuid parent-uuid})
+            acc))
+
+      acc)))
+
+
 (defn- parse-metadata-impl
   "Parses metadata rows into structured format.
    When strict? is true, throws if orphaned entries are detected.
-   When strict? is false, skips orphaned entries with warning and logs summary."
+   When strict? is false, skips orphaned entries with debug log and
+   a final summary warn."
   [rows strict?]
   (when (seq rows)
-    (let [uuid->row (into {} (map (fn [r] [(:uuid r) r]) rows))
-          orphaned-count (atom 0)
-          result (reduce
-                   (fn [acc row]
-                     (let [uuid (:uuid row)
-                           kind (keyword (:kind row))
-                           n (keyword (:name row))
-                           parent-uuid (:parent_uuid row)
-                           parent-row (get uuid->row parent-uuid)
-                           extra (parse-extra (:extra row))]
-                       (case kind
-                         :entity (assoc-in acc [:entities uuid] n)
-                         :field (if parent-row
-                                  (assoc-in acc [:fields uuid]
-                                            (merge {:entity (keyword (:name parent-row))
-                                                    :field n}
-                                                   (when extra
-                                                     (cond-> {:type (:type extra)
-                                                              :nullable? (:nullable? extra)}
-                                                       (:enum-name extra)
-                                                       (assoc :enum-name (:enum-name extra))))))
-                                  (if strict?
-                                    (throw (ex-info "Orphaned field entry in metadata"
-                                                    {:type :metadata-error/corrupted
-                                                     :field-uuid uuid
-                                                     :field-name n
-                                                     :missing-parent-uuid parent-uuid}))
-                                    (do
-                                      (swap! orphaned-count inc)
-                                      (log/debug "Orphaned field entry in metadata, skipping"
-                                                 {:field-uuid uuid
-                                                  :field-name n
-                                                  :missing-parent-uuid parent-uuid})
-                                      acc)))
-                         :enum (assoc-in acc [:enums uuid] n)
-                         :enum-value (if parent-row
-                                       (assoc-in acc [:enum-values uuid]
-                                                 {:enum (keyword (:name parent-row))
-                                                  :value n})
-                                       (if strict?
-                                         (throw (ex-info "Orphaned enum-value entry in metadata"
-                                                         {:type :metadata-error/corrupted
-                                                          :enum-value-uuid uuid
-                                                          :value-name n
-                                                          :missing-parent-uuid parent-uuid}))
-                                         (do
-                                           (swap! orphaned-count inc)
-                                           (log/debug "Orphaned enum-value entry in metadata, skipping"
-                                                      {:enum-value-uuid uuid
-                                                       :value-name n
-                                                       :missing-parent-uuid parent-uuid})
-                                           acc)))
-                         acc)))
-                   {:entities {} :fields {} :enums {} :enum-values {}}
-                   rows)]
-      ;; Log summary if any orphaned entries were found
-      (when (pos? @orphaned-count)
+    (let [uuid->row (into {} (map (juxt :uuid identity)) rows)
+          orphan-counter (atom 0)
+          result (reduce (fn [acc row]
+                           (absorb-row acc row uuid->row strict? orphan-counter))
+                         {:entities {} :fields {} :enums {} :enum-values {}}
+                         rows)]
+      (when (pos? @orphan-counter)
         (log/warn "Metadata parsing found orphaned entries"
-                  {:orphaned-count @orphaned-count
+                  {:orphaned-count @orphan-counter
                    :total-rows (count rows)}))
       result)))
 
@@ -180,48 +190,76 @@
                               {:quoted true}))))
 
 
-(defn- save-entity-field-metadata!
-  "Saves metadata for a single field."
-  [tx entity-uuid field-name field-spec]
-  (upsert-metadata! tx (:uuid field-spec) :field field-name entity-uuid
-                    (cond-> {:type (:type field-spec)
-                             :nullable? (get field-spec :nullable? false)}
-                      ;; Include enum-name for enum fields to enable proper casting
-                      (= (:type field-spec) :enum)
-                      (assoc :enum-name (:enum-name field-spec)))))
+(defn- field-metadata-row
+  "Build the row map for a single field's metadata entry."
+  [entity-uuid field-name field-spec]
+  (let [extra (cond-> {:type (:type field-spec)
+                       :nullable? (get field-spec :nullable? false)}
+                ;; Include enum-name for enum fields to enable proper casting
+                (= (:type field-spec) :enum)
+                (assoc :enum-name (:enum-name field-spec)))]
+    {:uuid (:uuid field-spec)
+     :kind "field"
+     :name (name field-name)
+     :parent_uuid entity-uuid
+     :extra [:cast (extra->json extra) :jsonb]}))
 
 
-(defn- save-entity-metadata!
-  "Saves metadata for a single entity and its fields."
-  [tx schema entity-name]
-  (let [entity-uuid (ds/entity-uuid schema entity-name)]
-    (upsert-metadata! tx entity-uuid :entity entity-name nil)
-    (run! (fn [[field-name field-spec]]
-            (save-entity-field-metadata! tx entity-uuid field-name field-spec))
-          (ds/entity-fields schema entity-name))))
-
-
-(defn- save-enum-value-metadata!
-  "Saves metadata for a single enum value."
-  [tx enum-uuid value-kw value-uuid]
-  (upsert-metadata! tx value-uuid :enum-value value-kw enum-uuid))
-
-
-(defn- save-enum-metadata!
-  "Saves metadata for a single enum and its values."
-  [tx enum-name {:keys [uuid values]}]
-  (upsert-metadata! tx uuid :enum enum-name nil)
-  (run! (fn [[value-kw value-uuid]]
-          (save-enum-value-metadata! tx uuid value-kw value-uuid))
-        values))
+(defn- collect-metadata-rows
+  "Build every metadata row a full schema would persist:
+   - one per entity
+   - one per field of each entity
+   - one per enum
+   - one per enum value
+   Returns a vector ready for a single batched INSERT."
+  [schema]
+  (let [entity-rows
+        (reduce
+          (fn [acc entity-name]
+            (let [entity-uuid (ds/entity-uuid schema entity-name)
+                  row {:uuid entity-uuid
+                       :kind "entity"
+                       :name (name entity-name)
+                       :parent_uuid nil
+                       :extra [:cast (extra->json nil) :jsonb]}
+                  field-rows (mapv (fn [[field-name field-spec]]
+                                     (field-metadata-row entity-uuid field-name field-spec))
+                                   (ds/entity-fields schema entity-name))]
+              (-> acc (conj row) (into field-rows))))
+          []
+          (ds/entities schema))
+        enum-rows
+        (reduce-kv
+          (fn [acc enum-name {:keys [uuid values]}]
+            (let [enum-row {:uuid uuid
+                            :kind "enum"
+                            :name (name enum-name)
+                            :parent_uuid nil
+                            :extra [:cast (extra->json nil) :jsonb]}
+                  value-rows (mapv (fn [[value-kw value-uuid]]
+                                     {:uuid value-uuid
+                                      :kind "enum-value"
+                                      :name (name value-kw)
+                                      :parent_uuid uuid
+                                      :extra [:cast (extra->json nil) :jsonb]})
+                                   values)]
+              (-> acc (conj enum-row) (into value-rows))))
+          []
+          (ds/enums schema))]
+    (into entity-rows enum-rows)))
 
 
 (defn save-metadata-in-tx!
-  "Saves complete metadata to table (truncate + insert all).
+  "Saves complete metadata to table (truncate + insert all in one batch).
    Assumes caller has already started a transaction."
   [tx schema]
   (jdbc/execute! tx (sql/format {:truncate (keyword metadata-table-name)}
                                 {:quoted true}))
-  (run! #(save-entity-metadata! tx schema %) (ds/entities schema))
-  (run! (fn [[enum-name enum-def]] (save-enum-metadata! tx enum-name enum-def))
-        (ds/enums schema)))
+  (let [rows (collect-metadata-rows schema)]
+    (when (seq rows)
+      (jdbc/execute! tx
+                     (sql/format {:insert-into (keyword metadata-table-name)
+                                  :values rows
+                                  :on-conflict [:uuid]
+                                  :do-update-set [:name :parent_uuid :extra]}
+                                 {:quoted true})))))

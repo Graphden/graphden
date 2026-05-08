@@ -1,7 +1,5 @@
 # Graphden Type System
 
-> **Last updated:** 2026-04-15
->
 > This document describes the type system design for graphden.
 > For core architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
 > For design principles, see [PHILOSOPHY.md](PHILOSOPHY.md).
@@ -17,13 +15,19 @@
 7. [Structural Types (Records)](#structural-types-records)
 8. [Type Rules for Data Structure Operations](#type-rules-for-data-structure-operations)
 9. [Refinement Types](#refinement-types)
-10. [Type Narrowing Through Inheritance](#type-narrowing-through-inheritance)
-11. [Typed and Untyped Boundary](#typed-and-untyped-boundary)
-12. [Runtime Validation from Types](#runtime-validation-from-types)
-13. [What the Type System Catches and What It Does Not](#what-the-type-system-catches-and-what-it-does-not)
-14. [Comparison with Other Systems](#comparison-with-other-systems)
-15. [Storage Schema](#storage-schema)
-16. [Implementation Phases](#implementation-phases)
+10. [Union Types](#union-types)
+11. [Tagged Variants](#tagged-variants)
+12. [Type Aliases](#type-aliases)
+13. [Effect Categories](#effect-categories)
+14. [Required Narrowing](#required-narrowing)
+15. [Type Narrowing Through Inheritance](#type-narrowing-through-inheritance)
+16. [Typed and Untyped Boundary](#typed-and-untyped-boundary)
+17. [Runtime Validation from Types](#runtime-validation-from-types)
+18. [What the Type System Catches and What It Does Not](#what-the-type-system-catches-and-what-it-does-not)
+19. [Comparison with Other Systems](#comparison-with-other-systems)
+20. [Storage Schema](#storage-schema)
+21. [Tooling](#tooling)
+22. [Implementation Phases](#implementation-phases)
 
 ---
 
@@ -395,6 +399,274 @@ The system does NOT prove that a value is positive. It forces the programmer to 
 ;; This would require an SMT solver — out of scope
 ```
 
+### Compound constraints
+
+Constraints support both atomic (`[op rhs]`) and compound (`[:and …]`,
+`[:or …]`) shapes. The literal evaluator walks them with the obvious
+short-circuit semantics; partially-decidable conjunctions defer to
+`:unknown` (the runtime check still applies):
+
+```edn
+;; A percent: 0..100 inclusive
+[:refine :numeric [:and [:>= 0] [:<= 100]]]
+
+;; A bit: literally 0 or 1
+[:refine :int [:or [:= 0] [:= 1]]]
+```
+
+Recognised atoms: `:>` `:>=` `:<` `:<=` `:=` `:not=` `:in` `:matches`.
+
+---
+
+## Union Types
+
+Untagged sum types: `[:union T1 T2 …]`. A value of union type is one
+of the branches — no constructor wrapper.
+
+```clojure
+(t/subtype? :int (t/make-union [:int :text]))     ; true
+(t/subtype? (t/make-union [:int :null]) :any)     ; true
+(t/subtype? (t/make-union [:int :null]) :int)     ; false
+```
+
+Subtyping rules:
+
+- `T ⊆ [:union T1 T2 …]`  iff  `T ⊆ Tᵢ` for some `i`   (membership)
+- `[:union T1 T2 …] ⊆ S`  iff  `Tᵢ ⊆ S` for every `i`  (disjunction)
+
+`make-union` is the canonical constructor: it flattens nested unions,
+deduplicates, collapses singletons, and absorbs `:any`. The sort order
+is deterministic so equality between freshly built unions is reliable.
+
+The `:if` base-fn's type-rule produces a union of its branches:
+
+```edn
+{:parent :if :args {:test :some-bool? :then 42 :else "fallback"}}
+;; computed return-type: [:union :int :text]
+```
+
+`bearer-token` (which uses `:if` with a `nil :else`) ends up at
+`[:union :null :text]` — the same shape `:nullable-text` declares.
+
+### Unification & unions
+
+The HM unifier doesn't pick a branch when given a union — it would
+have to commit to a choice the user never made. Instead, unify defers
+to `subtype?`: union ↔ X succeeds when the relation holds in either
+direction, fails otherwise. Type variables never get bound to a
+branch; declared union slots stay declared.
+
+---
+
+## Tagged Variants
+
+Discriminated sum types — sugar for a union of tagged records. The
+loader's `aliases.edn` `:variant [:tag1 T1 :tag2 T2 …]` entry desugars
+to:
+
+```clojure
+[:union {:tag [:refine :keyword [:= :tag1]] :value T1}
+        {:tag [:refine :keyword [:= :tag2]] :value T2}
+        …]
+```
+
+The `[:refine :keyword [:= :tag]]` pin on the tag slot is what makes
+each branch discriminable. Built-in variant aliases:
+
+```edn
+;; resources/packages/core/refinements/aliases.edn
+{:name :result-text :variant [:ok :text :err :text]}
+{:name :result-int  :variant [:ok :int  :err :text]}
+{:name :validation  :variant [:valid :any :invalid :text]}
+```
+
+### Discrimination
+
+No new pattern-matching base-fn. The `core.variants` module ships
+three composition-only fn-defs over the existing `:get` / `:equal?`:
+
+```edn
+;; resources/packages/core/variants/fns.edn
+{:name :variant-tag    :parent :get      :args {:key "tag"}}
+{:name :variant-value  :parent :get      :args {:key "value"}}
+{:name :variant-is?    :parent :equal?   :args {:a :variant-tag :b {:as :tag}}}
+```
+
+Authors then dispatch via the existing `:cond`:
+
+```edn
+{:parent :cond
+ :args {:pairs [(:variant-is? :coll my-result :tag :ok)
+                (:variant-value :coll my-result)
+                :else
+                (:variant-value :coll my-result)]}}
+```
+
+---
+
+## Type Aliases
+
+`aliases.edn` lets a module register `keyword → structural type`
+bindings before its `fns.edn` parses. Four entry shapes:
+
+| Shape       | Example                                                         | Meaning                                  |
+|-------------|-----------------------------------------------------------------|------------------------------------------|
+| Refinement  | `{:name :positive-int :base :int :constraint [:> 0]}`           | `[:refine :int [:> 0]]`                  |
+| Record      | `{:name :user :record {:id :uuid :name :text}}`                 | `{:id :uuid :name :text}`                |
+| Union       | `{:name :nullable-int :union [:null :int]}`                     | `[:union :null :int]`                    |
+| Variant     | `{:name :result-int :variant [:ok :int :err :text]}`            | union of pinned-tag records (see above)  |
+
+Aliases declared in `core/refinements/aliases.edn` cover everyday
+needs out of the box:
+
+| Alias              | Type                                                              | Used for                         |
+|--------------------|-------------------------------------------------------------------|----------------------------------|
+| `:positive-int`    | `[:refine :int [:> 0]]`                                           | counts, sizes                    |
+| `:non-negative-int`| `[:refine :int [:>= 0]]`                                          | indexes, lengths                 |
+| `:negative-int`    | `[:refine :int [:< 0]]`                                           | offsets                          |
+| `:non-empty-text`  | `[:refine :text [:not= ""]]`                                      | required strings                 |
+| `:positive-numeric`| `[:refine :numeric [:> 0]]`                                       | rates, weights                   |
+| `:percent`         | `[:refine :numeric [:and [:>= 0] [:<= 100]]]`                     | percentages                      |
+| `:probability`     | `[:refine :numeric [:and [:>= 0] [:<= 1]]]`                       | probabilities                    |
+| `:port`            | `[:refine :int [:and [:>= 1] [:<= 65535]]]`                       | TCP/UDP ports                    |
+| `:user-port`       | `[:refine :int [:and [:>= 1024] [:<= 65535]]]`                    | non-privileged ports             |
+| `:http-status`     | `[:refine :int [:and [:>= 100] [:<= 599]]]`                       | HTTP status codes                |
+| `:bit`             | `[:refine :int [:or [:= 0] [:= 1]]]`                              | binary flags                     |
+| `:nullable-T`      | `[:union :null T]`  (T ∈ #{int text bool numeric uuid})           | optional values                  |
+| `:result-T`        | tagged variant `{:ok T}|{:err :text}`                              | Result-style returns             |
+| `:validation`      | tagged variant `{:valid :any}|{:invalid :text}`                    | parsed-vs-error                  |
+
+Modules adding their own aliases should drop an `aliases.edn` next to
+their `fns.edn`; the loader picks it up automatically.
+
+---
+
+## Effect Categories
+
+Every fn-def carries an optional `:effects` set tagging the side
+effects it performs. The set propagates along composition: a fn-def
+inherits the union of every parent's and every ref-binding's
+`:effects`. Pure code stays at `#{}` (no `:effects` key in the
+registry entry).
+
+### Categories
+
+| Tag        | Meaning                                       | Cacheable within one top-level? |
+|------------|-----------------------------------------------|----------------------------------|
+| `:io`      | classpath / file reads                        | yes                              |
+| `:db`      | storage CRUD                                  | yes (one txn)                    |
+| `:env`     | env-var reads                                 | yes (stable per request)         |
+| `:network` | HTTP socket lifecycle                         | yes (server handle is singleton) |
+| `:time`    | wall-clock                                    | **no — always fresh**            |
+| `:random`  | non-determinism                               | **no — always fresh**            |
+| `:effect`  | legacy generic flag (`:effectful? true`)      | yes                              |
+
+### Caching policy
+
+The compiled executor's call-cache memoizes ref invocations within
+**one top-level call** so e.g. `:ring-body`'s single-use slurp is
+shared across siblings. Effectful fns are still cacheable — env
+values don't change mid-request, DB rows are consistent under one
+txn, etc. Only `:time` and `:random` bypass the cache and fire fresh
+every read; everything else benefits from sharing.
+
+### `:expects-effects` policy declarations
+
+Any fn-def can declare an `:expects-effects #{…}` set. At sync time,
+the type-checker compares declared vs computed; categories that show
+up in the actual graph but weren't in the declaration log a `WARN`:
+
+```
+fn-def :health declared :expects-effects #{:time}
+                but computed effects include #{:db}
+                — drift in the call graph?
+```
+
+Useful for routes / module boundaries — declare what each layer is
+ALLOWED to touch, and any accidental introduction of e.g. a DB read
+into a supposedly pure `/health` endpoint shows up in `bb deploy`
+logs at the moment of the regression. Default is no declaration → no
+check (backward compat).
+
+`:expects-effects` and **slot-level effect constraints** (Phase 8)
+are complementary:
+
+- `:expects-effects` is fn-def-wide policy — "this whole graph must
+  not introduce :db reads beyond what I declared". It's a *warning*
+  on drift.
+- A slot-level `[:fn args ret eff-set]` constraint binds at the
+  callsite: "any callable bound *here* must satisfy this effect
+  bound". It's a *hard reject* at sync time, same channel as a
+  return-type mismatch.
+
+Use the slot constraint when the *contract of the HOF itself*
+demands purity (`:filter`, `:map`, `:reduce` — order-independence,
+caching, replayability). Use `:expects-effects` when the *role of
+the fn-def* in the system demands a budget (e.g., `/health` is
+allowed to read time but not the DB).
+
+---
+
+## Required Narrowing
+
+Slots carry an optional `:required` flag (default `true`). A
+descendant fn-def can narrow an inherited optional slot to required
+via a binding — but never widen back. Same monotonicity rule as
+type narrowing.
+
+### Wire format
+
+In `fns.edn`, on a composed fn-def's `:args`:
+
+```edn
+{:name :base-search
+ :args {:query  {:type :text}
+        :limit  {:type :int :required false}}    ; opt at the slot
+ :return-type :jsonb}
+
+{:name :paginated-search
+ :parent :base-search
+ :args {:limit {:required true}}}                ; narrow to required
+```
+
+`:limit` is now required for `:paginated-search` and every fn-def
+inheriting from it. The free-arg propagation surfaces it to callers;
+the executor's `effective-required?` ORs the slot's baseline with
+every binding along the inheritance chain.
+
+### Direction
+
+- **Optional → required**: allowed (a binding with `:required true`).
+  Once narrowed, *every* descendant inherits the required state.
+- **Required → optional**: forbidden. The sync-time check rejects
+  any binding row carrying `:required false` with
+  `:bindings/widening-required`. Optionality is declared once, on
+  the slot itself.
+
+A binding may legitimately combine `:required true` with other
+metadata (`:value`, `:as`, `:type`) — narrowing applies regardless
+of whether the binding also carries a value. A `:required true` with
+no value/ref leaves the slot logically free under the same external
+name, just narrowed.
+
+### Why this rule (and not the reverse)
+
+Required-narrowing is monotonic for the same reason type-narrowing
+is: a downstream caller of `:paginated-search` who relies on
+`:limit` being required would break if some descendant could secretly
+make it optional again. The user-facing contract is "if any node in
+your inheritance chain says required, you must supply it" — a single
+direction, no surprises.
+
+### Implementation
+
+| Layer | What it does |
+|-------|-------------|
+| `binding.required` (schema) | Optional bool. nil = no opinion at this binding. |
+| `effective-required?` | Walks the inheritance chain, ORs slot's `:required` with every binding's `:required true`. Used by `classify-slot` to populate the `:free` entry's `:required` field. |
+| `check-required-widening!` | Pre-pass in `check-fn-def!` — rejects any binding map carrying `:required false`. Tagged `:bindings/widening-required`. Fires on package load AND on CRUD writes (CRUD funnels through `check-fn-def!` post-create). |
+| Loader (`map-arg-value->binding-fields`) | Recognises `:required` in `:args`-value maps and emits the corresponding binding-row column. |
+
 ---
 
 ## Type Narrowing Through Inheritance
@@ -433,7 +705,11 @@ Widening is an error:
 
 ### What is stored in DB
 
-Each arg may have an optional `type-refinement` field. The effective type is computed by walking the `source-id` chain and merging refinements (each must be a subtype of the previous).
+A slot's effective type comes from `slot.type-fn-id` overlayed by
+the closest `binding.type-override-fn-id` along the `parent-fn-ids`
+inheritance closure. Refinement narrowing flows through the
+type-row chain (`fn.base-fn-id` for `:refine`, `fn.element-fn-id`
+for `:list`, `fn.constraint` for predicates).
 
 ---
 
@@ -516,29 +792,112 @@ One type definition → static checking at save time + runtime validation at exe
 
 ## Storage Schema
 
-Two new fields on existing entities, no new entities:
+Types live as fn-rows themselves (record / refinement / list /
+union / variant) plus pointer fields on entities:
 
-### fn entity
+### fn entity (type-related fields)
 
 ```
 fn:
-  ...existing fields...
-  computed-type: jsonb          -- Computed by system, always present
-                                -- e.g. {:args {:a :int, :b :int}, :return {:int}}
-  return-type-override: jsonb   -- Optional, user-declared
-                                -- Must be subtype of computed return type
-                                -- Used instead of computed type when present
+  ...
+  return-type-fn-id   ref<fn>  -- author-declared return type
+  base-fn-id          ref<fn>  -- :refine — what we narrow
+  constraint          jsonb    -- :refine predicate
+  element-fn-id       ref<fn>  -- :list element type
+  anonymous-hash      text     -- dedup key for inline composites
 ```
 
-### arg entity
+### slot entity (per-slot type)
 
 ```
-arg:
-  ...existing fields...
-  type-refinement: jsonb        -- Optional, narrowing constraint
-                                -- Must be subtype of inherited type
-                                -- Merges with parent refinements via source-id chain
+slot:
+  type-fn-id   ref<fn>  -- the slot's value type
+  required     bool
 ```
+
+### binding entity (per-fn override)
+
+```
+binding:
+  type-override-fn-id  ref<fn>  -- override slot's type at this fn
+```
+
+The effective type at `(fn, slot)` is
+`(or binding.type-override-fn-id slot.type-fn-id)`. Refinement
+walking follows the type-row chain (`base-fn-id` /
+`element-fn-id`).
+
+---
+
+## Tooling
+
+### `/api/types`
+
+Snapshot of the in-memory rich-type registry as JSON. One entry per
+fn (base-fn or fn-def) the type-checker has processed:
+
+```jsonc
+{
+  "bearer-token": {
+    "return": ["union", "null", "text"],
+    "args":   { "coll": "jsonb", "default": "any" },
+    "effects": ["env"],
+    "source-file": "packages/web/ring-adapter/fns.edn",
+    "source-line": 188
+  },
+  "health": {
+    "return": "fn",
+    "args": { /* … */ },
+    "effects": ["time"],
+    "expects-effects": ["time"]
+  }
+}
+```
+
+The editor's fn-overlay reads this for: type-aware fn-picker
+filtering, "Expected: <type>" hints, type-mismatch outlines, effect
+badges, and declared-vs-computed drift markers.
+
+### Type-error messages with `file:line`
+
+The package loader uses `clojure.tools.reader` (instead of
+`clojure.edn/read`) to preserve source-position metadata on every
+fn-def. The type-checker threads it via a dynamic var into every
+error message, so authors see exactly which EDN entry to open:
+
+```
+  at packages/web/ring-adapter/fns.edn:188
+Type-check failed in fn-def :token-valid?
+  arg :a ← fn-ref → :auth-token-from-env
+  parent :equal? expects: :int
+  actual:                 [:union :null :text]
+  hint: the ref's return type is the actual
+```
+
+### `bb effects`
+
+Effects-breakdown report for a running instance:
+
+```
+$ bb effects
+URL: http://localhost:9002/api/types
+▶ effects breakdown  (effectful 94 of 452)
+  db       ( 41)  :_all-entities-body, :_router, :all, …
+  env      ( 31)  :_auth-required-body, :auth-token-from-env, …
+  io       ( 34)  :_build-hashes-raw, :_editor-handler, …
+  network  (  3)  :http-server, :http-stop, :web-server
+  time     ( 10)  :_health-handler, :current-time-ms, …
+
+⚠ drift in 1 fn-def(s):
+  metrics
+    over-declared (declared but not computed): time
+    declared: time  computed:
+```
+
+Exit code: `0` on no drift or over-declaration only (harmless); `1`
+when at least one fn-def has REAL drift (a computed effect not in
+its `:expects-effects`). Useful in CI as an audit gate without
+blocking on the more lenient sync-time WARN.
 
 ---
 
@@ -598,3 +957,139 @@ arg:
 - `type-schema` base-fn: introspect `computed-type`, generate malli schema
 - Integration with `json-handler` for automatic request body validation
 - Validation error messages derived from type structure
+
+### Phase 6: Effect categories ✅
+
+**Goal:** taint-style tracking of side effects through composition.
+
+- `:effects #{:io :db :env :time :network :random}` set on each base-fn
+- Loader normalises legacy `:effectful? true` to `:effects #{:effect}`
+- Composition unions ref-binding effects into the fn-def's set
+- Editor renders colour-coded chips per category
+- `:expects-effects` declarations + sync-time WARN on drift
+- `bb effects` CLI report
+- Per-category caching policy (`:time` / `:random` always-fresh,
+  others cacheable within one top-level invocation)
+
+### Phase 7: Runtime type-registry mutation ✅
+
+**Goal:** types created via API/editor become resolvable to the
+type-checker without a server restart, and broken bindings get
+rejected at write time instead of silently breaking later.
+
+**Single invalidation entry point.** `invalidate-graph-cache!` in
+`executor/context.clj` clears `:graph-cache`, `:compiled-registry`,
+AND lazily refreshes type-aliases from storage. Every CRUD mutation
+goes through this — readers, the next `execute`, and the type-
+checker all see the new state on the next request.
+
+**DB-side type-alias registration.** `register-type-aliases-from-
+db!` in `executor/compile-runtime.clj` walks fn-rows whose role
+classifies as record / refinement / list / union (via
+`type-row-role`'s constraint-tag detection) and registers each as
+an alias. Idempotent. Iterates to a fixed point so inner-name
+references resolve regardless of declaration order. Mirrors the
+EDN-side `register-type-aliases!` which only sees package data —
+runtime additions follow the same path.
+
+**Save-time rejection on type-check failure.** CRUD's
+`process-create-entity` validates ref-bindings (target's
+`:return-type` ⊆ slot's expected type via `subtype?`) AND runs
+full `check-fn-def!` on the owning fn-def for any binding /
+binding-list-item mutation. On failure, the just-created entity
+is deleted (best-effort rollback) and the response carries the
+type-checker's diagnostic. `parse-fn-from-form` resolves
+`return-type` form values via storage lookup with explicit error
+on unknown names.
+
+**Polymorphic `:invoke` via runtime detection.** `:invoke :func`
+is typed `[:fn {:arg a} b]` — the type-checker unifies, runtime
+disambiguates via `:produces-callable?` flag computed on each
+ref-binding (`compile/bindings.clj` consults the bound fn's
+`:return-type` from the rich-types registry — when it's itself
+a fn-type, the fn-graph PRODUCES a callable so `make-ref-entry`
+thunks instead of `hof-wrap`-ping). No `:hof-wrap` slot
+annotation; the dispatch is type-derived.
+
+**`record ↔ :jsonb` unification.** `subtype?` already accepted
+records as ⊆ `:jsonb` (records are jsonb-shaped on the wire);
+`unify` now does too. Lets a slot whose type-var narrowed to
+`:jsonb` at one call-site unify against a more-precisely-typed
+record at a later call-site — fixes the chain
+`:_app-ring-response :func :_router` where `:invoke`'s `:arg`
+type-var had been pinned to `:jsonb` by `:router-result :arg
+:internal-request`.
+
+### Phase 8: Slot-level effect constraint ✅
+
+**Goal:** let a slot whose type is `:fn` declare *which effects the
+callable is allowed to perform*. Effectful callbacks bound into a
+pure slot get rejected at sync time, just like a return-type
+mismatch — same channel, same diagnostic shape.
+
+**Wire format.** The fn-type form gains an optional 4th element —
+the effect constraint set on the *callable* side:
+
+```edn
+;; map's :func slot — pure-only constraint
+:func {:type [:fn {:item a} b #{}]}
+
+;; an alternate hypothetical "give me an :env-or-pure callable" slot
+:func {:type [:fn {:item a} b #{:env}]}
+```
+
+A 3-element form `[:fn args ret]` has *no* effect constraint —
+"any effects allowed". A 4-element form `[:fn args ret eff-set]`
+demands the bound callable's effects ⊆ `eff-set`.
+
+**Subtype rule.** `(fn-subtype? sub sup)` requires
+`sub-effects ⊆ sup-effects`, mirroring how arg variance and return
+covariance already work. nil sub-effects against a concrete
+sup-effects is **rejected** ("can't prove pure → assume impure").
+nil sup-effects accepts anything (no constraint declared).
+
+**Where it fires.** `check-fn-def!` walks each ref-binding,
+computes the callable's effective fn-type via `assemble-fn-type`
+(which surfaces the bound fn's `:effects` from the rich-types
+registry as the 4th element), then `subtype?`s against the slot's
+expected fn-type. A mismatch raises the standard `:types/check-
+failed` exception with the same arg-name / parent / expected /
+actual fields as a return-type mismatch.
+
+**Coverage in core/hof.** Every HOF callable slot now carries the
+`#{}` constraint:
+
+| HOF | Slot | Constraint | Why |
+|-----|------|-----------|-----|
+| `:map` | `:func` | `#{}` | element-wise, must be order-independent + cacheable |
+| `:filter` | `:pred` | `#{}` | predicate must be idempotent / replayable |
+| `:reduce` | `:func` | `#{}` | result must depend only on `(init, coll)` |
+| `:some` | `:pred` | `#{}` | early-termination relies on determinism |
+| `:every?` | `:pred` | `#{}` | same |
+| `:find-first` | `:pred` | `#{}` | same |
+| `:group-by` | `:key-fn` | `#{}` | same item must hash to the same bucket |
+| `:sort-by` | `:key-fn` | `#{}` | comparator stability |
+| `:transduce` | `:reducer` | `#{}` | same fold rationale as `:reduce` |
+
+Binding e.g. `:env-flag-pred` (effects `#{:env}`) into `:filter
+:pred` now fails sync with:
+
+```
+parent :filter expects: [:fn {:item a} :bool #{}]
+actual:                 [:fn {:item :any} :bool #{:env}]
+```
+
+**Why slot-level, not whole-function.** Haskell-style monadic
+effect tracking would require *every* call site to thread
+contexts. Graphden's value: catch the *specific* anti-pattern
+where an effectful callback silently slips into a pure HOF — same
+shape as catching a `:add-10` predicate (returns int, not bool).
+Slot-level is the smallest mechanism that delivers that.
+
+**Roundtrip preservation.** `resolve` (substitution),
+`resolve-alias`, `unify-fn`, and `assemble-fn-type` all preserve
+the 4th element when present. `assemble-fn-type` uses
+`(contains? info :effects)` rather than `(seq eff)` so that an
+explicit `:effects #{}` in rich-types stays distinguishable from
+"no effects key" — important because the former is a positive
+"provably pure" claim, the latter is "unknown".

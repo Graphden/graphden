@@ -71,6 +71,119 @@ async function getEntities(page) {
   }, BASE);
 }
 
+// Test-side flattened view of `(fn × slot × binding × item)`. Mirrors
+// the server-side `synth-args-from-bindings` derivation, but lives in
+// the test harness so the API can stop emitting `:args` while tests
+// keep their query DSL. Returns one row per (fn, slot) plus one row
+// per binding-list-item, with closest-binding overlays applied:
+//
+//   {id, fn-id, slot-id, binding-id, item-id, name, value, ref-id,
+//    source-id, type, prev-arg-id, next-arg-id}
+//
+// `id` is the synth id used by the editor's argMap key — for anchor
+// rows it's a deterministic UUID xor of (fn-id, slot-id); for list-
+// item rows it's the actual item-id.
+function synthArgs(ents) {
+  const fns = ents.fns || [];
+  const slots = ents.slots || [];
+  const fnSlots = ents['fn-slots'] || [];
+  const bindings = ents.bindings || [];
+  const items = ents['list-items'] || [];
+  const fnById = new Map(fns.map(f => [f.id, f]));
+  const slotById = new Map(slots.map(s => [s.id, s]));
+  const ownFnSlots = new Map();
+  fnSlots.forEach(fs => {
+    if (!ownFnSlots.has(fs['fn-id'])) ownFnSlots.set(fs['fn-id'], []);
+    ownFnSlots.get(fs['fn-id']).push(fs);
+  });
+  const bindingByFnSlot = new Map(
+    bindings.map(b => [b['fn-id'] + '|' + b['slot-id'], b]));
+  const itemsByBinding = new Map();
+  items.slice().sort((a, b) => (a.position || 0) - (b.position || 0))
+       .forEach(it => {
+         const bid = it['binding-id'];
+         if (!itemsByBinding.has(bid)) itemsByBinding.set(bid, []);
+         itemsByBinding.get(bid).push(it);
+       });
+
+  // Deterministic UUID xor of two UUIDs (matches server `synth-arg-id`).
+  function synthId(fnId, slotId) {
+    const parse = s => s.replace(/-/g, '');
+    const a = parse(fnId), b = parse(slotId);
+    let out = '';
+    for (let i = 0; i < 32; i++) {
+      out += (parseInt(a[i], 16) ^ parseInt(b[i], 16)).toString(16);
+    }
+    return out.slice(0, 8) + '-' + out.slice(8, 12) + '-' + out.slice(12, 16)
+         + '-' + out.slice(16, 20) + '-' + out.slice(20, 32);
+  }
+
+  function chain(fnId) {
+    const seen = new Set();
+    const out = [];
+    const queue = [fnId];
+    while (queue.length) {
+      const fid = queue.shift();
+      if (seen.has(fid)) continue;
+      seen.add(fid);
+      const f = fnById.get(fid);
+      if (!f) continue;
+      out.push(fid);
+      (f['parent-ids'] || []).forEach(p => { if (!seen.has(p)) queue.push(p); });
+    }
+    return out;
+  }
+
+  const anchorRows = [];
+  for (const fn of fns) {
+    const fnId = fn.id;
+    const seenSlots = new Set();
+    for (const fid of chain(fnId)) {
+      for (const fs of (ownFnSlots.get(fid) || [])) {
+        const sid = fs['slot-id'];
+        const slot = slotById.get(sid);
+        if (!slot || seenSlots.has(sid)) continue;
+        seenSlots.add(sid);
+        const b = bindingByFnSlot.get(fnId + '|' + sid);
+        const inheritsFrom = (fid !== fnId) ? synthId(fid, sid) : null;
+        anchorRows.push({
+          id: synthId(fnId, sid),
+          'fn-id': fnId,
+          'slot-id': sid,
+          'binding-id': b ? b.id : null,
+          name: (b && b['rename-to']) || slot.name,
+          required: true,
+          'source-id': inheritsFrom,
+          value: b ? b.value : null,
+          'ref-id': b ? b['ref-fn-id'] : null
+        });
+      }
+    }
+  }
+  const itemRows = [];
+  for (const b of bindings) {
+    const its = itemsByBinding.get(b.id) || [];
+    const anchorId = synthId(b['fn-id'], b['slot-id']);
+    its.forEach((it, idx) => {
+      itemRows.push({
+        id: it.id,
+        'fn-id': b['fn-id'],
+        'slot-id': b['slot-id'],
+        'binding-id': b.id,
+        'item-id': it.id,
+        name: null,
+        required: false,
+        'source-id': anchorId,
+        value: it.value,
+        'ref-id': it['ref-fn-id'],
+        'prev-arg-id': idx === 0 ? anchorId : its[idx - 1].id,
+        'next-arg-id': its[idx + 1] ? its[idx + 1].id : null
+      });
+    });
+  }
+  return anchorRows.concat(itemRows);
+}
+
 // Wait until `predicate` returns truthy, polling up to `timeoutMs`.
 async function waitFor(predicate, timeoutMs) {
   const deadline = Date.now() + (timeoutMs || 5000);
@@ -82,16 +195,41 @@ async function waitFor(predicate, timeoutMs) {
 }
 
 // Cleanup any leftover entities created by a test (idempotent).
+//
+// New slot/binding model: a test fn carries `bindings` (and possibly
+// `binding-list-items` under those bindings) plus rename-`slot`s
+// owned by the fn itself. Order matters — list-items reference
+// bindings, bindings reference fn + slot, fn-slot junctions
+// reference fn + slot, slots are standalone. Delete from leaves to
+// roots. Skip the legacy `args` field if the schema-snapshot doesn't
+// include it.
 async function deleteFnByName(page, name) {
   const ents = await getEntities(page);
   const matches = ents.fns.filter(f => f.name === name);
   for (const fn of matches) {
-    for (const a of ents.args.filter(x => x['fn-id'] === fn.id)) {
-      await api(page, 'DELETE', '/api/entities/arg/' + a.id);
+    const bindings = (ents.bindings || []).filter(b => b['fn-id'] === fn.id);
+    const bindingIds = new Set(bindings.map(b => b.id));
+    const items = (ents['list-items'] || []).filter(i => bindingIds.has(i['binding-id']));
+    for (const it of items) {
+      await api(page, 'DELETE', '/api/entities/binding-list-item/' + it.id);
+    }
+    for (const b of bindings) {
+      await api(page, 'DELETE', '/api/entities/binding/' + b.id);
+    }
+    const ownFnSlots = (ents['fn-slots'] || []).filter(fs => fs['fn-id'] === fn.id);
+    for (const fs of ownFnSlots) {
+      // fn-slot rows have a composite PK; the API treats them as
+      // entities keyed by `id` (set on creation); fall through if
+      // the row predates id-bearing rows.
+      if (fs.id) await api(page, 'DELETE', '/api/entities/fn-slot/' + fs.id);
+    }
+    const ownSlotIds = ownFnSlots.map(fs => fs['slot-id']);
+    for (const sid of ownSlotIds) {
+      await api(page, 'DELETE', '/api/entities/slot/' + sid);
     }
     await api(page, 'DELETE', '/api/entities/fn/' + fn.id);
   }
 }
 
-module.exports = { assert, deepEqual, newContext, api, getEntities, waitFor,
-                   deleteFnByName, AUTH, BASE };
+module.exports = { assert, deepEqual, newContext, api, getEntities,
+                   synthArgs, waitFor, deleteFnByName, AUTH, BASE };

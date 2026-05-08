@@ -9,29 +9,11 @@
   ;; COLLECTION BUILDING BLOCKS
   ;; =============================================================================
 
-  ;; conj to empty vector - first element of a list (free: item)
-  {:name :conj-empty
-   :description "`:conj` with `:coll` pre-bound to `[]` — start a fresh vector with one item. Free arg: `:item`."
-   :parent :conj
-   :args {:coll []}}
-
-  ;; pair: builds [item1, item2] - a 2-element vector
-  ;; pair-1 starts chain, renames item->item1 (free: item1)
-  {:name :pair-1
-   :description "First half of `:pair` — `[item1]` as a single-element vector. Internal building block."
-   :parent :conj-empty
-   :args {:item {:as :item1}}}
-
-  ;; pair adds second item (free: item1 from pair-1, item2)
-  {:name :pair
-   :description "Two-element vector `[item1 item2]`. Used everywhere a `[k v]` pair is needed (route as `[path method-data]`, map entry, etc.)."
-   :parent :conj
-   :args {:coll :pair-1
-          :item {:as :item2}}}
-
-  ;; NOTE: triple / list-10-N / list-11 were cascade-based N-element list
-  ;; builders — removed once the :list base-fn (sequence-arg) replaced them.
-  ;; :pair / :pair-1 are kept because :route still inherits from :pair.
+  ;; NOTE: cascade-based vector builders (`triple`, `list-10-N`, `list-11`,
+  ;; `:pair`, `:pair-1`, `:conj-empty`) have been retired in favour of the
+  ;; `:list` base-fn (sequence-arg). Routes, request-shape entries, and
+  ;; defaults-map entries that previously used `:parent :pair` now use
+  ;; `:parent :list :args {:items [a b]}` directly.
 
   ;; =============================================================================
   ;; ROUTE BUILDING BLOCKS
@@ -46,10 +28,11 @@
 
   ;; Level 2: assoc-handler (free: handler) - sets key="handler", renames value->handler
   ;; Diamond inheritance from :assoc: :assoc-fn refines :value to :fn-typed
-  ;; (its arg wins for `:value` because it appears first in :parents — the
-  ;; child arg name `value` resolves through `:assoc-fn.value` which has
-  ;; is-fn=true). :assoc-empty contributes :map={}. Result: handler ref
-  ;; becomes a hof-wrap'd Ring callable stored in the route's method-map.
+  ;; (its arg wins for `:value` because it appears first in :parents —
+  ;; the child arg name `value` resolves through `:assoc-fn.value`
+  ;; whose slot type is `:fn`, which IS the HOF marker). :assoc-empty
+  ;; contributes :map={}. Result: handler ref becomes a hof-wrap'd
+  ;; Ring callable stored in the route's method-map.
   {:name :assoc-handler
    :description "Build `{\"handler\" <handler-fn>}` — sets `:key=\"handler\"` and the value slot is `:fn`-typed via `:assoc-fn` so the bound fn-graph stays a Ring callable rather than being executed."
    :parents [:assoc-fn :assoc-empty]
@@ -64,13 +47,12 @@
    :args {:value {:as :handler :ref :assoc-handler}
           :key {:as :method}}}
 
-  ;; Level 3: route = [path, method-map] using pair
-  ;; Rename item1 -> path (handler is already renamed in method-map)
+  ;; Level 3: route = [path, method-map] using :list
+  ;; First item is the renamed free :path; second is the method-map.
   {:name :route
    :description "Generic reitit route — `[path method-data]`. Free args: `:path`, `:method`, `:handler`. Method-specific shortcuts below bind `:method`."
-   :parent :pair
-   :args {:item2 :method-map
-          :item1 {:as :path}}}
+   :parent :list
+   :args {:items [{:as :path} :method-map]}}
 
   ;; Level 4: HTTP method shortcuts (`get-route`, `post-route`, …) live in
   ;; `app.routes.method`. They keep the `-route` suffix because bare
@@ -94,9 +76,8 @@
   ;; Route carrying its own middleware list (free: path, handler, middleware).
   {:name :route-with-middleware
    :description "Reitit route that carries its own `:middleware` list — `[path {<method> {\"handler\" h \"middleware\" mw}}]`. Free args: `:path`, `:method`, `:handler`, `:middleware`."
-   :parent :pair
-   :args {:item2 :_method-map-with-middleware
-          :item1 {:as :path}}}
+   :parent :list
+   :args {:items [{:as :path} :_method-map-with-middleware]}}
 
   ;; Method shortcuts (`get-route-with-middleware`, …) live in
   ;; `app.routes.method` next to their plain-method twins.

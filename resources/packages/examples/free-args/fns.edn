@@ -25,8 +25,8 @@
 
   {:name :_ex-shout-upper
    :parent :str-upper}
-   ;; ↑ NO :args at all → `:string` is a free arg of `:_ex-shout-upper`,
-   ;; propagating up to `:ex-shout`.
+  ;; ↑ NO :args at all → `:string` is a free arg of `:_ex-shout-upper`,
+  ;; propagating up to `:ex-shout`.
 
   ;; Rename via {:as ...}: caller now passes `:name`, not `:string`.
   ;; The rename happens at the slot where we bind the parent's arg.

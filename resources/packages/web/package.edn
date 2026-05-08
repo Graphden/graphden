@@ -1,5 +1,5 @@
 {:name "web"
  :version "1.0.0"
- :description "Web primitives: HTTP, routing, HTML, CRUD, graph visualization"
+ :description "Web primitives: HTTP, routing, HTML, CRUD."
  :dependencies ["core"]
- :modules ["http" "reitit" "reitit-text" "html" "crud" "graph" "ring-adapter"]}
+ :modules ["http" "reitit" "reitit-text" "html" "crud" "ring-adapter"]}

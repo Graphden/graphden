@@ -27,37 +27,29 @@ const TRASH_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" s
 // =============================================================================
 
 async function postEntity(type, fields) {
-  const body = new URLSearchParams();
-  for (const [k, v] of Object.entries(fields)) {
-    if (v !== undefined && v !== null && v !== '') body.set(k, v);
-  }
-  const response = await authFetch('/api/entities/' + type, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
-  });
-  return response;
+  return authMutate('POST', '/api/entities/' + type, fields);
+}
+
+// Pull a human-readable reason out of a non-2xx response. The backend
+// wraps reasons in `<p class="error">…</p>`; we strip the wrapping
+// (and any other HTML) so the user reads the actual message instead
+// of `<p class="error">Failed to create fn: {:name "foo", :namespa`.
+async function extractErrorMessage(response) {
+  const raw = await response.text().catch(() => '');
+  if (!raw) return 'Status ' + response.status;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = raw;
+  const text = (tmp.textContent || '').trim();
+  return text || ('Status ' + response.status);
 }
 
 async function deleteEntity(type, id) {
-  const response = await authFetch('/api/entities/' + type + '/' + id, {
-    method: 'DELETE'
-  });
-  return response;
+  return authMutate('DELETE', '/api/entities/' + type + '/' + id);
 }
 
 
 async function putEntity(type, id, fields) {
-  const body = new URLSearchParams();
-  for (const [k, v] of Object.entries(fields)) {
-    if (v !== undefined && v !== null && v !== '') body.set(k, v);
-  }
-  const response = await authFetch('/api/entities/' + type + '/' + id, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
-  });
-  return response;
+  return authMutate('PUT', '/api/entities/' + type + '/' + id, fields);
 }
 
 // =============================================================================
@@ -198,8 +190,8 @@ function ensureAuth() {
 function fnDeleteBlockReason(fnId) {
   if (!lookups) return null;
   const reasons = [];
-  const asParent = (lookups.fnUsedAsParent && lookups.fnUsedAsParent.get(fnId)) || 0;
-  const asRef    = (lookups.fnUsedAsRef    && lookups.fnUsedAsRef.get(fnId))    || 0;
+  const asParent = (lookups.fnUsedAsParent?.get(fnId)) || 0;
+  const asRef    = (lookups.fnUsedAsRef?.get(fnId))    || 0;
   if (asParent) reasons.push('parent of ' + asParent + ' graph' + (asParent > 1 ? 's' : ''));
   if (asRef)    reasons.push('referenced by ' + asRef + ' arg' + (asRef > 1 ? 's' : ''));
   if (!reasons.length) return null;
@@ -209,8 +201,8 @@ function fnDeleteBlockReason(fnId) {
 function nsDeleteBlockReason(nsId) {
   if (!lookups) return null;
   const reasons = [];
-  const subNs = (lookups.nsHasChildNs && lookups.nsHasChildNs.get(nsId)) || 0;
-  const subFn = (lookups.nsHasChildFn && lookups.nsHasChildFn.get(nsId)) || 0;
+  const subNs = (lookups.nsHasChildNs?.get(nsId)) || 0;
+  const subFn = (lookups.nsHasChildFn?.get(nsId)) || 0;
   if (subNs) reasons.push('contains ' + subNs + ' nested namespace' + (subNs > 1 ? 's' : ''));
   if (subFn) reasons.push('contains ' + subFn + ' graph' + (subFn > 1 ? 's' : ''));
   if (!reasons.length) return null;
@@ -375,17 +367,23 @@ function buildCreateRow(indent) {
     placeholder,
     indent,
     onSubmit: async (name) => {
-      const fields = activeCreate.type === 'ns'
+      const createType = activeCreate.type;
+      const fields = createType === 'ns'
         ? { name, 'parent-id': activeCreate.parentNsId || '' }
         : { name, 'namespace-id': activeCreate.parentNsId || '' };
-      const response = await postEntity(activeCreate.type, fields);
+      const response = await postEntity(createType, fields);
       if (response.status >= 200 && response.status < 300) {
         activeCreate = null;
         await initGraph();
+        // For new fns, auto-select so the user lands on the empty
+        // graph card immediately. Without this, only the sidebar
+        // refreshes and the canvas keeps showing whatever was there
+        // (or nothing) — reads as a hang.
+        if (createType === 'fn' && typeof selectFnByName === 'function') {
+          selectFnByName(name);
+        }
       } else {
-        const text = await response.text().catch(() => '');
-        throw new Error('Status ' + response.status
-                        + (text ? ': ' + text.slice(0, 80) : ''));
+        throw new Error(await extractErrorMessage(response));
       }
     },
     onCancel: clearActiveCreate
@@ -396,7 +394,7 @@ function buildCreateRow(indent) {
 // INLINE RENAME
 // =============================================================================
 
-let activeRename = null;  // { nsId, nsPath } | null
+const activeRename = null;  // { nsId, nsPath } | null
 
 function startNsRename(headerEl, nsId, nsPath) {
   // Replace label + actions with input row inline.
@@ -421,9 +419,7 @@ function startNsRename(headerEl, nsId, nsPath) {
       if (response.status >= 200 && response.status < 300) {
         await initGraph();
       } else {
-        const text = await response.text().catch(() => '');
-        throw new Error('Status ' + response.status
-                        + (text ? ': ' + text.slice(0, 80) : ''));
+        throw new Error(await extractErrorMessage(response));
       }
     },
     onCancel: () => {
@@ -456,9 +452,7 @@ function startFnRename(itemEl, fnId, currentName) {
       if (response.status >= 200 && response.status < 300) {
         await initGraph();
       } else {
-        const text = await response.text().catch(() => '');
-        throw new Error('Status ' + response.status
-                        + (text ? ': ' + text.slice(0, 80) : ''));
+        throw new Error(await extractErrorMessage(response));
       }
     },
     onCancel: () => {

@@ -1,0 +1,15 @@
+{
+  "name": "graphden",
+  "private": true,
+  "description": "Frontend tooling root for graphden — biome lint over editor JS/CSS.",
+  "scripts": {
+    "lint": "biome check resources/packages/app/editor",
+    "lint:fix": "biome check --write resources/packages/app/editor"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "stylelint": "^17.11.0",
+    "stylelint-config-standard": "^40.0.0",
+    "stylelint-declaration-strict-value": "^1.11.1"
+  }
+}

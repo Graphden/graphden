@@ -1,138 +1,96 @@
-# Graph Constraints Reference
+## Graph Constraints Reference
 
-This document describes the integrity constraints enforced by the graphden storage layer. These constraints ensure the function graph remains consistent and executable.
+This document describes the integrity constraints enforced by the
+graphden storage layer. The slot/fn-slot/binding model handles most
+shape correctness through schema-level uniqueness (`UNIQUE` on the
+junction tables); the only protocol-level constraint that needs
+explicit code is dependency-cycle detection.
 
-## Overview
+## Entities
 
-Graphden uses a **2-entity graph model** where:
-- **fn** — function entity (base-fn or composed via parent-id)
-- **arg** — argument entity (primary or inherited via source-id)
+- **fn** — function or type-row. Inheritance via `parent-fn-ids`
+  (many-to-many junction).
+- **slot** — atomic `(name, type-fn-id)` pair, immutable post-create.
+- **fn-slot** — junction: which slots a fn exposes, with position.
+- **binding** — per-`(fn, slot)` customization (value, ref, rename,
+  type override, terminal seal, list flags).
+- **binding-list-item** — sequence content under a list-typed
+  binding, ordered by position.
 
-Arguments can reference other functions via `ref-id`, creating a dependency graph.
-
-## Constraint Protocol
-
-All storage implementations must implement the `GraphConstraints` protocol:
+## Protocol
 
 ```clojure
 (defprotocol GraphConstraints
-  (validate-no-dependency-cycle! [this owner-fn-id target-fn-id]))
+  (validate-no-dependency-cycle! [this owner-fn-id ref-fn-id]))
 ```
+
+Storage implementations enforce this by walking the
+`fn → binding.ref-fn-id → binding-list-item.ref-fn-id` graph.
 
 ## Constraints
 
 ### 1. No Dependency Cycle
 
-**Rule:** The dependency graph (via arg.ref-id references to other functions) cannot form a cycle.
+**Rule:** The dependency graph (any `ref-fn-id`, in either bindings
+or list-items) cannot form a cycle.
 
-**Rationale:** Cycles would cause infinite recursion during execution.
+**Rationale:** Cycles cause infinite recursion at compile / execute
+time.
 
 **Example:**
 ```
-fn: add-numbers
-  arg: {ref-id: multiply-numbers}   ; references multiply-numbers
-  arg: {value: 10}
+fn add-numbers
+  binding {slot s-other, ref-fn-id multiply-numbers}
 
-fn: multiply-numbers
-  arg: {ref-id: add-numbers}    ✗ Error: dependency-cycle
-  arg: {value: 2}
-
-// add-numbers needs multiply-numbers
-// multiply-numbers needs add-numbers
-// → Deadlock during execution
+fn multiply-numbers
+  binding {slot s-other, ref-fn-id add-numbers}    ✗ dependency-cycle
 ```
+
+**Self-reference:** allowed — recursion is bounded by the executor's
+depth limit, not by the storage protocol.
 
 **Error:** `:constraint-violation/dependency-cycle`
 
-**Detection:** Uses depth-first search through all arg.ref-id references.
+### 2. Schema-level uniqueness
 
-**Note:** Self-reference (recursion) IS allowed because it's controlled by the executor's depth limit:
+These hold by virtue of `UNIQUE` constraints in the schema, not the
+protocol:
 
-```
-fn: factorial
-  arg: {name: "n", ...}               ; input arg
-  arg: {ref-id: factorial}            ✓ (allowed - executor handles depth)
-```
+| Entity | Unique key | Note |
+|---|---|---|
+| `fn` | `name` | NULL allowed for anonymous / local fns |
+| `fn-slot` | `(fn-id, slot-id)` | a slot is exposed at most once per fn |
+| `binding` | `(fn-id, slot-id)` | one binding per `(fn, slot)` |
+| `binding-list-item` | `(binding-id, position)` | items ordered by position |
 
-### 2. Unique Fn Name
+`slot.name` and `slot.type-fn-id` are NOT individually unique — two
+slots with the same name and type are distinct identities (sharing
+is opt-in via fn-slot pointing at the same slot-id).
 
-**Rule:** Function names must be unique (NULL is allowed for local functions).
+## Implementation
 
-**Constraint:** `UNIQUE(name)` on fn table.
+| Storage | Location |
+|---|---|
+| postgres | `src/graphden/storage/postgres/constraints.clj` (SQL CTE for cycle walk) |
 
-**Example:**
-```
-fn: add (name: "add")       ✓
-fn: add-v2 (name: "add")    ✗ Error: unique constraint violation
-fn: local-fn (name: nil)    ✓ (local fn, no name collision)
-```
-
-### 3. Unique Arg per Fn + Source
-
-**Rule:** Each fn can have at most one arg per source-id.
-
-**Constraint:** `UNIQUE(fn-id, source-id)` on arg table.
-
-**Rationale:** Prevents duplicate inherited arguments.
-
-**Example:**
-```
-fn: parent
-  arg: a {source-id: nil}    ; primary arg
-
-fn: child (parent-id: parent)
-  arg: {source-id: a, value: 10}    ✓
-  arg: {source-id: a, value: 20}    ✗ Error: duplicate (fn-id, source-id)
-```
-
-### 4. Unique Arg Name within Fn
-
-**Rule:** Arg names must be unique within a function.
-
-**Constraint:** `UNIQUE(fn-id, name)` on arg table.
-
-**Example:**
-```
-fn: my-fn
-  arg: {name: "x", ...}    ✓
-  arg: {name: "y", ...}    ✓
-  arg: {name: "x", ...}    ✗ Error: duplicate arg name
-```
-
-### 5. Source-id References Valid Parent Arg (Application-Level)
-
-**Rule:** When source-id is set, it must reference an arg that belongs to an ancestor function in the parent-id chain.
-
-**Rationale:** Ensures inheritance makes sense — you can only inherit args from your parent (or parent's parent, etc.).
-
-**Note:** This is validated at application level, not via DB constraint.
-
-## Implementation Details
-
-### Storage-Specific Implementations
-
-| Storage | Location | Notes |
-|---------|----------|-------|
-| postgres | `storage/postgres/constraints.clj` | SQL queries + CTE for cycle detection |
-| age | `storage/age/age.clj` | Graph queries via Cypher |
-
-### Performance Considerations
-
-**Cycle Detection:**
-- Uses iterative DFS with visited set
-- Worst case O(V + E) where V = functions, E = references
-- Early termination on cycle detection
+The `GraphConstraints` extension is wired generically through
+`graphden.storage.protocol.generic-constraints`.
 
 ## Testing
 
-Contract tests in `storage-protocol/contract_tests.clj` verify all constraints work correctly for each storage implementation:
+`src/graphden/storage/protocol/contract_tests.clj` exercises the
+protocol against any storage that registers `GraphConstraints`.
+The suite covers cycle detection (allow nil ref, reject self,
+allow distinct fn) plus concurrent CRUD.
 
 ```bash
-# Run all storage tests including constraints
-bb test
+bb test  # runs unit tests
 ```
 
-Key test categories:
-- `no-dependency-cycle-test`
-- `unique-fn-name-test`
-- `unique-arg-source-test`
+Inheritance regression e2e tests live in
+`tools/browser-test/edit-inheritance-regression.test.js`:
+
+- (a) parent scalar binding hides child placeholder
+- (b) inherited sequence visible via expansion
+- (c) child override masks parent
+- (d) child list-append extends parent items

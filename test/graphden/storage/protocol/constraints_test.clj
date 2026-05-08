@@ -31,23 +31,14 @@
     (let [helpers (->MockConstraintHelpers {})]
       (is (nil? (storage/validate-no-dependency-cycle-impl helpers (random-uuid) nil)))))
 
-  (testing "self-reference throws"
+  (testing "self-reference is allowed (recursion is intended; depth bounded by executor)"
     (let [fn-id (random-uuid)
           helpers (->MockConstraintHelpers {})]
-      (is (thrown-with-msg?
-            clojure.lang.ExceptionInfo
-            #"Reference would create dependency cycle"
-            (storage/validate-no-dependency-cycle-impl helpers fn-id fn-id)))))
-
-  (testing "exception contains correct data for self-reference"
-    (let [fn-id (random-uuid)
-          helpers (->MockConstraintHelpers {})]
-      (try
-        (storage/validate-no-dependency-cycle-impl helpers fn-id fn-id)
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
-          (is (= fn-id (:owner-fn-id (ex-data e))))
-          (is (= fn-id (:ref-fn-id (ex-data e))))))))
+      ;; docs/CONSTRAINTS.md § Self-reference carves this case out so
+      ;; recursive fn-defs (the only way to express recursion in the
+      ;; slot/binding model) stay legal at the storage layer. The
+      ;; executor's *max-depth* bounds the runtime cost.
+      (is (nil? (storage/validate-no-dependency-cycle-impl helpers fn-id fn-id)))))
 
   (testing "non-cyclic dependency doesn't throw"
     (let [fn-a (random-uuid)

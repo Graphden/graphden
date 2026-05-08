@@ -1,6 +1,7 @@
 (ns graphden.executor.runtime-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.interface]
     [graphden.executor.runtime :as rt]))
 
 
@@ -75,3 +76,32 @@
       ;; Per `hof-callable`'s :else branch inside the IDeref clause: if
       ;; the derefed value isn't a UUID, it's returned. Deref-and-return.
       (is (= inner (rt/hof-callable {:func wrapped} :func nil))))))
+
+
+(deftest hof-callable-uuid-resolves-via-make-callable
+  (testing "raw UUID arg → wrap via make-single-arg-callable"
+    (let [calls (atom [])
+          fake-callable (fn [x] (str "called-with " x))]
+      ;; `hof-callable` resolves `make-single-arg-callable` lazily via
+      ;; requiring-resolve. Stub it via with-redefs so we don't need a
+      ;; full executor context — just verify the UUID hits the wrap
+      ;; path with the expected (ctx, fn-id) call.
+      (with-redefs [graphden.executor.interface/make-single-arg-callable
+                    (fn [ctx fn-id] (swap! calls conj [ctx fn-id]) fake-callable)]
+        (let [id (random-uuid)
+              result (rt/hof-callable {:func id} :func :ctx-sentinel)]
+          (is (identical? fake-callable result))
+          (is (= [[:ctx-sentinel id]] @calls)))))))
+
+
+(deftest hof-callable-ideref-of-uuid
+  (testing "IDeref-wrapped UUID also routes through make-callable"
+    (let [calls (atom [])
+          fake-callable (fn [x] x)]
+      (with-redefs [graphden.executor.interface/make-single-arg-callable
+                    (fn [ctx fn-id] (swap! calls conj [ctx fn-id]) fake-callable)]
+        (let [id (random-uuid)
+              wrapped (delay id)
+              result (rt/hof-callable {:func wrapped} :func :ctx-sentinel)]
+          (is (identical? fake-callable result))
+          (is (= [[:ctx-sentinel id]] @calls)))))))

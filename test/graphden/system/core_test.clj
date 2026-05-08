@@ -92,10 +92,12 @@
 ;; =============================================================================
 
 (defn- mock-sync-fns
-  "Mock for sync-fns-to-storage! that returns a map of fns."
-  ([_storage fn-defs] (mock-sync-fns _storage fn-defs {}))
-  ([_storage fn-defs _ns-id-map]
-   ;; Return a map of fn-name -> fn-entity for each fn-def
+  "Mock for sync-fns-to-storage! covering all arities (2/3/4/5)."
+  ([_storage fn-defs] (mock-sync-fns _storage fn-defs {} {} {}))
+  ([_storage fn-defs _ns-id-map] (mock-sync-fns _storage fn-defs _ns-id-map {} {}))
+  ([_storage fn-defs _ns-id-map _extra-name->id]
+   (mock-sync-fns _storage fn-defs _ns-id-map _extra-name->id {}))
+  ([_storage fn-defs _ns-id-map _extra-name->id _extra-defs-by-name]
    (into {}
          (map (fn [fn-def]
                 [(:name fn-def) {:id (random-uuid) :name (name (:name fn-def))}])

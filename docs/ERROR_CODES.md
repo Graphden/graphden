@@ -67,25 +67,18 @@ Error types follow the pattern `:category/specific-error` where:
 **Component:** storage-protocol
 **Description:** Attempted to insert a record with a duplicate unique key.
 **Ex-data keys:**
-- `:entity` - Entity name (`:fn` or `:arg`)
+- `:entity` - Entity name (`:fn`, `:slot`, `:fn-slot`, `:binding`, `:binding-list-item`)
 - `:field` - Field that violated uniqueness
 - `:value` - The duplicate value
 
 ### `:constraint-violation/dependency-cycle`
 **Component:** storage-protocol (GraphConstraints)
-**Description:** Creating an arg with ref-id would create a dependency cycle.
+**Description:** A binding's `:ref-fn-id` (or list-item's `:ref-fn-id`)
+would create a dependency cycle through fn references.
 **Ex-data keys:**
-- `:owner-fn-id` - Function owning the arg
-- `:target-fn-id` - Target function being referenced via ref-id
+- `:owner-fn-id` - Function owning the binding
+- `:target-fn-id` - Target function being referenced via ref-fn-id
 - `:cycle-path` - Path showing the cycle
-
-### `:constraint-violation/invalid-source-id`
-**Component:** storage-protocol (GraphConstraints)
-**Description:** Arg's source-id doesn't reference a valid ancestor arg.
-**Ex-data keys:**
-- `:fn-id` - The function owning the arg
-- `:source-id` - The invalid source-id
-- `:parent-id` - The function's parent-id
 
 ## Execution Errors
 

@@ -1,0 +1,35 @@
+;; REGRESSION: a `:sequence`-typed slot bound to a fn-ref doesn't
+;; surface as a visible edge in the editor's layout.
+;;
+;; Repro fn-def: `:ex-regression-str-via-ref` — `:str/:parts` is
+;; `:sequence`-typed; we bind it to the fn-ref `:_ex-regression-list`
+;; (a plain `:list` of literals). At runtime the call works correctly
+;; (`:str` joins the three items into "abc"). In the editor, however,
+;; navigating to `:ex-regression-str-via-ref` shows ONLY the root card
+;; — there is no `parts` edge going to the `:_ex-regression-list`
+;; card, even though the binding exists in storage.
+;;
+;; Same pattern in production: `:web-server`'s router chain ends at
+;; `:_router/:routes :all`, and the `:all` fn-card is invisible from
+;; web-server unless you navigate to it directly.
+;;
+;; The browser-test `tools/browser-test/regression-sequence-fn-ref.test.js`
+;; pins this fix in place: it asserts that
+;; `:ex-regression-str-via-ref`'s graph has exactly the four expected
+;; edges (parts inheritance from str + the outgoing parts ref + the
+;; three item-edges below the list card), failing loudly if a future
+;; layout-pipeline change drops the ref edge again.
+
+
+{:namespace "examples.regression.sequence-fn-ref"
+ :description "Pins down a layout-pipeline regression: :sequence-typed slot bound to a fn-ref must surface as an edge + downstream fn-card."
+ :fns
+ [{:name :_ex-regression-list
+   :description "A simple list-of-literals. Three string items, joined into \"abc\" when consumed by `:str/:parts` upstream."
+   :parent :list
+   :args {:items [{:value "a"} {:value "b"} {:value "c"}]}}
+
+  {:name :ex-regression-str-via-ref
+   :description "Reproduce the regression: bind the sequence-typed `:parts` slot to a fn-ref. Expected layout: ex-regression-str-via-ref card → `parts` edge → _ex-regression-list card. If the edge or downstream card is missing, the layout BFS dropped the ref."
+   :parent :str
+   :args {:parts :_ex-regression-list}}]}

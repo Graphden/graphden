@@ -1,924 +1,536 @@
 # Graphden: Visual Functional Programming System
 
-> **Last updated:** 2026-03-11
->
-> This document describes the technical architecture of graphden.
-> For packages system, see [PACKAGES.md](PACKAGES.md).
-> For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
+> Technical architecture of graphden. For packages and module
+> conventions, see [PACKAGES.md](PACKAGES.md). For implementation
+> status, see [ROADMAP.md](ROADMAP.md). For design rationale, see
+> [PHILOSOPHY.md](PHILOSOPHY.md).
 
 ## Table of Contents
 
-1. [Critical Model Analysis](#part-1-critical-model-analysis) - Design decisions and alternatives
-2. [Constraints Protocol](#part-2-constraints-protocol-graphconstraints) - Graph integrity
-3. [Recursion and Cycles](#part-3-recursion-and-cycles) - Handling recursive patterns
-4. [Data Schema](#part-4-data-schema) - Entity definitions
-5. [Execution Model](#part-5-execution-model) - Lazy evaluation with delays
-6. [System Limitations](#part-6-system-limitations) - Known constraints and mitigations
-7. [Distributed Execution](#part-7-distributed-execution-future) - Parallelization and distribution
-8. [Appendices](#appendix-a-component-dependency-graph) - Reference material
+1. [Design Overview](#part-1-design-overview)
+2. [Constraints Protocol](#part-2-constraints-protocol)
+3. [Recursion and Cycles](#part-3-recursion-and-cycles)
+4. [Data Schema](#part-4-data-schema)
+5. [Execution Model](#part-5-execution-model)
+6. [Composition (fn-defs)](#part-6-composition-fn-defs)
+7. [System Limitations](#part-7-system-limitations)
+8. [Distributed Execution (Future)](#part-8-distributed-execution-future)
+9. [Appendices](#appendix-a-storage-backend-architecture)
 
 ---
 
 ## Part 1: Design Overview
 
-### 2-Entity Graph Model
+The graph is built from five entity types arranged in a small,
+purposeful set:
 
-The graph uses only two entity types: `fn` and `arg`. This minimal model enables
-function composition through inheritance.
+- **fn** — function or type-row. Inheritance via `parent-fn-ids`
+  (many-to-many junction). A fn has different roles depending on
+  which fields are set:
+  - `parent-fn-ids` empty + `impl-hash` set → base-fn (Clojure impl)
+  - `parent-fn-ids` empty + `impl-hash=nil` + slots/refine/list →
+    type-row (record / refinement / list)
+  - `parent-fn-ids` non-empty → composed fn
+  - `name=nil` → anonymous (deduped via `anonymous-hash`)
+- **slot** — atomic `(name, type-fn-id)` pair, immutable
+  post-create. The same slot may be exposed by many fns through
+  `fn-slot` (sharing means MI inheritance picks up identity).
+- **fn-slot** — junction `(fn-id, slot-id, position)`. "Which slots
+  does this fn expose, in what order." Position drives the editor
+  layout and the impl arg order for base-fns.
+- **binding** — per-`(fn-id, slot-id)` overlay carrying any of:
+  `value`, `ref-fn-id`, `rename-to`, `type-override-fn-id`,
+  `terminal`, `list-append`, `list-closed`, `description`,
+  `override-kind`. Closer-fn-wins via inheritance walk.
+- **binding-list-item** — sequence content under a list-typed
+  binding, ordered by `position`.
 
-**fn (function):**
-- `parent-id=nil` → base-fn (has Clojure implementation)
-- `parent-id` set → composed fn (inherits from parent)
-- `name=nil` → local fn (scoped, not globally visible)
+The shape lets composition happen entirely at the data layer: a
+composed fn is "a `parent-fn-ids` plus zero or more bindings on the
+inherited slots." No runtime arg injection.
 
-**arg (argument):**
-- `source-id=nil` → primary argument (defines interface)
-- `source-id` set → inherited/forwarded argument
-- `value` → literal JSONB value
-- `ref-id` → reference to fn (execute and use result)
-- `is-fn=true` → pass fn-id directly (for HOF)
-
-**Schema:**
-
-```
-fn:
-  id: uuid (PK)
-  name: text (nullable) - nil for local fns
-  parent-id: ref<fn> (nullable) - nil for base-fn
-  return-type: enum<value-kind> (nullable)
-  impl-hash: text (nullable) - for base-fn version tracking
-  UNIQUE(name)
-
-arg:
-  id: uuid (PK)
-  fn-id: ref<fn>
-  via-fn-id: ref<fn> (nullable) - for forwarding through nested fns
-  source-id: ref<arg> (nullable) - nil for primary, set for inherited
-  value: JSONB (nullable) - literal value
-  ref-id: ref<fn> (nullable) - reference to fn
-  name: text (nullable)
-  type: enum<value-kind> (nullable)
-  required: bool (nullable)
-  is-fn: bool (nullable) - true for HOF args
-  UNIQUE(fn-id, source-id)
-  UNIQUE(fn-id, name)
-```
-
-**Example: Composing an add function:**
+**Example: an `add-10` that pre-fills the first number:**
 
 ```
-;; Base function (Clojure implementation)
-fn: add
-  parent-id: nil
-  return-type: :int
-  args:
-    - {name: "a", type: :int, required: true}
-    - {name: "b", type: :int, required: true}
+fn add  (base-fn, parent-fn-ids: [], impl-hash: <hash of `+`>)
+slot s-a  (name: "a", type-fn-id: int)
+slot s-b  (name: "b", type-fn-id: int)
+fn-slot {fn-id: add, slot-id: s-a, position: 0}
+fn-slot {fn-id: add, slot-id: s-b, position: 1}
 
-;; Composed function (inherits from add, binds 'a' to 10)
-fn: add-10
-  parent-id: add
-  args:
-    - {source-id: add/a, value: 10}  ; binds parent's 'a'
-    ; 'b' not specified = exposed to callers
+fn add-10  (parent-fn-ids: [add])
+binding {fn-id: add-10, slot-id: s-a, value: 10}
+;; s-b is not bound — it surfaces as `add-10`'s free input
 ```
 
-**Benefits:**
-- Only 2 entity types (down from 6)
-- Inheritance via parent-id eliminates separate schema entities
-- Args combine schema + value in one entity
-- All-or-nothing inheritance: if fn has ANY args, use only those
+Calling `(execute ctx add-10-id {:b 5})` runs `add` with `a=10, b=5`.
 
-**Constraints are extracted into an explicit protocol** - each storage MUST implement them.
+Constraints are extracted into an explicit protocol; each storage
+implementation MUST enforce them at write time.
 
 ---
 
-## Part 2: Constraints Protocol (GraphConstraints)
+## Part 2: Constraints Protocol
 
 ### Protocol Definition
 
-**File:** `src/graphden/storage/protocol/interface.clj`
+`src/graphden/storage/protocol/core.clj`:
 
 ```clojure
 (defprotocol GraphConstraints
-  "Function graph integrity constraints.
-   Each storage MUST implement this protocol.
-   Violation of any constraint = exception thrown."
-
   (validate-no-dependency-cycle!
-    [this owner-fn-id target-fn-id]
-    "Constraint: reference to target-fn must not create a dependency cycle.
-     Called when creating arg with ref-id pointing to another fn.
-     Throws: :constraint-violation/dependency-cycle"))
+    [this owner-fn-id ref-fn-id]
+    "Throws :constraint-violation/dependency-cycle when a binding's
+     `:ref-fn-id` (or list-item's) would close a cycle through fn
+     references."))
 ```
 
-### Implementation Architecture
+### Schema-level constraints
 
-The implementation uses a **shared validation logic** pattern with pluggable helpers:
+These hold by virtue of `UNIQUE` keys in the entity definitions:
 
-```clojure
-;; ConstraintHelpers protocol - each storage implements this
-(defprotocol ConstraintHelpers
-  (collect-dependency-chain [this fn-id]))
-```
+| Entity | Unique key |
+|---|---|
+| `fn` | `name` (NULL allowed for anonymous / local fns) |
+| `fn-slot` | `(fn-id, slot-id)` |
+| `binding` | `(fn-id, slot-id)` |
+| `binding-list-item` | `(binding-id, position)` |
 
-**Benefits of this approach:**
-- Code reuse across all storage backends
-- Each backend optimizes its helpers (SQL queries, graph traversal)
-- Consistent error messages and behavior
+### Implementation per backend
 
-### Implementation in Storage Backends
+| Backend | Cycle detection |
+|---|---|
+| postgres | `WITH RECURSIVE` CTE walking `binding.ref-fn-id` and `binding-list-item.ref-fn-id` |
 
-| Storage | Implementation | Optimization |
-|---------|----------------|--------------|
-| postgres | `storage/postgres/constraints.clj` | SQL queries |
-| graph-storage-age | `storage/age/graph.clj` | Cypher queries via Apache AGE |
+The protocol's shared validation logic
+(`validate-no-dependency-cycle-impl`) runs against backend-specific
+helpers (`ConstraintHelpers/collect-dependency-chain`), so behavior
+is uniform across storages.
 
 ---
 
 ## Part 3: Recursion and Cycles
 
-### Recursion
+### Cyclic dependencies
 
-**Problem**: A function can reference itself.
+`validate-no-dependency-cycle!` rejects any binding whose
+`:ref-fn-id` would close a cycle through fn references — including
+the self-reference `owner-fn-id == ref-fn-id` (caught early in
+`validate-no-dependency-cycle-impl` before walking the dependency
+chain). The walk follows binding `ref-fn-id`,
+`type-override-fn-id`, and `binding-list-item.ref-fn-id` edges; any
+binding pointing at its own fn or at an ancestor in its ref-chain
+is a write-time error.
 
 ```
-fn: factorial
-  fn-args: [
-    {arg: n, value: <input argument>},
-    {arg: recursive-call, value: ref<factorial>}  // Reference to itself
-  ]
+fn A binding {slot x, ref-fn-id B}
+fn B binding {slot y, ref-fn-id A}    ✗ dependency-cycle
 ```
 
-**With lazy execution this works**, given a base case:
+### Recursion at runtime, not in the graph
+
+Because graph-level cycles are forbidden, recursive Clojure
+functions don't bind themselves through `:ref-fn-id`. Instead, a
+base-fn impl re-enters the executor by name:
 
 ```clojure
-;; Self-referential base-fn (schematic — in practice self-recursion
-;; is expressed via fn-def composition over :if + a ref back to the
-;; fn itself, not in Clojure).
-(defbase base-factorial [n recursive-call]
+(defbase fact-step [n ctx]
   (if (<= n 1)
     1
-    (* n (recursive-call {:n (dec n)}))))
+    (* n (exec/execute-by-name ctx :fact-step {:n (dec n)}))))
 ```
 
-**Danger**: infinite recursion when there's no base case. The
-compile executor has no built-in depth cap on recursion — a runaway
-graph blows the JVM stack. Storage-layer graph resolution does cap
-walks via `*max-graph-iterations*` (default 10000), which bounds the
-number of entities compile can visit when building a closure.
+The graph stores `fact-step` as a normal base-fn — no cycle to
+detect at write time. Recursion happens in the impl code; the
+executor's depth and timeout limits bound runaway.
 
-### Cyclic Dependencies (Not Recursion)
+### Mutual recursion
 
-**Problem:**
+Two fns calling each other go through the same runtime
+re-entry: each impl invokes the other by name. No graph-level
+cycle, no cycle-check rejection.
 
-```
-fn: A
-  arg1: ref<B>
+### Runtime safety
 
-fn: B
-  arg1: ref<A>
-```
-
-**When trying to compute A** -> need B -> need A -> infinity.
-
-**Difference from recursion**: Recursion is one function calling itself (controlled). Cycle is two functions calling each other (uncontrolled).
-
-**Solution**: Forbid cycles when creating arg with ref-id via `validate-no-dependency-cycle!`.
-
-| Storage | Implementation |
-|---------|----------------|
-| PostgreSQL | Recursive CTE for cycle detection |
-| Apache AGE | Cypher path queries |
-
-### Mutual Recursion
-
-```
-fn: is-even (n) -> if n=0 then true else is-odd(n-1)
-fn: is-odd (n) -> if n=0 then false else is-even(n-1)
-```
-
-Technically this is a cycle (A->B->A), but this is a VALID pattern.
-
-**How to distinguish from a "bad" cycle?**
-- Bad cycle: A needs result of B, B needs result of A (deadlock)
-- Good cycle: A calls B with DIFFERENT arguments
-
-**Solution**: Don't forbid at schema level. Protection only at runtime (depth, timeout).
+The executor caps recursion through `:max-depth` and `:timeout-ms`
+on the execution context (defaults 1000 and 30 s). Storage-layer
+graph resolution caps walks via `*max-graph-iterations*` (default
+10000) when building closures.
 
 ---
 
 ## Part 4: Data Schema
 
-### Entities (2-Entity Model)
-
 ```
-+------------------------------------------------------------------+
-| fn (function)                                                     |
-+------------------------------------------------------------------+
-| id: uuid (PK)                                                     |
-| name: text (nullable) - nil for local fns                        |
-| parent-id: ref<fn> (nullable) - nil for base-fn                  |
-| return-type: enum<value-kind> (nullable)                         |
-| impl-hash: text (nullable) - for base-fn version tracking        |
-| UNIQUE(name)                                                      |
-+------------------------------------------------------------------+
-| parent-id=nil → base-fn (has Clojure implementation)             |
-| parent-id set → composed fn (inherits from parent)               |
-| name=nil → local fn (scoped, not globally visible)               |
-+------------------------------------------------------------------+
-         |
-         | 1:N
-         v
-+------------------------------------------------------------------+
-| arg (argument)                                                    |
-+------------------------------------------------------------------+
-| id: uuid (PK)                                                     |
-| fn-id: ref<fn>                                                    |
-| via-fn-id: ref<fn> (nullable) - for forwarding through nested    |
-| source-id: ref<arg> (nullable) - nil for primary arg             |
-| value: JSONB (nullable) - literal value                          |
-| ref-id: ref<fn> (nullable) - reference to fn                     |
-| name: text (nullable) - inherited from source if nil             |
-| type: enum<value-kind> (nullable) - inherited from source        |
-| required: bool (nullable) - inherited from source                |
-| is-fn: bool (nullable) - true for HOF args                       |
-| UNIQUE(fn-id, source-id)                                         |
-| UNIQUE(fn-id, name)                                               |
-+------------------------------------------------------------------+
-| source-id=nil → primary argument (defines interface)             |
-| source-id set → inherited/forwarded argument                     |
-| value set → literal value bound                                  |
-| ref-id set → reference to fn (execute and use result)            |
-| is-fn=true → pass fn-id directly (for HOF)                       |
-| value=nil AND ref-id=nil → exposed (part of fn interface)        |
-+------------------------------------------------------------------+
++-----------------------------------------------------------+
+| fn                                                         |
++-----------------------------------------------------------+
+| id                  uuid PK                                |
+| name                text NULL (NULL → anonymous)           |
+| namespace-id        ref<ns> NULL                           |
+| parent-fn-ids       ref-many<fn>  -- inheritance closure   |
+| impl-hash           text NULL    -- base-fn marker         |
+| base-fn-id          ref<fn> NULL -- :refine target         |
+| element-fn-id       ref<fn> NULL -- :list element type     |
+| return-type-fn-id   ref<fn> NULL                           |
+| anonymous-hash      text NULL    -- dedup key              |
+| constraint          jsonb NULL   -- :refine predicate      |
+| description         text NULL                              |
+| UNIQUE(name)                                               |
++-----------------------------------------------------------+
+                  |
+                  | many-to-many through fn-slot
+                  v
++-----------------------------------------------------------+
+| slot                                                       |
++-----------------------------------------------------------+
+| id           uuid PK                                       |
+| name         text                                          |
+| type-fn-id   ref<fn>  -- the slot's value type             |
+| required     bool NULL                                     |
+| description  text NULL                                     |
++-----------------------------------------------------------+
+                  ^
+                  | reference
+                  |
++-----------------------------------------------------------+
+| fn-slot (junction)                                         |
++-----------------------------------------------------------+
+| id        uuid PK                                          |
+| fn-id     ref<fn>                                          |
+| slot-id   ref<slot>                                        |
+| position  int                                              |
+| UNIQUE(fn-id, slot-id)                                     |
++-----------------------------------------------------------+
+
++-----------------------------------------------------------+
+| binding (per-(fn, slot) overlay)                           |
++-----------------------------------------------------------+
+| id                  uuid PK                                |
+| fn-id               ref<fn>                                |
+| slot-id             ref<slot>                              |
+| value               jsonb NULL                             |
+| ref-fn-id           ref<fn> NULL                           |
+| rename-to           text NULL                              |
+| type-override-fn-id ref<fn> NULL                           |
+| description         text NULL                              |
+| terminal            bool NULL  -- seal slot from descendants|
+| list-append         bool NULL  -- extend parent's chain    |
+| list-closed         bool NULL  -- forbid further append    |
+| override-kind       enum<override-kind> NULL               |
+| UNIQUE(fn-id, slot-id)                                     |
++-----------------------------------------------------------+
+
++-----------------------------------------------------------+
+| binding-list-item (sequence content)                       |
++-----------------------------------------------------------+
+| id          uuid PK                                        |
+| binding-id  ref<binding>                                   |
+| position    int                                            |
+| value       jsonb NULL                                     |
+| ref-fn-id   ref<fn> NULL                                   |
+| literal     bool NULL  -- :literal? for keyword items      |
+| UNIQUE(binding-id, position)                               |
++-----------------------------------------------------------+
 ```
 
-### Inheritance Model
+### Inheritance model
 
-**All-or-nothing inheritance:** If a composed fn has ANY args, only those args are used.
-Args without value/ref-id are exposed to callers (they form the fn's interface).
+A composed fn `F` inherits its parents' slots through the
+`parent-fn-ids` BFS closure. Each slot in that closure is exposed
+once at `F`; if multiple parents expose the same `slot-id`, that's
+sharing (fine). If they expose different slot-ids with the same
+`slot.name`, that's a name collision (rejected at write time by
+the editor's MI validator).
 
-**Example:**
-```
-fn: add (base-fn)
-  args: [{name: "a", type: :int}, {name: "b", type: :int}]
+A binding "applies" to the slot it names (`binding.slot-id`) at
+its owning fn (`binding.fn-id`). When rendering / executing `F`,
+walk `F`'s closure and overlay each slot with the closest
+binding's value/ref/rename. Item chains resolve the same way:
+`list-append: true` extends parent's items rather than replacing.
 
-fn: add-10 (parent-id: add)
-  args: [{source-id: add/a, value: 10}]  ; only 'a' is bound
-  ; 'b' is NOT automatically inherited - caller must provide it
-```
+### Versioning
 
-### Constraints and Their Implementation
+Versioned entities (per `graphden.versioning.storage.resolution/entity-config`):
 
-| # | Constraint | PostgreSQL |
-|---|------------|------------|
-| 1 | fn.name is unique | UNIQUE(name) |
-| 2 | arg is unique per fn + source | UNIQUE(fn-id, source-id) |
-| 3 | arg name is unique within fn | UNIQUE(fn-id, name) |
-| 4 | No cycles in fn graph through ref-id | Recursive CTE |
+| Entity | Version table | Versioned fields |
+|---|---|---|
+| `fn` | `fn-version` | `name`, `impl-hash`, `description`, `constraint`, `base-fn-id`, `element-fn-id`, `return-type-fn-id`, `anonymous-hash` |
+| `fn-slot` | `fn-slot-version` | `fn-id`, `slot-id`, `position` |
+| `binding` | `binding-version` | `fn-id`, `slot-id`, `value`, `ref-fn-id`, `override-kind`, `rename-to`, `type-override-fn-id`, `description`, `terminal`, `list-append`, `list-closed` |
+| `binding-list-item` | `binding-list-item-version` | `binding-id`, `position`, `value`, `ref-fn-id`, `literal` |
 
-### Constraint #4 in Detail (No Dependency Cycles)
-
-**When creating arg with ref-id:**
-
-1. Get target-fn-id from ref-id
-2. Recursively collect all fns that target-fn references through args with ref-id
-3. If fn-id (owner of this arg) is in this set -> REJECT (cycle)
-
-**Implementation**: `validate-no-dependency-cycle!` with recursive CTE.
+`slot` is intentionally not versioned — name+type is the slot's
+identity, so changing either creates a new slot.
 
 ---
 
 ## Part 5: Execution Model
 
-### Laziness via Clojure Delays
+### Compile at startup
 
-**File:** `src/graphden/executor/argument_resolution.clj`
+Default mode (`EXECUTOR=compiled`): every fn in the graph is
+compiled to a thunk at startup. Each call to `execute-by-name`
+delegates to a precomputed callable; `/health` ~10 ms,
+`/api/graph/layout` ~130 ms on the current dev graph.
 
-Arguments are wrapped in Clojure `delay` objects for lazy evaluation. This native approach:
-- Leverages Clojure's built-in memoization (delays compute once, cache result)
-- Enables lazy evaluation — values are only computed when dereferenced with `@`
-- Provides simple, idiomatic error handling
+`graphden.executor.compile/compile-all` walks the graph and emits:
 
-```clojure
-;; Literal value → immediate delay
-(delay value)
+- per-base-fn thunks that wrap the Clojure impl with delay-resolved
+  arg slots,
+- per-composed-fn thunks that wire bindings (value / ref / list-items)
+  into the parent's free-arg map,
+- a memo cache keyed by `ref-fn-id` (shared across nested calls for
+  the same execution).
 
-;; fn reference (type = :fn) → delay returning UUID for HOF
-(delay uuid-value)
+The legacy queue-based executor was retired; `compile-runtime` is
+the executor.
 
-;; fn reference (other type) → delay that executes function
-(wrap-delay-with-context arg-name :fn-ref
-  #(execute-internal context uuid-value nil))
+### Laziness via Clojure delays
 
-;; fn reference with is-fn=false → delay that executes and caches by ref-id
-(wrap-delay-with-context arg-name :fn-ref
-  #(execute-with-caching context ref-fn-id))
-```
+Arguments arrive at base-fn impls as resolvable thunks (`rt/resolve-arg`
+handles both new-style thunks and legacy `IDeref` delays). The
+`defbase` macro injects symbol-name → `(rt/resolve-arg args :symbol)`
+let-bindings so impls reference args by name without writing the
+deref dance themselves.
 
-### Argument Resolution Priority
-
-Arguments are resolved in this order (highest priority first):
-
-1. **Own args** — Args directly on the fn being executed
-2. **provided-args** — Explicitly passed at execute time (from HOF callables, for exposed args)
-3. Required arg with no value → error
-4. Optional arg with no value → delay returning nil
-
-### Argument Types and Their Handling
-
-**arg has mutually exclusive value fields:**
-- `value` (JSONB) - literal value
-- `ref-id` (ref<fn>) - reference to another fn
-
-**Runtime behavior is controlled by `is-fn` flag:**
-
-| arg field | is-fn | Delay Behavior |
-|-----------|-------|----------------|
-| value (literal) | any | `@delay` → literal value |
-| ref-id | false | `@delay` → execute fn, use result (cached) |
-| ref-id | true | `@delay` → pass fn-id directly (for HOF) |
-
-**Key principle:** The `is-fn` flag on the arg decides how to handle the reference.
-
-### Result Caching
-
-Results of executed refs are cached within execution by ref-fn-id:
-
-```
-fn: report
-  arg1: {ref-id: calculate-sales}      ← executes calculate-sales
-  arg2: {ref-id: calculate-sales}      ← same ref-id, result is cached
-
-// calculate-sales executes ONCE, result shared between arg1 and arg2
-```
-
-**Exposed arguments:** Args without value/ref-id form the fn's interface. Pass them at runtime, keyed by external (author-chosen) arg name:
+The chosen-branch laziness comes from Clojure's native `if`: the
+unchosen branch's symbol is never deref'd, so its thunk never fires.
 
 ```clojure
-;; fn-a exposes an argument externally named :count
-(execute ctx fn-a-id {:count 42})
-```
-
-### Base Functions and Their Types
-
-Base functions receive arguments as delays and use `@` (deref) to get values:
-
-```clojure
-;; Regular function - deref all arguments
-;; Uses defbase macro from fn-registry for automatic delay handling
-(defbase add
-  {:args {:nums :jsonb}
-   :return-type :numeric}
-  (apply + nums))  ; defbase auto-derefs, so 'nums' is the value
-
-;; Manual implementation shows the raw delay handling:
-(def add-def
-  {:args {:nums :jsonb}
-   :return-type :numeric
-   :impl (fn [delays _ctx]
-           (apply + @(:nums delays)))})  ; must deref manually
-
-;; Conditional - only deref the branch we need (true laziness)
 (defbase if-fn
-  {:args {:condition :bool, :then :any, :else :any}
-   :lazy-args #{:then :else}  ; don't auto-deref these
-   :return-type :any}
-  (if condition
-    @then    ; manually deref chosen branch
-    @else))
-
-;; HOF - f is passed as fn-id (type :fn), not executed
-;; The target function must have exactly 1 required argument (any name)
-(defbase map-fn
-  {:args {:f :fn, :coll :jsonb}
-   :return-type :jsonb}
-  (let [callable (exec/make-single-arg-callable ctx f)]
-    (mapv callable coll)))
+  "Lazy if: only the chosen branch's ref-thunk is invoked."
+  [test then else]
+  (if test then else))
 ```
 
-### Execution Context
+Structural benefits:
+- branches not taken (e.g. `:if`'s unchosen side) never evaluate;
+- the same `ref-fn-id` materialises at most once per execution
+  through `result-cache`;
+- HOF callable construction reuses the resolver layer — no ad-hoc
+  memoisation.
 
-**File:** `src/graphden/executor/context.clj`
+### HOF single-arg model
+
+Higher-order functions take a `:fn`-typed slot. The executor's
+runtime layer (`graphden.executor.runtime/resolve-arg`) detects
+the `:fn` type and wraps a raw fn-id via
+`make-single-arg-callable` BEFORE the impl gets it — so the impl
+receives an already-callable function. The callable threads its
+input through the target's first free slot; reduce-shape HOFs
+receive `[acc item]` as a single vector arg.
 
 ```clojure
-(defrecord ExecutionContext
-  [storage           ; Storage instance for graph resolution
-   execution-graph   ; Cached graph data (resolved once at top level)
-   base-fns          ; Registry of base function implementations
-   max-depth         ; Maximum recursion depth (default: 1000)
-   timeout-ms        ; Maximum execution time (default: 30000ms)
-   start-time        ; Execution start time
-   depth             ; Current recursion depth
-   current-ref-fn-id ; Current ref-fn-id being evaluated (nil for root)
-   result-cache      ; Atom: {ref-fn-id -> computed-result}
-   strict-type-validation?  ; If true (default), throw on unknown types
-   max-unknown-types ; Circuit breaker for forward compat mode (default: 10)
-   unknown-type-counter     ; Atom: count of unknown types encountered
-   clock             ; Function returning current time (for testing)
-   cache-warning-threshold  ; Warn when cache reaches this size (default: 1000)
-   cache-max-size])  ; Hard limit on cache size (default: 10000)
+(defbase map-fn [func coll]
+  (if coll
+    (map func coll)   ;; eager mode — caller supplied a coll
+    (map func)))      ;; transducer mode — no coll
 ```
 
-**Key design decisions:**
-1. **`execution-graph` caching** — Graph resolved once at top level, reused for all nested calls
-2. **`base-fns` registry** — Direct access to implementations without global state
-3. **`storage` reference** — Enables `ExecutionGraph` protocol calls if needed
-4. **`result-cache`** — Shared cache for fn computations within execution (by ref-fn-id)
-5. **`current-ref-fn-id`** — Tracks which ref-fn is being evaluated
-6. **`clock`** — Injectable time source for deterministic timeout testing
-7. **Forward compatibility** — `strict-type-validation?` + circuit breaker for schema migrations
+The HOF marker is the slot's effective type — `slot.type-fn-id`
+overlaid by `binding.type-override-fn-id`. When the resolved type
+is `:fn`, the executor passes the wrapped callable; otherwise it
+executes the ref and uses its result.
 
-### Limit Checking
+### Argument resolution
+
+Per call, the executor resolves a slot's value in this order:
+
+1. `provided-args` map passed to `execute` (free-arg fill-in)
+2. closest binding's `:value` or `:ref-fn-id` along the
+   inheritance closure
+3. closest list-binding's items (for sequence-typed slots), with
+   `list-append` extending parent items
+4. fail with `:execution-error/missing-required-arg` if the slot is
+   required and unfilled
+
+### Limit checking
 
 ```clojure
 (defn- check-limits! [context]
-  (check-depth-limit! context)   ; throws :execution-error/max-depth-exceeded
-  (check-timeout-limit! context)) ; throws :execution-error/timeout
+  (check-depth-limit! context)    ; :execution-error/max-depth-exceeded
+  (check-timeout-limit! context)) ; :execution-error/timeout
 ```
 
-**Important**: Timeout is checked at the START of each function call, not during execution. A long-running base function will complete fully even if it exceeds the timeout. For precise timeout control, base functions should implement their own timeout logic.
+Timeout fires at the START of each call, not mid-impl — a slow
+base-fn finishes even past the budget. Lazy-seq guards
+(`*max-lazy-seq-size*`, `*max-nested-collection-depth*`) realise
+infinite/deep inputs at call time so failures surface before the
+impl runs.
 
-### Lazy Sequence Protection
+### Local argument binding
 
-**File:** `src/graphden/executor/argument_resolution.clj`
-
-Lazy sequences are a potential DoS vector — an attacker could pass `(range)` (infinite sequence) as an argument. The executor protects against this:
-
-```clojure
-;; Configuration (in storage-protocol/config.clj)
-(def ^:dynamic *max-lazy-seq-size* 100000)        ; max elements
-(def ^:dynamic *max-nested-collection-depth* 100) ; max nesting
-
-;; Lazy sequences are realized with bounds when creating delays
-(realize-lazy-value value)
-;; - Lazy seqs → vectors (with size limit)
-;; - Nested maps → recursively realized (with depth limit)
-;; - Throws :execution-error/lazy-seq-too-large or :collection-too-deep
-```
-
-This ensures errors occur at argument evaluation time, not during consumption by base functions.
-
-### Local Argument Binding
-
-**Problem**: How to provide different argument values for the same function at different call sites?
-
-**Solution**: Create a composed fn that inherits from the base-fn and provides specific arg values.
+To call the same base-fn with different inputs at different sites,
+create a composed fn per site:
 
 ```
-;; Example: Using add twice with different arguments
+fn add-10-20  (parent-fn-ids: [add])
+binding {slot s-a, value 10}
+binding {slot s-b, value 20}
 
-;; 1. Base add function
-fn: add (parent-id: nil)
-  args: [{name: "a", type: :int}, {name: "b", type: :int}]
-
-;; 2. Composed fn for first usage (adds 10 + 20)
-fn: add-10-20 (parent-id: add)
-  args: [{source-id: add/a, value: 10},
-         {source-id: add/b, value: 20}]
-
-;; 3. Composed fn for second usage (adds 30 + 40)
-fn: add-30-40 (parent-id: add)
-  args: [{source-id: add/a, value: 30},
-         {source-id: add/b, value: 40}]
-
-;; 4. Parent function uses both
-fn: parent-fn (parent-id: some-combiner)
-  args: [{ref-id: add-10-20},   ;; Result: 30
-         {ref-id: add-30-40}]   ;; Result: 70
+fn add-30-40  (parent-fn-ids: [add])
+binding {slot s-a, value 30}
+binding {slot s-b, value 40}
 ```
 
-**Key insight**: All argument binding happens in the database via arg entities. No runtime argument injection is needed. The graph structure (fn + args with source-id + value) is sufficient for all use cases.
-
-### HOF Single-Argument Model
-
-Higher-order functions (map, filter, reduce, etc.) use a **single-argument model** for the functions they invoke:
-
-**Key principle**: Functions passed to HOF must have exactly **one required argument** (any name).
-
-```clojure
-;; Function for map/filter - one required arg
-(defbase is-positive
-  {:args {:n :int}   ; exactly 1 required arg
-   :return-type :bool}
-  (> n 0))
-
-;; Function for reduce - one required arg receiving [acc item] vector
-(defbase sum-pair
-  {:args {:pair :jsonb}  ; exactly 1 required arg
-   :return-type :int}
-  (let [[acc item] pair]
-    (+ acc item)))
-```
-
-**How HOF works internally:**
-
-1. HOF receives `fn-id` (UUID) for the `:fn` type argument
-2. HOF calls `exec/make-single-arg-callable` to create a callable
-3. `make-single-arg-callable` finds the single required arg and creates a function that passes values to it
-
-```clojure
-;; Inside map implementation
-(defbase map-fn
-  {:args {:f :fn, :coll :jsonb}
-   :return-type :jsonb}
-  (let [callable (exec/make-single-arg-callable ctx f)]
-    (mapv callable coll)))
-
-;; Inside reduce implementation
-(defbase reduce-fn
-  {:args {:f :fn, :init :any, :coll :jsonb}
-   :return-type :any}
-  (let [callable (exec/make-single-arg-callable ctx f)]
-    (reduce (fn [acc item] (callable [acc item])) init coll)))
-```
-
-**Why single-arg model:**
-
-1. **No naming convention** — user can name their argument anything (`n`, `x`, `value`, etc.)
-2. **Simple API** — HOF doesn't need to know argument names
-3. **Consistent behavior** — all HOF work the same way
-4. **Explicit for reduce** — `[acc item]` vector makes it clear what the function receives
-
-**Usage example in graph:**
-
-```
-;; 1. Create base function for doubling (1 required arg)
-fn: double-fn (parent-id: mul)
-  args: [{source-id: mul/a, value: 2},   ; bind 'a' to 2
-         {source-id: mul/b, name: "n"}]  ; expose 'b' as 'n'
-
-;; 2. Use in map
-fn: map-doubles (parent-id: map-fn)
-  args: [{source-id: map/f, ref-id: double-fn, is-fn: true},  ; fn reference
-         {source-id: map/coll, value: [1, 2, 3]}]             ; literal
-
-;; 3. Execute: map calls double-fn with each element
-;; Result: [2, 4, 6]
-```
+All variation lives in the data — the executor stays generic.
 
 ---
 
-## Part 5.5: Function Composition (fn-defs)
+## Part 6: Composition (fn-defs)
 
-### Two-Layer Architecture
+### Two layers
 
-Graphden separates function definitions into two layers:
-
-**Layer 1: Base Functions** — Clojure implementations
+**Base-fns** carry Clojure impls (typically 1–5 lines wrapping a
+library call). They're declared in `package/module/impls.clj` with
+`defbase` and shape-described in `package/module/fns.edn`.
 
 ```clojure
-;; In executor/base-fns, web/http-kit, web/reitit modules
 (defbase const
-  "Returns a constant function that ignores input and returns x."
-  {:args {:x :any}
-   :return-type :fn}
+  "Constant fn — ignores input, returns x."
+  {:args {:x :any} :return-type :fn}
   (fn [_] x))
 
 (defbase assoc-fn
-  {:args {:m :jsonb, :k :text, :v :any}
-   :return-type :jsonb}
+  {:args {:m :jsonb :k :text :v :any} :return-type :jsonb}
   (assoc m k v))
 ```
 
-**Layer 2: Fn Entities (fn-defs)** — Pure data compositions
+**Fn-defs** are pure data compositions in `fns.edn`:
 
 ```clojure
-;; In web/server/core.clj - no Clojure code, only data
-[{:name :hello-handler-fn
-  :parent :const
-  :args {:x {:status 200 :body "Hello"}}}
+{:name :hello-handler
+ :parent :const
+ :args {:x {:status 200 :body "Hello"}}}
 
- {:name :web-server-fn
-  :parent :http-server
-  :args {:handler :router-fn
-         :port 8080}}]
-```
-
-### Fn-def Syntax
-
-Each fn-def is a map with:
-- `:name` — unique keyword identifier
-- `:parent` — base function or another fn-def to inherit from
-- `:args` — argument values (literals or references)
-
-### Reference Syntax and `is-fn` Field
-
-References to functions use simple keyword syntax: `:fn-name`. The runtime behavior is **automatically determined by the `is-fn` field** inherited from the parent arg definition.
-
-**Runtime behavior is controlled by `is-fn` flag on the parent arg:**
-- `is-fn=true` → pass fn-id directly (for HOF to call)
-- `is-fn=false` → execute fn, use result value
-
-**Examples:**
-
-```clojure
-;; HOF case: map-fn has arg {:f :fn}, so is-fn=true
-;; The fn-id is passed directly to map-fn
-{:name :double-all
- :parent :map-fn
- :args {:f :double-fn     ; map-fn will call double-fn for each element
-        :coll [1 2 3]}}
-
-;; Non-HOF case: http-server has arg {:handler :any}, so is-fn=false
-;; The fn is executed and its result is passed
-{:name :web-server-fn
+{:name :web-server
  :parent :http-server
- :args {:handler :router-fn  ; router returns Clojure fn, pass that fn
-        :port 8080}}
+ :args {:handler :hello-handler :port 8080}}
 ```
 
-### defbase Arg Type `:fn` vs `:any`
+`:args` is sugar for binding rows — each entry becomes one or more
+bindings on the named slot.
 
-The arg type in defbase controls special handling:
+### Reference syntax
 
-| Arg Type | What defbase does |
-|----------|-------------------|
-| `:fn` | Auto-wraps with `make-single-arg-callable` for HOF |
-| `:any` | No special processing, receives value as-is |
-
-**Critical distinction:**
+Bindings reference other fns via `binding.ref-fn-id`. EDN sugar:
 
 ```clojure
-;; map-fn receives fn-id, needs to create callable from it
-(defbase map-fn
-  {:args {:f :fn, :coll :jsonb}  ; :fn → f will be wrapped in callable
-   :return-type :jsonb}
-  (let [callable (exec/make-single-arg-callable ctx f)]
-    (mapv callable coll)))
+;; HOF: slot type is :fn → executor passes :double-fn's id
+{:name :double-all :parent :map-fn
+ :args {:f :double-fn :coll [1 2 3]}}
 
-;; http-server receives already-executed Clojure fn
-(defbase http-server
-  {:args {:handler :any, :port :int}  ; :any → handler is Clojure fn, not fn-id
-   :return-type :any}
-  (http-kit/run-server handler {:port port}))
+;; Non-HOF: slot type isn't :fn → executor runs :router-fn,
+;; uses its result
+{:name :web-server :parent :http-server
+ :args {:handler :router-fn :port 8080}}
 ```
 
-### Complete Example: Building a Web Server
+### Free-arg propagation
 
-```clojure
-;; === Base functions (Clojure implementations) ===
-;; const: returns (fn [_] x) — a constant function
-;; assoc: returns (assoc m k v)
-;; conj: returns (conj coll x)
-;; router: creates Ring router from routes, returns Ring handler fn
-;; http-server: starts http-kit with handler fn
+Unbound slots of a referenced fn surface as free slots of the
+caller — that's how reusable templates work. Renames (`:rename-to`)
+swap the public name; type-overrides
+(`:type-override-fn-id`) swap the effective type for that one
+fn.
 
-;; === Fn-defs (data composition) ===
-[;; 1. Handler: const returns (fn [_] response)
- {:name :hello-handler-fn
-  :parent :const
-  :args {:x {:status 200 :body "Hello"}}}
+Worked example: `:get-route` exposes `:path` and `:handler`; a
+caller binds `:path` and inherits the rest as their own free
+arg.
 
- ;; 2. Route data: {"handler" <clojure-fn>}
- ;; Note: assoc's :v arg has is-fn=false, so :hello-handler-fn is executed
- {:name :hello-handler-map-fn
-  :parent :assoc
-  :args {:m {}, :k "handler", :v :hello-handler-fn}}
-
- ;; 3. Method map: {"get" {"handler" <fn>}}
- {:name :hello-method-map-fn
-  :parent :assoc
-  :args {:m {}, :k "get", :v :hello-handler-map-fn}}
-
- ;; 4. Route tuple: ["/" {"get" {"handler" <fn>}}]
- {:name :hello-route-path-fn
-  :parent :conj
-  :args {:coll [], :x "/"}}
-
- {:name :hello-route-fn
-  :parent :conj
-  :args {:coll :hello-route-path-fn, :x :hello-method-map-fn}}
-
- ;; 5. Routes collection: [["/" {...}]]
- {:name :routes-fn
-  :parent :conj
-  :args {:coll [], :x :hello-route-fn}}
-
- ;; 6. Router: creates Ring handler from routes
- {:name :router-fn
-  :parent :router
-  :args {:routes :routes-fn}}
-
- ;; 7. Server: starts http-kit with router as handler
- ;; http-server's :handler arg has is-fn=false, so :router-fn is executed
- {:name :web-server-fn
-  :parent :http-server
-  :args {:handler :router-fn
-         :port 8080}}]
-```
-
-### Execution Flow
-
-When executing `:web-server-fn`:
-
-1. Resolve `:router-fn` reference → `is-fn=false` → execute `:router-fn`
-2. `:router-fn` needs `:routes-fn` → `is-fn=false` → execute `:routes-fn`
-3. Continue recursively until all refs with `is-fn=false` are resolved
-4. `:const` returns `(fn [_] response)` — this Clojure fn propagates up
-5. `:http-server` receives Clojure fn as `:handler`, starts server
-
-### Key Insight
-
-References with `is-fn=false` (the `>` suffix in fn-defs) are cached within execution:
-- Result is computed once and cached by ref-id
-- Multiple args with same ref-id share the cached result
-- With `is-fn=true`, you pass the fn-id for HOF to call multiple times
+See [PACKAGES.md § Composition Best Practices](PACKAGES.md#composition-best-practices).
 
 ---
 
-## Part 6: System Limitations
+## Part 7: System Limitations
 
-### What CANNOT Be Done Elegantly
+### What can break
 
-1. **Constraints #5 and #6** require code - no pure declarative way in SQL/Datomic
-   - *Mitigation*: Shared validation logic reduces duplication
-2. **Mutual recursion** - cannot distinguish "good" from "bad" statically
-   - *Mitigation*: Runtime depth/timeout protection
-3. **Full type inference** - this is a separate large task
-   - *Mitigation*: Start with explicit types, add inference later
+- **Infinite recursion** — bounded only by depth/timeout; throws at
+  runtime.
+- **Concurrent cycle detection** — relies on the storage's
+  transactional guarantees. Postgres uses serializable transactions
+  on the relevant write path.
+- **Deep graph traversal** — many DB queries on the cold path.
+  Mitigated by graph caching (`:graph-cache` on the executor
+  context), invalidated explicitly by CRUD writes.
 
-### What Can Break
+### Known gaps
 
-1. **Infinite recursion** - protection via depth/timeout, but error at runtime
-2. **Races during cycle detection** - if two processes create arg bindings simultaneously
-   - *Mitigation*: PostgreSQL uses transactions; Datomic is inherently serialized
-3. **Performance on deep graphs** - many DB queries
-   - *Mitigation*: Apache AGE optimized Cypher queries for graph traversal
-
-### Mitigation Summary
-
-1. Apache AGE graph queries for efficient traversal
-2. Transactions for atomicity
-3. Monitoring and alerts for deep/long executions (planned)
+- *(no current entries — the historical "per-fn optionality override"
+  gap is now closed by binding-level `:required` narrowing; see
+  [TYPES.md § Required Narrowing](TYPES.md#required-narrowing).)*
 
 ---
 
-## Part 7: Distributed Execution (Future)
+## Part 8: Distributed Execution (Future)
 
-### Overview
+Graphden's graph-based representation enables automatic
+parallelisation. Independent subgraphs (no mutual dependency
+through `:ref-fn-id`) are eligible to run concurrently. The
+executor today is single-threaded; the plan is:
 
-Graphden's graph-based representation enables automatic parallelization and distribution of computations. Since functions are stored as a dependency graph rather than sequential text, the executor can:
+1. **Local parallelism** — fork independent args onto a thread pool.
+2. **Worker pool** — offload to processes on the same host.
+3. **Distributed workers** — remote executors with network transport.
+4. **Smart partitioning** — cost-based partitioner using the graph
+   shape.
 
-1. **Identify independent subgraphs** — arguments without mutual dependencies can be computed in parallel
-2. **Distribute computation** — large subgraphs can be offloaded to remote executors
-3. **Optimize data transfer** — only transfer necessary intermediate results between executors
-
-### Why Graph Structure Enables This
-
-Traditional text-based code requires explicit parallelization (threads, async/await, futures). In graphden:
-
-```
-fn: report
-  arg1: ref<calculate-sales>      ← Independent
-  arg2: ref<calculate-expenses>   ← Independent
-  arg3: ref<calculate-inventory>  ← Independent
-
-  // All three can execute in parallel automatically
-  // No explicit parallel constructs needed
-```
-
-The executor can analyze the graph and determine that `calculate-sales`, `calculate-expenses`, and `calculate-inventory` have no dependencies on each other — they can run concurrently.
-
-### Distributed Execution Model (Planned)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Coordinator                              │
-│  - Receives execution request                               │
-│  - Analyzes graph for parallelization opportunities         │
-│  - Partitions subgraphs across available executors          │
-│  - Aggregates results                                       │
-└─────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         v                    v                    v
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│  Executor 1 │      │  Executor 2 │      │  Executor 3 │
-│  (subgraph) │      │  (subgraph) │      │  (subgraph) │
-└─────────────┘      └─────────────┘      └─────────────┘
-```
-
-### Key Design Questions
-
-**1. Data Transfer Between Executors**
-
-When a subgraph on Executor 2 depends on a result from Executor 1:
-
-| Approach | Pros | Cons |
-|----------|------|------|
-| Direct transfer (E1 → E2) | Low latency | Complex networking, failure handling |
-| Via Coordinator | Simple topology | Coordinator bottleneck |
-| Via shared storage | Fault tolerant, resumable | Higher latency |
-| Hybrid (small via coordinator, large via storage) | Balanced | Complexity |
-
-**2. Granularity of Distribution**
-
-- **Coarse-grained**: Distribute entire independent branches
-- **Fine-grained**: Distribute individual function calls
-- **Adaptive**: Start coarse, subdivide based on execution time
-
-**3. State and Side Effects**
-
-Pure functions (no I/O) can be distributed freely. Functions with side effects need:
-- Explicit ordering guarantees
-- Transaction boundaries
-- Idempotency for retry safety
-
-**4. Failure Handling**
-
-- Retry failed subgraphs
-- Checkpoint intermediate results
-- Fallback to local execution
-
-### Implementation Phases
-
-1. **Local parallelism** — Execute independent args in parallel threads (same JVM)
-2. **Worker pool** — Offload to worker processes on same machine
-3. **Distributed workers** — Remote executors with network transport
-4. **Smart partitioning** — Cost-based optimizer for graph partitioning
-
-### Relevant Existing Components
-
-| Module | Role in Distribution |
-|--------|---------------------|
-| `executor` | Base execution, will need parallel/distributed modes |
-| `resolve-execution-graph` | Graph analysis for dependency detection |
-| `storage` | Shared state, potential intermediate result store |
+The architecture supports this naturally: pure subgraphs (no
+declared `:effects`) can run anywhere, side-effecting subgraphs
+need explicit ordering / idempotency. Effect declarations
+(`:effects #{:io :db ...}`) on base-fns let the partitioner
+distinguish.
 
 ---
 
 ## Appendix A: Storage Backend Architecture
 
-Two storage backends are available:
+Currently one backend ships:
 
-- `postgres-storage` — Pure PostgreSQL (SQL queries)
-- `graph-storage-age` — PostgreSQL + Apache AGE (Cypher queries for graph traversal)
+- `storage/postgres` — pure PostgreSQL with recursive CTEs for
+  graph traversal and cycle detection. Wrapped by
+  `versioning/storage` (Git-like branching).
 
-**Why AGE for graph operations?**
+Backend interface contracts live in `storage/protocol/`:
 
-| Operation | PostgreSQL | Apache AGE |
-|-----------|------------|------------|
-| Dependency chain traversal | Recursive CTE | Single Cypher MATCH path |
-| Cycle detection | WITH RECURSIVE + array | Path pattern matching |
-| Graph visualization | N/A | Native graph model |
+| Protocol | Purpose |
+|---|---|
+| `StorageCRUD` | create / read / update / delete / query per entity |
+| `StorageBatchCRUD` | batched variants for sync paths |
+| `StorageIntrospection` | live schema metadata (entities, fields, enums) |
+| `GraphConstraints` | the cycle check |
+| `StorageValueCodec` | encode/decode JSONB / enum-tagged values |
+| `StorageErrorClassifier` | wrap backend errors in storage-protocol error types |
 
-**When to add a new backend:**
-
-1. Implement all protocols from `storage-protocol/interface.clj`
-2. Run tests to verify compliance
-3. Add backend-specific optimizations
-
----
+To add a new backend: implement these protocols and run
+`graphden.storage.protocol.contract-tests/run-graph-constraints-tests`
++ `concurrent-read-write-test` to verify behavioural compliance.
 
 ## Appendix B: Module Dependency Graph
 
 ```
-                    ┌─────────────────────┐
-                    │   schema/fields     │
-                    └──────────┬──────────┘
-                               │
-           ┌───────────────────┼───────────────────┐
-           │                   │                   │
-           v                   v                   v
-┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│ schema/protocol  │ │ storage/protocol │ │ schema/malli     │
-└────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
-         │                    │                    │
-         └────────────────────┼────────────────────┘
-                              │
-                    ┌─────────┴─────────┐
-                    │                   │
-                    v                   v
-          ┌──────────────────┐ ┌──────────────────┐
-          │ storage/postgres │ │ schema/graph     │
-          └────────┬─────────┘ └────────┬─────────┘
-                   │                    │
-                   └─────────┬──────────┘
-                             │
-                             v
-                   ┌──────────────────┐
-                   │   executor       │
-                   └────────┬─────────┘
-                            │
-              ┌─────────────┼─────────────┐
-              │             │             │
-              v             v             v
-     ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-     │  packages/   │ │ executor/    │ │ versioning/  │
-     │  loader      │ │ registry     │ │ storage      │
-     └──────────────┘ └──────────────┘ └──────────────┘
+       schema/fields
+            │
+   ┌────────┼────────┐
+   v        v        v
+ schema/  storage/  schema/
+ protocol protocol  malli
+   │        │        │
+   └────────┼────────┘
+            v
+     storage/postgres ─── schema/graph
             │
             v
-     ┌────────────────────────────┐
-     │  resources/packages/       │
-     │  (core, web, app modules)  │
-     └────────────────────────────┘
+       executor/* ────┬───── packages/loader
+            │         │
+            │         └───── executor/registry
+            v
+       resources/packages/
+       (core, web, app, examples)
 ```
-
----
 
 ## Appendix C: Error Types
 
-See [ERROR_CODES.md](ERROR_CODES.md) for the complete error types reference.
+See [ERROR_CODES.md](ERROR_CODES.md).

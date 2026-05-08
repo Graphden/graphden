@@ -144,3 +144,83 @@
             :when (contains? ref-many-data field-name)]
       (delete-junction-rows! ds entity-name field-name owner-id)
       (insert-junction-rows! ds entity-name field-name owner-id (get ref-many-data field-name)))))
+
+
+(defn- insert-junction-rows-multi!
+  "Insert rows for many owners in one execute-batch. `owner->targets`
+   is `[[owner-id [target …]] …]`. Each owner's `targets` is written
+   with 0-based ord; positions are independent per owner."
+  [ds entity-name field-name owner->targets]
+  (let [rows (reduce (fn [acc [owner-id targets]]
+                       (into acc
+                             (map-indexed
+                               (fn [idx target]
+                                 [owner-id (normalize-uuid target) idx]))
+                             targets))
+                     []
+                     (filter #(seq (second %)) owner->targets))]
+    (when (seq rows)
+      (let [jt (ddl/junction-table-name entity-name field-name)]
+        (util/with-sql-error-handling "Database error" :insert-junction-batch
+                                      {:entity-name entity-name :field-name field-name
+                                       :owner-count (count owner->targets)}
+                                      (jdbc/execute-batch! ds
+                                                           (str "INSERT INTO \"" jt "\" (owner_id, target_id, ord) VALUES (?, ?, ?)")
+                                                           rows
+                                                           {}))))))
+
+
+(defn- delete-junction-rows-multi!
+  "DELETE rows for many owner-ids in one statement. No-op when empty."
+  [ds entity-name field-name owner-ids]
+  (when (seq owner-ids)
+    (let [jt (ddl/junction-table-name entity-name field-name)
+          placeholders (str/join "," (repeat (count owner-ids) "?"))
+          query (into [(str "DELETE FROM \"" jt "\" WHERE owner_id IN (" placeholders ")")]
+                      owner-ids)]
+      (util/with-sql-error-handling "Database error" :delete-junction-batch
+                                    {:entity-name entity-name :field-name field-name
+                                     :owner-count (count owner-ids)}
+                                    (jdbc/execute! ds query (util/query-opts))))))
+
+
+(defn write-ref-many-fields-batch!
+  "Batch version of `write-ref-many-fields!`: takes a sequence of
+   `[owner-id ref-many-data]` pairs and emits one INSERT per
+   (entity, field) covering every owner. Use after `create-entities`
+   so N×M individual INSERTs collapse to M."
+  [ds entity-name owner+ref-many-pairs]
+  (let [field->owners (reduce
+                        (fn [acc [owner-id rm-data]]
+                          (reduce-kv (fn [m field-name targets]
+                                       (update m field-name (fnil conj [])
+                                               [owner-id targets]))
+                                     acc
+                                     rm-data))
+                        {}
+                        (filter #(seq (second %)) owner+ref-many-pairs))]
+    (doseq [[field-name owner->targets] field->owners]
+      (insert-junction-rows-multi! ds entity-name field-name owner->targets))))
+
+
+(defn replace-ref-many-fields-batch!
+  "Batch version of `replace-ref-many-fields!`: one DELETE + one
+   INSERT per (entity, field) instead of N×M of each."
+  [ds entity-name owner+ref-many-pairs fields]
+  (let [rm-fields (ref-many-fields fields)
+        ;; Per field, collect owners that supplied data for it. Empty data
+        ;; vector still means "replace with nothing" — we DELETE the owner's
+        ;; rows but skip the INSERT.
+        field->owners (reduce
+                        (fn [acc [field-name _]]
+                          (let [pairs (keep (fn [[owner-id rm-data]]
+                                              (when (contains? rm-data field-name)
+                                                [owner-id (get rm-data field-name)]))
+                                            owner+ref-many-pairs)]
+                            (assoc acc field-name (vec pairs))))
+                        {}
+                        rm-fields)]
+    (doseq [[field-name owner->targets] field->owners
+            :when (seq owner->targets)]
+      (delete-junction-rows-multi! ds entity-name field-name (mapv first owner->targets))
+      (insert-junction-rows-multi! ds entity-name field-name owner->targets))))

@@ -64,9 +64,8 @@
       (is (= :ref (get-in fields [:ref-id :type])))
       (is (= :fn (get-in fields [:ref-id :ref-entity])))
       (is (true? (get-in fields [:ref-id :nullable?])))
-      ;; is-fn is nullable bool (for HOF)
-      (is (= :bool (get-in fields [:is-fn :type])))
-      (is (true? (get-in fields [:is-fn :nullable?])))
+      ;; is-fn was retired in #15b — type=:fn IS the HOF marker now.
+      (is (not (contains? fields :is-fn)))
       ;; required is nullable bool
       (is (= :bool (get-in fields [:required :type])))
       (is (true? (get-in fields [:required :nullable?])))))

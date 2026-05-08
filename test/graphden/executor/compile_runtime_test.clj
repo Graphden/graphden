@@ -9,6 +9,8 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.compile.bindings]
+    [graphden.executor.compile.lookups]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
@@ -157,7 +159,7 @@
         (exec/register-base-fn! :double (setup/fn-impl [x] (* 2 x)))
         (let [base-fn (setup/create-base-fn! storage "double" :int)
               _ (setup/create-arg! storage (:id base-fn)
-                                   {:name "x" :type :int :required true :is-fn false})
+                                   {:name "x" :type :int :required true})
               composed (setup/create-composed-fn! storage "my-double" (:id base-fn))
               ctx (exec/create-context {:storage storage})
               call (cr/make-single-arg-callable ctx (:id composed))]
@@ -177,5 +179,47 @@
               call (cr/make-single-arg-callable ctx (:id composed))]
           (is (zero? (call :whatever)))
           (is (zero? (call :something-else-entirely))))
+        (finally
+          (sp/close storage))))))
+
+
+;; ============================================================================
+;; binding-level :required narrowing — descendant flips inherited optional
+;; to required, verified via the executor's lookups
+;; ============================================================================
+
+(deftest binding-required-narrowing-flows-into-effective-required
+  (testing "child's `:required true` binding narrows parent's optional slot"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (exec/register-base-fn! :id-fn (setup/fn-impl [x] x))
+        (let [base-fn (setup/create-base-fn! storage "id-fn" :int)
+              ;; Slot defaults to :required false on the base-fn.
+              slot (sp/create-entity storage :slot
+                                     {:name "x"
+                                      :type-fn-id (get setup/primitive-fn-ids :int)
+                                      :required false})
+              _ (setup/attach-slot! storage (:id base-fn) (:id slot) 0)
+              ;; Plain composed — inherits the optional slot, no
+              ;; narrowing. classify-slot should report required=false.
+              composed (setup/create-composed-fn! storage "passthrough" (:id base-fn))
+              ;; Narrowing composed — :required true binding lifts it.
+              narrowed (setup/create-composed-fn! storage "must-have-x" (:id base-fn))
+              _ (sp/create-entity storage :binding
+                                  {:fn-id (:id narrowed)
+                                   :slot-id (:id slot)
+                                   :required true})
+              ctx (exec/create-context {:storage storage})
+              storage' (:storage ctx)
+              graph (#'graphden.executor.compile-runtime/read-graph storage')
+              lookups (#'graphden.executor.compile.lookups/build-lookups graph)
+              passthrough-bindings (#'graphden.executor.compile.bindings/collect-bindings
+                                    (:id composed) lookups)
+              narrowed-bindings (#'graphden.executor.compile.bindings/collect-bindings
+                                 (:id narrowed) lookups)]
+          (is (false? (:required (first passthrough-bindings)))
+              "no narrowing → free-arg keeps slot's :required false")
+          (is (true? (:required (first narrowed-bindings)))
+              "binding's :required true overrides slot's :required false"))
         (finally
           (sp/close storage))))))

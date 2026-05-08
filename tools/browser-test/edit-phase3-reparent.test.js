@@ -5,7 +5,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const { chromium } = require('playwright');
-const { assert, newContext, api, getEntities, deleteFnByName } =
+const { assert, newContext, api, getEntities, synthArgs, deleteFnByName } =
   require('./edit-test-helpers');
 
 const TEST_NAME = 'test-edit-phase3';
@@ -20,19 +20,20 @@ const TEST_NAME = 'test-edit-phase3';
     const ents = await getEntities(page);
     const add = ents.fns.find(f => f.name === 'add');
     const mul = ents.fns.find(f => f.name === 'mul');
-    const addNums = ents.args.find(a => a['fn-id'] === add.id && !a['source-id']);
-    const mulNums = ents.args.find(a => a['fn-id'] === mul.id && !a['source-id']);
+    const baseSynth = synthArgs(ents);
+    const addNums = baseSynth.find(a => a['fn-id'] === add.id && !a['source-id']);
+    const mulNums = baseSynth.find(a => a['fn-id'] === mul.id && !a['source-id']);
     assert(add && mul && addNums && mulNums, 'baseline ids resolved');
 
-    // 1. Create test fn (parent=[add]) + an arg pointing to add.nums.
+    // 1. Create test fn (parent=[add]). The :nums slot is inherited
+    //    automatically — no explicit "POST inheriting arg" step.
     await api(page, 'POST', '/api/entities/fn',
               'name=' + TEST_NAME + '&parent-ids=' + add.id);
     const created = (await getEntities(page)).fns.find(f => f.name === TEST_NAME);
     assert(created, 'test fn created');
-    await api(page, 'POST', '/api/entities/arg',
-              'fn-id=' + created.id + '&source-id=' + addNums.id + '&type=sequence');
-    const seeded = (await getEntities(page)).args.filter(a => a['fn-id'] === created.id);
-    assert(seeded.length === 1 && seeded[0]['source-id'] === addNums.id,
+    const seeded = synthArgs(await getEntities(page))
+                     .filter(a => a['fn-id'] === created.id);
+    assert(seeded.length === 1 && seeded[0]['slot-id'] === addNums['slot-id'],
            'inheriting arg points at add.nums');
 
     // 2. Open editor, exercise the parent-set editor end-to-end.
@@ -84,11 +85,11 @@ const TEST_NAME = 'test-edit-phase3';
     // 3. Verify cascade outcome.
     const after = await getEntities(page);
     const fnAfter = after.fns.find(f => f.id === created.id);
-    const argsAfter = after.args.filter(a => a['fn-id'] === created.id);
+    const argsAfter = synthArgs(after).filter(a => a['fn-id'] === created.id);
     assert(JSON.stringify(fnAfter['parent-ids']) === JSON.stringify([mul.id]),
            'parent-ids replaced with [mul]');
     assert(argsAfter.length === 1, 'exactly one arg after cascade');
-    assert(argsAfter[0]['source-id'] === mulNums.id,
+    assert(argsAfter[0]['slot-id'] === mulNums['slot-id'],
            'new arg points at mul.nums (orphan add.nums was deleted)');
   } finally {
     await deleteFnByName(page, TEST_NAME).catch(() => {});

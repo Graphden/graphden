@@ -25,7 +25,7 @@
 ;; === MalliDataSchema record ===
 
 (defrecord MalliDataSchema
-  [enums-map entities-map entity-uuids-map constraints-map compiled-schemas]
+  [enums-map entities-map entity-uuids-map constraints-map retired-fields-map compiled-schemas]
 
   ds/DataSchema
 
@@ -64,13 +64,18 @@
 
   (entity-constraints
     [_this entity-name]
-    (get constraints-map entity-name [])))
+    (get constraints-map entity-name []))
+
+
+  (retired-fields
+    [_this]
+    (or retired-fields-map {})))
 
 
 ;; === MalliDataSchemaBuilder record ===
 
 (defrecord MalliDataSchemaBuilder
-  [enums-map entities-map entity-uuids-map constraints-map known-uuids]
+  [enums-map entities-map entity-uuids-map constraints-map known-uuids retired-fields-map]
 
   ds/DataSchemaBuilder
 
@@ -219,6 +224,30 @@
     (update-in this [:constraints-map entity-name] (fnil conj []) constraint))
 
 
+  (retire-field
+    [this entity-name field-name field-uuid]
+    (when-not (keyword? entity-name)
+      (throw (ex-info "Entity name must be a keyword"
+                      {:entity-name entity-name :type (type entity-name)})))
+    (when-not (keyword? field-name)
+      (throw (ex-info "Field name must be a keyword"
+                      {:field-name field-name :type (type field-name)})))
+    (when-not (uuid? field-uuid)
+      (throw (ex-info "Retired field UUID must be a UUID"
+                      {:entity-name entity-name :field-name field-name
+                       :uuid field-uuid :type (type field-uuid)})))
+    ;; Sanity: the field MUST already be removed from the entity's
+    ;; current spec — retire-field is a tombstone, not a "schedule
+    ;; removal" mechanism. Catches the common mistake of declaring a
+    ;; retired field while it's still present.
+    (when (contains? (get entities-map entity-name {}) field-name)
+      (throw (ex-info (str "Cannot retire field still present in entity spec: "
+                           entity-name "/" field-name
+                           " — drop the field's entry from add-entity first.")
+                      {:entity-name entity-name :field-name field-name})))
+    (assoc-in this [:retired-fields-map entity-name field-name] field-uuid))
+
+
   (build
     [_this]
     (v/validate-field-specs entities-map)
@@ -228,13 +257,14 @@
     (let [compiled (into {}
                          (for [[entity-name fields] entities-map]
                            [entity-name (schema/make-entity-schema fields enums-map)]))]
-      (->MalliDataSchema enums-map entities-map entity-uuids-map constraints-map compiled))))
+      (->MalliDataSchema enums-map entities-map entity-uuids-map constraints-map
+                         (or retired-fields-map {}) compiled))))
 
 
 (defn create-builder
   "Creates a new MalliDataSchemaBuilder."
   []
-  (->MalliDataSchemaBuilder {} {} {} {} {}))
+  (->MalliDataSchemaBuilder {} {} {} {} {} {}))
 
 
 (defn schema->malli

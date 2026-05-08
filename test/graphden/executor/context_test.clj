@@ -74,3 +74,119 @@
         (is (= custom (:base-fns c))))
       (finally
         (sp/close storage)))))
+
+
+(deftest invalidate-graph-cache-resets-atom
+  (testing "with a :graph-cache atom set, invalidate clears it to nil"
+    (let [cache (atom {:fns [{:id 1}] :args []})]
+      (ctx/invalidate-graph-cache! {:graph-cache cache})
+      (is (nil? @cache))))
+  (testing "without a :graph-cache (test ctx without the atom) — no-op"
+    ;; Should not throw — the when-let guard skips when the key is absent.
+    (is (nil? (ctx/invalidate-graph-cache! {})))))
+
+
+(deftest invalidate-delta-only-recompiles-affected
+  (testing "passing changed-fn-ids to invalidate-graph-cache! preserves entries OUTSIDE the blast radius — fn-ids unrelated to the change keep the same compiled closure object instead of being recompiled from scratch (legacy 1-arity path threw the whole map away)."
+    (let [storage (setup/create-test-storage)]
+      (try
+        (setup/setup-add-function! storage)
+        (let [c (exec/create-context {:storage storage})
+              ;; Force initial registry build via the lazy fallback,
+              ;; then capture the per-fn closures and the reverse-deps
+              ;; index for comparison after the delta call.
+              reg-before ((requiring-resolve
+                            'graphden.executor.compile-runtime/registry)
+                          c)
+              deps-before (some-> c :compile-deps deref)
+              ;; Touch a single fn-id that the test storage does NOT
+              ;; have — the blast set is empty, so every entry must
+              ;; be reused as-is. This is the cleanest signal that
+              ;; the delta path didn't accidentally drop the world.
+              novel-id (random-uuid)]
+          (is (some? reg-before) "registry got built")
+          (is (some? deps-before) ":compile-deps populated alongside :compiled-registry")
+          (is (pos? (count reg-before)) "test storage has at least one compilable fn")
+          (ctx/invalidate-graph-cache! c #{novel-id})
+          (let [reg-after @(:compiled-registry c)]
+            (is (some? reg-after) "registry stays populated after delta invalidation")
+            (is (= (set (keys reg-before)) (set (keys reg-after)))
+                "no entries were dropped")
+            (is (every? (fn [k]
+                          (identical? (get reg-before k) (get reg-after k)))
+                        (keys reg-before))
+                "untouched fn-ids preserve their compiled closure objects (no recompile)")))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest invalidate-delta-blast-radius
+  (testing "delta invalidation walks reverse-deps. Touching a child fn leaves its parent untouched (parent never depends on the child); touching the parent forces every descendant to recompile (closures inherited bindings, and `:produces-callable?`-style flags baked from the parent's rich-type entry)."
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [base-fn composed-fn]} (setup/setup-add-function! storage)
+              c (exec/create-context {:storage storage})
+              before ((requiring-resolve
+                        'graphden.executor.compile-runtime/registry) c)
+              base-id (:id base-fn)
+              composed-id (:id composed-fn)
+              base-before (get before base-id)
+              composed-before (get before composed-id)]
+          (is (some? base-before) "base-fn closure compiled at startup")
+          (is (some? composed-before) "composed-fn closure compiled at startup")
+
+          ;; Touch the CHILD: parent must keep its closure (no
+          ;; reverse-dep edge child → parent), child gets recompiled.
+          (ctx/invalidate-graph-cache! c #{composed-id})
+          (let [after-child @(:compiled-registry c)]
+            (is (identical? base-before (get after-child base-id))
+                "base-fn closure unchanged when only the child mutates")
+            (is (not (identical? composed-before (get after-child composed-id)))
+                "composed-fn closure DID get recompiled (its bindings or own row mutated)"))
+
+          ;; Touch the PARENT: every descendant must also be
+          ;; recompiled because they inherit the parent's bindings.
+          (let [reg-mid @(:compiled-registry c)
+                composed-mid (get reg-mid composed-id)]
+            (ctx/invalidate-graph-cache! c #{base-id})
+            (let [after-parent @(:compiled-registry c)]
+              (is (not (identical? composed-mid (get after-parent composed-id)))
+                  "descendant recompiled when parent mutates (reverse-dep walk)"))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest invalidate-delta-purges-deleted-fn-ids
+  (testing "when a fn-id named in `changed-fn-ids` no longer has a row in storage (just got deleted), `delta-recompile!` must dissoc its stale closure from `:compiled-registry` — otherwise the next `execute` would find a closure for a fn that no longer exists and throw a confusing error from inside the compiled code rather than the clean fn-not-found path."
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [{:keys [composed-fn]} (setup/setup-add-function! storage)
+              c (exec/create-context {:storage storage})
+              _ (exec/execute c (:id composed-fn) {:a 1 :b 2})
+              before @(:compiled-registry c)
+              gone-id (:id composed-fn)]
+          (is (contains? before gone-id)
+              "registry has the composed fn before deletion")
+          (sp/delete-entity storage :fn gone-id)
+          ;; Caller names the deleted id; delta path runs.
+          (ctx/invalidate-graph-cache! c #{gone-id})
+          (let [after @(:compiled-registry c)]
+            (is (not (contains? after gone-id))
+                "deleted fn's stale closure was dissoc'd from the registry")))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest invalidate-full-clear-on-empty-fn-ids
+  (testing "invalidate-graph-cache! with no fn-ids (legacy 1-arity OR explicit nil) drops the whole compiled registry — the registry function rebuilds it from scratch on the next read."
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [c (exec/create-context {:storage storage})
+              _ ((requiring-resolve
+                   'graphden.executor.compile-runtime/registry) c)]
+          (is (some? @(:compiled-registry c)) "registry populated by initial build")
+          (ctx/invalidate-graph-cache! c)
+          (is (nil? @(:compiled-registry c))
+              "1-arity full-clear empties the registry"))
+        (finally
+          (sp/close storage))))))

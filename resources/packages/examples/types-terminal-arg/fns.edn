@@ -1,0 +1,50 @@
+;; Terminal optional free args — sealing an inherited slot from descendants.
+;;
+;; A fn-def inherits free args from its parent chain. Optional ones
+;; propagate even if downstream lineages have no use for them, polluting
+;; everyone's interface. The `{:terminal? true}` arg-spec EXPLICITLY
+;; removes the slot:
+;;
+;;   - Callers of THIS fn cannot bind the sealed arg.
+;;   - Descendants don't see the slot at all (no propagation downstream).
+;;
+;; Constraints:
+;;   - Only `:required false` (optional) args are sealable. Sealing a
+;;     required arg would break the parent's contract — the runtime
+;;     would be missing a value the body needs.
+;;   - `:terminal? true` is mutually exclusive with `:value` / `:ref` —
+;;     you either bind a value or seal the slot, not both.
+;;
+;; Verified runtime on 2026-04-29:
+;;   ex-terminal-greet           → "hi"            (default sealed via parent already? — no, this binds)
+;;   ex-terminal-greet-no-default → nil           (default unbound)
+;;   ex-terminal-greet-sealed     → nil           (default sealed — same runtime, but slot gone from interface)
+
+
+{:namespace "examples.types-terminal-arg"
+ :description "`{:terminal? true}` seals an inherited optional free arg — the slot is removed from the public interface and not propagated to descendants."
+ :fns
+ [;; Parent: looks up `:greeting` in a fixed map. `:default` is the
+  ;; optional free arg of `:get` — it propagates downstream as an
+  ;; optional slot callers can bind to override the nil-on-miss.
+  {:name :greet-or-default
+   :description "Lookup `:greeting` in `{:greeting \"hi\"}`. The fallback (`:get`'s `:default` slot) stays free for callers to override."
+   :parent :get
+   :args {:coll {:value {:greeting "hi"}}
+          :key {:value :greeting :literal? true}}}
+
+  ;; Demos.
+
+  {:name :ex-terminal-greet-bound
+   :description "Caller binds `:default` to 'hello' (used only if key is missing — here key exists, so result is 'hi')."
+   :parent :greet-or-default
+   :args {:default "hello"}}
+
+  {:name :ex-terminal-greet-no-default
+   :description "Caller leaves `:default` unbound — slot still visible on the interface (descendants would see it too)."
+   :parent :greet-or-default}
+
+  {:name :ex-terminal-greet-sealed
+   :description "Seals `:default` — slot is REMOVED from the interface. Descendants of this fn do not inherit the slot at all."
+   :parent :greet-or-default
+   :args {:default {:terminal? true}}}]}

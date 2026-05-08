@@ -1,5 +1,8 @@
 {:name "core"
  :version "1.0.0"
- :description "Core primitives: arithmetic, comparison, logic, HOF, collections, strings, system"
+ :description "Core primitives: arithmetic, comparison, logic, HOF, collections, strings, system, refinements"
  :dependencies []
- :modules ["arithmetic" "logic" "hof" "collections" "strings" "system"]}
+ ;; refinements load FIRST so their type aliases are registered
+ ;; before collections / strings / system / etc. try to resolve
+ ;; `:type :non-negative-int` etc. in their fns.edn declarations.
+ :modules ["refinements" "arithmetic" "logic" "hof" "collections" "strings" "system" "variants"]}

@@ -4,7 +4,6 @@
    Provides system information and Ring response primitives."
   (:require
     [cheshire.core :as json]
-    [clojure.string :as str]
     [graphden.executor.defbase :refer [defbase]])
   (:import
     (java.lang.management
@@ -16,23 +15,9 @@
 
 
 ;; === Ring Response Primitives ===
-
-(defn- stringify-keys
-  [m]
-  (when m (into {} (map (fn [[k v]] [(if (keyword? k) (name k) (str k)) v])) m)))
-
-
-(defbase ring-response [status headers body]
-  ;; Ring spec: header keys must be strings. JSONB round-trip keywordizes
-  ;; them, so we coerce back on the way out.
-  {:status status
-   :headers (stringify-keys headers)
-   :body body})
-
-
-(defbase make-handler [response]
-  (let [r response]
-    (fn [_request] r)))
+;; `:ring-response` is a fn-def constructor (see core/system/fns.edn) —
+;; built as an :assoc chain that threads `:headers` through
+;; `:stringify-map-keys` before assembly. No impl needed.
 
 
 (defbase to-json-string [data]
@@ -66,7 +51,7 @@
 
 
 (defbase thread-count []
-  {:count (Thread/activeCount)})
+  (Thread/activeCount))
 
 
 (defbase os-info []
@@ -132,9 +117,7 @@
 ;; === Registry ===
 
 (def impls
-  {:ring-response ring-response
-   :make-handler make-handler
-   :to-json-string to-json-string
+  {:to-json-string to-json-string
    :parse-json parse-json
    :jvm-version jvm-version
    :heap-memory heap-memory

@@ -12,27 +12,161 @@ function truncateLabel(label, maxLen) {
   return label;
 }
 
+
+// ============================================================================
+// CLIENT-SIDE SUBTYPE CHECK
+// ============================================================================
+//
+// Mirrors the backend's `subtype?` from src/graphden/types/core.clj for
+// the cases the editor needs (fn-picker filtering, hint validation).
+// Types come from /api/types as JSON, so keywords arrive as strings
+// (`"int"`), records as objects, and vectors as arrays. The function is
+// permissive on the side that means "deliberately wide" — `:any` /
+// `:jsonb` / unknown shapes accept anything — to avoid false negatives.
+
+const CLIENT_NUMERIC_SUPERS = { int: ['numeric'], float: ['numeric'] };
+
+function clientPrimitiveSubtype(sub, sup) {
+  if (sub === sup) return true;
+  const sups = CLIENT_NUMERIC_SUPERS[sub] || [];
+  return sups.some(s => clientPrimitiveSubtype(s, sup));
+}
+
+function clientNormalise(t) {
+  // :sequence (storage primitive) ≡ [:list :any]
+  if (t === 'sequence') return ['list', 'any'];
+  return t;
+}
+
+function clientSubtype(sub, sup) {
+  sub = clientNormalise(sub);
+  sup = clientNormalise(sup);
+  if (sub == null || sup == null) return true;
+  if (JSON.stringify(sub) === JSON.stringify(sup)) return true;
+  if (sup === 'any')  return true;
+  if (sub === 'any')  return false;
+  // Union LHS: every member must subtype.
+  if (Array.isArray(sub) && sub[0] === 'union') {
+    return sub.slice(1).every(m => clientSubtype(m, sup));
+  }
+  // Union RHS: at least one branch must accept.
+  if (Array.isArray(sup) && sup[0] === 'union') {
+    return sup.slice(1).some(m => clientSubtype(sub, m));
+  }
+  if (typeof sub === 'string' && typeof sup === 'string') {
+    if (clientPrimitiveSubtype(sub, sup)) return true;
+    if (sup === 'jsonb') return sub !== 'fn';   // fn is not a json value
+    return false;
+  }
+  // Refinement: [:refine B c] ⊆ B; B ⊄ refinement.
+  if (Array.isArray(sub) && sub[0] === 'refine') {
+    if (Array.isArray(sup) && sup[0] === 'refine') {
+      return JSON.stringify(sub[2]) === JSON.stringify(sup[2])
+          && clientSubtype(sub[1], sup[1]);
+    }
+    return clientSubtype(sub[1], sup);
+  }
+  if (Array.isArray(sup) && sup[0] === 'refine') return false;
+  // List subtype: covariant elem.
+  if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'list' && sup[0] === 'list') {
+    return clientSubtype(sub[1], sup[1]);
+  }
+  // Record subtype: open — sub has every field sup requires.
+  if (sub && typeof sub === 'object' && !Array.isArray(sub)
+      && sup && typeof sup === 'object' && !Array.isArray(sup)) {
+    return Object.entries(sup).every(([k, st]) =>
+      sub[k] != null && clientSubtype(sub[k], st));
+  }
+  // Fn subtype: contravariant args, covariant return.
+  if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'fn' && sup[0] === 'fn') {
+    if (!clientSubtype(sub[2], sup[2])) return false;
+    const a = sub[1] || {}, b = sup[1] || {};
+    if (Object.keys(a).length !== Object.keys(b).length) return false;
+    return Object.entries(b).every(([k, bt]) => a[k] != null && clientSubtype(bt, a[k]));
+  }
+  // Mixed shapes (jsonb / list-of-X / etc.) — fall back to permissive
+  // for the wider side. Editors prefer false positives over rejecting
+  // a valid pick.
+  if (sup === 'jsonb' && Array.isArray(sub)
+      && (sub[0] === 'list' || sub[0] === 'refine')) return true;
+  return false;
+}
+
 // ============================================================================
 // LOOKUP MAPS
 // ============================================================================
 
-// Build lookup maps from raw graph data
+// Build lookup maps from raw graph data.
+//
+// Produces TWO parallel lookup sets:
+//
+// NEW (slot/binding model — direct from the rewrite tables):
+//   slotMap            — id → slot row
+//   fnSlotsByFn        — fn-id → [fn-slot junction] sorted by :position
+//   slotByFnAndName    — [fn-id, slot-name-keyword] → slot row
+//   bindingMap         — id → binding row
+//   bindingsByFn       — fn-id → [bindings on it]
+//   bindingByFnSlot    — [fn-id, slot-id] → binding row
+//   itemsByBinding     — binding-id → [list-items] sorted by :position
+//
+// Plus shared maps:
+//   fnMap, nsMap, nsPathMap
+//   fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn
 function buildLookups(data) {
   const fnMap = new Map();
-  const argMap = new Map();
-  const argsByFn = new Map();
-  const nsMap = new Map();    // ns-id → ns entity
-  const nsPathMap = new Map(); // ns-id → full dotted path (e.g. "core.arithmetic")
+  const slotMap = new Map();
+  const fnSlotsByFn = new Map();
+  const slotByFnAndName = new Map();
+  const bindingMap = new Map();
+  const bindingsByFn = new Map();
+  const bindingByFnSlot = new Map();
+  const itemsByBinding = new Map();
+  const nsMap = new Map();
+  const nsPathMap = new Map();
 
   (data.fns || []).forEach(f => fnMap.set(f.id, f));
-  (data.args || []).forEach(a => {
-    argMap.set(a.id, a);
-    const fnId = a['fn-id'];
-    if (fnId) {
-      if (!argsByFn.has(fnId)) argsByFn.set(fnId, []);
-      argsByFn.get(fnId).push(a);
+
+  // --- new model ---
+  (data.slots || []).forEach(s => slotMap.set(s.id, s));
+  const sortedFnSlots = (data['fn-slots'] || []).slice()
+    .sort((a, b) => (a.position || 0) - (b.position || 0));
+  // Phase 6c — index renamed-view slots by (fn-id, source-slot-id)
+  // so getEffectiveSlotName can answer in O(1) without scanning
+  // fn-slots. A renamed slot is an own slot (fn-slot row on F)
+  // whose `:source-slot-id` FK points back at the slot it renames.
+  const slotByFnSourceSlot = new Map();
+  sortedFnSlots.forEach(fs => {
+    const fnId = fs['fn-id'];
+    if (!fnSlotsByFn.has(fnId)) fnSlotsByFn.set(fnId, []);
+    fnSlotsByFn.get(fnId).push(fs);
+    const slot = slotMap.get(fs['slot-id']);
+    if (slot?.name) {
+      slotByFnAndName.set(fnId + '|' + slot.name, slot);
+    }
+    if (slot?.['source-slot-id']) {
+      slotByFnSourceSlot.set(fnId + '|' + slot['source-slot-id'], slot);
     }
   });
+  (data.bindings || []).forEach(b => {
+    bindingMap.set(b.id, b);
+    const fnId = b['fn-id'];
+    if (fnId) {
+      if (!bindingsByFn.has(fnId)) bindingsByFn.set(fnId, []);
+      bindingsByFn.get(fnId).push(b);
+    }
+    if (fnId && b['slot-id']) {
+      bindingByFnSlot.set(fnId + '|' + b['slot-id'], b);
+    }
+  });
+  const sortedItems = (data['list-items'] || []).slice()
+    .sort((a, b) => (a.position || 0) - (b.position || 0));
+  sortedItems.forEach(it => {
+    const bid = it['binding-id'];
+    if (!bid) return;
+    if (!itemsByBinding.has(bid)) itemsByBinding.set(bid, []);
+    itemsByBinding.get(bid).push(it);
+  });
+
   // Build namespace maps
   (data.namespaces || []).forEach(ns => nsMap.set(ns.id, ns));
   // Compute full paths for each ns (walk parent chain)
@@ -46,26 +180,164 @@ function buildLookups(data) {
     nsPathMap.set(id, parts.join('.'));
   });
 
-  // Deletability sets — used by the sidebar's ✕ button to grey out
-  // entities that can't be safely removed and surface the reason in
-  // the button's tooltip. The backend enforces these same rules
-  // (`process-delete-entity` returns 409 + an explanation), so the
-  // frontend computation is just for ahead-of-time UX feedback.
-  const fnUsedAsParent = new Map();   // fn-id → count
-  const fnUsedAsRef    = new Map();   // fn-id → count
-  const nsHasChildNs   = new Map();   // ns-id → count
-  const nsHasChildFn   = new Map();   // ns-id → count
+  // Deletability sets.
+  const fnUsedAsParent = new Map();
+  const fnUsedAsRef    = new Map();
+  const nsHasChildNs   = new Map();
+  const nsHasChildFn   = new Map();
   const bump = (m, k) => { if (k) m.set(k, (m.get(k) || 0) + 1); };
 
   (data.fns || []).forEach(f => {
     (f['parent-ids'] || []).forEach(pid => bump(fnUsedAsParent, pid));
     bump(nsHasChildFn, f['namespace-id']);
   });
-  (data.args || []).forEach(a => bump(fnUsedAsRef, a['ref-id']));
+  // fnUsedAsRef counts ref-fn-id from bindings + list-items. Synth
+  // `:args` rows mirror the same ref-fn-ids, so counting them too
+  // would double-bump and falsely block fn-deletes that are actually
+  // safe.
+  (data.bindings || []).forEach(b => bump(fnUsedAsRef, b['ref-fn-id']));
+  (data['list-items'] || []).forEach(it => bump(fnUsedAsRef, it['ref-fn-id']));
   (data.namespaces || []).forEach(ns => bump(nsHasChildNs, ns['parent-id']));
 
-  return { fnMap, argMap, argsByFn, nsMap, nsPathMap,
+  return { fnMap,
+           slotMap, fnSlotsByFn, slotByFnAndName, slotByFnSourceSlot,
+           bindingMap, bindingsByFn, bindingByFnSlot, itemsByBinding,
+           nsMap, nsPathMap,
            fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn };
+}
+
+
+// === Slot/binding helpers (new model) =====================================
+//
+// Replace `arg.X` accessors / `lookups.argMap` walks with these so
+// editor JS can migrate off the synth-arg shape one callsite at a time.
+
+// Get the binding row for (fn-id, slot-id) — the one that overrides
+// the slot's value/ref/rename at this fn level. nil if no override.
+function getBindingForFnSlot(fnId, slotId) {
+  if (!lookups || !lookups.bindingByFnSlot) return null;
+  return lookups.bindingByFnSlot.get(fnId + '|' + slotId) || null;
+}
+
+// Get the closest binding for a slot walking the fn's inheritance
+// chain (fn first, then ancestors via :parent-ids). Mirrors the
+// backend's effective-binding lookup. Returns null when no binding
+// in the chain touches the slot.
+function getEffectiveBinding(fnId, slotId) {
+  if (!lookups || !lookups.fnMap) return null;
+  const visited = new Set();
+  const queue = [fnId];
+  while (queue.length) {
+    const fid = queue.shift();
+    if (visited.has(fid)) continue;
+    visited.add(fid);
+    const b = getBindingForFnSlot(fid, slotId);
+    if (b) return b;
+    const fn = lookups.fnMap.get(fid);
+    if (fn && Array.isArray(fn['parent-ids'])) {
+      for (const pid of fn['parent-ids']) {
+        if (!visited.has(pid)) queue.push(pid);
+      }
+    }
+  }
+  return null;
+}
+
+// Effective name of a slot at a particular fn — walks the
+// inheritance chain (closest-first) looking for an own renamed-view
+// slot whose `source-slot-id` FK matches; the renamed slot's name
+// wins. Falls back to the source slot's own name.
+//
+// Phase 6c: switched from `binding.rename-to` (text) to
+// `slot.source-slot-id` (FK). Both sources currently agree —
+// parser + Phase 6b's ensure-rename-slot! emit them in lock-step.
+function getEffectiveSlotName(fnId, slotId) {
+  if (!lookups || !lookups.fnMap) return null;
+  const visited = new Set();
+  const queue = [fnId];
+  while (queue.length) {
+    const fid = queue.shift();
+    if (visited.has(fid)) continue;
+    visited.add(fid);
+    const renamed = lookups.slotByFnSourceSlot?.get(fid + '|' + slotId);
+    if (renamed) return renamed.name;
+    const fn = lookups.fnMap.get(fid);
+    if (fn && Array.isArray(fn['parent-ids'])) {
+      for (const pid of fn['parent-ids']) {
+        if (!visited.has(pid)) queue.push(pid);
+      }
+    }
+  }
+  const slot = lookups.slotMap?.get(slotId);
+  return slot ? slot.name : null;
+}
+
+// Build an arg-shape row from a Cytoscape node's `data` plus the
+// slot/binding lookups. Replaces `lookups.argMap.get(argId)` —
+// pulls the same fields (fn-id, slot-id, binding-id, item-id,
+// value, ref-id, type, name) directly from the layout-emitted
+// `slotId` / `bindingId` / `itemId` / `fnId` / `argType` / `value`
+// fields without needing the synth `:args` collection.
+function argRowFromNode(nodeData) {
+  if (!nodeData) return null;
+  const data = (typeof nodeData.data === 'function') ? nodeData.data() : nodeData;
+  if (!data) return null;
+  // Node-data carries `argId`; edge-data carries `sourceArgId` for the
+  // bound-arg side. Both name the same logical entity (the arg row /
+  // synth row); accept either so the helper covers both sources.
+  const argId = data.argId || data.sourceArgId;
+  const slotId = data.slotId;
+  const bindingId = data.bindingId;
+  const itemId = data.itemId;
+  const fnId = data.fnId;
+  if (!argId && !slotId && !bindingId) return null;
+  const slot = slotId && lookups && lookups.slotMap && lookups.slotMap.get(slotId);
+  const binding = bindingId && lookups && lookups.bindingMap && lookups.bindingMap.get(bindingId);
+  const item = itemId && (() => {
+    if (!lookups || !lookups.itemsByBinding) return null;
+    for (const items of lookups.itemsByBinding.values()) {
+      for (const it of items) if (it.id === itemId) return it;
+    }
+    return null;
+  })();
+  const effName = fnId && slotId && (typeof getEffectiveSlotName === 'function')
+                  ? getEffectiveSlotName(fnId, slotId) : null;
+  return {
+    id: argId,
+    'fn-id': fnId,
+    'slot-id': slotId,
+    'binding-id': bindingId,
+    'item-id': itemId,
+    name: effName || (slot?.name) || null,
+    type: data.argType || (slot?.['type-fn-id']
+                            ? lookups.fnMap.get(slot['type-fn-id'])?.name
+                            : null),
+    value: (item && 'value' in item) ? item.value
+         : (binding && 'value' in binding) ? binding.value
+         : (data.value !== undefined ? data.value : null),
+    'ref-id': (item?.['ref-fn-id']) || (binding?.['ref-fn-id']) || null,
+    description: (binding?.description) || (slot?.description) || null
+  };
+}
+
+
+// Slots owned by `fn-id`'s root (the base-fn at the top of the
+// inheritance chain). These are the parameters the impl receives.
+function getRootSlots(fnId) {
+  if (!lookups || !lookups.fnMap) return [];
+  // Walk parent chain to find the fn with empty parent-ids.
+  const chain = getInheritanceChain(fnId);
+  let root = null;
+  for (const fid of chain) {
+    const fn = lookups.fnMap.get(fid);
+    if (fn && (!fn['parent-ids'] || fn['parent-ids'].length === 0)) {
+      root = fid;
+      break;
+    }
+  }
+  if (!root) return [];
+  const fnSlots = (lookups.fnSlotsByFn?.get(root)) || [];
+  return fnSlots.map(fs => lookups.slotMap.get(fs['slot-id'])).filter(Boolean);
 }
 
 // Mirror of the backend's `value_kind` enum
@@ -74,7 +346,8 @@ function buildLookups(data) {
 // Phase 2). Order matches the schema's declaration order, which is
 // also the order users will see in dropdowns.
 const VALUE_KINDS = ['null', 'uuid', 'text', 'int', 'bool', 'numeric',
-                     'timestamptz', 'jsonb', 'bytes', 'any', 'fn', 'sequence'];
+                     'timestamptz', 'jsonb', 'bytes', 'any', 'fn', 'sequence',
+                     'keyword'];
 
 // Editability gate — mirror of the backend's "fn-in-use-reason" delete
 // check: a fn can be edited inline only if it's not used as a parent
@@ -84,8 +357,8 @@ const VALUE_KINDS = ['null', 'uuid', 'text', 'int', 'bool', 'numeric',
 // to navigate to the dependents and detach them first.
 function isFnEditable(fnId) {
   if (!fnId || !lookups) return false;
-  const usedAsParent = (lookups.fnUsedAsParent && lookups.fnUsedAsParent.get(fnId)) || 0;
-  const usedAsRef    = (lookups.fnUsedAsRef    && lookups.fnUsedAsRef.get(fnId))    || 0;
+  const usedAsParent = (lookups.fnUsedAsParent?.get(fnId)) || 0;
+  const usedAsRef    = (lookups.fnUsedAsRef?.get(fnId))    || 0;
   return usedAsParent === 0 && usedAsRef === 0;
 }
 
@@ -106,6 +379,19 @@ function getQualifiedFnName(fn) {
     if (nsPath) return nsPath + '.' + name;
   }
   return name;
+}
+
+
+// Visible label for a fn-name in the editor — strips a single leading
+// `_` that marks a fn as private (graphden-fn-design SKILL). The full
+// name with prefix is still the canonical identifier used in
+// `getQualifiedFnName`, URL hashes, EDN refs, and the i-tooltip's
+// canonical-name line. This helper is purely for visual labels (sidebar
+// rows, ancestor-overlay rows, fn-picker entries). Non-private names
+// pass through unchanged.
+function displayLabel(name) {
+  if (!name || typeof name !== 'string') return name;
+  return name.startsWith('_') ? name.slice(1) : name;
 }
 
 // ============================================================================
@@ -148,35 +434,43 @@ function getInheritanceChain(fnId) {
 // ARG RESOLUTION
 // ============================================================================
 
-// Resolve arg name by following source chain
+// Resolve the effective name of an arg's slot at its fn — closest
+// `:rename-to` in the chain, or the slot's own name. Replaces the
+// legacy source-id walk that stitched arg names through the synth
+// chain; in the slot/binding model the answer is just one binding
+// lookup per ancestor.
 function resolveArgName(arg) {
-  let current = arg;
-  for (let i = 0; i < 100; i++) {
-    if (current.name) return current.name;
-    if (!current['source-id']) return null;
-    current = lookups.argMap.get(current['source-id']);
-    if (!current) return null;
-  }
-  return null;
+  if (!arg) return null;
+  if (arg.name) return arg.name;
+  const fnId = arg['fn-id'], slotId = arg['slot-id'];
+  if (!fnId || !slotId) return null;
+  return getEffectiveSlotName(fnId, slotId);
 }
 
-// Check if fn sets any args (has value or ref-id)
+// Check if fn sets any of its slots — a binding row with a value,
+// a ref, or list-append. These are the bindings that make ancestor
+// rows "interesting" enough to render as their own group on the
+// fn-overlay.
 function fnSetsArgs(fnId) {
-  const args = lookups.argsByFn.get(fnId) || [];
-  return args.some(arg => {
-    const hasValue = arg.value !== null && arg.value !== undefined;
-    const hasRef = !!arg['ref-id'];
-    return hasValue || hasRef;
+  const bindings = (lookups.bindingsByFn?.get(fnId)) || [];
+  return bindings.some(b => {
+    const hasValue = b.value !== null && b.value !== undefined;
+    const hasRef = !!b['ref-fn-id'];
+    const hasItems = !!b['list-append'];
+    return hasValue || hasRef || hasItems;
   });
 }
 
-// Check if fn has any ref-id args (references to other fns).
-// A fn with refs is "clickable" — expanding it produces new graph nodes.
-// A fn with only value/free args is "non-clickable" — its values are
-// discoverable via inheritance without expanding.
+// Check if fn has any ref-fn-id bindings or sequence items pointing
+// at other fns — those are the "clickable" ancestors whose expansion
+// produces new graph nodes.
 function fnHasRefArgs(fnId) {
-  const args = lookups.argsByFn.get(fnId) || [];
-  return args.some(arg => !!arg['ref-id']);
+  const bindings = (lookups.bindingsByFn?.get(fnId)) || [];
+  if (bindings.some(b => !!b['ref-fn-id'])) return true;
+  return bindings.some(b => {
+    const items = lookups.itemsByBinding?.get(b.id);
+    return items?.some(it => !!it['ref-fn-id']);
+  });
 }
 
 // ============================================================================
@@ -210,18 +504,18 @@ function buildAncestorLevels(levels) {
       // REAL parent chain renders on the rows below (which the user can
       // then expand). For deeper levels (>=1) we still fall back to the
       // nearest named ancestor so each row shows something meaningful.
-      let displayName = fn && fn.name;
+      let displayName = fn?.name;
       if (!displayName && fn && !topLevel) {
         const chain = getInheritanceChain(fnId);
         for (let i = 1; i < chain.length; i++) {
           const ancestor = lookups.fnMap.get(chain[i]);
-          if (ancestor && ancestor.name) { displayName = ancestor.name; break; }
+          if (ancestor?.name) { displayName = ancestor.name; break; }
         }
       }
       return {
         fnId,
         name: displayName || (topLevel ? '' : '(anonymous)'),
-        description: fn && fn.description,
+        description: fn?.description,
         setsArgs: fnSetsArgs(fnId),
         isClickable: fnSetsArgs(fnId)  // has value or ref-id → produces new nodes on expand
       };
@@ -261,7 +555,7 @@ function buildAncestorLevels(levels) {
       idx === 0 ||
       lv.anyClickable ||    // at least one clickable fn
       lv.isMI ||            // MI always starts its own group
-      (prev && prev.isMI);  // level after MI also starts a new group
+      (prev?.isMI);  // level after MI also starts a new group
     if (startsNew) groupId++;
     lv.groupId = groupId;
   });

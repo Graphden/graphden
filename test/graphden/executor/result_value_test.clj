@@ -116,9 +116,9 @@
           ;; Create base fn
           base-fn (setup/create-base-fn! storage "add-named" :int)
           _ (setup/create-arg! storage (:id base-fn)
-                               {:name "a" :type :int :required true :is-fn false})
+                               {:name "a" :type :int :required true})
           _ (setup/create-arg! storage (:id base-fn)
-                               {:name "b" :type :int :required true :is-fn false})
+                               {:name "b" :type :int :required true})
           ;; Create composed fn (free args - no values set)
           the-fn (setup/create-composed-fn! storage "my-add-named" (:id base-fn))
           ctx (exec/create-context {:storage storage})]
@@ -131,7 +131,7 @@
           ;; Create base fn
           base-fn (setup/create-base-fn! storage "single-arg" :int)
           _ (setup/create-arg! storage (:id base-fn)
-                               {:name "x" :type :int :required true :is-fn false})
+                               {:name "x" :type :int :required true})
           ;; Create composed fn
           the-fn (setup/create-composed-fn! storage "my-single-arg" (:id base-fn))
           ctx (exec/create-context {:storage storage})]

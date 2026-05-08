@@ -39,15 +39,41 @@
 
 (defn- mk-arg
   "Schema-shaped arg. `opts` is a partial map; we drop nil keys to match the
-   denser real DB shape and avoid surprising `(:value arg)` truthy checks."
+   denser real DB shape and avoid surprising `(:value arg)` truthy checks.
+   Adds a synthetic `:slot-id` so the slot-id-keyed walkers (added in
+   the slot/binding refactor) line up — defaults to the row's
+   `:source-id` (the inheritance lineage) or its own `:id`."
   [opts]
-  (into {} (remove (comp nil? val)) opts))
+  (let [base (into {} (remove (comp nil? val)) opts)]
+    (cond-> base
+      (not (contains? base :slot-id))
+      (assoc :slot-id (or (:source-id base) (:id base))))))
+
+
+(defn- resolve-slot-ids
+  "Test args carry a synthetic :slot-id (own arg-id or inherited
+   source-id). For inheritance to look correct to the layout, every
+   member of a single inheritance chain needs the SAME slot-id —
+   mirror that here by walking source-id back to the defining anchor
+   and reusing its slot-id."
+  [args]
+  (let [by-id (into {} (map (juxt :id identity)) args)
+        terminal (fn terminal
+                   [a]
+                   (if-let [src (some-> a :source-id by-id)]
+                     (recur src)
+                     a))]
+    (mapv (fn [a]
+            (assoc a :slot-id (:id (terminal a))))
+          args)))
 
 
 (defn- run
   ([root-id fns args] (run root-id fns args {}))
   ([root-id fns args expansions]
-   (build-graph-elements root-id expansions (build-lookups {:fns fns :args args}))))
+   (build-graph-elements root-id expansions
+                         (build-lookups {:fns fns
+                                         :args (resolve-slot-ids args)}))))
 
 
 (defn- node-by-id
@@ -156,9 +182,9 @@
                (mk-fn base-inner "base-inner")
                (mk-fn outer "outer" [base-outer])
                (mk-fn inner nil [base-inner])]
-          args [(mk-arg {:id base-outer-f :fn-id base-outer :name "f" :is-fn true})
+          args [(mk-arg {:id base-outer-f :fn-id base-outer :name "f" :type :fn})
                 (mk-arg {:id base-inner-v :fn-id base-inner :name "v"})
-                (mk-arg {:id outer-f :fn-id outer :source-id base-outer-f :ref-id inner :is-fn true})
+                (mk-arg {:id outer-f :fn-id outer :source-id base-outer-f :ref-id inner :type :fn})
                 (mk-arg {:id inner-v-propagated :fn-id inner :source-id base-inner-v})]
           {:keys [nodes]} (run outer fns args)
           inner-node (some #(when (re-find #"base-inner" (str (get-in % [:data :label]))) %) nodes)]
@@ -187,9 +213,9 @@
           fns [(mk-fn base "base")
                (mk-fn inner nil [base])
                (mk-fn outer "outer" [base])]
-          args [(mk-arg {:id base-f :fn-id base :name "f" :is-fn true})
+          args [(mk-arg {:id base-f :fn-id base :name "f" :type :fn})
                 (mk-arg {:id base-v :fn-id base :name "v"})
-                (mk-arg {:id outer-f :fn-id outer :source-id base-f :ref-id inner :is-fn true})
+                (mk-arg {:id outer-f :fn-id outer :source-id base-f :ref-id inner :type :fn})
                 (mk-arg {:id outer-v :fn-id outer :source-id base-v :value 42})
                 (mk-arg {:id inner-v :fn-id inner :source-id base-v})]
           {:keys [nodes edges]} (run outer fns args)

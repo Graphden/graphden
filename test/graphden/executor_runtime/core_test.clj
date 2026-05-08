@@ -416,6 +416,21 @@
 ;; -main Function Tests
 ;; =============================================================================
 
-;; Note: -main uses Java interop (Runtime/addShutdownHook) and blocks forever
-;; with @(promise). These are intentionally not unit tested.
-;; The components it uses (start!, stop!) are tested above.
+;; -main blocks on @(promise), so we redef the indirections it goes
+;; through (start!, install-shutdown-hook!, block-forever!) and call it
+;; directly. No JVM hooks are leaked.
+
+(deftest main-runs-startup-then-blocks
+  (testing "-main calls start! :prod, installs shutdown hook, then blocks"
+    (let [profile-used (atom nil)
+          hook-installed? (atom false)
+          blocked? (atom false)]
+      (with-redefs [rt/start! (fn
+                                ([] (reset! profile-used :no-arg))
+                                ([p] (reset! profile-used p)))
+                    rt/install-shutdown-hook! (fn [] (reset! hook-installed? true))
+                    rt/block-forever! (fn [] (reset! blocked? true))]
+        (rt/-main "ignored")
+        (is (= :prod @profile-used) "-main starts with :prod profile")
+        (is @hook-installed? "shutdown hook installed")
+        (is @blocked? "block step reached")))))

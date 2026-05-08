@@ -12,11 +12,24 @@ window.BUILD_HASH = BUILD_HASH;
 // ============================================================================
 // GLOBAL STATE
 // ============================================================================
+//
+// `let` (not `const`) on every binding below — these are MUTABLE
+// globals reassigned from OTHER files in the bundle (editor-main,
+// editor-cytoscape, editor-edit-modes, …). The editor ships as a
+// single concatenated <script> rather than ES modules, so plain
+// top-level `let` IS the cross-file mutable storage.
+//
+// Biome's per-file scope analysis can't see those reassignments and
+// would flag every line below as `useConst`-eligible. `biome.json`'s
+// override turns that rule off for THIS file (and `editor-ui.js`
+// for the same reason); don't switch any of these to `const`
+// without first confirming no other file rebinds it.
 
 let cy = null;                    // Cytoscape instance
 let selectedFnId = null;          // Currently selected function ID
 let graphData = null;             // Raw graph data from API
 let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
+let richTypes = {};               // {fn-name → {return, args}} from /api/types
 
 // Set of fn-ids reachable from `selectedFnId` via ref-id only — i.e.
 // fns that show up in the layout WITHOUT requiring an expansion. The
@@ -28,7 +41,8 @@ let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
 // (initGraph) and whenever lookups change.
 let implementationFnIds = new Set();
 function rebuildImplementationFnIds() {
-  if (!selectedFnId || !lookups || !lookups.argsByFn) {
+  if (!selectedFnId || !lookups
+      || !lookups.bindingsByFn || !lookups.itemsByBinding) {
     implementationFnIds = new Set();
     return;
   }
@@ -36,12 +50,20 @@ function rebuildImplementationFnIds() {
   const stack = [selectedFnId];
   while (stack.length) {
     const cur = stack.pop();
-    const args = lookups.argsByFn.get(cur) || [];
-    for (const a of args) {
-      const ref = a['ref-id'];
-      if (ref && !seen.has(ref)) {
-        seen.add(ref);
-        stack.push(ref);
+    const bindings = lookups.bindingsByFn.get(cur) || [];
+    for (const b of bindings) {
+      const directRef = b['ref-fn-id'];
+      if (directRef && !seen.has(directRef)) {
+        seen.add(directRef);
+        stack.push(directRef);
+      }
+      const items = lookups.itemsByBinding.get(b.id) || [];
+      for (const it of items) {
+        const itemRef = it['ref-fn-id'];
+        if (itemRef && !seen.has(itemRef)) {
+          seen.add(itemRef);
+          stack.push(itemRef);
+        }
       }
     }
   }

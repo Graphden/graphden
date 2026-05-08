@@ -1,0 +1,105 @@
+;; Refinement / union / variant type declarations + runtime narrowing.
+;;
+;; Each refinement is a fn-row with `:refine {:base T :constraint C}`;
+;; sync-time type-check rejects literal values that violate C, and
+;; rejects passing a base-typed value where a refinement is expected
+;; (forcing an explicit `:ensure-X` conversion).
+;;
+;; Each `:ensure-X` is a base-fn that re-validates at runtime and
+;; returns the value or throws — see impls.clj.
+;;
+;; Recognised constraint shapes (sync-time literal checks):
+;;   [:>  N]   [:>= N]   [:<  N]   [:<= N]   [:=  N]   [:not= V]
+;;   [:in #{vs…}]
+;;   [:and c1 c2 …]   [:or c1 c2 …]
+;; Unknown shapes are accepted (sync-only, runtime catches the rest).
+
+
+{:namespace "core.refinements"
+ :description "Refinement / union / variant type declarations plus runtime narrowing base-fns."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; Refinement-typed declarations (formerly aliases.edn).
+  ;; ---------------------------------------------------------------------
+
+  {:name :positive-int
+   :refine {:base :int :constraint [:> 0]}}
+
+  {:name :non-negative-int
+   :refine {:base :int :constraint [:>= 0]}}
+
+  {:name :negative-int
+   :refine {:base :int :constraint [:< 0]}}
+
+  {:name :non-empty-text
+   :refine {:base :text :constraint [:not= ""]}}
+
+  {:name :positive-numeric
+   :refine {:base :numeric :constraint [:> 0]}}
+
+  {:name :percent
+   :refine {:base :numeric :constraint [:and [:>= 0] [:<= 100]]}}
+
+  {:name :probability
+   :refine {:base :numeric :constraint [:and [:>= 0] [:<= 1]]}}
+
+  {:name :port
+   :refine {:base :int :constraint [:and [:>= 1] [:<= 65535]]}}
+
+  {:name :user-port
+   :refine {:base :int :constraint [:and [:>= 1024] [:<= 65535]]}}
+
+  {:name :http-status
+   :refine {:base :int :constraint [:and [:>= 100] [:<= 599]]}}
+
+  {:name :bit
+   :refine {:base :int :constraint [:or [:= 0] [:= 1]]}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Union types — `[T1 T2 …]`. A value satisfies the union iff it
+  ;; satisfies at least one branch.
+  ;; ---------------------------------------------------------------------
+
+  {:name :nullable-int      :union [:null :int]}
+  {:name :nullable-text     :union [:null :text]}
+  {:name :nullable-bool     :union [:null :bool]}
+  {:name :nullable-numeric  :union [:null :numeric]}
+  {:name :nullable-uuid     :union [:null :uuid]}
+
+  ;; ---------------------------------------------------------------------
+  ;; Variant types — Result-style discriminated unions. Each branch is
+  ;; `:tag T`; runtime discriminates by value's `:tag` field.
+  ;; ---------------------------------------------------------------------
+
+  {:name :result-text   :variant [:ok :text :err :text]}
+  {:name :result-int    :variant [:ok :int  :err :text]}
+  {:name :validation    :variant [:valid :any :invalid :text]}
+
+  ;; ---------------------------------------------------------------------
+  ;; Runtime narrowing impls — paired with a refinement above.
+  ;; ---------------------------------------------------------------------
+
+  {:name :ensure-positive-int
+   :description "Validate that `:value` is `> 0`; return it as `:positive-int`. Throws `refinement/violated` otherwise."
+   :args {:value {:type :int :description "Integer to validate."}}
+   :return-type :positive-int}
+
+  {:name :ensure-non-negative-int
+   :description "Validate that `:value` is `>= 0`; return it as `:non-negative-int`. Throws `refinement/violated` otherwise."
+   :args {:value {:type :int :description "Integer to validate."}}
+   :return-type :non-negative-int}
+
+  {:name :ensure-negative-int
+   :description "Validate that `:value` is `< 0`; return it as `:negative-int`. Throws `refinement/violated` otherwise."
+   :args {:value {:type :int :description "Integer to validate."}}
+   :return-type :negative-int}
+
+  {:name :ensure-non-empty-text
+   :description "Validate that `:value` is a non-empty string; return it as `:non-empty-text`. Throws `refinement/violated` otherwise."
+   :args {:value {:type :text :description "Text to validate."}}
+   :return-type :non-empty-text}
+
+  {:name :ensure-positive-numeric
+   :description "Validate that `:value` is `> 0`; return it as `:positive-numeric`. Throws `refinement/violated` otherwise."
+   :args {:value {:type :numeric :description "Number to validate."}}
+   :return-type :positive-numeric}]}

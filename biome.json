@@ -1,0 +1,59 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "organizeImports": { "enabled": false },
+  "files": {
+    "include": ["resources/packages/app/editor/**/*.js"],
+    "ignore": ["**/node_modules/**", "tools/browser-test/**"]
+  },
+  "javascript": {
+    "globals": [
+      "cytoscape",
+      "BUILD_HASH",
+      "authFetch",
+      "isAuthenticated"
+    ],
+    "formatter": { "enabled": false }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "noUselessElse": "off",
+        "useTemplate": "off",
+        "useConst": "warn",
+        "noVar": "off",
+        "noParameterAssign": "off",
+        "useSingleVarDeclarator": "off",
+        "useNumberNamespace": "off"
+      },
+      "complexity": {
+        "noForEach": "off",
+        "useArrowFunction": "off",
+        "useOptionalChain": "warn",
+        "useLiteralKeys": "warn",
+        "noUselessTernary": "warn"
+      },
+      "suspicious": {
+        "noAssignInExpressions": "warn",
+        "noConsole": "off"
+      },
+      "correctness": {
+        "noUnusedVariables": "off"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "include": [
+        "resources/packages/app/editor/editor-state.js",
+        "resources/packages/app/editor/editor-ui.js"
+      ],
+      "linter": {
+        "rules": {
+          "style": { "useConst": "off" }
+        }
+      }
+    }
+  ]
+}

@@ -269,8 +269,8 @@
   sp/ExecutionGraph
 
   (resolve-execution-graph
-    [_this fn-id]
-    (graph/resolve-execution-graph pool fn-id))
+    [this fn-id]
+    (graph/resolve-execution-graph pool this fn-id))
 
 
   sp/StorageErrorClassifier

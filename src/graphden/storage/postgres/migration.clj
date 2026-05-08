@@ -139,6 +139,10 @@
    (fn [_ctx entity-name old-name new-name]
      (ddl/rename-column! tx entity-name old-name new-name))
 
+   :on-delete-field!
+   (fn [_ctx entity-name field-name]
+     (ddl/drop-column! tx entity-name field-name))
+
    :on-existing-field!
    (fn [ctx entity-name field-name field-spec _old-field-info]
      ;; Type widening - use cached columns

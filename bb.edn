@@ -10,6 +10,7 @@
           (def green "\u001b[32m")
           (def red "\u001b[31m")
           (def cyan "\u001b[36m")
+          (def yellow "\u001b[33m")
           (def reset "\u001b[0m")
 
           (defn run-parallel
@@ -88,6 +89,30 @@
   cljstyle
   {:doc "Check formatting [path]"
    :task (clojure (str "-M:cljstyle check " (or (first *command-line-args*) all-paths)))}
+
+  biome
+  {:doc "Lint editor JS via biome"
+   :task (p/shell "npx" "biome" "check" "resources/packages/app/editor")}
+
+  biome-fix
+  {:doc "Auto-fix safe biome violations"
+   :task (p/shell "npx" "biome" "check" "--write" "resources/packages/app/editor")}
+
+  stylelint
+  {:doc "Lint editor CSS via stylelint (design-token discipline + standard rules)"
+   :task (p/shell "npx" "stylelint" "resources/packages/app/editor/**/*.css")}
+
+  stylelint-fix
+  {:doc "Auto-fix stylelint violations where possible"
+   :task (p/shell "npx" "stylelint" "--fix" "resources/packages/app/editor/**/*.css")}
+
+  visual
+  {:doc "Run Playwright visual-regression tests against running editor (default http://localhost:9002). Reads AUTH_TOKEN from env or .env. Use `bb visual-update` after intentional UI changes."
+   :task (p/shell {:dir "tools/visual-tests"} "npx" "playwright" "test")}
+
+  visual-update
+  {:doc "Refresh visual-regression baselines (commit the updated PNGs after intentional UI changes)"
+   :task (p/shell {:dir "tools/visual-tests"} "npx" "playwright" "test" "--update-snapshots")}
 
   ;; NOTE: Eastwood removed - incompatible with Clojure 1.12 qualified methods (Class/.method)
   ;; See: https://github.com/jonase/eastwood/issues/457
@@ -279,24 +304,24 @@
      (println (str cyan "Smoke testing " base-url reset))
 
      (step "GET /                          editor page renders"
-       (fn []
-         (let [r (get* "/")]
-           (cond
-             (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
-             (not (str/includes? (:body r) "id=\"cy\"")) {:ok? false :detail "no #cy in body"}
-             :else {:ok? true}))))
+           (fn []
+             (let [r (get* "/")]
+               (cond
+                 (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                 (not (str/includes? (:body r) "id=\"cy\"")) {:ok? false :detail "no #cy in body"}
+                 :else {:ok? true}))))
 
      (let [entities-resp (step "GET /api/graph/entities       returns JSON with fns"
-                           (fn []
-                             (let [r (get* "/api/graph/entities")]
-                               (cond
-                                 (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
-                                 :else
-                                 (let [parsed (json/parse-string (:body r) true)
-                                       fns (:fns parsed)]
-                                   (if (and (sequential? fns) (seq fns))
-                                     {:ok? true :data parsed}
-                                     {:ok? false :detail "no :fns / empty"}))))))
+                               (fn []
+                                 (let [r (get* "/api/graph/entities")]
+                                   (cond
+                                     (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                                     :else
+                                     (let [parsed (json/parse-string (:body r) true)
+                                           fns (:fns parsed)]
+                                       (if (and (sequential? fns) (seq fns))
+                                         {:ok? true :data parsed}
+                                         {:ok? false :detail "no :fns / empty"}))))))
            ;; Pick a "rich" fn to expand — one that actually has children
            ;; via parent-id chains. `web-server` is a stable choice on
            ;; this codebase.
@@ -306,62 +331,107 @@
                             first))
            target-id (some-> target-fn :id)
            collapsed-resp (step "POST /api/graph/layout (no expansions)  returns nodes"
-                            (fn []
-                              (if-not target-id
-                                {:ok? false :detail "couldn't find :web-server fn for layout test"}
-                                (let [r (post-json "/api/graph/layout"
-                                                   {"root-id" target-id "expansions" {}})]
-                                  (cond
-                                    (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
-                                    :else
-                                    (let [parsed (json/parse-string (:body r) true)
-                                          nodes (:nodes parsed)]
-                                      (if (and (sequential? nodes) (>= (count nodes) 1))
-                                        {:ok? true :node-count (count nodes)}
-                                        {:ok? false :detail "no nodes returned"})))))))]
+                                (fn []
+                                  (if-not target-id
+                                    {:ok? false :detail "couldn't find :web-server fn for layout test"}
+                                    (let [r (post-json "/api/graph/layout"
+                                                       {"root-id" target-id "expansions" {}})]
+                                      (cond
+                                        (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                                        :else
+                                        (let [parsed (json/parse-string (:body r) true)
+                                              nodes (:nodes parsed)]
+                                          (if (and (sequential? nodes) (>= (count nodes) 1))
+                                            {:ok? true :node-count (count nodes)}
+                                            {:ok? false :detail "no nodes returned"})))))))]
        (step "POST /api/graph/layout (with expansion)  endpoint accepts spec"
-         (fn []
-           (cond
-             (not (:ok? collapsed-resp)) {:ok? false :detail "skipped — collapsed layout failed"}
-             :else
-             (let [root-node-id (str "fn-" target-id)
-                   r (post-json "/api/graph/layout"
-                                {"root-id" target-id
-                                 "expansions" {root-node-id {"full-depth" 3
-                                                             "partial-fns" []}}})]
+             (fn []
+               (cond
+                 (not (:ok? collapsed-resp)) {:ok? false :detail "skipped — collapsed layout failed"}
+                 :else
+                 (let [root-node-id (str "fn-" target-id)
+                       r (post-json "/api/graph/layout"
+                                    {"root-id" target-id
+                                     "expansions" {root-node-id {"full-depth" 3
+                                                                 "partial-fns" []}}})]
+                   (cond
+                     (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                     :else
+                     (let [parsed (json/parse-string (:body r) true)
+                           n (count (:nodes parsed))]
+                       (if (and (sequential? (:nodes parsed)) (>= n 1))
+                         {:ok? true :detail (str n " nodes")}
+                         {:ok? false :detail "no nodes in expanded layout"}))))))))
+
+     ;; Phase 1 type-API: subtype check + candidate enumeration.
+     (step "POST /api/types/compatible (int ⊆ int)    → {ok:true}"
+           (fn []
+             (let [r (post-json "/api/types/compatible"
+                                {"expected" "int" "candidate" "int"})
+                   parsed (when (= 200 (:status r))
+                            (json/parse-string (:body r) true))]
                (cond
                  (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
-                 :else
-                 (let [parsed (json/parse-string (:body r) true)
-                       n (count (:nodes parsed))]
-                   (if (and (sequential? (:nodes parsed)) (>= n 1))
-                     {:ok? true :detail (str n " nodes")}
-                     {:ok? false :detail "no nodes in expanded layout"}))))))))
+                 (not (true? (:ok parsed))) {:ok? false :detail (str "expected ok=true, got " (pr-str parsed))}
+                 :else {:ok? true}))))
+
+     (step "POST /api/types/compatible (text ⊄ int)  → {ok:false :reason}"
+           (fn []
+             (let [r (post-json "/api/types/compatible"
+                                {"expected" "int" "candidate" "text"})
+                   parsed (when (= 200 (:status r))
+                            (json/parse-string (:body r) true))]
+               (cond
+                 (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                 (not (false? (:ok parsed))) {:ok? false :detail "expected ok=false"}
+                 (str/blank? (:reason parsed)) {:ok? false :detail "missing :reason"}
+                 :else {:ok? true}))))
+
+     (step "POST /api/types/candidates (expected=int)  → non-empty candidates"
+           (fn []
+             (let [r (post-json "/api/types/candidates" {"expected" "int"})
+                   parsed (when (= 200 (:status r))
+                            (json/parse-string (:body r) true))]
+               (cond
+                 (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                 (not (pos? (:count parsed 0))) {:ok? false :detail "no candidates returned"}
+                 :else {:ok? true :detail (str (:count parsed) " candidates")}))))
+
+     (step "POST /api/types/candidates (effects=[])    → pure subset only"
+           (fn []
+             (let [r-all (post-json "/api/types/candidates" {"expected" "int"})
+                   r-pure (post-json "/api/types/candidates" {"expected" "int" "effects" []})
+                   all-n (some-> r-all :body (json/parse-string true) :count)
+                   pure-n (some-> r-pure :body (json/parse-string true) :count)]
+               (cond
+                 (or (not all-n) (not pure-n)) {:ok? false :detail "request failed"}
+                 (> pure-n all-n) {:ok? false :detail "pure subset must be ≤ all"}
+                 :else {:ok? true :detail (str pure-n " pure ≤ " all-n " total")}))))
 
      (step "GET /api/auth/check (no token)      → 401 challenge"
-       (fn []
-         (let [r (get* "/api/auth/check")]
-           (if (= 401 (:status r))
-             {:ok? true}
-             {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
+           (fn []
+             (let [r (get* "/api/auth/check")]
+               (if (= 401 (:status r))
+                 {:ok? true}
+                 {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
 
      (step "GET /api/auth/check (wrong token)   → 401 challenge"
-       (fn []
-         (let [r (get* "/api/auth/check"
-                       {:headers {"Authorization" "Bearer this-is-not-the-token"}})]
-           (if (= 401 (:status r))
-             {:ok? true}
-             {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
+           (fn []
+             (let [r (get* "/api/auth/check"
+                           {:headers {"Authorization" "Bearer this-is-not-the-token"}})]
+               (if (= 401 (:status r))
+                 {:ok? true}
+                 {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
 
      (when token
        (step "GET /api/auth/check (env AUTH_TOKEN)  → 200 ok"
-         (fn []
-           (let [r (get* "/api/auth/check"
-                         {:headers {"Authorization" (str "Bearer " token)}})]
-             (cond
-               (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
-               (not= "ok" (str/trim (or (:body r) ""))) {:ok? false :detail (str "body=" (pr-str (:body r)))}
-               :else {:ok? true}))))
+             (fn []
+               (let [r (get* "/api/auth/check"
+                             {:headers {"Authorization" (str "Bearer " token)}})]
+                 (cond
+                   (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                   (not= "ok" (str/trim (or (:body r) ""))) {:ok? false :detail (str "body=" (pr-str (:body r)))}
+                   :else {:ok? true}))))
        nil)
      (when-not token
        (println (str cyan "  (set AUTH_TOKEN env to also test successful login)" reset)))
@@ -458,4 +528,79 @@
          (if (every? identity results)
            (println (str green "✓ MATCH — every section ships exactly this source" reset))
            (do (println (str red "✗ MISMATCH — some section is out of date or different" reset))
-               (System/exit 1))))))}}}
+               (System/exit 1))))))}
+
+  effects
+  {:doc "Effects breakdown for a running instance — counts fn-defs per :effects category and reports any drift between computed and declared :expects-effects. Usage: bb effects [http://host:port]"
+   :requires ([babashka.http-client :as http]
+              [cheshire.core :as json]
+              [clojure.set :as set])
+   :task
+   (let [raw-url (or (first *command-line-args*) "http://localhost:9002")
+         base-url (if (str/ends-with? raw-url "/") (subs raw-url 0 (dec (count raw-url))) raw-url)
+         types-url (str base-url "/api/types")
+         resp (try (http/get types-url {:throw false})
+                   (catch Throwable e {:error (.getMessage e)}))
+         body (when (and (= 200 (:status resp)) (:body resp))
+                (try (json/parse-string (:body resp) true)
+                     (catch Throwable _ nil)))]
+     (println (str cyan "URL: " reset types-url))
+     (cond
+       (nil? body)
+       (do (println (str red "✗ couldn't fetch /api/types: "
+                         (or (:error resp) (:status resp)) reset))
+           (System/exit 2))
+
+       :else
+       (let [total (count body)
+             by-cat (reduce-kv (fn [acc fn-name info]
+                                 (reduce (fn [a t] (update a t (fnil conj []) fn-name))
+                                         acc
+                                         (:effects info)))
+                               {} body)
+             effectful-total (count (filter (fn [[_ v]] (seq (:effects v))) body))
+             drifters (->> body
+                           (keep (fn [[fn-name info]]
+                                   (let [d (set (:expects-effects info))
+                                         c (set (:effects info))]
+                                     (when (seq d)
+                                       (let [unexpected (set/difference c d)
+                                             over       (set/difference d c)]
+                                         (when (or (seq unexpected) (seq over))
+                                           {:name fn-name
+                                            :declared d
+                                            :computed c
+                                            :drift unexpected
+                                            :over over}))))))
+                           (sort-by :name))]
+         (println (str cyan "▶ effects breakdown" reset
+                       "  (effectful " effectful-total " of " total ")"))
+         (doseq [tag (sort (keys by-cat))]
+           (let [fns (sort (by-cat tag))]
+             (println (format "  %-10s (%3d)  %s%s"
+                              (name tag)
+                              (count fns)
+                              (str/join ", " (take 6 fns))
+                              (if (> (count fns) 6) (format " … +%d more" (- (count fns) 6)) "")))))
+         (println)
+         (cond
+           (empty? drifters)
+           (println (str green "✓ no :expects-effects drift" reset))
+           :else
+           (do (println (str yellow "⚠ drift in " (count drifters) " fn-def(s):" reset))
+               (doseq [{nm :name :keys [declared computed drift over]} drifters]
+                 (println (format "  %s" (clojure.core/name nm)))
+                 (when (seq drift)
+                   (println (format "    DRIFT (computed but not declared): %s"
+                                    (str/join ", " (sort (map clojure.core/name drift))))))
+                 (when (seq over)
+                   (println (format "    over-declared (declared but not computed): %s"
+                                    (str/join ", " (sort (map clojure.core/name over))))))
+                 (println (format "    declared: %s  computed: %s"
+                                  (str/join "," (sort (map clojure.core/name declared)))
+                                  (str/join "," (sort (map clojure.core/name computed))))))
+               ;; Only EXIT non-zero when at least one fn-def had REAL
+               ;; drift (computed effect not in :expects-effects).
+               ;; Over-declaration alone is harmless.
+               (when (some (fn [{:keys [drift]}] (seq drift)) drifters)
+                 (System/exit 1)))))))}}}

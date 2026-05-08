@@ -1,9 +1,19 @@
 (ns graphden.packages.loader-test
   "Tests for package loader."
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.packages.loader :as loader]
-    [graphden.storage.protocol.core]))
+    [graphden.storage.protocol.core]
+    [graphden.types.core :as types]))
+
+
+;; Aliases registry is process-global; clear between tests so
+;; register-aliases! tests don't leak across each other.
+(use-fixtures :each
+  (fn [t]
+    (types/clear-aliases!)
+    (t)
+    (types/clear-aliases!)))
 
 
 ;; =============================================================================
@@ -24,8 +34,10 @@
            (#'loader/normalize-arg-spec {:type :text :required false}))))
 
   (testing "map arg-spec preserves extra fields"
-    (is (= {:type :fn :required true :is-fn true}
-           (#'loader/normalize-arg-spec {:type :fn :is-fn true})))))
+    ;; #15b retired the `:is-fn` field; here we use `:description`
+    ;; as the "extra field" the loader passes through unchanged.
+    (is (= {:type :fn :required true :description "callable"}
+           (#'loader/normalize-arg-spec {:type :fn :description "callable"})))))
 
 
 ;; =============================================================================
@@ -307,3 +319,8 @@
           (delete-entity [_ _ _] nil))]
     (is (= {} (loader/sync-namespaces! mock-storage #{})))
     (is (zero? @state) "no entities created for empty set")))
+
+
+;; register-aliases! tests removed — function dropped during full
+;; rewrite (commit f549820). Type-declaration tests live in
+;; graphden.packages.records-test.

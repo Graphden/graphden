@@ -1,6 +1,12 @@
 # Graph Layout Algorithm
 
-This document describes the complete algorithm for laying out function graphs in the Graphden editor.
+This document describes the complete algorithm for laying out
+function graphs in the Graphden editor. Internal data shape:
+`derive-fn-slot-views` flattens (fn × slot) views into "arg row"
+records that feed every walker; lookups are slot-id-keyed
+(`bindings`, `parent-bound-terminals`, `covered-slots`,
+`child-covered-sources-for-fn`). See
+`resources/packages/app/layout/impls.clj` for the implementation.
 
 ## Overview
 
@@ -21,11 +27,20 @@ Request → Load Data → Build Graph → Compute Paths → Sort Children → Pl
 **Input:** `root-id` (UUID), `expansions` (map of fn-id → level)
 
 **Process:**
-1. Load all `fn` and `arg` entities from storage
-2. Build lookup maps:
+1. Load all `fn` / `slot` / `fn-slot` / `binding` /
+   `binding-list-item` entities from storage.
+2. `derive-fn-slot-views` flattens each fn's inheritance closure
+   into anchor rows (one per `(fn, slot)` pair) plus item rows for
+   list-bindings.
+3. Build lookup maps:
    - `fn-map`: fn-id → fn entity
-   - `arg-map`: arg-id → arg entity
-   - `args-by-fn`: fn-id → [arg entities]
+   - `arg-map`: synth-arg-id → derived (fn, slot) view
+   - `args-by-fn`: fn-id → [view rows]
+   - `slot-map`: slot-id → slot entity
+   - `fn-slots-by-fn`: fn-id → [fn-slot junction rows]
+   - `binding-by-fn-slot`: [fn-id slot-id] → binding row
+   - `bindings-by-fn`: fn-id → [binding rows]
+   - `items-by-binding`: binding-id → [list-item rows] sorted by position
 
 ### Stage 2: Build Graph Elements
 
@@ -129,7 +144,7 @@ This rule applies in **four places** in the code:
 | `collect-expanded-args` → `ref-fn-arg-ids` | Args from displayed ref-fns | Items not filtered as "belonging inside ref" |
 | `process-expanded-fn` → `ancestor-ref-arg-sources` | Args from ancestor ref subtree | Level-0 items not filtered as "covered by ancestor" |
 | `process-fn` → `displayed-ref-arg-ids` | Args from displayed child ref-fns | Item bindings not filtered inside structural nodes |
-| `child-covered-sources-for-fn` | Source-ids from child ref chains | Item source-ids not mistakenly "covered by coll child" |
+| `child-covered-sources-for-fn` | Slot-ids exposed by child ref's closure | Slots not mistakenly "covered by coll child" when they live in the shared ancestor |
 
 **Recursive subtree walk for ancestor-ref-arg-sources:**
 The ancestor ref may have a deep composition tree (e.g., list-10 → list-10-9 → ... → pair-1).

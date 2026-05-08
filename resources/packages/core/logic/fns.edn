@@ -32,39 +32,49 @@
    :return-type :bool}
 
   ;; === Conditionals ===
+  ;; `:then` and `:else` share type-var `'a` so the return narrows to
+  ;; whichever concrete type both branches carry. `:else` is optional —
+  ;; when omitted, the runtime yields nil; the type system simplifies
+  ;; that to `'a` rather than `[:union :null 'a]`.
   {:name :if
    :description "Two-branch conditional. Returns `then` when `test` is truthy, else `else` (nil if omitted)."
    :args {:test {:type :any :description "Truthy/falsy expression."}
-          :then {:type :any :description "Returned when test is truthy."}
-          :else {:type :any :required false
+          :then {:type a :description "Returned when test is truthy."}
+          :else {:type a :required false
                  :description "Returned when test is falsy. Defaults to nil."}}
-   :return-type :any}
+   :return-type a}
 
   {:name :cond
    :description "Multi-branch — evaluates pairs `[test result …]`, returns the first result whose test is truthy."
    :args {:clauses {:type :sequence :of :any :description "Vector of alternating tests and result expressions."}}
    :return-type :any}
 
+  ;; The clauses map is opaque to the type system (its values are
+  ;; jsonb), so the only constraint we can express is that the
+  ;; `:default` and the result share a type. Heterogeneous clauses
+  ;; remain the user's responsibility.
   {:name :case
    :description "Constant-time dispatch on `value` via a `{match-value result}` map (Clojure's `(get clauses value default)`). Falls back to `:default` when the value isn't a key. Note: keys in a literal `:clauses` map come back keywordized after JSONB roundtrip — use string keys when matching against caller-supplied strings."
    :args {:value {:type :any :description "Value to look up in the clauses map."}
           :clauses {:type :jsonb :description "Map of `{match-value result}` — the dispatch table. Pass either a literal map or a fn-ref that returns one."}
-          :default {:type :any :required false
+          :default {:type a :required false
                     :description "Fallback when `value` isn't a key in `:clauses`. Defaults to nil."}}
-   :return-type :any}
+   :return-type a}
 
   ;; === Defaults ===
+  ;; `:value` and `:default` share `'a`: the result is whichever of the
+  ;; two ends up carrying the value, so the return narrows to that type.
   {:name :coalesce
    :description "Returns `value` if non-nil, else `default`."
-   :args {:value {:type :any :description "Primary value; used when non-nil."}
-          :default {:type :any :description "Fallback used when value is nil."}}
-   :return-type :any}
+   :args {:value {:type a :description "Primary value; used when non-nil."}
+          :default {:type a :description "Fallback used when value is nil."}}
+   :return-type a}
 
   ;; === Constants ===
   {:name :const
    :description "Identity-style passthrough — returns `:value` unchanged. Building block for capture renames `{:as :name}`."
-   :args {:value {:type :any :description "Value to return as-is."}}
-   :return-type :any}
+   :args {:value {:type a :description "Value to return as-is."}}
+   :return-type a}
 
   {:name :identity
    :description "Alias of `:const`."

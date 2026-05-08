@@ -80,9 +80,9 @@
    :return-type :jsonb}
 
   {:name :count
-   :description "Count items in a collection (Clojure's `count`). Returns 0 for nil."
+   :description "Count items in a collection (Clojure's `count`). Returns 0 for nil. Always non-negative."
    :args {:coll {:type :jsonb :description "Collection to size."}}
-   :return-type :int}
+   :return-type :non-negative-int}
 
   {:name :empty?
    :description "True iff the collection has no items (Clojure's `empty?`). True for nil."
@@ -146,19 +146,22 @@
 
   {:name :repeat
    :description "Vector of `count` copies of `item` (Clojure's `(into [] (repeat count item))`)."
-   :args {:count {:type :int :description "Number of copies."}
+   ;; `:non-negative-int` is a built-in type alias for
+   ;; `[:refine :int [:>= 0]]`. Negative counts are rejected at
+   ;; sync time — the runtime treats them as zero anyway.
+   :args {:count {:type :non-negative-int :description "Number of copies."}
           :item {:type :any :description "Value repeated."}}
    :return-type :jsonb}
 
   {:name :take
    :description "First `count` items of a collection (Clojure's `take`). Realises a lazy seq."
-   :args {:count {:type :int :description "Maximum number of items to take."}
+   :args {:count {:type :non-negative-int :description "Maximum number of items to take."}
           :coll {:type :jsonb :description "Source collection."}}
    :return-type :jsonb}
 
   {:name :drop
    :description "Skip the first `count` items (Clojure's `drop`). Returns a vector of the remainder."
-   :args {:count {:type :int :description "Number of items to skip."}
+   :args {:count {:type :non-negative-int :description "Number of items to skip."}
           :coll {:type :jsonb :description "Source collection."}}
    :return-type :jsonb}
 

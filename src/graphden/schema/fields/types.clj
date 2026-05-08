@@ -51,7 +51,9 @@
    :bytes       {:description "Binary data"
                  :clojure-type 'bytes}
    :sequence    {:description "Ordered linked-list of args (stored via next-arg-id chain)"
-                 :clojure-type 'clojure.lang.Sequential}})
+                 :clojure-type 'clojure.lang.Sequential}
+   :keyword     {:description "Clojure keyword (`:foo-bar`). Stored in JSONB as `\":foo\"` string; the codec's `normalize-parsed-json` restores the keyword on read. Slots typed `:keyword` accept bare keyword literals in fn-defs (no `:literal? true` escape)."
+                 :clojure-type 'clojure.lang.Keyword}})
 
 
 (def supported-types
@@ -76,10 +78,17 @@
    :timestamptz {:postgres "TIMESTAMPTZ" :datomic :db.type/instant :memory :any}
    :jsonb       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}
    :bytes       {:postgres "BYTEA"       :datomic :db.type/bytes   :memory :any}
-   ;; :sequence is a marker type — the actual items live in separate arg rows
-   ;; linked via arg.next_arg_id. Backends don't need a column for the sequence
-   ;; itself; we map to JSONB for forward compat with dumps.
+   ;; :sequence is a marker type — concrete items live in
+   ;; `binding-list-item` rows under a list-typed binding. Backends
+   ;; don't need a column for the sequence itself; we map to JSONB
+   ;; for forward compat with dumps.
    :sequence    {:postgres "JSONB"       :datomic :db.type/string  :memory :any}
+   ;; :keyword stored as TEXT (Clojure keyword serialised via `(str kw)`,
+   ;; deserialised via `(keyword (subs s 1))`). For dedicated columns
+   ;; only — bindings' `:value` field is JSONB and uses cheshire's
+   ;; `:` prefix convention via `normalize-parsed-json` regardless
+   ;; of slot type.
+   :keyword     {:postgres "TEXT"        :datomic :db.type/keyword :memory :any}
    ;; Special types for references
    :ref         {:postgres "UUID"        :datomic :db.type/ref     :memory :any}
    ;; :ref-many = many-to-many relationship.

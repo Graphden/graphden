@@ -25,7 +25,7 @@
    :parent :reduce
    :args {:func :_ex-sum-step
           :init 0
-          :coll {:value [1 2 3 4 5]}}}
+          :coll [1 2 3 4 5]}}
 
   {:name :_ex-sum-step
    :description "Reducer step `(+ acc item)`. Whole-arg rename `{:as :pair}` makes `:add/:nums` receive the `[acc item]` vector verbatim from `:reduce`'s call site."
@@ -38,7 +38,7 @@
    :parent :reduce
    :args {:func :_ex-mul-step
           :init 1
-          :coll {:value [1 2 3 4 5]}}}
+          :coll [1 2 3 4 5]}}
 
   {:name :_ex-mul-step
    :parent :mul

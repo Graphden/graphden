@@ -1,0 +1,102 @@
+;; Effect categories — what side-effects a fn (or any of its
+;; transitive descendants) performs.
+;;
+;; Categories: :io :db :env :time :network :random
+;;
+;; Effects are computed BOTTOM-UP at sync time. A base-fn declares
+;; its `:effects #{…}` (a set of categories); a composed fn-def's
+;; effects are the union of effects of every fn in its inheritance
+;; closure plus every fn-ref it reaches. Pure fns end up with
+;; effects = ∅ and are eligible for aggressive compile-time caching.
+;;
+;; The editor renders one chip per category in the bottom strip of
+;; a fn card. A pure fn renders no strip.
+;;
+;; CONTRACT: a fn-def can additionally declare `:expects-effects`,
+;; which sync compares against the computed set:
+;;   - declared = computed     → no warning, normal solid chip
+;;   - declared ⊃ computed     → over-declared, harmless; the editor
+;;                                shows declared-only chips as outlined
+;;                                "ghosts" so authors notice they
+;;                                paid for an effect they never used
+;;   - declared ⊊ computed     → DRIFT — sync logs a WARN naming the
+;;                                undeclared category, and the
+;;                                editor outlines the unexpected chip
+;;                                in red (look for the red ring on
+;;                                the strip)
+;;
+;; The drift case is what `:expects-effects` is FOR — it pins the
+;; effect surface so a downstream refactor that accidentally adds
+;; (say) :db gets surfaced loudly in CI.
+
+
+{:namespace "examples.types-effects"
+ :description "Effect categories and `:expects-effects` declarations. Pure / effectful / declared fns side-by-side; rich :description text explains how the editor visualises each case and what drift would do."
+ :fns
+ [;; PURE — :str-upper does no I/O. Computed effects: ∅.
+  ;; The editor card has NO effects strip (no clutter for the
+  ;; pure case, which is the 80% expectation in well-designed
+  ;; graphs).
+  {:name :ex-pure-shout
+   :description "Pure composition: :str-upper of a constant. Computed effects: ∅. No effects strip rendered — pure fns don't display the row, keeping cards quiet for the common case."
+   :parent :str-upper
+   :args {:string "hello"}}
+
+  ;; EFFECTFUL — :env reads the OS environment.
+  ;; :env's base-fn declares `:effects #{:env}`, so this fn-def's
+  ;; computed set is `#{:env}`. The editor card shows ONE green
+  ;; ENV chip in the strip.
+  {:name :ex-env-read-undeclared
+   :description "Reads the $HOME variable via :env. Computed effects: #{:env}. The card displays a single ENV chip. No `:expects-effects` declared, so no contract — drift detection is opt-in."
+   :parent :env
+   :args {:name "HOME"}}
+
+  ;; CONTRACT — same impl, but with a declaration matching the
+  ;; computed set. Sync passes. The chip renders normally (no
+  ;; outline) — the contract is honoured.
+  {:name :ex-env-read-declared
+   :description "Same as `:ex-env-read-undeclared` but with `:expects-effects #{:env}`. Sync verifies declared = computed; chip renders solid (no ring). If a future refactor adds (say) :io to the closure, sync immediately logs DRIFT and the editor outlines the surprise chip in red."
+   :parent :env
+   :args {:name "HOME"}
+   :expects-effects #{:env}}
+
+  ;; CONTRACT — declaring purity explicitly. Computed = ∅ matches
+  ;; declared = ∅, so sync passes silently. Useful for hot paths:
+  ;; if someone later threads an effectful fn-ref into the closure,
+  ;; CI surfaces it as drift before the change merges.
+  {:name :ex-pure-declared
+   :description "Pure shout, but with `:expects-effects #{}` as an explicit contract pinning purity. Sync passes (computed ∅ = declared ∅). Acts as a guard: any later refactor accidentally introducing an effect-bearing call into the closure will fail the contract loudly."
+   :parent :str-upper
+   :args {:string "hello"}
+   :expects-effects #{}}
+
+  ;; OVER-DECLARED — declaring an effect that's NOT in the computed
+  ;; set. Harmless (sync allows it), but the editor renders the
+  ;; declared-only chip as an OUTLINED ghost so authors notice
+  ;; they paid for an effect they never used. Useful as a
+  ;; placeholder when an effect is planned but not yet wired in.
+  {:name :ex-pure-overdeclared
+   :description "Pure body, but the contract claims `:expects-effects #{:io}` — over-declaration. Sync accepts; the editor's strip displays an OUTLINED `IO` chip (\"declared but not computed\") so the discrepancy is visible. Over-declaration is harmless but flags a stale contract: either the implementation lost an effect-bearing call, or the declaration was aspirational."
+   :parent :str-upper
+   :args {:string "hello"}
+   :expects-effects #{:io}}
+
+  ;; MULTI-CATEGORY — a fn that gets multiple effect categories
+  ;; from its closure. `:current-time-ms` is `:effects #{:time}`;
+  ;; composing it with `:env` (effects `#{:env}`) gives a closure
+  ;; with #{:env :time}. The editor strip renders TWO chips, one
+  ;; per category, sorted alphabetically.
+  {:name :ex-time-and-env
+   :description "Reads the current time AND the env's HOME. Computed effects: #{:env :time} — the union of both subgraphs. The strip shows two chips. Demonstrates that effects compose set-wise across a fn's transitive closure."
+   :parent :str
+   :args {:parts [:_ex-time-now :_ex-env-home]}}
+
+  ;; Helpers for the multi-category example. Anonymous (_-prefix)
+  ;; because they have no independent meaning outside this demo.
+  {:name :_ex-time-now
+   :parent :str
+   :args {:parts [:current-time-ms]}}
+
+  {:name :_ex-env-home
+   :parent :str
+   :args {:parts [{:value " home="} :ex-env-read-undeclared]}}]}

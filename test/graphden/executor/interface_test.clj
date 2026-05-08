@@ -86,7 +86,7 @@
         (exec/register-base-fn! :double (setup/fn-impl [x] (* 2 x)))
         (let [base-fn (setup/create-base-fn! storage "double" :int)
               _ (setup/create-arg! storage (:id base-fn)
-                                   {:name "x" :type :int :required true :is-fn false})
+                                   {:name "x" :type :int :required true})
               composed (setup/create-composed-fn! storage "my-double" (:id base-fn))
               ctx (exec/create-context {:storage storage})]
           (is (thrown-with-msg? clojure.lang.ExceptionInfo

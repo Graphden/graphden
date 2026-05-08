@@ -44,7 +44,7 @@
           base-fn (setup/create-base-fn! storage "use-any" :any)
           ;; Create arg for base fn
           _data-arg (setup/create-arg! storage (:id base-fn)
-                                       {:name "data" :type :any :required true :is-fn false})
+                                       {:name "data" :type :any :required true})
           ;; Create composed fn
           composed-fn (setup/create-composed-fn! storage "my-use-any" (:id base-fn))
           ;; No arg value - test provides values via execute (free arg)
@@ -90,7 +90,7 @@
           base-fn (setup/create-base-fn! storage "use-timestamp" :timestamptz)
           ;; Create arg for base fn
           _ts-arg (setup/create-arg! storage (:id base-fn)
-                                     {:name "ts" :type :timestamptz :required true :is-fn false})
+                                     {:name "ts" :type :timestamptz :required true})
           ;; Create composed fn
           composed-fn (setup/create-composed-fn! storage "my-use-timestamp" (:id base-fn))
           ;; No arg value - provide at runtime
@@ -113,10 +113,10 @@
           {:keys [arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
           ;; Create args for composed fn with values
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "a" :type :int :required true :is-fn false
+                               {:name "a" :type :int :required true
                                 :source-id (:id arg-a) :value 1})
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "b" :type :int :required true :is-fn false
+                               {:name "b" :type :int :required true
                                 :source-id (:id arg-b) :value 2})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -135,10 +135,10 @@
           {:keys [arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
           ;; Create args for composed fn with values
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "a" :type :int :required true :is-fn false
+                               {:name "a" :type :int :required true
                                 :source-id (:id arg-a) :value 1})
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "b" :type :int :required true :is-fn false
+                               {:name "b" :type :int :required true
                                 :source-id (:id arg-b) :value 2})
           ctx (exec/create-context {:storage storage})]
       ;; nil should work fine

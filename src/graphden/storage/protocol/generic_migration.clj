@@ -193,11 +193,27 @@
 
 ;; === Main orchestration ===
 
+(defn- process-retired-fields!
+  "Run `:on-delete-field!` for every field marked as retired on the
+   schema. Backends that don't support drops can omit the callback —
+   `do-migration!` then logs a no-op (the field stays in storage).
+   Idempotent: rerunning the migration with the same retired set
+   should be safe (`DROP COLUMN IF EXISTS` semantics on the backend
+   side). The framework only knows about the call; correctness lives
+   in the callback."
+  [callbacks schema ctx]
+  (when-let [on-delete (:on-delete-field! callbacks)]
+    (doseq [[entity-name field-map] (ds/retired-fields schema)
+            [field-name _uuid] field-map]
+      (on-delete ctx entity-name field-name))))
+
+
 (defn do-migration!
   "Performs schema migration using the provided callbacks.
    Returns changes map with created/renamed entities/fields/enums."
   [callbacks old-metadata schema]
-  ;; Check for destructive changes
+  ;; Check for destructive changes (retired fields are exempt — they
+  ;; were declared explicitly and get processed below).
   (sp/check-all-removals! old-metadata schema)
 
   ;; Check type compatibility
@@ -213,6 +229,9 @@
     ;; Process entities and fields
     (run! #(process-single-entity! callbacks schema old-metadata % ctx)
           (ds/entities schema))
+
+    ;; Process retired fields — DROP COLUMN equivalents.
+    (process-retired-fields! callbacks schema ctx)
 
     ;; Optional post-processing (e.g., datomic transact + validate)
     (when-let [post-fn (:post-process! callbacks)]

@@ -1,0 +1,83 @@
+;; Refinement-typed slots — narrowing a base type with a constraint.
+;;
+;; Refinement type-rows live in `core/refinements/fns.edn` as fn-defs:
+;;   {:name :positive-int :refine {:base :int :constraint [:>  0]}}
+;;   {:name :percent :refine {:base :numeric
+;;                            :constraint [:and [:>= 0]   [:<= 100]]}}
+;;   {:name :port :refine {:base :int
+;;                         :constraint [:and [:>= 1]   [:<= 65535]]}}
+;;   {:name :http-status :refine {:base :int
+;;                                :constraint [:and [:>= 100] [:<= 599]]}}
+;;
+;; When a slot's `:type` is a refinement, sync-time type-check
+;; verifies that any LITERAL value carried into the slot satisfies
+;; the constraint. Out-of-range literals throw at save, before the
+;; entity row is written.
+;;
+;; This module shows the SUCCESSFUL side of each refinement, with
+;; `:description` text spelling out what would fail and where.
+;; Synthetic broken examples (e.g. -1 into :positive-int) cannot
+;; live in this file: sync would reject the package at load time.
+;;
+;; The refinement narrow-ing is local to the slot — composing a
+;; refinement-typed value through arithmetic returns the un-refined
+;; base. To re-narrow, run the result through `:ensure-positive-int`
+;; or a similar runtime validator (see `core/refinements/fns.edn`).
+
+
+{:namespace "examples.types-refinement"
+ :description "Refinement type aliases (:positive-int, :port, :percent, :http-status, :bit) carrying valid literals. Out-of-range literals would fail the sync-time check; rich :description text explains the bounds and what each would reject."
+ :fns
+ [;; :port  =  [:refine :int [:and [:>= 1] [:<= 65535]]]
+  {:name :ex-port-default
+   :description "8080 fits :port [1, 65535]. Sync-time check verifies the literal lies in the constraint range. A negative port or one > 65535 would throw `:refinement/violated` before the fn-def is saved."
+   :parent :const
+   :args {:value 8080}}
+
+  ;; :http-status  =  [:refine :int [:and [:>= 100] [:<= 599]]]
+  {:name :ex-status-ok
+   :description "HTTP 200 — fits :http-status [100, 599]. Trying 99 (informational starts at 100) or 600 (5xx ends at 599) would fail at sync."
+   :parent :const
+   :args {:value 200}}
+
+  {:name :ex-status-not-found
+   :description "HTTP 404 — also fits :http-status. Any int in [100, 599] passes; the refinement doesn't enforce the IETF status registry, just the numeric range."
+   :parent :const
+   :args {:value 404}}
+
+  ;; :percent  =  [:refine :numeric [:and [:>= 0] [:<= 100]]]
+  {:name :ex-half-percent
+   :description "50 fits :percent [0, 100]. A literal 101 would fail; -1 would also fail. Note :percent's base is :numeric, so integer 50 narrows to :percent only because :int <: :numeric."
+   :parent :const
+   :args {:value 50}}
+
+  ;; :positive-int  =  [:refine :int [:> 0]]
+  {:name :ex-positive-three
+   :description "3 satisfies :positive-int [:> 0]. Zero would fail (constraint is strict >, not >=). Negative ints fail trivially."
+   :parent :const
+   :args {:value 3}}
+
+  ;; :bit  =  [:refine :int [:or [:= 0] [:= 1]]]
+  ;;
+  ;; Compound :or constraint — accepts EITHER literal. 2 would fail
+  ;; (neither = 0 nor = 1). Demonstrates: refinement constraints
+  ;; can be propositional, not just numeric ranges.
+  {:name :ex-bit-zero
+   :description "Bit 0 — passes the `:or [:= 0] [:= 1]` constraint trivially. The :or constraint shape supports any number of branches; compound :and / :or compose freely."
+   :parent :const
+   :args {:value 0}}
+
+  {:name :ex-bit-one
+   :description "Bit 1 — also passes :or. Together with `:ex-bit-zero` shows that a refinement with two valid literals behaves like a finite enum at the type level."
+   :parent :const
+   :args {:value 1}}
+
+  ;; Composing a refinement-typed value through plain arithmetic
+  ;; widens it back to the base type. The COMPOSED return type
+  ;; here is `:numeric` (not `:port`), because `:add` returns
+  ;; `:numeric`. Re-narrowing requires an explicit validator step
+  ;; (see `core/refinements`).
+  {:name :ex-port-incremented
+   :description "Demo of refinement WIDENING: a :port-typed value goes into `:add`'s :sequence-of-:any slot together with 1; the result type is :numeric (the un-refined base of :port's chain). The refinement is local to its slot, not propagated through arbitrary arithmetic."
+   :parent :add
+   :args {:nums [:ex-port-default 1]}}]}

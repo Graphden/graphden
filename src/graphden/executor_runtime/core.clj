@@ -90,15 +90,25 @@
 ;; Main Entry Point
 ;; =============================================================================
 
+(defn install-shutdown-hook!
+  "Register a JVM shutdown hook that stops the running system. Pulled
+   out of -main so tests can stub it without leaking real hooks."
+  []
+  (Runtime/.addShutdownHook (Runtime/getRuntime)
+                            (Thread. #(stop!))))
+
+
+(defn block-forever!
+  "Block the calling thread indefinitely. Pulled out of -main so tests
+   can stub it instead of waiting on a real promise."
+  []
+  @(promise))
+
+
 (defn -main
   "Main entry point for the executor runtime."
   [& _args]
   (start! :prod)
-
-  ;; Add shutdown hook for graceful shutdown
-  (Runtime/.addShutdownHook (Runtime/getRuntime)
-                            (Thread. #(stop!)))
-
-  ;; Block main thread to keep server running
+  (install-shutdown-hook!)
   (log/info "Server running. Press Ctrl+C to stop.")
-  @(promise))
+  (block-forever!))

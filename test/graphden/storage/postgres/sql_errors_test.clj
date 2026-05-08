@@ -20,7 +20,6 @@
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.crud :as crud]
     [graphden.storage.postgres.ddl :as ddl]
-    [graphden.storage.postgres.graph :as graph]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
@@ -102,9 +101,9 @@
         ;; Use graph schema which has unique constraints on names
         (sp/initialize storage (setup/make-graph-schema))
         (let [fn-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
-          (sp/create-entity storage :fn {:id fn-id :name "fn1" :parent-ids nil :return-type "int"})
+          (sp/create-entity storage :fn {:id fn-id :name "fn1" :parent-ids nil :impl-hash "test-hash"})
           (sp/create-entity storage :fn {:id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-                                         :name "fn2" :parent-ids nil :return-type "int"})
+                                         :name "fn2" :parent-ids nil :impl-hash "test-hash"})
           ;; Try to update fn2's name to conflict with fn1
           ;; Note: This requires a unique constraint on name, which we have.
           ;; Test that update works and returns properly typed errors when they occur.
@@ -114,24 +113,24 @@
 
 
 (deftest sql-error-foreign-key-violation-test
+  ;; The slot/binding model gives us FK relationships out of the box —
+  ;; binding.fn-id → fn.id and binding.slot-id → slot.id. Adding an
+  ;; ALTER TABLE to enforce them at DDL level so a fn-delete that
+  ;; orphans bindings hits a foreign-key-violation.
   (testing "delete-entity throws wrapped error on foreign key violation"
     (let [storage (setup/create-test-storage)]
       (try
         (sp/initialize storage (setup/make-graph-schema))
+        (setup/seed-primitives! storage)
         (let [pool (:pool storage)
-              base-fn-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-              arg-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
-          ;; Add FK constraint manually (not created by default in DDL)
-          (jdbc/execute! pool ["ALTER TABLE \"arg\" ADD CONSTRAINT fk_arg_fn
-                                FOREIGN KEY (\"fn_id\") REFERENCES \"fn\"(\"id\")"])
-          ;; Create base fn
-          (sp/create-entity storage :fn {:id base-fn-id :name "test" :parent-ids nil :return-type "int"})
-          ;; Create arg that references fn
-          (sp/create-entity storage :arg {:id arg-id :fn-id base-fn-id :name "x"
-                                          :type "int" :required true :is-fn false})
-          ;; Try to delete fn while arg still references it
+              _ (jdbc/execute! pool ["ALTER TABLE \"binding\" ADD CONSTRAINT fk_binding_fn
+                                      FOREIGN KEY (\"fn_id\") REFERENCES \"fn\"(\"id\")"])
+              base-fn (setup/create-base-fn! storage "test")
+              slot-x (setup/create-slot! storage "x" :int)
+              _ (setup/create-fn-slot! storage (:id base-fn) (:id slot-x) 0)
+              _ (setup/create-binding! storage (:id base-fn) (:id slot-x) :value 1)]
           (try
-            (sp/delete-entity storage :fn base-fn-id)
+            (sp/delete-entity storage :fn (:id base-fn))
             (is false "Should have thrown foreign key violation")
             (catch clojure.lang.ExceptionInfo e
               (is (= :foreign-key-violation (:type (ex-data e))))
@@ -144,20 +143,16 @@
     (let [storage (setup/create-test-storage)]
       (try
         (sp/initialize storage (setup/make-graph-schema))
+        (setup/seed-primitives! storage)
         (let [pool (:pool storage)
-              base-fn-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-              arg-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
-          ;; Add FK constraint manually
-          (jdbc/execute! pool ["ALTER TABLE \"arg\" ADD CONSTRAINT fk_arg_fn
-                                FOREIGN KEY (\"fn_id\") REFERENCES \"fn\"(\"id\")"])
-          ;; Create base fn
-          (sp/create-entity storage :fn {:id base-fn-id :name "test" :parent-ids nil :return-type "int"})
-          ;; Create arg that references fn
-          (sp/create-entity storage :arg {:id arg-id :fn-id base-fn-id :name "x"
-                                          :type "int" :required true :is-fn false})
-          ;; Try to delete fn while arg still references it
+              _ (jdbc/execute! pool ["ALTER TABLE \"binding\" ADD CONSTRAINT fk_binding_fn
+                                      FOREIGN KEY (\"fn_id\") REFERENCES \"fn\"(\"id\")"])
+              base-fn (setup/create-base-fn! storage "test")
+              slot-x (setup/create-slot! storage "x" :int)
+              _ (setup/create-fn-slot! storage (:id base-fn) (:id slot-x) 0)
+              _ (setup/create-binding! storage (:id base-fn) (:id slot-x) :value 1)]
           (try
-            (sp/delete-entities storage :fn [base-fn-id])
+            (sp/delete-entities storage :fn [(:id base-fn)])
             (is false "Should have thrown foreign key violation")
             (catch clojure.lang.ExceptionInfo e
               (is (= :foreign-key-violation (:type (ex-data e))))
@@ -166,31 +161,29 @@
           (sp/close storage))))))
 
 
-(deftest sql-error-not-found-in-graph-queries-test
+^:integration
+(deftest ^:integration sql-error-not-found-in-graph-queries-test
   (testing "resolve-execution-graph handles missing referenced fns gracefully"
-    ;; This tests that the graph resolution doesn't fail when a referenced fn
-    ;; has been deleted but the reference remains
+    ;; The graph resolver must not blow up if a binding's :ref-fn-id
+    ;; points at a fn that was hard-deleted (FK bypass via raw SQL).
     (let [storage (setup/create-test-storage)]
       (try
         (sp/initialize storage (setup/make-graph-schema))
+        (setup/seed-primitives! storage)
         (let [pool (:pool storage)
-              ;; Create base fn
-              base-fn (setup/create-base-fn! storage "identity" :int)
-              base-arg (setup/create-arg! storage (:id base-fn)
-                                          {:name "x" :type :int :required false :is-fn false})
-              ;; Create main composed fn
+              base-fn (setup/create-base-fn! storage "identity")
+              slot-x (setup/create-slot! storage "x" :int)
+              _ (setup/create-fn-slot! storage (:id base-fn) (:id slot-x) 0)
               main-fn (setup/create-composed-fn! storage "main" (:id base-fn))
-              ;; Create ref-target fn
               ref-fn (setup/create-composed-fn! storage "ref-target" (:id base-fn))
-              ;; Create arg referencing ref-fn via ref-id
-              _ (setup/create-arg! storage (:id main-fn)
-                                   {:name "x" :type :int :required false :is-fn false
-                                    :source-id (:id base-arg) :ref-id (:id ref-fn)})
-              ;; Delete the referenced fn directly (bypassing FK check)
+              _ (setup/create-binding! storage (:id main-fn) (:id slot-x)
+                                       :ref-fn-id (:id ref-fn))
+              ;; Hard-delete the referenced fn (bypass any FK cascade).
               _ (jdbc/execute! pool [(str "DELETE FROM \"fn\" WHERE id = '" (:id ref-fn) "'")])
-              ;; Now resolve - should handle missing fn gracefully
               graph (sp/resolve-execution-graph storage (:id main-fn))]
-          ;; Should only have main-fn and base-fn since ref-fn was deleted
+          ;; Resolver should report main + base (the dangling ref is
+          ;; tolerated — its row is gone but the binding's ref-fn-id
+          ;; just points at nothing).
           (is (= 2 (count (:fns graph))))
           (is (contains? (:fns graph) (:id main-fn))))
         (finally
@@ -240,29 +233,11 @@
       (is (instance? SQLException (ex-cause wrapped))))))
 
 
-(deftest batch-operations-empty-sequences-test
-  (testing "discover-graph-cte returns empty set for non-existent fn"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (sp/initialize storage (setup/make-graph-schema))
-        (let [pool (:pool storage)
-              discover-fn #'graph/discover-graph-cte
-              result (discover-fn pool (random-uuid))]
-          ;; Non-existent fn returns empty set
-          (is (= #{} result)))
-        (finally
-          (sp/close storage)))))
-
-  (testing "load-entities-batch returns empty for empty values"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (sp/initialize storage (setup/make-graph-schema))
-        (let [pool (:pool storage)
-              load-fn #'graph/load-entities-batch
-              result (load-fn pool :fn :id #{})]
-          (is (= {} result)))
-        (finally
-          (sp/close storage))))))
+;; The legacy `discover-graph-cte` / `load-entities-batch` postgres
+;; helpers were removed alongside the recursive-CTE graph traversal
+;; that targeted the old `:arg` table. The new slot/binding traversal
+;; goes through the generic protocol-level resolver — its tests live
+;; in graphden.versioning.storage.core-test (integration).
 
 
 ;; === Mock-based SQL Error Tests ===
@@ -332,30 +307,8 @@
             (is (= :read-entities (:operation (ex-data e))))))))))
 
 
-(deftest sql-error-graph-operations-mock-test
-  (testing "discover-graph-cte throws wrapped error on SQLException"
-    (let [discover-fn #'graph/discover-graph-cte
-          not-null-ex (SQLException. "not null violation" "23502")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw not-null-ex))]
-        (try
-          (discover-fn nil (random-uuid))
-          (is false "Should have thrown")
-          (catch clojure.lang.ExceptionInfo e
-            (is (= :not-null-violation (:type (ex-data e))))
-            (is (= :discover-graph-cte (:operation (ex-data e)))))))))
-
-  (testing "load-entities-batch throws wrapped error on SQLException"
-    (let [load-fn #'graph/load-entities-batch
-          check-ex (SQLException. "check violation" "23514")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw check-ex))]
-        (try
-          (load-fn nil :fn :id #{(random-uuid)})
-          (is false "Should have thrown")
-          (catch clojure.lang.ExceptionInfo e
-            (is (= :check-constraint-violation (:type (ex-data e))))
-            (is (= :load-entities-batch (:operation (ex-data e))))))))))
+;; Postgres-specific graph operation tests removed alongside the
+;; legacy CTE traversal — see comment above.
 
 
 ;; === DDL Error Tests ===
@@ -517,7 +470,9 @@
 
                         (entity-constraints
                           [_ _entity-name]
-                          [{:type :unique :fields [:name]}]))]
+                          [{:type :unique :fields [:name]}])
+
+                        (retired-fields [_] {}))]
       (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
                                     (throw ex))]
         (try

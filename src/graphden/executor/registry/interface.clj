@@ -1,15 +1,9 @@
 (ns graphden.executor.registry.interface
-  "Infrastructure for base function registration and storage sync.
+  "Public façade for base function registration and storage sync.
 
-   This component provides:
-   - Registration of base-fn impls in the global registry
-   - Storage synchronization via `sync-defs-to-storage!`
-   - Deterministic UUID generation for idempotent sync
-
-   For defining base-fn implementations themselves, use the `defbase`
-   macro in `graphden.executor.defbase`. Base function implementations
-   live in packages (`resources/packages/`); see `graphden.packages.loader`
-   for the package loading API."
+   Defining base-fn implementations themselves uses the `defbase` macro
+   in `graphden.executor.defbase`. Implementations live in packages
+   (`resources/packages/`); see `graphden.packages.loader`."
   (:require
     [graphden.executor.registry.core :as core]
     [graphden.packages.loader :as pkg]
@@ -19,16 +13,8 @@
 ;; === Function Registration ===
 
 (defn register-base-fns!
-  "Registers base functions from a definitions map. Impls receive the
-   raw args map — use `rt/resolve-arg` inside the body.
-
-   Arguments:
-   - defs: map of {fn-name -> fn-def}
-
-   Each fn-def should have:
-   - :args - map of {arg-name -> type}
-   - :return-type - keyword for return type
-   - :impl - implementation function (receives args map + ctx)"
+  "Registers base functions from a `{fn-name → fn-def}` map. Type-rows
+   (no `:impl` key) get a synthesised impl for their role."
   [defs]
   (core/register-base-fns! defs))
 
@@ -36,58 +22,44 @@
 ;; === Storage Sync ===
 
 (defn fn-uuid
-  "Generates deterministic UUID for a base function.
-   Uses UUID v5 (name-based) for reproducible IDs."
+  "Deterministic UUID for a globally-named (namespace-less) fn. Used
+   by tests that pre-built UUIDs match production records."
   [fn-name]
   (core/fn-uuid fn-name))
 
 
-(defn local-fn-uuid
-  "Generates a deterministic UUID for a local fn-def (the kind whose
-   `:name` starts with `_` and is stored as nil in DB). Keyed by
-   namespace + local name so re-syncs reuse the same row."
-  [ns-path local-name]
-  (core/local-fn-uuid ns-path local-name))
-
-
-(defn arg-uuid
-  "Generates deterministic UUID for a base function's arg.
-   Uses UUID v5 (name-based) for reproducible IDs."
-  [fn-name arg-name]
-  (core/arg-uuid fn-name arg-name))
-
-
 (defn sync-defs-to-storage!
-  "Syncs function definitions to storage.
-   Creates fn and arg entities for each base function.
-   Uses deterministic UUIDs so syncing is idempotent.
-
-   Arguments:
-   - storage: a storage instance that implements StorageCRUD
-   - defs: map of {fn-name -> fn-def} where fn-def has :args, :return-type
-
-   Returns a map with counts:
-   {:fns {:created n :updated m}
-    :args {:created n :updated m}}"
+  "Sync `{fn-name → fn-def}` to storage via the records-parser
+   pipeline. Returns the fn-name→id map produced by the underlying
+   `write-records!`."
   ([storage defs]
-   (core/sync-defs-to-storage! storage defs {}))
+   (core/sync-defs-to-storage! storage defs {} {}))
   ([storage defs ns-id-map]
-   (core/sync-defs-to-storage! storage defs ns-id-map)))
+   (core/sync-defs-to-storage! storage defs ns-id-map {}))
+  ([storage defs ns-id-map extra-name->id]
+   (core/sync-defs-to-storage! storage defs ns-id-map extra-name->id)))
+
+
+(defn sync-primitives!
+  "Pre-seed the 14 primitive fn-rows. Idempotent. Should run once at
+   storage init before any other sync."
+  [storage]
+  (core/sync-primitives! storage))
 
 
 ;; === Storage Initialization Helper ===
 
 (defn initialize-with-base-fns!
-  "Initializes a storage with base function definitions from packages.
-
-   Loads default packages (core+web+app), registers base-fns in the
-   executor, and syncs schemas to storage. Closes storage on error."
+  "Initialises a storage with base-fns from the default packages.
+   Loads core+web+app, registers base-fns in the executor, syncs
+   primitives + base-fn rows to storage."
   ([storage]
    (initialize-with-base-fns! storage ["core" "web" "app"]))
   ([storage package-names]
    (try
      (let [packages (pkg/load-packages package-names)
            base-fn-defs (:base-fn-defs packages)]
+       (sync-primitives! storage)
        (register-base-fns! base-fn-defs)
        (sync-defs-to-storage! storage base-fn-defs)
        storage)
@@ -97,8 +69,9 @@
 
 
 (defn initialize-all!
-  "Initializes storage with multiple sets of base function definitions."
+  "Initialises storage with multiple sets of base-fn definitions."
   [storage def-sets]
+  (sync-primitives! storage)
   (doseq [defs def-sets]
     (register-base-fns! defs)
     (sync-defs-to-storage! storage defs))

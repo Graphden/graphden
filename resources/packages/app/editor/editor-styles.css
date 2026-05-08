@@ -33,7 +33,57 @@
      overlay rows and the cy canvas, so it must read against any bg. */
   --tooltip-bg: rgba(0,0,0,0.88);
   --tooltip-fg: #fff;
+  /* Shadow + scrim tokens — same alpha curves as Material Design's
+     elevation set; centralised here so any new floating element picks
+     consistent depth instead of inventing a new opacity. */
+  --shadow-sm: 0 2px 6px rgba(0,0,0,0.18);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.25);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-xl: 0 4px 14px rgba(0,0,0,0.30);
+  --overlay-hover: rgba(0,0,0,0.08);
+  --overlay-pressed: rgba(127,127,127,0.20);
   --sidebar-width: 280px;
+  /* Touch-target sizing — Apple HIG / WCAG 2.5.5. The visible glyph
+     stays small on desktop (15px etc.); these tokens are the
+     min hit-area enforced under `@media (hover:none)`. Two values
+     so non-critical affordances (e.g. an inline `+` near big
+     siblings) can use `--touch-target-min` without bloating the
+     UI on tightly-packed rows. */
+  --touch-target: 44px;
+  --touch-target-min: 28px;
+  /* Below this viewport width the sidebar auto-collapses on first
+     visit (iPad portrait = 768; we leave headroom for split-view
+     1/2 and 1/3 multitasking on iPad). */
+  --sidebar-narrow-breakpoint: 900px;
+  /* Right-edge action icons are sized + pinned via these vars so
+     `@media (hover:none)` can grow them for touch without
+     touching the JS that builds the icons. `applyActionIconBox`
+     reads --icon-size; the pinning helpers use --icon-pin-r-1
+     (closest to edge) and --icon-pin-r-2 (one slot in). */
+  --icon-size: 15px;
+  --icon-font-size: 10px;
+  --icon-pin-r-1: 6px;
+  --icon-pin-r-2: 24px;
+  --icon-pin-r-3: 42px;
+  /* r-4 carries the Delete (🗑) icon when the root fn-name row
+     surfaces all four actions inline (i / ✎ / + / 🗑). */
+  --icon-pin-r-4: 60px;
+  /* Status semantic colours — used by edit-form validation, picker
+     compatibility hints, error tooltips. Same hue across themes so
+     "green = ok / red = problem" is unambiguous. */
+  --success-fg: #4ade80;
+  --error-fg: #ff6b6b;
+  /* Effect-chip categorical palette — encodes effect KIND (db / network
+     / time / …) so the chip background must be the same colour in both
+     themes. Chip text is fixed dark since every bg here is bright. */
+  --effect-chip-fg: #0f1011;
+  --effect-chip-db: #5eaaff;
+  --effect-chip-env: #c084fc;
+  --effect-chip-io: #4ade80;
+  --effect-chip-network: #ff9a3c;
+  --effect-chip-time: #facc15;
+  --effect-chip-misc: #ccc;
+  --effect-chip-random: #f0abfc;
 }
 body.theme-dark {
   --bg: #1a1a1a;
@@ -62,8 +112,33 @@ body.theme-dark {
   --hof-border: #3a4070;
   --tooltip-bg: rgba(232,232,232,0.92);
   --tooltip-fg: #1a1a1a;
+  /* Dark theme — slightly stronger shadows since they're on a darker
+     base, scrim flipped to white on dark. */
+  --shadow-sm: 0 2px 6px rgba(0,0,0,0.40);
+  --shadow-md: 0 2px 6px rgba(0,0,0,0.50);
+  --shadow-lg: 0 4px 12px rgba(0,0,0,0.50);
+  --shadow-xl: 0 4px 14px rgba(0,0,0,0.55);
+  --overlay-hover: rgba(255,255,255,0.08);
+  /* Status colours — slight desaturation against the dark background
+     so they don't vibrate. Hue still maps green=ok / red=error. */
+  --success-fg: #5be08a;
+  --error-fg: #ff7777;
+  /* Effect-chip palette stays identical in dark theme — colour encodes
+     category, not surface. Chip fg flips to white since dark-theme chips
+     could otherwise look washed out against page bg in screenshots. */
 }
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+/* Screen-reader-only utility — text is invisible but readable by
+   assistive tech. Standard recipe (clip + 1px box) survives
+   high-contrast mode and defeats accidental tab-focus. */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap; border: 0;
+}
 body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
   background: var(--bg); color: var(--fg); }
 
@@ -136,8 +211,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
   position: absolute; top: 0; right: -2px; width: 6px; height: 100%;
   cursor: col-resize; z-index: 250; user-select: none;
 }
-#sidebar-resizer:hover { background: rgba(0, 0, 0, 0.08); }
-body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); }
+#sidebar-resizer:hover { background: var(--overlay-hover); }
 
 /* Search bar */
 #search-bar { display: flex; padding: 6px 8px;
@@ -208,7 +282,7 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   position: fixed; z-index: 300;
   background: var(--bg); color: var(--fg); border: 1px solid var(--fg); border-radius: 3px;
   padding: 8px; min-width: 200px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-md);
   display: flex; flex-direction: column; gap: 6px;
 }
 .auth-popover.hidden { display: none; }
@@ -250,6 +324,18 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 .ns-row-actions {
   margin-left: auto; display: inline-flex; gap: 4px; align-items: center;
 }
+/* `createDescriptionBadge` / `createOpenInNewTabButton` set an inline
+   `margin-left: 4px` for non-pinned use (fn-overlay rows). Inside the
+   sidebar's icon group the container already supplies a 4px `gap`,
+   so the extra margin doubles up and the description-badge / ↗ drift
+   right of the create-btn-inline siblings — the row's icons read as
+   "dancing" at different distances. `!important` is required because
+   inline styles otherwise win over external CSS; the alternative
+   (changing the JS factories) would either need a per-callsite flag
+   or break their default fn-overlay placement. */
+.ns-row-actions > * {
+  margin-left: 0 !important;
+}
 .create-btn {
   background: transparent; color: inherit; border: 1px solid currentColor;
   border-radius: 3px; cursor: pointer; padding: 0;
@@ -263,7 +349,7 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
    show always; ✎/+ are actions and should not clutter the row when
    the user is just scanning the tree. */
 .create-btn-inline {
-  width: 15px; height: 15px;
+  width: var(--icon-size); height: var(--icon-size);
   opacity: 0; transition: opacity 0.1s;
   color: var(--fg);
 }
@@ -295,7 +381,7 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 .create-menu {
   background: var(--bg); color: var(--fg); border: 1px solid var(--fg); border-radius: 3px;
   min-width: 180px; padding: 4px; display: flex; flex-direction: column; gap: 2px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-md);
 }
 .create-menu-item {
   background: transparent; border: 0; border-radius: 2px;
@@ -381,30 +467,147 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   color: var(--fg);
 }
 
+/* Effect badges — small per-category chips on a fn's footer. Pure
+   fns omit the strip entirely; effectful fns show colour-coded
+   pills (one per category) so the type of effect is visible at a
+   glance without opening the full /api/types entry. */
+.effects-strip {
+  padding: 2px 6px;
+  border-top: 1px dashed var(--input-border);
+  background: var(--card-bg);
+  display: flex; flex-wrap: wrap; gap: 3px;
+  align-items: center;
+}
+.effects-chip {
+  display: inline-block;
+  padding: 0 5px;
+  font-family: SF Mono, Monaco, monospace;
+  font-size: 8.5px;
+  line-height: 12px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  border: 0;
+  border-radius: 2px;
+  color: var(--effect-chip-fg);
+  background: var(--muted-fg);
+  cursor: pointer;
+}
+.effects-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.effects-chip:hover {
+  filter: brightness(1.08);
+}
+.effects-chip-db      { background: var(--effect-chip-db); }       /* storage CRUD */
+.effects-chip-env     { background: var(--effect-chip-env); }      /* env-var read */
+.effects-chip-io      { background: var(--effect-chip-io); }       /* file/classpath */
+.effects-chip-network { background: var(--effect-chip-network); }  /* HTTP socket */
+.effects-chip-time    { background: var(--effect-chip-time); }     /* wall-clock */
+.effects-chip-effect  { background: var(--effect-chip-misc); }     /* legacy generic tag */
+.effects-chip-random  { background: var(--effect-chip-random); }   /* non-determinism */
+
+/* Drift = computed effect that the author DIDN'T declare in
+   `:expects-effects`. Ring it red so it stands out without changing
+   the category colour. */
+.effects-chip-drift {
+  box-shadow: 0 0 0 1.5px var(--error-fg);
+}
+/* Ghost = declared but not computed yet. Outlined-only — keeps the
+   colour signal but signals "expected, not seen" via the dashed ring. */
+.effects-chip-ghost {
+  background: transparent !important;
+  color: var(--muted-fg);
+  outline: 1px dashed currentColor;
+  outline-offset: -1px;
+}
+
 /* Edit pencil ✎ — right-pinned action icon, opacity transitions like
    the open-in-new-tab and description-badge so it stays unobtrusive
    when the user is just scanning. */
-.edit-pencil {
+.edit-pencil,
+.pinned-icon-btn,
+.namespace-badge {
   opacity: 0.85;
-  transition: opacity 0.1s, background-color 0.1s;
+  transition: opacity 0.1s, background-color 0.1s, color 0.1s;
 }
-.edit-pencil:hover {
+.edit-pencil:hover,
+.pinned-icon-btn:hover,
+.namespace-badge:hover {
   opacity: 1;
   background-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+/* Danger variant — used for the Delete (✕) icon on the root fn-name
+   row. Tinted so the row's destructive action stands out against the
+   neutral i / ✎ / + siblings without also blowing up its size. */
+.pinned-icon-btn-danger {
+  color: var(--error-fg);
+}
+.pinned-icon-btn-danger:hover {
+  background-color: color-mix(in srgb, var(--error-fg) 22%, transparent);
+}
+/* Disabled variant — Add-MI-parent button greys out when no
+   compatible candidate exists. The `title=` carries the reason so
+   users know WHY (different base-fn, every arg already covered, …)
+   instead of clicking a dead button. Hover keeps the help cursor.
+   Pointer-events stay enabled so the title-tooltip still surfaces;
+   the click handler is intentionally a no-op in this state. */
+.pinned-icon-btn-disabled,
+.pinned-icon-btn-disabled:hover {
+  opacity: 0.45;
+  background-color: transparent;
+  cursor: help;
+}
+
+
+/* Sidebar `i` description badge + ↗ open-in-new-tab — both hidden
+   until the row is hovered, matching the ✎ / + buttons. The
+   card-level `i`/↗ (inside fn-overlays) keep their always-visible
+   defaults; the rules below only narrow the icons that live in the
+   namespace tree. */
+.ns-header .description-badge,
+.entity-item .description-badge,
+.entity-item .open-in-new-tab.sidebar-action {
+  opacity: 0;
+  transition: opacity 0.1s, background-color 0.1s;
+}
+.ns-header:hover .description-badge,
+.entity-item:hover .description-badge,
+.entity-item:hover .open-in-new-tab.sidebar-action {
+  opacity: 0.85;
+}
+.ns-header .description-badge:hover,
+.entity-item .description-badge:hover,
+.entity-item .open-in-new-tab.sidebar-action:hover {
+  opacity: 1;
 }
 
 /* Arg-value edit popover — small floating panel anchored below the
    clicked value box. Theme-aware via the same vars as the rest of
    the editor; uses `--card-*` so the popover visually matches a
    graph node rather than a tooltip. */
-.arg-value-edit-popover {
+/* Shared chrome for every floating editor surface — arg-value /
+   arg-rename / arg-type / fn-rename / fn-return-type /
+   free-arg-bind / namespace-move popovers, the parent-set editor,
+   the fn-picker, and the namespace-picker. Container differences
+   (size, special accent stripe, mono vs system font) live in the
+   per-popover blocks below; this rule centralises position,
+   surface colours, border, shadow, padding, and the column flex
+   so a future popover only needs to set its own min-width and
+   accent. */
+.arg-value-edit-popover,
+.parent-set-editor,
+.fn-picker-popover {
   position: fixed; z-index: 10001;
   background: var(--card-bg); color: var(--card-fg);
   border: 1px solid var(--card-border); border-radius: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  padding: 8px; min-width: 220px;
+  box-shadow: var(--shadow-xl);
+  padding: 8px;
   display: flex; flex-direction: column; gap: 6px;
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+}
+.arg-value-edit-popover {
+  min-width: 220px;
 }
 .arg-value-edit-input {
   font-family: inherit; font-size: 12px;
@@ -426,8 +629,70 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 .arg-value-edit-btn-secondary {
   background: transparent; color: var(--fg);
 }
+/* Danger variant for the popover button row — used by the Delete
+   button on the value-edit popover (drops the binding so the slot
+   reverts to a free-arg). Floated to the LEFT of the row so it's
+   visually separated from the commit/dismiss pair on the right. */
+.arg-value-edit-btn-danger {
+  background: transparent; color: var(--error-fg);
+  border-color: color-mix(in srgb, var(--error-fg) 50%, var(--card-border));
+  margin-right: auto;
+}
+.arg-value-edit-btn-danger:hover {
+  background: color-mix(in srgb, var(--error-fg) 12%, transparent);
+}
+/* Persistent error panel inside edit popovers — used by reparent /
+   value-edit / type-edit flows. Bumped from "tiny red text" to a
+   structured panel: tinted background, left accent, "!" icon. The
+   message stays until the user fixes the cause and saves, or
+   closes the popover. Screen readers should announce it via
+   role="alert" set in JS at the call site. */
 .arg-value-edit-error {
-  font-size: 11px; color: #ff6b6b;
+  display: flex; align-items: flex-start; gap: 6px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  background: color-mix(in srgb, var(--error-fg) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error-fg) 35%, transparent);
+  border-left: 3px solid var(--error-fg);
+  border-radius: 3px;
+  font-size: 11.5px; line-height: 1.4;
+  color: var(--card-fg);
+  overflow-wrap: anywhere;
+}
+.arg-value-edit-error::before {
+  content: '!';
+  flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--error-fg); color: var(--card-bg);
+  font-weight: 700; font-size: 11px;
+  line-height: 1;
+}
+
+/* Type-hint line above the value input. Subtle italic so it reads
+   as metadata, not as a label that competes with the input. */
+.arg-value-edit-hint {
+  font-size: 11px; color: var(--muted-fg);
+  font-style: italic;
+  padding: 2px 0; opacity: 0.85;
+}
+
+/* Live-validation status line below the input. ✓ / ✗ + short
+   message; mirrors what the backend would say on save. */
+.arg-value-edit-status {
+  font-size: 11px; padding: 2px 0; min-height: 14px;
+  font-family: var(--mono, ui-monospace, monospace);
+}
+.arg-value-edit-status.ok  { color: var(--success-fg); }
+.arg-value-edit-status.err { color: var(--error-fg); }
+
+/* Type-mismatch indicator on arg-overlays. Surfaces broken bindings
+   directly on the graph view without needing to open the value-edit
+   popover. Box-shadow rather than border so the ring sits OUTSIDE
+   the overlay's existing layout box (no width jitter). */
+.arg-overlay-mismatch {
+  box-shadow: 0 0 0 1.5px var(--error-fg) !important;
 }
 
 /* Arg type-chip — small text label "[int]" / "[fn]" docked to the
@@ -442,19 +707,8 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   pointer-events: auto;
 }
 .arg-type-chip:hover { opacity: 1; }
-
-/* is-fn toggle chip — shown beside the type-chip for fn-typed args.
-   Same shape language as the type-chip; distinct content so the
-   user can spot the toggle without parsing the label. */
-.arg-isfn-chip {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 0 4px; margin-left: 4px;
-  font-family: inherit; font-size: 9px; line-height: 14px;
-  border: 1px solid currentColor; border-radius: 3px;
-  cursor: pointer; opacity: 0.7;
-  pointer-events: auto;
-}
-.arg-isfn-chip:hover { opacity: 1; }
+.arg-type-chip-readonly { cursor: default; }
+.arg-type-chip-readonly:hover { opacity: 0.7; }
 
 /* Free-arg binding chooser — two-button row inside the inline-edit
    popover; user picks "Bind literal" or "Bind fn-ref". */
@@ -482,13 +736,13 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 /* Fn-picker popover — search input + scrollable list of candidate
    fns, used by Phase 2 (arg-type → fn) and reused in later phases. */
 .fn-picker-popover {
-  position: fixed; z-index: 10002;
-  background: var(--card-bg); color: var(--card-fg);
-  border: 1px solid var(--card-border); border-radius: 4px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
-  padding: 6px; min-width: 280px; max-width: 360px;
-  display: flex; flex-direction: column; gap: 6px;
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  /* Picker sits ABOVE other popovers (e.g. opens from inside the
+     reparent or arg-type popover) so its z-index nudges above the
+     shared 10001. Padding tighter than other popovers because the
+     list itself fills the body. */
+  z-index: 10002;
+  padding: 6px;
+  min-width: 280px; max-width: 360px;
 }
 .fn-picker-search {
   font-family: inherit; font-size: 12px;
@@ -497,29 +751,149 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   background: var(--bg); color: var(--fg);
   outline: none; box-sizing: border-box; width: 100%;
 }
+.fn-picker-expected {
+  font-size: 10px; padding: 2px 4px;
+  opacity: 0.75; line-height: 1.3;
+  color: var(--muted-fg);
+  border-bottom: 1px dashed var(--card-border);
+}
 .fn-picker-search:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
 .fn-picker-list {
-  max-height: 260px; overflow-y: auto;
-  border: 1px solid var(--card-border); border-radius: 3px;
+  max-height: 200px; overflow-y: auto;
   background: var(--bg);
 }
+.fn-picker-list-other {
+  /* slightly dimmer background so the disclosed incompat section
+     reads as "secondary" without relying on row-level opacity */
+  background: color-mix(in srgb, var(--bg) 96%, var(--fg) 4%);
+}
 .fn-picker-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 4px 8px; cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; cursor: pointer;
   font-size: 11px;
+  min-height: 28px;
 }
 .fn-picker-row-active {
   background: color-mix(in srgb, var(--fg) 12%, transparent);
 }
-.fn-picker-row-name { flex: 1; }
+.fn-picker-row-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .fn-picker-row-rt {
-  font-style: italic; opacity: 0.6; margin-left: 8px;
+  font-style: italic; opacity: 0.7;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--muted-fg);
+}
+/* Effect badges — same `.effects-chip-*` palette used on fn-overlays
+   so users see the same colours throughout. Stacked horizontally
+   inside a row; pre-existing chip styling handles padding/font. */
+.fn-picker-row-effects {
+  display: inline-flex; gap: 2px; flex-shrink: 0;
+}
+/* Type-compat sections (only when `expectedType` is in play). The ✓
+   glyph keeps the row easy to scan; the section header makes the
+   compat/incompat boundary explicit instead of having the user infer
+   it from a dimmed row. */
+.fn-picker-row-ok {
+  color: var(--success-fg); font-weight: 600;
+  flex-shrink: 0;
+}
+.fn-picker-row-compat {
+  background: color-mix(in srgb, var(--success-fg) 6%, transparent);
+}
+.fn-picker-row-incompat {
+  opacity: 0.7;
+}
+
+/* Section grouping — sticky-ish headers above each list, plus a
+   disclosure for the "Other" (incompatible) section. */
+.fn-picker-sections {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--card-border); border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.fn-picker-section-header {
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 0.5px; text-transform: uppercase;
+  padding: 4px 8px;
+  color: var(--muted-fg);
+  background: var(--sidebar-bg);
+  border-bottom: 1px solid var(--card-border);
+  display: flex; align-items: center; gap: 4px;
+}
+.fn-picker-section-disclosure {
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  border: 0; border-top: 1px solid var(--card-border);
+  width: 100%;
+}
+.fn-picker-section-disclosure:hover {
+  background: var(--hover-bg);
+}
+.fn-picker-disclosure-arrow {
+  font-size: 8px; opacity: 0.6;
+  display: inline-block; min-width: 8px;
 }
 .fn-picker-empty {
   padding: 8px; font-size: 11px; opacity: 0.6; text-align: center;
 }
 .fn-picker-cancel-row {
   display: flex; justify-content: flex-end;
+}
+
+/* Phase 4 — Action toolbar pinned to the bottom of the selected
+   (nav-root) fn's overlay. Surfaces every mutating action in one
+   place so the user doesn't have to discover hover-revealed icons
+   scattered across the card. Always visible (no hover gate),
+   ≥44px touch targets on pointer-coarse devices. */
+.fn-action-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--card-border);
+  background: var(--card-bg);
+  /* Slight inset so the toolbar reads as a discrete stripe and
+     not a row of arbitrary buttons floating against the card. */
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--card-border) 40%, transparent);
+}
+.fn-action-toolbar-hint {
+  flex: 1; padding: 0 4px;
+  font-size: 11px; font-style: italic; color: var(--muted-fg);
+}
+.fn-action-btn {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 3px 6px;
+  flex: 1 1 auto;
+  justify-content: center;
+  font-family: inherit; font-size: 11px;
+  background: transparent; color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fn-action-btn:hover {
+  background: var(--hover-bg);
+}
+.fn-action-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.fn-action-btn-glyph {
+  font-size: 13px; line-height: 1;
+}
+.fn-action-btn-label {
+  /* Label is informational on desktop; on very narrow cards / phone
+     viewports we may want icon-only. Keep it visible by default and
+     hide it via the touch-narrow override below if needed. */
+}
+.fn-action-btn-danger {
+  color: var(--error-fg);
+  border-color: color-mix(in srgb, var(--error-fg) 40%, var(--card-border));
+}
+.fn-action-btn-danger:hover {
+  background: color-mix(in srgb, var(--error-fg) 12%, transparent);
 }
 
 /* Edit-parents strip — same layout as return-type strip but distinct
@@ -538,13 +912,9 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 
 /* Parent-set editor — popover with chip list + add/save controls. */
 .parent-set-editor {
-  position: fixed; z-index: 10001;
-  background: var(--card-bg); color: var(--card-fg);
-  border: 1px solid var(--card-border); border-radius: 4px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
-  padding: 8px; min-width: 280px; max-width: 380px;
-  display: flex; flex-direction: column; gap: 6px;
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  /* Reparent popover is wider than arg-value because it lists chips
+     for every existing parent + an "+ add parent" button. */
+  min-width: 280px; max-width: 380px;
 }
 .parent-set-editor-title {
   font-size: 11px; font-weight: 600;
@@ -588,7 +958,7 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   display: inline-flex; align-items: center; justify-content: center;
   opacity: 0.65;
 }
-.description-tooltip-close:hover { opacity: 1; background: rgba(127,127,127,0.2); }
+.description-tooltip-close:hover { opacity: 1; background: var(--overlay-pressed); }
 
 /* In-tooltip edit affordances — Edit pencil (read mode) and the
    Save/Cancel + textarea triplet (edit mode). The tooltip itself
@@ -618,7 +988,7 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 }
 .description-tooltip-error {
   margin-top: 4px; font-size: 11px;
-  color: #ff8080;
+  color: var(--error-fg);
 }
 
 /* Right-edge action icons — `i` (description) and `↗` (open in new tab).
@@ -666,4 +1036,448 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 /* Bottom row: [⌂] [⟲] [⊙]  — all in one line, right-aligned */
 .nav-bottom-row {
   display: flex; gap: 4px; align-items: center;
+}
+
+/* =========================================================================
+ * EDITOR BUSY — bottom-centre banner shown while a multi-step user
+ * action (reparent cascade, extend-fn, delete-fn) is in flight.
+ * Single-PUT inline edits don't get a banner; the Save button's own
+ * disabled state covers them. Spinner is a CSS ::before so the
+ * banner's textContent stays usable for screen readers.
+ * ========================================================================= */
+.editor-busy-banner {
+  position: fixed;
+  bottom: 16px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 10003;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  padding: 8px 14px;
+  font-family: inherit; font-size: 12px;
+  box-shadow: var(--shadow-lg);
+  display: none;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+.editor-busy-banner.visible { display: inline-flex; }
+.editor-busy-banner::before {
+  content: '';
+  width: 12px; height: 12px;
+  border: 2px solid var(--accent);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: editor-busy-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes editor-busy-spin {
+  to { transform: rotate(360deg); }
+}
+/* `cursor: progress` on the whole page reads better than `wait`
+   here — it keeps interactive affordances feeling allowed even
+   though they're temporarily disabled by the buttons themselves. */
+body.editor-busy { cursor: progress; }
+body.editor-busy .arg-value-edit-popover,
+body.editor-busy .parent-set-editor,
+body.editor-busy .fn-picker-popover,
+body.editor-busy .fn-action-toolbar { cursor: progress; }
+
+/* =========================================================================
+ * TYPE EXPLAINER — popover that opens on click of any type chip
+ * (arg-overlay's `[int]` chip, edge-label's chip). Surfaces the
+ * human-readable description plus the structural form below for
+ * users who already know the DSL. Editable chips additionally
+ * get a "Change type" button — clicking the chip is now a strict
+ * superset of the legacy "click to edit" behaviour.
+ * ========================================================================= */
+.type-explainer {
+  position: fixed; z-index: 10001;
+  display: none;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  padding: 8px 10px;
+  min-width: 220px; max-width: 360px;
+  font-family: inherit; font-size: 12px; line-height: 1.4;
+}
+.type-explainer.visible { display: block; }
+
+.type-explainer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--light-border);
+  margin-bottom: 6px; padding-bottom: 4px;
+}
+.type-explainer-title {
+  font-weight: 600; font-size: 12px;
+  color: var(--accent);
+  letter-spacing: 0.4px; text-transform: uppercase;
+}
+.type-explainer-close {
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; color: var(--card-fg);
+  border: 0; border-radius: 3px;
+  font-size: 18px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0.65;
+}
+.type-explainer-close:hover { opacity: 1; background: var(--overlay-pressed); }
+
+.type-explainer-human {
+  font-size: 13px;
+  margin: 4px 0;
+  color: var(--card-fg);
+  line-height: 1.5;
+}
+.type-explainer-structural {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  margin-top: 4px;
+  padding: 4px 6px;
+  background: color-mix(in srgb, var(--card-fg) 5%, transparent);
+  border-radius: 3px;
+  color: var(--muted-fg);
+  overflow-wrap: anywhere;
+}
+.type-explainer-actions {
+  display: flex; gap: 8px; align-items: center;
+  margin-top: 8px; padding-top: 6px;
+  border-top: 1px solid var(--light-border);
+}
+.type-explainer-btn {
+  font-family: inherit; font-size: 11px;
+  padding: 4px 10px; border-radius: 3px; cursor: pointer;
+  background: var(--card-fg); color: var(--card-bg);
+  border: 1px solid var(--card-fg);
+}
+.type-explainer-btn:hover { opacity: 0.85; }
+
+/* Tighten-effects row inside the type-explainer popover. Surfaces
+   the Phase-8 [:fn args ret #{eff-set}] narrowing when the slot is
+   fn-typed and has a backing binding. */
+.type-explainer-tighten {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--light-border);
+}
+.type-explainer-tighten-label {
+  font-size: 10px;
+  color: var(--muted-fg);
+  margin-bottom: 4px;
+}
+.type-explainer-tighten-row {
+  display: flex; flex-wrap: wrap; gap: 4px 10px;
+  margin-bottom: 6px;
+}
+.type-explainer-tighten-typerow {
+  display: flex; align-items: center; gap: 6px;
+  margin: 4px 0;
+}
+.type-explainer-tighten-typename {
+  font-size: 10px;
+  color: var(--muted-fg);
+  flex-shrink: 0;
+}
+.type-explainer-tighten-select {
+  font-family: inherit; font-size: 11px;
+  padding: 2px 4px; border-radius: 3px;
+  border: 1px solid var(--light-border);
+  background: var(--card-bg); color: var(--card-fg);
+  flex: 1;
+  min-width: 0;
+}
+.type-explainer-tighten-chk {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; cursor: pointer;
+}
+.type-explainer-tighten-chk input { margin: 0; }
+.type-explainer-tighten-err {
+  font-size: 10px;
+  color: var(--error-fg);
+  margin: 4px 0;
+  white-space: pre-wrap;
+}
+
+/* =========================================================================
+ * MISMATCH EXPLAINER — popover that opens on click of an
+ * `arg-overlay-mismatch` indicator. Distinct from the description
+ * tooltip: error-themed left accent stripe, structured rows, always
+ * persistent (clicked open, closed via × / outside-click / Esc).
+ * Built fresh per arg in editor-mismatch-explainer.js.
+ * ========================================================================= */
+.mismatch-explainer {
+  position: fixed; z-index: 10001;
+  display: none;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--error-fg);
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  padding: 8px 10px;
+  min-width: 240px; max-width: 360px;
+  font-family: inherit; font-size: 12px; line-height: 1.4;
+}
+.mismatch-explainer.visible { display: block; }
+
+.mismatch-explainer-header {
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--light-border);
+  margin-bottom: 6px; padding-bottom: 4px;
+}
+.mismatch-explainer-title {
+  font-weight: 600; font-size: 12px;
+  color: var(--error-fg);
+}
+.mismatch-explainer-close {
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; color: var(--card-fg);
+  border: 0; border-radius: 3px;
+  font-size: 18px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0.65;
+}
+.mismatch-explainer-close:hover {
+  opacity: 1; background: var(--overlay-pressed);
+}
+
+.mismatch-explainer-row {
+  display: flex; gap: 6px;
+  margin: 3px 0;
+}
+.mismatch-explainer-label {
+  flex: 0 0 64px;
+  color: var(--muted-fg);
+  font-size: 11px;
+}
+.mismatch-explainer-value {
+  flex: 1;
+  font-family: ui-monospace, monospace;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+/* Reason text wraps onto multiple lines and reads as prose, not code,
+   so flip to system font + slightly looser line-height. */
+.mismatch-row-reason .mismatch-explainer-value {
+  font-family: inherit;
+  line-height: 1.5;
+  color: var(--card-fg);
+}
+
+.mismatch-explainer-actions {
+  display: flex; gap: 8px; align-items: center;
+  margin-top: 8px; padding-top: 6px;
+  border-top: 1px solid var(--light-border);
+}
+.mismatch-explainer-btn {
+  font-family: inherit; font-size: 11px;
+  padding: 4px 10px; border-radius: 3px; cursor: pointer;
+  background: var(--card-fg); color: var(--card-bg);
+  border: 1px solid var(--card-fg);
+}
+.mismatch-explainer-btn:hover { opacity: 0.85; }
+.mismatch-explainer-hint {
+  font-size: 11px; color: var(--muted-fg);
+  font-style: italic;
+}
+
+/* Right-edge warning chip on a mismatched arg-overlay. Sits to the
+   right of the type-chip when present; otherwise pinned alone. The
+   visible glyph is a single ⚠-style "!" but lives inside a 1px ring
+   to match `applyActionIconBox` siblings, so the whole row reads as
+   "i ↗ ! type-chip" not "i ↗ × type-chip". */
+.arg-mismatch-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 4px;
+  width: var(--icon-size); height: var(--icon-size);
+  border: 1px solid var(--error-fg);
+  border-radius: 3px;
+  background: transparent; color: var(--error-fg);
+  font-family: inherit; font-size: var(--icon-font-size);
+  font-weight: 700;
+  line-height: 1; cursor: help;
+  padding: 0;
+}
+.arg-mismatch-badge:hover {
+  background: color-mix(in srgb, var(--error-fg) 18%, transparent);
+}
+
+/* =========================================================================
+ * TOUCH-DEVICE OVERRIDES — fires on iPad / phones / any pointer-coarse
+ * device. No-hover devices are exposed to the same hover-only affordances
+ * that desktop users discover by mousing over them; here we bring those
+ * up unconditionally and expand the hit area to ≥28px (WCAG 2.5.5
+ * minimum) so taps don't miss.
+ *
+ * Strategy: bump the existing CSS vars instead of adding a parallel
+ * sizing path. Component CSS that reads var(--icon-size) etc. picks up
+ * the touch values automatically. Hover-gated reveal rules below
+ * unconditionally surface the icons regardless of :hover state.
+ *
+ * Keep this block at the END of the file — last rule wins where
+ * specificity ties.
+ * ========================================================================= */
+@media (hover: none) and (pointer: coarse) {
+  :root {
+    /* Action-icon visual + pinning vars: bigger glyph, more breathing room
+       between stacked icons. Pin offsets recomputed so a 3-icon stack
+       fits at the right edge without overlap (28 + 4 gap × 2 = 92, last
+       slot = right:6+28+4+28+4 = 70 ≈ --icon-pin-r-3 below). */
+    --icon-size: 28px;
+    --icon-font-size: 14px;
+    --icon-pin-r-1: 4px;
+    --icon-pin-r-2: 38px;
+    --icon-pin-r-3: 72px;
+    --icon-pin-r-4: 106px;
+  }
+
+  /* Reveal hover-gated sidebar affordances unconditionally on touch.
+     Desktop's `opacity:0 → :hover .85` pattern is invisible on a
+     no-hover device — the user would never know these icons exist. */
+  .ns-header .description-badge,
+  .entity-item .description-badge,
+  .entity-item .open-in-new-tab.sidebar-action,
+  .ns-header:not(:hover) .ns-row-actions .create-btn-inline,
+  .entity-item:not(:hover) .ns-row-actions .create-btn-inline {
+    opacity: 0.85;
+  }
+
+  /* Sidebar rows: minimum tappable height. Without this a row is
+     ~21px tall — finger taps overshoot to neighbours. */
+  .ns-header,
+  .entity-item {
+    min-height: var(--touch-target);
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  /* ns-arrow doubles as the expand-collapse target. 16px is too small
+     for a finger; bump to ≥ 28px and re-centre the glyph. */
+  .ns-arrow {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+  }
+
+  /* Floating + sidebar-header buttons should hit Apple's 44pt baseline
+     since they're top-level navigation, not row-level glyphs. */
+  .nav-btn,
+  .prefs-btn,
+  .auth-lock-btn,
+  .sidebar-expand-floating {
+    min-width: var(--touch-target);
+    min-height: var(--touch-target);
+  }
+  .nav-btn { font-size: 28px; }
+
+  /* Sequence ±, type chip, popover close — small glyphs but real
+     actions. Bring them up to --touch-target-min. */
+  .arg-seq-btn,
+  .arg-type-chip,
+  .arg-type-chip-readonly,
+  .description-tooltip-close,
+  .parent-set-editor-chip-remove,
+  .arg-value-edit-btn,
+  .description-tooltip-btn {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+  }
+  /* Buttons that hold visible text (Save / Cancel) — don't constrain
+     min-width, just min-height so click area is tappable without
+     making a "Save" button absurdly wide. */
+  .arg-value-edit-btn,
+  .description-tooltip-btn {
+    min-width: 0;
+  }
+
+  /* Sidebar overlays the graph on narrow viewports rather than
+     pushing content. Easier than reflowing cy on every toggle. The
+     graph keeps its pan/zoom; the sidebar floats on top. */
+  body:not(.sidebar-collapsed) #side-menu {
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* SVG glyphs inside chrome buttons — every SVG in this editor was
+     authored with hardcoded width="11"/height="13". On touch the
+     parent button grows to ≥28px but the SVG stays small,
+     producing a tiny dot inside a giant target. CSS wins over the
+     inline width/height attributes for sizing — bump SVGs to 18px. */
+  .create-btn-inline svg,
+  .prefs-btn svg,
+  .auth-lock-btn svg,
+  .sidebar-expand-floating svg,
+  .nav-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Fn-picker rows — taps need ≥44px on touch (Apple HIG). The 11px
+     row text gets a hair bigger too so the iPad keyboard's
+     auto-zoom-on-focus doesn't kick in (Safari triggers when input
+     font-size < 16px on focus, but the surrounding rows stay legible
+     either way). */
+  .fn-picker-row { min-height: var(--touch-target); padding: 8px 10px; }
+  .fn-picker-search { font-size: 16px; padding: 8px 10px; }
+  .fn-picker-section-header { padding: 6px 10px; }
+
+  /* Phase 4 fn-action toolbar — buttons grow to Apple-HIG min-target
+     so the user can hit Rename / Describe / Re-parent / Delete with
+     a finger. Glyph reads larger; label still inline. */
+  .fn-action-btn {
+    min-height: var(--touch-target);
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .fn-action-btn-glyph { font-size: 16px; }
+
+  /* Polish round — every text/select input across the editor's
+     popovers needs to reach 16px so iPad Safari doesn't auto-zoom
+     on focus (which immediately clips the popover off-screen and
+     leaves the user staring at the keyboard). */
+  .arg-value-edit-input,
+  .description-tooltip-textarea {
+    font-size: 16px;
+    min-height: var(--touch-target);
+    padding: 8px 10px;
+  }
+  /* Save / Cancel buttons in popovers need the Apple-HIG target
+     too — applies to every button created by openInlineEditPopover
+     plus the description tooltip's Save/Cancel pair. */
+  .arg-value-edit-btn,
+  .description-tooltip-btn,
+  .parent-set-editor-chip-remove {
+    min-height: var(--touch-target);
+    padding: 6px 14px;
+    font-size: 13px;
+  }
+  /* The chip's × is a tap-and-remove glyph, not a labelled action;
+     keep its visual size compact while extending the hit area via
+     min-width. */
+  .parent-set-editor-chip-remove {
+    padding: 0 8px;
+    min-width: var(--touch-target-min);
+  }
+}
+
+/* =========================================================================
+ * RESPONSIVE — narrow viewports (phones, iPad portrait, iPad split view).
+ * Independent of pointer kind: a narrow desktop window (rare) gets the
+ * same layout treatment.
+ * ========================================================================= */
+@media (max-width: 900px) {
+  /* Sidebar overlays the graph instead of taking 30 %+ of the screen. */
+  #side-menu {
+    box-shadow: var(--shadow-lg);
+    z-index: 50;
+  }
+  /* Cap sidebar width so it doesn't blanket the whole screen on a
+     phone — leaves enough graph visible to remind the user where
+     they came from. */
+  :root {
+    --sidebar-width: min(280px, 80vw);
+  }
 }

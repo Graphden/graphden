@@ -22,17 +22,20 @@
   {:name :health
    :description "GET /health — current health status as JSON."
    :parent :get-route
-   :args {:path "/health" :handler :_health-handler}}
+   :args {:path "/health" :handler :_health-handler}
+   :expects-effects #{:time}}                 ; only wall-clock; no DB / env / IO
 
   {:name :metrics
    :description "GET /metrics — JVM info (heap, threads, uptime) as JSON."
    :parent :get-route
-   :args {:path "/metrics" :handler :_metrics-handler}}
+   :args {:path "/metrics" :handler :_metrics-handler}
+   :expects-effects #{:io}}                   ; reads JVM state (heap / threads / os)
 
   {:name :version
    :description "GET /version — `{\"build-hash\": \"<hex>\"}`. Hash is SHA-256 of every source file at build time; compare with `bb verify` to confirm a deploy actually shipped your changes."
    :parent :get-route
-   :args {:path "/version" :handler :_version-handler}}
+   :args {:path "/version" :handler :_version-handler}
+   :expects-effects #{:io}}                   ; reads classpath resource only
 
   {:name :favicon
    :description "GET /favicon.ico — inlined SVG icon, cached for 24 hours."
@@ -115,8 +118,8 @@
 
   {:name :entity-by-id
    :description "Multi-method route entry `[\"/:type/:id\" {:put … :delete …}]`. Sits inside `:entity-routes`."
-   :parent :pair
-   :args {:item1 "/:type/:id" :item2 :_entity-by-id-methods}}
+   :parent :list
+   :args {:items ["/:type/:id" :_entity-by-id-methods]}}
 
   {:name :entity-routes
    :description "/api/entities/* sub-group — POST `/:type` (create) and PUT/DELETE `/:type/:id` (update/delete). New methods on /:type/:id go into `:_entity-by-id-methods`; new sub-paths get listed here directly."
@@ -140,6 +143,19 @@
    :parent :list
    :args {:items ["/sequence" :sequence-append :sequence-remove]}}
 
+  ;; --- /api/bindings — binding-specific narrowing operations ---
+
+  {:name :tighten-binding-effects
+   :description "POST /api/bindings/:binding-id/tighten-fn-effects — narrow an fn-typed binding's effective type to a 4-arity `[:fn args ret #{eff-set}]`. Body: `{effects: [\"db\", \"io\", …]}`. Auth-required."
+   :parent :post
+   :args {:path "/:binding-id/tighten-fn-effects"
+          :handler :tighten-binding-effects-handler}}
+
+  {:name :bindings-routes
+   :description "/api/bindings/* sub-group — currently just the tighten-fn-effects endpoint."
+   :parent :list
+   :args {:items ["/bindings" :tighten-binding-effects]}}
+
   ;; --- /api/graph — graph data API ---
 
   {:name :api-entities
@@ -156,6 +172,31 @@
    :description "/api/graph/* sub-group — graph-data endpoints (entities dump + layout pipeline)."
    :parent :list
    :args {:items ["/graph" :api-entities :layout-api]}}
+
+  ;; --- /api/types — type-system surface ---
+
+  {:name :api-types
+   :description "GET /api/types — snapshot of the in-memory rich-type registry (every fn / fn-def's `:return` + `:args`). Powers editor type hints and external introspection."
+   :parent :get-route
+   :args {:path "" :handler :all-rich-types-handler}}
+
+  {:name :api-types-compatible
+   :description "POST /api/types/compatible — single-pair subtype check. Body: `{expected, candidate}` in the JSON shape produced by `/api/types`. Returns `{ok, expected, candidate, reason?}`. UI uses this for type-mismatch explainers without re-implementing `subtype?` in JS."
+   :parent :post-route
+   :args {:path "/compatible" :handler :types-compatible-handler}}
+
+  {:name :api-types-candidates
+   :description "POST /api/types/candidates — enumerate fns whose return type is a subtype of `expected`. Body: `{expected, effects?, name-prefix?}`. Returns `{count, candidates: [{name, return, args, effects}, ...]}` sorted alphabetically. Powers type-aware fn-pickers."
+   :parent :post-route
+   :args {:path "/candidates" :handler :types-candidates-handler}}
+
+  {:name :types-routes
+   :description "/api/types/* sub-group — registry snapshot + Phase 1 type-aware helpers (compatible / candidates) for the editor."
+   :parent :list
+   :args {:items ["/types"
+                  :api-types
+                  :api-types-compatible
+                  :api-types-candidates]}}
 
   ;; --- /api/auth/check — admin-token validation ping ---
 
@@ -177,5 +218,7 @@
    :args {:items ["/api"
                   :entity-routes
                   :sequence-routes
+                  :bindings-routes
+                  :types-routes
                   :graph-routes
                   :auth-check]}}]}

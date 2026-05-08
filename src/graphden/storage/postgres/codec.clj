@@ -23,7 +23,7 @@
 
 (def ^:private known-value-kind-values
   "Known values of the value_kind enum (SQL snake_case form)."
-  #{"null" "uuid" "text" "int" "bool" "numeric" "timestamptz" "jsonb" "bytes" "any" "fn" "sequence"})
+  #{"null" "uuid" "text" "int" "bool" "numeric" "timestamptz" "jsonb" "bytes" "any" "fn" "sequence" "keyword"})
 
 
 (defn- known-enum-value?
@@ -46,10 +46,16 @@
 
 (defn- preserve-keywords
   "Converts keyword VALUES to \":name\" strings so they survive JSON round-trip.
-   Map keys are left as-is (Cheshire handles key serialization separately)."
+   Map keys are left as-is (Cheshire handles key serialization separately).
+
+   Sets get tagged as `{:_set [...]}` — cheshire would otherwise lose
+   the set-vs-vector distinction (both serialise to JSON arrays).
+   Type-system constraints like `[:fn args ret #{:io}]` (Phase 8
+   effect carve-out) need the set preserved through storage."
   [v]
   (cond
     (keyword? v) (str v)
+    (set? v) {:_set (mapv preserve-keywords (vec v))}
     (map? v) (persistent! (reduce-kv (fn [m k v2] (assoc! m k (preserve-keywords v2))) (transient {}) v))
     (sequential? v) (mapv preserve-keywords v)
     :else v))
@@ -63,14 +69,25 @@
 
 
 (defn- normalize-parsed-json
-  "Post-processes parsed JSON: converts lazy seqs to vectors and restores
-   keyword values (strings starting with ':' → keywords)."
+  "Post-processes parsed JSON: converts lazy seqs to vectors, restores
+   keyword values (strings starting with ':' → keywords), and unwraps
+   `{:_set [...]}` markers back into Clojure sets (mirror of
+   `preserve-keywords`'s set-tagging)."
   [x]
   (cond
     (and (string? x)
          (> (count x) 1)
          (str/starts-with? x ":"))
     (keyword (subs x 1))
+
+    ;; Tagged-set unwrap. The single-key `:_set`/`"_set"` shape is the
+    ;; only place this convention applies; any other map flows through
+    ;; the normal recursion.
+    (and (map? x)
+         (= 1 (count x))
+         (let [k (first (keys x))]
+           (or (= k :_set) (= k "_set"))))
+    (into #{} (map normalize-parsed-json) (val (first x)))
 
     (map? x)
     (persistent! (reduce-kv (fn [m k v] (assoc! m k (normalize-parsed-json v))) (transient {}) x))

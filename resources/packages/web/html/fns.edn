@@ -14,17 +14,20 @@
   {:name :html-page
    :description "Build a full HTML page hiccup tree — `<!DOCTYPE html>` + `<head>` (title + head elements) + `<body>` (body + script tags)."
    :args {:title {:type :text :description "Document title (rendered in `<title>`)."}
-          :head {:type :jsonb :required false :description "Vector of additional `<head>` hiccup elements."}
+          :head {:type [:list :jsonb] :required false
+                 :description "Additional `<head>` hiccup elements."}
           :body {:type :jsonb :description "Hiccup tree placed inside `<body>`."}
-          :scripts {:type :jsonb :required false :description "Vector of `<script>` hiccup elements appended at end of body."}}
+          :scripts {:type [:list :jsonb] :required false
+                    :description "`<script>` hiccup elements appended at end of body."}}
    :return-type :jsonb}
 
   ;; Append a CDN script tag to head elements
   {:name :with-cdn-script
    :description "Append a `<script src=\"url\">` element to a head-elements vector."
-   :args {:head {:type :jsonb :required false :description "Existing head-elements vector (nil treated as empty)."}
+   :args {:head {:type [:list :jsonb] :required false
+                 :description "Existing head-elements list (nil treated as empty)."}
           :url {:type :text :description "CDN URL of the script to load."}}
-   :return-type :jsonb}
+   :return-type [:list :jsonb]}
 
   {:name :cytoscape-container
    :description "Hiccup snippet for a Cytoscape.js mount point — `<div id=… style=…>` ready for the JS to attach to."
@@ -45,7 +48,8 @@
    :description "Hiccup snippet for a labelled `<select>` field with an options list."
    :args {:field-name {:type :text :description "Form field name."}
           :label-text {:type :text :description "Visible label text."}
-          :options {:type :jsonb :description "Vector of `[value label]` pairs (or just values — re-used as labels)."}
+          :options {:type [:list :jsonb]
+                    :description "List of `[value label]` pairs (or just values — re-used as labels)."}
           :selected-value {:type :any :required false :description "Pre-selected option value."}
           :extra-attrs {:type :jsonb :required false :description "Extra attributes merged onto the `<select>`."}}
    :return-type :jsonb}
@@ -133,7 +137,8 @@
   {:name :entity-field-rows
    :description "Render a vector of `:field-row`s from a single entity, driven by a list of `[label key transform?]` specs."
    :args {:entity {:type :jsonb :description "Source entity map."}
-          :field-specs {:type :jsonb :description "Vector of `[label key]` or `[label key transform-fn]` specs."}}
+          :field-specs {:type [:list :jsonb]
+                        :description "List of `[label key]` or `[label key transform-fn]` specs."}}
    :return-type :jsonb}
 
   ;; Wrap text content in an HTML element. Pure composition over

@@ -1,7 +1,5 @@
 # Graphden Philosophy
 
-> **Last updated:** 2026-03-11
->
 > This document describes the core principles and philosophy behind graphden.
 > For technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
 > For packages system, see [PACKAGES.md](PACKAGES.md).
@@ -100,17 +98,17 @@ Following SICP, a language has three aspects:
 3. **Means of abstraction** — how to name and reuse compositions
 
 In graphden:
-- **Primitives**: Two entity types (fn, arg)
-- **Combination**: Parent-child inheritance (parent-id) and references (ref-id)
-- **Abstraction**: Base functions (Clojure implementations) and composed functions (parent-id inheritance)
+- **Primitives**: Five entity types — fn, slot, fn-slot, binding, binding-list-item (see [§ Language Aspects](#language-aspects-sicp) for the full breakdown)
+- **Combination**: Parent-fn-ids inheritance + binding overlays (`value` / `ref-fn-id`); `binding-list-item.position` for ordered chains
+- **Abstraction**: Base functions (Clojure implementations) and composed functions (`parent-fn-ids` inheritance + bindings)
 
 **We resist adding new entity types or edge types.** Every addition increases cognitive load and implementation complexity.
 
 #### 2.2 DRY (Don't Repeat Yourself)
 
 Abstractions must minimize the need to define anything twice:
-- Result caching (by ref-id within execution) enables sharing computed results
-- Composed functions (via parent-id) enable reuse without duplication
+- Result caching (by `ref-fn-id` within execution) enables sharing computed results
+- Composed functions (via `parent-fn-ids` + bindings) enable reuse without duplication
 - Base functions provide reusable implementations
 - UI can offer "create based on" = copying with ability to change
 
@@ -129,7 +127,7 @@ The system should support (or enable) development tools:
 
 | Tool Category | Classical Languages | Graphden Approach |
 |---------------|--------------------|--------------------|
-| Version control | Git (text diffs) | Graph versioning (planned) — group changes, rollback, branch, merge |
+| Version control | Git (text diffs) | Graph versioning via `VersionedStorage` decorator — branches, fork-point conflict detection, merge |
 | Testing | Unit test frameworks | Isolated node execution with mocked dependencies |
 | Linting | Static analysis | Graph structure constraints (already enforced) |
 | IDE features | Indexing, navigation | Database queries (inherent) |
@@ -141,30 +139,34 @@ The system should support (or enable) development tools:
 
 ### Primitives
 
+Five entity types, with deliberate roles:
+
 | Entity | Purpose |
 |--------|---------|
-| `fn` | Function (base or composed via parent-id) |
-| `arg` | Argument (schema + value in one, inherits via source-id) |
+| `fn` | Function entity OR type-row. Inheritance via `parent-fn-ids` (M:N). |
+| `slot` | Atomic `(name, type-fn-id)` pair. Immutable post-create; shared across fns. |
+| `fn-slot` | Junction: which slots a fn exposes, with `position`. |
+| `binding` | Per-`(fn, slot)` overlay (value, ref, rename, type-override, terminal, list flags). |
+| `binding-list-item` | Sequence content under a list-typed binding. |
 
-**Why only two?** They are the minimal set needed to express:
-- Base functions (fn with parent-id=nil, impl-hash links to Clojure)
-- Composed functions (fn with parent-id inherits behavior)
-- Argument definitions (arg with source-id=nil defines interface)
-- Argument binding (arg with value or ref-id provides data)
-- Argument inheritance (arg with source-id links to parent's arg)
+Slots are first-class because two fns can carry the **same slot
+identity**, which is how multiple-inheritance recognises that "two
+parents expose the same parameter" rather than colliding on names.
 
 ### Means of Combination
 
-References use the `ref-id` field with behavior controlled by `is-fn`:
+References point at fns via `binding.ref-fn-id` (or
+`binding-list-item.ref-fn-id` for sequence items). The executor
+dispatches based on the slot's effective type:
 
-| Arg Field | is-fn | Behavior |
-|-----------|-------|----------|
-| `ref-id` | `true` | Pass fn-id as value (for HOF) |
-| `ref-id` | `false` | Execute fn and use result |
+| Resolved slot type | Behavior |
+|---|---|
+| `:fn` | Pass `fn-id` directly — for HOF callables |
+| anything else | Execute the ref, use its result (cached per `ref-fn-id`) |
 
-**Why is-fn flag?** Higher-order functions (map, filter, reduce) need to receive functions as values, not their results. The flag on the arg itself determines behavior.
-
-**Simplification from old model**: Previously fn-usage was a separate entity. Now references point directly to fn, and is-fn determines execution behavior.
+The legacy `:is-fn` boolean flag on args was retired — `slot.type-fn-id`
+(overlaid by `binding.type-override-fn-id`) IS the HOF marker. One
+affordance, one concept.
 
 ### Base Functions Philosophy
 
@@ -244,16 +246,16 @@ This approach:
 
 ### Means of Abstraction
 
-#### Result Caching (via ref-id)
+#### Result Caching (via ref-fn-id)
 
 ```
-fn: report
-  arg1: {ref-id: calculate-sales}  ← executes calculate-sales
-  arg2: {ref-id: calculate-sales}  ← same ref-id, result cached
+fn report
+  binding {slot s-sales,    ref-fn-id calculate-sales}  ← executes calculate-sales
+  binding {slot s-snapshot, ref-fn-id calculate-sales}  ← same ref-fn-id, result cached
 ```
 
 This enables:
-- Sharing expensive computations (same ref-id = computed once)
+- Sharing expensive computations (same `ref-fn-id` = computed once)
 - Consistent snapshots (same value for multiple consumers)
 - Automatic caching within execution context
 
@@ -263,19 +265,29 @@ This enables:
 
 ### Accepted Complexity
 
-#### is-fn Flag for Reference Behavior
+#### Slot type drives HOF dispatch
 
-We wanted a single reference behavior, but HOF require passing functions as values. The `is-fn` flag on arg controls whether ref-id is passed directly (true) or executed (false).
+We wanted a single reference behavior, but HOFs need to receive
+**functions as values**. Rather than a side-channel flag, a slot
+typed `:fn` IS the HOF marker — the editor shows it through the
+type chip, the executor dispatches on it. One affordance for one
+concept.
 
-**Mitigation**: In visual UI, this can be shown as edge color or style, not requiring user to understand the flag.
+#### Five entity types
 
-#### Two Entity Types
+The minimum needed for the model we want:
+- `fn` carries inheritance + type-row metadata
+- `slot` and `fn-slot` separate "what is this parameter" from
+  "which fns expose it" — sharing slot identity is what makes MI
+  inheritance picky about identity vs. name
+- `binding` overlays per-fn customisation without forking the slot
+- `binding-list-item` keeps sequence content indexable so
+  reverse-queries ("which fns ref X via list?") stay cheap
 
-The minimum needed for function composition:
-- `fn` - functions (base or composed via parent-id)
-- `arg` - arguments (primary or inherited via source-id)
-
-Both are essential - removing either would make the system non-functional.
+Each entity earns its row. Removing any would either lose
+expressiveness (no slot sharing → no MI), or push semantics into
+ad-hoc fields on `fn` (binding overlays inside the fn entity →
+versioning per-fn instead of per-binding, lost dedup).
 
 ### Performance Concerns
 
@@ -306,24 +318,26 @@ This section maps each system component to the principles it serves. Use this to
 
 | Entity | Principles Served | How |
 |--------|-------------------|-----|
-| `fn` | Minimal entities, Expressiveness, DRY | Single entity for base and composed functions; inheritance via parent-id |
-| `arg` | Minimal entities, Explicit, Locality | Combines schema + value; inherits via source-id; values are explicit |
+| `fn` | Minimal entities, Expressiveness, DRY | Function or type-row; M:N inheritance via `parent-fn-ids` |
+| `slot` | Minimal entities, Explicit | Atomic identity for a parameter; sharing enables MI |
+| `fn-slot` | Locality, Explicit | Which fn exposes which slot in what order |
+| `binding` | Locality, Explicit | Per-`(fn, slot)` overlay; closer-fn-wins makes inheritance lookups O(chain length) |
+| `binding-list-item` | Indexability | Sequence content as rows so reverse-queries stay cheap |
 
 ### Storage Layer
 
 | Component | Principles Served | How |
 |-----------|-------------------|-----|
 | `storage-protocol` | Correctness, Minimal entities | Generic CRUD interface for all backends; schema-agnostic |
-| `postgres-storage` | Performance, Correctness | Production-grade ACID transactions |
-| `graph-storage-age` | Correctness, Performance | Graph queries via Apache AGE Cypher |
+| `postgres-storage` | Performance, Correctness | Production-grade ACID transactions; recursive CTE for cycle walks |
 
 ### Graph Layer
 
 | Component | Principles Served | How |
 |-----------|-------------------|-----|
-| `graph-protocol` | Correctness, Modularity | Graph-specific protocols: GraphReader, GraphConstraints |
-| `graph-data-schema` | Minimal entities | Core graph entities: fn, arg (only 2!) |
-| `graph-storage-*` | Dev simplicity | Pre-configured storage + graph schema bundles |
+| `storage/protocol/graph` | Correctness, Modularity | `ExecutionGraphResult` record + accessor functions |
+| `graph-data-schema` | Minimal entities | The five core entities (fn, slot, fn-slot, binding, binding-list-item) |
+| `versioning/storage` | Dev simplicity | Versioned-decorator wrapping any base storage |
 
 ### Execution Layer
 
@@ -334,40 +348,39 @@ This section maps each system component to the principles it serves. Use this to
 | `fn-registry` | DRY, Correctness | Single registration point; deterministic UUIDs |
 | `fn-composition` | DRY, Explicit | Data-driven composition; no hidden behavior |
 
-### Constraint System (GraphConstraints)
+### Constraint System
 
 | Constraint | Principles Served | How |
 |------------|-------------------|-----|
-| No dependency cycles | Correctness | Prevents infinite loops at write time |
-| source-id references valid parent arg | Correctness | Type safety for arg inheritance |
-| Unique (fn-id, source-id) | Correctness | No duplicate inherited args |
-| Unique (fn-id, name) | Correctness | No duplicate arg names |
+| No dependency cycles | Correctness | Prevents infinite loops at write time (binding.ref-fn-id graph) |
+| Schema `UNIQUE` keys | Correctness | fn.name, fn-slot, binding, binding-list-item identity |
 
 ### Protocol Design Decisions
 
 | Decision | Principles Served | Trade-off |
 |----------|-------------------|-----------|
-| `is-fn` flag for reference behavior | Expressiveness (HOF support) | +1 field, but minimum for HOF |
-| Union value/ref-id on arg | Minimal entities | Single arg entity instead of separate value types |
-| Result caching by ref-id | DRY, Performance | Cache logic in executor, not schema |
-| Inheritance via parent-id/source-id | DRY, Minimal entities | Eliminates schema/instance split |
+| Slot type IS the HOF marker | Expressiveness, Explicit | One concept (`type=:fn`) instead of two (type + flag) |
+| Union value/ref-fn-id on binding | Minimal entities | Mutual-exclusion checked at write |
+| Result caching by ref-fn-id | DRY, Performance | Cache lives in executor, not schema |
+| Slots shared across fns by id | DRY, MI correctness | Sharing is opt-in via fn-slot pointing at same slot-id |
+| Bindings overlay per (fn, slot) | Locality | One row per customisation; no fork-on-rename |
 
 ### Bundles
 
 | Component | Principles Served | How |
 |-----------|-------------------|-----|
-| `graph-storage-*` | Dev simplicity | Pre-configured storage + schema |
-| `graph-with-base-fns-*` | Dev simplicity | Complete stack in one call |
+| `system/*` | Dev simplicity | Integrant lifecycle wires storage + executor + base-fn registry + http server |
+| `packages/*` | Dev simplicity | One directory per package; loader auto-syncs at startup |
 
-### Future Components (Planned)
+### Future Components
 
-| Component | Target Principles | Expected Trade-offs |
-|-----------|-------------------|---------------------|
-| Distributed execution | Performance | Complexity in coordination |
-| Type system | Correctness, Dev tools | Complexity; may limit flexibility |
-| Versioning | Dev tools, Correctness | Storage overhead; migration complexity |
-| Permissions | Correctness | Query overhead; complexity |
-| Visual UI | Dev simplicity | Large implementation effort |
+| Component | Status | Target Principles | Expected Trade-offs |
+|-----------|--------|-------------------|---------------------|
+| Distributed execution | Planned | Performance | Complexity in coordination |
+| Type system | Done (refinements / records / lists / unions / variants) | Correctness, Dev tools | Save-time check + rich-type registry |
+| Versioning | Done (`VersionedStorage` decorator) | Dev tools, Correctness | Storage overhead; migration complexity |
+| Permissions | Planned | Correctness | Query overhead; complexity |
+| Visual UI | Done (Cytoscape-based editor) | Dev simplicity | Large implementation effort |
 
 ### How to Use This Mapping
 
@@ -406,16 +419,16 @@ Even a classic forum has this: developers write the engine, admins create sectio
 
 **Graphden should support this entire chain.** Through access levels to functions and graph operations, each role sees only what they need:
 
-- Platform developer: writes base-fn in Clojure, defines fn entity with impl-hash
-- System integrator: composes base-fn into graphs, configures storage and infrastructure
-- Domain builder: creates domain-specific functions from existing compositions, configures routing
+- Platform developer: writes base-fn in Clojure, defines `fn` entity with `impl-hash`
+- System integrator: composes base-fns into graphs (fn-defs + bindings), configures storage and infrastructure
+- Domain builder: creates domain-specific fns from existing compositions, configures routing
 - End user: invokes functions through UI, provides runtime arguments
 
 The boundaries between roles are enforced by the permission system, not by technical barriers. A domain builder doesn't need to know Clojure — they work with the same graph primitives, just at a higher level.
 
 ### Extension Modularity Problem
 
-The core system is simple: base-fn implementations + graph composition (fn, arg) + executor. But production features — versioning, caching, logging, permissions, environment management, secret storage — all require modifications to either storage (new fields, tables, query logic) or executor (new resolution steps, middleware).
+The core system is simple: base-fn implementations + graph composition (fn, slot, fn-slot, binding, binding-list-item) + executor. But production features — versioning, caching, logging, permissions, environment management, secret storage — all require modifications to either storage (new fields, tables, query logic) or executor (new resolution steps, middleware).
 
 Hardwiring these features into the core has problems:
 - Forces all users to use them, even when unnecessary
@@ -491,16 +504,17 @@ The system separates concerns into three distinct layers:
 │  - Does NOT know about storage details                          │
 └─────────────────────────────────────────────────────────────────┘
                               │
-                              │ uses GraphReader protocol
+                              │ uses ExecutionGraph + StorageCRUD protocols
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       GRAPH LAYER                                │
 │  - Provides execution graph for a fn-id                         │
-│  - Knows about graph entities (fn, arg)                         │
-│  - Middleware pattern: composable GraphReader implementations   │
-│    • DirectGraphReader(storage) — direct queries                │
-│    • CachedGraphReader(storage, cache) — DB-level caching       │
-│    • VersionedGraphReader(storage) — branch version resolution  │
+│  - Knows about graph entities (fn, slot, fn-slot, binding,      │
+│    binding-list-item)                                           │
+│  - Middleware pattern: composable storage decorators            │
+│    • Base storage — direct queries                              │
+│    • CachedStorage(base) — DB-level caching                     │
+│    • VersionedStorage(base) — branch version resolution         │
 │  - Does NOT know about execution semantics                      │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -522,50 +536,47 @@ The system separates concerns into three distinct layers:
 │                     DATA SCHEMA LAYER                            │
 │  - Defines entity types, fields, constraints                    │
 │  - Schema extensions are composable:                            │
-│    • graph-data-schema — fn, arg (minimal 2-entity model)      │
-│    • cache-data-schema — cached execution results              │
-│    • versioned-data-schema — branch, fn-version, arg-version   │
+│    • graph-data-schema — fn / slot / fn-slot / binding /        │
+│      binding-list-item                                          │
+│    • versioned-data-schema — branch + version table per         │
+│      versioned entity                                           │
 │  - Pure data definitions, no behavior                           │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Key principle**: Each layer depends only on the layer below it. The executor doesn't know if storage is versioned or cached — it only sees `GraphReader`. Storage doesn't know about execution — it only sees CRUD operations.
+**Key principle**: Each layer depends only on the layer below it. The executor doesn't know if storage is versioned or cached — it only sees `ExecutionGraph` + `StorageCRUD`. Storage doesn't know about execution — it only sees CRUD operations.
 
 **Graph-specific protocols in the right place**: The `GraphConstraints` and `ExecutionGraph` protocols belong in the Graph Layer, not Storage Layer:
 
 | Protocol | Layer | Reason |
 |----------|-------|--------|
 | `StorageCRUD` | Storage | Generic CRUD, schema-agnostic |
-| `GraphConstraints` | Graph | Knows about fn→arg→fn relationships |
+| `GraphConstraints` | Graph | Knows about fn → binding.ref-fn-id → fn relationships |
 | `ExecutionGraph` | Graph | Resolves graph structure for execution |
-| `GraphReader` | Graph | Provides graph data to executor |
 
-**GraphReader middleware pattern** enables composition:
+**Storage decorator pattern** enables composition:
 
 ```clojure
-;; Direct graph reading (simplest)
-(def reader (direct-graph-reader storage))
-
-;; With DB-level caching
-(def reader (cached-graph-reader storage cache-storage))
+;; Direct storage (simplest)
+(def storage (pg/create-storage cfg))
 
 ;; With versioning (branch resolution)
-(def reader (versioned-graph-reader versioned-storage))
+(def storage (vs/wrap-with-versioning (pg/create-storage cfg)))
 
-;; With both (cached + versioned)
-(def reader (cached-versioned-graph-reader versioned-storage cache-storage))
+;; Caching layer (planned)
+(def storage (cs/wrap-with-cache (vs/wrap-with-versioning base) cache))
 ```
 
-The executor creates context with any GraphReader:
+The executor takes any storage through the unified protocols:
 ```clojure
-(executor/create-context {:graph-reader reader
+(executor/create-context {:storage storage
                           :base-fns (registry/get-base-fns)})
 ```
 
 This design follows Django's "apps" pattern where each feature is an independent module that can:
 1. Extend the schema (add entities/fields)
 2. Modify CRUD behavior (storage decorators)
-3. Modify graph reading behavior (GraphReader implementations)
+3. Modify graph-resolution behavior (`ExecutionGraph` implementations)
 4. Be combined with other features in any order
 
 ### Self-Describing System (Long-term Vision)
@@ -622,7 +633,7 @@ This is analogous to Lisp's self-hosting capability: the language is expressive 
 **Question**: How to handle breaking changes?
 
 **Possible approaches**:
-- Versioning (implemented via parent-id inheritance)
+- Versioning (implemented via `VersionedStorage` decorator + branch fork-point conflict detection)
 - Migration tools
 - Compatibility analysis before changes
 

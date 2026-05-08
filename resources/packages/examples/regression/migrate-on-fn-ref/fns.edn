@@ -1,0 +1,72 @@
+;; REGRESSION: when a level-0 binding migrates to a fn-ref-reached
+;; descendant (filling that descendant's free arg slot via the
+;; inherited binding-chain), it must be REMOVED from the parent —
+;; not rendered in BOTH places.
+;;
+;; Substitution semantics: if parent binds `:item1 = "world"` and
+;; parent's body reaches a leaf where `:item1` is the free slot
+;; via fn-ref `:coll = some-helper`, then after expansion the
+;; literal lives ONLY at the deep helper card, not at the parent.
+;; The current layout shows it at BOTH.
+;;
+;; Production manifestation: text-error-router → ring-create-default-handler
+;; expansion shows `:not-found`, `:method-not-allowed`, `:not-acceptable`
+;; keyword literals TWICE — once on each `:_router-{*}-entry` card
+;; (level-0 :item1 binding) and once on the `:pair-1` card it reaches
+;; via :coll fn-ref (migrated value).
+;;
+;; This module reproduces the exact shape minimally: a 2-element
+;; pair built via fn-ref-to-list-helper inheritance.
+
+
+{:namespace "examples.regression.migrate-on-fn-ref"
+ :description "Pins a layout-pipeline regression: a level-0 value-binding migrating to a fn-ref-reached consumer must NOT also render on the binding's owning card."
+ :fns
+ [;; Helper: a 1-element list builder. Free arg :item1 (renamed
+  ;; from :item via {:as :item1}). Reached by `:ex-pair-like` via
+  ;; the :coll fn-ref inherited from :conj.
+  {:name :_ex-list-of-one
+   :description "Single-element list builder. Free arg `:item1` (renamed). Inlines what `:pair-1` used to do."
+   :parent :conj
+   :args {:coll []
+          :item {:as :item1}}}
+
+  ;; Parent: 2-element pair via :conj. Binds :coll to the 1-element
+  ;; helper above (so :coll is a fn-ref to a list, not a literal).
+  ;; Its own :item is renamed to :item2. Free args: :item1 (from
+  ;; helper), :item2.
+  {:name :_ex-pair-like
+   :description "2-element pair: `(conj (list-of-one item1) item2)`. Binds :coll to the helper, renames :item to :item2. Free args propagate up: :item1 (from helper) and :item2."
+   :parent :conj
+   :args {:coll :_ex-list-of-one
+          :item {:as :item2}}}
+
+  ;; Bound concrete: fixes :item1 = "first", leaves :item2 free.
+  ;; Mirrors `:_router-not-found-entry` shape.
+  {:name :_ex-pair-with-first
+   :description "Anonymous local that fixes :item1 = \"first\". Mirrors the production `:_router-not-found-entry`."
+   :parent :_ex-pair-like
+   :args {:item1 "first"}}
+
+  ;; Outer wrapper that consumes the entry via a sequence-arg, like
+  ;; pairs->map consumes its 3 entries in production. The user views
+  ;; this wrapper with text-error-router-style expansion (depth 2
+  ;; reveals the entry's body chain). Then "first" should appear
+  ;; ONCE — on the `:_ex-list-of-one` card. Currently it appears TWICE
+  ;; (once on the entry, once on the helper).
+  {:name :_ex-wrap-pair
+   :description "Anonymous wrapper of the entry via `:list/:items`."
+   :parent :list
+   :args {:items [:_ex-pair-with-first]}}
+
+  ;; Outer named root. Navigating here gives the user a card whose
+  ;; chain `(ex-outer → list)` shows :items binding to the wrap-pair
+  ;; helper. Expanding `:list` (depth 1) substitutes :_ex-wrap-pair's
+  ;; body, revealing the inner :_ex-pair-with-first → :_ex-pair-like →
+  ;; :conj chain with :_ex-list-of-one as a fn-ref child. That's the
+  ;; depth where the dup manifests: "first" should now live ONLY on
+  ;; :_ex-list-of-one's card. Currently it lives both there AND on
+  ;; :_ex-pair-with-first.
+  {:name :ex-outer
+   :description "Outer root for the regression. Expand `list` (depth 1) to see the dup."
+   :parent :_ex-wrap-pair}]}

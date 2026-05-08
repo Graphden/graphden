@@ -1,0 +1,49 @@
+;; Append-only list inheritance — descendants extend a parent's
+;; sequence-arg without replacing existing items.
+;;
+;; Default behaviour for a sequence-arg in a fn-def is REPLACE — when a
+;; child binds `:items [a b c]` it provides the entire list and any
+;; parent binding is shadowed. The `{:append [...]}` shape switches to
+;; EXTEND semantics — the child's items are appended to the parent's
+;; effective chain. Locked: descendants cannot remove or reorder the
+;; parent's items, only add at the tail.
+;;
+;; A descendant can ADDITIONALLY mark `:closed? true` to seal the chain.
+;; Any further descendant that tries `:append` against a closed anchor
+;; is rejected at sync time.
+;;
+;; Verified runtime on 2026-04-29:
+;;   ex-base-list      → ["a" "b" "c"]
+;;   ex-extended-list  → ["a" "b" "c" "d" "e"]
+;;   ex-deeper-list    → ["a" "b" "c" "d" "e" "f"]
+;;   ex-sealed-list    → ["a" "b" "c" "d" "e" "x"]
+;;   ;; A fn that tries `:items {:append [...]}` against `ex-sealed-list`
+;;   ;; fails sync with `:fn-composition/append-against-closed`.
+
+
+{:namespace "examples.types-append-list"
+ :description "`{:append [...]}` extends a parent's sequence-arg chain (vs. replacing it). `{:closed? true}` seals further extension."
+ :fns
+ [;; Base composition: produces ["a" "b" "c"].
+  {:name :ex-base-list
+   :description "Replaces the whole `:items` chain — the canonical default for sequence-args."
+   :parent :list
+   :args {:items ["a" "b" "c"]}}
+
+  ;; First level of extension: ["a" "b" "c" "d" "e"].
+  {:name :ex-extended-list
+   :description "Appends [\"d\" \"e\"] to the parent's chain via `{:append [...]}`. Parent's items remain locked."
+   :parent :ex-base-list
+   :args {:items {:append ["d" "e"]}}}
+
+  ;; Second level of extension: ["a" "b" "c" "d" "e" "f"].
+  {:name :ex-deeper-list
+   :description "Append further down the chain — `:f` is added on top of the already-extended list."
+   :parent :ex-extended-list
+   :args {:items {:append ["f"]}}}
+
+  ;; Sealing: append + close so descendants cannot extend further.
+  {:name :ex-sealed-list
+   :description "Appends `:x` and seals the chain — any descendant trying `{:append ...}` fails sync."
+   :parent :ex-extended-list
+   :args {:items {:append ["x"] :closed? true}}}]}

@@ -45,11 +45,11 @@
           ;; Create composed fn with both args: :a bound, :b free
           composed-fn (setup/create-composed-fn! storage "partial-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "a" :type :int :required true :is-fn false
+                               {:name "a" :type :int :required true
                                 :source-id (:id arg-a) :value 100})
           ;; Create free arg :b (no value, will be provided via named-args)
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "b" :type :int :required true :is-fn false
+                               {:name "b" :type :int :required true
                                 :source-id (:id arg-b)})
           ctx (exec/create-context {:storage storage})]
       ;; Provide free arg-b by name (arg-a from DB)
@@ -61,10 +61,10 @@
           {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
           composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "a" :type :int :required true :is-fn false
+                               {:name "a" :type :int :required true
                                 :source-id (:id arg-a) :value 5})
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "b" :type :int :required true :is-fn false
+                               {:name "b" :type :int :required true
                                 :source-id (:id arg-b) :value 7})
           ctx (exec/create-context {:storage storage})]
       (is (= 12 (exec/execute-with-named-args ctx (:id composed-fn) nil)))
@@ -75,10 +75,10 @@
           {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
           composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "a" :type :int :required true :is-fn false
+                               {:name "a" :type :int :required true
                                 :source-id (:id arg-a) :value 3})
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "b" :type :int :required true :is-fn false
+                               {:name "b" :type :int :required true
                                 :source-id (:id arg-b) :value 4})
           ctx (exec/create-context {:storage storage})]
       (is (= 7 (exec/execute-with-named-args ctx (:id composed-fn) {})))
@@ -89,10 +89,10 @@
           {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
           composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "a" :type :int :required true :is-fn false
+                               {:name "a" :type :int :required true
                                 :source-id (:id arg-a) :value 1})
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "b" :type :int :required true :is-fn false
+                               {:name "b" :type :int :required true
                                 :source-id (:id arg-b) :value 2})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -111,10 +111,10 @@
           {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
           composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "a" :type :int :required true :is-fn false
+                               {:name "a" :type :int :required true
                                 :source-id (:id arg-a) :value 1})
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "b" :type :int :required true :is-fn false
+                               {:name "b" :type :int :required true
                                 :source-id (:id arg-b) :value 2})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -131,10 +131,10 @@
           {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
           composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "a" :type :int :required true :is-fn false
+                               {:name "a" :type :int :required true
                                 :source-id (:id arg-a) :value 10})
           _ (setup/create-arg! storage (:id composed-fn)
-                               {:name "b" :type :int :required true :is-fn false
+                               {:name "b" :type :int :required true
                                 :source-id (:id arg-b) :value 20})
           ctx (exec/create-context {:storage storage})]
       ;; Note: the fn entity is named "my-add"
@@ -239,24 +239,24 @@
           ;; Create my-map base fn
           map-base (setup/create-base-fn! storage "my-map" :jsonb)
           map-arg-f (setup/create-arg! storage (:id map-base)
-                                       {:name "f" :type :fn :required true :is-fn true})
+                                       {:name "f" :type :fn :required true})
           map-arg-coll (setup/create-arg! storage (:id map-base)
-                                          {:name "coll" :type :jsonb :required true :is-fn false})
+                                          {:name "coll" :type :jsonb :required true})
           ;; Create recorder base fn with exactly 1 required arg
           rec-base (setup/create-base-fn! storage "recorder" :int)
           _rec-arg-item (setup/create-arg! storage (:id rec-base)
-                                           {:name "item" :type :int :required true :is-fn false})
+                                           {:name "item" :type :int :required true})
           ;; Create recorder fn instance (no args - item is free for HOF)
           rec-fn (setup/create-composed-fn! storage "rec-fn" (:id rec-base))
           ;; Create my-map fn instance
           map-fn (setup/create-composed-fn! storage "map-fn" (:id map-base))
           ;; map-fn's f -> rec-fn via ref-id (is-fn=true passes fn-id)
           _ (setup/create-arg! storage (:id map-fn)
-                               {:name "f" :type :fn :required true :is-fn true
+                               {:name "f" :type :fn :required true
                                 :source-id (:id map-arg-f) :ref-id (:id rec-fn)})
           ;; map-fn's coll -> [1 2 3]
           _ (setup/create-arg! storage (:id map-fn)
-                               {:name "coll" :type :jsonb :required true :is-fn false
+                               {:name "coll" :type :jsonb :required true
                                 :source-id (:id map-arg-coll) :value [1 2 3]})
           ctx (exec/create-context {:storage storage})]
       ;; Execute - should map recorder over [1 2 3]

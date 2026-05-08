@@ -161,6 +161,17 @@
                                                            {:quoted true}))))
 
 
+(defn drop-column!
+  "Drops a column. `IF EXISTS` makes the call idempotent — re-running
+   the same migration after the column is gone is a safe no-op."
+  [ds table-name col-name]
+  (util/with-sql-error-handling "DDL error" :drop-column
+                                {:table-name table-name :col-name col-name}
+                                (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
+                                                        " DROP COLUMN IF EXISTS "
+                                                        (util/ident->sql col-name))])))
+
+
 (defn alter-column-type!
   "Changes column type (for safe widening)."
   [ds table-name col-name new-type-sql]

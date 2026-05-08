@@ -70,10 +70,7 @@
     [graphden.storage.protocol.metadata :as metadata]
     [graphden.storage.protocol.naming :as naming]
     [graphden.storage.protocol.redaction :as redaction]
-    [graphden.storage.protocol.validation :as validation])
-  (:import
-    (graphden.storage.protocol.graph
-      ExecutionGraphResult)))
+    [graphden.storage.protocol.validation :as validation]))
 
 
 ;; ============================================================================
@@ -221,18 +218,6 @@
     "Resolves the complete execution graph for a function."))
 
 
-(defprotocol ExecutionGraphReader
-  "Protocol for reading data from execution graphs."
-
-  (graph-get-fn
-    [this fn-id]
-    "Returns fn record for fn-id.")
-
-  (graph-get-args
-    [this fn-id]
-    "Returns args for fn-id."))
-
-
 ;; ============================================================================
 ;; CONSTRAINT HELPER IMPLEMENTATIONS
 ;; ============================================================================
@@ -242,20 +227,6 @@
   [helpers owner-fn-id ref-fn-id]
   (constraints/validate-no-dependency-cycle-impl
     collect-dependency-chain helpers owner-fn-id ref-fn-id))
-
-
-;; ============================================================================
-;; EXECUTIONGRAPHREADER EXTENSION FOR EXECUTIONGRAPHRESULT
-;; ============================================================================
-
-(extend-type ExecutionGraphResult
-  ExecutionGraphReader
-
-  (graph-get-fn [this fn-id]
-    (get (:fns this) fn-id))
-
-  (graph-get-args [this fn-id]
-    (get (:args-by-fn this) fn-id [])))
 
 
 ;; ============================================================================
@@ -501,30 +472,21 @@
   (graph/execution-graph? x))
 
 
-(def extract-fn-refs-from-args graph/extract-fn-refs-from-args)
-
-
 ;; === ExecutionGraph accessor functions ===
-;; These provide stable API for accessing graph data.
+;; Stable API for accessing graph data.
 
-(def get-graph-fns
-  "Returns the fns map from an execution graph."
-  graph/get-graph-fns)
-
-
-(def get-graph-args
-  "Returns all args from an execution graph."
-  graph/get-graph-args)
-
-
-(def get-graph-args-for-fn
-  "Returns args for a specific fn-id from an execution graph."
-  graph/get-graph-args-for-fn)
+(def get-graph-fns        graph/get-graph-fns)
+(def get-graph-slots      graph/get-graph-slots)
+(def get-graph-fn-slots   graph/get-graph-fn-slots)
+(def get-graph-bindings   graph/get-graph-bindings)
+(def get-graph-list-items graph/get-graph-list-items)
+(def get-bindings-for-fn  graph/get-bindings-for-fn)
+(def get-fn-slots-for-fn  graph/get-fn-slots-for-fn)
+(def get-items-for-binding graph/get-items-for-binding)
 
 
 ;; === Constraint limits re-exports ===
 (def default-max-dependency-chain-depth constraints/default-max-dependency-chain-depth)
-(def validate-no-arg-descendants-impl constraints/validate-no-arg-descendants-impl)
 
 
 ;; === Lock re-exports ===

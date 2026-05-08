@@ -26,6 +26,24 @@
  :description "Ring request → router → response pipeline, plus bearer-token auth middleware. The `:router-ring-response` fn-def is the canonical shape bound to `:http-server.handler`."
  :fns
  [;; =============================================================================
+  ;; STRUCTURAL TYPE — Ring request shape
+  ;; =============================================================================
+  ;; The matching `:ring-response-shape` is declared in core/system
+  ;; (alongside `:ring-response`, the assoc-chain that builds it).
+  ;; Together they let `:http-server.handler` be typed as the fn-type
+  ;; `[:fn {:request :ring-request-shape} :ring-response-shape]`
+  ;; instead of bare `:fn`, so `:add` (arithmetic) gets rejected at
+  ;; sync-time rather than crashing at runtime.
+
+  {:name :ring-request-shape
+   :description "Structural shape of an inbound Ring HTTP request map."
+   :type {:request-method :keyword
+          :uri            :text
+          :query-string   :text
+          :headers        :jsonb
+          :body           :any}}
+
+  ;; =============================================================================
   ;; RING REQUEST EXTRACTION
   ;; =============================================================================
 
@@ -41,7 +59,7 @@
   {:name :ring-request
    :description "Single holder for the inbound Ring request — identity rename that exposes `:value` as the free arg `:request`. All field extractors below source from this one fn so each request flows through it once."
    :parent :identity
-   :args {:value {:as :request}}}
+   :args {:value {:as :request :type :ring-request-shape}}}
 
   ;; Shared `:coll :ring-request` lookup — factor out the common binding so
   ;; each field extractor below just names the key it wants.
@@ -86,28 +104,28 @@
 
   {:name :ring-method-entry
    :description "`[:request-method <method>]` entry for the internal-request map."
-   :parent :pair
-   :args {:item1 {:value :request-method} :item2 :ring-method}}
+   :parent :list
+   :args {:items [{:value :request-method :literal? true} :ring-method]}}
 
   {:name :ring-uri-entry
    :description "`[:uri <path>]` entry for the internal-request map."
-   :parent :pair
-   :args {:item1 {:value :uri} :item2 :ring-uri}}
+   :parent :list
+   :args {:items [{:value :uri :literal? true} :ring-uri]}}
 
   {:name :ring-query-string-entry
    :description "`[:query-string <qs>]` entry for the internal-request map."
-   :parent :pair
-   :args {:item1 {:value :query-string} :item2 :ring-query-string}}
+   :parent :list
+   :args {:items [{:value :query-string :literal? true} :ring-query-string]}}
 
   {:name :ring-headers-entry
    :description "`[:headers <headers>]` entry for the internal-request map."
-   :parent :pair
-   :args {:item1 {:value :headers} :item2 :ring-headers}}
+   :parent :list
+   :args {:items [{:value :headers :literal? true} :ring-headers]}}
 
   {:name :ring-body-entry
    :description "`[:body <input-stream>]` entry for the internal-request map. We pass the raw httpkit InputStream straight through (NOT pre-slurped via `:ring-body`) — slurping at this layer would consume the body before it reaches a handler that lives below an `:auth-required-middleware`, leaving downstream `(:body request)` reads with an empty string. Handlers slurp on demand via the `slurp-body` helper or pass directly to `json/parse-string` (which accepts InputStream)."
-   :parent :pair
-   :args {:item1 {:value :body} :item2 :ring-body-input-stream}}
+   :parent :list
+   :args {:items [{:value :body :literal? true} :ring-body-input-stream]}}
 
   {:name :internal-request
    :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`."
@@ -159,13 +177,24 @@
   ;; AUTH — Bearer token primitives (opinionated defaults)
   ;; =============================================================================
 
-  ;; `env-required` throws on empty/unset — prevents the `(= nil nil)`
-  ;; bypass where an unset AUTH_TOKEN would make `token-valid?` return
-  ;; true for requests without an Authorization header.
+  ;; nil when AUTH_TOKEN is unset. `token-valid?` below explicitly
+  ;; rejects nil env-tokens (`(and (some? env) (= bearer env))`), so
+  ;; an unconfigured server cleanly returns 401 for every auth-required
+  ;; request instead of 500-ing through `env-required`'s throw. The
+  ;; `(= nil nil)` bypass is closed by the `some?` gate, not by env's
+  ;; throw.
   {:name :auth-token-from-env
-   :description "Required `AUTH_TOKEN` env var. Throws on empty/unset to prevent the `(= nil nil)` bypass where requests with no Authorization header would otherwise validate."
-   :parent :env-required
+   :description "`AUTH_TOKEN` env var, or nil when unset. `token-valid?` rejects nil-vs-nil to prevent the bypass — so missing AUTH_TOKEN means \"every authed request returns 401\", not \"server crashes with 500\"."
+   :parent :env
    :args {:name "AUTH_TOKEN"}}
+
+  {:name :_auth-token-configured?
+   :parent :some?
+   :args {:value :auth-token-from-env}}
+
+  {:name :_bearer-equals-env?
+   :parent :equal?
+   :args {:a :bearer-token :b :auth-token-from-env}}
 
   ;; Missing `Authorization` header → `get` returns nil; downstream
   ;; `has-bearer-prefix?` is nil-safe (returns false), so no default
@@ -191,9 +220,9 @@
    :args {:test :has-bearer-prefix? :then :bearer-token-raw :else nil}}
 
   {:name :token-valid?
-   :description "True iff the request's bearer token equals the `AUTH_TOKEN` env var."
-   :parent :equal?
-   :args {:a :bearer-token :b :auth-token-from-env}}
+   :description "True iff AUTH_TOKEN is configured AND the request's bearer token equals it. The `some?` gate closes the `(= nil nil)` bypass — when AUTH_TOKEN is unset, requests without a header would otherwise spuriously validate."
+   :parent :and
+   :args {:values [:_auth-token-configured? :_bearer-equals-env?]}}
 
   ;; 401 response used by auth middleware on failure.
   {:name :_default-auth-fail-body

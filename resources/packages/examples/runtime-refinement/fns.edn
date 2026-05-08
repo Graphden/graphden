@@ -1,0 +1,91 @@
+;; Runtime narrowing for refinement types — the `:ensure-X` family.
+;;
+;; `examples.types-refinement` shows the SYNC-time side: literal values
+;; carried into a refinement-typed slot get checked when the fn-def is
+;; saved. That's enough when the value is hard-coded.
+;;
+;; This module shows the RUNTIME side: when a value isn't knowable at
+;; sync time (it flows in via a free arg, or is the result of another
+;; fn), the type system needs an explicit narrowing point. That's what
+;; `:ensure-positive-int` / `:ensure-non-empty-text` etc. provide:
+;;
+;;   - INPUT   : a base-typed value (`:int`, `:text`, …)
+;;   - OUTPUT  : the same value, narrowed to the refinement type, OR a
+;;               `refinement/violated` exception thrown at execute time
+;;
+;; The narrowed return type lets downstream slots that REQUIRE the
+;; refinement (e.g. a fn whose arg is `:type :positive-int`) accept
+;; this value where a raw `:int` would have been rejected.
+;;
+;; Pairs naturally with `examples.error-handling` — the exception is
+;; an `ExceptionInfo` and can be caught upstream.
+
+
+{:namespace "examples.runtime-refinement"
+ :description "Runtime narrowing via :ensure-X validators — convert a base-typed value at execute time, throwing :refinement/violated on mismatch."
+ :fns
+ [;; --- positive-int validator passthrough ---
+  ;;
+  ;; Inheriting `:ensure-positive-int` with NO bindings exposes its
+  ;; single free arg `:value :int` as our interface. Caller passes
+  ;; any int; the runtime check either lets it through (now narrowed
+  ;; to :positive-int) or throws.
+  {:name :ex-narrow-positive-int
+   :description "Caller-supplied :int → :positive-int at runtime. Pass 5 → returns 5 typed as :positive-int. Pass 0 or -1 → throws `refinement/violated`. Free arg: :value."
+   :parent :ensure-positive-int}
+
+  ;; --- end-to-end: validate a runtime value, then USE the narrowed
+  ;; result in a downstream slot that REQUIRES the refinement.
+  ;;
+  ;; This is the full payoff of refinement types: a downstream consumer
+  ;; can declare `:type :positive-int` and get a real guarantee that
+  ;; the value passed in has been checked. The user can't bypass the
+  ;; ensure step because the un-narrowed :int wouldn't subtype.
+  {:name :ex-double-positive
+   :description "Pass any :int through `:ex-narrow-positive-int` (= runtime narrow), then double it. Free arg: :value. At runtime: 7 → 14, but -7 → throws before the multiplication runs."
+   :parent :mul
+   :args {:nums [:ex-narrow-positive-int 2]}}
+
+  ;; --- non-empty-text validator with a literal fast-path ---
+  ;;
+  ;; Demonstrates that even when the input is a literal at sync, you
+  ;; can still route through a runtime validator — useful when the
+  ;; same fn-graph is reused for both literal and dynamic inputs.
+  ;; The literal "" branch would throw at runtime; "hello" passes.
+  {:name :ex-narrow-non-empty-text
+   :description "Caller-supplied :text → :non-empty-text at runtime. \"hello\" passes; \"\" throws `refinement/violated`. Free arg: :value."
+   :parent :ensure-non-empty-text}
+
+  ;; Use the validated text in a downstream string operation. Same
+  ;; payoff: anywhere downstream that REQUIRES :non-empty-text gets a
+  ;; checked value. Free arg of `:ex-narrow-non-empty-text` (`:value`)
+  ;; propagates up through the fn-ref.
+  {:name :ex-shout-non-empty
+   :description "Upper-case a non-empty string. Free arg: :value (forwarded from the validator). Empty input throws BEFORE :str-upper sees it."
+   :parent :str-upper
+   :args {:string :ex-narrow-non-empty-text}}
+
+  ;; --- combining with explicit error catch (pattern from
+  ;; `examples.error-handling`) ---
+  ;;
+  ;; A common production pattern: bracket the validator with a
+  ;; check-and-fall-back so the `refinement/violated` doesn't escape
+  ;; the request handler. The :if pattern here is parallel to
+  ;; `:ex-validate-age` in examples.error-handling — but instead of
+  ;; raising our own ex-info we route around the validator entirely.
+  {:name :ex-pos-or-default
+   :description "If `:value` is positive, double it; otherwise return `:default`. Free args: :value, :default. Demonstrates: pre-check the runtime constraint with a plain :gt? guard so the validator never throws — useful when the caller has a sane fallback."
+   :parent :if
+   :args {:test :_ex-pos-test
+          :then :_ex-pos-doubled
+          :else {:as :default}}}
+
+  {:name :_ex-pos-test
+   :description "Predicate: is :value strictly > 0?"
+   :parent :gt
+   :args {:nums [{:as :value} {:value 0}]}}
+
+  {:name :_ex-pos-doubled
+   :description "Doubling under the positive precondition; safe to skip the runtime ensure."
+   :parent :mul
+   :args {:nums [{:as :value} {:value 2}]}}]}

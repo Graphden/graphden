@@ -58,6 +58,11 @@
 
    See namespace docstring for definition format."
   ([storage fn-defs]
-   (core/sync-fns-to-storage! storage fn-defs {}))
+   (core/sync-fns-to-storage! storage fn-defs))
   ([storage fn-defs ns-id-map]
-   (core/sync-fns-to-storage! storage fn-defs ns-id-map)))
+   (core/sync-fns-to-storage! storage fn-defs ns-id-map))
+  ([storage fn-defs ns-id-map extra-name->id]
+   (core/sync-fns-to-storage! storage fn-defs ns-id-map extra-name->id))
+  ([storage fn-defs ns-id-map extra-name->id extra-defs-by-name]
+   (core/sync-fns-to-storage! storage fn-defs ns-id-map extra-name->id
+                              extra-defs-by-name)))

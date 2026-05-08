@@ -28,22 +28,27 @@
     [_this owner-fn-id]
     (constraints/collect-dependency-chain-impl
       (fn [current-id]
-        ;; Get fn record to check parent-ids
         (let [fn-rec (sp/read-entity storage :fn current-id)
-              ;; Get args for current fn
-              args (sp/query-entities storage :arg {:fn-id current-id})
-              ;; Collect fn references from args
-              arg-refs (->> args
-                            (mapcat (fn [arg]
-                                      (cond-> []
-                                        (:ref-id arg) (conj (:ref-id arg))
-                                        (and (:value arg) (uuid? (:value arg))) (conj (:value arg)))))
-                            (remove nil?)
-                            set)
-              ;; Add all parent-ids if present
+              bindings (sp/query-entities storage :binding {:fn-id current-id})
+              binding-refs (into #{}
+                                 (keep (fn [b]
+                                         (or (:ref-fn-id b)
+                                             (:type-override-fn-id b))))
+                                 bindings)
+              ;; Single batched query for ALL list-items belonging to
+              ;; this fn's bindings (was N queries — one per binding).
+              binding-ids (mapv :id bindings)
+              item-refs (if (empty? binding-ids)
+                          #{}
+                          (into #{}
+                                (keep :ref-fn-id)
+                                (sp/query-entities storage :binding-list-item
+                                                   {:binding-id binding-ids})))
               parent-ids (remove nil? (:parent-ids fn-rec))
-              all-refs (into arg-refs parent-ids)]
-          ;; Verify these are actual fn-ids
+              type-refs (keep #(get fn-rec %)
+                              [:base-fn-id :element-fn-id :return-type-fn-id])
+              all-refs (reduce into #{}
+                               [binding-refs item-refs parent-ids type-refs])]
           (if (empty? all-refs)
             #{}
             (let [fn-results (sp/read-entities storage :fn (vec all-refs))]

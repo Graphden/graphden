@@ -33,49 +33,50 @@ Graphden is a visual functional programming environment where functions and thei
 - **Lazy Execution** — delay-based evaluation, only computes what's needed
 - **Storage backend** — PostgreSQL with recursive CTE for graph traversal
 
-**Core entities** (only 2 — minimal by design):
-- `fn` — function (base or composed)
-  - `parent-id=nil` → base-fn (has Clojure implementation)
-  - `parent-id` set → composed fn (inherits from parent)
-  - `name=nil` → local fn (scoped, not globally visible)
-- `arg` — argument (primary or inherited)
-  - `source-id=nil` → primary argument (defines interface)
-  - `source-id` set → inherited/forwarded argument
-  - `value` → literal JSONB value
-  - `ref-id` → reference to fn (execute and use result)
-  - `is-fn=true` → pass fn-id directly (for HOF)
+**Core entities** (slot/binding model):
+- `fn` — function entity OR type-row. Inheritance via `parent-fn-ids` (many-to-many).
+  - empty `parent-fn-ids` + `impl-hash` set → base-fn (Clojure impl)
+  - empty `parent-fn-ids` + `impl-hash=nil` + slots/refine/list → type-row
+  - non-empty `parent-fn-ids` → composed fn
+  - `name=nil` → anonymous (deduped via `anonymous-hash`)
+- `slot` — atomic `(name, type-fn-id)` pair, immutable post-create. Shared across fns through `fn-slot`.
+- `fn-slot` — junction `(fn-id, slot-id, position)`. "Which slots does this fn expose, in what order."
+- `binding` — per-`(fn-id, slot-id)` customization: `value`, `ref-fn-id`, `rename-to`,
+  `type-override-fn-id`, `terminal`, `list-append`, `list-closed`, `description`.
+- `binding-list-item` — sequence content under a list-typed binding, ordered by `position`.
 
-## Core Concept: 2-Entity Inheritance Model
+## Core Concept: Inheritance Model
 
-The system uses a unified inheritance model where functions inherit from other functions:
+A composed fn inherits its parents' slots through `parent-fn-ids` BFS closure. Each
+slot in that closure is exposed once at the descendant; bindings overlay closer-fn-wins.
 
-**Base function (parent-id=nil):**
+**Base function (no parents, has impl):**
 ```
-fn: add (base-fn)
-  parent-id: nil         ; marks this as base-fn
-  return-type: :int
-  impl-hash: "sha256..." ; links to Clojure implementation
-  args:
-    - {name: "a", type: :int, required: true}
-    - {name: "b", type: :int, required: true}
+fn: add
+  parent-fn-ids: []
+  impl-hash: "sha256..."   ; links to Clojure impl
+fn-slot: {fn-id: add, slot-id: nums, position: 0}
+slot: {id: nums, name: "nums", type-fn-id: sequence}
 ```
 
-**Composed function (parent-id set):**
+**Composed function (parent-fn-ids set):**
 ```
 fn: add-10
-  parent-id: add         ; inherits from add
-  args:
-    - {source-id: add/a, value: 10}  ; binds parent's 'a' to 10
-    ; 'b' not specified = exposed to callers
+  parent-fn-ids: [add]     ; inherits add's :nums slot
+binding: {fn-id: add-10, slot-id: nums, list-append: true}
+binding-list-item: {binding-id: ..., position: 0, value: 10}
 ```
 
 **Using the composed function:**
 ```clojure
-;; Execute add-10 with b=5 → returns 15
-(execute ctx add-10-id {:b 5})
+;; add-10 inherits :nums and seeds it with [10]; caller may
+;; extend the chain or override.
+(execute ctx add-10-id {})  ;; → 10
 ```
 
-**Key insight:** All argument binding happens in the database via arg entities. No separate fn-arg/arg-value entities needed. The arg entity combines schema, value, and inheritance in one place.
+**Key insight:** Slots are global identities (one-shot creation, immutable). Bindings
+overlay them per `(fn, slot)` pair. Sequence content lives in dedicated rows so the
+chain can be queried/indexed independently of scalar bindings.
 
 ## Documentation Map
 
@@ -97,11 +98,17 @@ fn: add-10
 
 ```bash
 bb repl         # Start REPL with dev profile
-bb ci           # Full CI: linters + tests + coverage (parallel, live progress)
+bb ci           # Full CI: clj linters + biome + tests + coverage (parallel, live progress)
 bb test         # Run all tests
 bb coverage     # Tests with coverage report (open target/coverage/index.html)
-bb check        # Linters only (clj-kondo, splint, cljstyle in parallel)
-bb fix          # Auto-fix formatting
+bb check        # Clojure linters only (clj-kondo, splint, cljstyle in parallel)
+bb fix          # Auto-fix Clojure formatting (cljstyle)
+bb biome        # Lint editor JS (resources/packages/app/editor/**/*.js)
+bb biome-fix    # Apply safe biome autofixes
+bb stylelint    # Lint editor CSS — enforces design tokens for color/background/fill/stroke
+bb stylelint-fix # Apply safe stylelint autofixes
+bb visual       # Playwright visual-regression diff against committed baselines
+bb visual-update # Refresh visual baselines after intentional UI changes
 
 # Build & Deploy (Docker)
 bb rebuild      # Rebuild jar + docker + restart (ALWAYS use this after code changes!)
@@ -172,20 +179,36 @@ string `"__BUILD_HASH__"`.
 
 The editor frontend is split into modules for better maintainability:
 
-| File | Purpose | Dependencies |
-|------|---------|--------------|
-| `editor-state.js` | Global variables, constants, timestamp | - |
-| `editor-data.js` | Data utilities, lookups, inheritance | state |
-| `editor-layout.js` | Grid layout algorithm, positioning | state |
-| `editor-tooltips.js` | Description-tooltip + full-name popover singletons | state |
-| `editor-icons.js` | Right-edge action icons (`i`, `↗`) | state, data, tooltips |
-| `editor-drag.js` | Drag handle for any overlay | state |
-| `editor-overlays.js` | HTML overlays for cy nodes (rows, edges, placeholders, args) | state, data, tooltips, icons, drag |
-| `editor-ui.js` | Sidebar, selection, expansion controls | state, data, icons, cytoscape |
-| `editor-cytoscape.js` | Cytoscape initialization, rendering | state, layout, overlays |
-| `editor-main.js` | Entry point, init | all |
+| File | Purpose |
+|------|---------|
+| `editor-state.js` | Global variables, constants, `BUILD_HASH` placeholder |
+| `editor-busy.js` | Visible feedback for multi-step user actions (reparent / extend / delete cascades) — `withBusy(opKey, label, fn)` helper + bottom-centre banner |
+| `editor-prefs.js` | Theme + sidebar-collapsed prefs (localStorage) |
+| `editor-auth.js` | `authFetch`, `isAuthenticated`, login popover |
+| `editor-create.js` | Inline-input row helper, fn / namespace creation |
+| `editor-data.js` | Data utilities, lookups, inheritance, free-args |
+| `editor-layout.js` | Grid layout algorithm, positioning |
+| `editor-literal-types.js` | Type-validation helpers shared by edit popovers (mirrors `graphden.types.check`) |
+| `editor-tooltips.js` | Description-tooltip + full-name popover singletons |
+| `editor-icons.js` | Right-edge action icons (`i`, `↗`, ✎ pencil) |
+| `editor-drag.js` | Drag handle for any overlay |
+| `editor-fn-picker.js` | Type-aware fn-picker popover |
+| `editor-namespace-picker.js` | Namespace picker popover (Phase 5 ns-move) |
+| `editor-edit-validation.js` | Structural pre-checks: `wouldCycle`, `miCollisionCheck` |
+| `editor-edit-modes.js` | Inline edit popovers (arg-value / rename / type / free-arg-bind / sequence add-remove / namespace-move) |
+| `editor-edit-reparent.js` | Phase 3 re-parent cascade + parent-set editor popover |
+| `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
+| `editor-type-explainer.js` | Singleton popover shown on click of any type-chip — human-readable description + structural form + optional "Change type" button |
+| `editor-overlay-arg.js` | Arg-value overlay (in-place edit click target, type-chip, mismatch indicator) |
+| `editor-overlay-edge-label.js` | Edge-label overlay (rename click, description badge, sequence add/remove) |
+| `editor-overlays.js` | Fn-overlay (ancestor list, MI cells, return-type/effects/parents/ns strips), placeholder overlay, overlay positioner |
+| `editor-sidebar.js` | Namespace tree + entity list + filter |
+| `editor-expansion.js` | spec→state→preview machine for ancestor row click/hover |
+| `editor-ui.js` | Selection + navigation controls + the shared `previewDebounceTimer` |
+| `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
+| `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → data → layout → tooltips → icons → drag → overlays → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → busy → prefs → auth → create → data → layout → literal-types → tooltips → icons → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → type-explainer → overlay-arg → overlay-edge-label → overlays → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 
@@ -251,13 +274,16 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
 ### Reference Types
 
-All function references are stored in the `ref-id` field.
+Function references live in `binding.ref-fn-id` (or `binding-list-item.ref-fn-id`
+for sequence elements).
 
 | Syntax | Storage | Notes |
 |--------|---------|-------|
-| `:fn-name` | `ref-id` set | Reference to another fn |
+| `:fn-name` | `ref-fn-id` on the binding/item row | Reference to another fn |
 
-**Key principle:** The `is-fn` flag on the **parent arg** (inherited via `source-id`) determines whether to pass the fn-id directly (for HOF) or execute the function and use its result. This flag is set automatically when syncing base functions based on arg type (`:fn` type → `is-fn=true`).
+**Key principle:** A slot whose `type-fn-id` resolves to `:fn` IS the HOF marker —
+the executor passes the fn-id directly instead of executing it. The legacy `:is-fn`
+flag was retired in #15b; effective slot type drives the dispatch.
 
 ### Base Function Arg Types
 
@@ -353,12 +379,14 @@ See [docs/EXTENDING.md](docs/EXTENDING.md) for details.
 
 ## Graph Constraints
 
-Enforced at write time by `GraphConstraints` protocol (part of Graph Layer):
+Enforced at write time:
 
-1. **No dependency cycles** — A→B→A forbidden (self-recursion allowed with depth limit)
-2. **Arg source-id references valid parent arg** — type safety for inheritance
-3. **Unique arg per fn + source** — no duplicate inherited args
-4. **Unique arg name within fn** — no duplicate arg names
+1. **No dependency cycles** — A→B→A forbidden via the `binding.ref-fn-id` graph
+   (self-recursion allowed; the executor's depth limit handles it). Implemented by
+   the `GraphConstraints` protocol.
+2. **Schema-level uniqueness** — `UNIQUE` keys on `fn.name` (NULL allowed),
+   `fn-slot(fn-id, slot-id)`, `binding(fn-id, slot-id)`, and
+   `binding-list-item(binding-id, position)`.
 
 These constraints are implemented in `storage-protocol` and enforced by storage implementations.
 

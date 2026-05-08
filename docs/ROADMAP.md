@@ -1,7 +1,5 @@
 # Graphden Roadmap
 
-> **Last updated:** 2026-03-09
->
 > This document tracks implementation status and future plans.
 > For technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -9,22 +7,22 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| GraphConstraints Protocol | Done | No-cycle validation |
+| Slot/binding schema | Done | fn / slot / fn-slot / binding / binding-list-item |
+| GraphConstraints Protocol | Done | Dependency-cycle validation |
 | StorageCRUD Protocol | Done | + Batch operations |
-| Executor with Delays | Done | Lazy evaluation via Clojure delays |
-| Base Functions | Partial | 50+ functions done; I/O server done |
-| PostgreSQL Storage | Done | Full protocol support |
-| Apache AGE Storage | Done | Graph queries via Cypher |
+| Executor (compile-at-startup) | Done | Lazy via Clojure delays; thunks compiled once at boot |
+| Base Functions | Done | Arithmetic, logic, HOF, collections, strings, system; web (http, reitit, html, crud, ring-adapter) |
+| PostgreSQL Storage | Done | Full protocol support; recursive-CTE cycle walks |
 | Base Function impl-hash | Done | SHA-256 hash for version tracking |
 | Integrant System | Done | Component lifecycle management |
 | Logging | Done | Structured logging with MDC |
-| Web Server | Done | HTTP-kit + Reitit router |
-| Versioning | Done | VersionedStorage decorator |
-| 2-Entity Schema | Done | fn + arg model |
-| REST API | Planned | Phase 5 |
-| Web UI | Planned | Phase 5 |
-| Type System | Planned | Future work |
+| Web Server | Done | http-kit + Reitit router |
+| Versioning | Done | VersionedStorage decorator (fn / fn-slot / binding / binding-list-item) |
+| Type System (refinements / records / lists / unions / variants) | Done | Save-time check; rich-type registry |
+| Editor UI | Done | Cytoscape-based with server-computed layout, inline edit popovers |
+| REST API | Done | `/api/graph/entities`, `/api/graph/layout`, `/api/entities/<entity>/*`, `/api/sequence/append/:fn-id`, `/api/sequence/item/:item-id` |
 | Permissions | Planned | Future work |
+| Distributed execution | Planned | See [Distributed Execution](#distributed-execution) below |
 
 ---
 
@@ -39,19 +37,26 @@
 
 ## Phase 1: Data Schema and Constraints [DONE]
 
-**1.1 graph-data-schema** - 2-entity model:
-- `fn` — function entity (parent-id=nil for base-fn, parent-id set for composed)
-- `arg` — argument entity with value/ref-id, source-id for inheritance, is-fn for HOF
+**1.1 graph-data-schema** — slot/binding model:
+- `fn` — function or type-row; M:N inheritance via `parent-fn-ids`
+- `slot` — atomic `(name, type-fn-id)`; immutable post-create
+- `fn-slot` — junction `(fn-id, slot-id, position)`
+- `binding` — per-`(fn, slot)` overlay (value, ref, rename, type-override, terminal, list flags)
+- `binding-list-item` — sequence content under a list-typed binding
 
-**1.2 GraphConstraints protocol** - Validators:
-- No dependency cycles via ref-id references
-- Unique fn name (NULL allowed for local functions)
-- Unique arg per fn + source-id combination
-- Unique arg name within fn
+**1.2 GraphConstraints protocol** — runtime validator:
+- No dependency cycles via `binding.ref-fn-id` / `binding-list-item.ref-fn-id`
 
-**1.3 Contract tests** - Comprehensive test coverage
+**1.3 Schema-level uniqueness:**
+- `UNIQUE(fn.name)` (NULL allowed for anonymous fns)
+- `UNIQUE(fn-slot(fn-id, slot-id))`
+- `UNIQUE(binding(fn-id, slot-id))`
+- `UNIQUE(binding-list-item(binding-id, position))`
 
-**1.4 Storage implementations** - PostgreSQL + Apache AGE
+**1.4 Contract tests** — `graphden.storage.protocol.contract-tests`
+covers cycle detection + concurrent CRUD against any storage backend.
+
+**1.5 Storage implementations** — PostgreSQL.
 
 ---
 
@@ -148,9 +153,12 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 ## Phase 5: UI/API [PARTIAL]
 
 **5.1 REST API [PARTIAL]**
-- CRUD endpoints for fn / arg entities [DONE — `web/crud`]
+- CRUD endpoints for fn / namespace / slot / fn-slot / binding /
+  binding-list-item [DONE — `web/crud`]
 - GET `/api/graph/entities` [DONE]
 - POST `/api/graph/layout` [DONE — `app/layout`]
+- POST `/api/sequence/append/:fn-id` + DELETE
+  `/api/sequence/item/:item-id` [DONE]
 - Bearer-token auth middleware on mutating routes [DONE]
 - POST `/execute` — run fn from UI [PLANNED]
 - WebSocket for live updates [PLANNED]
@@ -194,24 +202,30 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 
 **Goal**: Human-readable names for free arguments in execution forms.
 
-**Problem**: When executing a function with free arguments via UI, users see technical identifiers (UUIDs). We need human-readable aliases.
+**Problem**: When executing a function with free arguments via UI,
+users see slot's primary name (or its inherited form). For
+domain-specific UI, we want a per-fn display alias.
 
-**Solution**: New entity `free-arg-alias` linking fn + arg to a display name.
+**Solution (Phase 6+, current model)**: a per-fn rename creates a new
+slot row owned by F whose `slot.source-slot-id` FK points at the
+inherited ancestor slot. F's `fn-slot` junction exposes the new
+slot under the alias name; bindings still resolve through the
+source-slot id, so the rename is purely a display-side rewrite.
 
-**Schema:**
-```
-free-arg-alias:
-  id: uuid (PK)
-  fn-id: ref<fn>
-  arg-id: ref<arg>
-  alias: text (human-readable name)
-  UNIQUE(fn-id, arg-id)
-```
+The retired `binding.rename-to` text column is no longer used —
+Phase 6c migrated every callsite (CRUD, compile, editor) to the FK
+link. `slot-by-fn-source-slot` (in
+`executor/compile/lookups.clj`) is the O(1) index that lets renamers
+be located without walking the inheritance chain.
 
 **Lifecycle:**
-- Created manually via UI when naming free arguments
-- **Auto-deleted** when the argument gets a value
-- This ensures aliases only exist for truly "free" arguments
+- Created via the inline rename popover (edit the edge label) — the
+  CRUD impl emits `slot.source-slot-id` + a new `fn-slot` junction.
+- Cleared by saving an empty value through the same popover; the
+  renamed-view slot row is deleted, exposing the source slot's
+  original name again.
+- Per-fn: a slot inherited at fn F may be renamed at F without
+  affecting siblings (each rename owns its own slot row).
 
 **UI Usage:**
 ```
@@ -283,8 +297,12 @@ Execute function: calculate-report
 
 | Entity | Versioned? | What changes |
 |--------|-----------|--------------|
-| `fn` | Yes (fn + fn_version) | name, parent-id, return-type, impl-hash |
-| `arg` | Yes (arg + arg_version) | name, type, required, value, ref-id, is-fn, source-id |
+| `fn` | Yes | name, impl-hash, description, constraint, base-fn-id, element-fn-id, return-type-fn-id, anonymous-hash |
+| `fn-slot` | Yes | fn-id, slot-id, position |
+| `binding` | Yes | value, ref-fn-id, rename-to, type-override-fn-id, description, terminal, list-{append,closed} |
+| `binding-list-item` | Yes | binding-id, position, value, ref-fn-id, literal |
+| `slot` | No | immutable post-create — name + type are the slot's identity |
+| `parent-fn-ids` | Junction (not versioned) | adding/removing parents creates new junction rows |
 
 **Branch operations:**
 

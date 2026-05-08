@@ -1,0 +1,84 @@
+;; The `_*`-prefix convention: local fn-defs hidden from the sidebar tree.
+;;
+;; A fn-def whose name starts with an underscore (`:_my-helper`) is
+;; treated as LOCAL — it loads, syncs, and is reachable from other
+;; fn-defs as a fn-ref, but the editor's namespace tree on the left
+;; SKIPS it. Only the "real" public fns of a namespace appear in the
+;; sidebar.
+;;
+;; This is purely a UI affordance — the runtime treats `_*`-prefixed
+;; fns identically to public ones. The convention exists so a module's
+;; top-level reads as a small set of intentions, with their
+;; implementation glue tucked away.
+;;
+;; HOW IT WORKS
+;;
+;; The sidebar build walks every fn entity in `graphData.fns`, groups
+;; by `:namespace-id`, and renders one row per fn whose `name` doesn't
+;; match `^_`. Locals are filtered out at the rendering layer
+;; (editor-sidebar.js's `buildFnItem` / `renderNsNode`). Click-to-view
+;; via the URL hash (e.g. `#_my-helper`) still works — it's just not
+;; offered in the tree.
+;;
+;; WHEN TO USE THE PREFIX
+;;
+;; Use `_` for fn-defs that are:
+;;   - building blocks of ONE consumer (the obvious caller)
+;;   - meaningful only inside the current pipeline
+;;   - things a reader scanning the sidebar would consider noise
+;;
+;; Don't use `_` for fns that would benefit a different consumer
+;; even if it's not the one you're working on right now — those are
+;; public.
+;;
+;; This very module is a meta-example: the public fn `:ex-public-formatter`
+;; has its label-helpers and number-helpers under `_`-prefixes. The
+;; module's sidebar entry shows ONE row, not five.
+
+
+{:namespace "examples.local-fns-pattern"
+ :description "The `_*`-prefix convention for local fn-defs hidden from the sidebar tree. The runtime treats them identically to public fns; the prefix is purely a UI affordance."
+ :fns
+ [;; --- the only PUBLIC fn — the one a reader sees in the sidebar ---
+  ;;
+  ;; This fn formats a small report from a free `:count` arg using
+  ;; helpers below. The user's mental model is "examples.local-fns-pattern
+  ;; gives me ONE thing — a formatter". The decomposition into label
+  ;; lookup + count formatting lives behind the `_`-prefix wall.
+  {:name :ex-public-formatter
+   :description "Format a count as `\"<LABEL>: <count>\"` (e.g. `\"Items: 7\"`). PUBLIC entry point — appears in the sidebar tree under examples.local-fns-pattern. Free arg: :count :int."
+   :parent :str
+   :args {:parts [:_ex-label
+                  {:value ": "}
+                  {:as :count}]}}
+
+  ;; --- locals, hidden from the sidebar ---
+  ;;
+  ;; Each underscore-prefixed name is reachable as a fn-ref from
+  ;; the public fn above and from other locals, but the sidebar
+  ;; tree skips them. The runtime doesn't care — `_ex-label` is
+  ;; just as much a fn as `:ex-public-formatter`.
+
+  {:name :_ex-label
+   :description "Hard-coded report label. Hidden from the sidebar — its only consumer is `:ex-public-formatter`."
+   :parent :const
+   :args {:value "Items"}}
+
+  ;; A local that ITSELF references another local. The reader of
+  ;; the sidebar still sees one row (`:ex-public-formatter`); the
+  ;; nesting is visible only by drilling into the graph.
+  {:name :_ex-doubled-count
+   :description "Helper local — used by `:ex-doubled-formatter` below. Demonstrates that locals can compose with other locals freely; the prefix doesn't change call semantics."
+   :parent :mul
+   :args {:nums [{:as :count} {:value 2}]}}
+
+  ;; A second public fn that consumes the doubled-count helper.
+  ;; This is here just to show that one helper can serve multiple
+  ;; public consumers — naming it without `_` would clutter the
+  ;; sidebar with an internal building block.
+  {:name :ex-doubled-formatter
+   :description "Format the DOUBLE of :count (e.g. count=3 → \"Items: 6\"). PUBLIC. Shares `:_ex-label` with the simpler formatter and uses `:_ex-doubled-count` to do the doubling."
+   :parent :str
+   :args {:parts [:_ex-label
+                  {:value ": "}
+                  :_ex-doubled-count]}}]}

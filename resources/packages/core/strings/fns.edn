@@ -19,9 +19,9 @@
    :return-type :text}
 
   {:name :str-len
-   :description "Length of a string in characters (Clojure's `count` on a string)."
+   :description "Length of a string in characters (Clojure's `count` on a string). Always non-negative."
    :args {:string {:type :text :description "String to measure."}}
-   :return-type :int}
+   :return-type :non-negative-int}
 
   {:name :str-upper
    :description "Upper-case a string (Java `String.toUpperCase`)."

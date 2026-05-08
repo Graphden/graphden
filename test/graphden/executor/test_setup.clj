@@ -1,22 +1,13 @@
 (ns graphden.executor.test-setup
-  "Shared test setup for executor tests.
+  "Shared test setup for executor tests in the slot/fn-slot/binding model.
 
-   Provides helper functions for creating test storage and setting up
-   common test fixtures using PostgreSQL testcontainers.
-
-   ## 2-Entity Schema
-
-   Uses simplified schema:
-   - fn: parent-id=nil for base-fn, parent-id set for composed fn
-   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
-
-   NOTE: This module has entity helpers that work with the PRODUCTION schema
-   (gds/build-schema). storage.postgres.test-setup has similar helpers but
-   they work with a simplified test schema (make-graph-schema) with text types
-   instead of enums. Cannot unify without schema alignment."
+   Helpers create fn rows, slot rows, fn-slot junctions, and binding
+   rows directly via the storage protocol. Higher-level helpers like
+   `setup-add-function!` synthesise a small example graph end-to-end."
   (:require
     [graphden.executor.interface :as exec]
     [graphden.executor.runtime :as rt]
+    [graphden.packages.records :as records]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.postgres.core :as pg]
@@ -30,145 +21,183 @@
 
 (defmacro fn-impl
   "Build an anonymous base-fn impl whose body references args by name,
-   mirroring `defbase` but inline. Equivalent to:
-
-     (fn [args ctx]
-       (let [a (rt/resolve-arg args :a)
-             b (rt/resolve-arg args :b)]
-         body))
-
-   The symbols `args` and `ctx` are bound by the generated fn and
-   accessible from the body — useful for HOF impls that need ctx
-   (`(exec/make-single-arg-callable ctx some-fn)`) or lazy impls that
-   want to skip the eager resolve for specific keys
-   (`(rt/resolve-arg args :then-branch)` inside an `if`).
-
-   Use in tests instead of `(fn [{:keys [a b]} _] (+ @a @b))` — the
-   latter relies on the legacy-deref adapter which production no longer
-   pays for on the hot path."
+   mirroring `defbase` but inline. The symbols `args` and `ctx` are
+   bound by the generated fn so HOF impls and lazy impls can reach
+   them."
   [arg-syms & body]
   (let [let-bindings (mapcat (fn [s] [s `(rt/resolve-arg ~'args ~(keyword s))]) arg-syms)]
     `(fn [~'args ~'ctx]
-       (let [~'ctx ~'ctx               ; keep kondo quiet for bodies that ignore ctx
-             ~'args ~'args             ; and same for args if the body only names resolved syms
+       (let [~'ctx ~'ctx
+             ~'args ~'args
              ~@let-bindings]
          ~@body))))
 
 
 ;; ============================================================================
-;; Container Management
+;; Container management
 ;; ============================================================================
 
 (def ^:dynamic *container*
-  "Dynamic var holding the PostgreSQL container for tests."
   nil)
 
 
 (defn create-container-fixture
-  "Creates a :once fixture that starts/stops a PostgreSQL container."
   []
   (pth/create-container-fixture #'*container*))
 
 
 (defn create-clean-db-fixture
-  "Creates an :each fixture that cleans the database before each test."
   []
   (pth/create-clean-db-fixture #'*container*))
 
 
-;; ============================================================================
-;; Storage Creation
-;; ============================================================================
-
 (defn create-test-storage
-  "Creates a PostgreSQL storage from the current test container.
-   Cleans the database and initializes schema before creating storage.
-   Must be called within a test that has the container fixture active."
   []
   (pth/clean-database-fast! *container*)
   (let [storage (pg/create-storage (pth/get-container-config *container*))
         schema (gds/build-schema (mds/create-builder))]
     (sp/initialize storage schema)
+    ;; Pre-seed the 14 primitive fn-rows so slot.type-fn-id refs resolve.
+    ;; `boot-primitive-records` returns tagged records (`:kind :fn`); strip
+    ;; the tag before storage upsert.
+    (sp/upsert-entities storage :fn
+                        (mapv #(dissoc % :kind) (records/boot-primitive-records)))
     storage))
 
 
 ;; ============================================================================
-;; Test Helpers - 2-Entity Schema (PRODUCTION schema with enum types)
+;; Test helpers — slot/fn-slot/binding model
 ;; ============================================================================
 
+(def primitive-fn-ids (records/primitive-fn-ids))
+
+
 (defn create-base-fn!
-  "Creates a base fn entity. Returns the fn record.
-   Base fns have parent-id=nil. Uses PRODUCTION schema with enum types."
-  [storage entity-name return-type]
-  (sp/create-entity storage :fn
-                    {:name entity-name
-                     :parent-ids nil
-                     :return-type return-type}))
+  "Creates a base-fn row (impl-hash set, no parent-ids). Returns the
+   created fn record."
+  ([storage fn-name]
+   (create-base-fn! storage fn-name nil))
+  ([storage fn-name return-type-keyword]
+   (sp/create-entity storage :fn
+                     {:name fn-name
+                      :parent-ids nil
+                      :impl-hash "test-stub-hash"
+                      :return-type-fn-id (when return-type-keyword
+                                           (get primitive-fn-ids return-type-keyword))})))
 
 
 (defn create-composed-fn!
-  "Creates a composed fn entity. Returns the fn record.
-   Composed fns have parent-id set to their base fn."
-  [storage entity-name parent-id]
+  "Creates a composed fn-row inheriting from `parent-id`."
+  [storage fn-name parent-id]
   (sp/create-entity storage :fn
-                    {:name entity-name
+                    {:name fn-name
                      :parent-ids [parent-id]}))
 
 
-(defn create-arg!
-  "Creates an arg entity. Returns the arg record.
+(defn create-slot!
+  "Creates a slot whose type points at a primitive (by keyword) or an
+   explicit fn-id (UUID)."
+  [storage slot-name type-ref]
+  (let [type-fn-id (cond
+                     (uuid? type-ref) type-ref
+                     (keyword? type-ref) (or (get primitive-fn-ids type-ref) type-ref)
+                     :else type-ref)]
+    (sp/create-entity storage :slot
+                      {:name slot-name
+                       :type-fn-id type-fn-id})))
 
-   Required:
-   - fn-id: the fn this arg belongs to
-   - opts map with :name, :type, :required, :is-fn
 
-   Optional in opts:
-   - :source-id - parent arg this inherits from
-   - :value - literal value (mutually exclusive with ref-id)
-   - :ref-id - reference to another fn (mutually exclusive with value)"
-  [storage fn-id {:keys [required is-fn source-id value ref-id]
-                  arg-name :name
-                  arg-type :type}]
-  (sp/create-entity storage :arg
+(defn attach-slot!
+  "Inserts a fn-slot junction at the given position."
+  [storage fn-id slot-id position]
+  (sp/create-entity storage :fn-slot
                     {:fn-id fn-id
-                     :name arg-name
-                     :type arg-type
-                     :required required
-                     :is-fn is-fn
-                     :source-id source-id
+                     :slot-id slot-id
+                     :position position}))
+
+
+(defn bind-value!
+  "Creates a value-binding for `slot-id` on `fn-id`."
+  [storage fn-id slot-id value]
+  (sp/create-entity storage :binding
+                    {:fn-id fn-id
+                     :slot-id slot-id
                      :value value
-                     :ref-id ref-id}))
+                     :override-kind :fixed}))
+
+
+(defn bind-ref!
+  "Creates a ref-binding for `slot-id` on `fn-id` pointing at
+   `target-fn-id`."
+  [storage fn-id slot-id target-fn-id]
+  (sp/create-entity storage :binding
+                    {:fn-id fn-id
+                     :slot-id slot-id
+                     :ref-fn-id target-fn-id
+                     :override-kind :fixed}))
+
+
+(defn create-arg!
+  "Compatibility helper that bridges legacy `arg`-table call sites.
+   Two flavours:
+
+   1. Primary-arg form (no `:source-id`): create a slot owned by
+      `fn-id` and attach it via fn-slot. Returns the slot record.
+
+   2. Inherited-arg form (`:source-id` set): treat `fn-id` as a
+      composed fn that wants to bind the slot named by `:source-id`'s
+      legacy id. Since slot-ids are deterministic from `(parent-fn-id,
+      slot-name)`, we recover the slot-id from the source-arg's
+      `:fn-id` + `:name` and emit a binding row. `:value` / `:ref-id`
+      determine which kind of binding."
+  ([storage fn-id opts]
+   (create-arg! storage fn-id opts 0))
+  ([storage fn-id
+    {arg-name :name arg-type :type
+     :keys [source-id value ref-id]} position]
+   (cond
+     ;; Inherited-with-binding form. The caller passes a slot record
+     ;; (or its id) as `:source-id`. We recover the slot-id from the
+     ;; record and add the corresponding binding row.
+     source-id
+     (let [;; Look up the source slot by id. The `:source-id` parameter
+           ;; in legacy tests was an arg-row id; in the new model
+           ;; `setup-add-function!` returns slot records as `:slot-a`/
+           ;; `:slot-b`, so source-id IS the slot-id directly.
+           slot-id source-id]
+       (cond
+         (some? value) (bind-value! storage fn-id slot-id value)
+         (some? ref-id) (bind-ref! storage fn-id slot-id ref-id)
+         :else nil))
+
+     :else
+     (let [slot (create-slot! storage arg-name arg-type)]
+       (attach-slot! storage fn-id (:id slot) position)
+       slot))))
 
 
 (defn setup-add-function!
-  "Sets up an 'add' function that adds two numbers.
-   Returns {:fn base-fn :arg-a arg-a :arg-b arg-b :composed-fn composed-fn}
-
-   In 2-entity schema:
-   - Creates base fn with parent-id=nil
-   - Creates args owned by base fn
-   - Creates composed fn with parent-id=base-fn-id"
+  "Builds a small `:add` example: base-fn `add` with two `:int` slots,
+   plus a composed instance with neither bound. Returns a map with
+   `:base-fn`, `:slot-a` / `:slot-b` (and `:arg-a` / `:arg-b` aliases
+   for legacy callers), `:composed-fn`."
   [storage]
-  ;; Register the base function. Args arrive via compile's build-args-map —
-  ;; plain values for literal bindings, `rt/thunk` for refs, or raw values
-  ;; in free-args. `rt/resolve-arg` handles all three.
   (exec/register-base-fn!
     :add
     (fn [args _ctx]
       (+ (rt/resolve-arg args :a) (rt/resolve-arg args :b))))
-
-  ;; Create base fn - keep name "add" to match registry keyword
-  ;; Composed fn gets unique name to avoid conflicts
   (let [unique-suffix (str (random-uuid))
         base-fn (create-base-fn! storage "add" :int)
-        ;; Create args for base fn
-        arg-a (create-arg! storage (:id base-fn)
-                           {:name "a" :type :int :required true :is-fn false})
-        arg-b (create-arg! storage (:id base-fn)
-                           {:name "b" :type :int :required true :is-fn false})
-        ;; Create composed fn instance with unique name
-        composed-fn (create-composed-fn! storage (str "my-add-" unique-suffix) (:id base-fn))]
+        slot-a (create-slot! storage "a" :int)
+        slot-b (create-slot! storage "b" :int)
+        _ (attach-slot! storage (:id base-fn) (:id slot-a) 0)
+        _ (attach-slot! storage (:id base-fn) (:id slot-b) 1)
+        composed-fn (create-composed-fn! storage
+                                         (str "my-add-" unique-suffix)
+                                         (:id base-fn))]
     {:base-fn base-fn
-     :arg-a arg-a
-     :arg-b arg-b
+     :slot-a slot-a :slot-b slot-b
+     ;; Legacy aliases — `setup/create-arg!` interprets `:source-id`
+     ;; as the slot-id directly, so passing `(:id arg-a)` works.
+     :arg-a slot-a :arg-b slot-b
      :composed-fn composed-fn}))

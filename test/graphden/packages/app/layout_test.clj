@@ -48,6 +48,16 @@
     (compute-layout-matrix {:elements {:nodes nodes :edges edges}})))
 
 
+(defn layout-graph
+  "Build a layout result from shorthand. Each `nodes` element is a
+   string id (default node-type \"fn\") or a `[id type]` pair. Each
+   `edges` element is `[src tgt]` or `[src tgt arg]`."
+  [nodes edges]
+  (layout-elements (mapv #(if (vector? %) (apply make-node %) (make-node %))
+                         nodes)
+                   (mapv (fn [tup] (apply make-edge tup)) edges)))
+
+
 (defn get-pos
   "Get position for a node from layout result."
   [result node-id]
@@ -60,9 +70,8 @@
 
 (deftest simple-chain-test
   (testing "Linear chain: A -> B -> C"
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C")]
-          edges [(make-edge "A" "B") (make-edge "B" "C")]
-          result (layout-elements nodes edges)]
+    (let [result (layout-graph ["A" "B" "C"]
+                               [["A" "B"] ["B" "C"]])]
       (is (:valid (:validation result)))
       (is (= 3 (count (:grid-pos result))))
       ;; All on same row
@@ -77,9 +86,8 @@
 
 (deftest branching-test
   (testing "Branching: A -> B, A -> C"
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C")]
-          edges [(make-edge "A" "B") (make-edge "A" "C")]
-          result (layout-elements nodes edges)]
+    (let [result (layout-graph ["A" "B" "C"]
+                               [["A" "B"] ["A" "C"]])]
       (is (:valid (:validation result)))
       (is (= 3 (count (:grid-pos result))))
       ;; A is root at col 0
@@ -98,10 +106,8 @@
 
 (deftest shared-argument-basic-test
   (testing "Shared node: A -> B, A -> C, B -> D, C -> D"
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C") (make-node "D")]
-          edges [(make-edge "A" "B") (make-edge "A" "C")
-                 (make-edge "B" "D") (make-edge "C" "D")]
-          result (layout-elements nodes edges)]
+    (let [result (layout-graph ["A" "B" "C" "D"]
+                               [["A" "B"] ["A" "C"] ["B" "D"] ["C" "D"]])]
       (is (:valid (:validation result)))
       (is (= 4 (count (:grid-pos result))))
       ;; D should be placed (shared nodes must not be dropped)
@@ -123,12 +129,10 @@
 
 (deftest shared-with-children-test
   (testing "Shared node with children: A -> B -> D, A -> C -> D, D -> E"
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
-                 (make-node "D") (make-node "E")]
-          edges [(make-edge "A" "B") (make-edge "A" "C")
-                 (make-edge "B" "D") (make-edge "C" "D")
-                 (make-edge "D" "E")]
-          result (layout-elements nodes edges)]
+    (let [result (layout-graph ["A" "B" "C" "D" "E"]
+                               [["A" "B"] ["A" "C"]
+                                ["B" "D"] ["C" "D"]
+                                ["D" "E"]])]
       (is (:valid (:validation result)))
       (is (= 5 (count (:grid-pos result))))
       ;; E should be placed (child of shared node)
@@ -140,17 +144,16 @@
 
 (deftest multiple-shared-arguments-test
   (testing "Multiple shared nodes like editor-routes pattern"
-    (let [nodes [(make-node "list-11")
-                 (make-node "item5-route") (make-node "item6-route")
-                 (make-node "shared-handler")
-                 (make-node "render-fn") (make-node "data-fn")]
-          edges [(make-edge "list-11" "item5-route" "item5")
-                 (make-edge "list-11" "item6-route" "item6")
-                 (make-edge "item5-route" "shared-handler" "handler")
-                 (make-edge "item6-route" "shared-handler" "handler")
-                 (make-edge "shared-handler" "render-fn" "render-fn")
-                 (make-edge "shared-handler" "data-fn" "data-fn")]
-          result (layout-elements nodes edges)]
+    (let [result (layout-graph ["list-11"
+                                "item5-route" "item6-route"
+                                "shared-handler"
+                                "render-fn" "data-fn"]
+                               [["list-11" "item5-route" "item5"]
+                                ["list-11" "item6-route" "item6"]
+                                ["item5-route" "shared-handler" "handler"]
+                                ["item6-route" "shared-handler" "handler"]
+                                ["shared-handler" "render-fn" "render-fn"]
+                                ["shared-handler" "data-fn" "data-fn"]])]
       (is (:valid (:validation result)))
       (is (= 6 (count (:grid-pos result))))
       ;; shared-handler should be placed
@@ -171,12 +174,8 @@
 
 (deftest no-node-collision-test
   (testing "No two nodes should occupy the same cell"
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
-                 (make-node "D") (make-node "E") (make-node "F")]
-          edges [(make-edge "A" "B") (make-edge "A" "C")
-                 (make-edge "B" "D") (make-edge "C" "D")
-                 (make-edge "D" "E") (make-edge "D" "F")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["A" "B" "C" "D" "E" "F"]
+                               [["A" "B"] ["A" "C"] ["B" "D"] ["C" "D"] ["D" "E"] ["D" "F"]])
           positions (vals (:grid-pos result))
           pos-keys (map #(str (:row %) "," (:col %)) positions)]
       (is (:valid (:validation result)))
@@ -220,9 +219,8 @@
 
 (deftest rule-first-child-same-row-as-parent
   (testing "RULE: First child must be on SAME ROW as parent"
-    (let [nodes [(make-node "P") (make-node "C1") (make-node "C2") (make-node "C3")]
-          edges [(make-edge "P" "C1") (make-edge "P" "C2") (make-edge "P" "C3")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["P" "C1" "C2" "C3"]
+                               [["P" "C1"] ["P" "C2"] ["P" "C3"]])
           p-row (:row (get-pos result "P"))
           c1-row (:row (get-pos result "C1"))]
       (is (:valid (:validation result)))
@@ -233,9 +231,8 @@
 
 (deftest rule-other-children-different-rows
   (testing "RULE: All children of same parent must be on DIFFERENT rows"
-    (let [nodes [(make-node "P") (make-node "C1") (make-node "C2") (make-node "C3")]
-          edges [(make-edge "P" "C1") (make-edge "P" "C2") (make-edge "P" "C3")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["P" "C1" "C2" "C3"]
+                               [["P" "C1"] ["P" "C2"] ["P" "C3"]])
           c1-row (:row (get-pos result "C1"))
           c2-row (:row (get-pos result "C2"))
           c3-row (:row (get-pos result "C3"))
@@ -268,9 +265,8 @@
 
 (deftest rule-deep-chain-first-child-same-row
   (testing "RULE: In chain A->B->C->D, all should be on same row (first child rule)"
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C") (make-node "D")]
-          edges [(make-edge "A" "B") (make-edge "B" "C") (make-edge "C" "D")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["A" "B" "C" "D"]
+                               [["A" "B"] ["B" "C"] ["C" "D"]])
           a-row (:row (get-pos result "A"))
           b-row (:row (get-pos result "B"))
           c-row (:row (get-pos result "C"))
@@ -288,12 +284,8 @@
     ;; P1 should be row 0, P2 row 1
     ;; S should be on row 1 (same as P2 - last parent)
     ;; C1 should be on row 1 (same as S - first child)
-    (let [nodes [(make-node "R") (make-node "P1") (make-node "P2")
-                 (make-node "S") (make-node "C1") (make-node "C2")]
-          edges [(make-edge "R" "P1") (make-edge "R" "P2")
-                 (make-edge "P1" "S") (make-edge "P2" "S")
-                 (make-edge "S" "C1") (make-edge "S" "C2")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["R" "P1" "P2" "S" "C1" "C2"]
+                               [["R" "P1"] ["R" "P2"] ["P1" "S"] ["P2" "S"] ["S" "C1"] ["S" "C2"]])
           r-row (:row (get-pos result "R"))
           p1-row (:row (get-pos result "P1"))
           p2-row (:row (get-pos result "P2"))
@@ -330,19 +322,8 @@
     ;;
     ;; P1 and P2 both point to S, but they are NOT consecutive children of R.
     ;; S should still be on the row of P2 (last parent).
-    (let [nodes [(make-node "R")
-                 (make-node "P1") (make-node "X1") (make-node "X2") (make-node "P2") (make-node "X3")
-                 (make-node "S")
-                 (make-node "A1" "arg") (make-node "A2" "arg")
-                 (make-node "H1") (make-node "H2") (make-node "H3")]
-          edges [(make-edge "R" "P1") (make-edge "R" "X1") (make-edge "R" "X2")
-                 (make-edge "R" "P2") (make-edge "R" "X3")
-                 ;; P1 and P2 both connect to shared S
-                 (make-edge "P1" "S") (make-edge "P1" "A1")
-                 (make-edge "P2" "S") (make-edge "P2" "A2")
-                 ;; Other routes
-                 (make-edge "X1" "H1") (make-edge "X2" "H2") (make-edge "X3" "H3")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["R" "P1" "X1" "X2" "P2" "X3" "S" ["A1" "arg"] ["A2" "arg"] "H1" "H2" "H3"]
+                               [["R" "P1"] ["R" "X1"] ["R" "X2"] ["R" "P2"] ["R" "X3"] ["P1" "S"] ["P1" "A1"] ["P2" "S"] ["P2" "A2"] ["X1" "H1"] ["X2" "H2"] ["X3" "H3"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           p1-row (:row (get-pos result "P1"))
@@ -372,13 +353,8 @@
     ;; Correct layout:
     ;;   row 0: R  A  B  C
     ;;   row 1:    E  F  D   <-- E and D share row, different columns
-    (let [nodes [(make-node "R") (make-node "A") (make-node "B")
-                 (make-node "C") (make-node "D")
-                 (make-node "E") (make-node "F")]
-          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C")
-                 (make-edge "B" "D")  ; B's second child at col 3
-                 (make-edge "R" "E") (make-edge "E" "F")]  ; R's second child
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["R" "A" "B" "C" "D" "E" "F"]
+                               [["R" "A"] ["A" "B"] ["B" "C"] ["B" "D"] ["R" "E"] ["E" "F"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           d-row (:row (get-pos result "D"))
@@ -409,15 +385,8 @@
     ;; The subtree of A includes: B, C, D, E, F, G
     ;; H must start AFTER all of these, even if H's branch (cols 1-2)
     ;; doesn't overlap with E (col 4) or D (col 4)
-    (let [nodes [(make-node "R") (make-node "A") (make-node "B") (make-node "C")
-                 (make-node "D") (make-node "E")
-                 (make-node "F") (make-node "G")
-                 (make-node "H") (make-node "I")]
-          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C") (make-edge "C" "D")
-                 (make-edge "C" "E")  ; C's second child
-                 (make-edge "A" "F") (make-edge "F" "G")  ; A's second child subtree
-                 (make-edge "R" "H") (make-edge "H" "I")]  ; R's second child
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["R" "A" "B" "C" "D" "E" "F" "G" "H" "I"]
+                               [["R" "A"] ["A" "B"] ["B" "C"] ["C" "D"] ["C" "E"] ["A" "F"] ["F" "G"] ["R" "H"] ["H" "I"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           ;; Get all rows from A's subtree
@@ -441,13 +410,8 @@
     ;; G is a child of A (inner branch node), so compaction applies.
     ;; G's branch (col 2) should be able to fit at row 1 because
     ;; only col 5 is occupied there (by F).
-    (let [nodes [(make-node "R") (make-node "A") (make-node "B") (make-node "C")
-                 (make-node "D") (make-node "E") (make-node "F") (make-node "G")]
-          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C")
-                 (make-edge "C" "D") (make-edge "D" "E")
-                 (make-edge "D" "F")  ; D's second child at col 5
-                 (make-edge "A" "G")]  ; A's second child at col 2
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["R" "A" "B" "C" "D" "E" "F" "G"]
+                               [["R" "A"] ["A" "B"] ["B" "C"] ["C" "D"] ["D" "E"] ["D" "F"] ["A" "G"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           f-row (:row (get-pos result "F"))
@@ -477,14 +441,8 @@
     ;;
     ;; Currently this is broken: G waits for global-max even though
     ;; its columns (1-2) don't overlap with F's column (5).
-    (let [nodes [(make-node "R") (make-node "A") (make-node "B") (make-node "C")
-                 (make-node "D") (make-node "E") (make-node "F")
-                 (make-node "G") (make-node "H")]
-          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C")
-                 (make-edge "C" "D") (make-edge "D" "E")
-                 (make-edge "D" "F")  ; D's second child at col 5
-                 (make-edge "R" "G") (make-edge "G" "H")]  ; R's second child
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["R" "A" "B" "C" "D" "E" "F" "G" "H"]
+                               [["R" "A"] ["A" "B"] ["B" "C"] ["C" "D"] ["D" "E"] ["D" "F"] ["R" "G"] ["G" "H"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           f-row (:row (get-pos result "F"))
@@ -610,13 +568,8 @@
     ;;
     ;; Or simpler: siblings of branch nodes must wait until all children
     ;; of that branch node are placed. (subtree containment rule)
-    (let [nodes [(make-node "R") (make-node "A") (make-node "B")
-                 (make-node "X")
-                 (make-node "E") (make-node "F")]
-          edges [(make-edge "R" "A") (make-edge "A" "B")
-                 (make-edge "A" "X")  ; A's second child
-                 (make-edge "R" "E") (make-edge "E" "F")]  ; R's second child
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["R" "A" "B" "X" "E" "F"]
+                               [["R" "A"] ["A" "B"] ["A" "X"] ["R" "E"] ["E" "F"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           a-pos (get-pos result "A")
@@ -693,15 +646,8 @@
     ;; - F is at (1,2) which is ON the edge A->X!
     ;;
     ;; This is the bug we need to test.
-    (let [nodes [(make-node "R") (make-node "A") (make-node "B") (make-node "C")
-                 (make-node "D")  ; B's second child that blocks row 1 col 3
-                 (make-node "X") (make-node "Y")  ; A's second child subtree
-                 (make-node "E") (make-node "F")]  ; R's second child
-          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C")
-                 (make-edge "B" "D")  ; B's second child, will be at (1,3)
-                 (make-edge "A" "X") (make-edge "X" "Y")  ; A's second child subtree
-                 (make-edge "R" "E") (make-edge "E" "F")]  ; R's second child
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["R" "A" "B" "C" "D" "X" "Y" "E" "F"]
+                               [["R" "A"] ["A" "B"] ["B" "C"] ["B" "D"] ["A" "X"] ["X" "Y"] ["R" "E"] ["E" "F"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           a-pos (get-pos result "A")
@@ -747,11 +693,8 @@
     ;;
     ;; Valid orderings: [B, C, D, E], [C, D, B, E], [B, E, C, D], etc.
     ;; Invalid ordering: [B, C, E, D] or [C, B, D, E] (neutral between divergence roots)
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
-                 (make-node "D") (make-node "E") (make-node "F")]
-          edges [(make-edge "A" "B") (make-edge "A" "C") (make-edge "A" "D") (make-edge "A" "E")
-                 (make-edge "C" "F") (make-edge "D" "F")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["A" "B" "C" "D" "E" "F"]
+                               [["A" "B"] ["A" "C"] ["A" "D"] ["A" "E"] ["C" "F"] ["D" "F"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           b-row (:row (get-pos result "B"))
@@ -787,11 +730,8 @@
     ;;
     ;; A, B at row 0 (horizontal branch, B has no children after S removed)
     ;; C, E, S at row 1 (lower path horizontal branch)
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
-                 (make-node "E") (make-node "S")]
-          edges [(make-edge "A" "B") (make-edge "A" "C")
-                 (make-edge "B" "S") (make-edge "C" "E") (make-edge "E" "S")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["A" "B" "C" "E" "S"]
+                               [["A" "B"] ["A" "C"] ["B" "S"] ["C" "E"] ["E" "S"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           c-row (:row (get-pos result "C"))
@@ -820,12 +760,8 @@
     ;;
     ;; B is row 0 (first child of A), X is row 0 (first child of B)
     ;; C is row 1 (second child of A), S is row 1 (first/only child of C after S removed from B)
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
-                 (make-node "X") (make-node "S")]
-          edges [(make-edge "A" "B") (make-edge "A" "C")
-                 (make-edge "B" "X") (make-edge "B" "S")
-                 (make-edge "C" "S")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["A" "B" "C" "X" "S"]
+                               [["A" "B"] ["A" "C"] ["B" "X"] ["B" "S"] ["C" "S"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           b-row (:row (get-pos result "B"))
@@ -862,13 +798,8 @@
     ;;
     ;; E and S on same row (lower path horizontal branch)
     ;; X below (other child of C)
-    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
-                 (make-node "E") (make-node "X") (make-node "S")]
-          edges [(make-edge "A" "B") (make-edge "A" "C")
-                 (make-edge "B" "S")
-                 (make-edge "C" "E") (make-edge "C" "X")
-                 (make-edge "E" "S")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["A" "B" "C" "E" "X" "S"]
+                               [["A" "B"] ["A" "C"] ["B" "S"] ["C" "E"] ["C" "X"] ["E" "S"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           a-row (:row (get-pos result "A"))
@@ -905,11 +836,8 @@
     ;;
     ;; Expected sorted order: [N1, C, D, N2] or [N1, D, C, N2]
     ;; NOT: [C, D, N1, N2] (pushed to top) or [N1, N2, C, D] (pushed to bottom)
-    (let [nodes [(make-node "A") (make-node "N1") (make-node "C")
-                 (make-node "D") (make-node "N2") (make-node "S")]
-          edges [(make-edge "A" "N1") (make-edge "A" "C") (make-edge "A" "D") (make-edge "A" "N2")
-                 (make-edge "C" "S") (make-edge "D" "S")]
-          result (layout-elements nodes edges)
+    (let [result (layout-graph ["A" "N1" "C" "D" "N2" "S"]
+                               [["A" "N1"] ["A" "C"] ["A" "D"] ["A" "N2"] ["C" "S"] ["D" "S"]])
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
           n1-row (:row (get-pos result "N1"))

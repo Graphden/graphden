@@ -42,8 +42,39 @@ function getStoredWidth() {
 }
 function setStoredWidth(px) { writePref(PREFS_WIDTH_KEY, String(px)); }
 
-function isCollapsedStored() { return readPref(PREFS_COLLAPSED_KEY, '0') === '1'; }
+// Three-valued: '1' / '0' / null (never explicitly set). Knowing
+// whether the user has chosen lets the auto-collapse logic kick in
+// only on first visit — once they've toggled the sidebar, their
+// choice survives every reload regardless of viewport.
+function readStoredCollapsedRaw() { return readPref(PREFS_COLLAPSED_KEY, null); }
 function setCollapsedStored(v) { writePref(PREFS_COLLAPSED_KEY, v ? '1' : '0'); }
+
+// Reads the CSS-defined breakpoint so the JS and the @media rules
+// stay in sync — the variable lives on :root in editor-styles.css.
+// Falls back to 900 if the var isn't set yet (very first paint of an
+// older cached stylesheet).
+function getNarrowBreakpointPx() {
+  try {
+    const raw = getComputedStyle(document.documentElement)
+      .getPropertyValue('--sidebar-narrow-breakpoint').trim();
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? n : 900;
+  } catch (_) { return 900; }
+}
+
+function isViewportNarrow() {
+  return window.innerWidth < getNarrowBreakpointPx();
+}
+
+// Collapse decision: explicit user pref ALWAYS wins; otherwise narrow
+// viewports default to collapsed so the sidebar doesn't blanket the
+// graph on iPad portrait / phone / iPad split-view.
+function decideCollapsed() {
+  const stored = readStoredCollapsedRaw();
+  if (stored === '1') return true;
+  if (stored === '0') return false;
+  return isViewportNarrow();
+}
 
 function isDarkStored() { return readPref(PREFS_THEME_KEY, 'light') === 'dark'; }
 function setDarkStored(v) { writePref(PREFS_THEME_KEY, v ? 'dark' : 'light'); }
@@ -195,7 +226,7 @@ function installFloatingExpandBtn() {
 function initPrefsEarly() {
   applyWidth(getStoredWidth());
   applyTheme(isDarkStored());
-  applyCollapsed(isCollapsedStored());
+  applyCollapsed(decideCollapsed());
 }
 
 function initPrefsLate() {
@@ -204,8 +235,32 @@ function initPrefsLate() {
   installResizeHandle();
   // Re-apply collapsed/theme so the freshly-mounted buttons show the
   // correct icon + title.
-  applyCollapsed(isCollapsedStored());
+  applyCollapsed(decideCollapsed());
   applyTheme(isDarkStored());
+  installViewportWatcher();
+}
+
+// Re-apply auto-collapse decision when the viewport crosses the
+// narrow breakpoint — on iPad rotate, on desktop window resize, or
+// when the address bar reflows on mobile. Only fires when the user
+// hasn't explicitly chosen a sidebar state; their explicit choice
+// always wins.
+function installViewportWatcher() {
+  let last = isViewportNarrow();
+  let raf = 0;
+  window.addEventListener('resize', () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      const now = isViewportNarrow();
+      if (now === last) return;
+      last = now;
+      // Only auto-apply when there's no explicit user pref. Once a
+      // user has tapped collapse/expand, their pref persists.
+      if (readStoredCollapsedRaw() != null) return;
+      applyCollapsed(now);
+    });
+  });
 }
 
 window.initPrefsEarly = initPrefsEarly;

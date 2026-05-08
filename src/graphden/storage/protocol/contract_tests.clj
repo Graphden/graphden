@@ -4,11 +4,9 @@
    graph integrity constraints. Each storage module should run these tests
    with their specific storage factory function.
 
-   ## 2-Entity Schema
-
-   Uses simplified schema:
-   - fn: parent-ids=nil/[] for base-fn, parent-ids=[...] for composed fn
-   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+   The schema is the production graph schema (fn / slot / fn-slot /
+   binding / binding-list-item) so the cycle walker reaches the
+   `:binding` table even when the test only exercises fn rows.
 
    Usage in storage implementation tests:
    ```clojure
@@ -19,52 +17,19 @@
    ```"
   (:require
     [clojure.test :refer [is testing]]
+    [graphden.schema.graph.schema :as graph-schema]
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Schema helper ===
 
 (def ^:private graph-schema
-  "Schema for graph constraint testing.
-   Uses 2-entity schema: fn + arg."
-  (-> (mds/create-builder)
-      ;; fn entity (base-fns have parent-ids=[]/nil, composed fns have parent-ids set)
-      (ds/add-entity :fn #uuid "10000000-0000-0000-0000-000000000001"
-                     {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002"
-                             :type :text}
-                      :parent-ids {:uuid #uuid "10000000-0000-0000-0000-000000000003"
-                                   :type :jsonb
-                                   :nullable? true}
-                      :return-type {:uuid #uuid "10000000-0000-0000-0000-000000000004"
-                                    :type :text
-                                    :nullable? true}})
-      (ds/add-constraint :fn {:type :unique :fields [:name]})
-
-      ;; arg entity (belongs to fn via fn-id, inherits from parent's arg via source-id)
-      (ds/add-entity :arg #uuid "10000000-0000-0000-0000-000000000010"
-                     {:fn-id {:uuid #uuid "10000000-0000-0000-0000-000000000011"
-                              :type :uuid}
-                      :name {:uuid #uuid "10000000-0000-0000-0000-000000000012"
-                             :type :text}
-                      :type {:uuid #uuid "10000000-0000-0000-0000-000000000013"
-                             :type :text}
-                      :required {:uuid #uuid "10000000-0000-0000-0000-000000000014"
-                                 :type :bool}
-                      :is-fn {:uuid #uuid "10000000-0000-0000-0000-000000000015"
-                              :type :bool}
-                      :source-id {:uuid #uuid "10000000-0000-0000-0000-000000000016"
-                                  :type :uuid
-                                  :nullable? true}
-                      :value {:uuid #uuid "10000000-0000-0000-0000-000000000017"
-                              :type :text
-                              :nullable? true}
-                      :ref-id {:uuid #uuid "10000000-0000-0000-0000-000000000018"
-                               :type :uuid
-                               :nullable? true}})
-      (ds/add-constraint :arg {:type :unique :fields [:fn-id :name]})
-      ds/build))
+  "Production graph schema (fn / slot / fn-slot / binding /
+   binding-list-item plus namespaces). The cycle walker reads
+   `:binding` for ref-fn-id chains; tests pass even with no
+   bindings present, as long as the table exists."
+  (graph-schema/build-schema (mds/create-builder)))
 
 
 ;; === Contract test runner ===
@@ -93,26 +58,27 @@
           (let [base-fn (sp/create-entity storage :fn
                                           {:name "test-fn"
                                            :parent-ids nil
-                                           :return-type "int"})]
+                                           :impl-hash "test-hash"})]
             ;; Should allow nil ref-id (literal value, not a fn reference)
             (is (nil? (sp/validate-no-dependency-cycle! storage (:id base-fn) nil))))
           (finally
             (close-storage-fn storage)))))
 
-    (testing "rejects self-reference as cycle"
+    (testing "allows self-reference (recursion is intended; depth bounded by executor)"
       (let [storage (create-storage-fn)]
         (try
           (sp/initialize storage graph-schema)
           (let [base-fn (sp/create-entity storage :fn
                                           {:name "test-fn"
                                            :parent-ids nil
-                                           :return-type "int"})]
-            ;; Self-reference is a cycle at storage level
-            ;; Recursion is handled at executor level via lazy evaluation
-            (is (thrown-with-msg?
-                  clojure.lang.ExceptionInfo
-                  #"cycle"
-                  (sp/validate-no-dependency-cycle! storage (:id base-fn) (:id base-fn)))))
+                                           :impl-hash "test-hash"})]
+            ;; Self-reference is the WHOLE point of recursion. The
+            ;; storage protocol carves it out per docs/CONSTRAINTS.md
+            ;; § Self-reference; executor's *max-depth* bounds the
+            ;; runtime cost. Without this carve-out, a user couldn't
+            ;; write a recursive fn-def at all.
+            (is (nil? (sp/validate-no-dependency-cycle!
+                        storage (:id base-fn) (:id base-fn)))))
           (finally
             (close-storage-fn storage)))))
 
@@ -123,11 +89,11 @@
           (let [fn-a (sp/create-entity storage :fn
                                        {:name "fn-a"
                                         :parent-ids nil
-                                        :return-type "int"})
+                                        :impl-hash "test-hash"})
                 fn-b (sp/create-entity storage :fn
                                        {:name "fn-b"
                                         :parent-ids nil
-                                        :return-type "int"})]
+                                        :impl-hash "test-hash"})]
             ;; Should allow reference to a different fn
             (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b)))))
           (finally
@@ -146,7 +112,7 @@
               fn-record (sp/create-entity storage :fn
                                           {:name "concurrent-fn"
                                            :parent-ids nil
-                                           :return-type "int"})
+                                           :impl-hash "test-hash"})
               fn-id (:id fn-record)
               ;; Run concurrent reads while updating
               read-results (atom [])
@@ -186,7 +152,7 @@
                 (let [fns (for [i (range fns-per-thread)]
                             {:name (str "batch-fn-" t "-" i)
                              :parent-ids nil
-                             :return-type "int"})]
+                             :impl-hash (str "test-hash-" t "-" i)})]
                   (swap! results concat (sp/create-entities storage :fn fns)))
                 (finally
                   (java.util.concurrent.CountDownLatch/.countDown latch)))))

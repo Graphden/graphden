@@ -16,10 +16,12 @@ This document covers:
 
 ## Higher-Order Functions (HOFs)
 
-A `:fn`-typed arg in an `fns.edn` declaration tells the compiler
-"this slot receives a callable". At sync-time, `is-fn=true` is set on
-the parent-arg; at compile-time, refs bound to such slots go through
-`hof-wrap` instead of the normal thunk path.
+A `:fn`-typed slot in an `fns.edn` declaration tells the compiler
+"this slot receives a callable". The slot's `type-fn-id` resolves to
+the `:fn` primitive (overlayable per-fn via
+`binding.type-override-fn-id`); at compile-time, refs bound to such
+slots go through `hof-wrap` instead of the normal thunk path. The
+legacy `:is-fn` boolean was retired — type IS the marker.
 
 ### Wrap shape by free-arg count
 
@@ -134,31 +136,36 @@ create a new backend:
 
 ## Graph Data Schema
 
-Two entity types only — by design (see PHILOSOPHY.md "Minimal
-entities").
+Five entity types — see PHILOSOPHY.md for rationale and CLAUDE.md
+for the up-to-date field list.
 
-| Entity | Fields | Notes |
-|--------|--------|-------|
-| `fn` | `id, name, parent-id, namespace-id, return-type, impl-hash` | `parent-id=nil` → base-fn; `name=nil` → local fn |
-| `arg` | `id, fn-id, source-id, via-fn-id, name, type, required, value, ref-id, is-fn, next-arg-id, prev-arg-id` | `source-id=nil` → primary arg; `next-arg-id`/`prev-arg-id` → sequence chain |
+| Entity | Notes |
+|---|---|
+| `fn` | function or type-row; `parent-fn-ids` ref-many for inheritance |
+| `slot` | atomic `(name, type-fn-id)`; immutable post-create |
+| `fn-slot` | junction `(fn-id, slot-id, position)` |
+| `binding` | per-`(fn, slot)` overlay (value, ref-fn-id, rename-to, type-override-fn-id, terminal, list-{append,closed}, description) |
+| `binding-list-item` | sequence content under a list-typed binding |
 
-### Inheritance via source-id
+### Inheritance through parent-fn-ids
 
-A composed fn's arg points at a parent's arg via `source-id`, then
-overrides with `value` or `ref-id`:
+A composed fn carries `parent-fn-ids` and a binding shadows the
+inherited slot:
 
 ```clojure
-;; Base
+;; Base fn `add` has slot `a` (type :int)
 (sp/create-entity storage :fn
-                  {:name "add" :parent-id nil :return-type :int})
-(sp/create-entity storage :arg
-                  {:fn-id base-fn-id :name "a" :type :int :required true})
+                  {:name "add" :parent-fn-ids [] :impl-hash "<sha256>"})
+(let [slot-a (sp/create-entity storage :slot
+                                {:name "a" :type-fn-id int-fn-id})]
+  (sp/create-entity storage :fn-slot
+                    {:fn-id add-id :slot-id (:id slot-a) :position 0})
 
-;; Composed fn that binds a=5
-(sp/create-entity storage :fn
-                  {:name "add-5" :parent-id base-fn-id})
-(sp/create-entity storage :arg
-                  {:fn-id composed-id :source-id arg-a-id :value 5})
+  ;; Composed fn that binds a=5
+  (let [add-5 (sp/create-entity storage :fn
+                                {:name "add-5" :parent-fn-ids [add-id]})]
+    (sp/create-entity storage :binding
+                      {:fn-id (:id add-5) :slot-id (:id slot-a) :value 5})))
 ```
 
 ### Extending the schema

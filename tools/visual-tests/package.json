@@ -1,0 +1,13 @@
+{
+  "name": "graphden-visual-tests",
+  "private": true,
+  "description": "Playwright visual-regression tests for the Graphden editor. Captures screenshots of key UI states and diffs against committed baselines.",
+  "scripts": {
+    "test": "playwright test",
+    "update": "playwright test --update-snapshots",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}

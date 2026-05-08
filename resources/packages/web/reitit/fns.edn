@@ -47,7 +47,7 @@
    :description "Compose a compiled reitit router and a default handler into the single Ring callable invoked per request."
    :args {:router {:type :any :description "Compiled reitit router (e.g. from `:ring-router`)."}
           :default-handler {:type :any :description "Already-built Ring callable invoked when no route matches (e.g. from `:ring-create-default-handler`). `:any` because the value flows through unchanged."}}
-   :return-type :fn}
+   :return-type [:fn {:request :ring-request-shape} :ring-response-shape]}
 
   ;; =============================================================================
   ;; MIDDLEWARE CHAIN
@@ -132,19 +132,19 @@
   ;; `{:value :kw}` bypasses fn-ref resolution); values are the constant
   ;; handlers built above.
   {:name :_router-not-found-entry
-   :parent :pair
-   :args {:item1 {:value :not-found}
-          :item2 :_router-not-found-handler}}
+   :parent :list
+   :args {:items [{:value :not-found :literal? true}
+                  :_router-not-found-handler]}}
 
   {:name :_router-method-not-allowed-entry
-   :parent :pair
-   :args {:item1 {:value :method-not-allowed}
-          :item2 :_router-method-not-allowed-handler}}
+   :parent :list
+   :args {:items [{:value :method-not-allowed :literal? true}
+                  :_router-method-not-allowed-handler]}}
 
   {:name :_router-not-acceptable-entry
-   :parent :pair
-   :args {:item1 {:value :not-acceptable}
-          :item2 :_router-not-acceptable-handler}}
+   :parent :list
+   :args {:items [{:value :not-acceptable :literal? true}
+                  :_router-not-acceptable-handler]}}
 
   {:name :_router-defaults-map
    :parent :pairs->map

@@ -51,7 +51,7 @@
                      (ds/build))]
       (is (some? schema))
       (is (contains? (set (ds/entities schema)) :trait))
-      (is (contains? (set (ds/entities schema)) :arg-trait)))))
+      (is (contains? (set (ds/entities schema)) :binding-trait)))))
 
 
 (deftest trait-crud-test
@@ -73,79 +73,82 @@
       (sp/close storage))))
 
 
-(deftest value-trait-crud-test
-  (testing "can assign trait to arg (2-entity schema)"
+(deftest binding-trait-crud-test
+  (testing "can assign trait to binding"
     (let [storage (create-test-storage)
-          ;; Create base fn
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-ids nil
-                                     :return-type :text})
-          ;; Create arg with value
-          arg (sp/create-entity storage :arg
-                                {:fn-id (:id base-fn)
-                                 :name "password"
-                                 :type :text
-                                 :value "secret123"})
-          ;; Create trait and assign to arg
+                                     :parent-ids []
+                                     :impl-hash "test-hash"})
+          slot (sp/create-entity storage :slot
+                                 {:name "password"
+                                  :type-fn-id (:id base-fn)})
+          b-row (sp/create-entity storage :binding
+                                  {:fn-id (:id base-fn)
+                                   :slot-id (:id slot)
+                                   :value "secret123"})
           trait (sp/create-entity storage :trait
                                   {:name "secret"
                                    :description "Should be hidden"})
-          value-trait (sp/create-entity storage :arg-trait
-                                        {:arg-id (:id arg)
-                                         :trait-id (:id trait)})]
-      (is (uuid? (:id value-trait)))
-      (is (= (:id arg) (:arg-id value-trait)))
-      (is (= (:id trait) (:trait-id value-trait)))
+          binding-trait (sp/create-entity storage :binding-trait
+                                          {:binding-id (:id b-row)
+                                           :trait-id (:id trait)})]
+      (is (uuid? (:id binding-trait)))
+      (is (= (:id b-row) (:binding-id binding-trait)))
+      (is (= (:id trait) (:trait-id binding-trait)))
       (sp/close storage)))
 
-  (testing "same trait cannot be assigned twice to same arg"
+  (testing "same trait cannot be assigned twice to same binding"
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-ids nil
-                                     :return-type :text})
-          arg (sp/create-entity storage :arg
-                                {:fn-id (:id base-fn)
-                                 :name "x"
-                                 :type :text
-                                 :value "test"})
+                                     :parent-ids []
+                                     :impl-hash "test-hash"})
+          slot (sp/create-entity storage :slot
+                                 {:name "x"
+                                  :type-fn-id (:id base-fn)})
+          b-row (sp/create-entity storage :binding
+                                  {:fn-id (:id base-fn)
+                                   :slot-id (:id slot)
+                                   :value "test"})
           trait (sp/create-entity storage :trait {:name "my-trait"})]
-      (sp/create-entity storage :arg-trait
-                        {:arg-id (:id arg)
+      (sp/create-entity storage :binding-trait
+                        {:binding-id (:id b-row)
                          :trait-id (:id trait)})
       (is (thrown? Exception
-            (sp/create-entity storage :arg-trait
-                              {:arg-id (:id arg)
+            (sp/create-entity storage :binding-trait
+                              {:binding-id (:id b-row)
                                :trait-id (:id trait)})))
       (sp/close storage))))
 
 
 (deftest query-traits-test
-  (testing "can query traits for an arg"
+  (testing "can query traits for a binding"
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-ids nil
-                                     :return-type :text})
-          arg (sp/create-entity storage :arg
-                                {:fn-id (:id base-fn)
-                                 :name "val"
-                                 :type :text
-                                 :value "myval"})
+                                     :parent-ids []
+                                     :impl-hash "test-hash"})
+          slot (sp/create-entity storage :slot
+                                 {:name "val"
+                                  :type-fn-id (:id base-fn)})
+          b-row (sp/create-entity storage :binding
+                                  {:fn-id (:id base-fn)
+                                   :slot-id (:id slot)
+                                   :value "myval"})
           trait1 (sp/create-entity storage :trait {:name "trait-a"})
           trait2 (sp/create-entity storage :trait {:name "trait-b"})
-          _ (sp/create-entity storage :arg-trait
-                              {:arg-id (:id arg)
+          _ (sp/create-entity storage :binding-trait
+                              {:binding-id (:id b-row)
                                :trait-id (:id trait1)})
-          _ (sp/create-entity storage :arg-trait
-                              {:arg-id (:id arg)
+          _ (sp/create-entity storage :binding-trait
+                              {:binding-id (:id b-row)
                                :trait-id (:id trait2)})
-          value-traits (sp/query-entities storage :arg-trait
-                                          {:arg-id (:id arg)})]
-      (is (= 2 (count value-traits)))
+          binding-traits (sp/query-entities storage :binding-trait
+                                            {:binding-id (:id b-row)})]
+      (is (= 2 (count binding-traits)))
       (is (= #{(:id trait1) (:id trait2)}
-             (set (map :trait-id value-traits))))
+             (set (map :trait-id binding-traits))))
       (sp/close storage))))
 
 
@@ -158,4 +161,4 @@
 
 (deftest trait-entities-test
   (testing "trait-entities set is correct"
-    (is (= #{:trait :arg-trait} vts/trait-entities))))
+    (is (= #{:trait :binding-trait} vts/trait-entities))))

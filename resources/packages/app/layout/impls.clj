@@ -16,6 +16,7 @@
     [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :as defbase]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs])
@@ -32,12 +33,231 @@
 ;; DATA LOADING FROM STORAGE
 ;; =============================================================================
 
+;; ---------------------------------------------------------------------
+;; Slot-view synthesis
+;;
+;; Layout's helpers think in terms of (fn × slot) rows: each fn exposes
+;; its own slots plus inherited ones, with the closest binding overlaying
+;; `:value` / `:ref-id`. The new storage model keeps slots, bindings,
+;; and list-items in separate tables; `derive-fn-slot-views` flattens
+;; them into the row shape the rest of this file consumes.
+;;
+;; This is purely an internal layout concept — `/api/graph/entities`
+;; ships the underlying tables; the editor JS reads them directly via
+;; `slotMap` / `bindingsByFn` / `itemsByBinding`. Nobody outside this
+;; namespace should depend on the synthetic shape.
+
+(defn- synth-arg-id
+  "Deterministic UUID for a (fn-id, slot-id) pair. Same pair always
+   produces the same id, so anchor rows have a stable identity across
+   layout invocations."
+  ^java.util.UUID
+  [^java.util.UUID fn-id ^java.util.UUID slot-id]
+  (java.util.UUID. (bit-xor (java.util.UUID/.getMostSignificantBits fn-id)
+                            (java.util.UUID/.getMostSignificantBits slot-id))
+                   (bit-xor (java.util.UUID/.getLeastSignificantBits fn-id)
+                            (java.util.UUID/.getLeastSignificantBits slot-id))))
+
+
+(defn- chain-of
+  "BFS of an fn's parent-id closure (self first, ancestors after).
+   Inlined here so this helper runs before the rest of the file's
+   inheritance walkers are declared."
+  [fn-by-id fn-id]
+  (loop [acc [fn-id], seen #{fn-id},
+         queue (vec (->> (get-in fn-by-id [fn-id :parent-ids])
+                         (remove nil?)))]
+    (if (empty? queue)
+      acc
+      (let [fid (first queue)
+            rest-q (subvec queue 1)]
+        (if (contains? seen fid)
+          (recur acc seen rest-q)
+          (let [pids (->> (get-in fn-by-id [fid :parent-ids])
+                          (remove nil?)
+                          (remove seen))]
+            (recur (conj acc fid)
+                   (conj seen fid)
+                   (into rest-q pids))))))))
+
+
+(defn- substitution-context-bindings-by-fn
+  "Bindings whose slot's owner is OUTSIDE the binding-fn's parent
+   chain. These come from ref-chain free-arg propagation — e.g.
+   `_app-ring-response :args {:func :_router}` binds the slot `:func`
+   of `:invoke`, which is reached only via `:m → :router-result →
+   :invoke`. The Pass 1 chain walk would otherwise miss the slot.
+   The expansion's migration mechanism (slot-owner chain matched
+   against ancestor-ref chains) routes the synth row down to the
+   right ref-target.
+
+   Returns a map fn-id → vector of bindings."
+  [fn-by-id slot-owner-by-id bindings]
+  (reduce
+    (fn [acc b]
+      (let [pchain (set (chain-of fn-by-id (:fn-id b)))
+            owner (get slot-owner-by-id (:slot-id b))]
+        (if (or (nil? owner) (contains? pchain owner))
+          acc
+          (update acc (:fn-id b) (fnil conj []) b))))
+    {}
+    bindings))
+
+
+(defn- build-anchor-row
+  "Build one anchor row for `(fn-id, slot-id)`. `inherits-from-fid`
+   is the parent fn whose slot this row inherits (nil for the
+   binding-owner itself OR for ref-chain-propagated bindings whose
+   `:source-id` chain doesn't apply)."
+  [fn-id slot-id inherits-from-fid {:keys [fn-by-id slot-by-id binding-by items-by-binding
+                                            slot-by-fn-source-slot]}]
+  (let [slot (get slot-by-id slot-id)
+        b (get binding-by [fn-id slot-id])
+        ;; Phase 6c — renamed-view slot owned by `fn-id` whose
+        ;; source-slot-id points back at slot-id. Replaces the legacy
+        ;; `(:rename-to b)` text lookup. Same scope as before — only
+        ;; the binding-owner's own renames affect the displayed name
+        ;; here; ancestor-owned renames flow through different
+        ;; build-anchor-row calls keyed on those ancestors.
+        renamed-view (when slot-by-fn-source-slot
+                       (get slot-by-fn-source-slot [fn-id slot-id]))
+        eff-tfn (or (some-> b :type-override-fn-id fn-by-id)
+                    (some-> (:type-fn-id slot) fn-by-id))
+        type-kw (or (when (and eff-tfn
+                               (empty? (:parent-ids eff-tfn))
+                               (nil? (:impl-hash eff-tfn))
+                               (nil? (:base-fn-id eff-tfn))
+                               (nil? (:element-fn-id eff-tfn))
+                               (some? (:name eff-tfn)))
+                      (keyword (:name eff-tfn)))
+                    ;; Anonymous fn-type rows (synthesised for inline
+                    ;; `[:fn args ret]` slot declarations) have nil
+                    ;; `:name` but a `:constraint [:fn …]`. Surface
+                    ;; them as the `:fn` primitive marker so the
+                    ;; flat-type chip / `compute-fn-typed-fn-ids`
+                    ;; both recognise the slot as HOF-callable. The
+                    ;; structural shape is recovered separately via
+                    ;; the rich-types snapshot.
+                    (when (and eff-tfn
+                               (vector? (:constraint eff-tfn))
+                               (= :fn (first (:constraint eff-tfn))))
+                      :fn)
+                    :jsonb)
+        inherits-from (when (and inherits-from-fid (not= inherits-from-fid fn-id))
+                        (synth-arg-id inherits-from-fid slot-id))
+        first-item-id (some-> b :id items-by-binding first :id)]
+    {:id (synth-arg-id fn-id slot-id)
+     :fn-id fn-id
+     :slot-id slot-id
+     :binding-id (:id b)
+     :name (or (:name renamed-view) (:name slot))
+     :type type-kw
+     :required (get slot :required true)
+     :source-id inherits-from
+     :value (:value b)
+     :ref-id (:ref-fn-id b)
+     :next-arg-id first-item-id
+     :append? (true? (:list-append b))}))
+
+
+(defn- derive-fn-slot-views
+  "Flatten {fns slots fn-slots bindings list-items} into the row shape
+   layout's helpers walk. Each `(fn, slot)` pair contributes one anchor
+   row; each binding-list-item contributes one item row.
+
+   Anchor row keys: :id :fn-id :slot-id :binding-id :name :type
+                    :required :source-id :value :ref-id
+   Item row keys add: :item-id :prev-arg-id :next-arg-id
+
+   `:source-id` on an anchor row points at the same slot's anchor one
+   parent hop up the chain (nil for the slot's defining fn), so the
+   pipeline's source-chain walks model inheritance the same way the
+   legacy primary/inherited arg pair did. `:source-id` on an item row
+   points at the binding's anchor — items never inherit beyond their
+   own binding."
+  [{:keys [fns slots fn-slots bindings list-items]}]
+  (let [fn-by-id (into {} (map (juxt :id identity)) fns)
+        slot-by-id (into {} (map (juxt :id identity)) slots)
+        own-fn-slots (group-by :fn-id fn-slots)
+        binding-by (into {} (map (juxt (juxt :fn-id :slot-id) identity)) bindings)
+        items-by-binding (->> list-items
+                              (sort-by :position)
+                              (reduce (fn [acc i]
+                                        (update acc (:binding-id i) (fnil conj []) i))
+                                      {}))
+        slot-owner-by-id (into {} (map (juxt :slot-id :fn-id)) fn-slots)
+        binding-extra-by-fn (substitution-context-bindings-by-fn
+                              fn-by-id slot-owner-by-id bindings)
+        ctx {:fn-by-id fn-by-id :slot-by-id slot-by-id
+             :binding-by binding-by :items-by-binding items-by-binding}
+        anchor-rows
+        (vec
+          (mapcat
+            (fn [{fn-id :id}]
+              (let [chain (chain-of fn-by-id fn-id)
+                    seen-slots (volatile! #{})
+                    rows (volatile! [])
+                    emit (fn [inherits-from-fid sid]
+                           (when (and (get slot-by-id sid)
+                                      (not (contains? @seen-slots sid)))
+                             (vswap! seen-slots conj sid)
+                             (vswap! rows conj
+                                     (build-anchor-row fn-id sid inherits-from-fid ctx))))]
+                ;; Pass 1 — parent-chain slots.
+                (doseq [fid chain
+                        fs (get own-fn-slots fid [])]
+                  (emit fid (:slot-id fs)))
+                ;; Pass 2 — bindings on ref-chain-propagated slots.
+                ;; Migration sees these through their slot-owner.
+                (doseq [b (get binding-extra-by-fn fn-id [])]
+                  (emit nil (:slot-id b)))
+                @rows))
+            fns))
+        item-rows
+        (vec
+          (mapcat
+            (fn [b]
+              (let [items (get items-by-binding (:id b) [])
+                    anchor-id (synth-arg-id (:fn-id b) (:slot-id b))
+                    sorted (vec items)]
+                (map-indexed
+                  (fn [idx item]
+                    (let [next-item (get sorted (inc idx))
+                          ;; First item's `:prev-arg-id` points at the
+                          ;; sequence anchor — the editor's "render `×`
+                          ;; and `+` on every item with a non-nil
+                          ;; prev-arg-id" rule relies on it.
+                          prev-item-id (if (pos? idx)
+                                         (:id (get sorted (dec idx)))
+                                         anchor-id)]
+                      {:id (:id item)
+                       :fn-id (:fn-id b)
+                       :slot-id (:slot-id b)
+                       :binding-id (:id b)
+                       :item-id (:id item)
+                       :name nil
+                       :type :any
+                       :required false
+                       :source-id anchor-id
+                       :value (:value item)
+                       :ref-id (:ref-fn-id item)
+                       :next-arg-id (some-> next-item :id)
+                       :prev-arg-id prev-item-id}))
+                  sorted)))
+            bindings))]
+    (into anchor-rows item-rows)))
+
+
 (defn- load-graph-entities-uncached
   [storage]
-  (if (instance? VersionedStorage storage)
-    (vs/query-all-graph-entities storage)
-    {:fns (vec (sp/query-entities storage :fn {}))
-     :args (vec (sp/query-entities storage :arg {}))}))
+  (let [graph (if (instance? VersionedStorage storage)
+                (vs/query-all-graph-entities storage)
+                {:fns        (vec (sp/query-entities storage :fn {}))
+                 :slots      (vec (sp/query-entities storage :slot {}))
+                 :fn-slots   (vec (sp/query-entities storage :fn-slot {}))
+                 :bindings   (vec (sp/query-entities storage :binding {}))
+                 :list-items (vec (sp/query-entities storage :binding-list-item {}))})]
+    (assoc graph :args (derive-fn-slot-views graph))))
 
 
 ;; Graph entities are loaded ONCE per executor context and cached on
@@ -48,28 +268,90 @@
 ;; the same model. Invalidation is driven by CRUD mutation defbase's
 ;; (create/update/delete entity, sequence append/remove) calling
 ;; `graphden.executor.context/invalidate-graph-cache!` after writing.
+(defn- ensure-synth-args
+  "Cached graph data may come from `compile-runtime/rebuild!` which
+   doesn't carry `:args`. Synthesise the slot views on demand if
+   missing."
+  [graph]
+  (cond-> graph
+    (not (contains? graph :args)) (assoc :args (derive-fn-slot-views graph))))
+
+
 (defn- load-graph-entities
   [ctx]
-  (let [cache (:graph-cache ctx)]
-    (or (and cache @cache)
-        (let [data (load-graph-entities-uncached (:storage ctx))]
-          (when cache (reset! cache data))
-          data))))
+  (or (some-> (exec-ctx/cached-graph ctx) ensure-synth-args)
+      (let [data (load-graph-entities-uncached (:storage ctx))]
+        (exec-ctx/fill-graph-cache! ctx data)
+        data)))
 
 
 (defn- build-lookups
-  "Build lookup maps from raw data."
-  [{:keys [fns args]}]
+  "Build lookup maps from raw data.
+
+   Two parallel views live here while the pipeline migrates:
+
+   - The (fn × slot) row view (`:arg-map`, `:args-by-fn`) — still used
+     by most helpers. Each row carries `:fn-id :slot-id :value :ref-id
+     :name :type` plus the synthetic `:id` (UUID xor of fn-id+slot-id)
+     and `:source-id` (the same slot's row at one parent hop up).
+
+   - The slot/binding tables (`:slot-map :fn-slots-by-fn
+     :binding-by-fn-slot :items-by-binding`) — used by helpers that
+     have been ported off the source-id chain idiom in favour of
+     walking `parent-ids` directly."
+  [{:keys [fns args slots fn-slots bindings list-items]}]
   (let [fn-map (into {} (map (fn [f] [(:id f) f]) fns))
         arg-map (into {} (map (fn [a] [(:id a) a]) args))
         args-by-fn (reduce (fn [m a]
                              (if-let [fn-id (:fn-id a)]
                                (update m fn-id (fnil conj []) a)
                                m))
-                           {} args)]
+                           {} args)
+        slot-map (into {} (map (juxt :id identity)) slots)
+        fn-slots-by-fn (reduce (fn [m fs]
+                                 (if-let [fid (:fn-id fs)]
+                                   (update m fid (fnil conj []) fs)
+                                   m))
+                               {} fn-slots)
+        binding-by-fn-slot (into {}
+                                 (map (fn [b] [[(:fn-id b) (:slot-id b)] b]))
+                                 bindings)
+        ;; Phase 6c — index renamed-view slots by (fn-id, source-slot-id)
+        ;; so layout helpers can answer "the displayed name of this
+        ;; binding's slot" via FK lookup instead of the legacy
+        ;; `binding.rename_to` text.
+        slot-by-fn-source-slot (into {}
+                                     (keep (fn [fs]
+                                             (when-let [s (get slot-map (:slot-id fs))]
+                                               (when-let [src (:source-slot-id s)]
+                                                 [[(:fn-id fs) src] s]))))
+                                     fn-slots)
+        bindings-by-fn (reduce (fn [m b]
+                                 (if-let [fid (:fn-id b)]
+                                   (update m fid (fnil conj []) b)
+                                   m))
+                               {} bindings)
+        items-by-binding (->> list-items
+                              (sort-by :position)
+                              (reduce (fn [m it]
+                                        (if-let [bid (:binding-id it)]
+                                          (update m bid (fnil conj []) it)
+                                          m))
+                                      {}))
+        ;; slot-id → fn-id of the fn that DECLARES the slot (i.e. has
+        ;; a fn-slot junction row for it). One owner per slot — slot
+        ;; identities are derived from `(owner-fn-id, slot-name)`.
+        slot-owner (into {} (map (fn [fs] [(:slot-id fs) (:fn-id fs)])) fn-slots)]
     {:fn-map fn-map
      :arg-map arg-map
-     :args-by-fn args-by-fn}))
+     :args-by-fn args-by-fn
+     :slot-map slot-map
+     :fn-slots-by-fn fn-slots-by-fn
+     :slot-by-fn-source-slot slot-by-fn-source-slot
+     :binding-by-fn-slot binding-by-fn-slot
+     :bindings-by-fn bindings-by-fn
+     :items-by-binding items-by-binding
+     :slot-owner slot-owner}))
 
 
 ;; =============================================================================
@@ -109,83 +391,86 @@
 
 
 (defn- resolve-arg-name
-  "Resolve arg name by following source chain."
+  "Effective name of an arg row. Anchor rows already carry the
+   resolved name (closest rename-to, falling back to slot.name) — see
+   `derive-fn-slot-views`. Item rows have `:name=nil`; their anchor
+   sits exactly one source-id hop up, so a single fallback step is
+   enough."
   [arg arg-map]
-  (loop [current arg
-         depth 0]
-    (cond
-      (or (nil? current) (> depth 100)) nil
-      (:name current) (:name current)
-      (:source-id current) (recur (get arg-map (:source-id current)) (inc depth))
-      :else nil)))
-
-
-(defn- fn-sets-args?
-  "Check if fn sets any args (has value or ref-id)."
-  [fn-id args-by-fn]
-  (let [args (get args-by-fn fn-id [])]
-    (some (fn [arg]
-            (or (some? (:value arg))
-                (some? (:ref-id arg))))
-          args)))
+  (or (:name arg)
+      (some-> arg :source-id arg-map :name)))
 
 
 ;; =============================================================================
 ;; BINDINGS RESOLUTION
 ;; =============================================================================
 
+(defn- arg-ids-from
+  "Pluck slot-id/binding-id/item-id/fn-id from an arg row so it can be
+   merged into the internal `compute-display-args` arg-row shape and
+   eventually surface on the emitted cytoscape node via
+   `arg-row->node-id-fields`."
+  [arg]
+  (select-keys arg [:slot-id :binding-id :item-id :fn-id]))
+
+
 (defn- add-bindings-from-fn
-  "Add arg bindings from a fn to bindings map."
-  [fn-id bindings args-by-fn arg-map]
-  (let [args (get args-by-fn fn-id [])]
+  "Add `fn-id`'s OWN binding rows to the slot-id-keyed bindings map.
+
+   A binding's mere presence (whether scalar `:value` / `:ref-fn-id`
+   or `:list-append` with items) marks the slot as bound at fn-id's
+   level. List-items live UNDER a binding row and don't introduce new
+   slot identities, so the binding's own entry suffices to make
+   downstream `(contains? bindings slot-id)` checks succeed.
+
+   Caller is responsible for reduce ordering: `build-chain-bindings`
+   walks ancestors-FIRST so descendants overlay via `assoc`."
+  [fn-id bindings lookups]
+  (let [{:keys [bindings-by-fn slot-map items-by-binding slot-by-fn-source-slot]} lookups]
     (reduce
-      (fn [b arg]
-        (let [has-value (some? (:value arg))
-              has-ref (some? (:ref-id arg))]
-          (if (and (or has-value has-ref) (:source-id arg))
-            ;; Walk up source chain and bind all ancestors
-            (loop [source-id (:source-id arg)
-                   b b]
-              (if-not source-id
-                b
-                (let [b (assoc b source-id
-                               {:arg-name (resolve-arg-name arg arg-map)
-                                :value (:value arg)
-                                :ref-id (:ref-id arg)
-                                :arg-id (:id arg)})
-                      source-arg (get arg-map source-id)]
-                  (recur (:source-id source-arg) b))))
+      (fn [b binding]
+        (let [sid (:slot-id binding)
+              slot (get slot-map sid)
+              ;; Phase 6c — same lookup as build-anchor-row. The
+              ;; renamed-view's name overrides the source slot's
+              ;; for display purposes when the binding-owner has
+              ;; declared a rename.
+              renamed-view (when slot-by-fn-source-slot
+                             (get slot-by-fn-source-slot [(:fn-id binding) sid]))
+              has-value (some? (:value binding))
+              has-ref (some? (:ref-fn-id binding))
+              has-items (seq (get items-by-binding (:id binding) []))]
+          (if (and slot (or has-value has-ref has-items))
+            (assoc b sid {:arg-name (or (:name renamed-view) (:name slot))
+                          :value (:value binding)
+                          :ref-id (:ref-fn-id binding)
+                          :arg-id (synth-arg-id fn-id sid)
+                          :slot-id sid
+                          :binding-id (:id binding)
+                          :fn-id fn-id})
             b)))
       bindings
-      args)))
+      (get bindings-by-fn fn-id []))))
 
 
 (defn- build-chain-bindings
-  "Build bindings from ALL fns in the BFS inheritance closure.
-   levels is [[self] [parent1 parent2 ...] [gp1 gp2 ...] ...].
-
-   target-depth used to be a limit but with multiple inheritance + diamond,
-   bindings can live on any ancestor (one parent binds X while a sibling
-   parent has X free). We always walk every level so the lookup finds the
-   binding wherever it is. Descendants are visited first; their bindings
-   override deeper ancestors via reduce ordering."
-  [levels _target-depth args-by-fn arg-map]
-  (let [all-fns (mapcat identity levels)]
-    (reduce
-      (fn [bindings fn-id]
-        (add-bindings-from-fn fn-id bindings args-by-fn arg-map))
-      {}
-      all-fns)))
+  "Slot-id-keyed bindings map for the BFS inheritance closure of a fn.
+   Closer fn (descendant) wins for the same slot. We walk ANCESTORS
+   first and let `assoc` overwrite as we descend — natural reduce
+   semantics produce closest-wins."
+  [levels lookups]
+  (reduce
+    (fn [b fn-id] (add-bindings-from-fn fn-id b lookups))
+    {}
+    (reverse (mapcat identity levels))))
 
 
 (defn- build-arg-bindings
-  "Build bindings from the fn's OWN args only (level-0, non-expanded mode).
-   Ancestor bindings are NOT included — they appear only when the user
-   explicitly expands to those depths (via build-chain-bindings in expanded
-   mode). This keeps the level-0 display clean: only the fn's own bindings
-   are visible, deeper values require explicit navigation."
-  [fn-id _fn-map args-by-fn arg-map]
-  (add-bindings-from-fn fn-id {} args-by-fn arg-map))
+  "Bindings from fn's OWN binding rows only (level-0, non-expanded
+   mode). Ancestor bindings excluded — they only appear when the user
+   explicitly expands those depths."
+  [fn-id lookups]
+  (add-bindings-from-fn fn-id {} lookups))
 
 
 ;; =============================================================================
@@ -201,18 +486,36 @@
 
 (defn- walk-anchor-chain
   "From a sequence anchor arg, walks next-arg-id via arg-map and returns
-   the ordered vector of item arg entities."
+   the ordered vector of item arg entities. When the anchor has
+   `:append? true`, recursively prepends the parent's effective chain
+   (resolved via `:source-id`) so callers see parent's items followed
+   by this anchor's appended items."
   [anchor arg-map]
-  (loop [cur (:next-arg-id anchor)
-         acc []
-         depth 0]
-    (cond
-      (or (nil? cur) (> depth 10000)) acc
-      :else
-      (let [item (get arg-map cur)]
-        (if (nil? item)
-          acc
-          (recur (:next-arg-id item) (conj acc item) (inc depth)))))))
+  (let [own (loop [cur (:next-arg-id anchor)
+                   acc []
+                   depth 0]
+              (cond
+                (or (nil? cur) (> depth 10000)) acc
+                :else
+                (let [item (get arg-map cur)]
+                  (if (nil? item)
+                    acc
+                    (recur (:next-arg-id item) (conj acc item) (inc depth))))))
+        prepended (when (true? (:append? anchor))
+                    (when-let [parent-anchor (some-> (:source-id anchor) arg-map)]
+                      (when (= :sequence (:type parent-anchor))
+                        (walk-anchor-chain parent-anchor arg-map))))]
+    (vec (concat (or prepended []) own))))
+
+
+(defn- sequence-anchor?
+  "A :sequence-typed arg is a chain anchor only when it doesn't carry
+   its own fn-ref binding. An arg whose `:ref-id` is set IS a
+   ref-to-list-returning-fn (e.g. `:_router/:routes :all`) and must
+   render as a regular ref edge — not as an empty-chain sentinel."
+  [arg]
+  (and (= :sequence (:type arg))
+       (nil? (:ref-id arg))))
 
 
 (defn- expand-sequence-anchor
@@ -228,26 +531,31 @@
   [anchor slot-name arg-map]
   (let [items (walk-anchor-chain anchor arg-map)]
     (if (empty? items)
-      [{:type :unset :arg-name slot-name
-        :arg-type (:type anchor) :arg-id (:id anchor)
-        :sequence-anchor? true}]
+      [(merge {:type :unset :arg-name slot-name
+               :arg-type (:type anchor) :arg-id (:id anchor)
+               :sequence-anchor? true}
+              (arg-ids-from anchor))]
       (into []
             (map-indexed
               (fn [idx item]
-                (let [lbl (str slot-name "[" idx "]")]
+                (let [lbl (str slot-name "[" idx "]")
+                      ids (arg-ids-from item)]
                   (cond
                     (some? (:ref-id item))
-                    {:type :ref :arg-name lbl
-                     :ref-id (:ref-id item) :arg-id (:id item)
-                     :is-binding false}
+                    (merge {:type :ref :arg-name lbl
+                            :ref-id (:ref-id item) :arg-id (:id item)
+                            :is-binding false}
+                           ids)
 
                     (some? (:value item))
-                    {:type :value :arg-name lbl
-                     :value (:value item) :arg-id (:id item)}
+                    (merge {:type :value :arg-name lbl
+                            :value (:value item) :arg-id (:id item)}
+                           ids)
 
                     :else
-                    {:type :unset :arg-name lbl
-                     :arg-type (:type item) :arg-id (:id item)}))))
+                    (merge {:type :unset :arg-name lbl
+                            :arg-type (:type item) :arg-id (:id item)}
+                           ids)))))
             items))))
 
 
@@ -300,12 +608,12 @@
    the base-fn's primary arg to know whether an unbound slot is truly
    optional (`:required false` → caller may leave it blank) or required
    (no explicit `:required false` → caller must supply it)."
-  [arg-map arg]
-  (let [root (loop [a arg, depth 0]
-               (if (or (> depth 200) (not (:source-id a)))
-                 a
-                 (recur (get arg-map (:source-id a)) (inc depth))))]
-    (false? (:required root))))
+  [_arg-map arg]
+  ;; Anchors carry the slot row's `:required` directly (see
+  ;; derive-fn-slot-views) so the legacy walk-to-root step is
+  ;; redundant — every anchor on the chain represents the same slot
+  ;; and therefore the same value.
+  (false? (:required arg)))
 
 
 ;; Forward declarations — these defn-s reference each other. The
@@ -316,7 +624,6 @@
          compute-edge-label
          build-inverse-source-map
          caller-bound-arg
-         terminal-arg-of
          terminal-source-of
          child-covered-sources-for-fn)
 
@@ -341,88 +648,121 @@
            (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
 
 
+(defn- arg-row->node-id-fields
+  "Extract slot/binding/item/fn ids from an arg row for embedding in
+   node data. Editor JS reads these directly so it can address the
+   real binding row through /api/entities/binding/:id without going
+   through a synth-arg-id reverse-lookup."
+  [arg]
+  (cond-> {}
+    (:slot-id arg)    (assoc :slotId    (str (:slot-id arg)))
+    (:binding-id arg) (assoc :bindingId (str (:binding-id arg)))
+    (:item-id arg)    (assoc :itemId    (str (:item-id arg)))
+    (:fn-id arg)      (assoc :fnId      (str (:fn-id arg)))
+    (:type arg)       (assoc :argType   (-> arg :type name))))
+
+
+(defn- edge-source-fields
+  "Edge-data shape mirroring `arg-row->node-id-fields` for the SOURCE
+   side of an inheritance/ref edge — same slot/binding/item/fn ids
+   plus `:sourcePrevArgId` / `:sourceNextArgId` so editor JS can render
+   sequence-item × / + buttons without consulting `lookups.argMap`.
+   Pulled from the synth arg row via arg-id."
+  [lookups source-arg-id]
+  (when source-arg-id
+    (when-let [arg (get-in lookups [:arg-map source-arg-id])]
+      (cond-> (arg-row->node-id-fields arg)
+        (:prev-arg-id arg) (assoc :sourcePrevArgId (str (:prev-arg-id arg)))
+        (:next-arg-id arg) (assoc :sourceNextArgId (str (:next-arg-id arg)))))))
+
+
 (defn- add-arg-value-node
   "Emit a value-style arg node + edge linking it to `source-node-id`.
    No-op when the node is already present (dedup by `:added-node-ids`).
    Returns the emitted node-id."
-  [state lookups arg-name value arg-id source-node-id expanded-fns]
-  (let [node-id (str "arg-" source-node-id "-" arg-id)
+  [state lookups arg source-node-id expanded-fns]
+  (let [arg-id (:arg-id arg)
+        arg-name (:arg-name arg)
+        value (:value arg)
+        node-id (str "arg-" source-node-id "-" arg-id)
         edge-id (str "e-val-" source-node-id "-" arg-id)]
     (when-not (contains? (:added-node-ids @state) node-id)
       (swap! state update :added-node-ids conj node-id)
-      (let [display-value (truncate-label (json/generate-string value) 20)]
+      ;; pr-str renders keywords with the leading `:`, distinguishing
+      ;; them from same-name strings. json/generate-string would lose
+      ;; that distinction (`:foo` and `"foo"` both serialised as `"foo"`),
+      ;; so the wire `:value` for a keyword goes out as `":foo"` (with
+      ;; the colon) — same convention the codec's `preserve-keywords`
+      ;; already uses for jsonb columns. The editor's `classifyLiteralJS`
+      ;; relies on the leading `:` to recognise keywords; without this
+      ;; fixup a literal `:headers` bound to a `[:list :keyword]` slot
+      ;; would mismatch as `text ⊄ keyword` and render the red ring.
+      (let [display-value (truncate-label (pr-str value) 20)
+            wire-value (if (keyword? value) (str value) value)
+            id-fields (arg-row->node-id-fields arg)]
         (swap! state update :nodes conj
-               {:data {:id node-id
-                       :label display-value
-                       :type "arg"
-                       ;; Carries the arg-row id so the frontend can
-                       ;; PUT /api/entities/arg/<id> from a click
-                       ;; without having to parse it out of node-id.
-                       :argId (str arg-id)}}))
+               {:data (merge {:id node-id
+                              :label display-value
+                              :type "arg"
+                              :argId (str arg-id)
+                              :value wire-value}
+                             id-fields)}))
       (swap! state update :edges conj
-             {:data {:id edge-id
-                     :source source-node-id
-                     :target node-id
-                     :sourceArgId arg-id
-                     :argName (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
-                                  (when arg-name (name arg-name)))}}))
+             {:data (merge {:id edge-id
+                            :source source-node-id
+                            :target node-id
+                            :sourceArgId arg-id
+                            :argName (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
+                                         (when arg-name (name arg-name)))}
+                           (edge-source-fields lookups arg-id))}))
     node-id))
 
 
 (defn- make-parent-bound-terminals
-  "Returns a memoized `(fn [fn-id])` that gives the set of terminal-
-   source-ids bound by `fn-id`'s parent-inheritance closure (including
-   itself). Bindings inside ref-id targets are NOT included — those are
-   scoped to the ref's own call context.
+  "Memoised `(fn [fn-id]) → #{slot-id …}`. Returns the set of slot-ids
+   that `fn-id`'s parent-id closure (including itself) binds. A slot
+   counts as bound when some fn in the closure has a binding row with
+   `:value`, `:ref-fn-id`, `:terminal true`, or non-empty list-items.
 
-   Memoised because the same fn-id is queried from many call sites
-   during a single layout pass."
+   Bindings inside ref-id targets are NOT included — those are scoped
+   to the ref's own call context, not to the inheritance chain."
   [lookups]
-  (let [{:keys [fn-map arg-map args-by-fn]} lookups
+  (let [{:keys [fn-map bindings-by-fn items-by-binding]} lookups
         cache (atom {})]
     (fn [fn-id]
       (or (get @cache fn-id)
           (let [visited (atom #{})
-                terms (atom #{})
+                slots (atom #{})
                 walk (fn walk
                        [fid]
                        (when (and fid (not (contains? @visited fid)))
                          (swap! visited conj fid)
-                         (doseq [a (get args-by-fn fid [])]
-                           (when (or (some? (:value a)) (some? (:ref-id a)))
-                             (swap! terms conj (terminal-source-of arg-map (:id a)))))
+                         (doseq [b (get bindings-by-fn fid [])]
+                           (when (or (some? (:value b))
+                                     (some? (:ref-fn-id b))
+                                     (true? (:terminal b))
+                                     (seq (get items-by-binding (:id b) [])))
+                             (swap! slots conj (:slot-id b))))
                          (when-let [f (get fn-map fid)]
                            (doseq [pid (:parent-ids f)]
                              (walk pid)))))]
             (walk fn-id)
-            (let [result @terms]
+            (let [result @slots]
               (swap! cache assoc fn-id result)
               result))))))
 
 
 (defn- arg-determined?
-  "True iff `arg-id`'s terminal source-id is bound by some fn reachable
-   via the source chain owners' parent inheritance.
-
-   Walks `arg-id`'s source chain; for each arg in the chain, takes the
-   OWNING fn's `parent-bound-terminals` set; checks if the terminal is
-   in it.
-
-   This correctly handles MI-propagated args (e.g. `text-error-router.headers`
-   → `text-not-found-response` in chain → `text-content-type` binds
-   `headers` via MI parent) WITHOUT falsely including ref-target
-   bindings (e.g. `method-map` references `assoc-handler` via 'value'
-   ref — `assoc-handler.key` binding is scoped to assoc-handler's own
-   call, not method-map.key)."
+  "True iff arg's slot is bound somewhere in its owning fn's
+   parent-id closure. With slots as terminal identity the legacy
+   source-chain walk collapses to a single closure-membership check
+   on the arg's `:fn-id`. MI is handled inside parent-bound-terminals
+   (it walks every parent path); ref-target bindings are excluded
+   there too (the walk only follows :parent-ids, not :ref-id)."
   [arg-map parent-bound-terminals arg-id]
-  (let [terminal (terminal-source-of arg-map arg-id)]
-    (loop [cur (get arg-map arg-id)]
-      (if (nil? cur)
-        false
-        (let [fid (:fn-id cur)]
-          (if (and fid (contains? (parent-bound-terminals fid) terminal))
-            true
-            (recur (get arg-map (:source-id cur)))))))))
+  (when-let [arg (get arg-map arg-id)]
+    (when-let [fid (:fn-id arg)]
+      (boolean (contains? (parent-bound-terminals fid) (:slot-id arg))))))
 
 
 (defn- collect-fn-args
@@ -446,29 +786,22 @@
                              :or {is-structural false displayed-ref-arg-ids #{} expansion-root-chain #{}}}]
   (let [{:keys [fn-map arg-map args-by-fn]} lookups
         fn-ancestry (set (get-inheritance-chain fn-id fn-map))
-        binding-reaches? (fn [b target-id]
-                           (let [barg (some-> (:arg-id b) arg-map)
-                                 terminal (terminal-arg-of arg-map target-id)]
-                             (and (contains? fn-ancestry (:fn-id terminal))
-                                  (loop [sid (:source-id barg)]
-                                    (cond
-                                      (nil? sid) false
-                                      (or (= sid target-id)
-                                          (= sid (:id terminal))) true
-                                      :else (recur (:source-id (get arg-map sid))))))))
-        binding-applies? (fn [b current-arg-id]
-                           (let [barg (some-> (:arg-id b) arg-map)]
-                             (or (nil? barg)
-                                 (contains? fn-ancestry (:fn-id barg))
-                                 (binding-reaches? b current-arg-id))))
+        ;; A binding "applies" when its owning fn is in `fn-id`'s
+        ;; inheritance closure AND it targets the same slot the arg
+        ;; under inspection lives on. With slots as terminal identity
+        ;; the old "walk source-id chain to see if it reaches target"
+        ;; collapses to a slot-id equality check.
+        ;; Bindings is keyed by slot-id; the entry already carries the
+        ;; binding's owner :fn-id. "Applies" reduces to: owner-fn is in
+        ;; fn-id's inheritance closure (slot-id match is implicit since
+        ;; we look up by slot-id).
+        binding-applies? (fn [b]
+                           (or (nil? b)
+                               (contains? fn-ancestry (:fn-id b))))
         bound-by-chain? (fn [arg]
-                          (loop [sid (:source-id arg)]
-                            (when sid
-                              (if (contains? bindings sid)
-                                true
-                                (recur (:source-id (get arg-map sid)))))))
+                          (contains? bindings (:slot-id arg)))
         raw-args (get args-by-fn fn-id [])
-        sequence-anchors (filterv #(= :sequence (:type %)) raw-args)
+        sequence-anchors (filterv sequence-anchor? raw-args)
         chain-item-ids (into #{}
                              (mapcat (fn [anchor]
                                        (map :id (walk-anchor-chain anchor arg-map))))
@@ -488,14 +821,13 @@
                       raw-args)
         child-sources (child-covered-sources-for-fn lookups fn-id :expansion-root-chain expansion-root-chain)
         all-covered-sources (into child-sources displayed-ref-arg-ids)
+        ;; child-covered-sources-for-fn now returns slot-ids; the
+        ;; binding's lookup is one direct slot-id check on the arg
+        ;; the binding is anchored at.
         binding-goes-to-child?
         (fn [binding-key]
-          (loop [sid binding-key]
-            (when sid
-              (if (contains? all-covered-sources sid)
-                true
-                (let [src-arg (get arg-map sid)]
-                  (recur (:source-id src-arg)))))))
+          (when-let [arg (get arg-map binding-key)]
+            (contains? all-covered-sources (:slot-id arg))))
         all-args (mapv (fn [arg]
                          (let [arg-name (resolve-arg-name arg arg-map)
                                has-value (some? (:value arg))
@@ -505,56 +837,60 @@
                                                   (some? (:ref-id source-arg))))
                                defines-own-ref (and has-ref (not source-has-ref))
                                binding-key (or (:id arg) (:source-id arg))
-                               raw-binding (loop [sid (:id arg)]
-                                             (if-let [b (get bindings sid)]
-                                               (if (binding-applies? b (:id arg))
-                                                 b
-                                                 (when-let [src-arg (get arg-map sid)]
-                                                   (when-let [next-sid (:source-id src-arg)]
-                                                     (recur next-sid))))
-                                               (when-let [src-arg (get arg-map sid)]
-                                                 (when-let [next-sid (:source-id src-arg)]
-                                                   (recur next-sid)))))
+                               ;; bindings is slot-id-keyed; one direct
+                               ;; lookup replaces the source-id chain
+                               ;; walk and the per-step `binding-applies?`
+                               ;; check is just the closure-membership
+                               ;; test (slot equality is implicit).
+                               raw-binding (let [b (get bindings (:slot-id arg))]
+                                             (when (binding-applies? b) b))
                                binding (when (and raw-binding
                                                   (not (binding-goes-to-child? binding-key)))
                                          raw-binding)]
                            (cond
                              (or (and has-ref defines-own-ref)
                                  (and binding (:ref-id binding) (= (:ref-id binding) (:ref-id arg))))
-                             {:type :ref :arg-name arg-name
-                              :ref-id (:ref-id arg) :arg-id (:id arg)
-                              :is-binding false}
+                             (merge {:type :ref :arg-name arg-name
+                                     :ref-id (:ref-id arg) :arg-id (:id arg)
+                                     :is-binding false}
+                                    (arg-ids-from arg))
 
                              (and binding (:ref-id binding)
                                   (or (and has-ref (not= (:ref-id binding) (:ref-id arg)))
                                       (and (not has-ref) (not has-value))))
-                             {:type :ref :arg-name (:arg-name binding)
-                              :ref-id (:ref-id binding) :arg-id (:arg-id binding)
-                              :is-binding true}
+                             (merge {:type :ref :arg-name (:arg-name binding)
+                                     :ref-id (:ref-id binding) :arg-id (:arg-id binding)
+                                     :is-binding true}
+                                    (arg-ids-from binding))
 
                              (and binding (some? (:value binding)))
-                             {:type :value :arg-name (:arg-name binding)
-                              :value (:value binding) :arg-id (:arg-id binding)}
+                             (merge {:type :value :arg-name (:arg-name binding)
+                                     :value (:value binding) :arg-id (:arg-id binding)}
+                                    (arg-ids-from binding))
 
                              (and has-ref (not is-structural))
-                             {:type :ref :arg-name arg-name
-                              :ref-id (:ref-id arg) :arg-id (:id arg)
-                              :is-binding false}
+                             (merge {:type :ref :arg-name arg-name
+                                     :ref-id (:ref-id arg) :arg-id (:id arg)
+                                     :is-binding false}
+                                    (arg-ids-from arg))
 
                              (and has-ref is-structural (not defines-own-ref))
-                             {:type :unset :arg-name arg-name
-                              :arg-type (:type arg) :arg-id (:id arg)}
+                             (merge {:type :unset :arg-name arg-name
+                                     :arg-type (:type arg) :arg-id (:id arg)}
+                                    (arg-ids-from arg))
 
                              has-value
-                             {:type :value :arg-name arg-name
-                              :value (:value arg) :arg-id (:id arg)}
+                             (merge {:type :value :arg-name arg-name
+                                     :value (:value arg) :arg-id (:id arg)}
+                                    (arg-ids-from arg))
 
                              (or raw-binding (bound-by-chain? arg))
                              nil
 
                              :else
-                             {:type :unset :arg-name arg-name
-                              :arg-type (:type arg) :arg-id (:id arg)})))
+                             (merge {:type :unset :arg-name arg-name
+                                     :arg-type (:type arg) :arg-id (:id arg)}
+                                    (arg-ids-from arg)))))
                        args)
         own-slot-terminals (into #{}
                                  (keep (fn [a]
@@ -572,11 +908,12 @@
                     (let [terminal-id (terminal-source-of arg-map (:id a))]
                       (when-not (contains? @seen-terminals terminal-id)
                         (swap! seen-terminals conj terminal-id)
-                        {:type :ref
-                         :arg-name (resolve-arg-name a arg-map)
-                         :ref-id (:ref-id a)
-                         :arg-id (:id a)
-                         :is-binding false}))))
+                        (merge {:type :ref
+                                :arg-name (resolve-arg-name a arg-map)
+                                :ref-id (:ref-id a)
+                                :arg-id (:id a)
+                                :is-binding false}
+                               (arg-ids-from a))))))
                 (mapcat #(get args-by-fn % []) ancestors)))))
         deduped-args
         (let [seen (atom #{})]
@@ -605,7 +942,10 @@
   [lookups levels expand-set bindings]
   (let [{:keys [arg-map args-by-fn]} lookups
         active-fns (filterv expand-set (mapcat identity levels))
-        covered-sources (atom #{})
+        ;; Slot-id-keyed dedup: once a slot has been emitted at the
+        ;; closest active fn, deeper ancestors' views of that same
+        ;; slot are skipped. Replaces the per-step source-chain walk.
+        covered-slots (atom #{})
         result (atom [])
         chain-level (atom 0)
         bound-slot-terminals
@@ -613,8 +953,9 @@
           (fn [acc fn-id]
             (reduce
               (fn [acc2 arg]
-                (if (or (some? (:value arg)) (some? (:ref-id arg)))
-                  (conj acc2 (terminal-source-of arg-map (:id arg)))
+                (if (or (some? (:value arg)) (some? (:ref-id arg))
+                        (true? (:terminal? arg)))
+                  (conj acc2 (:slot-id arg))
                   acc2))
               acc
               (get args-by-fn fn-id [])))
@@ -623,12 +964,12 @@
     (doseq [fn-id active-fns]
       (let [raw-args (get args-by-fn fn-id [])
             anchor-ids (into #{}
-                             (comp (filter #(= :sequence (:type %)))
+                             (comp (filter sequence-anchor?)
                                    (map :id))
                              raw-args)
             chain-ids (into #{}
                             (mapcat (fn [a]
-                                      (when (= :sequence (:type a))
+                                      (when (sequence-anchor? a)
                                         (map :id (walk-anchor-chain a arg-map)))))
                             raw-args)
             args (filterv (fn [a]
@@ -641,38 +982,38 @@
             fn-unsets (atom [])]
         (doseq [arg args]
           (let [arg-id (:id arg)
-                source-id (or (:source-id arg) arg-id)
-                already-covered (contains? @covered-sources source-id)
+                slot-id (:slot-id arg)
+                already-covered (contains? @covered-slots slot-id)
                 has-value (some? (:value arg))
                 has-ref (some? (:ref-id arg))
                 shadow-of-bound
                 (and (not has-value) (not has-ref)
-                     (contains? bound-slot-terminals
-                                (terminal-source-of arg-map arg-id)))]
+                     (contains? bound-slot-terminals slot-id))]
             (when (and (not already-covered) (not shadow-of-bound))
-              (loop [sid source-id]
-                (when sid
-                  (swap! covered-sources conj sid)
-                  (recur (:source-id (get arg-map sid)))))
+              (swap! covered-slots conj slot-id)
               (let [arg-name (resolve-arg-name arg arg-map)
                     from-ancestor (pos? current-level)]
-                (cond
-                  has-ref
-                  (swap! fn-refs conj {:type :ref :arg-name arg-name
-                                       :ref-id (:ref-id arg) :arg-id arg-id
-                                       :from-ancestor from-ancestor})
+                (let [ids (arg-ids-from arg)]
+                  (cond
+                    has-ref
+                    (swap! fn-refs conj (merge {:type :ref :arg-name arg-name
+                                                :ref-id (:ref-id arg) :arg-id arg-id
+                                                :from-ancestor from-ancestor}
+                                               ids))
 
-                  has-value
-                  (swap! fn-values conj {:type :value :arg-name arg-name
-                                         :value (:value arg) :arg-id arg-id
-                                         :from-ancestor from-ancestor})
+                    has-value
+                    (swap! fn-values conj (merge {:type :value :arg-name arg-name
+                                                  :value (:value arg) :arg-id arg-id
+                                                  :from-ancestor from-ancestor}
+                                                 ids))
 
-                  :else
-                  (swap! fn-unsets conj {:type :unset :arg-name arg-name
-                                         :arg-type (:type arg) :arg-id arg-id
-                                         :from-ancestor from-ancestor}))))))
+                    :else
+                    (swap! fn-unsets conj (merge {:type :unset :arg-name arg-name
+                                                  :arg-type (:type arg) :arg-id arg-id
+                                                  :from-ancestor from-ancestor}
+                                                 ids))))))))
         (let [raw-args-of-fn (get args-by-fn fn-id [])
-              anchors (filter #(= :sequence (:type %)) raw-args-of-fn)
+              anchors (filter sequence-anchor? raw-args-of-fn)
               from-ancestor (pos? current-level)]
           (doseq [anchor anchors
                   :let [slot-name (or (resolve-arg-name anchor arg-map) "items")]
@@ -683,16 +1024,14 @@
         (doseq [a @fn-unsets] (swap! result conj a))
         (swap! chain-level inc)))
     (let [seen (atom #{})
-          term (fn [sid]
-                 (loop [cur sid]
-                   (if-let [a (get arg-map cur)]
-                     (if (:source-id a)
-                       (recur (:source-id a))
-                       (:id a))
-                     cur)))]
+          ;; Slot-id is the terminal identity: dedup keys can use it
+          ;; directly instead of walking arg's source chain to find
+          ;; the defining anchor.
+          slot-id-of (fn [aid]
+                       (or (:slot-id (get arg-map aid)) aid))]
       (into []
             (keep (fn [arg]
-                    (let [t (term (:arg-id arg))
+                    (let [t (slot-id-of (:arg-id arg))
                           k (case (:type arg)
                               :ref [t :ref (:ref-id arg)]
                               :value [t :value (:value arg)]
@@ -705,46 +1044,44 @@
 
 
 (defn- child-covered-sources-for-fn
-  "Source-ids that `fn-id`'s child refs already render — used for binding
-   deduplication so the same upstream binding isn't drawn twice (once on
-   `fn-id` and once on the child node it actually feeds).
+  "Slot-ids that `fn-id`'s child refs already render — used for
+   binding deduplication so the same upstream binding isn't drawn
+   twice (once on `fn-id` and once on the child node it feeds).
 
-   `expansion-root-chain` (optional): set of fn-ids in the expansion
-   root's inheritance chain. Source-ids pointing INTO that chain are
-   excluded — they're shared-ancestor args, not child-owned, so the
-   parent should still render them."
+   For each child-ref of `fn-id`, walks the ref-target's inheritance
+   closure and collects every slot in its fn-slots junctions (own +
+   inherited). `expansion-root-chain` slots are excluded — those are
+   shared-ancestor slots, rendered at the parent regardless."
   [lookups fn-id & {:keys [expansion-root-chain] :or {expansion-root-chain #{}}}]
-  (let [{:keys [fn-map args-by-fn]} lookups
+  (let [{:keys [fn-map args-by-fn fn-slots-by-fn]} lookups
         fn-args (get args-by-fn fn-id [])
         child-ref-ids (keep :ref-id fn-args)
-        expansion-chain-arg-ids (when (seq expansion-root-chain)
-                                  (set (mapcat (fn [eid]
-                                                 (map :id (get args-by-fn eid [])))
-                                               expansion-root-chain)))]
-    (set (mapcat (fn [child-ref-id]
-                   (let [child-chain (get-inheritance-chain child-ref-id fn-map)]
-                     (mapcat (fn [child-fn-id]
-                               (keep (fn [arg]
-                                       (when-let [sid (:source-id arg)]
-                                         (when-not (and expansion-chain-arg-ids
-                                                        (contains? expansion-chain-arg-ids sid))
-                                           sid)))
-                                     (get args-by-fn child-fn-id [])))
-                             child-chain)))
-                 child-ref-ids))))
+        expansion-chain-slot-ids (when (seq expansion-root-chain)
+                                   (set (mapcat (fn [eid]
+                                                  (map :slot-id
+                                                       (get fn-slots-by-fn eid [])))
+                                                expansion-root-chain)))
+        slot-ids-of-fn-closure
+        (fn [root-fn-id]
+          (->> (get-inheritance-chain root-fn-id fn-map)
+               (mapcat (fn [fid] (map :slot-id (get fn-slots-by-fn fid []))))
+               (remove (fn [sid]
+                         (and expansion-chain-slot-ids
+                              (contains? expansion-chain-slot-ids sid))))))]
+    (set (mapcat slot-ids-of-fn-closure child-ref-ids))))
 
 
 (defn- arg-marks-hof?
-  "Does `arg-entity` propagate an `:is-fn=true` marker anywhere in its
-   source-id chain? Used to decide whether a ref-binding to another fn
-   crosses a HOF boundary."
-  [arg-map arg-entity]
-  (loop [a arg-entity, depth 0]
-    (cond
-      (nil? a) false
-      (> depth 200) false
-      (:is-fn a) true
-      :else (recur (get arg-map (:source-id a)) (inc depth)))))
+  "Does `arg-entity` propagate a fn-typed marker anywhere in its
+   source-id chain? Used to decide whether a ref-binding to another
+   fn crosses a HOF boundary. After #15b, the HOF marker is `:type
+   :fn` (the legacy `:is-fn` flag was retired)."
+  [_arg-map arg-entity]
+  ;; Anchor rows carry the slot's effective type directly (slot's
+  ;; `:type-fn-id` overlaid by the binding's `:type-override-fn-id`),
+  ;; so the legacy walk-to-root step is redundant — every row in the
+  ;; same slot's chain reports the same `:type`.
+  (= :fn (:type arg-entity)))
 
 
 (defn- child-hof
@@ -755,24 +1092,14 @@
   (or is-hof (arg-marks-hof? arg-map (get arg-map arg-id))))
 
 
-(defn- terminal-arg-of
-  "Walks `:source-id` chain from `arg-id` to the terminal arg (one with
-   no source-id, or the deepest id we can resolve in `arg-map`).
-   Returns the terminal arg ENTITY, or nil if the starting id has no
-   entry. Use `terminal-source-of` for the id-only variant."
-  [arg-map arg-id]
-  (loop [cur (get arg-map arg-id)]
-    (if (and cur (:source-id cur))
-      (if-let [src (get arg-map (:source-id cur))]
-        (recur src)
-        cur)
-      cur)))
-
-
 (defn- terminal-source-of
-  "Id of `arg-id`'s terminal arg, or `arg-id` itself if no chain entry."
+  "Stable identity for `arg-id`'s slot-inheritance lineage. In the
+   slot/binding model the slot itself is the terminal identity, so
+   we just return `:slot-id` of the row. Falls back to `arg-id`
+   when the row isn't in `arg-map` (callers occasionally pass a node
+   id that never came from a real arg row — e.g. expansion roots)."
   [arg-map arg-id]
-  (or (:id (terminal-arg-of arg-map arg-id)) arg-id))
+  (or (:slot-id (get arg-map arg-id)) arg-id))
 
 
 (defn- add-ref-edge!
@@ -796,12 +1123,13 @@
         (when arg-target-key
           (swap! state update :processed-arg-targets conj arg-target-key))
         (swap! state update :edges conj
-               {:data {:id edge-id
-                       :source source-node-id
-                       :target node-id
-                       :sourceArgId source-arg-id
-                       :argName (or (compute-edge-label lookups source-arg-id source-node-id source-expanded-fns)
-                                    (when edge-arg-name (name edge-arg-name)))}})))))
+               {:data (merge {:id edge-id
+                              :source source-node-id
+                              :target node-id
+                              :sourceArgId source-arg-id
+                              :argName (or (compute-edge-label lookups source-arg-id source-node-id source-expanded-fns)
+                                           (when edge-arg-name (name edge-arg-name)))}
+                             (edge-source-fields lookups source-arg-id))})))))
 
 
 (def ^:private max-visible-ancestors
@@ -898,11 +1226,15 @@
          displayed-name (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
                             (when arg-name (name arg-name)))]
      (cond
+       ;; Terminal seal at this fn — slot is consumed, render nothing.
+       (true? (:terminal? arg-rec))
+       nil
+
        optional?
        (record-optional-unset! state source-node-id displayed-name)
 
        is-hof
-       (if-let [bound (caller-bound-arg inverse-source-map arg-id)]
+       (if-let [bound (caller-bound-arg arg-map inverse-source-map arg-id)]
          (swap! state update :captured-edge-migrations assoc (:id bound) source-node-id)
          (record-hof-captured! state source-node-id displayed-name))
 
@@ -920,15 +1252,17 @@
          (when-not (contains? (:added-node-ids @state) node-id)
            (swap! state update :added-node-ids conj node-id)
            (swap! state update :nodes conj
-                  {:data (cond-> {:id node-id
-                                  :label (if arg-type (name arg-type) "any")
-                                  :type "fn"
-                                  :isPlaceholder true
-                                  ;; argId / argType let the frontend
-                                  ;; offer in-place binding of free-arg
-                                  ;; slots (Phase 4) without re-deriving
-                                  ;; them from the node-id string.
-                                  :argId (str arg-id)}
+                  {:data (cond-> (merge {:id node-id
+                                         :label (if arg-type (name arg-type) "any")
+                                         :type "fn"
+                                         :isPlaceholder true
+                                         ;; argId / argType let the frontend
+                                         ;; offer in-place binding of free-arg
+                                         ;; slots (Phase 4) without re-deriving
+                                         ;; them from the node-id string.
+                                         :argId (str arg-id)}
+                                        (when arg-rec
+                                          (arg-row->node-id-fields arg-rec)))
                            arg-type  (assoc :argType (name arg-type))
                            empty-seq? (assoc :isSequenceAnchor true
                                              :sequenceFnId (str (:fn-id arg-rec))))})
@@ -976,30 +1310,44 @@
 
 
 (defn- caller-bound-arg
-  "Reverse source-id BFS from `target-arg-id` over `inverse-source-map`:
-   returns the FIRST downstream arg with `:value` or `:ref-id` set
-   (structurally bound by some caller via cross-HOF source-id chain),
-   or nil. Used both to classify captures and to migrate the rendered
-   edge from the caller down to the inner consumer node."
-  [inverse-source-map target-arg-id]
-  (loop [queue [target-arg-id]
-         visited #{}]
-    (if (empty? queue)
-      nil
-      (let [cur (peek queue)
-            rest-q (pop queue)]
-        (if (contains? visited cur)
-          (recur rest-q visited)
-          (let [children (get inverse-source-map cur [])
-                bound (some (fn [a]
-                              (when (or (some? (:value a))
-                                        (some? (:ref-id a)))
-                                a))
-                            children)]
-            (if bound
-              bound
-              (recur (into rest-q (map :id) children)
-                     (conj visited cur)))))))))
+  "Walks the cross-HOF inheritance lineage of `target-arg-id` and
+   returns the first arg in that lineage with `:value` or `:ref-id`
+   set — i.e., the caller-side binding that fills the inner unset
+   slot. Returns nil when no caller has supplied a value.
+
+   Algorithm:
+     1. Walk UP `target-arg-id`'s `:source-id` chain to the terminal
+        anchor (`source-id=nil`). Every member of the chain shares a
+        slot identity.
+     2. BFS DOWN `inverse-source-map` starting at the terminal — that
+        traverses every arg in any descendant fn that views the same
+        slot.
+     3. Return the first hit with a binding.
+
+   Used both to classify HOF captures (λ-badge vs migration) and to
+   record the migration target so post-processing rewrites the edge
+   to originate at the inner consumer node."
+  [arg-map inverse-source-map target-arg-id]
+  (let [terminal (loop [aid target-arg-id]
+                   (if-let [parent (some-> aid arg-map :source-id)]
+                     (recur parent)
+                     aid))]
+    (loop [queue [terminal]
+           visited #{}]
+      (when-not (empty? queue)
+        (let [cur (peek queue)
+              rest-q (pop queue)]
+          (if (contains? visited cur)
+            (recur rest-q visited)
+            (let [children (get inverse-source-map cur [])
+                  bound (some (fn [a]
+                                (when (or (some? (:value a))
+                                          (some? (:ref-id a)))
+                                  a))
+                              children)]
+              (or bound
+                  (recur (into rest-q (map :id) children)
+                         (conj visited cur))))))))))
 
 
 (defn- compute-edge-label
@@ -1057,7 +1405,7 @@
   "Build graph elements (nodes, edges) from selected function.
    Returns {:nodes [...] :edges [...]}"
   [root-fn-id expansions lookups]
-  (let [{:keys [fn-map arg-map args-by-fn]} lookups
+  (let [{:keys [fn-map arg-map args-by-fn fn-slots-by-fn]} lookups
         ;; Mutable state collected during traversal lives in ONE atom keyed
         ;; by purpose. Helpers receive `state` via lexical closure and use
         ;; `(swap! state update :nodes conj …)` / `(:nodes @state)` to read.
@@ -1088,11 +1436,7 @@
                      :captured-edge-migrations {}})
 
         inverse-source-map (build-inverse-source-map arg-map)
-        parent-bound-terminals (make-parent-bound-terminals lookups)
-
-
-
-        ]
+        parent-bound-terminals (make-parent-bound-terminals lookups)]
 
     ;; Track bindings for EACH expanded function
     ;; Key: expanded-fn-id, Value: {:refs #{ref-ids}, :values #{arg-ids}}
@@ -1122,24 +1466,26 @@
                     ;; This is used to hide bindings that will appear on child nodes instead
                     (let [displayed-ref-arg-ids
                           (when (some? expansion-root)
-                            ;; Collect all ref-ids from this fn's args and bindings
+                            ;; Slot-ids the displayed child refs already
+                            ;; render — fed into collect-fn-args as
+                            ;; `displayed-ref-arg-ids` (now slot-id-
+                            ;; keyed alongside child-covered-sources-
+                            ;; for-fn). Bindings whose slot is in this
+                            ;; set are deferred to the leaf so we don't
+                            ;; double-render.
                             (let [fn-args (get args-by-fn display-fn-id [])
                                   ref-fn-ids (set (concat
                                                     (keep :ref-id fn-args)
                                                     (keep (fn [arg]
-                                                            (when-let [b (get bindings (:id arg))]
+                                                            (when-let [b (get bindings (:slot-id arg))]
                                                               (:ref-id b)))
                                                           fn-args)))
-                                  ;; Exclude fns in expansion root's chain to prevent
-                                  ;; shared ancestors (e.g., conj-any) from filtering out
-                                  ;; bindings that should flow to structural nodes
                                   expansion-chain-fns (set (get-inheritance-chain expansion-root fn-map))]
-                              ;; Get all arg-ids from these ref-fns, excluding shared ancestors
                               (set (mapcat (fn [ref-fn-id]
                                              (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
                                                (mapcat (fn [rfn-id]
                                                          (when-not (contains? expansion-chain-fns rfn-id)
-                                                           (map :id (get args-by-fn rfn-id []))))
+                                                           (map :slot-id (get fn-slots-by-fn rfn-id []))))
                                                        ref-chain)))
                                            ref-fn-ids))))
                           exp-root-chain (when expansion-root
@@ -1159,21 +1505,19 @@
                             ;; Only filter in non-structural (level-0) mode.
                             ;; In structural mode the expanded chain already handles this.
                             (let [all-levels (get-inheritance-levels display-fn-id fn-map)
-                                  ancestor-fns (rest (mapcat identity all-levels))]
+                                  ;; Ancestor-first reduce so descendants
+                                  ;; overlay via assoc (slot-id keying).
+                                  ancestor-fns (reverse (rest (mapcat identity all-levels)))]
                               (reduce
-                                (fn [b fid] (add-bindings-from-fn fid b args-by-fn arg-map))
+                                (fn [b fid] (add-bindings-from-fn fid b lookups))
                                 {} ancestor-fns)))
 
                           ancestor-bound?
                           (fn [arg-id]
-                            (or (when ancestor-bindings
-                                  (loop [sid arg-id]
-                                    (when sid
-                                      (if (get ancestor-bindings sid)
-                                        true
-                                        (when-let [src-arg (get arg-map sid)]
-                                          (recur (:source-id src-arg)))))))
-                                (arg-determined? arg-map parent-bound-terminals arg-id)))
+                            (let [arg (get arg-map arg-id)]
+                              (or (and ancestor-bindings arg
+                                       (contains? ancestor-bindings (:slot-id arg)))
+                                  (arg-determined? arg-map parent-bound-terminals arg-id))))
 
                           filtered-args
                           (filterv (fn [arg]
@@ -1186,7 +1530,7 @@
                           :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
                                      ref-bindings bindings]
                                  (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} (child-hof arg-map (:arg-id arg) is-hof)))
-                          :value (add-arg-value-node state lookups (:arg-name arg) (:value arg) (:arg-id arg) node-id #{display-fn-id})
+                          :value (add-arg-value-node state lookups arg node-id #{display-fn-id})
                           :unset (add-unset-arg-node state lookups inverse-source-map (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id} is-hof)
                           nil))))
                   node-id))
@@ -1229,9 +1573,9 @@
                       ;;    hides :unset args that are bound by non-expanded ancestors
                       ;;    (they're not truly free, just not yet visible).
                       display-bindings (reduce
-                                         (fn [b fid] (add-bindings-from-fn fid b args-by-fn arg-map))
+                                         (fn [b fid] (add-bindings-from-fn fid b lookups))
                                          {} expand-set)
-                      all-bindings (build-chain-bindings levels nil args-by-fn arg-map)
+                      all-bindings (build-chain-bindings levels lookups)
                       ;; Merge order: parent FIRST, display WINS for collisions.
                       chain-bindings (merge parent-bindings display-bindings)
                       ;; Determine expansion root for this node and its children:
@@ -1298,13 +1642,30 @@
                                           (map (fn [fid] [fid (:ref-id ref)]) chain))))
                               ancestor-refs)
 
+                        ;; Walks `arg-id`'s owning fn-id closure
+                        ;; checking each ancestor's match against
+                        ;; the ancestor-ref index. Replaces the old
+                        ;; per-step `:source-id` walk through synth
+                        ;; anchors — semantics: visit each fn whose
+                        ;; view of the slot the chain went through.
+                        ;; Slot-owner first: a binding on a ref-chain-
+                        ;; propagated slot (e.g. `_app-ring-response :args
+                        ;; {:func :_router}` — `:func` is owned by `:invoke`,
+                        ;; reached only via `:m → :router-result`) needs
+                        ;; migration to the ancestor-ref whose chain
+                        ;; INCLUDES that slot owner. Walking the binding's
+                        ;; own fn-id chain finds nothing (the slot is in a
+                        ;; different branch). Walk the slot-owner's chain.
                         migration-target-for
                         (fn [arg]
-                          (loop [sid (:arg-id arg)]
-                            (when sid
-                              (let [a (get arg-map sid)]
-                                (or (get fn-id->ancestor-ref-fn-id (:fn-id a))
-                                    (recur (:source-id a)))))))
+                          (when-let [a (get arg-map (:arg-id arg))]
+                            (let [slot-owner (some-> (:slot-id a)
+                                                     ((:slot-owner lookups)))]
+                              (or (when slot-owner
+                                    (some fn-id->ancestor-ref-fn-id
+                                          (get-inheritance-chain slot-owner fn-map)))
+                                  (some fn-id->ancestor-ref-fn-id
+                                        (get-inheritance-chain (:fn-id a) fn-map))))))
 
                         ;; Partition level-0 refs/values: stay at caller or
                         ;; migrate to one of the ancestor-refs.
@@ -1320,24 +1681,23 @@
                         level-0-stay (:stay classified-level-0)
                         migrated-by-ref (:migrated classified-level-0)
 
-                        ;; For a migrated arg, build bindings keyed by the
-                        ;; source-chain so the target leaf's find-migrated
-                        ;; walk hits them. Keys are the arg's source-chain
-                        ;; elements (same format as add-bindings-from-fn).
+                        ;; For a migrated arg, build bindings keyed by
+                        ;; slot-id so the target leaf's `find-migrated`
+                        ;; lookup hits them. With slot-as-terminal we
+                        ;; need exactly one entry per arg — no chain
+                        ;; walk required.
                         migrated-bindings-for
                         (fn [args]
                           (reduce
                             (fn [b arg]
-                              (let [entry {:arg-name (:arg-name arg)
-                                           :value (:value arg)
-                                           :ref-id (:ref-id arg)
-                                           :arg-id (:arg-id arg)}]
-                                (loop [sid (:arg-id arg), b b]
-                                  (if-not sid
-                                    b
-                                    (let [a (get arg-map sid)]
-                                      (recur (:source-id a)
-                                             (assoc b sid entry)))))))
+                              (if-let [sid (:slot-id (get arg-map (:arg-id arg)))]
+                                (assoc b sid {:arg-name (:arg-name arg)
+                                              :value (:value arg)
+                                              :ref-id (:ref-id arg)
+                                              :arg-id (:arg-id arg)
+                                              :slot-id sid
+                                              :fn-id (:fn-id (get arg-map (:arg-id arg)))})
+                                b))
                             {} args))]
 
                     (swap! expansion-bindings assoc original-fn-id
@@ -1352,11 +1712,10 @@
                           find-migrated
                           (fn [arg-id]
                             (when parent-bindings
-                              (loop [sid arg-id]
-                                (when sid
-                                  (if (contains? parent-bindings sid)
-                                    (get parent-bindings sid)
-                                    (recur (:source-id (get arg-map sid))))))))
+                              (some->> arg-id
+                                       (get arg-map)
+                                       :slot-id
+                                       (get parent-bindings))))
                           ;; Render an unset arg, consulting parent-bindings
                           ;; first for a migrated entry that fills the slot
                           ;; (renders as ref/value); falls back to the unset
@@ -1372,8 +1731,10 @@
                                                 parent-expansion-root expand-set (child-hof arg-map (:arg-id arg) is-hof))
                                 (and m (some? (:value m)))
                                 (add-arg-value-node state lookups
-                                                    (or (:arg-name m) (:arg-name arg))
-                                                    (:value m) (:arg-id arg) node-id expand-set)
+                                                    (assoc m
+                                                           :arg-id (:arg-id arg)
+                                                           :arg-name (or (:arg-name m) (:arg-name arg)))
+                                                    node-id expand-set)
                                 :else
                                 (add-unset-arg-node state lookups inverse-source-map
                                                     (:arg-name arg) (:arg-type arg)
@@ -1384,7 +1745,7 @@
                       (doseq [arg level-0-unsets] (render-unset arg))
 
                       (doseq [arg (filter #(= (:type %) :value) level-0-stay)]
-                        (add-arg-value-node state lookups (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))
+                        (add-arg-value-node state lookups arg node-id expand-set))
 
                       ;; Ancestor refs: pass ONLY their migrated bindings (if
                       ;; any) as the leaf's parent-bindings so it picks them
@@ -1398,7 +1759,7 @@
                       (doseq [arg ancestor-unsets] (render-unset arg))
 
                       (doseq [arg ancestor-values]
-                        (add-arg-value-node state lookups (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))))
+                        (add-arg-value-node state lookups arg node-id expand-set))))
 
                   node-id))
 
@@ -1442,7 +1803,7 @@
                     (let [node-id (add-fn-node state lookups fn-id false source-node-id source-arg-id)]
                       (add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
                       (let [raw-own-args (get args-by-fn fn-id [])
-                            seq-anchors (filterv #(= :sequence (:type %)) raw-own-args)
+                            seq-anchors (filterv sequence-anchor? raw-own-args)
                             seq-chain-ids (into #{}
                                                 (mapcat (fn [anchor]
                                                           (map :id (walk-anchor-chain anchor arg-map))))
@@ -1465,11 +1826,10 @@
                             find-migrated
                             (fn [arg-id]
                               (when parent-bindings
-                                (loop [sid arg-id]
-                                  (when sid
-                                    (if-let [b (get parent-bindings sid)]
-                                      b
-                                      (recur (:source-id (get arg-map sid))))))))]
+                                (some->> arg-id
+                                         (get arg-map)
+                                         :slot-id
+                                         (get parent-bindings))))]
                         (let [;; Dedup by (terminal-slot, rendered-kind).
                               ;; Propagation materializes many shadows per
                               ;; semantic slot; only emit one edge per slot.
@@ -1488,8 +1848,15 @@
                                 has-value
                                 (when (mark-once! [terminal :value (:value arg)])
                                   (add-arg-value-node state lookups
-                                                      (resolve-arg-name arg arg-map)
-                                                      (:value arg) (:id arg) node-id #{fn-id}))
+                                                      {:arg-id (:id arg)
+                                                       :arg-name (resolve-arg-name arg arg-map)
+                                                       :value (:value arg)
+                                                       :type (:type arg)
+                                                       :slot-id (:slot-id arg)
+                                                       :binding-id (:binding-id arg)
+                                                       :item-id (:item-id arg)
+                                                       :fn-id (:fn-id arg)}
+                                                      node-id #{fn-id}))
 
                                 (and migrated (:ref-id migrated))
                                 (when (mark-once! [terminal :ref (:ref-id migrated)])
@@ -1502,9 +1869,12 @@
                                 (and migrated (some? (:value migrated)))
                                 (when (mark-once! [terminal :value (:value migrated)])
                                   (add-arg-value-node state lookups
-                                                      (or (:arg-name migrated)
-                                                          (resolve-arg-name arg arg-map))
-                                                      (:value migrated) (:id arg)
+                                                      (assoc migrated
+                                                             :arg-id (:id arg)
+                                                             :arg-name (or (:arg-name migrated)
+                                                                           (resolve-arg-name arg arg-map))
+                                                             :type (:type arg)
+                                                             :fn-id (:fn-id arg))
                                                       node-id #{fn-id}))
 
                                 (and (not has-ref) (not (arg-determined? arg-map parent-bound-terminals (:id arg))))
@@ -1515,7 +1885,7 @@
                       node-id)
                     ;; Normal processing
                     (if (spec-trivial? spec)
-                      (let [bindings (build-arg-bindings fn-id fn-map args-by-fn arg-map)
+                      (let [bindings (build-arg-bindings fn-id lookups)
                             ;; Merge order: parent first, local (base) WINS.
                             ;; See process-expanded-fn comment for rationale.
                             bindings (if parent-bindings
@@ -1560,9 +1930,62 @@
                                                 :source new-src
                                                 :id (str "e-cap-" new-src "-" (:target data))))
                                   e)))
-                            (:edges @state))]
-      {:nodes final-nodes
-       :edges final-edges})))
+                            (:edges @state))
+          ;; Dedup duplicate value-arg-overlays. Same logical binding
+          ;; can be emitted twice when a level-0 :value migrates into
+          ;; a fn-ref-reached child: once as the parent's level-0
+          ;; binding, once as the child's `find-migrated` resolution.
+          ;; Substitution semantics says it should live at the deepest
+          ;; consumer only — keep the overlay whose source-node-id has
+          ;; the longest "fn-<root>-<arg1>-<arg2>..." suffix chain.
+          ;;
+          ;; Group by (terminal-source-id, displayed-value). Within a
+          ;; group, the overlay reached via the longer source-node-id
+          ;; chain is the deeper consumer; drop the others (and their
+          ;; edges).
+          arg-map (:arg-map lookups)
+          arg-node? (fn [n] (= "arg" (get-in n [:data :type])))
+          node-by-id (into {} (map (juxt #(get-in % [:data :id]) identity)) final-nodes)
+          edges-by-target (group-by #(get-in % [:data :target]) final-edges)
+          source-of (fn [node-id]
+                      (some-> (first (edges-by-target node-id))
+                              :data :source))
+          depth-of (fn [node-id]
+                     (count (filter #{\-} (or node-id ""))))
+          ;; Group arg-overlays by (terminal-source-id, value-label)
+          dedupe-groups (->> final-nodes
+                             (filter arg-node?)
+                             (group-by (fn [n]
+                                         (let [data (:data n)
+                                               aid (some-> (:argId data) parse-uuid)
+                                               terminal (when aid
+                                                          (terminal-source-of arg-map aid))]
+                                           [terminal (:label data)]))))
+          ;; For each group with >1 entry, drop everything except the
+          ;; deepest. Keep groups with [nil _] keys (no terminal —
+          ;; literals not wired to a primary slot — never dedup).
+          drop-node-ids (->> dedupe-groups
+                             (mapcat (fn [[[terminal _] members]]
+                                       (when (and terminal (> (count members) 1))
+                                         (let [scored (mapv (fn [n]
+                                                              [(depth-of (source-of (get-in n [:data :id]))) n])
+                                                            members)
+                                               max-depth (apply max (map first scored))
+                                               losers (->> scored
+                                                           (remove #(= max-depth (first %)))
+                                                           (map (comp #(get-in % [:data :id]) second)))]
+                                           losers))))
+                             set)
+          deduped-nodes (filterv (fn [n]
+                                   (not (contains? drop-node-ids
+                                                   (get-in n [:data :id]))))
+                                 final-nodes)
+          deduped-edges (filterv (fn [e]
+                                   (not (contains? drop-node-ids
+                                                   (get-in e [:data :target]))))
+                                 final-edges)]
+      {:nodes deduped-nodes
+       :edges deduped-edges})))
 
 
 ;; =============================================================================

@@ -1,35 +1,97 @@
 (ns graphden.executor.compile.lookups
-  "Index helpers over fn and arg entities used throughout compile.
+  "Index helpers over the slot / fn-slot / binding model used during compile.
 
    Pure functions on maps — no side effects, no dependency on the compile
    driver. Shared by `compile` (binding resolution, ref rewriting) and
-   `compile-runtime` (translating arg-ids back to external names).")
+   `compile-runtime` (mapping ext-names back to slots).")
 
 
 (defn build-lookups
-  "Index fns and args for fast lookup during compile."
-  [fns args]
-  (let [fn-map (into {} (map (juxt :id identity) fns))
-        arg-map (into {} (map (juxt :id identity) args))
-        args-by-fn (reduce (fn [m a]
-                             (update m (:fn-id a) (fnil conj []) a))
-                           {}
-                           args)]
-    {:fn-map fn-map
-     :arg-map arg-map
-     :args-by-fn args-by-fn}))
+  "Index entities for fast lookup during compile. Inputs:
+     fns                 — vector of fn rows
+     slots               — vector of slot rows
+     fn-slots            — vector of fn-slot junction rows
+     bindings            — vector of binding rows
+     list-items          — vector of binding-list-item rows
+
+   Output keys:
+     :fn-map               {fn-id → fn-row}
+     :slot-map             {slot-id → slot-row}
+     :fn-slots-by-fn       {fn-id → [fn-slot-row …]}, ordered by :position
+     :slot-by-fn-name      {[fn-id slot-name-keyword] → slot-row}
+     :slot-by-fn-source-slot
+                            {[fn-id source-slot-id] → slot-row} —
+                            renamed-view lookup. A composed fn that
+                            exposes ancestor slot S under a new name
+                            owns a slot row whose `:source-slot-id`
+                            points back at S; this index lets renamers
+                            be located in O(1) without walking
+                            fn-slots-by-fn.
+     :bindings-by-fn       {fn-id → [binding-row …]}
+     :binding-by-fn-slot   {[fn-id slot-id] → binding-row}
+     :items-by-binding     {binding-id → [item-row …]}, ordered by :position
+     :chain-cache          atom {fn-id → chain-vector} — lazy cache for
+                            `inheritance-chain*`. Multiple compile-time
+                            helpers (`effective-required?`, `effective-binding`,
+                            `fn-typed-slot?`, `list-items-for`,
+                            `closest-binding-for-slot`, `rename-for-slot`)
+                            walk the same chain for the same fn-id many
+                            times during one classification pass; this atom
+                            collapses that to a single BFS per fn-id."
+  [{:keys [fns slots fn-slots bindings list-items]}]
+  (let [fn-map (into {} (map (juxt :id identity)) fns)
+        slot-map (into {} (map (juxt :id identity)) slots)
+        fn-slots-by-fn (->> fn-slots
+                            (sort-by (juxt :fn-id :position))
+                            (reduce (fn [acc fs]
+                                      (update acc (:fn-id fs) (fnil conj []) fs))
+                                    {}))
+        slot-by-fn-name (into {}
+                              (mapcat (fn [[fid junctions]]
+                                        (keep (fn [fs]
+                                                (when-let [s (get slot-map (:slot-id fs))]
+                                                  [[fid (keyword (:name s))] s]))
+                                              junctions)))
+                              fn-slots-by-fn)
+        slot-by-fn-source-slot (into {}
+                                     (mapcat (fn [[fid junctions]]
+                                               (keep (fn [fs]
+                                                       (when-let [s (get slot-map (:slot-id fs))]
+                                                         (when-let [src (:source-slot-id s)]
+                                                           [[fid src] s])))
+                                                     junctions)))
+                                     fn-slots-by-fn)
+        bindings-by-fn (reduce (fn [acc b]
+                                 (update acc (:fn-id b) (fnil conj []) b))
+                               {}
+                               bindings)
+        binding-by-fn-slot (into {}
+                                 (map (juxt (juxt :fn-id :slot-id) identity))
+                                 bindings)
+        items-by-binding (->> list-items
+                              (sort-by (juxt :binding-id :position))
+                              (reduce (fn [acc i]
+                                        (update acc (:binding-id i) (fnil conj []) i))
+                                      {}))]
+    {:fn-map             fn-map
+     :slot-map           slot-map
+     :fn-slots-by-fn     fn-slots-by-fn
+     :slot-by-fn-name    slot-by-fn-name
+     :slot-by-fn-source-slot slot-by-fn-source-slot
+     :bindings-by-fn     bindings-by-fn
+     :binding-by-fn-slot binding-by-fn-slot
+     :items-by-binding   items-by-binding
+     :chain-cache        (atom {})}))
 
 
 (defn inheritance-chain
-  "Return vector of fn-ids reachable from F via `parent-ids` in BFS order.
-   F is first, then direct parents, then grandparents, etc. Under
-   multiple inheritance a fn may have several parents; we collect ALL
-   of them so bindings on non-primary parents (e.g. `text-not-found-
-   response` inheriting status from `not-found-response` AND content-
-   type from `text-content-type`) are both visible.
+  "Vector of fn-ids reachable from F via `parent-ids` in BFS order. F is
+   first, then direct parents, then grandparents, etc. Multi-inheritance
+   collects ALL parents — bindings on non-primary parents stay visible.
 
-   `closest-binding` walks this vector in order, so earlier (nearer F)
-   bindings still win when multiple ancestors bind the same slot."
+   Walking this vector in order (closest-first) makes the standard
+   override rule work: a binding on F shadows the same slot bound by an
+   ancestor."
   [fn-id fn-map]
   (loop [acc [fn-id]
          seen #{fn-id}
@@ -50,76 +112,82 @@
                    (into rest-queue pids))))))))
 
 
-(defn base-fn-of
-  "Return the terminal ancestor fn-entity (parent-ids empty) reachable
-   from fn-id. Graphden's data model guarantees MI paths all converge
-   to the same base-fn, so returning the first one found is correct."
-  [fn-id fn-map]
-  (let [chain (inheritance-chain fn-id fn-map)]
-    (some (fn [fid]
-            (let [f (get fn-map fid)]
-              (when (empty? (:parent-ids f))
-                f)))
-          chain)))
+(defn inheritance-chain*
+  "Memoised variant of `inheritance-chain`. Reads from / writes through
+   `:chain-cache` on the lookups map. Falls back to plain
+   `inheritance-chain` when `:chain-cache` isn't present (legacy callers
+   that hand-built lookups outside `build-lookups`)."
+  [fn-id {:keys [fn-map chain-cache]}]
+  (if chain-cache
+    (or (get @chain-cache fn-id)
+        (let [chain (inheritance-chain fn-id fn-map)]
+          (swap! chain-cache assoc fn-id chain)
+          chain))
+    (inheritance-chain fn-id fn-map)))
 
 
-(defn primary-arg?
-  "An arg is primary (belongs to the base-fn) when it has no source-id."
-  [arg]
-  (nil? (:source-id arg)))
+(defn root-fn
+  "Walk the inheritance chain of `fn-id` and return the first ancestor
+   with empty `:parent-ids` — the root that owns the slots. In the new
+   model the root is a base-fn (impl-hash set) OR a type-row (record /
+   refinement / list / primitive); both have synthesised impls registered
+   under their fn-name. Two-arity form takes raw `fn-map` (legacy);
+   three-arity form takes the full lookups map and benefits from chain
+   caching."
+  ([fn-id fn-map]
+   (let [chain (inheritance-chain fn-id fn-map)]
+     (some (fn [fid]
+             (let [f (get fn-map fid)]
+               (when (empty? (:parent-ids f))
+                 f)))
+           chain)))
+  ([fn-id fn-map lookups]
+   (let [chain (inheritance-chain* fn-id (assoc lookups :fn-map fn-map))]
+     (some (fn [fid]
+             (let [f (get fn-map fid)]
+               (when (empty? (:parent-ids f))
+                 f)))
+           chain))))
 
 
-(defn walk-source-chain
-  "Walk an arg's source-id chain upward and return the sequence of arg ids
-   from the arg itself to its terminal primary-arg. Stops at source-id=nil."
-  [arg-id arg-map]
-  (loop [acc [arg-id], id arg-id]
-    (let [a (get arg-map id)]
-      (if-let [sid (:source-id a)]
-        (recur (conj acc sid) sid)
-        acc))))
+(defn root-slots
+  "Vector of slot-rows owned by `fn-id`'s root, ordered by fn-slot
+   position. These are the parameters the impl receives."
+  [fn-id {:keys [fn-map slot-map fn-slots-by-fn] :as lookups}]
+  (when-let [root (root-fn fn-id fn-map lookups)]
+    (->> (get fn-slots-by-fn (:id root) [])
+         (keep (fn [fs] (get slot-map (:slot-id fs))))
+         vec)))
 
 
-(defn terminal-primary-id
-  "Return the id of the primary arg that this arg's source-chain terminates at.
-   For a primary arg itself, returns its own id."
-  [arg-id arg-map]
-  (peek (walk-source-chain arg-id arg-map)))
+(defn closest-binding-for-slot
+  "Walk F's inheritance chain (closest-first) and return the first
+   binding-row that targets `slot-id`. nil if no chain ancestor binds
+   the slot."
+  [fn-id slot-id {:keys [binding-by-fn-slot] :as lookups}]
+  (some (fn [fid]
+          (get binding-by-fn-slot [fid slot-id]))
+        (inheritance-chain* fn-id lookups)))
 
 
-(defn source-chain-set
-  "Set of all arg-ids in `arg-id`'s source-id chain (inclusive)."
-  [arg-id arg-map]
-  (set (walk-source-chain arg-id arg-map)))
+(defn rename-for-slot
+  "Effective external name for `slot-id` as seen by F's caller. Walks
+   the inheritance chain (closest-first); the first own-slot found
+   in the chain whose `:source-slot-id` points to `slot-id` wins —
+   its `:name` is the rename. Falls back to the slot's own name.
 
-
-(defn arg-ext-name
-  "External name of `arg-id` — first `:name` found walking its source-id
-   chain (from `arg-id` toward the terminal primary), falling back to the
-   terminal primary's name. Handles propagated args correctly: a nameless
-   pass-through arg inherits the name of whichever ancestor first set one
-   (typically the rename inside a ref-target)."
-  [arg-id arg-map]
-  (loop [id arg-id, fallback nil]
-    (if-let [a (get arg-map id)]
-      (let [nm (some-> (:name a) keyword)]
-        (cond
-          nm nm
-          (:source-id a) (recur (:source-id a) (or fallback nm))
-          :else fallback))
-      fallback)))
-
-
-(defn source-chain-stays-within?
-  "True iff every step of `arg-id`'s source-id chain lives on a fn that's
-   present in `fn-id-set`. Used to distinguish F's own binding args (stay
-   in F's inheritance chain) from propagation pass-throughs (chain crosses
-   into a ref-target fn)."
-  [arg-id fn-id-set arg-map]
-  (loop [id arg-id]
-    (let [a (get arg-map id)]
-      (if (contains? fn-id-set (:fn-id a))
-        (if-let [sid (:source-id a)]
-          (recur sid)
-          true)
-        false))))
+   Phase 6c: the FK link `slot.source-slot-id` is now the canonical
+   carrier for renames. The legacy `binding.rename-to` text is no
+   longer read here — Phase 6b ensures every UI-driven rename also
+   creates the renamed-view slot row, and Phase 6a's parser
+   populates the FK for every EDN-declared rename. Positional
+   list-item renames don't reach this resolver — they live in
+   binding-list-item rows and resolve through that path."
+  [fn-id slot-id {:keys [slot-map slot-by-fn-source-slot] :as lookups}]
+  (let [renamed (some (fn [fid]
+                        (some-> (get slot-by-fn-source-slot [fid slot-id])
+                                :name
+                                keyword))
+                      (inheritance-chain* fn-id lookups))]
+    (or renamed
+        (some-> (get-in slot-map [slot-id :name]) keyword))))

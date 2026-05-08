@@ -4,6 +4,7 @@
  :dependencies ["core"]
  :modules ["basics"
            "inheritance"
+           "multi-inheritance"
            "free-args"
            "collections"
            "hof"
@@ -12,4 +13,15 @@
            "literal-keyword-in-sequence"
            "cond-pattern"
            "reduce-pattern"
-           "error-handling"]}
+           "error-handling"
+           "types-refinement"
+           "types-effects"
+           "runtime-refinement"
+           "types-variants"
+           "types-nullable"
+           "types-terminal-arg"
+           "types-append-list"
+           "recipe-mini-app"
+           "local-fns-pattern"
+           "regression/sequence-fn-ref"
+           "regression/migrate-on-fn-ref"]}

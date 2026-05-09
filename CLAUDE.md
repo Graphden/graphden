@@ -190,7 +190,8 @@ The editor frontend is split into modules for better maintainability:
 | `editor-layout.js` | Grid layout algorithm, positioning |
 | `editor-literal-types.js` | Type-validation helpers shared by edit popovers (mirrors `graphden.types.check`) |
 | `editor-tooltips.js` | Description-tooltip + full-name popover singletons |
-| `editor-icons.js` | Right-edge action icons (`i`, `↗`, ✎ pencil) |
+| `editor-icons.js` | Right-edge action icons (`i`, `↗`, ✎ pencil) + per-row `⋯` more-actions trigger |
+| `editor-row-actions.js` | Singleton popover anchored OUTSIDE the card (right of the `⋯` trigger) — hosts ns / i / ↗ / ✎ / × / + / ✕ for each fn-row. Hover-show, click-pin, scales + repositions live with `cy.zoom() / cy.pan()` |
 | `editor-drag.js` | Drag handle for any overlay |
 | `editor-fn-picker.js` | Type-aware fn-picker popover |
 | `editor-namespace-picker.js` | Namespace picker popover (Phase 5 ns-move) |
@@ -208,7 +209,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → busy → prefs → auth → create → data → layout → literal-types → tooltips → icons → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → type-explainer → overlay-arg → overlay-edge-label → overlays → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → busy → prefs → auth → create → data → layout → literal-types → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → type-explainer → overlay-arg → overlay-edge-label → overlays → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 

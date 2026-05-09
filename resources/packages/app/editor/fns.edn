@@ -31,6 +31,7 @@
                   "packages/app/editor/editor-literal-types.js"
                   "packages/app/editor/editor-tooltips.js"
                   "packages/app/editor/editor-icons.js"
+                  "packages/app/editor/editor-row-actions.js"
                   "packages/app/editor/editor-drag.js"
                   "packages/app/editor/editor-fn-picker.js"
                   "packages/app/editor/editor-namespace-picker.js"

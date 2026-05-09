@@ -582,6 +582,42 @@ body.sidebar-collapsed .sidebar-expand-floating {
   opacity: 1;
 }
 
+/* More-actions trigger ("⋯") — always visible, sits at slot r-1 of
+   every fn-row. Hovering / clicking opens the row-actions popover
+   (rendered OUTSIDE the card silhouette, see editor-row-actions.js)
+   that hosts the ns / i / ↗ / ✎ / × / + / ✕ glyphs. The popover
+   itself uses the .row-actions-popover class. */
+.more-actions-trigger {
+  opacity: 0.55;
+  transition: opacity 0.1s, background-color 0.1s;
+}
+.more-actions-trigger:hover {
+  opacity: 1;
+  background: var(--hover-bg);
+}
+
+/* Row-actions popover — floats outside the card to the right (or
+   left if there's no room). Brief fade-in masks the position-shift
+   when zoom changes apply scale/transform mid-frame. */
+.row-actions-popover {
+  transition: opacity 0.08s ease;
+}
+.row-actions-popover .description-badge,
+.row-actions-popover .open-in-new-tab,
+.row-actions-popover .edit-pencil,
+.row-actions-popover .pinned-icon-btn,
+.row-actions-popover .namespace-badge {
+  opacity: 0.95;
+  transition: opacity 0.1s, background-color 0.1s;
+}
+.row-actions-popover .description-badge:hover,
+.row-actions-popover .open-in-new-tab:hover,
+.row-actions-popover .edit-pencil:hover,
+.row-actions-popover .pinned-icon-btn:hover,
+.row-actions-popover .namespace-badge:hover {
+  opacity: 1;
+}
+
 /* Arg-value edit popover — small floating panel anchored below the
    clicked value box. Theme-aware via the same vars as the rest of
    the editor; uses `--card-*` so the popover visually matches a

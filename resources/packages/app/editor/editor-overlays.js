@@ -74,7 +74,7 @@ function makeAddMIParentButton(cardFnEntity, onEnter, pinSlot) {
     title: candidateCount > 0
       ? 'Add another parent (multi-inheritance)'
       : ('No compatible MI parent — ' + firstReason),
-    pinSlot: pinSlot || 1,
+    inline: true,
     onEnter,
     onClick: candidateCount > 0
       ? (anchor) => addMIParentInline(cardFnEntity, anchor)
@@ -97,33 +97,10 @@ function rowWantsNamespaceBadge(rowFn) {
 }
 
 // Attach the left-pinned namespace badge to a fn-row. The badge is
-// always shown for named fns (root + every ancestor on every card),
-// readable on hover, click-to-edit when the targeted fn is editable
-// + the user is signed in. Returns the appended element so callers
-// can adjust z-index when they need to (column-below-MI uses an
-// absolute textOverlay above the column divs).
-function attachNamespaceBadge(line, rowFn, opts) {
-  opts = opts || {};
-  if (!rowWantsNamespaceBadge(rowFn)) return null;
-  if (!lookups?.fnMap || typeof createNamespaceBadge !== 'function') return null;
-  const fnEntity = lookups.fnMap.get(rowFn.fnId);
-  if (!fnEntity) return null;
-  const nsPath = (typeof getFnNamespace === 'function')
-                 ? getFnNamespace(fnEntity) : null;
-  const canEdit = typeof isAuthenticated === 'function' && isAuthenticated()
-               && typeof isFnEditable === 'function' && isFnEditable(rowFn.fnId)
-               && typeof enterNamespaceMoveEditMode === 'function';
-  const badge = createNamespaceBadge(nsPath, {
-    onEnter: opts.onEnter,
-    onClick: canEdit
-             ? (anchor) => enterNamespaceMoveEditMode(fnEntity, anchor)
-             : null
-  });
-  if (!badge) return null;
-  line.appendChild(badge);
-  return badge;
-}
-
+// `attachNamespaceBadge` lived here in earlier iterations to pin a
+// `ns` badge inside each fn-row. Removed when the row-actions popover
+// (editor-row-actions.js) absorbed the ns badge alongside the other
+// per-row affordances; row-bodies now show only the fn name.
 /**
  * Create overlay element with common styles
  */
@@ -333,8 +310,6 @@ function appendUseSiteHeader(overlay, ctx) {
     if (!expansionState.has(nodeId)) return;
     const collapsedSpec = { fullDepth: 0, partialFns: new Set() };
     applyPreviewStyle(collapsedSpec);
-    // depth=0 → computeSpecAfterClick returns null → applyHoverSpec
-    // stores {fullDepth:0, empty} in previewState (the layout fallback).
     applyHoverSpec(nodeId, 0, originalFnId, [originalFnId]);
   };
   attachPreviewHandlers(useSite, triggerUseSitePreview, onPreviewLeave, restoreStyles);
@@ -364,16 +339,13 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   // never spills under those controls — and the centering point
   // stays unchanged.
   const colFn = levelInfo.fns[0];
-  const colHasDesc = !!colFn.description;
   const colShowOpen = !!colFn.name && !(isNavRoot && levelInfo.depth === 0);
-  // Asymmetric: only the right side reserves room for the action
-  // icons. Symmetric reservation eats too much width in narrow MI
-  // cells and wraps the name behind the icons.
-  const colRightInset = (colHasDesc && colShowOpen) ? '42px'
-                      : (colHasDesc || colShowOpen) ? '24px'
-                      : '0';
-  // Left inset clears the `ns` badge when this row will carry one.
-  const colLeftInset = rowWantsNamespaceBadge(colFn) ? '28px' : '8px';
+  // Right inset reserves the single slot for the more-actions trigger
+  // pinned at slot r-1. Per-row affordances (description, ns,
+  // open-in-new-tab) live in the popover the trigger opens, so the
+  // text only has to clear that one icon.
+  const colRightInset = '24px';
+  const colLeftInset = '8px';
   const textOverlay = document.createElement('span');
   textOverlay.textContent = displayLabel(colFn.name);
   Object.assign(textOverlay.style, {
@@ -403,30 +375,47 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   });
   line.appendChild(textOverlay);
   const colClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-  const colDescBadge = createDescriptionBadge(colFn.description, {
-    pinRight: true,
-    onEnter: colClearPreview,
-    name: colFn.name,
-    namespace: getFnNamespace(lookups.fnMap.get(colFn.fnId)),
-    entityType: 'fn',
-    entityId: colFn.fnId
-  });
-  if (colDescBadge) {
-    colDescBadge.style.zIndex = '2';
-    line.appendChild(colDescBadge);
-  }
-  // Namespace badge — left-pinned, sits above the column divs.
-  const colNsBadge = attachNamespaceBadge(line, colFn, { onEnter: colClearPreview });
-  if (colNsBadge) colNsBadge.style.zIndex = '2';
-  if (colShowOpen) {
-    const colOpenBtn = createOpenInNewTabButton(lookups.fnMap.get(colFn.fnId), {
-      pinRight: true,
-      onEnter: colClearPreview
-    });
-    if (colOpenBtn) {
-      colOpenBtn.style.zIndex = '2';
-      line.appendChild(colOpenBtn);
+  const colFnEntity = lookups?.fnMap?.get(colFn.fnId) || null;
+  // Per-row affordances (ns / i / ↗) move into the row-actions
+  // popover anchored to the more-actions trigger. The trigger sits
+  // on top of the column divs so the user can hit it across the full
+  // row width.
+  const buildColPopoverContent = (host) => {
+    if (colFnEntity && rowWantsNamespaceBadge(colFn)
+        && typeof createNamespaceBadge === 'function') {
+      const nsPath = (typeof getFnNamespace === 'function')
+                     ? getFnNamespace(colFnEntity) : null;
+      const canEdit = typeof isAuthenticated === 'function' && isAuthenticated()
+                   && typeof isFnEditable === 'function' && isFnEditable(colFn.fnId)
+                   && typeof enterNamespaceMoveEditMode === 'function';
+      const nsBadge = createNamespaceBadge(nsPath, {
+        inline: true,
+        onClick: canEdit
+                 ? (anchor) => enterNamespaceMoveEditMode(colFnEntity, anchor)
+                 : null
+      });
+      if (nsBadge) host.appendChild(nsBadge);
     }
+    const descBadge = createDescriptionBadge(colFn.description, {
+      name: colFn.name,
+      namespace: colFnEntity ? (typeof getFnNamespace === 'function'
+                                 ? getFnNamespace(colFnEntity) : null) : null,
+      entityType: 'fn',
+      entityId: colFn.fnId
+    });
+    if (descBadge) host.appendChild(descBadge);
+    if (colShowOpen && colFnEntity) {
+      const openBtn = createOpenInNewTabButton(colFnEntity, {});
+      if (openBtn) host.appendChild(openBtn);
+    }
+  };
+  if (typeof createMoreActionsTrigger === 'function') {
+    const trigger = createMoreActionsTrigger({
+      onEnter: colClearPreview,
+      buildContent: buildColPopoverContent
+    });
+    trigger.style.zIndex = '2';
+    line.appendChild(trigger);
   }
   bindFullNameHover(line, textOverlay, colFn.name);
   // Store column info for paintWithSpec
@@ -436,12 +425,17 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   // depth (cascade through MI + this level). When collapsing (already
   // expanded), collapse the WHOLE group by targeting the MI level's
   // depth — so toggle goes to miDepth - 1, removing MI too.
-  line.style.cursor = 'pointer';
+  // The chevron in slot l-1 is the click target; the row body is a
+  // passive surface, so action icons can use the hover-to-show pattern
+  // without competing with a row-wide expansion handler.
   const fnIdForLine = levelInfo.fns[0].fnId;
   const allFnsAtDepth = [fnIdForLine];
   const expandDepth = levelInfo.groupMaxDepth;
   const collapseDepth = miLevelAbove.depth;  // collapse whole group
   const getTargetDepth = () => expandDepth <= fullDepth ? collapseDepth : expandDepth;
+  // Whole-line click cascades expansion to groupMaxDepth (so empty
+  // grouped levels expand together); hover previews the same.
+  line.style.cursor = 'pointer';
   const onMouseDown = (e) => {
     e.stopPropagation();
     e.preventDefault();
@@ -494,17 +488,12 @@ function renderMiRow(line, levelInfo, idx, ctx) {
   levelInfo.fns.forEach((f, i) => {
     const span = document.createElement('span');
     span.textContent = displayLabel(f.name);
-    span.style.cursor = 'pointer';
     const miShowOpen = !!f.name && !(isNavRoot && levelInfo.depth === 0);
-    // Asymmetric right padding leaves the action icons their own
-    // zone without halving the cell's text width on both sides.
-    const miInset = (f.description && miShowOpen) ? '4px 42px 4px 8px'
-                  : (f.description || miShowOpen) ? '4px 24px 4px 8px'
-                  : '4px 8px';
-    // Right padding reserves room for the action icons; text is
-    // left-aligned and truncated with an ellipsis when the cell is
-    // narrower than the name. Hover reveals the full name.
-    span.style.padding = miInset;
+    // Right inset reserves the single more-actions trigger slot;
+    // per-cell affordances live in the popover it opens, not in the
+    // cell. Left side is just the small breathing room around the
+    // name.
+    span.style.padding = '4px 24px 4px 8px';
     span.style.flex = '1 1 0';
     span.style.minWidth = '0';
     span.style.textAlign = 'left';
@@ -514,40 +503,62 @@ function renderMiRow(line, levelInfo, idx, ctx) {
     span.style.position = 'relative';
     bindFullNameHover(span, span, f.name);
     const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-    const miDescBadge = createDescriptionBadge(f.description, {
-      pinRight: true,
-      onEnter: miClearPreview,
-      name: f.name,
-      namespace: getFnNamespace(lookups.fnMap.get(f.fnId)),
-      entityType: 'fn',
-      entityId: f.fnId
-    });
-    if (miDescBadge) span.appendChild(miDescBadge);
-    if (miShowOpen) {
-      const miOpenBtn = createOpenInNewTabButton(lookups.fnMap.get(f.fnId), {
-        pinRight: true,
-        onEnter: miClearPreview
-      });
-      if (miOpenBtn) span.appendChild(miOpenBtn);
-    }
-    // Per-cell `×` remove-this-MI-parent — depth-1 of any editable
-    // card (nav-root + reachable value-fn cards). Same loose gate
-    // as renderSingleFnRow: re-parenting doesn't break refs.
+    const cellFnEntity = lookups?.fnMap?.get(f.fnId) || null;
+    const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
     const miEditable = levelInfo.depth === 1
       && typeof isAuthenticated === 'function' && isAuthenticated()
       && implementationFnIds?.has(ctx.originalFnId);
-    if (miEditable && lookups?.fnMap && typeof removeParentInline === 'function') {
-      const cardFnEntity = lookups.fnMap.get(ctx.originalFnId);
-      if (cardFnEntity) {
-        const removeBtn = createPinnedIconButton({
+    const buildCellPopoverContent = (host) => {
+      // ns badge for THIS MI parent (each cell is its own fn).
+      if (cellFnEntity && rowWantsNamespaceBadge(f)
+          && typeof createNamespaceBadge === 'function') {
+        const nsPath = (typeof getFnNamespace === 'function')
+                       ? getFnNamespace(cellFnEntity) : null;
+        const canEdit = typeof isAuthenticated === 'function' && isAuthenticated()
+                     && typeof isFnEditable === 'function' && isFnEditable(f.fnId)
+                     && typeof enterNamespaceMoveEditMode === 'function';
+        const nsBadge = createNamespaceBadge(nsPath, {
+          inline: true,
+          onClick: canEdit
+                   ? (anchor) => enterNamespaceMoveEditMode(cellFnEntity, anchor)
+                   : null
+        });
+        if (nsBadge) host.appendChild(nsBadge);
+      }
+      const descBadge = createDescriptionBadge(f.description, {
+        name: f.name,
+        namespace: cellFnEntity ? (typeof getFnNamespace === 'function'
+                                    ? getFnNamespace(cellFnEntity) : null) : null,
+        entityType: 'fn',
+        entityId: f.fnId
+      });
+      if (descBadge) host.appendChild(descBadge);
+      if (miShowOpen && cellFnEntity) {
+        const openBtn = createOpenInNewTabButton(cellFnEntity, {});
+        if (openBtn) host.appendChild(openBtn);
+      }
+      // `×` remove-this-MI-parent + `+` add-MI-parent — both are
+      // card-level edits (modify the cardFnEntity's parent set), so
+      // they're available from any MI cell's popover.
+      if (miEditable && cardFnEntity && typeof removeParentInline === 'function') {
+        host.appendChild(createPinnedIconButton({
           glyph: '×',
           title: 'Remove this parent',
-          pinSlot: 3,
-          onEnter: miClearPreview,
+          inline: true,
           onClick: () => removeParentInline(cardFnEntity, f.fnId)
-        });
-        if (removeBtn) span.appendChild(removeBtn);
+        }));
       }
+      if (miEditable && cardFnEntity) {
+        const addBtn = makeAddMIParentButton(cardFnEntity, null, 1);
+        if (addBtn) host.appendChild(addBtn);
+      }
+    };
+    if (typeof createMoreActionsTrigger === 'function') {
+      const trigger = createMoreActionsTrigger({
+        onEnter: miClearPreview,
+        buildContent: buildCellPopoverContent
+      });
+      span.appendChild(trigger);
     }
     if (i < levelInfo.fns.length - 1) {
       span.style.borderRight = '1px solid var(--light-border)';
@@ -576,11 +587,12 @@ function renderMiRow(line, levelInfo, idx, ctx) {
       }
       return spec;
     };
-    // MI per-fn click
+    span.style.cursor = 'pointer';
+    // MI per-fn click — cascades through any non-clickable followers
+    // (e.g. the column-below-MI text below this MI row).
     const onMouseDown = (e) => {
       e.stopPropagation();
       e.preventDefault();
-      // Compute spec, cascade through followers if promoted
       const raw = computeSpecAfterClick(getSpec(nodeId), levelInfo.depth, f.fnId, allFnsAtDepth);
       const spec = cascadePromoted(raw);
       if (spec === null) { expansionState.delete(nodeId); }
@@ -600,33 +612,18 @@ function renderMiRow(line, levelInfo, idx, ctx) {
         { fullDepth, partialFns }, levelInfo.depth, f.fnId, allFnsAtDepth);
       const preview = cascadePromoted(raw);
       applyPreviewStyle(preview || { fullDepth: 0, partialFns: new Set() });
-      // Use effective depth so the backend render matches the cascaded spec
-      const hoverDepth = (preview && preview.fullDepth === miEffectiveDepth) ? miEffectiveDepth : levelInfo.depth;
+      const hoverDepth = (preview && preview.fullDepth === miEffectiveDepth)
+                       ? miEffectiveDepth : levelInfo.depth;
       applyHoverSpec(nodeId, hoverDepth, f.fnId, allFnsAtDepth);
     };
     attachPreviewHandlers(span, triggerSpanPreview, onPreviewLeave, restoreStyles);
     line.appendChild(span);
   });
-  // Trailing `+` add-MI-parent cell — depth-1 of editable nav-root.
-  // Rendered as its own narrow flex slot with a vertical separator
-  // matching the inter-cell border so it reads as "another column,
-  // currently empty, click to fill".
-  const addMIEditable = levelInfo.depth === 1
-    && typeof isAuthenticated === 'function' && isAuthenticated()
-    && implementationFnIds?.has(ctx.originalFnId);
-  if (addMIEditable && lookups?.fnMap) {
-    const cardFnEntity = lookups.fnMap.get(ctx.originalFnId);
-    if (cardFnEntity) {
-      const addCell = document.createElement('span');
-      addCell.style.flex = '0 0 28px';
-      addCell.style.position = 'relative';
-      addCell.style.borderLeft = '1px solid var(--light-border)';
-      const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-      const addBtn = makeAddMIParentButton(cardFnEntity, miClearPreview, 1);
-      if (addBtn) addCell.appendChild(addBtn);
-      line.appendChild(addCell);
-    }
-  }
+  // Card-level `+` add-MI-parent moved into each MI cell's popover
+  // above (it modifies the same cardFnEntity from any cell), so
+  // there's no separate trailing cell on the row anymore — that
+  // inline-flex column was the last bit of "actions inside the card"
+  // and it has now followed the rest into the row-actions popover.
   return spansByFnId;
 }
 
@@ -643,7 +640,6 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   // are present, so wrapped names stay clear of them and the
   // visual centering point doesn't shift.
   const lineFn = levelInfo.fns[0];
-  const lineHasDesc = !!lineFn.description;
   const lineShowOpen = !!lineFn.name && !(isNavRoot && levelInfo.depth === 0);
   // Root row pins TWO extra icons (Extend +, Delete 🗑) when the user
   // is signed in and the fn is editable, so it claims four slots
@@ -672,170 +668,124 @@ function renderSingleFnRow(line, levelInfo, ctx) {
     && lineSignedIn
     && lookups?.fnMap
     && implementationFnIds?.has(ctx.originalFnId);
-  let rightPad;
-  if (rootEditable)            rightPad = 78;   // i + ✎ + + + 🗑
-  else if (useSiteArg)         rightPad = 78;   // i + ↗ + × + ✎
-  else if (parentEditAllowed)  rightPad = 78;   // i + ↗ + × + +
-  else if (lineHasDesc && lineShowOpen) rightPad = 42;
-  else if (lineHasDesc || lineShowOpen) rightPad = 24;
-  else                          rightPad = 8;
-  const leftPad = rowWantsNamespaceBadge(lineFn) ? 28 : 8;
+  // Right padding reserves the single slot for the more-actions
+  // trigger (`⋯`) — every per-row affordance now lives in the popover
+  // it opens, OUTSIDE the card silhouette. Left padding is just the
+  // small breathing room around the name.
+  const rightPad = 24;
+  const leftPad = 8;
   line.style.padding = '4px ' + rightPad + 'px 4px ' + leftPad + 'px';
   line.style.textAlign = 'left';
   line.style.whiteSpace = 'nowrap';
   line.style.overflow = 'hidden';
   line.style.textOverflow = 'ellipsis';
   line.style.position = 'relative';
-  // Single-fn level — whole-line click cascading to groupMaxDepth
-  // (so empty grouped levels expand together).
+  // Whole-line click cascading to groupMaxDepth (so empty grouped
+  // levels expand together).
   line.style.cursor = 'pointer';
   line.textContent = displayLabel(lineFn.name);
   const lineClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
-  const lineDescBadge = createDescriptionBadge(lineFn.description, {
-    pinRight: true,
-    onEnter: lineClearPreview,
-    name: lineFn.name,
-    namespace: getFnNamespace(lookups.fnMap.get(lineFn.fnId)),
-    entityType: 'fn',
-    entityId: lineFn.fnId
-  });
-  if (lineDescBadge) line.appendChild(lineDescBadge);
-  // Depth-1 row carries inline parent-set controls when the card's
-  // fn is reachable + the user is authed:
-  //   - `↗` open this parent's own page in a new tab (slot 2)
-  //   - `×` removes that parent (with a confirmation; orphan
-  //     bindings cascade-delete server-side) — slot 3
-  //   - `+` adds an MI parent (slot 4). Disabled with a `title=`
-  //     reason when no compatible candidate exists (different
-  //     base-fn, every arg is already covered, …).
-  // Single-fn depth-1 = the only parent; MI rows handle their
-  // per-cell version inside `renderMiRow`.
-  if (parentEditAllowed) {
-    const cardFnEntity = lookups.fnMap.get(ctx.originalFnId);
-    if (cardFnEntity) {
-      // `↗` open-in-new-tab — slot 2.
-      if (lineShowOpen) {
-        const lineOpenBtn = createOpenInNewTabButton(lookups.fnMap.get(lineFn.fnId), {
-          pinRight: true,
-          onEnter: lineClearPreview
-        });
-        if (lineOpenBtn) line.appendChild(lineOpenBtn);
-      }
-      // `×` remove-this-parent — slot 3.
-      const removeBtn = createPinnedIconButton({
+  const lineFnEntity = lookups?.fnMap?.get(lineFn.fnId) || null;
+  const cardFnEntity = lookups?.fnMap?.get(ctx.originalFnId) || null;
+
+  // All the per-row affordances now live in the row-actions popover
+  // (see editor-row-actions.js), reachable via the `⋯` trigger pinned
+  // at slot r-1. The card body stays minimal — fn name only, with
+  // hover-driven expansion as before. `buildPopoverContent` defers
+  // building the icons until the popover actually opens, so unhovered
+  // rows pay no DOM cost.
+  const buildPopoverContent = (host) => {
+    // ns badge — first slot in the popover so it reads "this fn lives
+    // in <ns>, here's everything you can do with it".
+    const fnEntity = lineFnEntity;
+    if (fnEntity && rowWantsNamespaceBadge(lineFn)
+        && typeof createNamespaceBadge === 'function') {
+      const nsPath = (typeof getFnNamespace === 'function')
+                     ? getFnNamespace(fnEntity) : null;
+      const canEdit = typeof isAuthenticated === 'function' && isAuthenticated()
+                   && typeof isFnEditable === 'function' && isFnEditable(lineFn.fnId)
+                   && typeof enterNamespaceMoveEditMode === 'function';
+      const nsBadge = createNamespaceBadge(nsPath, {
+        inline: true,
+        onClick: canEdit
+                 ? (anchor) => enterNamespaceMoveEditMode(fnEntity, anchor)
+                 : null
+      });
+      if (nsBadge) host.appendChild(nsBadge);
+    }
+    // Description badge — always; the dedicated tooltip handles empty
+    // description (turns into "click to add").
+    const descBadge = createDescriptionBadge(lineFn.description, {
+      name: lineFn.name,
+      namespace: fnEntity ? (typeof getFnNamespace === 'function'
+                              ? getFnNamespace(fnEntity) : null) : null,
+      entityType: 'fn',
+      entityId: lineFn.fnId
+    });
+    if (descBadge) host.appendChild(descBadge);
+    // ↗ open-in-new-tab — when the row's fn has a globally-resolvable
+    // name AND we're not already viewing it (root row).
+    if (lineShowOpen && fnEntity) {
+      const openBtn = createOpenInNewTabButton(fnEntity, {});
+      if (openBtn) host.appendChild(openBtn);
+    }
+    // Branch-specific buttons. Same handlers as the inline version
+    // used to wire — only the host changes.
+    if (parentEditAllowed && cardFnEntity) {
+      // `×` remove-this-parent.
+      host.appendChild(createPinnedIconButton({
         glyph: '×',
         title: 'Remove this parent',
-        pinSlot: 3,
-        onEnter: lineClearPreview,
+        inline: true,
         onClick: () => {
           if (typeof removeParentInline === 'function') {
             removeParentInline(cardFnEntity, lineFn.fnId);
           }
         }
-      });
-      if (removeBtn) line.appendChild(removeBtn);
-      // `+` add-MI-parent — moved into a trailing 28-px flex cell on
-      // the right with a left border so it visually reads as the
-      // "next, currently-empty MI cell" rather than just another
-      // right-pinned icon. Mirrors the renderMiRow layout. Wraps
-      // the existing line content (name + i + ↗ + ×) into a main
-      // flex cell so the trailing cell can sit beside it without
-      // overlapping the right-pinned icons.
-      const mainCell = document.createElement('span');
-      mainCell.style.flex = '1 1 0';
-      mainCell.style.position = 'relative';
-      mainCell.style.minWidth = '0';
-      mainCell.style.overflow = 'hidden';
-      mainCell.style.textOverflow = 'ellipsis';
-      mainCell.style.whiteSpace = 'nowrap';
-      // Inherit the row's padding budget — the right-pinned icons
-      // (i / ↗ / ×) keep their pin offsets relative to the main
-      // cell now that line has padding: 0. Subtract 18px (one slot)
-      // since `+` no longer occupies an icon-pin slot here.
-      mainCell.style.padding = '4px ' + Math.max(8, rightPad - 18) + 'px 4px '
-                             + leftPad + 'px';
-      while (line.firstChild) mainCell.appendChild(line.firstChild);
-      line.style.padding = '0';
-      line.style.display = 'flex';
-      line.appendChild(mainCell);
-
-      const trailingCell = document.createElement('span');
-      trailingCell.style.flex = '0 0 28px';
-      trailingCell.style.position = 'relative';
-      trailingCell.style.borderLeft = '1px solid var(--light-border)';
-      const addBtn = makeAddMIParentButton(cardFnEntity, lineClearPreview, 1);
-      if (addBtn) trailingCell.appendChild(addBtn);
-      line.appendChild(trailingCell);
-    }
-  } else if (lineShowOpen) {
-    const lineOpenBtn = createOpenInNewTabButton(lookups.fnMap.get(lineFn.fnId), {
-      pinRight: true,
-      onEnter: lineClearPreview
-    });
-    if (lineOpenBtn) line.appendChild(lineOpenBtn);
-    // Per-binding actions for the value-fn that fills an editable
-    // incoming binding. `×` clears the binding (slot reverts to
-    // free-arg / next item drops); `✎` opens the picker so the
-    // user can re-point the binding to a different fn (or literal,
-    // for non-fn slots).
-    if (useSiteArg) {
-      const deleteBtn = createPinnedIconButton({
+      }));
+      // `+` add MI parent.
+      const addBtn = makeAddMIParentButton(cardFnEntity, null, 1);
+      if (addBtn) host.appendChild(addBtn);
+    } else if (useSiteArg) {
+      // `×` remove this binding (slot reverts to free-arg).
+      host.appendChild(createPinnedIconButton({
         glyph: '×',
         title: 'Remove this value (slot reverts to free-arg)',
-        pinSlot: 3,
-        onEnter: lineClearPreview,
+        inline: true,
         onClick: () => {
           if (typeof deleteUseSiteBinding === 'function') {
             deleteUseSiteBinding(useSiteArg);
           }
         }
-      });
-      if (deleteBtn) line.appendChild(deleteBtn);
+      }));
+      // `✎` change value.
       if (typeof enterFreeArgBindEditMode === 'function') {
-        const changeBtn = createPinnedIconButton({
+        host.appendChild(createPinnedIconButton({
           glyph: '✎',
           title: 'Change value (pick another fn / set a literal)',
-          pinSlot: 4,
-          onEnter: lineClearPreview,
+          inline: true,
           onClick: (anchor) => enterFreeArgBindEditMode(useSiteArg, anchor)
-        });
-        if (changeBtn) line.appendChild(changeBtn);
+        }));
       }
-    }
-  } else if (rootEditable) {
-    // Root row gets a row of inline icons for the per-fn actions.
-    // Per the project's UX preference: action buttons live next to
-    // the thing they affect, not bundled into a separate toolbar.
-    // ↗ doesn't show on the root (we're already viewing it), so the
-    // right-pinned slots are free for ✎ rename + + extend + 🗑 delete.
-    const lineFnEntity = lookups.fnMap.get(lineFn.fnId);
-    const editBtn = createEditPencilButton({
-      pinRight: true,
-      onEnter: lineClearPreview,
-      onClick: (anchor) => {
-        if (lineFnEntity) enterFnRenameEditMode(lineFnEntity, anchor);
-      }
-    });
-    if (editBtn) line.appendChild(editBtn);
-    // Extend — creates a child fn-def with this fn as :parent.
-    if (typeof enterExtendEditMode === 'function' && lineFnEntity) {
-      const extendBtn = createPinnedIconButton({
-        glyph: '+',
-        title: 'Extend (create a child fn with this as :parent)',
-        pinSlot: 3,
-        onEnter: lineClearPreview,
-        onClick: (anchor) => enterExtendEditMode(lineFnEntity, anchor)
+    } else if (rootEditable && lineFnEntity) {
+      // Root row's per-fn actions: rename, extend, delete.
+      const editBtn = createEditPencilButton({
+        onClick: (anchor) => enterFnRenameEditMode(lineFnEntity, anchor)
       });
-      if (extendBtn) line.appendChild(extendBtn);
-    }
-    // Delete — guarded by confirm + busy banner.
-    if (lineFnEntity) {
-      const deleteBtn = createPinnedIconButton({
+      if (editBtn) host.appendChild(editBtn);
+      if (typeof enterExtendEditMode === 'function') {
+        host.appendChild(createPinnedIconButton({
+          glyph: '+',
+          title: 'Extend (create a child fn with this as :parent)',
+          inline: true,
+          onClick: (anchor) => enterExtendEditMode(lineFnEntity, anchor)
+        }));
+      }
+      host.appendChild(createPinnedIconButton({
         glyph: '✕',
         title: 'Delete this fn',
-        pinSlot: 4,
+        inline: true,
         danger: true,
-        onEnter: lineClearPreview,
         onClick: async () => {
           const display = (typeof getQualifiedFnName === 'function')
                           ? getQualifiedFnName(lineFnEntity)
@@ -865,16 +815,16 @@ function renderSingleFnRow(line, levelInfo, ctx) {
             await work();
           }
         }
-      });
-      if (deleteBtn) line.appendChild(deleteBtn);
+      }));
     }
+  };
+  if (typeof createMoreActionsTrigger === 'function') {
+    const trigger = createMoreActionsTrigger({
+      onEnter: lineClearPreview,
+      buildContent: buildPopoverContent
+    });
+    line.appendChild(trigger);
   }
-  // Namespace badge — left-pinned on every named fn row (root + each
-  // ancestor on every card). Read-only when the targeted fn isn't
-  // editable; click-to-edit otherwise. Hover-tooltip carries the
-  // qualified path so users can identify the owning namespace
-  // without leaving the canvas.
-  attachNamespaceBadge(line, lineFn, { onEnter: lineClearPreview });
   bindFullNameHover(line, line, lineFn.name);
   const fnIdForLine = levelInfo.fns[0].fnId;
   const allFnsAtDepth = [fnIdForLine];

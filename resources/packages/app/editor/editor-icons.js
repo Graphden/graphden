@@ -231,13 +231,21 @@ function createPinnedIconButton(opts) {
   applyActionIconBox(btn);
   btn.style.padding = '0';
   btn.style.pointerEvents = 'auto';
-  btn.style.position = 'absolute';
-  btn.style.top = '50%';
-  btn.style.transform = 'translateY(-50%)';
-  // Slot 1 = closest to the right edge. Higher numbers stack
-  // leftward on 18px steps. Touch overrides live in CSS.
-  const slot = opts.pinSlot || 1;
-  btn.style.right = 'var(--icon-pin-r-' + slot + ')';
+  if (opts.inline) {
+    // Inline mode — used by the row-actions popover that hosts the
+    // same glyphs OUTSIDE the card. No absolute positioning; flow
+    // happens via inline-flex with a small left-margin gap.
+    btn.style.marginLeft = '4px';
+    btn.style.verticalAlign = 'middle';
+  } else {
+    btn.style.position = 'absolute';
+    btn.style.top = '50%';
+    btn.style.transform = 'translateY(-50%)';
+    // Slot 1 = closest to the right edge. Higher numbers stack
+    // leftward on 18px steps. Touch overrides live in CSS.
+    const slot = opts.pinSlot || 1;
+    btn.style.right = 'var(--icon-pin-r-' + slot + ')';
+  }
   btn.addEventListener('mouseenter', () => {
     if (opts.onEnter) opts.onEnter();
     hideFullNameTooltip();
@@ -277,10 +285,12 @@ function createNamespaceBadge(nsPath, opts) {
   btn.style.fontSize = 'calc(var(--icon-font-size) - 1px)';
   btn.style.padding = '0';
   btn.style.pointerEvents = 'auto';
-  btn.style.position = 'absolute';
-  btn.style.left = 'var(--icon-pin-r-1)';
-  btn.style.top = '50%';
-  btn.style.transform = 'translateY(-50%)';
+  // Always inline now — the badge lives inside the row-actions popover
+  // (see editor-row-actions.js), never pinned inside the card. The
+  // older absolute-positioned `slotLeft` mode died with the in-row
+  // affordances. Margin matches the popover's flex gap.
+  btn.style.marginLeft = '4px';
+  btn.style.verticalAlign = 'middle';
   // The visible tooltip is the bare path — the `ns` glyph itself
   // already says "this is a namespace", and `showFullNameTooltip`
   // appears instantly (vs. the OS-level ~1 s delay on `title=`).
@@ -309,6 +319,84 @@ function createNamespaceBadge(nsPath, opts) {
     e.stopPropagation();
     e.preventDefault();
     if (opts.onClick) opts.onClick(btn);
+  });
+  return btn;
+}
+
+// Right-pinned more-actions trigger ("⋯"). Sits at slot r-1 of every
+// fn-row and exists for one purpose: opening the singleton row-actions
+// popover (see editor-row-actions.js) that hosts ns / i / ↗ / ✎ / × /
+// + / ✕ OUTSIDE the card silhouette. The card body itself is now
+// reserved for the fn name + the hover-driven expansion target.
+//
+// Hover (desktop) → opens the popover; pointer can travel from
+// trigger → popover without dismissing thanks to the popover's own
+// debounced hide. Click → pins the popover so touch users can read
+// + tap the affordances after their finger leaves.
+//
+// Caller supplies `buildContent(host)` which appends the actual icon
+// elements to the popover host. Each icon helper accepts `inline:true`
+// so the same factories used to render in-row icons render correctly
+// inside the popover.
+function createMoreActionsTrigger(opts) {
+  opts = opts || {};
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'more-actions-trigger';
+  btn.title = opts.title || 'More actions';
+  btn.setAttribute('aria-label', btn.title);
+  // Announce that this button controls a popover.
+  btn.setAttribute('aria-haspopup', 'true');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.textContent = opts.glyph || '⋯';
+  btn.style.color = 'currentColor';
+  btn.style.background = 'transparent';
+  btn.style.cursor = 'pointer';
+  btn.style.fontWeight = 'normal';
+  applyActionIconBox(btn);
+  btn.style.fontSize = 'calc(var(--icon-font-size) + 1px)';
+  btn.style.padding = '0';
+  btn.style.pointerEvents = 'auto';
+  btn.style.position = 'absolute';
+  btn.style.top = '50%';
+  btn.style.transform = 'translateY(-50%)';
+  const slot = opts.pinSlot || 1;
+  btn.style.right = 'var(--icon-pin-r-' + slot + ')';
+  btn.addEventListener('mouseenter', (e) => {
+    if (opts.onEnter) opts.onEnter(e);
+    if (typeof showRowActionsPopover === 'function') {
+      showRowActionsPopover(btn, opts.buildContent);
+    }
+  });
+  btn.addEventListener('mousemove', (e) => e.stopPropagation());
+  btn.addEventListener('mouseleave', () => {
+    if (typeof hideRowActionsPopover === 'function') hideRowActionsPopover();
+  });
+  // Click on the trigger pins the popover open (touch users land here
+  // since they have no hover state). A second click on the same
+  // trigger toggles back to closed.
+  const fire = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (typeof toggleRowActionsPopoverSticky === 'function') {
+      toggleRowActionsPopoverSticky(btn, opts.buildContent);
+    }
+  };
+  btn.addEventListener('mousedown', fire);
+  btn.addEventListener('touchend', fire);
+  // Keyboard: Enter / Space opens the popover (sticky), matching the
+  // native button activation contract. The default 'click' that the
+  // browser synthesises after Enter/Space would no-op since we don't
+  // have a click handler — wire keydown so screen-reader / keyboard
+  // users get the same affordance as mouse / touch users.
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof toggleRowActionsPopoverSticky === 'function') {
+        toggleRowActionsPopoverSticky(btn, opts.buildContent);
+      }
+    }
   });
   return btn;
 }

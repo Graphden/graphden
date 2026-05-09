@@ -70,18 +70,22 @@ async function checkEditor() {
       }
 
       if (overlay) {
-        // Click on the ancestor line at the desired level
+        // Click the per-row expand-control chevron (slot l-1) — the row
+        // body itself is no longer the click target since the
+        // hover-to-show action-icon redesign.
         const lines = await overlay.$$('.ancestor-line');
-        if (lines.length > level) {
-          await lines[level].click();
-          await page.waitForTimeout(300); // Wait for animation
-          console.log(`  Clicked level ${level}`);
+        const targetLine = lines.length > level ? lines[level] : lines[lines.length - 1];
+        if (!targetLine) {
+          console.log(`  Warning: no ancestor lines available`);
+          continue;
+        }
+        const chev = await targetLine.$('.expand-control');
+        if (chev) {
+          await chev.click();
+          await page.waitForTimeout(300);
+          console.log(`  Clicked level ${level} chevron`);
         } else {
-          console.log(`  Warning: only ${lines.length} levels available`);
-          if (lines.length > 0) {
-            await lines[lines.length - 1].click();
-            await page.waitForTimeout(300);
-          }
+          console.log(`  Warning: no expand-control on level ${level}`);
         }
       } else {
         console.log(`  Warning: node "${nodeName}" not found`);

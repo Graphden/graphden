@@ -128,16 +128,12 @@ function calculateNodeSize(nodeData) {
       if (!l.includes(', ')) return 0;
       return l.split(', ').length * MIN_MI_CELL;
     }));
-    // Slack budget = inner padding + room for the right-pinned action
-    // icons (i + ↗ ≈ 42px) + left-pinned `ns` badge (≈ 20px). Every
-    // named fn row carries an `ns` badge on the left, so non-root
-    // cards now need ~80px of chrome around the longest name, not 60.
-    //
-    // The nav-root card additionally pins TWO right-edge action icons
-    // (Extend +, Delete ✕) on its depth-0 row when the user is signed
-    // in and the fn is editable, claiming four right slots instead of
-    // two. Bump to ~120px in that case so the full name still fits.
-    const iconBudget = nodeData.isRoot ? 120 : 80;
+    // Per-row affordances now live in a popover OUTSIDE the card
+    // (see editor-row-actions.js). The only chrome inside the card
+    // is the `⋯` more-actions trigger pinned at slot r-1 (≈18 px) +
+    // the row's symmetric breathing room (8 + 8 ≈ 16 px). 36 covers
+    // it with a few pixels of slack so names hug the trigger.
+    const iconBudget = 36;
     const width = Math.max(80, maxLen * 7 + iconBudget, widthFromOptional, widthFromMI);
     // `appendUseSiteHeader` prepends one extra row to non-nav-root
     // overlays whose fn has a global name (it skips local / anonymous

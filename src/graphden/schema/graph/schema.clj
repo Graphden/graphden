@@ -180,6 +180,17 @@
   #uuid "a373c531-1ace-4b62-a9ed-789a83988a21")
 
 
+;; Authored `:expects-effects` declaration — the set of effects the
+;; fn-def's *author* claims this fn produces. The type-checker compares
+;; this against `:effects` computed from the impl/body and flags drift
+;; (effects appeared without being declared) or over-declaration
+;; (declared but never produced). Stored as a JSONB array of keywords
+;; (e.g. `["db" "io"]`) and surfaced both via /api/types and the editor.
+;; Loader writes from `fns.edn` on sync; UI may overwrite per-row.
+(def ^:private fn-expects-effects-field-uuid
+  #uuid "d52a7c10-3b94-4f0d-9c1e-7a4d8b6f2e15")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :slot
 ;; =============================================================================
@@ -395,7 +406,12 @@
                       ;; Hash for anonymous composite dedup.
                       :anonymous-hash {:uuid fn-anonymous-hash-field-uuid
                                        :type :text
-                                       :nullable? true}})
+                                       :nullable? true}
+                      ;; Authored effect-set declaration (drift checker
+                      ;; warns when computed effects diverge from this).
+                      :expects-effects {:uuid fn-expects-effects-field-uuid
+                                        :type :jsonb
+                                        :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:namespace-id :name]})
       (ds/add-constraint :fn {:type :unique :fields [:anonymous-hash]})
 

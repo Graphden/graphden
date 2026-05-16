@@ -43,6 +43,13 @@
           :headers        :jsonb
           :body           :any}}
 
+  {:name :security-headers-shape
+   :description "Default security response headers — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`. Keyword-keyed throughout the fn-graph (record-types in graphden are keyword-keyed); the `:http-server` adapter stringifies header keys once on the way to http-kit."
+   :type {:X-Content-Type-Options :text
+          :X-Frame-Options        :text
+          :X-XSS-Protection       :text
+          :Referrer-Policy        :text}}
+
   ;; =============================================================================
   ;; RING REQUEST EXTRACTION
   ;; =============================================================================
@@ -62,30 +69,37 @@
    :args {:value {:as :request :type :ring-request-shape}}}
 
   ;; Shared `:coll :ring-request` lookup — factor out the common binding so
-  ;; each field extractor below just names the key it wants.
+  ;; each field extractor below just names the key it wants. Pinning
+  ;; `:coll :ring-request-shape` propagates down through every extractor
+  ;; so the editor's `m`/`coll` chip shows the concrete shape instead of
+  ;; `:get`'s inherited `:any` contract.
   {:name :ring-request-field
    :description "Helper that binds `:coll :ring-request` once. Children name the field they want via `:key` instead of repeating the request binding."
    :parent :get
-   :args {:coll :ring-request}}
+   :args {:coll {:ref :ring-request :type :ring-request-shape}}}
 
   {:name :ring-method
    :description "HTTP method keyword from the Ring request (e.g. `:get`, `:post`)."
    :parent :ring-request-field
+   :return-type :keyword
    :args {:key {:value :request-method}}}
 
   {:name :ring-uri
    :description "Path portion of the request URI (e.g. `\"/api/entities\"`)."
    :parent :ring-request-field
+   :return-type :text
    :args {:key {:value :uri}}}
 
   {:name :ring-query-string
    :description "Raw query string from the request (without leading `?`), nil if absent."
    :parent :ring-request-field
+   :return-type :text
    :args {:key {:value :query-string}}}
 
   {:name :ring-headers
    :description "Header map from the Ring request — string keys, lower-cased per Ring convention."
    :parent :ring-request-field
+   :return-type :jsonb
    :args {:key {:value :headers}}}
 
   {:name :ring-body-input-stream
@@ -96,6 +110,7 @@
   {:name :ring-body
    :description "Request body slurped to a string."
    :parent :slurp
+   :return-type :text
    :args {:input :ring-body-input-stream}}
 
   ;; =============================================================================
@@ -128,7 +143,7 @@
    :args {:items [{:value :body :literal? true} :ring-body-input-stream]}}
 
   {:name :internal-request
-   :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`."
+   :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`. Author-declared `:return-type :ring-request-shape` deferred — `:pairs->map`'s rule has no static field reconstruction yet, so the type-checker can't prove the computed return is a record."
    :parent :pairs->map
    :args {:entries [:ring-method-entry
                     :ring-uri-entry
@@ -144,24 +159,27 @@
   ;; =============================================================================
 
   {:name :router-result
-   :description "Invoke the router callable (`:func`, free arg supplied by the consuming fn) on the parsed `:internal-request`. The result is a Ring response map."
+   :description "Ring-router invocation: feed the parsed `:internal-request` into `:func` and return whatever the router produced. The full `:func` contract — `[:fn {:arg :ring-request-shape} :ring-response-shape]` — is pinned at the slot, so consumers see the contract directly without reading downstream bindings. Non-Ring routers don't fit; for non-Ring single-arg calls extend `:invoke` directly instead of `:router-result`."
    :parent :invoke
-   :args {:arg :internal-request}}
+   :return-type :ring-response-shape
+   :args {:arg  {:ref :internal-request :type :ring-request-shape}
+          :func {:type [:fn {:arg :ring-request-shape} :ring-response-shape]}}}
 
-  ;; Opinionated default security headers — merged into every response.
-  ;; Stringified once (JSONB roundtrip turns string keys into keywords;
-  ;; http-kit needs strings).
-  {:name :_default-security-headers-raw
-   :parent :const
-   :args {:value {"X-Content-Type-Options" "nosniff"
-                  "X-Frame-Options" "DENY"
-                  "X-XSS-Protection" "1; mode=block"
-                  "Referrer-Policy" "strict-origin-when-cross-origin"}}}
-
+  ;; Opinionated default security headers — merged into every response's
+  ;; `:headers` map. Keyword-keyed because http-kit accepts both string
+  ;; and keyword keys in response headers (it calls `name` on them
+  ;; before writing to the wire); same convention `:json-content-type`
+  ;; and friends already rely on. Keeping the record-shape end-to-end
+  ;; lets `:security-headers-shape` flow through the merge-in into
+  ;; consumers without a type-erasing stringification step.
   {:name :default-security-headers
-   :description "Default security-header map merged into every response — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`. Keys are stringified for http-kit."
-   :parent :stringify-map-keys
-   :args {:m :_default-security-headers-raw}}
+   :description "Default security-header map merged into every response — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`."
+   :parent :const
+   :return-type :security-headers-shape
+   :args {:value {:X-Content-Type-Options "nosniff"
+                  :X-Frame-Options        "DENY"
+                  :X-XSS-Protection       "1; mode=block"
+                  :Referrer-Policy        "strict-origin-when-cross-origin"}}}
 
   ;; Take the router-result (a Ring response map) and merge default
   ;; security headers into its `:headers`. One node, no re-assembly:
@@ -169,8 +187,9 @@
   {:name :router-ring-response
    :description "Run the router (`:func`) on the parsed `:internal-request` and merge default security headers into the response. The fn-graph bound to `:http-server.handler`."
    :parent :merge-in
-   :args {:m :router-result
-          :path [{:value :headers :literal? true}]
+   :return-type :ring-response-shape
+   :args {:m        :router-result
+          :path     [{:value :headers :literal? true}]
           :defaults :default-security-headers}}
 
   ;; =============================================================================
@@ -186,14 +205,17 @@
   {:name :auth-token-from-env
    :description "`AUTH_TOKEN` env var, or nil when unset. `token-valid?` rejects nil-vs-nil to prevent the bypass — so missing AUTH_TOKEN means \"every authed request returns 401\", not \"server crashes with 500\"."
    :parent :env
+   :return-type :nullable-text
    :args {:name "AUTH_TOKEN"}}
 
   {:name :_auth-token-configured?
    :parent :some?
+   :return-type :bool
    :args {:value :auth-token-from-env}}
 
   {:name :_bearer-equals-env?
    :parent :equal?
+   :return-type :bool
    :args {:a :bearer-token :b :auth-token-from-env}}
 
   ;; Missing `Authorization` header → `get` returns nil; downstream
@@ -202,16 +224,18 @@
   {:name :authorization-header
    :description "Raw `Authorization` header from the request (nil when absent)."
    :parent :get
-   :args {:coll :ring-headers :key "authorization"}}
+   :args {:coll {:ref :ring-headers :type :jsonb} :key "authorization"}}
 
   {:name :has-bearer-prefix?
    :description "True iff the `Authorization` header starts with `\"Bearer \"`. Nil-safe — false for missing header."
    :parent :str-starts-with?
+   :return-type :bool
    :args {:string :authorization-header :prefix "Bearer "}}
 
   {:name :bearer-token-raw
    :description "Substring of the `Authorization` header after the `\"Bearer \"` prefix — only meaningful when `:has-bearer-prefix?` is true."
    :parent :subs
+   :return-type :nullable-text
    :args {:string :authorization-header :start 7}}
 
   {:name :bearer-token
@@ -222,6 +246,7 @@
   {:name :token-valid?
    :description "True iff AUTH_TOKEN is configured AND the request's bearer token equals it. The `some?` gate closes the `(= nil nil)` bypass — when AUTH_TOKEN is unset, requests without a header would otherwise spuriously validate."
    :parent :and
+   :return-type :bool
    :args {:values [:_auth-token-configured? :_bearer-equals-env?]}}
 
   ;; 401 response used by auth middleware on failure.
@@ -233,6 +258,7 @@
   {:name :default-auth-fail-response
    :description "Canonical 401 response used by `auth-required-middleware` when the bearer token is missing or wrong — `{:status 401 :body \"Unauthorized\"}` with text content-type."
    :parent :_default-auth-fail-body
+   :return-type :ring-response-shape
    :args {:body "Unauthorized"}}
 
   ;; =============================================================================

@@ -341,8 +341,16 @@
         ;; slot-id → fn-id of the fn that DECLARES the slot (i.e. has
         ;; a fn-slot junction row for it). One owner per slot — slot
         ;; identities are derived from `(owner-fn-id, slot-name)`.
-        slot-owner (into {} (map (fn [fs] [(:slot-id fs) (:fn-id fs)])) fn-slots)]
+        slot-owner (into {} (map (fn [fs] [(:slot-id fs) (:fn-id fs)])) fn-slots)
+        ;; name (keyword) → fn-row. Lets type-row internals resolve
+        ;; `:int` / `:null` / `:text` etc. in `:constraint` payloads
+        ;; without having to walk `fn-map` linearly.
+        fn-by-name (into {} (keep (fn [f]
+                                    (when-let [n (:name f)]
+                                      [(keyword n) f])))
+                         fns)]
     {:fn-map fn-map
+     :fn-by-name fn-by-name
      :arg-map arg-map
      :args-by-fn args-by-fn
      :slot-map slot-map
@@ -622,6 +630,8 @@
 ;; mutating helpers but is used by them.
 (declare target-interface-names
          compute-edge-label
+         compute-edge-type-chain
+         edge-narrowing-fields
          build-inverse-source-map
          caller-bound-arg
          terminal-source-of
@@ -714,7 +724,8 @@
                             :sourceArgId arg-id
                             :argName (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
                                          (when arg-name (name arg-name)))}
-                           (edge-source-fields lookups arg-id))}))
+                           (edge-source-fields lookups arg-id)
+                           (edge-narrowing-fields lookups arg-id expanded-fns))}))
     node-id))
 
 
@@ -954,7 +965,15 @@
             (reduce
               (fn [acc2 arg]
                 (if (or (some? (:value arg)) (some? (:ref-id arg))
-                        (true? (:terminal? arg)))
+                        (true? (:terminal? arg))
+                        ;; Sequence binding — the anchor arg row carries
+                        ;; no :value (items live in chained arg rows),
+                        ;; so without this branch a slot bound to e.g.
+                        ;; `[:headers]` reads as still-unset and an
+                        ;; expanded ancestor emits a phantom unset
+                        ;; placeholder for the same slot.
+                        (and (sequence-anchor? arg)
+                             (some? (:next-arg-id arg))))
                   (conj acc2 (:slot-id arg))
                   acc2))
               acc
@@ -1015,9 +1034,18 @@
         (let [raw-args-of-fn (get args-by-fn fn-id [])
               anchors (filter sequence-anchor? raw-args-of-fn)
               from-ancestor (pos? current-level)]
+          ;; Dedup anchors by slot-id too. Without this an inherited
+          ;; slot that's already bound by a closer fn (sequence items
+          ;; chained off the descendant's anchor) re-renders here from
+          ;; the parent's EMPTY anchor — which `expand-sequence-anchor`
+          ;; surfaces as a phantom `:unset` placeholder. The user sees
+          ;; "two `path` rows" after expanding the parent. Mirrors the
+          ;; covered-slots gate the scalar arg loop above uses.
           (doseq [anchor anchors
+                  :when (not (contains? @covered-slots (:slot-id anchor)))
                   :let [slot-name (or (resolve-arg-name anchor arg-map) "items")]
                   entry (expand-sequence-anchor anchor slot-name arg-map)]
+            (swap! covered-slots conj (:slot-id anchor))
             (swap! result conj (assoc entry :from-ancestor from-ancestor))))
         (doseq [a @fn-refs] (swap! result conj a))
         (doseq [a @fn-values] (swap! result conj a))
@@ -1129,13 +1157,107 @@
                               :sourceArgId source-arg-id
                               :argName (or (compute-edge-label lookups source-arg-id source-node-id source-expanded-fns)
                                            (when edge-arg-name (name edge-arg-name)))}
-                             (edge-source-fields lookups source-arg-id))})))))
+                             (edge-source-fields lookups source-arg-id)
+                             (edge-narrowing-fields lookups source-arg-id source-expanded-fns))})))))
 
 
 (def ^:private max-visible-ancestors
   "Cap on the number of ancestor BFS levels rendered in a fn-node's
    header label before we collapse the rest into `…`."
   4)
+
+
+(declare add-fn-node)
+
+
+(defn- type-row-role
+  "Classify a fn-row into one of the type roles. Mirrors
+   `executor.compile-runtime/type-row-role` so the layout can decide
+   whether to surface internal-structure edges for a type. Returns
+   `:base-fn` / `:composed` / `:refinement` / `:list` / `:union` /
+   `:variant` / `:fn-type` / `:record` / `:primitive`."
+  [fn-row has-slots?]
+  (let [c (:constraint fn-row)]
+    (cond
+      (seq (:parent-ids fn-row))      :composed
+      (some? (:impl-hash fn-row))     :base-fn
+      (some? (:base-fn-id fn-row))    :refinement
+      (some? (:element-fn-id fn-row)) :list
+      (and (vector? c) (= :union (first c)))   :union
+      (and (vector? c) (= :variant (first c))) :variant
+      (and (vector? c) (= :fn (first c)))      :fn-type
+      has-slots?                      :record
+      :else                           :primitive)))
+
+
+(defn- resolve-type-ref
+  "Resolve a type-form reference (a `:constraint`-vector element) to a
+   fn-id. Named primitives / aliases resolve via `fn-by-name`; nested
+   vectors are anonymous and skipped — they'll surface inline at a
+   later iteration."
+  [fn-by-name form]
+  (when (keyword? form)
+    (:id (get fn-by-name form))))
+
+
+(defn- emit-type-row-internal-edge!
+  "Append a single synthetic edge from a type-row root to one of its
+   constituent type targets. `target-fn-id` is added as a fn-node so
+   it renders as its own card."
+  [state lookups source-node-id target-fn-id edge-id arg-name]
+  (when (and target-fn-id
+             (not (contains? (:added-node-ids @state) edge-id)))
+    (let [target-id (add-fn-node state lookups target-fn-id false nil nil)]
+      (swap! state update :added-node-ids conj edge-id)
+      (swap! state update :edges conj
+             {:data {:id edge-id
+                     :source source-node-id
+                     :target target-id
+                     :argName arg-name
+                     :isTypeInternal true}}))))
+
+
+(defn- emit-type-row-internals!
+  "Surface a root-level type-row's internal composition as outgoing
+   edges. The target nodes are the real fn-rows of the referenced
+   types (rendered like any other fn-card). Roles:
+     :refinement → edge to base-fn (`base`)
+     :list       → edge to element-fn (`element`)
+     :union      → one unlabelled edge per branch
+     :variant    → one edge per branch, labelled with the tag
+   :record, :base-fn, :composed, :primitive, :fn-type — no synthetic
+   edges (records render via their own fn-slots; primitives are
+   leaves; composed/base-fns flow through the normal pipeline)."
+  [state lookups root-fn-id node-id]
+  (let [{:keys [fn-map fn-by-name fn-slots-by-fn]} lookups
+        f (get fn-map root-fn-id)
+        has-slots? (boolean (seq (get fn-slots-by-fn root-fn-id)))
+        role (when f (type-row-role f has-slots?))
+        edge-id (fn [suffix] (str "e-type-" node-id "-" suffix))]
+    (case role
+      :refinement
+      (emit-type-row-internal-edge!
+        state lookups node-id (:base-fn-id f) (edge-id "base") "base")
+
+      :list
+      (emit-type-row-internal-edge!
+        state lookups node-id (:element-fn-id f) (edge-id "element") "element")
+
+      :union
+      (doseq [[idx form] (map-indexed vector (rest (:constraint f)))]
+        (emit-type-row-internal-edge!
+          state lookups node-id (resolve-type-ref fn-by-name form)
+          (edge-id (str "union-" idx)) ""))
+
+      :variant
+      (doseq [[idx [tag form]] (map-indexed vector
+                                            (partition 2 (rest (:constraint f))))]
+        (emit-type-row-internal-edge!
+          state lookups node-id (resolve-type-ref fn-by-name form)
+          (edge-id (str "variant-" idx))
+          (str tag)))
+
+      nil)))
 
 
 (defn- add-fn-node
@@ -1267,11 +1389,19 @@
                            empty-seq? (assoc :isSequenceAnchor true
                                              :sequenceFnId (str (:fn-id arg-rec))))})
            (swap! state update :edges conj
-                  {:data {:id edge-id
-                          :source source-node-id
-                          :target node-id
-                          :argName displayed-name
-                          :isUnset true}})))))))
+                  {:data (merge {:id edge-id
+                                 :source source-node-id
+                                 :target node-id
+                                 :sourceArgId arg-id
+                                 :argName displayed-name
+                                 :isUnset true}
+                                ;; Same id-bundle as a bound-arg edge so the
+                                ;; edge-label overlay can resolve the slot /
+                                ;; fn / type via `argRowFromNode` and render
+                                ;; the type-chip on this edge (the placeholder
+                                ;; no longer carries a type label of its own).
+                                (edge-source-fields lookups arg-id)
+                                (edge-narrowing-fields lookups arg-id expanded-fns))})))))))
 
 
 (defn- target-interface-names
@@ -1348,6 +1478,54 @@
               (or bound
                   (recur (into rest-q (map :id) children)
                          (conj visited cur))))))))))
+
+
+(defn- edge-narrowing-fields
+  "Optional `:typeChain` edge-data field. Returns `{}` when the chain
+   is uninteresting (no narrowing visible at the current expansion),
+   so callers can `(merge … (edge-narrowing-fields …))` unconditionally."
+  [lookups arg-id expanded-fns]
+  (if-let [chain (compute-edge-type-chain lookups arg-id expanded-fns)]
+    {:typeChain chain}
+    {}))
+
+
+(defn- compute-edge-type-chain
+  "Walk the same source-chain `compute-edge-label` uses, group adjacent
+   anchor rows by their effective `:type`, and surface the groups iff
+   the user's expansion crosses a type-narrowing boundary (≥ 2 distinct
+   groups visible AND those groups span more than one fn). Each group:
+   `{:type kw :fns [fn-name …]}`, leaf first. nil when no narrowing is
+   visible — the edge then keeps its default single-chip rendering.
+
+   The extra cross-fn gate is what keeps a sequence-item edge clean:
+   inside one fn, the source-chain traverses item → anchor (e.g. `any`
+   → `sequence`), but that's a container/element relation, not an
+   inheritance narrowing. Without the gate the edge would carry a
+   bogus '↑ sequence (router-ring-response)' row that says nothing
+   about ancestors."
+  [lookups arg-id expanded-fns]
+  (let [{:keys [fn-map arg-map]} lookups]
+    (when arg-id
+      (let [source-chain (loop [acc [], cur (get arg-map arg-id)]
+                           (if cur
+                             (recur (conj acc cur)
+                                    (some-> (:source-id cur) arg-map))
+                             acc))
+            visible (filter #(contains? expanded-fns (:fn-id %)) source-chain)
+            labeled (mapv (fn [arg]
+                            {:fn   (some-> (:fn-id arg) fn-map :name name)
+                             :type (some-> (:type arg) name)})
+                          visible)
+            groups (->> labeled
+                        (partition-by :type)
+                        (mapv (fn [grp]
+                                {:type (:type (first grp))
+                                 :fns  (vec (keep :fn grp))})))
+            distinct-fns (->> groups (mapcat :fns) distinct count)]
+        (when (and (> (count groups) 1)
+                   (> distinct-fns 1))
+          groups)))))
 
 
 (defn- compute-edge-label
@@ -1519,11 +1697,38 @@
                                        (contains? ancestor-bindings (:slot-id arg)))
                                   (arg-determined? arg-map parent-bound-terminals arg-id))))
 
+                          ;; Loader synthesizes a `value` slot on every
+                          ;; refinement and an `items` slot on every list
+                          ;; type-row so a runtime-narrowing impl has
+                          ;; somewhere to read its input from. At the
+                          ;; refinement's / list's OWN page that slot is
+                          ;; plumbing — the type's structure is already
+                          ;; carried by the `base` / `element` edge
+                          ;; emit-type-row-internals! emits. Composed
+                          ;; children still see and bind it via slot
+                          ;; inheritance, so hiding here doesn't lose
+                          ;; functionality.
+                          hidden-synth-slot
+                          (when is-root
+                            (let [f (get fn-map display-fn-id)
+                                  has-slots? (boolean
+                                               (seq (get fn-slots-by-fn display-fn-id)))]
+                              (case (type-row-role f has-slots?)
+                                :refinement "value"
+                                :list       "items"
+                                nil)))
+                          synth-slot?
+                          (fn [arg]
+                            (and hidden-synth-slot
+                                 (= hidden-synth-slot
+                                    (:name (get-in lookups [:slot-map (:slot-id arg)])))))
+
                           filtered-args
                           (filterv (fn [arg]
-                                     (if (= :unset (:type arg))
-                                       (not (ancestor-bound? (:arg-id arg)))
-                                       true))
+                                     (and (not (synth-slot? arg))
+                                          (if (= :unset (:type arg))
+                                            (not (ancestor-bound? (:arg-id arg)))
+                                            true)))
                                    all-args)]
                       (doseq [arg filtered-args]
                         (case (:type arg)
@@ -1896,7 +2101,14 @@
                       (process-expanded-fn fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root source-expanded-fns is-hof)))))]
 
         ;; Start processing from root - no expansion-root initially, not HOF.
-        (process-any-fn root-fn-id nil nil true nil nil nil #{} false)))
+        (process-any-fn root-fn-id nil nil true nil nil nil #{} false)
+
+        ;; Type-row roots (refinement / list / union / variant) have no
+        ;; slots and no parents, so the standard pipeline produces only
+        ;; an empty card. Surface their referenced types as synthetic
+        ;; outgoing edges so the user sees the type's composition in
+        ;; the canvas instead of buried inside a chip's title.
+        (emit-type-row-internals! state lookups root-fn-id (str "fn-" root-fn-id))))
 
     ;; Attach the list of optional-unbound arg names to their source node so
     ;; the client can render a compact hint (e.g. "+default, +not-found")

@@ -97,11 +97,25 @@ function calculateNodeSize(nodeData) {
   const type = nodeData.type;
   const isPlaceholder = nodeData.isPlaceholder;
 
+  if (isPlaceholder) {
+    // The type-chip on the inbound edge already shows what the slot
+    // expects, so the placeholder itself collapses to a small click
+    // target (binder for free args, `+` for empty sequence anchors).
+    return { width: PLACEHOLDER_SIZE, height: PLACEHOLDER_SIZE };
+  }
+
   if (type === 'arg') {
     const maxLen = 30;
     const effectiveLen = Math.min(label.length, maxLen);
+    // arg-overlay is column-flex: row of (value text + type-chip +
+    // inline-expand trigger + optional mismatch badge), then the
+    // drag handle below. The horizontal budget only needs to cover
+    // the inline row; the drag handle's height already lives in
+    // DRAG_HANDLE_HEIGHT.
+    const chipBudget = 38;     // `int` / `text` / `bool` etc.
+    const triggerBudget = 14;  // `▸/▾` trigger
     return {
-      width: Math.max(40, effectiveLen * 6 + 16),
+      width: Math.max(40, effectiveLen * 6 + 16 + chipBudget + triggerBudget),
       height: 22 + DRAG_HANDLE_HEIGHT  // content (padding 4+4 + line 14) + drag handle
     };
   } else {
@@ -261,12 +275,17 @@ async function fetchBackendLayout() {
     const colGaps = new Map();
     const CHAR_WIDTH = 9;
     const LABEL_PADDING = 30;
-    // Chip widths stay in lock-step with editor-styles.css. The
-    // description badge is always rendered; the type chip + sequence
-    // buttons depend on whether the arg is editable. The is-fn `λ/()`
-    // chip was retired in #15b — `type=:fn` IS the HOF marker now and
-    // the type-chip already shows it.
-    const TYPE_CHIP_WIDTH  = 38;  // covers "sequence" comfortably
+    // Chip widths stay in lock-step with editor-styles.css. The chip
+    // itself is always rendered (read-only or editable); its visible
+    // text depends on the resolved type — short for primitives
+    // (`int`, `text`), long for fn-types (`(request)→ring-res…`).
+    // We compute the actual chip text via `compactTypeChipText` per
+    // edge so columns hosting fn-typed args reserve enough room for
+    // the chip to fit between source-card and target-card without
+    // crossing either.
+    const CHIP_CHAR_PX     = 6;   // SF Mono 9px ≈ 5.5–6 px per char
+    const CHIP_CHROME_PX   = 25;  // padding 8 + border 2 + margin 4 + slack
+    const TRIGGER_WIDTH    = 16;  // `▸ / ▾` inline-expand trigger
     const SEQ_BTN_WIDTH    = 18;  // × or +
     const DESC_BADGE_WIDTH = 19;  // 15 + 4 margin
     edges.forEach(e => {
@@ -276,7 +295,6 @@ async function fetchBackendLayout() {
         const labelCol = Math.min(srcPos.col, tgtPos.col);
         const widestLine = e.data.argName.split('\n').reduce(
           (max, line) => Math.max(max, line.length), 0);
-        let chipOverhead = DESC_BADGE_WIDTH;
         const editArg = (typeof argRowFromNode === 'function')
                         ? argRowFromNode(e.data) : null;
         const editable = editArg
@@ -284,8 +302,24 @@ async function fetchBackendLayout() {
                       && implementationFnIds.has(editArg['fn-id'])
                       && (typeof isAuthenticated === 'function'
                           ? isAuthenticated() : true);
+        // Estimate the chip's visible text width — the chip's text is
+        // produced by `compactTypeChipText(rich, flat)`, so reserve
+        // the same width here. Fall back to a short default when the
+        // helpers aren't loaded yet (e.g. first paint before
+        // editor-overlay-arg.js is fully wired).
+        const rich = (editArg && typeof expectedSlotType === 'function')
+                     ? expectedSlotType(editArg) : null;
+        const flat = editArg?.type
+                     ? String(editArg.type).replace(/^:/, '')
+                     : 'any';
+        const chipText = (typeof compactTypeChipText === 'function')
+                         ? compactTypeChipText(rich, flat)
+                         : flat;
+        const chipChars = (chipText || '').length;
+        let chipOverhead = DESC_BADGE_WIDTH
+                         + (chipChars * CHIP_CHAR_PX + CHIP_CHROME_PX);
         if (editable) {
-          chipOverhead += TYPE_CHIP_WIDTH;
+          chipOverhead += TRIGGER_WIDTH;
           if (e.data.sourcePrevArgId) {
             chipOverhead += SEQ_BTN_WIDTH;                              // ×
             if (!e.data.sourceNextArgId) chipOverhead += SEQ_BTN_WIDTH; // tail +

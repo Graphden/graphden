@@ -43,21 +43,10 @@
   ;; computes the record shape, which `:return-type :ring-response-shape`
   ;; pins (computed ⊆ declared check at sync time).
   ;;
-  ;; Headers must reach http-kit with string keys; JSONB roundtrip
-  ;; keywordizes literal-map keys, so the headers slot threads through
-  ;; `:stringify-map-keys` before being assoc'd in.
-  ;;
-  ;; NOTE: a "direct" `:parent :ring-response-shape` form does NOT work
-  ;; here — binding `:headers` to the stringify fn-ref at this level
-  ;; would close that slot to children's overrides (graphden's rule:
-  ;; once a slot is value/ref-bound, descendants can't rebind). The
-  ;; `:assoc` chain keeps `:headers` lifted as a free arg at the
-  ;; consumer surface so callers like `:default-auth-fail-response`
-  ;; remain free to bind it.
-
-  {:name :_ring-response--stringified-headers
-   :parent :stringify-map-keys
-   :args {:m {:as :headers :type :jsonb}}}
+  ;; `:headers` flows through keyword-keyed (JSONB roundtrip keywordizes
+  ;; literal map keys). The `:http-server` adapter (web/http/impls.clj)
+  ;; stringifies once on the way to http-kit, so no in-graph
+  ;; `:stringify-map-keys` step is needed here.
 
   {:name :_ring-response--w-status
    :parent :assoc
@@ -69,7 +58,7 @@
    :parent :assoc
    :args {:map :_ring-response--w-status
           :key {:value :headers :literal? true}
-          :value :_ring-response--stringified-headers}}
+          :value {:as :headers :type :jsonb}}}
 
   {:name :ring-response
    :description "Build a Ring response: `{:status :headers :body}`. Free args: `:status` (refined `:http-status`), `:headers` (jsonb, stringified), `:body` (text)."

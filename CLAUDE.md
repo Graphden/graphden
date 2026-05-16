@@ -200,16 +200,17 @@ The editor frontend is split into modules for better maintainability:
 | `editor-edit-reparent.js` | Phase 3 re-parent cascade + parent-set editor popover |
 | `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
 | `editor-type-explainer.js` | Singleton popover shown on click of any type-chip — human-readable description + structural form + optional "Change type" button |
-| `editor-overlay-arg.js` | Arg-value overlay (in-place edit click target, type-chip, mismatch indicator) |
-| `editor-overlay-edge-label.js` | Edge-label overlay (rename click, description badge, sequence add/remove) |
-| `editor-overlays.js` | Fn-overlay (ancestor list, MI cells, return-type/effects/parents/ns strips), placeholder overlay, overlay positioner |
+| `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom |
+| `editor-overlay-arg.js` | Arg-value overlay (in-place edit click target, type-chip, mismatch indicator). Column-flex outer: inline row of value+chip+trigger+mismatch sits over a drag-handle docked below |
+| `editor-overlay-edge-label.js` | Edge-label overlay (rename click, type-chip + inline-expand trigger, stacked type-narrowing chain, description badge, sequence add/remove). Anchored AFTER the taxi-bend so the shared part of a branching edge stays visible |
+| `editor-overlays.js` | Fn-overlay (ancestor list, MI cells, return-type/effects/parents/ns strips), placeholder binder (`+` click-target for unset free args / sequence anchors), overlay positioner |
 | `editor-sidebar.js` | Namespace tree + entity list + filter |
 | `editor-expansion.js` | spec→state→preview machine for ancestor row click/hover |
 | `editor-ui.js` | Selection + navigation controls + the shared `previewDebounceTimer` |
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → busy → prefs → auth → create → data → layout → literal-types → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → type-explainer → overlay-arg → overlay-edge-label → overlays → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → busy → prefs → auth → create → data → layout → literal-types → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → type-explainer → overlay-type-expand → overlay-arg → overlay-edge-label → overlays → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 

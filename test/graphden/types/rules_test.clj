@@ -118,6 +118,85 @@
                                   :any)))))
 
 
+(deftest get-with-default-on-missing-field-returns-default-type
+  (testing "missing field BUT :default supplied — intentional, not a typo"
+    (is (= :text
+           (r/compute-return-type :get
+                                  {:coll    {:type {:name :text}}
+                                   :key     {:type :text :value "missing"}
+                                   :default {:type :text :value "fallback"}}
+                                  :any)))))
+
+
+;; -----------------------------------------------------------------------------
+;; :update-in — return preserves m's shape; literal :path validated
+;; against m's record structure (typo-catching, mirrors :get).
+
+(deftest update-in-returns-m-shape
+  (is (= {:headers :jsonb :status :int}
+         (r/compute-return-type :update-in
+                                {:m {:type {:headers :jsonb :status :int}}}
+                                :any))))
+
+
+(deftest update-in-accepts-valid-path-segment
+  (testing "path segment naming a present field — no throw"
+    (is (= {:headers :jsonb}
+           (r/compute-return-type :update-in
+                                  {:m    {:type {:headers :jsonb}}
+                                   :path {:value [{:value :headers :literal? true}]}}
+                                  :any)))))
+
+
+(deftest update-in-throws-on-missing-path-segment
+  (testing "path segment naming an absent field — typo, throw"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"path segment :hdrs not found"
+          (r/compute-return-type :update-in
+                                 {:m    {:type {:headers :jsonb}}
+                                  :path {:value [{:value :hdrs :literal? true}]}}
+                                 :any)))))
+
+
+(deftest update-in-path-stops-at-non-record-level
+  (testing "a deeper segment into a :jsonb sub-level isn't validated"
+    (is (= {:headers :jsonb}
+           (r/compute-return-type :update-in
+                                  {:m    {:type {:headers :jsonb}}
+                                   :path {:value [{:value :headers :literal? true}
+                                                  {:value :anything :literal? true}]}}
+                                  :any)))))
+
+
+(deftest update-in-path-skipped-when-m-not-record
+  (testing "m generic — nothing to validate the path against"
+    (is (= :any
+           (r/compute-return-type :update-in
+                                  {:m    {:type :any}
+                                   :path {:value [{:value :whatever :literal? true}]}}
+                                  :any)))))
+
+
+(deftest update-in-slot-types-narrows-path
+  (testing "m is a known record → :path narrows to [:list :keyword]"
+    (is (= {:path [:list :keyword]}
+           (r/compute-slot-types :update-in {:m {:type {:headers :jsonb}}}))))
+  (testing "m generic → no slot narrowing"
+    (is (= {} (r/compute-slot-types :update-in {:m {:type :any}})))))
+
+
+(deftest update-in-nav-types-hands-over-m-structure
+  (testing "m is a known record → :path navigates that record's shape"
+    (is (= {:path {:headers :jsonb :status :int}}
+           (r/compute-nav-types
+             :update-in
+             {:m {:type {:headers :jsonb :status :int}}}))))
+  (testing "m generic / open map → nothing to navigate"
+    (is (= {} (r/compute-nav-types :update-in {:m {:type :any}})))
+    (is (= {} (r/compute-nav-types :update-in {:m {:type :jsonb}})))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; :first / :rest / :cons — list-elem propagation
 

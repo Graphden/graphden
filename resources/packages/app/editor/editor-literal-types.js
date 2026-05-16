@@ -18,9 +18,56 @@ function expectedSlotType(arg) {
   if (!arg || !lookups || !lookups.slotMap || !lookups.fnMap) return null;
   const slotId = arg['slot-id'];
   if (!slotId) return null;
+  // Per-position type for a nav-typed sequence item (`:update-in`
+  // `:path`): walk the navigable structure along the live path
+  // prefix. Wins over the homogeneous `[:list T]` element type — the
+  // valid key-set at segment N depends on segments 0..N-1.
+  if (arg['item-id']) {
+    const navT = (typeof navItemType === 'function') ? navItemType(arg) : null;
+    if (navT != null) return navT;
+  }
   const slot = lookups.slotMap.get(slotId);
   if (!slot || !slot['type-fn-id']) return null;
-  const tfn = lookups.fnMap.get(slot['type-fn-id']);
+  // Effective type at this binding site — most specific wins:
+  //  1. Author's explicit pin (`{:type T}` on the binding) — strongest
+  //     intent, narrows even inherited slot generics.
+  //  2. Backward-unification result — when the fn-def's declared
+  //     `:return-type` narrowed a parent type-var that ALSO types
+  //     this slot, the type-checker records the narrowed type in
+  //     rich-types `slot-types` (keyed by slot-name). E.g.
+  //     `:default-security-headers` declaring `:security-headers-shape`
+  //     over `:const` flows into the `:value` slot.
+  //  3. ref's declared return-type — when `{:ref X}` without an
+  //     explicit `:type`, the inferred narrow is what X returns.
+  //  4. slot's declared `type-fn-id` — fallback.
+  const bindingId = arg['binding-id'];
+  const binding = (bindingId && lookups.bindingMap)
+                  ? lookups.bindingMap.get(bindingId) : null;
+
+  // Priority 2 — backward-unified slot type from rich-types. Skipped
+  // when the author put an explicit `:type` override on the binding
+  // (priority 1 wins below). The value is a rich-type directly, not a
+  // fn-id, so it short-circuits the fn-id resolution path.
+  if (binding?.['type-override-fn-id'] == null) {
+    const ownFn = arg['fn-id'] ? lookups.fnMap.get(arg['fn-id']) : null;
+    const unified = (ownFn?.name && typeof richTypes === 'object' && richTypes)
+                    ? richTypes[ownFn.name]?.['slot-types']?.[slot.name]
+                    : null;
+    if (unified != null) {
+      if (arg['item-id']) {
+        const elem = listElementType(unified, null);
+        if (elem !== null) return elem;
+      }
+      return unified;
+    }
+  }
+
+  const refFnId = binding?.['ref-fn-id'];
+  const refFn = refFnId ? lookups.fnMap.get(refFnId) : null;
+  const tfnId = binding?.['type-override-fn-id']
+                || refFn?.['return-type-fn-id']
+                || slot['type-fn-id'];
+  const tfn = lookups.fnMap.get(tfnId);
   if (!tfn) return null;
   const slotType = computeSlotType(tfn);
   // For binding-list-items the slot's type is `[:list T]` / `:sequence`
@@ -52,6 +99,14 @@ function computeSlotType(tfn) {
   if (Array.isArray(c) && c[0] === 'fn') return c;
   if (!tfn.name) return null;
   const rich = (typeof richTypes !== 'undefined' && richTypes) ? richTypes[tfn.name] : null;
+  // For NAMED type-rows (record-shapes, list/union/variant aliases,
+  // refinements) prefer the alias name — readers recognise
+  // `ring-response-shape` instantly and the inline-expand panel still
+  // unfolds the constituents on demand. Returning the expanded
+  // structure (a JS object for records) breaks `compactTypeChipText`,
+  // which only renders strings and arrays — falls through to flat
+  // `any` / `jsonb`.
+  if (rich?.['type-row?']) return tfn.name;
   if (rich?.return && rich.return !== 'any') return rich.return;
   return tfn.name;
 }
@@ -129,8 +184,164 @@ function refinementOK(v, constraint) {
     case '<=':   return typeof v === 'number' && typeof rhs === 'number' && v <= rhs;
     case '=':    return v === rhs;
     case 'not=': return v !== rhs;
+    // `[:in [m…]]` — membership in a finite set. Keyword members
+    // serialise without their colon, the editor's keyword values
+    // keep it, so accept either form.
+    case 'in':   return Array.isArray(rhs)
+                        && rhs.some(x => x === v || (':' + x) === v);
     default:     return 'unknown';
   }
+}
+
+
+// Detect a CLOSED ENUMERATION — a refinement whose constraint pins the
+// value to a finite literal set (`[:refine base [:in […]]]`). Returns
+// `{base, members:[{value,label}]}` so the value-edit popover can offer
+// a <select>; null when the type isn't a closed enum. Keyword members
+// arrive colon-stripped on the wire — re-prefixed here so the option
+// `value` round-trips as the keyword it represents.
+function closedEnumOf(expected) {
+  const t = dereferenceType(expected);
+  if (!Array.isArray(t) || t[0] !== 'refine') return null;
+  const base = t[1];
+  const c = t[2];
+  if (!Array.isArray(c) || c[0] !== 'in' || !Array.isArray(c[1])) return null;
+  const isKw = base === 'keyword';
+  const members = c[1].slice()
+    .map(m => String(m))
+    .sort()
+    .map(m => {
+      const lit = (isKw && m.charAt(0) !== ':') ? ':' + m : m;
+      return { value: lit, label: lit };
+    });
+  return { base: base, members: members };
+}
+
+
+// True when `t` resolves to a keyword-based type — a bare `keyword`
+// or a refinement over one. Free text typed into such a slot's editor
+// names a keyword, so it must be stored colon-prefixed (`:foo`), not
+// as plain text.
+function isKeywordType(t) {
+  const d = dereferenceType(t);
+  if (d === 'keyword') return true;
+  return Array.isArray(d) && d[0] === 'refine' && d[1] === 'keyword';
+}
+
+
+// --- nav-type walk — per-position typing for sequence items that
+// index INTO a structure (e.g. `:update-in`'s `:path` walks `:m`).
+//
+// The backend hands over the navigable structure verbatim (rich-type
+// `nav-types`); the editor walks it against the LIVE path so each
+// position stays correct even mid-edit. The walk itself is generic
+// structural navigation — no base-fn knowledge.
+
+// Type a segment that navigates `t`: a record → its closed key-set,
+// an open map → a free keyword, a list → an int index. null = `t` is
+// a scalar — no further segment is valid.
+function navKeyType(t) {
+  const d = dereferenceType(t);
+  if (d && typeof d === 'object' && !Array.isArray(d)) {
+    const keys = Object.keys(d);
+    return keys.length ? ['refine', 'keyword', ['in', keys.slice().sort()]] : null;
+  }
+  if (d === 'jsonb' || d === 'any') return 'keyword';
+  if (Array.isArray(d) && d[0] === 'list') return 'int';
+  if (d === 'sequence') return 'int';
+  return null;
+}
+
+// Structure reached by following segment `key` (a bare field-name, or
+// null when the live segment is dynamic) into `t`.
+function descendType(t, key) {
+  const d = dereferenceType(t);
+  if (d && typeof d === 'object' && !Array.isArray(d)) {
+    return (key != null && Object.prototype.hasOwnProperty.call(d, key))
+           ? d[key] : 'any';
+  }
+  if (d === 'jsonb' || d === 'any') return d;
+  if (Array.isArray(d) && d[0] === 'list') return d[1];
+  if (d === 'sequence') return 'any';
+  return null;
+}
+
+function walkNavType(navType, keys) {
+  let t = navType;
+  for (const k of keys) {
+    if (t == null) return null;
+    t = descendType(t, k);
+  }
+  return t;
+}
+
+// Ordered {position, key} of a (fn,slot) sequence's LIVE items — a
+// literal keyword yields its bare name, a fn-ref / non-keyword yields
+// null (dynamic; the walk treats it as an unknown level). Raw
+// `position` values can have HOLES — a deleted item's slot is never
+// reused — so callers must index by list ORDER, not by `position`.
+function pathSegments(fnId, slotId) {
+  if (!fnId || !slotId || !lookups || !lookups.bindingMap || !lookups.itemsByBinding) {
+    return [];
+  }
+  let binding = null;
+  for (const b of lookups.bindingMap.values()) {
+    if (b['fn-id'] === fnId && b['slot-id'] === slotId) { binding = b; break; }
+  }
+  if (!binding) return [];
+  const items = (lookups.itemsByBinding.get(binding.id) || []).slice()
+                .sort((a, b) => Number(a.position) - Number(b.position));
+  return items.map(it => {
+    let key = null;
+    if (!it['ref-fn-id'] && typeof it.value === 'string') {
+      key = (it.value.charAt(0) === ':') ? it.value.slice(1) : it.value;
+    }
+    return { position: Number(it.position), key: key };
+  });
+}
+
+// Just the ordered keys — the full live path, for append-type walks.
+function pathSegKeys(fnId, slotId) {
+  return pathSegments(fnId, slotId).map(s => s.key);
+}
+
+// nav-types entry for a (fn,slot) — the structure its items index
+// into — or null when the slot isn't nav-typed.
+function navTypeOf(fnId, slotId) {
+  if (!fnId || !slotId || !lookups || typeof richTypes !== 'object' || !richTypes) {
+    return null;
+  }
+  const fn = lookups.fnMap?.get(fnId);
+  const slot = lookups.slotMap?.get(slotId);
+  if (!fn || !fn.name || !slot || !slot.name) return null;
+  const nav = richTypes[fn.name]?.['nav-types'];
+  return (nav && nav[slot.name] != null) ? nav[slot.name] : null;
+}
+
+// Expected type of an existing nav-typed sequence item — walk the
+// structure along the segments BEFORE this item. The prefix is taken
+// by list ORDER (the item's index among live items), not by raw
+// `position`, which may have holes from earlier deletions.
+function navItemType(arg) {
+  if (!arg || !arg['item-id']) return null;
+  const navType = navTypeOf(arg['fn-id'], arg['slot-id']);
+  if (navType == null) return null;
+  const segs = pathSegments(arg['fn-id'], arg['slot-id']);
+  const pos = Number(arg.position);
+  let idx = segs.findIndex(s => s.position === pos);
+  if (idx < 0) idx = segs.length;
+  const prefix = segs.slice(0, idx).map(s => s.key);
+  return navKeyType(walkNavType(navType, prefix));
+}
+
+// Type for the NEXT item appended to a (fn,slot) sequence:
+//   undefined — not a nav-typed sequence (caller: append unconstrained)
+//   null      — the live path can't be extended (caller: hide `+`)
+//   <type>    — expected type for the new segment
+function appendNavType(fnId, slotId) {
+  const navType = navTypeOf(fnId, slotId);
+  if (navType == null) return undefined;
+  return navKeyType(walkNavType(navType, pathSegKeys(fnId, slotId)));
 }
 
 
@@ -302,6 +513,9 @@ function constraintHuman(c) {
   if (op === 'or') {
     return c.slice(1).map(constraintHuman).join(' or ');
   }
+  if (op === 'in' && Array.isArray(c[1])) {
+    return 'one of ' + c[1].map(String).join(', ');
+  }
   if (c.length === 2) return op + ' ' + JSON.stringify(c[1]);
   return JSON.stringify(c);
 }
@@ -336,7 +550,17 @@ function formatTypeHint(t) {
   if (typeof t === 'string') return t;
   if (Array.isArray(t)) {
     const head = t[0];
-    if (head === 'refine')   return ':' + t[1] + ' (' + t[2].join(' ') + ')';
+    if (head === 'refine') {
+      const c = t[2];
+      // Closed enum — render the member set, not the raw constraint.
+      if (Array.isArray(c) && c[0] === 'in' && Array.isArray(c[1])) {
+        const isKw = t[1] === 'keyword';
+        const ms = c[1].map(m => (isKw && String(m).charAt(0) !== ':')
+                                  ? ':' + m : String(m));
+        return ':' + t[1] + ' (' + ms.join('|') + ')';
+      }
+      return ':' + t[1] + ' (' + c.join(' ') + ')';
+    }
     if (head === 'list')     return '[' + formatTypeHint(t[1]) + ']';
     if (head === 'union')    return t.slice(1).map(formatTypeHint).join('|');
     if (head === 'fn') {

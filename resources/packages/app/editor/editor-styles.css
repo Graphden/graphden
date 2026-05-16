@@ -237,6 +237,18 @@ body.sidebar-collapsed .sidebar-expand-floating {
 #entity-list { padding: 4px 0; margin: 0; }
 .ns-header { display: flex; align-items: center; padding: 3px 8px; cursor: pointer; user-select: none; }
 .ns-header:hover { background: var(--hover-bg); }
+/* Section label inside a namespace: separates "Types" from
+   "Functions" when both are present. Hidden when a namespace has
+   only one kind so single-purpose folders don't grow extra chrome. */
+.ns-section-label {
+  padding: 2px 8px 1px 24px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-fg);
+  user-select: none;
+}
 .ns-arrow { width: 16px; font-size: 10px; color: var(--muted-fg); flex-shrink: 0; text-align: center; }
 .ns-label { font-size: 13px; font-weight: 600; color: var(--fg); }
 .ns-children { padding-left: 16px; }
@@ -467,6 +479,27 @@ body.sidebar-collapsed .sidebar-expand-floating {
   color: var(--fg);
 }
 
+/* Edit-this-type-row strip — peer of `.return-type-strip-editable`,
+   surfaces "open the type-edit form" for type-rows on their nav-root
+   card. Italic muted text matches the other footer strips; hover
+   raises contrast so the affordance is unambiguous. */
+.edit-type-strip {
+  padding: 2px 8px;
+  color: var(--muted-fg);
+  font-size: 10px;
+  font-style: italic;
+  border-top: 1px dashed var(--input-border);
+  background: var(--card-bg);
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.edit-type-strip:hover,
+.edit-type-strip:focus-visible {
+  background: var(--hover-bg);
+  color: var(--fg);
+  outline: none;
+}
+
 /* Effect badges — small per-category chips on a fn's footer. Pure
    fns omit the strip entirely; effectful fns show colour-coded
    pills (one per category) so the type of effect is visible at a
@@ -522,6 +555,62 @@ body.sidebar-collapsed .sidebar-expand-floating {
   outline-offset: -1px;
 }
 
+/* Pencil at the right of the effects-strip — opens the inline-edit
+   popover that toggles `:expects-effects`. Text mode ("declare
+   effects…") used when no contract is set yet, glyph (`✎`) when one
+   exists. Same muted-fg → fg hover affordance as the other footer
+   strip controls. */
+.effects-strip-edit {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 10px;
+  background: transparent;
+  border: none;
+  color: var(--muted-fg);
+  cursor: pointer;
+  font-style: italic;
+}
+.effects-strip-edit:hover,
+.effects-strip-edit:focus-visible {
+  color: var(--fg);
+  outline: none;
+}
+
+/* Effect-contract picker — rendered inside the inline-edit popover.
+   Two-row layout: mode radio + 2-column checkbox grid. Disabled
+   state (no-contract mode) dims the checkboxes so the user sees
+   they're not currently consulted. */
+.expects-effects-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+.expects-effects-mode-row {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+}
+.expects-effects-mode-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.expects-effects-grid {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 4px 12px;
+  font-size: 11px;
+}
+.expects-effects-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.expects-effects-checkbox input:disabled + * { color: var(--muted-fg); }
+
 /* Edit pencil ✎ — right-pinned action icon, opacity transitions like
    the open-in-new-tab and description-badge so it stays unobtrusive
    when the user is just scanning. */
@@ -554,6 +643,22 @@ body.sidebar-collapsed .sidebar-expand-floating {
    the click handler is intentionally a no-op in this state. */
 .pinned-icon-btn-disabled,
 .pinned-icon-btn-disabled:hover {
+  opacity: 0.45;
+  background-color: transparent;
+  cursor: help;
+}
+
+/* Generic disabled-with-reason variant — applied via
+   `applyIconDisabledReason` in editor-icons.js when an action icon
+   stays visible for discoverability but the action itself is blocked
+   (e.g. ✎ rename on a fn referenced by other fns). Click reveals the
+   reason in `icon-reason-popover` instead of running the action. */
+.edit-pencil.action-disabled,
+.edit-pencil.action-disabled:hover,
+.pinned-icon-btn.action-disabled,
+.pinned-icon-btn.action-disabled:hover,
+.namespace-badge.action-disabled,
+.namespace-badge.action-disabled:hover {
   opacity: 0.45;
   background-color: transparent;
   cursor: help;
@@ -743,8 +848,499 @@ body.sidebar-collapsed .sidebar-expand-floating {
   pointer-events: auto;
 }
 .arg-type-chip:hover { opacity: 1; }
-.arg-type-chip-readonly { cursor: default; }
-.arg-type-chip-readonly:hover { opacity: 0.7; }
+/* Read-only variant — no hover-up because it's not actionable. The
+   parent's `--muted-fg` × 0.7 opacity lands at ~#888 on white, which
+   the a11y MCP flags as 3.54-contrast against the canvas. Pin
+   opacity at full and the colour at a token darker than its
+   neighbour `currentColor` (which is itself muted) so the chip
+   stays subordinate to actionable chips but clears WCAG 2 AA. */
+.arg-type-chip-readonly {
+  cursor: default;
+  opacity: 1;
+  color: var(--fg);
+}
+.arg-type-chip-readonly:hover { opacity: 1; }
+
+/* Sequence-item bracket chrome — wraps an `.arg-type-chip` so it reads
+   as `[elem-type]` (graphden's `[:list T]` structural notation) when
+   the edge represents one item of a sequence-bound slot. The brackets
+   are purely visual; the chip inside keeps its click target / inline-
+   expand / type-edit behaviour. Lower opacity than the chip itself so
+   they read as container chrome, not a sibling type. */
+.arg-type-chip-list-bracket {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 4px;
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 14px;
+}
+.arg-type-chip-list-bracket > .arg-type-chip { margin-left: 0; }
+.arg-type-chip-list-bracket::before {
+  content: '[';
+  opacity: 0.65;
+}
+.arg-type-chip-list-bracket::after {
+  content: ']';
+  opacity: 0.65;
+}
+
+/* Type-create popover — opens from sidebar's "+ New type…" menu.
+   Renders a kind picker first (refinement/record/union/variant/list)
+   then swaps to the per-kind form on selection. Same visual idiom
+   as the type-explainer popover: card-style frame, header strip,
+   form body, action-button row. */
+.type-create-popover {
+  display: none;
+  position: fixed;
+  z-index: 100;
+  width: 320px;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg);
+  padding: 0;
+  font-size: 11px;
+}
+.type-create-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--light-border);
+  background: var(--header-bg);
+  color: var(--header-fg);
+  border-radius: 6px 6px 0 0;
+}
+.type-create-title { font-weight: 600; font-size: 11px; }
+.type-create-close {
+  background: transparent; color: inherit;
+  border: none; cursor: pointer; padding: 0 4px;
+  font-size: 16px; line-height: 1;
+}
+.type-create-close:hover { opacity: 0.7; }
+.type-create-kinds {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 6px;
+}
+.type-create-kind {
+  display: flex; flex-direction: column; align-items: stretch;
+  gap: 2px;
+  padding: 6px 8px;
+  background: transparent;
+  color: var(--card-fg);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.type-create-kind:hover,
+.type-create-kind:focus-visible {
+  background: var(--hover-bg);
+  border-color: var(--light-border);
+  outline: none;
+}
+.type-create-kind-label { font-weight: 600; font-size: 11px; }
+.type-create-kind-hint { font-size: 10px; color: var(--muted-fg); }
+.type-create-form {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 8px;
+}
+.type-create-field {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.type-create-field-label {
+  font-size: 10px; color: var(--muted-fg);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.type-create-input {
+  font-family: inherit; font-size: 11px;
+  padding: 4px 6px;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--bg); color: var(--fg);
+}
+.type-create-input-mono {
+  font-family: 'SF Mono', Monaco, monospace;
+}
+.type-create-textarea {
+  font-family: 'SF Mono', Monaco, monospace;
+  resize: vertical;
+  min-height: 60px;
+}
+.type-create-input:focus-visible { outline: 2px solid var(--accent); }
+
+/* Variant / record pair-rows — two-column "(tag, type)" / "(name,
+   type)" widget with per-row × remove and a "+ add row" button at
+   the bottom. Replaces the freeform `tag: type\n` textarea so the
+   author doesn't need to know any line syntax. */
+.type-create-pair-list {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.type-create-pair-rows {
+  display: flex; flex-direction: column; gap: 3px;
+}
+.type-create-pair-row {
+  display: flex; gap: 4px; align-items: center;
+  background: var(--bg);
+}
+.type-create-pair-row-dragging {
+  opacity: 0.4;
+}
+.type-create-pair-drag {
+  width: 16px; flex-shrink: 0;
+  font-size: 12px; line-height: 1;
+  color: var(--muted-fg);
+  cursor: grab;
+  user-select: none;
+  text-align: center;
+}
+.type-create-pair-drag:active { cursor: grabbing; }
+.type-create-pair-drag:hover { color: var(--fg); }
+.type-create-pair-key,
+.type-create-pair-val { flex: 1; min-width: 0; }
+.type-create-pair-rm {
+  width: 22px; height: 22px;
+  flex-shrink: 0;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--bg); color: var(--muted-fg);
+  font-size: 13px; line-height: 1;
+  cursor: pointer;
+}
+.type-create-pair-rm:hover {
+  color: var(--error-fg);
+  border-color: var(--error-fg);
+}
+.type-create-pair-add {
+  align-self: flex-start;
+  font-family: inherit; font-size: 10px;
+  padding: 2px 8px;
+  border: 1px dashed var(--input-border);
+  border-radius: 3px;
+  background: transparent; color: var(--muted-fg);
+  cursor: pointer;
+}
+.type-create-pair-add:hover {
+  color: var(--fg); border-color: var(--fg);
+}
+
+/* Union branches input — single-line full-width without a "branches"
+   label above it (the placeholder + form header carry the meaning). */
+.type-create-input-fullrow { width: 100%; }
+
+/* Type-create kind tabs — segmented control at the top of the
+   unified create form. Saves a click vs the prior 2-step picker
+   (kind menu → form) and keeps name/description carried across
+   tab switches so the user doesn't retype while exploring kinds. */
+.type-create-tabs {
+  display: flex;
+  border-top: 1px solid var(--card-border);
+  border-bottom: 1px solid var(--card-border);
+  background: var(--card-bg);
+}
+.type-create-tab {
+  flex: 1;
+  font-family: inherit; font-size: 10px;
+  padding: 5px 4px;
+  background: transparent; border: none;
+  color: var(--muted-fg);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.type-create-tab:hover { color: var(--fg); }
+.type-create-tab-active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Refinement constraint builder — op-dropdown + value-input rows,
+   stacked with optional `:and` / `:or` combinator visible only when
+   >1 row. Mirrors the pair-row idiom (× per row, + add at the
+   bottom) so the form has one consistent multi-row UX. */
+.refinement-builder {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.refinement-rows {
+  display: flex; flex-direction: column; gap: 3px;
+}
+.refinement-row {
+  display: flex; gap: 4px; align-items: center;
+}
+.refinement-op {
+  width: 70px; flex-shrink: 0;
+  font-family: inherit; font-size: 11px;
+  padding: 3px 4px;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--bg); color: var(--fg);
+}
+.refinement-val { flex: 1; min-width: 0; }
+.refinement-combinator {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--muted-fg);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.refinement-combinator-select {
+  font-family: inherit; font-size: 11px;
+  padding: 2px 4px;
+  text-transform: lowercase;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  background: var(--bg); color: var(--fg);
+}
+.refinement-advanced-wrap {
+  display: flex; justify-content: flex-end;
+}
+.refinement-advanced-toggle {
+  font-family: inherit; font-size: 10px;
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: var(--muted-fg);
+  cursor: pointer;
+}
+.refinement-advanced-toggle:hover {
+  color: var(--fg);
+}
+
+.type-create-error {
+  font-size: 10px;
+  color: var(--error-fg);
+  white-space: pre-wrap;
+}
+.type-create-actions {
+  display: flex; justify-content: space-between;
+  gap: 6px; margin-top: 4px;
+}
+.type-create-back,
+.type-create-submit {
+  font-family: inherit; font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 3px; cursor: pointer;
+}
+.type-create-back {
+  background: var(--card-bg); color: var(--muted-fg);
+  border: 1px solid var(--light-border);
+}
+.type-create-back:hover { background: var(--hover-bg); }
+.type-create-submit {
+  background: var(--header-bg); color: var(--header-fg);
+  border: 1px solid var(--header-bg);
+  font-weight: 600;
+}
+.type-create-submit:hover { opacity: 0.85; }
+.type-create-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Inline type-chip expansion — appears as a floating card below
+   the chip when the user clicks an expandable chip. Reveals the
+   type's constituent parts (refine→base+constraint, list→element,
+   union→branches, record→fields) as a small indented tree. Same
+   visual vocabulary as the chip itself; no special colours/borders. */
+.type-chip-expandable {
+  /* Chip itself IS the click target for expansion — give it a
+     subtle dotted underline so users see the chip is interactive
+     beyond just opening a popover. */
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--muted-fg);
+  text-underline-offset: 2px;
+}
+.type-inline-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 2px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--light-border);
+}
+.type-inline-header-name {
+  font-weight: 600;
+  font-size: 10px;
+  color: var(--card-fg);
+}
+.type-inline-header-edit {
+  padding: 1px 6px;
+  font-size: 9px;
+  font-family: inherit;
+  line-height: 1.2;
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  cursor: pointer;
+}
+.type-inline-header-edit:hover,
+.type-inline-header-edit:focus-visible {
+  background: var(--hover-bg);
+  outline: none;
+}
+.type-inline-header-edit:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.type-inline-description {
+  margin: 0 0 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--light-border);
+  font-size: 10px;
+  color: var(--muted-fg);
+  font-style: italic;
+}
+/* Promote-anonymous button — appears in the inline-expand panel
+   when the type is anonymous (no name) and the user has edit
+   rights. Naming the type creates no copy — the existing fn-row
+   just gets a `:name`, so every callsite still points at it. */
+.type-inline-promote { margin-top: 6px; }
+.type-inline-promote-btn {
+  font-family: inherit; font-size: 10px;
+  padding: 3px 8px;
+  border: 1px dashed var(--muted-fg);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted-fg);
+  cursor: pointer;
+}
+.type-inline-promote-btn:hover,
+.type-inline-promote-btn:focus-visible {
+  background: var(--hover-bg);
+  color: var(--fg);
+  border-color: var(--fg);
+  outline: none;
+}
+
+/* "Used by N" back-link footer in the type-expansion panel. Lists
+   every fn that references this type-row — clickable to navigate. */
+.type-inline-usages {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--light-border);
+}
+.type-inline-usages-head {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--light-fg);
+  margin-bottom: 2px;
+}
+.type-inline-usages-list {
+  display: flex; flex-direction: column;
+  gap: 1px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.type-inline-usage-row {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.type-inline-usage-link {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.type-inline-usage-link:hover,
+.type-inline-usage-link:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+.type-inline-usage-kind {
+  color: var(--muted-fg);
+  font-size: 9px;
+}
+.type-inline-host {
+  /* Body-level floating panel — `position: fixed` so it doesn't
+     enlarge the edge-label overlay's bounding box (which is
+     right-anchored to the target node; growing it would push under
+     the source fn card). Positioned in JS to follow the chip. */
+  display: none;
+  position: fixed;
+  z-index: 100;
+  padding: 4px 6px;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 4px;
+  box-shadow: var(--shadow-md);
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  max-width: 260px;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+
+/* Edge-label overlay sits above fn-overlays (z-index 10). Edges
+   often pack the arg-name + type-chip into the gap between source
+   and target; when that gap is too small the overlay inevitably
+   extends into one of the cards. Without this, fn-cards stacked at
+   z-index 10 cover the chip's right tail and the user loses the
+   tail of the type signature. We trade: a few pixels of card chrome
+   sit BEHIND the overlay rather than the type-chip disappearing. */
+.edge-label-overlay { z-index: 11; }
+.type-inline-row {
+  display: block;
+  white-space: normal;
+  margin: 1px 0;
+}
+.type-inline-label {
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 9px;
+  color: var(--muted-fg);
+}
+.type-inline-label-renameable {
+  cursor: pointer;
+  text-decoration: underline dotted var(--muted-fg);
+  text-underline-offset: 2px;
+}
+.type-inline-label-renameable:hover { color: var(--fg); }
+.type-inline-chip {
+  font-size: 9px;
+  line-height: 12px;
+  margin-left: 0;
+}
+.type-inline-chip-expandable {
+  text-decoration: underline dotted var(--muted-fg);
+  text-underline-offset: 2px;
+}
+.type-inline-child {
+  display: block;
+  margin-left: 8px;
+  padding-left: 6px;
+  border-left: 1px solid var(--light-border);
+}
+.type-inline-constraint-text {
+  font-size: 9px;
+  color: var(--muted-fg);
+  font-family: inherit;
+}
+
+/* Stacked type-narrowing block — sits below the main edge-label row
+   when ≥ 2 type groups are visible along the source-chain. One row
+   per inherited level: `↑ [type] (source-fn)`. Same vocabulary as the
+   stacked rename in the label text — no new visual idiom. */
+.edge-type-chain {
+  display: flex; flex-direction: column;
+  margin-top: 2px;
+  gap: 1px;
+}
+.edge-type-chain-row {
+  display: inline-flex; align-items: center;
+  white-space: nowrap;
+}
+.edge-type-chain-arrow {
+  font-size: 9px;
+  color: var(--muted-fg);
+  margin-right: 2px;
+  line-height: 14px;
+}
+.edge-type-chain-source {
+  font-size: 9px;
+  color: var(--muted-fg);
+  margin-left: 4px;
+  line-height: 1.2;
+}
 
 /* Free-arg binding chooser — two-button row inside the inline-edit
    popover; user picks "Bind literal" or "Bind fn-ref". */
@@ -768,6 +1364,42 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .arg-seq-btn:hover { opacity: 1; }
 .arg-seq-btn-remove { color: var(--muted-fg); }
 .arg-seq-btn-add { font-weight: bold; }
+
+/* Placeholder binder — the small `+` button that sits at the endpoint
+   of an unset edge. Replaces the old dashed type-name card; the
+   type-chip on the inbound edge already shows what the slot expects,
+   so this is purely a click affordance ("bind this slot" or, on a
+   sequence anchor, "add the first item"). Sized as a non-critical
+   touch-target — `--touch-target-min` kicks in on hover-less devices. */
+.placeholder-overlay {
+  display: flex; align-items: center; justify-content: center;
+}
+.placeholder-binder {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0;
+  width: 18px; height: 18px;
+  font-family: inherit; font-size: 14px; line-height: 1;
+  font-weight: 600;
+  border: 1px dashed var(--muted-fg);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--muted-fg);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 120ms, color 120ms, border-color 120ms,
+              background-color 120ms;
+}
+.placeholder-binder:hover,
+.placeholder-binder:focus-visible {
+  opacity: 1;
+  color: var(--fg);
+  border-color: var(--fg);
+  border-style: solid;
+  outline: none;
+}
+.placeholder-binder:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
 
 /* Fn-picker popover — search input + scrollable list of candidate
    fns, used by Phase 2 (arg-type → fn) and reused in later phases. */
@@ -819,6 +1451,27 @@ body.sidebar-collapsed .sidebar-expand-floating {
   font-size: 10px;
   color: var(--muted-fg);
 }
+/* Kind annotation — small tag pill on the fn-picker row for type-row
+   fns (refinement / record / union / variant / list / fn-type /
+   base-fn / primitive). Composed fns get nothing — the return-type
+   chip already carries the "what does this fn return" signal. */
+.fn-picker-row-kind {
+  display: inline-block;
+  flex-shrink: 0;
+  padding: 0 4px;
+  font-size: 9px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  color: var(--muted-fg);
+  background: var(--card-bg);
+}
+.fn-picker-row-kind-primitive {
+  border-style: dashed;
+}
+
 /* Effect badges — same `.effects-chip-*` palette used on fn-overlays
    so users see the same colours throughout. Stacked horizontally
    inside a row; pre-existing chip styling handles padding/font. */
@@ -1190,18 +1843,15 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 }
 .type-explainer-btn:hover { opacity: 0.85; }
 
-/* Tighten-effects row inside the type-explainer popover. Surfaces
-   the Phase-8 [:fn args ret #{eff-set}] narrowing when the slot is
-   fn-typed and has a backing binding. */
+/* Tighten-effects controls — used by the fn-type inline expansion
+   panel (editor-overlay-type-expand.js) to narrow [:fn args ret
+   #{eff-set}]. Each row contains a `<select>` for narrower types;
+   the effect set sits in a row of inline checkboxes; the Tighten
+   button submits the delta. */
 .type-explainer-tighten {
   margin-top: 8px;
   padding-top: 6px;
   border-top: 1px solid var(--light-border);
-}
-.type-explainer-tighten-label {
-  font-size: 10px;
-  color: var(--muted-fg);
-  margin-bottom: 4px;
 }
 .type-explainer-tighten-row {
   display: flex; flex-wrap: wrap; gap: 4px 10px;
@@ -1210,11 +1860,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .type-explainer-tighten-typerow {
   display: flex; align-items: center; gap: 6px;
   margin: 4px 0;
-}
-.type-explainer-tighten-typename {
-  font-size: 10px;
-  color: var(--muted-fg);
-  flex-shrink: 0;
 }
 .type-explainer-tighten-select {
   font-family: inherit; font-size: 11px;
@@ -1418,7 +2063,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   .description-tooltip-close,
   .parent-set-editor-chip-remove,
   .arg-value-edit-btn,
-  .description-tooltip-btn {
+  .description-tooltip-btn,
+  .placeholder-binder {
     min-width: var(--touch-target-min);
     min-height: var(--touch-target-min);
   }

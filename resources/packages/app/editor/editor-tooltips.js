@@ -406,6 +406,101 @@ function hideFullNameTooltip() {
   }, 130);
 }
 
+// Click-to-reveal reason popover for row-action icons that are visible
+// but disabled (e.g. ✎ rename on a fn that's referenced by other fns).
+// One singleton — same lifecycle as full-name-tooltip but multi-line
+// and dismissed by outside click / Escape / a second activation.
+let iconReasonPopoverEl = null;
+let iconReasonAnchor = null;
+
+function ensureIconReasonPopover() {
+  if (iconReasonPopoverEl) return iconReasonPopoverEl;
+  const el = document.createElement('div');
+  el.className = 'icon-reason-popover';
+  el.setAttribute('role', 'status');
+  Object.assign(el.style, {
+    position: 'fixed',
+    zIndex: '9999',
+    background: 'var(--bg)',
+    color: 'var(--fg)',
+    border: '1px solid var(--input-border)',
+    boxShadow: 'var(--shadow-md)',
+    padding: '6px 10px',
+    borderRadius: '4px',
+    fontFamily: 'inherit',
+    fontSize: '12px',
+    lineHeight: '1.35',
+    maxWidth: '260px',
+    pointerEvents: 'auto',
+    opacity: '0',
+    transform: 'translateY(4px)',
+    transition: 'opacity 110ms ease-out, transform 110ms ease-out',
+    display: 'none'
+  });
+  document.body.appendChild(el);
+  iconReasonPopoverEl = el;
+  // Outside-click / Escape dismissal. Same handler is safe to bind once.
+  document.addEventListener('mousedown', (e) => {
+    if (!iconReasonPopoverEl || iconReasonPopoverEl.style.display === 'none') return;
+    if (iconReasonPopoverEl.contains(e.target)) return;
+    if (iconReasonAnchor?.contains(e.target)) return;
+    hideIconReasonPopover();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!iconReasonPopoverEl || iconReasonPopoverEl.style.display === 'none') return;
+    hideIconReasonPopover();
+  });
+  return el;
+}
+
+function showIconReasonPopover(anchorEl, text) {
+  if (!anchorEl || !text) return;
+  // Toggle off if we're re-clicking the same anchor.
+  if (iconReasonAnchor === anchorEl
+      && iconReasonPopoverEl
+      && iconReasonPopoverEl.style.display !== 'none') {
+    hideIconReasonPopover();
+    return;
+  }
+  const el = ensureIconReasonPopover();
+  el.textContent = text;
+  el.style.display = 'block';
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(4px)';
+  void el.offsetWidth;
+  const ar = anchorEl.getBoundingClientRect();
+  const gap = 6;
+  let top = ar.bottom + gap;
+  if (top + el.offsetHeight > window.innerHeight - 8) {
+    top = Math.max(8, ar.top - el.offsetHeight - gap);
+  }
+  let left = ar.left;
+  if (left + el.offsetWidth > window.innerWidth - 8) {
+    left = window.innerWidth - el.offsetWidth - 8;
+  }
+  if (left < 8) left = 8;
+  el.style.left = left + 'px';
+  el.style.top = top + 'px';
+  iconReasonAnchor = anchorEl;
+  requestAnimationFrame(() => {
+    el.style.opacity = '1';
+    el.style.transform = 'translateY(0)';
+  });
+}
+
+function hideIconReasonPopover() {
+  if (!iconReasonPopoverEl) return;
+  iconReasonPopoverEl.style.opacity = '0';
+  iconReasonPopoverEl.style.transform = 'translateY(4px)';
+  iconReasonAnchor = null;
+  setTimeout(() => {
+    if (iconReasonPopoverEl && iconReasonPopoverEl.style.opacity === '0') {
+      iconReasonPopoverEl.style.display = 'none';
+    }
+  }, 130);
+}
+
 // Binds hover handlers that pop the full name when the visible text is
 // truncated. `hoverEl` is the element whose mouseenter/leave we listen
 // to; `measureEl` is where we measure scrollWidth vs clientWidth (often

@@ -26,7 +26,6 @@
 ;; Verified end-to-end on 2026-04-29 against the dev system:
 ;;   ex-nullable-nil       → nil
 ;;   ex-nullable-text      → "hello"
-;;   ex-lookup-missing     → nil
 ;;   ex-lookup-with-default → "none"
 ;;   ex-env-maybe          → nil          (UNSET_GRAPHDEN_VAR isn't set)
 ;;   ex-env-or-local       → "local"      (substitute pattern)
@@ -52,23 +51,17 @@
 
   ;; --- nullable producer: :get with missing key ---
   ;;
-  ;; (:get {:a 1} :missing-key) returns nil at runtime. The
-  ;; static return-type of :get is :any (so technically narrower
-  ;; than :nullable-anything), but in practice authors treat
-  ;; the result as nullable and either provide a :default or
-  ;; gate downstream consumers behind a nil-check.
-  {:name :ex-lookup-missing
-   :description "Look up `:missing-key` in `{:a 1}` — runtime returns nil. Demonstrates the nullable-in-spirit pattern: any :get without a :default may yield nil even though the static type is :any."
-   :parent :get
-   :args {:coll {:value {:a 1}}
-          :key {:value :missing-key :literal? true}}}
-
   ;; --- substitute pattern via :get's :default arg ---
   ;;
   ;; `:get` already takes :default; supplying it narrows the
   ;; result type from "could-be-nil" to "always present" because
   ;; the missing-key path returns the default instead of nil.
   ;; Cleanest substitution form when the producer is :get/:get-in.
+  ;;
+  ;; (A `:get` of a literal record with a literal absent key and NO
+  ;; `:default` is a type error — the type-checker can prove the key
+  ;; is missing and treats it as a typo. The SUBSTITUTE form below is
+  ;; the supported way to look something up that may be absent.)
   {:name :ex-lookup-with-default
    :description "Same lookup but with `:default \"none\"` — runtime returns \"none\" instead of nil. Cleanest narrowing for :get-style producers; the result is unconditionally :text."
    :parent :get

@@ -279,7 +279,8 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
   menu.className = 'create-menu';
   menu.innerHTML =
     '<button class="create-menu-item" data-type="ns">New namespace…</button>' +
-    '<button class="create-menu-item" data-type="fn">New graph…</button>';
+    '<button class="create-menu-item" data-type="fn">New graph…</button>' +
+    '<button class="create-menu-item" data-type="type">New type…</button>';
   // Position fixed under the anchor.
   const rect = anchorEl.getBoundingClientRect();
   menu.style.position = 'fixed';
@@ -295,7 +296,15 @@ function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
       e.stopPropagation();
       const type = btn.dataset.type;
       closeChildCreateMenu();
-      startInlineCreate(type, parentNsId, parentNsPath);
+      if (type === 'type') {
+        // Type-row creation has multi-field forms — handled by the
+        // dedicated popover in editor-create-type.js.
+        if (typeof openTypeCreatePicker === 'function') {
+          openTypeCreatePicker(parentNsId, parentNsPath, anchorEl);
+        }
+      } else {
+        startInlineCreate(type, parentNsId, parentNsPath);
+      }
     });
   });
 

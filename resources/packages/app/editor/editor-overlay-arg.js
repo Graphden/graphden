@@ -13,16 +13,28 @@
 function createArgOverlay(node, container) {
   const overlay = createOverlay(node.id(), { borderRadius: '4px', fontSize: '10px' });
 
-  // Flex row so the type-chip docks to the right without overlapping
-  // the value text.
+  // Column-flex outer: the inline content (value text + chip +
+  // trigger + badges) sits in one row, the drag handle docks BELOW
+  // the row (same convention as fn-overlay cards). The previous
+  // single-row layout pushed the drag handle out to the right of
+  // the chip, looking like another inline affordance instead of
+  // the "grab here to move the node" plate.
   overlay.style.display = 'flex';
-  overlay.style.alignItems = 'center';
+  overlay.style.flexDirection = 'column';
+  overlay.style.alignItems = 'stretch';
+
+  const row = document.createElement('div');
+  row.className = 'arg-overlay-row';
+  row.style.display = 'flex';
+  row.style.alignItems = 'center';
+  row.style.flex = '1';
+  overlay.appendChild(row);
 
   const content = document.createElement('div');
   content.style.padding = '4px 8px';
   content.style.flex = '1';
   content.textContent = truncateLabel(node.data('label') || '', 30);
-  overlay.appendChild(content);
+  row.appendChild(content);
 
   // Persistent mismatch indicator. If this arg's literal value would
   // fail the live type-check (same logic as the value-edit popover),
@@ -73,7 +85,7 @@ function createArgOverlay(node, container) {
       badge.addEventListener('mousedown', (e) => e.stopPropagation());
       badge.addEventListener('touchstart', (e) => e.stopPropagation(),
                              { passive: true });
-      overlay.appendChild(badge);
+      row.appendChild(badge);
     }
   })();
 
@@ -101,7 +113,10 @@ function createArgOverlay(node, container) {
     // so this is just a presence check.
     if (arg.type) {
       const chip = createTypeChip(arg);
-      if (chip) overlay.appendChild(chip);
+      if (chip) {
+        row.appendChild(chip);
+        attachArgChipExpand(chip, arg, node.id(), { editable: true });
+      }
     }
   } else if (inImpl && !signedIn) {
     // Read-only because the user is unauthenticated, NOT because
@@ -118,7 +133,10 @@ function createArgOverlay(node, container) {
     });
     if (arg.type) {
       const chip = createTypeChip(arg, { readOnly: true });
-      if (chip) overlay.appendChild(chip);
+      if (chip) {
+        row.appendChild(chip);
+        attachArgChipExpand(chip, arg, node.id(), { editable: false });
+      }
     }
   } else if (arg && !inImpl) {
     // Structurally read-only — this row was surfaced via an
@@ -147,13 +165,55 @@ function createArgOverlay(node, container) {
     });
     if (arg.type) {
       const chip = createTypeChip(arg, { readOnly: true });
-      if (chip) overlay.appendChild(chip);
+      if (chip) {
+        row.appendChild(chip);
+        attachArgChipExpand(chip, arg, node.id(), { editable: false });
+      }
     }
   }
 
   createDragHandle(overlay, node);
   container.appendChild(overlay);
 }
+
+// Wire the inline-expand click handler onto a chip rendered on an
+// arg-value-overlay (mirrors the edge-label hookup). Stable path is
+// keyed by the cy node-id so the open/closed state survives layout
+// rebuilds and hover-preview redraws.
+function attachArgChipExpand(chipEl, arg, nodeId, opts) {
+  if (typeof attachInlineExpand !== 'function') return;
+  const rich = (typeof expectedSlotType === 'function')
+               ? expectedSlotType(arg) : null;
+  const effective = (rich != null) ? rich : resolveArgType(arg);
+  if (effective == null) return;
+  const editable = !!opts?.editable;
+  attachInlineExpand(chipEl, effective, nodeId + '/arg-chip', {
+    typeName: (typeof rich === 'string') ? rich
+               : (typeof effective === 'string' ? effective : null),
+    editable,
+    onEdit: editable ? () => enterArgTypeEditMode(arg, chipEl) : null,
+    bindingId: arg?.['binding-id'],
+    anonymousFnId: findAnonymousTypeFnId(arg),
+  });
+}
+
+
+// Return the fn-id of the type-row backing this arg's slot WHEN that
+// type-row is anonymous (no `:name`). Used by the inline-expand
+// panel's promote-anonymous affordance. Returns null when the type-
+// row has a name (already promoted) or when we can't resolve it.
+function findAnonymousTypeFnId(arg) {
+  if (!arg || !lookups) return null;
+  const binding = arg['binding-id']
+    ? lookups.bindingMap?.get(arg['binding-id']) : null;
+  const slot = arg['slot-id'] ? lookups.slotMap?.get(arg['slot-id']) : null;
+  const typeFnId = binding?.['type-override-fn-id']
+                || slot?.['type-fn-id'];
+  if (!typeFnId) return null;
+  const typeFn = lookups.fnMap?.get(typeFnId);
+  return (typeFn && !typeFn.name) ? typeFnId : null;
+}
+
 
 // Effective type for an arg row — the layout-emitted row already
 // carries the slot's resolved type-kw (binding's type-override-fn-id
@@ -170,8 +230,16 @@ function createTypeChip(arg, options) {
   const readOnly = !!(options?.readOnly)
                 || typeof enterArgTypeEditMode !== 'function';
   const flatType = resolveArgType(arg) || 'any';
-  const richType = (typeof expectedSlotType === 'function')
-                   ? expectedSlotType(arg) : null;
+  // Rich-types is indexed by (fn-name, slot-name) and doesn't yet honor
+  // binding-level `type-override-fn-id`. When a binding narrows the slot
+  // type, `flatType` (computed from the binding's anchor row, see
+  // `build-anchor-row`) is more specific. Prefer it over `any` from
+  // rich-types so the chip reflects the actual effective type at this fn.
+  const effectiveRich = (typeof expectedSlotType === 'function')
+                        ? expectedSlotType(arg) : null;
+  const richType = (effectiveRich === 'any' && flatType !== 'any')
+                   ? null
+                   : effectiveRich;
   const display = compactTypeChipText(richType, flatType);
   const chip = document.createElement('span');
   chip.className = 'arg-type-chip' + (readOnly ? ' arg-type-chip-readonly' : '');
@@ -183,34 +251,15 @@ function createTypeChip(arg, options) {
   if (richType && typeof formatTypeHint === 'function') {
     hint = formatTypeHint(richType);
   }
-  // Phase 5 — chip click opens the type explainer for both
-  // read-only AND editable chips. The explainer shows the human-
-  // readable description + the structural form, and (for editable
-  // chips) carries a "Change type" button that drops back into
-  // enterArgTypeEditMode. Touch users finally get a tap target
-  // that explains "what is :int?" / "what is [:list :int]?"
-  // instead of staring at a chip without context.
+  // Chip click behaviour is wired by attachInlineExpand (called from
+  // the chip's owner — edge-label overlay or arg overlay). For
+  // composite types it toggles the inline expansion panel; for
+  // editable primitives it drops straight into enterArgTypeEditMode.
+  // Read-only primitives are inert. Keeping the click logic OUT of
+  // createTypeChip avoids two competing handlers on the same chip.
   chip.title = 'Type: ' + hint
-             + (readOnly ? ' — tap to explain' : ' — tap to explain or change');
+             + (readOnly ? '' : ' — tap to expand or change');
   chip.setAttribute('aria-label', chip.title);
-  chip.addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (typeof showTypeExplainer === 'function') {
-      showTypeExplainer({
-        type: richType || flatType,
-        anchorEl: chip,
-        onEdit: readOnly ? null : () => enterArgTypeEditMode(arg, chip),
-        // For fn-typed slots, the explainer surfaces an
-        // effect-tightening row when the slot has a backing
-        // binding-id. Threaded through here from the arg shape.
-        bindingId: arg?.['binding-id'],
-        editable: !readOnly,
-      });
-    } else if (!readOnly) {
-      // Fallback if the explainer module hasn't loaded.
-      enterArgTypeEditMode(arg, chip);
-    }
-  });
   return chip;
 }
 
@@ -241,7 +290,9 @@ function compactTypeChipText(rich, flat) {
     }
     if (head === 'fn') {
       // Two-tier rendering:
-      //  - full `(arg:T,arg:T)→R` if it fits in 22 chars
+      //  - full `(arg:T,arg:T)→R` if it fits in 32 chars (room for one
+      //    named shape like `:ring-request-shape` in the arg position
+      //    + a short return-type alias)
       //  - terse `(N)→ret-prefix` otherwise (e.g. `(request)→ring-r…`)
       // Falls through to `flat` ("fn") only when even the terse form
       // is too wide. Pre-fix the chip always read "fn" — uninformative.
@@ -251,7 +302,7 @@ function compactTypeChipText(rich, flat) {
         .map(([k, v]) => k + ':' + compactTypeChipText(v, 'any'))
         .join(',');
       const full = '(' + argsFull + ')→' + ret;
-      if (full.length <= 22) return full;
+      if (full.length <= 32) return full;
       const argsTerse = argEntries.length === 0 ? '()'
                        : argEntries.length === 1 ? '(' + argEntries[0][0].slice(0, 8) + ')'
                        : '(' + argEntries.length + ')';
@@ -259,7 +310,7 @@ function compactTypeChipText(rich, flat) {
                        ? (rich[2].length > 9 ? rich[2].slice(0, 8) + '…' : rich[2])
                        : '*';
       const terse = argsTerse + '→' + retTerse;
-      return terse.length > 22 ? flat : terse;
+      return terse.length > 32 ? flat : terse;
     }
   }
   return flat;

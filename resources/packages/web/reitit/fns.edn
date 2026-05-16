@@ -28,11 +28,19 @@
    :return-type :any}
 
   ;; Build a Ring handler reitit falls back to when no route matches.
-  ;; `handlers` is a map with `:not-found`, `:method-not-allowed`,
-  ;; `:not-acceptable` keys; each value is a Ring-shaped handler fn.
+  ;; Takes the three slot-specific response maps directly — the impl
+  ;; wraps each in `constantly` for reitit's `(handler request)`
+  ;; contract. Slots are typed as response shapes so the type-checker
+  ;; sees the contract directly without going through the
+  ;; previously-needed `:make-handler`-per-slot intermediary.
   {:name :ring-create-default-handler
-   :description "Build a Ring fallback handler from a `{:not-found :method-not-allowed :not-acceptable}` map of per-slot Ring callables."
-   :args {:handlers {:type :jsonb :description "Map with `:not-found`, `:method-not-allowed`, `:not-acceptable` keys; each value a Ring callable."}}
+   :description "Build a Ring fallback handler from the three slot-specific Ring responses (404 / 405 / 406). Each response is wired into reitit's default-handler map and wrapped in `constantly` at the adapter."
+   :args {:not-found-response          {:type :ring-response-shape
+                                        :description "Response served when no route matches the request path."}
+          :method-not-allowed-response {:type :ring-response-shape
+                                        :description "Response served when the path matches but the method doesn't."}
+          :not-acceptable-response     {:type :ring-response-shape
+                                        :description "Response served when no per-method handler is configured for a matched path (reitit's `:not-acceptable` slot)."}}
    :return-type :fn}
 
   ;; Compose a compiled reitit router and a default handler into the
@@ -89,11 +97,13 @@
   ;;
   ;; Pipeline:
   ;;
-  ;;   :routes → filter nils → keywordize keys → :ring-router
-  ;;                                                     ↓
-  ;;                                     :ring-handler → :router
-  ;;                                                     ↑
-  ;;    make-handler × 3 → pairs→map → :ring-create-default-handler
+  ;;   :routes  → filter nils  → :ring-router (deep-keywordises internally)
+  ;;                                  ↓
+  ;;                            :ring-handler → :router
+  ;;                                  ↑
+  ;;   three response slots → :ring-create-default-handler (wraps in
+  ;;                                                        constantly inside
+  ;;                                                        the adapter)
   ;; =============================================================================
 
   ;; Drop nils so unused slot entries can be passed in uniformly.
@@ -102,59 +112,20 @@
    :args {:pred :some?
           :coll {:as :routes}}}
 
-  ;; Reitit walks route-data with keyword keys; our routes arrive with
-  ;; string keys (`"get"`, `"handler"`, `"middleware"`) because they
-  ;; were built via `:assoc` with literal string keys in app/common.
-  {:name :_router-normalized-routes
-   :parent :keywordize-map-keys
-   :args {:m :_router-non-nil-routes}}
-
+  ;; Reitit needs keyword keys on route data; the `:ring-router` adapter
+  ;; deep-keywordizes internally (see web/reitit/impls.clj), so the
+  ;; graph hands it the filtered route vector as-is.
   {:name :_router-compiled
    :parent :ring-router
-   :args {:routes :_router-normalized-routes}}
+   :args {:routes :_router-non-nil-routes}}
 
-  ;; Three constant Ring handlers — one per reitit fallback slot.
-  ;; Free arg on each is the response it wraps; those names become
-  ;; the router fn-def's public free-arg interface.
-  {:name :_router-not-found-handler
-   :parent :make-handler
-   :args {:response {:as :not-found-response}}}
-
-  {:name :_router-method-not-allowed-handler
-   :parent :make-handler
-   :args {:response {:as :method-not-allowed-response}}}
-
-  {:name :_router-not-acceptable-handler
-   :parent :make-handler
-   :args {:response {:as :error-response}}}
-
-  ;; Defaults-map entries. Keys are reitit slot keywords (literal, so
-  ;; `{:value :kw}` bypasses fn-ref resolution); values are the constant
-  ;; handlers built above.
-  {:name :_router-not-found-entry
-   :parent :list
-   :args {:items [{:value :not-found :literal? true}
-                  :_router-not-found-handler]}}
-
-  {:name :_router-method-not-allowed-entry
-   :parent :list
-   :args {:items [{:value :method-not-allowed :literal? true}
-                  :_router-method-not-allowed-handler]}}
-
-  {:name :_router-not-acceptable-entry
-   :parent :list
-   :args {:items [{:value :not-acceptable :literal? true}
-                  :_router-not-acceptable-handler]}}
-
-  {:name :_router-defaults-map
-   :parent :pairs->map
-   :args {:entries [:_router-not-found-entry
-                    :_router-method-not-allowed-entry
-                    :_router-not-acceptable-entry]}}
-
+  ;; Default-handler: three response slots flow straight into the
+  ;; adapter, which wraps each in `constantly` inside reitit's API.
+  ;; `:not-acceptable-response` is renamed to `:error-response` to match
+  ;; the public free-arg name the `:r500` preset binds.
   {:name :_router-default-handler
    :parent :ring-create-default-handler
-   :args {:handlers :_router-defaults-map}}
+   :args {:not-acceptable-response {:as :error-response}}}
 
   ;; Entry point. Same free-arg surface as the old `:router` base-fn,
   ;; so all downstream fn-defs (`:router-with-text-404`, etc.) keep

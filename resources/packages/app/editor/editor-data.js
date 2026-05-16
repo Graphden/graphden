@@ -302,6 +302,17 @@ function argRowFromNode(nodeData) {
   })();
   const effName = fnId && slotId && (typeof getEffectiveSlotName === 'function')
                   ? getEffectiveSlotName(fnId, slotId) : null;
+  // A `literal: true` row stores a keyword as a bare string (the colon
+  // is stripped on the wire). Re-prefix it so the value materialises as
+  // the keyword it represents — otherwise classifyLiteralJS reads it as
+  // plain text and reports a false type mismatch.
+  const rawValue = (item && 'value' in item) ? item.value
+                 : (binding && 'value' in binding) ? binding.value
+                 : (data.value !== undefined ? data.value : null);
+  const isLiteralKw = (item?.literal === true || binding?.literal === true)
+                      && typeof rawValue === 'string'
+                      && rawValue.length > 0
+                      && rawValue.charAt(0) !== ':';
   return {
     id: argId,
     'fn-id': fnId,
@@ -312,9 +323,8 @@ function argRowFromNode(nodeData) {
     type: data.argType || (slot?.['type-fn-id']
                             ? lookups.fnMap.get(slot['type-fn-id'])?.name
                             : null),
-    value: (item && 'value' in item) ? item.value
-         : (binding && 'value' in binding) ? binding.value
-         : (data.value !== undefined ? data.value : null),
+    position: item ? item.position : null,
+    value: isLiteralKw ? ':' + rawValue : rawValue,
     'ref-id': (item?.['ref-fn-id']) || (binding?.['ref-fn-id']) || null,
     description: (binding?.description) || (slot?.description) || null
   };
@@ -360,6 +370,21 @@ function isFnEditable(fnId) {
   const usedAsParent = (lookups.fnUsedAsParent?.get(fnId)) || 0;
   const usedAsRef    = (lookups.fnUsedAsRef?.get(fnId))    || 0;
   return usedAsParent === 0 && usedAsRef === 0;
+}
+
+// Human-readable explanation when `isFnEditable` returns false — used
+// by disabled-state row-action icons so a click reveals the concrete
+// reason ("used as :parent by 3 fn(s)…") instead of nothing happening.
+// Returns null when the fn IS editable.
+function getFnEditBlockReason(fnId) {
+  if (!fnId || !lookups) return null;
+  const asParent = (lookups.fnUsedAsParent?.get(fnId)) || 0;
+  const asRef    = (lookups.fnUsedAsRef?.get(fnId))    || 0;
+  if (asParent === 0 && asRef === 0) return null;
+  const parts = [];
+  if (asParent > 0) parts.push('extended by ' + asParent + ' fn' + (asParent === 1 ? '' : 's'));
+  if (asRef    > 0) parts.push('referenced by ' + asRef    + ' arg' + (asRef    === 1 ? '' : 's'));
+  return 'In use — ' + parts.join(' and ') + '. Detach those first.';
 }
 
 // Look up a fn's namespace as a dotted path (e.g. "core.collections")

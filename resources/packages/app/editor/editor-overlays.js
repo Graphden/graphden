@@ -648,10 +648,13 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   // sits at icon-pin-r-1 on every named fn row.
   const lineIsRoot = isNavRoot && levelInfo.depth === 0;
   const lineSignedIn = typeof isAuthenticated === 'function' && isAuthenticated();
-  const rootEditable = lineIsRoot
-                    && lineSignedIn
-                    && typeof isFnEditable === 'function'
-                    && isFnEditable(lineFn.fnId);
+  const lineEditable = typeof isFnEditable === 'function' && isFnEditable(lineFn.fnId);
+  // The "this fn is in use elsewhere, detach first" reason — shown on
+  // click of a disabled action icon (✎ / + / ✕ / ns) so the user can
+  // still see the affordances exist and discover WHY they're blocked.
+  const lineEditBlockReason = (!lineEditable && typeof getFnEditBlockReason === 'function')
+                              ? getFnEditBlockReason(lineFn.fnId) : null;
+  const rootAffordancesVisible = lineIsRoot && lineSignedIn;
   // Depth-0 row of a non-nav-root card with a single editable
   // incoming binding pins per-binding action icons (× delete value
   // and ✎ change value) on the right edge — same number of slots as
@@ -702,14 +705,17 @@ function renderSingleFnRow(line, levelInfo, ctx) {
         && typeof createNamespaceBadge === 'function') {
       const nsPath = (typeof getFnNamespace === 'function')
                      ? getFnNamespace(fnEntity) : null;
-      const canEdit = typeof isAuthenticated === 'function' && isAuthenticated()
-                   && typeof isFnEditable === 'function' && isFnEditable(lineFn.fnId)
-                   && typeof enterNamespaceMoveEditMode === 'function';
+      const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
+      const editorReady = typeof enterNamespaceMoveEditMode === 'function';
       const nsBadge = createNamespaceBadge(nsPath, {
         inline: true,
-        onClick: canEdit
+        onClick: (signedIn && lineEditable && editorReady)
                  ? (anchor) => enterNamespaceMoveEditMode(fnEntity, anchor)
-                 : null
+                 : null,
+        // When the fn is in-use we still want the badge to feel like an
+        // affordance (hover → ✎ swap) but click should reveal the reason
+        // instead of opening the namespace picker.
+        disabledReason: (signedIn && !lineEditable) ? lineEditBlockReason : null
       });
       if (nsBadge) host.appendChild(nsBadge);
     }
@@ -767,10 +773,15 @@ function renderSingleFnRow(line, levelInfo, ctx) {
           onClick: (anchor) => enterFreeArgBindEditMode(useSiteArg, anchor)
         }));
       }
-    } else if (rootEditable && lineFnEntity) {
-      // Root row's per-fn actions: rename, extend, delete.
+    } else if (rootAffordancesVisible && lineFnEntity) {
+      // Root row's per-fn actions: rename, extend, delete. Always
+      // rendered when the user is signed in — when the fn can't be
+      // edited (it's referenced elsewhere), each icon goes into a
+      // disabled-with-reason state so a click reveals WHY instead of
+      // the user wondering whether the affordance just isn't there.
       const editBtn = createEditPencilButton({
-        onClick: (anchor) => enterFnRenameEditMode(lineFnEntity, anchor)
+        onClick: (anchor) => enterFnRenameEditMode(lineFnEntity, anchor),
+        disabledReason: lineEditBlockReason
       });
       if (editBtn) host.appendChild(editBtn);
       if (typeof enterExtendEditMode === 'function') {
@@ -778,7 +789,8 @@ function renderSingleFnRow(line, levelInfo, ctx) {
           glyph: '+',
           title: 'Extend (create a child fn with this as :parent)',
           inline: true,
-          onClick: (anchor) => enterExtendEditMode(lineFnEntity, anchor)
+          onClick: (anchor) => enterExtendEditMode(lineFnEntity, anchor),
+          disabledReason: lineEditBlockReason
         }));
       }
       host.appendChild(createPinnedIconButton({
@@ -786,6 +798,7 @@ function renderSingleFnRow(line, levelInfo, ctx) {
         title: 'Delete this fn',
         inline: true,
         danger: true,
+        disabledReason: lineEditBlockReason,
         onClick: async () => {
           const display = (typeof getQualifiedFnName === 'function')
                           ? getQualifiedFnName(lineFnEntity)
@@ -996,9 +1009,21 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
   if (cardFnEntity.name && typeof richTypes === 'object' && richTypes) {
     const re = richTypes[cardFnEntity.name];
     const computed = (re && Array.isArray(re.effects)) ? re.effects : [];
-    const declared = (re && Array.isArray(re['expects-effects'])) ? re['expects-effects'] : null;
+    // Prefer the live DB value (updated by UI edits) over the
+    // richTypes snapshot which is rebuilt only at server start.
+    const dbDeclared = Array.isArray(cardFnEntity['expects-effects'])
+      ? cardFnEntity['expects-effects'] : null;
+    const declared = dbDeclared
+      || ((re && Array.isArray(re['expects-effects'])) ? re['expects-effects'] : null);
     const all = new Set([...computed, ...(declared || [])]);
-    if (all.size > 0) {
+    // The :expects-effects edit affordance is gated more loosely than
+    // most footer-strip controls — the field is a documentation/drift
+    // annotation, not a structural change, so we don't need to block
+    // when the fn already has children (the `isFnEditable` gate is for
+    // deletion). Auth + nav-root is enough.
+    const effectsEditable = isNavRoot
+                         && (typeof isAuthenticated === 'function' && isAuthenticated());
+    if (all.size > 0 || (effectsEditable && computed.length === 0)) {
       const effRow = document.createElement('div');
       effRow.className = 'effects-strip';
       const titleParts = [];
@@ -1032,6 +1057,30 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
         });
         effRow.appendChild(chip);
       });
+      // Inline "declare effects…" edit pencil — only for the
+      // navigation-root card and only when the viewer can edit. On
+      // pure fns with no contract yet, the strip otherwise wouldn't
+      // exist; the all.size>0 gate above admits this case so the
+      // pencil is always reachable.
+      if (effectsEditable && typeof enterExpectsEffectsEditMode === 'function') {
+        // Same `✎` glyph in both states (contract / no-contract) so
+        // the affordance is one consistent thing the user can learn,
+        // not two-text-vs-icon. The title carries the state-specific
+        // hint for new users and screen readers.
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'effects-strip-edit';
+        editBtn.textContent = '✎';
+        editBtn.title = declared
+          ? 'Edit declared effect contract'
+          : 'Declare an effect contract (drift checker compares declared vs computed)';
+        editBtn.setAttribute('aria-label', editBtn.title);
+        editBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          enterExpectsEffectsEditMode(cardFnEntity, editBtn, declared);
+        });
+        effRow.appendChild(editBtn);
+      }
       overlay.appendChild(effRow);
     }
   }
@@ -1047,6 +1096,48 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
     });
     overlay.appendChild(strip);
   };
+
+  // --- edit-type-row strip ---
+  // Type-rows have no parents and no callable signature — their value
+  // lives in the structural fields (`base-fn-id`, `element-fn-id`,
+  // `constraint`, or fn-slots for records). The fn-action toolbar at
+  // the bottom of the card handles rename / delete / namespace, but
+  // none of those touch the type's *definition*. Surface a single
+  // strip whose click reopens the create-type form pre-populated with
+  // the current values — submit goes through PUT.
+  //
+  // Only the kinds whose definition fits in one form (no compound
+  // delta against existing slots) get an editable affordance: record
+  // edit is read-only-prefilled and only rename works. fn-types are
+  // anonymous structural fn-rows attached via `slot.type-fn-id`; the
+  // arg-chip popover handles their rename instead.
+  if (isNavRoot && rtEditable && typeof openTypeEditForm === 'function') {
+    const editableRoles = new Set(['refinement', 'union', 'variant', 'list',
+                                    'record',
+                                    ':refinement', ':union', ':variant', ':list',
+                                    ':record']);
+    const role = cardFnEntity.role;
+    if (editableRoles.has(role)) {
+      const strip = document.createElement('div');
+      strip.className = 'edit-type-strip';
+      strip.tabIndex = 0;
+      strip.setAttribute('role', 'button');
+      strip.textContent = 'edit this type…';
+      strip.title = 'Open the type-edit form to change this type-row\'s definition';
+      const handler = (e) => {
+        e.stopPropagation();
+        openTypeEditForm(originalFnId, strip);
+      };
+      strip.addEventListener('click', handler);
+      strip.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handler(e);
+        }
+      });
+      overlay.appendChild(strip);
+    }
+  }
 
   // --- set-parent strip (no-parents case only) ---
   // When the fn HAS a parent, the depth-1 ancestor row already shows
@@ -1112,8 +1203,13 @@ function attachFnOverlayHoverHandlers(overlay, nodeId) {
 //
 // Visibility rules:
 //   - Only on the nav-root card (the fn the user navigated to).
-//   - Always visible — no hover gate. Read-only state for users who
-//     aren't authenticated or for fns marked `:protected`.
+//   - Renders just the "Sign in to edit" CTA when the user isn't authed.
+//     When authed, the bar drops entirely — every per-fn action now
+//     lives next to its target (see comment block at the end of the
+//     function). The old "Read-only — protected fn" banner is gone:
+//     the ✎ / + / ✕ / ns icons themselves render in a disabled state
+//     and reveal the in-use reason on click (see
+//     `getFnEditBlockReason` + `applyIconDisabledReason`).
 function appendFnActionToolbar(overlay, originalFnId, isNavRoot) {
   if (!isNavRoot) return;
   if (!lookups || !lookups.fnMap) return;
@@ -1121,7 +1217,6 @@ function appendFnActionToolbar(overlay, originalFnId, isNavRoot) {
   if (!fn) return;
 
   const authed = typeof isAuthenticated === 'function' && isAuthenticated();
-  const editable = (typeof isFnEditable !== 'function') || isFnEditable(originalFnId);
 
   const bar = document.createElement('div');
   bar.className = 'fn-action-toolbar';
@@ -1167,15 +1262,6 @@ function appendFnActionToolbar(overlay, originalFnId, isNavRoot) {
       },
     });
     bar.appendChild(signIn);
-    overlay.appendChild(bar);
-    return;
-  }
-
-  if (!editable) {
-    const banner = document.createElement('span');
-    banner.className = 'fn-action-toolbar-hint';
-    banner.textContent = 'Read-only — protected fn';
-    bar.appendChild(banner);
     overlay.appendChild(bar);
     return;
   }
@@ -1387,56 +1473,68 @@ function createFnOverlay(node, container) {
 // or createPlaceholderOverlay.
 
 /**
- * Create overlay for placeholder node (unset arg)
+ * Create overlay for a placeholder node (unset arg, or empty sequence
+ * anchor). The slot's expected type already reads off the incoming
+ * edge's type-chip, so the placeholder itself collapses to a small
+ * `+` click target — its job is only to host the binder action.
+ *
+ * Non-editable viewers see no overlay at all (the empty edge endpoint
+ * is sufficient signal that the slot is unbound).
  */
 function createPlaceholderOverlay(node, container) {
-  const overlay = createOverlay(node.id(), { border: '2px dashed black' });
-  overlay.style.display = 'flex';
-  overlay.style.flexDirection = 'column';
-
-  const content = document.createElement('div');
-  content.style.padding = '4px 8px';
-  content.style.flex = '1';
-  content.textContent = node.data('label') || 'any';
-  overlay.appendChild(content);
-
-  // Free-arg binding (Phase 4): clicking a placeholder of an
-  // implementation fn's free arg opens a small chooser — bind as
-  // literal value or as a fn-ref. Editability gate mirrors the
-  // arg-overlay rules: any fn in implementationFnIds counts.
   const arg = (typeof argRowFromNode === 'function')
               ? argRowFromNode(node.data())
               : null;
   const inImpl = arg && implementationFnIds && implementationFnIds.has(arg['fn-id']);
   const editable = inImpl
                 && (typeof isAuthenticated === 'function' && isAuthenticated());
-  if (editable) {
-    // Empty-sequence anchor (Phase 5): the layout marks these so we
-    // route the click into the sequence-append flow rather than the
-    // regular free-arg binder, which would PUT value/ref-id on the
-    // anchor itself (a category error for sequence anchors).
-    if (node.data('isSequenceAnchor') && typeof appendSequenceItem === 'function') {
-      content.style.cursor = 'pointer';
-      content.title = 'Click to add the first item';
-      // Render a `+ first item` hint so the empty placeholder reads as
-      // an action, not a passive type chip.
-      content.textContent = '+ first item';
-      content.addEventListener('click', (e) => {
-        e.stopPropagation();
-        appendSequenceItem(node.data('sequenceFnId') || arg['fn-id'], content);
-      });
-    } else if (typeof enterFreeArgBindEditMode === 'function') {
-      content.style.cursor = 'pointer';
-      content.title = 'Click to bind this slot';
-      content.addEventListener('click', (e) => {
-        e.stopPropagation();
-        enterFreeArgBindEditMode(arg, content);
-      });
-    }
-  }
+  if (!editable) return;
 
-  createDragHandle(overlay, node);
-  container.appendChild(overlay);
+  const isSeqAnchor = !!node.data('isSequenceAnchor');
+  const seqFnId = node.data('sequenceFnId') || arg['fn-id'];
+  // Nav-typed sequence (`:update-in` `:path`) whose structure can't be
+  // navigated further → no first item is valid, so skip the `+`.
+  const appendT = (isSeqAnchor && typeof appendNavType === 'function')
+                  ? appendNavType(seqFnId, arg['slot-id'])
+                  : undefined;
+  if (appendT === null) return;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'placeholder-binder' + (isSeqAnchor ? ' is-seq-anchor' : '');
+  btn.dataset.nodeId = node.id();
+  btn.textContent = '+';
+  btn.title = isSeqAnchor
+              ? 'Add the first item'
+              : 'Bind this slot (literal value or fn-ref)';
+  btn.setAttribute('aria-label', btn.title);
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (isSeqAnchor && typeof appendSequenceItem === 'function') {
+      appendSequenceItem(seqFnId, btn, appendT);
+    } else if (typeof enterFreeArgBindEditMode === 'function') {
+      enterFreeArgBindEditMode(arg, btn);
+    }
+  });
+
+  // Position the binder over the placeholder node's cytoscape footprint.
+  // Reuses .node-overlay's pan/zoom positioning so the +.button tracks
+  // the node through layout changes.
+  const wrap = document.createElement('div');
+  wrap.className = 'node-overlay placeholder-overlay';
+  wrap.dataset.nodeId = node.id();
+  Object.assign(wrap.style, {
+    position: 'absolute',
+    pointerEvents: 'none',  // children opt back in
+    zIndex: '10',
+    background: 'transparent',
+    border: 'none',
+    overflow: 'visible'
+  });
+  btn.style.pointerEvents = 'auto';
+  wrap.appendChild(btn);
+  container.appendChild(wrap);
 }
 
 // ============================================================================
@@ -1544,16 +1642,63 @@ function updateOverlayPositions() {
     const edge = cy.getElementById(edgeId);
     if (!edge.length) return;
     const target = edge.target();
+    const source = edge.source();
     if (!target.length) return;
 
     const tPos = target.position();
     const tWidth = target.width();
-    const screenRight = (tPos.x - tWidth / 2) * zoom + pan.x - 6;
+    const targetLeftPx = (tPos.x - tWidth / 2) * zoom + pan.x;
     const screenMid = tPos.y * zoom + pan.y;
 
     const w = overlay.offsetWidth;
     const h = overlay.offsetHeight;
-    overlay.style.left = (screenRight - w * zoom) + 'px';
+    const wPx = w * zoom;
+
+    // Anchor strategy. Taxi-style edges leave the source horizontally,
+    // bend at a column boundary, then continue vertically + horizontally
+    // toward the target. The visually "shared part" of an edge that
+    // branches to multiple slots is the initial horizontal segment up
+    // to that bend, plus the vertical descent — so we want the overlay
+    // to sit AFTER the bend (in the source-side-of-target horizontal
+    // segment), not on top of the shared part. The post-bend gap is
+    // chosen so a visible stretch of horizontal edge remains BETWEEN
+    // the bend and the label (instead of the label butting against
+    // the vertical segment). Same gap is the floor on the fallback
+    // path so a wide label never gets pushed back onto the vertical
+    // edge segment — we'd rather clip the label's right side against
+    // the target than smear it across the bend.
+    let leftPx;
+    if (source.length) {
+      const sPos = source.position();
+      const sWidth = source.width();
+      const sourceRightPx = (sPos.x + sWidth / 2) * zoom + pan.x;
+      const colRight = source.data('colRightX');
+      // Matches the `taxi-turn` formula in editor-cytoscape.js:
+      // bend = colRight + 20 (graph units) when colRightX is known;
+      // otherwise fall back to source.right + 20.
+      const bendXpx = (colRight !== undefined)
+                      ? (colRight + 20) * zoom + pan.x
+                      : sourceRightPx + 20 * zoom;
+      // Post-bend gap scales with zoom so the visible stretch stays
+      // proportional to the edge thickness at any zoom level.
+      const postBendGap = 18 * zoom;
+      const afterBend = bendXpx + postBendGap;
+      const targetClampRight = targetLeftPx - 6;
+      // Preferred: start just past the bend so the shared part of the
+      // edge is fully visible. Fall back to "right-anchored to target"
+      // when there isn't room after the bend (very short edges) — but
+      // never let the label's LEFT slide past `afterBend`, so the
+      // vertical edge segment stays clear regardless of label width.
+      if (afterBend + wPx <= targetClampRight) {
+        leftPx = afterBend;
+      } else {
+        leftPx = Math.max(afterBend, targetClampRight - wPx);
+      }
+    } else {
+      leftPx = targetLeftPx - 6 - wPx;
+    }
+
+    overlay.style.left = leftPx + 'px';
     overlay.style.top = (screenMid - h * zoom / 2) + 'px';
     overlay.style.transform = 'scale(' + zoom + ')';
   });

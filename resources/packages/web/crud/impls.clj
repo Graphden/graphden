@@ -366,6 +366,51 @@
       nil)))
 
 
+;; Operators / kind heads inside a constraint vector that are NOT
+;; type-row references — used by `constraint-type-ref-names` to
+;; filter them out. Anything else that looks like a keyword is
+;; treated as a candidate type-row name. False positives (e.g. a
+;; variant tag that happens to share a name with an existing type)
+;; only over-reject; under-rejection would let cycles slip through.
+(def ^:private constraint-op-keywords
+  #{:union :variant :fn :refine :and :or :not
+    :> :>= :< :<= := :not= :matches :in :exists :every})
+
+
+(defn- constraint-type-ref-names
+  "Walk a constraint vector and collect every keyword nested anywhere
+   inside it as a bare-name string set, minus the operator heads in
+   `constraint-op-keywords`. Used to find type-row references hidden
+   in `[:union T1 T2 …]` / `[:variant :tag1 T1 …]` / `[:fn {…} T]`
+   shapes — those are stored as keywords, NOT FK columns, so the
+   FK-only cycle walker misses them."
+  [c]
+  (let [walk (fn walk [x acc]
+               (cond
+                 (keyword? x)
+                 (if (constraint-op-keywords x)
+                   acc
+                   (conj acc (name x)))
+                 (map? x)
+                 (reduce-kv (fn [a _k v] (walk v a)) acc x)
+                 (sequential? x)
+                 (reduce (fn [a el] (walk el a)) acc x)
+                 :else acc))]
+    (walk c #{})))
+
+
+(defn- resolve-constraint-refs-to-ids
+  "Batched name → fn-id resolution for the set of bare-name strings
+   produced by `constraint-type-ref-names`. Names that don't resolve
+   (e.g. variant tags) are silently dropped. Empty input → empty set."
+  [storage names]
+  (if (empty? names)
+    #{}
+    (->> (sp/query-entities storage :fn {:name (vec names)})
+         (keep :id)
+         set)))
+
+
 (defn- cycle-check-rej
   "Inspect `entity-data` for the writes that introduce fn-id edges
    and run a cycle check on each. Returns nil on success or
@@ -382,9 +427,17 @@
     (let [own-id (:id entity-data)
           parent-ids (filter some? (:parent-ids entity-data))
           fk-refs (keep entity-data
-                        [:base-fn-id :element-fn-id :return-type-fn-id])]
+                        [:base-fn-id :element-fn-id :return-type-fn-id])
+          ;; Constraint-vector type-refs — keyword type names buried
+          ;; inside `[:union …]` / `[:variant …]` / `[:fn …]` shapes.
+          ;; The FK-only walker misses these because they're stored
+          ;; as JSONB keywords, not UUID columns.
+          constraint-refs (when-let [c (:constraint entity-data)]
+                            (resolve-constraint-refs-to-ids
+                              storage (constraint-type-ref-names c)))]
       (or (some #(cycle-check-pair storage own-id %) parent-ids)
-          (some #(cycle-check-pair storage own-id %) fk-refs)))
+          (some #(cycle-check-pair storage own-id %) fk-refs)
+          (some #(cycle-check-pair storage own-id %) constraint-refs)))
 
     :binding
     (let [own-id (:fn-id entity-data)]
@@ -399,6 +452,99 @@
         (cycle-check-pair storage (:fn-id b) (:ref-fn-id entity-data))))
 
     nil))
+
+
+;; === Constraint-shape validation ============================================
+;;
+;; The CRUD write path historically accepted any `:constraint` payload
+;; that round-tripped through `parse-fn-from-form`. That left every
+;; ill-formed shape — empty `[:and]`, single-branch `[:union :int]`,
+;; non-even `[:variant t1 T1 orphan]` — quietly persisted to land as a
+;; runtime puzzle later. The fixes belong here, on the boundary, not
+;; somewhere downstream where the bad shape has already propagated.
+
+(defn- resolve-base-name
+  "Walk `:base-fn-id` through refinements down to a primitive keyword
+   so `constraint-compatible-with-base?` can dispatch. nil if the
+   chain dead-ends or the base isn't a known primitive."
+  [storage base-fn-id]
+  (loop [cur base-fn-id, depth 0]
+    (when (and cur (< depth 32))
+      (when-let [f (sp/read-entity storage :fn cur)]
+        (let [nm (some-> (:name f) keyword)]
+          (cond
+            ;; Reached a primitive (no parents, no impl, no constraint).
+            (and nm
+                 (empty? (:parent-ids f))
+                 (nil? (:impl-hash f))
+                 (nil? (:base-fn-id f))
+                 (nil? (:element-fn-id f))
+                 (nil? (:constraint f))
+                 (#{:null :uuid :text :int :bool :numeric :timestamptz
+                    :jsonb :bytes :any :fn :sequence :keyword :float} nm))
+            nm
+            ;; Refinement-of-refinement: descend.
+            (:base-fn-id f)
+            (recur (:base-fn-id f) (inc depth))
+            ;; Otherwise unknown shape — bail.
+            :else nil))))))
+
+
+(defn- constraint-shape-rej
+  "Validate the high-level shape of `:constraint` and (for refinements)
+   its compatibility with the base. Returns `{:reason …}` on rejection
+   or nil. Only runs against `:fn` writes — other entity types pass
+   through."
+  [storage entity-type entity-data]
+  (when (= entity-type :fn)
+    (let [c (:constraint entity-data)
+          base-id (:base-fn-id entity-data)]
+      (cond
+        ;; No constraint → nothing to check here.
+        (nil? c) nil
+
+        (not (vector? c))
+        {:reason (str "Constraint must be a vector; got " (pr-str c))}
+
+        :else
+        (let [head (first c)
+              args (rest c)]
+          (cond
+            (= head :union)
+            (cond
+              (< (count args) 2)
+              {:reason "Union needs ≥ 2 branches"}
+              (not= (count args) (count (set args)))
+              {:reason "Union has duplicate branches"})
+
+            (= head :variant)
+            (cond
+              (zero? (count args))
+              {:reason "Variant needs ≥ 1 (tag, type) pair"}
+              (odd? (count args))
+              {:reason "Variant tag/type pairs must come in pairs (odd element count)"}
+              (let [tags (take-nth 2 args)]
+                (not= (count tags) (count (set tags))))
+              {:reason "Variant has duplicate tags"})
+
+            (#{:and :or} head)
+            (when (zero? (count args))
+              {:reason (str (name head) " constraint needs ≥ 1 operand")})
+
+            (= head :fn)
+            (cond
+              (not (map? (first args)))
+              {:reason "fn-type constraint must be `[:fn {args-map} ret-type]`"}
+              (< (count args) 2)
+              {:reason "fn-type constraint must include both args-map and return-type"})
+
+            ;; Atomic op (`:>`, `:matches`, …) on a refinement — defer
+            ;; to types/check.
+            (and base-id (some? head))
+            (when-let [base-name (resolve-base-name storage base-id)]
+              (when-not (types-check/constraint-compatible-with-base? base-name c)
+                {:reason (str "Constraint op " (pr-str head)
+                              " is not legal on base type :" (name base-name))}))))))))
 
 
 ;; === Context-aware Query Functions ===
@@ -422,6 +568,8 @@
   [storage entity-type entity-data]
   (or (some-> (cycle-check-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/dependency-cycle))
+      (some-> (constraint-shape-rej storage entity-type entity-data)
+              (assoc :type :constraint-violation/constraint-shape))
       (some-> (mi-collision-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/mi-collision))
       (some-> (terminal-rej storage entity-type entity-data)
@@ -509,15 +657,60 @@
         data)))
 
 
+(defn- compute-fn-role
+  "Mirrors `executor.compile-runtime/type-row-role`, with one tweak:
+   `impl-hash` is currently always `nil` in storage (sync uses a
+   placeholder hash impl — see `executor.composition.core/
+   compute-impl-hash`), so a base-fn looks indistinguishable from a
+   synthesised record in storage alone. We cross-reference the
+   `rich-types-registry` snapshot: if a fn-name has a non-empty
+   `:args` map and is NOT marked `:type-row?`, it's a base-fn even
+   when `impl-hash` is nil. Roles: `:composed`, `:base-fn`,
+   `:refinement`, `:list`, `:union`, `:variant`, `:fn-type`,
+   `:record`, `:primitive`."
+  [fn-row has-slots? rich-snapshot]
+  (let [c (:constraint fn-row)
+        rich-entry (some-> (:name fn-row) keyword rich-snapshot)
+        base-fn-via-registry? (and rich-entry
+                                   (not (:type-row? rich-entry))
+                                   (seq (:args rich-entry)))]
+    (cond
+      (seq (:parent-ids fn-row))                 :composed
+      (some? (:impl-hash fn-row))                :base-fn
+      base-fn-via-registry?                      :base-fn
+      (some? (:base-fn-id fn-row))               :refinement
+      (some? (:element-fn-id fn-row))            :list
+      (and (vector? c) (= :union (first c)))     :union
+      (and (vector? c) (= :variant (first c)))   :variant
+      (and (vector? c) (= :fn (first c)))        :fn-type
+      has-slots?                                 :record
+      :else                                      :primitive)))
+
+
 (defbase list-all-graph-entities
   []
   ;; Slot/fn-slot/binding model: dump every storage row the editor
   ;; needs to render the graph. Routes through the shared graph-cache
   ;; (populated by layout / compile-runtime) so editor refreshes after
   ;; mutations don't re-query the same five tables every time.
+  ;;
+  ;; Each fn-row is augmented with a `:role` field so the sidebar can
+  ;; group entries into Types vs Functions sections without an extra
+  ;; round-trip through `/api/types`.
   (let [storage (require-storage ctx)
-        base (cached-or-load-graph ctx)]
-    (assoc base :namespaces (vec (sp/query-entities storage :ns {})))))
+        base (cached-or-load-graph ctx)
+        fn-slots-by-fn (group-by :fn-id (:fn-slots base))
+        rich-snapshot (registry/rich-types-snapshot)
+        roled-fns (mapv (fn [f]
+                          (assoc f :role
+                                 (compute-fn-role
+                                   f
+                                   (boolean (seq (get fn-slots-by-fn (:id f))))
+                                   rich-snapshot)))
+                        (:fns base))]
+    (-> base
+        (assoc :fns roled-fns)
+        (assoc :namespaces (vec (sp/query-entities storage :ns {}))))))
 
 
 (declare type-fn->rich-type)
@@ -631,8 +824,11 @@
                 ;; the original `record-rich-types-raw!` path and have
                 ;; no `:type-row?` flag, so they stay candidate-eligible.
                 (if (and n structural real-type-row?)
-                  (assoc acc n {:return structural :args {} :effects #{}
-                                :type-row? true})
+                  (assoc acc n (cond-> {:return structural :args {} :effects #{}
+                                        :type-row? true}
+                                 (and (:description f)
+                                      (seq (:description f)))
+                                 (assoc :description (:description f))))
                   acc)))
             snapshot
             type-rows)))
@@ -819,6 +1015,438 @@
          :candidates (vec candidates)}))))
 
 
+(defn- constraint-contains-type-ref?
+  "Walk a `constraint` payload (`[:union T1 T2 …]`, `[:variant tag1 T1
+   tag2 T2 …]`, `[:fn {arg T} ret eff-set]`) and return true if any
+   nested keyword/string entry resolves to `type-name`."
+  [constraint type-name]
+  (let [target (some-> type-name name)]
+    (boolean
+      (when target
+        (letfn [(matches? [x]
+                  (cond
+                    (keyword? x) (= (name x) target)
+                    (string? x)  (= x target)
+                    :else        false))
+                (walk [x]
+                  (cond
+                    (matches? x) true
+                    (vector? x)  (some walk x)
+                    (seq? x)     (some walk x)
+                    (map? x)     (or (some walk (keys x))
+                                     (some walk (vals x)))
+                    :else        false))]
+          (walk constraint))))))
+
+
+(declare resolve-type-fn-id)
+(declare parse-uuid-or-clear)
+
+
+(defn- resolve-type-fn-id-or-throw
+  "Like `resolve-type-fn-id` but throws `:type-row/unknown-type` when
+   the name doesn't match anything. Used by the compound-create
+   endpoints so the caller gets a clean error instead of a NULL
+   foreign key violation downstream."
+  [storage type-ref]
+  (or (resolve-type-fn-id storage type-ref)
+      (throw (ex-info (str "Unknown type: " (pr-str type-ref))
+                      {:type :type-row/unknown-type :type-ref type-ref}))))
+
+
+(defbase process-create-record-type
+  "Atomically create a record type-row: one fn-row + N slot-rows + N
+   fn-slot-junctions. JSON body shape:
+     {namespace-id?, name, description?,
+      fields: [{name, type, description?, required?}, …]}
+   `type` per field accepts a name (`\"int\"` / `\"ring-request-shape\"`)
+   or a UUID. On any sub-write failure the partial fn-row is
+   deleted (best-effort rollback) and the error surfaces to the
+   caller via `{:ok false :error \"…\"}`."
+  [request]
+  (let [storage (require-storage ctx)
+        body (read-json-body request)
+        nm (some-> (:name body) str)
+        ns-raw (:namespace-id body)
+        ns-id (when-not (str/blank? (str ns-raw)) (parse-uuid-or-clear (str ns-raw)))
+        desc (:description body)
+        fields (vec (:fields body))]
+    (cond
+      (str/blank? nm)
+      {:ok false :error "name required"}
+
+      (empty? fields)
+      {:ok false :error "fields required (a record needs ≥1 field)"}
+
+      :else
+      (let [own-id (java.util.UUID/randomUUID)
+            created (atom [])
+            cleanup (fn []
+                      (doseq [[et id] (reverse @created)]
+                        (try (sp/delete-entity storage et id) (catch Exception _ nil))))]
+        (try
+          (sp/create-entity storage :fn
+                            (cond-> {:id own-id
+                                     :name nm
+                                     :namespace-id ns-id
+                                     :parent-ids []
+                                     :impl-hash nil
+                                     :base-fn-id nil
+                                     :element-fn-id nil
+                                     :return-type-fn-id nil
+                                     :anonymous-hash nil
+                                     :constraint nil}
+                              (and desc (seq desc)) (assoc :description desc)))
+          (swap! created conj [:fn own-id])
+          (doseq [[idx field] (map-indexed vector fields)]
+            (let [field-name (some-> (:name field) str)
+                  type-id (resolve-type-fn-id-or-throw storage (:type field))
+                  field-desc (:description field)
+                  required? (if (contains? field :required) (boolean (:required field)) true)
+                  slot-id (java.util.UUID/randomUUID)
+                  fn-slot-id (java.util.UUID/randomUUID)]
+              (when (str/blank? field-name)
+                (throw (ex-info "field name required"
+                                {:type :type-row/field-missing-name})))
+              (sp/create-entity storage :slot
+                                (cond-> {:id slot-id
+                                         :name field-name
+                                         :type-fn-id type-id
+                                         :required required?}
+                                  (and field-desc (seq field-desc))
+                                  (assoc :description field-desc)))
+              (swap! created conj [:slot slot-id])
+              (sp/create-entity storage :fn-slot
+                                {:id fn-slot-id
+                                 :fn-id own-id
+                                 :slot-id slot-id
+                                 :position idx})
+              (swap! created conj [:fn-slot fn-slot-id])))
+          (invalidate! ctx storage :fn {:id own-id})
+          {:ok true :id (str own-id) :name nm}
+          (catch clojure.lang.ExceptionInfo e
+            (cleanup)
+            {:ok false :error (.getMessage e) :data (ex-data e)})
+          (catch Exception e
+            (cleanup)
+            {:ok false :error (str (.getMessage e))}))))))
+
+
+(defbase process-create-list-type
+  "Atomically create a list type-row: one fn-row with `element-fn-id`
+   plus the synthesised `items` slot. JSON body:
+     {namespace-id?, name, description?, element-type}
+   `element-type` accepts a type-name or a UUID."
+  [request]
+  (let [storage (require-storage ctx)
+        body (read-json-body request)
+        nm (some-> (:name body) str)
+        ns-raw (:namespace-id body)
+        ns-id (when-not (str/blank? (str ns-raw)) (parse-uuid-or-clear (str ns-raw)))
+        desc (:description body)
+        element-ref (:element-type body)]
+    (cond
+      (str/blank? nm)
+      {:ok false :error "name required"}
+
+      (nil? element-ref)
+      {:ok false :error "element-type required"}
+
+      :else
+      (let [own-id (java.util.UUID/randomUUID)
+            created (atom [])
+            cleanup (fn []
+                      (doseq [[et id] (reverse @created)]
+                        (try (sp/delete-entity storage et id) (catch Exception _ nil))))]
+        (try
+          (let [elem-id (resolve-type-fn-id-or-throw storage element-ref)
+                seq-id (resolve-type-fn-id-or-throw storage "sequence")
+                slot-id (java.util.UUID/randomUUID)
+                fn-slot-id (java.util.UUID/randomUUID)]
+            (sp/create-entity storage :fn
+                              (cond-> {:id own-id
+                                       :name nm
+                                       :namespace-id ns-id
+                                       :parent-ids []
+                                       :impl-hash nil
+                                       :base-fn-id nil
+                                       :element-fn-id elem-id
+                                       :return-type-fn-id nil
+                                       :anonymous-hash nil
+                                       :constraint nil}
+                                (and desc (seq desc)) (assoc :description desc)))
+            (swap! created conj [:fn own-id])
+            (sp/create-entity storage :slot
+                              {:id slot-id
+                               :name "items"
+                               :type-fn-id seq-id
+                               :required true})
+            (swap! created conj [:slot slot-id])
+            (sp/create-entity storage :fn-slot
+                              {:id fn-slot-id
+                               :fn-id own-id
+                               :slot-id slot-id
+                               :position 0})
+            (swap! created conj [:fn-slot fn-slot-id])
+            (invalidate! ctx storage :fn {:id own-id})
+            {:ok true :id (str own-id) :name nm})
+          (catch clojure.lang.ExceptionInfo e
+            (cleanup)
+            {:ok false :error (.getMessage e) :data (ex-data e)})
+          (catch Exception e
+            (cleanup)
+            {:ok false :error (str (.getMessage e))}))))))
+
+
+(defbase process-update-record-type
+  "Update an existing record type-row by computing the diff of the
+   submitted field list against the row's current fn-slots, then
+   atomically applying it. JSON body:
+     {id, name?, description?,
+      fields: [{name, type, description?, required?}, …]}
+   Matching is by `(name, resolved type-fn-id)` against the slots
+   the record currently exposes:
+     - same `(name, type)` → keep existing slot, refresh position
+     - new entry / changed type → create a fresh slot (slots are
+       immutable so a retype is always a new slot)
+     - missing from input → drop the fn-slot junction (the slot
+       row itself stays — it may be shared by other fns)
+   Field renames are modelled as a remove + add, losing any
+   bindings the user had carved against the old (name, type) pair.
+
+   Atomicity: there's no with-transaction at the protocol layer,
+   so we journal every write into a `created` atom together with
+   enough state to undo it. On any failure mid-flight we walk the
+   journal in reverse — re-INSERTing deleted fn-slots and
+   DELETing freshly-minted slots / fn-slots — to leave the row
+   in its prior shape.
+
+   Caveat: this does NOT garbage-collect orphaned slots. A slot
+   that the record dropped but no other fn references is left
+   floating; storage-level shared-slot semantics mean we can't
+   tell from here whether deletion is safe."
+  [request]
+  (let [storage (require-storage ctx)
+        body (read-json-body request)
+        fn-id-raw (:id body)
+        fn-id (when fn-id-raw
+                (try (java.util.UUID/fromString (str fn-id-raw))
+                     (catch Exception _ nil)))
+        nm (some-> (:name body) str)
+        desc (when (contains? body :description) (:description body))
+        fields (vec (:fields body))]
+    (cond
+      (nil? fn-id)
+      {:ok false :error "id required (UUID)"}
+
+      (empty? fields)
+      {:ok false :error "fields required (a record needs ≥1 field)"}
+
+      :else
+      (let [existing-fn (first (sp/query-entities storage :fn {:id fn-id}))
+            current-fss (sp/query-entities storage :fn-slot {:fn-id fn-id})
+            current-slot-ids (mapv :slot-id current-fss)
+            current-slots (when (seq current-slot-ids)
+                            (sp/query-entities storage :slot
+                                               {:id current-slot-ids}))
+            slots-by-id (into {} (map (juxt :id identity)) (or current-slots []))
+            ;; Match by (name, type-fn-id): retypes must yield a new
+            ;; slot since slot rows are immutable.
+            slots-by-name+type (into {} (map (fn [fs]
+                                               (let [s (get slots-by-id (:slot-id fs))]
+                                                 [[(:name s) (:type-fn-id s)] fs])))
+                                     current-fss)
+            journal (atom [])
+            cleanup (fn []
+                      (doseq [entry (reverse @journal)]
+                        (try
+                          (case (:op entry)
+                            :create (sp/delete-entity storage (:entity-type entry) (:id entry))
+                            :delete (sp/create-entity storage (:entity-type entry) (:row entry))
+                            nil)
+                          (catch Exception _ nil))))]
+        (cond
+          (nil? existing-fn)
+          {:ok false :error (str "fn " fn-id " not found")}
+
+          :else
+          (try
+            ;; Phase 1: resolve every incoming field's type up front
+            ;; so a typo doesn't leave us with a half-rewritten row.
+            (let [resolved (mapv (fn [field]
+                                   (let [field-name (some-> (:name field) str)
+                                         _ (when (str/blank? field-name)
+                                             (throw (ex-info "field name required"
+                                                             {:type :type-row/field-missing-name})))
+                                         type-id (resolve-type-fn-id-or-throw storage (:type field))
+                                         required? (if (contains? field :required)
+                                                     (boolean (:required field)) true)]
+                                     {:name field-name
+                                      :type-fn-id type-id
+                                      :description (:description field)
+                                      :required required?}))
+                                 fields)
+                  ;; Decide per-field whether to reuse a current slot
+                  ;; (same name+type) or mint a new one.
+                  kept-fs-ids (atom #{})
+                  assignments (mapv (fn [r]
+                                      (if-let [fs (get slots-by-name+type
+                                                       [(:name r) (:type-fn-id r)])]
+                                        (do (swap! kept-fs-ids conj (:id fs))
+                                            {:slot-id (:slot-id fs)
+                                             :fn-slot-id (:id fs)
+                                             :reuse? true})
+                                        {:slot-id (java.util.UUID/randomUUID)
+                                         :fn-slot-id (java.util.UUID/randomUUID)
+                                         :reuse? false
+                                         :spec r}))
+                                    resolved)]
+              ;; Phase 2: create slots for new entries.
+              (doseq [a assignments
+                      :when (not (:reuse? a))]
+                (let [{:keys [slot-id spec]} a]
+                  (sp/create-entity storage :slot
+                                    (cond-> {:id slot-id
+                                             :name (:name spec)
+                                             :type-fn-id (:type-fn-id spec)
+                                             :required (:required spec)}
+                                      (and (:description spec) (seq (:description spec)))
+                                      (assoc :description (:description spec))))
+                  (swap! journal conj {:op :create :entity-type :slot :id slot-id})))
+              ;; Phase 3: delete every existing fn-slot that we're
+              ;; not keeping. Journal the full row so cleanup can
+              ;; resurrect it on failure downstream.
+              (doseq [fs current-fss
+                      :when (not (@kept-fs-ids (:id fs)))]
+                (sp/delete-entity storage :fn-slot (:id fs))
+                (swap! journal conj {:op :delete :entity-type :fn-slot :row fs}))
+              ;; Phase 4: bump positions on kept fn-slots that
+              ;; moved, and create fresh fn-slots for new entries.
+              ;; Position is unique per (fn-id, position) so we
+              ;; never re-use a position already on a row we kept.
+              (doseq [[idx a] (map-indexed vector assignments)]
+                (cond
+                  (:reuse? a)
+                  (let [old-fs (first (filter #(= (:id %) (:fn-slot-id a)) current-fss))]
+                    (when (and old-fs (not= (:position old-fs) idx))
+                      ;; Two-step shuffle: delete + re-create with new
+                      ;; position. The journal records both legs so a
+                      ;; later failure can rewind to the pre-update row.
+                      (sp/delete-entity storage :fn-slot (:id old-fs))
+                      (swap! journal conj {:op :delete :entity-type :fn-slot :row old-fs})
+                      (let [new-row (assoc old-fs :position idx)]
+                        (sp/create-entity storage :fn-slot new-row)
+                        (swap! journal conj {:op :create :entity-type :fn-slot :id (:id new-row)}))))
+
+                  :else
+                  (do
+                    (sp/create-entity storage :fn-slot
+                                      {:id (:fn-slot-id a)
+                                       :fn-id fn-id
+                                       :slot-id (:slot-id a)
+                                       :position idx})
+                    (swap! journal conj {:op :create :entity-type :fn-slot :id (:fn-slot-id a)}))))
+              ;; Phase 5: optional rename / re-description of the fn-row.
+              (when (or (and nm (not= nm (:name existing-fn)))
+                        (contains? body :description))
+                (let [patch (cond-> {}
+                              (and nm (not= nm (:name existing-fn)))
+                              (assoc :name nm)
+                              (contains? body :description)
+                              (assoc :description desc))]
+                  (sp/update-entity storage :fn fn-id patch)))
+              ;; The compound write happened through `sp/*-entity` —
+              ;; bypassing the defbase wrappers that normally call
+              ;; `invalidate!`. Without this nudge the next read of
+              ;; `/api/graph/entities` would return the cached pre-
+              ;; update graph and the editor would see no change.
+              (invalidate! ctx storage :fn-slot {:fn-id fn-id})
+              {:ok true :id (str fn-id) :name (or nm (:name existing-fn))})
+            (catch clojure.lang.ExceptionInfo e
+              (cleanup)
+              {:ok false :error (.getMessage e) :data (ex-data e)})
+            (catch Exception e
+              (cleanup)
+              {:ok false :error (str (.getMessage e))})))))))
+
+
+(defbase types-usages
+  "Find every place a type-row is referenced. POST body
+   `{type-fn-id: <uuid-string>}`. Returns `{ok, type-fn-id,
+   type-name, usages: [{fn-id, fn-name, role, kind, slot-name?},
+   …]}` — one entry per usage. `kind` is one of `:base-of`
+   (refinement target), `:element-of` (list element type),
+   `:return-of` (declared return type), `:slot-of` (a slot's
+   `type-fn-id`), `:binding-of` (a binding's
+   `type-override-fn-id`), `:union-branch`, `:variant-branch`.
+
+   Powers the inline-expand panel's \"Used by N\" footer so the
+   user can navigate from a type-row to every fn that mentions it."
+  [request]
+  (let [body (read-json-body request)
+        target-id-raw (:type-fn-id body)
+        target-id (when target-id-raw
+                    (try (java.util.UUID/fromString (str target-id-raw))
+                         (catch Exception _ nil)))]
+    (if (nil? target-id)
+      {:ok false :error "Request body must include valid 'type-fn-id'"}
+      (let [{:keys [fns slots fn-slots bindings]} (cached-or-load-graph ctx)
+            fn-by-id (into {} (map (juxt :id identity)) fns)
+            slot-by-id (into {} (map (juxt :id identity)) slots)
+            slot-owner-by-id (into {} (map (juxt :slot-id :fn-id)) fn-slots)
+            target-fn (get fn-by-id target-id)
+            target-name (some-> target-fn :name)
+            fn-summary (fn [fid kind & [extra]]
+                         (let [f (get fn-by-id fid)]
+                           (merge {:fn-id (str fid)
+                                   :fn-name (or (:name f) "(anonymous)")
+                                   :role (:role f)
+                                   :kind kind}
+                                  (or extra {}))))
+            base-uses (->> fns
+                           (filter #(= (:base-fn-id %) target-id))
+                           (map #(fn-summary (:id %) :base-of)))
+            elem-uses (->> fns
+                           (filter #(= (:element-fn-id %) target-id))
+                           (map #(fn-summary (:id %) :element-of)))
+            ret-uses (->> fns
+                          (filter #(= (:return-type-fn-id %) target-id))
+                          (map #(fn-summary (:id %) :return-of)))
+            constraint-uses
+            (->> fns
+                 (filter (fn [f]
+                           (and (vector? (:constraint f))
+                                target-name
+                                (constraint-contains-type-ref? (:constraint f) target-name))))
+                 (mapcat (fn [f]
+                           (let [kind (case (first (:constraint f))
+                                        :union :union-branch
+                                        :variant :variant-branch
+                                        :fn :fn-type-arg-or-return
+                                        :other)]
+                             [(fn-summary (:id f) kind)]))))
+            slot-uses (->> slots
+                           (filter #(= (:type-fn-id %) target-id))
+                           (mapcat (fn [s]
+                                     (let [owner-id (get slot-owner-by-id (:id s))]
+                                       (when owner-id
+                                         [(fn-summary owner-id :slot-of
+                                                      {:slot-name (:name s)})])))))
+            binding-uses (->> bindings
+                              (filter #(= (:type-override-fn-id %) target-id))
+                              (map (fn [b]
+                                     (let [s (get slot-by-id (:slot-id b))]
+                                       (fn-summary (:fn-id b) :binding-of
+                                                   {:slot-name (:name s)})))))
+            usages (vec (concat base-uses elem-uses ret-uses
+                                constraint-uses slot-uses binding-uses))]
+        {:ok true
+         :type-fn-id (str target-id)
+         :type-name (some-> target-name str)
+         :count (count usages)
+         :usages usages}))))
+
+
 ;; === Rendering Helpers (private) ===
 ;; NOTE: fn-field-specs duplicates the `:fn-field-specs` fn-def in
 ;; fns.edn — they must stay in sync. The duplication exists because
@@ -976,7 +1604,68 @@
                (if (str/blank? v)
                  []
                  (mapv #(java.util.UUID/fromString (str/trim %))
-                       (str/split v #","))))))))
+                       (str/split v #",")))))
+      ;; Type-row creation fields. Accept either UUID or named-type
+      ;; ref for `base-fn-id` / `element-fn-id`; `constraint` arrives
+      ;; as a JSON-encoded vector (e.g. `["union","null","text"]`).
+      ;; Parsed back into a Clojure vector with keywordised heads /
+      ;; primitives — same shape the loader / type-checker expect.
+      (contains? form-data :base-fn-id)
+      (assoc :base-fn-id
+             (when-not (str/blank? (:base-fn-id form-data))
+               (resolve-type-fn-id storage (:base-fn-id form-data))))
+      (contains? form-data :element-fn-id)
+      (assoc :element-fn-id
+             (when-not (str/blank? (:element-fn-id form-data))
+               (resolve-type-fn-id storage (:element-fn-id form-data))))
+      ;; `expects-effects` — authored effect-set contract. Storage
+       ;; holds nil (= no contract) or a JSONB array of bare effect
+       ;; names (e.g. `["db" "io"]`). Form field arrives as
+       ;; comma-separated bare names; a literal "[]" or "null" lets
+       ;; the user pin "no contract" / "explicit no-effects" distinct
+       ;; from "unset" (cleared field = unset / nil).
+       (contains? form-data :expects-effects)
+       (assoc :expects-effects
+              (let [raw (str (:expects-effects form-data))]
+                (cond
+                  (str/blank? raw)          nil
+                  (= raw "null")            nil
+                  (= raw "[]")              []
+                  :else
+                  (vec (->> (str/split raw #",")
+                            (map str/trim)
+                            (remove str/blank?)
+                            (map #(str/replace-first % #"^:" "")))))))
+      (contains? form-data :constraint)
+      (assoc :constraint
+             (let [raw (:constraint form-data)]
+               (when-not (str/blank? raw)
+                 ;; JSON arrays / strings re-keywordised: `:union`,
+                 ;; `:variant`, `:and`, `:or`, `:>=` etc. live on the
+                 ;; Clojure side as keywords, with type-name members
+                 ;; (`"null"` `"int"`) also coerced to keywords.
+                 (let [parsed (try (json/parse-string raw)
+                                   (catch Exception _ raw))]
+                   (letfn [(re-kw [x]
+                             (cond
+                               (and (string? x)
+                                    (or (str/starts-with? x ":")
+                                        ;; Alpha-leading identifiers (`union`,
+                                        ;; `int`, `matches`, etc.) and bare
+                                        ;; comparison operators (`>`, `>=`,
+                                        ;; `<`, `<=`, `=`, `!=`) — without
+                                        ;; the second branch any constraint
+                                        ;; whose head is a non-alphanumeric
+                                        ;; op would stay as a string and
+                                        ;; downstream contains? checks (which
+                                        ;; key on `:>` keywords) would fail.
+                                        (re-matches #"[a-zA-Z][a-zA-Z0-9_-]*" x)
+                                        (re-matches #"[!<>=]+" x)))
+                               (keyword (str/replace-first x #"^:" ""))
+                               (vector? x) (mapv re-kw x)
+                               (sequential? x) (mapv re-kw x)
+                               :else x))]
+                     (re-kw parsed)))))))))
 
 
 (defbase parse-ns-from-form
@@ -1818,7 +2507,14 @@
    Body shapes:
      {\"ref\":  \"fn-uuid-string\"}
      {\"ref-name\": \"my-fn\"}
-     {\"value\": <any JSON>}"
+     {\"value\": <any JSON>}
+
+   A `\":foo\"`-shaped value string is the wire form of a keyword
+   literal (JSON has no keyword type) — restore the keyword and set
+   `:literal true`, matching how `records.clj` stores a fn-def's
+   `{:value :kw :literal? true}` item. Without the flag a read would
+   re-emit the keyword colon-stripped and the editor would mis-type
+   it as plain text."
   [storage body]
   (cond
     (contains? body :ref)
@@ -1831,7 +2527,10 @@
                       {:type :sequence-op/fn-not-found :ref-name (:ref-name body)})))
 
     (contains? body :value)
-    {:value (:value body)}
+    (let [v (:value body)]
+      (if (and (string? v) (> (count v) 1) (str/starts-with? v ":"))
+        {:value (keyword (subs v 1)) :literal true}
+        {:value v}))
 
     :else
     (throw (ex-info "Sequence op body requires :ref, :ref-name, or :value"
@@ -1860,13 +2559,25 @@
       (nil? body)  {:status 400 :body "<p class=\"error\">JSON body required</p>"}
       :else
       (if-let [binding (ensure-sequence-binding ctx fn-id)]
-        (let [items (sp/query-entities storage :binding-list-item
-                                       {:binding-id (:id binding)})
-              max-pos (apply max -1 (map :position items))
-              new-pos (inc max-pos)
+        (let [binding-id (:id binding)
+              ;; A new item's `:position` must clear the BASE
+              ;; `binding_list_item` table, not just the resolved
+              ;; view. A soft-deleted item leaves its base row (the
+              ;; cross-branch identity) still holding `(binding_id,
+              ;; position)`, and that row's UNIQUE index rejects a
+              ;; colliding insert. The resolved view hides those
+              ;; orphans — query the base storage so they count.
+              base-storage (or (:base-storage storage) storage)
+              used-pos (map :position
+                            (concat
+                              (sp/query-entities base-storage :binding-list-item
+                                                 {:binding-id binding-id})
+                              (sp/query-entities storage :binding-list-item
+                                                 {:binding-id binding-id})))
+              new-pos (inc (apply max -1 used-pos))
               payload (resolve-sequence-payload storage body)
               new-item (merge {:id (random-uuid)
-                               :binding-id (:id binding)
+                               :binding-id binding-id
                                :position new-pos}
                               payload)
               ;; Same write-time guards as the regular binding-list-
@@ -1909,6 +2620,44 @@
               ;; that to the binding's `:fn-id` for the seed.
               (invalidate! ctx storage :binding-list-item item)
               {:status 200 :body ""}))))))
+
+
+(defbase process-sequence-update
+  "PUT /api/sequence/item/:item-id
+   Body: {\"ref\"|\"ref-name\"|\"value\": …}
+   Replaces the value/ref of one existing binding-list-item — the
+   in-place edit counterpart of append/remove. The complementary
+   column is cleared so the item stays unambiguously a value OR a
+   ref; the `:literal` keyword flag is set when (and only when) the
+   new value is a keyword (see `resolve-sequence-payload`)."
+  [request]
+  (let [storage (require-storage ctx)
+        item-id-str (or (get-in request [:path-params :item-id])
+                        (:item-id-str (parse-uri-segments (:uri request))))
+        item-id (try (java.util.UUID/fromString item-id-str) (catch Exception _ nil))
+        raw-body (:body request)
+        body-str (cond
+                   (string? raw-body) raw-body
+                   (instance? java.io.InputStream raw-body) (clojure.core/slurp raw-body)
+                   :else nil)
+        body (when body-str
+               (try (json/parse-string body-str true) (catch Exception _ nil)))]
+    (cond
+      (nil? item-id) {:status 400 :body "<p class=\"error\">Invalid item-id</p>"}
+      (nil? body)    {:status 400 :body "<p class=\"error\">JSON body required</p>"}
+      :else
+      (let [item (sp/read-entity storage :binding-list-item item-id)]
+        (if (nil? item)
+          {:status 404 :body "<p class=\"error\">Item not found</p>"}
+          (let [payload (resolve-sequence-payload storage body)
+                changes (merge {:value nil :ref-fn-id nil :literal nil} payload)
+                pre-rej (write-rej storage :binding-list-item
+                                   (merge item changes {:id item-id}))]
+            (if pre-rej
+              {:status 400 :body (str "<p class=\"error\">" (:reason pre-rej) "</p>")}
+              (do (sp/update-entity storage :binding-list-item item-id changes)
+                  (invalidate! ctx storage :binding-list-item item)
+                  {:status 200 :body ""}))))))))
 
 
 ;; === Tighten fn-typed binding effects =====================================
@@ -2174,6 +2923,10 @@
    :all-rich-types all-rich-types
    :types-compatible types-compatible
    :types-candidates types-candidates
+   :types-usages types-usages
+   :process-create-record-type process-create-record-type
+   :process-create-list-type process-create-list-type
+   :process-update-record-type process-update-record-type
    :render-entity-details-view render-entity-details-view
    :render-entity-form-view render-entity-form-view
    :process-create-entity process-create-entity
@@ -2181,6 +2934,7 @@
    :process-delete-entity process-delete-entity
    :process-sequence-append process-sequence-append
    :process-sequence-remove process-sequence-remove
+   :process-sequence-update process-sequence-update
    :process-tighten-binding-effects process-tighten-binding-effects
    :render-entity-actions render-entity-actions
    :parse-fn-from-form parse-fn-from-form

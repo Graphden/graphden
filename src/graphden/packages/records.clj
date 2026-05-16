@@ -613,22 +613,38 @@
 (defn- parse-variant
   "`{:name :foo :variant [:tag1 T1 :tag2 T2 …]}` — discriminated union.
    Like union, stored as a fn-row whose `:constraint` carries the
-   variant payload for the type-checker to inspect."
+   variant payload for the type-checker to inspect.
+
+   Rejects duplicate tag keywords — a variant whose `:ok` appears
+   twice is structurally ambiguous (two different value-types for the
+   same tag) and silently corrupting it would surface much later as
+   confusing runtime mismatches."
   [{:keys [variant description]
     fn-name :name ns-id :namespace} _name->id]
-  (let [own-id (fn-id ns-id fn-name)]
-    [{:kind :fn
-      :id own-id
-      :name (clojure.core/name fn-name)
-      :namespace-id ns-id
-      :parent-ids []
-      :impl-hash nil
-      :base-fn-id nil
-      :element-fn-id nil
-      :return-type-fn-id nil
-      :anonymous-hash nil
-      :constraint (into [:variant] variant)
-      :description description}]))
+  (let [pairs (partition 2 variant)
+        tags (map first pairs)
+        dup-tag (->> tags frequencies (some (fn [[k n]] (when (> n 1) k))))]
+    (when dup-tag
+      (throw (ex-info (str "Variant " (pr-str fn-name)
+                           " declares tag " (pr-str dup-tag) " twice — "
+                           "each tag must be unique.")
+                      {:type :invalid-variant-duplicate-tag
+                       :fn-name fn-name
+                       :tag dup-tag
+                       :variant variant})))
+    (let [own-id (fn-id ns-id fn-name)]
+      [{:kind :fn
+        :id own-id
+        :name (clojure.core/name fn-name)
+        :namespace-id ns-id
+        :parent-ids []
+        :impl-hash nil
+        :base-fn-id nil
+        :element-fn-id nil
+        :return-type-fn-id nil
+        :anonymous-hash nil
+        :constraint (into [:variant] variant)
+        :description description}])))
 
 
 (defn- resolve-parent-list
@@ -1029,8 +1045,10 @@
 (defn- composed-own-fn
   "Top-level fn-row record for a composed fn-def — no impl-hash and no
    type-row markers (those are owned by base-fn / type-row branches
-   of the parser)."
-  [own-id fn-name ns-id parent-ids description]
+   of the parser). `return-type-fn-id` may be set when the composed
+   def explicitly narrows the inherited return type (e.g.
+   `:return-type :ring-response-shape` on a child of `:update-in`)."
+  [own-id fn-name ns-id parent-ids description return-type-fn-id]
   {:kind :fn
    :id own-id
    :name (clojure.core/name fn-name)
@@ -1039,7 +1057,7 @@
    :impl-hash nil
    :base-fn-id nil
    :element-fn-id nil
-   :return-type-fn-id nil
+   :return-type-fn-id return-type-fn-id
    :anonymous-hash nil
    :constraint nil
    :description description})
@@ -1212,10 +1230,12 @@
    resolved owner's fn-id and the slot's original name, so siblings
    that bind the same effective slot agree on its id."
   [fn-def name->id defs-by-name]
-  (let [{:keys [args description] fn-name :name ns-id :namespace} fn-def
+  (let [{:keys [args description return-type] fn-name :name ns-id :namespace} fn-def
         own-id (fn-id ns-id fn-name)
         parent-ids (resolve-parent-list fn-def name->id)
-        own-fn (composed-own-fn own-id fn-name ns-id parent-ids description)
+        ret-id (when return-type
+                 (try (resolve-type-ref return-type name->id) (catch Exception _ nil)))
+        own-fn (composed-own-fn own-id fn-name ns-id parent-ids description ret-id)
         exposed-names (collect-exposed-names args fn-name defs-by-name)
         rename-slot-records (build-rename-slot-records fn-name exposed-names
                                                        own-id name->id
@@ -1226,6 +1246,19 @@
     (into [own-fn]
           (concat (apply concat rename-slot-records)
                   (apply concat binding+items)))))
+
+
+(defn- attach-fn-meta
+  "Post-process step that copies fn-def-level metadata onto the first
+   record of every parser's output (which is always the `:fn` row).
+   Today there's only one such field — `:expects-effects` — but the
+   pattern is here so any future authored-only column slips into the
+   first row without a per-parser tweak."
+  [records fn-def]
+  (if-let [ee (:expects-effects fn-def)]
+    (let [normalised (vec (map #(if (keyword? %) (name %) (str %)) ee))]
+      (update records 0 assoc :expects-effects normalised))
+    records))
 
 
 (defn parse-fn-def
@@ -1239,39 +1272,40 @@
   ([fn-def name->id]
    (parse-fn-def fn-def name->id {}))
   ([fn-def name->id defs-by-name]
-   (cond
-     (or (:parent fn-def) (:parents fn-def))
-     (parse-composed fn-def name->id defs-by-name)
-     (:type fn-def)    (parse-record-type fn-def name->id)
-     (:refine fn-def)  (parse-refinement fn-def name->id)
-     (:list fn-def)    (parse-list-type fn-def name->id)
-     (:union fn-def)   (parse-union fn-def name->id)
-     (:variant fn-def) (parse-variant fn-def name->id)
-     ;; `:fn-type` declarations now produce a fn-row with the
-     ;; structural `[:fn args ret]` shape stashed in `:constraint`
-     ;; (mirrors how unions / variants stash their payload). The
-     ;; in-memory type-alias registry still gets the keyword→shape
-     ;; entry for `subtype?` / `unify` (`system/core` registers it
-     ;; at init AND `compile_runtime/register-type-aliases-from-db!`
-     ;; mirrors from the row's constraint), so resolution works on
-     ;; both EDN and DB-driven paths.
-     (:fn-type fn-def)
-     (let [{fn-name :name ns-id :namespace
-            description :description ft :fn-type} fn-def
-           [args ret] ft]
-       [{:kind :fn
-         :id (fn-id ns-id fn-name)
-         :name (clojure.core/name fn-name)
-         :namespace-id ns-id
-         :parent-ids []
-         :impl-hash nil
-         :base-fn-id nil
-         :element-fn-id nil
-         :return-type-fn-id nil
-         :anonymous-hash nil
-         :constraint (into [:fn] [(or args {}) ret])
-         :description description}])
-     :else             (parse-base-fn fn-def name->id))))
+   (-> (cond
+         (or (:parent fn-def) (:parents fn-def))
+         (parse-composed fn-def name->id defs-by-name)
+         (:type fn-def)    (parse-record-type fn-def name->id)
+         (:refine fn-def)  (parse-refinement fn-def name->id)
+         (:list fn-def)    (parse-list-type fn-def name->id)
+         (:union fn-def)   (parse-union fn-def name->id)
+         (:variant fn-def) (parse-variant fn-def name->id)
+         ;; `:fn-type` declarations now produce a fn-row with the
+         ;; structural `[:fn args ret]` shape stashed in `:constraint`
+         ;; (mirrors how unions / variants stash their payload). The
+         ;; in-memory type-alias registry still gets the keyword→shape
+         ;; entry for `subtype?` / `unify` (`system/core` registers it
+         ;; at init AND `compile_runtime/register-type-aliases-from-db!`
+         ;; mirrors from the row's constraint), so resolution works on
+         ;; both EDN and DB-driven paths.
+         (:fn-type fn-def)
+         (let [{fn-name :name ns-id :namespace
+                description :description ft :fn-type} fn-def
+               [args ret] ft]
+           [{:kind :fn
+             :id (fn-id ns-id fn-name)
+             :name (clojure.core/name fn-name)
+             :namespace-id ns-id
+             :parent-ids []
+             :impl-hash nil
+             :base-fn-id nil
+             :element-fn-id nil
+             :return-type-fn-id nil
+             :anonymous-hash nil
+             :constraint (into [:fn] [(or args {}) ret])
+             :description description}])
+         :else             (parse-base-fn fn-def name->id))
+       (attach-fn-meta fn-def))))
 
 
 (defn parse-module

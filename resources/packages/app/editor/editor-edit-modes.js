@@ -154,6 +154,10 @@ function openInlineEditPopover(opts) {
 function enterArgValueEditMode(arg, anchorEl) {
   if (!arg) return;
   const expected = expectedSlotType(arg);
+  // Closed-enum slot → the value can only be one of a known set, so
+  // the editor offers a <select> rather than a free text field.
+  const enumInfo = (typeof closedEnumOf === 'function')
+                   ? closedEnumOf(expected) : null;
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Edit arg value',
@@ -167,13 +171,37 @@ function enterArgValueEditMode(arg, anchorEl) {
         hint.textContent = 'Expected: ' + formatTypeHint(expected);
         root.insertBefore(hint, root.firstChild);
       }
+
+      const v = arg.value;
+      const cur = (typeof v === 'string') ? v
+                : (v === null || v === undefined) ? ''
+                : JSON.stringify(v);
+
+      // Closed enum → <select>. The current value is injected as an
+      // extra option when it falls outside the set, so opening the
+      // editor never silently rewrites a stale binding.
+      if (enumInfo) {
+        const select = document.createElement('select');
+        select.className = 'arg-value-edit-input';
+        const members = enumInfo.members.slice();
+        if (cur !== '' && !members.some(m => m.value === cur)) {
+          members.unshift({ value: cur, label: cur + ' (current)' });
+        }
+        for (const m of members) {
+          const opt = document.createElement('option');
+          opt.value = m.value;
+          opt.textContent = m.label;
+          if (m.value === cur) opt.selected = true;
+          select.appendChild(opt);
+        }
+        root.insertBefore(select, root.firstChild);
+        return select;
+      }
+
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'arg-value-edit-input';
-      const v = arg.value;
-      input.value = (typeof v === 'string') ? v
-                  : (v === null || v === undefined) ? ''
-                  : JSON.stringify(v);
+      input.value = cur;
       root.insertBefore(input, root.firstChild);
 
       // Live validation status — mirrors saveArgValue's smart-parse
@@ -206,8 +234,24 @@ function enterArgValueEditMode(arg, anchorEl) {
       }
       return input;
     },
-    async doSave(input) { return saveArgValue(arg, input.value); },
-    onSaved()           { if (typeof renderGraph === 'function') renderGraph(false); },
+    async doSave(control) {
+      let raw = control.value;
+      // Free-text edit of a keyword-typed slot → coerce to keyword
+      // form. The <select> path already yields colon-prefixed values,
+      // so this only bites the free-input (non-enum keyword) case.
+      if (typeof raw === 'string' && raw.trim()
+          && raw.trim().charAt(0) !== ':'
+          && typeof isKeywordType === 'function' && isKeywordType(expected)) {
+        raw = ':' + raw.trim();
+      }
+      return saveArgValue(arg, raw);
+    },
+    // Full refresh, not `renderGraph` — a value change alters binding/
+    // item rows, and `renderGraph` only re-fetches LAYOUT, leaving
+    // `lookups` (which drives argRowFromNode / nav-type walks / the
+    // `+` gating) stale. `initGraph` re-fetches entities and rebuilds
+    // `lookups`. Matches the sequence-append flow.
+    onSaved()           { if (typeof initGraph === 'function') initGraph(); },
     // Delete drops the binding so the slot reverts to a free-arg
     // placeholder. From there the user can re-bind to a literal OR a
     // fn-ref via the placeholder's chooser — single inline path for
@@ -259,8 +303,31 @@ async function saveArgValue(arg, rawInput) {
   let parsed;
   try { parsed = JSON.parse(trimmed); }
   catch (_) { parsed = rawInput; }
+  // A sequence item is a `binding-list-item`, not a binding — its
+  // value lives in a dedicated row. Route the edit to the item
+  // endpoint; the binding PUT would otherwise write a stray scalar
+  // `value` onto the parent list-binding.
+  if (arg['item-id']) {
+    return await putSequenceItemValue(arg['item-id'], parsed);
+  }
   const jsonStr = JSON.stringify(parsed);
   return await writeBindingFields(arg, { value: jsonStr });
+}
+
+// PUT /api/sequence/item/:id with a JSON `{value}` body — the
+// in-place edit counterpart of the append / remove helpers.
+async function putSequenceItemValue(itemId, value) {
+  if (!itemId) return false;
+  try {
+    const r = await authFetch('/api/sequence/item/' + encodeURIComponent(itemId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: value })
+    });
+    return !!r?.ok;
+  } catch (_) {
+    return false;
+  }
 }
 
 // --- arg rename (Phase 1) ---
@@ -406,6 +473,113 @@ function enterFnRenameEditMode(fn, anchorEl) {
 // Click the `→ <type>` strip on the root fn card → small `<select>`
 // dropdown of `value_kind` enum entries → save.
 
+// --- :expects-effects contract edit ---
+//
+// Three states the backend recognises:
+//   - null / undefined    "no contract"        no drift checking
+//   - []                  "explicit purity"    drift = any effect at all
+//   - ["db", "io", …]     "contract"           drift = effect ∉ this set
+// The picker exposes a "no contract" radio + 6 effect checkboxes; if
+// no effects are ticked but "explicit purity" is chosen, we POST `[]`.
+function enterExpectsEffectsEditMode(fn, anchorEl, currentDeclared) {
+  if (!fn) return;
+  const cats = ['db', 'env', 'io', 'network', 'time', 'random'];
+  const initial = Array.isArray(currentDeclared) ? currentDeclared : null;
+  openInlineEditPopover({
+    anchorEl,
+    ariaLabel: 'Edit declared effects',
+    makeControl(root) {
+      const wrap = document.createElement('div');
+      wrap.className = 'expects-effects-edit';
+      // Mode picker — choose between "no contract" and "explicit
+      // contract" — the second mode unlocks the checkbox grid.
+      const modeNone = document.createElement('label');
+      const noneRadio = document.createElement('input');
+      noneRadio.type = 'radio';
+      noneRadio.name = 'ee-mode';
+      noneRadio.value = 'none';
+      noneRadio.checked = initial == null;
+      modeNone.appendChild(noneRadio);
+      modeNone.appendChild(document.createTextNode(' no contract'));
+      modeNone.title = 'Drift checker is off for this fn (default).';
+
+      const modeContract = document.createElement('label');
+      const contractRadio = document.createElement('input');
+      contractRadio.type = 'radio';
+      contractRadio.name = 'ee-mode';
+      contractRadio.value = 'contract';
+      contractRadio.checked = initial != null;
+      modeContract.appendChild(contractRadio);
+      modeContract.appendChild(document.createTextNode(' explicit contract'));
+      modeContract.title = 'Drift checker compares computed effects against the ticked set. Empty = pinned purity.';
+
+      const modeRow = document.createElement('div');
+      modeRow.className = 'expects-effects-mode-row';
+      modeRow.appendChild(modeNone);
+      modeRow.appendChild(modeContract);
+      wrap.appendChild(modeRow);
+
+      const grid = document.createElement('div');
+      grid.className = 'expects-effects-grid';
+      const boxes = {};
+      cats.forEach((c) => {
+        const lab = document.createElement('label');
+        lab.className = 'expects-effects-checkbox';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = c;
+        cb.checked = !!(initial && initial.indexOf(c) >= 0);
+        cb.disabled = initial == null;
+        boxes[c] = cb;
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(' ' + c));
+        grid.appendChild(lab);
+      });
+      wrap.appendChild(grid);
+
+      const refreshDisabled = () => {
+        const inContract = contractRadio.checked;
+        cats.forEach(c => { boxes[c].disabled = !inContract; });
+      };
+      noneRadio.addEventListener('change', refreshDisabled);
+      contractRadio.addEventListener('change', refreshDisabled);
+
+      root.insertBefore(wrap, root.firstChild);
+      // Expose collected state on the control element for doSave to
+      // read — keeping doSave's signature single-argument matches the
+      // shape openInlineEditPopover uses for every other edit-mode.
+      wrap._collect = () => {
+        if (noneRadio.checked) return null;
+        return cats.filter(c => boxes[c].checked);
+      };
+      return wrap;
+    },
+    async doSave(control) {
+      const value = control._collect();
+      // The form payload encodes the three states via a single
+      // string field: "" (clear → nil), "[]" (explicit empty),
+      // or a comma-separated list. parse-fn-from-form does the
+      // round-trip.
+      const wireValue =
+        value == null       ? '' :
+        value.length === 0  ? '[]' :
+                              value.join(',');
+      try {
+        const r = await authMutate('PUT',
+          '/api/entities/fn/' + encodeURIComponent(fn.id),
+          { 'expects-effects': wireValue });
+        if (r?.ok) {
+          patchFnFieldInState(fn.id, 'expects-effects', value);
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    },
+    onSaved() { if (typeof renderGraph === 'function') renderGraph(false); }
+  });
+}
+
+
 function enterFnReturnTypeEditMode(fn, anchorEl) {
   if (!fn) return;
   openInlineEditPopover({
@@ -550,9 +724,12 @@ function enterArgTypeEditMode(arg, anchorEl) {
       // alias-aware `subtype?` predicate, no JS analogue handles
       // refinements / records / fn-types fully).
       if (cur) {
+        // `selected=true` + the option being the very first item is
+        // enough signal for the user; appending " (current)" was
+        // redundant chrome the inline-expand panel already dropped.
         const o = document.createElement('option');
         o.value = cur;
-        o.textContent = cur + ' (current)';
+        o.textContent = cur;
         o.selected = true;
         select.appendChild(o);
       }
@@ -741,7 +918,11 @@ function enterNamespaceMoveEditMode(fn, anchorEl) {
 // tail kicks off a small chooser (literal vs fn-ref) so the new
 // item's binding is set in the same operation.
 
-async function appendSequenceItem(fnId, anchorEl) {
+// `expectedType` (optional) — the type the appended item must have,
+// as resolved by `appendNavType` for a nav-typed sequence (e.g. an
+// `:update-in` `:path`). When it's a closed enum the literal prompt
+// renders a <select>; undefined means an unconstrained append.
+async function appendSequenceItem(fnId, anchorEl, expectedType) {
   if (!fnId) return;
   closeInlineEdit();
   // Two-step UX mirroring free-arg binding: pick "Literal" or "Fn-ref",
@@ -764,7 +945,7 @@ async function appendSequenceItem(fnId, anchorEl) {
       litBtn.addEventListener('click', (e) => {
         e.preventDefault();
         closeInlineEdit();
-        promptLiteralForAppend(fnId, anchorEl);
+        promptLiteralForAppend(fnId, anchorEl, expectedType);
       });
       refBtn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -786,25 +967,56 @@ async function appendSequenceItem(fnId, anchorEl) {
   });
 }
 
-function promptLiteralForAppend(fnId, anchorEl) {
+function promptLiteralForAppend(fnId, anchorEl, expectedType) {
+  // Closed-enum target → <select> of valid values; otherwise free text.
+  const enumInfo = (expectedType != null && typeof closedEnumOf === 'function')
+                   ? closedEnumOf(expectedType) : null;
   openInlineEditPopover({
     anchorEl: anchorEl || document.body,
     ariaLabel: 'Enter literal value to append',
     makeControl(root) {
+      if (expectedType != null && typeof formatTypeHint === 'function') {
+        const hint = document.createElement('div');
+        hint.className = 'arg-value-edit-hint';
+        hint.textContent = 'Expected: ' + formatTypeHint(expectedType);
+        root.insertBefore(hint, root.firstChild);
+      }
+      if (enumInfo) {
+        const select = document.createElement('select');
+        select.className = 'arg-value-edit-input';
+        for (const m of enumInfo.members) {
+          const opt = document.createElement('option');
+          opt.value = m.value;
+          opt.textContent = m.label;
+          select.appendChild(opt);
+        }
+        root.insertBefore(select, root.firstChild);
+        return select;
+      }
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'arg-value-edit-input';
-      input.placeholder = 'JSON value (e.g. 42, "text", true)';
+      input.placeholder =
+        (typeof isKeywordType === 'function' && isKeywordType(expectedType))
+          ? ':key-name'
+          : 'JSON value (e.g. 42, "text", true)';
       root.insertBefore(input, root.firstChild);
       return input;
     },
-    async doSave(input) {
-      const trimmed = (input.value || '').trim();
+    async doSave(control) {
+      const trimmed = (control.value || '').trim();
       if (trimmed === '') return false;
-      let parsed;
-      try { parsed = JSON.parse(trimmed); }
-      catch (_) { parsed = input.value; }
-      return postSequenceAppend(fnId, { value: parsed });
+      let value;
+      if (typeof isKeywordType === 'function' && isKeywordType(expectedType)) {
+        // Keyword-typed segment — the input names a keyword. Store it
+        // colon-prefixed so the backend keeps it AS a keyword; a bare
+        // string would persist as plain text.
+        value = (trimmed.charAt(0) === ':') ? trimmed : ':' + trimmed;
+      } else {
+        try { value = JSON.parse(trimmed); }
+        catch (_) { value = control.value; }
+      }
+      return postSequenceAppend(fnId, { value: value });
     },
     onSaved() { if (typeof initGraph === 'function') initGraph(); }
   });

@@ -131,6 +131,7 @@ const ANIM_DURATION = 200;        // Animation duration in ms
 const GRID_GAP_X = 80;            // Horizontal gap between columns
 const GRID_GAP_Y = 40;            // Vertical gap between rows
 const DRAG_HANDLE_HEIGHT = 14;    // Height of drag handle at bottom of nodes
+const PLACEHOLDER_SIZE = 20;      // Click-target square for free-arg / empty-sequence-anchor
 
 
 // ============================================================================

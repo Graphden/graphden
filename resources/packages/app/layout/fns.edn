@@ -12,7 +12,7 @@
   ;; Context-aware: receives storage from ctx
   {:name :get-layout-data
    :description "Fetch every fn/arg entity from storage, expand the requested subgraph based on the request's `:root-id` + `:expansions` map, run the layout pipeline, and return `{:nodes :edges :grid-pos :validation}`. Context-aware (reads storage from `ctx`)."
-   :args {:request {:type :jsonb :description "Internal Ring request — body parsed into `{:root-id :expansions}`."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request — body parsed into `{:root-id :expansions}`."}}
    :return-type :jsonb}
 
   ;; =============================================================================

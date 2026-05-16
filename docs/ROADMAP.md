@@ -255,6 +255,40 @@ Execute function: calculate-report
 
 ---
 
+### Error Tolerance (type errors as visible diagnostics)
+
+**Goal**: A graph with type errors can be saved and iterated on — sketch
+the structure first, fix details later — without errors being silent.
+
+**Current state**: type mismatch IS treated as an error (the type-rules
+throw), but the sync-time check wraps every `check-fn-def!` in a
+swallowing `try/catch` — a broken fn just drops out of the rich-types
+registry with no surfaced diagnostic. The editor shows per-arg mismatch
+rings, but there is no graph-level error status or branch-wide error
+list.
+
+**What's needed:**
+- Type errors as DERIVED, non-blocking diagnostics — recorded per fn,
+  always recomputed, never swallowed. Saving an invalid fn stays
+  allowed; only the hard structural gates (cycles, name uniqueness,
+  terminal/list-closed) reject a write.
+- Graph-level "this fn has N errors" status + a "view all errors in a
+  branch" surface.
+- Branch policy gates: a protected branch may forbid invalid fns
+  (block merge); execution of an invalid fn is refused with a clear
+  "unresolved type errors" message rather than a runtime crash.
+- NO `is_draft` flag — a branch IS the unit of work-in-progress. A WIP
+  branch holds WIP fns; "draft-ness" is branch policy, not a per-fn
+  column. Validity is a derived fact, not stored state.
+
+**Depends on**: the branches/versions system (already present) plus the
+user/role system below.
+
+**Complexity**: Medium. Mostly diagnostics plumbing + editor surface;
+no new entity kinds.
+
+---
+
 ### Base Function Version Tracking [DONE]
 
 **Goal**: Detect when base function implementations change to enable safe upgrades.
@@ -332,6 +366,28 @@ Execute function: calculate-report
 - Compatible changes (new optional arg): single base fn name, Clojure code supports both old and new signatures
 - Breaking changes (removed arg, changed type): register new fn name (e.g., `map-v2`), old code remains functional
 - Implementation-only changes (bug fix, same signature): all users get the new code automatically (Clojure runtime is shared), `impl_hash` updated on platform branch
+
+**Known issue — base-table `(binding_id, position)` unique constraint
+vs versioning:**
+
+`binding_list_item` (the stable identity table) carries a pre-versioning
+`UNIQUE (binding_id, position)` index, but `position` is versioned data.
+This conflicts with the two-table model in two ways:
+
+1. **Soft-delete orphans a position.** `delete-entity` removes an item's
+   *version* rows but keeps its base identity row (correct — the item may
+   still live on another branch). The orphan base row keeps occupying
+   `(binding_id, position)` in the unique index forever.
+2. **Cross-branch divergence collides.** Two branches independently adding
+   a different item at the same sequence position both need a base row at
+   `(binding_id, position)` — the second insert is rejected.
+
+`process-sequence-append` works around (1) by choosing a position that
+clears the *base* table, not just the resolved view. The deeper fix is to
+stop enforcing `position` uniqueness on the identity table — position is a
+resolved-view property, so its uniqueness is an application-level
+invariant, not a base-row one. Deferred until cross-branch sequence
+editing is actually exercised.
 
 ---
 

@@ -13,6 +13,7 @@
   {:name :styles
    :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css`. Wrapped into `<style>` by `:style-element`."
    :parent :read-resource
+   :return-type :text
    :args {:path "packages/app/editor/editor-styles.css"}}
 
   ;; Editor JS modules — loaded from resources and concatenated in order.
@@ -26,6 +27,7 @@
                   "packages/app/editor/editor-prefs.js"
                   "packages/app/editor/editor-auth.js"
                   "packages/app/editor/editor-create.js"
+                  "packages/app/editor/editor-create-type.js"
                   "packages/app/editor/editor-data.js"
                   "packages/app/editor/editor-layout.js"
                   "packages/app/editor/editor-literal-types.js"
@@ -40,6 +42,7 @@
                   "packages/app/editor/editor-edit-reparent.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-type-explainer.js"
+                  "packages/app/editor/editor-overlay-type-expand.js"
                   "packages/app/editor/editor-overlay-arg.js"
                   "packages/app/editor/editor-overlay-edge-label.js"
                   "packages/app/editor/editor-overlays.js"
@@ -54,6 +57,7 @@
   {:name :_script-raw
    :description "Concatenated editor JS bundle, BEFORE the build-hash substitution."
    :parent :concat-resources
+   :return-type :text
    :args {:paths :_editor-script-paths}}
 
   ;; The placeholder is replaced with the FRONTEND-section build hash
@@ -63,8 +67,9 @@
   {:name :script
    :description "Bundled editor JS with `__BUILD_HASH__` substituted by `:build-hash-frontend-short`. The in-page console marker mirrors the `frontend` value returned by `GET /version`, so the browser bundle's identity is never out of step with what the server reports."
    :parent :str-replace
-   :args {:s :_script-raw
-          :match "__BUILD_HASH__"
+   :return-type :text
+   :args {:s        {:ref :_script-raw                :type :text}
+          :match    "__BUILD_HASH__"
           :replacement :build-hash-frontend-short}}
 
   ;; =============================================================================
@@ -181,6 +186,7 @@
   ;; a constant Ring callable.
   {:name :_editor-rendered-page
    :parent :render-hiccup
+   :return-type :text
    :args {:hiccup :page}}
 
   {:name :_editor-handler

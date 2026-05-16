@@ -19,6 +19,39 @@
     [graphden.storage.protocol.core :as sp]))
 
 
+;; Operators / kind heads inside a constraint vector — must mirror
+;; the set in `crud.impls/constraint-op-keywords` so write-time and
+;; chain-walk views of "which keywords inside a constraint vector
+;; are type-row references" agree.
+(def ^:private constraint-op-keywords
+  #{:union :variant :fn :refine :and :or :not
+    :> :>= :< :<= := :not= :matches :in :exists :every})
+
+
+(defn- constraint-type-ref-names
+  "Walk a constraint vector and collect every keyword that could be
+   a type-row name (bare-name strings, minus the operators). Same
+   shape as the CRUD-side helper. Variant tag keywords that happen
+   to share a name with a type-row will over-include — that means
+   the cycle-walker may visit unrelated fns, but it never causes a
+   false positive on the cycle itself (visiting a fn only adds it
+   to the dependency closure, doesn't claim a cycle exists)."
+  [c]
+  (let [walk (fn walk
+               [x acc]
+               (cond
+                 (keyword? x)
+                 (if (constraint-op-keywords x)
+                   acc
+                   (conj acc (name x)))
+                 (map? x)
+                 (reduce-kv (fn [a _k v] (walk v a)) acc x)
+                 (sequential? x)
+                 (reduce (fn [a el] (walk el a)) acc x)
+                 :else acc))]
+    (walk c #{})))
+
+
 (defrecord GenericConstraintHelpers
   [storage]
 
@@ -47,8 +80,22 @@
               parent-ids (remove nil? (:parent-ids fn-rec))
               type-refs (keep #(get fn-rec %)
                               [:base-fn-id :element-fn-id :return-type-fn-id])
+              ;; Constraint-vector type-refs (e.g. `[:union :a :b]`)
+              ;; — names resolved to fn-ids via a single batched
+              ;; query, slot into the same `all-refs` set so the
+              ;; cycle walker doesn't care which slot of the fn
+              ;; carried each edge.
+              constraint-name-refs (some-> fn-rec :constraint
+                                           constraint-type-ref-names)
+              constraint-refs (if (empty? constraint-name-refs)
+                                #{}
+                                (into #{}
+                                      (keep :id)
+                                      (sp/query-entities storage :fn
+                                                         {:name (vec constraint-name-refs)})))
               all-refs (reduce into #{}
-                               [binding-refs item-refs parent-ids type-refs])]
+                               [binding-refs item-refs parent-ids
+                                type-refs constraint-refs])]
           (if (empty? all-refs)
             #{}
             (let [fn-results (sp/read-entities storage :fn (vec all-refs))]

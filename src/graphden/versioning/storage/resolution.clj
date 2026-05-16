@@ -51,7 +51,7 @@
         :version-id-field :fn-id
         :version-data-fields #{:name :impl-hash :description :constraint
                                :base-fn-id :element-fn-id :return-type-fn-id
-                               :anonymous-hash}}
+                               :anonymous-hash :expects-effects}}
 
    :fn-slot {:version-entity :fn-slot-version
              :version-id-field :fn-slot-id

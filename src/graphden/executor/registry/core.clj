@@ -176,7 +176,9 @@
    shape.
 
    `:effects` is recorded straight from the fn-def as a set of keyword
-   tags. `:effectful? true` legacy boolean normalises to `#{:effect}`."
+   tags. `:effectful? true` legacy boolean normalises to `#{:effect}`.
+   `:description` is propagated so the editor's inline-expand panel
+   can surface a human-readable hint without a separate API call."
   [fn-name fn-def]
   (let [args (:args fn-def)
         ret  (some-> (:return-type fn-def) types/resolve-alias)
@@ -187,11 +189,13 @@
         effects (cond
                   (:effects fn-def)    (set (:effects fn-def))
                   (:effectful? fn-def) #{:effect}
-                  :else                #{})]
+                  :else                #{})
+        desc (:description fn-def)]
     (swap! rich-types-registry assoc fn-name
            (cond-> {:return (or ret :any)
                     :args   per-arg}
-             (seq effects) (assoc :effects effects)))))
+             (seq effects)              (assoc :effects effects)
+             (and desc (seq desc))      (assoc :description desc)))))
 
 
 (defn effectful-rich-type?
@@ -243,6 +247,21 @@
                         {:type :invalid-return-type
                          :fn-name fn-name
                          :return-type (:return-type fn-def)})))))
+  ;; Refinement-specific: catch nonsense like `{:base :text :constraint
+  ;; [:>= 0]}` at sync time rather than letting it silently land in
+  ;; storage and confuse downstream type-checking / runtime narrowing.
+  (when-let [refine (:refine fn-def)]
+    (let [base (:base refine)
+          constraint (:constraint refine)
+          check-fn (requiring-resolve 'graphden.types.check/constraint-compatible-with-base?)]
+      (when (and constraint check-fn
+                 (not (check-fn base constraint)))
+        (throw (ex-info (str "Refinement constraint " (pr-str constraint)
+                             " uses operators not valid on base " (pr-str base))
+                        {:type :invalid-refinement-constraint
+                         :fn-name fn-name
+                         :base base
+                         :constraint constraint})))))
   (doseq [[arg-name arg-spec] (:args fn-def)]
     (arg-spec->rich-type arg-name arg-spec)))
 

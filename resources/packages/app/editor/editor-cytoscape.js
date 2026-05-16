@@ -54,7 +54,9 @@ function buildCytoscapeStyles() {
     'border-width': 0,
     'overlay-opacity': 0    // suppress cytoscape's default click/select highlight
   }},
-  // Placeholder (unset arg) - hide, overlay shows content with drag handle
+  // Placeholder (unset arg) - hide; overlay shows a small `+` binder
+  // for editable viewers, nothing for read-only viewers (the empty
+  // edge endpoint is itself the "slot is unbound" signal).
   { selector: 'node[?isPlaceholder]', style: {
     'label': '',
     'background-opacity': 0,
@@ -115,10 +117,11 @@ function buildCytoscapeStyles() {
   // Edge labels are rendered as HTML overlays (see createEdgeLabelOverlay)
   // — Cytoscape's target-label doesn't render multi-line text reliably with
   // taxi edges, so we render them as positioned divs instead.
-  // Unset edge - dashed, same black color
-  { selector: 'edge[?isUnset]', style: {
-    'line-style': 'dashed'
-  }},
+  //
+  // Unset edges keep the same solid line — the absence of a value at the
+  // edge's endpoint (only a small `+` binder, not a fn card) is sufficient
+  // signal that the slot is unbound. Type expectations read off the
+  // type-chip on the edge label, not from a separate placeholder card.
   // Hover highlight: edges fan out from a single fn's right edge and converge
   // onto single target nodes, so any hover lights up the whole visual bundle
   // (all edges that share the hovered edge's source OR target). Accent blue
@@ -487,21 +490,28 @@ async function renderGraph(shouldFit = true) {
   const edgesToAdd = edges.filter(e => !cy.getElementById(e.data.id).length);
 
 
-  // Update existing node data
+  // Update existing node + edge data. Cytoscape's `.data(obj)` is a
+  // MERGE — fields the backend stops sending stick around on the
+  // element. That bit us on edges' `typeChain`: after the user
+  // collapses an expansion the backend correctly returns an edge
+  // without the chain, but the old chain lingered in cy data and
+  // the renderer kept drawing the stale narrowing row. Replace by
+  // clearing keys that don't appear in the new payload, then merging.
+  const replaceData = (el, newData) => {
+    if (!newData) return;
+    const newKeys = new Set(Object.keys(newData));
+    for (const k of Object.keys(el.data())) {
+      if (!newKeys.has(k)) el.removeData(k);
+    }
+    el.data(newData);
+  };
   cy.nodes().forEach(node => {
-    const newData = nodes.find(n => n.data.id === node.id());
-    if (newData) {
-      node.data(newData.data);
-    }
+    const fresh = nodes.find(n => n.data.id === node.id());
+    if (fresh) replaceData(node, fresh.data);
   });
-
-  // Update existing edge data (e.g. argName changes when expansion reveals
-  // rename chains — same edge id, different label)
   cy.edges().forEach(edge => {
-    const newData = edges.find(e => e.data.id === edge.id());
-    if (newData) {
-      edge.data(newData.data);
-    }
+    const fresh = edges.find(e => e.data.id === edge.id());
+    if (fresh) replaceData(edge, fresh.data);
   });
 
   function completeUpdate() {

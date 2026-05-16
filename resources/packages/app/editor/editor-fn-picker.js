@@ -118,6 +118,13 @@ function openFnPicker(opts) {
         richReturn: info.return,
         effects: info.effects,
         compatible: compatible,
+        // Surface the type-row kind so the row can carry a small
+        // annotation ("refinement", "record", …). For "composed"
+        // fns we leave it null — the return-type chip already says
+        // what a regular fn returns; the kind tag is redundant.
+        kind: f.role && f.role !== 'composed'
+              ? String(f.role).replace(/^:/, '')
+              : null,
       };
     });
 
@@ -278,6 +285,17 @@ function openFnPicker(opts) {
       : (typeof displayLabel === 'function' ? displayLabel(c.qualified) : c.qualified);
     main.textContent = visible;
     row.appendChild(main);
+
+    // Kind annotation pill — refinement / record / union / variant /
+    // list / fn-type / base-fn / primitive. Lets the user
+    // disambiguate type-rows from regular fns at a glance.
+    if (c.kind) {
+      const kindEl = document.createElement('span');
+      kindEl.className = 'fn-picker-row-kind fn-picker-row-kind-' + c.kind;
+      kindEl.textContent = c.kind;
+      kindEl.setAttribute('aria-label', 'Kind: ' + c.kind);
+      row.appendChild(kindEl);
+    }
 
     const effects = buildEffectsBadges(c.effects);
     if (effects) row.appendChild(effects);

@@ -11,6 +11,7 @@
    namespace only carries library call-sites and the middleware
    factory."
   (:require
+    [clojure.walk :as walk]
     [graphden.executor.defbase :refer [defbase]]
     [reitit.ring :as ring]))
 
@@ -22,17 +23,34 @@
    data — a vector whose entries are either leaves `[path method-data]`
    or prefix groups `[prefix child …]` (which reitit expands into full
    paths by walking the tree). Multi-method paths are merged at the
-   graph level so reitit's natural conflict detection handles the rest."
+   graph level so reitit's natural conflict detection handles the rest.
+
+   Routes can carry string or keyword keys (literal `:assoc` bindings
+   produce strings at runtime; JSONB-stored literals come back as
+   keywords). Reitit itself requires keyword keys (`:get`, `:handler`,
+   `:middleware`), so we deep-keywordize here at the adapter — the
+   fn-graph can stay key-style-agnostic instead of every route author
+   having to pipe their tree through `:keywordize-map-keys`."
   [routes]
-  (ring/router routes))
+  (ring/router (walk/keywordize-keys routes)))
 
 
 (defbase ring-create-default-handler-fn
   "Build a Ring handler that reitit falls back to when no route matches.
-   `handlers` is a map with `:not-found`, `:method-not-allowed`,
-   `:not-acceptable` keys, each a Ring handler."
-  [handlers]
-  (ring/create-default-handler handlers))
+   Takes the three slot-specific Ring RESPONSE maps directly — wraps
+   each in `constantly` to satisfy reitit's `(handler request)`
+   contract here at the adapter, so the fn-graph composes responses
+   (pure data) without having to thread `:make-handler` per slot.
+   Previously each handler was built as a separate `:make-handler`
+   fn-graph and stuffed into a defaults map via `pairs->map`; that
+   chain didn't propagate `:not-found-response` etc. through the ref
+   boundary, so the values landed as nil. Single base-fn taking three
+   response slots eliminates the boundary."
+  [not-found-response method-not-allowed-response not-acceptable-response]
+  (ring/create-default-handler
+    {:not-found          (constantly not-found-response)
+     :method-not-allowed (constantly method-not-allowed-response)
+     :not-acceptable     (constantly not-acceptable-response)}))
 
 
 (defbase ring-handler-fn

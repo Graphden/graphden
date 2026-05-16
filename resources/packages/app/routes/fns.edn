@@ -133,15 +133,37 @@
    :parent :post
    :args {:path "/append/:fn-id" :handler :sequence-append-handler}}
 
-  {:name :sequence-remove
-   :description "DELETE /api/sequence/item/:item-id — removes an item from its sequence-arg. Auth-required."
-   :parent :delete
-   :args {:path "/item/:item-id" :handler :sequence-remove-handler}}
+  ;; PUT and DELETE both target /item/:item-id — combine their
+  ;; method-maps into one reitit entry so the path is declared once.
+
+  {:name :sequence-item-update
+   :description "Method-data for PUT on `/api/sequence/item/:item-id` — replaces an item's value/ref. Combined with `:sequence-item-remove` into `:sequence-item`. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "put"
+          :handler :sequence-update-handler
+          :middleware :_middleware-list}}
+
+  {:name :sequence-item-remove
+   :description "Method-data for DELETE on `/api/sequence/item/:item-id` — removes an item from its sequence-arg. Combined with `:sequence-item-update` into `:sequence-item`. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "delete"
+          :handler :sequence-remove-handler
+          :middleware :_middleware-list}}
+
+  {:name :_sequence-item-methods
+   :description "Merged method-data — `{:put {…} :delete {…}}` — for `/api/sequence/item/:item-id`."
+   :parent :merge
+   :args {:maps [:sequence-item-update :sequence-item-remove]}}
+
+  {:name :sequence-item
+   :description "Multi-method route entry `[\"/item/:item-id\" {:put … :delete …}]`. Sits inside `:sequence-routes`."
+   :parent :list
+   :args {:items ["/item/:item-id" :_sequence-item-methods]}}
 
   {:name :sequence-routes
-   :description "/api/sequence/* sub-group — append / remove endpoints (each on a distinct sub-path, so no method merging needed)."
+   :description "/api/sequence/* sub-group — POST `/append/:fn-id` plus PUT/DELETE `/item/:item-id`. New methods on /item/:item-id go into `:_sequence-item-methods`."
    :parent :list
-   :args {:items ["/sequence" :sequence-append :sequence-remove]}}
+   :args {:items ["/sequence" :sequence-append :sequence-item]}}
 
   ;; --- /api/bindings — binding-specific narrowing operations ---
 
@@ -190,13 +212,37 @@
    :parent :post-route
    :args {:path "/candidates" :handler :types-candidates-handler}}
 
+  {:name :api-types-usages
+   :description "POST /api/types/usages — list every fn that references a given type-row. Body: `{type-fn-id}`. Returns `{count, usages: [{fn-id, fn-name, role, kind, slot-name?}, ...]}`. Powers the inline-expand panel's 'Used by N' navigation."
+   :parent :post-route
+   :args {:path "/usages" :handler :types-usages-handler}}
+
+  {:name :api-types-record
+   :description "POST /api/types/record — atomically create a record type-row. JSON body `{namespace-id?, name, description?, fields: [{name, type, description?, required?}, …]}`. Returns `{ok, id?, name?, error?}`. Auth-required (creates entities)."
+   :parent :post
+   :args {:path "/record" :handler :types-create-record-handler}}
+
+  {:name :api-types-record-update
+   :description "PUT /api/types/record-update — diff-update an existing record (path-distinct from POST /record because the reitit router rejects duplicate path entries even across methods in our compile pipeline). JSON body `{id, name?, description?, fields: [{name, type, …}, …]}`. Auth-required."
+   :parent :put
+   :args {:path "/record-update" :handler :types-update-record-handler}}
+
+  {:name :api-types-list
+   :description "POST /api/types/list — atomically create a list type-row (fn + auto-`items` slot). JSON body `{namespace-id?, name, description?, element-type}`. Auth-required."
+   :parent :post
+   :args {:path "/list" :handler :types-create-list-handler}}
+
   {:name :types-routes
-   :description "/api/types/* sub-group — registry snapshot + Phase 1 type-aware helpers (compatible / candidates) for the editor."
+   :description "/api/types/* sub-group — registry snapshot + Phase 1 type-aware helpers (compatible / candidates / usages) + Tier-2 compound creators (record / list) for the editor."
    :parent :list
    :args {:items ["/types"
                   :api-types
                   :api-types-compatible
-                  :api-types-candidates]}}
+                  :api-types-candidates
+                  :api-types-usages
+                  :api-types-record
+                  :api-types-record-update
+                  :api-types-list]}}
 
   ;; --- /api/auth/check — admin-token validation ping ---
 

@@ -62,7 +62,6 @@ function createEdgeLabelOverlay(edge, container) {
   Object.assign(overlay.style, {
     position: 'absolute',
     pointerEvents: 'auto',
-    zIndex: '5',
     background: 'var(--bg)',
     color: 'var(--muted-fg)',
     fontFamily: 'SF Mono, Monaco, monospace',
@@ -91,9 +90,59 @@ function createEdgeLabelOverlay(edge, container) {
   const argEditable = editArg
                    && implementationFnIds && implementationFnIds.has(editArg['fn-id'])
                    && (typeof isAuthenticated === 'function' && isAuthenticated());
+  // Sequence-item edges encode an element/container relationship:
+  // the leaf chip is the element type (from the slot's `:of`), and the
+  // immediate parent in the source-chain is the sequence anchor. The
+  // backend's typeChain surfaces those as TWO stacked chips after the
+  // user expands an ancestor, which read as "two unrelated types of
+  // one arg" instead of "element of a sequence". Wrap the chip in
+  // bracket chrome (CSS ::before/::after on the bracket span — the
+  // chip itself stays as the click target for inline-expand and
+  // type-edit) so the relationship reads as `[any]` at a glance. The
+  // chain block below is suppressed for the same reason — its only
+  // entry would be the immediate sequence anchor.
+  const isSequenceItem = !!edge.data('sourcePrevArgId');
+  let leafChip = null;
   if (editArg) {
-    const chip = createTypeChip(editArg, { readOnly: !argEditable });
-    if (chip) overlay.appendChild(chip);
+    leafChip = createTypeChip(editArg, { readOnly: !argEditable });
+    if (leafChip) {
+      if (isSequenceItem) {
+        const bracket = document.createElement('span');
+        bracket.className = 'arg-type-chip-list-bracket';
+        bracket.appendChild(leafChip);
+        overlay.appendChild(bracket);
+        // Override the chip's hover title so the brackets carry meaning
+        // explicitly (screen readers / touch users don't get the visual
+        // affordance otherwise).
+        leafChip.title = 'Element of a sequence — tap to expand or change the element type';
+        leafChip.setAttribute('aria-label', leafChip.title);
+      } else {
+        overlay.appendChild(leafChip);
+      }
+    }
+  }
+
+  // Inline type expansion — the chip IS the trigger. Click reveals
+  // the type's constituents (refine→base+constraint, list→element,
+  // union→branches, record→fields); for editable primitives the
+  // chip opens enterArgTypeEditMode directly. State persists across
+  // rebuilds via `expandedTypePaths`.
+  const leafRich = (editArg && typeof expectedSlotType === 'function')
+                   ? expectedSlotType(editArg) : null;
+  const leafFlat = (editArg && typeof resolveArgType === 'function')
+                   ? resolveArgType(editArg) : null;
+  const leafType = (leafRich != null) ? leafRich : leafFlat;
+  if (leafChip && leafType != null
+      && typeof attachInlineExpand === 'function') {
+    attachInlineExpand(leafChip, leafType, edge.id() + '/leaf', {
+      typeName: (typeof leafRich === 'string') ? leafRich
+                 : (typeof leafType === 'string' ? leafType : null),
+      editable: argEditable,
+      onEdit: argEditable ? () => enterArgTypeEditMode(editArg, leafChip) : null,
+      bindingId: editArg?.['binding-id'],
+      anonymousFnId: (typeof findAnonymousTypeFnId === 'function')
+                     ? findAnonymousTypeFnId(editArg) : null,
+    });
   }
 
   if (argEditable) {
@@ -125,20 +174,28 @@ function createEdgeLabelOverlay(edge, container) {
         if (typeof removeSequenceItem === 'function') removeSequenceItem(editArg.id);
       });
       overlay.appendChild(removeBtn);
-      // Tail of the chain: also render `+` to append.
+      // Tail of the chain: also render `+` to append — UNLESS this is
+      // a nav-typed sequence (`:update-in` `:path`) whose live path
+      // already ends at a scalar: there's no valid further segment,
+      // so the `+` is suppressed entirely.
       if (!nextArgId) {
-        const addBtn = document.createElement('button');
-        addBtn.type = 'button';
-        addBtn.className = 'arg-seq-btn arg-seq-btn-add';
-        addBtn.textContent = '+';
-        addBtn.title = 'Append a new item';
-        addBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (typeof appendSequenceItem === 'function') {
-            appendSequenceItem(editArg['fn-id'], addBtn);
-          }
-        });
-        overlay.appendChild(addBtn);
+        const appendT = (typeof appendNavType === 'function')
+                        ? appendNavType(editArg['fn-id'], editArg['slot-id'])
+                        : undefined;
+        if (appendT !== null) {
+          const addBtn = document.createElement('button');
+          addBtn.type = 'button';
+          addBtn.className = 'arg-seq-btn arg-seq-btn-add';
+          addBtn.textContent = '+';
+          addBtn.title = 'Append a new item';
+          addBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (typeof appendSequenceItem === 'function') {
+              appendSequenceItem(editArg['fn-id'], addBtn, appendT);
+            }
+          });
+          overlay.appendChild(addBtn);
+        }
       }
     }
 
@@ -155,6 +212,52 @@ function createEdgeLabelOverlay(edge, container) {
       entityId: descriptionTarget.entityId
     });
     if (desc) overlay.appendChild(desc);
+  }
+
+  // Stacked type-narrowing — same idea as the multi-line `name (parent)`
+  // rename stacking. Backend emits `:typeChain` only when the source-
+  // chain visible at the current expansion crosses a narrowing boundary,
+  // so the default single-chip view stays unchanged for non-expanded
+  // graphs. The leaf chip is already rendered above; this block adds the
+  // historical entries below it.
+  //
+  // For sequence-item edges the FIRST chain entry (i=1) is the
+  // immediate sequence anchor, which is what the bracket chrome above
+  // already conveys — skip that entry. Deeper entries (real cross-fn
+  // narrowing of a nested sequence's element type, hypothetical) still
+  // render normally.
+  const typeChain = edge.data('typeChain');
+  if (Array.isArray(typeChain) && typeChain.length > 1) {
+    const chainStart = isSequenceItem ? 2 : 1;
+    if (typeChain.length > chainStart) {
+      const block = document.createElement('div');
+      block.className = 'edge-type-chain';
+      for (let i = chainStart; i < typeChain.length; i++) {
+        const entry = typeChain[i];
+        const row = document.createElement('div');
+        row.className = 'edge-type-chain-row';
+
+        const arrow = document.createElement('span');
+        arrow.className = 'edge-type-chain-arrow';
+        arrow.textContent = '↑';
+        row.appendChild(arrow);
+
+        const chip = document.createElement('span');
+        chip.className = 'arg-type-chip arg-type-chip-readonly';
+        chip.textContent = entry.type || 'any';
+        chip.title = 'Inherited type at ' + (entry.fns?.join(', ') || 'ancestor');
+        chip.setAttribute('aria-label', chip.title);
+        row.appendChild(chip);
+
+        const src = document.createElement('span');
+        src.className = 'edge-type-chain-source';
+        src.textContent = '(' + (entry.fns?.join(', ') || '') + ')';
+        row.appendChild(src);
+
+        block.appendChild(row);
+      }
+      overlay.appendChild(block);
+    }
   }
 
   container.appendChild(overlay);

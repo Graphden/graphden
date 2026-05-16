@@ -54,6 +54,41 @@
   default-ret)
 
 
+(defmulti compute-slot-types
+  "Multimethod dispatched on base-fn name. Returns `{slot-name →
+   narrowed-type}` for INPUT slots whose effective type a base-fn can
+   refine beyond the slot's own declaration, given the bindings.
+
+   Counterpart to `compute-return-type` (which refines the OUTPUT).
+   The editor surfaces these on the slot's type-chip. Most base-fns
+   have nothing to add — the `:default` method returns `{}`."
+  {:arglists '([base-fn-name bindings-info])}
+  (fn [base-fn-name _bindings-info] base-fn-name))
+
+
+(defmethod compute-slot-types :default [_ _] {})
+
+
+(defmulti compute-nav-types
+  "Multimethod dispatched on base-fn name. Returns `{slot-name →
+   navigable-type}` for SEQUENCE slots whose items navigate a known
+   structure position-by-position — e.g. `:update-in`'s `:path`
+   walks `:m`'s record shape.
+
+   Unlike `compute-slot-types` (one type for the whole slot), this
+   names the structure the items index INTO; the editor walks it
+   against the LIVE path to type each position and decide whether a
+   further segment is even possible. A snapshot vector would go stale
+   the moment a segment is edited — handing over the structure keeps
+   the editor's per-position view always current. Most base-fns have
+   nothing to add — the `:default` method returns `{}`."
+  {:arglists '([base-fn-name bindings-info])}
+  (fn [base-fn-name _bindings-info] base-fn-name))
+
+
+(defmethod compute-nav-types :default [_ _] {})
+
+
 ;; -----------------------------------------------------------------------------
 ;; :assoc — `(:assoc :map {…} :key "field" :value <value>)` returns
 ;; `(merge m {field-keyword (type-of v)})` when `:key` is a literal
@@ -78,6 +113,21 @@
     (keyword? v) (keyword (name v))
     (string? v)  (keyword v)
     :else        nil))
+
+
+(defn- path-seg-key
+  "Literal field-keyword a sequence-path segment addresses, or nil
+   when the segment is dynamic (a fn-ref / computed value) and can't
+   be statically checked. Sequence-item bindings carry literal keys
+   as `{:value :k :literal? true}` maps — a BARE keyword in a sequence
+   position is a fn-ref, hence dynamic."
+  [seg]
+  (cond
+    (and (map? seg) (contains? seg :value))
+    (field-keyword-from-literal (:value seg))
+
+    (string? seg) (field-keyword-from-literal seg)
+    :else         nil))
 
 
 (defn- assoc-record-builder
@@ -150,10 +200,18 @@
       (and (types/record-type? coll-type) (contains? coll-type field-kw))
       (get coll-type field-kw)
 
-      ;; Field literally missing from a KNOWN record. The user wrote a
-      ;; literal key that doesn't exist in the record's known fields —
-      ;; that's a typo, not a runtime case. Throw with the available
-      ;; field list so the user can spot the misspelling.
+      ;; Field missing from a KNOWN record BUT `:default` is bound —
+      ;; absence is explicitly handled, so the lookup is intentional,
+      ;; not a typo. The result is unconditionally the default's type.
+      (and (types/record-type? coll-type)
+           (contains? bindings-info :default))
+      (or (get-in bindings-info [:default :type]) default-ret)
+
+      ;; Field literally missing from a KNOWN record, no `:default`.
+      ;; The user wrote a literal key that doesn't exist in the
+      ;; record's known fields and gave no fallback — that's a typo,
+      ;; not a runtime case. Throw with the available field list so
+      ;; the user can spot the misspelling.
       (types/record-type? coll-type)
       (throw (ex-info (str ":get — field "
                            (pr-str field-kw)
@@ -169,15 +227,24 @@
 
 
 ;; -----------------------------------------------------------------------------
-;; :merge — N-ary; just OR the fields of every input record.
-;; Falls back to :jsonb when any input is non-record.
+;; :merge — N-ary; union the fields of every input record, later items
+;; winning on key collisions (matches clojure.core/merge semantics).
+;; `:elem-types` carries the per-item types when `:maps` is bound to a
+;; literal vector of refs/values; if every item is a record we can
+;; rebuild the exact merged shape. Falls back to whatever the sequence
+;; lub gave us when any item isn't a known record.
 
 (defmethod compute-return-type :merge
   [_ bindings-info default-ret]
-  (let [maps-type (get-in bindings-info [:maps :type])]
-    ;; :maps is a sequence; we can't peek at items here without
-    ;; deeper integration. Defer to default for now.
-    (or maps-type default-ret)))
+  (let [elem-types (get-in bindings-info [:maps :elem-types])
+        maps-type  (get-in bindings-info [:maps :type])]
+    (cond
+      (and (sequential? elem-types)
+           (seq elem-types)
+           (every? types/record-type? elem-types))
+      (reduce merge {} elem-types)
+
+      :else (or maps-type default-ret))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -196,7 +263,61 @@
 
 (defmethod compute-return-type :update-in
   [_ bindings-info default-ret]
-  (or (get-in bindings-info [:m :type]) default-ret))
+  (let [m-type   (get-in bindings-info [:m :type])
+        path-val (get-in bindings-info [:path :value])]
+    ;; Validate the literal path against m's structure: every segment
+    ;; that navigates a KNOWN record must name one of its fields. A
+    ;; segment naming an absent field is a typo (mirrors `:get`'s
+    ;; field check, extended to a multi-level path). Descent stops
+    ;; once the structure is no longer a known record (`:jsonb` /
+    ;; `:any` — deeper keys can't be validated) or a segment is
+    ;; dynamic (a fn-ref — value unknown at sync time).
+    (when (sequential? path-val)
+      (loop [t m-type, segs (seq path-val)]
+        (when (and segs (types/record-type? t))
+          (let [k (path-seg-key (first segs))]
+            (cond
+              (nil? k)        nil
+              (contains? t k) (recur (get t k) (next segs))
+              :else
+              (throw (ex-info (str ":update-in — path segment "
+                                   (pr-str k)
+                                   " not found in record. Available: "
+                                   (pr-str (sort (keys t))))
+                              {:type :types/check-failed
+                               :rule :update-in
+                               :reason :missing-field
+                               :field k
+                               :record t})))))))
+    (or m-type default-ret)))
+
+
+;; When `:m` is a known record, `:update-in`'s `:path` navigates
+;; record structure — every segment that lands on a record addresses
+;; a field KEYWORD (graphden records are keyword-keyed). Narrow the
+;; `:path` slot from the generic `[:list :any]` to `[:list :keyword]`
+;; so the editor chip reads `[keyword]` instead of `[any]`. Per-
+;; position precision (which keys are valid at segment N, and whether
+;; an N+1 segment exists at all) is the editor's job — it walks the
+;; `:m` structure handed over by `compute-nav-types` below.
+(defmethod compute-slot-types :update-in
+  [_ bindings-info]
+  (if (types/record-type? (get-in bindings-info [:m :type]))
+    {:path [:list :keyword]}
+    {}))
+
+
+;; `:update-in`'s `:path` items index INTO `:m`'s record shape. Hand
+;; the editor that structure (keyed by the `:path` slot) so it can
+;; walk it against the live path: a record level yields a closed
+;; key-set for the picker, a `:jsonb` sub-map a free keyword, a
+;; scalar means no further segment is valid. `:merge-in` inherits
+;; this via `root-base-fn-name`.
+(defmethod compute-nav-types :update-in
+  [_ bindings-info]
+  (if (types/record-type? (get-in bindings-info [:m :type]))
+    {:path (get-in bindings-info [:m :type])}
+    {}))
 
 
 ;; -----------------------------------------------------------------------------
@@ -335,6 +456,42 @@
              (types/list-type? (types/list-elem colls-type)))
       (types/list-elem colls-type)
       d)))
+
+
+;; -----------------------------------------------------------------------------
+;; :list — `(:list :items [a b c …])` constructs a vector. The
+;; binding-info upstream already lubs the elem types into the
+;; `:items :type` (it's a `:sequence`-typed slot, so the vector
+;; binding rewrites it to `[:list (lub …)]`). Lift that here so
+;; the rule returns the precise list-shape instead of bare `:jsonb`.
+
+(defmethod compute-return-type :list
+  [_ b d]
+  (let [items-type (get-in b [:items :type])]
+    (if (types/list-type? items-type)
+      items-type
+      d)))
+
+
+;; -----------------------------------------------------------------------------
+;; :conj — `(:conj :coll C :item X)` adds X to C. When C is a known
+;; `[:list T]` and X's type ⊆ T, the result is the same `[:list T]`;
+;; when X widens the element type, the rule returns `[:list (lub …)]`
+;; so callers see the broadened shape.
+
+(defmethod compute-return-type :conj
+  [_ b d]
+  (let [coll-type (get-in b [:coll :type])
+        item-type (get-in b [:item :type])]
+    (cond
+      (and (types/list-type? coll-type) item-type)
+      (let [old (types/list-elem coll-type)]
+        (if (= old item-type)
+          coll-type
+          [:list (lub [old item-type])]))
+
+      (types/list-type? coll-type) coll-type
+      :else d)))
 
 
 ;; -----------------------------------------------------------------------------

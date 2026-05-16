@@ -23,6 +23,34 @@ function applyActionIconBox(el) {
   el.style.fontSize = 'var(--icon-font-size)';
 }
 
+// Mark an action button as disabled-with-reason: dim it, swap the
+// title, and override the click handler to reveal the reason via
+// `showIconReasonPopover` (see editor-tooltips.js). Used when the
+// affordance must remain visible for discoverability but the action
+// is blocked (e.g. ✎ rename on a fn that's referenced elsewhere).
+//
+// Caller signals intent by passing `opts.disabledReason: <string>`
+// to the icon factory; the factory then calls this helper instead of
+// wiring the real `onClick`.
+function applyIconDisabledReason(btn, reason) {
+  btn.classList.add('action-disabled');
+  btn.setAttribute('aria-disabled', 'true');
+  btn.title = reason;
+  btn.style.cursor = 'help';
+  // Cancel any pending real onClick — the wrapper handler below is the
+  // only thing that should fire.
+  const fire = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (typeof showIconReasonPopover === 'function') {
+      showIconReasonPopover(btn, reason);
+    }
+  };
+  btn.addEventListener('click', fire);
+  btn.addEventListener('mousedown', (e) => e.stopPropagation());
+  btn.addEventListener('touchend', fire);
+}
+
 function createDescriptionBadge(description, opts) {
   opts = opts || {};
   const badge = document.createElement('span');
@@ -198,13 +226,17 @@ function createEditPencilButton(opts) {
     hideFullNameTooltip();
   });
   btn.addEventListener('mousemove', (e) => e.stopPropagation());
-  btn.addEventListener('mousedown', (e) => e.stopPropagation());
-  btn.addEventListener('touchend', (e) => e.stopPropagation());
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (opts.onClick) opts.onClick(btn);
-  });
+  if (opts.disabledReason) {
+    applyIconDisabledReason(btn, opts.disabledReason);
+  } else {
+    btn.addEventListener('mousedown', (e) => e.stopPropagation());
+    btn.addEventListener('touchend', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (opts.onClick) opts.onClick(btn);
+    });
+  }
   return btn;
 }
 
@@ -251,13 +283,17 @@ function createPinnedIconButton(opts) {
     hideFullNameTooltip();
   });
   btn.addEventListener('mousemove', (e) => e.stopPropagation());
-  btn.addEventListener('mousedown', (e) => e.stopPropagation());
-  btn.addEventListener('touchend', (e) => e.stopPropagation());
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (opts.onClick) opts.onClick(btn);
-  });
+  if (opts.disabledReason) {
+    applyIconDisabledReason(btn, opts.disabledReason);
+  } else {
+    btn.addEventListener('mousedown', (e) => e.stopPropagation());
+    btn.addEventListener('touchend', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (opts.onClick) opts.onClick(btn);
+    });
+  }
   return btn;
 }
 
@@ -313,13 +349,17 @@ function createNamespaceBadge(nsPath, opts) {
     if (editable) btn.textContent = 'ns';
   });
   btn.addEventListener('mousemove', (e) => e.stopPropagation());
-  btn.addEventListener('mousedown', (e) => e.stopPropagation());
-  btn.addEventListener('touchend', (e) => e.stopPropagation());
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (opts.onClick) opts.onClick(btn);
-  });
+  if (opts.disabledReason) {
+    applyIconDisabledReason(btn, opts.disabledReason);
+  } else {
+    btn.addEventListener('mousedown', (e) => e.stopPropagation());
+    btn.addEventListener('touchend', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (opts.onClick) opts.onClick(btn);
+    });
+  }
   return btn;
 }
 

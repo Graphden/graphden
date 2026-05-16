@@ -57,32 +57,56 @@
 
   {:name :types-compatible
    :description "Phase 1 type-API: subtype check between an `expected` (slot-side) and `candidate` (binding-side) type. POST body `{expected, candidate}` in the JSON shape produced by `/api/types`. Returns `{ok :bool, expected, candidate, reason?}`. The editor's fn-picker / mismatch explainers call this instead of duplicating `subtype?` logic in JS."
-   :args {:request {:type :jsonb :description "Internal Ring request — body parsed into `{expected, candidate}` types."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request — body parsed into `{expected, candidate}` types."}}
    :return-type :jsonb
    :effects #{:db}}
 
   {:name :types-candidates
    :description "Phase 1 type-API: enumerate fns whose return type is a subtype of `expected`. POST body `{expected, effects?, name-prefix?}` — optional filters narrow by allowed-effect set or namespace / name prefix. Returns `{count, candidates: [{name, return, args, effects}, ...]}` sorted alphabetically. Powers type-aware fn-pickers."
-   :args {:request {:type :jsonb :description "Internal Ring request — body parsed into `{expected, effects?, name-prefix?}`."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request — body parsed into `{expected, effects?, name-prefix?}`."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :types-usages
+   :description "Find every fn that references a given type-row. POST body `{type-fn-id}`. Returns `{count, usages: [{fn-id, fn-name, role, kind, slot-name?}, ...]}` where `kind ∈ {:base-of :element-of :return-of :slot-of :binding-of :union-branch :variant-branch}`. Used by the editor's inline-expand panel to surface a 'Used by N' footer for navigation from a type-row back to its callers."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request — body parsed into `{type-fn-id}`."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :process-create-record-type
+   :description "Atomically create a record type-row: 1 fn-row + N slot-rows + N fn-slot-junctions. JSON body `{namespace-id?, name, description?, fields: [{name, type, description?, required?}, …]}`. Returns `{ok, id, name}` on success or `{error}` with HTTP 400/500."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :process-create-list-type
+   :description "Atomically create a list type-row: 1 fn-row with `element-fn-id` + synthesised `items` slot. JSON body `{namespace-id?, name, description?, element-type}`."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :process-update-record-type
+   :description "Atomic compound update: diff incoming `{id, name?, description?, fields:[…]}` against the record's current fn-slots, create new slots for added/retyped fields, drop fn-slots for removed fields, re-sequence positions, optionally rename / re-describe the fn-row. Returns `{ok, id, name}` or `{error}`. Caveat: orphaned slots are NOT garbage-collected (slot rows are shared across fns)."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
    :return-type :jsonb
    :effects #{:db}}
 
   ;; Action functions (context-aware, return {:status :headers :body} response map)
   {:name :process-create-entity
    :description "Parse a Ring request, create the entity it carries, return a partial Ring response (`{:status :headers :body}`) for the caller to wrap."
-   :args {:request {:type :jsonb :description "Internal Ring request map."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
    :return-type :jsonb
    :effects #{:db}}
 
   {:name :process-update-entity
    :description "Parse a Ring request, update the entity it identifies (PUT /api/entities/:type/:id), return a partial Ring response."
-   :args {:request {:type :jsonb :description "Internal Ring request map."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
    :return-type :jsonb
    :effects #{:db}}
 
   {:name :process-delete-entity
    :description "Parse a Ring request, delete the entity it identifies, return a partial Ring response."
-   :args {:request {:type :jsonb :description "Internal Ring request map."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
    :return-type :jsonb
    :effects #{:db}}
 
@@ -90,30 +114,36 @@
   ;; that has a `:sequence`-typed anchor (e.g. :list, :pairs->map children).
   {:name :process-sequence-append
    :description "Append an item to a `:sequence`-typed arg on the fn identified by the request. Returns a partial Ring response."
-   :args {:request {:type :jsonb :description "Internal Ring request map."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
    :return-type :jsonb
    :effects #{:db}}
 
   {:name :process-sequence-remove
    :description "Remove an item from a `:sequence`-typed arg by item id. Returns a partial Ring response."
-   :args {:request {:type :jsonb :description "Internal Ring request map."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :process-sequence-update
+   :description "Update an existing `:sequence`-arg item by item id (PUT /api/sequence/item/:item-id) — replaces its `:value` or `:ref-fn-id`. Returns a partial Ring response."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
    :return-type :jsonb
    :effects #{:db}}
 
   {:name :process-tighten-binding-effects
    :description "POST /api/bindings/:binding-id/tighten-fn-effects — narrow an fn-typed binding's effective type to a 4-arity `[:fn args ret #{eff-set}]`. Body: `{effects: [\"db\", \"io\", …]}`. Creates / dedupes the anonymous fn-row carrying the new constraint and writes the binding's `:type-override-fn-id`."
-   :args {:request {:type :jsonb :description "Internal Ring request map."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
    :return-type :jsonb
    :effects #{:db}}
 
   {:name :parse-form-body
    :description "Parse an `application/x-www-form-urlencoded` request body into a `{key value}` map."
-   :args {:request {:type :jsonb :description "Internal Ring request map (uses its `:body`)."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map (uses its `:body`)."}}
    :return-type :jsonb}
 
   {:name :parse-json-body
    :description "Parse a JSON request body into a Clojure value (keywordizing string keys)."
-   :args {:request {:type :jsonb :description "Internal Ring request map (uses its `:body`)."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map (uses its `:body`)."}}
    :return-type :jsonb}
 
   {:name :str-to-uuid
@@ -124,12 +154,12 @@
   ;; Render functions (context-aware, return hiccup)
   {:name :render-entity-details-view
    :description "Build the hiccup tree for the entity-details panel (right-side view). Read-only."
-   :args {:request {:type :jsonb :description "Internal Ring request — path params identify the entity."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request — path params identify the entity."}}
    :return-type :jsonb}
 
   {:name :render-entity-form-view
    :description "Build the hiccup tree for the entity create/edit form. Path determines create-vs-edit."
-   :args {:request {:type :jsonb :description "Internal Ring request — path params identify the entity (for edit)."}}
+   :args {:request {:type :ring-request-shape :description "Internal Ring request — path params identify the entity (for edit)."}}
    :return-type :jsonb}
 
   ;; Renders action buttons (Edit/Delete) for entity
@@ -239,6 +269,42 @@
    :parent :to-json-string
    :args {:data :types-candidates}}
 
+  {:name :types-usages-handler
+   :description "Ring handler for `POST /api/types/usages` — wraps `:types-usages` in a JSON 200 response."
+   :parent :json-ok-response
+   :args {:body :_types-usages-body}}
+
+  {:name :_types-usages-body
+   :parent :to-json-string
+   :args {:data :types-usages}}
+
+  {:name :types-create-record-handler
+   :description "Ring handler for `POST /api/types/record` — atomic compound create for a record type-row. Wraps `process-create-record-type` in a JSON 200 response (the {:ok false :error} payload itself carries any error)."
+   :parent :json-ok-response
+   :args {:body :_types-create-record-body}}
+
+  {:name :_types-create-record-body
+   :parent :to-json-string
+   :args {:data :process-create-record-type}}
+
+  {:name :types-create-list-handler
+   :description "Ring handler for `POST /api/types/list` — atomic compound create for a list type-row."
+   :parent :json-ok-response
+   :args {:body :_types-create-list-body}}
+
+  {:name :_types-create-list-body
+   :parent :to-json-string
+   :args {:data :process-create-list-type}}
+
+  {:name :types-update-record-handler
+   :description "Ring handler for `PUT /api/types/record` — atomic compound update for a record type-row. Wraps `process-update-record-type` in a JSON 200 response (the {:ok false :error} payload carries failures)."
+   :parent :json-ok-response
+   :args {:body :_types-update-record-body}}
+
+  {:name :_types-update-record-body
+   :parent :to-json-string
+   :args {:data :process-update-record-type}}
+
   ;; Template for HTML-rendering Ring handlers. Free arg `:hiccup`
   ;; propagates up from the body fn-def's `:render-hiccup`-typed slot,
   ;; so concrete handlers below set `:hiccup :render-…-view` directly
@@ -320,6 +386,11 @@
    :description "Ring handler for `DELETE /api/sequence/item/:item-id` — removes an item from its sequence-arg."
    :parent :html-action-response
    :args {:result :process-sequence-remove}}
+
+  {:name :sequence-update-handler
+   :description "Ring handler for `PUT /api/sequence/item/:item-id` — replaces an item's value/ref."
+   :parent :html-action-response
+   :args {:result :process-sequence-update}}
 
   {:name :tighten-binding-effects-handler
    :description "Ring handler for `POST /api/bindings/:binding-id/tighten-fn-effects` — narrow an fn-typed binding's effective type."

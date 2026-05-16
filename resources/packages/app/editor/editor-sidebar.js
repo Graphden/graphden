@@ -229,11 +229,35 @@ function renderNsNode(container, name, node, path) {
     renderNsNode(childGroup, childName, childNode, nsPath);
   }
 
-  // Fn items (sorted)
+  // Fn items — split into "Types" and "Functions" sub-sections so
+  // refinements / records / unions / variants / lists / primitives
+  // don't clutter the function browse. The backend ships a `:role`
+  // per fn (see crud/impls.clj compute-fn-role) so the sidebar
+  // doesn't have to re-derive it.
   const sortedFns = [...node.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  const TYPE_ROLES = new Set(['refinement', 'list', 'union', 'variant',
+                              'record', 'fn-type', 'primitive']);
+  const typeFns = [];
+  const functionFns = [];
   for (const fn of sortedFns) {
-    childGroup.appendChild(buildFnItem(fn));
+    const role = (fn.role || '').replace(/^:/, '');
+    if (TYPE_ROLES.has(role)) typeFns.push(fn);
+    else functionFns.push(fn);
   }
+  const renderSection = (label, fns) => {
+    if (!fns.length) return;
+    // Header only when BOTH sections have entries — for a namespace
+    // with only fns or only types, the label adds noise.
+    if (typeFns.length && functionFns.length) {
+      const head = document.createElement('div');
+      head.className = 'ns-section-label';
+      head.textContent = label;
+      childGroup.appendChild(head);
+    }
+    for (const fn of fns) childGroup.appendChild(buildFnItem(fn));
+  };
+  renderSection('Types', typeFns);
+  renderSection('Functions', functionFns);
 
   // If the user has an active inline-create rooted at THIS namespace,
   // append the input row inside `childGroup` so it sits where the new

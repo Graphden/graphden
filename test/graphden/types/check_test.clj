@@ -49,8 +49,18 @@
   (is (= :bool    (check/classify-literal true)))
   (is (= :null    (check/classify-literal nil)))
   (is (= :keyword (check/classify-literal :kw)))
-  (is (= :jsonb   (check/classify-literal [1 2 3])))
-  (is (= :jsonb   (check/classify-literal {:a 1}))))
+  (testing "vectors classify structurally as [:list T]"
+    (is (= [:list :int] (check/classify-literal [1 2 3])))
+    (is (= [:list :any] (check/classify-literal [1 "two"])) "mixed elems → :any")
+    (is (= [:list :any] (check/classify-literal []))        "empty → :any elem"))
+  (testing "keyword-keyed maps classify structurally as record-types"
+    (is (= {:a :int}          (check/classify-literal {:a 1})))
+    (is (= {:a :int :b :text} (check/classify-literal {:a 1 :b "x"})))
+    (is (= {:a {:b :int}}     (check/classify-literal {:a {:b 1}})) "recurses"))
+  (testing "string/mixed-keyed maps and empty maps stay :jsonb"
+    (is (= :jsonb (check/classify-literal {"a" 1})))
+    (is (= :jsonb (check/classify-literal {:a 1 "b" 2})))
+    (is (= :jsonb (check/classify-literal {})))))
 
 
 (deftest accepts-matching-literals

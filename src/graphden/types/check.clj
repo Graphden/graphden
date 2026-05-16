@@ -51,9 +51,21 @@
 
 
 (defn classify-literal
-  "Infer the type of a literal Clojure value. Returns nil if the
-   shape isn't a recognised primitive (callers can then fall back
-   to `:any` or skip type-checking the binding)."
+  "Infer the type of a literal Clojure value. Recursively walks maps
+   and vectors so a literal classifies into its STRUCTURAL type, not
+   the flat `:jsonb` catch-all — that lets a literal map type-check
+   against a declared record-type (`:security-headers-shape`, etc.)
+   instead of silently failing `:jsonb ⊄ <record>`.
+
+   - keyword-keyed non-empty map → record-type `{k (classify v) …}`
+   - string/mixed-keyed map, or empty map → `:jsonb` (a genuine
+     generic JSON object — graphden record-types are keyword-keyed,
+     and an empty literal carries no field evidence)
+   - vector → `[:list T]` where T is the least-upper-bound of the
+     items' types (`:any` when items disagree or the vector is empty)
+
+   Returns nil if the shape isn't a recognised literal (callers fall
+   back to `:any` or skip type-checking the binding)."
   [v]
   (cond
     (nil? v)         :null
@@ -63,9 +75,14 @@
     (string? v)      :text
     (keyword? v)     :keyword
     (uuid? v)        :uuid
-    ;; Pending list-element inference for vector — :jsonb is the
-    ;; conservative classification that flows everywhere safely.
-    (or (vector? v) (map? v)) :jsonb
+    (map? v)         (if (and (seq v) (every? keyword? (keys v)))
+                       (into {}
+                             (map (fn [[k fv]]
+                                    [k (or (classify-literal fv) :any)]))
+                             v)
+                       :jsonb)
+    (vector? v)      (let [elems (into #{} (map #(or (classify-literal %) :any)) v)]
+                       [:list (if (= 1 (count elems)) (first elems) :any)])
     :else            nil))
 
 
@@ -128,6 +145,61 @@
         :in    (and (set? rhs) (contains? rhs v))
         :unknown))
     :else                                  :unknown))
+
+
+(def ^:private ^{:doc "Comparison ops only valid on ordered numeric types."}
+  numeric-ops
+  #{:> :>= :< :<= := :not= :in})
+
+
+(def ^:private ^{:doc "Ops that only need equality / membership semantics —
+  valid on any base type (text, keyword, bool, null included)."}
+  equality-ops
+  #{:= :not= :in})
+
+
+(def ^:private ^{:doc "Ops valid for text-only constraints (regex matching)."}
+  text-only-ops
+  #{:matches})
+
+
+(defn- base-allowed-ops
+  "Which atomic constraint operators are legal on a given base type.
+   Defensive default: an unknown base permits every op (no rejection
+   for type-rows we don't model yet)."
+  [base]
+  (case base
+    (:int :numeric :float)  (into numeric-ops text-only-ops)
+    :text                   (into equality-ops text-only-ops)
+    (:bool :keyword :null
+           :uuid :timestamptz)    equality-ops
+    nil                     #{} ; nil base — reject everything
+    :any))
+
+
+(defn constraint-compatible-with-base?
+  "Sync-time check that a refinement's `:constraint` uses only ops
+   the base type can support semantically. Returns `true` when every
+   atomic operator under :and / :or fits the base, `false` otherwise.
+
+   Caller (`validate-fn-def!`) raises a clear error rather than let
+   the row land in storage where it'd later confuse type-checking
+   and runtime narrowing.
+
+   Examples:
+     ✓ `{:base :int  :constraint [:> 0]}`
+     ✓ `{:base :text :constraint [:matches #\"\\d+\"]}`
+     ✗ `{:base :text :constraint [:>= 0]}`     ← `>=` undefined on text
+     ✗ `{:base :bool :constraint [:< 5]}`      ← ordering on bool
+     ✗ `{:base :null :constraint [:not= 1]}`   ← :null only equals :null"
+  [base constraint]
+  (let [allowed (base-allowed-ops base)]
+    (cond
+      (or (= allowed :any) (not (vector? constraint))) true
+      (#{:and :or} (first constraint))
+      (every? #(constraint-compatible-with-base? base %) (rest constraint))
+      :else
+      (contains? allowed (first constraint)))))
 
 
 (defn- ref-binding?
@@ -482,6 +554,20 @@
        (not (contains? b :ref))))
 
 
+(defn- type-only-binding?
+  "True iff `b` is `{:type T}` style — pins the slot's static type but
+   leaves the slot itself free (no `:value`, no `:ref`, no `:as`).
+   Useful when an author wants to narrow an inherited generic slot
+   (e.g. `:invoke`'s `[:fn {:arg a} b]`) without supplying a value at
+   this fn-def level."
+  [b]
+  (and (map? b)
+       (contains? b :type)
+       (not (contains? b :value))
+       (not (contains? b :ref))
+       (not (contains? b :as))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; Pre-Phase: structural check for required-narrowing widening.
 
@@ -626,12 +712,17 @@
 
 (defn- type-check-bindings
   "Reduce over the fn-def's args; for each, type-check the binding
-   against the parent's expected type. Returns the final substitution."
-  [fn-def primary-parent parent-args]
+   against the parent's expected type. Returns the final substitution.
+
+   `init-subst` seeds the reduction — `check-fn-def!` passes the
+   backward-unification result here (declared `:return-type` already
+   bound to the parent's return type-var), so a slot typed by that
+   same var is checked against the narrowed type."
+  [fn-def primary-parent parent-args init-subst]
   (reduce-kv (fn [subst arg-name b-form]
                (check-one-binding primary-parent (:name fn-def)
                                   parent-args subst arg-name b-form))
-             {}
+             (or init-subst {})
              (:args fn-def)))
 
 
@@ -690,9 +781,17 @@
    transitive ref-free args (freshened per ref)."
   [fn-def parent-args subst]
   (let [args (:args fn-def)
+        ;; Rename-bindings and type-only bindings BOTH leave the slot
+        ;; free at this fn-def level — neither carries a `:value` /
+        ;; `:ref`, they only annotate (new name / pinned type). Keep
+        ;; them out of `real-bound` so the slot still surfaces on the
+        ;; free-arg interface.
+        free-shape? (fn [b]
+                      (or (rename-binding? b)
+                          (type-only-binding? b)))
         real-bound (into #{}
                          (keep (fn [[a b]]
-                                 (when-not (rename-binding? b) a)))
+                                 (when-not (free-shape? b) a)))
                          args)
         renamed-original-names (into #{}
                                      (keep (fn [[k b]]
@@ -714,10 +813,21 @@
                                      (types/resolve subst
                                                     (or (get parent-args a) :any)))])))
                       args)
-        local-free (into renamed
+        ;; Type-only bindings pin the free-arg's type to the author's
+        ;; override (same idea as rename-with-:type, but the public name
+        ;; stays the same — no rename involved). Without this entry the
+        ;; slot would surface on `local-free` below with the parent's
+        ;; looser declared type, defeating the override.
+        type-pinned (into {}
+                          (keep (fn [[a b]]
+                                  (when (type-only-binding? b)
+                                    [a (some-> (:type b) types/resolve-alias)])))
+                          args)
+        local-free (into (merge renamed type-pinned)
                          (keep (fn [[a t]]
                                  (when-not (or (contains? real-bound a)
-                                               (contains? renamed-original-names a))
+                                               (contains? renamed-original-names a)
+                                               (contains? type-pinned a))
                                    [a (types/resolve subst t)])))
                          parent-args)]
     (merge (ref-free-args args) local-free)))
@@ -766,11 +876,16 @@
    ring-response-shape (because `:func` is now bound to `:_router`)
    rather than the `:any` `:router-result` recorded in isolation.
 
+   Author-pinned types (`{:ref :X :type :T}` in fns.edn, flagged
+   `:pinned?` upstream) skip the re-fire — the author is asserting
+   the binding's type explicitly and shouldn't be silently
+   overridden by the ref's recorded shape.
+
    `seen` and `depth` cap unbounded recursion through
    self/cyclic refs."
   [info combined-bindings seen depth]
-  (or (when-let [ref-name (:ref info)]
-        (effective-ref-return ref-name combined-bindings seen depth))
+  (or (when (and (:ref info) (not (:pinned? info)))
+        (effective-ref-return (:ref info) combined-bindings seen depth))
       (:type info)))
 
 
@@ -837,16 +952,55 @@
                               :value nil}
 
                              (and (map? b-form) (contains? b-form :value))
-                             {:type (or (classify-literal (:value b-form)) :any)
+                             {:type (or (some-> (:type b-form) types/resolve-alias)
+                                        (classify-literal (:value b-form))
+                                        :any)
                               :value (:value b-form)}
+
+                             ;; `{:type T}` alone — author pins the static
+                             ;; type without supplying a value. The slot
+                             ;; stays free at runtime; the override flows
+                             ;; through to consumers / rules verbatim.
+                             ;; Same `:pinned?` flag as `{:ref … :type T}`
+                             ;; so `effective-binding-type` won't clobber
+                             ;; the override by re-firing a ref's rule.
+                             (type-only-binding? b-form)
+                             {:type (or (some-> (:type b-form) types/resolve-alias) :any)
+                              :value nil
+                              :pinned? true}
 
                              (ref-binding? b-form)
                              {:type (or (:return (registry/rich-type-of b-form)) :any)
                               :value nil
                               :ref b-form}
 
+                             ;; `{:ref :name :type T}` — explicit ref-with-
+                             ;; type-override (parser writes the binding's
+                             ;; `:type-override-fn-id`). The override is the
+                             ;; author's narrowed contract; prefer it over
+                             ;; the ref's recorded return so the type-rule
+                             ;; sees the tighter shape. `:pinned?` flags
+                             ;; the author-set case so `effective-binding-
+                             ;; type` doesn't re-fire the ref's rule and
+                             ;; clobber the override.
+                             (and (map? b-form) (contains? b-form :ref))
+                             (let [pinned? (contains? b-form :type)]
+                               {:type (or (some-> (:type b-form) types/resolve-alias)
+                                          (:return (registry/rich-type-of (:ref b-form)))
+                                          :any)
+                                :value nil
+                                :ref (:ref b-form)
+                                :pinned? pinned?})
+
                              (vector? b-form)
+                             ;; `:elem-types` carries the PER-ITEM types
+                             ;; the rule may need to look at (e.g.
+                             ;; `:merge` walks each :maps element to
+                             ;; union their record fields). The lubbed
+                             ;; `:type` keeps the shape every other
+                             ;; rule already reads.
                              {:type [:list (lub-elem-type (vector-binding-elem-types b-form))]
+                              :elem-types (vector-binding-elem-types b-form)
                               :value b-form}
 
                              (keyword? b-form)
@@ -949,19 +1103,37 @@
    `:resolved-bindings` (NEW) — accumulated `{slot → {:type … :value …}}`
    for slots BOUND at any level of this fn-def's chain. Type-rules
    on descendants can read a slot's type even when the binding lives
-   deeper up. Closer-fn-wins (own bindings shadow parent's)."
+   deeper up. Closer-fn-wins (own bindings shadow parent's).
+
+   `:slot-types` — `{slot-name → unified-type}` for slots whose
+   parent-declared type-var got narrowed at THIS fn-def (e.g. a
+   declared `:return-type` flowing through `:const`'s `a` into the
+   `:value` slot). Only slots whose type actually changed are
+   listed. The editor reads this to show the effective slot type on
+   the chip instead of the parent's generic type-var.
+
+   `:nav-types` — `{slot-name → navigable-structure}` for sequence
+   slots whose items index into a known shape (`:update-in`'s `:path`
+   → `:m`'s record). The editor walks this against the live path to
+   type each segment position and gate the `+` append affordance."
   [fn-name fn-def primary-parent parent-info free-args
-   computed-return effects own-resolved]
+   computed-return effects own-resolved slot-types nav-types]
   (let [expected (some-> fn-def :expects-effects set)
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)]
     (registry/record-rich-types-raw!
       fn-name
       (cond-> (merge {:return computed-return :args free-args}
                      (source-info-for fn-def))
-        (seq resolved)  (assoc :resolved-bindings resolved)
-        primary-parent (assoc :primary-parent primary-parent)
-        (seq effects)  (assoc :effects effects)
-        expected       (assoc :expects-effects expected)))))
+        (seq resolved)    (assoc :resolved-bindings resolved)
+        (seq slot-types)  (assoc :slot-types slot-types)
+        (seq nav-types)   (assoc :nav-types nav-types)
+        primary-parent    (assoc :primary-parent primary-parent)
+        (seq effects)     (assoc :effects effects)
+        expected          (assoc :expects-effects expected)
+        ;; Surface description so the inline-expand panel can show
+        ;; a human-readable hint under the type name.
+        (and (:description fn-def)
+             (seq (:description fn-def))) (assoc :description (:description fn-def))))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -1005,6 +1177,29 @@
                              (bindings-info-for-rule (:args fn-def)
                                                      parent-args)
                              static-ret))
+
+
+(defn- compute-rule-slot-types
+  "Run the ROOT base-fn's `compute-slot-types` rule — narrowed INPUT
+   slot types the editor surfaces on type-chips (e.g. `:update-in`
+   narrowing `:path` to `[:list :keyword]` when `:m` is a record).
+   Empty for base-fns without a slot-types rule."
+  [fn-def primary-parent parent-args]
+  (rules/compute-slot-types (root-base-fn-name primary-parent)
+                            (bindings-info-for-rule (:args fn-def)
+                                                    parent-args)))
+
+
+(defn- compute-rule-nav-types
+  "Run the ROOT base-fn's `compute-nav-types` rule — `{slot-name →
+   navigable-structure}` for sequence slots whose items index into a
+   known shape (e.g. `:update-in`'s `:path` walking `:m`'s record).
+   The editor walks this against the live path. Empty for base-fns
+   without a nav-types rule."
+  [fn-def primary-parent parent-args]
+  (rules/compute-nav-types (root-base-fn-name primary-parent)
+                           (bindings-info-for-rule (:args fn-def)
+                                                   parent-args)))
 
 
 (defn- enforce-declared-return!
@@ -1061,7 +1256,36 @@
                    (into {}
                          (map (fn [[k t]] [k {:type t :value nil}]))
                          parent-args))
-            subst (type-check-bindings fn-def primary-parent parent-args)
+            ;; Backward unification: when this fn-def declares a
+            ;; concrete `:return-type` and the parent's return is a
+            ;; bare type-var, bind that var. Any parent slot typed by
+            ;; the SAME var is then checked against (and surfaced as)
+            ;; the narrowed type — e.g. `:default-security-headers`
+            ;; declaring `:return-type :security-headers-shape` over
+            ;; `:const` binds `a`, so the `:value` slot reads as
+            ;; `:security-headers-shape` instead of generic `a`.
+            parent-ret    (:return parent-info)
+            declared-ret  (:return-type fn-def)
+            init-subst    (if (and declared-ret (types/type-var? parent-ret))
+                            {parent-ret declared-ret}
+                            {})
+            subst (type-check-bindings fn-def primary-parent parent-args init-subst)
+            ;; Slots whose type changed once `subst` is applied (backward
+            ;; unification) PLUS rule-derived narrowings (e.g. `:update-in`
+            ;; narrowing `:path` from its `:m` record). Rule narrowings
+            ;; win on a key collision — a rule knows more than generic
+            ;; var-substitution. The editor shows these on type-chips.
+            slot-types (merge
+                         (into {}
+                               (keep (fn [[arg-name arg-type]]
+                                       (let [resolved (types/resolve subst arg-type)]
+                                         (when (not= resolved arg-type)
+                                           [arg-name resolved]))))
+                               parent-args)
+                         (compute-rule-slot-types fn-def primary-parent
+                                                  effective-parent))
+            nav-types (compute-rule-nav-types fn-def primary-parent
+                                              effective-parent)
             free-args (collect-free-args fn-def parent-args subst)
             static-ret (types/resolve subst (or (:return parent-info) :any))
             own-bindings (bindings-info-for-rule (:args fn-def))
@@ -1071,7 +1295,8 @@
             effects (compute-effects (:args fn-def) parent-info)]
         (check-effects-policy! fn-name fn-def effects)
         (record-result! fn-name fn-def primary-parent parent-info
-                        free-args recorded-return effects own-bindings)
+                        free-args recorded-return effects own-bindings
+                        slot-types nav-types)
         subst))))
 
 

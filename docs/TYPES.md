@@ -461,8 +461,8 @@ branch; declared union slots stay declared.
 ## Tagged Variants
 
 Discriminated sum types — sugar for a union of tagged records. The
-loader's `aliases.edn` `:variant [:tag1 T1 :tag2 T2 …]` entry desugars
-to:
+loader's `:variant [:tag1 T1 :tag2 T2 …]` shape on a `fns.edn` entry
+desugars to:
 
 ```clojure
 [:union {:tag [:refine :keyword [:= :tag1]] :value T1}
@@ -474,7 +474,7 @@ The `[:refine :keyword [:= :tag]]` pin on the tag slot is what makes
 each branch discriminable. Built-in variant aliases:
 
 ```edn
-;; resources/packages/core/refinements/aliases.edn
+;; resources/packages/core/refinements/fns.edn
 {:name :result-text :variant [:ok :text :err :text]}
 {:name :result-int  :variant [:ok :int  :err :text]}
 {:name :validation  :variant [:valid :any :invalid :text]}
@@ -506,17 +506,20 @@ Authors then dispatch via the existing `:cond`:
 
 ## Type Aliases
 
-`aliases.edn` lets a module register `keyword → structural type`
-bindings before its `fns.edn` parses. Four entry shapes:
+Named type-rows live alongside fn-defs in the same `fns.edn` files
+— the loader inspects the entry shape (`:refine` / `:list` /
+`:union` / `:variant` / `:record`) and emits a fn-row + slots in
+the right shape. There is no separate `aliases.edn` file. Four
+entry shapes:
 
 | Shape       | Example                                                         | Meaning                                  |
 |-------------|-----------------------------------------------------------------|------------------------------------------|
-| Refinement  | `{:name :positive-int :base :int :constraint [:> 0]}`           | `[:refine :int [:> 0]]`                  |
+| Refinement  | `{:name :positive-int :refine {:base :int :constraint [:> 0]}}` | `[:refine :int [:> 0]]`                  |
 | Record      | `{:name :user :record {:id :uuid :name :text}}`                 | `{:id :uuid :name :text}`                |
 | Union       | `{:name :nullable-int :union [:null :int]}`                     | `[:union :null :int]`                    |
 | Variant     | `{:name :result-int :variant [:ok :int :err :text]}`            | union of pinned-tag records (see above)  |
 
-Aliases declared in `core/refinements/aliases.edn` cover everyday
+Type-rows declared in `core/refinements/fns.edn` cover everyday
 needs out of the box:
 
 | Alias              | Type                                                              | Used for                         |
@@ -536,8 +539,10 @@ needs out of the box:
 | `:result-T`        | tagged variant `{:ok T}|{:err :text}`                              | Result-style returns             |
 | `:validation`      | tagged variant `{:valid :any}|{:invalid :text}`                    | parsed-vs-error                  |
 
-Modules adding their own aliases should drop an `aliases.edn` next to
-their `fns.edn`; the loader picks it up automatically.
+Modules adding their own named type-rows just put the
+`:refine` / `:list` / `:union` / `:variant` / `:record` entries
+directly in their `fns.edn` alongside their fn-defs — the loader
+recognises the shape and emits the right fn-row + slot structure.
 
 ---
 

@@ -141,6 +141,14 @@
   #uuid "35363738-3940-4123-2a3b-4c5d6e7f8a9b")
 
 
+;; Mirrors fn.expects-effects (sym `fn-expects-effects-field-uuid` in
+;; the graph-data-schema). Must exist on the version mirror or the
+;; versioned-storage decorator strips writes silently and reads come
+;; back without the column.
+(def ^:private fn-version-expects-effects-field-uuid
+  #uuid "44a5c620-9e31-4d28-8b3a-6c1f5e9d2a47")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :fn-slot-version
 ;; =============================================================================
@@ -360,6 +368,8 @@
                                           :type :uuid :nullable? true}
                       :anonymous-hash {:uuid fn-version-anonymous-hash-field-uuid
                                        :type :text :nullable? true}
+                      :expects-effects {:uuid fn-version-expects-effects-field-uuid
+                                        :type :jsonb :nullable? true}
                       :created-at {:uuid fn-version-created-at-field-uuid
                                    :type :timestamptz}
                       :deleted-at {:uuid fn-version-deleted-at-field-uuid

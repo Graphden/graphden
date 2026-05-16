@@ -113,198 +113,20 @@ function renderInfoPopover({ title, description, structural, action }, anchorEl)
   return true;
 }
 
-function showTypeExplainer({ type, anchorEl, onEdit, bindingId, editable }) {
-  if (type == null || !anchorEl) return;
-  if (typeof formatTypeHint !== 'function'
-      || typeof formatTypeHumanReadable !== 'function') return;
-  renderInfoPopover({
-    title: 'Type',
-    description: formatTypeHumanReadable(type),
-    structural: formatTypeHint(type),
-    action: typeof onEdit === 'function'
-            ? { label: 'Change type', onClick: onEdit }
-            : null,
-  }, anchorEl);
-  // For fn-typed slots that have a backing binding (and are
-  // editable), append an effect-narrowing row directly in the
-  // popover. Phase 8's `[:fn args ret #{eff-set}]` form has
-  // backend support but had no UI surface — `:handler` slots used
-  // to be uneditable beyond replacing the entire type. The row
-  // below lets the user say "this callable may only do :network"
-  // and have sync-time `:expects-effects` checks enforce that.
-  if (editable && bindingId
-      && Array.isArray(type) && type[0] === 'fn'
-      && typeof renderEffectTighteningRow === 'function') {
-    renderEffectTighteningRow(typeExplainerEl, type, bindingId);
-  }
-}
+// `showTypeExplainer` and `renderEffectTighteningRow` (which used to
+// live here) were removed when the chip-click flow moved into
+// `editor-overlay-type-expand.js`'s inline expansion panel. Both
+// surfaced the same structural + tightening UI; the inline panel
+// supersedes them and avoids the popover-vs-canvas context switch.
+// `populateNarrowerOptions`, `compactTypeAsValue`, `EFFECT_CATEGORIES`,
+// `EFFECT_DESCRIPTIONS`, and the generic `renderInfoPopover` +
+// `showEffectExplainer` stay — they're consumed by either the
+// inline-expand renderer or the effect-chip click flow on fn-cards.
 
 
-// Tightening row — three-axis narrower for an fn-typed slot:
-//   - per-arg type pickers (replace `:request :ring-request-shape`
-//     with a NAMED narrower type)
-//   - return-type picker (same shape)
-//   - effect-set checkboxes (Phase 8 carve-out)
-//
-// All three submit through the same `tighten-fn-effects` endpoint
-// — the backend accepts any subset of `{args, ret, effects}` as a
-// delta and merges with the current constraint. The "Tighten"
-// button collects non-default selections from each control and
-// sends one combined request.
+// Effect categories — referenced by the tightening UI in
+// `editor-overlay-type-expand.js`.
 const EFFECT_CATEGORIES = ['db', 'env', 'io', 'network', 'time', 'random'];
-
-function renderEffectTighteningRow(parent, fnType, bindingId) {
-  if (!parent || !fnType) return;
-  const currentEff = (Array.isArray(fnType) && fnType.length === 4)
-                     ? new Set((fnType[3] || []).map(e =>
-                                 typeof e === 'string' ? e.replace(/^:/, '') : String(e)))
-                     : null;
-  const cur3argsArr = Array.isArray(fnType) ? Object.entries(fnType[1] || {}) : [];
-  const curRet = Array.isArray(fnType) ? fnType[2] : null;
-
-  const wrap = document.createElement('div');
-  wrap.className = 'type-explainer-tighten';
-  const lbl = document.createElement('div');
-  lbl.className = 'type-explainer-tighten-label';
-  lbl.textContent = 'Tighten:';
-  wrap.appendChild(lbl);
-
-  // Per-arg pickers + ret picker. Each row carries a `<select>`
-  // pre-selected with the current type, async-populated with
-  // narrower compatible types via /api/types/compatible.
-  const argSelects = {};
-  for (const [argName, argType] of cur3argsArr) {
-    const argRow = document.createElement('div');
-    argRow.className = 'type-explainer-tighten-typerow';
-    const lab = document.createElement('span');
-    lab.className = 'type-explainer-tighten-typename';
-    lab.textContent = argName + ':';
-    argRow.appendChild(lab);
-    const sel = document.createElement('select');
-    sel.className = 'type-explainer-tighten-select';
-    populateNarrowerOptions(sel, argType);
-    argRow.appendChild(sel);
-    argSelects[argName] = { sel, current: argType };
-    wrap.appendChild(argRow);
-  }
-  let retSelect = null;
-  if (curRet != null) {
-    const retRow = document.createElement('div');
-    retRow.className = 'type-explainer-tighten-typerow';
-    const lab = document.createElement('span');
-    lab.className = 'type-explainer-tighten-typename';
-    lab.textContent = '→';
-    retRow.appendChild(lab);
-    retSelect = document.createElement('select');
-    retSelect.className = 'type-explainer-tighten-select';
-    populateNarrowerOptions(retSelect, curRet);
-    retRow.appendChild(retSelect);
-    wrap.appendChild(retRow);
-  }
-
-  // Effect checkboxes.
-  const effLabel = document.createElement('div');
-  effLabel.className = 'type-explainer-tighten-typename';
-  effLabel.textContent = currentEff
-    ? 'Effects (uncheck to forbid):'
-    : 'Effects (none = unconstrained):';
-  wrap.appendChild(effLabel);
-  const row = document.createElement('div');
-  row.className = 'type-explainer-tighten-row';
-  const checkboxes = {};
-  for (const cat of EFFECT_CATEGORIES) {
-    const wrap1 = document.createElement('label');
-    wrap1.className = 'type-explainer-tighten-chk';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.value = cat;
-    if (currentEff?.has(cat)) cb.checked = true;
-    checkboxes[cat] = cb;
-    wrap1.appendChild(cb);
-    const sp = document.createElement('span');
-    sp.textContent = cat;
-    wrap1.appendChild(sp);
-    row.appendChild(wrap1);
-  }
-  wrap.appendChild(row);
-
-  const errEl = document.createElement('div');
-  errEl.className = 'type-explainer-tighten-err';
-  errEl.style.display = 'none';
-  wrap.appendChild(errEl);
-
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'type-explainer-btn';
-  btn.textContent = 'Tighten';
-  btn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    btn.disabled = true;
-    errEl.style.display = 'none';
-    // Collect deltas. Args / ret send only when the picker
-    // diverged from the current value; otherwise omit so the
-    // backend keeps the existing component. Effects always send
-    // (a 3-arity slot newly tightened to #{} reads as "no effects
-    // allowed"; that's a meaningful narrowing).
-    const argDelta = {};
-    let argsChanged = false;
-    for (const [name, { sel, current }] of Object.entries(argSelects)) {
-      if (sel.value && sel.value !== compactTypeAsValue(current)) {
-        argDelta[name] = sel.value;
-        argsChanged = true;
-      }
-    }
-    const body = {};
-    if (argsChanged) body.args = argDelta;
-    if (retSelect?.value
-        && retSelect.value !== compactTypeAsValue(curRet)) {
-      body.ret = retSelect.value;
-    }
-    // Effects: only send when the user actually wants a 4-arity
-    // constraint. For a 3-arity slot this is the only way to ADD
-    // a 4-arity constraint, so we always send when ANY checkbox
-    // is checked. If all are unchecked AND the slot is currently
-    // 3-arity, skip — sending `[]` would commit "no effects
-    // allowed" which is rarely what an empty checklist means.
-    const effects = EFFECT_CATEGORIES.filter(c => checkboxes[c].checked);
-    if (effects.length > 0 || currentEff) {
-      body.effects = effects;
-    }
-    if (Object.keys(body).length === 0) {
-      errEl.textContent = 'No changes — pick a narrower type or check an effect.';
-      errEl.style.display = 'block';
-      btn.disabled = false;
-      return;
-    }
-    try {
-      const fetchFn = (typeof authFetch === 'function') ? authFetch : fetch;
-      const resp = await fetchFn(
-        '/api/bindings/' + encodeURIComponent(bindingId) + '/tighten-fn-effects',
-        { method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body) });
-      if (!resp.ok) {
-        const text = await resp.text();
-        const m = text?.match(/<p class="error">([^<]+)<\/p>/);
-        errEl.textContent = m ? m[1] : ('HTTP ' + resp.status);
-        errEl.style.display = 'block';
-        btn.disabled = false;
-        return;
-      }
-      hideTypeExplainer();
-      if (typeof initGraph === 'function') initGraph();
-    } catch (err) {
-      errEl.textContent = String(err?.message ? err.message : err);
-      errEl.style.display = 'block';
-      btn.disabled = false;
-    }
-  });
-  wrap.appendChild(btn);
-  parent.appendChild(wrap);
-  // Re-position the popover; adding the row may have changed its
-  // height enough to push it off-screen.
-  positionTypeExplainer(parent, typeExplainerAnchor);
-}
 
 
 // Render a structural type as the SAME wire-shape `/api/types/
@@ -330,7 +152,10 @@ async function populateNarrowerOptions(select, currentType) {
                    : JSON.stringify(currentType);
   const curOpt = document.createElement('option');
   curOpt.value = curVal;
-  curOpt.textContent = curLabel + ' (current)';
+  // No "(current)" suffix — selected=true plus the option being the
+  // first item already conveys it, and the parent structural row
+  // shows the same type as a chip immediately above.
+  curOpt.textContent = curLabel;
   curOpt.selected = true;
   select.appendChild(curOpt);
   if (typeof richTypes !== 'object' || !richTypes) return;
@@ -407,6 +232,5 @@ function installTypeExplainerDismiss() {
   });
 }
 
-window.showTypeExplainer = showTypeExplainer;
 window.showEffectExplainer = showEffectExplainer;
 window.hideTypeExplainer = hideTypeExplainer;

@@ -110,7 +110,45 @@ fn-def'а, который их объявил (если их два, выбир�
 Composite — это описание значения. Private fn — это описание вычисления.
 Не путать.
 
-## 4. Multiple inheritance — когда оправдано
+## 4. Named constants — `:parent :const`
+
+Чтобы дать ИМЯ конкретному значению (security headers, default config,
+fallback responses, и т. п.), пиши fn-def, расширяющий `:const`:
+
+```edn
+{:name :default-security-headers
+ :parent :const
+ :return-type :security-headers-shape
+ :args {:value {:X-Content-Type-Options "nosniff"
+                :X-Frame-Options        "DENY"
+                ...}}}
+```
+
+`:const :args {:value a} :return-type a` — это identity base-fn,
+буквально «верни своё значение». Extending его с literal в `:value`
+производит fn-graph, который при evaluation возвращает literal.
+
+**Это единственная форма для named values.** В schema нет шестой
+категории "named-value" entity kind (см. `src/graphden/schema/graph/
+schema.clj` — fn-row бывает base / composed / record-type / refinement
+/ list-type / primitive, всё). Любая попытка избежать `:const`-обёртки
+требует либо добавления entity kind (#2 violation — minimal entities),
+либо parser sugar, скрывающего эту структуру (#3 violation — explicit
+over implicit).
+
+Двух-этажная карточка в editor'е (`my-constant / const`) — это
+честное отображение: «это composed fn-def с одним родителем `:const`,
+return равен указанному `:value`». Это не лишняя прослойка, это
+**минимальная необходимая церемония** для того, чтобы значение могло
+быть NAMED и REFERENCED через `{:ref :name}` / bare keyword refs.
+
+Когда писать `:return-type T` на named-constant'е: всегда. Без явного
+return-type'а `:const`'s rule вернёт classify-literal'ом выведенный
+тип (`:jsonb` для maps/vectors, `:int` для чисел, и т. д.) — это
+обычно слишком широкий тип. Пин на конкретный record/refinement
+показывает читателю что именно эта константа представляет.
+
+## 5. Multiple inheritance — когда оправдано
 
 `:parents [:a :b]` (вместо `:parent :a`) — это **mix-in**: fn получает
 slots обоих родителей. Используется в трёх ситуациях:
@@ -141,7 +179,7 @@ slots обоих родителей. Используется в трёх сит
 **Эвристика:** если после прочтения `:parents [a b]` непонятно, какие
 slots откуда приходят, перепиши на single-parent + `_`-helper.
 
-## 5. Группировка в namespace — когда выделить отдельный
+## 6. Группировка в namespace — когда выделить отдельный
 
 Каждый fn лежит в namespace (берётся из `:namespace` поля fns.edn-файла).
 Создавай новый namespace, когда:
@@ -165,7 +203,7 @@ collapse-by-default + новые fn'ы в нём auto-получают `_`-prefi
 Эквивалентно тому, что каждая fn в нём имела бы `_`. Используй для
 крупных deeply-private модулей (типа `app.server.internal`).
 
-## 6. Decomposition — когда «делить» большую fn
+## 7. Decomposition — когда «делить» большую fn
 
 В Clojure'е `(defn big-fn [x] (let [a (...) b (...) c (...)] (...)))` ←
 если let'ов много, выносим в `defn-`. Тот же критерий тут:
@@ -186,7 +224,7 @@ collapse-by-default + новые fn'ы в нём auto-получают `_`-prefi
 - Decomposition не имеет естественной границы — попытка чисто
   «уменьшить тело» создаст плохо названные `_step1`, `_step2`.
 
-## 7. Display rules — что увидит пользователь
+## 8. Display rules — что увидит пользователь
 
 | Тип fn | Sidebar | На графе при expand | `i`-tooltip |
 |---|---|---|---|
@@ -216,7 +254,7 @@ fan-out не происходит. У `_`-fn'и с переиспользова�
 display автоматически переключится на «отдельный узел» при следующем
 рендере. Решение per-render, не per-decl.
 
-## 8. Quick decision flowchart
+## 9. Quick decision flowchart
 
 ```
 Хочешь добавить fn-def?
@@ -243,7 +281,7 @@ display автоматически переключится на «отдель�
   └─ Просто хочется уменьшить тело без логического разреза → НЕ делить.
 ```
 
-## 9. Anti-patterns
+## 10. Anti-patterns
 
 - **`_`-prefix на public-API fn.** Если кто-то ссылается из другого
   пакета — это уже не private.
@@ -256,8 +294,36 @@ display автоматически переключится на «отдель�
   внутри — overhead. Положи в `app.server`.
 - **Auto-name руками.** Не пиши `_anon-3f2a` сам — это служебное имя,
   оно генерируется. Если хочется явно назвать — назови по-человечески.
+- **Фальшивый полиморфизм при специализации.** Если ты наследуешь
+  generic primitive (`:invoke`, `:if`, `:map`, …) и в твоей fn-def
+  type-variable из родителя перестаёт быть реально полиморфным —
+  закрой его НА ЭТОМ fn-def, не downstream. Слот должен честно
+  объявлять свой контракт; пользователь не должен идти к каллерам
+  читать их `:type`-пины, чтобы понять, чего ждёт `:func`.
 
-## 10. Связи с другими местами
+  Type-var остаётся свободным только когда:
+  - **(a)** реально >1 callsite использует его с разными типами
+    (legit polymorphism: `:invoke.return = b`, `:if.return = a`,
+    `:map.return = [:list b]`), ИЛИ
+  - **(b)** это passthrough — `:return-type` совпадает с одним из
+    bound slot-vars и роль fn'а буквально «вернуть что приняли»
+    (`:const`, `:identity`, `:constantly`).
+
+  Иначе — **(c) fake polymorphism**, закрыть. Пример (исторический):
+  `:router-result :parent :invoke` сначала был `[:fn {:arg :ring-
+  request-shape} b] :return-type b`, а реальный контракт «return =
+  `:ring-response-shape`» висел на downstream-пине
+  `:router-ring-response.m {:type :ring-response-shape}`. Чип на
+  слоте `:func` показывал `→'b`, contract был спрятан. Закрыли:
+  `:func :type [:fn {:arg :ring-request-shape} :ring-response-shape]
+  :return-type :ring-response-shape`. Чип теперь читает
+  `(arg:ring-request-shape)→ring-response-shape` без походов на
+  use-site.
+
+  Если же ТЕБЕ нужна generic-версия с другим return-shape — extend
+  primitive (`:invoke`) напрямую, не сужаемого ребёнка.
+
+## 11. Связи с другими местами
 
 - Реализация `_`-prefix UI rules: `editor-overlays.js`,
   `editor-sidebar.js`.
@@ -267,7 +333,7 @@ display автоматически переключится на «отдель�
 - Validate-no-duplicate-names + правила naming: `composition.validation`.
 - Live-проверка fn-def'а в REPL: см. `graphden-repl` skill.
 
-## 11. Что планируется (не реализовано прямо сейчас)
+## 12. Что планируется (не реализовано прямо сейчас)
 
 - **Export пакета как EDN.** В планах фича: выгрузить пользовательские
   fn-defs как переносимый пакет. Поэтому **все** fn'ы должны иметь

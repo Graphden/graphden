@@ -63,27 +63,6 @@ function fnRichInfo(f) {
   };
 }
 
-// Format a return type compactly for the row's right-edge chip.
-// Mirrors `compactTypeChipText` from editor-overlay-arg.js but
-// inlined here to avoid a JS dependency cycle (overlay-arg loads
-// AFTER this module).
-function pickerReturnLabel(rich, flat) {
-  if (rich == null) return flat || '';
-  if (typeof rich === 'string') return rich;
-  if (Array.isArray(rich)) {
-    const head = rich[0];
-    if (head === 'list')   return '[' + pickerReturnLabel(rich[1], 'any') + ']';
-    if (head === 'refine') return pickerReturnLabel(rich[1], flat);
-    if (head === 'union') {
-      const parts = rich.slice(1).map(t => pickerReturnLabel(t, 'any'));
-      const joined = parts.join('|');
-      return joined.length > 16 ? (flat || 'union') : joined;
-    }
-    if (head === 'fn')     return 'fn';
-  }
-  return flat || 'jsonb';
-}
-
 function openFnPicker(opts) {
   closeFnPicker();
   if (!opts || !opts.anchorEl) return;
@@ -220,7 +199,7 @@ function openFnPicker(opts) {
     }
     const formatExpected = (typeof formatTypeHint === 'function')
                            ? formatTypeHint(expected) : String(expected);
-    const formatGot = pickerReturnLabel(c.richReturn, c.flatReturn) || '(unknown)';
+    const formatGot = compactTypeChipText(c.richReturn, c.flatReturn) || '(unknown)';
     // Best-effort reason — clientSubtype was already false. The
     // backend /api/types/compatible would give a richer message, but
     // it's a network roundtrip per click. For now, derive a generic
@@ -300,7 +279,7 @@ function openFnPicker(opts) {
     const effects = buildEffectsBadges(c.effects);
     if (effects) row.appendChild(effects);
 
-    const rt = pickerReturnLabel(c.richReturn, c.flatReturn);
+    const rt = compactTypeChipText(c.richReturn, c.flatReturn);
     if (rt) {
       const rtEl = document.createElement('span');
       rtEl.className = 'fn-picker-row-rt';

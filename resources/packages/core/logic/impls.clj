@@ -4,7 +4,11 @@
    Migrated to `defbase` — arg symbols resolve at use site via the runtime
    helper. Clojure's native short-circuit evaluation (`if`, `and`, `or`,
    `cond`) handles laziness for conditional args without any `:lazy` flag
-   inspection: references in unchosen branches simply never run."
+   inspection: references in unchosen branches simply never run.
+
+   `:const`'s type-rule (moved verbatim from `graphden.types.rules`)
+   lives here as a `defn` and is wired into the `impls` map as
+   `{:impl … :return-type-rule …}`."
   (:require
     [graphden.executor.defbase :refer [defbase]]))
 
@@ -77,10 +81,29 @@
   (= a b))
 
 
+;; === Type-rules ===
+;; :const / :identity — `(:const :value V)` returns V. `:identity`
+;; is `:parent :const` so the rule covers both via the type-checker's
+;; `root-base-fn-name` walk. Used by graphden renames
+;; (`:value {:as :request :type :ring-request-shape}` → `:ring-request`
+;; exposes `:value` as the free arg `:request`, type flows through).
+;; Without this rule the result type defaults to the polymorphic `'a`
+;; and all structural propagation upstream is lost. The standard
+;; polymorphic `'a → 'a` rule SHOULD work via unify, but type-var
+;; binding only kicks in when the slot's `:type` is consulted at the
+;; rule level — wiring it explicitly here surfaces the type-aware
+;; rename without depending on subst lookup.
+
+(defn const-return-rule
+  [bindings-info default-ret]
+  (or (get-in bindings-info [:value :type]) default-ret))
+
+
 ;; === Registry ===
+;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map.
 
 (def impls
-  "Map of fn-name → impl-fn"
+  "Map of fn-name → impl-fn (or `{:impl … :*-rule …}`)"
   {:and and-fn
    :or or-fn
    :not not-fn
@@ -90,5 +113,5 @@
    :cond cond-fn
    :case case-fn
    :coalesce coalesce
-   :const const
+   :const {:impl const :return-type-rule const-return-rule}
    :equal? equal?-fn})

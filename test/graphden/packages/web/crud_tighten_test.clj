@@ -1,12 +1,13 @@
 (ns graphden.packages.web.crud-tighten-test
-  "Tests for the `tighten-effects-impl!` private fn that powers
-   `POST /api/bindings/:id/tighten-fn-effects`. Loads `web/crud`'s
-   impls dynamically (same pattern as `layout-test`) so the test
-   can call the private fn directly and assert on its `{:status
-   :reason :result}` map without bringing up the full HTTP stack."
+  "Tests for the `tighten-effects-impl!` fn that powers
+   `POST /api/bindings/:id/tighten-fn-effects`. The tightening logic
+   now lives in `graphden.crud.entities` (extracted from the
+   `web/crud` package impls), so the test calls it directly and
+   asserts on its `{:status :reason :result}` map without bringing
+   up the full HTTP stack."
   (:require
-    [clojure.java.io :as io]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.entities :as entities]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
@@ -17,27 +18,13 @@
 
 
 ;; ============================================================================
-;; DYNAMIC LOADING OF web/crud IMPLS
+;; TIGHTEN LOGIC UNDER TEST
 ;; ============================================================================
 
-;; web/crud/impls requires web/html/impls (for the html/render-* helpers
-;; used by the form pages); load it first so the require resolves. The
-;; ordering mirrors how the package loader resolves cross-module deps
-;; before evaluating impls.
-(def ^:private crud-ns
-  (do (when-let [html-file (io/resource "packages/web/html/impls.clj")]
-        (load-file (java.io.File/.getPath (io/file html-file))))
-      (when-let [impls-file (io/resource "packages/web/crud/impls.clj")]
-        (load-file (java.io.File/.getPath (io/file impls-file))))
-      (find-ns 'graphden.packages.web.crud.impls)))
+(def ^:private tighten-effects-impl! entities/tighten-effects-impl!)
 
 
-(def ^:private tighten-effects-impl!
-  (some-> crud-ns (ns-resolve 'tighten-effects-impl!)))
-
-
-(def ^:private tighten-fn-type-impl!
-  (some-> crud-ns (ns-resolve 'tighten-fn-type-impl!)))
+(def ^:private tighten-fn-type-impl! entities/tighten-fn-type-impl!)
 
 
 ;; ============================================================================

@@ -1,10 +1,18 @@
 (ns graphden.packages.core.collections.impls
-  "Implementations for core/collections base functions."
+  "Implementations for core/collections base functions.
+
+   Each base-fn's type-rule (the `compute-return-type` /
+   `compute-slot-types` / `compute-nav-types` logic that used to live
+   as a name-dispatched `defmethod` in `graphden.types.rules`) lives
+   here as a plain `defn` next to the `defbase` it belongs to, and is
+   wired into the `impls` map as `{:impl … :return-type-rule … …}`.
+   Looked up by base-fn identity — no name-dispatch."
   (:require
     [clojure.math :as math]
     [clojure.walk]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.core :as types]))
 
 
 ;; === Validation Helpers ===
@@ -204,39 +212,466 @@
   (into {} entries))
 
 
+;; === Type-rules ===
+;; Per-base-fn rules — moved verbatim from graphden.types.rules.
+;; Each `*-rule` is wired into the `impls` map below and looked up by
+;; the type-checker through the rich-types-registry.
+
+;; --- Shared helpers ---------------------------------------------------------
+
+(defn- field-keyword-from-literal
+  "Coerce a literal key value into a record field keyword. Keywords
+   and strings work; anything else returns nil → degrade."
+  [v]
+  (cond
+    (keyword? v) (keyword (name v))
+    (string? v)  (keyword v)
+    :else        nil))
+
+
+(defn- path-seg-key
+  "Literal field-keyword a sequence-path segment addresses, or nil
+   when the segment is dynamic (a fn-ref / computed value) and can't
+   be statically checked. Sequence-item bindings carry literal keys
+   as `{:value :k :literal? true}` maps — a BARE keyword in a sequence
+   position is a fn-ref, hence dynamic."
+  [seg]
+  (cond
+    (and (map? seg) (contains? seg :value))
+    (field-keyword-from-literal (:value seg))
+
+    (string? seg) (field-keyword-from-literal seg)
+    :else         nil))
+
+
+;; --- :assoc -----------------------------------------------------------------
+;; `(:assoc :map {…} :key "field" :value <value>)` returns
+;; `(merge m {field-keyword (type-of v)})` when `:key` is a literal
+;; that names the field. Falls back to `:jsonb` otherwise.
+;;
+;; Coverage:
+;;   :map's type      :key (literal)      :value's type →   computed return
+;;   {…} (record)     "name"              :text         →   {…name :text}
+;;   :jsonb           "name"              :text         →   {name :text}
+;;   :any             "name"              :text         →   {name :text}
+;;   anything         (ref/computed)      anything      →   :jsonb (degrade)
+;;
+;; The `:key` binding's `:value` is what dictates the field name. When
+;; `:key` is keyword-shaped (`:name`), the field name is its `name`;
+;; when it's a string, the same. Anything else degrades.
+;;
+;; `:assoc-fn` (the `:value`-as-fn fn-def variant, `:parent :assoc`)
+;; inherits this rule through the type-checker's `root-base-fn-name`
+;; walk — no separate rule needed.
+
+(defn assoc-return-rule
+  [bindings-info _default-ret]
+  (let [m-type   (get-in bindings-info [:map :type])
+        k-value  (get-in bindings-info [:key :value])
+        v-type   (get-in bindings-info [:value :type])
+        field-kw (field-keyword-from-literal k-value)]
+    (cond
+      (nil? field-kw)
+      ;; Computed key — value unknown at sync time, can't refine.
+      :jsonb
+
+      (types/record-type? m-type)
+      (assoc m-type field-kw (or v-type :any))
+
+      ;; `:map` is `:any`, `:jsonb`, etc. — start a fresh record.
+      :else
+      {field-kw (or v-type :any)})))
+
+
+;; --- :dissoc ----------------------------------------------------------------
+;; Remove a literal key from a record. Anything else → :jsonb.
+
+(defn dissoc-return-rule
+  [bindings-info default-ret]
+  (let [m-type   (get-in bindings-info [:map :type])
+        k-value  (get-in bindings-info [:key :value])
+        field-kw (field-keyword-from-literal k-value)]
+    (cond
+      (nil? field-kw)
+      :jsonb
+
+      (types/record-type? m-type)
+      (dissoc m-type field-kw)
+
+      :else default-ret)))
+
+
+;; --- :get -------------------------------------------------------------------
+;; Look up a field by literal key. Returns the field's type when `:m`
+;; is a known record AND the field exists.
+
+(defn get-return-rule
+  [bindings-info default-ret]
+  (let [coll-type (get-in bindings-info [:coll :type])
+        k-value   (get-in bindings-info [:key :value])
+        field-kw  (field-keyword-from-literal k-value)]
+    (cond
+      (nil? field-kw) default-ret
+
+      (and (types/record-type? coll-type) (contains? coll-type field-kw))
+      (get coll-type field-kw)
+
+      ;; Field missing from a KNOWN record BUT `:default` is bound —
+      ;; absence is explicitly handled, so the lookup is intentional,
+      ;; not a typo. The result is unconditionally the default's type.
+      (and (types/record-type? coll-type)
+           (contains? bindings-info :default))
+      (or (get-in bindings-info [:default :type]) default-ret)
+
+      ;; Field literally missing from a KNOWN record, no `:default`.
+      ;; The user wrote a literal key that doesn't exist in the
+      ;; record's known fields and gave no fallback — that's a typo,
+      ;; not a runtime case. Throw with the available field list so
+      ;; the user can spot the misspelling.
+      (types/record-type? coll-type)
+      (throw (ex-info (str ":get — field "
+                           (pr-str field-kw)
+                           " not found in record. Available: "
+                           (pr-str (sort (keys coll-type))))
+                      {:type :types/check-failed
+                       :rule :get
+                       :reason :missing-field
+                       :field field-kw
+                       :record coll-type}))
+
+      :else default-ret)))
+
+
+;; --- :merge -----------------------------------------------------------------
+;; N-ary; union the fields of every input record, later items winning
+;; on key collisions (matches clojure.core/merge semantics).
+;; `:elem-types` carries the per-item types when `:maps` is bound to a
+;; literal vector of refs/values; if every item is a record we can
+;; rebuild the exact merged shape. Falls back to whatever the sequence
+;; lub gave us when any item isn't a known record.
+
+(defn merge-return-rule
+  [bindings-info default-ret]
+  (let [elem-types (get-in bindings-info [:maps :elem-types])
+        maps-type  (get-in bindings-info [:maps :type])]
+    (cond
+      (and (sequential? elem-types)
+           (seq elem-types)
+           (every? types/record-type? elem-types))
+      (reduce merge {} elem-types)
+
+      :else (or maps-type default-ret))))
+
+
+;; --- :update-in / :merge-in -------------------------------------------------
+;; Preserve the input map's shape.
+;;
+;; `:update-in :args {:m :M :path :P :f :F}` returns m with the value
+;; at path replaced by `(f (get-in m path))`. The TOP-LEVEL shape
+;; (which fields exist at the root) doesn't change — only one nested
+;; value is replaced — so the returned record has the SAME field set
+;; as :m. Without a rule, the inferred return is `:any`, which breaks
+;; the structural-typing chain on Ring handlers built from
+;; `:router-ring-response` (`:merge-in` with `:m :router-result`).
+;;
+;; `:merge-in` inherits from `:update-in`, so this rule covers both
+;; via `root-base-fn-name`'s walk.
+
+(defn update-in-return-rule
+  [bindings-info default-ret]
+  (let [m-type   (get-in bindings-info [:m :type])
+        path-val (get-in bindings-info [:path :value])]
+    ;; Validate the literal path against m's structure: every segment
+    ;; that navigates a KNOWN record must name one of its fields. A
+    ;; segment naming an absent field is a typo (mirrors `:get`'s
+    ;; field check, extended to a multi-level path). Descent stops
+    ;; once the structure is no longer a known record (`:jsonb` /
+    ;; `:any` — deeper keys can't be validated) or a segment is
+    ;; dynamic (a fn-ref — value unknown at sync time).
+    (when (sequential? path-val)
+      (loop [t m-type, segs (seq path-val)]
+        (when (and segs (types/record-type? t))
+          (let [k (path-seg-key (first segs))]
+            (cond
+              (nil? k)        nil
+              (contains? t k) (recur (get t k) (next segs))
+              :else
+              (throw (ex-info (str ":update-in — path segment "
+                                   (pr-str k)
+                                   " not found in record. Available: "
+                                   (pr-str (sort (keys t))))
+                              {:type :types/check-failed
+                               :rule :update-in
+                               :reason :missing-field
+                               :field k
+                               :record t})))))))
+    (or m-type default-ret)))
+
+
+;; When `:m` is a known record, `:update-in`'s `:path` navigates
+;; record structure — every segment that lands on a record addresses
+;; a field KEYWORD (graphden records are keyword-keyed). Narrow the
+;; `:path` slot from the generic `[:list :any]` to `[:list :keyword]`
+;; so the editor chip reads `[keyword]` instead of `[any]`. Per-
+;; position precision (which keys are valid at segment N, and whether
+;; an N+1 segment exists at all) is the editor's job — it walks the
+;; `:m` structure handed over by `update-in-nav-rule` below.
+(defn update-in-slot-rule
+  [bindings-info]
+  (if (types/record-type? (get-in bindings-info [:m :type]))
+    {:path [:list :keyword]}
+    {}))
+
+
+;; `:update-in`'s `:path` items index INTO `:m`'s record shape. Hand
+;; the editor that structure (keyed by the `:path` slot) so it can
+;; walk it against the live path: a record level yields a closed
+;; key-set for the picker, a `:jsonb` sub-map a free keyword, a
+;; scalar means no further segment is valid. `:merge-in` inherits
+;; this via `root-base-fn-name`.
+(defn update-in-nav-rule
+  [bindings-info]
+  (if (types/record-type? (get-in bindings-info [:m :type]))
+    {:path (get-in bindings-info [:m :type])}
+    {}))
+
+
+;; --- List-shape rules -------------------------------------------------------
+;; :first, :rest, :cons, :take, :drop, :reverse, :sort, :distinct.
+;;
+;; All read `:coll` and either lift the elem-type or preserve the same
+;; `[:list T]`. Two helpers cover both shapes; each rule is then a
+;; single-line dispatch.
+;;
+;; The fn IS allowed to return nil for empty collections at runtime;
+;; that's covered by `:null ⊆ :any` and the type-check's leniency for
+;; null actuals. Returning the precise elem type rather than `:any`
+;; lets downstream uses (e.g. `(:add (:first ints) 1)`) type-check
+;; instead of degrading to :jsonb.
+
+(defn- list-elem-of-arg
+  "If the named arg is bound to a `[:list T]`, return T; else nil."
+  [bindings-info arg-name]
+  (let [t (get-in bindings-info [arg-name :type])]
+    (when (types/list-type? t) (types/list-elem t))))
+
+
+(defn- list-of-arg
+  "If the named arg is bound to a `[:list T]`, return that whole
+   `[:list T]`; else nil."
+  [bindings-info arg-name]
+  (let [t (get-in bindings-info [arg-name :type])]
+    (when (types/list-type? t) t)))
+
+
+(defn- preserve-coll-list
+  "All same-shape ops on `:coll` simply preserve `[:list T]`."
+  [b d]
+  (or (list-of-arg b :coll) d))
+
+
+;; :first lifts the elem-type out of `:coll`.
+(defn first-return-rule
+  [b d]
+  (or (list-elem-of-arg b :coll) d))
+
+
+(defn rest-return-rule     [b d] (preserve-coll-list b d))
+(defn cons-return-rule     [b d] (preserve-coll-list b d))
+(defn take-return-rule     [b d] (preserve-coll-list b d))
+(defn drop-return-rule     [b d] (preserve-coll-list b d))
+(defn reverse-return-rule  [b d] (preserve-coll-list b d))
+(defn sort-return-rule     [b d] (preserve-coll-list b d))
+(defn distinct-return-rule [b d] (preserve-coll-list b d))
+
+
+;; --- :keys / :vals ----------------------------------------------------------
+;; When `:map` is a known record, the result is a list of either the
+;; key keywords or the field-types respectively. We don't track
+;; keyword-singleton types, so `:keys` falls back to `[:list :keyword]`.
+;; `:vals` is more useful — `[:list (lub of vals)]` gives the precise
+;; elem-type when all field types agree, else degrades to `:any`.
+
+(defn keys-return-rule
+  [b d]
+  (let [m-type (get-in b [:map :type])]
+    (if (types/record-type? m-type) [:list :keyword] d)))
+
+
+(defn vals-return-rule
+  [b d]
+  (let [m-type (get-in b [:map :type])]
+    (if (types/record-type? m-type) [:list (types/coarse-lub (vals m-type))] d)))
+
+
+;; --- :concat ----------------------------------------------------------------
+;; Flattens a sequence of lists. When `:colls` is itself
+;; `[:list [:list T]]`, the result is `[:list T]`. We don't track that
+;; nesting unless the literal-vector inference walked one level;
+;; degrades to default otherwise.
+
+(defn concat-return-rule
+  [b d]
+  (let [colls-type (get-in b [:colls :type])]
+    (if (and (types/list-type? colls-type)
+             (types/list-type? (types/list-elem colls-type)))
+      (types/list-elem colls-type)
+      d)))
+
+
+;; --- :list ------------------------------------------------------------------
+;; `(:list :items [a b c …])` constructs a vector. The binding-info
+;; upstream already lubs the elem types into the `:items :type` (it's
+;; a `:sequence`-typed slot, so the vector binding rewrites it to
+;; `[:list (lub …)]`). Lift that here so the rule returns the precise
+;; list-shape instead of bare `:jsonb`.
+
+(defn list-return-rule
+  [b d]
+  (let [items-type (get-in b [:items :type])]
+    (if (types/list-type? items-type)
+      items-type
+      d)))
+
+
+;; --- :conj ------------------------------------------------------------------
+;; `(:conj :coll C :item X)` adds X to C. When C is a known `[:list T]`
+;; and X's type ⊆ T, the result is the same `[:list T]`; when X widens
+;; the element type, the rule returns `[:list (lub …)]` so callers see
+;; the broadened shape.
+
+(defn conj-return-rule
+  [b d]
+  (let [coll-type (get-in b [:coll :type])
+        item-type (get-in b [:item :type])]
+    (cond
+      (and (types/list-type? coll-type) item-type)
+      (let [old (types/list-elem coll-type)]
+        (if (= old item-type)
+          coll-type
+          [:list (types/coarse-lub [old item-type])]))
+
+      (types/list-type? coll-type) coll-type
+      :else d)))
+
+
+;; --- :into ------------------------------------------------------------------
+;; Preserve the destination collection's type. If `:to` is `[:list T]`,
+;; the result is `[:list T]` regardless of `:from`. If `:to` is a known
+;; record, `:into` won't typically be used (it would conj key-value
+;; pairs), so we degrade.
+
+(defn into-return-rule
+  [bindings-info default-ret]
+  (let [to-type (get-in bindings-info [:to :type])]
+    (if (types/list-type? to-type) to-type default-ret)))
+
+
+;; --- :assoc-in --------------------------------------------------------------
+;; Walk a literal key-path through nested records and replace the
+;; deepest field's type with `:v`'s. Falls back to default if the path
+;; can't be statically resolved (non-literal path or segments not
+;; present in a known record).
+
+(defn assoc-in-return-rule
+  [bindings-info default-ret]
+  (let [m-type   (get-in bindings-info [:m :type])
+        path-val (get-in bindings-info [:path :value])
+        v-type   (get-in bindings-info [:v :type])]
+    (if (and (sequential? path-val)
+             (every? #(or (keyword? %) (string? %)) path-val)
+             (seq path-val))
+      (letfn [(set-deep
+                [t segs]
+                (let [k (field-keyword-from-literal (first segs))
+                      rest-segs (rest segs)]
+                  (cond
+                    (nil? k) nil
+                    (empty? rest-segs)
+                    (cond
+                      (types/record-type? t) (assoc t k (or v-type :any))
+                      (or (= t :any) (= t :jsonb) (nil? t))
+                      {k (or v-type :any)}
+                      :else nil)
+                    :else
+                    (let [child (cond (types/record-type? t) (get t k :any)
+                                      :else :any)
+                          updated-child (set-deep child rest-segs)]
+                      (when updated-child
+                        (cond
+                          (types/record-type? t) (assoc t k updated-child)
+                          :else                  {k updated-child}))))))]
+        (or (set-deep m-type path-val) default-ret))
+      default-ret)))
+
+
+;; --- :get-in ----------------------------------------------------------------
+;; Walk a record by literal-key path. When the path is a sequence of
+;; literal keys AND every intermediate is a record, return the
+;; deeply-nested field type. Any non-record intermediate or non-literal
+;; key falls back to default.
+;;
+;; The `:path` arg is a `:sequence`-typed slot — bindings-info has its
+;; literal items collected by check-fn-def!. We accept either a vector
+;; value (rare here, since sequence args travel through arg-chain) or
+;; fall through to default.
+
+(defn get-in-return-rule
+  [bindings-info default-ret]
+  (let [m-type    (get-in bindings-info [:map :type])
+        path-val  (get-in bindings-info [:path :value])]
+    (if (and (sequential? path-val)
+             (every? #(or (keyword? %) (string? %)) path-val))
+      (loop [t m-type, segs path-val]
+        (cond
+          (empty? segs) t
+          (types/record-type? t)
+          (let [k (field-keyword-from-literal (first segs))]
+            (if (and k (contains? t k))
+              (recur (get t k) (rest segs))
+              default-ret))
+          :else default-ret))
+      default-ret)))
+
+
 ;; === Registry ===
 
+;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map
+;; carrying the base-fn's type-rule(s). The loader normalises both.
 (def impls
-  {:first first-fn
-   :rest rest-fn
-   :cons cons-fn
-   :conj conj-any-fn
-   :get get-fn
-   :get-in get-in-fn
-   :assoc assoc-any-fn
-   :dissoc dissoc-fn
+  {:first {:impl first-fn :return-type-rule first-return-rule}
+   :rest {:impl rest-fn :return-type-rule rest-return-rule}
+   :cons {:impl cons-fn :return-type-rule cons-return-rule}
+   :conj {:impl conj-any-fn :return-type-rule conj-return-rule}
+   :get {:impl get-fn :return-type-rule get-return-rule}
+   :get-in {:impl get-in-fn :return-type-rule get-in-return-rule}
+   :assoc {:impl assoc-any-fn :return-type-rule assoc-return-rule}
+   :dissoc {:impl dissoc-fn :return-type-rule dissoc-return-rule}
    :count count-fn
    :empty? empty?-fn
    :contains? contains?-fn
-   :keys keys-fn
-   :vals vals-fn
-   :merge merge-fn
-   :into into-fn
-   :assoc-in assoc-in-fn
+   :keys {:impl keys-fn :return-type-rule keys-return-rule}
+   :vals {:impl vals-fn :return-type-rule vals-return-rule}
+   :merge {:impl merge-fn :return-type-rule merge-return-rule}
+   :into {:impl into-fn :return-type-rule into-return-rule}
+   :assoc-in {:impl assoc-in-fn :return-type-rule assoc-in-return-rule}
    :range range-fn
    :repeat repeat-fn
-   :take take-fn
-   :drop drop-fn
-   :reverse reverse-fn
-   :sort sort-fn
-   :concat concat-fn
+   :take {:impl take-fn :return-type-rule take-return-rule}
+   :drop {:impl drop-fn :return-type-rule drop-return-rule}
+   :reverse {:impl reverse-fn :return-type-rule reverse-return-rule}
+   :sort {:impl sort-fn :return-type-rule sort-return-rule}
+   :concat {:impl concat-fn :return-type-rule concat-return-rule}
    :flatten flatten-fn
-   :distinct distinct-fn
+   :distinct {:impl distinct-fn :return-type-rule distinct-return-rule}
    :stringify-map-keys stringify-map-keys-fn
    :keywordize-map-keys keywordize-map-keys-fn
    :select-keys select-keys-fn
    :zipmap zipmap-fn
    :update-vals update-vals-fn
-   :update-in update-in-fn
-   :list list-fn
+   :update-in {:impl update-in-fn
+               :return-type-rule update-in-return-rule
+               :slot-types-rule update-in-slot-rule
+               :nav-types-rule update-in-nav-rule}
+   :list {:impl list-fn :return-type-rule list-return-rule}
    :pairs->map pairs->map-fn})

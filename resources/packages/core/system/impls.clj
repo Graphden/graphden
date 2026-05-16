@@ -1,10 +1,15 @@
 (ns graphden.packages.core.system.impls
   "Implementations for core/system base functions.
 
-   Provides system information and Ring response primitives."
+   Provides system information and Ring response primitives.
+
+   `:invoke`'s type-rule (moved verbatim from `graphden.types.rules`)
+   lives here as a `defn` and is wired into the `impls` map as
+   `{:impl … :return-type-rule …}`."
   (:require
     [cheshire.core :as json]
-    [graphden.executor.defbase :refer [defbase]])
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.types.core :as types])
   (:import
     (java.lang.management
       ManagementFactory
@@ -114,7 +119,27 @@
       (apply str (map #(format "%02x" (bit-and ^byte % 0xff)) bs)))))
 
 
+;; === Type-rules ===
+;; :invoke — `(:invoke :func F :arg A)` calls F on A and returns
+;; whatever F returns. F is `:fn`-typed; if its rich-type is known
+;; (callee resolved at sync time) we can lift its return.
+;;
+;; Without this rule, every `:invoke` chain (router-result, etc.)
+;; degrades to :any, severing structural propagation.
+
+(defn invoke-return-rule
+  [bindings-info default-ret]
+  (let [func-type (get-in bindings-info [:func :type])]
+    (cond
+      ;; Best case: the bound :func has a structural fn-type and we
+      ;; can read its return directly.
+      (types/fn-type? func-type)
+      (types/fn-ret func-type)
+      :else default-ret)))
+
+
 ;; === Registry ===
+;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map.
 
 (def impls
   {:to-json-string to-json-string
@@ -128,7 +153,7 @@
    :ex-info ex-info-fn
    :throw throw-fn
    :read-resource-or-nil read-resource-or-nil
-   :invoke invoke-fn
+   :invoke {:impl invoke-fn :return-type-rule invoke-return-rule}
    :call invoke-fn
    :slurp slurp-fn
    :sha256-hex sha256-hex-fn})

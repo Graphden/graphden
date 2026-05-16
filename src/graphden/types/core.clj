@@ -110,6 +110,19 @@
   (and (vector? t) (= :refine (first t)) (= 3 (count t))))
 
 
+(defn coarse-lub
+  "Coarse least-upper-bound of a collection of types: all equal → that
+   type, otherwise (or empty input) → `:any`. Used where a precise
+   join isn't worth computing — e.g. the element type of a
+   heterogeneous list or a record's `:vals`."
+  [types]
+  (let [ts (set types)]
+    (cond
+      (empty? ts)      :any
+      (= 1 (count ts)) (first ts)
+      :else            :any)))
+
+
 (defn union-type?
   "`[:union T1 T2 …]` — a sum / disjoint type. A value of union type
    is either a T1 or a T2 or … No tagged constructor: callers

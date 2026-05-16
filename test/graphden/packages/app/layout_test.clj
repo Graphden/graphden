@@ -1,28 +1,9 @@
 (ns graphden.packages.app.layout-test
   "Tests for graph layout algorithm.
-   These tests verify grid-based layout calculation for graph visualization.
-
-   These tests load the layout impls dynamically since they're in resources/packages/."
+   These tests verify grid-based layout calculation for graph visualization."
   (:require
-    [clojure.java.io :as io]
-    [clojure.test :refer [deftest is testing]]))
-
-
-;; =============================================================================
-;; DYNAMIC LOADING OF LAYOUT IMPLS
-;; =============================================================================
-
-;; Load layout impls from resources/packages/
-(def ^:private layout-ns
-  (let [impls-file (io/resource "packages/app/layout/impls.clj")]
-    (when impls-file
-      (load-file (java.io.File/.getPath (io/file impls-file))))
-    (find-ns 'graphden.packages.app.layout.impls)))
-
-
-(def ^:private compute-layout-matrix
-  (when layout-ns
-    (ns-resolve layout-ns 'compute-layout-matrix)))
+    [clojure.test :refer [deftest is testing]]
+    [graphden.layout.core :as layout]))
 
 
 ;; =============================================================================
@@ -44,8 +25,7 @@
 (defn layout-elements
   "Compute layout for given nodes and edges."
   [nodes edges]
-  (when compute-layout-matrix
-    (compute-layout-matrix {:elements {:nodes nodes :edges edges}})))
+  (layout/compute-layout-matrix {:elements {:nodes nodes :edges edges}}))
 
 
 (defn layout-graph

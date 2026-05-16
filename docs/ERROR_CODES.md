@@ -80,6 +80,19 @@ would create a dependency cycle through fn references.
 - `:target-fn-id` - Target function being referenced via ref-fn-id
 - `:cycle-path` - Path showing the cycle
 
+### `:constraint-violation/main-branch-undeletable`
+**Component:** versioning (VersionedStorage)
+**Description:** Attempted to delete the `main` branch.
+**Ex-data keys:**
+- `:branch-id` - The branch the delete was attempted on
+
+### `:constraint-violation/branch-has-children`
+**Component:** versioning (VersionedStorage)
+**Description:** Attempted to delete a branch that still has child branches.
+**Ex-data keys:**
+- `:branch-id` - The branch the delete was attempted on
+- `:child-branch-ids` - IDs of the child branches blocking the delete
+
 ## Execution Errors
 
 ### `:execution-error/invalid-context`

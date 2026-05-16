@@ -182,10 +182,12 @@ The editor frontend is split into modules for better maintainability:
 | File | Purpose |
 |------|---------|
 | `editor-state.js` | Global variables, constants, `BUILD_HASH` placeholder |
+| `editor-popover-base.js` | Shared singleton-popover scaffolding — `anchorBelowClamped` viewport-clamped positioner + `installPopoverDismiss` outside-pointerdown/Esc handler |
 | `editor-busy.js` | Visible feedback for multi-step user actions (reparent / extend / delete cascades) — `withBusy(opKey, label, fn)` helper + bottom-centre banner |
 | `editor-prefs.js` | Theme + sidebar-collapsed prefs (localStorage) |
 | `editor-auth.js` | `authFetch`, `isAuthenticated`, login popover |
 | `editor-create.js` | Inline-input row helper, fn / namespace creation |
+| `editor-create-type.js` | Type-row creation popover (refinement / record / union / variant / list) |
 | `editor-data.js` | Data utilities, lookups, inheritance, free-args |
 | `editor-layout.js` | Grid layout algorithm, positioning |
 | `editor-literal-types.js` | Type-validation helpers shared by edit popovers (mirrors `graphden.types.check`) |
@@ -199,18 +201,20 @@ The editor frontend is split into modules for better maintainability:
 | `editor-edit-modes.js` | Inline edit popovers (arg-value / rename / type / free-arg-bind / sequence add-remove / namespace-move) |
 | `editor-edit-reparent.js` | Phase 3 re-parent cascade + parent-set editor popover |
 | `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
-| `editor-type-explainer.js` | Singleton popover shown on click of any type-chip — human-readable description + structural form + optional "Change type" button |
+| `editor-effect-explainer.js` | Singleton popover shown on click of an effect-chip — plain-English description of a tracked side-effect (db / env / io / network / time / random) + the canonical effect tag |
 | `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom |
 | `editor-overlay-arg.js` | Arg-value overlay (in-place edit click target, type-chip, mismatch indicator). Column-flex outer: inline row of value+chip+trigger+mismatch sits over a drag-handle docked below |
 | `editor-overlay-edge-label.js` | Edge-label overlay (rename click, type-chip + inline-expand trigger, stacked type-narrowing chain, description badge, sequence add/remove). Anchored AFTER the taxi-bend so the shared part of a branching edge stays visible |
-| `editor-overlays.js` | Fn-overlay (ancestor list, MI cells, return-type/effects/parents/ns strips), placeholder binder (`+` click-target for unset free args / sequence anchors), overlay positioner |
+| `editor-overlay-fn.js` | Fn-overlay renderer — ancestor rows, MI cells, paint state machine, `createFnOverlay` |
+| `editor-overlay-strips.js` | Bottom-of-card metadata strips — return-type / effects / parents / ns / optional-args / HOF-captured-args, sign-in CTA |
+| `editor-overlay-manager.js` | Base `createOverlay` factory, placeholder-overlay binder, `createNodeOverlays` / `updateOverlayPositions` lifecycle |
 | `editor-sidebar.js` | Namespace tree + entity list + filter |
 | `editor-expansion.js` | spec→state→preview machine for ancestor row click/hover |
 | `editor-ui.js` | Selection + navigation controls + the shared `previewDebounceTimer` |
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → busy → prefs → auth → create → data → layout → literal-types → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → type-explainer → overlay-type-expand → overlay-arg → overlay-edge-label → overlays → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → create → create-type → data → layout → literal-types → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → effect-explainer → overlay-type-expand → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 

@@ -1,0 +1,111 @@
+(ns graphden.crud.request
+  "Request / URI parsing helpers for the web/crud base functions.
+
+   Leaf namespace — no other `graphden.crud.*` dependency. Holds the
+   pure HTTP-boundary plumbing the CRUD impls share: query-string and
+   URI-segment parsing, entity-type coercion, storage extraction, and
+   the JSON / UUID coercion helpers."
+  (:require
+    [cheshire.core :as json]
+    [clojure.string :as str]))
+
+
+(defn parse-query-string
+  [s]
+  (when (and s (not (str/blank? s)))
+    (into {} (for [pair (str/split s #"&")
+                   :let [[k v] (str/split pair #"=" 2)]
+                   :when k]
+               [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
+
+
+(defn require-storage
+  [ctx]
+  (or (:storage ctx)
+      (throw (ex-info "Storage not available in context"
+                      {:type :execution-error/missing-storage}))))
+
+
+(defn entity-type-from-string
+  [s]
+  (case s
+    "fn" :fn
+    "ns" :ns
+    "slot" :slot
+    "fn-slot" :fn-slot
+    "binding" :binding
+    "binding-list-item" :binding-list-item
+    nil))
+
+
+(defn parse-uri-segments
+  "Pulls the `(type [id])` tail out of `:uri` for the entity routes.
+
+   We can't rely on reitit's `:path-params` here because the route
+   handler is invoked through a hof-wrap whose `:request` deep-free is
+   captured from the outer fn-graph scope rather than from reitit's
+   per-call `enrich-request` augmentation. The captured request is
+   the raw http-kit one and never sees `:path-params`. Parsing the URI
+   ourselves is dependency-free and exact for this small path family."
+  [uri]
+  (when uri
+    ;; Recognised shapes:
+    ;;   /api/entities/:type
+    ;;   /api/entities/:type/:id
+    ;;   /api/sequence/append/:fn-id
+    ;;   /api/sequence/item/:item-id
+    (let [segs (->> (str/split uri #"/") (remove str/blank?) vec)]
+      (cond
+        (and (= "api" (get segs 0)) (= "entities" (get segs 1)))
+        {:type-str (get segs 2) :id-str (get segs 3)}
+
+        (and (= "api" (get segs 0)) (= "sequence" (get segs 1)) (= "append" (get segs 2)))
+        {:fn-id-str (get segs 3)}
+
+        (and (= "api" (get segs 0)) (= "sequence" (get segs 1)) (= "item" (get segs 2)))
+        {:item-id-str (get segs 3)}
+
+        (and (= "api" (get segs 0)) (= "bindings" (get segs 1))
+             (= "tighten-fn-effects" (get segs 3)))
+        {:binding-id-str (get segs 2)}
+
+        :else {}))))
+
+
+(defn extract-entity-params
+  "Extracts type-str, id-str, entity-type from request. Prefers
+   reitit's `:path-params` when present; falls back to URI parsing
+   (the handler is sometimes reached with the raw http-kit request
+   that hasn't been through reitit's `enrich-request`)."
+  [request]
+  (let [pp (:path-params request)
+        rp (when (nil? pp) (parse-uri-segments (:uri request)))
+        type-str (or (:type pp) (:type-str rp))
+        id-str (or (:id pp) (:id-str rp))]
+    {:type-str type-str
+     :id-str id-str
+     :entity-type (entity-type-from-string type-str)}))
+
+
+(defn read-json-body
+  "Pull the JSON body off a Ring request whether it arrives as a
+   string, an InputStream, or already-parsed Clojure data. Returns
+   a Clojure map with keyword keys, or nil for an empty body. The
+   layout endpoint has the same logic — we duplicate here so the
+   types API doesn't depend on app.layout (cross-package)."
+  [request]
+  (let [raw (:body request)]
+    (cond
+      (nil? raw)                            nil
+      (map? raw)                            raw
+      (instance? java.io.InputStream raw)
+      (json/parse-stream
+        (java.io.InputStreamReader. raw "UTF-8") true)
+      (and (string? raw) (not (str/blank? raw)))
+      (json/parse-string raw true)
+      :else                                 nil)))
+
+
+(defn parse-uuid-or-clear
+  [v]
+  (when-not (str/blank? v) (java.util.UUID/fromString v)))

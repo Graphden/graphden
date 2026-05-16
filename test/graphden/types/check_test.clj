@@ -4,13 +4,20 @@
     [clojure.tools.logging :as log]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
+    [graphden.packages.loader :as loader]
     [graphden.types.check :as check]
     [graphden.types.core :as types-core]))
 
 
 ;; The check namespace reads from the rich-types registry. Each test
-;; seeds a few base-fn signatures, runs the check, and asserts the
-;; outcome. We use a tiny synthetic registry — no DB / sync needed.
+;; runs against the real core base-fn registry — so the per-base-fn
+;; type-rules (`:return-type-rule` etc., declared in each base-fn's
+;; impls.clj) resolve — plus a few synthetic signatures the type-var /
+;; HOF tests need. No DB / sync; `load-packages` only eval's the
+;; package resources.
+(defonce ^:private core-base-fns
+  (:base-fn-defs (loader/load-packages ["core"])))
+
 
 (use-fixtures :each
   exec/with-clean-registry
@@ -23,7 +30,12 @@
     (types-core/register-type-alias! :non-empty-text   [:refine :text    [:not= ""]])
     (test-fn))
   (fn [t]
-    ;; Seed only the base-fns we need for these tests.
+    ;; Real core base-fns first — their per-base-fn type-rules ride in
+    ;; through `record-rich-types!` so the type-checker resolves them.
+    (doseq [[fn-name fn-def] core-base-fns]
+      (registry/record-rich-types! fn-name fn-def))
+    ;; Synthetic signatures layered on top (overriding on collision)
+    ;; for the type-var / HOF tests.
     (registry/record-rich-types! :int-add
                                  {:args {:a :int :b :int}
                                   :return-type :int})
@@ -710,7 +722,8 @@
     ;; :primary-parent is :assoc — same shape as the production setup.
     (registry/record-rich-types! :assoc
                                  {:args {:map :any :key :any :value :any}
-                                  :return-type :any})
+                                  :return-type :any
+                                  :return-type-rule (:return-type-rule (core-base-fns :assoc))})
     (check/check-fn-def! {:name :assoc-empty
                           :parent :assoc
                           :args {:map {}}})
@@ -726,7 +739,8 @@
   (testing ":get with a literal key not in the :coll's record type throws at sync"
     (registry/record-rich-types! :get
                                  {:args {:coll :jsonb :key :any}
-                                  :return-type :any})
+                                  :return-type :any
+                                  :return-type-rule (:return-type-rule (core-base-fns :get))})
     (registry/record-rich-types! :produces-user-record
                                  {:args {} :return-type {:name :text :age :int}})
     (is (thrown-with-msg?
@@ -745,7 +759,8 @@
   (testing "fn-def's declared :return-type is accepted when computed ⊆ declared"
     (registry/record-rich-types! :assoc
                                  {:args {:map :any :key :any :value :any}
-                                  :return-type :any})
+                                  :return-type :any
+                                  :return-type-rule (:return-type-rule (core-base-fns :assoc))})
     ;; Computed: {:status :int}. Declared: :jsonb (a wider type — record ⊆ jsonb).
     (check/check-fn-def! {:name :status-builder
                           :parent :assoc

@@ -178,7 +178,13 @@
    `:effects` is recorded straight from the fn-def as a set of keyword
    tags. `:effectful? true` legacy boolean normalises to `#{:effect}`.
    `:description` is propagated so the editor's inline-expand panel
-   can surface a human-readable hint without a separate API call."
+   can surface a human-readable hint without a separate API call.
+
+   `:return-type-rule` / `:slot-types-rule` / `:nav-types-rule` —
+   per-base-fn type-rules declared at the base-fn's `impls.clj`
+   registration site. When present they ride into the registry entry
+   so the type-checker looks them up by base-fn identity instead of
+   dispatching a multimethod on the fn name."
   [fn-name fn-def]
   (let [args (:args fn-def)
         ret  (some-> (:return-type fn-def) types/resolve-alias)
@@ -195,7 +201,13 @@
            (cond-> {:return (or ret :any)
                     :args   per-arg}
              (seq effects)              (assoc :effects effects)
-             (and desc (seq desc))      (assoc :description desc)))))
+             (and desc (seq desc))      (assoc :description desc)
+             (:return-type-rule fn-def) (assoc :return-type-rule
+                                               (:return-type-rule fn-def))
+             (:slot-types-rule fn-def)  (assoc :slot-types-rule
+                                               (:slot-types-rule fn-def))
+             (:nav-types-rule fn-def)   (assoc :nav-types-rule
+                                               (:nav-types-rule fn-def))))))
 
 
 (defn effectful-rich-type?

@@ -35,35 +35,6 @@ function ensureMismatchExplainerEl() {
   return el;
 }
 
-// Position the popover below `anchorEl`, clamped inside the viewport.
-// Mirrors `positionDescriptionTooltipAt` but attaches to a known DOM
-// element rather than a click event.
-function positionMismatchExplainer(el, anchorEl) {
-  const anchorRect = anchorEl.getBoundingClientRect();
-  // Render once invisibly to read its size; CSS handles `display:none`
-  // → `display:block` flip via the `.visible` class below.
-  el.style.left = '0px';
-  el.style.top = '-9999px';
-  el.style.display = 'block';
-  const w = el.offsetWidth || 320;
-  const h = el.offsetHeight || 180;
-  const margin = 8;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  // Default: below the anchor, left-aligned.
-  let left = anchorRect.left;
-  let top = anchorRect.bottom + margin;
-  // Flip above if no room below.
-  if (top + h + margin > vh) {
-    top = Math.max(margin, anchorRect.top - h - margin);
-  }
-  // Clamp horizontally.
-  if (left + w + margin > vw) left = Math.max(margin, vw - w - margin);
-  if (left < margin) left = margin;
-  el.style.left = left + 'px';
-  el.style.top = top + 'px';
-}
-
 function buildMismatchHeader(closeFn) {
   const head = document.createElement('div');
   head.className = 'mismatch-explainer-header';
@@ -167,9 +138,8 @@ function renderMismatchExplainer(info, anchorEl) {
   el.appendChild(actions);
 
   el.classList.add('visible');
-  positionMismatchExplainer(el, anchorEl);
+  anchorBelowClamped(el, anchorEl);
   mismatchExplainerAnchor = anchorEl;
-  installMismatchExplainerDismiss();
   return true;
 }
 
@@ -210,31 +180,14 @@ function hideMismatchExplainer() {
   mismatchExplainerAnchor = null;
 }
 
-let mismatchExplainerDismissInstalled = false;
-
-function installMismatchExplainerDismiss() {
-  if (mismatchExplainerDismissInstalled) return;
-  mismatchExplainerDismissInstalled = true;
-  // Click anywhere outside the popover or its anchor closes it. The
-  // anchor allowance lets the user re-trigger the same explainer
-  // without an intermediate close.
-  document.addEventListener('click', (e) => {
-    if (!mismatchExplainerEl || !mismatchExplainerEl.classList.contains('visible')) return;
-    const t = e.target;
-    if (t && (mismatchExplainerEl.contains(t)
-              || (mismatchExplainerAnchor?.contains(t)))) {
-      return;
-    }
-    hideMismatchExplainer();
-  }, true);
-  // Esc dismisses too — keyboard users.
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && mismatchExplainerEl
-        && mismatchExplainerEl.classList.contains('visible')) {
-      hideMismatchExplainer();
-    }
-  });
-}
+// Outside-pointerdown / Esc dismissal. The anchor allowance lets the
+// user re-trigger the same explainer without an intermediate close.
+installPopoverDismiss({
+  getEl: () => mismatchExplainerEl,
+  getAnchor: () => mismatchExplainerAnchor,
+  isVisible: () => !!mismatchExplainerEl && mismatchExplainerEl.classList.contains('visible'),
+  onDismiss: hideMismatchExplainer,
+});
 
 window.showMismatchExplainer = showMismatchExplainer;
 window.hideMismatchExplainer = hideMismatchExplainer;

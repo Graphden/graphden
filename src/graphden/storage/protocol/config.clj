@@ -125,56 +125,6 @@
     non-negative-int]])
 
 
-;; === Datomic configuration schemas ===
-
-(def datomic-local-config
-  "Schema for datomic-local configuration."
-  [:map
-   {:closed true}
-   [:server-type [:= :datomic-local]]
-   [:system :string]
-   [:storage-dir :string]
-   [:db-name :string]])
-
-
-(def datomic-peer-server-config
-  "Schema for datomic peer-server configuration."
-  [:map
-   {:closed true}
-   [:server-type [:= :peer-server]]
-   [:endpoint :string]
-   [:access-key :string]
-   [:secret :string]
-   [:db-name :string]])
-
-
-(def datomic-ion-config
-  "Schema for datomic ion configuration."
-  [:map
-   [:server-type [:= :ion]]
-   [:region :string]
-   [:system :string]
-   [:db-name :string]])
-
-
-(def datomic-cloud-config
-  "Schema for datomic cloud configuration."
-  [:map
-   [:server-type [:= :cloud]]
-   [:region :string]
-   [:system :string]
-   [:db-name :string]])
-
-
-(def datomic-config
-  "Schema for any Datomic configuration (union of all types)."
-  [:or
-   datomic-local-config
-   datomic-peer-server-config
-   datomic-ion-config
-   datomic-cloud-config])
-
-
 ;; === Validation functions ===
 
 (defn validate-config!
@@ -214,34 +164,6 @@
                       {:type :config-error/invalid-pool-config
                        :idle-timeout idle-timeout
                        :max-lifetime max-lifetime})))))
-
-
-(defn validate-datomic-config!
-  "Validates Datomic client configuration.
-   Throws ex-info on invalid configuration."
-  [config]
-  (validate-config! config datomic-config "Datomic"))
-
-
-(defn apply-defaults
-  "Applies default values to a configuration map based on schema.
-   Returns config with defaults filled in for missing optional fields."
-  [config schema]
-  (let [schema-form (m/form schema)]
-    (if (and (vector? schema-form) (= :map (first schema-form)))
-      (reduce
-        (fn [cfg field-def]
-          (if (and (vector? field-def) (>= (count field-def) 2))
-            (let [field-name (first field-def)
-                  field-props (when (map? (second field-def)) (second field-def))
-                  default-val (:default field-props)]
-              (if (and default-val (not (contains? cfg field-name)))
-                (assoc cfg field-name default-val)
-                cfg))
-            cfg))
-        config
-        (rest schema-form))
-      config)))
 
 
 ;; ============================================================================

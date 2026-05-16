@@ -23,6 +23,7 @@
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
+                  "packages/app/editor/editor-popover-base.js"
                   "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"
                   "packages/app/editor/editor-auth.js"
@@ -41,11 +42,13 @@
                   "packages/app/editor/editor-edit-modes.js"
                   "packages/app/editor/editor-edit-reparent.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
-                  "packages/app/editor/editor-type-explainer.js"
+                  "packages/app/editor/editor-effect-explainer.js"
                   "packages/app/editor/editor-overlay-type-expand.js"
                   "packages/app/editor/editor-overlay-arg.js"
                   "packages/app/editor/editor-overlay-edge-label.js"
-                  "packages/app/editor/editor-overlays.js"
+                  "packages/app/editor/editor-overlay-fn.js"
+                  "packages/app/editor/editor-overlay-strips.js"
+                  "packages/app/editor/editor-overlay-manager.js"
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"

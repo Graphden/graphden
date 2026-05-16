@@ -305,7 +305,13 @@
     (dotimes [_ 2]
       (doseq [fd fn-defs]
         (try (types-check/check-fn-def! fd)
-             (catch Exception _))))
+             (catch Exception e
+               ;; A fn-def whose type-check throws is skipped — but log
+               ;; it: a silent swallow here hid composed fn-defs (their
+               ;; effects / computed return type) from the rich-type
+               ;; registry, so the editor lost their effect-strip.
+               (log/warn "Type-check skipped fn-def" (:name fd) "—"
+                         (ex-message e))))))
     (log/info "Fn entities created:" (count fns))
     fns))
 

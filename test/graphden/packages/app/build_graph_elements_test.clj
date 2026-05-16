@@ -6,23 +6,8 @@
    λ-badge vs cross-HOF capture migration), and the migrated-binding
    rendering inside expanded named-fn ancestors."
   (:require
-    [clojure.java.io :as io]
-    [clojure.test :refer [deftest is testing]]))
-
-
-;; =============================================================================
-;; DYNAMIC LOADING — same pattern as layout-test.clj
-;; =============================================================================
-
-(def ^:private layout-ns
-  (let [impls-file (io/resource "packages/app/layout/impls.clj")]
-    (when impls-file
-      (load-file (java.io.File/.getPath (io/file impls-file))))
-    (find-ns 'graphden.packages.app.layout.impls)))
-
-
-(def ^:private build-lookups        (some-> layout-ns (ns-resolve 'build-lookups)))
-(def ^:private build-graph-elements (some-> layout-ns (ns-resolve 'build-graph-elements)))
+    [clojure.test :refer [deftest is testing]]
+    [graphden.layout.graph :refer [build-graph-elements build-lookups]]))
 
 
 ;; =============================================================================

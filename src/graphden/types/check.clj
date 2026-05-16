@@ -46,8 +46,7 @@
   (:require
     [clojure.set :as set]
     [graphden.executor.registry.core :as registry]
-    [graphden.types.core :as types]
-    [graphden.types.rules :as rules]))
+    [graphden.types.core :as types]))
 
 
 (defn classify-literal
@@ -854,18 +853,7 @@
         items))
 
 
-(defn- lub-elem-type
-  "Coarse least-upper-bound of a vector of types: agree → that type,
-   disagree → :any. Empty input also degrades to :any."
-  [ts]
-  (let [s (set ts)]
-    (cond
-      (empty? s)      :any
-      (= 1 (count s)) (first s)
-      :else           :any)))
-
-
-(declare effective-ref-return root-base-fn-name)
+(declare base-fn-type-rule effective-ref-return root-base-fn-name)
 
 
 (defn- effective-binding-type
@@ -911,7 +899,9 @@
                              combined)
             root-base (root-base-fn-name ref-name)
             static (or (:return info) :any)
-            recomputed (rules/compute-return-type root-base inner-info static)]
+            recomputed (if-let [rule (base-fn-type-rule :return-type-rule root-base)]
+                         (rule inner-info static)
+                         static)]
         ;; Prefer the recomputed answer when it's strictly more
         ;; informative than the static one (`:any` is the
         ;; "uninformative" sentinel).
@@ -999,7 +989,7 @@
                              ;; union their record fields). The lubbed
                              ;; `:type` keeps the shape every other
                              ;; rule already reads.
-                             {:type [:list (lub-elem-type (vector-binding-elem-types b-form))]
+                             {:type [:list (types/coarse-lub (vector-binding-elem-types b-form))]
                               :elem-types (vector-binding-elem-types b-form)
                               :value b-form}
 
@@ -1158,6 +1148,16 @@
           cur)))))
 
 
+(defn- base-fn-type-rule
+  "Look up a per-base-fn type-rule — `:return-type-rule`,
+   `:slot-types-rule` or `:nav-types-rule` — from the rich-types
+   registry by base-fn name. Each rule is declared at the base-fn's
+   own impls.clj registration site (no name-dispatched multimethod);
+   nil when the base-fn has no rule of that kind."
+  [rule-key base-fn-name]
+  (rule-key (registry/rich-type-of base-fn-name)))
+
+
 (defn- compute-return-type
   "Run the ROOT base-fn's type-rule (e.g. `:assoc` record-builder) on
    `static-ret` to produce the rich, possibly-narrowed return shape.
@@ -1173,10 +1173,10 @@
    rule on `:ring-method` should see `:coll`'s type as a record so
    it can lift `:request-method`'s primitive type out of the shape."
   [fn-def primary-parent parent-args static-ret]
-  (rules/compute-return-type (root-base-fn-name primary-parent)
-                             (bindings-info-for-rule (:args fn-def)
-                                                     parent-args)
-                             static-ret))
+  (if-let [rule (base-fn-type-rule :return-type-rule
+                                   (root-base-fn-name primary-parent))]
+    (rule (bindings-info-for-rule (:args fn-def) parent-args) static-ret)
+    static-ret))
 
 
 (defn- compute-rule-slot-types
@@ -1185,9 +1185,10 @@
    narrowing `:path` to `[:list :keyword]` when `:m` is a record).
    Empty for base-fns without a slot-types rule."
   [fn-def primary-parent parent-args]
-  (rules/compute-slot-types (root-base-fn-name primary-parent)
-                            (bindings-info-for-rule (:args fn-def)
-                                                    parent-args)))
+  (if-let [rule (base-fn-type-rule :slot-types-rule
+                                   (root-base-fn-name primary-parent))]
+    (rule (bindings-info-for-rule (:args fn-def) parent-args))
+    {}))
 
 
 (defn- compute-rule-nav-types
@@ -1197,9 +1198,10 @@
    The editor walks this against the live path. Empty for base-fns
    without a nav-types rule."
   [fn-def primary-parent parent-args]
-  (rules/compute-nav-types (root-base-fn-name primary-parent)
-                           (bindings-info-for-rule (:args fn-def)
-                                                   parent-args)))
+  (if-let [rule (base-fn-type-rule :nav-types-rule
+                                   (root-base-fn-name primary-parent))]
+    (rule (bindings-info-for-rule (:args fn-def) parent-args))
+    {}))
 
 
 (defn- enforce-declared-return!

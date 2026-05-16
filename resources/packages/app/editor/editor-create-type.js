@@ -34,6 +34,15 @@ function hideTypeCreatePopover() {
   typeCreateContext = null;
 }
 
+// Outside-pointerdown / Esc dismissal — the anchor allowance lets the
+// trigger re-open the popover without an intermediate close.
+installPopoverDismiss({
+  getEl: () => typeCreatePopoverEl,
+  getAnchor: () => typeCreateContext?.anchorEl,
+  isVisible: () => !!typeCreatePopoverEl && typeCreatePopoverEl.style.display !== 'none',
+  onDismiss: hideTypeCreatePopover,
+});
+
 function ensureTypeCreatePopover() {
   if (typeCreatePopoverEl) return typeCreatePopoverEl;
   const el = document.createElement('div');
@@ -42,39 +51,7 @@ function ensureTypeCreatePopover() {
   el.setAttribute('aria-label', 'Create type');
   document.body.appendChild(el);
   typeCreatePopoverEl = el;
-  // Dismiss on outside click / Escape.
-  document.addEventListener('click', (e) => {
-    if (!typeCreatePopoverEl || typeCreatePopoverEl.style.display === 'none') return;
-    if (typeCreatePopoverEl.contains(e.target)
-        || typeCreateContext?.anchorEl?.contains(e.target)) return;
-    hideTypeCreatePopover();
-  }, true);
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && typeCreatePopoverEl
-        && typeCreatePopoverEl.style.display !== 'none') {
-      hideTypeCreatePopover();
-    }
-  });
   return el;
-}
-
-function positionTypeCreatePopover(anchorEl) {
-  const el = typeCreatePopoverEl;
-  if (!el || !anchorEl) return;
-  el.style.position = 'fixed';
-  el.style.display = 'block';
-  el.style.top = '-9999px';
-  el.style.left = '0px';
-  const r = anchorEl.getBoundingClientRect();
-  const w = el.offsetWidth || 280;
-  const h = el.offsetHeight || 160;
-  const margin = 8;
-  let top = r.bottom + 4;
-  let left = r.left;
-  if (left + w > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - w - margin);
-  if (top + h > window.innerHeight - margin) top = Math.max(margin, r.top - h - 4);
-  el.style.top = top + 'px';
-  el.style.left = left + 'px';
 }
 
 // Kind metadata shared between the tab strip (create-flow) and the
@@ -324,7 +301,7 @@ function showTypeCreateForm(kind) {
       submit.disabled = false;
     }
   });
-  positionTypeCreatePopover(ctx.anchorEl);
+  anchorBelowClamped(typeCreatePopoverEl, ctx.anchorEl);
   // Auto-focus first input.
   setTimeout(() => nameIn.focus(), 0);
 }

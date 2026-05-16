@@ -231,78 +231,59 @@
   ;; chain; hof-wrap turns the leftover into a single-arg callable.
   ;; =============================================================================
 
-  ;; --- Data handlers: data-fn -> body-fn -> response wrapper ---
+  ;; --- JSON data handlers: a data-fn wrapped by the :json-handler
+  ;; template (serialise → 200 application/json) ---
+
+  ;; Template for JSON-rendering Ring handlers. Free arg `:data`
+  ;; propagates up from `:to-json-string`, so concrete handlers below
+  ;; set `:data :some-data-fn` directly instead of each defining its
+  ;; own private `_*-body` fn-def. Mirrors `:hiccup-handler`.
+  {:name :json-handler
+   :description "Template Ring handler — serialises a value (free arg `:data`) to JSON and returns it as a 200 OK with `application/json` content-type."
+   :parent :json-ok-response
+   :args {:body :_json-handler-body}}
+
+  {:name :_json-handler-body
+   :parent :to-json-string}
 
   {:name :all-entities-handler
    :description "Ring handler that returns the full graph dump as JSON. Bound by `app.routes.api-entities`."
-   :parent :json-ok-response
-   :args {:body :_all-entities-body}}
-
-  {:name :_all-entities-body
-   :parent :to-json-string
+   :parent :json-handler
    :args {:data :list-all-graph-entities}}
 
   {:name :all-rich-types-handler
    :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON. Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."
-   :parent :json-ok-response
-   :args {:body :_all-rich-types-body}}
-
-  {:name :_all-rich-types-body
-   :parent :to-json-string
+   :parent :json-handler
    :args {:data :all-rich-types}}
 
   {:name :types-compatible-handler
    :description "Ring handler for `POST /api/types/compatible` — wraps `:types-compatible` in a JSON 200 response."
-   :parent :json-ok-response
-   :args {:body :_types-compatible-body}}
-
-  {:name :_types-compatible-body
-   :parent :to-json-string
+   :parent :json-handler
    :args {:data :types-compatible}}
 
   {:name :types-candidates-handler
    :description "Ring handler for `POST /api/types/candidates` — wraps `:types-candidates` in a JSON 200 response."
-   :parent :json-ok-response
-   :args {:body :_types-candidates-body}}
-
-  {:name :_types-candidates-body
-   :parent :to-json-string
+   :parent :json-handler
    :args {:data :types-candidates}}
 
   {:name :types-usages-handler
    :description "Ring handler for `POST /api/types/usages` — wraps `:types-usages` in a JSON 200 response."
-   :parent :json-ok-response
-   :args {:body :_types-usages-body}}
-
-  {:name :_types-usages-body
-   :parent :to-json-string
+   :parent :json-handler
    :args {:data :types-usages}}
 
   {:name :types-create-record-handler
    :description "Ring handler for `POST /api/types/record` — atomic compound create for a record type-row. Wraps `process-create-record-type` in a JSON 200 response (the {:ok false :error} payload itself carries any error)."
-   :parent :json-ok-response
-   :args {:body :_types-create-record-body}}
-
-  {:name :_types-create-record-body
-   :parent :to-json-string
+   :parent :json-handler
    :args {:data :process-create-record-type}}
 
   {:name :types-create-list-handler
    :description "Ring handler for `POST /api/types/list` — atomic compound create for a list type-row."
-   :parent :json-ok-response
-   :args {:body :_types-create-list-body}}
-
-  {:name :_types-create-list-body
-   :parent :to-json-string
+   :parent :json-handler
    :args {:data :process-create-list-type}}
 
   {:name :types-update-record-handler
    :description "Ring handler for `PUT /api/types/record` — atomic compound update for a record type-row. Wraps `process-update-record-type` in a JSON 200 response (the {:ok false :error} payload carries failures)."
-   :parent :json-ok-response
-   :args {:body :_types-update-record-body}}
-
-  {:name :_types-update-record-body
-   :parent :to-json-string
+   :parent :json-handler
    :args {:data :process-update-record-type}}
 
   ;; Template for HTML-rendering Ring handlers. Free arg `:hiccup`

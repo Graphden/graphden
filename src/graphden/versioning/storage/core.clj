@@ -515,12 +515,12 @@
                       {:type :not-found :branch-id branch-id})))
     (when (= "main" (:name branch))
       (throw (ex-info "Cannot delete main branch"
-                      {:type :constraint-violation :branch-id branch-id})))
+                      {:type :constraint-violation/main-branch-undeletable :branch-id branch-id})))
     ;; Check no child branches
     (let [children (sp/query-entities base :branch {:base-branch-id branch-id})]
       (when (seq children)
         (throw (ex-info "Branch has child branches"
-                        {:type :constraint-violation
+                        {:type :constraint-violation/branch-has-children
                          :branch-id branch-id
                          :child-branch-ids (mapv :id children)}))))
     ;; Delete all version records on this branch (batch)

@@ -188,6 +188,14 @@
          {:category :constraint :retryable? false
           :description "Cycle in arg-value references"}
 
+         :constraint-violation/main-branch-undeletable
+         {:category :constraint :retryable? false
+          :description "Attempted to delete the main branch"}
+
+         :constraint-violation/branch-has-children
+         {:category :constraint :retryable? false
+          :description "Attempted to delete a branch that still has child branches"}
+
          ;; Validation errors
          :validation-error/required-field-missing
          {:category :validation :retryable? false

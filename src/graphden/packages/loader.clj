@@ -222,8 +222,20 @@
        (not (type-row? fn-def))))
 
 
+(defn- impl-entry->parts
+  "An `impls`-map VALUE is either a bare impl fn (back-compat) or a map
+   `{:impl … :return-type-rule … :slot-types-rule … :nav-types-rule …}`
+   declaring per-base-fn type-rules at the base-fn's registration site.
+   Normalises both to a map with at least `:impl` (nil-safe — caller
+   handles the missing-impl case)."
+  [impl-entry]
+  (if (map? impl-entry)
+    impl-entry
+    {:impl impl-entry}))
+
+
 (defn- fn-def->base-fn-def
-  "Converts a fns.edn entry + impl function to registry format.
+  "Converts a fns.edn entry + impl entry to registry format.
 
    Input:  {:name :add :args {:nums :jsonb} :return-type :numeric}
    Impl:   (defbase add [nums] (apply + nums))
@@ -231,20 +243,35 @@
             :return-type :numeric
             :impl <fn>}
 
+   The `impl-entry` is either a bare impl fn or a map
+   `{:impl … :return-type-rule … :slot-types-rule … :nav-types-rule …}`
+   — the optional `*-rule` fns are the base-fn-specific type-rules
+   declared at the base-fn's own registration site. They flow into the
+   base-fn-def map and `record-rich-types!` threads them into the
+   rich-types-registry so the type-checker can look them up by base-fn
+   identity (no name-dispatch).
+
    All registered impls are 2-arity `(fn [args ctx] …)` (produced by
    `defbase`). The executor always calls them with both args, so the
    loader simply hands impl-fn through."
-  [fn-def impl-fn]
-  (cond-> {:args (normalize-args (:args fn-def))
-           :return-type (:return-type fn-def)
-           :impl impl-fn}
-    (:description fn-def) (assoc :description (:description fn-def))
-    ;; Forward `:effects` (set of category tags) and the legacy
-    ;; `:effectful?` boolean — both shapes get normalised inside
-    ;; `record-rich-types!` so the registry stores a single canonical
-    ;; `:effects` set.
-    (:effects fn-def)     (assoc :effects (set (:effects fn-def)))
-    (:effectful? fn-def)  (assoc :effectful? true)))
+  [fn-def impl-entry]
+  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule]}
+        (impl-entry->parts impl-entry)]
+    (cond-> {:args (normalize-args (:args fn-def))
+             :return-type (:return-type fn-def)
+             :impl impl}
+      (:description fn-def) (assoc :description (:description fn-def))
+      ;; Forward `:effects` (set of category tags) and the legacy
+      ;; `:effectful?` boolean — both shapes get normalised inside
+      ;; `record-rich-types!` so the registry stores a single canonical
+      ;; `:effects` set.
+      (:effects fn-def)     (assoc :effects (set (:effects fn-def)))
+      (:effectful? fn-def)  (assoc :effectful? true)
+      ;; Per-base-fn type-rules — only present when the impls.clj
+      ;; declared them on the entry map.
+      return-type-rule      (assoc :return-type-rule return-type-rule)
+      slot-types-rule       (assoc :slot-types-rule slot-types-rule)
+      nav-types-rule        (assoc :nav-types-rule nav-types-rule))))
 
 
 ;; Type-rows are first-class fn-rows declared in `fns.edn` alongside
@@ -279,15 +306,20 @@
         ;; Separate base functions from fn-defs
         {base-fns true fn-defs false} (group-by base-fn? fns)
 
-        ;; Convert base functions to registry format
+        ;; Convert base functions to registry format. The `impls`-map
+        ;; value is either a bare impl fn or a `{:impl … :*-rule …}`
+        ;; map; `fn-def->base-fn-def` normalises both. The "no impl"
+        ;; check inspects the normalised `:impl` so a rule-only entry
+        ;; (missing `:impl`) is still rejected.
         base-fn-defs (into {}
                            (filter some?)
                            (for [fn-def base-fns
                                  :let [fn-name (:name fn-def)
-                                       impl-fn (get impls fn-name)]]
-                             (if impl-fn
-                               [fn-name (assoc (fn-def->base-fn-def fn-def impl-fn)
-                                               :namespace ns-path)]
+                                       impl-entry (get impls fn-name)
+                                       base-def (when impl-entry
+                                                  (fn-def->base-fn-def fn-def impl-entry))]]
+                             (if (:impl base-def)
+                               [fn-name (assoc base-def :namespace ns-path)]
                                (do
                                  (log/warn "No impl found for base fn:" fn-name
                                            "in" package-name "/" module-name)

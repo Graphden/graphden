@@ -17,19 +17,8 @@
    `(root APP-RING, expand root:1)` migrates `:func` down so the edge
    sources from ROUTER-RES, NOT from APP-RING."
   (:require
-    [clojure.java.io :as io]
-    [clojure.test :refer [deftest is testing]]))
-
-
-(def ^:private layout-ns
-  (let [impls-file (io/resource "packages/app/layout/impls.clj")]
-    (when impls-file
-      (load-file (java.io.File/.getPath (io/file impls-file))))
-    (find-ns 'graphden.packages.app.layout.impls)))
-
-
-(def ^:private derive-fn-slot-views
-  (when layout-ns (ns-resolve layout-ns 'derive-fn-slot-views)))
+    [clojure.test :refer [deftest is testing]]
+    [graphden.layout.graph :refer [derive-fn-slot-views]]))
 
 
 (defn- uuid

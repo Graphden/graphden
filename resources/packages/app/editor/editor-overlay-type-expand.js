@@ -20,6 +20,71 @@ const expandedTypePaths = new Set();
 const inlineHostsByPath = new Map();
 let inlinePositionListenersInstalled = false;
 
+
+// === Type-narrowing helpers ===
+// Moved here from the former editor-type-explainer.js: the inline-
+// expansion picker below is their only consumer.
+
+// Effect categories — drive the effect-tightening rows in the
+// inline-expand panel.
+const EFFECT_CATEGORIES = ['db', 'env', 'io', 'network', 'time', 'random'];
+
+// Render a structural type as the SAME wire-shape `/api/types/
+// compatible` accepts — keyword names stripped of leading `:`,
+// structural arrays kept as-is. The arg/ret pickers compare the
+// user's selection against this so a no-op selection (current
+// type) doesn't get sent to the backend.
+function compactTypeAsValue(t) {
+  if (typeof t === 'string') return t.replace(/^:/, '');
+  return JSON.stringify(t);  // structural — Edit by typing isn't supported
+                             // yet; the picker only offers named alternates.
+}
+
+// Populate `<select>` with the current type + every named alias
+// that's a subtype of it. Async; the picker shows the current
+// option immediately so the user has an answer even before the
+// fetches complete.
+async function populateNarrowerOptions(select, currentType) {
+  const curVal = compactTypeAsValue(currentType);
+  const curLabel = (typeof currentType === 'string')
+                   ? currentType.replace(/^:/, '')
+                   : JSON.stringify(currentType);
+  const curOpt = document.createElement('option');
+  curOpt.value = curVal;
+  // No "(current)" suffix — selected=true plus the option being the
+  // first item already conveys it, and the parent structural row
+  // shows the same type as a chip immediately above.
+  curOpt.textContent = curLabel;
+  curOpt.selected = true;
+  select.appendChild(curOpt);
+  if (typeof richTypes !== 'object' || !richTypes) return;
+  // Candidates: every type-row entry. Filter via /api/types/
+  // compatible. Same approach as the main type-edit picker.
+  const aliases = Object.keys(richTypes)
+    .filter(k => richTypes[k] && richTypes[k]['type-row?'] === true);
+  if (aliases.length === 0) return;
+  try {
+    const results = await Promise.all(aliases.map(async name => {
+      try {
+        const r = await fetch('/api/types/compatible', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expected: currentType, candidate: name })
+        }).then(r => r.json());
+        return { name, ok: !!r.ok };
+      } catch (_) { return { name, ok: false }; }
+    }));
+    for (const r of results) {
+      if (r.ok && r.name !== curVal) {
+        const o = document.createElement('option');
+        o.value = r.name;
+        o.textContent = r.name;
+        select.appendChild(o);
+      }
+    }
+  } catch (_) { /* leave just the current option */ }
+}
+
 function rcLookupRich(name) {
   if (typeof name !== 'string') return null;
   if (typeof richTypes !== 'object' || !richTypes) return null;
@@ -516,9 +581,6 @@ function makeInlineNarrowerSelect(currentType, ariaLabel) {
 }
 
 function makeEffectsRow(currentEff) {
-  // EFFECT_CATEGORIES is a top-level const defined in
-  // editor-type-explainer.js — visible globally in the concat
-  // bundle.
   const cats = (typeof EFFECT_CATEGORIES !== 'undefined')
                ? EFFECT_CATEGORIES
                : ['db', 'env', 'io', 'network', 'time', 'random'];

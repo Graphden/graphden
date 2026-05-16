@@ -139,6 +139,35 @@
                                 :any)))))
 
 
+(deftest assoc-keeps-inherited-record-when-map-opaque
+  (testing ":map isn't a visible record but default-ret is — assoc into the inherited record"
+    ;; A descendant of a record-typed assoc-chain (e.g. :ring-response,
+    ;; which declares :ring-response-shape) re-fires this rule with
+    ;; :map surfacing as :any. The inherited record must be kept and
+    ;; extended, NOT collapsed to a fresh one-field record — a
+    ;; return-type rule must never widen the type it inherited.
+    (is (= {:status :int :headers :jsonb :body :text}
+           (compute-return-type :assoc
+                                {:map   {:type :any :value nil}
+                                 :key   {:type :text :value "body"}
+                                 :value {:type :text :value "x"}}
+                                {:status :int :headers :jsonb :body :text})))
+    (testing "a new field is assoc'd into the inherited record"
+      (is (= {:status :int :extra :bool}
+             (compute-return-type :assoc
+                                  {:map   {:type :jsonb :value nil}
+                                   :key   {:type :text :value "extra"}
+                                   :value {:type :bool :value true}}
+                                  {:status :int}))))
+    (testing ":map's own record still wins over the inherited one"
+      (is (= {:a :int :body :text}
+             (compute-return-type :assoc
+                                  {:map   {:type {:a :int} :value nil}
+                                   :key   {:type :text :value "body"}
+                                   :value {:type :text :value "x"}}
+                                  {:status :int :body :int}))))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; :dissoc
 

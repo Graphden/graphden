@@ -1049,9 +1049,13 @@ demands the bound callable's effects ⊆ `eff-set`.
 
 **Subtype rule.** `(fn-subtype? sub sup)` requires
 `sub-effects ⊆ sup-effects`, mirroring how arg variance and return
-covariance already work. nil sub-effects against a concrete
-sup-effects is **rejected** ("can't prove pure → assume impure").
-nil sup-effects accepts anything (no constraint declared).
+covariance already work. nil sub-effects means the callee is
+**pure** (`#{}`): graphden computes effects totally — every fn-def
+goes through `compute-effects`, which treats an absent `:effects`
+as `#{}` — so a missing effect set is computed-pure, not "unknown".
+Treating it otherwise ("assume impure") would make a `#{}` pure-only
+slot unsatisfiable by any ordinary pure fn. nil sup-effects accepts
+anything (no constraint declared).
 
 **Where it fires.** `check-fn-def!` walks each ref-binding,
 computes the callable's effective fn-type via `assemble-fn-type`
@@ -1061,13 +1065,13 @@ expected fn-type. A mismatch raises the standard `:types/check-
 failed` exception with the same arg-name / parent / expected /
 actual fields as a return-type mismatch.
 
-**Coverage in core/hof.** Every HOF callable slot now carries the
-`#{}` constraint:
+**Coverage in core/hof.** HOF *predicate* slots carry the `#{}`
+constraint; `:map`'s `:func` deliberately does NOT:
 
 | HOF | Slot | Constraint | Why |
 |-----|------|-----------|-----|
-| `:map` | `:func` | `#{}` | element-wise, must be order-independent + cacheable |
-| `:filter` | `:pred` | `#{}` | predicate must be idempotent / replayable |
+| `:map` | `:func` | *(none)* | mapping an effectful transform (`:read-resource` over paths) is normal; effects propagate via `compute-effects` and the result is tagged, not rejected. A `:map`-callback's effect only tags the elements it produces — the collection's shape stays deterministic |
+| `:filter` | `:pred` | `#{}` | an effectful predicate changes WHICH elements survive — unsafe under lazy realisation; predicate must be idempotent / replayable |
 | `:reduce` | `:func` | `#{}` | result must depend only on `(init, coll)` |
 | `:some` | `:pred` | `#{}` | early-termination relies on determinism |
 | `:every?` | `:pred` | `#{}` | same |
@@ -1093,8 +1097,9 @@ Slot-level is the smallest mechanism that delivers that.
 
 **Roundtrip preservation.** `resolve` (substitution),
 `resolve-alias`, `unify-fn`, and `assemble-fn-type` all preserve
-the 4th element when present. `assemble-fn-type` uses
-`(contains? info :effects)` rather than `(seq eff)` so that an
-explicit `:effects #{}` in rich-types stays distinguishable from
-"no effects key" — important because the former is a positive
-"provably pure" claim, the latter is "unknown".
+the 4th element when present. `assemble-fn-type` keys off
+`(contains? info :effects)` rather than `(seq eff)` so an explicit
+`:effects #{}` rides through as a 4-element fn-type — but the
+distinction is no longer load-bearing for the check outcome: both
+an absent `:effects` and an explicit `#{}` are read as **pure** by
+`effects-compatible?`, consistent with `compute-effects`.

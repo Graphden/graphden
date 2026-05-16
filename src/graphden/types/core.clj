@@ -40,8 +40,11 @@
      {a :int b :text} ⊆ {a :int}                           more fields = subtype
      [:list :a] ⊆ [:list :b]  iff  :a ⊆ :b                 covariant
      [:fn args ret] ⊆ [:fn args' ret']  iff
-         every arg-name in args' has args ⊇ args' on it    contravariant
-         and ret ⊆ ret'                                    covariant
+         ret ⊆ ret'                                        covariant
+         and args contravariant, matched the way hof-wrap
+         calls the callable — a 1-arg slot positionally
+         (param names are alpha-equivalent), a ≥2-arg slot
+         by name (map-callable). See `fn-args-subtype?`.
      :jsonb ⊄ any concrete type                            requires explicit conversion"
   (:refer-clojure :exclude [resolve]))
 
@@ -514,49 +517,97 @@
 
 
 (defn- effects-compatible?
-  "Slot-effect-constraint check. Sub's effects must be a subset of
-   sup's effects (the slot's allowed set). Both nil/`:any` mean
-   unconstrained — any effects allowed."
+  "Slot-effect-constraint check. The callee's effects (`sub-eff`) must
+   be a subset of the slot's allowed set (`sup-eff`).
+
+   - `sup-eff` nil or `:any` → the slot declares no constraint; any
+     callee passes.
+   - `sub-eff` nil → the callee is PURE. graphden computes effects
+     totally — `compute-effects` runs on every fn-def and treats an
+     absent `:effects` as `#{}`, and `record-result!` stores
+     `:effects` only when non-empty — so a missing/nil effect set IS
+     `#{}` (computed-pure), not \"unknown\". Treating it as pure keeps
+     `effects-compatible?` consistent with `compute-effects`; the
+     opposite (\"can't prove pure → assume impure\") would make a
+     `#{}` pure-only slot unsatisfiable by any ordinary pure fn.
+   - `sub-eff` `:any` → the callee's effects are explicitly
+     unconstrained; it cannot satisfy a concrete `sup-eff`."
   [sub-eff sup-eff]
   (cond
     (or (nil? sup-eff) (= sup-eff :any)) true
-    (or (nil? sub-eff) (= sub-eff :any)) false
-    (set? sup-eff) (every? sup-eff (or sub-eff #{}))
-    :else true))
+    (= sub-eff :any)                     false
+    (set? sup-eff)                       (every? sup-eff (or sub-eff #{}))
+    :else                                true))
+
+
+(defn- fn-args-subtype?
+  "Contravariant argument check for `fn-subtype?`, dispatched on the
+   SLOT (sup) arity — which fixes the calling convention the
+   executor's `hof-wrap` uses for a bound callable:
+
+   - sup arity ≤ 1 → single-arg (or input-ignoring) callable; the
+     impl invokes it positionally as `(f v)`. Parameter NAMES are
+     local bound variables — alpha-equivalent — so the lone arg pair
+     is compared by POSITION, not by name. A callee with extra free
+     args (optional slots / env-captured names) still satisfies a
+     1-arg slot: hof-wrap captures the rest, and the slot's single
+     param is matched to the callee arg of the same name. A 0-arg
+     callee satisfies a 1-arg slot too — it just ignores the value.
+
+   - sup arity ≥ 2 → map-callable; `hof-wrap` fills the callee's free
+     args BY NAME (`(f {:k v …})`), so names ARE significant. Every
+     sup param must name an arg the callee exposes; those pairs are
+     compared contravariantly. Extra callee args are fine — captured
+     from the environment.
+
+   `a` is the sub (callee) arg-map, `b` the sup (slot) arg-map.
+   Contravariance: `sup-arg ⊆ sub-arg`."
+  [a b]
+  (cond
+    ;; Map-callable slot — by name.
+    (>= (count b) 2)
+    (every? (fn [[k bt]]
+              (when-let [at (get a k)]
+                (subtype? bt at)))
+            b)
+
+    ;; Single-arg / nullary slot, callee of the same arity — positional.
+    (= (count a) (count b))
+    (let [av (mapv val (sort-by key a))
+          bv (mapv val (sort-by key b))]
+      (every? (fn [i] (subtype? (get bv i) (get av i)))
+              (range (count bv))))
+
+    ;; 1-arg slot, callee carries extra (optional / captured) args —
+    ;; match the slot's lone param to the callee arg of that name.
+    (and (= 1 (count b)) (> (count a) 1))
+    (let [[k bt] (first b)]
+      (boolean (when-let [at (get a k)]
+                 (subtype? bt at))))
+
+    ;; 1-arg slot, nullary callee — the callable ignores its input.
+    (and (= 1 (count b)) (zero? (count a)))
+    true
+
+    :else false))
 
 
 (defn- fn-subtype?
   "Function subtyping under graphden's hof-wrap semantics.
 
-   Contravariant args, covariant return — but `args` is interpreted
-   the graphden way: a fn-graph's compile-time free-args list every
-   slot a downstream binding might consult; at the call site,
-   hof-wrap fills those that aren't lambda-params from the
-   environment (chain-bound names, defaults). The CONSUMER (sup)
-   declares only the keys it actually plans to provide per call;
-   the CALLEE (sub) may declare strictly more, knowing the rest
-   get captured.
+   Covariant return, effect-subset constraint, and contravariant
+   arguments via `fn-args-subtype?` — which dispatches on the slot's
+   arity to mirror hof-wrap's single-arg (positional) vs map-callable
+   (by-name) conventions.
 
-   Rules:
-   - `sub-ret ⊆ sup-ret` (covariant return — unchanged).
-   - `(keys sup-args) ⊆ (keys sub-args)` — every key the consumer
-     names must exist in the callee's free args. Extra keys on the
-     callee are fine; hof-wrap sources them from the environment.
-   - For shared keys, `sup-arg ⊆ sub-arg` (caller passes a narrower
-     value than the callee accepts — standard contravariance).
+   - `sub-ret ⊆ sup-ret` (covariant return).
    - `sub-effects ⊆ sup-effects` (callable-side covariant effect
      constraint — bound fn must NOT exceed the slot's allowed
      effect set; `nil`/`:any` on the slot means \"unconstrained\")."
   [sub sup]
   (and (subtype? (fn-ret sub) (fn-ret sup))
        (effects-compatible? (fn-effects sub) (fn-effects sup))
-       (let [a (fn-args sub)
-             b (fn-args sup)]
-         (and (every? (fn [k] (contains? a k)) (keys b))
-              (every? (fn [[k bt]]
-                        (when-let [at (get a k)]
-                          (subtype? bt at)))
-                      b)))))
+       (fn-args-subtype? (fn-args sub) (fn-args sup))))
 
 
 (defn- normalise
@@ -860,6 +911,15 @@
          b (normalise (resolve subst t2))]
      (cond
        (or (= a b) (= a :any) (= b :any)) subst
+       ;; A type variable binds to whatever the other side is — a
+       ;; primitive, a union, a fn-type, anything (subject to the
+       ;; occurs-check in `bind-var`). This MUST precede the union
+       ;; branch below: `unify('a, [:union …])` would otherwise be
+       ;; captured by the union case, which only runs a subtype probe
+       ;; — and a free type-var is a subtype of nothing — so it would
+       ;; fail instead of binding the var to the union.
+       (type-var? a)        (bind-var a b subst)
+       (type-var? b)        (bind-var b a subst)
        ;; Unions: HM unifier doesn't naturally pick a branch (multiple
        ;; valid choices), so defer to subtype? — succeed without
        ;; binding when the relation holds in either direction. This
@@ -889,8 +949,6 @@
            (and (= b :jsonb)
                 (or (record-type? a) (list-type? a) (refine-type? a))))
        subst
-       (type-var? a)        (bind-var a b subst)
-       (type-var? b)        (bind-var b a subst)
        (and (fn-type? a) (fn-type? b))         (unify-fn a b subst)
        (and (list-type? a) (list-type? b))     (unify (list-elem a) (list-elem b) subst)
        (and (record-type? a) (record-type? b)) (unify-record a b subst)

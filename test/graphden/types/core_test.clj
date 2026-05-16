@@ -213,21 +213,33 @@
     (is (t/subtype? [:fn {:x :any} :int] [:fn {:x :int} :int]))
     (is (not (t/subtype? [:fn {:x :int} :int] [:fn {:x :any} :int])))
     (is (not (t/subtype? [:fn {:x :int} :any] [:fn {:x :int} :int]))))
-  (testing "callee may declare extra free args (hof-wrap fills them)"
-    ;; A handler fn-graph's compile-time free args list every slot
-    ;; downstream might read; hof-wrap captures the names the
-    ;; consumer doesn't supply per-call from the environment. So a
-    ;; callee `[:fn {:request :T :next-handler :any} :R]` IS a
-    ;; subtype of `[:fn {:request :T} :R]` — the consumer only
-    ;; promises `:request`; `:next-handler` gets captured.
+  (testing "1-arg slot — positional, parameter names alpha-equivalent"
+    ;; A 1-arg HOF slot is invoked positionally (`hof-wrap` 1 →
+    ;; `(f v)`); the callee's parameter NAME is a local bound
+    ;; variable. So `:some?` (param `:value`) satisfies `:filter`'s
+    ;; `:pred` slot (param `:item`) — same shape, different name.
+    (is (t/subtype? [:fn {:value :int} :bool] [:fn {:item :int} :bool]))
+    (is (t/subtype? [:fn {:value :any} :bool] [:fn {:item :int} :bool]))
+    ;; contravariance still bites regardless of the name.
+    (is (not (t/subtype? [:fn {:value :int} :bool] [:fn {:item :any} :bool]))))
+  (testing "callee may declare extra free args (hof-wrap captures them)"
+    ;; A handler fn-graph carries extra compile-time free args (an
+    ;; optional slot, an env-captured name). Against a 1-arg slot the
+    ;; lone param is matched to the callee arg of that name; the rest
+    ;; are captured from the environment.
     (is (t/subtype? [:fn {:request :int :next-handler :any} :int]
                     [:fn {:request :int} :int])))
-  (testing "callee missing a key the consumer declares is NOT a subtype"
-    ;; Reversal of the above: if the consumer says it'll pass
-    ;; `:request`, a callee that doesn't list `:request` at all
-    ;; can't be invoked safely.
-    (is (not (t/subtype? [:fn {:other :int} :int]
-                         [:fn {:request :int} :int]))))
+  (testing "≥2-arg slot — map-callable, matched by name"
+    ;; A ≥2-arg slot is a map-callable: `hof-wrap` fills the callee's
+    ;; free args BY NAME, so every slot param must name a callee arg.
+    (is (t/subtype? [:fn {:request :int :next-handler :any} :int]
+                    [:fn {:request :int :next-handler :any} :int]))
+    ;; callee missing a name the slot declares — cannot be filled.
+    (is (not (t/subtype? [:fn {:other :int :next-handler :any} :int]
+                         [:fn {:request :int :next-handler :any} :int])))
+    ;; extra callee args beyond the slot's keys are fine (captured).
+    (is (t/subtype? [:fn {:request :int :next-handler :any :extra :int} :int]
+                    [:fn {:request :int :next-handler :any} :int])))
   (testing "slot-level effect constraint — bound fn must not exceed allowed set"
     ;; sup says \":pred must be PURE\" (#{}). sub says \"I do nothing\" (#{}) → subtype.
     (is (t/subtype? [:fn {:item :int} :bool #{}]
@@ -287,6 +299,25 @@
   (let [s (t/unify 'a :int)]
     (is (t/unified? s))
     (is (= :int (t/resolve s 'a)))))
+
+
+(deftest unify-var-union-test
+  ;; A type variable binds to a union like any other type — the
+  ;; type-var case must be reached BEFORE the union branch, which
+  ;; only runs a subtype probe (a free var is a subtype of nothing)
+  ;; and would otherwise fail. `:if`'s `:then` slot is the bare var
+  ;; `a`; binding a `[:union :null :text]`-returning ref there must
+  ;; succeed and pin `a` to the union.
+  (testing "type-var on the left binds to a union"
+    (let [s (t/unify 'a [:union :null :text])]
+      (is (t/unified? s))
+      (is (= [:union :null :text] (t/resolve s 'a)))))
+  (testing "type-var on the right binds to a union"
+    (let [s (t/unify [:union :null :text] 'a)]
+      (is (t/unified? s))
+      (is (= [:union :null :text] (t/resolve s 'a)))))
+  (testing "occurs-check still rejects a recursive union binding"
+    (is (t/fail? (t/unify 'a [:union :null [:list 'a]])))))
 
 
 (deftest unify-fn-test

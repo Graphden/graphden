@@ -13,6 +13,7 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
@@ -284,34 +285,22 @@
       (when-let [fn-name (:name fd)]
         (try (registry-core/record-rich-types! fn-name fd)
              (catch Exception _))))
-    ;; Per-fn-def try/catch so a single mismatched declaration doesn't
-    ;; abort the whole pass — surrounding fn-defs still get their
-    ;; effects-strip data registered. Two passes so refs to fn-defs that
-    ;; come later in the iteration order get their effects propagated
-    ;; on the second sweep (transitive `:effects` need their referenced
-    ;; rich-type entry to already be in the registry).
-    ;; Each fn-def's check-fn-def! is wrapped in try/catch so a single
-    ;; mismatched declaration doesn't abort the whole pass. The
-    ;; legitimate use case for this lenient catch: structural fn-types
-    ;; on hof-wrap-target slots (e.g. `:http-server.handler`) require
-    ;; the bound fn-graph's COMPUTED return to satisfy the declared
-    ;; record type — which only works when every intermediate base-fn
-    ;; has a return-type rule (`:assoc`'s record-builder, etc.). For
-    ;; chains that pass through `:merge-in` / `:update-in` whose
-    ;; computed return is `:any`, the structural check fails. The
-    ;; declaration still lives on the parent's slot — type-check
-    ;; catches obvious misuses (`:add` as a handler) at WRITE time
-    ;; via the storage-side guard.
-    (dotimes [_ 2]
-      (doseq [fd fn-defs]
-        (try (types-check/check-fn-def! fd)
-             (catch Exception e
-               ;; A fn-def whose type-check throws is skipped — but log
-               ;; it: a silent swallow here hid composed fn-defs (their
-               ;; effects / computed return type) from the rich-type
-               ;; registry, so the editor lost their effect-strip.
-               (log/warn "Type-check skipped fn-def" (:name fd) "—"
-                         (ex-message e))))))
+    ;; Type-check in dependency (topological) order: every fn-def is
+    ;; checked AFTER the parents and refs it reads, so a SINGLE sweep
+    ;; reaches the fixpoint — `check-fn-def!` always sees its
+    ;; dependencies' final rich-types, never a stale seed. This is
+    ;; what eliminates the order-dependent under-convergence a fixed
+    ;; pass count over arbitrary order suffered (a deep chain it
+    ;; couldn't propagate, leaving composed fn-defs absent or
+    ;; mis-typed). A fn-def that throws here is genuinely absent from
+    ;; the rich-type registry — the editor would miss its effect strip
+    ;; / computed return — so it's logged. The per-fn-def try/catch
+    ;; keeps one mismatch from aborting the rest of the sweep.
+    (doseq [fd (deps/topological-sort fn-defs)]
+      (try (types-check/check-fn-def! fd)
+           (catch Exception e
+             (log/warn "Type-check failed for fn-def" (:name fd) "—"
+                       (ex-message e)))))
     (log/info "Fn entities created:" (count fns))
     fns))
 

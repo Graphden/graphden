@@ -245,42 +245,50 @@
 
 
 ;; --- :assoc -----------------------------------------------------------------
-;; `(:assoc :map {…} :key "field" :value <value>)` returns
-;; `(merge m {field-keyword (type-of v)})` when `:key` is a literal
-;; that names the field. Falls back to `:jsonb` otherwise.
+;; `(:assoc :map {…} :key "field" :value <value>)` returns the map's
+;; record type with `{field-keyword (type-of v)}` assoc'd in, when
+;; `:key` is a literal naming the field.
 ;;
 ;; Coverage:
 ;;   :map's type      :key (literal)      :value's type →   computed return
 ;;   {…} (record)     "name"              :text         →   {…name :text}
-;;   :jsonb           "name"              :text         →   {name :text}
-;;   :any             "name"              :text         →   {name :text}
+;;   :jsonb / :any    "name"              :text         →   (assoc default-ret
+;;                                                            name :text) when
+;;                                                            default-ret is a
+;;                                                            record, else
+;;                                                            {name :text}
 ;;   anything         (ref/computed)      anything      →   :jsonb (degrade)
 ;;
-;; The `:key` binding's `:value` is what dictates the field name. When
-;; `:key` is keyword-shaped (`:name`), the field name is its `name`;
-;; when it's a string, the same. Anything else degrades.
+;; Using `default-ret` (the inherited return) as the base when `:map`
+;; isn't a visible record is what keeps a descendant of a record-typed
+;; assoc-chain — e.g. `:ring-response`, which declares
+;; `:ring-response-shape` — from collapsing back to a fresh one-field
+;; record when this rule re-fires further down the chain (where `:map`
+;; surfaces as `:any`/`:jsonb`). A return-type rule must never widen
+;; the type it inherited.
 ;;
 ;; `:assoc-fn` (the `:value`-as-fn fn-def variant, `:parent :assoc`)
 ;; inherits this rule through the type-checker's `root-base-fn-name`
 ;; walk — no separate rule needed.
 
 (defn assoc-return-rule
-  [bindings-info _default-ret]
+  [bindings-info default-ret]
   (let [m-type   (get-in bindings-info [:map :type])
         k-value  (get-in bindings-info [:key :value])
         v-type   (get-in bindings-info [:value :type])
-        field-kw (field-keyword-from-literal k-value)]
+        field-kw (field-keyword-from-literal k-value)
+        base     (cond (types/record-type? m-type)      m-type
+                       (types/record-type? default-ret) default-ret
+                       :else                            nil)]
     (cond
-      (nil? field-kw)
-      ;; Computed key — value unknown at sync time, can't refine.
-      :jsonb
+      ;; Computed key — can't name the field; can't refine soundly.
+      (nil? field-kw) :jsonb
 
-      (types/record-type? m-type)
-      (assoc m-type field-kw (or v-type :any))
+      base            (assoc base field-kw (or v-type :any))
 
-      ;; `:map` is `:any`, `:jsonb`, etc. — start a fresh record.
-      :else
-      {field-kw (or v-type :any)})))
+      ;; Neither `:map` nor the inherited return is a known record —
+      ;; start a fresh one-field record.
+      :else           {field-kw (or v-type :any)})))
 
 
 ;; --- :dissoc ----------------------------------------------------------------

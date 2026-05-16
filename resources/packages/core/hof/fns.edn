@@ -9,17 +9,22 @@
    :description "Apply a callable to each item in a collection (Clojure's `map`). When `:coll` is omitted, returns a transducer."
    ;; Type vars `a` (input element) and `b` (output element):
    ;;   :func ≡ a → b,  :coll ≡ [list a],  return ≡ [list b].
-   ;; `#{}` effect constraint — element-wise transforms should be
-   ;; pure (same input → same output) so the result is cacheable
-   ;; and order-independent. An effectful per-element callable
-   ;; (`:env`-reading, `:db`-writing) implies the result depends on
-   ;; iteration timing, breaking determinism.
+   ;; `:func` carries NO effect constraint (3-element fn-type):
+   ;; mapping an effectful transform (`:read-resource` over a list of
+   ;; paths) is a normal operation. Effects are not forbidden — they
+   ;; PROPAGATE: `compute-effects` unions the callable's effects into
+   ;; the `:map`-based fn-def, the editor surfaces the effect chip,
+   ;; and the caching layer keys off that tag. `:filter` keeps the
+   ;; `#{}` (pure-only) constraint — an effectful predicate changes
+   ;; WHICH elements survive, which is genuinely unsafe under lazy
+   ;; realisation; an effectful `:map` only tags the elements it
+   ;; produces, leaving the collection's shape deterministic.
    ;; When :coll is omitted (:required false) :map returns a
    ;; transducer instead — that overload is not yet expressible in
    ;; the type system; the structured types here cover the with-coll
    ;; path which is the common case.
-   :args {:func {:type [:fn {:item a} b #{}]
-                 :description "Pure callable applied to each item."}
+   :args {:func {:type [:fn {:item a} b]
+                 :description "Callable applied to each item; may be effectful (effects propagate)."}
           :coll {:type [:list a] :required false
                  :description "Collection to map over. When omitted, returns a transducer."}}
    :return-type [:list b]}

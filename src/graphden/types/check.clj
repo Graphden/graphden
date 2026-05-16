@@ -508,7 +508,23 @@
   "Combine N parent registry entries into one parent-info for an MI
    fn-def. Returns nil when none of the parents have a registry entry
    (defer like the pre-MI behaviour did). With one parent the entry
-   is returned verbatim."
+   is returned verbatim.
+
+   Free args (`:args`): a slot is free in the MI child iff NO parent
+   binds it. Each parent's `:args` already excludes that parent's own
+   bindings, but a slot bound by parent A and left free by parent B
+   would survive a naive `merge` of the maps — closer-fn-wins MI means
+   A's binding applies to the child, so the slot is NOT free. We
+   subtract the union of every parent's `:resolved-bindings` keys (the
+   slots bound anywhere in each parent's chain) from the merged
+   free-arg map.
+
+   `:resolved-bindings`: merged across parents (later parent wins on a
+   collision — closer-fn-wins). Without this an MI fn-def loses the
+   bindings its parents accumulated up the chain, so a return-type
+   rule re-firing on it (or a descendant) can't see slots bound deeper
+   up — e.g. the `:assoc` record-builder loses `:map`/`:key`/`:value`
+   and collapses the response record to `:jsonb`."
   [parent-list]
   (let [infos (mapv registry/rich-type-of parent-list)]
     (cond
@@ -517,9 +533,16 @@
       :else
       ;; Merge with `or` defaults so a missing parent (registered
       ;; later, or never) doesn't poison the union.
-      {:return  (or (:return (first infos)) :any)
-       :args    (apply merge (mapv #(:args % {}) infos))
-       :effects (reduce into #{} (mapv #(:effects % #{}) infos))})))
+      (let [bound (into #{}
+                        (mapcat #(keys (:resolved-bindings % {})))
+                        infos)]
+        {:return   (or (:return (first infos)) :any)
+         :args     (reduce dissoc
+                           (apply merge (mapv #(:args % {}) infos))
+                           bound)
+         :effects  (reduce into #{} (mapv #(:effects % #{}) infos))
+         :resolved-bindings (apply merge
+                                   (mapv #(:resolved-bindings % {}) infos))}))))
 
 
 (defn- resolve-parent-info
@@ -748,28 +771,45 @@
     :else {}))
 
 
+(defn- hof-slot?
+  "True iff slot `arg-name` is declared as a callable — the bare `:fn`
+   primitive or a structural `[:fn …]`. A ref bound to such a slot is
+   a HOF lambda: the executor's `hof-wrap` consumes that ref's leftover
+   free args per-call, so they must NOT widen the calling fn-def's own
+   free-arg surface. Mirrors `compile.renames/deep-free-ext-names`,
+   which stops at `:is-fn` refs for the same reason."
+  [parent-args arg-name]
+  (let [t (get parent-args arg-name)]
+    (or (= :fn t) (types/fn-type? t))))
+
+
 (defn- ref-free-args
   "Per-ref freshening: each fn-ref binding brings its own scope of
    type-vars into the fn-def's surface. Without freshening, two refs
    both exposing `'a` would collide. `types/freshen-args` renames
-   each var to a unique `'a-<n>` while keeping sharing within one ref."
-  [args]
+   each var to a unique `'a-<n>` while keeping sharing within one ref.
+
+   A ref bound to a HOF slot (`hof-slot?`) is a boundary — its free
+   args are consumed by the inner `hof-wrap` and are NOT lifted."
+  [args parent-args]
   (let [fresh (fn [fn-name]
                 (when-let [ents (:args (registry/rich-type-of fn-name))]
                   (types/freshen-args ents)))]
-    (reduce-kv (fn [acc _ b-form]
-                 (cond
-                   (keyword? b-form)
-                   (merge acc (or (fresh b-form) {}))
+    (reduce-kv (fn [acc arg-name b-form]
+                 (if (hof-slot? parent-args arg-name)
+                   acc
+                   (cond
+                     (keyword? b-form)
+                     (merge acc (or (fresh b-form) {}))
 
-                   (and (map? b-form) (contains? b-form :ref))
-                   (merge acc (or (fresh (:ref b-form)) {}))
+                     (and (map? b-form) (contains? b-form :ref))
+                     (merge acc (or (fresh (:ref b-form)) {}))
 
-                   (vector? b-form)
-                   (reduce (fn [a item] (merge a (item-free-args item)))
-                           acc b-form)
+                     (vector? b-form)
+                     (reduce (fn [a item] (merge a (item-free-args item)))
+                             acc b-form)
 
-                   :else acc))
+                     :else acc)))
                {}
                args)))
 
@@ -829,7 +869,7 @@
                                                (contains? type-pinned a))
                                    [a (types/resolve subst t)])))
                          parent-args)]
-    (merge (ref-free-args args) local-free)))
+    (merge (ref-free-args args parent-args) local-free)))
 
 
 ;; -----------------------------------------------------------------------------

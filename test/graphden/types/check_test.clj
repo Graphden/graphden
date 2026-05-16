@@ -189,16 +189,17 @@
         "pure predicate satisfies the constraint")))
 
 
-(deftest hof-effect-constraint-rejects-unannotated-callback
-  (testing "callback without :effects in registry is treated as \"unknown effects\" — rejected from a pure slot"
-    ;; A rich-types entry that lacks an `:effects` key (raw test
-    ;; data, or a fn-def whose check-fn-def! hasn't run yet) reads
-    ;; as nil on the actual side. `effects-compatible?` treats nil
-    ;; sub vs concrete sup as a REJECTION — \"if I can't prove you're
-    ;; pure, I assume the worst\". Same defensive stance as Haskell's
-    ;; \"unknown monadic context can't be lifted into pure\". In
-    ;; practice every fn-def gets :effects populated by check-fn-def!,
-    ;; so this case only fires for raw test data.
+(deftest hof-effect-constraint-accepts-unannotated-callback
+  (testing "callback without :effects in the registry is PURE — accepted by a pure slot"
+    ;; A rich-types entry that lacks an `:effects` key reads as nil
+    ;; on the actual side. graphden computes effects totally —
+    ;; `compute-effects` runs on every fn-def and treats an absent
+    ;; `:effects` as `#{}`, and `record-result!` only stores the key
+    ;; when non-empty — so a missing effect set IS `#{}`
+    ;; (computed-pure), not \"unknown\". `effects-compatible?` reads
+    ;; nil sub-effects as pure, consistent with `compute-effects`;
+    ;; the opposite would make a `#{}` slot unsatisfiable by any
+    ;; ordinary pure fn (`:some?`, `:add`, …).
     (registry/record-rich-types! :filter-pure
                                  {:args {:pred {:type [:fn {:item 'a} :bool #{}]}
                                          :coll {:type [:list 'a]}}
@@ -206,12 +207,10 @@
     (registry/record-rich-types-raw!
       :unannotated-pred
       {:args {:item :any} :return :bool})
-    (is (thrown-with-msg?
-          clojure.lang.ExceptionInfo #"(?i)type-check failed"
-          (check/check-fn-def! {:name :bad
-                                :parent :filter-pure
-                                :args {:pred :unannotated-pred}}))
-        "unannotated effects ≢ provably pure")))
+    (is (some? (check/check-fn-def! {:name :ok
+                                     :parent :filter-pure
+                                     :args {:pred :unannotated-pred}}))
+        "absent :effects is computed-pure, satisfies the #{} constraint")))
 
 
 (deftest unknown-parent-skips-check
@@ -839,3 +838,73 @@
                                 :parents [:parent-one :parent-two]
                                 :args {:flag {:required false}}}))
         "MI doesn't unlock widening — the structural rule fires uniformly")))
+
+
+(deftest mi-fn-def-inherits-parents-resolved-bindings
+  (testing "an MI fn-def merges :resolved-bindings from every parent"
+    ;; Each parent carries a binding the other lacks — accumulated up
+    ;; its own chain. The MI child must inherit BOTH: without this a
+    ;; return-type rule re-firing on the child (or a descendant) loses
+    ;; slots bound deeper up the chain — the bug that collapsed the
+    ;; Ring-response record to :jsonb for the `:r404`/`:r405`/`:r500`
+    ;; multiple-inheritance presets.
+    (registry/record-rich-types-raw!
+      :mi-rb-parent-a
+      {:return :int :args {} :resolved-bindings {:x {:type :int :value 1}}})
+    (registry/record-rich-types-raw!
+      :mi-rb-parent-b
+      {:return :int :args {} :resolved-bindings {:y {:type :text :value "z"}}})
+    (check/check-fn-def! {:name :mi-rb-child
+                          :parents [:mi-rb-parent-a :mi-rb-parent-b]})
+    (let [rb (:resolved-bindings (registry/rich-type-of :mi-rb-child))]
+      (is (contains? rb :x) "binding from the first parent survives")
+      (is (contains? rb :y) "binding from the second parent survives"))))
+
+
+(deftest mi-fn-def-drops-slot-bound-by-a-sibling-parent
+  (testing "a slot left free by one MI parent but bound by another is NOT free in the child"
+    ;; closer-fn-wins MI: parent-b's binding of :s applies to the
+    ;; child, so :s must not survive as a free arg even though
+    ;; parent-a still lists it. merge-mi-parent-infos subtracts the
+    ;; union of every parent's :resolved-bindings keys from the merged
+    ;; free-arg map.
+    (registry/record-rich-types-raw!
+      :mi-a-parent {:return :int :args {:s :int :a :int}})
+    (registry/record-rich-types-raw!
+      :mi-b-parent {:return :int :args {:b :text}
+                    :resolved-bindings {:s {:type :int :value 1}}})
+    (check/check-fn-def! {:name :mi-drop-child
+                          :parents [:mi-a-parent :mi-b-parent]})
+    (let [args (:args (registry/rich-type-of :mi-drop-child))]
+      (is (not (contains? args :s))
+          ":s — bound by mi-b-parent — does not re-leak as a free arg")
+      (is (contains? args :a) ":a (unbound by every parent) stays free")
+      (is (contains? args :b) ":b (unbound by every parent) stays free"))))
+
+
+(deftest ref-on-fn-slot-is-a-hof-boundary
+  ;; `:hb-parent` exposes a :fn-typed slot (:func) and a plain one
+  ;; (:coll); `:hb-ref` is a fn with a free arg :r-free.
+  (registry/record-rich-types-raw!
+    :hb-parent {:return :any :args {:func :fn :coll :any}})
+  (registry/record-rich-types-raw!
+    :hb-ref {:return :bool :args {:r-free :int}})
+  (testing "a ref bound to a :fn slot does NOT leak its free args"
+    ;; The executor's hof-wrap consumes a HOF callable's leftover free
+    ;; args per call, so they must not widen the calling fn-def's own
+    ;; free-arg surface — mirrors `compile.renames/deep-free-ext-names`,
+    ;; which stops at `:is-fn` refs.
+    (check/check-fn-def! {:name :hb-on-fn-slot
+                          :parent :hb-parent
+                          :args {:func :hb-ref}})
+    (let [args (:args (registry/rich-type-of :hb-on-fn-slot))]
+      (is (not (contains? args :r-free))
+          ":hb-ref's free arg is consumed by hof-wrap, not lifted")
+      (is (contains? args :coll) "the unbound non-fn slot stays free")))
+  (testing "a ref bound to a NON-fn slot DOES lift its free args (contrast)"
+    (check/check-fn-def! {:name :hb-on-coll-slot
+                          :parent :hb-parent
+                          :args {:coll :hb-ref}})
+    (let [args (:args (registry/rich-type-of :hb-on-coll-slot))]
+      (is (contains? args :r-free)
+          "a non-HOF ref propagates its free args up to the caller"))))

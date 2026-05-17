@@ -302,9 +302,9 @@
               host     (setup/create-base-fn! storage "tu-ovr-host")
               slot     (setup/create-slot! storage "n" :int)
               _        (setup/attach-slot! storage (:id host) (:id slot) 0)
-              comp     (setup/create-composed-fn! storage "tu-ovr-comp" (:id host))
+              comp-fn     (setup/create-composed-fn! storage "tu-ovr-comp-fn" (:id host))
               _        (sp/create-entity storage :binding
-                                         {:fn-id (:id comp) :slot-id (:id slot)
+                                         {:fn-id (:id comp-fn) :slot-id (:id slot)
                                           :type-override-fn-id (:id type-row)
                                           :override-kind :fixed})
               res      (ta/types-usages

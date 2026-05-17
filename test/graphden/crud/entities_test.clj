@@ -605,16 +605,16 @@
       (let [base (setup/create-base-fn! storage "pceb-base")
             slot (setup/create-slot! storage "n" :int)
             _    (setup/attach-slot! storage (:id base) (:id slot) 0)
-            comp (setup/create-composed-fn! storage "pceb-comp" (:id base))]
+            comp-fn (setup/create-composed-fn! storage "pceb-comp-fn" (:id base))]
         (testing "form-encoded binding create → 200, binding persisted"
           (let [resp (entities/process-create-entity
                        {:uri "/api/entities/binding"
-                        :body (str "fn-id=" (:id comp) "&slot-id=" (:id slot)
+                        :body (str "fn-id=" (:id comp-fn) "&slot-id=" (:id slot)
                                    "&value=42&override-kind=fixed")}
                        c)]
             (is (= 200 (:status resp)))
             (is (= 1 (count (sp/query-entities storage :binding
-                                               {:fn-id (:id comp)}))))))
+                                               {:fn-id (:id comp-fn)}))))))
 
         (testing "a binding carrying rename-to also mints the renamed-view slot"
           (let [base2 (setup/create-base-fn! storage "pceb-base2")
@@ -671,9 +671,9 @@
         (let [base (setup/create-base-fn! storage "pde-bind-base")
               slot (setup/create-slot! storage "n" :int)
               _    (setup/attach-slot! storage (:id base) (:id slot) 0)
-              comp (setup/create-composed-fn! storage "pde-bind-comp" (:id base))
+              comp-fn (setup/create-composed-fn! storage "pde-bind-comp-fn" (:id base))
               bind (sp/create-entity storage :binding
-                                     {:fn-id (:id comp) :slot-id (:id slot)
+                                     {:fn-id (:id comp-fn) :slot-id (:id slot)
                                       :value 1 :override-kind :fixed})
               resp (entities/process-delete-entity
                      {:uri (str "/api/entities/binding/" (:id bind))} c)]

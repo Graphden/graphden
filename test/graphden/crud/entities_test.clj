@@ -756,3 +756,71 @@
           (is (= before (count (sp/query-entities storage :fn {})))
               "the half-created fn-row was rolled back")))
       (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-* — request error / rejection branches
+;; ============================================================================
+
+(deftest process-create-entity-rejection-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "a composed fn can't own a fresh (non-rename) slot via fn-slot"
+        ;; POST /api/entities/fn-slot for a composed fn + a plain slot
+        ;; whose :source-slot-id is nil → fn-slot-rej → 400
+        (let [base (setup/create-base-fn! storage "pcer-base")
+              comp-fn (setup/create-composed-fn! storage "pcer-comp" (:id base))
+              slot (setup/create-slot! storage "fresh" :int)
+              resp (entities/process-create-entity
+                     {:uri "/api/entities/fn-slot"
+                      :body (str "fn-id=" (:id comp-fn) "&slot-id=" (:id slot)
+                                 "&position=0")} c)]
+          (is (= 400 (:status resp)))
+          (is (re-find #"can only own slots that rename" (:body resp)))))
+      (finally (sp/close storage)))))
+
+
+(deftest process-update-entity-slot-and-rename-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "form-encoded slot update dispatches through parse-slot-from-form"
+        (let [slot (setup/create-slot! storage "n" :int)
+              resp (entities/process-update-entity
+                     {:uri (str "/api/entities/slot/" (:id slot))
+                      :body "description=slot-desc"} c)]
+          (is (= 200 (:status resp)))
+          (is (= "slot-desc"
+                 (:description (sp/read-entity storage :slot (:id slot)))))))
+
+      (testing "a binding update carrying rename-to mints the renamed-view slot"
+        (let [base    (setup/create-base-fn! storage "puesr-base")
+              slot    (setup/create-slot! storage "orig" :int)
+              _       (setup/attach-slot! storage (:id base) (:id slot) 0)
+              comp-fn (setup/create-composed-fn! storage "puesr-comp" (:id base))
+              bind    (sp/create-entity storage :binding
+                                        {:fn-id (:id comp-fn) :slot-id (:id slot)
+                                         :value 1 :override-kind :fixed})
+              resp    (entities/process-update-entity
+                        {:uri (str "/api/entities/binding/" (:id bind))
+                         :body "value=2&rename-to=renamed-orig"} c)]
+          (is (= 200 (:status resp)))
+          (is (some #(= "renamed-orig" (:name %))
+                    (sp/query-entities storage :slot {})))))
+      (finally (sp/close storage)))))
+
+
+(deftest process-create-list-type-rollback-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "an unresolvable element-type rolls the half-created row back"
+        (let [before (count (sp/query-entities storage :fn {}))
+              res    (entities/process-create-list-type
+                       {:body {:name "BadList" :element-type "no-such-type"}} c)]
+          (is (false? (:ok res)))
+          (is (string? (:error res)))
+          (is (= before (count (sp/query-entities storage :fn {})))
+              "cleanup removed the partially-created list fn-row")))
+      (finally (sp/close storage)))))

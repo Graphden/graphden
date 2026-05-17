@@ -112,6 +112,40 @@
             "no duplicate r404-body card")))))
 
 
+(deftest layout-router-default-handler-test
+  (testing "fully expanding `_router` migrates the three response
+            bindings down to `_router-default-handler` and shows each
+            slot exactly once (no phantom raw `not-acceptable-response`
+            beside the renamed `error-response`)"
+    (let [router  (fn-id "_router")
+          dh      (fn-id "_router-default-handler")
+          result  (layout router {(str "fn-" router) {:full-depth 5
+                                                      :partial-fns #{}}})
+          node-by-id (into {} (map (juxt #(:id (:data %)) identity))
+                           (:nodes result))
+          orig-of (fn [node-id] (:originalFnId (:data (node-by-id node-id))))
+          dh-node    (some #(when (= (str dh) (:originalFnId (:data %))) %)
+                           (:nodes result))
+          dh-node-id (:id (:data dh-node))
+          dh-edges   (filter #(= dh-node-id (:source (:data %))) (:edges result))
+          dh-args    (set (map #(:argName (:data %)) dh-edges))
+          body-ids   (set (map #(str (fn-id %))
+                               ["_r404-body" "_r405-body" "_r500-body"]))
+          root->bodies (filter #(and (= (str "fn-" router) (:source (:data %)))
+                                     (contains? body-ids
+                                                (orig-of (:target (:data %)))))
+                               (:edges result))]
+      (is (some? dh-node) "_router-default-handler node present")
+      (is (= #{"not-found-response" "method-not-allowed-response"
+               "error-response"}
+             dh-args)
+          "default-handler exposes exactly its 3 renamed response slots")
+      (is (every? #(not (:isUnset (:data %))) dh-edges)
+          "all three response slots are bound, none unset")
+      (is (empty? root->bodies)
+          "no response binding sources from the root _router card"))))
+
+
 (deftest layout-router-and-handlers-test
   (testing "the router and a route handler lay out without error"
     (doseq [nm ["router" "_router" "health-handler" "_app-ring-response"]]

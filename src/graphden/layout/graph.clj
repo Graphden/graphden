@@ -201,7 +201,18 @@
                     emit (fn [inherits-from-fid sid]
                            (when (and (get slot-by-id sid)
                                       (not (contains? @seen-slots sid)))
-                             (vswap! seen-slots conj sid)
+                             ;; A renamed-view slot (`{:as …}` — a slot
+                             ;; with `:source-slot-id`) and the source
+                             ;; slot it renames are ONE logical slot.
+                             ;; The chain is walked descendant-first, so
+                             ;; the renamed view emits first; mark its
+                             ;; whole source chain seen so the inherited
+                             ;; raw slot doesn't surface as a second row.
+                             (loop [s sid, guard #{}]
+                               (vswap! seen-slots conj s)
+                               (let [src (:source-slot-id (get slot-by-id s))]
+                                 (when (and src (not (contains? guard s)))
+                                   (recur src (conj guard s)))))
                              (vswap! rows conj
                                      (build-anchor-row fn-id sid inherits-from-fid ctx))))]
                 ;; Pass 1 — parent-chain slots.
@@ -927,8 +938,21 @@
    helpers (`terminal-source-of`, `walk-anchor-chain`, `resolve-arg-name`,
    `expand-sequence-anchor`)."
   [lookups levels expand-set _bindings]
-  (let [{:keys [arg-map args-by-fn]} lookups
+  (let [{:keys [arg-map args-by-fn slot-map]} lookups
         active-fns (filterv expand-set (mapcat identity levels))
+        ;; A renamed-view slot (`{:as …}`) is a distinct slot row whose
+        ;; `:source-slot-id` points at the slot it renames. It and its
+        ;; source are ONE logical slot — collapse them to a single
+        ;; identity so the dedup below treats the inherited raw slot and
+        ;; the descendant's renamed view as the same thing (otherwise an
+        ;; expanded fn shows both, e.g. `error-response` + the raw
+        ;; `not-acceptable-response`).
+        canon-slot (fn [sid]
+                     (loop [s sid, seen #{}]
+                       (let [src (:source-slot-id (get slot-map s))]
+                         (if (and src (not (contains? seen s)))
+                           (recur src (conj seen s))
+                           s))))
         ;; Slot-id-keyed dedup: once a slot has been emitted at the
         ;; closest active fn, deeper ancestors' views of that same
         ;; slot are skipped. Replaces the per-step source-chain walk.
@@ -950,7 +974,7 @@
                         ;; placeholder for the same slot.
                         (and (sequence-anchor? arg)
                              (some? (:next-arg-id arg))))
-                  (conj acc2 (:slot-id arg))
+                  (conj acc2 (canon-slot (:slot-id arg)))
                   acc2))
               acc
               (get args-by-fn fn-id [])))
@@ -978,14 +1002,15 @@
         (doseq [arg args]
           (let [arg-id (:id arg)
                 slot-id (:slot-id arg)
-                already-covered (contains? @covered-slots slot-id)
+                cslot (canon-slot slot-id)
+                already-covered (contains? @covered-slots cslot)
                 has-value (some? (:value arg))
                 has-ref (some? (:ref-id arg))
                 shadow-of-bound
                 (and (not has-value) (not has-ref)
-                     (contains? bound-slot-terminals slot-id))]
+                     (contains? bound-slot-terminals cslot))]
             (when (and (not already-covered) (not shadow-of-bound))
-              (swap! covered-slots conj slot-id)
+              (swap! covered-slots conj cslot)
               (let [arg-name (resolve-arg-name arg arg-map)
                     from-ancestor (pos? current-level)
                     ids (arg-ids-from arg)]
@@ -1018,10 +1043,10 @@
           ;; "two `path` rows" after expanding the parent. Mirrors the
           ;; covered-slots gate the scalar arg loop above uses.
           (doseq [anchor anchors
-                  :when (not (contains? @covered-slots (:slot-id anchor)))
+                  :when (not (contains? @covered-slots (canon-slot (:slot-id anchor))))
                   :let [slot-name (or (resolve-arg-name anchor arg-map) "items")]
                   entry (expand-sequence-anchor anchor slot-name arg-map)]
-            (swap! covered-slots conj (:slot-id anchor))
+            (swap! covered-slots conj (canon-slot (:slot-id anchor)))
             (swap! result conj (assoc entry :from-ancestor from-ancestor))))
         (doseq [a @fn-refs] (swap! result conj a))
         (doseq [a @fn-values] (swap! result conj a))
@@ -1030,9 +1055,10 @@
     (let [seen (atom #{})
           ;; Slot-id is the terminal identity: dedup keys can use it
           ;; directly instead of walking arg's source chain to find
-          ;; the defining anchor.
+          ;; the defining anchor. Canonicalised across `:source-slot-id`
+          ;; so a renamed view and its source collapse to one key.
           slot-id-of (fn [aid]
-                       (or (:slot-id (get arg-map aid)) aid))]
+                       (canon-slot (or (:slot-id (get arg-map aid)) aid)))]
       (into []
             (keep (fn [arg]
                     (let [t (slot-id-of (:arg-id arg))
@@ -1842,19 +1868,37 @@
                                   (some fn-id->ancestor-ref-fn-id
                                         (get-inheritance-chain (:fn-id a) fn-map))))))
 
-                        ;; Partition level-0 refs/values: stay at caller or
-                        ;; migrate to one of the ancestor-refs.
-                        classified-level-0
+                        ;; Partition caller-side AND ancestor refs/values:
+                        ;; stay where they are, or migrate onto an ancestor-ref
+                        ;; whose subtree owns the slot. Ancestor-origin bindings
+                        ;; need this too — an MI parent can bind a slot defined
+                        ;; in a sibling ref's subtree (e.g. the r404/r405/r500
+                        ;; presets bind `ring-create-default-handler` slots
+                        ;; reached only via `:default-handler`). Without
+                        ;; migrating those, the binding edge sources from the
+                        ;; enclosing card instead of the actual consumer.
+                        classified
                         (reduce
                           (fn [acc arg]
-                            (if-let [target (migration-target-for arg)]
-                              (update-in acc [:migrated target] (fnil conj []) arg)
-                              (update acc :stay conj arg)))
-                          {:stay [] :migrated {}}
-                          (concat level-0-refs level-0-values))
+                            (let [target (migration-target-for arg)]
+                              (if (and target (not= target (:ref-id arg)))
+                                (-> acc
+                                    (update-in [:migrated target] (fnil conj []) arg)
+                                    (update :migrated-ids conj (:arg-id arg)))
+                                acc)))
+                          {:migrated {} :migrated-ids #{}}
+                          (concat level-0-refs level-0-values
+                                  ancestor-refs ancestor-values))
 
-                        level-0-stay (:stay classified-level-0)
-                        migrated-by-ref (:migrated classified-level-0)
+                        migrated-by-ref (:migrated classified)
+                        migrated-id?    (:migrated-ids classified)
+                        not-migrated    (fn [coll]
+                                          (remove #(contains? migrated-id? (:arg-id %))
+                                                  coll))
+                        level-0-stay         (not-migrated (concat level-0-refs
+                                                                   level-0-values))
+                        ancestor-refs-stay   (not-migrated ancestor-refs)
+                        ancestor-values-stay (not-migrated ancestor-values)
 
                         ;; For a migrated arg, build bindings keyed by
                         ;; slot-id so the target leaf's `find-migrated`
@@ -1925,7 +1969,9 @@
                       ;; Ancestor refs: pass ONLY their migrated bindings (if
                       ;; any) as the leaf's parent-bindings so it picks them
                       ;; up via find-migrated without seeing siblings'.
-                      (doseq [arg ancestor-refs]
+                      ;; Ancestor-refs that themselves migrated are dropped
+                      ;; here — they render under their migration target.
+                      (doseq [arg ancestor-refs-stay]
                         (let [ref-target-id (:ref-id arg)
                               migrated-to-this-ref (get migrated-by-ref ref-target-id [])
                               leaf-bindings (migrated-bindings-for migrated-to-this-ref)]
@@ -1933,7 +1979,7 @@
 
                       (doseq [arg ancestor-unsets] (render-unset arg))
 
-                      (doseq [arg ancestor-values]
+                      (doseq [arg ancestor-values-stay]
                         (add-arg-value-node state lookups arg node-id expand-set))))
 
                   node-id))

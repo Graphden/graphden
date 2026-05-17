@@ -33,7 +33,7 @@
       (is (= root root-id))
       (is (= 2 (get expansions "fn-a")))
       (is (= {:full-depth 3 :partial-fns #{pf}} (get expansions "fn-b")))
-      (is (= 0 (get expansions "fn-c")))))
+      (is (zero? (get expansions "fn-c")))))
 
   (testing "a map spec with no :full-depth defaults the depth to 0"
     (let [req {:body {:root-id (str (random-uuid))

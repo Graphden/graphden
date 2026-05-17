@@ -319,8 +319,9 @@
         (let [base (setup/create-base-fn! storage "tcbd-bid-base")
               slot (setup/create-slot! storage "n" :int)
               _    (setup/attach-slot! storage (:id base) (:id slot) 0)
-              comp (setup/create-composed-fn! storage "tcbd-bid-comp" (:id base))
-              bind (setup/bind-value! storage (:id comp) (:id slot) 3)]
+              comp-fn (setup/create-composed-fn! storage "tcbd-bid-comp"
+                                                 (:id base))
+              bind (setup/bind-value! storage (:id comp-fn) (:id slot) 3)]
           ;; entity-data carries no :slot-id — the check reads the
           ;; binding row to recover it
           (is (nil? (tc/type-check-binding-direct!

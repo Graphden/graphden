@@ -648,6 +648,22 @@
           (is (= 200 (:status resp)))
           (is (= "updated-desc"
                  (:description (sp/read-entity storage :fn (:id f)))))))
+
+      (testing "form-encoded binding value update → 200, value applied"
+        ;; the binding row carries the override_kind enum column —
+        ;; exercises the codec round-trip fixed in postgres/crud.clj
+        (let [base    (setup/create-base-fn! storage "pue-base")
+              slot    (setup/create-slot! storage "n" :int)
+              _       (setup/attach-slot! storage (:id base) (:id slot) 0)
+              comp-fn (setup/create-composed-fn! storage "pue-comp" (:id base))
+              bind    (sp/create-entity storage :binding
+                                        {:fn-id (:id comp-fn) :slot-id (:id slot)
+                                         :value 1 :override-kind :fixed})
+              resp    (entities/process-update-entity
+                        {:uri (str "/api/entities/binding/" (:id bind))
+                         :body "value=99"} c)]
+          (is (= 200 (:status resp)))
+          (is (= 99 (:value (sp/read-entity storage :binding (:id bind)))))))
       (finally (sp/close storage)))))
 
 

@@ -105,6 +105,30 @@
                                 #uuid "11111111-1111-1111-1111-111111111111"
                                 {:name "Test"})))
         (finally
+          (sp/close storage)))))
+
+  (testing "updating a row with an enum column re-encodes the enum
+            (regression: read-entity decoded override_kind as a bare
+            string, so the full-row UPDATE re-sent it as varchar →
+            \"column override_kind is of type override_kind but
+            expression is of type character varying\")"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (sp/initialize storage (setup/make-graph-schema))
+        (setup/seed-primitives! storage)
+        (let [base (setup/create-base-fn! storage "ec-base")
+              slot (setup/create-slot! storage "x" :int)
+              _    (setup/create-fn-slot! storage (:id base) (:id slot) 0)
+              bind (setup/create-binding! storage (:id base) (:id slot)
+                                          :value 1 :override-kind :fixed)]
+          ;; updating an unrelated scalar must not choke on the row's
+          ;; override_kind enum column
+          (sp/update-entity storage :binding (:id bind) {:value 99})
+          (let [reread (sp/read-entity storage :binding (:id bind))]
+            (is (= 99 (:value reread)))
+            (is (= :fixed (:override-kind reread))
+                "enum round-trips as a keyword, not a bare string")))
+        (finally
           (sp/close storage))))))
 
 

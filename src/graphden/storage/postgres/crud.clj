@@ -44,9 +44,10 @@
 (defn- merge-back-ref-many
   "Pair `result-rows` from JDBC back with the `ref-many-records` we
    stripped off before persistence, so the returned records reflect
-   the full shape we wrote."
-  [result-rows ref-many-records]
-  (mapv (fn [row rm-data] (merge (codec/row->entity row) rm-data))
+   the full shape we wrote. `fields` flows into `row->entity` so
+   enum / jsonb columns decode against their schema spec."
+  [result-rows ref-many-records fields]
+  (mapv (fn [row rm-data] (merge (codec/row->entity row fields) rm-data))
         result-rows
         ref-many-records))
 
@@ -91,7 +92,7 @@
                           {:quoted true})]
     (util/with-sql-error-handling "Database error" :create-entity {:entity-name entity-name :id id}
                                   (let [created (-> (jdbc/execute-one! ds query (util/query-opts))
-                                                    codec/row->entity)]
+                                                    (codec/row->entity fields))]
                                     (when (seq ref-many-data)
                                       (junction/write-ref-many-fields! ds entity-name (:id created) ref-many-data))
                                     ;; Merge back the ref-many fields so the returned record
@@ -115,7 +116,7 @@
                            {:quoted true})]
      (util/with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
                                    (when-let [row (jdbc/execute-one! ds query (util/query-opts))]
-                                     (let [record (codec/row->entity row)]
+                                     (let [record (codec/row->entity row fields)]
                                        (if (and fields (junction/has-ref-many? fields))
                                          (first (junction/populate-ref-many-fields ds entity-name [record] fields))
                                          record)))))))
@@ -153,7 +154,7 @@
         (util/with-sql-error-handling "Database error" :update-entity {:entity-name entity-name :id id}
                                       (let [updated-row (if do-column-update?
                                                           (-> (jdbc/execute-one! ds query (util/query-opts))
-                                                              codec/row->entity)
+                                                              (codec/row->entity fields))
                                                           (dissoc columnar-data nil))]
                                         ;; Replace junction rows for any ref-many fields actually present in the update
                                         (when (and (seq ref-many-data) fields)
@@ -279,7 +280,7 @@
                            :expected-count expected-count
                            :actual-count actual-count})))
         (write-junction-rows! ds entity-name batch-ids ref-many-records fields false)
-        (merge-back-ref-many result-rows ref-many-records)))))
+        (merge-back-ref-many result-rows ref-many-records fields)))))
 
 
 (defn read-entities
@@ -414,7 +415,7 @@
                                    :expected-count batch-size
                                    :actual-count actual-count}))))
               (write-junction-rows! ds entity-name batch-ids ref-many-records fields true)
-              (merge-back-ref-many result-rows ref-many-records))))))))
+              (merge-back-ref-many result-rows ref-many-records fields))))))))
 
 
 (defn upsert-entities
@@ -471,7 +472,7 @@
                            :expected-count expected-count
                            :actual-count actual-count})))
         (write-junction-rows! ds entity-name batch-ids ref-many-records fields true)
-        (merge-back-ref-many result-rows ref-many-records)))))
+        (merge-back-ref-many result-rows ref-many-records fields)))))
 
 
 (defn delete-entities

@@ -138,3 +138,20 @@
 
   (testing ":reduce over a caller-supplied collection (free `:coll`)"
     (is (= 6 (run "ex-sum-of" {:coll [1 2 3]})))))
+
+
+;; ============================================================================
+;; examples.regression — env-bindings + sequence-typed ref slots
+;; ============================================================================
+
+(deftest regression-examples-test
+  (testing "a value bound on a ref-reached slot flows through augment-env"
+    ;; `ex-outer` → … → `_ex-list-of-one`, where `:item1` (renamed,
+    ;; reached only via the `:coll` fn-ref) is fixed to \"first\" by an
+    ;; ancestor. That's an env-binding — the runtime merges it into the
+    ;; closure via `augment-env`.
+    (is (= [["first" "second"]]
+           (mapv vec (run "ex-outer" {:item2 "second"})))))
+
+  (testing "a :sequence-typed slot bound to a single fn-ref resolves"
+    (is (= "abc" (run "ex-regression-str-via-ref")))))

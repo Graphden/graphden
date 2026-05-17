@@ -42,6 +42,10 @@
       (is (= [:union :int :text]
              (tc/rich-type-from-row {:constraint [:union :int :text]} fns))))
 
+    (testing "variant constraint is desugared"
+      (is (some? (tc/rich-type-from-row
+                   {:constraint [:variant :ok :int :err :text]} fns))))
+
     (testing "base-fn (impl-hash set, no type role) degrades to :jsonb"
       (is (= :jsonb
              (tc/rich-type-from-row {:name "add" :parent-ids [] :impl-hash "h"}
@@ -305,6 +309,48 @@
               target (setup/create-base-fn! storage "tcbd-int-fn")
               _      (registry/record-rich-types-raw!
                        :tcbd-int-fn {:return :int :args {} :effects #{}})]
+          (is (nil? (tc/type-check-binding-direct!
+                      storage {:slot-id (:id slot) :ref-fn-id (:id target)} nil))))
+        (finally (sp/close storage)))))
+
+  (testing "the slot-id is recovered from binding-id when entity-data omits it"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/create-base-fn! storage "tcbd-bid-base")
+              slot (setup/create-slot! storage "n" :int)
+              _    (setup/attach-slot! storage (:id base) (:id slot) 0)
+              comp (setup/create-composed-fn! storage "tcbd-bid-comp" (:id base))
+              bind (setup/bind-value! storage (:id comp) (:id slot) 3)]
+          ;; entity-data carries no :slot-id — the check reads the
+          ;; binding row to recover it
+          (is (nil? (tc/type-check-binding-direct!
+                      storage {:value 7} (:id bind)))))
+        (finally (sp/close storage)))))
+
+  (testing "a value satisfying a refinement-typed slot → nil"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [int-id (get setup/primitive-fn-ids :int)
+              refine (sp/create-entity storage :fn
+                                       {:name "tcbd-pos" :parent-ids []
+                                        :base-fn-id int-id :constraint [:> 0]})
+              slot   (setup/create-slot! storage "n" (:id refine))]
+          ;; 5 > 0 — satisfies; base-subtype + refinement both hold
+          (is (nil? (tc/type-check-binding-direct!
+                      storage {:slot-id (:id slot) :value 5} nil))))
+        (finally (sp/close storage)))))
+
+  (testing "a ref whose base-typed return feeds a refinement slot → nil"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [int-id (get setup/primitive-fn-ids :int)
+              refine (sp/create-entity storage :fn
+                                       {:name "tcbd-pos2" :parent-ids []
+                                        :base-fn-id int-id :constraint [:> 0]})
+              slot   (setup/create-slot! storage "n" (:id refine))
+              target (setup/create-base-fn! storage "tcbd-ret-int")
+              _      (registry/record-rich-types-raw!
+                       :tcbd-ret-int {:return :int :args {} :effects #{}})]
           (is (nil? (tc/type-check-binding-direct!
                       storage {:slot-id (:id slot) :ref-fn-id (:id target)} nil))))
         (finally (sp/close storage))))))

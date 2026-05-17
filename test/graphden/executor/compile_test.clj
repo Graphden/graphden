@@ -36,14 +36,14 @@
 (deftest forward-deps-of-test
   (testing "edge sources: parent-ids, FK type refs, binding + list-item refs"
     (let [a (random-uuid) p (random-uuid) base (random-uuid)
-          ref (random-uuid) tov (random-uuid) item-ref (random-uuid)
+          ref-fn (random-uuid) tov (random-uuid) item-ref (random-uuid)
           bid (random-uuid)
           graph {:fns {a {:id a :parent-ids [p] :base-fn-id base
                           :element-fn-id nil :return-type-fn-id nil}}
-                 :bindings [{:id bid :fn-id a :ref-fn-id ref
+                 :bindings [{:id bid :fn-id a :ref-fn-id ref-fn
                              :type-override-fn-id tov}]
                  :list-items [{:binding-id bid :ref-fn-id item-ref}]}]
-      (is (= #{p base ref tov item-ref}
+      (is (= #{p base ref-fn tov item-ref}
              (compile/forward-deps-of a graph)))))
 
   (testing "a fn with no edges → empty set"

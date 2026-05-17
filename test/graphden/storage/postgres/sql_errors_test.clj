@@ -189,6 +189,26 @@
         (finally
           (sp/close storage)))))
 
+
+  (deftest ^:integration resolve-execution-graph-edge-cases-test
+    (testing "an unknown fn-id throws :not-found; a binding-free fn resolves clean"
+      (let [storage (setup/create-test-storage)]
+        (try
+          (sp/initialize storage (setup/make-graph-schema))
+          (setup/seed-primitives! storage)
+          (testing "unknown fn-id → :not-found"
+            (let [ex (try (sp/resolve-execution-graph storage (random-uuid))
+                          (catch clojure.lang.ExceptionInfo e e))]
+              (is (= :not-found (:type (ex-data ex))))))
+
+          (testing "a fn with no bindings resolves to an empty list-items set"
+            (let [base  (setup/create-base-fn! storage "reg-no-bindings")
+                  graph (sp/resolve-execution-graph storage (:id base))]
+              (is (contains? (:fns graph) (:id base)))
+              (is (empty? (:list-items graph)))))
+          (finally
+            (sp/close storage))))))
+
   (testing "read-entities handles SQL errors"
     (let [storage (setup/create-test-storage)
           schema (th/make-schema)]

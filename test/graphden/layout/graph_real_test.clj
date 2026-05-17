@@ -162,3 +162,17 @@
       (when-let [id (fn-id nm)]
         (let [result (layout id)]
           (is (seq (:nodes result)) (str nm " produces nodes")))))))
+
+
+(deftest layout-migrate-on-fn-ref-test
+  (testing "the migrate-on-fn-ref example fns lay out across expansion
+            depths — exercises build-graph-elements' migrated-binding
+            branches (a value bound on a ref-reached slot)"
+    (doseq [nm ["ex-outer" "_ex-pair-with-first" "_ex-pair-like"]]
+      (when-let [id (fn-id nm)]
+        (doseq [depth [1 2 3 4]]
+          (let [result (layout id {(str "fn-" id) {:full-depth depth
+                                                   :partial-fns #{}}})]
+            (is (seq (:nodes result)) (str nm " @" depth " produces nodes"))
+            (is (:valid (:validation result))
+                (str nm " @" depth " grid is valid"))))))))

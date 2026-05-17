@@ -172,6 +172,14 @@
               result (layout storage (:id uni))]
           (is (<= 2 (count (fn-nodes result)))
               "root + one node per union branch")))
+
+      (testing "a variant type-row emits one internal edge per tagged branch"
+        (let [var (sp/create-entity storage :fn
+                                    {:name "lg-variant" :parent-ids []
+                                     :constraint [:variant :ok :int :err :text]})
+              result (layout storage (:id var))]
+          (is (<= 2 (count (fn-nodes result)))
+              "root + one node per variant branch")))
       (finally (sp/close storage)))))
 
 

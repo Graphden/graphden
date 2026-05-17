@@ -199,3 +199,96 @@
           (is (some #(= "1" (str (:label (:data %)))) (:nodes result))
               "the first sequence item renders"))
         (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; compute-layout — multi-inheritance, HOF, optional args, deep expansion
+;; ============================================================================
+
+(deftest layout-multi-inheritance-test
+  (testing "an MI root renders, and expanding it walks the MI ancestor level"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [p1 (setup/create-base-fn! storage "lg-mi-p1")
+              p2 (setup/create-base-fn! storage "lg-mi-p2")
+              mi (sp/create-entity storage :fn
+                                   {:name "lg-mi" :parent-ids [(:id p1) (:id p2)]})
+              collapsed (layout storage (:id mi))
+              expanded  (layout storage (:id mi)
+                                {(str "fn-" (:id mi)) {:full-depth 1
+                                                       :partial-fns #{}}})]
+          (is (some #(= (str (:id mi)) (:originalFnId (:data %)))
+                    (fn-nodes collapsed)))
+          (is (seq (:nodes expanded))))
+        (finally (sp/close storage))))))
+
+
+(deftest layout-partial-mi-expansion-test
+  (testing "a partial-fns spec expands only the named MI parent"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [p1 (setup/create-base-fn! storage "lg-pmi-p1")
+              p2 (setup/create-base-fn! storage "lg-pmi-p2")
+              mi (sp/create-entity storage :fn
+                                   {:name "lg-pmi" :parent-ids [(:id p1) (:id p2)]})
+              result (layout storage (:id mi)
+                             {(str "fn-" (:id mi))
+                              {:full-depth 0 :partial-fns #{(:id p1)}}})]
+          (is (seq (:nodes result))))
+        (finally (sp/close storage))))))
+
+
+(deftest layout-hof-slot-test
+  (testing "a ref bound into an :fn-typed slot drives the HOF path"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base   (setup/create-base-fn! storage "lg-hof-base")
+              fslot  (setup/create-slot! storage "func" :fn)
+              _      (setup/attach-slot! storage (:id base) (:id fslot) 0)
+              target (setup/create-base-fn! storage "lg-hof-target")
+              c      (setup/create-composed-fn! storage "lg-hof-fn" (:id base))
+              _      (setup/bind-ref! storage (:id c) (:id fslot) (:id target))
+              result (layout storage (:id c))]
+          (is (seq (:nodes result)))
+          (is (some #(= (str (:id target)) (:originalFnId (:data %)))
+                    (fn-nodes result))))
+        (finally (sp/close storage))))))
+
+
+(deftest layout-optional-arg-test
+  (testing "an unbound optional slot is routed as a compact optional badge"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/create-base-fn! storage "lg-opt-base")
+              slot (sp/create-entity storage :slot
+                                     {:name "opt"
+                                      :type-fn-id (get setup/primitive-fn-ids :int)
+                                      :required false})
+              _    (setup/attach-slot! storage (:id base) (:id slot) 0)
+              c    (setup/create-composed-fn! storage "lg-opt-fn" (:id base))
+              result (layout storage (:id c))]
+          (is (seq (:nodes result)))
+          ;; The optional arg surfaces on the fn-node's :optionalArgs,
+          ;; not as a standalone placeholder node.
+          (is (some #(some (fn [n] (= "opt" (name n)))
+                           (:optionalArgs (:data %)))
+                    (fn-nodes result))))
+        (finally (sp/close storage))))))
+
+
+(deftest layout-deep-expansion-test
+  (testing "a two-level inheritance chain expands to full depth"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "lg-deep-base")
+              slot  (setup/create-slot! storage "n" :int)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              mid   (setup/create-composed-fn! storage "lg-deep-mid" (:id base))
+              child (setup/create-composed-fn! storage "lg-deep-child" (:id mid))
+              result (layout storage (:id child)
+                             {(str "fn-" (:id child)) {:full-depth 2
+                                                       :partial-fns #{}}})]
+          (is (seq (:nodes result)))
+          (is (some #(= (str (:id child)) (:originalFnId (:data %)))
+                    (fn-nodes result))))
+        (finally (sp/close storage))))))

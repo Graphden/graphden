@@ -22,6 +22,22 @@
     [graphden.types.core :as types]))
 
 
+(defn- query-fn-by-name
+  "Look up a fn by `:name`, tolerating the enum-typed `fn.name` column.
+   A name that was never created is not a valid enum value, so the
+   storage codec raises `:validation-error/type-mismatch` on the
+   query itself. Swallow exactly that — it just means \"no such fn\"
+   — but rethrow anything else. Mirrors
+   `compile-runtime/query-fn-by-name`."
+  [storage value]
+  (try
+    (first (sp/query-entities storage :fn {:name value}))
+    (catch clojure.lang.ExceptionInfo e
+      (when-not (= :validation-error/type-mismatch (:type (ex-data e)))
+        (throw e))
+      nil)))
+
+
 (defn resolve-type-fn-id
   "Look up a type-row fn by name in storage and return its id (a UUID
    the schema's `return-type-fn-id` FK accepts). The argument is the
@@ -32,9 +48,8 @@
   [storage v]
   (when-not (str/blank? v)
     (or (try (java.util.UUID/fromString v) (catch Exception _ nil))
-        (let [match (or (first (sp/query-entities storage :fn {:name v}))
-                        (first (sp/query-entities storage :fn
-                                                  {:name (keyword v)})))]
+        (let [match (or (query-fn-by-name storage v)
+                        (query-fn-by-name storage (keyword v)))]
           (or (:id match)
               (throw (ex-info (str "Unknown type reference: " (pr-str v)
                                    " — no fn with that name exists yet")

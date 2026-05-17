@@ -74,20 +74,17 @@
           (is (= (:id f) (tc/resolve-type-fn-id storage "rtfi-known"))))
         (finally (sp/close storage)))))
 
-  (testing "an unknown name is rejected with an ExceptionInfo"
-    ;; NOTE: the docstring promises `:crud/unknown-type-ref`, but with an
-    ;; enum-typed `fn.name` column an unmatched name is not a valid enum
-    ;; value, so the storage codec raises `:validation-error/type-mismatch`
-    ;; on the query before the function's own throw is reached. Either
-    ;; way an unknown name does NOT resolve silently.
+  (testing "an unknown name throws :crud/unknown-type-ref"
+    ;; The enum-typed `fn.name` column makes an unmatched name an
+    ;; invalid enum value; `query-fn-by-name` swallows the resulting
+    ;; `:validation-error/type-mismatch` so the function's own
+    ;; documented `:crud/unknown-type-ref` is the error that surfaces.
     (let [storage (setup/create-test-storage)]
       (try
         (let [ex (try (tc/resolve-type-fn-id storage "rtfi-nope")
                       (catch clojure.lang.ExceptionInfo e e))]
           (is (instance? clojure.lang.ExceptionInfo ex))
-          (is (contains? #{:crud/unknown-type-ref
-                           :validation-error/type-mismatch}
-                         (:type (ex-data ex)))))
+          (is (= :crud/unknown-type-ref (:type (ex-data ex)))))
         (finally (sp/close storage))))))
 
 

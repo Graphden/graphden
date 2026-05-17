@@ -199,3 +199,92 @@
             (is (= main-id (:target-branch-id record)))
             (is (some? (sp/read-entity base :branch-merge (:id record)))))))
       (finally (sp/close base)))))
+
+
+;; ============================================================================
+;; VersionedStorage — the StorageCRUD protocol over a versioned entity (:fn)
+;; ============================================================================
+
+(deftest versioned-crud-test
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (testing "create → read → update → delete round-trip on a versioned :fn"
+        (let [created (sp/create-entity v :fn {:name "vc-fn" :parent-ids []
+                                               :impl-hash "h"})
+              id      (:id created)]
+          (is (= "vc-fn" (:name (sp/read-entity v :fn id))))
+          (sp/update-entity v :fn id {:description "updated"})
+          (is (= "updated" (:description (sp/read-entity v :fn id))))
+          (is (true? (sp/delete-entity v :fn id)))
+          (is (nil? (sp/read-entity v :fn id)))))
+
+      (testing "update-entity on a missing entity → :not-found"
+        (let [ex (try (sp/update-entity v :fn (random-uuid) {:description "x"})
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (= :not-found (:type (ex-data ex))))))
+
+      (testing "a non-versioned entity (:ns) passes straight through"
+        (let [ns-row (sp/create-entity v :ns {:name "vc-ns"})]
+          (is (= "vc-ns" (:name (sp/read-entity v :ns (:id ns-row)))))
+          (sp/delete-entity v :ns (:id ns-row))
+          (is (nil? (sp/read-entity v :ns (:id ns-row))))))
+      (finally (sp/close base)))))
+
+
+(deftest versioned-batch-crud-test
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (testing "create-entities → read-entities → update-entities → delete-entities"
+        (let [created (sp/create-entities v :fn
+                                          [{:name "vb-a" :parent-ids [] :impl-hash "h"}
+                                           {:name "vb-b" :parent-ids [] :impl-hash "h"}])
+              ids     (mapv :id created)]
+          (is (= 2 (count (sp/read-entities v :fn ids))))
+          (sp/update-entities v :fn (mapv #(assoc % :description "batch") created))
+          (is (every? #(= "batch" (:description %))
+                      (vals (sp/read-entities v :fn ids))))
+          (is (= 2 (sp/delete-entities v :fn ids)))))
+
+      (testing "update-entities with a missing id → :not-found"
+        (let [ex (try (sp/update-entities v :fn [{:id (random-uuid)
+                                                  :description "x"}])
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (= :not-found (:type (ex-data ex))))))
+      (finally (sp/close base)))))
+
+
+(deftest versioned-introspection-test
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (testing "introspection delegates to the base storage"
+        (is (seq (sp/current-entities v)))
+        (is (seq (sp/current-fields v :fn)))
+        (is (some? (sp/schema-metadata v)))
+        ;; current-enums / current-enum-values just need to not blow up.
+        (is (coll? (sp/current-enums v))))
+      (finally (sp/close base)))))
+
+
+(deftest versioned-execution-graph-test
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (testing "resolve-execution-graph on an unknown fn → :not-found"
+        (let [ex (try (sp/resolve-execution-graph v (random-uuid))
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (= :not-found (:type (ex-data ex))))))
+
+      (testing "resolve-execution-graph on a real fn returns its graph"
+        (let [f (sp/create-entity v :fn {:name "veg-fn" :parent-ids []
+                                         :impl-hash "h"})
+              result (sp/resolve-execution-graph v (:id f))]
+          (is (contains? (:fns result) (:id f)))))
+
+      (testing "validate-no-dependency-cycle! — nil ref is a no-op"
+        (let [f (sp/create-entity v :fn {:name "veg-cyc" :parent-ids []
+                                         :impl-hash "h"})]
+          (is (nil? (sp/validate-no-dependency-cycle! v (:id f) nil)))))
+      (finally (sp/close base)))))

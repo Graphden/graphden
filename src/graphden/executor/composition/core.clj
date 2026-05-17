@@ -86,8 +86,67 @@
   (mapv #(dissoc % :kind) records))
 
 
+(defn- reconcile-fn-bodies!
+  "Make every synced fn's body — its `fn-slot` / `binding` /
+   `binding-list-item` rows — match its declaration EXACTLY.
+
+   `write-records!`'s upserts alone are additive: body rows from a
+   fn's PRIOR definition survive a package refactor. A renamed slot,
+   a dropped arg, a restructured inherited chain each mint new
+   deterministic ids (`binding-id` keys off `(fn-id, slot-id)`), so
+   the upsert writes the new row and silently leaves the old one
+   behind. The layout and executor then see a live row AND its stale
+   shadow — e.g. one `r404` binding rendered as two `_r404-body`
+   cards.
+
+   A fn's fn-slots and bindings (and the bindings' list-items) are
+   owned by exactly that fn and wholly determined by its declaration,
+   so re-syncing the fn must delete whatever it no longer declares.
+   Slots are deliberately NOT reconciled — they are shared, immutable
+   and content-addressed; an unreferenced slot row is inert.
+
+   `parse-module` is a pure, deterministic function of the package
+   source (no storage reads on the production 5-arity sync path), so
+   re-syncing UNCHANGED source produces an identical record set and
+   this reconciliation is a guaranteed no-op. It only deletes rows
+   when the source genuinely changed — exactly the orphans a refactor
+   leaves behind.
+
+   Scoped to `synced-fn-ids` (the fns in THIS batch): user-created
+   fns (never part of a package batch) and package fns synced in a
+   different batch are left untouched."
+  [storage synced-fn-ids declared-fn-slots declared-bindings declared-items]
+  (when (seq synced-fn-ids)
+    (let [declared-fn-slot-ids (into #{} (map :id) declared-fn-slots)
+          declared-binding-ids (into #{} (map :id) declared-bindings)
+          declared-item-ids    (into #{} (map :id) declared-items)
+          owns-fn? (fn [row] (contains? synced-fn-ids (:fn-id row)))
+          existing-fn-slots (filterv owns-fn? (sp/query-entities storage :fn-slot {}))
+          existing-bindings (filterv owns-fn? (sp/query-entities storage :binding {}))
+          owned-binding-ids (into #{} (map :id) existing-bindings)
+          existing-items    (filterv #(contains? owned-binding-ids (:binding-id %))
+                                     (sp/query-entities storage :binding-list-item {}))
+          stale-ids (fn [rows declared-ids]
+                      (into [] (comp (remove #(contains? declared-ids (:id %)))
+                                     (map :id))
+                            rows))
+          stale-items    (stale-ids existing-items    declared-item-ids)
+          stale-bindings (stale-ids existing-bindings declared-binding-ids)
+          stale-fn-slots (stale-ids existing-fn-slots declared-fn-slot-ids)]
+      ;; Delete leaves first — list-item FK → binding, binding / fn-slot FK → fn.
+      (when (seq stale-items)
+        (sp/delete-entities storage :binding-list-item stale-items))
+      (when (seq stale-bindings)
+        (sp/delete-entities storage :binding stale-bindings))
+      (when (seq stale-fn-slots)
+        (sp/delete-entities storage :fn-slot stale-fn-slots)))))
+
+
 (defn write-records!
-  "Batch-upsert records of all kinds to storage in dependency order.
+  "Batch-upsert records of all kinds to storage in dependency order,
+   then reconcile each synced fn's body so storage matches the
+   declaration exactly (see `reconcile-fn-bodies!`).
+
    `records` is a flat vector of tagged maps (output of
    `records/parse-module` or `records/boot-primitive-records`).
    Returns `{fn-name → fn-id}` for named fn rows."
@@ -112,6 +171,11 @@
       (sp/upsert-entities storage :binding (strip-kind bindings)))
     (when (seq items)
       (sp/upsert-entities storage :binding-list-item (strip-kind items)))
+    ;; The upserts above are additive; this makes the sync declarative
+    ;; — body rows a fn no longer declares are dropped.
+    (reconcile-fn-bodies! storage
+                          (into #{} (keep :id) fns)
+                          fn-slots bindings items)
     ;; Build the name→id return map.
     (into {}
           (keep (fn [fr]

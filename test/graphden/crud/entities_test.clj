@@ -66,7 +66,19 @@
                 :terminal "true" :list-append "false" :override-kind "fixed"})))
       (is (= {:value nil} (entities/parse-binding-from-form {:value ""})))
       (is (= {:required nil} (entities/parse-binding-from-form {:required ""})))
-      (is (= {} (entities/parse-binding-from-form {}))))))
+      (is (= {} (entities/parse-binding-from-form {})))))
+
+  (testing "ref-fn-id / type-override-fn-id / description / list-closed / required"
+    (let [r (random-uuid) tov (random-uuid)]
+      (is (= {:ref-fn-id r :type-override-fn-id tov :description "d"
+              :list-closed true :required true}
+             (entities/parse-binding-from-form
+               {:ref-fn-id (str r) :type-override-fn-id (str tov)
+                :description "d" :list-closed "true" :required "true"})))
+      ;; empty-as-clear on the nullable ref slots
+      (is (= {:ref-fn-id nil :type-override-fn-id nil}
+             (entities/parse-binding-from-form
+               {:ref-fn-id "" :type-override-fn-id ""}))))))
 
 
 (deftest parse-binding-list-item-from-form-test
@@ -109,10 +121,37 @@
                (entities/parse-fn-from-form
                  {:constraint "[\"union\",\"int\",\"text\"]"} c))))
 
+      (testing "constraint with comparison ops + numeric members"
+        ;; bare `[!<>=]+` ops keywordise; numbers stay as-is (`:else x`)
+        (is (= {:constraint [:and [:>= 100] [:<= 599]]}
+               (entities/parse-fn-from-form
+                 {:constraint "[\"and\",[\">=\",100],[\"<=\",599]]"} c))))
+
+      (testing "a constraint that isn't valid JSON falls back to the raw string"
+        ;; json/parse-string throws → caught → raw string → re-kw
+        ;; keywordises the bare alpha identifier
+        (is (= {:constraint :not-json}
+               (entities/parse-fn-from-form {:constraint "not-json"} c))))
+
       (testing "return-type name resolves to a fn-id"
         (let [parsed (entities/parse-fn-from-form {:return-type "int"} c)]
           (is (= (get setup/primitive-fn-ids :int)
                  (:return-type-fn-id parsed)))))
+
+      (testing "base-fn-id / element-fn-id resolve named types (empty → nil)"
+        (let [parsed (entities/parse-fn-from-form
+                       {:base-fn-id "int" :element-fn-id "text"} c)]
+          (is (= (get setup/primitive-fn-ids :int) (:base-fn-id parsed)))
+          (is (= (get setup/primitive-fn-ids :text) (:element-fn-id parsed))))
+        (is (= {:base-fn-id nil :element-fn-id nil}
+               (entities/parse-fn-from-form
+                 {:base-fn-id "" :element-fn-id ""} c))))
+
+      (testing "parent-id (single) + namespace-id resolve to UUIDs"
+        (let [p (random-uuid) n (random-uuid)]
+          (is (= {:parent-id p :namespace-id n}
+                 (entities/parse-fn-from-form
+                   {:parent-id (str p) :namespace-id (str n)} c)))))
       (finally (sp/close storage)))))
 
 
@@ -535,4 +574,169 @@
         (testing "a body with no args / ret / effects → 400"
           (is (= 400 (:status (entities/process-tighten-binding-effects
                                 {:uri uri :body {}} c))))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-create-entity — fn / binding success paths + error humanising
+;; ============================================================================
+
+(deftest process-create-entity-fn-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "form-encoded composed-fn create → 200 + entityCreated"
+        (let [base (setup/create-base-fn! storage "pce-base")
+              resp (entities/process-create-entity
+                     {:uri "/api/entities/fn"
+                      :body (str "name=pce-composed&parent-ids=" (:id base))}
+                     c)]
+          (is (= 200 (:status resp)))
+          (is (= "entityCreated" (get-in resp [:headers "HX-Trigger"])))
+          (is (some #(= "pce-composed" (:name %))
+                    (sp/query-entities storage :fn {})))))
+      (finally (sp/close storage)))))
+
+
+(deftest process-create-entity-binding-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (let [base (setup/create-base-fn! storage "pceb-base")
+            slot (setup/create-slot! storage "n" :int)
+            _    (setup/attach-slot! storage (:id base) (:id slot) 0)
+            comp (setup/create-composed-fn! storage "pceb-comp" (:id base))]
+        (testing "form-encoded binding create → 200, binding persisted"
+          (let [resp (entities/process-create-entity
+                       {:uri "/api/entities/binding"
+                        :body (str "fn-id=" (:id comp) "&slot-id=" (:id slot)
+                                   "&value=42&override-kind=fixed")}
+                       c)]
+            (is (= 200 (:status resp)))
+            (is (= 1 (count (sp/query-entities storage :binding
+                                               {:fn-id (:id comp)}))))))
+
+        (testing "a binding carrying rename-to also mints the renamed-view slot"
+          (let [base2 (setup/create-base-fn! storage "pceb-base2")
+                slot2 (setup/create-slot! storage "orig" :int)
+                _     (setup/attach-slot! storage (:id base2) (:id slot2) 0)
+                comp2 (setup/create-composed-fn! storage "pceb-comp2" (:id base2))
+                resp  (entities/process-create-entity
+                        {:uri "/api/entities/binding"
+                         :body (str "fn-id=" (:id comp2) "&slot-id=" (:id slot2)
+                                    "&value=1&override-kind=fixed&rename-to=renamed-n")}
+                        c)]
+            (is (= 200 (:status resp)))
+            (is (some #(= "renamed-n" (:name %))
+                      (sp/query-entities storage :slot {}))))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-update-entity — fn / binding success paths
+;; ============================================================================
+
+(deftest process-update-entity-fn-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "form-encoded fn description update → 200, field applied"
+        (let [f    (setup/create-base-fn! storage "pue-fn")
+              resp (entities/process-update-entity
+                     {:uri (str "/api/entities/fn/" (:id f))
+                      :body "description=updated-desc"} c)]
+          (is (= 200 (:status resp)))
+          (is (= "updated-desc"
+                 (:description (sp/read-entity storage :fn (:id f)))))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-delete-entity — fn / binding success paths
+;; ============================================================================
+
+(deftest process-delete-entity-fn-binding-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "deleting an unreferenced fn → 200 + entityDeleted"
+        (let [f    (setup/create-base-fn! storage "pde-free-fn")
+              resp (entities/process-delete-entity
+                     {:uri (str "/api/entities/fn/" (:id f))} c)]
+          (is (= 200 (:status resp)))
+          (is (= "entityDeleted" (get-in resp [:headers "HX-Trigger"])))
+          (is (nil? (sp/read-entity storage :fn (:id f))))))
+
+      (testing "deleting a binding → 200, row gone"
+        (let [base (setup/create-base-fn! storage "pde-bind-base")
+              slot (setup/create-slot! storage "n" :int)
+              _    (setup/attach-slot! storage (:id base) (:id slot) 0)
+              comp (setup/create-composed-fn! storage "pde-bind-comp" (:id base))
+              bind (sp/create-entity storage :binding
+                                     {:fn-id (:id comp) :slot-id (:id slot)
+                                      :value 1 :override-kind :fixed})
+              resp (entities/process-delete-entity
+                     {:uri (str "/api/entities/binding/" (:id bind))} c)]
+          (is (= 200 (:status resp)))
+          (is (nil? (sp/read-entity storage :binding (:id bind))))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-update-record-type — field removal / reposition / fn rename
+;; ============================================================================
+
+(deftest process-update-record-type-diff-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "dropping a field, reordering the rest, renaming the record"
+        (let [created (entities/process-create-record-type
+                        {:body {:name "DiffRec"
+                                :fields [{:name "a" :type "int"}
+                                         {:name "b" :type "text"}
+                                         {:name "c" :type "int"}]}} c)
+              rec-id  (:id created)
+              fn-uuid (java.util.UUID/fromString rec-id)
+              ;; keep c + a (drops b), reorder, rename + describe the fn-row
+              res     (entities/process-update-record-type
+                        {:body {:id rec-id
+                                :name "DiffRecRenamed"
+                                :description "now described"
+                                :fields [{:name "c" :type "int"}
+                                         {:name "a" :type "int"}]}} c)]
+          (is (true? (:ok res)))
+          (is (= 2 (count (sp/query-entities storage :fn-slot
+                                             {:fn-id fn-uuid}))))
+          (let [row (sp/read-entity storage :fn fn-uuid)]
+            (is (= "DiffRecRenamed" (:name row)))
+            (is (= "now described" (:description row))))))
+
+      (testing "a field with a blank name fails the whole update"
+        (let [created (entities/process-create-record-type
+                        {:body {:name "BlankFieldRec"
+                                :fields [{:name "x" :type "int"}]}} c)
+              res     (entities/process-update-record-type
+                        {:body {:id (:id created)
+                                :fields [{:name "" :type "int"}]}} c)]
+          (is (false? (:ok res)))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-create-record-type — a field missing its name rolls back
+;; ============================================================================
+
+(deftest process-create-record-type-blank-field-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "a blank field name throws → cleanup → :ok false, nothing left"
+        (let [before (count (sp/query-entities storage :fn {}))
+              res    (entities/process-create-record-type
+                       {:body {:name "RollbackRec"
+                               :fields [{:name "" :type "int"}]}} c)]
+          (is (false? (:ok res)))
+          (is (= before (count (sp/query-entities storage :fn {})))
+              "the half-created fn-row was rolled back")))
       (finally (sp/close storage)))))

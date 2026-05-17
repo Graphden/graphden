@@ -359,3 +359,180 @@
         (let [resp (entities/process-delete-entity {:uri "/api/entities/fn"} c)]
           (is (= 400 (:status resp)))))
       (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-update-record-type
+;; ============================================================================
+
+(deftest process-update-record-type-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "missing id / empty fields are rejected"
+        (is (false? (:ok (entities/process-update-record-type
+                            {:body {:fields [{:name "x" :type "int"}]}} c))))
+        (is (false? (:ok (entities/process-update-record-type
+                            {:body {:id (str (random-uuid)) :fields []}} c)))))
+
+      (testing "an unknown fn id → not found"
+        (let [res (entities/process-update-record-type
+                    {:body {:id (str (random-uuid))
+                            :fields [{:name "x" :type "int"}]}} c)]
+          (is (false? (:ok res)))
+          (is (re-find #"not found" (:error res)))))
+
+      (testing "happy update — adding a field keeps the old slot, mints the new one"
+        (let [created (entities/process-create-record-type
+                        {:body {:name "UpdRec"
+                                :fields [{:name "title" :type "text"}]}} c)
+              rec-id  (:id created)
+              res     (entities/process-update-record-type
+                        {:body {:id rec-id
+                                :fields [{:name "title" :type "text"}
+                                         {:name "count" :type "int"}]}} c)]
+          (is (true? (:ok res)))
+          (is (= 2 (count (sp/query-entities
+                            storage :fn-slot
+                            {:fn-id (java.util.UUID/fromString rec-id)}))))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-update-entity
+;; ============================================================================
+
+(deftest process-update-entity-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "form-encoded ns update → 200, field applied"
+        (let [ns-row (entities/create-entity "ns" {:name "upd-ns"} c)
+              resp   (entities/process-update-entity
+                       {:uri (str "/api/entities/ns/" (:id ns-row))
+                        :body "description=changed"} c)]
+          (is (= 200 (:status resp)))
+          (is (= "changed"
+                 (:description (entities/get-entity "ns" (:id ns-row) c))))))
+
+      (testing "a request with no id segment → 400"
+        (let [resp (entities/process-update-entity
+                     {:uri "/api/entities/ns" :body "name=x"} c)]
+          (is (= 400 (:status resp)))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; ensure-rename-slot!
+;; ============================================================================
+
+(deftest ensure-rename-slot-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (testing "a composed fn gets a renamed-view slot linked to the source slot"
+        (let [parent   (setup/create-base-fn! storage "ers-parent")
+              src-slot (setup/create-slot! storage "orig" :int)
+              _        (setup/attach-slot! storage (:id parent) (:id src-slot) 0)
+              child    (setup/create-composed-fn! storage "ers-child" (:id parent))]
+          (entities/ensure-rename-slot! storage (:id child) (:id src-slot) "renamed")
+          (let [renamed (->> (sp/query-entities storage :slot {})
+                             (filter #(= "renamed" (:name %)))
+                             first)]
+            (is (some? renamed))
+            (is (= (:id src-slot) (:source-slot-id renamed))))
+          ;; Idempotent — a second identical call must not throw.
+          (is (nil? (entities/ensure-rename-slot!
+                      storage (:id child) (:id src-slot) "renamed")))))
+
+      (testing "blank rename-to / base-fn owner → no-op"
+        (let [base (setup/create-base-fn! storage "ers-base")
+              s    (setup/create-slot! storage "x" :int)]
+          (is (nil? (entities/ensure-rename-slot! storage (:id base) (:id s) "")))
+          (is (nil? (entities/ensure-rename-slot! storage (:id base) (:id s) "nope")))
+          (is (empty? (->> (sp/query-entities storage :slot {})
+                           (filter #(= "nope" (:name %))))))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; Sequence operations — append / update / remove
+;; ============================================================================
+
+(deftest sequence-operations-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (let [host (setup/create-base-fn! storage "seq-host")
+            slot (setup/create-slot! storage "items" :sequence)
+            _    (setup/attach-slot! storage (:id host) (:id slot) 0)
+            append-uri (str "/api/sequence/append/" (:id host))]
+        (testing "append to a fn with a sequence slot → 200, item persisted"
+          (let [resp (entities/process-sequence-append
+                       {:uri append-uri :body "{\"value\": 42}"} c)]
+            (is (= 200 (:status resp)))
+            (is (= 1 (count (sp/query-entities storage :binding-list-item {}))))))
+
+        (testing "append: invalid fn-id → 400, missing body → 400"
+          (is (= 400 (:status (entities/process-sequence-append
+                                {:uri "/api/sequence/append/not-a-uuid"
+                                 :body "{}"} c))))
+          (is (= 400 (:status (entities/process-sequence-append
+                                {:uri append-uri} c)))))
+
+        (testing "update then remove the appended item"
+          (let [item-id (:id (first (sp/query-entities
+                                       storage :binding-list-item {})))
+                upd  (entities/process-sequence-update
+                       {:uri (str "/api/sequence/item/" item-id)
+                        :body "{\"value\": 99}"} c)
+                _    (is (= 200 (:status upd)))
+                rm   (entities/process-sequence-remove
+                       {:uri (str "/api/sequence/item/" item-id)} c)]
+            (is (= 200 (:status rm)))
+            (is (nil? (sp/read-entity storage :binding-list-item item-id)))))
+
+        (testing "remove / update of an unknown item → 404"
+          (is (= 404 (:status (entities/process-sequence-remove
+                                {:uri (str "/api/sequence/item/" (random-uuid))}
+                                c))))
+          (is (= 404 (:status (entities/process-sequence-update
+                                {:uri (str "/api/sequence/item/" (random-uuid))
+                                 :body "{\"value\": 1}"} c))))))
+
+      (testing "append to a fn with NO sequence slot → 404"
+        (let [plain (setup/create-base-fn! storage "no-seq-host")
+              s     (setup/create-slot! storage "n" :int)
+              _     (setup/attach-slot! storage (:id plain) (:id s) 0)
+              resp  (entities/process-sequence-append
+                      {:uri (str "/api/sequence/append/" (:id plain))
+                       :body "{\"value\": 1}"} c)]
+          (is (= 404 (:status resp)))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; process-tighten-binding-effects — request validation branches
+;; ============================================================================
+
+(deftest process-tighten-binding-effects-validation-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "invalid binding-id → 400"
+        (is (= 400 (:status (entities/process-tighten-binding-effects
+                               {:uri "/api/bindings/not-a-uuid/tighten-fn-effects"
+                                :body {}} c)))))
+
+      (let [uri (str "/api/bindings/" (random-uuid) "/tighten-fn-effects")]
+        (testing "'effects' not a JSON array → 400"
+          (is (= 400 (:status (entities/process-tighten-binding-effects
+                                 {:uri uri :body {:effects "nope"}} c)))))
+
+        (testing "'args' not a JSON object → 400"
+          (is (= 400 (:status (entities/process-tighten-binding-effects
+                                 {:uri uri :body {:args "nope"}} c)))))
+
+        (testing "a body with no args / ret / effects → 400"
+          (is (= 400 (:status (entities/process-tighten-binding-effects
+                                 {:uri uri :body {}} c))))))
+      (finally (sp/close storage)))))

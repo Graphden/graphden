@@ -71,9 +71,13 @@
     (is (= {:a :int :b :text}
            (ta/json->type {"a" "int" "b" "text"}))))
 
-  (testing "json->type-form behaves the same"
+  (testing "json->type-form — vectors, maps (string keys → keywords), scalars"
     (is (= [:union :int :text]
-           (ta/json->type-form ["union" "int" "text"])))))
+           (ta/json->type-form ["union" "int" "text"])))
+    (is (= {:x :int :y :text}
+           (ta/json->type-form {"x" "int" "y" "text"})))
+    (is (= 7 (ta/json->type-form 7)))
+    (is (nil? (ta/json->type-form nil)))))
 
 
 ;; ============================================================================
@@ -96,7 +100,16 @@
   (testing "two fn-types → signature-mismatch message"
     (is (re-find #"function signature mismatch"
                  (ta/describe-mismatch [:fn {:x :int} :int]
-                                       [:fn {} :int])))))
+                                       [:fn {} :int]))))
+
+  (testing "two refinements with different constraints → constraints-differ"
+    (is (re-find #"refinement constraints differ"
+                 (ta/describe-mismatch [:refine :int [:> 0]]
+                                       [:refine :int [:> 5]]))))
+
+  (testing "mismatched type kinds fall through to the generic message"
+    (is (re-find #"is not a subtype of"
+                 (ta/describe-mismatch :int [:list :int])))))
 
 
 ;; ============================================================================
@@ -175,6 +188,40 @@
 
       (testing "all-rich-types is the same snapshot"
         (is (map? (ta/all-rich-types c))))
+
+      (finally (sp/close storage))))
+
+  ;; Fresh storage — `cached-or-load-graph` memoises on the ctx, so a
+  ;; second batch of writes needs a clean ctx to be visible.
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "record / union / variant / list / fn type-rows all surface"
+        (let [int-id  (get setup/primitive-fn-ids :int)
+              text-id (get setup/primitive-fn-ids :text)
+              ;; record type-row — a fn with own slots, no parent/impl
+              rec   (sp/create-entity storage :fn
+                                      {:name "rttr-rec" :parent-ids []
+                                       :description "a record row"})
+              s1    (setup/create-slot! storage "title" :text)
+              s2    (setup/create-slot! storage "count" :int)
+              _     (setup/attach-slot! storage (:id rec) (:id s1) 0)
+              _     (setup/attach-slot! storage (:id rec) (:id s2) 1)
+              _     (sp/create-entity storage :fn
+                                      {:name "rttr-union" :parent-ids []
+                                       :constraint [:union :int :text]})
+              _     (sp/create-entity storage :fn
+                                      {:name "rttr-list" :parent-ids []
+                                       :element-fn-id int-id})
+              _     (sp/create-entity storage :fn
+                                      {:name "rttr-fn" :parent-ids []
+                                       :constraint [:fn text-id int-id]})
+              snap  (ta/rich-types-with-type-rows c)]
+          ;; every storage-only type-row is flagged and carries its name
+          (is (every? #(some? (get snap %))
+                      [:rttr-rec :rttr-union :rttr-list :rttr-fn]))
+          (is (true? (:type-row? (get snap :rttr-rec))))
+          (is (= "a record row" (:description (get snap :rttr-rec))))))
       (finally (sp/close storage)))))
 
 
@@ -194,6 +241,19 @@
           (is (true? (:ok res)))
           (is (vector? (:candidates res)))
           (is (= (:count res) (count (:candidates res))))))
+
+      (testing "the effects filter keeps only candidates within the allowed set"
+        (let [res (ta/types-candidates
+                    {:body {:expected "any" :effects []}} c)]
+          (is (true? (:ok res)))
+          ;; effects=[] → only pure (no-effect) producers survive
+          (is (every? #(empty? (:effects %)) (:candidates res)))))
+
+      (testing "the name-prefix filter restricts by fn-name"
+        (let [res (ta/types-candidates
+                    {:body {:expected "any" :name-prefix "zzz-no-such"}} c)]
+          (is (true? (:ok res)))
+          (is (zero? (:count res)))))
       (finally (sp/close storage)))))
 
 
@@ -221,4 +281,36 @@
           (is (true? (:ok res)))
           (is (pos? (:count res)))
           (is (some #(= :slot-of (:kind %)) (:usages res)))))
+
+      (finally (sp/close storage))))
+
+  ;; Fresh storage — the cached graph from the slot-usage call above
+  ;; would otherwise hide these later writes.
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "a union branch + a binding type-override referencing the target"
+        (let [int-id   (get setup/primitive-fn-ids :int)
+              type-row (sp/create-entity storage :fn
+                                         {:name "tu-target" :parent-ids []
+                                          :base-fn-id int-id :constraint [:> 0]})
+              ;; a union type-row whose constraint names the target
+              _        (sp/create-entity storage :fn
+                                         {:name "tu-union" :parent-ids []
+                                          :constraint [:union :tu-target :text]})
+              ;; a binding whose :type-override-fn-id is the target
+              host     (setup/create-base-fn! storage "tu-ovr-host")
+              slot     (setup/create-slot! storage "n" :int)
+              _        (setup/attach-slot! storage (:id host) (:id slot) 0)
+              comp     (setup/create-composed-fn! storage "tu-ovr-comp" (:id host))
+              _        (sp/create-entity storage :binding
+                                         {:fn-id (:id comp) :slot-id (:id slot)
+                                          :type-override-fn-id (:id type-row)
+                                          :override-kind :fixed})
+              res      (ta/types-usages
+                         {:body {:type-fn-id (str (:id type-row))}} c)
+              kinds    (set (map :kind (:usages res)))]
+          (is (true? (:ok res)))
+          (is (contains? kinds :union-branch))
+          (is (contains? kinds :binding-of))))
       (finally (sp/close storage)))))

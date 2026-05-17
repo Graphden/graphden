@@ -137,6 +137,37 @@
         (finally (sp/close storage))))))
 
 
+(deftest compile-execute-sequence-ref-item-test
+  (testing "a binding-list-item that's a fn-ref resolves via resolve-seq-item
+            — the ref is executed through the call-cache and its result
+            takes that position in the materialised sequence"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (exec/register-base-fn! :ct-seqsum (setup/fn-impl [nums] (reduce + 0 nums)))
+        (exec/register-base-fn! :ct-ten (setup/fn-impl [] 10))
+        (let [sumbase  (setup/create-base-fn! storage "ct-seqsum")
+              slot     (setup/create-slot! storage "nums" :sequence)
+              _        (setup/attach-slot! storage (:id sumbase) (:id slot) 0)
+              tenbase  (setup/create-base-fn! storage "ct-ten")
+              ten      (setup/create-composed-fn! storage "ct-ten-fn" (:id tenbase))
+              composed (setup/create-composed-fn! storage "ct-seq-mixed"
+                                                  (:id sumbase))
+              bind     (sp/create-entity storage :binding
+                                         {:fn-id (:id composed) :slot-id (:id slot)
+                                          :list-append true :override-kind :fixed})
+              _ (sp/create-entity storage :binding-list-item
+                                  {:binding-id (:id bind) :position 0 :value 1})
+              _ (sp/create-entity storage :binding-list-item
+                                  {:binding-id (:id bind) :position 1
+                                   :ref-fn-id (:id ten)})
+              _ (sp/create-entity storage :binding-list-item
+                                  {:binding-id (:id bind) :position 2 :value 2})
+              ctx (exec/create-context {:storage storage})]
+          ;; [1, (ct-ten-fn → 10), 2] summed → 13
+          (is (= 13 (exec/execute ctx (:id composed) {}))))
+        (finally (sp/close storage))))))
+
+
 ;; ============================================================================
 ;; set-always-fresh-fn-ids!
 ;; ============================================================================

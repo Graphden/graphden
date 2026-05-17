@@ -155,3 +155,16 @@
 
   (testing "a :sequence-typed slot bound to a single fn-ref resolves"
     (is (= "abc" (run "ex-regression-str-via-ref")))))
+
+
+;; ============================================================================
+;; ref env-bindings — compiling/executing the real router
+;; ============================================================================
+
+(deftest router-ref-env-bindings-test
+  (testing "`_router` compiles + executes to a callable"
+    ;; text-error-router's MI parents (r404/r405/r500) bind the
+    ;; default-handler response slots — substitution-context bindings
+    ;; that surface as `:ref`-kind env-bindings, exercising
+    ;; augment-env's :ref branch + make-ref-entry.
+    (is (fn? (run "_router")))))

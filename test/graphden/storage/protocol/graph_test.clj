@@ -44,9 +44,9 @@
   (testing "with-max-graph-iterations rebinds the limit for the body"
     (is (= 5 (g/with-max-graph-iterations 5 (fn [] g/*max-graph-iterations*))))
     (g/with-max-graph-iterations 5
-      (fn []
-        (is (thrown? clojure.lang.ExceptionInfo
-                     (g/check-graph-iteration-limit! 6 (random-uuid))))))))
+                                 (fn []
+                                   (is (thrown? clojure.lang.ExceptionInfo
+                                         (g/check-graph-iteration-limit! 6 (random-uuid))))))))
 
 
 ;; ============================================================================

@@ -60,7 +60,7 @@
   (testing "strings → keywords, scalars pass through"
     (is (= :int (ta/json->type "int")))
     (is (= 42 (ta/json->type 42)))
-    (is (= true (ta/json->type true)))
+    (is (true? (ta/json->type true)))
     (is (nil? (ta/json->type nil))))
 
   (testing "fn-type / refinement / record JSON shapes round-trip"

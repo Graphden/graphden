@@ -122,8 +122,8 @@
     (is (nil? (reg/validate-all-defs! {:vad-a {:return-type :int}
                                        :vad-b {:return-type :text}})))
     (is (thrown? clojure.lang.ExceptionInfo
-                 (reg/validate-all-defs! {:vad-a {:return-type :int}
-                                          :vad-bad {:args {:a :int}}})))))
+          (reg/validate-all-defs! {:vad-a {:return-type :int}
+                                   :vad-bad {:args {:a :int}}})))))
 
 
 ;; ============================================================================

@@ -149,7 +149,7 @@
 
   (testing "InputStream body is parsed with keyword keys"
     (let [stream (ByteArrayInputStream.
-                   (.getBytes "{\"x\":2}" "UTF-8"))]
+                   (String/.getBytes "{\"x\":2}" "UTF-8"))]
       (is (= {:x 2} (req/read-json-body {:body stream})))))
 
   (testing "non-string/stream/map body → nil"
@@ -172,4 +172,4 @@
 
   (testing "malformed UUID string → throws"
     (is (thrown? IllegalArgumentException
-                 (req/parse-uuid-or-clear "not-a-uuid")))))
+          (req/parse-uuid-or-clear "not-a-uuid")))))

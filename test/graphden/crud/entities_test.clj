@@ -206,9 +206,9 @@
     (try
       (testing "missing name / empty fields are rejected"
         (is (false? (:ok (entities/process-create-record-type
-                            {:body {:fields [{:name "x" :type "int"}]}} c))))
+                           {:body {:fields [{:name "x" :type "int"}]}} c))))
         (is (false? (:ok (entities/process-create-record-type
-                            {:body {:name "R" :fields []}} c)))))
+                           {:body {:name "R" :fields []}} c)))))
 
       (testing "happy path creates one fn-row + N slots + N fn-slot junctions"
         (let [res (entities/process-create-record-type
@@ -238,9 +238,9 @@
     (try
       (testing "missing name / element-type are rejected"
         (is (false? (:ok (entities/process-create-list-type
-                            {:body {:element-type "int"}} c))))
+                           {:body {:element-type "int"}} c))))
         (is (false? (:ok (entities/process-create-list-type
-                            {:body {:name "L"}} c)))))
+                           {:body {:name "L"}} c)))))
 
       (testing "happy path creates a fn-row with element-fn-id + items slot"
         (let [res (entities/process-create-list-type
@@ -306,12 +306,12 @@
           (is (= {:ref-fn-id (:id f)}
                  (entities/resolve-sequence-payload storage {:ref-name "rsp-target"})))
           (is (thrown? clojure.lang.ExceptionInfo
-                       (entities/resolve-sequence-payload
-                         storage {:ref-name "rsp-missing"})))))
+                (entities/resolve-sequence-payload
+                  storage {:ref-name "rsp-missing"})))))
 
       (testing "a body with none of :ref / :ref-name / :value throws"
         (is (thrown? clojure.lang.ExceptionInfo
-                     (entities/resolve-sequence-payload storage {}))))
+              (entities/resolve-sequence-payload storage {}))))
       (finally (sp/close storage)))))
 
 
@@ -371,9 +371,9 @@
     (try
       (testing "missing id / empty fields are rejected"
         (is (false? (:ok (entities/process-update-record-type
-                            {:body {:fields [{:name "x" :type "int"}]}} c))))
+                           {:body {:fields [{:name "x" :type "int"}]}} c))))
         (is (false? (:ok (entities/process-update-record-type
-                            {:body {:id (str (random-uuid)) :fields []}} c)))))
+                           {:body {:id (str (random-uuid)) :fields []}} c)))))
 
       (testing "an unknown fn id → not found"
         (let [res (entities/process-update-record-type
@@ -481,7 +481,7 @@
 
         (testing "update then remove the appended item"
           (let [item-id (:id (first (sp/query-entities
-                                       storage :binding-list-item {})))
+                                      storage :binding-list-item {})))
                 upd  (entities/process-sequence-update
                        {:uri (str "/api/sequence/item/" item-id)
                         :body "{\"value\": 99}"} c)
@@ -520,19 +520,19 @@
     (try
       (testing "invalid binding-id → 400"
         (is (= 400 (:status (entities/process-tighten-binding-effects
-                               {:uri "/api/bindings/not-a-uuid/tighten-fn-effects"
-                                :body {}} c)))))
+                              {:uri "/api/bindings/not-a-uuid/tighten-fn-effects"
+                               :body {}} c)))))
 
       (let [uri (str "/api/bindings/" (random-uuid) "/tighten-fn-effects")]
         (testing "'effects' not a JSON array → 400"
           (is (= 400 (:status (entities/process-tighten-binding-effects
-                                 {:uri uri :body {:effects "nope"}} c)))))
+                                {:uri uri :body {:effects "nope"}} c)))))
 
         (testing "'args' not a JSON object → 400"
           (is (= 400 (:status (entities/process-tighten-binding-effects
-                                 {:uri uri :body {:args "nope"}} c)))))
+                                {:uri uri :body {:args "nope"}} c)))))
 
         (testing "a body with no args / ret / effects → 400"
           (is (= 400 (:status (entities/process-tighten-binding-effects
-                                 {:uri uri :body {}} c))))))
+                                {:uri uri :body {}} c))))))
       (finally (sp/close storage)))))

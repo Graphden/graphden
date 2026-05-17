@@ -740,7 +740,11 @@
                     "binding-list-item"
                     (parse-binding-list-item-from-form form-data)
                     nil)}
-                 (catch clojure.lang.ExceptionInfo e
+                 ;; Catch EVERYTHING, not just ExceptionInfo — the
+                 ;; parsers throw IllegalArgumentException on a bad
+                 ;; UUID and JsonParseException on bad `:value` JSON;
+                 ;; a malformed request must surface as 400, not 500.
+                 (catch Exception e
                    {:parse-rej {:reason (Throwable/.getMessage e)}}))
             entity-data (:entity-data parse-result)
             parse-rej (:parse-rej parse-result)
@@ -888,15 +892,23 @@
                                   (request/parse-query-string body-str))))]
     (cond
       (and entity-type id-str form-data)
-      (let [entity-data (case type-str
-                          "fn" (parse-fn-from-form form-data ctx)
-                          "ns" (parse-ns-from-form form-data)
-                          "slot" (parse-slot-from-form form-data)
-                          "fn-slot" (parse-fn-slot-from-form form-data)
-                          "binding" (parse-binding-from-form form-data)
-                          "binding-list-item"
-                          (parse-binding-list-item-from-form form-data)
-                          nil)
+      (let [parse-result
+            (try {:entity-data
+                  (case type-str
+                    "fn" (parse-fn-from-form form-data ctx)
+                    "ns" (parse-ns-from-form form-data)
+                    "slot" (parse-slot-from-form form-data)
+                    "fn-slot" (parse-fn-slot-from-form form-data)
+                    "binding" (parse-binding-from-form form-data)
+                    "binding-list-item"
+                    (parse-binding-list-item-from-form form-data)
+                    nil)}
+                 ;; A bad UUID / malformed JSON in the form must be a
+                 ;; 400, not an uncaught 500 (mirror process-create-entity).
+                 (catch Exception e
+                   {:parse-error (Throwable/.getMessage e)}))
+            entity-data (:entity-data parse-result)
+            parse-error (:parse-error parse-result)
             id-uuid (try (java.util.UUID/fromString id-str) (catch Exception _ nil))
             ;; Pre-read the existing row so the post-update invalidation
             ;; can name the affected fn-id even when the form-data
@@ -941,6 +953,8 @@
                              (catch Exception e
                                (log/error e "ensure-rename-slot! failed"))))]
         (cond
+          parse-error {:status 400
+                       :body (str "<p class=\"error\">" parse-error "</p>")}
           type-rej {:status 400
                     :body (str "<p class=\"error\">" (:reason type-rej) "</p>")}
           updated  (do (invalidate! ctx storage entity-type

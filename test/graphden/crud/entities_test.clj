@@ -766,6 +766,14 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
+      (testing "a malformed form (bad UUID) → 400, not an uncaught 500"
+        ;; parent-id isn't a UUID → parse-fn-from-form throws
+        ;; IllegalArgumentException → caught → :parse-rej → 400
+        (let [resp (entities/process-create-entity
+                     {:uri "/api/entities/fn"
+                      :body "name=bad&parent-id=not-a-uuid"} c)]
+          (is (= 400 (:status resp)))))
+
       (testing "a composed fn can't own a fresh (non-rename) slot via fn-slot"
         ;; POST /api/entities/fn-slot for a composed fn + a plain slot
         ;; whose :source-slot-id is nil → fn-slot-rej → 400
@@ -793,6 +801,13 @@
           (is (= 200 (:status resp)))
           (is (= "slot-desc"
                  (:description (sp/read-entity storage :slot (:id slot)))))))
+
+      (testing "a malformed form (bad UUID) on update → 400, not 500"
+        (let [f (setup/create-base-fn! storage "puesr-badform")
+              resp (entities/process-update-entity
+                     {:uri (str "/api/entities/fn/" (:id f))
+                      :body "parent-id=not-a-uuid"} c)]
+          (is (= 400 (:status resp)))))
 
       (testing "a binding update carrying rename-to mints the renamed-view slot"
         (let [base    (setup/create-base-fn! storage "puesr-base")

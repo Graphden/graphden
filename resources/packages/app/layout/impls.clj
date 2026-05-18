@@ -1,5 +1,5 @@
 (ns graphden.packages.app.layout.impls
-  "Graph layout calculation — thin defbase shim.
+  "Graph layout calculation — thin defbase shims.
 
    API: POST /api/graph/layout
    Input: {root-id: uuid, expansions: {fn-id: level, ...}}
@@ -8,9 +8,13 @@
    The whole layout algorithm lives in `graphden.layout.graph`
    (Stages 1-2 — slot-view synthesis, data loading, graph building)
    and `graphden.layout.core` (Stages 3-7 — placement, validation,
-   request parsing, the `compute-layout` orchestrator) so this
-   base-fn impl stays a minimal primitive: read storage from `ctx`,
-   parse the request, load the graph, delegate."
+   request parsing, the `compute-layout` orchestrator).
+
+   The `parse → load → build → place` pipeline that produces a layout
+   is itself a composition, so it is expressed as graph fn-defs
+   (`:_compute-layout` and `:get-layout-data` in `fns.edn`) gluing the
+   base-fns below. Each base-fn stays a minimal primitive: read `ctx`
+   and/or delegate to one `graphden.layout.*` call."
   (:require
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :as defbase]
@@ -31,20 +35,41 @@
         data)))
 
 
-(defbase/defbase get-layout-data
-  "Compute layout from root-id and expansions.
-   Input (from request body): {root-id: uuid-string, expansions: {fn-id: level, ...}}
-   Output: {nodes: [...], edges: [...], grid-pos: {...}, validation: {...}}"
+(defbase/defbase _parse-layout-request
+  "Parse the internal Ring request body into `{:root-id :expansions}`.
+   Thin wrapper around `layout/parse-layout-request`."
   [request]
-  (let [storage (:storage ctx)]
-    (when-not storage
-      (throw (ex-info "Storage not available in context"
-                      {:type :execution-error/missing-storage})))
-    (let [{:keys [root-id expansions]} (layout/parse-layout-request request)]
-      (layout/compute-layout (load-graph-entities ctx) root-id expansions))))
+  (layout/parse-layout-request request))
+
+
+(defbase/defbase _load-graph-cached
+  "Load every graph entity for layout, served from the per-context
+   cache when warm. Context-aware: no args, pulls storage + cache
+   from `ctx`."
+  []
+  (load-graph-entities ctx))
+
+
+(defbase/defbase _layout-build-elements
+  "Stage A — build cytoscape `{:nodes :edges}` for the requested
+   subgraph. `graph` is the entity snapshot from `_load-graph-cached`;
+   `parsed` is `{:root-id :expansions}` from `_parse-layout-request`."
+  [graph parsed]
+  (layout/build-elements graph (:root-id parsed) (:expansions parsed)))
+
+
+(defbase/defbase _layout-place
+  "Stage B — grid-place the `{:nodes :edges}` from
+   `_layout-build-elements` into the full layout response
+   `{:nodes :edges :grid-pos :validation}`."
+  [elements]
+  (layout/place-elements elements))
 
 
 ;; === Registry ===
 
 (def impls
-  {:get-layout-data get-layout-data})
+  {:_parse-layout-request _parse-layout-request
+   :_load-graph-cached _load-graph-cached
+   :_layout-build-elements _layout-build-elements
+   :_layout-place _layout-place})

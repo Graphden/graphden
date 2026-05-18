@@ -286,6 +286,24 @@
           ;; Batch create all version records
           (when (seq version-records)
             (sp/create-entities base-storage version-entity version-records))
+          ;; Ref-many junctions (notably fn `:parent-ids`) and other
+          ;; non-versioned columns live on the base identity row, not in
+          ;; a version record — the diff above only covers
+          ;; `version-data-fields`. Flow every non-versioned change
+          ;; through to base storage, whose singular `update-entity`
+          ;; merges with the existing row (filling NOT-NULL columns) and
+          ;; reconciles ref-many junctions. Without this a base-fn →
+          ;; composed-fn parent change is silently dropped. Mirrors the
+          ;; singular `update-entity` above; guarded so an unchanged
+          ;; re-sync stays a no-op.
+          (doseq [data data-seq
+                  :let [id (:id data)
+                        non-versioned (apply dissoc data :id version-data-fields)
+                        current (get current-by-id id)]
+                  :when (and (seq non-versioned)
+                             (not= non-versioned
+                                   (select-keys current (keys non-versioned))))]
+            (sp/update-entity base-storage entity-name id non-versioned))
           ;; Return merged data for all records (including unchanged)
           (mapv (fn [data]
                   (merge (get current-by-id (:id data)) data))

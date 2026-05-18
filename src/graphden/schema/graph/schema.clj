@@ -49,20 +49,32 @@
   #uuid "b79e6e8b-8aff-4188-862b-d8a85ef4fcdf")
 
 
+;; array-map preserves insertion order — `value-kinds` below derives
+;; the editor-facing ordered enum list from these keys, so this is the
+;; single place the value-kind set AND its order are declared.
 (def ^:private value-kind-values
-  {:null        #uuid "c703ffd9-6401-4c49-9ca3-a280f6aac8ba"
-   :uuid        #uuid "3a83af1b-f15c-421d-a5f1-f13db07deb72"
-   :text        #uuid "cf26384f-d093-461d-9268-b42b8fd6eae6"
-   :int         #uuid "154d3c4f-8d11-4592-9e24-5c40176cc5a7"
-   :bool        #uuid "7497d750-67aa-4b55-8477-8323a9ab7761"
-   :numeric     #uuid "f7a6728b-5ac6-4e1a-8bdb-ddc240cc059d"
-   :timestamptz #uuid "e4476a32-3e93-4333-b0e5-964b9b19bea1"
-   :jsonb       #uuid "b1b15bb9-a458-4337-9241-2a33e1ef25ea"
-   :bytes       #uuid "2dcadfbd-800f-4b7b-bbcc-82b2afcf9f86"
-   :any         #uuid "a3d7e8f1-9b2c-4d5e-8f6a-1c2d3e4f5a6b"
-   :fn          #uuid "b4e8f9a2-0c3d-5e6f-9a7b-2d3e4f5a6b7c"
-   :sequence    #uuid "9d1b3f8c-7a2e-4c5d-8e3f-1a2b4c6d8e0f"
-   :keyword     #uuid "5e2a4b6c-8d1f-4e7a-9b3c-7f5d8e0a2c4d"})
+  (array-map
+    :null        #uuid "c703ffd9-6401-4c49-9ca3-a280f6aac8ba"
+    :uuid        #uuid "3a83af1b-f15c-421d-a5f1-f13db07deb72"
+    :text        #uuid "cf26384f-d093-461d-9268-b42b8fd6eae6"
+    :int         #uuid "154d3c4f-8d11-4592-9e24-5c40176cc5a7"
+    :bool        #uuid "7497d750-67aa-4b55-8477-8323a9ab7761"
+    :numeric     #uuid "f7a6728b-5ac6-4e1a-8bdb-ddc240cc059d"
+    :timestamptz #uuid "e4476a32-3e93-4333-b0e5-964b9b19bea1"
+    :jsonb       #uuid "b1b15bb9-a458-4337-9241-2a33e1ef25ea"
+    :bytes       #uuid "2dcadfbd-800f-4b7b-bbcc-82b2afcf9f86"
+    :any         #uuid "a3d7e8f1-9b2c-4d5e-8f6a-1c2d3e4f5a6b"
+    :fn          #uuid "b4e8f9a2-0c3d-5e6f-9a7b-2d3e4f5a6b7c"
+    :sequence    #uuid "9d1b3f8c-7a2e-4c5d-8e3f-1a2b4c6d8e0f"
+    :keyword     #uuid "5e2a4b6c-8d1f-4e7a-9b3c-7f5d8e0a2c4d"))
+
+
+(def value-kinds
+  "Ordered `value_kind` enum values — the primitive type tags a binding
+   `value` (or a slot) can carry. The single source of truth; served
+   verbatim by `GET /api/value-kinds` so the editor's type-pickers read
+   it instead of hard-coding the list."
+  (vec (keys value-kind-values)))
 
 
 ;; Override-kind enum — policy для binding'а value/ref:

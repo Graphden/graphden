@@ -237,20 +237,49 @@
 
 ;; ============================================================================
 ;; Compound type-row creation
+;; ----------------------------------------------------------------------------
+;; The record/list create + record update handlers are decomposed into
+;; parse → validate → apply `src/` stages, glued in production by the
+;; `:process-create-record-type` / `:process-create-list-type` /
+;; `:process-update-record-type` `:if` graph fn-defs. `validate-*`
+;; returns the `{:ok false :error}` rejection directly, so the helpers
+;; below are a plain `(or rejection apply)` — the test-level
+;; equivalent of the graph.
 ;; ============================================================================
+
+(defn- process-create-record-type
+  [request ctx]
+  (let [parsed (entities/parse-create-record-type request)]
+    (or (entities/validate-create-record-type parsed)
+        (entities/apply-create-record-type parsed ctx))))
+
+
+(defn- process-create-list-type
+  [request ctx]
+  (let [parsed (entities/parse-create-list-type request)]
+    (or (entities/validate-create-list-type parsed)
+        (entities/apply-create-list-type parsed ctx))))
+
+
+(defn- process-update-record-type
+  [request ctx]
+  (let [parsed (entities/parse-update-record-type request)]
+    (or (entities/validate-update-record-type parsed ctx)
+        (entities/apply-update-record-type parsed ctx))))
+
 
 (deftest process-create-record-type-test
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
       (testing "missing name / empty fields are rejected"
-        (is (false? (:ok (entities/process-create-record-type
+        (is (false? (:ok (process-create-record-type
                            {:body {:fields [{:name "x" :type "int"}]}} c))))
-        (is (false? (:ok (entities/process-create-record-type
+        (is (false? (:ok (process-create-record-type
                            {:body {:name "R" :fields []}} c)))))
 
       (testing "happy path creates one fn-row + N slots + N fn-slot junctions"
-        (let [res (entities/process-create-record-type
+        (let [res (process-create-record-type
                     {:body {:name "MyRecord"
                             :fields [{:name "title" :type "text"}
                                      {:name "count" :type "int"}]}}
@@ -262,7 +291,7 @@
             (is (= 2 (count (sp/query-entities storage :fn-slot {:fn-id fn-id})))))))
 
       (testing "an unresolvable field type fails the whole create"
-        (let [res (entities/process-create-record-type
+        (let [res (process-create-record-type
                     {:body {:name "BadRecord"
                             :fields [{:name "x" :type "no-such-type"}]}}
                     c)]
@@ -276,13 +305,13 @@
         c (test-ctx storage)]
     (try
       (testing "missing name / element-type are rejected"
-        (is (false? (:ok (entities/process-create-list-type
+        (is (false? (:ok (process-create-list-type
                            {:body {:element-type "int"}} c))))
-        (is (false? (:ok (entities/process-create-list-type
+        (is (false? (:ok (process-create-list-type
                            {:body {:name "L"}} c)))))
 
       (testing "happy path creates a fn-row with element-fn-id + items slot"
-        (let [res (entities/process-create-list-type
+        (let [res (process-create-list-type
                     {:body {:name "IntList" :element-type "int"}} c)]
           (is (true? (:ok res)))
           (let [fn-id (java.util.UUID/fromString (:id res))
@@ -356,14 +385,37 @@
 
 ;; ============================================================================
 ;; process-create-entity / process-delete-entity (HTTP dispatchers)
+;; ----------------------------------------------------------------------------
+;; The create / update handlers are decomposed into parse → validate →
+;; apply `src/` stages, glued in production by the `:process-create-entity`
+;; / `:process-update-entity` `:if` graph fn-defs. `process-create` /
+;; `process-update` below run those stages in sequence — the test-level
+;; equivalent of the graph — so the scenario tests exercise the whole
+;; pipeline.
 ;; ============================================================================
+
+(defn- process-create
+  [request ctx]
+  (let [parsed (entities/parse-create-request request ctx)]
+    (if-let [rej (entities/validate-create parsed ctx)]
+      {:status 400 :body (str "<p class=\"error\">" (:reason rej) "</p>")}
+      (entities/apply-create parsed ctx))))
+
+
+(defn- process-update
+  [request ctx]
+  (let [parsed (entities/parse-update-request request ctx)]
+    (if-let [rej (entities/validate-update parsed ctx)]
+      {:status 400 :body (str "<p class=\"error\">" (:reason rej) "</p>")}
+      (entities/apply-update parsed ctx))))
+
 
 (deftest process-create-entity-test
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
       (testing "form-encoded ns create → 200 + entityCreated trigger"
-        (let [resp (entities/process-create-entity
+        (let [resp (process-create
                      {:uri "/api/entities/ns" :body "name=proc-ns"} c)]
           (is (= 200 (:status resp)))
           (is (= "entityCreated" (get-in resp [:headers "HX-Trigger"])))
@@ -371,7 +423,7 @@
                     (sp/query-entities storage :ns {})))))
 
       (testing "a request with no usable body → 400"
-        (let [resp (entities/process-create-entity {:uri "/api/entities/ns"} c)]
+        (let [resp (process-create {:uri "/api/entities/ns"} c)]
           (is (= 400 (:status resp)))))
       (finally (sp/close storage)))))
 
@@ -409,24 +461,24 @@
         c (test-ctx storage)]
     (try
       (testing "missing id / empty fields are rejected"
-        (is (false? (:ok (entities/process-update-record-type
+        (is (false? (:ok (process-update-record-type
                            {:body {:fields [{:name "x" :type "int"}]}} c))))
-        (is (false? (:ok (entities/process-update-record-type
+        (is (false? (:ok (process-update-record-type
                            {:body {:id (str (random-uuid)) :fields []}} c)))))
 
       (testing "an unknown fn id → not found"
-        (let [res (entities/process-update-record-type
+        (let [res (process-update-record-type
                     {:body {:id (str (random-uuid))
                             :fields [{:name "x" :type "int"}]}} c)]
           (is (false? (:ok res)))
           (is (re-find #"not found" (:error res)))))
 
       (testing "happy update — adding a field keeps the old slot, mints the new one"
-        (let [created (entities/process-create-record-type
+        (let [created (process-create-record-type
                         {:body {:name "UpdRec"
                                 :fields [{:name "title" :type "text"}]}} c)
               rec-id  (:id created)
-              res     (entities/process-update-record-type
+              res     (process-update-record-type
                         {:body {:id rec-id
                                 :fields [{:name "title" :type "text"}
                                          {:name "count" :type "int"}]}} c)]
@@ -447,7 +499,7 @@
     (try
       (testing "form-encoded ns update → 200, field applied"
         (let [ns-row (entities/create-entity "ns" {:name "upd-ns"} c)
-              resp   (entities/process-update-entity
+              resp   (process-update
                        {:uri (str "/api/entities/ns/" (:id ns-row))
                         :body "description=changed"} c)]
           (is (= 200 (:status resp)))
@@ -455,7 +507,7 @@
                  (:description (entities/get-entity "ns" (:id ns-row) c))))))
 
       (testing "a request with no id segment → 400"
-        (let [resp (entities/process-update-entity
+        (let [resp (process-update
                      {:uri "/api/entities/ns" :body "name=x"} c)]
           (is (= 400 (:status resp)))))
       (finally (sp/close storage)))))
@@ -550,31 +602,43 @@
 
 
 ;; ============================================================================
-;; process-tighten-binding-effects — request validation branches
+;; parse-tighten-request — request parsing for the tighten `:cond` graph
+;; ----------------------------------------------------------------------------
+;; The four validation branches that used to live in
+;; `process-tighten-binding-effects` are now a `:cond` graph fn-def
+;; (`web/crud` fns.edn). What stays a pure `src/` unit is the parse;
+;; the predicates that drive the `:cond` clauses are pure functions of
+;; the map produced here.
 ;; ============================================================================
 
-(deftest process-tighten-binding-effects-validation-test
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      (testing "invalid binding-id → 400"
-        (is (= 400 (:status (entities/process-tighten-binding-effects
-                              {:uri "/api/bindings/not-a-uuid/tighten-fn-effects"
-                               :body {}} c)))))
+(deftest parse-tighten-request-test
+  (testing "malformed binding-id → :binding-id nil (drives the first guard)"
+    (is (nil? (:binding-id (entities/parse-tighten-request
+                             {:uri "/api/bindings/not-a-uuid/tighten-fn-effects"
+                              :body {}})))))
 
-      (let [uri (str "/api/bindings/" (random-uuid) "/tighten-fn-effects")]
-        (testing "'effects' not a JSON array → 400"
-          (is (= 400 (:status (entities/process-tighten-binding-effects
-                                {:uri uri :body {:effects "nope"}} c)))))
+  (let [bid (random-uuid)
+        uri (str "/api/bindings/" bid "/tighten-fn-effects")]
+    (testing "a well-formed binding-id is parsed out of the URI"
+      (is (= bid (:binding-id (entities/parse-tighten-request {:uri uri :body {}})))))
 
-        (testing "'args' not a JSON object → 400"
-          (is (= 400 (:status (entities/process-tighten-binding-effects
-                                {:uri uri :body {:args "nope"}} c)))))
+    (testing "an empty body → empty :delta (drives the delta-empty guard)"
+      (is (= {} (:delta (entities/parse-tighten-request {:uri uri :body {}})))))
 
-        (testing "a body with no args / ret / effects → 400"
-          (is (= 400 (:status (entities/process-tighten-binding-effects
-                                {:uri uri :body {}} c))))))
-      (finally (sp/close storage)))))
+    (testing "effects / args / ret flow into :delta and the *-val fields"
+      (let [p (entities/parse-tighten-request
+                {:uri uri :body {:effects ["db"] :args {:x :int} :ret "text"}})]
+        (is (= ["db"] (:effects-val p)))
+        (is (= {:x :int} (:args-val p)))
+        (is (= "text" (:ret-val p)))
+        (is (= {:effects ["db"] :args {:x :int} :ret "text"} (:delta p)))))
+
+    (testing "a non-array effects / non-map args value is preserved verbatim
+              so the `:cond` graph's predicates can reject it"
+      (let [p (entities/parse-tighten-request
+                {:uri uri :body {:effects "nope" :args "nope"}})]
+        (is (= "nope" (:effects-val p)))
+        (is (= "nope" (:args-val p)))))))
 
 
 ;; ============================================================================
@@ -587,7 +651,7 @@
     (try
       (testing "form-encoded composed-fn create → 200 + entityCreated"
         (let [base (setup/create-base-fn! storage "pce-base")
-              resp (entities/process-create-entity
+              resp (process-create
                      {:uri "/api/entities/fn"
                       :body (str "name=pce-composed&parent-ids=" (:id base))}
                      c)]
@@ -607,7 +671,7 @@
             _    (setup/attach-slot! storage (:id base) (:id slot) 0)
             comp-fn (setup/create-composed-fn! storage "pceb-comp-fn" (:id base))]
         (testing "form-encoded binding create → 200, binding persisted"
-          (let [resp (entities/process-create-entity
+          (let [resp (process-create
                        {:uri "/api/entities/binding"
                         :body (str "fn-id=" (:id comp-fn) "&slot-id=" (:id slot)
                                    "&value=42&override-kind=fixed")}
@@ -621,7 +685,7 @@
                 slot2 (setup/create-slot! storage "orig" :int)
                 _     (setup/attach-slot! storage (:id base2) (:id slot2) 0)
                 comp2 (setup/create-composed-fn! storage "pceb-comp2" (:id base2))
-                resp  (entities/process-create-entity
+                resp  (process-create
                         {:uri "/api/entities/binding"
                          :body (str "fn-id=" (:id comp2) "&slot-id=" (:id slot2)
                                     "&value=1&override-kind=fixed&rename-to=renamed-n")}
@@ -642,7 +706,7 @@
     (try
       (testing "form-encoded fn description update → 200, field applied"
         (let [f    (setup/create-base-fn! storage "pue-fn")
-              resp (entities/process-update-entity
+              resp (process-update
                      {:uri (str "/api/entities/fn/" (:id f))
                       :body "description=updated-desc"} c)]
           (is (= 200 (:status resp)))
@@ -659,7 +723,7 @@
               bind    (sp/create-entity storage :binding
                                         {:fn-id (:id comp-fn) :slot-id (:id slot)
                                          :value 1 :override-kind :fixed})
-              resp    (entities/process-update-entity
+              resp    (process-update
                         {:uri (str "/api/entities/binding/" (:id bind))
                          :body "value=99"} c)]
           (is (= 200 (:status resp)))
@@ -707,7 +771,7 @@
         c (test-ctx storage)]
     (try
       (testing "dropping a field, reordering the rest, renaming the record"
-        (let [created (entities/process-create-record-type
+        (let [created (process-create-record-type
                         {:body {:name "DiffRec"
                                 :fields [{:name "a" :type "int"}
                                          {:name "b" :type "text"}
@@ -715,7 +779,7 @@
               rec-id  (:id created)
               fn-uuid (java.util.UUID/fromString rec-id)
               ;; keep c + a (drops b), reorder, rename + describe the fn-row
-              res     (entities/process-update-record-type
+              res     (process-update-record-type
                         {:body {:id rec-id
                                 :name "DiffRecRenamed"
                                 :description "now described"
@@ -729,10 +793,10 @@
             (is (= "now described" (:description row))))))
 
       (testing "a field with a blank name fails the whole update"
-        (let [created (entities/process-create-record-type
+        (let [created (process-create-record-type
                         {:body {:name "BlankFieldRec"
                                 :fields [{:name "x" :type "int"}]}} c)
-              res     (entities/process-update-record-type
+              res     (process-update-record-type
                         {:body {:id (:id created)
                                 :fields [{:name "" :type "int"}]}} c)]
           (is (false? (:ok res)))))
@@ -749,7 +813,7 @@
     (try
       (testing "a blank field name throws → cleanup → :ok false, nothing left"
         (let [before (count (sp/query-entities storage :fn {}))
-              res    (entities/process-create-record-type
+              res    (process-create-record-type
                        {:body {:name "RollbackRec"
                                :fields [{:name "" :type "int"}]}} c)]
           (is (false? (:ok res)))
@@ -769,7 +833,7 @@
       (testing "a malformed form (bad UUID) → 400, not an uncaught 500"
         ;; parent-id isn't a UUID → parse-fn-from-form throws
         ;; IllegalArgumentException → caught → :parse-rej → 400
-        (let [resp (entities/process-create-entity
+        (let [resp (process-create
                      {:uri "/api/entities/fn"
                       :body "name=bad&parent-id=not-a-uuid"} c)]
           (is (= 400 (:status resp)))))
@@ -780,7 +844,7 @@
         (let [base (setup/create-base-fn! storage "pcer-base")
               comp-fn (setup/create-composed-fn! storage "pcer-comp" (:id base))
               slot (setup/create-slot! storage "fresh" :int)
-              resp (entities/process-create-entity
+              resp (process-create
                      {:uri "/api/entities/fn-slot"
                       :body (str "fn-id=" (:id comp-fn) "&slot-id=" (:id slot)
                                  "&position=0")} c)]
@@ -795,7 +859,7 @@
     (try
       (testing "form-encoded slot update dispatches through parse-slot-from-form"
         (let [slot (setup/create-slot! storage "n" :int)
-              resp (entities/process-update-entity
+              resp (process-update
                      {:uri (str "/api/entities/slot/" (:id slot))
                       :body "description=slot-desc"} c)]
           (is (= 200 (:status resp)))
@@ -804,7 +868,7 @@
 
       (testing "a malformed form (bad UUID) on update → 400, not 500"
         (let [f (setup/create-base-fn! storage "puesr-badform")
-              resp (entities/process-update-entity
+              resp (process-update
                      {:uri (str "/api/entities/fn/" (:id f))
                       :body "parent-id=not-a-uuid"} c)]
           (is (= 400 (:status resp)))))
@@ -817,7 +881,7 @@
               bind    (sp/create-entity storage :binding
                                         {:fn-id (:id comp-fn) :slot-id (:id slot)
                                          :value 1 :override-kind :fixed})
-              resp    (entities/process-update-entity
+              resp    (process-update
                         {:uri (str "/api/entities/binding/" (:id bind))
                          :body "value=2&rename-to=renamed-orig"} c)]
           (is (= 200 (:status resp)))
@@ -832,7 +896,7 @@
     (try
       (testing "an unresolvable element-type rolls the half-created row back"
         (let [before (count (sp/query-entities storage :fn {}))
-              res    (entities/process-create-list-type
+              res    (process-create-list-type
                        {:body {:name "BadList" :element-type "no-such-type"}} c)]
           (is (false? (:ok res)))
           (is (string? (:error res)))

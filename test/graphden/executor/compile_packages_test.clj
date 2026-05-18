@@ -168,3 +168,27 @@
     ;; that surface as `:ref`-kind env-bindings, exercising
     ;; augment-env's :ref branch + make-ref-entry.
     (is (fn? (run "_router")))))
+
+
+;; ============================================================================
+;; :cond / :case execution + executor laziness (short-circuit)
+;; ============================================================================
+
+(deftest cond-case-execution-test
+  (testing ":cond multi-branch dispatch over a free arg"
+    (is (= "neg"  (run "ex-sign" {:n -3})))
+    (is (= "zero" (run "ex-sign" {:n 0})))
+    (is (= "pos"  (run "ex-sign" {:n 7}))))
+  (testing ":case exact-match dispatch + default"
+    (is (= "Active"  (run "ex-status-label" {:status "active"})))
+    (is (= "Unknown" (run "ex-status-label" {:status "no-such"})))))
+
+
+(deftest lazy-short-circuit-test
+  (testing ":cond / :and / :or / :case never evaluate an un-taken branch
+            — each example hides a :throw there; reaching it would raise
+            `examples/laziness-violated` and fail this test"
+    (is (= "safe"    (run "ex-lazy-cond")))
+    (is (false?      (run "ex-lazy-and")))
+    (is (true?       (run "ex-lazy-or")))
+    (is (= "matched" (run "ex-lazy-case")))))

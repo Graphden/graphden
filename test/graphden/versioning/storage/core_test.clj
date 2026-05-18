@@ -247,6 +247,18 @@
                       (vals (sp/read-entities v :fn ids))))
           (is (= 2 (sp/delete-entities v :fn ids)))))
 
+      (testing "batch update-entities reconciles the :parent-ids ref-many junction"
+        ;; Regression (fix 12253c8): VersionedStorage's batch
+        ;; update-entities only wrote version records, so non-versioned
+        ;; junctions like fn :parent-ids were dropped — a base-fn →
+        ;; composed-fn change (same row) silently lost its parent link.
+        (let [parent (sp/create-entity v :fn {:name "vb-parent" :parent-ids [] :impl-hash "h"})
+              child  (sp/create-entity v :fn {:name "vb-child" :parent-ids [] :impl-hash "h"})]
+          (sp/update-entities v :fn [(assoc child :parent-ids [(:id parent)])])
+          (is (= [(:id parent)]
+                 (:parent-ids (sp/read-entity v :fn (:id child))))
+              "the :parent-ids junction must survive the batch update")))
+
       (testing "update-entities with a missing id → :not-found"
         (let [ex (try (sp/update-entities v :fn [{:id (random-uuid)
                                                   :description "x"}])

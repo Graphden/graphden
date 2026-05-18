@@ -12,14 +12,18 @@ async function initGraph() {
   // Load entities + the rich-type registry in parallel. Types feed
   // the in-place edit popovers' "Expected: <type>" hints, so they
   // need to be ready before the user opens any editor.
-  const [entResp, typeResp] = await Promise.all([
+  const [entResp, typeResp, vkResp] = await Promise.all([
     fetch('/api/graph/entities'),
-    fetch('/api/types').catch(() => null)
+    fetch('/api/types').catch(() => null),
+    fetch('/api/value-kinds').catch(() => null)
   ]);
   graphData = await entResp.json();
   lookups = buildLookups(graphData);
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); } catch (_) { richTypes = {}; }
+  }
+  if (vkResp?.ok) {
+    try { VALUE_KINDS = await vkResp.json(); } catch (_) { VALUE_KINDS = []; }
   }
   updateEntityList(graphData);
 

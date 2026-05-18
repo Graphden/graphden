@@ -90,15 +90,6 @@
     :else []))
 
 
-(defn- apply-transform-impl
-  [value transform]
-  (case (when transform (keyword transform))
-    :keyword-to-str (when value (if (keyword? value) (name value) (str value)))
-    :pr-str (when value (pr-str value))
-    :bool-to-yesno (if value "Yes" "No")
-    value))
-
-
 ;; === Implementations ===
 
 (defbase render-hiccup
@@ -132,77 +123,10 @@
   [:div {:id id :style style}])
 
 
-(defbase form-input
-  [field-name label-text input-type field-value extra-attrs]
-  [:div {:class "form-group"}
-   [:label {:for field-name} label-text]
-   [:input (merge {:type input-type :name field-name :id field-name}
-                  (when field-value {:value field-value})
-                  extra-attrs)]])
-
-
-(defbase form-select
-  [field-name label-text options selected-value extra-attrs]
-  [:div {:class "form-group"}
-   [:label {:for field-name} label-text]
-   (into [:select (merge {:name field-name :id field-name} extra-attrs)]
-         (for [opt options
-               :let [[v l] (if (map? opt) [(:value opt) (:label opt)] opt)]]
-           [:option (cond-> {:value v} (= v selected-value) (assoc :selected true)) l]))])
-
-
-;; Plain Clojure helpers — used by crud's render code. No longer base-fns
-;; (see web/html/fns.edn for the graph-level fn-def equivalents). Single
-;; map-arg signature so callers like `(html/button {:btn-text "..."})` work.
-(defn button
-  [{:keys [btn-text btn-type extra-attrs]}]
-  [:button (merge {:type (or btn-type "button")} extra-attrs) btn-text])
-
-
-(defn field-row
-  [{:keys [label value]}]
-  [:div {:class "field-row"}
-   [:span {:class "field-label"} label]
-   [:span {:class "field-value"} (if (nil? value) "-" (str value))]])
-
-
-(defn badge
-  [{:keys [badge-text badge-type]}]
-  [:span {:class (if badge-type (str "badge badge-" badge-type) "badge")} badge-text])
-
-
-(defbase entity-field-rows
-  "Renders multiple field rows from entity using field-specs.
-   field-specs: [[label key] ...] or [[label key transform] ...]"
-  [entity field-specs]
-  (into [:div]
-        (for [spec field-specs]
-          (let [[label key-path transform] (if (= 3 (count spec))
-                                             spec
-                                             [(first spec) (second spec) nil])
-                raw-value (if (vector? key-path)
-                            (get-in entity key-path)
-                            (get entity key-path))
-                value (apply-transform-impl raw-value transform)]
-            [:div {:class "field-row"}
-             [:span {:class "field-label"} label]
-             [:span {:class "field-value"} (if (nil? value) "-" (str value))]]))))
-
-
 (defbase hiccup-element
   [tag attrs children]
   (let [tag-kw (if (keyword? tag) tag (keyword tag))]
     (into (if attrs [tag-kw attrs] [tag-kw]) children)))
-
-
-(defn button-row
-  [{:keys [buttons style]}]
-  (into [:div {:style style}] buttons))
-
-
-(defbase apply-transform-fn
-  [value transform]
-  (apply-transform-impl value transform))
 
 
 ;; === Registry ===
@@ -212,8 +136,4 @@
    :html-page html-page
    :with-cdn-script with-cdn-script
    :cytoscape-container cytoscape-container
-   :form-input form-input
-   :form-select form-select
-   :entity-field-rows entity-field-rows
-   :hiccup hiccup-element
-   :apply-transform apply-transform-fn})
+   :hiccup hiccup-element})

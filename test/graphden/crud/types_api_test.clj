@@ -22,6 +22,36 @@
   (ctx/create-context {:storage storage :base-fns {}}))
 
 
+;; ----------------------------------------------------------------------------
+;; The type-API handlers are decomposed into parse → validate → apply
+;; `src/` stages, glued in production by the `:types-compatible` /
+;; `:types-candidates` / `:types-usages` `:if` graph fn-defs.
+;; `validate-*` returns the `{:ok false :error}` rejection directly, so
+;; the helpers below are a plain `(or rejection apply)` — the
+;; test-level equivalent of the graph.
+;; ----------------------------------------------------------------------------
+
+(defn- types-compatible
+  [request]
+  (let [parsed (ta/parse-types-compatible-request request)]
+    (or (ta/validate-types-compatible parsed)
+        (ta/apply-types-compatible parsed))))
+
+
+(defn- types-candidates
+  [request ctx]
+  (let [parsed (ta/parse-types-candidates-request request)]
+    (or (ta/validate-types-candidates parsed)
+        (ta/apply-types-candidates parsed ctx))))
+
+
+(defn- types-usages
+  [request ctx]
+  (let [parsed (ta/parse-types-usages-request request)]
+    (or (ta/validate-types-usages parsed)
+        (ta/apply-types-usages parsed ctx))))
+
+
 ;; ============================================================================
 ;; compute-fn-role — pure
 ;; ============================================================================
@@ -53,7 +83,7 @@
 
 
 ;; ============================================================================
-;; json->type / json->type-form — pure
+;; json->type — pure
 ;; ============================================================================
 
 (deftest json->type-test
@@ -71,13 +101,13 @@
     (is (= {:a :int :b :text}
            (ta/json->type {"a" "int" "b" "text"}))))
 
-  (testing "json->type-form — vectors, maps (string keys → keywords), scalars"
+  (testing "union vectors, maps (string keys → keywords), scalars"
     (is (= [:union :int :text]
-           (ta/json->type-form ["union" "int" "text"])))
+           (ta/json->type ["union" "int" "text"])))
     (is (= {:x :int :y :text}
-           (ta/json->type-form {"x" "int" "y" "text"})))
-    (is (= 7 (ta/json->type-form 7)))
-    (is (nil? (ta/json->type-form nil)))))
+           (ta/json->type {"x" "int" "y" "text"})))
+    (is (= 7 (ta/json->type 7)))
+    (is (nil? (ta/json->type nil)))))
 
 
 ;; ============================================================================
@@ -132,16 +162,16 @@
 
 (deftest types-compatible-test
   (testing "missing 'expected' / 'candidate' → {:ok false}"
-    (is (false? (:ok (ta/types-compatible {:body {:candidate "int"}}))))
-    (is (false? (:ok (ta/types-compatible {:body {:expected "int"}})))))
+    (is (false? (:ok (types-compatible {:body {:candidate "int"}}))))
+    (is (false? (:ok (types-compatible {:body {:expected "int"}})))))
 
   (testing "compatible pair → ok true"
-    (let [res (ta/types-compatible {:body {:expected "int" :candidate "int"}})]
+    (let [res (types-compatible {:body {:expected "int" :candidate "int"}})]
       (is (true? (:ok res)))
       (is (= :int (:expected res)))))
 
   (testing "incompatible pair → ok false with a reason"
-    (let [res (ta/types-compatible {:body {:expected "int" :candidate "text"}})]
+    (let [res (types-compatible {:body {:expected "int" :candidate "text"}})]
       (is (false? (:ok res)))
       (is (string? (:reason res))))))
 
@@ -234,23 +264,23 @@
         c (test-ctx storage)]
     (try
       (testing "missing 'expected' → {:ok false}"
-        (is (false? (:ok (ta/types-candidates {:body {}} c)))))
+        (is (false? (:ok (types-candidates {:body {}} c)))))
 
       (testing "expected :any enumerates candidates; :count matches the vector"
-        (let [res (ta/types-candidates {:body {:expected "any"}} c)]
+        (let [res (types-candidates {:body {:expected "any"}} c)]
           (is (true? (:ok res)))
           (is (vector? (:candidates res)))
           (is (= (:count res) (count (:candidates res))))))
 
       (testing "the effects filter keeps only candidates within the allowed set"
-        (let [res (ta/types-candidates
+        (let [res (types-candidates
                     {:body {:expected "any" :effects []}} c)]
           (is (true? (:ok res)))
           ;; effects=[] → only pure (no-effect) producers survive
           (is (every? #(empty? (:effects %)) (:candidates res)))))
 
       (testing "the name-prefix filter restricts by fn-name"
-        (let [res (ta/types-candidates
+        (let [res (types-candidates
                     {:body {:expected "any" :name-prefix "zzz-no-such"}} c)]
           (is (true? (:ok res)))
           (is (zero? (:count res)))))
@@ -266,8 +296,8 @@
         c (test-ctx storage)]
     (try
       (testing "missing / invalid type-fn-id → {:ok false}"
-        (is (false? (:ok (ta/types-usages {:body {}} c))))
-        (is (false? (:ok (ta/types-usages {:body {:type-fn-id "not-a-uuid"}} c)))))
+        (is (false? (:ok (types-usages {:body {}} c))))
+        (is (false? (:ok (types-usages {:body {:type-fn-id "not-a-uuid"}} c)))))
 
       (testing "a slot typed against the target type-row is reported as a usage"
         (let [int-id  (get setup/primitive-fn-ids :int)
@@ -277,7 +307,7 @@
               host    (setup/create-base-fn! storage "tu-host")
               slot    (setup/create-slot! storage "field" (:id type-row))
               _       (setup/attach-slot! storage (:id host) (:id slot) 0)
-              res     (ta/types-usages {:body {:type-fn-id (str (:id type-row))}} c)]
+              res     (types-usages {:body {:type-fn-id (str (:id type-row))}} c)]
           (is (true? (:ok res)))
           (is (pos? (:count res)))
           (is (some #(= :slot-of (:kind %)) (:usages res)))))
@@ -307,7 +337,7 @@
                                          {:fn-id (:id comp-fn) :slot-id (:id slot)
                                           :type-override-fn-id (:id type-row)
                                           :override-kind :fixed})
-              res      (ta/types-usages
+              res      (types-usages
                          {:body {:type-fn-id (str (:id type-row))}} c)
               kinds    (set (map :kind (:usages res)))]
           (is (true? (:ok res)))

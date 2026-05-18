@@ -230,24 +230,6 @@
     :else           x))
 
 
-(defn json->type-form
-  "Local copy of the inverse-of-cheshire encoding used by
-   `/api/types/compatible` — keeps `tighten-fn-type-impl!` self-
-   contained without reaching into the public defbase. Strings →
-   keywords, recurses into vectors / maps, leaves everything else
-   alone."
-  [x]
-  (cond
-    (string? x)     (keyword x)
-    (map? x)        (into {}
-                          (map (fn [[k v]]
-                                 [(if (string? k) (keyword k) k)
-                                  (json->type-form v)]))
-                          x)
-    (sequential? x) (mapv json->type-form x)
-    :else           x))
-
-
 (defn describe-mismatch
   "One-line human-readable explanation for why `candidate` is NOT a
    subtype of `expected`. Best-effort — the type-checker proper
@@ -316,135 +298,179 @@
 
 ;; === Heavy logic bodies behind the type-API defbases ========================
 
-(defn types-compatible
-  "Body of the `types-compatible` base-fn. Single-pair subtype check."
+;; --- types-compatible — parse → validate → apply (single-pair
+;; subtype check). `validate-*` returns the `{:ok false :error}`
+;; rejection directly (or nil); `apply-*` is reached only when valid.
+
+(defn parse-types-compatible-request
+  "Stage 1 of types-compatible — JSON body → `{:expected :candidate}`,
+   each decoded from the wire shape via `json->type`."
+  [request]
+  (let [body (request/read-json-body request)]
+    {:expected (json->type (:expected body))
+     :candidate (json->type (:candidate body))}))
+
+
+(defn validate-types-compatible
+  "Stage 2 of types-compatible. Returns the `{:ok false :error}`
+   rejection response, or nil when both sides are present."
+  [parsed]
+  (cond
+    (nil? (:expected parsed))
+    {:ok false :error "Request body must include 'expected'"}
+
+    (nil? (:candidate parsed))
+    {:ok false :error "Request body must include 'candidate'"}
+
+    :else nil))
+
+
+(defn apply-types-compatible
+  "Stage 3 of types-compatible — the subtype check. Reached only after
+   `validate-types-compatible` passes."
+  [parsed]
+  (let [{:keys [expected candidate]} parsed
+        ok? (types/subtype? candidate expected)]
+    (cond-> {:ok ok?
+             :expected expected
+             :candidate candidate}
+      (not ok?)
+      (assoc :reason (describe-mismatch expected candidate)))))
+
+
+;; --- types-candidates — parse → validate → apply (enumerate every fn
+;; whose return type is a subtype of `expected`, optionally filtered).
+
+(defn parse-types-candidates-request
+  "Stage 1 of types-candidates — JSON body → `{:expected
+   :allowed-effects :name-prefix}`."
+  [request]
+  (let [body (request/read-json-body request)]
+    {:expected (json->type (:expected body))
+     :allowed-effects (when-let [effs (:effects body)]
+                        (set (map (fn [e] (if (string? e) (keyword e) e))
+                                  effs)))
+     :name-prefix (some-> (:name-prefix body) str)}))
+
+
+(defn validate-types-candidates
+  "Stage 2 of types-candidates. Returns the `{:ok false :error}`
+   rejection response, or nil when `expected` is present."
+  [parsed]
+  (when (nil? (:expected parsed))
+    {:ok false :error "Request body must include 'expected'"}))
+
+
+(defn apply-types-candidates
+  "Stage 3 of types-candidates — enumerate matching fns. Reached only
+   after `validate-types-candidates` passes."
+  [parsed ctx]
+  (let [{:keys [expected allowed-effects name-prefix]} parsed
+        registry-snapshot (rich-types-with-type-rows ctx)
+        candidates
+        (->> registry-snapshot
+             (keep (fn [[fn-name {:keys [return args effects type-row?]}]]
+                     (let [eff-set (or effects #{})
+                           name-str (some-> fn-name name)]
+                       (when (and (not type-row?) ; type-rows aren't callable producers
+                                  (types/subtype? return expected)
+                                  (or (nil? allowed-effects)
+                                      (every? allowed-effects eff-set))
+                                  (or (nil? name-prefix)
+                                      (and name-str
+                                           (str/starts-with? name-str name-prefix))))
+                         {:name fn-name
+                          :return return
+                          :args (or args {})
+                          :effects (vec (sort eff-set))}))))
+             (sort-by (fn [c] (some-> c :name name))))]
+    {:ok true
+     :expected expected
+     :count (count candidates)
+     :candidates (vec candidates)}))
+
+
+;; --- types-usages — parse → validate → apply (find every place a
+;; type-row is referenced).
+
+(defn parse-types-usages-request
+  "Stage 1 of types-usages — JSON body → `{:target-id}` (the
+   `type-fn-id` coerced to a UUID, or nil when absent / malformed)."
   [request]
   (let [body (request/read-json-body request)
-        expected-raw (:expected body)
-        candidate-raw (:candidate body)]
-    (cond
-      (nil? expected-raw)
-      {:ok false
-       :error "Request body must include 'expected'"}
-
-      (nil? candidate-raw)
-      {:ok false
-       :error "Request body must include 'candidate'"}
-
-      :else
-      (let [expected (json->type expected-raw)
-            candidate (json->type candidate-raw)
-            ok? (types/subtype? candidate expected)]
-        (cond-> {:ok ok?
-                 :expected expected
-                 :candidate candidate}
-          (not ok?)
-          (assoc :reason (describe-mismatch expected candidate)))))))
+        target-id-raw (:type-fn-id body)]
+    {:target-id (when target-id-raw
+                  (try (java.util.UUID/fromString (str target-id-raw))
+                       (catch Exception _ nil)))}))
 
 
-(defn types-candidates
-  "Body of the `types-candidates` base-fn. Enumerate every fn whose
-   return type is a subtype of `expected`, optionally further
-   filtered by allowed-effect set or name-prefix."
-  [request ctx]
-  (let [body (request/read-json-body request)
-        expected-raw (:expected body)]
-    (if (nil? expected-raw)
-      {:ok false :error "Request body must include 'expected'"}
-      (let [expected (json->type expected-raw)
-            allowed-effects (when-let [effs (:effects body)]
-                              (set (map (fn [e] (if (string? e) (keyword e) e))
-                                        effs)))
-            name-prefix (some-> (:name-prefix body) str)
-            registry-snapshot (rich-types-with-type-rows ctx)
-            candidates
-            (->> registry-snapshot
-                 (keep (fn [[fn-name {:keys [return args effects type-row?]}]]
-                         (let [eff-set (or effects #{})
-                               name-str (some-> fn-name name)]
-                           (when (and (not type-row?) ; type-rows aren't callable producers
-                                      (types/subtype? return expected)
-                                      (or (nil? allowed-effects)
-                                          (every? allowed-effects eff-set))
-                                      (or (nil? name-prefix)
-                                          (and name-str
-                                               (str/starts-with? name-str name-prefix))))
-                             {:name fn-name
-                              :return return
-                              :args (or args {})
-                              :effects (vec (sort eff-set))}))))
-                 (sort-by (fn [c] (some-> c :name name))))]
-        {:ok true
-         :expected expected
-         :count (count candidates)
-         :candidates (vec candidates)}))))
+(defn validate-types-usages
+  "Stage 2 of types-usages. Returns the `{:ok false :error}` rejection
+   response, or nil when a valid `type-fn-id` was supplied."
+  [parsed]
+  (when (nil? (:target-id parsed))
+    {:ok false :error "Request body must include valid 'type-fn-id'"}))
 
 
-(defn types-usages
-  "Body of the `types-usages` base-fn. Find every place a type-row is
-   referenced."
-  [request ctx]
-  (let [body (request/read-json-body request)
-        target-id-raw (:type-fn-id body)
-        target-id (when target-id-raw
-                    (try (java.util.UUID/fromString (str target-id-raw))
-                         (catch Exception _ nil)))]
-    (if (nil? target-id)
-      {:ok false :error "Request body must include valid 'type-fn-id'"}
-      (let [{:keys [fns slots fn-slots bindings]} (cached-or-load-graph ctx)
-            fn-by-id (into {} (map (juxt :id identity)) fns)
-            slot-by-id (into {} (map (juxt :id identity)) slots)
-            slot-owner-by-id (into {} (map (juxt :slot-id :fn-id)) fn-slots)
-            target-fn (get fn-by-id target-id)
-            target-name (some-> target-fn :name)
-            fn-summary (fn [fid kind & [extra]]
-                         (let [f (get fn-by-id fid)]
-                           (merge {:fn-id (str fid)
-                                   :fn-name (or (:name f) "(anonymous)")
-                                   :role (:role f)
-                                   :kind kind}
-                                  (or extra {}))))
-            base-uses (->> fns
-                           (filter #(= (:base-fn-id %) target-id))
-                           (map #(fn-summary (:id %) :base-of)))
-            elem-uses (->> fns
-                           (filter #(= (:element-fn-id %) target-id))
-                           (map #(fn-summary (:id %) :element-of)))
-            ret-uses (->> fns
-                          (filter #(= (:return-type-fn-id %) target-id))
-                          (map #(fn-summary (:id %) :return-of)))
-            constraint-uses
-            (->> fns
-                 (filter (fn [f]
-                           (and (vector? (:constraint f))
-                                target-name
-                                (constraint-contains-type-ref? (:constraint f) target-name))))
-                 (mapcat (fn [f]
-                           (let [kind (case (first (:constraint f))
-                                        :union :union-branch
-                                        :variant :variant-branch
-                                        :fn :fn-type-arg-or-return
-                                        :other)]
-                             [(fn-summary (:id f) kind)]))))
-            slot-uses (->> slots
-                           (filter #(= (:type-fn-id %) target-id))
-                           (mapcat (fn [s]
-                                     (when-let [owner-id (get slot-owner-by-id (:id s))]
-                                       [(fn-summary owner-id :slot-of
-                                                    {:slot-name (:name s)})]))))
-            binding-uses (->> bindings
-                              (filter #(= (:type-override-fn-id %) target-id))
-                              (map (fn [b]
-                                     (let [s (get slot-by-id (:slot-id b))]
-                                       (fn-summary (:fn-id b) :binding-of
-                                                   {:slot-name (:name s)})))))
-            usages (vec (concat base-uses elem-uses ret-uses
-                                constraint-uses slot-uses binding-uses))]
-        {:ok true
-         :type-fn-id (str target-id)
-         :type-name (some-> target-name str)
-         :count (count usages)
-         :usages usages}))))
+(defn apply-types-usages
+  "Stage 3 of types-usages — walk the graph for every reference to the
+   target type-row. Reached only after `validate-types-usages` passes."
+  [parsed ctx]
+  (let [target-id (:target-id parsed)
+        {:keys [fns slots fn-slots bindings]} (cached-or-load-graph ctx)
+        fn-by-id (into {} (map (juxt :id identity)) fns)
+        slot-by-id (into {} (map (juxt :id identity)) slots)
+        slot-owner-by-id (into {} (map (juxt :slot-id :fn-id)) fn-slots)
+        target-fn (get fn-by-id target-id)
+        target-name (some-> target-fn :name)
+        fn-summary (fn [fid kind & [extra]]
+                     (let [f (get fn-by-id fid)]
+                       (merge {:fn-id (str fid)
+                               :fn-name (or (:name f) "(anonymous)")
+                               :role (:role f)
+                               :kind kind}
+                              (or extra {}))))
+        base-uses (->> fns
+                       (filter #(= (:base-fn-id %) target-id))
+                       (map #(fn-summary (:id %) :base-of)))
+        elem-uses (->> fns
+                       (filter #(= (:element-fn-id %) target-id))
+                       (map #(fn-summary (:id %) :element-of)))
+        ret-uses (->> fns
+                      (filter #(= (:return-type-fn-id %) target-id))
+                      (map #(fn-summary (:id %) :return-of)))
+        constraint-uses
+        (->> fns
+             (filter (fn [f]
+                       (and (vector? (:constraint f))
+                            target-name
+                            (constraint-contains-type-ref? (:constraint f) target-name))))
+             (mapcat (fn [f]
+                       (let [kind (case (first (:constraint f))
+                                    :union :union-branch
+                                    :variant :variant-branch
+                                    :fn :fn-type-arg-or-return
+                                    :other)]
+                         [(fn-summary (:id f) kind)]))))
+        slot-uses (->> slots
+                       (filter #(= (:type-fn-id %) target-id))
+                       (mapcat (fn [s]
+                                 (when-let [owner-id (get slot-owner-by-id (:id s))]
+                                   [(fn-summary owner-id :slot-of
+                                                {:slot-name (:name s)})]))))
+        binding-uses (->> bindings
+                          (filter #(= (:type-override-fn-id %) target-id))
+                          (map (fn [b]
+                                 (let [s (get slot-by-id (:slot-id b))]
+                                   (fn-summary (:fn-id b) :binding-of
+                                               {:slot-name (:name s)})))))
+        usages (vec (concat base-uses elem-uses ret-uses
+                            constraint-uses slot-uses binding-uses))]
+    {:ok true
+     :type-fn-id (str target-id)
+     :type-name (some-> target-name str)
+     :count (count usages)
+     :usages usages}))
 
 
 (defn all-rich-types

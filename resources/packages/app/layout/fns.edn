@@ -1,5 +1,12 @@
-;; Graph layout calculation base functions
-;; get-layout-data: fetches data from DB, builds graph, computes layout
+;; Graph layout calculation
+;;
+;; `get-layout-data` is a graph fn-def composing base-fn primitives so
+;; the layout pipeline is visible in the graph rather than hidden in a
+;; single big impl:
+;;
+;;   get-layout-data = _compute-layout( _load-graph-cached,
+;;                                      _parse-layout-request(request) )
+;;   _compute-layout = _layout-place( _layout-build-elements(graph, parsed) )
 ;;
 ;; Input: {root-id: uuid-string, expansions: {fn-id: level, ...}}
 ;; Output: {nodes: [...], edges: [...], grid-pos: {...}, validation: {...}}
@@ -8,12 +15,49 @@
 {:namespace "app.layout"
  :description "Graph-layout pass — turns raw fn/arg entities + per-call expansion specs into the {:nodes :edges :grid-pos :validation} cytoscape response."
  :fns
- [;; Layout data function - fetches from DB, builds graph, computes layout
-  ;; Context-aware: receives storage from ctx
-  {:name :get-layout-data
-   :description "Fetch every fn/arg entity from storage, expand the requested subgraph based on the request's `:root-id` + `:expansions` map, run the layout pipeline, and return `{:nodes :edges :grid-pos :validation}`. Context-aware (reads storage from `ctx`)."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request — body parsed into `{:root-id :expansions}`."}}
+ [;; =============================================================================
+  ;; BASE-FNS: layout pipeline primitives
+  ;; =============================================================================
+
+  {:name :_parse-layout-request
+   :description "Parse the internal Ring request body into `{:root-id :expansions}` for the layout pipeline."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request — body carries `{:root-id :expansions}`."}}
    :return-type :jsonb}
+
+  {:name :_load-graph-cached
+   :description "Load every fn/slot/binding entity for layout, served from the per-context graph cache when warm. Context-aware (reads storage from `ctx`)."
+   :args {}
+   :return-type :jsonb}
+
+  {:name :_layout-build-elements
+   :description "Stage A — build cytoscape `{:nodes :edges}` for the requested subgraph from the graph snapshot + parsed request."
+   :args {:graph {:type :jsonb :description "Entity snapshot from `:_load-graph-cached`."}
+          :parsed {:type :jsonb :description "`{:root-id :expansions}` from `:_parse-layout-request`."}}
+   :return-type :jsonb}
+
+  {:name :_layout-place
+   :description "Stage B — grid-place the `{:nodes :edges}` from `:_layout-build-elements` into the full `{:nodes :edges :grid-pos :validation}` response."
+   :args {:elements {:type :jsonb :description "`{:nodes :edges}` from `:_layout-build-elements`."}}
+   :return-type :jsonb}
+
+  ;; =============================================================================
+  ;; FN-DEFS: layout pipeline composition
+  ;; =============================================================================
+
+  ;; build → place. Free args `graph` + `parsed` propagate up from
+  ;; `_layout-build-elements`.
+  {:name :_compute-layout
+   :description "Run the build → place layout pipeline for one parsed request. Composition of `:_layout-build-elements` → `:_layout-place`."
+   :parent :_layout-place
+   :args {:elements :_layout-build-elements}}
+
+  ;; parse → load → compute. Context-aware: free arg `request`
+  ;; propagates up from `_parse-layout-request`.
+  {:name :get-layout-data
+   :description "Fetch every fn/arg entity from storage, expand the requested subgraph based on the request's `:root-id` + `:expansions` map, run the layout pipeline, and return `{:nodes :edges :grid-pos :validation}`. Composition of `:_parse-layout-request` → `:_load-graph-cached` → `:_compute-layout`."
+   :parent :_compute-layout
+   :args {:graph :_load-graph-cached
+          :parsed :_parse-layout-request}}
 
   ;; =============================================================================
   ;; FN-DEFS: Layout API handler

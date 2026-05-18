@@ -30,6 +30,7 @@ let selectedFnId = null;          // Currently selected function ID
 let graphData = null;             // Raw graph data from API
 let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
 let richTypes = {};               // {fn-name → {return, args}} from /api/types
+let VALUE_KINDS = [];             // value_kind schema enum, from /api/value-kinds
 
 // Set of fn-ids reachable from `selectedFnId` via ref-id only — i.e.
 // fns that show up in the layout WITHOUT requiring an expansion. The

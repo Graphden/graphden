@@ -165,39 +165,6 @@
    :args {:exception {:type :any :description "Exception to raise (typically built via `:ex-info`)."}}
    :return-type a}
 
-  ;; `:env-required` is now a fn-def (see below) composing :env with
-  ;; :if + :throw + :ex-info — kept here as a forward declaration so
-  ;; consumers reading fns.edn see the spec in one place.
-  {:name :env-required
-   :description "Read an OS environment variable, throwing `execution-error/missing-env-var` if it's unset or blank. Pure composition over `:if`/`:env`/`:blank?`/`:throw`/`:ex-info`."
-   :parent :if
-   :args {:test :_env-blank?
-          :then :_env-missing-throw
-          :else :_env-value}}
-
-  {:name :_env-value
-   :parent :env
-   :args {:name {:as :name}}}
-
-  {:name :_env-blank?
-   :parent :blank?
-   :args {:string :_env-value}}
-
-  {:name :_env-missing-message
-   :parent :str
-   :args {:parts [{:value "Required env var "}
-                  {:as :name}
-                  {:value " is not set"}]}}
-
-  {:name :_env-missing-error
-   :parent :ex-info
-   :args {:message :_env-missing-message
-          :data {"type" "execution-error/missing-env-var"}}}
-
-  {:name :_env-missing-throw
-   :parent :throw
-   :args {:exception :_env-missing-error}}
-
   ;; Look up a classpath resource and slurp it. Returns nil if missing.
   {:name :read-resource-or-nil
    :description "Read a classpath resource as a string, or return nil if the path doesn't resolve. Building block for `:read-resource` (which throws on miss)."
@@ -293,16 +260,6 @@
    :description "Frontend-section SHA-256 — every `.js` / `.css` under `resources/packages/`. Changes only when a browser-side asset changes."
    :parent :get
    :args {:coll :build-hashes :key "frontend"}}
-
-  {:name :build-hash-backend
-   :description "Backend-section SHA-256 — `src/**/*.clj` plus non-package resources. Changes only when Clojure server code or system config changes."
-   :parent :get
-   :args {:coll :build-hashes :key "backend"}}
-
-  {:name :build-hash-packages
-   :description "Packages-section SHA-256 — every `.edn` and `.clj` under `resources/packages/`. Changes only when graph fn-defs or base-fn impls change."
-   :parent :get
-   :args {:coll :build-hashes :key "packages"}}
 
   {:name :build-hash-frontend-short
    :description "First 12 chars of `:build-hash-frontend` — used by the editor's `BUILD_HASH` console marker so the in-page identifier reflects exactly which JS/CSS the user is running."

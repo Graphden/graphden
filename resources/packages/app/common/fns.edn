@@ -101,11 +101,6 @@
    :parent :ring-response
    :args {:status 200}}
 
-  {:name :bad-request-response
-   :description "Status axis: 400 Bad Request."
-   :parent :ring-response
-   :args {:status 400}}
-
   {:name :not-found-response
    :description "Status axis: 404 Not Found."
    :parent :ring-response
@@ -138,14 +133,8 @@
    :parent :ring-response
    :args {:headers {"Content-Type" "text/plain"}}}
 
-  {:name :svg-content-type
-   :description "Content-type axis: `image/svg+xml`."
-   :parent :ring-response
-   :args {:headers {"Content-Type" "image/svg+xml"}}}
-
-  ;; Cached SVG: one extra header beyond :svg-content-type, so it gets its
-  ;; own content-type fn (the :headers map cannot be merged via MI — it is a
-  ;; single arg, so the whole map must be set in one place).
+  ;; Cached SVG content-type — its own fn because the :headers map can't be
+  ;; merged via MI (it's a single arg, so the whole map is set in one place).
   {:name :cached-svg-content-type
    :description "Content-type axis: `image/svg+xml` + `Cache-Control: public, max-age=86400`. Separate fn because the headers map can't be merged via MI."
    :parent :ring-response
@@ -163,37 +152,18 @@
   {:name :text-ok-response
    :description "200 OK with `text/plain` content-type. Free arg: `:body`."
    :parents [:text-content-type :ok-response]}
-  {:name :svg-ok-response
-   :description "200 OK with `image/svg+xml` content-type. Free arg: `:body` (raw SVG)."
-   :parents [:svg-content-type  :ok-response]}
   {:name :cached-svg-ok-response
    :description "200 OK with `image/svg+xml` content-type and a 24-hour `Cache-Control` header. Used for the favicon."
    :parents [:cached-svg-content-type :ok-response]}
-
-  {:name :html-bad-request-response
-   :description "400 Bad Request with `text/html` content-type."
-   :parents [:html-content-type :bad-request-response]}
 
   {:name :text-method-not-allowed-response
    :description "405 Method Not Allowed with `text/plain` content-type. Used by the reitit fallback handler."
    :parents [:text-content-type :method-not-allowed-response]}
 
-  {:name :json-not-found-response
-   :description "404 Not Found with `application/json` content-type."
-   :parents [:json-content-type :not-found-response]}
-  {:name :html-not-found-response
-   :description "404 Not Found with `text/html` content-type."
-   :parents [:html-content-type :not-found-response]}
   {:name :text-not-found-response
    :description "404 Not Found with `text/plain` content-type. Used by the reitit fallback handler."
    :parents [:text-content-type :not-found-response]}
 
-  {:name :json-error-response
-   :description "500 Internal Server Error with `application/json` content-type."
-   :parents [:json-content-type :error-response]}
-  {:name :html-error-response
-   :description "500 Internal Server Error with `text/html` content-type."
-   :parents [:html-content-type :error-response]}
   {:name :text-error-response
    :description "500 Internal Server Error with `text/plain` content-type. Used by the reitit fallback handler."
    :parents [:text-content-type :error-response]}

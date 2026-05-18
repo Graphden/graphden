@@ -58,7 +58,13 @@
 
 
 (defbase conj-any-fn [coll item]
-  (conj coll item))
+  ;; Append for sequential colls — a `:seq` binding / `:list` result is
+  ;; an (unchunked) lazy-seq, and `conj` would PREPEND onto a seq.
+  ;; `vec` first so list-building keeps insertion order; maps / sets
+  ;; take a plain `conj`.
+  (if (or (nil? coll) (sequential? coll))
+    (conj (vec coll) item)
+    (conj coll item)))
 
 
 (defbase get-fn [coll key default]
@@ -102,7 +108,11 @@
 
 
 (defbase into-fn [to from]
-  (into to from))
+  ;; A non-vector sequential `to` (e.g. a lazy-seq from a `:seq`
+  ;; binding) would make `into` prepend each element; `vec` it so the
+  ;; result keeps `from`'s order. Vectors / maps / sets pass through.
+  (into (if (and (sequential? to) (not (vector? to))) (vec to) to)
+        from))
 
 
 (defbase assoc-in-fn [m path v]
@@ -201,15 +211,19 @@
 
 
 ;; === Sequence primitives ===
-;; Executor resolves the linked-list chain into a Clojure vector before
-;; calling these impls.
+;; The executor resolves a `:seq` binding into an unchunked lazy-seq
+;; (`compile/resolve-seq-items`). `list-fn` returns it as-is — `vec`
+;; would force every element, defeating the per-element laziness that
+;; lets `:cond` clauses (built via `:list`) short-circuit.
 
 (defbase list-fn [items]
-  (vec items))
+  items)
 
 
 (defbase pairs->map-fn [entries]
-  (into {} entries))
+  ;; `into {}` needs each entry to be a vector / map-entry; a pair
+  ;; built via `:list` is now a lazy-seq, so coerce each with `vec`.
+  (into {} (map vec) entries))
 
 
 ;; === Type-rules ===

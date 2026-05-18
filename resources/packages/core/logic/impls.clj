@@ -1,10 +1,14 @@
 (ns graphden.packages.core.logic.impls
   "Implementations for core/logic base functions.
 
-   Migrated to `defbase` — arg symbols resolve at use site via the runtime
-   helper. Clojure's native short-circuit evaluation (`if`, `and`, `or`,
-   `cond`) handles laziness for conditional args without any `:lazy` flag
-   inspection: references in unchosen branches simply never run.
+   Migrated to `defbase` — arg symbols resolve at use site via the
+   runtime helper (`rt/resolve-arg`). Laziness needs no `:lazy` flag:
+   scalar `:ref` args arrive as thunks, and `:seq` args as UNCHUNKED
+   lazy-seqs (`compile/resolve-seq-items`). So an impl's native Clojure
+   control flow — `if` / `and` / `or` / `cond` / `case` — forces only
+   what it reaches; references in un-taken branches never run, side
+   effects and all. `cond-fn` / `case-fn` are written to exploit this
+   (force the test / lookup, defer the result / default).
 
    `:const`'s type-rule (moved verbatim from `graphden.types.rules`)
    lives here as a `defn` and is wired into the `impls` map as
@@ -48,21 +52,37 @@
 
 (defbase cond-fn
   "Evaluates clauses as [[test1 result1] [test2 result2] ...].
-   Returns first result where test is truthy, or nil if none match."
+   Returns first result where test is truthy, or nil if none match.
+
+   Lazy: `clauses` is an unchunked lazy-seq, and each clause likewise.
+   The loop forces a clause's test via `(first clause)`; the result
+   `(second clause)` is forced ONLY in the branch that wins. A
+   side-effecting un-taken clause is never run."
   [clauses]
-  (loop [remaining clauses]
-    (when (seq remaining)
-      (let [[test result] (first remaining)]
-        (if test
-          result
-          (recur (rest remaining)))))))
+  (loop [remaining (seq clauses)]
+    (when remaining
+      (let [clause (first remaining)]
+        (if (first clause)
+          (second clause)
+          (recur (next remaining)))))))
+
+
+(def ^:private case-miss
+  "Unique sentinel — lets `case-fn` tell 'no clause matched' apart from
+   a clause whose result is itself nil, so `default` is forced only on
+   a genuine miss."
+  (Object.))
 
 
 (defbase case-fn
   "Dispatches on value. Clauses is a map {match-value result ...}.
-   Returns result for matching value, or default if no match."
+   Returns result for matching value, or default if no match.
+
+   Lazy: `default` is referenced only on the no-match branch, so its
+   ref-thunk fires solely when no clause matches."
   [value clauses default]
-  (get clauses value default))
+  (let [r (get clauses value case-miss)]
+    (if (identical? r case-miss) default r)))
 
 
 ;; === Defaults ===

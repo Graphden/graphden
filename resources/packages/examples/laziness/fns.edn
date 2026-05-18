@@ -1,0 +1,63 @@
+;; Executor laziness — short-circuit evaluation.
+;;
+;; A graphden fn-graph is lazy: a consumer only runs the branches /
+;; elements it actually reaches. Scalar `:ref` args are thunks; `:seq`
+;; bindings (`:cond` clauses, `:and`/`:or` values) are unchunked
+;; lazy-seqs. So `:cond` / `:and` / `:or` / `:case` / `:if`
+;; short-circuit — an un-taken branch's side effect never fires.
+;;
+;; Each `ex-lazy-*` below puts a `:throw` (`:_lazy-boom`) in a branch
+;; that must NOT be taken. If the executor were eager the throw would
+;; fire; because it is lazy, every `ex-lazy-*` evaluates to its safe
+;; value. The `compile-packages` test asserts exactly that.
+
+
+{:namespace "examples.laziness"
+ :description "Short-circuit evaluation — `:cond`/`:and`/`:or`/`:case` never run an un-taken branch. Each example hides a `:throw` in the branch that must not be reached."
+ :fns
+ [;; --- :cond — a falsy clause's RESULT is never forced ---------------
+  {:name :ex-lazy-cond
+   :description "`:cond` over two clauses. Clause 0's test is `false`, so its result `:_lazy-boom` (a throw) must never be forced; clause 1 matches and yields `\"safe\"`."
+   :parent :cond
+   :args {:clauses [:_lazy-clause-boom :_lazy-clause-safe]}}
+
+  {:name :_lazy-clause-boom
+   :description "Clause `[false <throw>]` — the test fails, so the result is never evaluated."
+   :parent :list
+   :args {:items [{:value false} :_lazy-boom]}}
+
+  {:name :_lazy-clause-safe
+   :description "Clause `[true \"safe\"]` — the matching clause."
+   :parent :list
+   :args {:items [{:value true} {:value "safe"}]}}
+
+  ;; --- :and — stops at the first falsy value -------------------------
+  {:name :ex-lazy-and
+   :description "`:and` of `[false <throw>]`. `every?` short-circuits on the first falsy element, so `:_lazy-boom` is never realised; result is `false`."
+   :parent :and
+   :args {:values [{:value false} :_lazy-boom]}}
+
+  ;; --- :or — stops at the first truthy value -------------------------
+  {:name :ex-lazy-or
+   :description "`:or` of `[true <throw>]`. `some` short-circuits on the first truthy element, so `:_lazy-boom` is never realised; result is `true`."
+   :parent :or
+   :args {:values [{:value true} :_lazy-boom]}}
+
+  ;; --- :case — the default is forced only on a miss ------------------
+  {:name :ex-lazy-case
+   :description "`:case` dispatch where `:value` matches a clause, so the `:default` (`:_lazy-boom`, a throw) is never forced; result is `\"matched\"`."
+   :parent :case
+   :args {:value {:value :a}
+          :clauses {:value {:a "matched"}}
+          :default :_lazy-boom}}
+
+  ;; --- The shared "evaluating me is a bug" branch ---------------------
+  {:name :_lazy-boom
+   :description "If anything forces this, executor laziness is broken — it raises `examples/laziness-violated`."
+   :parent :throw
+   :args {:exception :_lazy-boom-error}}
+
+  {:name :_lazy-boom-error
+   :parent :ex-info
+   :args {:message {:value "lazy short-circuit violated — an un-taken branch was evaluated"}
+          :data {"type" "examples/laziness-violated"}}}]}

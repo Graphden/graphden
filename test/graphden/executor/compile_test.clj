@@ -168,6 +168,41 @@
         (finally (sp/close storage))))))
 
 
+(deftest compile-execute-seq-element-laziness-test
+  (testing "an un-reached seq-binding element is NOT executed — a
+            consumer that forces only `(first xs)` never realises
+            element 1, so its side-effecting ref never fires. This is
+            the executor mechanism `:cond` / `:and` / `:or` rely on to
+            short-circuit."
+    (let [storage (setup/create-test-storage)
+          fired   (atom false)]
+      (try
+        (exec/register-base-fn! :ct-take-first (setup/fn-impl [xs] (first xs)))
+        (exec/register-base-fn! :ct-side-effect
+                                (setup/fn-impl [] (reset! fired true) :boom))
+        (let [tf-base  (setup/create-base-fn! storage "ct-take-first")
+              slot     (setup/create-slot! storage "xs" :sequence)
+              _        (setup/attach-slot! storage (:id tf-base) (:id slot) 0)
+              se-base  (setup/create-base-fn! storage "ct-side-effect")
+              se       (setup/create-composed-fn! storage "ct-se-fn" (:id se-base))
+              composed (setup/create-composed-fn! storage "ct-take-first-call"
+                                                  (:id tf-base))
+              bind     (sp/create-entity storage :binding
+                                         {:fn-id (:id composed) :slot-id (:id slot)
+                                          :list-append true :override-kind :fixed})
+              _ (sp/create-entity storage :binding-list-item
+                                  {:binding-id (:id bind) :position 0 :value 1})
+              _ (sp/create-entity storage :binding-list-item
+                                  {:binding-id (:id bind) :position 1
+                                   :ref-fn-id (:id se)})
+              ctx (exec/create-context {:storage storage})]
+          (is (= 1 (exec/execute ctx (:id composed) {}))
+              "consumer forces only (first xs) → element 0")
+          (is (false? @fired)
+              "element 1 — a side-effecting ref — was never realised"))
+        (finally (sp/close storage))))))
+
+
 ;; ============================================================================
 ;; set-always-fresh-fn-ids!
 ;; ============================================================================

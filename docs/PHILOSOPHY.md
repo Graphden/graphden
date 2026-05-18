@@ -702,7 +702,7 @@ Base-fns must not contain hardcoded configuration values. Defaults belong in fn-
 **Examples:**
 - Security headers: from hardcoded map in `http-server` → fn-def arg `:default-headers`
 - Error responses: from hardcoded maps in `router` → fn-defs via MI (`text-error-router`)
-- Default styles: from `cytoscape-container`, `button-row` → explicit required args
+- Default styles: from `cytoscape-container` → explicit required arg `:style`
 - Optional args with defaults: declared in fns.edn with default value, not `(or arg val)` in impl
 
 ### 4. Content → Fn-defs, Not Impls

@@ -350,15 +350,6 @@ function getRootSlots(fnId) {
   return fnSlots.map(fs => lookups.slotMap.get(fs['slot-id'])).filter(Boolean);
 }
 
-// Mirror of the backend's `value_kind` enum
-// (src/graphden/schema/graph/schema.clj). Used by the in-graph
-// type-pickers (return-type chip on fn cards, arg type-chip in
-// Phase 2). Order matches the schema's declaration order, which is
-// also the order users will see in dropdowns.
-const VALUE_KINDS = ['null', 'uuid', 'text', 'int', 'bool', 'numeric',
-                     'timestamptz', 'jsonb', 'bytes', 'any', 'fn', 'sequence',
-                     'keyword'];
-
 // Editability gate — mirror of the backend's "fn-in-use-reason" delete
 // check: a fn can be edited inline only if it's not used as a parent
 // of any other fn AND not referenced as ref-id by any arg. Same rule

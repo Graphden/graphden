@@ -22,21 +22,6 @@
    :parent :route
    :args {:method "post"}}
 
-  {:name :put-route
-   :description "Method template for `PUT` routes. Caller supplies `:path` and `:handler`."
-   :parent :route
-   :args {:method "put"}}
-
-  {:name :delete-route
-   :description "Method template for `DELETE` routes. Caller supplies `:path` and `:handler`."
-   :parent :route
-   :args {:method "delete"}}
-
-  {:name :patch-route
-   :description "Method template for `PATCH` routes. Caller supplies `:path` and `:handler`."
-   :parent :route
-   :args {:method "patch"}}
-
   ;; --- Method routes that carry their own middleware list ---
   ;; Free args: path, handler, middleware.
 
@@ -53,14 +38,4 @@
   {:name :put-route-with-middleware
    :description "Method template for `PUT` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
    :parent :route-with-middleware
-   :args {:method "put"}}
-
-  {:name :delete-route-with-middleware
-   :description "Method template for `DELETE` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
-   :parent :route-with-middleware
-   :args {:method "delete"}}
-
-  {:name :patch-route-with-middleware
-   :description "Method template for `PATCH` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
-   :parent :route-with-middleware
-   :args {:method "patch"}}]}
+   :args {:method "put"}}]}

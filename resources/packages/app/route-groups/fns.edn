@@ -1,52 +1,21 @@
-;; Route groups — top-level entries reitit consumes via `app.server._router`.
+;; Route groups — the top-level entry reitit consumes via `app.server._router`.
 ;;
 ;; After the nested-routes refactor, `:all` is no longer a flat list of
 ;; every endpoint — it's a small list of TOP-LEVEL reitit entries:
 ;; standalone leaves (`:health`, `:metrics`, `:favicon`, `:editor`) and
-;; the prefix groups (`:partials-routes`, `:api-routes`). Reitit walks
-;; the nested vectors and assembles full paths itself.
-;;
-;; The other groups (`:ui`, `:entity-crud`, `:graph-api`, `:monitoring`)
-;; are still useful as sidebar bundles for the editor — they let the
-;; user navigate to logically-related endpoints regardless of where
-;; they sit in the route tree.
+;; the `:api-routes` prefix group. Reitit walks the nested vectors and
+;; assembles full paths itself.
 
 
 {:namespace "app.routes.groups"
- :description "Route bundles. `:all` is the top-level nested-tree input to reitit; the other groups (`:ui`, `:entity-crud`, …) collect logically-related endpoints for the editor's sidebar."
+ :description "The `:all` route bundle — the top-level nested-tree input to reitit's router."
  :fns
- [{:name :ui
-   :description "User-facing UI route group — favicon and the editor page."
-   :parent :list
-   :args {:items [:favicon :editor]}}
-
-  {:name :entity-crud
-   :description "Entity CRUD bundle — partial views and the create / update / delete operations. `:entity-update` and `:entity-delete` are method-maps now (combined into `:entity-by-id`); the bundle still references them so the user can jump to the per-method definition from the sidebar."
-   :parent :list
-   :args {:items [:entity-details
-                  :entity-form-create
-                  :entity-form-edit
-                  :entity-create
-                  :entity-update
-                  :entity-delete]}}
-
-  {:name :graph-api
-   :description "Graph-data API routes — `/api/graph/entities` (raw dump) and `/api/graph/layout` (layout pipeline)."
-   :parent :list
-   :args {:items [:api-entities :layout-api]}}
-
-  {:name :monitoring
-   :description "Health + metrics + version route group consumed by docker healthcheck, external scrapers, and `bb verify`."
-   :parent :list
-   :args {:items [:health :metrics :version]}}
-
-  {:name :all
-   :description "Top-level reitit entries — the small list of standalone leaves and prefix groups that the router walks. Adding a new path = either drop a new leaf in here (if it has no prefix-mate) or extend the appropriate sub-group inside `:partials-routes` / `:api-routes`."
+ [{:name :all
+   :description "Top-level reitit entries — the small list of standalone leaves and the `:api-routes` prefix group that the router walks. Adding a new path = either drop a new leaf in here (if it has no prefix-mate) or extend the appropriate sub-group inside `:api-routes`."
    :parent :list
    :args {:items [:favicon
                   :editor
                   :health
                   :metrics
                   :version
-                  :partials-routes
                   :api-routes]}}]}

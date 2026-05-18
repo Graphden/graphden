@@ -6,13 +6,7 @@
    symbol through as an explicit argument. The heavy logic — request
    parsing, write-time validation, type checks, the `process-*`
    dispatchers, sequence ops and the type-API bodies — lives in those
-   `src/` namespaces so each base-fn impl stays a minimal primitive.
-
-   The only logic that remains here is the rendering code
-   (`render-entity-*`, `render-fn-form`, `form-input-h`,
-   `form-select-h`, `fn-field-specs`): it depends on the
-   `graphden.packages.web.html.impls` *package*, which `src/` may not
-   require, so it stays put."
+   `src/` namespaces so each base-fn impl stays a minimal primitive."
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
@@ -20,8 +14,7 @@
     [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.packages.web.html.impls :as html]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.schema.graph.schema :as graph-schema]))
 
 
 ;; === Context-aware Query Functions ===
@@ -61,168 +54,117 @@
   (types-api/all-rich-types ctx))
 
 
+(defbase value-kinds
+  "The `value_kind` schema enum — ordered list of primitive type-tag
+   strings (`\"int\"`, `\"text\"`, …) a binding value / slot can carry.
+   The editor's type-pickers read this instead of hard-coding the list."
+  []
+  (mapv name graph-schema/value-kinds))
+
+
 ;; === Type-API base functions ===
+;; `types-compatible` / `types-candidates` / `types-usages` are `:if`
+;; graph fn-defs (`web/crud` fns.edn) — an `:if` over the validation
+;; result, branching to the `{:ok false :error}` rejection or to the
+;; computation. These base-fns are the parse / validate / apply stages;
+;; `_rejected?` (below) is shared with every other `:if` handler.
 
-(defbase types-compatible
-  "Single-pair subtype check. POST body: `{expected, candidate}` where
-   each side is a type in the JSON shape produced by `/api/types`.
-   Returns `{ok, expected, candidate, reason?}`. UI uses this to
-   render type-mismatch explainers without re-implementing
-   `subtype?` in JS."
+(defbase _types-compatible-parsed
   [request]
-  (types-api/types-compatible request))
+  (types-api/parse-types-compatible-request request))
 
 
-(defbase types-candidates
-  "Enumerate every fn whose return type is a subtype of `expected`,
-   optionally further filtered. POST body:
-     {expected: <type>,
-      effects?: [\"db\" \"env\" …]   ; allowed-effect set; candidates
-                                     ; with effects ⊆ this pass
-      name-prefix?: \"app.server\"   ; namespace / name prefix filter}
-   Returns `{count, candidates: [{name, return, args, effects}, ...]}`
-   sorted alphabetically."
+(defbase _types-compatible-validation
+  [parsed]
+  (types-api/validate-types-compatible parsed))
+
+
+(defbase _types-compatible-apply
+  [parsed]
+  (types-api/apply-types-compatible parsed))
+
+
+(defbase _types-candidates-parsed
   [request]
-  (types-api/types-candidates request ctx))
+  (types-api/parse-types-candidates-request request))
 
 
-(defbase types-usages
-  "Find every place a type-row is referenced. POST body
-   `{type-fn-id: <uuid-string>}`. Returns `{ok, type-fn-id,
-   type-name, usages: [{fn-id, fn-name, role, kind, slot-name?},
-   …]}` — one entry per usage."
+(defbase _types-candidates-validation
+  [parsed]
+  (types-api/validate-types-candidates parsed))
+
+
+(defbase _types-candidates-apply
+  [parsed]
+  (types-api/apply-types-candidates parsed ctx))
+
+
+(defbase _types-usages-parsed
   [request]
-  (types-api/types-usages request ctx))
+  (types-api/parse-types-usages-request request))
 
 
-(defbase process-create-record-type
-  "Atomically create a record type-row: one fn-row + N slot-rows + N
-   fn-slot-junctions. JSON body shape:
-     {namespace-id?, name, description?,
-      fields: [{name, type, description?, required?}, …]}
-   `type` per field accepts a name (`\"int\"` / `\"ring-request-shape\"`)
-   or a UUID. On any sub-write failure the partial fn-row is
-   deleted (best-effort rollback) and the error surfaces to the
-   caller via `{:ok false :error \"…\"}`."
+(defbase _types-usages-validation
+  [parsed]
+  (types-api/validate-types-usages parsed))
+
+
+(defbase _types-usages-apply
+  [parsed]
+  (types-api/apply-types-usages parsed ctx))
+
+
+;; === Type-row compound handlers ===
+;; `process-create-record-type` / `process-create-list-type` /
+;; `process-update-record-type` are `:if` graph fn-defs (`web/crud`
+;; fns.edn) — an `:if` over the validation result, branching to the
+;; `{:ok false :error}` rejection or to the transactional apply.
+;; These base-fns are the parse / validate / apply stages; `_rejected?`
+;; (below) is shared with the entity create/update handlers.
+
+(defbase _create-record-type-parsed
   [request]
-  (entities/process-create-record-type request ctx))
+  (entities/parse-create-record-type request))
 
 
-(defbase process-create-list-type
-  "Atomically create a list type-row: one fn-row with `element-fn-id`
-   plus the synthesised `items` slot. JSON body:
-     {namespace-id?, name, description?, element-type}
-   `element-type` accepts a type-name or a UUID."
+(defbase _create-record-type-validation
+  [parsed]
+  (entities/validate-create-record-type parsed))
+
+
+(defbase _create-record-type-apply
+  [parsed]
+  (entities/apply-create-record-type parsed ctx))
+
+
+(defbase _create-list-type-parsed
   [request]
-  (entities/process-create-list-type request ctx))
+  (entities/parse-create-list-type request))
 
 
-(defbase process-update-record-type
-  "Update an existing record type-row by computing the diff of the
-   submitted field list against the row's current fn-slots, then
-   atomically applying it. JSON body:
-     {id, name?, description?,
-      fields: [{name, type, description?, required?}, …]}
-   Atomicity: there's no with-transaction at the protocol layer, so
-   the impl journals every write and rewinds on failure. Caveat: this
-   does NOT garbage-collect orphaned slots (slot rows are shared)."
+(defbase _create-list-type-validation
+  [parsed]
+  (entities/validate-create-list-type parsed))
+
+
+(defbase _create-list-type-apply
+  [parsed]
+  (entities/apply-create-list-type parsed ctx))
+
+
+(defbase _update-record-type-parsed
   [request]
-  (entities/process-update-record-type request ctx))
+  (entities/parse-update-record-type request))
 
 
-;; === Rendering Helpers (stay in this package — depend on web.html) ===
-;; NOTE: fn-field-specs duplicates the `:fn-field-specs` fn-def in
-;; fns.edn — they must stay in sync. The duplication exists because
-;; base-fn impls cannot resolve fn-defs at runtime.
-
-(def ^:private fn-field-specs
-  [["ID" :id] ["Name" :name :keyword-to-str] ["Parent ID" :parent-id]
-   ["Return Type" :return-type :keyword-to-str] ["Impl Hash" :impl-hash]])
+(defbase _update-record-type-validation
+  [parsed]
+  (entities/validate-update-record-type parsed ctx))
 
 
-(defn- form-input-h
-  [{:keys [field-name label-text field-value extra-attrs]}]
-  [:div {:class "form-group"}
-   [:label {:for field-name} label-text]
-   [:input (merge {:type "text" :name field-name :id field-name}
-                  (when field-value {:value field-value})
-                  extra-attrs)]])
-
-
-(defn- form-select-h
-  [{:keys [field-name label-text options selected-value extra-attrs]}]
-  [:div {:class "form-group"}
-   [:label {:for field-name} label-text]
-   (into [:select (merge {:name field-name :id field-name} extra-attrs)]
-         (for [[v l] options]
-           [:option (cond-> {:value v} (= v selected-value) (assoc :selected true)) l]))])
-
-
-(defn- render-fn-form
-  [entity all-fns]
-  (let [editing? (some? entity)
-        parent-options (into [["" "None"]]
-                             (->> all-fns
-                                  (filter :name)
-                                  (mapv (fn [f] [(str (:id f)) (name (:name f))]))))]
-    [:form {:hx-post (if editing? (str "/api/entities/fn/" (:id entity)) "/api/entities/fn")
-            :hx-target "#modal-content" :hx-swap "innerHTML"
-            :_ "on htmx:afterRequest if event.detail.successful trigger entityCreated on body then call hideModal()"}
-     (form-input-h {:field-name "name" :label-text "Name"
-                    :field-value (when entity (name (:name entity)))
-                    :extra-attrs {:required true}})
-     (form-select-h {:field-name "parent-id" :label-text "Parent (optional)"
-                     :options parent-options
-                     :selected-value (when entity (str (:parent-id entity)))})
-     (html/button-row {:buttons [[:button {:type "button" :class "btn btn-secondary" :onclick "hideModal()"} "Cancel"]
-                                 [:button {:type "submit" :class "btn btn-primary"} (if editing? "Save" "Create")]]
-                       :style {:display "flex" :gap "8px" :justify-content "flex-end" :margin-top "16px"}})]))
-
-
-;; === Render View Functions (context-aware) ===
-
-(defbase render-entity-actions
-  [entity-type entity-id]
-  [:div {:style "margin-top: 16px; display: flex; gap: 8px;"}
-   [:button {:class "btn btn-primary"
-             :hx-get (str "/partials/entity-form/" entity-type "/" entity-id)
-             :hx-target "#details-content" :hx-swap "innerHTML"} "Edit"]
-   [:button {:class "btn btn-danger"
-             :hx-delete (str "/api/entities/" entity-type "/" entity-id)
-             :hx-confirm "Are you sure you want to delete this entity?"
-             :hx-target "#details-panel" :hx-swap "outerHTML"
-             :_ "on htmx:afterRequest trigger entityDeleted on body"} "Delete"]])
-
-
-(defbase render-entity-details-view
-  [request]
-  (let [storage (request/require-storage ctx)
-        {:keys [type-str id-str entity-type]} (request/extract-entity-params request)]
-    (if (and entity-type id-str)
-      (if-let [entity (sp/read-entity storage entity-type (java.util.UUID/fromString id-str))]
-        [:div
-         [:div {:style "margin-bottom: 12px;"}
-          (html/badge {:badge-text type-str :badge-type type-str})]
-         (when (= type-str "fn")
-           (html/entity-field-rows {:entity entity :field-specs fn-field-specs}))
-         (render-entity-actions {:entity-type type-str :entity-id id-str})]
-        [:p {:class "error"} "Entity not found"])
-      [:p {:class "error"} "Invalid request"])))
-
-
-(defbase render-entity-form-view
-  [request]
-  (let [storage (request/require-storage ctx)
-        {:keys [type-str id-str entity-type]} (request/extract-entity-params request)]
-    (if entity-type
-      (let [entity (when id-str (sp/read-entity storage entity-type (java.util.UUID/fromString id-str)))
-            all-fns (vec (sp/query-entities storage :fn {}))]
-        [:div
-         [:h4 (str (if entity "Edit " "Create ") type-str)]
-         (case type-str
-           "fn" (render-fn-form entity all-fns)
-           [:p "Not implemented"])])
-      [:p {:class "error"} "Invalid entity type"])))
+(defbase _update-record-type-apply
+  [parsed]
+  (entities/apply-update-record-type parsed ctx))
 
 
 ;; === Form data parsing base functions ===
@@ -270,18 +212,53 @@
 
 
 ;; === Action Handlers (context-aware) ===
+;; `process-create-entity` / `process-update-entity` are graph fn-defs
+;; (`web/crud` fns.edn) — an `:if` over `parse → validate`, branching
+;; to a 400 or to the apply (write) stage. These base-fns are the
+;; pipeline stages; `_rejected?` / `_rejection-response` are shared by
+;; both handlers.
 
-(defbase process-create-entity
+(defbase _create-parsed
   [request]
-  (entities/process-create-entity request ctx))
+  (entities/parse-create-request request ctx))
 
 
-(defbase process-update-entity
-  "PUT /api/entities/:type/:id — updates an entity from a form-encoded
-   body. Mirror of `process-create-entity` but goes through
-   `update-entity` and requires both `:type` and `:id` URI segments."
+(defbase _create-validation
+  [parsed]
+  (entities/validate-create parsed ctx))
+
+
+(defbase _create-apply
+  [parsed]
+  (entities/apply-create parsed ctx))
+
+
+(defbase _update-parsed
   [request]
-  (entities/process-update-entity request ctx))
+  (entities/parse-update-request request ctx))
+
+
+(defbase _update-validation
+  [parsed]
+  (entities/validate-update parsed ctx))
+
+
+(defbase _update-apply
+  [parsed]
+  (entities/apply-update parsed ctx))
+
+
+(defbase _rejected?
+  "True when a validate-* stage produced a rejection."
+  [validation]
+  (some? validation))
+
+
+(defbase _rejection-response
+  "Render a validate-* rejection as a 400 partial Ring response."
+  [validation]
+  {:status 400
+   :body (str "<p class=\"error\">" (:reason validation) "</p>")})
 
 
 (defbase process-delete-entity
@@ -319,16 +296,40 @@
 
 
 ;; === Tighten fn-typed binding effects ===
+;; The validation chain + success path is a `:cond` graph fn-def
+;; (`:process-tighten-binding-effects` in fns.edn). These base-fns are
+;; its primitives: one parse, four guard predicates, one apply.
 
-(defbase process-tighten-binding-effects
-  "POST /api/bindings/:binding-id/tighten-fn-effects
-   Body: `{\"args\"?: {…}, \"ret\"?: T, \"effects\"?: [\"db\" …]}`
-
-   For an fn-typed binding, narrow the slot's effective type by
-   selectively replacing `args`, `ret`, or `effects`. Any subset
-   may be supplied; omitted components keep their current value."
+(defbase _tighten-parsed
   [request]
-  (entities/process-tighten-binding-effects request ctx))
+  (entities/parse-tighten-request request))
+
+
+(defbase _tighten-binding-id-invalid?
+  [parsed]
+  (nil? (:binding-id parsed)))
+
+
+(defbase _tighten-effects-invalid?
+  [parsed]
+  (let [e (:effects-val parsed)]
+    (and (some? e) (not (sequential? e)))))
+
+
+(defbase _tighten-args-invalid?
+  [parsed]
+  (let [a (:args-val parsed)]
+    (and (some? a) (not (map? a)))))
+
+
+(defbase _tighten-delta-empty?
+  [parsed]
+  (empty? (:delta parsed)))
+
+
+(defbase _tighten-apply
+  [parsed]
+  (entities/apply-tighten parsed ctx))
 
 
 ;; === Pure Functions ===
@@ -368,22 +369,43 @@
    :delete-entity delete-entity
    :list-all-graph-entities list-all-graph-entities
    :all-rich-types all-rich-types
-   :types-compatible types-compatible
-   :types-candidates types-candidates
-   :types-usages types-usages
-   :process-create-record-type process-create-record-type
-   :process-create-list-type process-create-list-type
-   :process-update-record-type process-update-record-type
-   :render-entity-details-view render-entity-details-view
-   :render-entity-form-view render-entity-form-view
-   :process-create-entity process-create-entity
-   :process-update-entity process-update-entity
+   :value-kinds value-kinds
+   :_types-compatible-parsed _types-compatible-parsed
+   :_types-compatible-validation _types-compatible-validation
+   :_types-compatible-apply _types-compatible-apply
+   :_types-candidates-parsed _types-candidates-parsed
+   :_types-candidates-validation _types-candidates-validation
+   :_types-candidates-apply _types-candidates-apply
+   :_types-usages-parsed _types-usages-parsed
+   :_types-usages-validation _types-usages-validation
+   :_types-usages-apply _types-usages-apply
+   :_create-record-type-parsed _create-record-type-parsed
+   :_create-record-type-validation _create-record-type-validation
+   :_create-record-type-apply _create-record-type-apply
+   :_create-list-type-parsed _create-list-type-parsed
+   :_create-list-type-validation _create-list-type-validation
+   :_create-list-type-apply _create-list-type-apply
+   :_update-record-type-parsed _update-record-type-parsed
+   :_update-record-type-validation _update-record-type-validation
+   :_update-record-type-apply _update-record-type-apply
+   :_create-parsed _create-parsed
+   :_create-validation _create-validation
+   :_create-apply _create-apply
+   :_update-parsed _update-parsed
+   :_update-validation _update-validation
+   :_update-apply _update-apply
+   :_rejected? _rejected?
+   :_rejection-response _rejection-response
    :process-delete-entity process-delete-entity
    :process-sequence-append process-sequence-append
    :process-sequence-remove process-sequence-remove
    :process-sequence-update process-sequence-update
-   :process-tighten-binding-effects process-tighten-binding-effects
-   :render-entity-actions render-entity-actions
+   :_tighten-parsed _tighten-parsed
+   :_tighten-binding-id-invalid? _tighten-binding-id-invalid?
+   :_tighten-effects-invalid? _tighten-effects-invalid?
+   :_tighten-args-invalid? _tighten-args-invalid?
+   :_tighten-delta-empty? _tighten-delta-empty?
+   :_tighten-apply _tighten-apply
    :parse-fn-from-form parse-fn-from-form
    :parse-ns-from-form parse-ns-from-form
    :parse-slot-from-form parse-slot-from-form

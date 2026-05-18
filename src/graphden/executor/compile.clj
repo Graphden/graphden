@@ -197,12 +197,29 @@
            (call-with-cache ref-id callee all-fns r-args))))))
 
 
+(defn- resolve-seq-items
+  "Lazily resolve binding-list-items into runtime values. Hand-rolled
+   UNCHUNKED lazy-seq — deliberately NOT `map`, whose chunking would
+   realise up to 32 elements (and execute their ref-items) at once.
+   Each element is realised only when the consumer actually reaches
+   it. This is what makes conditional impls short-circuit: `cond-fn`
+   forces a clause's test but not its result; `every?` / `some`
+   (`:and` / `:or`) stop at the first decisive element — so a side
+   effect in an un-taken branch never runs."
+  [items all-fns env-fn]
+  (lazy-seq
+    (when-let [s (seq items)]
+      (cons (resolve-seq-item (first s) all-fns (env-fn))
+            (resolve-seq-items (rest s) all-fns env-fn)))))
+
+
 (defn- make-seq-entry
   "Runtime value for a `:seq` binding — a thunk that materialises the
-   linked-list items into a vector. Each item resolves via
-   `resolve-seq-item` against the env snapshot at call time."
+   linked-list items into an unchunked lazy-seq (see `resolve-seq-items`)
+   so consumers only force the elements they reach. Each item resolves
+   against the env snapshot at call time."
   [items all-fns env-fn]
-  (rt/thunk #(mapv (fn [i] (resolve-seq-item i all-fns (env-fn))) items)))
+  (rt/thunk #(resolve-seq-items items all-fns env-fn)))
 
 
 (defn- build-args-and-aug

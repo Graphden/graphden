@@ -421,7 +421,7 @@ When the natural verb-prefix form clashes with a base-fn or sibling, swap to ver
 | `create-entity-route` | `entity-create` | `create-entity` is a `web.crud` base-fn |
 | `delete-entity-route` | `entity-delete` | `delete-entity` is a `web.crud` base-fn |
 
-In the sidebar, `entity-create`, `entity-delete`, `entity-details`, `entity-form-create`, `entity-form-edit` cluster together; `create-entity`, `delete-entity`, `entity-details`, … would split the domain in two.
+In the sidebar, `entity-create`, `entity-update`, `entity-delete` cluster together; `create-entity`, `update-entity`, `delete-entity` would split the domain in two.
 
 ### Extract a sub-namespace when a group shares a long prefix
 

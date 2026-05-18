@@ -322,34 +322,46 @@
      :expansions (parse-expansions (:expansions body {}))}))
 
 
-(defn compute-layout
-  "Orchestrate the full layout pipeline for a parsed request.
-
-   Takes the loaded graph entities (the `{:fns :slots …}` snapshot
-   already enriched with `:args` — see
-   `graphden.layout.graph/load-graph-entities-uncached`) plus the
-   request's `:root-id` and parsed `:expansions`. Runs build →
-   layout → validate and returns the exact map the former
-   `get-layout-data` defbase produced:
-
-       {:nodes [...] :edges [...] :grid-pos {...} :validation {...}}
+(defn build-elements
+  "Stage A of the layout pipeline. Takes the loaded graph entities
+   (the `{:fns :slots …}` snapshot already enriched with `:args` —
+   see `graphden.layout.graph/load-graph-entities-uncached`) plus the
+   request's `:root-id` and parsed `:expansions`, and produces the
+   cytoscape `{:nodes [...] :edges [...]}` for that subgraph.
 
    Throws `:execution-error/not-found` when `root-id` isn't in the
-   graph — same behaviour as the old impl."
+   graph."
   [graph-entities root-id expansions]
-  (let [lookups (lgraph/build-lookups graph-entities)
-        _ (when-not (get (:fn-map lookups) root-id)
-            (throw (ex-info "Root function not found"
-                            {:type :execution-error/not-found
-                             :root-id root-id})))
-        {:keys [nodes edges]} (lgraph/build-graph-elements root-id expansions lookups)
-        graph-info (build-graph-info nodes edges)
+  (let [lookups (lgraph/build-lookups graph-entities)]
+    (when-not (get (:fn-map lookups) root-id)
+      (throw (ex-info "Root function not found"
+                      {:type :execution-error/not-found
+                       :root-id root-id})))
+    (lgraph/build-graph-elements root-id expansions lookups)))
+
+
+(defn place-elements
+  "Stage B of the layout pipeline. Grid-places the `{:nodes :edges}`
+   produced by `build-elements` and returns the full layout response
+   `{:nodes :edges :grid-pos :validation}` — `:nodes` / `:edges` are
+   passed through unchanged."
+  [{:keys [nodes edges] :as elements}]
+  (let [graph-info (build-graph-info nodes edges)
         root-node (find-root-node nodes edges)
         matrix (if root-node
                  (layout-graph (get-in root-node [:data :id]) graph-info)
                  (empty-matrix))
         validation (validate-layout matrix)]
-    {:nodes nodes
-     :edges edges
-     :grid-pos (:positions matrix)
-     :validation validation}))
+    (assoc elements
+           :grid-pos (:positions matrix)
+           :validation validation)))
+
+
+(defn compute-layout
+  "Orchestrate the full layout pipeline for a parsed request:
+   Stage A (`build-elements`) then Stage B (`place-elements`).
+   Returns `{:nodes [...] :edges [...] :grid-pos {...}
+   :validation {...}}`. Throws `:execution-error/not-found` when
+   `root-id` isn't in the graph."
+  [graph-entities root-id expansions]
+  (place-elements (build-elements graph-entities root-id expansions)))

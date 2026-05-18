@@ -1,7 +1,9 @@
 // Editor Edit Validation - pre-flight checks for structural mutations
-// (re-parent, MI add). Backend constraints are minimal in this area
-// (gap G3: no parent-id-cycle check), so the frontend mirrors the
-// rules to give the user feedback BEFORE the cascade kicks off.
+// (re-parent, MI add). The backend enforces these at write time
+// (src/graphden/crud/validation.clj — parent-id cycles via
+// cycle-check-rej, MI arg-name collisions via mi-collision-rej);
+// these helpers mirror the same rules client-side so the user gets
+// feedback BEFORE the re-parent cascade fires a doomed request.
 //
 // All helpers operate on `lookups` (see editor-data.js) and return a
 // terse {ok: true} | {ok: false, reason: string} shape so callers

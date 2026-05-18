@@ -155,19 +155,12 @@
    :parent :conj
    :args {:coll [] :item :style-element}}
 
-  ;; Head elements for Cytoscape (adds cytoscape scripts)
-  {:name :cytoscape-head
-   :description "`:head-elements-0` plus the Cytoscape.js CDN `<script>` — Cytoscape becomes available as `window.cytoscape`."
+  ;; Final editor <head> — style + the Cytoscape.js CDN script.
+  {:name :head
+   :description "Final editor `<head>` element vector — `:style-element` plus the Cytoscape.js CDN `<script>` (Cytoscape becomes `window.cytoscape`)."
    :parent :with-cdn-script
    :args {:head :head-elements-0
           :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
-
-  ;; Head elements with HTMX (adds htmx script)
-  {:name :head
-   :description "Final editor `<head>` element vector — style + Cytoscape + HTMX CDN scripts."
-   :parent :with-cdn-script
-   :args {:head :cytoscape-head
-          :url "https://unpkg.com/htmx.org@2.0.4"}}
 
   ;; Complete HTML page
   ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)

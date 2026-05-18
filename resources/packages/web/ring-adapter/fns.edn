@@ -107,12 +107,6 @@
    :parent :ring-request-field
    :args {:key {:value :body}}}
 
-  {:name :ring-body
-   :description "Request body slurped to a string."
-   :parent :slurp
-   :return-type :text
-   :args {:input :ring-body-input-stream}}
-
   ;; =============================================================================
   ;; INTERNAL REQUEST SHAPE — one :pairs->map with 5 pair entries.
   ;; =============================================================================

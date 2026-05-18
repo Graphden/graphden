@@ -75,32 +75,6 @@
    :args {:string {:type :text :description "Raw query string (without leading `?`)."}}
    :return-type :jsonb}
 
-  ;; (if (> (count s) n) (str (subs s 0 n) "...") s) — pure composition.
-  {:name :truncate
-   :description "Truncate a string to at most `:max-length` characters, appending `…` when shortened. Pure fn-graph composition over `:if`/`:gt`/`:subs`/`:str`."
-   :parent :if
-   :args {:test :_truncate-too-long?
-          :then :_truncate-suffixed
-          :else {:as :string}}}
-
-  {:name :_truncate-len
-   :parent :str-len
-   :args {:string {:as :string}}}
-
-  {:name :_truncate-too-long?
-   :parent :gt
-   :args {:nums [:_truncate-len {:as :max-length}]}}
-
-  {:name :_truncate-prefix
-   :parent :subs
-   :args {:string {:as :string}
-          :start 0
-          :end {:as :max-length}}}
-
-  {:name :_truncate-suffixed
-   :parent :str
-   :args {:parts [:_truncate-prefix {:value "..."}]}}
-
   {:name :blank?
    :description "True iff the string is nil, empty, or contains only whitespace (Clojure's `clojure.string/blank?`)."
    :args {:string {:type :text :required false :description "String to test (nil-safe)."}}

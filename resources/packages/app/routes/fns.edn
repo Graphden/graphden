@@ -7,13 +7,13 @@
 ;; (`:_method-map-with-middleware`) and pairing the result with the
 ;; sub-path — that gives reitit a single conflict-free entry per path.
 ;;
-;; Top-level groups (`:partials-routes`, `:api-routes`) and the standalone
-;; root-level routes (`:health`, `:metrics`, `:favicon`, `:editor`) are
-;; collected into `app.routes.groups.all` for the `:_router` binding.
+;; The top-level group (`:api-routes`) and the standalone root-level
+;; routes (`:health`, `:metrics`, `:favicon`, `:editor`) are collected
+;; into `app.routes.groups.all` for the `:_router` binding.
 
 
 {:namespace "app.routes"
- :description "Application routes — sub-paths inside nested groups (`:partials-routes`, `:api-routes`) plus a handful of standalone root-level entries. Each entry is one reitit-shaped route, with multi-method paths combined at the graph level so reitit's natural conflict detection sees clean data."
+ :description "Application routes — sub-paths inside the `:api-routes` group plus a handful of standalone root-level entries. Each entry is one reitit-shaped route, with multi-method paths combined at the graph level so reitit's natural conflict detection sees clean data."
  :fns
  [;; =============================================================================
   ;; STANDALONE ROOT-LEVEL ROUTES
@@ -46,41 +46,6 @@
    :description "GET / — the graph-editor HTML page."
    :parent :get-route
    :args {:path "/" :handler :_editor-handler}}
-
-  ;; =============================================================================
-  ;; /partials/* — server-rendered HTML fragments for the editor
-  ;; =============================================================================
-
-  ;; --- /partials/entity-form sub-group ---
-
-  {:name :entity-form-create
-   :description "GET /partials/entity-form/:type — HTML create form for an entity type."
-   :parent :get-route
-   :args {:path "/:type" :handler :entity-form-create-handler}}
-
-  {:name :entity-form-edit
-   :description "GET /partials/entity-form/:type/:id — HTML edit form for one entity."
-   :parent :get-route
-   :args {:path "/:type/:id" :handler :entity-form-edit-handler}}
-
-  {:name :entity-form-routes
-   :description "/partials/entity-form/* sub-group — create + edit form partials. Sub-paths `/:type` (create) and `/:type/:id` (edit)."
-   :parent :list
-   :args {:items ["/entity-form" :entity-form-create :entity-form-edit]}}
-
-  ;; --- /partials/entity-details (single leaf, lives inside :partials-routes) ---
-
-  {:name :entity-details
-   :description "GET /partials/entity-details/:type/:id — read-only HTML view of one entity's fields."
-   :parent :get-route
-   :args {:path "/entity-details/:type/:id" :handler :entity-details-handler}}
-
-  ;; --- /partials top group ---
-
-  {:name :partials-routes
-   :description "/partials/* — wraps `:entity-form-routes` and the standalone `:entity-details` leaf under the shared `/partials` prefix."
-   :parent :list
-   :args {:items ["/partials" :entity-form-routes :entity-details]}}
 
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
@@ -256,7 +221,14 @@
    :parent :text-ok-response
    :args {:body "ok"}}
 
-  ;; --- /api top group (combines all /api/* sub-groups + the auth-check leaf) ---
+  ;; --- /api/value-kinds — value_kind schema enum ---
+
+  {:name :api-value-kinds
+   :description "GET /api/value-kinds — the `value_kind` schema enum as a JSON array of primitive type-tag strings. The editor's type-pickers fetch this instead of hard-coding the enum."
+   :parent :get-route
+   :args {:path "/value-kinds" :handler :value-kinds-handler}}
+
+  ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
   {:name :api-routes
    :description "/api/* — full API surface. To add API versioning (e.g. `/v1`), wrap this in a list with the version prefix as first item — one change instead of one-per-endpoint."
@@ -267,4 +239,5 @@
                   :bindings-routes
                   :types-routes
                   :graph-routes
+                  :api-value-kinds
                   :auth-check]}}]}

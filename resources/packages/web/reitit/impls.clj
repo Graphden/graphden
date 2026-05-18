@@ -25,14 +25,24 @@
    paths by walking the tree). Multi-method paths are merged at the
    graph level so reitit's natural conflict detection handles the rest.
 
-   Routes can carry string or keyword keys (literal `:assoc` bindings
-   produce strings at runtime; JSONB-stored literals come back as
-   keywords). Reitit itself requires keyword keys (`:get`, `:handler`,
-   `:middleware`), so we deep-keywordize here at the adapter — the
-   fn-graph can stay key-style-agnostic instead of every route author
-   having to pipe their tree through `:keywordize-map-keys`."
+   Adapter-boundary coercion (one deep-walk, here): graph `:list` /
+   `:seq` bindings are unchunked lazy-seqs, but reitit needs vector
+   route data — so every sequence is `vec`'d. And routes can carry
+   string keys (literal `:assoc` bindings produce strings; JSONB
+   literals come back keywords) while reitit needs keyword keys
+   (`:get`, `:handler`, `:middleware`) — so string map-keys are
+   keywordized. The fn-graph stays representation-agnostic; the
+   external library's exact shape requirement is met at this one
+   adapter."
   [routes]
-  (ring/router (walk/keywordize-keys routes)))
+  (ring/router
+    (walk/postwalk
+      (fn [x]
+        (cond
+          (map? x) (update-keys x #(cond-> % (string? %) keyword))
+          (seq? x) (vec x)
+          :else    x))
+      routes)))
 
 
 (defbase ring-create-default-handler-fn

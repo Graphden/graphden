@@ -55,54 +55,167 @@
    :return-type :jsonb
    :effects #{:db}}
 
-  {:name :types-compatible
-   :description "Phase 1 type-API: subtype check between an `expected` (slot-side) and `candidate` (binding-side) type. POST body `{expected, candidate}` in the JSON shape produced by `/api/types`. Returns `{ok :bool, expected, candidate, reason?}`. The editor's fn-picker / mismatch explainers call this instead of duplicating `subtype?` logic in JS."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request — body parsed into `{expected, candidate}` types."}}
+  {:name :value-kinds
+   :description "The `value_kind` schema enum as an ordered list of primitive type-tag strings (`\"int\"`, `\"text\"`, …) a binding value / slot can carry. Powers `GET /api/value-kinds` — the editor's type-pickers read it instead of hard-coding the enum. Pure: reads a compile-time constant."
+   :args {}
+   :return-type :jsonb}
+
+  ;; --- type-API handler primitives. The handlers themselves are `:if`
+  ;; graph fn-defs below; these base-fns are the parse / validate /
+  ;; apply stages. `validate-*` returns the `{:ok false :error}`
+  ;; rejection response directly (or nil), so the `:if`'s `:then` branch
+  ;; is the validation result itself; `_rejected?` is shared with the
+  ;; entity create/update + type-row handlers. ---
+  {:name :_types-compatible-parsed
+   :description "Stage 1 of types-compatible — JSON body → `{:expected :candidate}`, each decoded from the wire shape produced by `/api/types`."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_types-compatible-validation
+   :description "Stage 2 of types-compatible — guards (both `expected` and `candidate` present). Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :args {:parsed {:type :jsonb :description "Output of `:_types-compatible-parsed`."}}
+   :return-type :jsonb}
+
+  {:name :_types-compatible-apply
+   :description "Stage 3 of types-compatible — the single-pair subtype check between an `expected` (slot-side) and `candidate` (binding-side) type. Returns `{:ok :expected :candidate :reason?}`. Reached only after validation passes."
+   :args {:parsed {:type :jsonb :description "Output of `:_types-compatible-parsed`."}}
+   :return-type :jsonb}
+
+  {:name :_types-candidates-parsed
+   :description "Stage 1 of types-candidates — JSON body → `{:expected :allowed-effects :name-prefix}`."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_types-candidates-validation
+   :description "Stage 2 of types-candidates — guards `expected` present. Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :args {:parsed {:type :jsonb :description "Output of `:_types-candidates-parsed`."}}
+   :return-type :jsonb}
+
+  {:name :_types-candidates-apply
+   :description "Stage 3 of types-candidates — enumerate every fn whose return type is a subtype of `expected`, narrowed by the optional allowed-effect set / name-prefix. Returns `{:ok :expected :count :candidates}` sorted alphabetically. Reached only after validation passes."
+   :args {:parsed {:type :jsonb :description "Output of `:_types-candidates-parsed`."}}
    :return-type :jsonb
    :effects #{:db}}
 
-  {:name :types-candidates
-   :description "Phase 1 type-API: enumerate fns whose return type is a subtype of `expected`. POST body `{expected, effects?, name-prefix?}` — optional filters narrow by allowed-effect set or namespace / name prefix. Returns `{count, candidates: [{name, return, args, effects}, ...]}` sorted alphabetically. Powers type-aware fn-pickers."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request — body parsed into `{expected, effects?, name-prefix?}`."}}
+  {:name :_types-usages-parsed
+   :description "Stage 1 of types-usages — JSON body → `{:target-id}` (the `type-fn-id` coerced to a UUID, or nil when absent / malformed)."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_types-usages-validation
+   :description "Stage 2 of types-usages — guards a valid `type-fn-id`. Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :args {:parsed {:type :jsonb :description "Output of `:_types-usages-parsed`."}}
+   :return-type :jsonb}
+
+  {:name :_types-usages-apply
+   :description "Stage 3 of types-usages — walk the graph for every reference to the target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}` where each usage's `kind ∈ {:base-of :element-of :return-of :slot-of :binding-of :union-branch :variant-branch}`. Reached only after validation passes."
+   :args {:parsed {:type :jsonb :description "Output of `:_types-usages-parsed`."}}
    :return-type :jsonb
    :effects #{:db}}
 
-  {:name :types-usages
-   :description "Find every fn that references a given type-row. POST body `{type-fn-id}`. Returns `{count, usages: [{fn-id, fn-name, role, kind, slot-name?}, ...]}` where `kind ∈ {:base-of :element-of :return-of :slot-of :binding-of :union-branch :variant-branch}`. Used by the editor's inline-expand panel to surface a 'Used by N' footer for navigation from a type-row back to its callers."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request — body parsed into `{type-fn-id}`."}}
+  ;; --- type-row compound handler primitives. The handlers themselves
+  ;; are `:if` graph fn-defs below; these base-fns are the parse /
+  ;; validate / apply stages. `validate-*` returns the `{:ok false
+  ;; :error}` rejection response directly (or nil), so the `:if`'s
+  ;; `:then` branch is the validation result itself; `_rejected?` is
+  ;; shared with the entity create/update handlers. ---
+  {:name :_create-record-type-parsed
+   :description "Stage 1 of create-record-type — JSON body → `{:name :ns-id :description :fields}`."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_create-record-type-validation
+   :description "Stage 2 of create-record-type — guards (blank name, empty field list). Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :args {:parsed {:type :jsonb :description "Output of `:_create-record-type-parsed`."}}
+   :return-type :jsonb}
+
+  {:name :_create-record-type-apply
+   :description "Stage 3 of create-record-type — atomically create the record type-row (1 fn-row + N slot-rows + N fn-slot-junctions); rolls partial writes back on failure. Reached only after validation passes. Returns `{:ok true :id :name}`."
+   :args {:parsed {:type :jsonb :description "Output of `:_create-record-type-parsed`."}}
    :return-type :jsonb
    :effects #{:db}}
 
-  {:name :process-create-record-type
-   :description "Atomically create a record type-row: 1 fn-row + N slot-rows + N fn-slot-junctions. JSON body `{namespace-id?, name, description?, fields: [{name, type, description?, required?}, …]}`. Returns `{ok, id, name}` on success or `{error}` with HTTP 400/500."
+  {:name :_create-list-type-parsed
+   :description "Stage 1 of create-list-type — JSON body → `{:name :ns-id :description :element-ref}`."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_create-list-type-validation
+   :description "Stage 2 of create-list-type — guards (blank name, missing element-type). Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :args {:parsed {:type :jsonb :description "Output of `:_create-list-type-parsed`."}}
+   :return-type :jsonb}
+
+  {:name :_create-list-type-apply
+   :description "Stage 3 of create-list-type — atomically create the list type-row (1 fn-row with `element-fn-id` + synthesised `items` slot); rolls partial writes back on failure. Reached only after validation passes. Returns `{:ok true :id :name}`."
+   :args {:parsed {:type :jsonb :description "Output of `:_create-list-type-parsed`."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_update-record-type-parsed
+   :description "Stage 1 of update-record-type — JSON body → `{:fn-id :name :has-description? :description :fields}`."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_update-record-type-validation
+   :description "Stage 2 of update-record-type — guards (missing id, empty field list, fn-row not found). The final guard reads storage. Returns the `{:ok false :error}` rejection response, or nil when well-formed."
+   :args {:parsed {:type :jsonb :description "Output of `:_update-record-type-parsed`."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_update-record-type-apply
+   :description "Stage 3 of update-record-type — diff the submitted field list against the row's current fn-slots and atomically apply it (journalled rollback on failure). Reached only after validation passes. Returns `{:ok true :id :name}`. Caveat: orphaned slots are NOT garbage-collected (slot rows are shared)."
+   :args {:parsed {:type :jsonb :description "Output of `:_update-record-type-parsed`."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  ;; --- entity create / update pipeline primitives. The handlers
+  ;; themselves are `:if` graph fn-defs below; these base-fns are the
+  ;; parse / validate / apply stages. `_rejected?` + `_rejection-response`
+  ;; are shared by both create and update. ---
+  {:name :_create-parsed
+   :description "Stage 1 of create — URI entity-type + form-decoded body routed through the per-type parser. `{:entity-type :type-str :form-data :entity-data :parse-error}`."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_create-validation
+   :description "Stage 2 of create — every write-time guard; the first rejection `{:reason …}` or nil."
+   :args {:parsed {:type :jsonb :description "Output of `:_create-parsed`."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_create-apply
+   :description "Stage 3 of create — create the entity, run the post-create whole-fn type-check (rollback on failure), return the partial Ring response. Reached only after validation passes."
+   :args {:parsed {:type :jsonb :description "Output of `:_create-parsed`."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_update-parsed
+   :description "Stage 1 of update — like `:_create-parsed` plus the `:id` segment and a pre-read of the existing row."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
    :return-type :jsonb
    :effects #{:db}}
 
-  {:name :process-create-list-type
-   :description "Atomically create a list type-row: 1 fn-row with `element-fn-id` + synthesised `items` slot. JSON body `{namespace-id?, name, description?, element-type}`."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+  {:name :_update-validation
+   :description "Stage 2 of update — write-time guards against the merged post-write view; first rejection or nil."
+   :args {:parsed {:type :jsonb :description "Output of `:_update-parsed`."}}
    :return-type :jsonb
    :effects #{:db}}
 
-  {:name :process-update-record-type
-   :description "Atomic compound update: diff incoming `{id, name?, description?, fields:[…]}` against the record's current fn-slots, create new slots for added/retyped fields, drop fn-slots for removed fields, re-sequence positions, optionally rename / re-describe the fn-row. Returns `{ok, id, name}` or `{error}`. Caveat: orphaned slots are NOT garbage-collected (slot rows are shared across fns)."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+  {:name :_update-apply
+   :description "Stage 3 of update — update the entity and return the partial Ring response. Reached only after validation passes."
+   :args {:parsed {:type :jsonb :description "Output of `:_update-parsed`."}}
    :return-type :jsonb
    :effects #{:db}}
 
-  ;; Action functions (context-aware, return {:status :headers :body} response map)
-  {:name :process-create-entity
-   :description "Parse a Ring request, create the entity it carries, return a partial Ring response (`{:status :headers :body}`) for the caller to wrap."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb
-   :effects #{:db}}
+  {:name :_rejected?
+   :description "True when a `validate-*` stage produced a rejection."
+   :args {:validation {:type :jsonb :description "A `{:reason …}` rejection map, or nil."}}
+   :return-type :bool}
 
-  {:name :process-update-entity
-   :description "Parse a Ring request, update the entity it identifies (PUT /api/entities/:type/:id), return a partial Ring response."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb
-   :effects #{:db}}
+  {:name :_rejection-response
+   :description "Render a `validate-*` rejection as a 400 partial Ring response."
+   :args {:validation {:type :jsonb :description "A `{:reason …}` rejection map."}}
+   :return-type :jsonb}
 
   {:name :process-delete-entity
    :description "Parse a Ring request, delete the entity it identifies, return a partial Ring response."
@@ -130,9 +243,37 @@
    :return-type :jsonb
    :effects #{:db}}
 
-  {:name :process-tighten-binding-effects
-   :description "POST /api/bindings/:binding-id/tighten-fn-effects — narrow an fn-typed binding's effective type to a 4-arity `[:fn args ret #{eff-set}]`. Body: `{effects: [\"db\", \"io\", …]}`. Creates / dedupes the anonymous fn-row carrying the new constraint and writes the binding's `:type-override-fn-id`."
+  ;; --- tighten-fn-effects primitives. The handler itself is a
+  ;; `:cond` graph fn-def (`:process-tighten-binding-effects` below);
+  ;; these are its parse / guard-predicate / apply primitives. ---
+  {:name :_tighten-parsed
+   :description "Parse a tighten-fn-effects request into `{:binding-id :effects-val :args-val :ret-val :delta}` — no validation."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_tighten-binding-id-invalid?
+   :description "Guard predicate — true when the request carries no valid binding-id."
+   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
+   :return-type :bool}
+
+  {:name :_tighten-effects-invalid?
+   :description "Guard predicate — true when `effects` is present but not a JSON array."
+   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
+   :return-type :bool}
+
+  {:name :_tighten-args-invalid?
+   :description "Guard predicate — true when `args` is present but not a JSON object."
+   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
+   :return-type :bool}
+
+  {:name :_tighten-delta-empty?
+   :description "Guard predicate — true when the body carried none of args / ret / effects."
+   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
+   :return-type :bool}
+
+  {:name :_tighten-apply
+   :description "Success branch — narrow the fn-typed binding's effective type to a 4-arity `[:fn args ret #{eff-set}]`, dedupe the anonymous constraint fn-row, write the binding's `:type-override-fn-id`, and return the partial Ring response. Reached only after every `:cond` guard passes."
+   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
    :return-type :jsonb
    :effects #{:db}}
 
@@ -150,24 +291,6 @@
    :description "Coerce a string to `java.util.UUID`. Throws on malformed input."
    :args {:string {:type :text :description "UUID in canonical 8-4-4-4-12 form."}}
    :return-type :uuid}
-
-  ;; Render functions (context-aware, return hiccup)
-  {:name :render-entity-details-view
-   :description "Build the hiccup tree for the entity-details panel (right-side view). Read-only."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request — path params identify the entity."}}
-   :return-type :jsonb}
-
-  {:name :render-entity-form-view
-   :description "Build the hiccup tree for the entity create/edit form. Path determines create-vs-edit."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request — path params identify the entity (for edit)."}}
-   :return-type :jsonb}
-
-  ;; Renders action buttons (Edit/Delete) for entity
-  {:name :render-entity-actions
-   :description "Hiccup snippet with Edit/Delete buttons for the given entity."
-   :args {:entity-type {:type :text :description "Entity-name keyword as string."}
-          :entity-id {:type :text :description "Entity id (already string-coerced)."}}
-   :return-type :jsonb}
 
   ;; Form data parsing helpers
   {:name :parse-fn-from-form
@@ -201,27 +324,6 @@
    :return-type :jsonb}
 
   ;; =============================================================================
-  ;; FN-DEFS: Constants and composed functions
-  ;; =============================================================================
-
-  ;; Field specs for fn entity details
-  {:name :fn-field-specs
-   :description "Field-row specs for rendering a fn entity's details. Each spec is `[label key & formatter]`."
-   :parent :const
-   :args {:value [["ID" :id]
-                  ["Name" :name :keyword-to-str]
-                  ["Parent ID" :parent-id]
-                  ["Return Type" :return-type :keyword-to-str]
-                  ["Impl Hash" :impl-hash]]}}
-
-  ;; Render fn details using entity-field-rows
-  {:name :render-fn-details
-   :description "Render the fn-entity details panel — `:entity-field-rows` driven by `:fn-field-specs`."
-   :parent :entity-field-rows
-   :args {:field-specs :fn-field-specs
-          :entity {:as :entity}}}
-
-  ;; =============================================================================
   ;; FN-DEFS: Response handlers composed from base functions
   ;;
   ;; Handlers are fn-graphs. At the route binding (:assoc-handler.value
@@ -237,7 +339,7 @@
   ;; Template for JSON-rendering Ring handlers. Free arg `:data`
   ;; propagates up from `:to-json-string`, so concrete handlers below
   ;; set `:data :some-data-fn` directly instead of each defining its
-  ;; own private `_*-body` fn-def. Mirrors `:hiccup-handler`.
+  ;; own private `_*-body` fn-def.
   {:name :json-handler
    :description "Template Ring handler — serialises a value (free arg `:data`) to JSON and returns it as a 200 OK with `application/json` content-type."
    :parent :json-ok-response
@@ -255,6 +357,42 @@
    :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON. Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."
    :parent :json-handler
    :args {:data :all-rich-types}}
+
+  {:name :value-kinds-handler
+   :description "Ring handler for `GET /api/value-kinds` — returns the `value_kind` schema enum as a JSON array of primitive type-tag strings."
+   :parent :json-handler
+   :args {:data :value-kinds}}
+
+  ;; --- type-API handlers — parse → validate → branch graphs. `:if`
+  ;; over the validation result: the rejection IS the `{:ok false
+  ;; :error}` payload (so `:then` reuses the validation ref), the clean
+  ;; path runs the computation. ---
+  {:name :types-compatible
+   :description "POST /api/types/compatible — parse the JSON body `{expected, candidate}`, validate (both present), and on success run the subtype check. Returns `{:ok :expected :candidate :reason?}` or `{:ok false :error}`. The editor's fn-picker / mismatch explainers call this instead of duplicating `subtype?` in JS."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_types-compatible-validation
+          :else :_types-compatible-apply
+          :validation :_types-compatible-validation
+          :parsed :_types-compatible-parsed}}
+
+  {:name :types-candidates
+   :description "POST /api/types/candidates — parse the JSON body `{expected, effects?, name-prefix?}`, validate (`expected` present), and on success enumerate fns whose return type is a subtype of `expected`. Returns `{:ok :expected :count :candidates}` or `{:ok false :error}`. Powers type-aware fn-pickers."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_types-candidates-validation
+          :else :_types-candidates-apply
+          :validation :_types-candidates-validation
+          :parsed :_types-candidates-parsed}}
+
+  {:name :types-usages
+   :description "POST /api/types/usages — parse the JSON body `{type-fn-id}`, validate (valid UUID), and on success find every fn that references the type-row. Returns `{:ok :type-fn-id :type-name :count :usages}` or `{:ok false :error}`. Powers the editor's inline-expand 'Used by N' footer."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_types-usages-validation
+          :else :_types-usages-apply
+          :validation :_types-usages-validation
+          :parsed :_types-usages-parsed}}
 
   {:name :types-compatible-handler
    :description "Ring handler for `POST /api/types/compatible` — wraps `:types-compatible` in a JSON 200 response."
@@ -286,33 +424,6 @@
    :parent :json-handler
    :args {:data :process-update-record-type}}
 
-  ;; Template for HTML-rendering Ring handlers. Free arg `:hiccup`
-  ;; propagates up from the body fn-def's `:render-hiccup`-typed slot,
-  ;; so concrete handlers below set `:hiccup :render-…-view` directly
-  ;; instead of each defining its own private `_*-body` fn-def.
-  {:name :hiccup-handler
-   :description "Template Ring handler — renders a hiccup tree (free arg `:hiccup`) and returns it as a 200 OK with `text/html` content-type."
-   :parent :html-ok-response
-   :args {:body :_hiccup-handler-body}}
-
-  {:name :_hiccup-handler-body
-   :parent :render-hiccup}
-
-  {:name :entity-details-handler
-   :description "Ring handler that returns the entity-details HTML partial. Bound by `app.routes.entity-details`."
-   :parent :hiccup-handler
-   :args {:hiccup :render-entity-details-view}}
-
-  {:name :entity-form-create-handler
-   :description "Ring handler that returns the create-form HTML partial. Bound by `app.routes.entity-form-create`."
-   :parent :hiccup-handler
-   :args {:hiccup :render-entity-form-view}}
-
-  {:name :entity-form-edit-handler
-   :description "Ring handler that returns the edit-form HTML partial. Bound by `app.routes.entity-form-edit`."
-   :parent :hiccup-handler
-   :args {:hiccup :render-entity-form-view}}
-
   ;; --- Action handlers: action-fn returns partial response, defaults
   ;; (status 200, body "", html headers) supplied by composition. ---
 
@@ -343,6 +454,61 @@
           :headers :_action-headers
           :body :_action-body}}
 
+  ;; --- entity create / update — parse → validate → branch graphs.
+  ;; `:if` over the validation result: a rejection renders a 400, the
+  ;; clean path runs the apply (write) stage. `:if` is lazy, so the
+  ;; write runs only when validation passes. `validation` + `parsed`
+  ;; are shared sub-results bound once at the `:if` fn-def. ---
+  {:name :process-create-entity
+   :description "POST /api/entities/:type — parse the request, run write-time validation, and on success create the entity (with post-create whole-fn type-check + rollback). Returns a partial Ring response."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_rejection-response
+          :else :_create-apply
+          :validation :_create-validation
+          :parsed :_create-parsed}}
+
+  {:name :process-update-entity
+   :description "PUT /api/entities/:type/:id — parse the request, run write-time validation against the merged post-write view, and on success update the entity. Returns a partial Ring response."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_rejection-response
+          :else :_update-apply
+          :validation :_update-validation
+          :parsed :_update-parsed}}
+
+  ;; --- type-row compound handlers — parse → validate → branch graphs.
+  ;; `:if` over the validation result: the rejection IS the
+  ;; `{:ok false :error}` payload (so `:then` reuses the validation
+  ;; ref), the clean path runs the transactional apply. `:if` is lazy,
+  ;; so the multi-row write runs only when validation passes. ---
+  {:name :process-create-record-type
+   :description "POST /api/types/record — parse the JSON body `{namespace-id?, name, description?, fields:[…]}`, validate (name + ≥1 field), and on success atomically create the record type-row. Returns `{:ok true :id :name}` or `{:ok false :error}`."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_create-record-type-validation
+          :else :_create-record-type-apply
+          :validation :_create-record-type-validation
+          :parsed :_create-record-type-parsed}}
+
+  {:name :process-create-list-type
+   :description "POST /api/types/list — parse the JSON body `{namespace-id?, name, description?, element-type}`, validate (name + element-type), and on success atomically create the list type-row. Returns `{:ok true :id :name}` or `{:ok false :error}`."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_create-list-type-validation
+          :else :_create-list-type-apply
+          :validation :_create-list-type-validation
+          :parsed :_create-list-type-parsed}}
+
+  {:name :process-update-record-type
+   :description "PUT /api/types/record — parse the JSON body `{id, name?, description?, fields:[…]}`, validate (id + ≥1 field + the fn-row exists), and on success atomically apply the field diff (journalled rollback). Returns `{:ok true :id :name}` or `{:ok false :error}`."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_update-record-type-validation
+          :else :_update-record-type-apply
+          :validation :_update-record-type-validation
+          :parsed :_update-record-type-parsed}}
+
   {:name :create-entity-handler
    :description "Ring handler for `POST /api/entities/:type` — runs `process-create-entity` and wraps the result via `html-action-response`."
    :parent :html-action-response
@@ -372,6 +538,70 @@
    :description "Ring handler for `PUT /api/sequence/item/:item-id` — replaces an item's value/ref."
    :parent :html-action-response
    :args {:result :process-sequence-update}}
+
+  ;; =============================================================================
+  ;; FN-DEFS: tighten-fn-effects — validation chain as a :cond graph
+  ;;
+  ;; The handler is a `:cond`: each clause is a `[predicate 400-response]`
+  ;; pair, the `:else` clause runs `:_tighten-apply` (the DB write). The
+  ;; executor is lazy — `:cond` forces a clause's test but never an
+  ;; un-taken clause's result — so the write runs solely when every
+  ;; guard passes. `parsed` is one shared `:_tighten-parsed`, bound at
+  ;; the `:cond` fn-def — the free arg every clause's predicate exposes.
+  ;; =============================================================================
+
+  {:name :_tighten-err-binding-id
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:status 400 :body "<p class=\"error\">Invalid binding-id</p>"}}}
+
+  {:name :_tighten-err-effects
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:status 400 :body "<p class=\"error\">'effects' must be a JSON array</p>"}}}
+
+  {:name :_tighten-err-args
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:status 400 :body "<p class=\"error\">'args' must be a JSON object</p>"}}}
+
+  {:name :_tighten-err-delta
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:status 400 :body "<p class=\"error\">Body must include at least one of args / ret / effects</p>"}}}
+
+  ;; `:cond` clauses — `[test result]` pairs built via `:list` so the
+  ;; fn-refs inside resolve (see examples.cond-pattern).
+  {:name :_tighten-clause-binding-id
+   :parent :list
+   :args {:items [:_tighten-binding-id-invalid? :_tighten-err-binding-id]}}
+
+  {:name :_tighten-clause-effects
+   :parent :list
+   :args {:items [:_tighten-effects-invalid? :_tighten-err-effects]}}
+
+  {:name :_tighten-clause-args
+   :parent :list
+   :args {:items [:_tighten-args-invalid? :_tighten-err-args]}}
+
+  {:name :_tighten-clause-delta
+   :parent :list
+   :args {:items [:_tighten-delta-empty? :_tighten-err-delta]}}
+
+  ;; Default clause — `test = true` always matches once the guards fall through.
+  {:name :_tighten-clause-ok
+   :parent :list
+   :args {:items [{:value true} :_tighten-apply]}}
+
+  {:name :process-tighten-binding-effects
+   :description "POST /api/bindings/:binding-id/tighten-fn-effects — narrow an fn-typed binding's effective type. The four validation guards and the success path are a `:cond` graph: each clause is `[predicate 400-response]`, the `:else` runs `:_tighten-apply`. `:cond` is lazy, so the DB write runs only when every guard passes. Returns a partial Ring response."
+   :parent :cond
+   :args {:clauses [:_tighten-clause-binding-id
+                    :_tighten-clause-effects
+                    :_tighten-clause-args
+                    :_tighten-clause-delta
+                    :_tighten-clause-ok]
+          :parsed :_tighten-parsed}}
 
   {:name :tighten-binding-effects-handler
    :description "Ring handler for `POST /api/bindings/:binding-id/tighten-fn-effects` — narrow an fn-typed binding's effective type."

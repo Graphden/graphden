@@ -402,24 +402,24 @@ Starting from min_row, search downward for a row where:
 
 **Column-aware compaction example:**
 ```
-Graph (with expanded delete-entity-route):
-  editor-routes (col 0)
-  ├── delete-entity-route (col 1)
-  │   ├── method-map (col 2) → ... → "delete" (col 3, row 1)
-  │   └── pair (col 2, row 2) → path (col 3, row 2)
-  └── entity-form-create-route (col 1)
-      └── path (col 2)
+Graph (with branch-A expanded):
+  root (col 0)
+  ├── branch-A (col 1)
+  │   ├── inner (col 2) → ... → leaf-X (col 3, row 1)
+  │   └── child (col 2, row 2) → leaf-Y (col 3, row 2)
+  └── branch-B (col 1)
+      └── leaf-Z (col 2)
 
 Processing:
-1. Place horizontal branch: editor-routes, delete-entity-route, method-map, ...
-2. Process delete-entity-route subtree (fills cols 2-5, rows 0-2)
-3. Process entity-form-create-route (sibling):
+1. Place horizontal branch: root, branch-A, inner, ...
+2. Process branch-A subtree (fills cols 2-5, rows 0-2)
+3. Process branch-B (sibling):
    - min_row = 1 (parent's row + 1)
    - Branch uses cols 1-2
-   - Row 1: check cols 1-2 → both free! ("delete" is at col 3)
+   - Row 1: check cols 1-2 → both free! (leaf-X is at col 3)
    - Place at row 1, col 1
 
-Result: entity-form-create-route can use row 1 because its columns (1-2) don't overlap
+Result: branch-B can use row 1 because its columns (1-2) don't overlap
 with subtree nodes at row 1 (which are at col 3+).
 ```
 

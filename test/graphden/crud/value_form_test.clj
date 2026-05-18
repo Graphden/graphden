@@ -26,6 +26,9 @@
 (def ^:private build-enum-control #'vf/build-enum-control)
 (def ^:private nav-descend        #'vf/nav-descend)
 (def ^:private nav-key-type       #'vf/nav-key-type)
+(def ^:private nav-item-type      #'vf/nav-item-type)
+(def ^:private item-key           #'vf/item-key)
+(def ^:private current-value      #'vf/current-value)
 (def ^:private value-fits?        #'vf/value-fits?)
 (def ^:private type-label         #'vf/type-label)
 
@@ -72,6 +75,20 @@
       (is (= :record (:kind r)))
       (is (= {:kind :list :element {:kind :leaf :type :text}}
              (:form tags))))))
+
+
+(deftest resolve-form-variant-test
+  (testing "a tagged variant desugars to a union of record branches"
+    (let [r (vf/resolve-form [:variant :ok :text :err :text])]
+      (is (= :union (:kind r)))
+      (is (= 2 (count (:branches r))))
+      (is (every? #(= :record (:kind (:form %))) (:branches r))))))
+
+
+(deftest resolve-form-depth-guard-test
+  (testing "past the recursion-depth guard any type collapses to a leaf"
+    (is (= {:kind :leaf :type {:host :text}}
+           (vf/resolve-form {:host :text} 13)))))
 
 
 ;; ============================================================================
@@ -198,6 +215,8 @@
     (is (= :any (nav-descend {:a :int} nil))))
   (testing "a list descends to its element type for any key"
     (is (= :int (nav-descend [:list :int] 0))))
+  (testing "a bare :sequence descends to :any (untyped element)"
+    (is (= :any (nav-descend :sequence :k))))
   (testing "jsonb / any pass through; a scalar dead-ends"
     (is (= :jsonb (nav-descend :jsonb :k)))
     (is (nil? (nav-descend :int :k)))))
@@ -207,11 +226,78 @@
   (testing "a record yields a closed keyword-enum of its (sorted) fields"
     (is (= [:refine :keyword [:in [:a :b]]]
            (nav-key-type {:b :text :a :int}))))
-  (testing "an open map keys by free keyword, a list by int"
+  (testing "an open map keys by free keyword, a list / sequence by int"
     (is (= :keyword (nav-key-type :jsonb)))
-    (is (= :int (nav-key-type [:list :int]))))
+    (is (= :int (nav-key-type [:list :int])))
+    (is (= :int (nav-key-type :sequence))))
   (testing "a scalar has no valid key"
     (is (nil? (nav-key-type :int)))))
+
+
+(deftest item-key-test
+  (testing "a keyword-valued item contributes its keyword as the nav key"
+    (is (= :name (item-key {:value :name}))))
+  (testing "a ref item is a dynamic segment — it has no static key"
+    (is (nil? (item-key {:value :name :ref-fn-id (random-uuid)}))))
+  (testing "a non-keyword literal is a dynamic segment"
+    (is (nil? (item-key {:value "name"})))
+    (is (nil? (item-key {:value 0})))))
+
+
+(deftest nav-item-type-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [slot (setup/create-slot! storage "path" :sequence)
+            fr   (setup/create-base-fn! storage "nav-owner")
+            bnd  (sp/create-entity storage :binding
+                                   {:fn-id (:id fr) :slot-id (:id slot)
+                                    :list-append true :override-kind :fixed})
+            i0   (sp/create-entity storage :binding-list-item
+                                   {:binding-id (:id bnd) :position 0
+                                    :value :user :literal true})
+            i1   (sp/create-entity storage :binding-list-item
+                                   {:binding-id (:id bnd) :position 1
+                                    :value :name :literal true})
+            nav  {:user {:name :text :age :int}}]
+        (testing "the first segment keys into the root structure"
+          (is (= [:refine :keyword [:in [:user]]]
+                 (nav-item-type storage (:id bnd) (:id i0) nav))))
+        (testing "a later segment keys into the structure the prefix reached"
+          (is (= [:refine :keyword [:in [:age :name]]]
+                 (nav-item-type storage (:id bnd) (:id i1) nav))))
+        (testing "an item-id past the end walks the full prefix — a scalar
+                  path has no further key"
+          (is (nil? (nav-item-type storage (:id bnd) (random-uuid) nav))))
+        (testing "a nil binding-id resolves to nil"
+          (is (nil? (nav-item-type storage nil (:id i0) nav)))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; current-value — the literal bound at the edit site
+;; ============================================================================
+
+(deftest current-value-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (testing "with a binding-id, reads the literal on the binding row"
+        (let [slot (setup/create-slot! storage "cv1" :int)
+              fr   (setup/create-base-fn! storage "cv-owner-1")
+              b    (setup/bind-value! storage (:id fr) (:id slot) 42)]
+          (is (= 42 (current-value storage {:binding-id (:id b)})))))
+      (testing "with an item-id, reads the list-item row — not the binding"
+        (let [slot (setup/create-slot! storage "cv2" :sequence)
+              fr   (setup/create-base-fn! storage "cv-owner-2")
+              b    (sp/create-entity storage :binding
+                                     {:fn-id (:id fr) :slot-id (:id slot)
+                                      :list-append true :override-kind :fixed})
+              it   (sp/create-entity storage :binding-list-item
+                                     {:binding-id (:id b) :position 0 :value 7})]
+          (is (= 7 (current-value storage {:binding-id (:id b)
+                                           :item-id (:id it)})))))
+      (testing "an unbound free-arg (no ids) has no current value"
+        (is (nil? (current-value storage {}))))
+      (finally (sp/close storage)))))
 
 
 ;; ============================================================================
@@ -239,7 +325,12 @@
     (is (= "[text]" (type-label [:list :text]))))
   (testing "composites get a short word"
     (is (= "record" (type-label {:a :int})))
-    (is (= "fn" (type-label [:fn {} :int])))))
+    (is (= "fn" (type-label [:fn {} :int]))))
+  (testing "any other constructor vector shows its head keyword"
+    (is (= "union" (type-label [:union :int :text])))
+    (is (= "map" (type-label [:map :keyword :int]))))
+  (testing "an unclassifiable value falls back to pr-str"
+    (is (= "5" (type-label 5)))))
 
 
 ;; ============================================================================

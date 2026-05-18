@@ -1,16 +1,19 @@
 (ns graphden.crud.value-form-test
   "Tests for `graphden.crud.value-form` — the `/api/value-form`
    resolver: structural classification, form-fn dispatch, refinement
-   extraction, the request parse/validate stages, and the storage-
-   backed slot-type resolution.
+   extraction, the request parse/validate stages, the storage-backed
+   slot-type resolution, and the ctx-backed form assembly.
 
-   Pure helpers need no fixture; `resolve-slot-effective-type` goes
-   through the shared container. `apply-value-form` itself executes
-   the `app.forms` package fn-defs and is exercised end-to-end via the
-   `/api/value-form` endpoint rather than here."
+   Pure helpers need no fixture; the storage-backed resolvers go
+   through the shared container. The ctx-backed assembly (registry-
+   pairs / build-leaf-form / build-form / apply-value-form) runs
+   against a minimal in-test forms package — a `vf-const` identity
+   base-fn plus the leaf form-fn `:const` rows + the dispatch
+   registry — built by `forms-ctx`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.value-form :as vf]
+    [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
@@ -31,6 +34,9 @@
 (def ^:private current-value      #'vf/current-value)
 (def ^:private value-fits?        #'vf/value-fits?)
 (def ^:private type-label         #'vf/type-label)
+(def ^:private registry-pairs     #'vf/registry-pairs)
+(def ^:private build-leaf-form    #'vf/build-leaf-form)
+(def ^:private build-form         #'vf/build-form)
 
 
 ;; ============================================================================
@@ -404,3 +410,139 @@
                         storage {:binding-id (:id b)
                                  :item-id (random-uuid)})))))
       (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; ctx-backed form assembly — registry-pairs / build-leaf-form / build-form /
+;; apply-value-form, driven against a minimal in-storage forms package.
+;; ============================================================================
+
+(defn- forms-ctx
+  "Seed `storage` with a minimal value-form forms package — the
+   `vf-const` identity base-fn, the leaf form-fn `:const` rows, and the
+   `_value-form-registry` dispatch list — and return an executor ctx
+   over it. Enough to drive the ctx-backed stages without loading the
+   real `app.forms` package."
+  [storage]
+  (exec/register-base-fn! :vf-const (setup/fn-impl [value] value))
+  (let [const (setup/create-base-fn! storage "vf-const")
+        vslot (setup/create-slot! storage "value" :any)
+        _     (setup/attach-slot! storage (:id const) (:id vslot) 0)
+        form! (fn [nm hiccup]
+                (let [f (setup/create-composed-fn! storage nm (:id const))]
+                  (setup/bind-value! storage (:id f) (:id vslot) hiccup)
+                  f))]
+    (form! "_form-text"
+           ["input" {"type" "text" "class" "arg-value-edit-input"
+                     "data-form-field" "" "data-field-kind" "text"}])
+    (form! "_form-number"
+           ["input" {"type" "number" "class" "arg-value-edit-input"
+                     "data-form-field" "" "data-field-kind" "number"}])
+    (form! "_form-json"
+           ["textarea" {"class" "arg-value-edit-input"
+                        "data-form-field" "" "data-field-kind" "json"}])
+    (form! "_value-form-registry"
+           [["text" "_form-text"] ["int" "_form-number"]
+            ["numeric" "_form-number"] ["any" "_form-json"]])
+    (exec/create-context {:storage storage})))
+
+
+(defn- in-tree?
+  "True when value `x` appears anywhere in the nested hiccup `form`."
+  [form x]
+  (boolean (some #(= x %) (tree-seq coll? seq form))))
+
+
+(deftest registry-pairs-test
+  (testing "reads :_value-form-registry into [[type-kw fn-name] …] pairs"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (is (= [[:text "_form-text"] [:int "_form-number"]
+                [:numeric "_form-number"] [:any "_form-json"]]
+               (registry-pairs (forms-ctx storage))))
+        (finally (sp/close storage))))))
+
+
+(deftest registry-pairs-missing-registry-test
+  (testing "a ctx with no registry fn yields [] — the resolver degrades
+            to the _form-json fallback rather than throwing"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (is (= [] (registry-pairs (exec/create-context {:storage storage}))))
+        (finally (sp/close storage))))))
+
+
+(deftest build-leaf-form-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [ctx (forms-ctx storage)]
+        (testing "a primitive picks its registered form-fn control"
+          (let [c (build-leaf-form ctx :int "" nil)]
+            (is (= "input" (first c)))
+            (is (in-tree? c "number"))))
+        (testing "a type with no registered form-fn falls back to _form-json"
+          (is (= "textarea" (first (build-leaf-form ctx :bool "" nil)))))
+        (testing "a bounded numeric refinement threads HTML min / max"
+          (let [c (build-leaf-form ctx [:refine :int [:and [:>= 1] [:<= 65535]]]
+                                   "" nil)]
+            (is (= 1 (get (second c) "min")))
+            (is (= 65535 (get (second c) "max")))))
+        (testing "a closed-enum refinement renders a <select>, not an input"
+          (let [c (build-leaf-form ctx [:refine :keyword [:in [:get :post]]]
+                                   "" nil)]
+            (is (= "select" (first c)))
+            (is (= "enum" (get (second c) "data-field-kind")))))
+        (testing "a non-empty path is threaded onto the control"
+          (is (= "host" (get (second (build-leaf-form ctx :int "host" nil))
+                             "data-field-path")))))
+      (finally (sp/close storage)))))
+
+
+(deftest build-form-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [ctx (forms-ctx storage)]
+        (testing "a record descriptor becomes a labelled fieldset"
+          (let [f (build-form ctx (vf/resolve-form {:host :text :port :int})
+                              "" nil {:host "h" :port 8080})]
+            (is (in-tree? f "value-form-group"))
+            (is (in-tree? f "value-form-field"))
+            (is (in-tree? f "host"))
+            (is (in-tree? f "port"))))
+        (testing "a union descriptor renders a branch <select> plus branches,
+                  pre-selecting the branch the current value fits"
+          (let [int-fit  (build-form ctx (vf/resolve-form [:union :int :text])
+                                     "" nil 5)
+                text-fit (build-form ctx (vf/resolve-form [:union :int :text])
+                                     "" nil "hello")]
+            (is (in-tree? int-fit "value-form-union"))
+            (is (= "0" (get (nth int-fit 1) "data-union-active")))
+            (is (= "1" (get (nth text-fit 1) "data-union-active")))))
+        (testing "a list descriptor falls back to a JSON editor"
+          (is (= "textarea"
+                 (first (build-form ctx (vf/resolve-form [:list :int])
+                                    "" nil [1 2])))))
+        (testing "a leaf descriptor delegates to build-leaf-form"
+          (is (= "input"
+                 (first (build-form ctx (vf/resolve-form :int) "" nil 7))))))
+      (finally (sp/close storage)))))
+
+
+(deftest apply-value-form-test
+  (testing "end-to-end: a bound :int slot yields a number control wrapped
+            in a data-form-root div carrying the binding id"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [ctx    (forms-ctx storage)
+              slot   (setup/create-slot! storage "n" :int)
+              fr     (setup/create-base-fn! storage "avf-owner")
+              b      (setup/bind-value! storage (:id fr) (:id slot) 5)
+              result (vf/apply-value-form {:binding-id (:id b)} ctx)
+              [tag attrs control] (:form result)]
+          (is (true? (:ok result)))
+          (is (= 5 (:value result)))
+          (is (= "div" tag))
+          (is (contains? attrs "data-form-root"))
+          (is (= (str (:id b)) (get attrs "data-binding-id")))
+          (is (in-tree? control "number")))
+        (finally (sp/close storage))))))

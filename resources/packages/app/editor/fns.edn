@@ -32,6 +32,8 @@
                   "packages/app/editor/editor-data.js"
                   "packages/app/editor/editor-layout.js"
                   "packages/app/editor/editor-literal-types.js"
+                  "packages/app/editor/editor-value-form.js"
+                  "packages/app/editor/editor-widget-rating.js"
                   "packages/app/editor/editor-tooltips.js"
                   "packages/app/editor/editor-icons.js"
                   "packages/app/editor/editor-row-actions.js"

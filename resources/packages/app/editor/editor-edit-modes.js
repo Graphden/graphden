@@ -85,14 +85,19 @@ function openInlineEditPopover(opts) {
     save.disabled = true;
     cancel.disabled = true;
     errorEl.style.display = 'none';
-    const ok = await opts.doSave(control);
+    // `doSave` may return a bare boolean (legacy edit modes) or a
+    // `{ok, error}` result — the latter lets a save surface the
+    // server's rejection reason instead of the generic message.
+    const res = await opts.doSave(control);
+    const ok = (res === true) || !!res?.ok;
     if (ok) {
       closeInlineEdit();
       if (typeof opts.onSaved === 'function') opts.onSaved();
     } else {
       save.disabled = false;
       cancel.disabled = false;
-      errorEl.textContent = 'Save failed — check that you’re signed in.';
+      errorEl.textContent = res?.error
+        || 'Save failed — check that you’re signed in.';
       errorEl.style.display = 'block';
     }
   };
@@ -153,180 +158,147 @@ function openInlineEditPopover(opts) {
 
 function enterArgValueEditMode(arg, anchorEl) {
   if (!arg) return;
-  const expected = expectedSlotType(arg);
-  // Closed-enum slot → the value can only be one of a known set, so
-  // the editor offers a <select> rather than a free text field.
-  const enumInfo = (typeof closedEnumOf === 'function')
-                   ? closedEnumOf(expected) : null;
+  const expected = (typeof expectedSlotType === 'function')
+                   ? expectedSlotType(arg) : null;
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Edit arg value',
     makeControl(root) {
-      // Hint line above the input — only when we know the slot's
-      // expected type. Helps the user pick a value compatible with
-      // the saved type-check; refinements show their constraint.
-      if (expected) {
+      // Hint line above the form — shown when the slot's expected
+      // type is known.
+      if (expected && typeof formatTypeHint === 'function') {
         const hint = document.createElement('div');
         hint.className = 'arg-value-edit-hint';
         hint.textContent = 'Expected: ' + formatTypeHint(expected);
-        root.insertBefore(hint, root.firstChild);
+        root.appendChild(hint);
       }
+      // The form is fetched async, but `makeControl` must return a
+      // control synchronously — so it returns a host div (with a
+      // spinner) and fills it once /api/value-form responds.
+      const host = document.createElement('div');
+      host.className = 'value-form-host';
+      host.tabIndex = -1;
+      const loading = document.createElement('div');
+      loading.className = 'value-form-loading';
+      loading.textContent = 'Loading…';
+      host.appendChild(loading);
+      root.appendChild(host);
 
-      const v = arg.value;
-      const cur = (typeof v === 'string') ? v
-                : (v === null || v === undefined) ? ''
-                : JSON.stringify(v);
+      const status = document.createElement('div');
+      status.className = 'arg-value-edit-status';
+      root.appendChild(status);
 
-      // Closed enum → <select>. The current value is injected as an
-      // extra option when it falls outside the set, so opening the
-      // editor never silently rewrites a stale binding.
-      if (enumInfo) {
-        const select = document.createElement('select');
-        select.className = 'arg-value-edit-input';
-        const members = enumInfo.members.slice();
-        if (cur !== '' && !members.some(m => m.value === cur)) {
-          members.unshift({ value: cur, label: cur + ' (current)' });
+      // The backend resolves the slot type and serves the matching
+      // control as hiccup. If the endpoint is unreachable, fall back
+      // to a legacy single-line input so value-editing never breaks.
+      fetchValueForm(arg).then((payload) => {
+        // The user may have dismissed the popover mid-fetch — `root`
+        // is then detached from the document.
+        if (!root.isConnected) return;
+        if (!payload) {
+          makeLegacyControl(host, arg, expected, status);
+          return;
         }
-        for (const m of members) {
-          const opt = document.createElement('option');
-          opt.value = m.value;
-          opt.textContent = m.label;
-          if (m.value === cur) opt.selected = true;
-          select.appendChild(opt);
-        }
-        root.insertBefore(select, root.firstChild);
-        return select;
-      }
-
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.className = 'arg-value-edit-input';
-      input.value = cur;
-      root.insertBefore(input, root.firstChild);
-
-      // Live validation status — mirrors saveArgValue's smart-parse
-      // (try JSON, fall back to raw string), then runs the same
-      // literal-vs-type check the backend will run on save. Lets the
-      // user fix typos before the round-trip.
-      if (expected) {
-        const status = document.createElement('div');
-        status.className = 'arg-value-edit-status';
-        const update = () => {
-          const trimmed = (input.value || '').trim();
-          if (trimmed === '') {
-            status.textContent = '';
-            status.classList.remove('ok', 'err');
-            return;
-          }
-          let parsed;
-          try { parsed = JSON.parse(trimmed); }
-          catch (_) { parsed = input.value; }
-          const r = validateLiteralAgainstType(parsed, expected);
-          status.textContent = (r.ok ? '✓ ' : '✗ ') + (r.message || '');
-          status.classList.toggle('ok',  r.ok);
-          status.classList.toggle('err', !r.ok);
-        };
-        input.addEventListener('input', update);
-        // Render once on open so the user sees status for the
-        // pre-filled value.
-        setTimeout(update, 0);
-        root.insertBefore(status, input.nextSibling);
-      }
-      return input;
+        renderValueForm(host, payload, { expected, statusEl: status });
+      });
+      return host;
     },
     async doSave(control) {
-      let raw = control.value;
-      // Free-text edit of a keyword-typed slot → coerce to keyword
-      // form. The <select> path already yields colon-prefixed values,
-      // so this only bites the free-input (non-enum keyword) case.
-      if (typeof raw === 'string' && raw.trim()
-          && raw.trim().charAt(0) !== ':'
-          && typeof isKeywordType === 'function' && isKeywordType(expected)) {
-        raw = ':' + raw.trim();
-      }
-      return saveArgValue(arg, raw);
+      return saveFormValue(arg, control);
     },
     // Full refresh, not `renderGraph` — a value change alters binding/
-    // item rows, and `renderGraph` only re-fetches LAYOUT, leaving
-    // `lookups` (which drives argRowFromNode / nav-type walks / the
-    // `+` gating) stale. `initGraph` re-fetches entities and rebuilds
-    // `lookups`. Matches the sequence-append flow.
-    onSaved()           { if (typeof initGraph === 'function') initGraph(); },
+    // item rows, leaving `lookups` stale; `initGraph` re-fetches
+    // entities and rebuilds it.
+    onSaved() { if (typeof initGraph === 'function') initGraph(); },
     // Delete drops the binding so the slot reverts to a free-arg
-    // placeholder. From there the user can re-bind to a literal OR a
-    // fn-ref via the placeholder's chooser — single inline path for
-    // switching a bound literal to anything else.
+    // placeholder — the single inline path for switching a bound
+    // literal to anything else.
     onDelete: arg['binding-id']
               ? () => { if (typeof deleteUseSiteBinding === 'function') deleteUseSiteBinding(arg); }
               : null
   });
 }
 
+// Legacy fallback control — a single text input, used ONLY when
+// `/api/value-form` is unreachable. It carries the same `data-*`
+// contract as a backend form-fn (`data-field-kind="any"` =
+// smart-parse) so `saveFormValue` collects it through the identical
+// path.
+function makeLegacyControl(host, arg, expected, statusEl) {
+  host.textContent = '';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'arg-value-edit-input';
+  input.setAttribute('data-form-field', '');
+  input.setAttribute('data-field-kind', 'any');
+  const v = arg.value;
+  input.value = (typeof v === 'string') ? v
+              : (v === null || v === undefined) ? ''
+              : JSON.stringify(v);
+  host.appendChild(input);
+  try { input.focus(); input.select(); } catch (_) {}
+  if (statusEl && expected && typeof installFormLiveValidation === 'function') {
+    installFormLiveValidation(host, expected, statusEl);
+  }
+}
+
+// Turn a failed mutation `Response` into a user-facing message. The
+// backend renders a write rejection as `<p class="error">reason</p>`
+// — strip the tags so the popover shows the bare reason (e.g. a
+// type-mismatch). 401 is the auth case.
+async function responseError(r) {
+  if (!r) return 'Save failed — network error.';
+  if (r.status === 401) return 'Sign in to save this value.';
+  let body = '';
+  try { body = await r.text(); } catch (_) {}
+  const stripped = body.replace(/<[^>]*>/g, '').trim();
+  return stripped || ('Save failed (HTTP ' + r.status + ').');
+}
+
 // Slot/binding-aware writer: PUT /api/entities/binding/:id when the
 // slot already has an own binding on this fn, POST a new binding
 // otherwise. `arg` carries `fn-id` + `slot-id` (+ optional `binding-id`)
 // — those come from the synth-arg adapter, populated server-side from
-// the slot/binding rows. Editor JS no longer touches /api/entities/arg.
+// the slot/binding rows. Returns `{ok, error?}` — `error` carries the
+// server's rejection reason for the popover to display.
 async function writeBindingFields(arg, fields) {
-  if (!arg) return false;
+  if (!arg) return { ok: false, error: 'No target binding.' };
   const fnId = arg['fn-id'];
   const slotId = arg['slot-id'];
   const bindingId = arg['binding-id'];
-  if (!fnId || !slotId) return false;
+  if (!fnId || !slotId) return { ok: false, error: 'No target binding.' };
   const body = Object.entries(fields)
     .map(([k, v]) => k + '=' + encodeURIComponent(v == null ? '' : v))
     .join('&');
   try {
-    if (bindingId) {
-      const r = await authMutate('PUT',
-                                 '/api/entities/binding/' + encodeURIComponent(bindingId),
-                                 body);
-      return !!(r?.ok);
-    }
-    const r = await authMutate('POST', '/api/entities/binding',
-                               'fn-id=' + encodeURIComponent(fnId) +
-                               '&slot-id=' + encodeURIComponent(slotId) +
-                               (body ? '&' + body : ''));
-    return !!(r?.ok);
+    const r = bindingId
+      ? await authMutate('PUT',
+                          '/api/entities/binding/' + encodeURIComponent(bindingId),
+                          body)
+      : await authMutate('POST', '/api/entities/binding',
+                          'fn-id=' + encodeURIComponent(fnId) +
+                          '&slot-id=' + encodeURIComponent(slotId) +
+                          (body ? '&' + body : ''));
+    return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
   } catch (_) {
-    return false;
+    return { ok: false, error: 'Save failed — network error.' };
   }
-}
-
-async function saveArgValue(arg, rawInput) {
-  // Smart parse: trim, try JSON, fall back to raw string. Empty input
-  // is rejected here because the backend's permissive parse skips
-  // blank `value=` (so a clear would be a no-op). Phase 2 type-change
-  // will be the path to clear values.
-  const trimmed = (rawInput || '').trim();
-  if (trimmed === '') return false;
-  let parsed;
-  try { parsed = JSON.parse(trimmed); }
-  catch (_) { parsed = rawInput; }
-  // A sequence item is a `binding-list-item`, not a binding — its
-  // value lives in a dedicated row. Route the edit to the item
-  // endpoint; the binding PUT would otherwise write a stray scalar
-  // `value` onto the parent list-binding.
-  if (arg['item-id']) {
-    return await putSequenceItemValue(arg['item-id'], parsed);
-  }
-  const jsonStr = JSON.stringify(parsed);
-  return await writeBindingFields(arg, { value: jsonStr });
 }
 
 // PUT /api/sequence/item/:id with a JSON `{value}` body — the
-// in-place edit counterpart of the append / remove helpers.
+// in-place edit counterpart of the append / remove helpers. Returns
+// `{ok, error?}`.
 async function putSequenceItemValue(itemId, value) {
-  if (!itemId) return false;
+  if (!itemId) return { ok: false, error: 'No sequence item.' };
   try {
     const r = await authFetch('/api/sequence/item/' + encodeURIComponent(itemId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: value })
     });
-    return !!r?.ok;
+    return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
   } catch (_) {
-    return false;
+    return { ok: false, error: 'Save failed — network error.' };
   }
 }
 
@@ -761,11 +733,11 @@ function enterArgTypeEditMode(arg, anchorEl) {
           && !f['element-fn-id']);
         return fn ? fn.id : '';
       })();
-      if (!await writeBindingFields(arg, {
+      if (!(await writeBindingFields(arg, {
         'type-override-fn-id': primitiveFnId,
         value: '',
         'ref-fn-id': ''
-      })) return false;
+      })).ok) return false;
       // Local arg-shape mirror — used by onSaved below to decide
       // whether to chain into the fn-picker. The next initGraph()
       // refetches authoritative state, so this only needs to live
@@ -1086,7 +1058,7 @@ async function saveArgRef(arg, refFnId) {
   // Picker contract retained — but the body now writes binding's
   // `:ref-fn-id` directly via the slot/binding API.
   if (!arg) return false;
-  if (await writeBindingFields(arg, { 'ref-fn-id': refFnId })) {
+  if ((await writeBindingFields(arg, { 'ref-fn-id': refFnId })).ok) {
     if (typeof initGraph === 'function') initGraph();
     return true;
   }

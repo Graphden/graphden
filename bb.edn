@@ -361,7 +361,24 @@
                            n (count (:nodes parsed))]
                        (if (and (sequential? (:nodes parsed)) (>= n 1))
                          {:ok? true :detail (str n " nodes")}
-                         {:ok? false :detail "no nodes in expanded layout"}))))))))
+                         {:ok? false :detail "no nodes in expanded layout"})))))))
+
+       (step "POST /api/value-form (binding)         → {ok:true} + form hiccup"
+             (fn []
+               (let [vb (when (:ok? entities-resp)
+                          (->> entities-resp :data :bindings
+                               (filter (fn [b] (some? (:value b))))
+                               first))]
+                 (if-not vb
+                   {:ok? false :detail "no value-binding to test"}
+                   (let [r (post-json "/api/value-form" {"binding-id" (:id vb)})
+                         parsed (when (= 200 (:status r))
+                                  (json/parse-string (:body r) true))]
+                     (cond
+                       (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                       (not (true? (:ok parsed))) {:ok? false :detail (str "expected ok=true — " (pr-str parsed))}
+                       (not (vector? (:form parsed))) {:ok? false :detail "no :form hiccup"}
+                       :else {:ok? true})))))))
 
      ;; Phase 1 type-API: subtype check + candidate enumeration.
      (step "POST /api/types/compatible (int ⊆ int)    → {ok:true}"

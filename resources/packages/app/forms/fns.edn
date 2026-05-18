@@ -1,0 +1,168 @@
+;; Type-aware value-form system — built-in form-fns + the dispatch
+;; registry.
+;;
+;; A "form-fn" is a `:const` fn-def holding a STATIC hiccup template
+;; for one input control. The hiccup is authored with plain-string
+;; tags and string attribute keys so it survives the JSONB / JSON
+;; round-trip to the editor unchanged — no keyword sugar.
+;;
+;; The control carries the `data-*` contract the editor's form
+;; runtime reads:
+;;   data-form-field   — presence marks a value-bearing control
+;;   data-field-kind   — text | number | bool | keyword | json | enum
+;;                       (how the JS reads + coerces the raw value)
+;; A scalar control omits `data-field-path` (absent = the whole
+;; value IS this one field).
+;;
+;; `:_value-form-registry` maps a type to the form-fn that renders
+;; it. The `/api/value-form` resolver reads this list and matches a
+;; leaf type by `subtype?`, most-specific wins — the same shared-list
+;; pattern as `:api-routes :items`. Add a form-fn here to extend the
+;; system; no executor / resolver change needed.
+
+
+{:namespace "app.forms"
+ :description "Type-aware value-edit forms — built-in scalar form-fns (static hiccup control templates) and the type -> form-fn dispatch registry consumed by the /api/value-form resolver."
+ :fns
+ [;; --- scalar leaf form-fns ---
+
+  {:name :_form-text
+   :description "Single-line text input — the form for a `:text` slot."
+   :parent :const
+   :args {:value ["input" {"type" "text"
+                           "class" "arg-value-edit-input"
+                           "data-form-field" ""
+                           "data-field-kind" "text"}]}}
+
+  {:name :_form-number
+   :description "Numeric input — the form for `:int` / `:numeric` / `:float` slots."
+   :parent :const
+   :args {:value ["input" {"type" "number"
+                           "class" "arg-value-edit-input"
+                           "data-form-field" ""
+                           "data-field-kind" "number"}]}}
+
+  {:name :_form-bool
+   :description "Checkbox — the form for a `:bool` slot."
+   :parent :const
+   :args {:value ["input" {"type" "checkbox"
+                           "data-form-field" ""
+                           "data-field-kind" "bool"}]}}
+
+  {:name :_form-keyword
+   :description "Text input for a `:keyword` slot. The runtime stores the entry colon-prefixed so it round-trips AS a keyword."
+   :parent :const
+   :args {:value ["input" {"type" "text"
+                           "class" "arg-value-edit-input"
+                           "placeholder" ":keyword"
+                           "data-form-field" ""
+                           "data-field-kind" "keyword"}]}}
+
+  {:name :_form-json
+   :description "Multi-line JSON textarea — the fallback form for `:jsonb` / `:any` and any type with no more specific form-fn."
+   :parent :const
+   :args {:value ["textarea" {"class" "arg-value-edit-input"
+                              "rows" 6
+                              "data-form-field" ""
+                              "data-field-kind" "json"}]}}
+
+  ;; --- Tier 2 demo: a custom-widget form-fn ---
+  ;;
+  ;; `:vf-rating` is a 1-5 integer refinement; `:_form-rating` renders
+  ;; it via the `rating` custom widget — a registered JS module that
+  ;; mounts itself on the `data-form-widget` node — instead of a plain
+  ;; number input. This is the reference example for Tier 2: a user
+  ;; adds a widget by shipping its JS, a `:const` form-fn carrying
+  ;; `data-form-widget`, and a registry entry.
+
+  {:name :vf-rating
+   :description "Demo refinement — an integer star-rating in [1, 5]. Rendered by the `rating` custom widget."
+   :refine {:base :int :constraint [:and [:>= 1] [:<= 5]]}}
+
+  {:name :_form-rating
+   :description "Custom-widget form for `:vf-rating` — emits a `data-form-widget` mount point the editor's `rating` widget hydrates into a slider control."
+   :parent :const
+   :args {:value ["div" {"class" "value-form-widget"
+                         "data-form-widget" "rating"}]}}
+
+  ;; --- value-form demo shape ---
+  ;;
+  ;; A record whose fields exercise each non-trivial form kind: a
+  ;; closed-enum `<select>` (`verb`), a union branch-selector (`mix`),
+  ;; and the `rating` custom widget (`score`). Its field slots are the
+  ;; reference targets for `/api/value-form`. Record fields must be
+  ;; NAMED type-rows — an inline structural type degrades to its base
+  ;; on sync — so the enum / union get their own aliases.
+
+  {:name :ex-http-verb
+   :description "Demo closed enum — an HTTP verb keyword."
+   :refine {:base :keyword :constraint [:in [:get :post :put :delete]]}}
+
+  {:name :ex-int-or-text
+   :description "Demo union — an int or a text value."
+   :union [:int :text]}
+
+  {:name :ex-value-form-shape
+   :description "Demo record for the type-aware value-form: `verb` is a closed keyword enum, `mix` a union, `score` the custom-widget `:vf-rating`."
+   :type {:verb  :ex-http-verb
+          :mix   :ex-int-or-text
+          :score :vf-rating}}
+
+  ;; --- dispatch registry ---
+  ;;
+  ;; Vector of [type-name form-fn-name] pairs, both as plain strings
+  ;; (string form-fn names can never be mistaken for fn-refs inside a
+  ;; `:const` literal). The resolver reads this, keywordises each
+  ;; entry, and picks the form-fn whose type is the most-specific
+  ;; supertype of the slot's effective type via `subtype?`.
+
+  {:name :_value-form-registry
+   :description "Type -> form-fn dispatch table for /api/value-form. Each pair is [type-name form-fn-name]; the resolver subtype-matches the slot's effective type, most-specific wins, falling back to _form-json."
+   :parent :const
+   :args {:value [["text" "_form-text"]
+                  ["int" "_form-number"]
+                  ["numeric" "_form-number"]
+                  ["float" "_form-number"]
+                  ["bool" "_form-bool"]
+                  ["keyword" "_form-keyword"]
+                  ["jsonb" "_form-json"]
+                  ["any" "_form-json"]
+                  ["vf-rating" "_form-rating"]]}}
+
+  ;; --- /api/value-form endpoint — parse -> validate -> apply ---
+  ;;
+  ;; Mirrors the type-API handler pattern (web/crud): three base-fns
+  ;; glued by an `:if` over the validation result. POST with a JSON
+  ;; body `{binding-id | fn-id+slot-id, item-id?}`; the body shape
+  ;; matches the type-API endpoints rather than parsing a GET query
+  ;; string (no query-param precedent in the codebase).
+
+  {:name :_value-form-parsed
+   :description "Stage 1 of value-form — JSON body -> {:binding-id :fn-id :slot-id :item-id}, each coerced to a UUID."
+   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
+  {:name :_value-form-validation
+   :description "Stage 2 of value-form — the request must identify a slot (binding-id, or fn-id+slot-id). Returns the {:ok false :error} rejection, or nil when well-formed."
+   :args {:parsed {:type :jsonb :description "Output of `:_value-form-parsed`."}}
+   :return-type :jsonb}
+
+  {:name :_value-form-apply
+   :description "Stage 3 of value-form — resolve the slot's effective type, pick the matching form-fn, execute it, and wrap the control in a data-form-root div. Returns {:ok true :form <hiccup> :value <current>}. Reached only after validation passes."
+   :args {:parsed {:type :jsonb :description "Output of `:_value-form-parsed`."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :value-form
+   :description "POST /api/value-form — parse the JSON body identifying a binding/slot, validate, and on success resolve the type-aware editor form. Returns {:ok true :form :value} or {:ok false :error}."
+   :parent :if
+   :args {:test :_rejected?
+          :then :_value-form-validation
+          :else :_value-form-apply
+          :validation :_value-form-validation
+          :parsed :_value-form-parsed}}
+
+  {:name :value-form-handler
+   :description "Ring handler for `POST /api/value-form` — wraps `:value-form` in a JSON 200 response."
+   :parent :json-handler
+   :args {:data :value-form}}]}

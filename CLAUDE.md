@@ -191,6 +191,8 @@ The editor frontend is split into modules for better maintainability:
 | `editor-data.js` | Data utilities, lookups, inheritance, free-args |
 | `editor-layout.js` | Grid layout algorithm, positioning |
 | `editor-literal-types.js` | Type-validation helpers shared by edit popovers (mirrors `graphden.types.check`) |
+| `editor-value-form.js` | Type-aware value-edit forms — generic hiccup→DOM renderer + collect/fill/validate/save runtime, fetches `POST /api/value-form`; union branch-swap, Tier-2 widget hydration, singleton read-only value viewer |
+| `editor-widget-rating.js` | Tier-2 custom value-form widget — a 1-5 slider, registered on `window.GraphdenFormWidgets`; reference example for adding widgets |
 | `editor-tooltips.js` | Description-tooltip + full-name popover singletons |
 | `editor-icons.js` | Right-edge action icons (`i`, `↗`, ✎ pencil) + per-row `⋯` more-actions trigger |
 | `editor-row-actions.js` | Singleton popover anchored OUTSIDE the card (right of the `⋯` trigger) — hosts ns / i / ↗ / ✎ / × / + / ✕ for each fn-row. Hover-show, click-pin, scales + repositions live with `cy.zoom() / cy.pan()` |
@@ -214,7 +216,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → create → create-type → data → layout → literal-types → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → effect-explainer → overlay-type-expand → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → effect-explainer → overlay-type-expand → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 

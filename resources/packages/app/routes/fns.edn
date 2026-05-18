@@ -228,6 +228,13 @@
    :parent :get-route
    :args {:path "/value-kinds" :handler :value-kinds-handler}}
 
+  ;; --- /api/value-form — type-aware editor form for a binding/slot ---
+
+  {:name :api-value-form
+   :description "POST /api/value-form — JSON body `{binding-id | fn-id+slot-id, item-id?}`. Resolves the slot's effective type, picks the matching form-fn, and returns `{ok, form: <hiccup>, value: <current>}`. The editor renders the hiccup as the value-edit popover."
+   :parent :post-route
+   :args {:path "/value-form" :handler :value-form-handler}}
+
   ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
   {:name :api-routes
@@ -240,4 +247,5 @@
                   :types-routes
                   :graph-routes
                   :api-value-kinds
+                  :api-value-form
                   :auth-check]}}]}

@@ -33,7 +33,13 @@ function createArgOverlay(node, container) {
   const content = document.createElement('div');
   content.style.padding = '4px 8px';
   content.style.flex = '1';
-  content.textContent = truncateLabel(node.data('label') || '', 30);
+  // The canvas label is hard-truncated at 30 chars. When it IS
+  // truncated the native `title=` becomes the only way to read the
+  // full value (the action hints below are dropped in that case) —
+  // critical for read-only rows that have no edit popover at all.
+  const rawLabel = node.data('label') || '';
+  const isTruncated = rawLabel.length > 30;
+  content.textContent = truncateLabel(rawLabel, 30);
   row.appendChild(content);
 
   // Persistent mismatch indicator. If this arg's literal value would
@@ -104,7 +110,7 @@ function createArgOverlay(node, container) {
   const editable = inImpl && signedIn;
   if (editable) {
     content.style.cursor = 'pointer';
-    content.title = 'Click to edit value';
+    content.title = isTruncated ? rawLabel : 'Click to edit value';
     content.addEventListener('click', (e) => {
       e.stopPropagation();
       enterArgValueEditMode(arg, content);
@@ -125,7 +131,8 @@ function createArgOverlay(node, container) {
     // hint below). Click → open the auth lock popover so the path
     // back to "edit" is one tap, not "find the lock icon yourself".
     content.style.cursor = 'help';
-    content.title = 'Sign in to edit this value (tap to open login)';
+    content.title = isTruncated ? rawLabel
+                  : 'Sign in to edit this value (tap to open login)';
     content.addEventListener('click', (e) => {
       e.stopPropagation();
       const lockBtn = document.getElementById('auth-lock-btn');
@@ -145,23 +152,15 @@ function createArgOverlay(node, container) {
     // in-new-tab icon (which already lives next to the row when
     // available) and provide a fallback click that does the
     // navigation for them.
-    content.style.cursor = 'help';
-    content.title = 'Read-only here — tap to open this fn\'s page';
+    content.style.cursor = 'pointer';
+    content.title = isTruncated ? rawLabel
+                  : 'Read-only here — tap to view the full value';
     content.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Prefer the ↗ link if the row already has one — it carries
-      // the qualified-name → hash routing logic. Otherwise fall
-      // back to setting location.hash directly when we can resolve
-      // the fn-id to a name.
-      const openLink = overlay.querySelector('.open-in-new-tab');
-      if (openLink?.click) { openLink.click(); return; }
-      if (lookups?.fnMap && typeof getQualifiedFnName === 'function') {
-        const owning = lookups.fnMap.get(arg['fn-id']);
-        const qn = owning && getQualifiedFnName(owning);
-        if (qn && qn !== '(anonymous)') {
-          window.location.hash = encodeURIComponent(qn);
-        }
-      }
+      // Structurally read-only — no edit popover. Show the value in
+      // the read-only viewer (full, type-aware, scrollable). Navigation
+      // to the owning fn's page stays on the ↗ open-in-new-tab icon.
+      if (typeof openValueViewer === 'function') openValueViewer(arg, content);
     });
     if (arg.type) {
       const chip = createTypeChip(arg, { readOnly: true });

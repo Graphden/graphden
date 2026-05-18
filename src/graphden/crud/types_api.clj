@@ -125,6 +125,8 @@
                    (constraint-tagged? f :union)
                    (constraint-tagged? f :variant)
                    (constraint-tagged? f :fn)
+                   (constraint-tagged? f :map)
+                   (constraint-tagged? f :tuple)
                    (and (empty? (:parent-ids f))
                         (nil? (:impl-hash f))
                         (seq (get slots-by-fn (:id f)))))))
@@ -155,7 +157,9 @@
                                 (:element-fn-id f)
                                 (constraint-tagged? f :union)
                                 (constraint-tagged? f :variant)
-                                (constraint-tagged? f :fn))
+                                (constraint-tagged? f :fn)
+                                (constraint-tagged? f :map)
+                                (constraint-tagged? f :tuple))
                     structural (if marker?
                                  (tc/rich-type-from-row f fns-by-id)
                                  (or (record-shape f)
@@ -201,6 +205,64 @@
 
 ;; === Type-API helpers (Phase 1: type-aware UI integration) ===
 
+;; Constraint ops whose operands are themselves sub-constraints (and so
+;; recurse). Every other op — comparison, membership, regex — carries
+;; literal VALUE operands. Mirrors the `:and`/`:or` recursion in
+;; `graphden.types.core/constraint-implies?`.
+(def ^:private logical-constraint-ops
+  #{:and :or :not})
+
+
+(declare json->type)
+
+
+(defn- keyword-domain?
+  "True when a refinement's (already-decoded) base type bottoms out at
+   `:keyword` — meaning its constraint operands are keyword values
+   (`[:in [:get :post]]`, `[:= :ok]`) rather than string literals.
+
+   Recurses through nested refinements: `rich-type-from-row` always
+   emits a fully-resolved base, so only a primitive keyword or a
+   `[:refine …]` vector can appear here — never a bare type name."
+  [base]
+  (cond
+    (= base :keyword) true
+    (and (vector? base) (= :refine (first base))) (recur (second base))
+    :else false))
+
+
+(defn- json->constraint
+  "Decode the constraint slot of a `[:refine base C]` wire shape.
+
+   JSON can't distinguish a keyword from a string, so a blind decode
+   corrupts value-carrying constraints. The type grammar resolves it:
+
+   - The operator is always at position 0 → always a keyword.
+   - The refinement BASE type fixes the value domain. A `:keyword`
+     base means the operands are keyword values (`[:in [:get :post]]`,
+     `[:= :ok]`); any other base means a string operand is a genuine
+     literal (`[:not= \"\"]`, `[:= \"x\"]`, `[:matches \"re\"]`) and
+     must survive verbatim.
+
+   Logical ops (`:and`/`:or`/`:not`) carry sub-constraints and recurse;
+   every other op carries values, with `:in` carrying a value
+   collection. The head is keywordised whether or not it's recognised,
+   so a future op can't silently decode to a string."
+  [kw-vals? c]
+  (if-not (and (sequential? c) (seq c))
+    c
+    (let [op (let [h (first c)] (if (string? h) (keyword h) h))
+          decode-val (fn [v] (if (and kw-vals? (string? v)) (keyword v) v))]
+      (if (logical-constraint-ops op)
+        (into [op] (map #(json->constraint kw-vals? %)) (rest c))
+        (into [op]
+              (map (fn [o]
+                     (if (sequential? o)
+                       (mapv decode-val o)   ; :in value collection
+                       (decode-val o))))
+              (rest c))))))
+
+
 (defn json->type
   "Inverse of cheshire's default Clojure→JSON encoding for type
    expressions. The wire format is whatever `(rich-types-with-type-rows)`
@@ -214,20 +276,30 @@
                                                       →  {:a :int :b :text}
 
    Strings become keywords, map keys become keywords, vectors recurse,
-   numbers / booleans / nil pass through. Strings inside refinement
-   constraints (rare) WILL be keywordised — refinements are mostly
-   numeric so the trade-off is acceptable; refactor here if string
-   literals enter the type language."
+   numbers / booleans / nil pass through — EXCEPT inside a refinement
+   constraint, where `json->constraint` uses the refinement base type
+   to keep string literal values intact. A blind decode would turn
+   `[:not= \"\"]` into `[:not= :]` and silently break `:non-empty-text`."
   [x]
   (cond
-    (string? x)     (keyword x)
-    (map? x)        (into {}
-                          (map (fn [[k v]]
-                                 [(if (string? k) (keyword k) k)
-                                  (json->type v)]))
-                          x)
+    (string? x) (keyword x)
+
+    (map? x)
+    (into {}
+          (map (fn [[k v]] [(if (string? k) (keyword k) k) (json->type v)]))
+          x)
+
+    ;; Refinement — decode `base` as a type, then hand the constraint
+    ;; to `json->constraint` with the base as the disambiguating
+    ;; context. Everything else (union / variant / fn / list / record)
+    ;; carries only types and recurses uniformly below.
+    (and (vector? x) (#{:refine "refine"} (first x)))
+    (let [base (json->type (second x))]
+      [:refine base (json->constraint (keyword-domain? base) (nth x 2 nil))])
+
     (sequential? x) (mapv json->type x)
-    :else           x))
+
+    :else x))
 
 
 (defn describe-mismatch

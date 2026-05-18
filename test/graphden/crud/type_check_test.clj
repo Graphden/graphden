@@ -34,6 +34,24 @@
              (tc/rich-type-from-row {:base-fn-id :int-id :constraint [:> 0]}
                                     fns))))
 
+    (testing "value-carrying constraints preserve their string values"
+      ;; The storage codec already round-trips keyword operators and
+      ;; leaves string values intact — `rich-type-from-row` must NOT
+      ;; keywordize them. Regression: `[:not= ""]` once became
+      ;; `[:not= :]`, silently making `:non-empty-text` accept `""`.
+      (is (= [:refine :text [:not= ""]]
+             (tc/rich-type-from-row {:base-fn-id :text-id :constraint [:not= ""]}
+                                    fns)))
+      (is (= [:refine :text [:= "x"]]
+             (tc/rich-type-from-row {:base-fn-id :text-id :constraint [:= "x"]}
+                                    fns)))
+      (is (= [:refine :text [:in ["a" "b"]]]
+             (tc/rich-type-from-row
+               {:base-fn-id :text-id :constraint [:in ["a" "b"]]} fns)))
+      (is (= [:refine :text [:matches "^[a-z]+$"]]
+             (tc/rich-type-from-row
+               {:base-fn-id :text-id :constraint [:matches "^[a-z]+$"]} fns))))
+
     (testing "list walks element-fn-id"
       (is (= [:list :int]
              (tc/rich-type-from-row {:element-fn-id :int-id} fns))))
@@ -41,6 +59,12 @@
     (testing "union surfaces its constraint verbatim"
       (is (= [:union :int :text]
              (tc/rich-type-from-row {:constraint [:union :int :text]} fns))))
+
+    (testing "map / tuple constraints surface verbatim"
+      (is (= [:map :keyword :int]
+             (tc/rich-type-from-row {:constraint [:map :keyword :int]} fns)))
+      (is (= [:tuple :text :int]
+             (tc/rich-type-from-row {:constraint [:tuple :text :int]} fns))))
 
     (testing "variant constraint is desugared"
       (is (some? (tc/rich-type-from-row
@@ -339,6 +363,23 @@
           ;; 5 > 0 — satisfies; base-subtype + refinement both hold
           (is (nil? (tc/type-check-binding-direct!
                       storage {:slot-id (:id slot) :value 5} nil))))
+        (finally (sp/close storage)))))
+
+  (testing "a non-empty-text slot rejects \"\" but accepts a non-empty string"
+    ;; End-to-end guard for the constraint-keywordization bug: the
+    ;; `[:not= ""]` constraint must reach the refinement check intact,
+    ;; or `""` slips through.
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [text-id (get setup/primitive-fn-ids :text)
+              refine  (sp/create-entity storage :fn
+                                        {:name "tcbd-nonempty" :parent-ids []
+                                         :base-fn-id text-id :constraint [:not= ""]})
+              slot    (setup/create-slot! storage "s" (:id refine))]
+          (is (some? (tc/type-check-binding-direct!
+                       storage {:slot-id (:id slot) :value ""} nil)))
+          (is (nil? (tc/type-check-binding-direct!
+                      storage {:slot-id (:id slot) :value "hello"} nil))))
         (finally (sp/close storage)))))
 
   (testing "a ref whose base-typed return feeds a refinement slot → nil"

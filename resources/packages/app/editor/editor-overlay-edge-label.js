@@ -254,6 +254,23 @@ function createEdgeLabelOverlay(edge, container) {
         src.textContent = '(' + (entry.fns?.join(', ') || '') + ')';
         row.appendChild(src);
 
+        // Attribution — WHY this entry has its type: a binding
+        // type-override narrowed it, or it's the slot's own declared
+        // type. Backend tags each chain group with `:source`.
+        if (entry.source) {
+          const kind = document.createElement('span');
+          kind.className = 'edge-type-chain-kind';
+          if (entry.source === 'binding-override') {
+            kind.textContent = 'override';
+            kind.title = 'Narrowed by a binding type-override';
+          } else {
+            kind.textContent = 'slot';
+            kind.title = 'The slot’s own declared type';
+          }
+          kind.setAttribute('aria-label', kind.title);
+          row.appendChild(kind);
+        }
+
         block.appendChild(row);
       }
       overlay.appendChild(block);

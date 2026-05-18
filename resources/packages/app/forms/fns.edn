@@ -137,20 +137,28 @@
   ;; matches the type-API endpoints rather than parsing a GET query
   ;; string (no query-param precedent in the codebase).
 
+  {:name :_value-form-parsed-shape
+   :description "Output of `:_value-form-parsed` — the slot-identifying ids (a binding-id, or an fn-id + slot-id, optionally an item-id), each a UUID."
+   :type {:binding-id :uuid :fn-id :uuid :slot-id :uuid :item-id :uuid}}
+
+  {:name :_value-form-result-shape
+   :description "Output of `:_value-form-apply` — the resolved editor form: `:form` is the control hiccup, `:value` the binding's current value."
+   :type {:ok :bool :form :jsonb :value :jsonb}}
+
   {:name :_value-form-parsed
    :description "Stage 1 of value-form — JSON body -> {:binding-id :fn-id :slot-id :item-id}, each coerced to a UUID."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_value-form-parsed-shape}
 
   {:name :_value-form-validation
    :description "Stage 2 of value-form — the request must identify a slot (binding-id, or fn-id+slot-id). Returns the {:ok false :error} rejection, or nil when well-formed."
-   :args {:parsed {:type :jsonb :description "Output of `:_value-form-parsed`."}}
-   :return-type :jsonb}
+   :args {:parsed {:type :_value-form-parsed-shape :description "Output of `:_value-form-parsed`."}}
+   :return-type :_error-result-shape}
 
   {:name :_value-form-apply
    :description "Stage 3 of value-form — resolve the slot's effective type, pick the matching form-fn, execute it, and wrap the control in a data-form-root div. Returns {:ok true :form <hiccup> :value <current>}. Reached only after validation passes."
-   :args {:parsed {:type :jsonb :description "Output of `:_value-form-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_value-form-parsed-shape :description "Output of `:_value-form-parsed`."}}
+   :return-type :_value-form-result-shape
    :effects #{:db}}
 
   {:name :value-form

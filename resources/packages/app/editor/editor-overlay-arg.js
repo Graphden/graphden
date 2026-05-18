@@ -171,8 +171,50 @@ function createArgOverlay(node, container) {
     }
   }
 
+  // Inheritance provenance — when this row's slot was inherited from
+  // a parent fn, append a compact ↖ affordance. Shown regardless of
+  // editability: knowing where a slot came from is useful even on a
+  // read-only ancestor-expansion row.
+  const sourceLink = createArgSourceLink(node);
+  if (sourceLink) row.appendChild(sourceLink);
+
   createDragHandle(overlay, node);
   container.appendChild(overlay);
+}
+
+// Provenance affordance for an inherited-slot arg row. Returns a
+// compact ↖ link when the layout marked this node with a `sourceChain`
+// (the full ancestor chain the slot was inherited through, leaf→root).
+// Hover reveals the whole chain; click opens the immediate parent in a
+// new tab. Returns null for an own (non-inherited) slot.
+function createArgSourceLink(node) {
+  const chain = node.data('sourceChain');
+  if (!Array.isArray(chain) || chain.length === 0) return null;
+  const names = chain.map(c => c.fnName || '(anonymous)');
+  const link = document.createElement('a');
+  link.className = 'arg-source-link';
+  link.textContent = '↖';
+  // leaf→root chain reads as "inherited from X, which got it from Y…".
+  const label = 'Inherited from ' + names.join(' ← ');
+  link.title = label;
+  link.setAttribute('aria-label', label);
+  // Navigate to the immediate parent the slot came from, when it
+  // resolves to a globally addressable name (anonymous → tooltip only).
+  const immediate = chain[0];
+  const fn = (immediate?.fnId && lookups && lookups.fnMap)
+             ? lookups.fnMap.get(immediate.fnId) : null;
+  const qualified = (fn && typeof getQualifiedFnName === 'function')
+                    ? getQualifiedFnName(fn) : null;
+  if (qualified && qualified !== '(anonymous)') {
+    link.href = '#' + encodeURIComponent(qualified);
+    link.target = '_blank';
+    link.rel = 'noopener';
+  }
+  // Don't let a tap on the affordance also drag the overlay.
+  link.addEventListener('mousedown', (e) => e.stopPropagation());
+  link.addEventListener('touchend', (e) => e.stopPropagation());
+  link.addEventListener('click', (e) => e.stopPropagation());
+  return link;
 }
 
 // Wire the inline-expand click handler onto a chip rendered on an
@@ -193,6 +235,10 @@ function attachArgChipExpand(chipEl, arg, nodeId, opts) {
     onEdit: editable ? () => enterArgTypeEditMode(arg, chipEl) : null,
     bindingId: arg?.['binding-id'],
     anonymousFnId: findAnonymousTypeFnId(arg),
+    // Threaded so the panel can render the "Resolved via" provenance
+    // section. Unset on recursive structural sub-panels — the section
+    // shows once, on the arg's own top-level panel.
+    arg,
   });
 }
 

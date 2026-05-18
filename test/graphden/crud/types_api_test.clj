@@ -107,7 +107,47 @@
     (is (= {:x :int :y :text}
            (ta/json->type {"x" "int" "y" "text"})))
     (is (= 7 (ta/json->type 7)))
-    (is (nil? (ta/json->type nil)))))
+    (is (nil? (ta/json->type nil))))
+
+  (testing "refinement constraints keep string literal values intact"
+    ;; JSON can't tell a keyword from a string; a blind decode once
+    ;; keywordized constraint values — `[:not= ""]` → `[:not= :]`,
+    ;; silently making `:non-empty-text` accept `""`.
+    (is (= [:refine :text [:not= ""]]
+           (ta/json->type ["refine" "text" ["not=" ""]])))
+    (is (= [:refine :text [:= "x"]]
+           (ta/json->type ["refine" "text" ["=" "x"]])))
+    (is (= [:refine :text [:matches "^[a-z]+$"]]
+           (ta/json->type ["refine" "text" ["matches" "^[a-z]+$"]])))
+    (is (= [:refine :int [:and [:>= 1] [:<= 5]]]
+           (ta/json->type ["refine" "int" ["and" [">=" 1] ["<=" 5]]]))))
+
+  (testing "a :keyword-based refinement keeps keyword constraint values"
+    ;; The refinement base disambiguates: a `:keyword` base means the
+    ;; operands ARE keywords (`[:in [:get :post]]`, `[:= :ok]`), so a
+    ;; structural-only fix that never keywordized would be wrong too.
+    (is (= [:refine :keyword [:in [:get :post :delete]]]
+           (ta/json->type
+             ["refine" "keyword" ["in" ["get" "post" "delete"]]])))
+    (is (= [:refine :keyword [:= :ok]]
+           (ta/json->type ["refine" "keyword" ["=" "ok"]])))
+    ;; A refinement OF a keyword-refinement: the base resolves to
+    ;; `:keyword` only by recursing through the nested `[:refine …]`.
+    (is (= [:refine [:refine :keyword [:in [:get :post]]] [:not= :patch]]
+           (ta/json->type
+             ["refine" ["refine" "keyword" ["in" ["get" "post"]]]
+              ["not=" "patch"]]))))
+
+  (testing "a refinement nested inside a union still round-trips"
+    (is (= [:union :null [:refine :text [:not= ""]]]
+           (ta/json->type
+             ["union" "null" ["refine" "text" ["not=" ""]]]))))
+
+  (testing "an unrecognised constraint op still gets a keyword head"
+    ;; The decoder must not depend on an enumerated op set — a future
+    ;; op should keywordise its head, not silently decode to a string.
+    (is (= [:refine :text [:future-op "v"]]
+           (ta/json->type ["refine" "text" ["future-op" "v"]])))))
 
 
 ;; ============================================================================

@@ -301,3 +301,61 @@
           (is (some #(= (str (:id child)) (:originalFnId (:data %)))
                     (fn-nodes result))))
         (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; Provenance — inheritance-source fields + type-narrowing-chain attribution
+;; ============================================================================
+
+(deftest layout-inheritance-source-test
+  (testing "an inherited slot's value-arg node carries the ancestor chain"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base   (setup/create-base-fn! storage "lg-src-base")
+              slot   (setup/create-slot! storage "a" :int)
+              _      (setup/attach-slot! storage (:id base) (:id slot) 0)
+              child  (setup/create-composed-fn! storage "lg-src-child" (:id base))
+              _      (setup/bind-value! storage (:id child) (:id slot) 7)
+              result (layout storage (:id child))
+              arg-node (first (filter #(= "7" (str (:label (:data %))))
+                                      (:nodes result)))]
+          (is (some? arg-node) "the inherited value-arg renders")
+          (is (= [{:fnId (str (:id base)) :fnName "lg-src-base"}]
+                 (:sourceChain (:data arg-node)))
+              "sourceChain walks :source-id to the slot-owning ancestor"))
+        (finally (sp/close storage)))))
+  (testing "a two-level inheritance chain surfaces both ancestors"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base  (setup/create-base-fn! storage "lg-src2-base")
+              slot  (setup/create-slot! storage "a" :int)
+              _     (setup/attach-slot! storage (:id base) (:id slot) 0)
+              mid   (setup/create-composed-fn! storage "lg-src2-mid" (:id base))
+              child (setup/create-composed-fn! storage "lg-src2-child" (:id mid))
+              _     (setup/bind-value! storage (:id child) (:id slot) 9)
+              result (layout storage (:id child))
+              arg-node (first (filter #(= "9" (str (:label (:data %))))
+                                      (:nodes result)))]
+          (is (= [{:fnId (str (:id mid))  :fnName "lg-src2-mid"}
+                  {:fnId (str (:id base)) :fnName "lg-src2-base"}]
+                 (:sourceChain (:data arg-node)))
+              "chain is leaf→root: immediate parent first, owner last"))
+        (finally (sp/close storage))))))
+
+
+(deftest edge-type-chain-source-attribution-test
+  (testing "compute-edge-type-chain tags each group with its narrowing source"
+    ;; `:typeChain` is gated hard (no current package graph triggers it),
+    ;; so the private chain builder is exercised directly: a 2-fn chain
+    ;; where the leaf fn overrides the slot's type via a binding.
+    (let [f1 (random-uuid) f2 (random-uuid) s (random-uuid)
+          a1 (random-uuid) a2 (random-uuid) ov (random-uuid)
+          lookups {:fn-map  {f1 {:id f1 :name "f1"} f2 {:id f2 :name "f2"}}
+                   :arg-map {a1 {:id a1 :fn-id f1 :slot-id s :type :int :source-id a2}
+                             a2 {:id a2 :fn-id f2 :slot-id s :type :jsonb :source-id nil}}
+                   ;; f1 overrides the type via a binding; f2 does not.
+                   :binding-by-fn-slot {[f1 s] {:type-override-fn-id ov}
+                                        [f2 s] {}}}]
+      (is (= [{:type "int"   :fns ["f1"] :source "binding-override"}
+              {:type "jsonb" :fns ["f2"] :source "slot-declared"}]
+             (#'lg/compute-edge-type-chain lookups a1 #{f1 f2}))))))

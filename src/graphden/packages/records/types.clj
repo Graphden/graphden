@@ -179,6 +179,9 @@
                       type-vals
                       (when refine-base [refine-base])
                       [(:list fn-def)]
+                      (when-let [m (:map fn-def)]
+                        [(:key m) (:value m)])
+                      (:tuple fn-def)
                       (when-let [ft (:fn-type fn-def)]
                         ;; `:fn-type [args ret]` shape — wrap so the
                         ;; recursion sees the inner args / ret.

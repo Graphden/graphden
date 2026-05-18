@@ -47,6 +47,8 @@
      :concat    (rule c 'concat-return-rule)
      :list      (rule c 'list-return-rule)
      :conj      (rule c 'conj-return-rule)
+     :range     (rule c 'range-return-rule)
+     :repeat    (rule c 'repeat-return-rule)
      :into      (rule c 'into-return-rule)
      :assoc-in  (rule c 'assoc-in-return-rule)
      :get-in    (rule c 'get-in-return-rule)
@@ -594,3 +596,22 @@
            (compute-return-type :merge
                                 {}
                                 :jsonb)))))
+
+
+;; -----------------------------------------------------------------------------
+;; :range / :repeat
+
+(deftest range-always-builds-an-int-list
+  (is (= [:list :int]
+         (compute-return-type :range {} :jsonb))))
+
+
+(deftest repeat-builds-list-of-item-type
+  (testing "result is [:list <item-type>]"
+    (is (= [:list :int]
+           (compute-return-type :repeat {:item {:type :int}} :jsonb)))
+    (is (= [:list :text]
+           (compute-return-type :repeat {:item {:type :text}} :jsonb))))
+  (testing "untyped item → [:list :any]"
+    (is (= [:list :any]
+           (compute-return-type :repeat {} :jsonb)))))

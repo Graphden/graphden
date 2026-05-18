@@ -659,6 +659,32 @@
     (:type arg)       (assoc :argType   (-> arg :type name))))
 
 
+(defn- arg-source-fn-fields
+  "Provenance for an inherited slot. An arg row's `:source-id` jumps
+   straight to the slot's defining fn (the owner), so to surface the
+   FULL inheritance path this walks the fn's parent chain instead —
+   from the immediate parent down to (and including) the owner — and
+   emits `:sourceChain`: a vector of `{:fnId :fnName}` ordered
+   leaf→root. Returns `{}` for an own (non-inherited) slot, so callers
+   can `merge` unconditionally."
+  [lookups arg]
+  (let [{:keys [fn-map slot-owner]} lookups
+        owner (when (:source-id arg) (get slot-owner (:slot-id arg)))]
+    (if (and owner (not= owner (:fn-id arg)))
+      (let [ancestor-fns (loop [acc [], cs (rest (chain-of fn-map (:fn-id arg)))]
+                           (cond
+                             (empty? cs)          acc
+                             (= (first cs) owner) (conj acc owner)
+                             :else (recur (conj acc (first cs)) (rest cs))))]
+        (if (seq ancestor-fns)
+          {:sourceChain (mapv (fn [fid]
+                                {:fnId   (str fid)
+                                 :fnName (some-> fid fn-map :name name)})
+                              ancestor-fns)}
+          {}))
+      {})))
+
+
 (defn- edge-source-fields
   "Edge-data shape mirroring `arg-row->node-id-fields` for the SOURCE
    side of an inheritance/ref edge — same slot/binding/item/fn ids
@@ -703,7 +729,13 @@
                               :type "arg"
                               :argId (str arg-id)
                               :value wire-value}
-                             id-fields)}))
+                             id-fields
+                             ;; `arg` here is the display-projected row
+                             ;; (`:arg-id` / `:arg-name`), which carries
+                             ;; no `:source-id`; resolve the canonical
+                             ;; anchor row from `arg-map` for provenance.
+                             (arg-source-fn-fields
+                               lookups (get (:arg-map lookups) arg-id)))}))
       (swap! state update :edges conj
              {:data (merge {:id edge-id
                             :source source-node-id
@@ -1507,7 +1539,7 @@
    bogus '↑ sequence (router-ring-response)' row that says nothing
    about ancestors."
   [lookups arg-id expanded-fns]
-  (let [{:keys [fn-map arg-map]} lookups]
+  (let [{:keys [fn-map arg-map binding-by-fn-slot]} lookups]
     (when arg-id
       (let [source-chain (loop [acc [], cur (get arg-map arg-id)]
                            (if cur
@@ -1516,14 +1548,23 @@
                              acc))
             visible (filter #(contains? expanded-fns (:fn-id %)) source-chain)
             labeled (mapv (fn [arg]
-                            {:fn   (some-> (:fn-id arg) fn-map :name name)
-                             :type (some-> (:type arg) name)})
+                            (let [b (get binding-by-fn-slot
+                                         [(:fn-id arg) (:slot-id arg)])]
+                              {:fn   (some-> (:fn-id arg) fn-map :name name)
+                               :type (some-> (:type arg) name)
+                               ;; `build-anchor-row`'s `:type` is the slot's
+                               ;; declared type unless a binding overrides it
+                               ;; — so a narrowing visible in this chain is
+                               ;; attributable to one of those two sources.
+                               :source (if (:type-override-fn-id b)
+                                         "binding-override" "slot-declared")}))
                           visible)
             groups (->> labeled
                         (partition-by :type)
                         (mapv (fn [grp]
-                                {:type (:type (first grp))
-                                 :fns  (vec (keep :fn grp))})))
+                                {:type   (:type (first grp))
+                                 :fns    (vec (keep :fn grp))
+                                 :source (:source (first grp))})))
             distinct-fns (->> groups (mapcat :fns) distinct count)]
         (when (and (> (count groups) 1)
                    (> distinct-fns 1))

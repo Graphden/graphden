@@ -38,6 +38,68 @@ function clientNormalise(t) {
   return t;
 }
 
+// Mirror of backend `atom-implies?` (types/core.clj) — does leaf
+// constraint `a` imply `b`? Numeric comparison crosses plus
+// set-membership / equality reasoning. Returns true / false / null
+// (null = shapes outside the supported set → caller falls back).
+function clientAtomImplies(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return null;
+  const ak = a[0], av = a.length >= 2 ? a[1] : undefined;
+  const bk = b[0], bv = b.length >= 2 ? b[1] : undefined;
+  const numeric = typeof av === 'number' && typeof bv === 'number';
+  if (JSON.stringify(a) === JSON.stringify(b)) return true;
+  if (ak === '=' && numeric) {
+    switch (bk) {
+      case '=':    return av === bv;
+      case '>':    return av > bv;
+      case '>=':   return av >= bv;
+      case '<':    return av < bv;
+      case '<=':   return av <= bv;
+      case 'not=': return av !== bv;
+      default:     return null;
+    }
+  }
+  if (numeric && ak === bk) {
+    if (ak === '>' || ak === '>=') return av >= bv;
+    if (ak === '<' || ak === '<=') return av <= bv;
+    return null;
+  }
+  if (numeric && ak === '>'  && bk === '>=') return av >= bv;
+  if (numeric && ak === '>=' && bk === '>')  return av > bv;
+  if (numeric && ak === '<'  && bk === '<=') return av <= bv;
+  if (numeric && ak === '<=' && bk === '<')  return av < bv;
+  // Set-membership — `:in` operands arrive as JSON arrays.
+  const has = (coll, x) => Array.isArray(coll)
+    && coll.some(e => JSON.stringify(e) === JSON.stringify(x));
+  if (ak === '=' && bk === 'in')  return has(bv, av);
+  if (ak === 'in' && bk === 'in') return Array.isArray(av) && av.every(e => has(bv, e));
+  if (ak === 'in' && bk === '=')  return Array.isArray(av) && av.length === 1 && has(av, bv);
+  if (ak === '=' && bk === 'not=') return JSON.stringify(av) !== JSON.stringify(bv);
+  if (ak === 'in' && bk === 'not=') return Array.isArray(av) && !has(av, bv);
+  return null;
+}
+
+// Mirror of backend `constraint-implies?` — true iff every value
+// satisfying refinement constraint `a` also satisfies `b`. Recurses
+// through `[:and …]` / `[:or …]`; leaves go to `clientAtomImplies`.
+function clientConstraintImplies(a, b) {
+  if (JSON.stringify(a) === JSON.stringify(b)) return true;
+  if (a == null || b == null) return false;
+  if (Array.isArray(b) && b[0] === 'and') {
+    return b.slice(1).every(x => clientConstraintImplies(a, x));
+  }
+  if (Array.isArray(a) && a[0] === 'or') {
+    return a.slice(1).every(x => clientConstraintImplies(x, b));
+  }
+  if (Array.isArray(a) && a[0] === 'and') {
+    return a.slice(1).some(x => clientConstraintImplies(x, b));
+  }
+  if (Array.isArray(b) && b[0] === 'or') {
+    return b.slice(1).some(x => clientConstraintImplies(a, x));
+  }
+  return clientAtomImplies(a, b) === true;
+}
+
 function clientSubtype(sub, sup) {
   sub = clientNormalise(sub);
   sup = clientNormalise(sup);
@@ -61,7 +123,9 @@ function clientSubtype(sub, sup) {
   // Refinement: [:refine B c] ⊆ B; B ⊄ refinement.
   if (Array.isArray(sub) && sub[0] === 'refine') {
     if (Array.isArray(sup) && sup[0] === 'refine') {
-      return JSON.stringify(sub[2]) === JSON.stringify(sup[2])
+      // Constraint subtyping via implication (not just equality) so
+      // the picker hint matches the backend `subtype?` save-check.
+      return clientConstraintImplies(sub[2], sup[2])
           && clientSubtype(sub[1], sup[1]);
     }
     return clientSubtype(sub[1], sup);
@@ -70,6 +134,21 @@ function clientSubtype(sub, sup) {
   // List subtype: covariant elem.
   if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'list' && sup[0] === 'list') {
     return clientSubtype(sub[1], sup[1]);
+  }
+  // Map subtype: covariant key AND value.
+  if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'map' && sup[0] === 'map') {
+    return clientSubtype(sub[1], sup[1]) && clientSubtype(sub[2], sup[2]);
+  }
+  // A keyword-keyed record is a valid [:map :keyword V] value.
+  if (sub && typeof sub === 'object' && !Array.isArray(sub)
+      && Array.isArray(sup) && sup[0] === 'map') {
+    return clientSubtype('keyword', sup[1])
+        && Object.values(sub).every(vt => clientSubtype(vt, sup[2]));
+  }
+  // Tuple subtype: equal length, covariant per position.
+  if (Array.isArray(sub) && Array.isArray(sup) && sub[0] === 'tuple' && sup[0] === 'tuple') {
+    if (sub.length !== sup.length) return false;
+    return sub.slice(1).every((t, i) => clientSubtype(t, sup[i + 1]));
   }
   // Record subtype: open — sub has every field sup requires.
   if (sub && typeof sub === 'object' && !Array.isArray(sub)
@@ -88,7 +167,8 @@ function clientSubtype(sub, sup) {
   // for the wider side. Editors prefer false positives over rejecting
   // a valid pick.
   if (sup === 'jsonb' && Array.isArray(sub)
-      && (sub[0] === 'list' || sub[0] === 'refine')) return true;
+      && (sub[0] === 'list' || sub[0] === 'refine' || sub[0] === 'map'
+          || sub[0] === 'tuple')) return true;
   return false;
 }
 

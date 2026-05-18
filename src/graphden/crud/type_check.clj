@@ -84,7 +84,13 @@
     (some? (:base-fn-id tfn))
     (let [base (rich-type-from-row (get fns-by-id (:base-fn-id tfn)) fns-by-id)
           c (:constraint tfn)]
-      (when base [:refine base (when c (mapv #(if (string? %) (keyword %) %) c))]))
+      ;; `c` arrives already decoded by the storage codec, which
+      ;; round-trips keyword operators (`:=` / `:not=` / …) and leaves
+      ;; string VALUES (`[:= "x"]`, `[:not= ""]`, `[:matches "re"]`)
+      ;; intact — so pass it through verbatim. Keywordizing here would
+      ;; corrupt value-carrying constraints (e.g. `:non-empty-text`'s
+      ;; `[:not= ""]` → `[:not= :]`, which then accepts `""`).
+      (when base [:refine base c]))
     (some? (:element-fn-id tfn))
     (when-let [elem (rich-type-from-row (get fns-by-id (:element-fn-id tfn)) fns-by-id)]
       [:list elem])
@@ -95,7 +101,7 @@
          (= :variant (first (:constraint tfn))))
     (types/desugar-variant (:constraint tfn))
     (and (vector? (:constraint tfn))
-         (= :fn (first (:constraint tfn))))
+         (#{:fn :map :tuple} (first (:constraint tfn))))
     (:constraint tfn)
     (and (empty? (:parent-ids tfn))
          (nil? (:impl-hash tfn))

@@ -22,9 +22,14 @@
   ;; Compile routes into a reitit router. `routes` is the shape reitit
   ;; expects: `[[path {:method {:handler …}} …] …]` with keyword keys
   ;; at every level of the route-data map.
+  ;; `:routes` is `:jsonb`, not `:any` — it IS a JSON-shaped data
+  ;; structure (a vector of `[path method-data]` entries), not an
+  ;; opaque runtime object. `:jsonb` is the tightest verifiable type:
+  ;; the route list is built via `:list` (`:all`), whose return type
+  ;; is `:jsonb`, so a more precise `[:list …]` can't type-check.
   {:name :ring-router
    :description "Compile a vector of `[path method-data]` route entries into a reitit router. Wraps `reitit.ring/router`."
-   :args {:routes {:type :any :description "Vector of `[path {:method {:handler …}}]` entries — already keywordized."}}
+   :args {:routes {:type :jsonb :description "Vector of `[path {:method {:handler …}}]` entries — already keywordized."}}
    :return-type :any}
 
   ;; Build a Ring handler reitit falls back to when no route matches.

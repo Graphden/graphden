@@ -1235,6 +1235,13 @@ textarea.arg-value-edit-input {
   text-decoration-color: var(--muted-fg);
   text-underline-offset: 2px;
 }
+/* Expandable chips carry `role="button"` + `tabindex` — give keyboard
+   focus a visible ring (WCAG 2.4.7). */
+.type-chip-expandable:focus-visible,
+.type-inline-chip-expandable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 .type-inline-header {
   display: flex; align-items: center; justify-content: space-between;
   gap: 8px;
@@ -1298,6 +1305,40 @@ textarea.arg-value-edit-input {
 
 /* "Used by N" back-link footer in the type-expansion panel. Lists
    every fn that references this type-row — clickable to navigate. */
+/* "Resolved via" — the type-resolution priority chain in the
+ * inline-expand panel. Winning tier highlighted; the rest dimmed. */
+.type-inline-resolution {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--light-border);
+}
+.type-inline-resolution-head {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--light-fg);
+  margin-bottom: 2px;
+}
+.type-inline-resolution-row {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--muted-fg);
+}
+.type-inline-resolution-active {
+  color: var(--fg);
+  font-weight: 600;
+}
+.type-inline-resolution-mark {
+  flex: 0 0 auto;
+  width: 9px;
+  text-align: center;
+  color: var(--light-fg);
+}
+.type-inline-resolution-active .type-inline-resolution-mark { color: var(--accent); }
+.type-inline-resolution-label { flex: 1 1 auto; }
+.type-inline-resolution-active .type-inline-resolution-type { color: var(--accent); }
+
 .type-inline-usages {
   margin-top: 6px;
   padding-top: 4px;
@@ -1427,6 +1468,19 @@ textarea.arg-value-edit-input {
   color: var(--muted-fg);
   margin-left: 4px;
   line-height: 1.2;
+}
+/* Narrowing attribution — why a chain entry has its type
+ * (binding-override vs the slot's own declaration). */
+.edge-type-chain-kind {
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--light-fg);
+  margin-left: 4px;
+  padding: 0 3px;
+  border: 1px solid var(--light-border);
+  border-radius: 2px;
+  line-height: 1.4;
 }
 
 /* Free-arg binding chooser — two-button row inside the inline-edit
@@ -2070,6 +2124,21 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .arg-mismatch-badge:hover {
   background: color-mix(in srgb, var(--error-fg) 18%, transparent);
 }
+
+/* Inheritance-provenance affordance — a compact ↖ on an arg row whose
+ * slot was inherited from a parent fn. Hover reveals the ancestor name
+ * (native title); the link opens that fn in a new tab. */
+.arg-source-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 4px;
+  width: var(--icon-size); height: var(--icon-size);
+  color: var(--muted-fg);
+  font-size: var(--icon-font-size);
+  line-height: 1; cursor: pointer;
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+.arg-source-link:hover { color: var(--accent); }
 
 /* =========================================================================
  * TOUCH-DEVICE OVERRIDES — fires on iPad / phones / any pointer-coarse

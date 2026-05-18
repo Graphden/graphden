@@ -83,6 +83,51 @@ function expectedSlotType(arg) {
   return slotType;
 }
 
+// Companion to `expectedSlotType`: reports HOW a slot's effective type
+// resolved — the 4-tier priority chain (binding type-override →
+// backward-unified slot-type → bound-fn return-type → slot
+// declaration), the type each tier contributes (null when the tier
+// doesn't apply), and which tier won. Returns null for list-item rows
+// (their type comes from nav / element logic, not the slot chain) and
+// for args that don't resolve. The editor's inline-expand panel
+// renders this as a "Resolved via" section.
+function slotTypeProvenance(arg) {
+  if (!arg || !lookups || !lookups.slotMap || !lookups.fnMap) return null;
+  if (arg['item-id']) return null;
+  const slotId = arg['slot-id'];
+  if (!slotId) return null;
+  const slot = lookups.slotMap.get(slotId);
+  if (!slot || !slot['type-fn-id']) return null;
+  const binding = (arg['binding-id'] && lookups.bindingMap)
+                  ? lookups.bindingMap.get(arg['binding-id']) : null;
+  const typeOfFn = (fnId) => {
+    const tfn = fnId ? lookups.fnMap.get(fnId) : null;
+    return tfn ? computeSlotType(tfn) : null;
+  };
+  const overrideFnId = binding?.['type-override-fn-id'];
+  // Tier 2 is skipped under an explicit override — mirrors expectedSlotType.
+  let unifiedType = null;
+  if (overrideFnId == null) {
+    const ownFn = arg['fn-id'] ? lookups.fnMap.get(arg['fn-id']) : null;
+    unifiedType = (ownFn?.name && typeof richTypes === 'object' && richTypes)
+                  ? (richTypes[ownFn.name]?.['slot-types']?.[slot.name] ?? null)
+                  : null;
+  }
+  const refFn = binding?.['ref-fn-id'] ? lookups.fnMap.get(binding['ref-fn-id']) : null;
+  const tiers = [
+    { key: 'override', label: 'Binding type-override',
+      type: typeOfFn(overrideFnId) },
+    { key: 'unified', label: 'Backward-unified return type',
+      type: unifiedType },
+    { key: 'ref-return', label: 'Bound fn return type',
+      type: typeOfFn(refFn?.['return-type-fn-id']) },
+    { key: 'slot', label: 'Slot declaration',
+      type: typeOfFn(slot['type-fn-id']) },
+  ];
+  const winner = tiers.find((t) => t.type != null);
+  return { winner: winner ? winner.key : null, tiers };
+}
+
 
 // Resolve the structural type of a slot's type-fn row, preferring the
 // rich aliased form when one is registered. Pulled out of
@@ -90,13 +135,13 @@ function expectedSlotType(arg) {
 // for the slot AND for the unfolded element type.
 function computeSlotType(tfn) {
   if (!tfn) return null;
-  // Anonymous fn-type rows (inline `[:fn args ret]` slot
-  // declarations) have nil `:name` but their structural shape lives
-  // on `:constraint`. Recover it directly so the chip / explainer
-  // / mismatch logic see `[fn, {…}, ret]` rather than the flat
-  // fallback "fn" / "jsonb".
+  // Anonymous fn-type / map-type rows (inline `[:fn args ret]` /
+  // `[:map K V]` slot declarations) have nil `:name` but their
+  // structural shape lives on `:constraint`. Recover it directly so
+  // the chip / explainer / mismatch logic see the structural form
+  // rather than the flat fallback "fn" / "jsonb".
   const c = tfn.constraint;
-  if (Array.isArray(c) && c[0] === 'fn') return c;
+  if (Array.isArray(c) && (c[0] === 'fn' || c[0] === 'map' || c[0] === 'tuple')) return c;
   if (!tfn.name) return null;
   const rich = (typeof richTypes !== 'undefined' && richTypes) ? richTypes[tfn.name] : null;
   // For NAMED type-rows (record-shapes, list/union/variant aliases,
@@ -442,6 +487,13 @@ function formatTypeHumanReadable(t) {
     if (head === 'list') {
       return 'list of ' + pluralise(formatTypeHumanReadable(t[1]));
     }
+    if (head === 'map') {
+      return 'map of ' + formatTypeHumanReadable(t[1]) + ' to '
+           + formatTypeHumanReadable(t[2]);
+    }
+    if (head === 'tuple') {
+      return 'tuple of (' + t.slice(1).map(formatTypeHumanReadable).join(', ') + ')';
+    }
     if (head === 'union') {
       const parts = t.slice(1).map(formatTypeHumanReadable);
       if (parts.length === 2) return 'either ' + parts[0] + ' or ' + parts[1];
@@ -562,6 +614,9 @@ function formatTypeHint(t) {
       return ':' + t[1] + ' (' + c.join(' ') + ')';
     }
     if (head === 'list')     return '[' + formatTypeHint(t[1]) + ']';
+    if (head === 'map')      return '{' + formatTypeHint(t[1]) + ' → '
+                                    + formatTypeHint(t[2]) + '}';
+    if (head === 'tuple')    return '(' + t.slice(1).map(formatTypeHint).join(', ') + ')';
     if (head === 'union')    return t.slice(1).map(formatTypeHint).join('|');
     if (head === 'fn') {
       const args = Object.entries(t[1]).map(([k, v]) => k + ':' + formatTypeHint(v)).join(', ');
@@ -598,6 +653,16 @@ function compactTypeChipText(rich, flat) {
   if (Array.isArray(rich)) {
     const head = rich[0];
     if (head === 'list')   return '[' + compactTypeChipText(rich[1], 'any') + ']';
+    if (head === 'map') {
+      const joined = '{' + compactTypeChipText(rich[1], 'any') + '→'
+                   + compactTypeChipText(rich[2], 'any') + '}';
+      return joined.length > 14 ? flat : joined;
+    }
+    if (head === 'tuple') {
+      const joined = '(' + rich.slice(1)
+                       .map(t => compactTypeChipText(t, 'any')).join(',') + ')';
+      return joined.length > 16 ? flat : joined;
+    }
     if (head === 'refine') return compactTypeChipText(rich[1], flat);
     if (head === 'union') {
       const parts = rich.slice(1).map(t => compactTypeChipText(t, 'any'));

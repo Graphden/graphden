@@ -100,7 +100,8 @@ function isTypeExpandable(rich) {
   if (rich == null) return false;
   if (Array.isArray(rich)) {
     const head = rich[0];
-    return head === 'refine' || head === 'list' || head === 'union' || head === 'fn';
+    return head === 'refine' || head === 'list' || head === 'union'
+        || head === 'fn' || head === 'map' || head === 'tuple';
   }
   if (typeof rich === 'object') return Object.keys(rich).length > 0;
   if (typeof rich === 'string') {
@@ -123,6 +124,10 @@ function shortTypeLabel(rich) {
     if (head === 'list')   return '[' + shortTypeLabel(rich[1]) + ']';
     if (head === 'union')  return 'union';
     if (head === 'fn')     return 'fn';
+    if (head === 'map')    return '{' + shortTypeLabel(rich[1]) + '→'
+                                  + shortTypeLabel(rich[2]) + '}';
+    if (head === 'tuple')  return '(' + rich.slice(1).map(shortTypeLabel).join(',')
+                                  + ')';
     return 'type';
   }
   if (typeof rich === 'object') return 'record';
@@ -160,6 +165,7 @@ function buildInlineTypeRow(label, rich, path) {
   if (expandable) {
     chip.classList.add('type-inline-chip-expandable');
     chip.setAttribute('role', 'button');
+    chip.setAttribute('tabindex', '0');
     chip.setAttribute('aria-expanded', expandedTypePaths.has(path) ? 'true' : 'false');
     chip.style.cursor = 'pointer';
     // For a named child type (e.g. `ring-request-shape`), thread the
@@ -184,6 +190,13 @@ function buildInlineTypeRow(label, rich, path) {
       // Re-position any open ancestor hosts since the tree's height
       // changed.
       repositionAllInlineHosts();
+    });
+    // Keyboard activation for the button-role chip.
+    chip.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        chip.click();
+      }
     });
     if (expandedTypePaths.has(path)) {
       renderInlineExpansionInto(slot, rich, path, childCtx);
@@ -263,6 +276,13 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
   if (c.typeName && lookups?.fnMap) {
     appendTypeUsagesSection(host, c.typeName);
   }
+  // "Resolved via" — the 4-tier priority chain that produced this
+  // slot's effective type, winner highlighted. Top-level panel only:
+  // `ctx.arg` is unset on the recursive structural sub-panels.
+  if (c.arg && typeof slotTypeProvenance === 'function') {
+    const prov = slotTypeProvenance(c.arg);
+    if (prov?.winner) appendResolutionSection(host, prov);
+  }
   if (!isTypeExpandable(rich)) return;
   const effective = resolveOneHop(rich);
 
@@ -285,6 +305,17 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
     }
     if (head === 'list') {
       host.appendChild(buildInlineTypeRow('element', effective[1], path + '/element'));
+      return;
+    }
+    if (head === 'map') {
+      host.appendChild(buildInlineTypeRow('key', effective[1], path + '/key'));
+      host.appendChild(buildInlineTypeRow('value', effective[2], path + '/value'));
+      return;
+    }
+    if (head === 'tuple') {
+      effective.slice(1).forEach((el, idx) => {
+        host.appendChild(buildInlineTypeRow('#' + idx, el, path + '/t' + idx));
+      });
       return;
     }
     if (head === 'union') {
@@ -442,6 +473,41 @@ function appendPromoteAnonymousButton(host, fnId) {
   host.appendChild(wrap);
 }
 
+
+// ---------- "Resolved via" provenance section ----------------------
+
+// Render the 4-tier type-resolution chain from `slotTypeProvenance`.
+// Each tier shows the type it would contribute (`—` when it doesn't
+// apply); the winning tier is marked and highlighted. Mirrors the
+// priority logic in `expectedSlotType`.
+function appendResolutionSection(host, prov) {
+  const section = document.createElement('div');
+  section.className = 'type-inline-resolution';
+  const head = document.createElement('div');
+  head.className = 'type-inline-resolution-head';
+  head.textContent = 'Resolved via';
+  section.appendChild(head);
+  for (const tier of prov.tiers) {
+    const won = tier.key === prov.winner;
+    const row = document.createElement('div');
+    row.className = 'type-inline-resolution-row'
+                  + (won ? ' type-inline-resolution-active' : '');
+    const mark = document.createElement('span');
+    mark.className = 'type-inline-resolution-mark';
+    mark.textContent = won ? '✓' : '·';
+    row.appendChild(mark);
+    const lab = document.createElement('span');
+    lab.className = 'type-inline-resolution-label';
+    lab.textContent = tier.label;
+    row.appendChild(lab);
+    const val = document.createElement('span');
+    val.className = 'type-inline-resolution-type';
+    val.textContent = (tier.type != null) ? shortTypeLabel(tier.type) : '—';
+    row.appendChild(val);
+    section.appendChild(row);
+  }
+  host.appendChild(section);
+}
 
 // ---------- Used-by back-link (one fetch per named type per panel) ----
 
@@ -840,6 +906,12 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
   chipEl.dataset.inlineAnchor = path;
   chipEl.classList.add('type-chip-expandable');
   chipEl.style.cursor = 'pointer';
+  // The chip is a real expand/collapse control: `aria-expanded` is
+  // only valid on a widget role, and a `button` role must be
+  // keyboard-operable — so set the role, make it focusable, and
+  // mirror Enter / Space onto the click handler below.
+  chipEl.setAttribute('role', 'button');
+  chipEl.setAttribute('tabindex', '0');
   chipEl.setAttribute('aria-expanded', expandedTypePaths.has(path) ? 'true' : 'false');
 
   // If the path is already expanded (e.g. user toggled it on, then
@@ -863,6 +935,13 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
     } else {
       const host = inlineHostsByPath.get(path);
       if (host) host.style.display = 'none';
+    }
+  });
+  // Keyboard activation for the button-role chip.
+  chipEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      chipEl.click();
     }
   });
   return null;

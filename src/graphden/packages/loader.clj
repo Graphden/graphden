@@ -200,15 +200,16 @@
 
 (defn- type-row?
   "True iff `fn-def` is a type-row declaration (record / refinement /
-   list / union / variant / fn-type). Type-rows have no impl and live
-   in `:fn-defs` alongside composed defs — the records-parser routes
-   them by their role marker. `:fn-type` declarations don't actually
-   produce a fn-row (they're pure type-aliases) but they still flow
-   through this path so they get registered as aliases by
+   list / map / union / variant / fn-type). Type-rows have no impl and
+   live in `:fn-defs` alongside composed defs — the records-parser
+   routes them by their role marker. `:fn-type` declarations don't
+   actually produce a fn-row (they're pure type-aliases) but they
+   still flow through this path so they get registered as aliases by
    system/core's `register-type-aliases!`."
   [fn-def]
   (boolean (or (:type fn-def) (:refine fn-def) (:list fn-def)
-               (:union fn-def) (:variant fn-def) (:fn-type fn-def))))
+               (:map fn-def) (:tuple fn-def) (:union fn-def)
+               (:variant fn-def) (:fn-type fn-def))))
 
 
 (defn- base-fn?

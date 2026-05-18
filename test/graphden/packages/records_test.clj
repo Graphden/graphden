@@ -130,6 +130,35 @@
         (is (= "items" (:name s)))))))
 
 
+(deftest map-type-basic
+  (let [recs (r/parse-fn-def
+               {:name :kw-int-map
+                :namespace "test"
+                :map {:key :keyword :value :int}}
+               {})
+        fns (filter #(= :fn (:kind %)) recs)]
+    (testing "produces a single fn-row, no slots — pure type metadata"
+      (is (= 1 (count fns)))
+      (is (empty? (filter #(= :slot (:kind %)) recs))))
+    (let [fn-row (first fns)]
+      (is (= [:map :keyword :int] (:constraint fn-row)))
+      (is (nil? (:base-fn-id fn-row)))
+      (is (nil? (:element-fn-id fn-row))))))
+
+
+(deftest tuple-type-basic
+  (let [recs (r/parse-fn-def
+               {:name :text-int-pair
+                :namespace "test"
+                :tuple [:text :int]}
+               {})
+        fns (filter #(= :fn (:kind %)) recs)]
+    (testing "produces a single fn-row, no slots — pure type metadata"
+      (is (= 1 (count fns)))
+      (is (empty? (filter #(= :slot (:kind %)) recs))))
+    (is (= [:tuple :text :int] (:constraint (first fns))))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; Composed fn-def parsing
 

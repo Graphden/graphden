@@ -74,8 +74,10 @@ All three mechanisms use the same infrastructure — fn-defs, arg entities, `com
 ├── :text                      ← string
 ├── :bool                      ← boolean
 ├── :keyword                   ← keyword
-├── [:list :a]                 ← parameterized list
-├── {:name :text, :age :int}   ← structural record type
+├── [:list :a]                 ← parameterized list (homogeneous, any length)
+├── [:map :k :v]               ← homogeneous map (every key :k, every value :v)
+├── [:tuple :a :b]             ← fixed-length heterogeneous tuple
+├── {:name :text, :age :int}   ← structural record type (fixed named fields)
 └── {:fn [:a :b]}              ← function type (input → output)
 ```
 
@@ -83,8 +85,10 @@ Subtyping rules:
 
 - Every type is a subtype of `:any`
 - Primitive types (`:int`, `:text`, etc.) are subtypes of `:jsonb`
-- Record types are subtypes of `:jsonb`
+- Record, list, map and tuple types are subtypes of `:jsonb`
 - A record with MORE fields is a subtype of a record with FEWER fields (`{:a :int, :b :text}` ⊂ `{:a :int}`)
+- `[:map K V]` is covariant in both key and value; a keyword-keyed record is a valid `[:map :keyword V]` value
+- `[:tuple …]` is covariant per position and requires equal length
 - A refinement type is a subtype of its base type (`:positive-int` ⊂ `:int`)
 - `:jsonb` is NOT a subtype of any concrete type (requires explicit conversion)
 

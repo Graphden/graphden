@@ -230,7 +230,7 @@
 ;; variant tag that happens to share a name with an existing type)
 ;; only over-reject; under-rejection would let cycles slip through.
 (def constraint-op-keywords
-  #{:union :variant :fn :refine :and :or :not
+  #{:union :variant :fn :refine :map :tuple :and :or :not
     :> :>= :< :<= := :not= :matches :in :exists :every})
 
 

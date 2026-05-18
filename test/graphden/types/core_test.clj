@@ -131,11 +131,73 @@
     ;; :probability [:and [:>= 0] [:<= 1]] ⊆ :percent [:and [:>= 0] [:<= 100]]
     (is (t/subtype? [:refine :numeric [:and [:>= 0] [:<= 1]]]
                     [:refine :numeric [:and [:>= 0] [:<= 100]]])))
+  (testing "set-membership / equality reasoning (non-numeric domains)"
+    ;; [:in S1] ⊆ [:in S2]  iff  S1 ⊆ S2
+    (is (t/subtype? [:refine :keyword [:in #{:a}]]
+                    [:refine :keyword [:in #{:a :b}]]))
+    (is (not (t/subtype? [:refine :keyword [:in #{:a :b}]]
+                         [:refine :keyword [:in #{:a}]])))
+    ;; [:= x] ⊆ [:in S]  iff  x ∈ S
+    (is (t/subtype? [:refine :keyword [:= :a]]
+                    [:refine :keyword [:in #{:a :b}]]))
+    (is (not (t/subtype? [:refine :keyword [:= :z]]
+                         [:refine :keyword [:in #{:a :b}]])))
+    ;; [:in #{x}] ⊆ [:= x]  (singleton)
+    (is (t/subtype? [:refine :keyword [:in #{:a}]]
+                    [:refine :keyword [:= :a]]))
+    ;; [:= x] ⊆ [:not= y]  iff  x ≠ y
+    (is (t/subtype? [:refine :text [:= "a"]] [:refine :text [:not= "b"]]))
+    (is (not (t/subtype? [:refine :text [:= "a"]] [:refine :text [:not= "a"]])))
+    ;; `:in` operand may be authored as a vector, not a set
+    (is (t/subtype? [:refine :keyword [:in [:get]]]
+                    [:refine :keyword [:in [:get :post]]])))
   (testing "preserves equality fallback for unknown shapes"
     (is (t/subtype? [:refine :int [:custom-shape 42]]
                     [:refine :int [:custom-shape 42]]))
     (is (not (t/subtype? [:refine :int [:custom-shape 42]]
                          [:refine :int [:custom-shape 100]])))))
+
+
+(deftest map-type-test
+  (testing "map-type? recognises [:map K V] only"
+    (is (t/map-type? [:map :keyword :int]))
+    (is (not (t/map-type? [:list :int])))
+    (is (not (t/map-type? {:a :int})))
+    (is (not (t/map-type? [:map :int]))))
+  (testing "homogeneous-map subtyping — covariant in key AND value"
+    (is (t/subtype? [:map :keyword :int] [:map :keyword :int]))
+    (is (t/subtype? [:map :keyword :int] [:map :keyword :numeric]))
+    (is (not (t/subtype? [:map :keyword :numeric] [:map :keyword :int])))
+    (is (t/subtype? [:map :keyword :int] :jsonb))
+    (is (t/subtype? [:map :keyword :int] :any)))
+  (testing "a keyword-keyed record is a valid [:map :keyword V] value"
+    (is (t/subtype? {:a :int :b :int} [:map :keyword :int]))
+    (is (not (t/subtype? {:a :text} [:map :keyword :int])))
+    ;; a [:map …] is NOT a record — no guaranteed named fields
+    (is (not (t/subtype? [:map :keyword :int] {:a :int}))))
+  (testing "well-formed? + storage-kind"
+    (is (t/well-formed? [:map :keyword :int]))
+    (is (not (t/well-formed? [:map :int])))
+    (is (= :jsonb (t/type->storage-kind [:map :keyword :int])))))
+
+
+(deftest tuple-type-test
+  (testing "tuple-type? recognises [:tuple …]"
+    (is (t/tuple-type? [:tuple :text :int]))
+    (is (t/tuple-type? [:tuple :int]))
+    (is (not (t/tuple-type? [:list :int])))
+    (is (not (t/tuple-type? {:a :int}))))
+  (testing "tuple subtyping — equal length, covariant per position"
+    (is (t/subtype? [:tuple :int :int] [:tuple :int :int]))
+    (is (t/subtype? [:tuple :int :int] [:tuple :numeric :numeric]))
+    (is (not (t/subtype? [:tuple :numeric :int] [:tuple :int :int])))
+    (is (not (t/subtype? [:tuple :int] [:tuple :int :int]))
+        "length mismatch — not a subtype")
+    (is (t/subtype? [:tuple :text :int] :jsonb))
+    (is (t/subtype? [:tuple :text :int] :any)))
+  (testing "well-formed? + storage-kind"
+    (is (t/well-formed? [:tuple :text :int]))
+    (is (= :sequence (t/type->storage-kind [:tuple :text :int])))))
 
 
 (deftest subtype-resolves-aliases-test

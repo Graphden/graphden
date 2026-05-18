@@ -6,11 +6,108 @@
 {:namespace "web.crud"
  :description "Storage CRUD primitives for the web UI — query/render/dispatch entity create/update/delete via context-aware impls."
  :fns
- [;; Query functions (context-aware)
+ [;; ---------------------------------------------------------------------
+  ;; Parse-stage output shapes. Each `_*-parsed` base-fn returns a
+  ;; record of a known shape; naming it lets the matching validate /
+  ;; apply stages declare `:parsed` as that record instead of bare
+  ;; `:jsonb`. `_`-prefixed — internal to one handler triple each.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_types-compatible-parsed-shape
+   :description "Output of `:_types-compatible-parsed` — the two type expressions to subtype-check."
+   :type {:expected :jsonb :candidate :jsonb}}
+
+  {:name :_types-candidates-parsed-shape
+   :description "Output of `:_types-candidates-parsed` — the target type plus optional effect-set / name-prefix filters."
+   :type {:expected :jsonb :allowed-effects :jsonb :name-prefix :text}}
+
+  {:name :_types-usages-parsed-shape
+   :description "Output of `:_types-usages-parsed` — the type-row id to search references for."
+   :type {:target-id :uuid}}
+
+  {:name :_create-record-type-parsed-shape
+   :description "Output of `:_create-record-type-parsed` — a record type-row's name, owning namespace, description and field list."
+   :type {:name :text :ns-id :uuid :description :text :fields :jsonb}}
+
+  {:name :_create-list-type-parsed-shape
+   :description "Output of `:_create-list-type-parsed` — a list type-row's name, owning namespace, description and element-type reference."
+   :type {:name :text :ns-id :uuid :description :text :element-ref :text}}
+
+  {:name :_update-record-type-parsed-shape
+   :description "Output of `:_update-record-type-parsed` — the target fn-id plus the submitted name / description / field list. `:has-description?` distinguishes a submitted-nil description from an absent key."
+   :type {:fn-id :uuid :name :text :has-description? :bool :description :text :fields :jsonb}}
+
+  {:name :_create-parsed-shape
+   :description "Output of `:_create-parsed` — the URI entity-type, the form-decoded body, the per-type-parsed entity field map, and a `:parse-error` string set when the per-type parser threw."
+   :type {:entity-type :keyword :type-str :text :form-data :jsonb :entity-data :jsonb :parse-error :text}}
+
+  {:name :_update-parsed-shape
+   :description "Output of `:_update-parsed` — like `:_create-parsed-shape` plus the `:id` URI segment (`:id-str` / `:id-uuid`) and `:pre-existing`, the pre-read of the row being updated."
+   :type {:entity-type :keyword :type-str :text :id-str :text :id-uuid :uuid :form-data :jsonb :pre-existing :jsonb :entity-data :jsonb :parse-error :text}}
+
+  {:name :_tighten-parsed-shape
+   :description "Output of `:_tighten-parsed` — the target binding-id and the raw `effects` / `args` / `ret` body components plus the assembled `:delta` map."
+   :type {:binding-id :uuid :effects-val :jsonb :args-val :jsonb :ret-val :jsonb :delta :jsonb}}
+
+  ;; A write-time validation rejection. The `_*-validation` stages
+  ;; return this when a guard fails (or nil when the request passes);
+  ;; `_rejection-response` renders the `:reason` into a 400.
+  {:name :_rejection-shape
+   :description "A write-time validation rejection — `_rejection-response` renders `:reason` into a 400 partial response."
+   :type {:reason :text}}
+
+  ;; --- handler RESULT shapes — the JSON payloads the type-API /
+  ;; type-row stages return (distinct from `_rejection-shape`, the
+  ;; entity-CRUD `{:reason}` rejection). ---
+
+  {:name :_error-result-shape
+   :description "The `{:ok false :error}` rejection payload returned by every type-API / type-row / value-form validation stage."
+   :type {:ok :bool :error :text}}
+
+  {:name :_types-compatible-result-shape
+   :description "Output of `:_types-compatible-apply` — the subtype-check verdict. An extra `:reason` is present when not ok (open-record — extra fields are fine)."
+   :type {:ok :bool :expected :jsonb :candidate :jsonb}}
+
+  {:name :_types-candidates-result-shape
+   :description "Output of `:_types-candidates-apply` — the enumeration of fns whose return type is a subtype of `expected`."
+   :type {:ok :bool :expected :jsonb :count :int :candidates :jsonb}}
+
+  {:name :_types-usages-result-shape
+   :description "Output of `:_types-usages-apply` — every reference to the target type-row. `:type-fn-id` is the id stringified."
+   :type {:ok :bool :type-fn-id :text :type-name :text :count :int :usages :jsonb}}
+
+  {:name :_id-name-result-shape
+   :description "The success payload of a type-row create / update — the new row's id (stringified) and name."
+   :type {:ok :bool :id :text :name :text}}
+
+  {:name :_type-row-result-shape
+   :description "What a type-row create / update apply stage returns — the success payload, or an `{:ok false :error}` map when the transactional write failed."
+   :union [:_id-name-result-shape :_error-result-shape]}
+
+  {:name :_partial-response-shape
+   :description "A partial Ring response from a `process-*` / `_*-apply` stage — `:status` + `:body`, optionally `:headers` (open-record). `html-action-response` wraps it into a full response, defaulting any missing field."
+   :type {:status :int :body :text}}
+
+  ;; --- open-map shapes — `[:map K V]` typed maps, replacing bare
+  ;; `:jsonb` where the key / value domains ARE known. ---
+
+  {:name :_storage-where-map
+   :description "A storage query filter — `{column-keyword → match-value}`. Keys are entity column names; values arbitrary."
+   :map {:key :keyword :value :any}}
+
+  {:name :_form-field-map
+   :description "Parsed `application/x-www-form-urlencoded` fields — `{field-keyword → string-value}`."
+   :map {:key :keyword :value :text}}
+
+  {:name :_entity-field-map
+   :description "An entity's field map — `{column-keyword → value}`. The sparse shape a form parser extracts and `create` / `update-entity` writes."
+   :map {:key :keyword :value :any}}
+
+  ;; Query functions (context-aware)
   {:name :list-entities
    :description "Query a list of entities of a given type, optionally filtered by `:where`. Reads through the storage attached to the executor context."
    :args {:entity-type {:type :text :description "Entity-name keyword as string (e.g. \"fn\", \"arg\", \"ns\")."}
-          :where {:type :jsonb :required false :description "Storage filter map. Omit to fetch all of the type."}}
+          :where {:type :_storage-where-map :required false :description "Storage filter map. Omit to fetch all of the type."}}
    :return-type :jsonb
    :effects #{:db}}
 
@@ -24,7 +121,7 @@
   {:name :create-entity
    :description "Insert a new entity row from `:data`. The id is generated by storage if absent."
    :args {:entity-type {:type :text :description "Entity-name keyword as string."}
-          :data {:type :jsonb :description "Field map for the new row."}}
+          :data {:type :_entity-field-map :description "Field map for the new row."}}
    :return-type :jsonb
    :effects #{:db}}
 
@@ -32,7 +129,7 @@
    :description "Update an existing entity by id with `:data` (sparse — only fields present in `:data` change)."
    :args {:entity-type {:type :text :description "Entity-name keyword as string."}
           :id {:type :uuid :description "Entity UUID to update."}
-          :data {:type :jsonb :description "Sparse field map of changes."}}
+          :data {:type :_entity-field-map :description "Sparse field map of changes."}}
    :return-type :jsonb
    :effects #{:db}}
 
@@ -69,48 +166,48 @@
   {:name :_types-compatible-parsed
    :description "Stage 1 of types-compatible — JSON body → `{:expected :candidate}`, each decoded from the wire shape produced by `/api/types`."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_types-compatible-parsed-shape}
 
   {:name :_types-compatible-validation
    :description "Stage 2 of types-compatible — guards (both `expected` and `candidate` present). Returns the `{:ok false :error}` rejection response, or nil when well-formed."
-   :args {:parsed {:type :jsonb :description "Output of `:_types-compatible-parsed`."}}
-   :return-type :jsonb}
+   :args {:parsed {:type :_types-compatible-parsed-shape :description "Output of `:_types-compatible-parsed`."}}
+   :return-type :_error-result-shape}
 
   {:name :_types-compatible-apply
    :description "Stage 3 of types-compatible — the single-pair subtype check between an `expected` (slot-side) and `candidate` (binding-side) type. Returns `{:ok :expected :candidate :reason?}`. Reached only after validation passes."
-   :args {:parsed {:type :jsonb :description "Output of `:_types-compatible-parsed`."}}
-   :return-type :jsonb}
+   :args {:parsed {:type :_types-compatible-parsed-shape :description "Output of `:_types-compatible-parsed`."}}
+   :return-type :_types-compatible-result-shape}
 
   {:name :_types-candidates-parsed
    :description "Stage 1 of types-candidates — JSON body → `{:expected :allowed-effects :name-prefix}`."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_types-candidates-parsed-shape}
 
   {:name :_types-candidates-validation
    :description "Stage 2 of types-candidates — guards `expected` present. Returns the `{:ok false :error}` rejection response, or nil when well-formed."
-   :args {:parsed {:type :jsonb :description "Output of `:_types-candidates-parsed`."}}
-   :return-type :jsonb}
+   :args {:parsed {:type :_types-candidates-parsed-shape :description "Output of `:_types-candidates-parsed`."}}
+   :return-type :_error-result-shape}
 
   {:name :_types-candidates-apply
    :description "Stage 3 of types-candidates — enumerate every fn whose return type is a subtype of `expected`, narrowed by the optional allowed-effect set / name-prefix. Returns `{:ok :expected :count :candidates}` sorted alphabetically. Reached only after validation passes."
-   :args {:parsed {:type :jsonb :description "Output of `:_types-candidates-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_types-candidates-parsed-shape :description "Output of `:_types-candidates-parsed`."}}
+   :return-type :_types-candidates-result-shape
    :effects #{:db}}
 
   {:name :_types-usages-parsed
    :description "Stage 1 of types-usages — JSON body → `{:target-id}` (the `type-fn-id` coerced to a UUID, or nil when absent / malformed)."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_types-usages-parsed-shape}
 
   {:name :_types-usages-validation
    :description "Stage 2 of types-usages — guards a valid `type-fn-id`. Returns the `{:ok false :error}` rejection response, or nil when well-formed."
-   :args {:parsed {:type :jsonb :description "Output of `:_types-usages-parsed`."}}
-   :return-type :jsonb}
+   :args {:parsed {:type :_types-usages-parsed-shape :description "Output of `:_types-usages-parsed`."}}
+   :return-type :_error-result-shape}
 
   {:name :_types-usages-apply
    :description "Stage 3 of types-usages — walk the graph for every reference to the target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}` where each usage's `kind ∈ {:base-of :element-of :return-of :slot-of :binding-of :union-branch :variant-branch}`. Reached only after validation passes."
-   :args {:parsed {:type :jsonb :description "Output of `:_types-usages-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_types-usages-parsed-shape :description "Output of `:_types-usages-parsed`."}}
+   :return-type :_types-usages-result-shape
    :effects #{:db}}
 
   ;; --- type-row compound handler primitives. The handlers themselves
@@ -122,50 +219,50 @@
   {:name :_create-record-type-parsed
    :description "Stage 1 of create-record-type — JSON body → `{:name :ns-id :description :fields}`."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_create-record-type-parsed-shape}
 
   {:name :_create-record-type-validation
    :description "Stage 2 of create-record-type — guards (blank name, empty field list). Returns the `{:ok false :error}` rejection response, or nil when well-formed."
-   :args {:parsed {:type :jsonb :description "Output of `:_create-record-type-parsed`."}}
-   :return-type :jsonb}
+   :args {:parsed {:type :_create-record-type-parsed-shape :description "Output of `:_create-record-type-parsed`."}}
+   :return-type :_error-result-shape}
 
   {:name :_create-record-type-apply
    :description "Stage 3 of create-record-type — atomically create the record type-row (1 fn-row + N slot-rows + N fn-slot-junctions); rolls partial writes back on failure. Reached only after validation passes. Returns `{:ok true :id :name}`."
-   :args {:parsed {:type :jsonb :description "Output of `:_create-record-type-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_create-record-type-parsed-shape :description "Output of `:_create-record-type-parsed`."}}
+   :return-type :_type-row-result-shape
    :effects #{:db}}
 
   {:name :_create-list-type-parsed
    :description "Stage 1 of create-list-type — JSON body → `{:name :ns-id :description :element-ref}`."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_create-list-type-parsed-shape}
 
   {:name :_create-list-type-validation
    :description "Stage 2 of create-list-type — guards (blank name, missing element-type). Returns the `{:ok false :error}` rejection response, or nil when well-formed."
-   :args {:parsed {:type :jsonb :description "Output of `:_create-list-type-parsed`."}}
-   :return-type :jsonb}
+   :args {:parsed {:type :_create-list-type-parsed-shape :description "Output of `:_create-list-type-parsed`."}}
+   :return-type :_error-result-shape}
 
   {:name :_create-list-type-apply
    :description "Stage 3 of create-list-type — atomically create the list type-row (1 fn-row with `element-fn-id` + synthesised `items` slot); rolls partial writes back on failure. Reached only after validation passes. Returns `{:ok true :id :name}`."
-   :args {:parsed {:type :jsonb :description "Output of `:_create-list-type-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_create-list-type-parsed-shape :description "Output of `:_create-list-type-parsed`."}}
+   :return-type :_type-row-result-shape
    :effects #{:db}}
 
   {:name :_update-record-type-parsed
    :description "Stage 1 of update-record-type — JSON body → `{:fn-id :name :has-description? :description :fields}`."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_update-record-type-parsed-shape}
 
   {:name :_update-record-type-validation
    :description "Stage 2 of update-record-type — guards (missing id, empty field list, fn-row not found). The final guard reads storage. Returns the `{:ok false :error}` rejection response, or nil when well-formed."
-   :args {:parsed {:type :jsonb :description "Output of `:_update-record-type-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_update-record-type-parsed-shape :description "Output of `:_update-record-type-parsed`."}}
+   :return-type :_error-result-shape
    :effects #{:db}}
 
   {:name :_update-record-type-apply
    :description "Stage 3 of update-record-type — diff the submitted field list against the row's current fn-slots and atomically apply it (journalled rollback on failure). Reached only after validation passes. Returns `{:ok true :id :name}`. Caveat: orphaned slots are NOT garbage-collected (slot rows are shared)."
-   :args {:parsed {:type :jsonb :description "Output of `:_update-record-type-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_update-record-type-parsed-shape :description "Output of `:_update-record-type-parsed`."}}
+   :return-type :_type-row-result-shape
    :effects #{:db}}
 
   ;; --- entity create / update pipeline primitives. The handlers
@@ -175,36 +272,36 @@
   {:name :_create-parsed
    :description "Stage 1 of create — URI entity-type + form-decoded body routed through the per-type parser. `{:entity-type :type-str :form-data :entity-data :parse-error}`."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_create-parsed-shape}
 
   {:name :_create-validation
    :description "Stage 2 of create — every write-time guard; the first rejection `{:reason …}` or nil."
-   :args {:parsed {:type :jsonb :description "Output of `:_create-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_create-parsed-shape :description "Output of `:_create-parsed`."}}
+   :return-type :_rejection-shape
    :effects #{:db}}
 
   {:name :_create-apply
    :description "Stage 3 of create — create the entity, run the post-create whole-fn type-check (rollback on failure), return the partial Ring response. Reached only after validation passes."
-   :args {:parsed {:type :jsonb :description "Output of `:_create-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_create-parsed-shape :description "Output of `:_create-parsed`."}}
+   :return-type :_partial-response-shape
    :effects #{:db}}
 
   {:name :_update-parsed
    :description "Stage 1 of update — like `:_create-parsed` plus the `:id` segment and a pre-read of the existing row."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb
+   :return-type :_update-parsed-shape
    :effects #{:db}}
 
   {:name :_update-validation
    :description "Stage 2 of update — write-time guards against the merged post-write view; first rejection or nil."
-   :args {:parsed {:type :jsonb :description "Output of `:_update-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_update-parsed-shape :description "Output of `:_update-parsed`."}}
+   :return-type :_rejection-shape
    :effects #{:db}}
 
   {:name :_update-apply
    :description "Stage 3 of update — update the entity and return the partial Ring response. Reached only after validation passes."
-   :args {:parsed {:type :jsonb :description "Output of `:_update-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_update-parsed-shape :description "Output of `:_update-parsed`."}}
+   :return-type :_partial-response-shape
    :effects #{:db}}
 
   {:name :_rejected?
@@ -214,13 +311,13 @@
 
   {:name :_rejection-response
    :description "Render a `validate-*` rejection as a 400 partial Ring response."
-   :args {:validation {:type :jsonb :description "A `{:reason …}` rejection map."}}
-   :return-type :jsonb}
+   :args {:validation {:type :_rejection-shape :description "A `{:reason …}` rejection map."}}
+   :return-type :_partial-response-shape}
 
   {:name :process-delete-entity
    :description "Parse a Ring request, delete the entity it identifies, return a partial Ring response."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb
+   :return-type :_partial-response-shape
    :effects #{:db}}
 
   ;; Sequence operations: append/remove items of a sequence arg on any fn
@@ -228,19 +325,19 @@
   {:name :process-sequence-append
    :description "Append an item to a `:sequence`-typed arg on the fn identified by the request. Returns a partial Ring response."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb
+   :return-type :_partial-response-shape
    :effects #{:db}}
 
   {:name :process-sequence-remove
    :description "Remove an item from a `:sequence`-typed arg by item id. Returns a partial Ring response."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb
+   :return-type :_partial-response-shape
    :effects #{:db}}
 
   {:name :process-sequence-update
    :description "Update an existing `:sequence`-arg item by item id (PUT /api/sequence/item/:item-id) — replaces its `:value` or `:ref-fn-id`. Returns a partial Ring response."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb
+   :return-type :_partial-response-shape
    :effects #{:db}}
 
   ;; --- tighten-fn-effects primitives. The handler itself is a
@@ -249,38 +346,38 @@
   {:name :_tighten-parsed
    :description "Parse a tighten-fn-effects request into `{:binding-id :effects-val :args-val :ret-val :delta}` — no validation."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :jsonb}
+   :return-type :_tighten-parsed-shape}
 
   {:name :_tighten-binding-id-invalid?
    :description "Guard predicate — true when the request carries no valid binding-id."
-   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
+   :args {:parsed {:type :_tighten-parsed-shape :description "Output of `:_tighten-parsed`."}}
    :return-type :bool}
 
   {:name :_tighten-effects-invalid?
    :description "Guard predicate — true when `effects` is present but not a JSON array."
-   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
+   :args {:parsed {:type :_tighten-parsed-shape :description "Output of `:_tighten-parsed`."}}
    :return-type :bool}
 
   {:name :_tighten-args-invalid?
    :description "Guard predicate — true when `args` is present but not a JSON object."
-   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
+   :args {:parsed {:type :_tighten-parsed-shape :description "Output of `:_tighten-parsed`."}}
    :return-type :bool}
 
   {:name :_tighten-delta-empty?
    :description "Guard predicate — true when the body carried none of args / ret / effects."
-   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
+   :args {:parsed {:type :_tighten-parsed-shape :description "Output of `:_tighten-parsed`."}}
    :return-type :bool}
 
   {:name :_tighten-apply
    :description "Success branch — narrow the fn-typed binding's effective type to a 4-arity `[:fn args ret #{eff-set}]`, dedupe the anonymous constraint fn-row, write the binding's `:type-override-fn-id`, and return the partial Ring response. Reached only after every `:cond` guard passes."
-   :args {:parsed {:type :jsonb :description "Output of `:_tighten-parsed`."}}
-   :return-type :jsonb
+   :args {:parsed {:type :_tighten-parsed-shape :description "Output of `:_tighten-parsed`."}}
+   :return-type :_partial-response-shape
    :effects #{:db}}
 
   {:name :parse-form-body
    :description "Parse an `application/x-www-form-urlencoded` request body into a `{key value}` map."
    :args {:request {:type :ring-request-shape :description "Internal Ring request map (uses its `:body`)."}}
-   :return-type :jsonb}
+   :return-type :_form-field-map}
 
   {:name :parse-json-body
    :description "Parse a JSON request body into a Clojure value (keywordizing string keys)."
@@ -295,33 +392,33 @@
   ;; Form data parsing helpers
   {:name :parse-fn-from-form
    :description "Extract a fn entity's field map from a parsed form-data map."
-   :args {:form-data {:type :jsonb :description "`{key value}` map from `parse-form-body`."}}
-   :return-type :jsonb}
+   :args {:form-data {:type :_form-field-map :description "`{key value}` map from `parse-form-body`."}}
+   :return-type :_entity-field-map}
 
   {:name :parse-ns-from-form
    :description "Extract a namespace entity's field map from a parsed form-data map. `:name` (string) is required; `:parent-id` and `:description` are optional. The form is the body of `POST /api/entities/ns` from the editor's `+` menu."
-   :args {:form-data {:type :jsonb :description "`{key value}` map from `parse-form-body`."}}
-   :return-type :jsonb}
+   :args {:form-data {:type :_form-field-map :description "`{key value}` map from `parse-form-body`."}}
+   :return-type :_entity-field-map}
 
   {:name :parse-slot-from-form
    :description "Extract a slot entity's field map from a parsed form-data map. `:name` (string) is required on create; `:type-fn-id` (UUID), `:description`, `:required` are optional."
-   :args {:form-data {:type :jsonb :description "`{key value}` map from `parse-form-body`."}}
-   :return-type :jsonb}
+   :args {:form-data {:type :_form-field-map :description "`{key value}` map from `parse-form-body`."}}
+   :return-type :_entity-field-map}
 
   {:name :parse-fn-slot-from-form
    :description "Extract a fn-slot junction's field map. `:fn-id` and `:slot-id` (UUIDs) are required; `:position` (int) is optional and defaults to 0."
-   :args {:form-data {:type :jsonb :description "`{key value}` map from `parse-form-body`."}}
-   :return-type :jsonb}
+   :args {:form-data {:type :_form-field-map :description "`{key value}` map from `parse-form-body`."}}
+   :return-type :_entity-field-map}
 
   {:name :parse-binding-from-form
    :description "Extract a binding entity's field map. `:fn-id` and `:slot-id` (UUIDs) identify the slot being bound. Optional fields: `:value` (JSON literal), `:ref-fn-id` (UUID), `:rename-to` (string), `:type-override-fn-id` (UUID), `:description`, `:terminal`/`:list-append`/`:list-closed` (bool), `:override-kind` (`:fixed` / `:default`). Empty form values clear the corresponding column."
-   :args {:form-data {:type :jsonb :description "`{key value}` map from `parse-form-body`."}}
-   :return-type :jsonb}
+   :args {:form-data {:type :_form-field-map :description "`{key value}` map from `parse-form-body`."}}
+   :return-type :_entity-field-map}
 
   {:name :parse-binding-list-item-from-form
    :description "Extract a binding-list-item field map. `:binding-id` (UUID) and `:position` (int) are required for create. The item carries either a `:value` (JSON literal) or a `:ref-fn-id` (UUID), plus an optional `:literal` boolean (true marks a keyword literal)."
-   :args {:form-data {:type :jsonb :description "`{key value}` map from `parse-form-body`."}}
-   :return-type :jsonb}
+   :args {:form-data {:type :_form-field-map :description "`{key value}` map from `parse-form-body`."}}
+   :return-type :_entity-field-map}
 
   ;; =============================================================================
   ;; FN-DEFS: Response handlers composed from base functions
@@ -552,22 +649,22 @@
 
   {:name :_tighten-err-binding-id
    :parent :const
-   :return-type :jsonb
+   :return-type :_partial-response-shape
    :args {:value {:status 400 :body "<p class=\"error\">Invalid binding-id</p>"}}}
 
   {:name :_tighten-err-effects
    :parent :const
-   :return-type :jsonb
+   :return-type :_partial-response-shape
    :args {:value {:status 400 :body "<p class=\"error\">'effects' must be a JSON array</p>"}}}
 
   {:name :_tighten-err-args
    :parent :const
-   :return-type :jsonb
+   :return-type :_partial-response-shape
    :args {:value {:status 400 :body "<p class=\"error\">'args' must be a JSON object</p>"}}}
 
   {:name :_tighten-err-delta
    :parent :const
-   :return-type :jsonb
+   :return-type :_partial-response-shape
    :args {:value {:status 400 :body "<p class=\"error\">Body must include at least one of args / ret / effects</p>"}}}
 
   ;; `:cond` clauses — `[test result]` pairs built via `:list` so the

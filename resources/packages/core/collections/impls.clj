@@ -556,6 +556,20 @@
       d)))
 
 
+;; --- :range / :repeat -------------------------------------------------------
+;; `:range` always builds an integer vector. `:repeat` builds a vector
+;; of copies of its `:item`, so the result is `[:list <item-type>]`.
+
+(defn range-return-rule
+  [_b _d]
+  [:list :int])
+
+
+(defn repeat-return-rule
+  [b _d]
+  [:list (or (get-in b [:item :type]) :any)])
+
+
 ;; --- :conj ------------------------------------------------------------------
 ;; `(:conj :coll C :item X)` adds X to C. When C is a known `[:list T]`
 ;; and X's type ⊆ T, the result is the same `[:list T]`; when X widens
@@ -677,8 +691,8 @@
    :merge {:impl merge-fn :return-type-rule merge-return-rule}
    :into {:impl into-fn :return-type-rule into-return-rule}
    :assoc-in {:impl assoc-in-fn :return-type-rule assoc-in-return-rule}
-   :range range-fn
-   :repeat repeat-fn
+   :range {:impl range-fn :return-type-rule range-return-rule}
+   :repeat {:impl repeat-fn :return-type-rule repeat-return-rule}
    :take {:impl take-fn :return-type-rule take-return-rule}
    :drop {:impl drop-fn :return-type-rule drop-return-rule}
    :reverse {:impl reverse-fn :return-type-rule reverse-return-rule}

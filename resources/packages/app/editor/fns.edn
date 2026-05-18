@@ -114,8 +114,13 @@
               [:button {:id "search-clear" :onclick "clearSearch()" :aria-label "Clear filter"} "\u00D7"]]
              [:nav {:id "entity-list" :aria-label "Namespace tree"}]]
             ;; Graph container \u2014 <main> landmark
+            ;; `#cy` is a `group`, not an `img`: it hosts the cytoscape
+            ;; canvas AND the interactive HTML overlays (fn cards, arg
+            ;; rows, action buttons). `role="img"` would make a screen
+            ;; reader treat it as one atomic graphic and skip every
+            ;; overlay control inside (axe `nested-interactive`).
             [:main {:id "graph-container" :aria-label "Function graph"}
-             [:div {:id "cy" :role "img" :aria-label "Composition graph"}]
+             [:div {:id "cy" :role "group" :aria-label "Composition graph"}]
              ;; Navigation controls \u2014 group with role="toolbar" so
              ;; screen readers announce the buttons as a related set.
              [:div {:id "nav-controls" :role "toolbar" :aria-label "Graph navigation"}

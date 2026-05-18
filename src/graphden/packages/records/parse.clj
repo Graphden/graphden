@@ -219,6 +219,48 @@
       :description description}]))
 
 
+(defn parse-map
+  "`{:name :foo :map {:key K :value V}}` — homogeneous-map type. Like
+   `:union`, stored as a fn-row whose `:constraint` carries `[:map K V]`
+   for the type-checker; no slots — the row is pure type metadata."
+  [{:keys [description]
+    fn-name :name ns-id :namespace map-spec :map} _name->id]
+  (let [own-id (ids/fn-id ns-id fn-name)]
+    [{:kind :fn
+      :id own-id
+      :name (clojure.core/name fn-name)
+      :namespace-id ns-id
+      :parent-ids []
+      :impl-hash nil
+      :base-fn-id nil
+      :element-fn-id nil
+      :return-type-fn-id nil
+      :anonymous-hash nil
+      :constraint [:map (:key map-spec) (:value map-spec)]
+      :description description}]))
+
+
+(defn parse-tuple
+  "`{:name :foo :tuple [T1 T2 …]}` — fixed-length heterogeneous tuple.
+   Like `:union`, stored as a fn-row whose `:constraint` carries
+   `[:tuple T1 T2 …]`; no slots — pure type metadata."
+  [{:keys [tuple description]
+    fn-name :name ns-id :namespace} _name->id]
+  (let [own-id (ids/fn-id ns-id fn-name)]
+    [{:kind :fn
+      :id own-id
+      :name (clojure.core/name fn-name)
+      :namespace-id ns-id
+      :parent-ids []
+      :impl-hash nil
+      :base-fn-id nil
+      :element-fn-id nil
+      :return-type-fn-id nil
+      :anonymous-hash nil
+      :constraint (into [:tuple] tuple)
+      :description description}]))
+
+
 (defn parse-variant
   "`{:name :foo :variant [:tag1 T1 :tag2 T2 …]}` — discriminated union.
    Like union, stored as a fn-row whose `:constraint` carries the
@@ -519,6 +561,8 @@
          (:refine fn-def)  (parse-refinement fn-def name->id)
          (:list fn-def)    (parse-list-type fn-def name->id)
          (:union fn-def)   (parse-union fn-def name->id)
+         (:map fn-def)     (parse-map fn-def name->id)
+         (:tuple fn-def)   (parse-tuple fn-def name->id)
          (:variant fn-def) (parse-variant fn-def name->id)
          ;; `:fn-type` declarations now produce a fn-row with the
          ;; structural `[:fn args ret]` shape stashed in `:constraint`

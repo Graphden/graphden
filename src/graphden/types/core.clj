@@ -184,6 +184,39 @@
   (when (list-type? t) (nth t 1)))
 
 
+(defn map-type?
+  "`[:map key-type val-type]` — a homogeneous map: every key is of
+   `key-type`, every value of `val-type`. Distinct from a record
+   (`{:field T …}`), which has a FIXED set of named fields. Subtyping
+   is covariant in both key and value."
+  [t]
+  (and (vector? t) (= :map (first t)) (= 3 (count t))))
+
+
+(defn map-key
+  [t]
+  (when (map-type? t) (nth t 1)))
+
+
+(defn map-val
+  [t]
+  (when (map-type? t) (nth t 2)))
+
+
+(defn tuple-type?
+  "`[:tuple T1 T2 …]` — a fixed-length heterogeneous sequence: position
+   i holds a value of type Tᵢ. Distinct from `[:list T]` (homogeneous,
+   any length). Subtyping requires equal length and is covariant
+   per-position."
+  [t]
+  (and (vector? t) (= :tuple (first t)) (>= (count t) 1)))
+
+
+(defn tuple-elems
+  [t]
+  (when (tuple-type? t) (vec (rest t))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; Validity check — anything else is malformed
 
@@ -223,6 +256,8 @@
                                 (and (set? eff)
                                      (every? keyword? eff)))))
     (list-type? t)   (well-formed? (list-elem t))
+    (map-type? t)    (and (well-formed? (map-key t)) (well-formed? (map-val t)))
+    (tuple-type? t)  (every? well-formed? (tuple-elems t))
     (refine-type? t) (well-formed? (refine-base t))
     (union-type? t)  (every? well-formed? (union-members t))
     :else            false))
@@ -355,6 +390,11 @@
                         ;; that need resolution.
                         (if eff (conj base eff) base))
      (list-type? t)   [:list (resolve-alias (list-elem t) seen)]
+     (map-type? t)    [:map (resolve-alias (map-key t) seen)
+                       (resolve-alias (map-val t) seen)]
+     (tuple-type? t)  (into [:tuple]
+                            (map #(resolve-alias % seen))
+                            (tuple-elems t))
      (record-type? t) (into {} (map (fn [[k v]] [k (resolve-alias v seen)])) t)
      (refine-type? t) [:refine (resolve-alias (refine-base t) seen) (refine-constraint t)]
      (union-type? t)  (make-union (mapv #(resolve-alias % seen) (union-members t)))
@@ -433,8 +473,8 @@
       (primitive? t')   t'
       (type-var? t')    :any
       (fn-type? t')     :fn
-      (list-type? t')   :sequence
-      (record-type? t') :jsonb
+      (or (list-type? t') (tuple-type? t')) :sequence
+      (or (map-type? t') (record-type? t')) :jsonb
       (refine-type? t') (recur (refine-base t'))
       (union-type? t')  :any
       :else             nil)))
@@ -472,6 +512,8 @@
                    ;; of the declared set.
                    (if eff (conj base eff) base))
     (list-type? t)   [:list (resolve subst (list-elem t))]
+    (map-type? t)    [:map (resolve subst (map-key t)) (resolve subst (map-val t))]
+    (tuple-type? t)  (into [:tuple] (map #(resolve subst %)) (tuple-elems t))
     (record-type? t) (into {} (map (fn [[k v]] [k (resolve subst v)])) t)
     (union-type? t)  (make-union (mapv #(resolve subst %) (union-members t)))
     :else t))
@@ -489,6 +531,9 @@
       (fn-type? t')    (or (some #(occurs? v % subst) (vals (fn-args t')))
                            (occurs? v (fn-ret t') subst))
       (list-type? t')  (occurs? v (list-elem t') subst)
+      (map-type? t')   (or (occurs? v (map-key t') subst)
+                           (occurs? v (map-val t') subst))
+      (tuple-type? t') (some #(occurs? v % subst) (tuple-elems t'))
       (record-type? t') (some #(occurs? v % subst) (vals t'))
       (union-type? t') (some #(occurs? v % subst) (union-members t'))
       :else            false)))
@@ -514,6 +559,21 @@
 (defn- list-subtype?
   [sub sup]
   (subtype? (list-elem sub) (list-elem sup)))
+
+
+(defn- map-subtype?
+  "Homogeneous-map subtyping — covariant in both key and value type."
+  [sub sup]
+  (and (subtype? (map-key sub) (map-key sup))
+       (subtype? (map-val sub) (map-val sup))))
+
+
+(defn- tuple-subtype?
+  "Fixed-length-tuple subtyping — equal length, covariant per position."
+  [sub sup]
+  (let [a (tuple-elems sub) b (tuple-elems sup)]
+    (and (= (count a) (count b))
+         (every? true? (map subtype? a b)))))
 
 
 (defn- effects-compatible?
@@ -707,6 +767,26 @@
         (and numeric? (= ak :<) (= bk :<=))   (<= av bv)
         (and numeric? (= ak :<=) (= bk :<))   (< av bv)
 
+        ;; Set-membership / equality reasoning — value-domain agnostic
+        ;; (keywords, strings, …), not just numerics. `:in` operands
+        ;; arrive as a set or a vector depending on the EDN author, so
+        ;; normalise to a set before reasoning.
+        ;; [:= x]  ⊆ [:in S]    iff  x ∈ S
+        (and (= ak :=) (= bk :in) (coll? bv))
+        (contains? (set bv) av)
+        ;; [:in S1] ⊆ [:in S2]  iff  S1 ⊆ S2
+        (and (= ak :in) (= bk :in) (coll? av) (coll? bv))
+        (let [bs (set bv)] (every? #(contains? bs %) av))
+        ;; [:in S]  ⊆ [:= x]    iff  S = #{x}  (singleton)
+        (and (= ak :in) (= bk :=) (coll? av))
+        (= (set av) #{bv})
+        ;; [:= x]  ⊆ [:not= y]  iff  x ≠ y
+        (and (= ak :=) (= bk :not=))
+        (not= av bv)
+        ;; [:in S]  ⊆ [:not= y]  iff  y ∉ S
+        (and (= ak :in) (= bk :not=) (coll? av))
+        (not (contains? (set av) bv))
+
         :else nil))))
 
 
@@ -788,6 +868,8 @@
                (or (primitive? sub)
                    (record-type? sub)
                    (list-type? sub)
+                   (map-type? sub)
+                   (tuple-type? sub)
                    (refine-type? sub)))) true
       (= sub :jsonb)                           false
 
@@ -817,6 +899,15 @@
       (and (record-type? sub) (record-type? sup))
       (record-subtype? sub sup)
       (and (list-type? sub) (list-type? sup))  (list-subtype? sub sup)
+      (and (map-type? sub) (map-type? sup))    (map-subtype? sub sup)
+      (and (tuple-type? sub) (tuple-type? sup)) (tuple-subtype? sub sup)
+      ;; A concrete keyword-keyed record IS a valid homogeneous-map
+      ;; value when the map's key type admits keywords and every field
+      ;; value fits the map's value type — lets a literal map (which
+      ;; classifies as a record) bind into a `[:map …]`-typed slot.
+      (and (record-type? sub) (map-type? sup))
+      (and (subtype? :keyword (map-key sup))
+           (every? #(subtype? % (map-val sup)) (vals sub)))
       (and (fn-type? sub) (fn-type? sup))      (fn-subtype? sub sup)
       :else                                    false)))
 
@@ -945,12 +1036,24 @@
        (or (and (primitive? a) (primitive? b)
                 (or (primitive-subtype? a b) (primitive-subtype? b a)))
            (and (= a :jsonb)
-                (or (record-type? b) (list-type? b) (refine-type? b)))
+                (or (record-type? b) (list-type? b) (map-type? b)
+                    (tuple-type? b) (refine-type? b)))
            (and (= b :jsonb)
-                (or (record-type? a) (list-type? a) (refine-type? a))))
+                (or (record-type? a) (list-type? a) (map-type? a)
+                    (tuple-type? a) (refine-type? a))))
        subst
        (and (fn-type? a) (fn-type? b))         (unify-fn a b subst)
        (and (list-type? a) (list-type? b))     (unify (list-elem a) (list-elem b) subst)
+       (and (map-type? a) (map-type? b))
+       (let [s (unify (map-key a) (map-key b) subst)]
+         (if (= s ::fail) ::fail (unify (map-val a) (map-val b) s)))
+       (and (tuple-type? a) (tuple-type? b))
+       (let [ea (tuple-elems a) eb (tuple-elems b)]
+         (if (= (count ea) (count eb))
+           (reduce (fn [s [x y]]
+                     (if (= s ::fail) ::fail (unify x y s)))
+                   subst (map vector ea eb))
+           ::fail))
        (and (record-type? a) (record-type? b)) (unify-record a b subst)
        :else                ::fail))))
 
@@ -1008,6 +1111,8 @@
                       (into {} (map (fn [[k v]] [k (freshen* v subst)])) (fn-args t))
                       (freshen* (fn-ret t) subst)]
     (list-type? t)   [:list (freshen* (list-elem t) subst)]
+    (map-type? t)    [:map (freshen* (map-key t) subst) (freshen* (map-val t) subst)]
+    (tuple-type? t)  (into [:tuple] (map #(freshen* % subst)) (tuple-elems t))
     (record-type? t) (into {} (map (fn [[k v]] [k (freshen* v subst)])) t)
     (refine-type? t) [:refine (freshen* (refine-base t) subst)
                       (refine-constraint t)]

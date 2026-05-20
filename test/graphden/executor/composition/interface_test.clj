@@ -64,6 +64,29 @@
           (sp/close storage))))))
 
 
+(deftest sync-fns-to-storage-4-arity-accepts-extra-name-id-map
+  (testing "4-arity threads `extra-name->id` (pre-resolved refs from a sibling package)"
+    (let [storage (create-test-storage)]
+      (try
+        (exec/register-base-fn! :_outer-const (fn [_ _] 1))
+        (registry/sync-defs-to-storage! storage {:_outer-const {:args {}
+                                                                :return-type :int
+                                                                :impl (fn [_ _] 1)}})
+        ;; Pre-resolve the parent ref into extra-name->id (as packages-loader
+        ;; does for cross-package references). Empty `ns-id-map` + non-empty
+        ;; extra-name->id is the wrapper variant exclusive to this arity.
+        (let [outer-id (registry/fn-uuid :_outer-const)
+              result (fn-composition/sync-fns-to-storage!
+                       storage
+                       [{:name :_uses-outer :parent :_outer-const}]
+                       {}
+                       {:_outer-const outer-id})]
+          (is (map? result))
+          (is (contains? result :_uses-outer)))
+        (finally
+          (sp/close storage))))))
+
+
 (deftest sync-fns-to-storage!-test
   (testing "syncs fn definitions to storage"
     (let [storage (create-test-storage)

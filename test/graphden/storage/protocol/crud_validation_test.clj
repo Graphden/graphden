@@ -149,6 +149,18 @@
         (is (= :nonexistent (:field (ex-data e))))))))
 
 
+;; Exercises the cond where :id is conj'd onto the known-fields set
+;; alongside the user-declared fields — :id passes silently while the
+;; other key in the same map trips the unknown-field guard.
+(deftest validate-where-clause-fields-id-coexists-with-error-test
+  (testing ":id valid + unknown field in the SAME where-clause throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown field"
+          (storage/validate-where-clause-fields!
+            :user
+            {:name {:type :text}}
+            {:id (random-uuid) :nonexistent "value"})))))
+
+
 ;; === validate-where-clause-types! tests ===
 
 (deftest validate-where-clause-types!-test
@@ -270,7 +282,66 @@
     (is (nil? (storage/validate-where-clause-types!
                 :user
                 {:name {:type :text}}
-                {:unknown-field 123})))))
+                {:unknown-field 123}))))
+
+  ;; ─── IN-clause queries ──────────────────────────────────────────────
+  (testing "IN-clause: vector of UUIDs for :uuid field passes"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:fn-id {:type :uuid}}
+                {:fn-id [(random-uuid) (random-uuid)]}))))
+
+  (testing "IN-clause: vector of UUIDs for :ref field passes"
+    (is (nil? (storage/validate-where-clause-types!
+                :binding
+                {:slot-id {:type :ref}}
+                {:slot-id [(random-uuid)]}))))
+
+  (testing "IN-clause: set of ints for :int field passes"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:age {:type :int}}
+                {:age #{10 20 30}}))))
+
+  (testing "IN-clause: empty vector is rejected (not a valid IN)"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:fn-id {:type :uuid}}
+            {:fn-id []}))))
+
+  (testing "IN-clause: heterogeneous vector is rejected"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:fn-id {:type :uuid}}
+            {:fn-id [(random-uuid) "not-a-uuid"]}))))
+
+  ;; ─── Exotic-type mismatch errors ────────────────────────────────────
+  (testing "wrong type throws - non-keyword for :enum"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:status {:type :enum}}
+            {:status "active"}))))
+
+  ;; :jsonb / :any / :union / :null are intentionally permissive
+  ;; (`(constantly true)` in type-validators), so any non-nil value
+  ;; passes — there's no negative-test case to write for them.
+
+  (testing "wrong type throws - text for :numeric"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:balance {:type :numeric}}
+            {:balance "12.34"}))))
+
+  (testing "wrong type throws - bool for :timestamptz"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:created-at {:type :timestamptz}}
+            {:created-at true})))))
 
 
 ;; === validate-entity-name! tests ===

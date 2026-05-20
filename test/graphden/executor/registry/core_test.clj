@@ -206,3 +206,20 @@
           (is (contains? name->id :reg-sync-fn))
           (is (seq (sp/query-entities storage :fn {:name "reg-sync-fn"}))))
         (finally (sp/close storage))))))
+
+
+(deftest sync-defs-to-storage-3-arity-test
+  (testing "3-arity threads ns-id-map; extra-name->id defaults to {}"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [name->id (reg/sync-defs-to-storage!
+                         storage
+                         {:reg-sync-fn-3 {:return-type :int
+                                          :args {:a {:type :int}}
+                                          :impl (fn [_ _] 1)
+                                          :impl-source ['(quote 1)]}}
+                         ;; Empty ns-id-map — namespace-less fns still
+                         ;; get registered via fn-uuid's deterministic id.
+                         {})]
+          (is (contains? name->id :reg-sync-fn-3)))
+        (finally (sp/close storage))))))

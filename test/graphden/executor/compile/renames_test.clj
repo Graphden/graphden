@@ -116,3 +116,85 @@
           (is (= [] (r/hof-lambda-params (:id r-fn) (:id f-fn)
                                          (lookups-for storage)))))
         (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; HOF :is-fn boundary — pins both `deep-free-ext-names` and
+;; `find-slot-id-in-tree` :ref guard branches (line 55/96 in renames.clj).
+;;
+;; Without this test the walker only ever sees plain `:ref` bindings where
+;; `:is-fn` is false, so the `(when-not (:is-fn bnd) …)` guard's truthy
+;; arm is never hit and cloverage flags the line as half-covered.
+;; ============================================================================
+
+(deftest hof-ref-is-a-boundary-test
+  (testing ":is-fn ref binding stops the walker from descending into the target"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [;; Inner fn `T` exposes a free slot `:inner-free`.
+              base-t  (setup/create-base-fn! storage "bdy-base-t")
+              s-free  (setup/create-slot! storage "inner-free" :int)
+              _       (setup/attach-slot! storage (:id base-t) (:id s-free) 0)
+              t-fn    (setup/create-composed-fn! storage "bdy-t" (:id base-t))
+              ;; Outer fn `F` has a slot typed as the `:fn` primitive
+              ;; (HOF marker) and binds it to a ref of T. The binding's
+              ;; `:is-fn` flag becomes true → `deep-free-ext-names`'s
+              ;; `:ref` branch hits the BOUNDARY arm and skips T's frees.
+              base-f  (setup/create-base-fn! storage "bdy-base-f")
+              s-callee (setup/create-slot! storage "callee" :fn)
+              _       (setup/attach-slot! storage (:id base-f) (:id s-callee) 0)
+              f-fn    (setup/create-composed-fn! storage "bdy-f" (:id base-f))
+              _       (setup/bind-ref! storage (:id f-fn) (:id s-callee) (:id t-fn))]
+          (testing "T's free args do NOT bubble up through the HOF boundary"
+            (is (= [] (r/deep-free-ext-names (:id f-fn) (lookups-for storage)))
+                "the :is-fn=true ref guard suppresses recursion into T"))
+          (testing "find-slot-id-in-tree (via hof-lambda-params) honors the same guard"
+            ;; hof-lambda-params runs find-slot-id-in-tree against every
+            ;; deep-free name of an outer HOF-target. Nothing in F's tree
+            ;; supplies `inner-free`, so it becomes a lambda-param of T
+            ;; when called from F.
+            (is (= [:inner-free]
+                   (r/hof-lambda-params (:id t-fn) (:id f-fn)
+                                        (lookups-for storage))))))
+        (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; Seq-binding deep-free emission — pins the `:seq` arm of
+;; `deep-free-ext-names` (lines 57-73). The walker treats a list-item's
+;; literal `{:as :name}` map as a positional rename that re-exposes
+;; `:name` as a free arg of the binding's owner.
+;; ============================================================================
+
+(deftest deep-free-emits-positional-renames-from-seq-items-test
+  (testing "seq-binding with `{:as :outer-name}` items exposes those names as free"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [;; F's `items` slot is a list — bind with :list-append true
+              ;; so classify-slot lands on the :seq branch.
+              base    (setup/create-base-fn! storage "seq-base")
+              s-list  (setup/create-slot! storage "items" :int)
+              _       (setup/attach-slot! storage (:id base) (:id s-list) 0)
+              f-fn    (setup/create-composed-fn! storage "seq-f" (:id base))
+              list-bn (sp/create-entity storage :binding
+                                        {:fn-id (:id f-fn)
+                                         :slot-id (:id s-list)
+                                         :list-append true
+                                         :override-kind :fixed})]
+          ;; Two list items, both literal maps with `:as` → each re-
+          ;; exposes its `:as` keyword as a deep-free name of F.
+          (sp/create-entity storage :binding-list-item
+                            {:binding-id (:id list-bn) :position 0
+                             :value {:as "alpha"} :literal nil})
+          (sp/create-entity storage :binding-list-item
+                            {:binding-id (:id list-bn) :position 1
+                             :value {:as "beta"}  :literal nil})
+          ;; A third item with `:literal true` MUST be skipped — the
+          ;; predicate is `(not (:literal item))`.
+          (sp/create-entity storage :binding-list-item
+                            {:binding-id (:id list-bn) :position 2
+                             :value {:as "skip-me"} :literal true})
+          (is (= [:alpha :beta]
+                 (r/deep-free-ext-names (:id f-fn) (lookups-for storage)))
+              "literal :as maps surface; :literal=true items are excluded"))
+        (finally (sp/close storage))))))

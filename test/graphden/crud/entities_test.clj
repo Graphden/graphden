@@ -214,6 +214,68 @@
                       (catch clojure.lang.ExceptionInfo e e))]
           (is (instance? clojure.lang.ExceptionInfo ex))
           (is (= :constraint-violation/constraint-shape (:type (ex-data ex))))))
+
+      (testing "update-entity surfaces a write-rej as a typed ex-info"
+        ;; Create a valid fn-row, then try to update it with a malformed
+        ;; constraint — write-rej fires and we want the ex-info shape
+        ;; (lines 119-121 in crud/entities.clj).
+        (let [created (entities/create-entity
+                        "fn" {:name "crud-update-target"
+                              :parent-ids []
+                              :impl-hash nil
+                              :base-fn-id nil
+                              :element-fn-id nil
+                              :return-type-fn-id nil
+                              :anonymous-hash nil
+                              :constraint nil} c)
+              ex (try (entities/update-entity
+                        "fn" (:id created)
+                        {:constraint [:union :int]} c)
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (instance? clojure.lang.ExceptionInfo ex))
+          (is (= :constraint-violation/constraint-shape (:type (ex-data ex))))
+          (is (= (:id created) (:id (ex-data ex))))))
+
+      (testing "delete-entity :fn skips the pre-read fast-path"
+        ;; The `:fn` arm of delete-entity synthesizes `{:id id}` instead
+        ;; of pre-reading the row (lines 135-137). The behaviour is
+        ;; invisible without an actual :fn delete — this test pins it.
+        (let [fn-row (setup/create-base-fn! storage "delete-fast-path")
+              ;; No exception before the delete; the snapshot is the
+              ;; synthesized map, not a DB read.
+              ok? (entities/delete-entity "fn" (:id fn-row) c)]
+          (is (true? ok?))
+          (is (nil? (sp/read-entity storage :fn (:id fn-row))))))
+      (finally (sp/close storage)))))
+
+
+(deftest apply-create-record-type-rollback-test
+  ;; Pins the cleanup path at lines 208-210, 251-256 — a mid-create
+  ;; failure (unknown type-ref on field 2) must roll back the :fn row
+  ;; created on line 212. Without the cleanup, the orphan :fn would
+  ;; persist and the response code would still report :ok false.
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (testing "unknown field type triggers rollback of every prior write"
+        (let [;; Snapshot the :fn count before the attempt so we can prove
+              ;; the rollback put us back exactly.
+              before (count (sp/query-entities storage :fn {}))
+              resp (entities/apply-create-record-type
+                     {:name "rollback-record"
+                      :ns-id nil
+                      :description "first field is :int (ok), second references an unknown type → rollback"
+                      :fields [{:name "ok-field" :type "int"}
+                               {:name "bad-field" :type "no-such-type-row"}]}
+                     c)
+              after (count (sp/query-entities storage :fn {}))]
+          (is (false? (:ok resp))
+              "compound-create returns {:ok false …} when any field fails")
+          (is (string? (:error resp)))
+          (is (= before after)
+              "rollback restored the :fn count — no orphan rows")
+          (is (empty? (sp/query-entities storage :fn {:name "rollback-record"}))
+              "the named row is gone after rollback")))
       (finally (sp/close storage)))))
 
 

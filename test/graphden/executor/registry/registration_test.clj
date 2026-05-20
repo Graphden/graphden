@@ -137,6 +137,31 @@
           (sp/close storage))))))
 
 
+(deftest sync-defs-to-storage-interface-arities-test
+  ;; Exercise the wrapper arities on `registry.interface` directly —
+  ;; existing tests jump between 2-arity (`(sync-defs-to-storage!
+  ;; storage defs)`) and the underlying 4-arity in registry.core. The
+  ;; intermediate 3-arity wrapper (line 38 of registry/interface.clj —
+  ;; pre-fills `extra-name->id` with `{}`) had no callers in test, so
+  ;; cloverage flagged it as dead from outside.
+  (testing "3-arity wrapper threads ns-id-map; extra-name->id defaults to {}"
+    (let [storage (create-test-storage)
+          defs {:wrap-3 {:args {:x :int} :return-type :int
+                         :impl (fn [_ _] 1)}}]
+      (try
+        (let [name->id (registry/sync-defs-to-storage! storage defs {})]
+          (is (contains? name->id :wrap-3)))
+        (finally (sp/close storage)))))
+  (testing "4-arity wrapper threads both ns-id-map and extra-name->id"
+    (let [storage (create-test-storage)
+          defs {:wrap-4 {:args {:x :int} :return-type :int
+                         :impl (fn [_ _] 1)}}]
+      (try
+        (let [name->id (registry/sync-defs-to-storage! storage defs {} {})]
+          (is (contains? name->id :wrap-4)))
+        (finally (sp/close storage))))))
+
+
 ;; === initialize-all! Tests ===
 
 (deftest initialize-all-test

@@ -244,13 +244,23 @@ node check-editor.js web-server root:1 router-fn:1
 **Expand spec format:** `node-name:level` (use `root` for selected function)
 
 The same directory also hosts e2e edit-flow tests (`edit-*.test.js`) and
-the type-system UI helper smoke tests:
+the type-system UI helper smoke tests, split by concern:
 
 ```bash
-# Pure-function helpers — refinementChain, typeKindLabel, ruleNarrators,
-# closedEnumOf, appendClosedEnumSection, etc. Verifies the editor's
-# type-system UI primitives via page.evaluate (no DB writes).
-node type-system-ui-helpers.test.js
+# refinementChain, typeKindLabel, closedEnumOf, formatTypeHumanReadable,
+# shortTypeLabel — pure type helpers from editor-literal-types.js +
+# editor-overlay-type-expand.js. No DOM construction asserted here.
+node type-system-ui-types.test.js
+
+# ruleNarrators dispatch table — coverage check + per-rule prose
+# spot-checks. Trips when a new return-rule is registered without a
+# matching narrator template.
+node type-system-ui-narrators.test.js
+
+# appendResolutionSection (incl. multi-override visualization +
+# onNavigate spy), appendClosedEnumSection, appendEffectConstraintSection,
+# appendPopoverSection — DOM rendering of the provenance popover.
+node type-system-ui-resolution.test.js
 ```
 
 Each `*.test.js` file is a standalone Node script — exit code 0 = PASS,

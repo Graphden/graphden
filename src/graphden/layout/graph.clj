@@ -421,6 +421,71 @@
   (select-keys arg [:slot-id :binding-id :item-id :fn-id]))
 
 
+;; ---------------------------------------------------------------------------
+;; Classifier-item constructors — five tiny builders that materialise the
+;; `{:kind :ref|:value|:unset :arg-name :arg-type :arg-id …}` maps the
+;; layout pipeline threads downstream. Pre-extract, every cond arm in
+;; `compute-display-args` / `collect-expanded-args` / `expand-sequence-
+;; anchor` re-spelled the same 4-7 line merge — easy place to forget
+;; `:arg-type` or `:is-binding` while editing. Centralising them also
+;; documents the SHAPE of each kind in one place.
+;;
+;; `:from-ancestor` and `:sequence-anchor?` aren't baked in here — they
+;; only matter for a subset of callers, which assoc them on top.
+
+(defn- ref-item-from-arg
+  "`:ref` classifier item where the raw arg defines its own ref —
+   arg-name + ref-id come straight from the arg row."
+  [arg arg-name]
+  (merge {:kind :ref :arg-name arg-name
+          :arg-type (:type arg)
+          :ref-id (:ref-id arg) :arg-id (:id arg)
+          :is-binding false}
+         (arg-ids-from arg)))
+
+
+(defn- ref-item-from-bnd
+  "`:ref` classifier item where an ancestor binding (`bnd`) covers the
+   slot — bnd's rename + ref-id win over the raw arg. `:arg-type`
+   still comes from the raw arg row (the slot's type-kw doesn't change
+   under a value/ref binding)."
+  [arg bnd]
+  (merge {:kind :ref :arg-name (:arg-name bnd)
+          :arg-type (:type arg)
+          :ref-id (:ref-id bnd) :arg-id (:arg-id bnd)
+          :is-binding true}
+         (arg-ids-from bnd)))
+
+
+(defn- value-item-from-arg
+  "`:value` classifier item where the literal value sits on the raw arg."
+  [arg arg-name]
+  (merge {:kind :value :arg-name arg-name
+          :arg-type (:type arg)
+          :value (:value arg) :arg-id (:id arg)}
+         (arg-ids-from arg)))
+
+
+(defn- value-item-from-bnd
+  "`:value` classifier item where the literal value sits on a covering
+   ancestor binding (`bnd`)."
+  [arg bnd]
+  (merge {:kind :value :arg-name (:arg-name bnd)
+          :arg-type (:type arg)
+          :value (:value bnd) :arg-id (:arg-id bnd)}
+         (arg-ids-from bnd)))
+
+
+(defn- unset-item-from-arg
+  "`:unset` classifier item — placeholder for a slot with no value or
+   ref binding. The slot's `:type` flows through as `:arg-type` so
+   placeholder chips can still display the expected type."
+  [arg arg-name]
+  (merge {:kind :unset :arg-name arg-name
+          :arg-type (:type arg) :arg-id (:id arg)}
+         (arg-ids-from arg)))
+
+
 (defn- add-bindings-from-fn
   "Add `fn-id`'s OWN binding rows to the slot-id-keyed bindings map.
 
@@ -526,33 +591,18 @@
   [anchor slot-name arg-map]
   (let [items (walk-anchor-chain anchor arg-map)]
     (if (empty? items)
-      [(merge {:kind :unset :arg-name slot-name
-               :arg-type (:type anchor) :arg-id (:id anchor)
-               :sequence-anchor? true}
-              (arg-ids-from anchor))]
+      ;; Empty-anchor sentinel — marked so the frontend routes click
+      ;; through `appendSequenceItem` instead of the regular binder.
+      [(assoc (unset-item-from-arg anchor slot-name)
+              :sequence-anchor? true)]
       (into []
             (map-indexed
               (fn [idx item]
-                (let [lbl (str slot-name "[" idx "]")
-                      ids (arg-ids-from item)]
+                (let [lbl (str slot-name "[" idx "]")]
                   (cond
-                    (some? (:ref-id item))
-                    (merge {:kind :ref :arg-name lbl
-                            :arg-type (:type item)
-                            :ref-id (:ref-id item) :arg-id (:id item)
-                            :is-binding false}
-                           ids)
-
-                    (some? (:value item))
-                    (merge {:kind :value :arg-name lbl
-                            :arg-type (:type item)
-                            :value (:value item) :arg-id (:id item)}
-                           ids)
-
-                    :else
-                    (merge {:kind :unset :arg-name lbl
-                            :arg-type (:type item) :arg-id (:id item)}
-                           ids)))))
+                    (some? (:ref-id item)) (ref-item-from-arg item lbl)
+                    (some? (:value item))  (value-item-from-arg item lbl)
+                    :else                  (unset-item-from-arg item lbl)))))
             items))))
 
 
@@ -898,54 +948,41 @@
                                               (not (binding-goes-to-child? binding-key)))
                                      raw-binding)]
                            (cond
+                             ;; Own-ref or matching bnd-ref → emit from the raw arg.
                              (or (and has-ref defines-own-ref)
                                  (and bnd (:ref-id bnd) (= (:ref-id bnd) (:ref-id arg))))
-                             (merge {:kind :ref :arg-name arg-name
-                                     :arg-type (:type arg)
-                                     :ref-id (:ref-id arg) :arg-id (:id arg)
-                                     :is-binding false}
-                                    (arg-ids-from arg))
+                             (ref-item-from-arg arg arg-name)
 
+                             ;; Ancestor binding's ref shadows / fills the slot.
                              (and bnd (:ref-id bnd)
                                   (or (and has-ref (not= (:ref-id bnd) (:ref-id arg)))
                                       (and (not has-ref) (not has-value))))
-                             (merge {:kind :ref :arg-name (:arg-name bnd)
-                                     :arg-type (:type arg)
-                                     :ref-id (:ref-id bnd) :arg-id (:arg-id bnd)
-                                     :is-binding true}
-                                    (arg-ids-from bnd))
+                             (ref-item-from-bnd arg bnd)
 
+                             ;; Ancestor binding's literal value covers the slot.
                              (and bnd (some? (:value bnd)))
-                             (merge {:kind :value :arg-name (:arg-name bnd)
-                                     :arg-type (:type arg)
-                                     :value (:value bnd) :arg-id (:arg-id bnd)}
-                                    (arg-ids-from bnd))
+                             (value-item-from-bnd arg bnd)
 
+                             ;; Has-ref on a non-structural call — emit as own ref.
                              (and has-ref (not is-structural))
-                             (merge {:kind :ref :arg-name arg-name
-                                     :arg-type (:type arg)
-                                     :ref-id (:ref-id arg) :arg-id (:id arg)
-                                     :is-binding false}
-                                    (arg-ids-from arg))
+                             (ref-item-from-arg arg arg-name)
 
+                             ;; Structural ref without its own binding — render
+                             ;; as a dashed unset (the ref's bindings handle it).
                              (and has-ref is-structural (not defines-own-ref))
-                             (merge {:kind :unset :arg-name arg-name
-                                     :arg-type (:type arg) :arg-id (:id arg)}
-                                    (arg-ids-from arg))
+                             (unset-item-from-arg arg arg-name)
 
+                             ;; Raw arg carries a literal value.
                              has-value
-                             (merge {:kind :value :arg-name arg-name
-                                     :arg-type (:type arg)
-                                     :value (:value arg) :arg-id (:id arg)}
-                                    (arg-ids-from arg))
+                             (value-item-from-arg arg arg-name)
 
+                             ;; Slot covered by an ancestor's binding-chain —
+                             ;; skip this row (the binding's emission handles it).
                              (or raw-binding (bound-by-chain? arg))
                              nil
 
                              :else
-                             (merge {:kind :unset :arg-name arg-name
-                                     :arg-type (:type arg) :arg-id (:id arg)}
-                                    (arg-ids-from arg)))))
+                             (unset-item-from-arg arg arg-name))))
                        args)
         own-slot-terminals (into #{}
                                  (keep (fn [a]
@@ -1057,9 +1094,7 @@
             fn-values (atom [])
             fn-unsets (atom [])]
         (doseq [arg args]
-          (let [arg-id (:id arg)
-                slot-id (:slot-id arg)
-                cslot (canon-slot slot-id)
+          (let [cslot (canon-slot (:slot-id arg))
                 already-covered (contains? @covered-slots cslot)
                 has-value (some? (:value arg))
                 has-ref (some? (:ref-id arg))
@@ -1069,28 +1104,22 @@
             (when (and (not already-covered) (not shadow-of-bound))
               (swap! covered-slots conj cslot)
               (let [arg-name (resolve-arg-name arg arg-map)
-                    from-ancestor (pos? current-level)
-                    ids (arg-ids-from arg)]
+                    from-ancestor (pos? current-level)]
                 (cond
                   has-ref
-                  (swap! fn-refs conj (merge {:kind :ref :arg-name arg-name
-                                              :arg-type (:type arg)
-                                              :ref-id (:ref-id arg) :arg-id arg-id
-                                              :from-ancestor from-ancestor}
-                                             ids))
+                  (swap! fn-refs conj
+                         (assoc (ref-item-from-arg arg arg-name)
+                                :from-ancestor from-ancestor))
 
                   has-value
-                  (swap! fn-values conj (merge {:kind :value :arg-name arg-name
-                                                :arg-type (:type arg)
-                                                :value (:value arg) :arg-id arg-id
-                                                :from-ancestor from-ancestor}
-                                               ids))
+                  (swap! fn-values conj
+                         (assoc (value-item-from-arg arg arg-name)
+                                :from-ancestor from-ancestor))
 
                   :else
-                  (swap! fn-unsets conj (merge {:kind :unset :arg-name arg-name
-                                                :arg-type (:type arg) :arg-id arg-id
-                                                :from-ancestor from-ancestor}
-                                               ids)))))))
+                  (swap! fn-unsets conj
+                         (assoc (unset-item-from-arg arg arg-name)
+                                :from-ancestor from-ancestor)))))))
         (let [raw-args-of-fn (get args-by-fn fn-id [])
               anchors (filter sequence-anchor? raw-args-of-fn)
               from-ancestor (pos? current-level)]

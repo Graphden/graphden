@@ -176,6 +176,74 @@
        slot))))
 
 
+(defn build-fn!
+  "Higher-level fixture builder — collapses the
+   create-base-fn! / create-slot! / attach-slot! / create-composed-fn! /
+   bind-value!/bind-ref! sequence into one call.
+
+   Two shapes:
+
+   1. Base-fn:
+        (build-fn! storage {:name \"add\" :return-type :int
+                             :slots [{:name \"a\" :type :int}
+                                     {:name \"b\" :type :int}]})
+      → {:fn <fn-record>
+         :slots {\"a\" <slot-record> \"b\" <slot-record>}}
+
+   2. Composed-fn (over a previously built parent map):
+        (build-fn! storage {:name \"my-add\"
+                             :parent parent
+                             :bindings {\"a\" {:value 1}
+                                        \"b\" {:value 2}}})
+      → {:fn <fn-record>}
+
+   `:parent` is the map returned by a prior `build-fn!` call —
+   `bindings` keys are slot-NAMES resolved against `parent`'s slots map.
+   `:value V` or `:ref R` (R may be a UUID, fn record, or
+   `build-fn!` result map) are the supported binding shapes.
+
+   Callers that need lower-level control still use the granular
+   helpers below."
+  [storage {fn-name :name :keys [return-type slots parent bindings]}]
+  (cond
+    parent
+    (let [parent-id (or (some-> parent :fn :id) (:id parent))
+          parent-slots (or (:slots parent) {})
+          fn-rec (create-composed-fn! storage fn-name parent-id)]
+      (doseq [[slot-key b] (or bindings {})]
+        (let [slot-rec (get parent-slots slot-key)
+              slot-id (or (some-> slot-rec :id)
+                          (throw (ex-info (str "build-fn!: unknown slot "
+                                               (pr-str slot-key))
+                                          {:parent-slots (keys parent-slots)
+                                           :requested slot-key})))]
+          (cond
+            (contains? b :value)
+            (bind-value! storage (:id fn-rec) slot-id (:value b))
+
+            (contains? b :ref)
+            (let [r (:ref b)
+                  ref-id (cond
+                           (uuid? r) r
+                           (some-> r :fn :id) (-> r :fn :id)
+                           (some-> r :id) (:id r)
+                           :else (throw (ex-info "build-fn!: bad :ref"
+                                                 {:ref r})))]
+              (bind-ref! storage (:id fn-rec) slot-id ref-id)))))
+      {:fn fn-rec})
+
+    :else
+    (let [fn-rec (create-base-fn! storage fn-name return-type)
+          slots-map (into {}
+                          (map-indexed
+                            (fn [idx {sn :name st :type}]
+                              (let [slot (create-slot! storage sn st)]
+                                (attach-slot! storage (:id fn-rec) (:id slot) idx)
+                                [sn slot])))
+                          (or slots []))]
+      {:fn fn-rec :slots slots-map})))
+
+
 (defn setup-add-function!
   "Builds a small `:add` example: base-fn `add` with two `:int` slots,
    plus a composed instance with neither bound. Returns a map with

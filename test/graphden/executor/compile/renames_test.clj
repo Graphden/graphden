@@ -49,33 +49,39 @@
   (testing "an unbound slot surfaces as a deep-free name; a bound one does not"
     (let [storage (setup/create-test-storage)]
       (try
-        (let [base (setup/create-base-fn! storage "dfn-base")
-              sa   (setup/create-slot! storage "a" :int)
-              sb   (setup/create-slot! storage "b" :int)
-              _    (setup/attach-slot! storage (:id base) (:id sa) 0)
-              _    (setup/attach-slot! storage (:id base) (:id sb) 1)
-              fn1  (setup/create-composed-fn! storage "dfn-1" (:id base))
-              _    (setup/bind-value! storage (:id fn1) (:id sa) 10)]
+        (let [base (setup/build-fn! storage
+                                    {:name "dfn-base"
+                                     :slots [{:name "a" :type :int}
+                                             {:name "b" :type :int}]})
+              fn1 (setup/build-fn! storage
+                                   {:name "dfn-1"
+                                    :parent base
+                                    :bindings {"a" {:value 10}}})]
           ;; a is value-bound, b is free → only b surfaces.
-          (is (= [:b] (r/deep-free-ext-names (:id fn1) (lookups-for storage)))))
+          (is (= [:b] (r/deep-free-ext-names (-> fn1 :fn :id)
+                                             (lookups-for storage)))))
         (finally (sp/close storage)))))
 
   (testing "deep-free walks across a non-HOF ref into the ref-target's free args"
     (let [storage (setup/create-test-storage)]
       (try
         (let [;; D exposes a free slot `inner`.
-              base-d (setup/create-base-fn! storage "dfn-base-d")
-              s-in   (setup/create-slot! storage "inner" :int)
-              _      (setup/attach-slot! storage (:id base-d) (:id s-in) 0)
-              d      (setup/create-composed-fn! storage "dfn-d" (:id base-d))
+              base-d (setup/build-fn! storage
+                                      {:name "dfn-base-d"
+                                       :slots [{:name "inner" :type :int}]})
+              d      (setup/build-fn! storage
+                                      {:name "dfn-d" :parent base-d})
               ;; C binds its slot `s` to a ref of D.
-              base-c (setup/create-base-fn! storage "dfn-base-c")
-              s-c    (setup/create-slot! storage "s" :int)
-              _      (setup/attach-slot! storage (:id base-c) (:id s-c) 0)
-              c      (setup/create-composed-fn! storage "dfn-c" (:id base-c))
-              _      (setup/bind-ref! storage (:id c) (:id s-c) (:id d))]
+              base-c (setup/build-fn! storage
+                                      {:name "dfn-base-c"
+                                       :slots [{:name "s" :type :int}]})
+              c      (setup/build-fn! storage
+                                      {:name "dfn-c"
+                                       :parent base-c
+                                       :bindings {"s" {:ref d}}})]
           ;; C's own slot s is ref-bound; D's `inner` bubbles up.
-          (is (= [:inner] (r/deep-free-ext-names (:id c) (lookups-for storage)))))
+          (is (= [:inner] (r/deep-free-ext-names (-> c :fn :id)
+                                                 (lookups-for storage)))))
         (finally (sp/close storage))))))
 
 
@@ -88,32 +94,38 @@
     (let [storage (setup/create-test-storage)]
       (try
         (let [;; R exposes free `x`.
-              base-r (setup/create-base-fn! storage "hlp-base-r")
-              slot-x (setup/create-slot! storage "x" :int)
-              _      (setup/attach-slot! storage (:id base-r) (:id slot-x) 0)
-              r-fn   (setup/create-composed-fn! storage "hlp-r" (:id base-r))
-              ;; F is built on an unrelated base — it neither owns nor
-              ;; supplies `x`.
-              base-f (setup/create-base-fn! storage "hlp-base-f")
-              slot-y (setup/create-slot! storage "y" :int)
-              _      (setup/attach-slot! storage (:id base-f) (:id slot-y) 0)
-              f-fn   (setup/create-composed-fn! storage "hlp-f" (:id base-f))]
+              base-r (setup/build-fn! storage
+                                      {:name "hlp-base-r"
+                                       :slots [{:name "x" :type :int}]})
+              r-fn   (setup/build-fn! storage
+                                      {:name "hlp-r" :parent base-r})
+              ;; F is built on an unrelated base — neither owns nor supplies `x`.
+              base-f (setup/build-fn! storage
+                                      {:name "hlp-base-f"
+                                       :slots [{:name "y" :type :int}]})
+              f-fn   (setup/build-fn! storage
+                                      {:name "hlp-f" :parent base-f})]
           ;; Nothing in F's world supplies x → x is a per-call lambda-param.
-          (is (= [:x] (r/hof-lambda-params (:id r-fn) (:id f-fn)
+          (is (= [:x] (r/hof-lambda-params (-> r-fn :fn :id)
+                                           (-> f-fn :fn :id)
                                            (lookups-for storage)))))
         (finally (sp/close storage)))))
 
   (testing "a name a caller-relative supplies is captured, not a lambda-param"
     (let [storage (setup/create-test-storage)]
       (try
-        (let [base (setup/create-base-fn! storage "hlp2-base")
-              slot (setup/create-slot! storage "x" :int)
-              _    (setup/attach-slot! storage (:id base) (:id slot) 0)
-              r-fn (setup/create-composed-fn! storage "hlp2-r" (:id base))
-              f-fn (setup/create-composed-fn! storage "hlp2-f" (:id base))
-              _    (setup/bind-value! storage (:id f-fn) (:id slot) 99)]
+        (let [base (setup/build-fn! storage
+                                    {:name "hlp2-base"
+                                     :slots [{:name "x" :type :int}]})
+              r-fn (setup/build-fn! storage
+                                    {:name "hlp2-r" :parent base})
+              f-fn (setup/build-fn! storage
+                                    {:name "hlp2-f"
+                                     :parent base
+                                     :bindings {"x" {:value 99}}})]
           ;; f binds x → x flows in from the closure → no lambda-params.
-          (is (= [] (r/hof-lambda-params (:id r-fn) (:id f-fn)
+          (is (= [] (r/hof-lambda-params (-> r-fn :fn :id)
+                                         (-> f-fn :fn :id)
                                          (lookups-for storage)))))
         (finally (sp/close storage))))))
 

@@ -42,4 +42,21 @@
   {:name :ex-set-status-error
    :description "Sibling of `:ex-set-status-ok` — inherits the same `:ex-set-status` parent (so `:key` is \"status\") but binds `:value` differently. Shows: the same parent can spawn many children with different bindings."
    :parent :ex-set-status
-   :args {:value "error"}}]}
+   :args {:value "error"}}
+
+  ;; TRANSITIVE NARROWING demo. The parent pins `:key` to a stricter
+  ;; type (`:keyword` — narrower than the original `:any` on `:assoc`).
+  ;; The child doesn't re-narrow but supplies a value that satisfies
+  ;; the parent's narrowing. In the editor, the child's `:key` chip
+  ;; gets a ↳ provenance badge whose tooltip reads "Inherited
+  ;; narrowing from :ex-keyword-key-assoc" (the ancestor that
+  ;; introduced the type-override), driven by `findBindingOverrideChain`.
+  {:name :ex-keyword-key-assoc
+   :description "Parent narrows `:key` to `:keyword` via a type-override binding (no value supplied; the slot stays free under the tighter type). Demonstrates: a parent can declare a slot is :keyword-only without binding it."
+   :parent :assoc
+   :args {:key {:type :keyword}}}
+
+  {:name :ex-keyword-key-status
+   :description "Child of `:ex-keyword-key-assoc`. Supplies a literal keyword for `:key` without re-narrowing the type. The editor's arg-overlay shows the chip narrowed to :keyword and attributes it via the ↳ provenance badge to the parent — even though THIS fn-def's binding has no type-override of its own."
+   :parent :ex-keyword-key-assoc
+   :args {:key :status}}]}

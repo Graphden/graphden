@@ -8,34 +8,37 @@
  :description "Collection primitives — first/rest/conj/get/assoc/merge/range/take/drop and other Clojure-equivalent operations over maps/vectors/seqs."
  :fns
  [{:name :first
-   :description "First item of a collection (Clojure's `first`). Returns nil for empty/nil."
-   :args {:coll {:type :jsonb :description "Collection to take the first of."}}
-   :return-type :any}
+   :description "First item of a list (Clojure's `first`). Returns nil for an empty or nil list, hence the `[:union :null a]` return — narrow via `:coalesce` before use where non-null is required."
+   :args {:coll {:type [:list a] :description "List to take the first of."}}
+   :return-type [:union :null a]}
 
   {:name :rest
    :description "Everything after the first item (Clojure's `rest`). Empty for nil/empty input."
-   :args {:coll {:type :jsonb :description "Collection to take the rest of."}}
-   :return-type :jsonb}
+   :args {:coll {:type [:list a] :description "List to take the rest of."}}
+   :return-type [:list a]}
 
   {:name :cons
-   :description "Prepend an item to a collection (Clojure's `cons`). Returns a new seq."
-   :args {:item {:type :any :description "Item placed at the head."}
-          :coll {:type :jsonb :description "Collection placed after the head."}}
-   :return-type :jsonb}
+   :description "Prepend an item to a list (Clojure's `cons`). Returns a new seq."
+   :args {:item {:type a :description "Item placed at the head."}
+          :coll {:type [:list a] :description "List placed after the head."}}
+   :return-type [:list a]}
 
   ;; First-class list primitive. :items is a sequence-arg; items live in
   ;; linked arg entities chained via arg.next_arg_id.
   {:name :list
    :description "Construct a vector from a sequence-arg. Each item is a separate arg entity chained via `next-arg-id`, so refs and literals can be freely mixed."
-   :args {:items {:type :sequence :of :any :description "Items in order. Each can be a literal or a fn-ref."}}
-   :return-type :jsonb}
+   ;; `:items` is `[:list :any]` (heterogeneous) — a `:list` may freely
+   ;; mix element types (`:cond` builds `[test result test result …]`
+   ;; this way). `list-return-rule` lubs the actual items per call site.
+   :args {:items {:type [:list :any] :description "Items in order. Each can be a literal or a fn-ref."}}
+   :return-type [:list :any]}
 
   ;; Converts a list of 2-element pairs into a map. :entries is a sequence-arg
   ;; where each item is either a :pair fn-def result or a literal [k v] vector.
   {:name :pairs->map
    :description "Build a map from a sequence of `[key value]` pairs (or `:pair` results). Later pairs override earlier ones with the same key."
-   :args {:entries {:type :sequence :of :any :description "Sequence of two-element pairs."}}
-   :return-type :jsonb}
+   :args {:entries {:type [:list :any] :description "Sequence of two-element pairs."}}
+   :return-type [:map :any :any]}
 
   {:name :conj
    :description "Append/prepend an item depending on collection type (Clojure's `conj`). Vectors append; lists/seqs prepend; maps add a `[k v]` entry."
@@ -53,7 +56,7 @@
   {:name :get-in
    :description "Look up a value at a nested path (Clojure's `get-in`). Falls back to `:default` if any segment is missing."
    :args {:map {:type :jsonb :description "Map to read from."}
-          :path {:type :sequence :of :any :description "Path to traverse — each item may be a literal key or a fn-ref."}
+          :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
           :default {:type :any :required false :description "Returned when the path is absent."}}
    :return-type :any}
 
@@ -68,16 +71,32 @@
   ;; ref is hof-wrap'd into a callable instead of being executed and
   ;; merged as a value. Used for routes where the assoc'd value must
   ;; remain a Ring callable (handler).
+  ;;
+  ;; Why this is its own fn-def rather than an inline `{:type [:fn …]}`
+  ;; on every consumer: `:assoc-handler` mixes `:assoc-fn` + `:assoc-empty`
+  ;; via MI to combine fn-typed `:value` + pre-bound `:map {}` in one
+  ;; named building block. Each consumer that wants Ring-callable assoc
+  ;; would otherwise reproduce the same override every time. Slot-
+  ;; resolution's `ancestor-type-pin` walks the parents-chain for
+  ;; exactly this MI pattern — see slot_resolution.clj. Keep as a
+  ;; named alias rather than inlining.
   {:name :assoc-fn
-   :description "Variant of `:assoc` whose `:value` is `:fn`-typed — the bound fn-graph is hof-wrap'd into a callable rather than executed and stored. Used where the value must remain a function (e.g. Ring handlers in route maps)."
+   :description "Variant of `:assoc` whose `:value` is `:fn`-typed — the bound fn-graph is hof-wrap'd into a callable rather than executed and stored. Used where the value must remain a function (e.g. Ring handlers in route maps). Slot type `[:fn {:arg a} b]` — single-arg generic callable; positional unify so the callee's leftover free-arg name is alpha-equivalent."
    :parent :assoc
-   :args {:value {:as :value :type :fn}}}
+   :args {:value {:as :value :type [:fn {:arg a} b]}}}
 
   {:name :dissoc
    :description "Remove a single key from a map (Clojure's `dissoc`)."
-   :args {:map {:type :jsonb :description "Map to remove from."}
-          :key {:type :any :description "Key to remove."}}
-   :return-type :jsonb}
+   ;; `:map` is `[:map a :any]`, not `[:map a b]`: a heterogeneous-
+   ;; valued record (the common case) can't unify a single `b` over
+   ;; its mixed field types. Fixing the value side to `:any` keeps
+   ;; record arguments accepted via `unify-map-record` while still
+   ;; rejecting `[:list :int]` (lists aren't map-typed at all). The
+   ;; rule (`dissoc-return-rule`) recovers the precise record shape
+   ;; when `:key` is a literal.
+   :args {:map {:type [:map a :any] :description "Map to remove from."}
+          :key {:type a :description "Key to remove."}}
+   :return-type [:map a :any]}
 
   {:name :count
    :description "Count items in a collection (Clojure's `count`). Returns 0 for nil. Always non-negative."
@@ -97,20 +116,23 @@
 
   {:name :keys
    :description "Vector of map keys (Clojure's `keys`). Order is unspecified for unsorted maps."
-   :args {:map {:type :jsonb :description "Map to enumerate."}}
-   :return-type :jsonb}
+   :args {:map {:type [:map k v] :description "Map to enumerate."}}
+   :return-type [:list k]}
 
   {:name :vals
    :description "Vector of map values (Clojure's `vals`). Order matches `:keys`."
-   :args {:map {:type :jsonb :description "Map to enumerate."}}
-   :return-type :jsonb}
+   :args {:map {:type [:map k v] :description "Map to enumerate."}}
+   :return-type [:list v]}
 
   ;; `(apply merge maps)` — variadic merge like Clojure's. `:maps` is a
   ;; sequence-arg so callers can inline refs: `{:maps [:a-ref :b-ref]}`.
+  ;; Item type is `[:map a :any]` — admits records via unify-map-record
+  ;; (heterogeneous values fit `:any`) while rejecting a stray `[:list]`
+  ;; bound by mistake.
   {:name :merge
    :description "Merge a sequence of maps left-to-right (Clojure's `(apply merge maps)`); later keys override earlier ones."
-   :args {:maps {:type :sequence :of :any :description "Maps to merge in order."}}
-   :return-type :jsonb}
+   :args {:maps {:type [:list [:map a :any]] :description "Maps to merge in order."}}
+   :return-type [:map :any :any]}
 
   {:name :into
    :description "Pour items from one collection into another (Clojure's `into`). The destination's type is preserved."
@@ -121,7 +143,7 @@
   {:name :assoc-in
    :description "Set the value at a nested path in a map (Clojure's `assoc-in`). Creates intermediate maps as needed."
    :args {:m {:type :any :description "Map to update (nil treated as empty)."}
-          :path {:type :sequence :of :any :description "Path to traverse — each item may be a literal key or a fn-ref."}
+          :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
           :v {:type :any :description "Value to write at the path."}}
    :return-type :any}
 
@@ -133,8 +155,8 @@
   {:name :update-in
    :description "Apply a callable to the value at a nested path (Clojure's `update-in`). The `:f` slot is :fn-typed; impl invokes `(f existing-value)` per call."
    :args {:m {:type :any :description "Map to update (nil treated as empty)."}
-          :path {:type :sequence :of :any :description "Path to traverse — each item may be a literal key or a fn-ref."}
-          :f {:type :fn :description "Callable receiving the existing value, returning the new one."}}
+          :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
+          :f {:type [:fn {:existing a} b] :description "Callable receiving the existing value at the path under the convention name `:existing` (alpha-equivalent for 1-arg callees), returning the new value."}}
    :return-type :any}
 
   {:name :range
@@ -142,7 +164,7 @@
    :args {:start {:type :int :value 0 :description "Inclusive lower bound. Defaults to 0."}
           :end {:type :int :description "Exclusive upper bound."}
           :step {:type :int :value 1 :description "Step between successive values. Defaults to 1; must be non-zero."}}
-   :return-type :jsonb}
+   :return-type [:list :int]}
 
   {:name :repeat
    :description "Vector of `count` copies of `item` (Clojure's `(into [] (repeat count item))`)."
@@ -150,72 +172,72 @@
    ;; `[:refine :int [:>= 0]]`. Negative counts are rejected at
    ;; sync time — the runtime treats them as zero anyway.
    :args {:count {:type :non-negative-int :description "Number of copies."}
-          :item {:type :any :description "Value repeated."}}
-   :return-type :jsonb}
+          :item {:type a :description "Value repeated."}}
+   :return-type [:list a]}
 
   {:name :take
-   :description "First `count` items of a collection (Clojure's `take`). Realises a lazy seq."
+   :description "First `count` items of a list (Clojure's `take`). Realises a lazy seq."
    :args {:count {:type :non-negative-int :description "Maximum number of items to take."}
-          :coll {:type :jsonb :description "Source collection."}}
-   :return-type :jsonb}
+          :coll {:type [:list a] :description "Source list."}}
+   :return-type [:list a]}
 
   {:name :drop
    :description "Skip the first `count` items (Clojure's `drop`). Returns a vector of the remainder."
    :args {:count {:type :non-negative-int :description "Number of items to skip."}
-          :coll {:type :jsonb :description "Source collection."}}
-   :return-type :jsonb}
+          :coll {:type [:list a] :description "Source list."}}
+   :return-type [:list a]}
 
   {:name :reverse
    :description "Reverse a sequence (Clojure's `reverse`)."
-   :args {:coll {:type :jsonb :description "Collection to reverse."}}
-   :return-type :jsonb}
+   :args {:coll {:type [:list a] :description "List to reverse."}}
+   :return-type [:list a]}
 
   {:name :sort
    :description "Sort a sequence in natural order (Clojure's `sort`). For mixed types use a custom comparator via composition."
-   :args {:coll {:type :jsonb :description "Collection to sort."}}
-   :return-type :jsonb}
+   :args {:coll {:type [:list a] :description "List to sort."}}
+   :return-type [:list a]}
 
   {:name :concat
    :description "Concatenate a sequence of sequences into one (Clojure's `(apply concat colls)`)."
-   :args {:colls {:type :sequence :of :any :description "Sequence of sequences to concatenate; each item may be a literal collection or a fn-ref."}}
-   :return-type :jsonb}
+   :args {:colls {:type [:list [:list :any]] :description "Sequence of sequences to concatenate; each item may be a literal collection or a fn-ref."}}
+   :return-type [:list :any]}
 
   {:name :flatten
    :description "Flatten nested sequences into a single flat one (Clojure's `flatten`)."
    :args {:coll {:type :jsonb :description "Possibly-nested collection."}}
-   :return-type :jsonb}
+   :return-type [:list :any]}
 
   {:name :distinct
    :description "Drop duplicate items, preserving first occurrence (Clojure's `distinct`)."
-   :args {:coll {:type :jsonb :description "Collection that may contain duplicates."}}
-   :return-type :jsonb}
+   :args {:coll {:type [:list a] :description "List that may contain duplicates."}}
+   :return-type [:list a]}
 
   {:name :stringify-map-keys
    :description "Walk a map and convert each keyword key into a string key. Useful at JSON/string boundaries."
    :args {:m {:type :jsonb :description "Map whose keys to stringify."}}
-   :return-type :jsonb}
+   :return-type [:map :text :any]}
 
   {:name :keywordize-map-keys
    :description "Walk a map and convert each string key into a keyword. Inverse of `:stringify-map-keys`."
    :args {:m {:type :any :description "Map whose keys to keywordize."}}
-   :return-type :any}
+   :return-type [:map :keyword :any]}
 
   {:name :select-keys
-   :description "Submap containing only the specified keys (Clojure's `select-keys`)."
+   :description "Submap containing only the specified keys (Clojure's `select-keys`). Records in graphden are keyword-keyed, so the result is a `[:map :keyword :any]`."
    :args {:m {:type :any :description "Source map."}
-          :ks {:type :sequence :of :any :description "Keys to keep — each item may be a literal key or a fn-ref."}}
-   :return-type :any}
+          :ks {:type [:list :keyword] :description "Keys to keep — keyword each (records in graphden are keyword-keyed). Each item may be a literal or a fn-ref."}}
+   :return-type [:map :keyword :any]}
 
   {:name :zipmap
    :description "Build a map from parallel `keys` and `vals` sequences (Clojure's `zipmap`)."
-   :args {:keys {:type :jsonb :description "Vector of map keys."}
-          :vals {:type :jsonb :description "Vector of corresponding values."}}
-   :return-type :any}
+   :args {:keys {:type [:list k] :description "Vector of map keys."}
+          :vals {:type [:list v] :description "Vector of corresponding values."}}
+   :return-type [:map k v]}
 
   {:name :update-vals
    :description "Apply a function to every value in a map (Clojure's `update-vals`). Keys are preserved."
    :args {:m {:type :any :description "Map whose values to transform."}
-          :f {:type :fn :description "Callable applied to each value."}}
+          :f {:type [:fn {:value v} w] :description "Callable receiving each value under the convention name `:value` (alpha-equivalent for 1-arg callees), returning the new one."}}
    :return-type :any}
 
   ;; (update-in m path #(merge defaults %)) — Clojure-style closure.

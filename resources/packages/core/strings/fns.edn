@@ -8,7 +8,7 @@
  :fns
  [{:name :str
    :description "Concatenate a sequence of values into a single string (Clojure's `(apply str parts)`). Each part is stringified."
-   :args {:parts {:type :sequence :of :any :description "Items to stringify and concatenate. Each item may be a literal or a fn-ref."}}
+   :args {:parts {:type [:list :any] :description "Items to stringify and concatenate. Each item may be a literal or a fn-ref."}}
    :return-type :text}
 
   {:name :subs
@@ -42,38 +42,38 @@
    :description "Split a string by separator (Clojure's `(str/split s (re-pattern separator))`). Separator is a regex."
    :args {:string {:type :text :description "String to split."}
           :separator {:type :text :description "Regex pattern that delimits parts."}}
-   :return-type :jsonb}
+   :return-type [:list :text]}
 
   {:name :str-join
    :description "Join a collection of strings into one (Clojure's `clojure.string/join`)."
-   :args {:coll {:type :jsonb :description "Collection of strings (or stringifiable values)."}
+   :args {:coll {:type [:list :any] :description "Collection of items to stringify and concatenate (each `str`'d before joining)."}
           :separator {:type :text :value "" :description "Inserted between every pair. Defaults to empty."}}
    :return-type :text}
 
   {:name :str-to-keyword
    :description "Coerce a string into a keyword (Clojure's `keyword`)."
    :args {:string {:type :text :description "String to convert."}}
-   :return-type :any}
+   :return-type :keyword}
 
   {:name :keyword-to-str
    :description "Coerce a keyword into a string without the leading colon (Clojure's `name`)."
-   :args {:keyword {:type :any :description "Keyword to convert."}}
+   :args {:keyword {:type :keyword :description "Keyword to convert."}}
    :return-type :text}
 
   {:name :pr-str
    :description "Print-readable string form of a value (Clojure's `pr-str`). Strings are quoted, keywords prefixed."
-   :args {:value {:type :any :description "Value to print."}}
+   :args {:value {:type a :description "Value to print."}}
    :return-type :text}
 
   {:name :to-str
    :description "Plain string form of a value (Clojure's `str`). No quoting; nil renders as empty string."
-   :args {:value {:type :any :description "Value to stringify."}}
+   :args {:value {:type a :description "Value to stringify."}}
    :return-type :text}
 
   {:name :parse-query-string
    :description "Parse an HTTP query string into a `{key value}` map. Repeated keys collapse to last."
    :args {:string {:type :text :description "Raw query string (without leading `?`)."}}
-   :return-type :jsonb}
+   :return-type [:map :text :text]}
 
   {:name :blank?
    :description "True iff the string is nil, empty, or contains only whitespace (Clojure's `clojure.string/blank?`)."

@@ -7,13 +7,14 @@
 ;; over and over.
 ;;
 ;; Discrimination still flows through the existing `:cond` /
-;; `:if` — no new dispatcher base-fn — so authors compose:
+;; `:if` — no new dispatcher base-fn — so authors compose a flat
+;; `:cond` (alternating test / result, literal `true` as else-test):
 ;;
 ;;     {:parent :cond
-;;      :args {:pairs [(:variant-is? :coll my-result :tag :ok)
-;;                     (:variant-value :coll my-result)
-;;                     :else
-;;                     (:variant-value :coll my-result)]}}
+;;      :args {:clauses [(:variant-is? :coll my-result :tag :ok)
+;;                       (:variant-value :coll my-result)
+;;                       true
+;;                       (:variant-value :coll my-result)]}}
 ;;
 ;; All three fn-defs are pure compositions over `:get` / `:equal?` —
 ;; no new Clojure impl needed.

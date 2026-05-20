@@ -213,6 +213,45 @@
         "absent :effects is computed-pure, satisfies the #{} constraint")))
 
 
+;; -----------------------------------------------------------------------------
+;; `has-type-var?` — gates whether check-binding! falls back from
+;; subtype to unify. Each compound-type arm covers a real bug class:
+;; without the arm, a ref-binding whose unification would have bound a
+;; type-var gets rejected by the strict-subtype check that doesn't
+;; reason about type-vars at all. Test every compound shape so a
+;; future refactor can't silently drop an arm.
+;; -----------------------------------------------------------------------------
+
+(deftest has-type-var-covers-every-compound-shape
+  (let [htv? @#'check/has-type-var?]
+    (testing "leaf cases"
+      (is (htv? 'a))
+      (is (not (htv? :int)))
+      (is (not (htv? :any)))
+      (is (not (htv? nil))))
+    (testing ":map — type-var in key OR value"
+      (is (htv? [:map 'a :int]))
+      (is (htv? [:map :keyword 'b]))
+      (is (not (htv? [:map :keyword :int]))))
+    (testing ":tuple — type-var at any position"
+      (is (htv? [:tuple 'a :int]))
+      (is (htv? [:tuple :int 'b :text]))
+      (is (not (htv? [:tuple :int :text]))))
+    (testing ":refine — type-var in the base"
+      (is (htv? [:refine 'a [:> 0]]))
+      (is (not (htv? [:refine :int [:> 0]]))))
+    (testing ":union — type-var in any member"
+      (is (htv? [:union :null 'a]))
+      (is (htv? [:union 'a :int]))
+      (is (not (htv? [:union :null :int]))))
+    (testing ":list / :fn / record (regression baseline)"
+      (is (htv? [:list 'a]))
+      (is (htv? [:fn {:item 'a} 'b]))
+      (is (htv? {:k 'a}))
+      (is (not (htv? [:list :int])))
+      (is (not (htv? [:fn {:item :int} :bool]))))))
+
+
 (deftest unknown-parent-skips-check
   (testing "non-base-fn parent or unknown parent → no-op"
     ;; :no-such-parent isn't seeded; check returns nil, no throw.
@@ -376,6 +415,40 @@
              :source-line 42})))))
 
 
+(deftest ancestor-source-shown-in-type-error
+  (testing "parent's source-file/line is inlined next to the expected line"
+    (registry/record-rich-types! :greet-loc
+                                 {:args        {:name {:type :text}}
+                                  :return-type :text
+                                  :source-file "packages/greetings/fns.edn"
+                                  :source-line 7})
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"(?s)parent :greet-loc \(packages/greetings/fns\.edn:7\) expects:"
+          (check/check-fn-def!
+            {:name   :bad-greet-loc
+             :parent :greet-loc
+             :args   {:name 123}}))))
+  (testing "ref-binding's actual line carries the ref's source-info too"
+    (registry/record-rich-types! :wants-int
+                                 {:args        {:n {:type :int}}
+                                  :return-type :int
+                                  :source-file "packages/math/fns.edn"
+                                  :source-line 12})
+    (registry/record-rich-types! :gives-text
+                                 {:args        {}
+                                  :return-type :text
+                                  :source-file "packages/strings/fns.edn"
+                                  :source-line 99})
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"(?s)actual:\s+:text \(packages/strings/fns\.edn:99\)"
+          (check/check-fn-def!
+            {:name   :bad-int-via-ref
+             :parent :wants-int
+             :args   {:n :gives-text}})))))
+
+
 (deftest effects-propagate-from-parent
   (testing "fn-def whose parent has :effects inherits the same set"
     (registry/record-rich-types! :do-io
@@ -402,12 +475,41 @@
            (:effects (registry/rich-type-of :env-and-time))))))
 
 
+(deftest effects-union-across-three-mi-parents
+  (testing "MI fn-def with ≥3 parents — child's effects = union of every parent's"
+    (registry/record-rich-types! :mi-eff-db
+                                 {:args {:x {:type :int}}
+                                  :return-type :int
+                                  :effects #{:db}})
+    (registry/record-rich-types! :mi-eff-env
+                                 {:args {:y {:type :int}}
+                                  :return-type :int
+                                  :effects #{:env}})
+    (registry/record-rich-types! :mi-eff-io-network
+                                 {:args {:z {:type :int}}
+                                  :return-type :int
+                                  :effects #{:io :network}})
+    (check/check-fn-def!
+      {:name :mi-effect-triple
+       :parents [:mi-eff-db :mi-eff-env :mi-eff-io-network]
+       :args {:x 1 :y 2 :z 3}})
+    ;; compute-effects taints across the parent chain: child sees
+    ;; every parent's :effects category, unioned. With 3 parents
+    ;; each declaring disjoint effects the child's :effects is the
+    ;; full union — under-declaration via MI is the regression we
+    ;; want pinned.
+    (is (= #{:db :env :io :network}
+           (:effects (registry/rich-type-of :mi-effect-triple))))))
+
+
 (deftest pure-fn-def-stays-pure
-  (testing "pure parent + pure ref ⇒ fn-def has no :effects entry"
+  (testing "pure parent + pure ref ⇒ fn-def carries explicit empty :effects"
     (registry/record-rich-types! :pure-id-2
                                  {:args {:x {:type :int}} :return-type :int})
     (check/check-fn-def! {:name :pure-composed :parent :pure-id-2 :args {:x 7}})
-    (is (nil? (:effects (registry/rich-type-of :pure-composed))))
+    ;; Post-P8: :effects is always stored; pure fns carry an explicit
+    ;; #{} marker rather than relying on key-absence.
+    (is (= #{} (:effects (registry/rich-type-of :pure-composed))))
     (is (false? (registry/effectful-rich-type? (registry/rich-type-of :pure-composed))))))
 
 
@@ -484,13 +586,25 @@
     (is (= #{:env :db} (:effects (registry/rich-type-of :mi-effects))))))
 
 
-(deftest legacy-effectful-bool-normalises-to-effect-set
-  (testing "an EDN-declared `:effectful? true` becomes `:effects #{:effect}`"
+(deftest legacy-effectful-bool-is-ignored
+  ;; `:effectful? true` was a 1-bit legacy flag that normalised to
+  ;; `:effects #{:effect}`. The generic `:effect` category was
+  ;; retired in favour of the six named categories — every effectful
+  ;; base-fn now names its specific category (db / env / io /
+  ;; network / time / random). The legacy boolean is silently
+  ;; dropped: a fn-def using only the deprecated shim now reads as
+  ;; pure (which is the correct outcome — authors must port to a
+  ;; specific category).
+  (testing "an EDN-declared `:effectful? true` is silently dropped"
     (registry/record-rich-types! :legacy-bool
                                  {:args {} :return-type :int :effectful? true})
     (let [info (registry/rich-type-of :legacy-bool)]
-      (is (= #{:effect} (:effects info)))
-      (is (registry/effectful-rich-type? info)))))
+      ;; `:effects` is always recorded as the computed set; legacy
+      ;; `:effectful? true` doesn't add a category, so the set is
+      ;; empty — the correct "computed-pure" representation.
+      (is (= #{} (:effects info))
+          "Empty :effects set — the legacy generic shim was retired.")
+      (is (not (registry/effectful-rich-type? info))))))
 
 
 (deftest source-location-recorded-in-registry
@@ -820,6 +934,102 @@
         ":required true on its own (no value, no ref) is a valid narrowing")))
 
 
+;; -----------------------------------------------------------------------------
+;; :type widening rejection — bindings cannot widen the inherited slot type
+
+(deftest binding-type-override-widening-rejected
+  (testing "{:type :any} on an :int slot is rejected — widening forbidden"
+    (registry/record-rich-types! :wants-int
+                                 {:args {:n {:type :int}}
+                                  :return-type :int})
+    (let [thrown (try
+                   (check/check-fn-def! {:name :widens-n
+                                         :parent :wants-int
+                                         :args {:n {:type :any}}})
+                   (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :bindings/widening-type (:type (ex-data thrown)))
+          "tagged with the dedicated :bindings/widening-type category")
+      (is (re-find #"cannot widen the inherited type" (ex-message thrown))
+          "diagnostic explicitly names the widening direction"))))
+
+
+(deftest binding-type-override-narrowing-accepted
+  (testing "{:type :positive-int} on an :int slot is accepted — narrowing is allowed"
+    (registry/record-rich-types! :wants-int-2
+                                 {:args {:n {:type :int}}
+                                  :return-type :int})
+    (is (some? (check/check-fn-def! {:name :narrows-to-positive
+                                     :parent :wants-int-2
+                                     :args {:n {:type :positive-int}}}))
+        ":positive-int ⊆ :int — valid narrowing")))
+
+
+(deftest binding-type-multi-level-widening-rejected
+  (testing "grandchild can't widen back to :int after parent narrowed to :positive-int"
+    ;; Grandparent has :int slot
+    (registry/record-rich-types! :gp-wants-int
+                                 {:args {:n {:type :int}}
+                                  :return-type :int})
+    ;; Parent narrows to :positive-int — valid
+    (registry/record-rich-types! :p-narrows-positive
+                                 {:args {:n {:type :positive-int}}
+                                  :return-type :int})
+    ;; Grandchild trying to widen :positive-int → :int — invalid.
+    ;; check-binding-monotonicity! compares the child's :type override
+    ;; against its IMMEDIATE parent's resolved slot type, which already
+    ;; reflects the upstream narrowing.
+    (let [thrown (try
+                   (check/check-fn-def! {:name :gc-widens-to-int
+                                         :parent :p-narrows-positive
+                                         :args {:n {:type :int}}})
+                   (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :bindings/widening-type (:type (ex-data thrown)))
+          "widening at the grandchild against the narrowed grandparent → reject")
+      ;; Alias resolution flattens :positive-int to its structural form
+      ;; before comparison, so the diagnostic carries the refine vector.
+      (is (re-find #":refine :int" (ex-message thrown))
+          "diagnostic names the narrower (refinement) type that the override tried to widen"))))
+
+
+(deftest binding-type-widening-via-union-rejected
+  (testing "{:type [:union :int :null]} on an :int slot is rejected — nullability widens"
+    (registry/record-rich-types! :wants-strict-int
+                                 {:args {:n {:type :int}}
+                                  :return-type :int})
+    (let [thrown (try
+                   (check/check-fn-def! {:name :widens-via-union
+                                         :parent :wants-strict-int
+                                         :args {:n {:type [:union :int :null]}}})
+                   (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :bindings/widening-type (:type (ex-data thrown)))
+          "adding :null to a non-null slot is widening, not narrowing"))))
+
+
+(deftest binding-type-narrowing-via-union-accepted
+  (testing "{:type :int} on a [:union :int :null] slot is accepted — null-stripping is narrowing"
+    (registry/record-rich-types! :wants-nullable
+                                 {:args {:n {:type [:union :int :null]}}
+                                  :return-type [:union :int :null]})
+    (is (some? (check/check-fn-def! {:name :strips-null
+                                     :parent :wants-nullable
+                                     :args {:n {:type :int}}}))
+        ":int ⊆ [:union :int :null] — dropping the null branch is narrowing")))
+
+
+(deftest binding-type-override-on-type-var-slot-skipped
+  (testing "type-var slots skip the monotonicity check (unification handles them later)"
+    (registry/record-rich-types! :wants-polymorphic
+                                 {:args {:value {:type 'a}}
+                                  :return-type 'a})
+    ;; Pinning a polymorphic slot to a concrete type is the standard
+    ;; way to instantiate a parametric base-fn — must not be flagged
+    ;; as widening even though 'a ≠ :int by literal comparison.
+    (is (some? (check/check-fn-def! {:name :instantiates-polymorphic
+                                     :parent :wants-polymorphic
+                                     :args {:value {:type :int}}}))
+        "binding {:type :int} on a type-var slot is instantiation, not widening")))
+
+
 (deftest binding-required-false-rejected-under-mi
   (testing "MI fn-def cannot widen to :required false even with multiple parents"
     ;; Two parents, neither knows about :required narrowing — but the
@@ -908,3 +1118,19 @@
     (let [args (:args (registry/rich-type-of :hb-on-coll-slot))]
       (is (contains? args :r-free)
           "a non-HOF ref propagates its free args up to the caller"))))
+
+
+(deftest get-real-path-rejects-missing-record-field-typo
+  ;; :get of a known record with a literal key that isn't a field, and
+  ;; NO :default — a typo. get-return-rule should throw at
+  ;; check-fn-def! time. This exercises the REAL bindings-info path
+  ;; (not the rules_test shim): parent-arg fallback injects a :default
+  ;; entry into bindings-info, so the rule must tell "bound" from
+  ;; "free" to keep typo-detection alive.
+  (testing ":get with a typo'd literal key and no :default is rejected"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"not found in record"
+          (check/check-fn-def!
+            {:name :typo-get :parent :get
+             :args {:coll {:value {:a 1}}
+                    :key {:value :nope}}})))))

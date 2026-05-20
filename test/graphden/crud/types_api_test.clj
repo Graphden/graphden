@@ -83,6 +83,72 @@
 
 
 ;; ============================================================================
+;; project-rich-type-entry — pure projection from in-memory registry shape
+;; to the JSON-safe wire shape served by `/api/types`. Each per-base-fn
+;; type-rule key (the Clojure-fn values that can't survive serialization)
+;; must be replaced by a JSON-safe boolean flag so the editor can detect
+;; "this entry's return-type was rule-computed" without ever seeing the
+;; rule's impl.
+;; ============================================================================
+
+(deftest project-rich-type-entry-test
+  (testing "pure entry with no rule keys passes through unchanged"
+    (let [entry {:return :int :args {:a :int} :effects [] :description "add"}]
+      (is (= entry (ta/project-rich-type-entry entry)))
+      (is (not (contains? (ta/project-rich-type-entry entry)
+                          :has-return-type-rule?)))))
+
+  (testing ":return-type-rule replaced with :has-return-type-rule? true"
+    (let [rule (fn [_ _] :int)
+          projected (ta/project-rich-type-entry
+                      {:return :any :return-type-rule rule})]
+      (is (true? (:has-return-type-rule? projected))
+          "flag is set")
+      (is (not (contains? projected :return-type-rule))
+          "rule fn is stripped — never leaks to JSON")))
+
+  (testing ":slot-types-rule and :nav-types-rule project independently"
+    (let [rule (fn [_ _] :int)
+          projected (ta/project-rich-type-entry
+                      {:return :any
+                       :return-type-rule rule
+                       :slot-types-rule rule
+                       :nav-types-rule rule})]
+      (is (true? (:has-return-type-rule? projected)))
+      (is (true? (:has-slot-types-rule? projected)))
+      (is (true? (:has-nav-types-rule? projected)))
+      (is (not (contains? projected :return-type-rule)))
+      (is (not (contains? projected :slot-types-rule)))
+      (is (not (contains? projected :nav-types-rule)))))
+
+  (testing "every value in the projected entry is JSON-encodable"
+    ;; A future contributor adding a non-encodable side-channel will
+    ;; trip this — the assertion stays naive (no Clojure-fns / instances).
+    (let [projected (ta/project-rich-type-entry
+                      {:return :any
+                       :return-type-rule (fn [_ _] :int)
+                       :slot-types-rule (fn [_ _] :int)
+                       :nav-types-rule (fn [_ _] :int)
+                       :args {:m :any}
+                       :effects []})]
+      (doseq [v (vals projected)]
+        (is (not (fn? v))
+            (str "projected entry should not carry a Clojure fn, got: "
+                 (type v))))))
+
+  (testing "partial rule presence — only the present rules get flagged"
+    (let [rule (fn [_ _] :int)]
+      (is (= {:return :any :has-slot-types-rule? true}
+             (ta/project-rich-type-entry
+               {:return :any :slot-types-rule rule}))
+          "only :slot-types-rule present → only :has-slot-types-rule? flag")
+      (is (= {:return :any :has-nav-types-rule? true}
+             (ta/project-rich-type-entry
+               {:return :any :nav-types-rule rule}))
+          "only :nav-types-rule present → only :has-nav-types-rule? flag"))))
+
+
+;; ============================================================================
 ;; json->type — pure
 ;; ============================================================================
 

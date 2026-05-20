@@ -40,12 +40,14 @@
   {:name :favicon
    :description "GET /favicon.ico — inlined SVG icon, cached for 24 hours."
    :parent :get-route
-   :args {:path "/favicon.ico" :handler :_favicon-handler}}
+   :args {:path "/favicon.ico" :handler :_favicon-handler}
+   :expects-effects #{}}                      ; SVG body is a const; no IO
 
   {:name :editor
    :description "GET / — the graph-editor HTML page."
    :parent :get-route
-   :args {:path "/" :handler :_editor-handler}}
+   :args {:path "/" :handler :_editor-handler}
+   :expects-effects #{:io}}                   ; reads classpath resources (HTML/JS/CSS)
 
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of

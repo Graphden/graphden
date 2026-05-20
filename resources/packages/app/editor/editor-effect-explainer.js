@@ -106,7 +106,6 @@ const EFFECT_DESCRIPTIONS = {
   network: 'Makes outbound HTTP / network calls.',
   time:    'Uses wall-clock time — call returns a different value over time.',
   random:  'Generates random or otherwise non-deterministic values.',
-  effect:  'Has unspecified side effects (legacy generic tag).',
 };
 
 function showEffectExplainer({ effect, anchorEl }) {

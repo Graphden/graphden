@@ -4,7 +4,7 @@
 ;;   - a literal value carried by `:const`
 ;;   - a keyword in arg position is a fn-REFERENCE (not a literal keyword)
 ;;   - a single fn-ref filling a scalar slot
-;;   - the escape for a *literal keyword*: `{:value :kw :literal? true}`
+;;   - the escape for a *literal keyword*: `{:value :kw}`
 ;;
 ;; For mixing literals and fn-refs inside a collection see examples.collections
 ;; (sequence-typed slots accept `[lit ref lit]` directly). For literal keywords
@@ -30,9 +30,9 @@
    :args {:string :ex-greeting}}
 
   {:name :ex-status-keyword
-   :description "Carries the *keyword value* `:ok`. Without `:literal? true` the executor would resolve `:ok` as a fn-ref and fail; the escape `{:value :ok :literal? true}` forces literal interpretation."
+   :description "Carries the *keyword value* `:ok`. The `{:value :ok}` shape is the escape for a literal keyword — a bare `:ok` in arg position would otherwise be parsed as a fn-reference (and fail, since no such fn exists)."
    :parent :const
-   :args {:value {:value :ok :literal? true}}}
+   :args {:value {:value :ok}}}
 
   ;; Three forms of binding a sequence-typed slot:
   ;;   1. inline vector  → items (covered by examples.collections)

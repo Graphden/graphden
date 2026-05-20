@@ -620,4 +620,53 @@
                ;; drift (computed effect not in :expects-effects).
                ;; Over-declaration alone is harmless.
                (when (some (fn [{:keys [drift]}] (seq drift)) drifters)
-                 (System/exit 1)))))))}}}
+                 (System/exit 1)))))))}
+
+  types-drift
+  {:doc "Return-type drift report for a running instance — lists fn-defs whose declared :return-type is strictly wider than the rule-computed return (advisory: declaration may be deliberately wide). Usage: bb types-drift [http://host:port]"
+   :requires ([babashka.http-client :as http]
+              [cheshire.core :as json])
+   :task
+   (let [raw-url (or (first *command-line-args*) "http://localhost:9002")
+         base-url (if (str/ends-with? raw-url "/") (subs raw-url 0 (dec (count raw-url))) raw-url)
+         types-url (str base-url "/api/types")
+         resp (try (http/get types-url {:throw false})
+                   (catch Throwable e {:error (.getMessage e)}))
+         body (when (and (= 200 (:status resp)) (:body resp))
+                (try (json/parse-string (:body resp) true)
+                     (catch Throwable _ nil)))]
+     (println (str cyan "URL: " reset types-url))
+     (cond
+       (nil? body)
+       (do (println (str red "✗ couldn't fetch /api/types: "
+                         (or (:error resp) (:status resp)) reset))
+           (System/exit 2))
+
+       :else
+       (let [drifters (->> body
+                           (keep (fn [[fn-name info]]
+                                   (when-let [d (:return-type-drift info)]
+                                     {:name fn-name
+                                      :declared (:declared d)
+                                      :computed (:computed d)
+                                      :source-file (:source-file info)
+                                      :source-line (:source-line info)})))
+                           (sort-by :name))]
+         (println (str cyan "▶ return-type drift" reset
+                       "  (" (count drifters) " fn-def(s) of " (count body) " total)"))
+         (cond
+           (empty? drifters)
+           (println (str green "✓ no return-type drift" reset))
+           :else
+           (do (doseq [{nm :name :keys [declared computed source-file source-line]}
+                       drifters]
+                 (println (format "  %s" (clojure.core/name nm)))
+                 (println (format "    declared: %s" (pr-str declared)))
+                 (println (format "    computed: %s" (pr-str computed)))
+                 (when source-file
+                   (println (format "    at %s%s" source-file
+                                    (if source-line (str ":" source-line) "")))))
+               ;; Advisory only — exit 0 even on drift. Tighten to
+               ;; exit 1 once authors have cleaned up the existing
+               ;; backlog (per the task spec).
+               (println (str yellow "⚠ advisory — declarations may be deliberately wide" reset)))))))}}}

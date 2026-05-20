@@ -61,7 +61,6 @@
    ```"
   (:require
     [clojure.string :as str]
-    [graphden.schema.fields.types :as ft]
     [malli.core :as m]
     [malli.error :as me]))
 
@@ -416,82 +415,11 @@
 ;; All hardcoded limits are defined here for easy discovery and configuration.
 ;; These are grouped by category and documented with rationale.
 
-;; === Identifier Limits ===
-
-(def max-identifier-length
-  "Maximum length for SQL identifiers (entity names, field names, enum values).
-   Re-exported from field-types for backwards compatibility.
-   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1)."
-  ft/max-identifier-length)
-
-
-(def ^:const max-fn-name-length
-  "Maximum length for function names in fn-registry.
-   Matches PostgreSQL identifier limit for consistency."
-  63)
-
-
-;; === Credential Limits ===
-;; Note: These are also defined in credential_validation.clj for backwards compatibility.
-;; New code should use these directly from config.
-
-(def ^:const max-credential-username-length
-  "Maximum length for database username.
-   Reasonable limit that covers all common database systems."
-  128)
-
-
-(def ^:const max-credential-password-length
-  "Maximum length for database password.
-   1024 allows for long generated passwords and passphrases."
-  1024)
-
-
-(def ^:const max-credential-jdbc-url-length
-  "Maximum length for JDBC connection URLs.
-   Generous limit to handle complex URLs with query parameters."
-  4096)
-
-
-;; === Batch Limits ===
-
-(def ^:const max-sync-batch-size
-  "Maximum definitions in a single sync-defs-to-storage! call.
-   Prevents memory exhaustion from huge batch operations."
-  500)
-
-
-;; === Graph Traversal Limits ===
-
-(def ^:const default-max-dependency-chain-depth
-  "Default maximum depth for dependency chain traversal.
-   Prevents infinite loops in graph resolution."
-  1000)
-
-
-;; === Cache Limits ===
-
-(def ^:const default-cache-max-size
-  "Default maximum entries in result cache.
-   Prevents OOM from unbounded execution graphs."
-  10000)
-
-
-(def ^:const default-cache-warning-threshold
-  "Default threshold for cache size warnings.
-   Logs warning when cache reaches this size."
-  1000)
-
-
-(def ^:const cache-eviction-ratio
-  "Ratio of cache entries to evict when cache is full.
-   0.2 means evict 20% of entries (oldest first)."
-  0.2)
-
-
-;; === Execution Limits ===
-
-(def ^:const warning-threshold-ratio
-  "Ratio of limit at which to log warnings.
-   0.8 means warn at 80% of limit."
-  0.8)
+;; === Limits — canonical sources elsewhere ===
+;; Identifier / fn-name / batch / cache / dependency-chain limits used
+;; to be re-exported (or duplicated) here for "backwards compat" but
+;; had no callers — the live constants live next to their use sites:
+;;   - `max-identifier-length`    → `schema.fields.types`
+;;   - credential-length limits   → `storage.protocol.credential-validation`
+;;   - `default-max-dependency-chain-depth` → `storage.protocol.constraints`
+;; Reach for those namespaces directly.

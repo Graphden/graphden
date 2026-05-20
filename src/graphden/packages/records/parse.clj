@@ -322,9 +322,9 @@
 (defn map-arg-value->binding-fields
   "Map-shaped arg-value branch of `arg-value->binding-fields`. Carries
    every recognised key (`:as`, `:ref`, `:value`, `:type`, `:append`,
-   `:closed`, `:terminal?`, `:literal?`, `:required`) and emits the
-   corresponding binding columns. Falls back to `:value <whole-map>`
-   when none of the recognised keys are present (literal map binding).
+   `:closed`, `:terminal?`, `:required`) and emits the corresponding
+   binding columns. Falls back to `:value <whole-map>` when none of
+   the recognised keys are present (literal map binding).
 
    `:required true` narrows an inherited optional slot to required at
    this level — a one-way ratchet (descendants can't widen back).
@@ -332,7 +332,7 @@
    (widening forbidden); we still pass it through here so the diagnostic
    fires on the actual binding row, not as a silent drop."
   [arg-value name->id]
-  (let [{:keys [as value append closed terminal? literal? required]
+  (let [{:keys [as value append closed terminal? required]
          ref-name :ref type-ref :type} arg-value
         has-required? (contains? arg-value :required)
         override-fn-id (when type-ref
@@ -356,7 +356,7 @@
                                            :list-closed (boolean closed))
                  has-required? (assoc :required (boolean required))
                  (not (or ref-name (contains? arg-value :value) as type-ref
-                          append closed terminal? literal? has-required?))
+                          append closed terminal? has-required?))
                  (assoc :value arg-value))]
     {:fields fields
      :items (vec (when (vector? append) append))}))
@@ -379,7 +379,8 @@
      `{:append [items]}`           → `:list-append true` + items
      `{:as :name}` map             → `:rename-to`
      `{:as :n :type T}`            → rename + `:type-override-fn-id`
-     `{:value v :literal? true}`   → bypass fn-ref resolution
+     `{:value v}`                  → literal `:value` (bypasses
+                                     bare-keyword fn-ref resolution)
      `{:ref :name}`                → `:ref-fn-id`
      `{:terminal? true}`           → `:terminal`
      anything else (incl. literal map) → `:value`"
@@ -410,8 +411,12 @@
      keyword that names a fn       → `:ref-fn-id`
      other value (kw, str, num, …) → literal `:value`
      `{:ref :n}` map               → `:ref-fn-id`
-     `{:value v :literal? true}`   → literal `:value` plus `:literal true`
-     `{:value v}`                  → literal `:value`"
+     `{:value v}`                  → literal `:value`
+
+   The storage `:literal` column stays nil here. CRUD's keyword-
+   wire-restore path (`entities.clj`) is the only writer that sets
+   `:literal true` — there it disambiguates `\":foo\"`-shaped JSON
+   strings (keyword on the wire) from plain text on read-back."
   [item idx owner-binding-id name->id]
   (let [base {:kind :binding-list-item
               :id (ids/binding-list-item-id owner-binding-id idx)
@@ -425,14 +430,13 @@
       (assoc base :ref-fn-id (get name->id item))
 
       (map? item)
-      (let [{:keys [value literal?] ref-name :ref} item]
+      (let [{:keys [value] ref-name :ref} item]
         (cond
           (and ref-name (contains? name->id ref-name))
           (assoc base :ref-fn-id (get name->id ref-name))
 
           (contains? item :value)
-          (cond-> (assoc base :value value)
-            literal? (assoc :literal true))
+          (assoc base :value value)
 
           :else
           (assoc base :value item)))
@@ -490,7 +494,14 @@
         slot (ids/slot-id owner-fn-id owner-arg)
         bid (ids/binding-id own-id slot)
         slot-type (slot-res/slot-type-of owner-name owner-arg defs-by-name)
-        sequence-slot? (= :sequence slot-type)
+        ;; A slot holds a list either via the `:sequence` primitive or
+        ;; a structural `[:list T]` declaration — both make bare-vector
+        ;; bindings sequence content. Mirrors `types.check/sequence-slot?`
+        ;; so the loader and the type-checker agree on which slots are
+        ;; list-shaped.
+        sequence-slot? (or (= :sequence slot-type)
+                           (and (vector? slot-type)
+                                (= :list (first slot-type))))
         {:keys [fields items]} (arg-value->binding-fields arg-value name->id sequence-slot?)
         binding-row (merge blank-binding-row
                            {:id bid :fn-id own-id :slot-id slot}
@@ -586,7 +597,12 @@
              :element-fn-id nil
              :return-type-fn-id nil
              :anonymous-hash nil
-             :constraint (into [:fn] [(or args {}) ret])
+             ;; Canonical 4-element form: 4th = `:any` means "no
+             ;; effect constraint declared" (any callable passes the
+             ;; slot's subtype check). Authors that need a tighter
+             ;; bound write `[:fn {…} ret #{:pure-or-whatever}]`
+             ;; explicitly and parse-fn-type-decl preserves it.
+             :constraint [:fn (or args {}) ret :any]
              :description description}])
          :else             (parse-base-fn fn-def name->id))
        (attach-fn-meta fn-def))))

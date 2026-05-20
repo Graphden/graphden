@@ -14,7 +14,7 @@
 
   {:name :ring-response-shape
    :type {:status :http-status
-          :headers :jsonb
+          :headers [:map :text :text]
           :body :text}}
 
   {:name :jvm-version-shape
@@ -51,20 +51,20 @@
   {:name :_ring-response--w-status
    :parent :assoc
    :args {:map {}
-          :key {:value :status :literal? true}
+          :key {:value :status}
           :value {:as :status :type :http-status}}}
 
   {:name :_ring-response--w-headers
    :parent :assoc
    :args {:map :_ring-response--w-status
-          :key {:value :headers :literal? true}
-          :value {:as :headers :type :jsonb}}}
+          :key {:value :headers}
+          :value {:as :headers :type [:map :text :text]}}}
 
   {:name :ring-response
    :description "Build a Ring response: `{:status :headers :body}`. Free args: `:status` (refined `:http-status`), `:headers` (jsonb, stringified), `:body` (text)."
    :parent :assoc
    :args {:map :_ring-response--w-headers
-          :key {:value :body :literal? true}
+          :key {:value :body}
           :value {:as :body :type :text}}
    :return-type :ring-response-shape}
 
@@ -82,7 +82,7 @@
 
   {:name :to-json-string
    :description "Serialize a Clojure value to a JSON string."
-   :args {:data {:type :any :description "Any JSON-encodable value."}}
+   :args {:data {:type :jsonb :description "Any JSON-encodable value."}}
    :return-type :text}
 
   {:name :parse-json
@@ -141,9 +141,9 @@
    :effects #{:time}}
 
   {:name :env
-   :description "Read an OS environment variable. Returns nil if unset."
+   :description "Read an OS environment variable. Returns nil if the variable is unset, hence the `:nullable-text` (`[:union :null :text]`) return — callers narrow to non-null via `:coalesce` (or an `:if`/`:nil?` guard)."
    :args {:name {:type :text :description "Environment variable name."}}
-   :return-type :text
+   :return-type :nullable-text
    :effects #{:env}}
 
   ;; Construct an ExceptionInfo. Paired with :throw to raise from
@@ -156,14 +156,14 @@
    :return-type :any}
 
   ;; Raise the given exception. Control flow never returns, so the
-  ;; result type is unconstrained — the type-var `'a` lets the consumer
-  ;; pin it to whatever the surrounding context expects (the bottom-type
-  ;; pattern). E.g. `(:if cond :then "ok" :else (:throw …))` infers
-  ;; `:text` because `:throw`'s `'a` unifies with `:then`'s `:text`.
+  ;; result type is `:never` — the bottom type, a subtype of every
+  ;; type. In `(:if cond :then "ok" :else (:throw …))` the union of
+  ;; the branches is `[:union :text :never]`, which `make-union`
+  ;; collapses to `:text` — the throwing branch contributes nothing.
   {:name :throw
-   :description "Raise an exception from graph code. Control flow never returns; `:return-type` is a free type-var so the throwing branch unifies with whatever the surrounding context expects."
+   :description "Raise an exception from graph code. Control flow never returns; `:return-type` is `:never` (the bottom type) so a throwing branch is accepted in any context and vanishes from a branch union."
    :args {:exception {:type :any :description "Exception to raise (typically built via `:ex-info`)."}}
-   :return-type a}
+   :return-type :never}
 
   ;; Look up a classpath resource and slurp it. Returns nil if missing.
   {:name :read-resource-or-nil
@@ -293,9 +293,9 @@
   ;; returns a response).
   {:name :call
    :description "Invoke a fn-graph (hof-wrap'd into a Clojure callable) with one argument. Use when `:func` IS a callable; for already-built Clojure fns use `:invoke`."
-   :args {:func {:type :fn :description "Fn-graph to wrap into a callable."}
-          :arg {:type :any :description "Single argument passed to the callable."}}
-   :return-type :any}
+   :args {:func {:type [:fn {:arg a} b] :description "Fn-graph to wrap into a callable. Single-arg slot; positional unify (the callee's leftover free-arg name is alpha-equivalent)."}
+          :arg {:type a :description "Single argument passed to the callable."}}
+   :return-type b}
 
   ;; Read an InputStream/Reader to string
   {:name :slurp

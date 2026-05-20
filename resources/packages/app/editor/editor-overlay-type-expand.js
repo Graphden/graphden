@@ -18,6 +18,21 @@
 
 const expandedTypePaths = new Set();
 const inlineHostsByPath = new Map();
+
+
+// Close every open inline-expand panel and clear the persistent
+// `expandedTypePaths` Set. Called when a sibling popover (currently
+// the mismatch-explainer) needs to claim the user's focus — keeping
+// two type popovers visible at once shows the same "Resolved via"
+// chain in both places, which the type-system audit flagged as
+// confusing duplication. Mutual dismissal collapses the overlap.
+function hideAllInlineHosts() {
+  for (const host of inlineHostsByPath.values()) {
+    host.style.display = 'none';
+  }
+  expandedTypePaths.clear();
+}
+window.hideAllInlineHosts = hideAllInlineHosts;
 let inlinePositionListenersInstalled = false;
 
 
@@ -111,33 +126,10 @@ function isTypeExpandable(rich) {
   return false;
 }
 
-// Compact chip text for an inline mini-chip — reuses the same shape
-// as the leaf edge-label chip (see compactTypeChipText) but always
-// favours a short visible label, since these chips appear in a
-// dense vertical tree.
-function shortTypeLabel(rich) {
-  if (rich == null) return 'any';
-  if (typeof rich === 'string') return rich;
-  if (Array.isArray(rich)) {
-    const head = rich[0];
-    if (head === 'refine') return shortTypeLabel(rich[1]);
-    if (head === 'list')   return '[' + shortTypeLabel(rich[1]) + ']';
-    if (head === 'union')  return 'union';
-    if (head === 'fn')     return 'fn';
-    if (head === 'map')    return '{' + shortTypeLabel(rich[1]) + '→'
-                                  + shortTypeLabel(rich[2]) + '}';
-    if (head === 'tuple')  return '(' + rich.slice(1).map(shortTypeLabel).join(',')
-                                  + ')';
-    return 'type';
-  }
-  if (typeof rich === 'object') return 'record';
-  return String(rich);
-}
-
 // Render one mini-chip wrapped in a row that may carry a left
 // affordance (field-name / tag) plus a recursive child slot. Returns
 // the row element.
-function buildInlineTypeRow(label, rich, path) {
+function buildInlineTypeRow(label, rich, path, parentAncestors) {
   const row = document.createElement('div');
   row.className = 'type-inline-row';
 
@@ -148,8 +140,26 @@ function buildInlineTypeRow(label, rich, path) {
     row.appendChild(lab);
   }
 
+  // Cycle detection — a self-recursive alias (e.g. `:tree = [:list :tree]`)
+  // would otherwise let the user click-click-click forever. If the
+  // chip's type name is already in the parent expansion chain, render
+  // a non-expandable cycle indicator (`↻ :tree`) instead of an
+  // expandable chip. parentAncestors is a Set<string> threaded
+  // through from renderInlineExpansionInto; missing → empty.
+  const ancestors = parentAncestors || new Set();
+  const richName = (typeof rich === 'string') ? rich : null;
+  const isCycle = !!(richName && ancestors.has(richName));
+
   const chip = document.createElement('span');
   chip.className = 'arg-type-chip arg-type-chip-readonly type-inline-chip';
+  if (isCycle) {
+    chip.classList.add('type-inline-chip-cycle');
+    chip.textContent = '↻ ' + richName;
+    chip.title = 'Recursive type — the chain loops back to :' + richName;
+    chip.setAttribute('aria-label', chip.title);
+    row.appendChild(chip);
+    return row;
+  }
   chip.textContent = shortTypeLabel(rich);
   chip.title = (typeof formatTypeHumanReadable === 'function')
                ? ('Type: ' + formatTypeHumanReadable(rich))
@@ -170,8 +180,15 @@ function buildInlineTypeRow(label, rich, path) {
     chip.style.cursor = 'pointer';
     // For a named child type (e.g. `ring-request-shape`), thread the
     // name through so the recursive panel can show that type's
-    // description in its header.
-    const childCtx = (typeof rich === 'string') ? { typeName: rich } : null;
+    // description in its header. The cycle-detection set extends with
+    // THIS chip's type name when present, so a downstream re-encounter
+    // gets rendered as `↻ :name` instead of expanding endlessly.
+    const childAncestors = richName
+      ? new Set([...ancestors, richName])
+      : ancestors;
+    const childCtx = richName
+      ? { typeName: richName, ancestorTypes: childAncestors }
+      : { ancestorTypes: childAncestors };
     chip.addEventListener('click', (e) => {
       e.stopPropagation();
       const willOpen = !expandedTypePaths.has(path);
@@ -215,6 +232,147 @@ function resolveOneHop(rich) {
   return (sub != null && sub !== rich) ? sub : rich;
 }
 
+
+// Human-readable kind tag for a structural type. Surfaced in the
+// inline-expand panel header so anonymous record vs anonymous map are
+// distinguishable at a glance (both expand into a row list; the body
+// alone doesn't say which is which). Returns null for plain
+// primitives / aliases — those render their name directly, no tag
+// needed.
+function typeKindLabel(rich) {
+  if (rich == null || typeof rich === 'string') return null;
+  if (Array.isArray(rich)) {
+    switch (rich[0]) {
+      case 'map':    return 'Map';
+      case 'list':   return 'List';
+      case 'tuple':  return 'Tuple';
+      case 'fn':     return 'Function';
+      case 'refine': return 'Refinement';
+      case 'union':  return 'Union';
+      default:       return null;
+    }
+  }
+  if (typeof rich === 'object') return 'Record';
+  return null;
+}
+
+
+// Frontend mirror of `graphden.types.core/primitive-supers` — the
+// arithmetic-narrowing hierarchy backend uses for `subtype?`. Only two
+// entries (`:int ⊂ :numeric`, `:float ⊂ :numeric`); the rest of the
+// primitives are leaves. Used to extend the refinement chain past the
+// last `:refine` link so the reader sees `:user-port ⊂ :int ⊂ :numeric`
+// instead of stopping at `:int`.
+const PRIMITIVE_SUPERS = { int: 'numeric', float: 'numeric' };
+
+
+// Walk every `:refine` link in `rich` down to the first non-refinement
+// base, then follow `PRIMITIVE_SUPERS` once if the base is a primitive
+// with a known super. Each link carries the NAMED alias at that step
+// (when present) plus the constraint at that level. The chain is what
+// `subtype?` reasoning actually traverses — surfacing it in the
+// inline-expand panel as a one-line breadcrumb answers "what's this
+// type a subtype of?" at a glance.
+//
+// Returns `{ steps: [{name?, constraint?, rich}, …] }` — the FULL
+// breadcrumb from the original type down to the top primitive. The
+// first step is the original; intermediate steps each carry their
+// `:refine` constraint; the last step (primitive or alias) has no
+// constraint.
+function refinementChain(rich) {
+  const steps = [];
+  let cur = rich;
+  let curName = (typeof rich === 'string') ? rich : null;
+  // First step — the type ITSELF (before any walking). Constraint is
+  // null at this entry; subsequent steps record the constraint of the
+  // refine link that PRODUCED them.
+  steps.push({ name: curName, constraint: null, rich: cur });
+  // Cap the walk so a circular alias can't lock us up.
+  let hops = 0;
+  while (hops < 32) {
+    hops += 1;
+    const resolved = (typeof cur === 'string') ? rcLookupRich(cur) : cur;
+    if (!Array.isArray(resolved) || resolved[0] !== 'refine') break;
+    cur = resolved[1];
+    curName = (typeof cur === 'string') ? cur : null;
+    // Stamp the previous step with the constraint that links it to
+    // this one — the constraint at refinement level N applies to the
+    // value at step N, narrowing it to step N's base.
+    steps[steps.length - 1].constraint = resolved[2];
+    steps.push({ name: curName, constraint: null, rich: cur });
+  }
+  // Extend through one primitive super if applicable (`:int ⊂ :numeric`).
+  if (typeof cur === 'string' && PRIMITIVE_SUPERS[cur]) {
+    steps.push({ name: PRIMITIVE_SUPERS[cur], constraint: null,
+                 rich: PRIMITIVE_SUPERS[cur] });
+  }
+  return { steps };
+}
+
+
+// Render the refinement-chain breadcrumb section. One row showing
+// `:user-port ⊂ :int ⊂ :numeric` joined by `⊂` glyphs; each name is
+// clickable when a named type-row backs it (selects that type-row in
+// the editor). Constraint per step shown as a tooltip on the name's
+// chip so the cumulative narrowing is discoverable without bloating
+// the row width.
+function buildRefinementChainSection(chain, ctx) {
+  const wrap = document.createElement('div');
+  wrap.className = 'type-inline-refinement-chain';
+  const head = document.createElement('div');
+  head.className = 'type-inline-resolution-head';
+  head.textContent = 'Subtype chain';
+  wrap.appendChild(head);
+  const row = document.createElement('div');
+  row.className = 'type-inline-refinement-chain-row';
+  const findFnIdByName = (name) => {
+    if (!name || typeof lookups === 'undefined' || !lookups?.fnByName) return null;
+    const e = lookups.fnByName.get(name);
+    return e?.id || null;
+  };
+  const makeStepEl = (step) => {
+    const name = step.name;
+    const label = name ? (':' + name) : '(anonymous)';
+    const tooltipParts = [name ? ('Type :' + name) : 'Anonymous type'];
+    if (step.constraint != null) {
+      tooltipParts.push('Constraint: ' + constraintToString(step.constraint));
+    }
+    const tooltip = tooltipParts.join(' — ');
+    const id = name ? findFnIdByName(name) : null;
+    if (id && typeof selectFn === 'function') {
+      const a = document.createElement('a');
+      a.href = '#';
+      a.className = 'type-inline-resolution-link';
+      a.textContent = label;
+      a.title = tooltip;
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        selectFn(id);
+      });
+      return a;
+    }
+    const sp = document.createElement('span');
+    sp.className = name
+      ? 'type-inline-resolution-label'
+      : 'type-inline-refinement-chain-anon';
+    sp.textContent = label;
+    sp.title = tooltip;
+    return sp;
+  };
+  chain.steps.forEach((step, idx) => {
+    if (idx > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'type-inline-refinement-chain-sep';
+      sep.textContent = '⊂';
+      row.appendChild(sep);
+    }
+    row.appendChild(makeStepEl(step));
+  });
+  wrap.appendChild(row);
+  return wrap;
+}
+
 // Render an inline expansion into `host`, replacing any previous
 // content. Each call is independent — re-rendering clears + rebuilds.
 // `ctx` (optional): `{ typeName, editable, onEdit, bindingId }` for
@@ -235,6 +393,19 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       name.textContent = c.typeName;
       head.appendChild(name);
     }
+    // Kind tag — `{K→V}` map vs `{a b}` record both expand into a row
+    // list, so the structural reader can't tell them apart by the
+    // expanded body alone. The tag (Map / Record / Refinement / Union
+    // / Tuple / Function) sits in the header next to the name so the
+    // reader knows the structural KIND at a glance, including for
+    // anonymous types with no alias to fall back on.
+    const kindTag = typeKindLabel(resolveOneHop(rich));
+    if (kindTag) {
+      const tag = document.createElement('span');
+      tag.className = 'type-inline-header-kind';
+      tag.textContent = kindTag;
+      head.appendChild(tag);
+    }
     if (c.editable && typeof c.onEdit === 'function') {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -250,6 +421,32 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
         c.onEdit();
       });
       head.appendChild(btn);
+    }
+    // "↳ provenance" link — the inline panel itself is structural-only
+    // (base/constraint, list elem, record fields, fn args/ret/eff). The
+    // 4-tier resolution + inheritance chain lives in the dedicated
+    // provenance popover; this link is the in-panel entry point so a
+    // user reading structure doesn't have to close the panel and hunt
+    // for the `↳` badge on the chip. Renders only when the panel was
+    // opened on a slot-bound arg AND slotTypeProvenance has something
+    // to show (non-null winner).
+    if (c.arg && typeof slotTypeProvenance === 'function'
+        && typeof showProvenancePopover === 'function') {
+      const prov = slotTypeProvenance(c.arg);
+      if (prov?.winner) {
+        const provBtn = document.createElement('button');
+        provBtn.type = 'button';
+        provBtn.className = 'type-inline-header-provenance';
+        provBtn.textContent = '↳ provenance';
+        provBtn.title = 'Show how this slot\'s type was resolved';
+        provBtn.setAttribute('aria-haspopup', 'dialog');
+        provBtn.setAttribute('aria-expanded', 'false');
+        provBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          showProvenancePopover(c.arg, provBtn);
+        });
+        head.appendChild(provBtn);
+      }
     }
     host.appendChild(head);
   }
@@ -276,20 +473,29 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
   if (c.typeName && lookups?.fnMap) {
     appendTypeUsagesSection(host, c.typeName);
   }
-  // "Resolved via" — the 4-tier priority chain that produced this
-  // slot's effective type, winner highlighted. Top-level panel only:
-  // `ctx.arg` is unset on the recursive structural sub-panels.
-  if (c.arg && typeof slotTypeProvenance === 'function') {
-    const prov = slotTypeProvenance(c.arg);
-    if (prov?.winner) appendResolutionSection(host, prov);
-  }
   if (!isTypeExpandable(rich)) return;
   const effective = resolveOneHop(rich);
 
   if (Array.isArray(effective)) {
     const head = effective[0];
     if (head === 'refine') {
-      host.appendChild(buildInlineTypeRow('base', effective[1], path + '/base'));
+      // Refinement chain summary — walks every `:refine` link from
+      // THIS level down to the base primitive, so the reader sees
+      // `:user-port ⊂ :port ⊂ :int` (each link clickable to navigate
+      // to that named type-row) without re-clicking the `base` chip
+      // at every level. Constraints listed inline next to each link
+      // so the cumulative tightening is legible at a glance.
+      const chain = refinementChain(rich);
+      // Show the chain only when it adds info beyond the single
+      // `base / where` row below — at minimum 2 steps means there's a
+      // transition to display.
+      if (chain.steps.length >= 2) {
+        host.appendChild(buildRefinementChainSection(chain, c));
+      }
+      // The structural one-hop rows STAY — they're the click-to-drill
+      // surface (rename / tighten / promote-anonymous) and the
+      // breadcrumb is read-only. Two views, same data.
+      host.appendChild(buildInlineTypeRow('base', effective[1], path + '/base', c.ancestorTypes));
       const consRow = document.createElement('div');
       consRow.className = 'type-inline-row type-inline-constraint';
       const lab = document.createElement('span');
@@ -304,23 +510,23 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       return;
     }
     if (head === 'list') {
-      host.appendChild(buildInlineTypeRow('element', effective[1], path + '/element'));
+      host.appendChild(buildInlineTypeRow('element', effective[1], path + '/element', c.ancestorTypes));
       return;
     }
     if (head === 'map') {
-      host.appendChild(buildInlineTypeRow('key', effective[1], path + '/key'));
-      host.appendChild(buildInlineTypeRow('value', effective[2], path + '/value'));
+      host.appendChild(buildInlineTypeRow('key', effective[1], path + '/key', c.ancestorTypes));
+      host.appendChild(buildInlineTypeRow('value', effective[2], path + '/value', c.ancestorTypes));
       return;
     }
     if (head === 'tuple') {
       effective.slice(1).forEach((el, idx) => {
-        host.appendChild(buildInlineTypeRow('#' + idx, el, path + '/t' + idx));
+        host.appendChild(buildInlineTypeRow('#' + idx, el, path + '/t' + idx, c.ancestorTypes));
       });
       return;
     }
     if (head === 'union') {
       effective.slice(1).forEach((branch, idx) => {
-        host.appendChild(buildInlineTypeRow('', branch, path + '/u' + idx));
+        host.appendChild(buildInlineTypeRow('', branch, path + '/u' + idx, c.ancestorTypes));
       });
       return;
     }
@@ -331,10 +537,16 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       const renameable = !!(c.editable && c.anonymousFnId);
       const argSelects = {};
       let retSelect = null;
-      const currentEff = (effective.length === 4)
-        ? new Set((effective[3] || []).map(e =>
-            typeof e === 'string' ? e.replace(/^:/, '') : String(e)))
-        : null;
+      // Effects slot — 4th element. Post-T4 canonical form is always
+      // 4-elem with either `:any` (string 'any', no constraint) or a
+      // concrete set/array.
+      const effRaw = (effective.length === 4) ? effective[3] : null;
+      const effIsAny = effRaw == null || effRaw === 'any' || effRaw === ':any';
+      const currentEff = (!effIsAny && Array.isArray(effRaw))
+        ? new Set(effRaw.map(e => typeof e === 'string' ? e.replace(/^:/, '') : String(e)))
+        : (!effIsAny && effective.length === 4)
+          ? new Set([])
+          : null;
 
       // Each structural row gets the narrowing select inline next to
       // the chip — that's where the user looks to read the current
@@ -342,7 +554,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       // right beside it. No separate Tighten section listing the
       // same arg-names again.
       Object.entries(argMap).forEach(([k, v]) => {
-        const row = buildInlineTypeRow(k, v, path + '/a/' + k);
+        const row = buildInlineTypeRow(k, v, path + '/a/' + k, c.ancestorTypes);
         if (renameable) {
           // The arg-name label becomes click-to-rename — backed by an
           // in-place PUT on the anonymous fn-row's constraint (the
@@ -368,7 +580,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
       // `→` instead of the word "returns" — the arrow is already the
       // canonical return marker in the compact chip form
       // (`(request)→ring-res…`) and in standard fn-type notation.
-      const retRow = buildInlineTypeRow('→', effective[2], path + '/ret');
+      const retRow = buildInlineTypeRow('→', effective[2], path + '/ret', c.ancestorTypes);
       if (tighten) {
         retSelect = makeInlineNarrowerSelect(effective[2], 'Narrower return type');
         retRow.insertBefore(retSelect, retRow.querySelector('.type-inline-child'));
@@ -392,13 +604,20 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
           errEl,
         });
         host.appendChild(btn);
+      } else if (currentEff != null) {
+        // Read-only callers: always show the slot's effect contract
+        // so a reader knows whether the bound callable must be pure
+        // (#{}) or limited to specific categories — without opening
+        // edit mode. Skipped only when the 4th element is `:any`
+        // (no constraint, the default).
+        host.appendChild(makeEffectsReadOnly(currentEff));
       }
       return;
     }
   }
   if (typeof effective === 'object' && effective !== null) {
     Object.entries(effective).forEach(([k, v]) => {
-      host.appendChild(buildInlineTypeRow(k, v, path + '/f/' + k));
+      host.appendChild(buildInlineTypeRow(k, v, path + '/f/' + k, c.ancestorTypes));
     });
   }
 }
@@ -473,41 +692,6 @@ function appendPromoteAnonymousButton(host, fnId) {
   host.appendChild(wrap);
 }
 
-
-// ---------- "Resolved via" provenance section ----------------------
-
-// Render the 4-tier type-resolution chain from `slotTypeProvenance`.
-// Each tier shows the type it would contribute (`—` when it doesn't
-// apply); the winning tier is marked and highlighted. Mirrors the
-// priority logic in `expectedSlotType`.
-function appendResolutionSection(host, prov) {
-  const section = document.createElement('div');
-  section.className = 'type-inline-resolution';
-  const head = document.createElement('div');
-  head.className = 'type-inline-resolution-head';
-  head.textContent = 'Resolved via';
-  section.appendChild(head);
-  for (const tier of prov.tiers) {
-    const won = tier.key === prov.winner;
-    const row = document.createElement('div');
-    row.className = 'type-inline-resolution-row'
-                  + (won ? ' type-inline-resolution-active' : '');
-    const mark = document.createElement('span');
-    mark.className = 'type-inline-resolution-mark';
-    mark.textContent = won ? '✓' : '·';
-    row.appendChild(mark);
-    const lab = document.createElement('span');
-    lab.className = 'type-inline-resolution-label';
-    lab.textContent = tier.label;
-    row.appendChild(lab);
-    const val = document.createElement('span');
-    val.className = 'type-inline-resolution-type';
-    val.textContent = (tier.type != null) ? shortTypeLabel(tier.type) : '—';
-    row.appendChild(val);
-    section.appendChild(row);
-  }
-  host.appendChild(section);
-}
 
 // ---------- Used-by back-link (one fetch per named type per panel) ----
 
@@ -645,6 +829,37 @@ function makeInlineNarrowerSelect(currentType, ariaLabel) {
   sel.addEventListener('click', (e) => e.stopPropagation());
   return sel;
 }
+
+// Read-only effect-constraint badge row — one line of mini effect
+// chips showing the slot's allowed effect set. Pure (`#{}`) renders
+// as a single "pure" pill; a concrete set renders one chip per
+// category. `:any` callers skip this (no constraint = nothing to
+// show; that's the implicit default).
+function makeEffectsReadOnly(currentEff) {
+  const wrap = document.createElement('div');
+  wrap.className = 'type-inline-effects-readonly';
+  const label = document.createElement('span');
+  label.className = 'type-inline-effects-label';
+  label.textContent = 'eff:';
+  wrap.appendChild(label);
+  if (!currentEff || currentEff.size === 0) {
+    const pill = document.createElement('span');
+    pill.className = 'type-inline-effects-pure';
+    pill.textContent = 'pure';
+    pill.title = 'This slot requires a PURE callable (no side effects).';
+    wrap.appendChild(pill);
+    return wrap;
+  }
+  for (const cat of currentEff) {
+    const chip = document.createElement('span');
+    chip.className = 'effects-chip effects-chip-' + cat;
+    chip.textContent = cat;
+    chip.title = 'Allowed effect: ' + cat;
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
 
 function makeEffectsRow(currentEff) {
   const cats = (typeof EFFECT_CATEGORIES !== 'undefined')
@@ -929,6 +1144,10 @@ function attachInlineExpand(chipEl, rich, path, ctx) {
     else expandedTypePaths.delete(path);
     chipEl.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
     if (willOpen) {
+      // Mutually exclusive with the mismatch-explainer: the inline
+      // panel hosts its own copy of "Resolved via", so showing both
+      // simultaneously duplicates the same provenance chain.
+      if (typeof hideMismatchExplainer === 'function') hideMismatchExplainer();
       const host = ensureInlineHost(path);
       renderInlineExpansionInto(host, rich, path, c);
       positionInlineHost(host, chipEl);

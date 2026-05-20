@@ -115,8 +115,9 @@
 (defn inheritance-chain*
   "Memoised variant of `inheritance-chain`. Reads from / writes through
    `:chain-cache` on the lookups map. Falls back to plain
-   `inheritance-chain` when `:chain-cache` isn't present (legacy callers
-   that hand-built lookups outside `build-lookups`)."
+   `inheritance-chain` when `:chain-cache` isn't present — callers
+   that hand-build a lookups map outside `build-lookups` (e.g. in
+   tests) get correct behaviour without the cache."
   [fn-id {:keys [fn-map chain-cache]}]
   (if chain-cache
     (or (get @chain-cache fn-id)
@@ -131,9 +132,9 @@
    with empty `:parent-ids` — the root that owns the slots. In the new
    model the root is a base-fn (impl-hash set) OR a type-row (record /
    refinement / list / primitive); both have synthesised impls registered
-   under their fn-name. Two-arity form takes raw `fn-map` (legacy);
-   three-arity form takes the full lookups map and benefits from chain
-   caching."
+   under their fn-name. Two-arity form takes raw `fn-map` (used when
+   the caller has no lookups in hand); three-arity form takes the
+   full lookups map and benefits from chain caching."
   ([fn-id fn-map]
    (let [chain (inheritance-chain fn-id fn-map)]
      (some (fn [fid]

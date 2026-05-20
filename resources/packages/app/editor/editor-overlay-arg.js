@@ -122,6 +122,8 @@ function createArgOverlay(node, container) {
       if (chip) {
         row.appendChild(chip);
         attachArgChipExpand(chip, arg, node.id(), { editable: true });
+        const badge = createProvenanceBadge(getTypeNarrowingInfo(arg), arg);
+        if (badge) row.appendChild(badge);
       }
     }
   } else if (inImpl && !signedIn) {
@@ -143,6 +145,8 @@ function createArgOverlay(node, container) {
       if (chip) {
         row.appendChild(chip);
         attachArgChipExpand(chip, arg, node.id(), { editable: false });
+        const badge = createProvenanceBadge(getTypeNarrowingInfo(arg), arg);
+        if (badge) row.appendChild(badge);
       }
     }
   } else if (arg && !inImpl) {
@@ -167,6 +171,8 @@ function createArgOverlay(node, container) {
       if (chip) {
         row.appendChild(chip);
         attachArgChipExpand(chip, arg, node.id(), { editable: false });
+        const badge = createProvenanceBadge(getTypeNarrowingInfo(arg), arg);
+        if (badge) row.appendChild(badge);
       }
     }
   }
@@ -268,9 +274,134 @@ function resolveArgType(arg) {
   return String(arg.type).replace(/^:/, '');
 }
 
+// Inspect the binding behind an arg row to see whether the slot's
+// declared type was narrowed at this binding. Two ways narrowing can
+// happen, both flagged the same way to a reader:
+//
+//   1. EXPLICIT — the binding carries `:type-override-fn-id` that
+//      differs from the slot's own `:type-fn-id`. Author wrote
+//      `{:ref X :type T}` or `{:type T}` in fns.edn and the parser
+//      persisted the override.
+//   2. REF-RETURN — the binding is a ref-binding (no override), but
+//      the bound fn declares a `:return-type-fn-id` more specific
+//      than the slot's `:type-fn-id`. The type-checker accepts it
+//      under subtype rules; the chip surfaces the ref's return-type;
+//      the badge attributes the narrowing to the ref.
+//
+// Returns {narrowed: true, kind, sourceFnName, baseTypeName} or null.
+function getTypeNarrowingInfo(arg) {
+  if (!arg || !lookups) return null;
+  const binding = arg['binding-id']
+    ? lookups.bindingMap?.get(arg['binding-id']) : null;
+  if (!binding) return null;
+  const slot = arg['slot-id'] ? lookups.slotMap?.get(arg['slot-id']) : null;
+  const slotTypeId = slot?.['type-fn-id'];
+  const baseTypeFn = slotTypeId ? lookups.fnMap?.get(slotTypeId) : null;
+
+  // 1. Explicit type-override.
+  const overrideId = binding['type-override-fn-id'];
+  if (overrideId && overrideId !== slotTypeId) {
+    const ownerFn = binding['fn-id'] ? lookups.fnMap?.get(binding['fn-id']) : null;
+    return {
+      narrowed: true,
+      kind: 'override',
+      sourceFnName: ownerFn?.name || '(anonymous)',
+      baseTypeName: baseTypeFn?.name || null,
+    };
+  }
+
+  // 2. Ref-binding whose return-type is more specific than the slot.
+  const refFnId = binding['ref-fn-id'];
+  if (refFnId && !overrideId) {
+    const refFn = lookups.fnMap?.get(refFnId);
+    const refRetId = refFn?.['return-type-fn-id'];
+    if (refRetId && slotTypeId && refRetId !== slotTypeId) {
+      return {
+        narrowed: true,
+        kind: 'ref-return',
+        sourceFnName: refFn?.name || '(anonymous)',
+        baseTypeName: baseTypeFn?.name || null,
+      };
+    }
+  }
+
+  // 3. Transitive: ancestor in the inheritance chain narrowed via a
+  //    type-override, and this descendant didn't re-narrow. The chip
+  //    still shows the narrowed type (resolved via expectedSlotType's
+  //    priority-2 backward-unification or priority-3 ref-return path)
+  //    but the binding-LEVEL narrowing source is an ancestor, not the
+  //    immediate row. Surfaces "inherited from <ancestor>" so a reader
+  //    can trace the constraint without opening the inline-expand
+  //    panel's "Resolved via" chain.
+  if (typeof findBindingOverrideChain === 'function' && arg['fn-id'] && arg['slot-id']) {
+    const chain = findBindingOverrideChain(arg['fn-id'], arg['slot-id']);
+    const inherited = chain.find((entry) => entry.fnId !== arg['fn-id']);
+    if (inherited && inherited.overrideFnId !== slotTypeId) {
+      return {
+        narrowed: true,
+        kind: 'inherited',
+        sourceFnName: inherited.fnName || '(anonymous)',
+        baseTypeName: baseTypeFn?.name || null,
+      };
+    }
+  }
+  return null;
+}
+
+
+// Small `↳` badge appended after a type-chip when the slot's type was
+// narrowed at this binding. Answers "where did this constraint come
+// from?" — hover shows the immediate narrowing source as a tooltip;
+// click opens the provenance popover with the FULL narrowing chain
+// (every ancestor that contributed an override + the 4-tier resolution
+// + clickable navigation to each source fn).
+function createProvenanceBadge(narrowingInfo, arg) {
+  if (!narrowingInfo || !narrowingInfo.narrowed) return null;
+  const badge = document.createElement('button');
+  badge.type = 'button';
+  badge.className = 'arg-type-provenance';
+  badge.textContent = '↳';
+  const baseHint = narrowingInfo.baseTypeName
+    ? ' (narrowed from :' + narrowingInfo.baseTypeName + ')'
+    : '';
+  // The verb differs by narrowing kind: an explicit override is
+  // "narrowed AT" the fn that pinned it; a ref-binding is "narrowed BY"
+  // the fn whose typed return surfaced through; an inherited override
+  // is "inherited from" the ancestor that holds it. All three attribute
+  // the source by name.
+  const verb = narrowingInfo.kind === 'ref-return'
+    ? 'Narrowed by ref :'
+    : narrowingInfo.kind === 'inherited'
+      ? 'Inherited narrowing from :'
+      : 'Narrowed at :';
+  badge.title = verb + narrowingInfo.sourceFnName + baseHint
+              + ' — click for full chain';
+  badge.setAttribute('aria-label', badge.title);
+  // Disclosure button — the provenance popover is anchored to and
+  // controlled by this trigger. Starts closed; flipped to "true" by
+  // `attachAndShow` in editor-provenance-popover.js when the popover
+  // becomes visible, back to "false" by `hideProvenancePopover`.
+  badge.setAttribute('aria-expanded', 'false');
+  badge.setAttribute('aria-haspopup', 'dialog');
+  badge.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof showProvenancePopover === 'function' && arg) {
+      showProvenancePopover(arg, badge);
+    }
+  });
+  return badge;
+}
+
+
 // Compact button styled like the description-i and ↗ glyphs but
 // wider (text label fits "timestamptz" at ~9px). Click →
 // enterArgTypeEditMode when editable; pure label when readOnly.
+//
+// Refinements render as a stacked two-line chip — base type on top,
+// constraint below at smaller weight — so the visual answers "this is
+// a SUBTYPE of <base>, narrowed by <constraint>" without forcing the
+// user to read the constraint syntax `int (> 0)` as a single phrase.
 function createTypeChip(arg, options) {
   const readOnly = !!(options?.readOnly)
                 || typeof enterArgTypeEditMode !== 'function';
@@ -288,7 +419,69 @@ function createTypeChip(arg, options) {
   const display = compactTypeChipText(richType, flatType);
   const chip = document.createElement('span');
   chip.className = 'arg-type-chip' + (readOnly ? ' arg-type-chip-readonly' : '');
-  chip.textContent = display;
+  // Refinement stacking — two paths reach here:
+  //   1. richType is the structural form ['refine', base, constraint]
+  //      (anonymous refinement on the slot, no alias).
+  //   2. richType is a string alias ('positive-int', 'non-negative-int')
+  //      whose rich-types entry has a refine-shaped :return. Looking
+  //      up the alias gives us the constraint to surface; the chip's
+  //      top line stays the alias name (more informative than the
+  //      base type).
+  const refineStruct = Array.isArray(richType) && richType[0] === 'refine'
+    ? richType
+    : resolveRefinementAlias(richType);
+  const refineConstraint = refinementConstraintText(refineStruct);
+  if (refineConstraint) {
+    chip.classList.add('arg-type-chip-refine');
+    const base = document.createElement('span');
+    base.className = 'arg-type-chip-refine-base';
+    base.textContent = display;
+    chip.appendChild(base);
+    const constraint = document.createElement('span');
+    constraint.className = 'arg-type-chip-refine-constraint';
+    constraint.textContent = refineConstraint;
+    // Hover-title on the constraint span — natural-language form of
+    // the refinement (e.g. "positive integer" / "integer where >= 1024
+    // and <= 65535"). Lets the reader translate `(≥ 1024) (≤ 65535)`
+    // without leaving the chip. The chip's outer title still carries
+    // the compact rich-type form (`:int (> 0)`) for the rest of the
+    // hover surface.
+    if (refineStruct && typeof formatTypeHumanReadable === 'function') {
+      constraint.title = formatTypeHumanReadable(refineStruct);
+    }
+    chip.appendChild(constraint);
+  } else {
+    chip.textContent = display;
+  }
+  // Inline subtype-of line for binding-level narrowing — when the
+  // slot's declared base differs from what's displayed (because an
+  // override or an inherited binding narrowed it), append a small
+  // `< :base` line so the relationship is visible without opening
+  // the inline-expand panel or hovering the `↳` badge. Skipped for
+  // refinement-stacked chips (the refinement chain panel already
+  // exposes the base via `:positive-int ⊂ :int`), for chips where
+  // the base equals the displayed text, and when the narrowing
+  // info isn't available (read-only arg-overlay without binding).
+  if (!refineConstraint && typeof getTypeNarrowingInfo === 'function') {
+    const narrow = getTypeNarrowingInfo(arg);
+    if (narrow && narrow.baseTypeName && narrow.baseTypeName !== display) {
+      chip.classList.add('arg-type-chip-narrowed');
+      const subOf = document.createElement('span');
+      subOf.className = 'arg-type-chip-narrowed-base';
+      subOf.textContent = '< :' + narrow.baseTypeName;
+      // Verb mirrors the `↳` badge tooltip so the inline line and the
+      // badge tell the same story — useful when only one is visible at
+      // a given zoom (overlay clip on narrow cards).
+      const verb = narrow.kind === 'ref-return'
+        ? 'narrowed by ref :'
+        : narrow.kind === 'inherited'
+          ? 'inherited narrowing from :'
+          : 'narrowed at :';
+      subOf.title = 'subtype of :' + narrow.baseTypeName
+                  + ' — ' + verb + (narrow.sourceFnName || '(anonymous)');
+      chip.appendChild(subOf);
+    }
+  }
   // Hover-title shows the FULL rich type if any. The visible text
   // already prefers the rich form so this is just for cases where
   // the compact rendering elided detail.

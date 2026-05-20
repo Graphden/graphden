@@ -247,8 +247,8 @@
   "Literal field-keyword a sequence-path segment addresses, or nil
    when the segment is dynamic (a fn-ref / computed value) and can't
    be statically checked. Sequence-item bindings carry literal keys
-   as `{:value :k :literal? true}` maps — a BARE keyword in a sequence
-   position is a fn-ref, hence dynamic."
+   as `{:value :k}` maps — a BARE keyword in a sequence position is
+   auto-resolved as a fn-ref, hence dynamic."
   [seg]
   (cond
     (and (map? seg) (contains? seg :value))
@@ -331,8 +331,27 @@
   [bindings-info default-ret]
   (let [coll-type (get-in bindings-info [:coll :type])
         k-value   (get-in bindings-info [:key :value])
-        field-kw  (field-keyword-from-literal k-value)]
+        field-kw  (field-keyword-from-literal k-value)
+        dflt      (get bindings-info :default)
+        ;; `:default` is genuinely BOUND only when its entry carries a
+        ;; value or a ref. Parent-arg fallback injects a bare
+        ;; `{:type T :value nil}` entry for every `:get` child, so
+        ;; `(contains? bindings-info :default)` is ALWAYS true and
+        ;; can't tell "bound" from "free" — using it silently killed
+        ;; the missing-field typo throw below.
+        default-bound? (boolean (and dflt
+                                     (or (some? (:value dflt))
+                                         (some? (:ref dflt)))))]
     (cond
+      ;; Homogeneous map — no fixed fields, so key presence is
+      ;; unknowable at sync time: a lookup is value-or-default, or
+      ;; value-or-nil when no default is bound.
+      (types/map-type? coll-type)
+      (let [v (types/map-val coll-type)]
+        (if default-bound?
+          (types/make-union [v (or (:type dflt) :any)])
+          (types/make-union [:null v])))
+
       (nil? field-kw) default-ret
 
       (and (types/record-type? coll-type) (contains? coll-type field-kw))
@@ -341,9 +360,8 @@
       ;; Field missing from a KNOWN record BUT `:default` is bound —
       ;; absence is explicitly handled, so the lookup is intentional,
       ;; not a typo. The result is unconditionally the default's type.
-      (and (types/record-type? coll-type)
-           (contains? bindings-info :default))
-      (or (get-in bindings-info [:default :type]) default-ret)
+      (and (types/record-type? coll-type) default-bound?)
+      (or (:type dflt) default-ret)
 
       ;; Field literally missing from a KNOWN record, no `:default`.
       ;; The user wrote a literal key that doesn't exist in the
@@ -369,20 +387,21 @@
 ;; on key collisions (matches clojure.core/merge semantics).
 ;; `:elem-types` carries the per-item types when `:maps` is bound to a
 ;; literal vector of refs/values; if every item is a record we can
-;; rebuild the exact merged shape. Falls back to whatever the sequence
-;; lub gave us when any item isn't a known record.
+;; rebuild the exact merged shape. Otherwise falls through to the
+;; declared return — `[:map :any :any]` — because we don't track
+;; per-key narrowing on heterogeneous merges. (The previous fallback
+;; `(or maps-type default-ret)` returned `[:list T]` — the slot's own
+;; type — which is structurally wrong: `:merge` produces a map, never
+;; a list.)
 
 (defn merge-return-rule
   [bindings-info default-ret]
-  (let [elem-types (get-in bindings-info [:maps :elem-types])
-        maps-type  (get-in bindings-info [:maps :type])]
-    (cond
-      (and (sequential? elem-types)
-           (seq elem-types)
-           (every? types/record-type? elem-types))
+  (let [elem-types (get-in bindings-info [:maps :elem-types])]
+    (if (and (sequential? elem-types)
+             (seq elem-types)
+             (every? types/record-type? elem-types))
       (reduce merge {} elem-types)
-
-      :else (or maps-type default-ret))))
+      default-ret)))
 
 
 ;; --- :update-in / :merge-in -------------------------------------------------
@@ -492,10 +511,12 @@
   (or (list-of-arg b :coll) d))
 
 
-;; :first lifts the elem-type out of `:coll`.
+;; :first lifts `:coll`'s elem-type — but an empty / nil list yields
+;; nil, so the result is `[:union :null T]`, not bare `T`.
 (defn first-return-rule
   [b d]
-  (or (list-elem-of-arg b :coll) d))
+  (let [t (list-elem-of-arg b :coll)]
+    (if t (types/make-union [:null t]) d)))
 
 
 (defn rest-return-rule     [b d] (preserve-coll-list b d))
@@ -517,13 +538,19 @@
 (defn keys-return-rule
   [b d]
   (let [m-type (get-in b [:map :type])]
-    (if (types/record-type? m-type) [:list :keyword] d)))
+    (cond
+      (types/record-type? m-type) [:list :keyword]
+      (types/map-type? m-type)    [:list (types/map-key m-type)]
+      :else                       d)))
 
 
 (defn vals-return-rule
   [b d]
   (let [m-type (get-in b [:map :type])]
-    (if (types/record-type? m-type) [:list (types/coarse-lub (vals m-type))] d)))
+    (cond
+      (types/record-type? m-type) [:list (types/coarse-lub (vals m-type))]
+      (types/map-type? m-type)    [:list (types/map-val m-type)]
+      :else                       d)))
 
 
 ;; --- :concat ----------------------------------------------------------------
@@ -617,6 +644,11 @@
     (if (and (sequential? path-val)
              (every? #(or (keyword? %) (string? %)) path-val)
              (seq path-val))
+      ;; `[:map K V]` intermediates / leaves preserve their shape:
+      ;; `(assoc-in [:map K V] [k] v)` is still `[:map K V]` (homogeneous
+      ;; map, we don't track per-key widening). A missing intermediate
+      ;; in a map is nil-safe at runtime (`(assoc-in nil [k] v)` builds
+      ;; a fresh `{k v}`), so the result is non-null either way.
       (letfn [(set-deep
                 [t segs]
                 (let [k (field-keyword-from-literal (first segs))
@@ -626,16 +658,19 @@
                     (empty? rest-segs)
                     (cond
                       (types/record-type? t) (assoc t k (or v-type :any))
+                      (types/map-type? t)    t
                       (or (= t :any) (= t :jsonb) (nil? t))
                       {k (or v-type :any)}
                       :else nil)
                     :else
                     (let [child (cond (types/record-type? t) (get t k :any)
-                                      :else :any)
+                                      (types/map-type? t)    (types/map-val t)
+                                      :else                  :any)
                           updated-child (set-deep child rest-segs)]
                       (when updated-child
                         (cond
                           (types/record-type? t) (assoc t k updated-child)
+                          (types/map-type? t)    t
                           :else                  {k updated-child}))))))]
         (or (set-deep m-type path-val) default-ret))
       default-ret)))
@@ -658,14 +693,26 @@
         path-val  (get-in bindings-info [:path :value])]
     (if (and (sequential? path-val)
              (every? #(or (keyword? %) (string? %)) path-val))
-      (loop [t m-type, segs path-val]
+      ;; `nullable?` becomes true once the walk traverses a
+      ;; `[:map K V]` intermediate — the key MAY be absent there, so
+      ;; the final result is `[:union :null T]`. Records (closed,
+      ;; total) keep nullability false; navigating off a known record
+      ;; (missing field) falls through to default — the typo path
+      ;; the per-record rule already exercises.
+      (loop [t m-type, segs path-val, nullable? false]
         (cond
-          (empty? segs) t
+          (empty? segs)
+          (if nullable? (types/make-union [:null t]) t)
+
           (types/record-type? t)
           (let [k (field-keyword-from-literal (first segs))]
             (if (and k (contains? t k))
-              (recur (get t k) (rest segs))
+              (recur (get t k) (rest segs) nullable?)
               default-ret))
+
+          (types/map-type? t)
+          (recur (types/map-val t) (rest segs) true)
+
           :else default-ret))
       default-ret)))
 

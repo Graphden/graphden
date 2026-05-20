@@ -24,20 +24,29 @@
   ;; =============================================================================
 
   {:name :_parse-layout-request-shape
-   :description "Output of `:_parse-layout-request` — the layout root and the per-fn expansion-level map."
-   :type {:root-id :uuid :expansions :jsonb}}
+   :description "Output of `:_parse-layout-request` — the layout root and the per-fn expansion-level map keyed by cytoscape node-id."
+   :type {:root-id :uuid :expansions [:map :text :any]}}
 
   {:name :_graph-snapshot-shape
-   :description "Output of `:_load-graph-cached` — every fn / slot / fn-slot / binding / list-item row plus the derived `:args` slot views."
-   :type {:fns :jsonb :slots :jsonb :fn-slots :jsonb :bindings :jsonb :list-items :jsonb :args :jsonb}}
+   :description "Output of `:_load-graph-cached` — every fn / slot / fn-slot / binding / list-item row plus the derived `:args` slot views. Each list element is one entity record (heterogeneous columns → `:jsonb`)."
+   :type {:fns         [:list :jsonb]
+          :slots       [:list :jsonb]
+          :fn-slots    [:list :jsonb]
+          :bindings    [:list :jsonb]
+          :list-items  [:list :jsonb]
+          :args        [:list :jsonb]}}
 
   {:name :_layout-elements-shape
-   :description "Output of `:_layout-build-elements` — the cytoscape node / edge lists before grid placement."
-   :type {:nodes :jsonb :edges :jsonb}}
+   :description "Output of `:_layout-build-elements` — the cytoscape node / edge lists (each element a `{:data … :position?}` map) before grid placement."
+   :type {:nodes [:list :jsonb]
+          :edges [:list :jsonb]}}
 
   {:name :_layout-response-shape
-   :description "Output of `:_layout-place` — the full layout response: placed nodes / edges plus grid positions and validation."
-   :type {:nodes :jsonb :edges :jsonb :grid-pos :jsonb :validation :jsonb}}
+   :description "Output of `:_layout-place` — the full layout response: placed nodes / edges plus a node-id → position map and validation summary."
+   :type {:nodes      [:list :jsonb]
+          :edges      [:list :jsonb]
+          :grid-pos   [:map :text :jsonb]
+          :validation :jsonb}}
 
   ;; =============================================================================
   ;; BASE-FNS: layout pipeline primitives

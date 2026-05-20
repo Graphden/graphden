@@ -116,12 +116,12 @@
   {:name :constantly
    :description "Return `:value` unchanged regardless of input (Clojure's `constantly`). Shaped as a HOF callable."
    :args {:value {:type a :description "Constant value to return."}
-          :_item {:type :any :required false :description "Ignored input slot — present so the fn-graph satisfies a HOF callable signature."}}
+          :_item {:type b :required false :description "Ignored input slot — present so the fn-graph satisfies a HOF callable signature."}}
    :return-type a}
 
   {:name :comp
    :description "Right-to-left composition of functions/transducers (Clojure's `comp`)."
-   :args {:functions {:type :sequence :of :any :description "Callables; rightmost is applied first. Each item may be a literal callable or a fn-ref."}}
+   :args {:functions {:type [:list :any] :description "Callables; rightmost is applied first. Each item may be a literal callable or a fn-ref."}}
    :return-type :any}
 
   {:name :transduce

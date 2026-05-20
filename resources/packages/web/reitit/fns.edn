@@ -46,7 +46,7 @@
                                         :description "Response served when the path matches but the method doesn't."}
           :not-acceptable-response     {:type :ring-response-shape
                                         :description "Response served when no per-method handler is configured for a matched path (reitit's `:not-acceptable` slot)."}}
-   :return-type :fn}
+   :return-type [:fn {:request :ring-request-shape} :ring-response-shape]}
 
   ;; Compose a compiled reitit router and a default handler into the
   ;; final Ring callable that http-kit invokes per request.
@@ -75,8 +75,8 @@
   ;; the chain (it just runs `:invoke` over those two free args).
   {:name :middleware
    :description "Build a reitit middleware spec. `:body` is a Ring-shaped fn-graph with two leftover free args (`:request` and `:next-handler`) — the executor map-callable-wraps it. Inside the body, use `:proceed` to delegate to the next link."
-   :args {:name {:type :any :description "Identifier (keyword or string) shown in reitit's middleware chain log."}
-          :body {:type :fn :description "Ring-shaped fn-graph; receives `:request` and `:next-handler` as free args."}}
+   :args {:name {:type [:union :keyword :text] :description "Identifier (keyword or string) shown in reitit's middleware chain log."}
+          :body {:type [:fn {:request :ring-request-shape :next-handler :any} :ring-response-shape] :description "Ring-shaped fn-graph; receives `:request` and `:next-handler` as free args (2-arg map-callable). Names are load-bearing — they're how `hof-wrap` routes the inputs. `:next-handler` stays `:any` because the value flows through opaquely (reitit-supplied callable)."}}
    :return-type :jsonb}
 
   ;; Delegate to the next handler in the middleware chain. Replaces

@@ -119,6 +119,24 @@ function createEdgeLabelOverlay(edge, container) {
       } else {
         overlay.appendChild(leafChip);
       }
+      // T9 — provenance ↳ badge when this edge's binding narrows the
+      // slot's inherited type. Lives on the edge-label overlay (the
+      // arg's primary surface) so the user sees the narrowing source
+      // inline without expanding the chip.
+      if (typeof getTypeNarrowingInfo === 'function'
+          && typeof createProvenanceBadge === 'function') {
+        const badge = createProvenanceBadge(getTypeNarrowingInfo(editArg), editArg);
+        if (badge) {
+          if (isSequenceItem) {
+            // Drop the badge AFTER the bracket-wrapped chip so the
+            // brackets still read as "[type]" and the ↳ sits to the
+            // right of the closing bracket.
+            overlay.appendChild(badge);
+          } else {
+            overlay.appendChild(badge);
+          }
+        }
+      }
     }
   }
 

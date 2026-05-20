@@ -176,9 +176,12 @@
    shape.
 
    `:effects` is recorded straight from the fn-def as a set of keyword
-   tags. `:effectful? true` legacy boolean normalises to `#{:effect}`.
-   `:description` is propagated so the editor's inline-expand panel
-   can surface a human-readable hint without a separate API call.
+   tags (`:db` / `:env` / `:io` / `:network` / `:time` / `:random`).
+   The legacy generic `:effectful? true` boolean / `:effect` tag have
+   been retired — every base-fn that produces side effects names a
+   specific category. `:description` is propagated so the editor's
+   inline-expand panel can surface a human-readable hint without a
+   separate API call.
 
    `:return-type-rule` / `:slot-types-rule` / `:nav-types-rule` —
    per-base-fn type-rules declared at the base-fn's `impls.clj`
@@ -192,26 +195,47 @@
                       (map (fn [[arg-name arg-spec]]
                              [arg-name (or (arg-spec->rich-type arg-name arg-spec) :any)]))
                       args)
-        effects (cond
-                  (:effects fn-def)    (set (:effects fn-def))
-                  (:effectful? fn-def) #{:effect}
-                  :else                #{})
+        effects (set (:effects fn-def))
         desc (:description fn-def)]
     (swap! rich-types-registry assoc fn-name
            (cond-> {:return (or ret :any)
-                    :args   per-arg}
-             (seq effects)              (assoc :effects effects)
+                    :args   per-arg
+                    ;; Always store the computed set, even when empty.
+                    ;; compute-effects is total — every fn has a known
+                    ;; set, possibly #{} (pure). Gating on (seq effects)
+                    ;; collapsed "computed pure" and "no info recorded"
+                    ;; into one absent-key state, which forced every
+                    ;; consumer downstream to write (or (:effects info)
+                    ;; #{}) to recover the pure case. Storing #{}
+                    ;; explicitly drops the asymmetry.
+                    :effects effects}
              (and desc (seq desc))      (assoc :description desc)
              (:return-type-rule fn-def) (assoc :return-type-rule
                                                (:return-type-rule fn-def))
              (:slot-types-rule fn-def)  (assoc :slot-types-rule
                                                (:slot-types-rule fn-def))
              (:nav-types-rule fn-def)   (assoc :nav-types-rule
-                                               (:nav-types-rule fn-def))))))
+                                               (:nav-types-rule fn-def))
+             ;; `:lazy-seq-args` — slot names the executor resolves to
+             ;; delay-wrapped seq items; read by `compile/bindings` to
+             ;; tag the binding so a consumer like `:cond` short-circuits.
+             (:lazy-seq-args fn-def)    (assoc :lazy-seq-args
+                                               (:lazy-seq-args fn-def))
+             ;; `:source-file` / `:source-line` — origin of the EDN entry
+             ;; (tools.reader meta). Stored alongside the rich-type so
+             ;; type-error messages can point at the fn that introduced
+             ;; the offending constraint.
+             (:source-file fn-def)      (assoc :source-file
+                                               (:source-file fn-def))
+             (:source-line fn-def)      (assoc :source-line
+                                               (:source-line fn-def))))))
 
 
 (defn effectful-rich-type?
-  "True iff the entry mentions any effect tag."
+  "True iff the entry's computed effect-set is non-empty. `:effects` is
+   always present after record-rich-types! (a pure fn carries `#{}`),
+   so `seq` distinguishes pure (`#{}` → falsy) from effectful (any set
+   with members → truthy)."
   [info]
   (boolean (seq (:effects info))))
 
@@ -219,9 +243,15 @@
 (defn record-rich-types-raw!
   "Stash a pre-computed `{:return … :args …}` map directly. Used by the
    type-checker for composed fn-defs whose computed types come from
-   unification."
+   unification.
+
+   Mirrors `record-rich-types!`'s P8 invariant — `:effects` is always
+   present, defaulting to `#{}` (computed-pure) when the caller omits
+   it. Keeps downstream consumers (`assemble-fn-type`, `effects-
+   compatible?`) free of `(or … #{})` fallbacks for raw entries too."
   [fn-name rich-type-map]
-  (swap! rich-types-registry assoc fn-name rich-type-map))
+  (swap! rich-types-registry assoc fn-name
+         (update rich-type-map :effects #(or % #{}))))
 
 
 (defn rich-type-of

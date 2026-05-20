@@ -37,11 +37,18 @@
 
   {:name :ring-request-shape
    :description "Structural shape of an inbound Ring HTTP request map."
+   ;; `:headers` is `[:map :text :text]` (lowercased string keys / string
+   ;; values, per http-kit). `:body` is the canonical Ring body union —
+   ;; nil for missing, raw `:input-stream` straight from http-kit,
+   ;; pre-slurped `:text` for middlewares that stringify, parsed `:jsonb`
+   ;; for middlewares that decode JSON eagerly. Downstream extractors
+   ;; (`:ring-body-input-stream`, `:slurp`, `:parse-json-body`) consume
+   ;; one branch of the union per call site.
    :type {:request-method :keyword
           :uri            :text
           :query-string   :text
-          :headers        :jsonb
-          :body           :any}}
+          :headers        [:map :text :text]
+          :body           [:union :null :input-stream :text :jsonb]}}
 
   {:name :security-headers-shape
    :description "Default security response headers — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`. Keyword-keyed throughout the fn-graph (record-types in graphden are keyword-keyed); the `:http-server` adapter stringifies header keys once on the way to http-kit."
@@ -99,7 +106,6 @@
   {:name :ring-headers
    :description "Header map from the Ring request — string keys, lower-cased per Ring convention."
    :parent :ring-request-field
-   :return-type :jsonb
    :args {:key {:value :headers}}}
 
   {:name :ring-body-input-stream
@@ -114,27 +120,27 @@
   {:name :ring-method-entry
    :description "`[:request-method <method>]` entry for the internal-request map."
    :parent :list
-   :args {:items [{:value :request-method :literal? true} :ring-method]}}
+   :args {:items [{:value :request-method} :ring-method]}}
 
   {:name :ring-uri-entry
    :description "`[:uri <path>]` entry for the internal-request map."
    :parent :list
-   :args {:items [{:value :uri :literal? true} :ring-uri]}}
+   :args {:items [{:value :uri} :ring-uri]}}
 
   {:name :ring-query-string-entry
    :description "`[:query-string <qs>]` entry for the internal-request map."
    :parent :list
-   :args {:items [{:value :query-string :literal? true} :ring-query-string]}}
+   :args {:items [{:value :query-string} :ring-query-string]}}
 
   {:name :ring-headers-entry
    :description "`[:headers <headers>]` entry for the internal-request map."
    :parent :list
-   :args {:items [{:value :headers :literal? true} :ring-headers]}}
+   :args {:items [{:value :headers} :ring-headers]}}
 
   {:name :ring-body-entry
    :description "`[:body <input-stream>]` entry for the internal-request map. We pass the raw httpkit InputStream straight through (NOT pre-slurped via `:ring-body`) — slurping at this layer would consume the body before it reaches a handler that lives below an `:auth-required-middleware`, leaving downstream `(:body request)` reads with an empty string. Handlers slurp on demand via the `slurp-body` helper or pass directly to `json/parse-string` (which accepts InputStream)."
    :parent :list
-   :args {:items [{:value :body :literal? true} :ring-body-input-stream]}}
+   :args {:items [{:value :body} :ring-body-input-stream]}}
 
   {:name :internal-request
    :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`. Author-declared `:return-type :ring-request-shape` deferred — `:pairs->map`'s rule has no static field reconstruction yet, so the type-checker can't prove the computed return is a record."
@@ -183,7 +189,7 @@
    :parent :merge-in
    :return-type :ring-response-shape
    :args {:m        :router-result
-          :path     [{:value :headers :literal? true}]
+          :path     [{:value :headers}]
           :defaults :default-security-headers}}
 
   ;; =============================================================================
@@ -218,7 +224,7 @@
   {:name :authorization-header
    :description "Raw `Authorization` header from the request (nil when absent)."
    :parent :get
-   :args {:coll {:ref :ring-headers :type :jsonb} :key "authorization"}}
+   :args {:coll :ring-headers :key "authorization"}}
 
   {:name :has-bearer-prefix?
    :description "True iff the `Authorization` header starts with `\"Bearer \"`. Nil-safe — false for missing header."

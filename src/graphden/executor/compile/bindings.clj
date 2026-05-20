@@ -155,14 +155,26 @@
       (types/fn-type? (:return info)))))
 
 
+(defn- lazy-seq-arg-names
+  "Set of slot base-names the root base-fn of `fn-id` declared in its
+   `:lazy-seq-args` — those `:seq` slots resolve to delay-wrapped
+   elements (`compile/resolve-seq-thunks`) so a consumer like `cond-fn`
+   can step past an un-taken element without executing it. Declared
+   once at the base-fn's `impls.clj` registration site and read here
+   by base-fn identity — never by name-dispatch."
+  [fn-id {:keys [fn-map] :as lookups}]
+  (when-let [root-name (some-> (l/root-fn fn-id fn-map lookups) :name keyword)]
+    (some-> (@rich-type-of-fn root-name) :lazy-seq-args set)))
+
+
 (defn- classify-slot
   "Classify one root slot. Returns one of:
      {:kind :value :base-name K :ext-name K :value V}
      {:kind :ref   :base-name K :ext-name K :ref-id UUID :is-fn BOOL
                    :produces-callable? BOOL}
-     {:kind :seq   :base-name K :ext-name K :items [...]}
+     {:kind :seq   :base-name K :ext-name K :items [...] :lazy-seq? BOOL}
      {:kind :free  :base-name K :ext-name K :required true}"
-  [slot fn-id lookups fn-typed-fn-ids]
+  [slot fn-id lookups fn-typed-fn-ids lazy-seq-args]
   (let [base-name (keyword (:name slot))
         slot-id (:id slot)
         ext-name (l/rename-for-slot fn-id slot-id lookups)
@@ -179,7 +191,8 @@
 
       (list-binding? b)
       {:kind :seq :base-name base-name :ext-name ext-name
-       :items (list-items-for fn-id slot-id lookups)}
+       :items (list-items-for fn-id slot-id lookups)
+       :lazy-seq? (contains? (or lazy-seq-args #{}) base-name)}
 
       :else
       {:kind :free :base-name base-name :ext-name ext-name
@@ -224,8 +237,10 @@
    in fn-slot position order."
   [fn-id lookups]
   (let [slots (l/root-slots fn-id lookups)
-        fn-typed-fn-ids (compute-fn-typed-fn-ids lookups)]
-    (mapv #(classify-slot % fn-id lookups fn-typed-fn-ids) slots)))
+        fn-typed-fn-ids (compute-fn-typed-fn-ids lookups)
+        lazy-seq-args (lazy-seq-arg-names fn-id lookups)]
+    (mapv #(classify-slot % fn-id lookups fn-typed-fn-ids lazy-seq-args)
+          slots)))
 
 
 (defn- own-fn-of-slot

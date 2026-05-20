@@ -68,26 +68,69 @@ All three mechanisms use the same infrastructure — fn-defs, arg entities, `com
 ```
 :any                           ← top type, accepts everything
 ├── :jsonb                     ← untyped structured data (escape hatch)
-├── :int                       ← integer
-│   └── :positive-int          ← refinement subtype (constraint: > 0)
-├── :float                     ← floating point
+├── :numeric                   ← arbitrary-precision numeric supertype
+│   ├── :int                   ← integer
+│   │   └── :positive-int      ← refinement subtype (constraint: > 0)
+│   ├── :float                 ← floating point
+│   └── :decimal               ← arbitrary-precision rational (BigDecimal)
 ├── :text                      ← string
 ├── :bool                      ← boolean
 ├── :keyword                   ← keyword
+├── :uuid / :timestamptz / :bytes
+├── :input-stream              ← transient java.io.InputStream
+│                                (type-system-only; storage-kind = :any)
 ├── [:list :a]                 ← parameterized list (homogeneous, any length)
 ├── [:map :k :v]               ← homogeneous map (every key :k, every value :v)
 ├── [:tuple :a :b]             ← fixed-length heterogeneous tuple
 ├── {:name :text, :age :int}   ← structural record type (fixed named fields)
 └── {:fn [:a :b]}              ← function type (input → output)
+
+:never                         ← bottom type, subtype of everything
 ```
+
+Storage-kind degradation (`type->storage-kind`): `:int`/`:float` stay
+as themselves; `:decimal` degrades to `:numeric` (the value_kind enum
+has no `:decimal` entry); `:input-stream` and `:never` degrade to
+`:any` (transient / phantom — never persisted as data).
+
+### When to use `:any` vs `:jsonb` vs a type variable
+
+`:any` is the inference top — it's what the system falls back to when
+no better information is available. **Avoid declaring `:any` on an
+arg or return type** unless one of these holds:
+
+| Situation                                | Right declaration |
+|------------------------------------------|-------------------|
+| Slot accepts untyped JSON-shaped data (HTTP body, env-var output, opaque map) | `:jsonb` |
+| Slot accepts a polymorphic value the fn returns or passes through unchanged | type variable `a` |
+| Slot's precise type depends on another slot's literal value (`:assoc` reading `:key`) | `:any` plus a `:return-type-rule` |
+| Slot accepts an opaque library handle (compiled router, exception, …) | `:any` (no better shape exists) |
+
+If you're tempted to write `:any` and none of the four cases match,
+the right answer is usually a type variable. `:any` says "I have no
+information here"; a type-variable says "the system should track
+this slot's actual type across the composition" — strictly more
+useful at every call site, identical at runtime.
+
+`:jsonb` and `:any` are NOT interchangeable: `:jsonb` rejects
+callables (they're not JSON-shaped data), `:any` accepts them. A
+slot that genuinely takes "anything that fits into JSON" should be
+`:jsonb`; a slot that accepts a callable too should be `:any`.
+
+`:never` is the BOTTOM type — the dual of `:any` (top). It is the
+type of a computation that never produces a value (`:throw`). It is
+a subtype of every type, so a throwing branch is accepted in any
+context, and `make-union` absorbs it (`[:union :never T]` = `T`) so
+`(:if c (:throw …) x)` is typed exactly `x`. No literal value ever
+has type `:never`; on the storage wire it degrades to `:any`.
 
 Subtyping rules:
 
-- Every type is a subtype of `:any`
+- Every type is a subtype of `:any`; `:never` is a subtype of every type
 - Primitive types (`:int`, `:text`, etc.) are subtypes of `:jsonb`
 - Record, list, map and tuple types are subtypes of `:jsonb`
 - A record with MORE fields is a subtype of a record with FEWER fields (`{:a :int, :b :text}` ⊂ `{:a :int}`)
-- `[:map K V]` is covariant in both key and value; a keyword-keyed record is a valid `[:map :keyword V]` value
+- `[:map K V]` is covariant in both key and value; a keyword-keyed record is a valid `[:map :keyword V]` value (`unify` bridges record ↔ `[:map …]`, mirroring `subtype?`)
 - `[:tuple …]` is covariant per position and requires equal length
 - A refinement type is a subtype of its base type (`:positive-int` ⊂ `:int`)
 - `:jsonb` is NOT a subtype of any concrete type (requires explicit conversion)
@@ -317,8 +360,17 @@ Example:
 ### dissoc
 
 ```
+slot:      :map  [:map a :any]   ; record ⊆ [:map :keyword :any] via subtype;
+                                 ; [:list …] rejected at the type level.
 type-rule: if k is a literal, result = type(m) minus field k
 ```
+
+The slot uses `[:map a :any]` (not `[:map a b]`) so heterogeneous-
+valued records still unify: a single `b` can't bind to both `:int`
+and `:text` across `{:foo :int :bar :text}`'s fields. Fixing the
+value side to `:any` keeps `record-to-map` unification through
+`unify-map-record`; the rule recovers the precise record shape when
+`:key` is a literal.
 
 ### merge
 
@@ -442,15 +494,26 @@ Subtyping rules:
 deduplicates, collapses singletons, and absorbs `:any`. The sort order
 is deterministic so equality between freshly built unions is reliable.
 
-The `:if` base-fn's type-rule produces a union of its branches:
+The `:if` base-fn types its branches as INDEPENDENT type variables
+and returns their union: `{:then a, :else b}` → `[:union a b]`. The
+branches need not agree — `make-union` collapses `[:union T T]` back
+to `T` when they do, so a homogeneous `:if` still reads as a single
+type:
 
 ```edn
 {:parent :if :args {:test :some-bool? :then 42 :else "fallback"}}
 ;; computed return-type: [:union :int :text]
+
+{:parent :if :args {:test :some-bool? :then 1 :else 2}}
+;; computed return-type: :int   (union of :int with :int)
 ```
 
-`bearer-token` (which uses `:if` with a `nil :else`) ends up at
-`[:union :null :text]` — the same shape `:nullable-text` declares.
+A shared type variable on `:then`/`:else` would instead FORCE the
+branches to unify and reject every heterogeneous `:if` (e.g. an
+error-record branch vs a success-record branch).
+
+`(:if c (:throw …) x)` is typed exactly `x`: `:throw` returns
+`:never` (the bottom type), and `[:union :never T]` = `T`.
 
 ### Unification & unions
 
@@ -496,14 +559,16 @@ three composition-only fn-defs over the existing `:get` / `:equal?`:
 {:name :variant-is?    :parent :equal?   :args {:a :variant-tag :b {:as :tag}}}
 ```
 
-Authors then dispatch via the existing `:cond`:
+Authors then dispatch via the existing `:cond` — its `:clauses` is a
+flat `[test result test result …]` sequence; a literal `true` test is
+the else-branch:
 
 ```edn
 {:parent :cond
- :args {:pairs [(:variant-is? :coll my-result :tag :ok)
-                (:variant-value :coll my-result)
-                :else
-                (:variant-value :coll my-result)]}}
+ :args {:clauses [(:variant-is? :coll my-result :tag :ok)
+                  (:variant-value :coll my-result)
+                  true
+                  (:variant-value :coll my-result)]}}
 ```
 
 ---
@@ -532,6 +597,8 @@ needs out of the box:
 | `:non-negative-int`| `[:refine :int [:>= 0]]`                                          | indexes, lengths                 |
 | `:negative-int`    | `[:refine :int [:< 0]]`                                           | offsets                          |
 | `:non-empty-text`  | `[:refine :text [:not= ""]]`                                      | required strings                 |
+| `:non-blank-text`  | `[:refine :text [:matches "\\S"]]`                                | strings with at least one non-ws char |
+| `:url`             | `[:refine :text [:matches "^https?://"]]`                         | HTTP / HTTPS URLs                |
 | `:positive-numeric`| `[:refine :numeric [:> 0]]`                                       | rates, weights                   |
 | `:percent`         | `[:refine :numeric [:and [:>= 0] [:<= 100]]]`                     | percentages                      |
 | `:probability`     | `[:refine :numeric [:and [:>= 0] [:<= 1]]]`                       | probabilities                    |
@@ -539,7 +606,7 @@ needs out of the box:
 | `:user-port`       | `[:refine :int [:and [:>= 1024] [:<= 65535]]]`                    | non-privileged ports             |
 | `:http-status`     | `[:refine :int [:and [:>= 100] [:<= 599]]]`                       | HTTP status codes                |
 | `:bit`             | `[:refine :int [:or [:= 0] [:= 1]]]`                              | binary flags                     |
-| `:nullable-T`      | `[:union :null T]`  (T ∈ #{int text bool numeric uuid})           | optional values                  |
+| `:nullable-text`   | `[:union :null :text]`                                            | optional text (env vars, headers); other primitives use inline `[:union :null T]` |
 | `:result-T`        | tagged variant `{:ok T}|{:err :text}`                              | Result-style returns             |
 | `:validation`      | tagged variant `{:valid :any}|{:invalid :text}`                    | parsed-vs-error                  |
 
@@ -547,6 +614,26 @@ Modules adding their own named type-rows just put the
 `:refine` / `:list` / `:union` / `:variant` / `:record` entries
 directly in their `fns.edn` alongside their fn-defs — the loader
 recognises the shape and emits the right fn-row + slot structure.
+
+### Retired aliases — migration note
+
+`:nullable-int`, `:nullable-bool`, `:nullable-numeric`, and
+`:nullable-uuid` were retired (commit `b9ec4a80`) — they had zero
+real usage outside their own declaration. If a binding or
+return-type override in a long-lived DB still references one of
+these names, the next clean deploy will fail to resolve it. Fix
+by replacing the reference with the inline form:
+
+```edn
+;; before
+{:type :nullable-int}
+;; after
+{:type [:union :null :int]}
+```
+
+`register-type-aliases!` warns "body references an unknown type"
+when this happens — search server logs for that string after a
+deploy if anything pages.
 
 ---
 
@@ -568,7 +655,6 @@ registry entry).
 | `:network` | HTTP socket lifecycle                         | yes (server handle is singleton) |
 | `:time`    | wall-clock                                    | **no — always fresh**            |
 | `:random`  | non-determinism                               | **no — always fresh**            |
-| `:effect`  | legacy generic flag (`:effectful? true`)      | yes                              |
 
 ### Caching policy
 
@@ -673,7 +759,7 @@ direction, no surprises.
 |-------|-------------|
 | `binding.required` (schema) | Optional bool. nil = no opinion at this binding. |
 | `effective-required?` | Walks the inheritance chain, ORs slot's `:required` with every binding's `:required true`. Used by `classify-slot` to populate the `:free` entry's `:required` field. |
-| `check-required-widening!` | Pre-pass in `check-fn-def!` — rejects any binding map carrying `:required false`. Tagged `:bindings/widening-required`. Fires on package load AND on CRUD writes (CRUD funnels through `check-fn-def!` post-create). |
+| `check-binding-monotonicity!` | Unified pre-pass in `check-fn-def!` — rejects `:required false` bindings (tag `:bindings/widening-required`) AND `:type T` overrides where T ⊄ inherited slot type (tag `:bindings/widening-type`). Fires on package load AND on CRUD writes. Replaces the older `check-required-widening!` which only covered the boolean half. |
 | Loader (`map-arg-value->binding-fields`) | Recognises `:required` in `:args`-value maps and emits the corresponding binding-row column. |
 
 ---
@@ -711,6 +797,22 @@ Widening is an error:
  :refine {:body {:type :jsonb}}}
 ;; :jsonb ⊄ {:to :text, ...} → ERROR: cannot widen type
 ```
+
+### Unified monotonicity check
+
+`check-binding-monotonicity!` is one pre-pass that enforces BOTH
+narrowing channels — `:required` (boolean) and `:type` (structural
+subtype) — under the same `:bindings/widening-{required,type}`
+error category:
+
+- `{:required false}` on any slot → `:bindings/widening-required`
+- `{:type T}` where T ⊄ inherited slot type → `:bindings/widening-type`
+
+Both fire BEFORE the regular per-binding type-check, so a widening
+attempt fails with a clear "this is a widening, not a value
+mismatch" diagnostic rather than the secondary "literal value
+classifies as map, doesn't match :int" the value-binding path used
+to emit for `{:type :any}` overrides.
 
 ### What is stored in DB
 
@@ -866,6 +968,67 @@ fn (base-fn or fn-def) the type-checker has processed:
 The editor's fn-overlay reads this for: type-aware fn-picker
 filtering, "Expected: <type>" hints, type-mismatch outlines, effect
 badges, and declared-vs-computed drift markers.
+
+### Editor surfacing of type narrowing
+
+The editor exposes type provenance through **one canonical surface**
+— the `↳` popover — plus two read-at-a-glance affordances on the
+chip itself. The split is deliberate: the inline `▸/▾` panel stays
+**structure-only** (what shape is this type?), the `↳` popover stays
+**provenance-only** (where did this type come from?). One source of
+truth for narrowing display, no duplicated "Resolved via" sections
+across the UI.
+
+**1. Inline `▸/▾` panel** (chip click) — structural reveal only:
+
+- Refinement chain breadcrumb (`:user-port ⊂ :int ⊂ :numeric`,
+  each link clickable to navigate to its type-row).
+- Constituents: refine → base+constraint, list → element, map → key+value,
+  tuple → #idx slots, record → field rows, union → branches,
+  fn → args+ret+effect-row.
+- Kind tag in header (Map / Record / Tuple / Refinement / Union /
+  Function) so anonymous structural types are distinguishable.
+- A small `↳ provenance` link in the header opens the popover below
+  when the panel was opened on a slot-bound arg with non-null
+  provenance — single click to switch from "what's the shape?" to
+  "where did it come from?".
+
+**2. Provenance popover** (↳ badge click, OR ↳ link from inline
+panel): the canonical answer to "where did this type come from?".
+Four stacked sections, all sourced from `/api/types`:
+
+| Section           | When it appears                                                          | What it shows |
+|-------------------|--------------------------------------------------------------------------|----------------|
+| Inherited via     | ≥ 1 ancestor in the inheritance chain carries a `type-override` binding  | Closer-wins list: ancestor → override. When ≥ 2 candidates compete (MI / inherited overrides at different depths), the closer-fn-wins winner is marked `✓ (chosen)`; the shadowed candidates get `↳ (also by)` so the resolution decision is visible instead of silent. |
+| Resolved via      | Always (4-tier priority chain)                                           | override → backward-unified → ref-return → slot-declaration; winning tier marked `✓`. Source fn-name on each tier is clickable — jumps to the fn that pinned the constraint. Type-row names in the type column are also clickable. |
+| Allowed values    | Slot's effective type is `[:refine kw [:in […]]]`                        | Each member rendered as a chip. |
+| Slot effect bound | Slot's effective type is `[:fn args ret eff]` with a concrete eff set    | `eff: pure` (empty set) or one chip per allowed category. |
+
+The `↳` glyph on a fn-card's return-type strip opens the type-rule
+variant of the same popover: same header surface plus a per-rule
+narrative line — e.g. for `:assoc`: "Literal key `"jvm"`, value
+typed record — added field `"jvm": record` to map's record shape."
+Inputs table follows for raw `:resolved-bindings`.
+
+**3. On-chip narrowing hints** — visible without any click:
+
+- **Refinement stacking**: `:positive-int` chip renders the alias
+  name on top and `(> 0)` constraint underneath. Hover the
+  constraint span for the natural-language form
+  (`constraintHuman` → "integer where >= 1024 and <= 65535").
+- **`< :base` subtype line** on the chip when a binding-level
+  `:type-override` (or an inherited override) narrowed the slot
+  to a type whose declared base differs from the displayed text.
+  Lets the reader see `:positive-int < :any` without opening
+  any popover. Skipped for refinement-stacked chips (the chain
+  breadcrumb already exposes the base).
+
+**4. Mismatch explainer** (red `!` indicator click): the bind-time
+"why is this rejected?" surface — expected / got / reason / leaf
+disagreements — followed by the SAME provenance chain renderer as
+the `↳` popover, so the source-fn names that pinned the offending
+constraint are clickable from inside the mismatch too. One click to
+trace upstream from the failure.
 
 ### Type-error messages with `file:line`
 
@@ -1047,19 +1210,28 @@ the effect constraint set on the *callable* side:
 :func {:type [:fn {:item a} b #{:env}]}
 ```
 
-A 3-element form `[:fn args ret]` has *no* effect constraint —
-"any effects allowed". A 4-element form `[:fn args ret eff-set]`
-demands the bound callable's effects ⊆ `eff-set`.
+Authors may still write a 3-element form `[:fn args ret]` in EDN —
+`normalise` (the canonicalisation pass at every subtype/unify
+boundary) rewrites it to the 4-element form with `:any` (the slot-
+side "no constraint declared" sentinel). Internally every fn-type
+is 4-element; the 3-element legacy form is read-time sugar only.
+
+A 4-element form with `:any` in slot 3 demands no constraint
+(matches a 3-element form's intent). A 4-element form with a
+concrete set (`#{}` for pure, `#{:db}` for db-only, …) demands the
+bound callable's effects ⊆ that set.
+
+`make-fn-type` is the canonical constructor for new sites and
+always produces 4-element output.
 
 **Subtype rule.** `(fn-subtype? sub sup)` requires
 `sub-effects ⊆ sup-effects`, mirroring how arg variance and return
-covariance already work. nil sub-effects means the callee is
-**pure** (`#{}`): graphden computes effects totally — every fn-def
-goes through `compute-effects`, which treats an absent `:effects`
-as `#{}` — so a missing effect set is computed-pure, not "unknown".
-Treating it otherwise ("assume impure") would make a `#{}` pure-only
-slot unsatisfiable by any ordinary pure fn. nil sup-effects accepts
-anything (no constraint declared).
+covariance already work. `compute-effects` is total — every fn-def
+has a known set, possibly `#{}` (pure) — and `record-rich-types!`
+always stores it explicitly (`:effects #{}` for pure fns). nil
+sub-effects only occurs for legacy fn-types missing the 4th element;
+those normalise to `:any` (unconstrained), not pure. nil sup-effects
+accepts anything (no constraint declared at the slot).
 
 **Where it fires.** `check-fn-def!` walks each ref-binding,
 computes the callable's effective fn-type via `assemble-fn-type`
@@ -1101,9 +1273,9 @@ Slot-level is the smallest mechanism that delivers that.
 
 **Roundtrip preservation.** `resolve` (substitution),
 `resolve-alias`, `unify-fn`, and `assemble-fn-type` all preserve
-the 4th element when present. `assemble-fn-type` keys off
-`(contains? info :effects)` rather than `(seq eff)` so an explicit
-`:effects #{}` rides through as a 4-element fn-type — but the
-distinction is no longer load-bearing for the check outcome: both
-an absent `:effects` and an explicit `#{}` are read as **pure** by
-`effects-compatible?`, consistent with `compute-effects`.
+the 4th element. After the storage-unification cleanup the registry
+always carries `:effects` — possibly `#{}` for pure fns — so
+`assemble-fn-type` emits a canonical 4-element fn-type
+unconditionally. The "absent key vs. empty set" ambiguity was
+retired; `compute-effects`-computed pure and explicit `#{}` are
+the same wire representation.

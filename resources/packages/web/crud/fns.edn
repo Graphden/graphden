@@ -108,7 +108,7 @@
    :description "Query a list of entities of a given type, optionally filtered by `:where`. Reads through the storage attached to the executor context."
    :args {:entity-type {:type :text :description "Entity-name keyword as string (e.g. \"fn\", \"arg\", \"ns\")."}
           :where {:type :_storage-where-map :required false :description "Storage filter map. Omit to fetch all of the type."}}
-   :return-type :jsonb
+   :return-type [:list :jsonb]
    :effects #{:db}}
 
   {:name :get-entity
@@ -155,7 +155,7 @@
   {:name :value-kinds
    :description "The `value_kind` schema enum as an ordered list of primitive type-tag strings (`\"int\"`, `\"text\"`, …) a binding value / slot can carry. Powers `GET /api/value-kinds` — the editor's type-pickers read it instead of hard-coding the enum. Pure: reads a compile-time constant."
    :args {}
-   :return-type :jsonb}
+   :return-type [:list :text]}
 
   ;; --- type-API handler primitives. The handlers themselves are `:if`
   ;; graph fn-defs below; these base-fns are the parse / validate /
@@ -306,7 +306,7 @@
 
   {:name :_rejected?
    :description "True when a `validate-*` stage produced a rejection."
-   :args {:validation {:type :jsonb :description "A `{:reason …}` rejection map, or nil."}}
+   :args {:validation {:type [:union :_rejection-shape :null] :description "A `{:reason …}` rejection map, or nil."}}
    :return-type :bool}
 
   {:name :_rejection-response
@@ -667,37 +667,14 @@
    :return-type :_partial-response-shape
    :args {:value {:status 400 :body "<p class=\"error\">Body must include at least one of args / ret / effects</p>"}}}
 
-  ;; `:cond` clauses — `[test result]` pairs built via `:list` so the
-  ;; fn-refs inside resolve (see examples.cond-pattern).
-  {:name :_tighten-clause-binding-id
-   :parent :list
-   :args {:items [:_tighten-binding-id-invalid? :_tighten-err-binding-id]}}
-
-  {:name :_tighten-clause-effects
-   :parent :list
-   :args {:items [:_tighten-effects-invalid? :_tighten-err-effects]}}
-
-  {:name :_tighten-clause-args
-   :parent :list
-   :args {:items [:_tighten-args-invalid? :_tighten-err-args]}}
-
-  {:name :_tighten-clause-delta
-   :parent :list
-   :args {:items [:_tighten-delta-empty? :_tighten-err-delta]}}
-
-  ;; Default clause — `test = true` always matches once the guards fall through.
-  {:name :_tighten-clause-ok
-   :parent :list
-   :args {:items [{:value true} :_tighten-apply]}}
-
   {:name :process-tighten-binding-effects
-   :description "POST /api/bindings/:binding-id/tighten-fn-effects — narrow an fn-typed binding's effective type. The four validation guards and the success path are a `:cond` graph: each clause is `[predicate 400-response]`, the `:else` runs `:_tighten-apply`. `:cond` is lazy, so the DB write runs only when every guard passes. Returns a partial Ring response."
+   :description "POST /api/bindings/:binding-id/tighten-fn-effects — narrow an fn-typed binding's effective type. The four validation guards and the success path are a flat `:cond` — alternating `[predicate 400-response]`, ending with `true → :_tighten-apply`. `:cond` is lazy, so the DB write runs only when every guard passes. Returns a partial Ring response."
    :parent :cond
-   :args {:clauses [:_tighten-clause-binding-id
-                    :_tighten-clause-effects
-                    :_tighten-clause-args
-                    :_tighten-clause-delta
-                    :_tighten-clause-ok]
+   :args {:clauses [:_tighten-binding-id-invalid? :_tighten-err-binding-id
+                    :_tighten-effects-invalid?    :_tighten-err-effects
+                    :_tighten-args-invalid?       :_tighten-err-args
+                    :_tighten-delta-empty?        :_tighten-err-delta
+                    {:value true}                 :_tighten-apply]
           :parsed :_tighten-parsed}}
 
   {:name :tighten-binding-effects-handler

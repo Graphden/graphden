@@ -8,27 +8,27 @@
  [;; === Logic ===
   {:name :and
    :description "Logical AND over a vector — true iff every value is truthy."
-   :args {:values {:type :sequence :of :any :description "Vector of values to AND."}}
+   :args {:values {:type [:list :any] :description "Vector of values to AND."}}
    :return-type :bool}
 
   {:name :or
    :description "Logical OR over a vector — true iff at least one value is truthy."
-   :args {:values {:type :sequence :of :any :description "Vector of values to OR."}}
+   :args {:values {:type [:list :any] :description "Vector of values to OR."}}
    :return-type :bool}
 
   {:name :not
    :description "Boolean negation."
-   :args {:value {:type :any :description "Any value; truthy → false, falsy → true."}}
+   :args {:value {:type a :description "Any value; truthy → false, falsy → true."}}
    :return-type :bool}
 
   {:name :some?
    :description "True iff value is non-nil."
-   :args {:value {:type :any :description "Value to test for nilness."}}
+   :args {:value {:type a :description "Value to test for nilness."}}
    :return-type :bool}
 
   {:name :nil?
    :description "True iff value is nil."
-   :args {:value {:type :any :description "Value to test for nilness."}}
+   :args {:value {:type a :description "Value to test for nilness."}}
    :return-type :bool}
 
   ;; === Conditionals ===
@@ -38,35 +38,61 @@
   ;; that to `'a` rather than `[:union :null 'a]`.
   {:name :if
    :description "Two-branch conditional. Returns `then` when `test` is truthy, else `else` (nil if omitted)."
+   ;; `:then` and `:else` are INDEPENDENT type variables — the branches
+   ;; need not agree. The return is their union (`make-union` collapses
+   ;; `[:union T T]` back to `T` when they do agree), matching the
+   ;; runtime "whichever branch ran" semantics. A shared `a` here would
+   ;; force the branches to unify and reject every heterogeneous `:if`.
    :args {:test {:type :any :description "Truthy/falsy expression."}
           :then {:type a :description "Returned when test is truthy."}
-          :else {:type a :required false
+          :else {:type b :required false
                  :description "Returned when test is falsy. Defaults to nil."}}
-   :return-type a}
+   :return-type [:union a b]}
 
+  ;; Flat clause sequence `[test1 result1 test2 result2 …]`. `:clauses`
+  ;; is a `:lazy-seq-args` slot of `:cond` — items arrive as delays, so
+  ;; an un-taken clause's result never runs (short-circuit). The
+  ;; `cond-return-rule` types the return as the union of the
+  ;; result-position branches, generalising `:if`'s `[:union then else]`.
   {:name :cond
-   :description "Multi-branch — evaluates pairs `[test result …]`, returns the first result whose test is truthy."
-   :args {:clauses {:type :sequence :of :any :description "Vector of alternating tests and result expressions."}}
+   :description "Multi-branch conditional. `:clauses` is a flat sequence `[test1 result1 test2 result2 …]` — returns the first result whose test is truthy, nil if none match. Use a literal `true` as the final else-branch test. Each item may be a literal or a fn-ref."
+   :args {:clauses {:type [:list :any] :description "Flat sequence of alternating test / result items; each may be a literal or a fn-ref."}}
    :return-type :any}
 
-  ;; The clauses map is opaque to the type system (its values are
-  ;; jsonb), so the only constraint we can express is that the
-  ;; `:default` and the result share a type. Heterogeneous clauses
-  ;; remain the user's responsibility.
+  ;; When `:clauses` is a literal map (or a homogeneous `[:map K V]`)
+  ;; the type-checker's `case-return-rule` unions every clause value's
+  ;; type with `:default`'s — so a `:case` with heterogeneous clauses
+  ;; is typed `[:union …]`, not just `:default`'s type. When `:clauses`
+  ;; is an opaque ref the return falls back to the declared `'a`.
   {:name :case
    :description "Constant-time dispatch on `value` via a `{match-value result}` map (Clojure's `(get clauses value default)`). Falls back to `:default` when the value isn't a key. Note: keys in a literal `:clauses` map come back keywordized after JSONB roundtrip — use string keys when matching against caller-supplied strings."
    :args {:value {:type :any :description "Value to look up in the clauses map."}
-          :clauses {:type :jsonb :description "Map of `{match-value result}` — the dispatch table. Pass either a literal map or a fn-ref that returns one."}
+          ;; `:clauses` is `[:map a :any]` — the dispatch table is a map,
+          ;; not an arbitrary jsonb value. `:any` on the value side keeps
+          ;; heterogeneous result-types (which case-return-rule then
+          ;; unions); the `a` key-type binds to whatever the matched
+          ;; keys classify as.
+          :clauses {:type [:map a :any] :description "Map of `{match-value result}` — the dispatch table. Pass either a literal map or a fn-ref that returns one."}
           :default {:type a :required false
                     :description "Fallback when `value` isn't a key in `:clauses`. Defaults to nil."}}
    :return-type a}
 
   ;; === Defaults ===
-  ;; `:value` and `:default` share `'a`: the result is whichever of the
-  ;; two ends up carrying the value, so the return narrows to that type.
+  ;; `:coalesce` is the null-eliminator. `:value` is `:any` — any
+  ;; maybe-nil value can be coalesced; `coalesce-return-rule` strips
+  ;; `:null` from `:value`'s type and unions it with `:default`'s, so
+  ;; a `[:union :null T]` value coalesced with a `T` default is typed
+  ;; `T`. This is the explicit point where a nullable narrows back to
+  ;; non-null.
   {:name :coalesce
-   :description "Returns `value` if non-nil, else `default`."
-   :args {:value {:type a :description "Primary value; used when non-nil."}
+   :description "Returns `value` if non-nil, else `default`. The null-eliminator — `coalesce-return-rule` strips `:null` from the value's type."
+   ;; `:value` is `[:union :null a]` — pinning the contract that the
+   ;; argument is either nil or some type `a` (which the default's
+   ;; type also pins). Concrete non-null inputs (e.g. `:int`) still
+   ;; type-check via subtype: `:int ⊆ [:union :null :int]` after
+   ;; unification binds `a := :int`. `coalesce-return-rule` then
+   ;; strips `:null` and unions with the default's type.
+   :args {:value {:type [:union :null a] :description "Primary value; used when non-nil. Either nil or some `a` (matching the default's type)."}
           :default {:type a :description "Fallback used when value is nil."}}
    :return-type a}
 

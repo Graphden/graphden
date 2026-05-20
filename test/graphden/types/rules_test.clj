@@ -7,7 +7,8 @@
    the rule fns from the resulting namespaces."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.packages.loader :as loader]))
+    [graphden.packages.loader :as loader]
+    [graphden.types.core :as t]))
 
 
 ;; Eval the core package's impls.clj resources so their namespaces
@@ -59,7 +60,10 @@
      :neg       (rule a 'neg-return-rule)
      :abs       (rule a 'abs-return-rule)
      :invoke    (rule s 'invoke-return-rule)
-     :const     (rule l 'const-return-rule)}))
+     :const     (rule l 'const-return-rule)
+     :cond      (rule l 'cond-return-rule)
+     :case      (rule l 'case-return-rule)
+     :coalesce  (rule l 'coalesce-return-rule)}))
 
 
 (defn- compute-return-type
@@ -241,6 +245,38 @@
                                 :any)))))
 
 
+(deftest get-missing-field-with-free-default-still-throws
+  (testing "a parent-fallback :default entry (no :value / :ref) is NOT a
+            real binding — the missing-field typo throw must still fire"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"field :missing not found"
+          (compute-return-type :get
+                               {:coll    {:type {:name :text}}
+                                :key     {:type :text :value "missing"}
+                                :default {:type :text :value nil}}
+                               :any)))))
+
+
+(deftest get-on-map-type-is-nullable
+  (testing ":get of a [:map K V] — key may be absent → [:union :null V]"
+    (is (= (t/make-union [:null :int])
+           (compute-return-type :get
+                                {:coll {:type [:map :keyword :int]}
+                                 :key  {:type :keyword :value :k}}
+                                :any)))))
+
+
+(deftest get-on-map-type-with-default-unions-default
+  (testing ":get of a [:map K V] with a bound :default → [:union V default]"
+    (is (= (t/make-union [:int :text])
+           (compute-return-type :get
+                                {:coll    {:type [:map :keyword :int]}
+                                 :key     {:type :keyword :value :k}
+                                 :default {:type :text :value "x"}}
+                                :any)))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; :update-in — return preserves m's shape; literal :path validated
 ;; against m's record structure (typo-catching, mirrors :get).
@@ -257,7 +293,7 @@
     (is (= {:headers :jsonb}
            (compute-return-type :update-in
                                 {:m    {:type {:headers :jsonb}}
-                                 :path {:value [{:value :headers :literal? true}]}}
+                                 :path {:value [{:value :headers}]}}
                                 :any)))))
 
 
@@ -268,7 +304,7 @@
           #"path segment :hdrs not found"
           (compute-return-type :update-in
                                {:m    {:type {:headers :jsonb}}
-                                :path {:value [{:value :hdrs :literal? true}]}}
+                                :path {:value [{:value :hdrs}]}}
                                :any)))))
 
 
@@ -277,8 +313,8 @@
     (is (= {:headers :jsonb}
            (compute-return-type :update-in
                                 {:m    {:type {:headers :jsonb}}
-                                 :path {:value [{:value :headers :literal? true}
-                                                {:value :anything :literal? true}]}}
+                                 :path {:value [{:value :headers}
+                                                {:value :anything}]}}
                                 :any)))))
 
 
@@ -287,7 +323,7 @@
     (is (= :any
            (compute-return-type :update-in
                                 {:m    {:type :any}
-                                 :path {:value [{:value :whatever :literal? true}]}}
+                                 :path {:value [{:value :whatever}]}}
                                 :any)))))
 
 
@@ -313,8 +349,9 @@
 ;; -----------------------------------------------------------------------------
 ;; :first / :rest / :cons — list-elem propagation
 
-(deftest first-on-typed-list-returns-elem-type
-  (is (= :int
+(deftest first-on-typed-list-returns-nullable-elem-type
+  ;; `(first [])` is nil, so `:first` over `[:list T]` is `[:union :null T]`.
+  (is (= (t/make-union [:null :int])
          (compute-return-type :first
                               {:coll {:type [:list :int]}}
                               :any))))
@@ -398,6 +435,27 @@
                               {:map  {:type {:user {:name :text}}}
                                :path {:type :sequence :value nil}}
                               :any))))
+
+
+(deftest get-in-through-map-intermediate-is-nullable
+  (testing "any `[:map K V]` step in the path → key may be absent → nullable result"
+    ;; record-of-map-of-int: walk `:cfg` (record present) then a map
+    ;; key (V = :int; may be absent) → [:union :null :int].
+    (is (= (t/make-union [:null :int])
+           (compute-return-type :get-in
+                                {:map  {:type {:cfg [:map :keyword :int]}}
+                                 :path {:type :sequence
+                                        :value [:cfg :limit]}}
+                                :any)))))
+
+
+(deftest get-in-top-level-map-is-nullable
+  (testing "top-level [:map K V] → single-segment get-in is nullable too"
+    (is (= (t/make-union [:null :text])
+           (compute-return-type :get-in
+                                {:map  {:type [:map :keyword :text]}
+                                 :path {:type :sequence :value [:k]}}
+                                :any)))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -555,6 +613,27 @@
                               :any))))
 
 
+(deftest assoc-in-preserves-top-level-map-shape
+  (testing "top-level [:map K V] stays [:map K V] (assoc-in fills nil-safe)"
+    (is (= [:map :keyword :int]
+           (compute-return-type :assoc-in
+                                {:m    {:type [:map :keyword :int]}
+                                 :path {:type :sequence :value [:k]}
+                                 :v    {:type :int :value 42}}
+                                :any)))))
+
+
+(deftest assoc-in-preserves-map-shape-via-record-field
+  (testing "record with a [:map K V] field — assoc-in into the map keeps
+            the record AND the field's [:map K V] shape"
+    (is (= {:cfg [:map :keyword :int]}
+           (compute-return-type :assoc-in
+                                {:m    {:type {:cfg [:map :keyword :int]}}
+                                 :path {:type :sequence :value [:cfg :limit]}
+                                 :v    {:type :int :value 10}}
+                                :any)))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; :if — handled by type-var polymorphism in the declaration
 ;; (`:then 'a :else 'a → 'a`), no `compute-return-type :if` rule.
@@ -585,16 +664,25 @@
                                 :jsonb)))))
 
 
-(deftest merge-passes-through-maps-type-or-default
-  (testing ":merge returns :maps's type when a list/sequence shape is known"
-    (is (= [:list :any]
+(deftest merge-degrades-to-default-on-heterogeneous-input
+  (testing ":merge degrades to default when :maps has no per-item type info"
+    ;; `[:list T]` describes the SHAPE OF THE INPUT (a list of values),
+    ;; not the shape of merge's RESULT. The rule must NOT pass the list
+    ;; type through to the return — `:merge` always returns a map.
+    (is (= :jsonb
            (compute-return-type :merge
                                 {:maps {:type [:list :any]}}
                                 :jsonb))))
-  (testing ":merge degrades to default when :maps has no type info"
+  (testing ":merge degrades to default when no maps info at all"
     (is (= :jsonb
            (compute-return-type :merge
                                 {}
+                                :jsonb))))
+  (testing "all-record per-item types produce the merged record shape"
+    (is (= {:a :int :b :text}
+           (compute-return-type :merge
+                                {:maps {:type [:list :any]
+                                        :elem-types [{:a :int} {:b :text}]}}
                                 :jsonb)))))
 
 
@@ -615,3 +703,140 @@
   (testing "untyped item → [:list :any]"
     (is (= [:list :any]
            (compute-return-type :repeat {} :jsonb)))))
+
+
+;; -----------------------------------------------------------------------------
+;; :cond — return = union of the result-position (odd-index) branch
+;; types, plus :null when no literal-`true` test makes the cond
+;; exhaustive (it can otherwise fall through every clause → nil).
+
+(deftest cond-unions-result-branches-with-null-when-not-exhaustive
+  (testing "no literal-true test → cond can fall through → :null joins the union"
+    (is (= (t/make-union [:int :text :null])
+           (compute-return-type
+             :cond
+             {:clauses {:elem-types [:bool :text :bool :int]
+                        :value [:pred-a {:value "x"} :pred-b {:value 1}]}}
+             :any)))))
+
+
+(deftest cond-exhaustive-true-test-drops-null
+  (testing "a literal `true` else-test makes the cond exhaustive — no :null"
+    (is (= (t/make-union [:int :text])
+           (compute-return-type
+             :cond
+             {:clauses {:elem-types [:bool :text :bool :int]
+                        :value [:pred-a {:value "x"} {:value true} {:value 1}]}}
+             :any)))))
+
+
+(deftest cond-collapses-homogeneous-exhaustive-results
+  (testing "all results same type + exhaustive → that type, no union"
+    (is (= :text
+           (compute-return-type
+             :cond
+             {:clauses {:elem-types [:bool :text :bool :text]
+                        :value [:pred-a {:value "x"} {:value true} {:value "y"}]}}
+             :any)))))
+
+
+(deftest cond-falls-back-without-elem-types
+  (testing ":clauses an opaque ref (no per-item types) → default-ret"
+    (is (= :any
+           (compute-return-type :cond {:clauses {:type :jsonb}} :any)))))
+
+
+;; -----------------------------------------------------------------------------
+;; :case — return = union of clause-value types with :default's.
+
+(deftest case-unions-literal-clause-values
+  (testing "literal clauses map (a record) → its vals unioned with :default"
+    (is (= (t/make-union [:int :text :bool])
+           (compute-return-type
+             :case
+             {:clauses {:type {:a :int :b :text}}
+              :default {:type :bool}}
+             :any)))))
+
+
+(deftest case-unions-map-typed-clauses
+  (testing "[:map K V] clauses → V unioned with :default"
+    (is (= (t/make-union [:int :text])
+           (compute-return-type
+             :case
+             {:clauses {:type [:map :keyword :int]}
+              :default {:type :text}}
+             :any)))))
+
+
+(deftest case-falls-back-on-opaque-clauses
+  (testing ":clauses neither a record nor a [:map …] → default-ret"
+    (is (= :any
+           (compute-return-type
+             :case
+             {:clauses {:type :jsonb} :default {:type :bool}}
+             :any)))))
+
+
+;; -----------------------------------------------------------------------------
+;; :cond runtime — `cond-fn` over a flat `[test result …]` clause seq.
+;; Items arrive as delays (`:lazy-seq-args`); these drive the impl
+;; directly with hand-built delay seqs. Happy-path multi-branch dispatch
+;; and the lazy short-circuit are covered by `compile-packages-test`'s
+;; `cond-case-execution-test` / `lazy-short-circuit-test`.
+
+(def ^:private cond-fn-impl
+  (rule 'graphden.packages.core.logic.impls 'cond-fn))
+
+
+(deftest cond-fn-picks-first-truthy-result
+  (testing "a falsy clause is stepped past; the next truthy result wins"
+    (is (= "yes"
+           (cond-fn-impl {:clauses (list (delay false) (delay "no")
+                                         (delay true)  (delay "yes"))}
+                         nil)))))
+
+
+(deftest cond-fn-no-match-returns-nil
+  (testing "every test falsy → nil"
+    (is (nil? (cond-fn-impl {:clauses (list (delay false) (delay "a")
+                                            (delay false) (delay "b"))}
+                            nil))))
+  (testing "empty clause seq → nil"
+    (is (nil? (cond-fn-impl {:clauses (list)} nil))))
+  (testing "odd-length clauses (dangling test, no result) → nil"
+    (is (nil? (cond-fn-impl {:clauses (list (delay false) (delay "a")
+                                            (delay false))}
+                            nil)))))
+
+
+;; -----------------------------------------------------------------------------
+;; :coalesce — the null-eliminator: strips :null from :value's type,
+;; unions the rest with :default's.
+
+(deftest coalesce-strips-null-from-value
+  (testing "[:union :null T] value + T default → T (null eliminated)"
+    (is (= :text
+           (compute-return-type
+             :coalesce
+             {:value   {:type (t/make-union [:null :text])}
+              :default {:type :text}}
+             :any)))))
+
+
+(deftest coalesce-unions-value-and-default
+  (testing "non-null value + differently-typed default → union of both"
+    (is (= (t/make-union [:int :text])
+           (compute-return-type
+             :coalesce
+             {:value {:type :int} :default {:type :text}}
+             :any)))))
+
+
+(deftest coalesce-statically-nil-value-yields-default
+  (testing ":value typed exactly :null → result is :default's type"
+    (is (= :text
+           (compute-return-type
+             :coalesce
+             {:value {:type :null} :default {:type :text}}
+             :any)))))

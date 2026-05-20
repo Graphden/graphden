@@ -1,12 +1,10 @@
-;; Union types via `:nullable-T` aliases — the canonical "T or nil" shape.
+;; Union types — the canonical "T or nil" shape via `[:union :null T]`.
 ;;
-;; Aliases live in `core/refinements/fns.edn` as `:type {:union …}`
-;; fn-defs:
-;;   {:name :nullable-int     :type {:union [:null :int]}}
-;;   {:name :nullable-text    :type {:union [:null :text]}}
-;;   {:name :nullable-bool    :type {:union [:null :bool]}}
-;;   {:name :nullable-numeric :type {:union [:null :numeric]}}
-;;   {:name :nullable-uuid    :type {:union [:null :uuid]}}
+;; Only `:nullable-text` ships as a named alias (in
+;; `core/refinements/fns.edn`) because it's used 12+ times across the
+;; standard packages. For the other primitives — `:int`, `:bool`,
+;; `:numeric`, `:uuid` — write `[:union :null T]` inline; that's
+;; three keywords, not worth a named row.
 ;;
 ;; A slot typed `:nullable-T` accepts BOTH `nil` and a `T`-typed
 ;; value. The subtype rule rejects passing `:nullable-T` where a
@@ -66,16 +64,16 @@
    :description "Same lookup but with `:default \"none\"` — runtime returns \"none\" instead of nil. Cleanest narrowing for :get-style producers; the result is unconditionally :text."
    :parent :get
    :args {:coll {:value {:a 1}}
-          :key {:value :missing-key :literal? true}
+          :key {:value :missing-key}
           :default "none"}}
 
   ;; --- nullable producer: :env reads OS variable ---
   ;;
-  ;; :env returns the var's value or nil if unset. Static return-
-  ;; type is :text but the runtime value is text-or-nil (nullable
-  ;; in spirit). Use the substitute pattern below to narrow.
+  ;; :env's declared return is `:nullable-text` (`[:union :null :text]`)
+  ;; — it yields the variable's value or nil if unset. Use a
+  ;; substitute pattern below to narrow it to non-null `:text`.
   {:name :ex-env-maybe
-   :description "Read $UNSET_GRAPHDEN_VAR — returns nil because the var isn't set in the test environment. Demonstrates: :env's static :text return-type is a slight lie; runtime is nullable, and callers should handle nil explicitly."
+   :description "Read $UNSET_GRAPHDEN_VAR — returns nil because the var isn't set in the test environment. A clean `:nullable-text` producer: `:env`'s declared return is `[:union :null :text]`, so callers must narrow explicitly before using it where non-null `:text` is required."
    :parent :env
    :args {:name "UNSET_GRAPHDEN_VAR"}}
 
@@ -86,7 +84,7 @@
   ;; provide a literal fallback. The :else branch threads the
   ;; original (now narrowed-to-non-nil-by-flow) through.
   {:name :ex-env-or-local
-   :description "Read $UNSET_GRAPHDEN_VAR, fall back to \"local\" if it's nil. The :nil? probe gates the :if; result is always :text. This is the universal substitute idiom — works for any nullable producer regardless of whether it has a built-in :default."
+   :description "Read $UNSET_GRAPHDEN_VAR, fall back to \"local\" if it's nil — the universal substitute idiom: a `:nil?` probe gates an `:if`. Works for any nullable producer even without a built-in `:default`. (`:coalesce` is the more direct form — it strips `:null` from the value's type.)"
    :parent :if
    :args {:test :_ex-env-is-nil?
           :then {:value "local"}

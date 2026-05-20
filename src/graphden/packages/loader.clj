@@ -224,9 +224,10 @@
 
 
 (defn- impl-entry->parts
-  "An `impls`-map VALUE is either a bare impl fn (back-compat) or a map
-   `{:impl … :return-type-rule … :slot-types-rule … :nav-types-rule …}`
-   declaring per-base-fn type-rules at the base-fn's registration site.
+  "An `impls`-map VALUE is either a bare impl fn (the common short
+   form, no type-rule) or a map `{:impl … :return-type-rule …
+   :slot-types-rule … :nav-types-rule …}` when the base-fn declares
+   per-base-fn type-rules at the base-fn's registration site.
    Normalises both to a map with at least `:impl` (nil-safe — caller
    handles the missing-impl case)."
   [impl-entry]
@@ -256,23 +257,28 @@
    `defbase`). The executor always calls them with both args, so the
    loader simply hands impl-fn through."
   [fn-def impl-entry]
-  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule]}
+  (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule
+                lazy-seq-args]}
         (impl-entry->parts impl-entry)]
     (cond-> {:args (normalize-args (:args fn-def))
              :return-type (:return-type fn-def)
              :impl impl}
       (:description fn-def) (assoc :description (:description fn-def))
-      ;; Forward `:effects` (set of category tags) and the legacy
-      ;; `:effectful?` boolean — both shapes get normalised inside
-      ;; `record-rich-types!` so the registry stores a single canonical
-      ;; `:effects` set.
+      ;; Forward `:effects` (set of category tags). The legacy
+      ;; `:effectful? true` shim has been retired — every effectful
+      ;; base-fn now names its specific category
+      ;; (`:db` / `:env` / `:io` / `:network` / `:time` / `:random`).
       (:effects fn-def)     (assoc :effects (set (:effects fn-def)))
-      (:effectful? fn-def)  (assoc :effectful? true)
       ;; Per-base-fn type-rules — only present when the impls.clj
       ;; declared them on the entry map.
       return-type-rule      (assoc :return-type-rule return-type-rule)
       slot-types-rule       (assoc :slot-types-rule slot-types-rule)
-      nav-types-rule        (assoc :nav-types-rule nav-types-rule))))
+      nav-types-rule        (assoc :nav-types-rule nav-types-rule)
+      ;; `:lazy-seq-args` — set of slot names whose `:seq` binding the
+      ;; executor resolves to delay-wrapped items (see
+      ;; `compile/resolve-seq-thunks`). Declared by the base-fn so a
+      ;; consumer like `:cond` can skip un-taken clauses lazily.
+      lazy-seq-args         (assoc :lazy-seq-args lazy-seq-args))))
 
 
 ;; Type-rows are first-class fn-rows declared in `fns.edn` alongside

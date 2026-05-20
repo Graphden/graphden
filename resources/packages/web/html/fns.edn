@@ -6,34 +6,57 @@
 {:namespace "web.html"
  :description "HTML/Hiccup primitives — render a hiccup tree, page scaffolding, the generic `hiccup` element constructor, and `<style>` / `<script>` wrappers."
  :fns
- [{:name :render-hiccup
+ [;; -----------------------------------------------------------------
+  ;; Named type for hiccup tree values.
+  ;;
+  ;; A hiccup value at runtime is either a leaf scalar (nil / text /
+  ;; number / bool) or a vector `[tag attrs? & children]`. The vector
+  ;; case classifies as `[:list :any]` via `classify-literal`'s LUB —
+  ;; the heterogeneous mix of keyword tag + attrs-map + children means
+  ;; the elem-LUB collapses to `:any`. We accept that widening; the
+  ;; point of this alias is to:
+  ;;   (a) reject opaque jsonb maps in hiccup-typed slots — a bare
+  ;;       `{:foo 1}` is `:jsonb` (record-shaped on the wire) but is
+  ;;       NOT a member of this union, so `:html-page/:body {…}` is
+  ;;       rejected at sync time instead of misrendering as `<map>`.
+  ;;   (b) surface a meaningful chip name in the editor — slots show
+  ;;       `hiccup-node` rather than the generic `jsonb`.
+  ;;
+  ;; Precise per-position structure (`[tag attrs? & children]`) is
+  ;; out of reach without a new "head + variadic tail" type form.
+  ;; -----------------------------------------------------------------
+  {:name :hiccup-node
+   :description "A hiccup tree value — `nil`, a scalar (`:text`/`:int`/`:float`/`:bool`), or a vector `[tag attrs? & children]`. Children are themselves hiccup-nodes; `:any`-typed at the element level so heterogeneous literal vectors like `[:div {:class \"x\"} \"hi\"]` classify cleanly."
+   :union [:null :text :int :float :bool [:list :any]]}
+
+  {:name :render-hiccup
    :description "Render a hiccup tree to an HTML string (`hiccup2.core/html`)."
-   :args {:hiccup {:type :jsonb :description "Hiccup expression — vector of `[tag attrs? & children]`."}}
+   :args {:hiccup {:type :hiccup-node :description "Hiccup expression — vector of `[tag attrs? & children]`."}}
    :return-type :text}
 
   {:name :html-page
    :description "Build a full HTML page hiccup tree — `<!DOCTYPE html>` + `<head>` (title + head elements) + `<body>` (body + script tags)."
    :args {:title {:type :text :description "Document title (rendered in `<title>`)."}
-          :head {:type [:list :jsonb] :required false
+          :head {:type [:list :hiccup-node] :required false
                  :description "Additional `<head>` hiccup elements."}
-          :body {:type :jsonb :description "Hiccup tree placed inside `<body>`."}
-          :scripts {:type [:list :jsonb] :required false
+          :body {:type :hiccup-node :description "Hiccup tree placed inside `<body>`."}
+          :scripts {:type [:list :hiccup-node] :required false
                     :description "`<script>` hiccup elements appended at end of body."}}
-   :return-type :jsonb}
+   :return-type :hiccup-node}
 
   ;; Append a CDN script tag to head elements
   {:name :with-cdn-script
    :description "Append a `<script src=\"url\">` element to a head-elements vector."
-   :args {:head {:type [:list :jsonb] :required false
+   :args {:head {:type [:list :hiccup-node] :required false
                  :description "Existing head-elements list (nil treated as empty)."}
-          :url {:type :text :description "CDN URL of the script to load."}}
-   :return-type [:list :jsonb]}
+          :url {:type :url :description "CDN URL of the script to load."}}
+   :return-type [:list :hiccup-node]}
 
   {:name :cytoscape-container
    :description "Hiccup snippet for a Cytoscape.js mount point — `<div id=… style=…>` ready for the JS to attach to."
    :args {:id {:type :text :description "DOM id used by the JS to find this container."}
           :style {:type :jsonb :description "Inline-style map (e.g. `{\"width\" \"100%\"}`)."}}
-   :return-type :jsonb}
+   :return-type :hiccup-node}
 
   ;; Wrap text content in an HTML element. Pure composition over
   ;; :hiccup with a single-item children sequence.
@@ -57,5 +80,5 @@
    :description "Build a hiccup vector `[tag attrs & children]`. `attrs` and `children` are optional."
    :args {:tag {:type :text :description "HTML tag name."}
           :attrs {:type :jsonb :required false :description "Attribute map (string keys). Omit/nil for no attributes."}
-          :children {:type :sequence :of :any :required false :description "Child hiccup nodes — each item may be a literal node or a fn-ref."}}
-   :return-type :jsonb}]}
+          :children {:type [:list :hiccup-node] :required false :description "Child hiccup nodes — each item may be a literal node or a fn-ref."}}
+   :return-type :hiccup-node}]}

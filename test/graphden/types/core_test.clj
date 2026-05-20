@@ -74,6 +74,29 @@
     (is (not (t/subtype? :bool :int)))))
 
 
+(deftest coarse-lub-test
+  (testing "empty input → :any (no information to LUB)"
+    (is (= :any (t/coarse-lub []))))
+  (testing "single-element collections → that element verbatim"
+    (is (= :int  (t/coarse-lub [:int])))
+    (is (= :text (t/coarse-lub [:text])))
+    (is (= [:list :int] (t/coarse-lub [[:list :int]]))))
+  (testing "all-equal collections → that element"
+    (is (= :int  (t/coarse-lub [:int :int :int])))
+    (is (= :bool (t/coarse-lub [:bool :bool]))))
+  (testing "heterogeneous collections → :any (no precise join attempted)"
+    ;; Coarse-lub is intentionally conservative — even :int vs :float,
+    ;; both numeric, degrades to :any. Callers that need precision
+    ;; should use a structural rule (e.g. union or numeric narrowing).
+    (is (= :any (t/coarse-lub [:int :text])))
+    (is (= :any (t/coarse-lub [:int :float]))
+        ":int and :float share :numeric super but coarse-lub is set-equality based")
+    (is (= :any (t/coarse-lub [:int :text :bool]))))
+  (testing "structural types compared by value equality"
+    (is (= [:list :int] (t/coarse-lub [[:list :int] [:list :int]])))
+    (is (= :any (t/coarse-lub [[:list :int] [:list :text]])))))
+
+
 (deftest type-aliases-test
   (testing "built-in refinements registered"
     (is (= [:refine :int [:> 0]]
@@ -155,7 +178,106 @@
     (is (t/subtype? [:refine :int [:custom-shape 42]]
                     [:refine :int [:custom-shape 42]]))
     (is (not (t/subtype? [:refine :int [:custom-shape 42]]
-                         [:refine :int [:custom-shape 100]])))))
+                         [:refine :int [:custom-shape 100]]))))
+  (testing "regex constraint subtype"
+    ;; Same pattern — trivial equality.
+    (is (t/subtype? [:refine :text [:matches "^https?://"]]
+                    [:refine :text [:matches "^https?://"]]))
+    ;; Different patterns — NOT subtype-comparable even if one is
+    ;; provably stricter. Regex containment in general needs an engine
+    ;; theorem prover; we deliberately keep it conservative.
+    (is (not (t/subtype? [:refine :text [:matches "^https://"]]
+                         [:refine :text [:matches "^https?://"]])))
+    ;; The load-bearing case: `:url` (`[:matches "^https?://"]`)
+    ;; subtypes `:non-empty-text` (`[:not= ""]`). A `:url`-typed
+    ;; argument now passes where `:non-empty-text` is expected.
+    (is (t/subtype? [:refine :text [:matches "^https?://"]]
+                    [:refine :text [:not= ""]]))
+    ;; Empty pattern doesn't imply non-emptiness — degenerate case.
+    (is (not (t/subtype? [:refine :text [:matches ""]]
+                         [:refine :text [:not= ""]])))
+    ;; Pin the "conservative by design" contract: even when one regex
+    ;; obviously implies the other (every match of `^x+` is also a
+    ;; match of `^x*`), constraint-implies? doesn't try to prove it.
+    ;; Both directions reject — change-detector if someone wires in
+    ;; regex containment reasoning later.
+    (is (not (t/subtype? [:refine :text [:matches "^x+"]]
+                         [:refine :text [:matches "^x*"]]))
+        "regex containment is NOT inferred (kept conservative)")
+    (is (not (t/subtype? [:refine :text [:matches "^x*"]]
+                         [:refine :text [:matches "^x+"]]))
+        "regex containment in the other direction also rejected")
+    ;; Cross-shape: a `[:matches P]` constraint and a `[:= literal]`
+    ;; constraint are NOT subtype-comparable — even when the literal
+    ;; matches the pattern, the type system can't know without
+    ;; evaluating the regex at every callsite.
+    (is (not (t/subtype? [:refine :text [:= "https://x"]]
+                         [:refine :text [:matches "^https?://"]]))
+        ":= literal vs :matches regex — incomparable across shapes")
+    ;; [:matches P] ⊆ [:matches P] holds even when P is a Pattern
+    ;; object rather than a string (we keep raw values from parse).
+    (is (t/subtype? [:refine :text [:matches "^a"]]
+                    [:refine :text [:matches "^a"]])
+        "regex equality holds for the same source pattern")))
+
+
+;; -----------------------------------------------------------------------------
+;; New primitives — :decimal and :input-stream
+
+(deftest decimal-primitive-test
+  (testing ":decimal is a primitive"
+    (is (t/primitive? :decimal)))
+  (testing ":decimal ⊆ :numeric (joins the numeric tower)"
+    (is (t/subtype? :decimal :numeric))
+    (is (t/subtype? :decimal :jsonb))
+    (is (t/subtype? :decimal :any))
+    (is (not (t/subtype? :numeric :decimal))
+        ":numeric is NOT a subtype of :decimal — supertype direction")
+    (is (not (t/subtype? :int :decimal))
+        "siblings in the numeric tower don't subtype each other"))
+  (testing ":decimal storage-kind degrades to :numeric"
+    (is (= :numeric (t/type->storage-kind :decimal))
+        "storage value_kind has no :decimal enum entry; degrade to super")))
+
+
+;; -----------------------------------------------------------------------------
+;; occurs? must recurse into every compound shape — otherwise a self-
+;; referential unification (`unify 'a [:refine 'a [:> 0]]`) silently
+;; builds an infinite type. Test every compound arm directly via
+;; behavioural unify so a future regression (dropping an arm) trips
+;; here loudly.
+
+(deftest unify-rejects-cyclic-bindings-in-every-compound-shape
+  (testing "unify('a, T) where 'a occurs anywhere inside T → ::fail"
+    (is (t/fail? (t/unify 'a [:list 'a])))
+    (is (t/fail? (t/unify 'a [:map 'a :int])))
+    (is (t/fail? (t/unify 'a [:map :keyword 'a])))
+    (is (t/fail? (t/unify 'a [:tuple :int 'a])))
+    (is (t/fail? (t/unify 'a [:fn {:item 'a} :bool])))
+    (is (t/fail? (t/unify 'a [:fn {:item :int} 'a])))
+    (is (t/fail? (t/unify 'a [:refine 'a [:> 0]])))
+    (is (t/fail? (t/unify 'a [:union :null 'a])))
+    (is (t/fail? (t/unify 'a {:f 'a})))
+    (is (t/fail? (t/unify 'a {:f [:list 'a]}))
+        "nested compounds — 'a inside list inside record"))
+  (testing "no cycle → unify binds normally"
+    (is (= {'a [:refine :int [:> 0]]}
+           (t/unify 'a [:refine :int [:> 0]] {}))
+        "no occurrence of 'a inside the refinement → bind 'a to the whole shape")
+    (is (= {'a :int} (t/unify 'a :int {})))))
+
+
+(deftest input-stream-primitive-test
+  (testing ":input-stream is a primitive"
+    (is (t/primitive? :input-stream)))
+  (testing ":input-stream is a leaf — relates to :any (the top)"
+    (is (t/subtype? :input-stream :any))
+    (is (not (t/subtype? :jsonb :input-stream)))
+    (is (not (t/subtype? :input-stream :bytes))
+        ":input-stream is NOT bytes — it's a stream wrapper, not a buffer"))
+  (testing ":input-stream storage-kind degrades to :any"
+    (is (= :any (t/type->storage-kind :input-stream))
+        "transient runtime object — never stored as data")))
 
 
 (deftest map-type-test
@@ -441,7 +563,9 @@
   (let [subst {'a :int 'b [:list 'a]}]
     (is (= :int (t/resolve subst 'a)))
     (is (= [:list :int] (t/resolve subst 'b)))
-    (is (= [:fn {:x :int} :int] (t/resolve subst [:fn {:x 'a} 'a])))))
+    ;; resolve canonicalises fn-types to the 4-element form with `:any`
+    ;; in the effects slot (unconstrained) — see `fn-type?` docstring.
+    (is (= [:fn {:x :int} :int :any] (t/resolve subst [:fn {:x 'a} 'a])))))
 
 
 ;; -----------------------------------------------------------------------------

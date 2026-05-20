@@ -190,7 +190,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-create-type.js` | Type-row creation popover (refinement / record / union / variant / list) |
 | `editor-data.js` | Data utilities, lookups, inheritance, free-args |
 | `editor-layout.js` | Grid layout algorithm, positioning |
-| `editor-literal-types.js` | Type-validation helpers shared by edit popovers (mirrors `graphden.types.check`) |
+| `editor-literal-types.js` | Type-validation helpers shared by edit popovers (mirrors `graphden.types.check`). Also exports `refinementConstraintText` / `resolveRefinementAlias` — pure utilities for unwrapping refinement chips, used by stacked refinement rendering in `createTypeChip` |
 | `editor-value-form.js` | Type-aware value-edit forms — generic hiccup→DOM renderer + collect/fill/validate/save runtime, fetches `POST /api/value-form`; union branch-swap, Tier-2 widget hydration, singleton read-only value viewer |
 | `editor-widget-rating.js` | Tier-2 custom value-form widget — a 1-5 slider, registered on `window.GraphdenFormWidgets`; reference example for adding widgets |
 | `editor-tooltips.js` | Description-tooltip + full-name popover singletons |
@@ -204,11 +204,12 @@ The editor frontend is split into modules for better maintainability:
 | `editor-edit-reparent.js` | Phase 3 re-parent cascade + parent-set editor popover |
 | `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
 | `editor-effect-explainer.js` | Singleton popover shown on click of an effect-chip — plain-English description of a tracked side-effect (db / env / io / network / time / random) + the canonical effect tag |
-| `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom |
-| `editor-overlay-arg.js` | Arg-value overlay (in-place edit click target, type-chip, mismatch indicator). Column-flex outer: inline row of value+chip+trigger+mismatch sits over a drag-handle docked below |
-| `editor-overlay-edge-label.js` | Edge-label overlay (rename click, type-chip + inline-expand trigger, stacked type-narrowing chain, description badge, sequence add/remove). Anchored AFTER the taxi-bend so the shared part of a branching edge stays visible |
+| `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom. Fn-type panels include a read-only `eff: pure / <chips>` row (`makeEffectsReadOnly`) showing the slot-level effect constraint — separate from the editable tightening widgets below. Exports `appendResolutionSection(host, prov, opts?)` — the shared 4-tier + inheritance-chain renderer; `opts.onNavigate(fnId)` makes ancestor / source-fn labels clickable links |
+| `editor-provenance-popover.js` | Click-driven singleton popover anchored to the `↳` provenance badge on an arg-overlay's type-chip. Calls `slotTypeProvenance` for data + `appendResolutionSection` for rendering (with `onNavigate: selectFn`), so every ancestor / source-fn row navigates on click. Surfaces the FULL narrowing chain without forcing the user to open the inline `▸/▾` type-expand panel |
+| `editor-overlay-arg.js` | Arg-value overlay (in-place edit click target, type-chip, mismatch indicator, type-narrowing `↳` provenance badge). Column-flex outer: inline row of value+chip+trigger+mismatch sits over a drag-handle docked below. Exports `createTypeChip` (stacks base+constraint for refinements), `getTypeNarrowingInfo` (detects both `:type-override` and ref-return narrowing), and `createProvenanceBadge` (the `↳` glyph reused by edge-label overlays) |
+| `editor-overlay-edge-label.js` | Edge-label overlay (rename click, type-chip + inline-expand trigger, stacked type-narrowing chain, description badge, sequence add/remove, `↳` provenance badge for ref-binding narrowing). Anchored AFTER the taxi-bend so the shared part of a branching edge stays visible |
 | `editor-overlay-fn.js` | Fn-overlay renderer — ancestor rows, MI cells, paint state machine, `createFnOverlay` |
-| `editor-overlay-strips.js` | Bottom-of-card metadata strips — return-type / effects / parents / ns / optional-args / HOF-captured-args, sign-in CTA |
+| `editor-overlay-strips.js` | Bottom-of-card metadata strips — return-type (refinement variant stacks `→ base` over `(constraint)`) / effects / parents / ns / optional-args (each entry on the wire is `{:name :slot-id}`; the strip emits one span per `?name`, title carries the arg-type from rich-types + the declaring ancestor via `findSlotDeclaringFn`) / HOF-captured-args, sign-in CTA |
 | `editor-overlay-manager.js` | Base `createOverlay` factory, placeholder-overlay binder, `createNodeOverlays` / `updateOverlayPositions` lifecycle |
 | `editor-sidebar.js` | Namespace tree + entity list + filter |
 | `editor-expansion.js` | spec→state→preview machine for ancestor row click/hover |
@@ -216,7 +217,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → effect-explainer → overlay-type-expand → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 
@@ -241,6 +242,19 @@ node check-editor.js web-server root:1 router-fn:1
 - Build timestamp verification
 
 **Expand spec format:** `node-name:level` (use `root` for selected function)
+
+The same directory also hosts e2e edit-flow tests (`edit-*.test.js`) and
+the type-system UI helper smoke tests:
+
+```bash
+# Pure-function helpers — refinementChain, typeKindLabel, ruleNarrators,
+# closedEnumOf, appendClosedEnumSection, etc. Verifies the editor's
+# type-system UI primitives via page.evaluate (no DB writes).
+node type-system-ui-helpers.test.js
+```
+
+Each `*.test.js` file is a standalone Node script — exit code 0 = PASS,
+1 = FAIL. Run individually or via `./run-edit-tests.sh`.
 
 ## Architecture Overview
 

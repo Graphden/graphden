@@ -232,6 +232,64 @@
         (finally (sp/close storage))))))
 
 
+(deftest layout-leaf-self-ref-migration-no-stackoverflow-test
+  ;; Reproduces the `:health-status` shape: a fn binds an inherited slot
+  ;; to a ref-fn that itself inherits the SAME slot. Before the guard at
+  ;; the leaf-migration recursion in graph.clj:2121, the layout engine
+  ;; would re-apply the migrated binding when descending into the ref-fn's
+  ;; own slot of the same name (slot-ids are global), recursing forever.
+  (testing "a leaf bound to a ref that inherits the same slot doesn't StackOverflow"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base    (setup/create-base-fn! storage "lg-self-ref-base")
+              slot    (setup/create-slot! storage "x" :int)
+              _       (setup/attach-slot! storage (:id base) (:id slot) 0)
+              ;; sibling — also inherits :x from base
+              sibling (setup/create-composed-fn! storage "lg-self-ref-sibling" (:id base))
+              ;; root — inherits :x, binds it to sibling. Sibling itself
+              ;; has :x free. The bug: the layout would migrate the
+              ;; root's `x → sibling` binding into sibling's own :x slot.
+              root    (setup/create-composed-fn! storage "lg-self-ref-root" (:id base))
+              _       (setup/bind-ref! storage (:id root) (:id slot) (:id sibling))
+              result  (layout storage (:id root))]
+          (is (seq (:nodes result))
+              "layout completes without StackOverflowError")
+          (is (some #(= (str (:id sibling)) (:originalFnId (:data %)))
+                    (fn-nodes result))
+              "sibling renders as its own card via the ref edge"))
+        (finally (sp/close storage))))))
+
+
+(deftest layout-leaf-multi-hop-cycle-no-stackoverflow-test
+  ;; A→B→A migration loop variant of the self-ref case: two sibling fns
+  ;; each bind the shared slot to the OTHER. Walking the leaf migration
+  ;; chain naïvely would alternate between A's and B's bindings forever.
+  ;; The single-hop guard at graph.clj:2121 catches its own arrow; the
+  ;; safety here comes from each level being a NAMED-leaf boundary that
+  ;; doesn't recurse into the body unless explicitly expanded. This test
+  ;; nails that property: no further fixes were needed for the multi-hop
+  ;; case at the time the regression test was added (Audit N1: 632/632
+  ;; named fns layout cleanly), but the test guards against a future
+  ;; broadening of the leaf-migration recursion.
+  (testing "A→B→A cycle of leaf-migration bindings doesn't StackOverflow"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/create-base-fn! storage "lg-multi-hop-base")
+              slot (setup/create-slot! storage "x" :int)
+              _    (setup/attach-slot! storage (:id base) (:id slot) 0)
+              a    (setup/create-composed-fn! storage "lg-multi-hop-a" (:id base))
+              b    (setup/create-composed-fn! storage "lg-multi-hop-b" (:id base))
+              _    (setup/bind-ref! storage (:id a) (:id slot) (:id b))
+              _    (setup/bind-ref! storage (:id b) (:id slot) (:id a))
+              result (layout storage (:id a))]
+          (is (seq (:nodes result))
+              "A→B→A doesn't StackOverflow at layout time")
+          (is (some #(= (str (:id b)) (:originalFnId (:data %)))
+                    (fn-nodes result))
+              "the bound B renders as its own card via the ref edge"))
+        (finally (sp/close storage))))))
+
+
 (deftest layout-partial-mi-expansion-test
   (testing "a partial-fns spec expands only the named MI parent"
     (let [storage (setup/create-test-storage)]
@@ -275,13 +333,19 @@
                                       :required false})
               _    (setup/attach-slot! storage (:id base) (:id slot) 0)
               c    (setup/create-composed-fn! storage "lg-opt-fn" (:id base))
-              result (layout storage (:id c))]
+              result (layout storage (:id c))
+              entry (some (fn [n]
+                            (some (fn [e] (when (= "opt" (name (:name e))) e))
+                                  (:optionalArgs (:data n))))
+                          (fn-nodes result))]
           (is (seq (:nodes result)))
-          ;; The optional arg surfaces on the fn-node's :optionalArgs,
+          ;; The optional arg surfaces on the fn-node's :optionalArgs
+          ;; (each entry `{:name … :slot-id …}` so the editor can
+          ;; resolve the declaring ancestor for the strip's tooltip),
           ;; not as a standalone placeholder node.
-          (is (some #(some (fn [n] (= "opt" (name n)))
-                           (:optionalArgs (:data %)))
-                    (fn-nodes result))))
+          (is entry "optional arg entry present")
+          (is (= (:id slot) (:slot-id entry))
+              "entry carries slot-id so the editor's findSlotDeclaringFn can attribute the source"))
         (finally (sp/close storage))))))
 
 

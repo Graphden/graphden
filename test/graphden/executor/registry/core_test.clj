@@ -57,24 +57,39 @@
     (let [entry (reg/rich-type-of :rtc-plain)]
       (is (= :int (:return entry)))
       (is (= {:a :int} (:args entry)))
-      (is (not (contains? entry :effects))))
+      ;; `:effects` is ALWAYS recorded (even empty) so downstream
+      ;; consumers stop having to write `(or (:effects info) #{})`
+      ;; just to recover the pure case. compute-effects is total.
+      (is (= #{} (:effects entry)) "pure fns carry an explicit empty set"))
     (is (= :int (reg/rich-type-of :rtc-plain :a))))
 
-  (testing "an :effects set is recorded; :effectful? true normalises to #{:effect}"
+  (testing "an :effects set is recorded as a set of category tags"
     (reg/record-rich-types! :rtc-eff {:args {} :return-type :int :effects [:db :io]})
-    (is (= #{:db :io} (:effects (reg/rich-type-of :rtc-eff))))
+    (is (= #{:db :io} (:effects (reg/rich-type-of :rtc-eff)))))
+
+  (testing "legacy :effectful? boolean is ignored (the generic :effect tag was retired)"
     (reg/record-rich-types! :rtc-legacy {:args {} :return-type :int :effectful? true})
-    (is (= #{:effect} (:effects (reg/rich-type-of :rtc-legacy)))))
+    (is (= #{} (:effects (reg/rich-type-of :rtc-legacy)))
+        "Pure rich-type entry — :effectful? doesn't add an effect tag; the empty set is the computed-pure marker."))
 
   (testing "rich-types-snapshot includes every recorded entry"
     (is (contains? (reg/rich-types-snapshot) :rtc-plain))))
 
 
 (deftest record-rich-types-raw-test
-  (testing "a precomputed map is stashed verbatim"
+  (testing "a precomputed map with effects is stashed verbatim"
     (let [m {:return [:list :int] :args {:xs [:list :int]} :effects #{:db}}]
       (reg/record-rich-types-raw! :rtc-raw m)
-      (is (= m (reg/rich-type-of :rtc-raw))))))
+      (is (= m (reg/rich-type-of :rtc-raw)))))
+  (testing "a precomputed map WITHOUT :effects defaults to #{} (pure) on read"
+    ;; Mirrors `record-rich-types!`'s P8 invariant — `:effects` is
+    ;; always present in registry entries so downstream consumers
+    ;; don't have to write `(or (:effects info) #{})` to recover the
+    ;; pure case.
+    (reg/record-rich-types-raw! :rtc-raw-no-eff
+                                {:return :int :args {}})
+    (is (= #{} (:effects (reg/rich-type-of :rtc-raw-no-eff)))
+        "missing :effects defaults to the explicit empty set")))
 
 
 (deftest effectful-rich-type-test

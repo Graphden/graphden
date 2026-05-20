@@ -660,11 +660,12 @@
 
    `:rename-to` is intentionally NOT a binding field anymore — Phase
    6c moved rename info onto a dedicated renamed-view slot row
-   (`slot.source-slot-id` FK link). UI rename code path keeps the
-   `rename-to` form field for back-compat: `process-update-entity`
-   drops it from the binding write and forwards it to
-   `ensure-rename-slot!`, which creates / updates the renamed-view
-   slot directly."
+   (`slot.source-slot-id` FK link). The UI wire format still uses a
+   `rename-to` form field as a single API entrypoint:
+   `process-update-entity` drops it from the binding write and
+   forwards it to `ensure-rename-slot!`, which creates / updates the
+   renamed-view slot directly. (The storage move is transparent to
+   the editor.)"
   [form-data]
   (cond-> {}
     (contains? form-data :fn-id)
@@ -1178,9 +1179,11 @@
    A `\":foo\"`-shaped value string is the wire form of a keyword
    literal (JSON has no keyword type) — restore the keyword and set
    `:literal true`, matching how `records.clj` stores a fn-def's
-   `{:value :kw :literal? true}` item. Without the flag a read would
-   re-emit the keyword colon-stripped and the editor would mis-type
-   it as plain text."
+   `{:value :kw}` item. Without the flag a read would re-emit the
+   keyword colon-stripped and the editor would mis-type it as plain
+   text. (The legacy `:literal? true` EDN flag was retired; the
+   storage `:literal` column is still used to disambiguate keyword
+   literals from string text on read-back.)"
   [storage body]
   (cond
     (contains? body :ref)

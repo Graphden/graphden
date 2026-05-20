@@ -9,8 +9,23 @@
 // render as a thin, muted strip instead of their own placeholder nodes —
 // they carry sane fallbacks so they're not part of the function's interface,
 // just a nicety the caller may or may not care about.
-function appendOptionalArgsStrip(overlay, optionalArgs) {
+//
+// Each `?name` is its own span so a hover shows the arg's declared type
+// AND the ancestor that originally declared the slot (resolved via
+// `findSlotDeclaringFn` from the optional entry's `slotId`). A user
+// reading the strip learns the name, the type-shape, AND which fn in
+// the inheritance chain introduced the optional arg — without opening
+// any popover.
+//
+// Wire format: each entry is `{:name "n" :slot-id "uuid"}` (or a plain
+// string in older payloads — kept for backward compatibility).
+function appendOptionalArgsStrip(overlay, optionalArgs, originalFnId) {
   if (!Array.isArray(optionalArgs) || !optionalArgs.length) return;
+  // Normalise the wire shape so the rendering loop stays uniform.
+  const entries = optionalArgs.map((e) => {
+    if (typeof e === 'string') return { name: e, slotId: null };
+    return { name: e.name, slotId: e['slot-id'] || e.slotId };
+  });
   const strip = document.createElement('div');
   Object.assign(strip.style, {
     padding: '2px 8px',
@@ -23,8 +38,26 @@ function appendOptionalArgsStrip(overlay, optionalArgs) {
     overflow: 'hidden',
     textOverflow: 'ellipsis'
   });
-  strip.title = 'Optional args (unset, using defaults): ' + optionalArgs.join(', ');
-  strip.textContent = optionalArgs.map(n => '?' + n).join(' ');
+  strip.title = 'Optional args (unset, using defaults): '
+              + entries.map((e) => e.name).join(', ');
+  const fnName = originalFnId && lookups?.fnMap?.get(originalFnId)?.name;
+  const richArgs = (fnName && typeof richTypes === 'object' && richTypes)
+                   ? (richTypes[fnName]?.args || null) : null;
+  entries.forEach((entry, i) => {
+    if (i > 0) strip.appendChild(document.createTextNode(' '));
+    const span = document.createElement('span');
+    span.textContent = '?' + entry.name;
+    const argType = richArgs ? richArgs[entry.name] : null;
+    const typePart = (argType != null && typeof formatTypeHint === 'function')
+                     ? ' : ' + formatTypeHint(argType) : '';
+    let originPart = '';
+    if (entry.slotId && originalFnId && typeof findSlotDeclaringFn === 'function') {
+      const decl = findSlotDeclaringFn(originalFnId, entry.slotId);
+      if (decl?.fnName) originPart = ' (from :' + decl.fnName + ')';
+    }
+    span.title = '?' + entry.name + typePart + originPart;
+    strip.appendChild(span);
+  });
   overlay.appendChild(strip);
 }
 
@@ -109,10 +142,73 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
     const strip = document.createElement('div');
     strip.className = 'return-type-strip';
     const displayText = displayRich || rt;
-    strip.textContent = displayText ? ('→ ' + displayText) : '→ (none)';
+    // Pull the rich form (if any) to feed the refinement detector.
+    // displayRich is a string alias like ':positive-int' (or null); the
+    // rich-types lookup gives the structural ['refine', base, constraint]
+    // form, which resolveRefinementAlias / refinementConstraintText
+    // walks for the chip's stacked second line.
+    const richReturn = (cardFnEntity.name && typeof richTypes === 'object' && richTypes)
+                       ? (richTypes[cardFnEntity.name]?.return || null)
+                       : null;
+    const refineStruct = (Array.isArray(richReturn) && richReturn[0] === 'refine')
+      ? richReturn
+      : (typeof resolveRefinementAlias === 'function'
+          ? resolveRefinementAlias(displayRich ? displayRich.replace(/^:/, '') : null)
+          : null);
+    const constraintText = (typeof refinementConstraintText === 'function')
+      ? refinementConstraintText(refineStruct) : null;
+    if (constraintText) {
+      // Stacked refinement on the return-type strip — mirrors the
+      // arg-overlay chip's two-line layout (base / constraint).
+      strip.classList.add('return-type-strip-refine');
+      const arrow = document.createElement('span');
+      arrow.className = 'return-type-strip-arrow';
+      arrow.textContent = '→ ';
+      strip.appendChild(arrow);
+      const base = document.createElement('span');
+      base.className = 'return-type-strip-base';
+      base.textContent = displayText;
+      strip.appendChild(base);
+      const constraint = document.createElement('span');
+      constraint.className = 'return-type-strip-constraint';
+      constraint.textContent = constraintText;
+      // Hover-title — natural-language form so the reader can translate
+      // a terse `(>= 1024) (<= 65535)` constraint into "integer where
+      // >= 1024 and <= 65535" without opening the inline panel.
+      if (refineStruct && typeof formatTypeHumanReadable === 'function') {
+        constraint.title = formatTypeHumanReadable(refineStruct);
+      }
+      strip.appendChild(constraint);
+    } else {
+      // Wrap the display text in a `flex: 1; overflow: hidden; ellipsis`
+      // span instead of setting textContent on the strip directly — that
+      // way a trailing provenance button (added below) is laid out as a
+      // sibling flex item that never gets clipped by the strip's own
+      // overflow:hidden + text-overflow:ellipsis. Without the wrapper,
+      // a long type expression pushes the button past the strip's
+      // visible edge and the OS hit-tester (Playwright + real mouse)
+      // reports the STRIP as the click target, not the button.
+      strip.classList.add('return-type-strip-flex');
+      const textSpan = document.createElement('span');
+      textSpan.className = 'return-type-strip-text';
+      textSpan.textContent = displayText ? ('→ ' + displayText) : '→ (none)';
+      strip.appendChild(textSpan);
+    }
+    // Strip title — three cases:
+    //   - declared (`rt` is set): "Return type: <rt>" plus an "(computed: …)"
+    //     suffix when the rich form is more specific.
+    //   - no declared return-type but a computed one (`displayRich` only):
+    //     "Computed return type: <displayRich>" — the strip's visible text
+    //     is `→ <displayRich>`, so saying "No return type set" would
+    //     mislead the user about what the strip is showing.
+    //   - neither: "No return type set" (the `→ (none)` placeholder case).
     strip.title = rt
-      ? ('Return type: ' + rt + (displayRich && displayRich !== rt ? ' (computed: ' + displayRich + ')' : ''))
-      : 'No return type set';
+      ? ('Return type: ' + rt
+         + (displayRich && displayRich !== rt
+            ? ' (computed: ' + displayRich + ')' : ''))
+      : (displayRich
+          ? 'Computed return type: ' + displayRich
+          : 'No return type set');
     if (rtEditable) {
       strip.classList.add('return-type-strip-editable');
       strip.title = (displayRich && displayRich !== rt
@@ -122,6 +218,67 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
         e.stopPropagation();
         enterFnReturnTypeEditMode(cardFnEntity, strip);
       });
+    }
+    // Type-rule provenance — when this fn-def inherits (possibly through
+    // a chain of intermediate fn-defs) from a base-fn whose
+    // :return-type-rule computed the return type (assoc / get / dissoc /
+    // conj / first / cons / …), the chip's value isn't from a declaration
+    // or simple unification — it was COMPUTED. Surface a small `↳`
+    // button so the user can answer "where did this return type come
+    // from?" without reading the parent base-fn's source. The popover
+    // names the rule's source and lists the resolved bindings that fed
+    // into it.
+    //
+    // The rule lives on a BASE-FN (the leaf of the primary-parent
+    // chain), but the immediate primary-parent is often itself a fn-def
+    // (`:assoc-timestamp → :assoc`, `:json-ok-response → … → :assoc`).
+    // Walk the chain until we either hit a base-fn carrying the flag or
+    // exhaust it. Cycle-guard via a Set + a hop cap so a misshapen
+    // registry can't lock the renderer.
+    const entry = (cardFnEntity.name && typeof richTypes === 'object' && richTypes)
+                  ? richTypes[cardFnEntity.name] : null;
+    let ruleOwner = null;
+    if (entry && typeof richTypes === 'object' && richTypes) {
+      const seen = new Set();
+      let cur = entry['primary-parent'];
+      let hops = 0;
+      while (cur && !seen.has(cur) && hops < 32) {
+        seen.add(cur);
+        const cand = richTypes[cur];
+        if (!cand) break;
+        if (cand['has-return-type-rule?']) { ruleOwner = cur; break; }
+        cur = cand['primary-parent'];
+        hops += 1;
+      }
+    }
+    if (ruleOwner && typeof showReturnTypeRulePopover === 'function') {
+      const provBtn = document.createElement('button');
+      provBtn.type = 'button';
+      provBtn.className = 'return-type-strip-provenance';
+      provBtn.textContent = '↳';
+      provBtn.title = "Computed by :" + ruleOwner
+                    + "'s :return-type-rule — click for inputs";
+      provBtn.setAttribute('aria-label', provBtn.title);
+      // Disclosure button — opens the type-rule popover.
+      // `attachAndShow` (editor-provenance-popover.js) flips this to
+      // "true" on open, hideProvenancePopover back to "false".
+      provBtn.setAttribute('aria-expanded', 'false');
+      provBtn.setAttribute('aria-haspopup', 'dialog');
+      provBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Look up the rule-owner base-fn's id so the popover's "open
+        // base-fn" link can navigate. lookups.fnMap is indexed by id;
+        // scan once.
+        let ruleOwnerFnId = null;
+        if (typeof lookups !== 'undefined' && lookups?.fnMap) {
+          for (const f of lookups.fnMap.values()) {
+            if (f.name === ruleOwner) { ruleOwnerFnId = f.id; break; }
+          }
+        }
+        showReturnTypeRulePopover(entry, ruleOwner, ruleOwnerFnId, provBtn);
+      });
+      strip.appendChild(provBtn);
     }
     overlay.appendChild(strip);
   }

@@ -158,23 +158,6 @@ function positionDescriptionTooltipAt(el, clientX, clientY) {
 // /api/entities/<type>/<id> on save (auth-required), then patch the
 // in-memory copy of the entity so subsequent tooltip opens reflect the
 // new description without a graph refetch.
-// Programmatic entry into description-edit mode — used by Phase 4's
-// fn-action toolbar to jump straight from a click on its "Describe"
-// button into the textarea, skipping the hover→pin→Edit sequence
-// the keyboard / mouse user has to walk through manually. The
-// anchor is the toolbar button so the tooltip pops below it.
-function openDescriptionEditor(content, anchorEl) {
-  if (!content || !anchorEl) return;
-  descriptionTooltipSticky = true;
-  const r = anchorEl.getBoundingClientRect();
-  // showDescriptionTooltip wants a click-event-shaped object; fake
-  // one from the anchor's bottom-centre so the tooltip lands below
-  // the button.
-  const evt = { clientX: r.left + r.width / 2, clientY: r.bottom + 4 };
-  showDescriptionTooltip(content, evt);
-  enterDescriptionEditMode();
-}
-
 function enterDescriptionEditMode() {
   const el = descriptionTooltipEl;
   const content = descriptionTooltipContent;

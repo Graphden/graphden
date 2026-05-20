@@ -53,13 +53,13 @@
 ;; from the registry: any fn whose `:effects` intersects
 ;; #{:time :random} lands here.
 ;;
-;; Other effectful categories (`:env`, `:io`, `:db`, `:network`,
-;; `:effect` legacy) ARE cacheable within one top-level invocation —
-;; env values don't change mid-request, DB rows are consistent under
-;; one txn, etc. — so e.g. `:ring-body`'s single-use InputStream slurp
-;; gets shared across sibling consumers as before. Wall-clock and rng
-;; are the only categories where two adjacent reads in the same
-;; request must see different values.
+;; Other effectful categories (`:env`, `:io`, `:db`, `:network`) ARE
+;; cacheable within one top-level invocation — env values don't
+;; change mid-request, DB rows are consistent under one txn, etc. —
+;; so e.g. `:ring-body`'s single-use InputStream slurp gets shared
+;; across sibling consumers as before. Wall-clock and rng are the
+;; only categories where two adjacent reads in the same request must
+;; see different values.
 (def ^:private always-fresh-fn-ids (atom #{}))
 
 
@@ -202,10 +202,13 @@
    UNCHUNKED lazy-seq — deliberately NOT `map`, whose chunking would
    realise up to 32 elements (and execute their ref-items) at once.
    Each element is realised only when the consumer actually reaches
-   it. This is what makes conditional impls short-circuit: `cond-fn`
-   forces a clause's test but not its result; `every?` / `some`
-   (`:and` / `:or`) stop at the first decisive element — so a side
-   effect in an un-taken branch never runs."
+   it. This is what makes `:and` / `:or` short-circuit: `every?` /
+   `some` stop at the first decisive element, so a side effect in a
+   later element never runs.
+
+   Note the limit: reaching element N executes element N. A consumer
+   that must STEP PAST an element without running it (`:cond` skipping
+   an un-taken clause's result) needs `resolve-seq-thunks` instead."
   [items all-fns env-fn]
   (lazy-seq
     (when-let [s (seq items)]
@@ -213,13 +216,40 @@
             (resolve-seq-items (rest s) all-fns env-fn)))))
 
 
+(defn- resolve-seq-thunks
+  "Like `resolve-seq-items`, but each element is a `delay` over its
+   resolution rather than the resolved value. Realising a spine cell
+   only BUILDS the delay — the ref executes solely when the consumer
+   `force`s that delay.
+
+   This is what a flat `:cond` needs: `cond-fn` forces a clause's test
+   delay, and on a falsy test steps past the result delay via `nnext`
+   WITHOUT forcing it — so an un-taken clause's result is never
+   executed. With plain `resolve-seq-items` the step-past (`rest`)
+   would realise — and thereby execute — that result.
+
+   Used only for slots a base-fn marked `:lazy-seq-args`."
+  [items all-fns env-fn]
+  (lazy-seq
+    (when-let [s (seq items)]
+      (cons (delay (resolve-seq-item (first s) all-fns (env-fn)))
+            (resolve-seq-thunks (rest s) all-fns env-fn)))))
+
+
 (defn- make-seq-entry
   "Runtime value for a `:seq` binding — a thunk that materialises the
-   linked-list items into an unchunked lazy-seq (see `resolve-seq-items`)
-   so consumers only force the elements they reach. Each item resolves
-   against the env snapshot at call time."
-  [items all-fns env-fn]
-  (rt/thunk #(resolve-seq-items items all-fns env-fn)))
+   linked-list items into an unchunked lazy-seq so consumers only
+   force the elements they reach. Each item resolves against the env
+   snapshot at call time.
+
+   `lazy?` true (slot is in its root base-fn's `:lazy-seq-args`) →
+   elements are `delay`s (`resolve-seq-thunks`); the consumer forces
+   them selectively. Otherwise elements are resolved values
+   (`resolve-seq-items`)."
+  [items all-fns env-fn lazy?]
+  (rt/thunk #(if lazy?
+               (resolve-seq-thunks items all-fns env-fn)
+               (resolve-seq-items items all-fns env-fn))))
 
 
 (defn- build-args-and-aug
@@ -273,7 +303,8 @@
                  {:args (assoc args base-name entry)
                   :aug aug})
 
-          :seq (let [entry (make-seq-entry items all-fns env-fn)]
+          :seq (let [entry (make-seq-entry items all-fns env-fn
+                                           (:lazy-seq? b))]
                  ;; Same reasoning as :ref — `:seq` items resolve
                  ;; through their own thunks; exposing the same thunk
                  ;; under ext-name in free-args is just an alias that
@@ -335,7 +366,8 @@
         (case kind
           :value (assoc acc env-name value)
           :ref (assoc acc env-name (make-ref-entry b all-fns env-fn))
-          :seq (assoc acc env-name (make-seq-entry items all-fns env-fn))))
+          :seq (assoc acc env-name (make-seq-entry items all-fns env-fn
+                                                   (:lazy-seq? b)))))
       free-args
       env-bindings)))
 

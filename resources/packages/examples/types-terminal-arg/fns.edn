@@ -31,7 +31,7 @@
    :description "Lookup `:greeting` in `{:greeting \"hi\"}`. The fallback (`:get`'s `:default` slot) stays free for callers to override."
    :parent :get
    :args {:coll {:value {:greeting "hi"}}
-          :key {:value :greeting :literal? true}}}
+          :key {:value :greeting}}}
 
   ;; Demos.
 

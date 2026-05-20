@@ -46,6 +46,7 @@
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"
                   "packages/app/editor/editor-overlay-type-expand.js"
+                  "packages/app/editor/editor-provenance-popover.js"
                   "packages/app/editor/editor-overlay-arg.js"
                   "packages/app/editor/editor-overlay-edge-label.js"
                   "packages/app/editor/editor-overlay-fn.js"

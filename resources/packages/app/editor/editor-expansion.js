@@ -206,13 +206,4 @@ function clearPreview(nodeId) {
   }, PREVIEW_DEBOUNCE_MS);
 }
 
-/**
- * Clear all preview state
- */
-function clearPreviewState() {
-  if (previewState.size > 0) {
-    previewState.clear();
-    renderGraph(false);
-  }
-}
 

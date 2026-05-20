@@ -17,19 +17,10 @@
  :fns
  [;; --- :cond — a falsy clause's RESULT is never forced ---------------
   {:name :ex-lazy-cond
-   :description "`:cond` over two clauses. Clause 0's test is `false`, so its result `:_lazy-boom` (a throw) must never be forced; clause 1 matches and yields `\"safe\"`."
+   :description "`:cond` over two flat clauses `[false <throw> true \"safe\"]`. Clause 0's test is `false`, so its result `:_lazy-boom` (a throw) must never be forced; clause 1's `true` test matches and yields `\"safe\"`."
    :parent :cond
-   :args {:clauses [:_lazy-clause-boom :_lazy-clause-safe]}}
-
-  {:name :_lazy-clause-boom
-   :description "Clause `[false <throw>]` — the test fails, so the result is never evaluated."
-   :parent :list
-   :args {:items [{:value false} :_lazy-boom]}}
-
-  {:name :_lazy-clause-safe
-   :description "Clause `[true \"safe\"]` — the matching clause."
-   :parent :list
-   :args {:items [{:value true} {:value "safe"}]}}
+   :args {:clauses [{:value false} :_lazy-boom
+                    {:value true}  {:value "safe"}]}}
 
   ;; --- :and — stops at the first falsy value -------------------------
   {:name :ex-lazy-and

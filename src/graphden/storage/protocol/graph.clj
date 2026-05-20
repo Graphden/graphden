@@ -39,37 +39,7 @@
    `ExecutionGraph` in this package's `core` ns."
   (:require
     [clojure.set :as set]
-    [clojure.tools.logging :as log]
-    [graphden.storage.protocol.config :as config]))
-
-
-;; === Shared constants ===
-
-;; Re-export from config for backwards compatibility
-(def default-query-timeout-ms
-  "Default timeout for storage queries in milliseconds.
-   Re-exported from config - see config/default-query-timeout-ms for details."
-  config/default-query-timeout-ms)
-
-
-(def default-max-depth
-  "Default maximum recursion depth for function execution.
-   Value: 1000 - reasonable default for most use cases."
-  1000)
-
-
-(def default-max-unknown-types
-  "Default maximum unknown types allowed per execution in forward compatibility mode.
-   Acts as circuit breaker to prevent silent schema mismatch issues."
-  10)
-
-
-;; === UUID constants for SQL/Cypher queries ===
-
-(def uuid-regex-pattern
-  "PostgreSQL regex pattern for UUID validation.
-   Format: 8-4-4-4-12 hexadecimal characters."
-  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+    [clojure.tools.logging :as log]))
 
 
 (def ^:dynamic *max-graph-iterations*

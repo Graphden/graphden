@@ -83,10 +83,5 @@ function isOpInflight(opKey) {
   return inflightOps.has(opKey);
 }
 
-function anyOpInflight() {
-  return inflightOps.size > 0;
-}
-
 window.withBusy = withBusy;
 window.isOpInflight = isOpInflight;
-window.anyOpInflight = anyOpInflight;

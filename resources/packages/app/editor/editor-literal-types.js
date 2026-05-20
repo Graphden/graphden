@@ -7,6 +7,29 @@
 // editor-cytoscape.js after fetching /api/types). Loaded into the
 // concatenated bundle BEFORE editor-tooltips.js.
 
+// The rich (structural) declared type of `arg`'s slot, recovered from
+// the rich-types registry. `[:list T]` / `[:map K V]` / `[:tuple …]`
+// slot types degrade to the bare `:sequence` / `:jsonb` primitive on
+// the storage slot row — T / K / V survive only in `richTypes`. Walk
+// the owning fn's inheritance chain for the first ancestor whose rich
+// `args` entry names this slot (closest narrowing wins). Returns null
+// when nothing is found.
+function slotRichType(arg) {
+  if (!arg || !arg['fn-id'] || !arg['slot-id']) return null;
+  if (typeof richTypes !== 'object' || !richTypes) return null;
+  if (typeof getInheritanceChain !== 'function') return null;
+  const slot = lookups?.slotMap?.get(arg['slot-id']);
+  const slotName = slot?.name;
+  if (!slotName) return null;
+  for (const fid of getInheritanceChain(arg['fn-id'])) {
+    const fn = lookups?.fnMap?.get(fid);
+    const t = (fn?.name && richTypes[fn.name])
+              ? richTypes[fn.name].args?.[slotName] : null;
+    if (t != null) return t;
+  }
+  return null;
+}
+
 // Resolve an arg row's expected type from its slot. The arg row
 // (synth-shape from the layout pipeline) carries `:slot-id` directly
 // — look up the slot, get its type-fn-id, return either:
@@ -70,6 +93,25 @@ function expectedSlotType(arg) {
   const tfn = lookups.fnMap.get(tfnId);
   if (!tfn) return null;
   const slotType = computeSlotType(tfn);
+  // Priority 4 — slot's declared type. `[:list T]` / `[:map K V]` /
+  // `[:tuple …]` degrade to the bare `:sequence` / `:jsonb` primitive
+  // on the storage slot row; the structural form survives only in the
+  // rich-types registry. Prefer it — but ONLY when this resolution
+  // actually fell through to the slot declaration (no binding
+  // type-override, no ref return-type pinning the type).
+  const usingSlotDecl = !binding?.['type-override-fn-id']
+                        && !refFn?.['return-type-fn-id'];
+  const declRich = usingSlotDecl ? slotRichType(arg) : null;
+  // Only let the rich-types form override when `slotType` came back
+  // DEGRADED — a bare `:sequence` / `:jsonb` / `:any` primitive that
+  // lost its structure on the storage slot row. When `computeSlotType`
+  // already produced a structural form (e.g. `[:fn …]` recovered from
+  // the slot's anonymous-row `:constraint`), THAT is the precise one
+  // — a coarser rich-types entry must not clobber it.
+  const degraded = slotType === 'sequence' || slotType === 'jsonb'
+                   || slotType === 'any';
+  const effective = (degraded && Array.isArray(declRich))
+                    ? declRich : slotType;
   // For binding-list-items the slot's type is `[:list T]` / `:sequence`
   // but the ITEM-level expected is `T` (the element type). Without
   // this unfold a literal `:headers` keyword bound into a
@@ -77,20 +119,75 @@ function expectedSlotType(arg) {
   // and render with a red ring. Detect list-items by `:item-id` —
   // that field is the binding-list-item's row id.
   if (arg['item-id']) {
-    const elemType = listElementType(slotType, tfn);
+    const elemType = listElementType(effective, tfn);
     if (elemType !== null) return elemType;
   }
-  return slotType;
+  return effective;
 }
+
+// Walk the inheritance chain from `fnId` to find the DEEPEST ancestor
+// (root base-fn) whose fn-slot junctions include `slotId` — that's the
+// fn that originally introduced the slot. Graphden slots are global
+// identities (one-shot creation, immutable post-create), so the
+// declaring fn is well-defined. Returns the {fnId, fnName} pair, or
+// null when the slot can't be traced (shouldn't happen for any
+// inherited slot).
+function findSlotDeclaringFn(fnId, slotId) {
+  if (!lookups || !lookups.fnMap || !lookups.fnSlotsByFn) return null;
+  const chain = getInheritanceChain(fnId);
+  // BFS-ordered, leaf first → root last. Iterate in REVERSE so the
+  // deepest ancestor that owns the fn-slot wins.
+  for (let i = chain.length - 1; i >= 0; i -= 1) {
+    const fid = chain[i];
+    const fnSlots = lookups.fnSlotsByFn.get(fid) || [];
+    if (fnSlots.some((fs) => fs['slot-id'] === slotId)) {
+      const fn = lookups.fnMap.get(fid);
+      return { fnId: fid, fnName: fn?.name || null };
+    }
+  }
+  return null;
+}
+
+
+// Walk the inheritance chain from `fnId` to find every ancestor that
+// carries a BINDING (with or without :type-override) for `slotId`.
+// Returns the list in CLOSER-WINS order (leaf-first). Used for the
+// "Inherited via" chain row above the 4-tier resolution.
+function findBindingOverrideChain(fnId, slotId) {
+  if (!lookups || !lookups.fnMap || !lookups.bindingMap) return [];
+  const chain = getInheritanceChain(fnId);
+  const out = [];
+  for (const fid of chain) {
+    const binding = lookups.bindingMap.get(`${fid}/${slotId}`)
+                 || (() => {
+                   // Fallback: iterate bindingMap if it's not keyed compactly
+                   for (const b of lookups.bindingMap.values()) {
+                     if (b['fn-id'] === fid && b['slot-id'] === slotId) return b;
+                   }
+                   return null;
+                 })();
+    if (binding?.['type-override-fn-id']) {
+      const fn = lookups.fnMap.get(fid);
+      out.push({
+        fnId: fid,
+        fnName: fn?.name || null,
+        overrideFnId: binding['type-override-fn-id'],
+      });
+    }
+  }
+  return out;
+}
+
 
 // Companion to `expectedSlotType`: reports HOW a slot's effective type
 // resolved — the 4-tier priority chain (binding type-override →
 // backward-unified slot-type → bound-fn return-type → slot
 // declaration), the type each tier contributes (null when the tier
-// doesn't apply), and which tier won. Returns null for list-item rows
-// (their type comes from nav / element logic, not the slot chain) and
-// for args that don't resolve. The editor's inline-expand panel
-// renders this as a "Resolved via" section.
+// doesn't apply), the SOURCE fn-name that contributed each tier, and
+// which tier won. Returns null for list-item rows (their type comes
+// from nav / element logic, not the slot chain) and for args that
+// don't resolve. The editor's inline-expand panel renders this as a
+// "Resolved via" section.
 function slotTypeProvenance(arg) {
   if (!arg || !lookups || !lookups.slotMap || !lookups.fnMap) return null;
   if (arg['item-id']) return null;
@@ -114,18 +211,50 @@ function slotTypeProvenance(arg) {
                   : null;
   }
   const refFn = binding?.['ref-fn-id'] ? lookups.fnMap.get(binding['ref-fn-id']) : null;
+  // Source attribution per tier:
+  //   override  — the fn that owns this binding (i.e., arg['fn-id']).
+  //   unified   — the same: backward-unification produced the narrowing
+  //               at THIS fn-def's check.
+  //   ref-return — the bound fn's name (refFn).
+  //   slot      — the root base-fn that originally declared this slot.
+  const ownFn = arg['fn-id'] ? lookups.fnMap.get(arg['fn-id']) : null;
+  const declaringSource = (arg['fn-id'])
+                          ? findSlotDeclaringFn(arg['fn-id'], slotId)
+                          : null;
+  // Each tier's source carries both fnName (display) and fnId (so the
+  // popover can navigate to the source fn on click). The renderer
+  // (appendResolutionSection in editor-overlay-type-expand.js) treats
+  // fnId as optional — plain text falls back gracefully.
   const tiers = [
     { key: 'override', label: 'Binding type-override',
-      type: typeOfFn(overrideFnId) },
+      type: typeOfFn(overrideFnId),
+      source: (overrideFnId && ownFn?.name)
+              ? { fnName: ownFn.name, fnId: arg['fn-id'] } : null },
     { key: 'unified', label: 'Backward-unified return type',
-      type: unifiedType },
+      type: unifiedType,
+      source: (unifiedType != null && ownFn?.name)
+              ? { fnName: ownFn.name, fnId: arg['fn-id'] } : null },
     { key: 'ref-return', label: 'Bound fn return type',
-      type: typeOfFn(refFn?.['return-type-fn-id']) },
+      type: typeOfFn(refFn?.['return-type-fn-id']),
+      source: refFn?.name
+              ? { fnName: refFn.name, fnId: binding['ref-fn-id'] } : null },
     { key: 'slot', label: 'Slot declaration',
-      type: typeOfFn(slot['type-fn-id']) },
+      type: typeOfFn(slot['type-fn-id']),
+      source: declaringSource },
   ];
   const winner = tiers.find((t) => t.type != null);
-  return { winner: winner ? winner.key : null, tiers };
+  // Inheritance chain: every ancestor between `arg['fn-id']` and the
+  // root base-fn that contributes a type-override binding for this
+  // slot. The editor renders this as a leading "Inherited via:" row
+  // ABOVE the 4 tiers, surfacing the multi-hop narrowing path.
+  const inheritanceChain = arg['fn-id']
+                           ? findBindingOverrideChain(arg['fn-id'], slotId)
+                           : [];
+  return {
+    winner: winner ? winner.key : null,
+    tiers,
+    inheritanceChain,
+  };
 }
 
 
@@ -423,6 +552,120 @@ function dereferenceType(t) {
 }
 
 
+// Walk a literal VALUE against an EXPECTED type and collect the
+// leaf-level disagreements as `[{path, expected, actual}]`. Used by
+// the mismatch-explainer to point the user at the EXACT field /
+// element that doesn't fit instead of just saying "list of ints
+// doesn't match".
+//
+// Path format: dot-notation strings. `.users[2].age` reads "the age
+// field of the third users element". Empty path = top-level
+// disagreement.
+//
+// Returns `[]` for a full match. Stops walking once the structural
+// form diverges (e.g. expected list, got string) — that's reported
+// once at the divergence point rather than spamming.
+function diffValueAgainstType(value, expected, path) {
+  const out = [];
+  const pathStr = path || '';
+  const exp = dereferenceType(expected);
+  if (exp === 'any' || exp === 'jsonb') return out;
+  // Union — accept if any branch matches; report the BEST near-miss
+  // (the branch with the fewest leaf disagreements) when no branch
+  // accepts. Falls back to a top-level "is none of …" when all
+  // branches reject.
+  if (Array.isArray(exp) && exp[0] === 'union') {
+    const branches = exp.slice(1);
+    let bestLeaves = null;
+    for (const branch of branches) {
+      const leaves = diffValueAgainstType(value, branch, pathStr);
+      if (leaves.length === 0) return [];
+      if (bestLeaves === null || leaves.length < bestLeaves.length) {
+        bestLeaves = leaves;
+      }
+    }
+    return bestLeaves || [];
+  }
+  if (Array.isArray(exp) && exp[0] === 'refine') {
+    const [, base, constraint] = exp;
+    const baseLeaves = diffValueAgainstType(value, base, pathStr);
+    if (baseLeaves.length > 0) return baseLeaves;
+    const sat = refinementOK(value, constraint);
+    if (sat === false) {
+      out.push({ path: pathStr, expected: exp, actual: classifyLiteralJS(value) });
+    }
+    return out;
+  }
+  if (Array.isArray(exp) && exp[0] === 'list') {
+    if (!Array.isArray(value)) {
+      out.push({ path: pathStr, expected: exp, actual: classifyLiteralJS(value) });
+      return out;
+    }
+    const elemType = exp[1];
+    for (let i = 0; i < value.length; i += 1) {
+      const sub = diffValueAgainstType(value[i], elemType, `${pathStr}[${i}]`);
+      for (const leaf of sub) out.push(leaf);
+    }
+    return out;
+  }
+  if (Array.isArray(exp) && exp[0] === 'map') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      out.push({ path: pathStr, expected: exp, actual: classifyLiteralJS(value) });
+      return out;
+    }
+    const [, _kType, vType] = exp;
+    for (const [k, v] of Object.entries(value)) {
+      const sub = diffValueAgainstType(v, vType, `${pathStr}.${k}`);
+      for (const leaf of sub) out.push(leaf);
+    }
+    return out;
+  }
+  if (Array.isArray(exp) && exp[0] === 'tuple') {
+    if (!Array.isArray(value)) {
+      out.push({ path: pathStr, expected: exp, actual: classifyLiteralJS(value) });
+      return out;
+    }
+    const elems = exp.slice(1);
+    if (value.length !== elems.length) {
+      out.push({ path: pathStr, expected: exp,
+                 actual: `tuple of length ${value.length}` });
+      return out;
+    }
+    for (let i = 0; i < elems.length; i += 1) {
+      const sub = diffValueAgainstType(value[i], elems[i], `${pathStr}[${i}]`);
+      for (const leaf of sub) out.push(leaf);
+    }
+    return out;
+  }
+  if (typeof exp === 'object' && exp !== null && !Array.isArray(exp)) {
+    // Record — keyword-keyed fixed-field map.
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      out.push({ path: pathStr, expected: exp, actual: classifyLiteralJS(value) });
+      return out;
+    }
+    for (const [k, fieldType] of Object.entries(exp)) {
+      if (!(k in value)) {
+        out.push({ path: `${pathStr}.${k}`, expected: fieldType,
+                   actual: 'missing' });
+      } else {
+        const sub = diffValueAgainstType(value[k], fieldType, `${pathStr}.${k}`);
+        for (const leaf of sub) out.push(leaf);
+      }
+    }
+    return out;
+  }
+  // Primitive — single check at this path.
+  if (typeof exp === 'string') {
+    const actual = classifyLiteralJS(value);
+    if (actual !== null && !primitiveSubtype(actual, exp)) {
+      out.push({ path: pathStr, expected: exp, actual });
+    }
+    return out;
+  }
+  return out;
+}
+
+
 // Run a literal value against the expected slot type. Returns
 // `{ok: true|false, message}` so the caller can render a single
 // status line.
@@ -505,7 +748,28 @@ function formatTypeHumanReadable(t) {
         .join(', ');
       const ret = formatTypeHumanReadable(t[2]);
       const argsPart = args.length ? 'takes ' + args + ', ' : 'takes no args, ';
-      return 'function: ' + argsPart + 'returns ' + ret;
+      // 4th element (when present) is the slot-level effect constraint.
+      // `null`/`'any'`/missing → unconstrained. `[]` → pure (no effects
+      // allowed). Otherwise a list of category names — the callable's
+      // effects must be a SUBSET of these.
+      const effSet = t[3];
+      let effSuffix = '';
+      if (effSet === undefined || effSet === null || effSet === 'any') {
+        effSuffix = '';
+      } else if (Array.isArray(effSet) && effSet.length === 0) {
+        effSuffix = '; must be pure (no effects allowed)';
+      } else if (Array.isArray(effSet)) {
+        effSuffix = '; allowed effects: ' + effSet.join(', ');
+      }
+      // Variance hint — one short line so the tooltip stays compact.
+      // Args are contravariant (callable may accept WIDER inputs),
+      // return is covariant (callable may produce NARROWER outputs).
+      // We only mention it when the function shape is non-trivial
+      // (≥ 1 arg) so the hint doesn't pollute trivial cases.
+      const varianceHint = (args.length > 0)
+                           ? '. Args contravariant; return covariant.'
+                           : '';
+      return 'function: ' + argsPart + 'returns ' + ret + effSuffix + varianceHint;
     }
     return JSON.stringify(t);
   }
@@ -603,15 +867,10 @@ function formatTypeHint(t) {
   if (Array.isArray(t)) {
     const head = t[0];
     if (head === 'refine') {
-      const c = t[2];
-      // Closed enum — render the member set, not the raw constraint.
-      if (Array.isArray(c) && c[0] === 'in' && Array.isArray(c[1])) {
-        const isKw = t[1] === 'keyword';
-        const ms = c[1].map(m => (isKw && String(m).charAt(0) !== ':')
-                                  ? ':' + m : String(m));
-        return ':' + t[1] + ' (' + ms.join('|') + ')';
-      }
-      return ':' + t[1] + ' (' + c.join(' ') + ')';
+      // Constraint string comes from the shared helper (used by chip
+      // stacking too); prefix the base with `:` for the hint form.
+      const cText = refinementConstraintText(t);
+      return ':' + t[1] + (cText ? ' ' + cText : '');
     }
     if (head === 'list')     return '[' + formatTypeHint(t[1]) + ']';
     if (head === 'map')      return '{' + formatTypeHint(t[1]) + ' → '
@@ -620,7 +879,18 @@ function formatTypeHint(t) {
     if (head === 'union')    return t.slice(1).map(formatTypeHint).join('|');
     if (head === 'fn') {
       const args = Object.entries(t[1]).map(([k, v]) => k + ':' + formatTypeHint(v)).join(', ');
-      return '(' + args + ') → ' + formatTypeHint(t[2]);
+      const ret = formatTypeHint(t[2]);
+      // 4th element (when present) is the slot-level effect constraint
+      // — append it compactly so the chip title still shows the
+      // contract. `[]` = pure, `[db, env]` = subset of those.
+      const eff = t[3];
+      let effSuffix = '';
+      if (eff !== undefined && eff !== null && eff !== 'any') {
+        if (Array.isArray(eff)) {
+          effSuffix = eff.length === 0 ? ' pure' : ' eff:' + eff.join(',');
+        }
+      }
+      return '(' + args + ') → ' + ret + effSuffix;
     }
     return JSON.stringify(t);
   }
@@ -695,4 +965,239 @@ function compactTypeChipText(rich, flat) {
     }
   }
   return flat;
+}
+
+
+// Format a refinement's constraint as a compact chip-second-line
+// string: `[:refine :int [:> 0]]` → `(> 0)`. Mirrors formatTypeHint's
+// refine branch but returns only the constraint half so a chip can
+// stack base over constraint. Returns null when `rich` isn't a
+// refinement vector.
+function refinementConstraintText(rich) {
+  if (!Array.isArray(rich) || rich[0] !== 'refine') return null;
+  const c = rich[2];
+  if (Array.isArray(c) && c[0] === 'in' && Array.isArray(c[1])) {
+    const isKw = rich[1] === 'keyword';
+    const ms = c[1].map((m) => (isKw && String(m).charAt(0) !== ':') ? ':' + m : String(m));
+    return '(' + ms.join('|') + ')';
+  }
+  if (Array.isArray(c)) return '(' + c.join(' ') + ')';
+  return null;
+}
+
+
+// Lift a named refinement alias (e.g. `'non-negative-int'`) to its
+// structural body (`['refine', 'int', ['>=', 0]]`) by looking up the
+// rich-types snapshot. Returns the array form when the alias resolves
+// to a refinement; null otherwise (alias not registered or names a
+// non-refinement type).
+function resolveRefinementAlias(rich) {
+  if (typeof rich !== 'string') return null;
+  if (typeof richTypes !== 'object' || richTypes == null) return null;
+  const entry = richTypes[rich];
+  const r = entry?.return;
+  if (Array.isArray(r) && r[0] === 'refine') return r;
+  return null;
+}
+
+
+// === Provenance rendering (shared DOM-builder) ===
+//
+// Lives in literal-types.js so the three callers — inline-expand
+// panel, ↳ provenance popover, mismatch-explainer — all see it
+// regardless of bundle order (literal-types loads first).
+
+// Tiny compact label for a rich type, used both by the inline-expand
+// mini-chips and by the provenance row "type at this tier" column.
+// Stays short: refinements show their base name (constraint elided),
+// lists / maps / tuples render with structural brackets, functions
+// and unions collapse to a single word. Pure (no globals).
+function shortTypeLabel(rich) {
+  if (rich == null) return 'any';
+  if (typeof rich === 'string') return rich;
+  if (Array.isArray(rich)) {
+    const head = rich[0];
+    if (head === 'refine') return shortTypeLabel(rich[1]);
+    if (head === 'list')   return '[' + shortTypeLabel(rich[1]) + ']';
+    if (head === 'union')  return 'union';
+    if (head === 'fn')     return 'fn';
+    if (head === 'map')    return '{' + shortTypeLabel(rich[1]) + '→'
+                                  + shortTypeLabel(rich[2]) + '}';
+    if (head === 'tuple')  return '(' + rich.slice(1).map(shortTypeLabel).join(',')
+                                  + ')';
+    return 'type';
+  }
+  if (typeof rich === 'object') return 'record';
+  return String(rich);
+}
+
+
+// Render the type-resolution chain from `slotTypeProvenance`.
+//
+// Two parts:
+//   1. "Inherited via" — for each ancestor in the inheritance chain
+//      that contributes a type-override binding, a small row naming
+//      the ancestor + the override it carries. Closer-wins order.
+//      Skipped when the chain is empty (no inherited overrides).
+//   2. "Resolved via" — the 4-tier priority chain (override → unified
+//      → ref-return → slot). Each row labels the SOURCE fn (the
+//      ancestor or ref that contributed it) so the user can answer
+//      "where did this type come from?" by reading the name. Winning
+//      tier is marked with ✓.
+//
+// Optional `opts.onNavigate(fnId)` — when supplied, each ancestor /
+// source fn-name renders as a clickable link calling this callback.
+// The provenance-popover entry point passes `selectFn` here so the
+// chain becomes a navigable "open the fn that pinned this constraint"
+// breadcrumb. When omitted, names render as plain text (the in-panel
+// embedding stays read-only).
+function appendResolutionSection(host, prov, opts) {
+  const onNavigate = opts && typeof opts.onNavigate === 'function'
+                     ? opts.onNavigate : null;
+  const section = document.createElement('div');
+  section.className = 'type-inline-resolution';
+
+  // Render a fn-name span — clickable (anchor-like) when onNavigate is
+  // provided and fnId is non-null, plain span otherwise.
+  const makeFnLabel = (fnName, fnId) => {
+    const text = fnName || '(anonymous)';
+    if (onNavigate && fnId) {
+      const link = document.createElement('a');
+      link.href = '#';
+      link.className = 'type-inline-resolution-label type-inline-resolution-link';
+      link.textContent = text;
+      link.title = 'Open :' + text;
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onNavigate(fnId);
+      });
+      return link;
+    }
+    const plain = document.createElement('span');
+    plain.className = 'type-inline-resolution-label';
+    plain.textContent = text;
+    return plain;
+  };
+
+  // Render a type column — clickable when onNavigate is provided AND
+  // the type is a string that names a known type-row entity. Structural
+  // arrays (`[:list T]`, `[:fn …]`) render as plain text since they
+  // don't have a single fn-id to navigate to (compact form via
+  // shortTypeLabel keeps the row narrow). Lets the reader jump from
+  // ":user-port" in a chain to the type-row that defines it.
+  const makeTypeCell = (type) => {
+    const cell = document.createElement('span');
+    cell.className = 'type-inline-resolution-type';
+    if (type == null) { cell.textContent = '—'; return cell; }
+    const label = shortTypeLabel(type);
+    cell.textContent = label;
+    if (onNavigate && typeof type === 'string'
+        && typeof lookups !== 'undefined' && lookups?.fnByName) {
+      const entry = lookups.fnByName.get(type);
+      if (entry?.id) {
+        cell.classList.add('type-inline-resolution-link');
+        cell.setAttribute('role', 'link');
+        cell.setAttribute('tabindex', '0');
+        cell.title = 'Open type :' + type;
+        cell.style.cursor = 'pointer';
+        const navigate = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onNavigate(entry.id);
+        };
+        cell.addEventListener('click', navigate);
+        cell.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') navigate(e);
+        });
+      }
+    }
+    return cell;
+  };
+
+  // Inheritance chain — multi-hop narrowing path. Render ONLY when
+  // there's something to say (>0 entries); otherwise the simple
+  // 4-tier list speaks for itself.
+  //
+  // The chain comes back in closer-first order from
+  // `findBindingOverrideChain`. Backend resolves multi-parent override
+  // conflicts by closer-fn-wins, so the FIRST entry is the override
+  // actually applied; subsequent entries are siblings / farther
+  // ancestors whose overrides exist but were shadowed. When there are
+  // ≥ 2 candidates we mark the winner with ✓ (chosen) and the rest
+  // with "(also by)" so the user can see which parent's narrowing was
+  // selected and what the alternatives were — otherwise the closer-
+  // wins decision is invisible.
+  if (prov.inheritanceChain && prov.inheritanceChain.length > 0) {
+    const chainHead = document.createElement('div');
+    chainHead.className = 'type-inline-resolution-head';
+    chainHead.textContent = 'Inherited via';
+    section.appendChild(chainHead);
+    const multi = prov.inheritanceChain.length >= 2;
+    prov.inheritanceChain.forEach((link, idx) => {
+      const winner = idx === 0;
+      const row = document.createElement('div');
+      row.className = 'type-inline-resolution-row type-inline-resolution-chain-link'
+                    + (winner && multi ? ' type-inline-resolution-chain-winner' : '')
+                    + (!winner && multi ? ' type-inline-resolution-chain-also'  : '');
+      const mark = document.createElement('span');
+      mark.className = 'type-inline-resolution-mark';
+      mark.textContent = (multi && winner) ? '✓' : '↳';
+      row.appendChild(mark);
+      row.appendChild(makeFnLabel(link.fnName, link.fnId));
+      // Suffix tag — only present in multi-override scenarios. Lets the
+      // reader see "this was the closer-fn-wins pick; sibling X had a
+      // candidate too but lost". Single-override case stays unadorned
+      // — the chain row is already self-explanatory.
+      if (multi) {
+        const tag = document.createElement('span');
+        tag.className = 'type-inline-resolution-chain-tag';
+        tag.textContent = winner ? '(chosen)' : '(also by)';
+        row.appendChild(tag);
+      }
+      const overrideFn = (typeof lookups !== 'undefined'
+                          && lookups?.fnMap?.get(link.overrideFnId)) || null;
+      const overrideType = overrideFn ? computeSlotType(overrideFn) : null;
+      row.appendChild(makeTypeCell(overrideType));
+      section.appendChild(row);
+    });
+  }
+
+  const head = document.createElement('div');
+  head.className = 'type-inline-resolution-head';
+  head.textContent = 'Resolved via';
+  section.appendChild(head);
+  for (const tier of prov.tiers) {
+    const won = tier.key === prov.winner;
+    const row = document.createElement('div');
+    row.className = 'type-inline-resolution-row'
+                  + (won ? ' type-inline-resolution-active' : '');
+    const mark = document.createElement('span');
+    mark.className = 'type-inline-resolution-mark';
+    mark.textContent = won ? '✓' : '·';
+    row.appendChild(mark);
+    // The mechanism label and the source-fn name go in separate
+    // spans so the fn-name can be a clickable link without dragging
+    // the mechanism text into the click target.
+    const lab = document.createElement('span');
+    lab.className = 'type-inline-resolution-label';
+    lab.textContent = tier.label;
+    row.appendChild(lab);
+    if (tier.source?.fnName) {
+      const sep = document.createElement('span');
+      sep.className = 'type-inline-resolution-sep';
+      sep.textContent = ' · ';
+      row.appendChild(sep);
+      // tier.source carries fnName today; resolve fn-id when possible
+      // so the link can navigate (slot tier surfaces declaring base-fn
+      // via name — look up by name in fnByName when available).
+      const sourceFnId = tier.source.fnId
+        || (typeof lookups !== 'undefined' && lookups?.fnByName?.get(tier.source.fnName)?.id)
+        || null;
+      row.appendChild(makeFnLabel(tier.source.fnName, sourceFnId));
+    }
+    row.appendChild(makeTypeCell(tier.type));
+    section.appendChild(row);
+  }
+  host.appendChild(section);
 }

@@ -1023,7 +1023,7 @@ function createFnOverlay(node, container) {
     overlay.appendChild(more);
   }
 
-  appendOptionalArgsStrip(overlay, node.data('optionalArgs'));
+  appendOptionalArgsStrip(overlay, node.data('optionalArgs'), originalFnId);
 
   appendFnMetadataStrips(overlay, originalFnId, isNavRoot);
 

@@ -45,6 +45,24 @@
     (violated! :non-empty-text [:not= ""] value)))
 
 
+(def ^:private non-blank-re #"\S")
+
+
+(defbase ensure-non-blank-text [value]
+  (if (and (string? value) (re-find non-blank-re value))
+    value
+    (violated! :non-blank-text [:matches "\\S"] value)))
+
+
+(def ^:private url-re #"^https?://")
+
+
+(defbase ensure-url [value]
+  (if (and (string? value) (re-find url-re value))
+    value
+    (violated! :url [:matches "^https?://"] value)))
+
+
 (defbase ensure-positive-numeric [value]
   (if (and (number? value) (pos? value))
     value
@@ -56,4 +74,6 @@
    :ensure-non-negative-int  ensure-non-negative-int
    :ensure-negative-int      ensure-negative-int
    :ensure-non-empty-text    ensure-non-empty-text
+   :ensure-non-blank-text    ensure-non-blank-text
+   :ensure-url               ensure-url
    :ensure-positive-numeric  ensure-positive-numeric})

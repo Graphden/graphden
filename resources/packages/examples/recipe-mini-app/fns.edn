@@ -26,7 +26,7 @@
   ;;   2.   formats {:name " is a/an " :band "."}
   ;;   3.     :band lookup runs the classifier on the validated age
   ;;     :name flows through verbatim
-  ;;   4.       classifier runs :cond over four pre-built pairs
+  ;;   4.       classifier runs :cond over four flat clauses
   {:name :ex-recipe-greeting
    :description "Top-level entry point. Free args: `:age` (int, validated 0..149) and `:name` (string). Returns `\"<NAME> is a/an <BAND>.\"`. The `:age` value flows through `:_ex-band` (classifier) which itself runs the validator, so an out-of-range age throws BEFORE the string is built."
    :parent :str
@@ -35,42 +35,18 @@
                   :_ex-band
                   {:value "."}]}}
 
-  ;; CLASSIFIER LAYER — runs :cond on a validated :age. Each cond
-  ;; pair carries a comparison test and the corresponding band label.
-  ;; The `:_ex-validate` step at the top of the chain ensures :age
-  ;; is in [0, 150).
+  ;; CLASSIFIER LAYER — runs :cond on a validated :age. The flat
+  ;; clause sequence alternates a comparison test and the
+  ;; corresponding band label; the last clause's literal `true` test
+  ;; is the default. The `:_ex-validate` step at the top of the chain
+  ;; ensures :age is in [0, 150).
   {:name :_ex-band
-   :description "Classify the validated :age into one of four band labels. The :cond clauses use `:_ex-age-validated` (= the input post-check) so the validation throws before any branch is evaluated."
+   :description "Classify the validated :age into one of four band labels via a flat `:cond` — alternating `[age-comparison band-label]`, ending with `true → \"senior\"`. The comparison tests share the post-check :age, so an out-of-range age throws before any branch is evaluated."
    :parent :cond
-   :args {:clauses [:_ex-band-infant-pair
-                    :_ex-band-child-pair
-                    :_ex-band-adult-pair
-                    :_ex-band-senior-pair]}}
-
-  ;; --- band classification pairs ---
-  ;;
-  ;; Each pair: [test result-string]. The test is a comparison
-  ;; against the validated :age; the result is the band label.
-
-  {:name :_ex-band-infant-pair
-   :description "Pair `[(< age 2) \"infant\"]`."
-   :parent :list
-   :args {:items [:_ex-age-lt-2 {:value "infant"}]}}
-
-  {:name :_ex-band-child-pair
-   :description "Pair `[(< age 13) \"child\"]`."
-   :parent :list
-   :args {:items [:_ex-age-lt-13 {:value "child"}]}}
-
-  {:name :_ex-band-adult-pair
-   :description "Pair `[(< age 65) \"adult\"]`."
-   :parent :list
-   :args {:items [:_ex-age-lt-65 {:value "adult"}]}}
-
-  {:name :_ex-band-senior-pair
-   :description "Default branch: matches anything not yet matched (including 65+). `:test` is the literal `true` so the dispatch always picks this if no earlier clause fired."
-   :parent :list
-   :args {:items [{:value true} {:value "senior"}]}}
+   :args {:clauses [:_ex-age-lt-2  {:value "infant"}
+                    :_ex-age-lt-13 {:value "child"}
+                    :_ex-age-lt-65 {:value "adult"}
+                    {:value true}  {:value "senior"}]}}
 
   ;; --- comparison helpers (each shares the validated :age) ---
   ;;

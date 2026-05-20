@@ -25,8 +25,10 @@
 
 
 ;; === Configuration ===
-;; Query timeout is centralized in storage-protocol.config.
-;; Re-export functions for backward compatibility.
+;; Query timeout is centralized in storage-protocol.config; this
+;; namespace just aliases the public helpers so postgres call sites
+;; can `(:require [.util :as util])` once and reach both timeout and
+;; error helpers under one prefix.
 
 (def with-query-timeout
   "Executes f with a custom query timeout (in milliseconds).

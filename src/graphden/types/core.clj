@@ -53,15 +53,34 @@
 ;; Predicates
 
 (def primitives
-  "The flat enum of value-kind primitives. Mirrors
-   `value-kind-values` in schema/graph/schema.clj — keep these in
-   sync (validated by registry sync-time check). `:fn` is included
-   as a primitive for backwards compat with declarations that use
-   the bare keyword instead of a structural `[:fn …]`; structurally,
-   it acts like `[:fn {} :any]` (any callable). `:float` and
-   `:keyword` are reserved for upcoming use."
+  "The flat enum of value-kind primitives. A superset of
+   `value-kind-values` in schema/graph/schema.clj — every storage
+   value-kind is a primitive here, but a few primitives are
+   type-system-only and never reach the `value_kind` column
+   (`:float`, `:keyword`, `:never`, `:input-stream`, `:decimal`).
+   `:fn` is included as a primitive for backwards compat with
+   declarations that use the bare keyword instead of a structural
+   `[:fn …]`; structurally, it acts like `[:fn {} :any]` (any
+   callable).
+
+   `:never` is the BOTTOM type — the dual of `:any` (top). It is a
+   subtype of every type and the type of a computation that never
+   produces a value (`:throw`). In a union it is absorbed
+   (`[:union :never T]` = `T`), so `(:if c (:throw …) x)` is typed
+   exactly `x`. `:float` and `:keyword` are type-system-only —
+   emitted by `classify-literal` for float / keyword literals — and
+   never reach the storage `value_kind` column.
+
+   `:input-stream` is the type of a transient `java.io.InputStream`
+   (Ring request bodies, file streams) — values are never stored as
+   data, so it's type-system-only too. `type->storage-kind` degrades
+   it to `:any`.
+
+   `:decimal` is arbitrary-precision rational (Clojure's `BigDecimal`
+   / Java `java.math.BigDecimal`). Subtype of `:numeric` alongside
+   `:int` and `:float`."
   #{:null :uuid :text :int :bool :numeric :timestamptz :jsonb :bytes
-    :any :fn :float :keyword :sequence})
+    :any :fn :float :keyword :sequence :never :input-stream :decimal})
 
 
 (defn primitive?
@@ -80,18 +99,29 @@
 
 
 (defn fn-type?
-  "`[:fn args ret]` — three-element form, no effect constraint
-   (callback may have any effects, traditional behaviour).
+  "`[:fn args ret effects]` — canonical four-element form. `effects`
+   is either:
+     - `:any` — the slot declares no constraint; callable may have
+       any effects.
+     - a set of effect-category keywords (`#{}` pure-only,
+       `#{:io :time}` read-only system state, …) — the bound fn's
+       `:effects` must be a subset.
 
-   `[:fn args ret effects]` — four-element form with a slot-level
-   effect constraint. `effects` is a set of effect-category keywords
-   (e.g. `#{}` for pure-only, `#{:io :time}` for read-only system
-   state). At binding time the bound fn's `:effects` must be a
-   subset of `effects`. Lets HOF slots like `:filter :pred` declare
-   they require pure callbacks instead of silently letting effects
-   bubble through `compute-effects` union."
+   `[:fn args ret]` — legacy three-element form, equivalent to the
+   four-element form with `:any` as the 4th element. Accepted on
+   read (storage / EDN authors may still write it); `normalise`
+   canonicalises to four-element before any subtype/unify check."
   [t]
   (and (vector? t) (= :fn (first t)) (#{3 4} (count t))))
+
+
+(defn make-fn-type
+  "Canonical constructor for a function type. Always produces the
+   four-element form; `eff` defaults to `:any` (unconstrained slot)
+   when omitted. New code should prefer this over hand-rolled
+   `[:fn args ret …]` vectors so the wire format stays consistent."
+  ([args ret]      (make-fn-type args ret :any))
+  ([args ret eff]  [:fn (or args {}) ret eff]))
 
 
 (defn list-type?
@@ -169,14 +199,20 @@
 
 
 (defn fn-effects
-  "Slot-level effect constraint of a fn-type. Returns the declared set
-   when the 4-element form `[:fn args ret effects]` is in use; nil
-   for the 3-element form (no constraint — backward compat: any
-   effects allowed). nil and the universal sentinel `:any` both mean
-   \"unconstrained\" at the subtype/unify check sites."
+  "Slot-level effect constraint of a fn-type. Always returns a value
+   for fn-types: the declared 4th element if present, else `:any`
+   (the legacy three-element form is treated as the canonical
+   four-element form with `:any` as the slot meaning — unconstrained,
+   any callable passes). nil for non-fn-types.
+
+   `effects-compatible?` reads this and handles `:any` (sup-side =
+   unconstrained, sub-side = can't satisfy concrete) — see its
+   docstring for the directional rule."
   [t]
-  (when (and (fn-type? t) (= 4 (count t)))
-    (nth t 3)))
+  (cond
+    (not (fn-type? t)) nil
+    (= 4 (count t))    (nth t 3)
+    :else              :any))
 
 
 (defn list-elem
@@ -274,6 +310,11 @@
   [members]
   (let [flat (mapcat (fn [m] (if (union-type? m) (union-members m) [m]))
                      members)
+        ;; `:never` (bottom) drops out of a union — `[:union :never T]`
+        ;; = `T` — dual to `:any` (top) absorbing. A union of nothing
+        ;; but `:never` members collapses back to `:never`.
+        non-never (remove #{:never} flat)
+        flat (if (seq non-never) non-never flat)
         ;; Stable order to keep the canonical form deterministic for
         ;; equality. `pr-str` sorts heterogeneous keywords/vectors
         ;; without confusing comparators.
@@ -465,11 +506,19 @@
        [:refine B c]   → storage-kind of B (the constraint lives only
                                             in the type system)
        [:union …]      → :any        (no single storage tag fits a union)
+       :never          → :any        (bottom type — no value is ever
+                                       `:never`-typed at rest)
+       :input-stream   → :any        (transient runtime object — never
+                                       stored as data)
+       :decimal        → :numeric    (storage value_kind has no
+                                       :decimal — degrades to its super)
        <alias keyword> → resolves through `resolve-alias` first, then
                           recurses on the structural body."
   [t]
   (let [t' (resolve-alias t)]
     (cond
+      (or (= t' :never) (= t' :input-stream)) :any
+      (= t' :decimal)      :numeric
       (primitive? t')   t'
       (type-var? t')    :any
       (fn-type? t')     :fn
@@ -522,7 +571,14 @@
 (defn- occurs?
   "Standard occurs-check — does `v` appear inside `t` after applying
    `subst`? Required to keep unification sound; without it
-   `unify('a, [:list 'a])` would build an infinite type."
+   `unify('a, [:list 'a])` would build an infinite type.
+
+   Must cover EVERY compound shape `types/core` defines — a missing
+   arm here lets a self-referential binding slip through unification
+   and the type-checker builds an infinite type. The constraint
+   payload on `:refine` is opaque (a vector of comparators / regex /
+   `:and`/`:or` shapes) and never names a type-variable, so the
+   refine arm only recurses into the base."
   [v t subst]
   (let [t' (resolve subst t)]
     (cond
@@ -535,6 +591,7 @@
                            (occurs? v (map-val t') subst))
       (tuple-type? t') (some #(occurs? v % subst) (tuple-elems t'))
       (record-type? t') (some #(occurs? v % subst) (vals t'))
+      (refine-type? t') (occurs? v (refine-base t') subst)
       (union-type? t') (some #(occurs? v % subst) (union-members t'))
       :else            false)))
 
@@ -697,19 +754,27 @@
    `resolve-alias` recurses into compound types and is idempotent on
    already-structural inputs, so chaining the two passes is safe."
   [t]
-  (let [t (cond (= t :sequence) [:list :any]
-                :else           t)]
+  (let [t (cond
+            (= t :sequence) [:list :any]
+            ;; Canonicalise the legacy 3-element fn-type form to 4-element
+            ;; with `:any` (unconstrained slot). Internal code can rely on
+            ;; the 4th slot always being present.
+            (and (vector? t) (= :fn (first t)) (= 3 (count t)))
+            (conj t :any)
+            :else t)]
     (resolve-alias t)))
 
 
 ;; Primitive subtype hierarchy. Doc-aligned:
-;;   :int ⊆ :numeric  ⊆ :jsonb  ⊆ :any
-;;   :float ⊆ :numeric
+;;   :int     ⊆ :numeric  ⊆ :jsonb  ⊆ :any
+;;   :float   ⊆ :numeric
+;;   :decimal ⊆ :numeric
 ;; (`:numeric` is the doc's wider numeric supertype — runtime
-;; arbitrary-precision values, plus integers and floats.)
+;; arbitrary-precision values, plus integers, floats and decimals.)
 (def ^:private primitive-supers
-  {:int   #{:numeric}
-   :float #{:numeric}})
+  {:int     #{:numeric}
+   :float   #{:numeric}
+   :decimal #{:numeric}})
 
 
 (defn- primitive-subtype?
@@ -783,6 +848,24 @@
         ;; [:= x]  ⊆ [:not= y]  iff  x ≠ y
         (and (= ak :=) (= bk :not=))
         (not= av bv)
+        ;; Regex equality — `[:matches P]` ⊆ `[:matches P]`. Different
+        ;; patterns are NOT subtype-comparable: even if one regex is
+        ;; provably stricter (e.g. `"^https://"` ⊆ `"^https?://"`),
+        ;; deciding regex containment in general requires a regex
+        ;; engine theorem prover. Equality covers the common
+        ;; same-pattern case (a child fn-def reaffirming its parent's
+        ;; refinement) without false positives.
+        (and (= ak :matches) (= bk :matches))
+        (= av bv)
+        ;; `[:matches P]` ⊆ `[:not= ""]` when P is non-empty — any
+        ;; string matching a non-empty pattern is itself non-empty.
+        ;; This is the load-bearing case: `:url` (`[:matches "^https?://"]`)
+        ;; subtypes `:non-empty-text` (`[:not= ""]`) so a `:url`
+        ;; argument is accepted where `:non-empty-text` is expected.
+        (and (= ak :matches) (= bk :not=)
+             (string? av) (seq av) (= bv ""))
+        true
+
         ;; [:in S]  ⊆ [:not= y]  iff  y ∉ S
         (and (= ak :in) (= bk :not=) (coll? av))
         (not (contains? (set av) bv))
@@ -853,6 +936,12 @@
     (cond
       (or (= sub sup) (= sup :any))            true
       (= sub :any)                             false
+
+      ;; `:never` is the bottom type — a subtype of every type, and
+      ;; nothing but itself is a subtype of it. (`:never ⊆ :never`
+      ;; is already covered by the `= sub sup` reflexive case above.)
+      (= sub :never)                           true
+      (= sup :never)                           false
 
       ;; Union LHS: every member must subtype.
       (union-type? sub)
@@ -984,6 +1073,28 @@
             (keys a))))
 
 
+(defn- unify-map-record
+  "Unify a homogeneous-map type `[:map K V]` with a concrete
+   keyword-keyed record. Mirrors the `subtype?` rule
+   `record ⊆ [:map :keyword V]`: the record's keyword keys fix
+   `K := :keyword`, every field value unifies against `V`.
+
+   Without this, a `[:map k v]`-typed slot (`:keys` / `:vals` /
+   `:zipmap`'s return) would reject a record argument even though
+   `subtype?` accepts it — the same asymmetry the record ↔ `:jsonb`
+   arm below already closes for the untyped case."
+  [map-t rec subst]
+  (let [k-step (unify (map-key map-t) :keyword subst)]
+    (if (= k-step ::fail)
+      ::fail
+      (reduce (fn [s v]
+                (if (= s ::fail)
+                  (reduced ::fail)
+                  (unify (map-val map-t) v s)))
+              k-step
+              (vals rec)))))
+
+
 (defn unify
   "Unify two types. Returns an updated substitution, or `::fail` if
    they cannot be made equal. Substitution is a `{type-var type}` map.
@@ -1011,6 +1122,12 @@
        ;; fail instead of binding the var to the union.
        (type-var? a)        (bind-var a b subst)
        (type-var? b)        (bind-var b a subst)
+       ;; `:never` (bottom) unifies with anything — it is a subtype of
+       ;; every type, so a divergent `:throw` branch fits any context.
+       ;; Placed AFTER the type-var arms so a var still BINDS to
+       ;; `:never` (letting `make-union` later absorb it) rather than
+       ;; merely succeeding without a binding.
+       (or (= a :never) (= b :never)) subst
        ;; Unions: HM unifier doesn't naturally pick a branch (multiple
        ;; valid choices), so defer to subtype? — succeed without
        ;; binding when the relation holds in either direction. This
@@ -1055,6 +1172,10 @@
                    subst (map vector ea eb))
            ::fail))
        (and (record-type? a) (record-type? b)) (unify-record a b subst)
+       ;; A keyword-keyed record unifies with `[:map K V]` — same
+       ;; relation `subtype?` already grants (`record ⊆ [:map …]`).
+       (and (map-type? a) (record-type? b))    (unify-map-record a b subst)
+       (and (record-type? a) (map-type? b))    (unify-map-record b a subst)
        :else                ::fail))))
 
 

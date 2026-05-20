@@ -34,6 +34,12 @@
   {:name :non-empty-text
    :refine {:base :text :constraint [:not= ""]}}
 
+  {:name :non-blank-text
+   :refine {:base :text :constraint [:matches "\\S"]}}
+
+  {:name :url
+   :refine {:base :text :constraint [:matches "^https?://"]}}
+
   {:name :positive-numeric
    :refine {:base :numeric :constraint [:> 0]}}
 
@@ -59,12 +65,15 @@
   ;; Union types — `[T1 T2 …]`. A value satisfies the union iff it
   ;; satisfies at least one branch.
   ;; ---------------------------------------------------------------------
+  ;;
+  ;; Only `:nullable-text` ships as an alias (12+ sites in the standard
+  ;; packages — `:env`, `:bearer-token`, `:auth-token-from-env`, …).
+  ;; The other shapes (`:nullable-int`, `:nullable-bool`,
+  ;; `:nullable-numeric`, `:nullable-uuid`) had ZERO real uses and
+  ;; were retired to keep the alias set tight — write `[:union :null T]`
+  ;; inline when needed; it's three keywords, not worth a named row.
 
-  {:name :nullable-int      :union [:null :int]}
   {:name :nullable-text     :union [:null :text]}
-  {:name :nullable-bool     :union [:null :bool]}
-  {:name :nullable-numeric  :union [:null :numeric]}
-  {:name :nullable-uuid     :union [:null :uuid]}
 
   ;; ---------------------------------------------------------------------
   ;; Variant types — Result-style discriminated unions. Each branch is
@@ -98,6 +107,16 @@
    :description "Validate that `:value` is a non-empty string; return it as `:non-empty-text`. Throws `refinement/violated` otherwise."
    :args {:value {:type :text :description "Text to validate."}}
    :return-type :non-empty-text}
+
+  {:name :ensure-non-blank-text
+   :description "Validate that `:value` contains at least one non-whitespace character; return it as `:non-blank-text`. Throws `refinement/violated` otherwise."
+   :args {:value {:type :text :description "Text to validate."}}
+   :return-type :non-blank-text}
+
+  {:name :ensure-url
+   :description "Validate that `:value` starts with `http://` or `https://`; return it as `:url`. Throws `refinement/violated` otherwise."
+   :args {:value {:type :text :description "URL to validate."}}
+   :return-type :url}
 
   {:name :ensure-positive-numeric
    :description "Validate that `:value` is `> 0`; return it as `:positive-numeric`. Throws `refinement/violated` otherwise."

@@ -45,6 +45,12 @@
     (and (keyword? t) (some #{t} ids/primitive-names))
     (ids/primitive-fn-id t)
 
+    ;; `:never` (bottom type) has no storage value-kind — degrade to
+    ;; `:any`, the same way a type-var does. The rich `:never` lives
+    ;; only in the in-memory rich-types registry.
+    (= t :never)
+    (ids/primitive-fn-id :any)
+
     (keyword? t)
     (or (get name->id t)
         (throw (ex-info (str "Unknown type reference: " (pr-str t))
@@ -74,6 +80,11 @@
       ;; structural form via the row's `:constraint`.
       :fn     (ids/anonymous-fn-id (ids/digest-hex "SHA-1" (pr-str t)))
       :list   (ids/primitive-fn-id :sequence)
+      ;; A homogeneous `[:map K V]` is jsonb-shaped on the wire — same
+      ;; storage kind as a record. A `[:tuple …]` is a fixed-length
+      ;; sequence. The rich shape is kept in the rich-types registry.
+      :map    (ids/primitive-fn-id :jsonb)
+      :tuple  (ids/primitive-fn-id :sequence)
       :refine (recur (second t) name->id)
       :union  (ids/primitive-fn-id :any)
       (throw (ex-info (str "Unsupported structural type: " (pr-str t))
@@ -147,7 +158,9 @@
     (and (vector? form) (#{:list :refine} (first form)))
     (inline-fn-type-rows-from-form (nth form 1 nil))
 
-    (and (vector? form) (= :union (first form)))
+    ;; `[:union …]` / `[:map K V]` / `[:tuple …]` — every element past
+    ;; the head is itself a type that may bury an inline fn-type.
+    (and (vector? form) (#{:union :map :tuple} (first form)))
     (mapcat inline-fn-type-rows-from-form (rest form))
 
     ;; Type-spec map `{:type T :required B}` — recurse on `:type`.

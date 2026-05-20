@@ -26,8 +26,12 @@
    - HOF / structural fn-typed slots: assemble `[:fn args ret]` from
      the ref's free-args and unify positionally.
    - Type-rules for `:assoc` / `:dissoc` / `:get` / `:get-in` /
-     `:assoc-in` / `:if` / `:into` / `:first` / `:rest` / arithmetic
-     narrowing / etc — see `graphden.types.rules`.
+     `:assoc-in` / `:into` / `:first` / `:rest` / `:case` / arithmetic
+     narrowing / etc — each registered per-base-fn in that package's
+     `impls.clj` as a `:return-type-rule` (no central namespace) and
+     looked up through the rich-types registry. (`:if` carries no
+     rule — its `[:union then else]` return is plain declared-var
+     polymorphism.)
    - Refinement constraints on literal values (compound `:and` / `:or`
      supported).
    - Effect categories: `:effects` set propagates parent ∪ refs;
@@ -45,6 +49,7 @@
      equality only — no SMT-style narrowing reasoning."
   (:require
     [clojure.set :as set]
+    [clojure.tools.logging :as log]
     [graphden.executor.registry.core :as registry]
     [graphden.types.core :as types]))
 
@@ -211,14 +216,17 @@
   "True iff `v` is a map binding that carries ONLY metadata
    (`:as`, `:required`, `:terminal?`, `:type`) without an explicit
    value or ref. Such bindings leave the slot logically free —
-   nothing to type-check against the slot's expected type."
+   nothing to value-type-check against the slot's expected type
+   (the `:type` override itself is monotonicity-checked separately
+   by `check-binding-monotonicity!`)."
   [v]
   (and (map? v)
        (not (contains? v :value))
        (not (contains? v :ref))
        (or (contains? v :as)
            (contains? v :required)
-           (contains? v :terminal?))))
+           (contains? v :terminal?)
+           (contains? v :type))))
 
 
 (defn- value-binding?
@@ -251,37 +259,51 @@
    `:produces-callable?` detection in compile/bindings.clj — same
    `(types/fn-type? (:return info))` predicate.
 
+   Always emits the canonical 4-element form. `compute-effects` is
+   total — every fn-def has a computed set, possibly `#{}` (pure) —
+   so the 4th element is always the registry's `:effects` (or `#{}`
+   if absent, which is the same as computed-pure). Producing 3-elem
+   on the sub side would be ambiguous (callee pure vs callee
+   unconstrained) — `normalise` would rewrite to `:any` (slot
+   meaning), which is wrong for a sub.
+
    Returns `:any` (a permissive sentinel) ONLY when the registry has
    no entry for the name yet."
   [fn-name]
   (when-let [info (registry/rich-type-of fn-name)]
     (let [ret (or (:return info) :any)
+          ;; `:effects` is unconditionally stored — by record-rich-types!
+          ;; AND record-rich-types-raw! (both default `#{}` for pure
+          ;; fns post-P8). Direct lookup is safe.
           eff (:effects info)]
       (if (types/fn-type? ret)
         ;; Producer-of-callable: the inner fn-type already carries
         ;; whatever effects-constraint the slot declared. We can't
         ;; meaningfully inject the producer's own effects here.
         ret
-        ;; Standard case: include effects as the 4th element when
-        ;; the registry has an `:effects` key — even `#{}` (pure)
-        ;; matters at the slot-effect-constraint subtype check, so
-        ;; distinguish \"explicitly pure\" from \"unannotated\" via
-        ;; key presence rather than seq-truthiness.
-        (if (contains? info :effects)
-          [:fn (or (:args info) {}) ret eff]
-          [:fn (or (:args info) {}) ret])))))
+        (types/make-fn-type (or (:args info) {}) ret eff)))))
 
 
 (defn- has-type-var?
   "True iff `t` mentions any type variable. Polymorphic checks need
    `unify` (to find variable bindings); monomorphic ones just want
-   `subtype?` to test actual ⊆ expected."
+   `subtype?` to test actual ⊆ expected.
+
+   Must cover every compound shape `types/core` defines — a missing
+   arm here causes `check-binding!` to skip the `unify` fallback for
+   that shape and reject a binding whose unification would have
+   succeeded (e.g. record ↔ `[:map a :any]`)."
   [t]
   (cond
     (types/type-var? t)    true
     (types/fn-type? t)     (or (some has-type-var? (vals (types/fn-args t)))
                                (has-type-var? (types/fn-ret t)))
     (types/list-type? t)   (has-type-var? (types/list-elem t))
+    (types/map-type? t)    (or (has-type-var? (types/map-key t))
+                               (has-type-var? (types/map-val t)))
+    (types/tuple-type? t)  (some has-type-var? (types/tuple-elems t))
+    (types/refine-type? t) (has-type-var? (types/refine-base t))
+    (types/union-type? t)  (some has-type-var? (types/union-members t))
     (types/record-type? t) (some has-type-var? (vals t))
     :else                  false))
 
@@ -332,23 +354,55 @@
     (str "the literal value classifies as " (pr-str actual))))
 
 
+(defn- source-suffix
+  "`  at packages/foo/fns.edn:42` for a fn-name's registry entry, or
+   empty when the fn has no source info recorded (base-fns, dynamically-
+   created fns)."
+  [fn-name]
+  (when-let [info (and fn-name (registry/rich-type-of fn-name))]
+    (let [{:keys [source-file source-line]} info]
+      (cond
+        (and source-file source-line) (str " (" source-file ":" source-line ")")
+        source-file                   (str " (" source-file ")")
+        :else                         ""))))
+
+
+(defn- actual-source
+  "When the actual type comes from a ref-binding, return that ref's
+   source-info suffix so the error can point at the fn that produced
+   the offending return type. nil when actual is from a literal value."
+  [b-form]
+  (let [ref-name (cond
+                   (keyword? b-form)                                  b-form
+                   (and (map? b-form) (contains? b-form :ref))        (:ref b-form))]
+    (some-> ref-name source-suffix)))
+
+
 (defn- format-message
   "Build the multi-line error message. Reads cleanly in REPL output,
    `bb deploy` logs, and HTTP error responses. When the ctx map
    carries `:source-file` / `:source-line`, the location is prepended
-   so editor / IDE / log readers can jump straight to the EDN entry."
+   so editor / IDE / log readers can jump straight to the EDN entry.
+
+   `parent` and `actual` lines carry inline source attribution where
+   available — so the user sees not just the type mismatch but which
+   ancestor introduced the expectation and which fn produced the
+   actual return."
   [{:keys [fn-name parent-name arg-name expected actual
            source-file source-line]
     b-form :binding}]
-  (str (when source-file
-         (str "  at " source-file
-              (when source-line (str ":" source-line))
-              "\n"))
-       "Type-check failed in fn-def " (pr-str fn-name) "\n"
-       "  arg "        (pr-str arg-name) " ← " (describe-binding b-form) "\n"
-       "  parent "     (pr-str parent-name) " expects: " (pr-str expected) "\n"
-       "  actual:                "                (pr-str actual) "\n"
-       "  hint: "      (hint-for-actual b-form actual)))
+  (let [parent-src (source-suffix parent-name)
+        actual-src (or (actual-source b-form) "")]
+    (str (when source-file
+           (str "  at " source-file
+                (when source-line (str ":" source-line))
+                "\n"))
+         "Type-check failed in fn-def " (pr-str fn-name) "\n"
+         "  arg "        (pr-str arg-name) " ← " (describe-binding b-form) "\n"
+         "  parent "     (pr-str parent-name) parent-src
+         " expects: " (pr-str expected) "\n"
+         "  actual:                "                (pr-str actual) actual-src "\n"
+         "  hint: "      (hint-for-actual b-form actual))))
 
 
 ;; Source-location of the fn-def currently being checked. Set in a
@@ -441,12 +495,25 @@
    needed."
   [parent-name arg-name expected actual subst fn-name b-form]
   (cond
-    ;; `:any` is the doc's static escape hatch; `:null` is the
-    ;; runtime escape hatch — nil is a legal value for every
-    ;; Clojure type at runtime, and graphden has no nullable-vs-
-    ;; non-null distinction yet. Both pass through silently.
-    (or (= actual :any) (= actual :null))
+    ;; `:any` is the doc's static escape hatch — it passes through
+    ;; silently. (`:null` used to pass too, as a blanket runtime
+    ;; escape hatch. Now that nil-producing base-fns are typed
+    ;; `[:union :null T]`, a bare `:null` actual is checked normally:
+    ;; it satisfies a nullable / `:any` / type-var slot via subtype?
+    ;; / unify, and is correctly REJECTED by a concrete non-null slot
+    ;; — that rejection is the point of the nullability work.)
+    (= actual :any)
     subst
+
+    ;; `:never` (bottom) actual — a divergent `:throw` branch. It fits
+    ;; any expected type, but we unify rather than pass silently so a
+    ;; type-var expected (e.g. `:if`'s `:then` slot) BINDS to `:never`.
+    ;; Without the binding the branch union keeps a free var instead
+    ;; of letting `make-union` absorb the bottom. `unify` with a
+    ;; `:never` operand always succeeds, so the result is never a fail.
+    (= actual :never)
+    (let [s (types/unify expected actual subst)]
+      (if (types/fail? s) subst s))
 
     ;; Refinement on a LITERAL value: if we know the literal AND
     ;; can evaluate the constraint, accept-or-reject inline.
@@ -591,35 +658,80 @@
 
 
 ;; -----------------------------------------------------------------------------
-;; Pre-Phase: structural check for required-narrowing widening.
+;; Pre-Phase: structural monotonicity checks on bindings.
+;;
+;; Two narrowing channels feed the same one-way ratchet:
+;;   - `:required` — boolean optional→required, never the reverse.
+;;   - `:type`     — structural T ⊆ inherited slot type, never wider.
+;;
+;; Both fail with the same `:bindings/widening-*` error category so
+;; downstream tooling (UI, /api/types/compatible) reads them through
+;; one branch.
 
-(defn- check-required-widening!
-  "Reject any binding map that carries `:required false`. The `:required`
-   field on a binding is a one-way ratchet — descendants may narrow an
-   inherited optional slot to required (`:required true`), but never
-   widen a required slot back to optional. The slot's own `:required`
-   on the base-fn declaration is the only way to declare optionality.
-   Throws `:bindings/widening-required` on violation; pure pass otherwise."
-  [{fn-name :name :as fn-def} parent-name]
+(defn- throw-widening!
+  [fn-name parent-name arg-name b-form direction reason]
+  (throw (ex-info
+           (str "Type-check failed in fn-def " (pr-str fn-name)
+                "\n  arg " (pr-str arg-name) " ← " (pr-str b-form)
+                "\n  parent " (pr-str parent-name) (source-suffix parent-name)
+                "\n  reason: " reason)
+           (merge {:fn-name fn-name
+                   :parent-name parent-name
+                   :parent parent-name
+                   :arg-name arg-name
+                   :arg arg-name
+                   :binding b-form
+                   :type (keyword "bindings" (str "widening-" (name direction)))}
+                  *source-info*))))
+
+
+(defn- check-binding-monotonicity!
+  "Reject any binding that widens an inherited narrowing. Two cases
+   share one pre-pass:
+
+   1. `:required false` — descendants may narrow optional → required,
+      but never widen a required slot back to optional. The slot's
+      own `:required` on the base-fn declaration is the only way to
+      declare optionality.
+
+   2. `:type T` where T is NOT a subtype of the inherited slot type —
+      descendants may narrow a wider type (e.g. `:int` → `:positive-
+      int`), but never widen it back. Without this check a descendant
+      could relax the contract callers depend on.
+
+   `parent-args` is the parent's resolved free-arg type map (the
+   inherited slot types). nil entries (slot not in parent) skip the
+   type check — they're not narrowings of anything."
+  [{fn-name :name :as fn-def} parent-name parent-args]
   (doseq [[arg-name b-form] (:args fn-def)]
-    (when (and (map? b-form)
-               (contains? b-form :required)
-               (false? (:required b-form)))
-      (throw (ex-info
-               (str "Type-check failed in fn-def " (pr-str fn-name)
-                    "\n  arg " (pr-str arg-name) " ← :required false"
-                    "\n  parent " (pr-str parent-name)
-                    "\n  reason: bindings cannot widen `:required true` back to false."
-                    "\n  Optionality lives on the slot itself; descendants may only"
-                    "\n  narrow optional → required, never the reverse.")
-               (merge {:fn-name fn-name
-                       :parent-name parent-name
-                       :parent parent-name
-                       :arg-name arg-name
-                       :arg arg-name
-                       :binding b-form
-                       :type :bindings/widening-required}
-                      *source-info*))))))
+    (when (map? b-form)
+      ;; (1) required widening.
+      (when (and (contains? b-form :required)
+                 (false? (:required b-form)))
+        (throw-widening!
+          fn-name parent-name arg-name b-form :required
+          (str "bindings cannot widen `:required true` back to false. "
+               "Optionality lives on the slot itself; descendants may only "
+               "narrow optional → required, never the reverse.")))
+      ;; (2) type widening — author wrote `:type T` (alone, with
+      ;;     `:value`, with `:ref`, or alongside `:as`). T must be ⊆
+      ;;     the inherited slot type.
+      (when-let [override (and (contains? b-form :type) (:type b-form))]
+        (let [inherited (some-> (get parent-args arg-name) types/resolve-alias)
+              override' (types/resolve-alias override)]
+          (when (and inherited
+                     ;; Type variables get unified later; skip them here.
+                     (not (types/type-var? inherited))
+                     (not (types/type-var? override'))
+                     (not (types/subtype? override' inherited)))
+            (throw-widening!
+              fn-name parent-name arg-name b-form :type
+              (str "cannot widen the inherited type "
+                   (pr-str inherited)
+                   " to " (pr-str override') ". "
+                   "Descendants may narrow (subtype) an inherited slot type, "
+                   "but never widen it — callers of the parent rely on the "
+                   "tighter contract."))))))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -682,9 +794,11 @@
            (or (contains? b-form :as)
                (and (contains? b-form :ref)
                     (not (contains? b-form :value)))))
-      ;; A metadata-only binding (e.g. `{:required true}`) carries no
-      ;; value to check — defer to the post-pass that validates the
-      ;; metadata itself (`check-required-widening!` for `:required`).
+      ;; A metadata-only binding (e.g. `{:required true}` or
+      ;; `{:type T}`) carries no value to check — defer to the
+      ;; pre-pass that validates the metadata itself
+      ;; (`check-binding-monotonicity!` handles both `:required` and
+      ;; `:type` widening).
       (metadata-only-binding? b-form)
       (vector? b-form)))
 
@@ -904,15 +1018,16 @@
    ring-response-shape (because `:func` is now bound to `:_router`)
    rather than the `:any` `:router-result` recorded in isolation.
 
-   Author-pinned types (`{:ref :X :type :T}` in fns.edn, flagged
-   `:pinned?` upstream) skip the re-fire — the author is asserting
-   the binding's type explicitly and shouldn't be silently
-   overridden by the ref's recorded shape.
+   Author-pinned types (`{:ref :X :type :T}` in fns.edn) skip the
+   re-fire — they're represented in info maps WITHOUT a `:ref` key,
+   so `effective-binding-type` simply returns the pinned `:type`.
+   `bindings-info-for-rule` is the single source of truth: it omits
+   `:ref` from the entry when the author also wrote `:type`.
 
    `seen` and `depth` cap unbounded recursion through
    self/cyclic refs."
   [info combined-bindings seen depth]
-  (or (when (and (:ref info) (not (:pinned? info)))
+  (or (when (:ref info)
         (effective-ref-return (:ref info) combined-bindings seen depth))
       (:type info)))
 
@@ -991,13 +1106,12 @@
                              ;; type without supplying a value. The slot
                              ;; stays free at runtime; the override flows
                              ;; through to consumers / rules verbatim.
-                             ;; Same `:pinned?` flag as `{:ref … :type T}`
-                             ;; so `effective-binding-type` won't clobber
-                             ;; the override by re-firing a ref's rule.
+                             ;; No `:ref` in the info entry → `effective-
+                             ;; binding-type` returns `:type` directly,
+                             ;; without re-firing any ref's rule.
                              (type-only-binding? b-form)
                              {:type (or (some-> (:type b-form) types/resolve-alias) :any)
-                              :value nil
-                              :pinned? true}
+                              :value nil}
 
                              (ref-binding? b-form)
                              {:type (or (:return (registry/rich-type-of b-form)) :any)
@@ -1009,18 +1123,18 @@
                              ;; `:type-override-fn-id`). The override is the
                              ;; author's narrowed contract; prefer it over
                              ;; the ref's recorded return so the type-rule
-                             ;; sees the tighter shape. `:pinned?` flags
-                             ;; the author-set case so `effective-binding-
-                             ;; type` doesn't re-fire the ref's rule and
-                             ;; clobber the override.
+                             ;; sees the tighter shape. When the author
+                             ;; pinned a `:type`, OMIT `:ref` from the
+                             ;; info entry so `effective-binding-type`
+                             ;; doesn't re-fire the ref's rule and clobber
+                             ;; the override.
                              (and (map? b-form) (contains? b-form :ref))
-                             (let [pinned? (contains? b-form :type)]
-                               {:type (or (some-> (:type b-form) types/resolve-alias)
-                                          (:return (registry/rich-type-of (:ref b-form)))
-                                          :any)
-                                :value nil
-                                :ref (:ref b-form)
-                                :pinned? pinned?})
+                             (cond-> {:type (or (some-> (:type b-form) types/resolve-alias)
+                                                (:return (registry/rich-type-of (:ref b-form)))
+                                                :any)
+                                      :value nil}
+                               (not (contains? b-form :type))
+                               (assoc :ref (:ref b-form)))
 
                              (vector? b-form)
                              ;; `:elem-types` carries the PER-ITEM types
@@ -1147,7 +1261,7 @@
    → `:m`'s record). The editor walks this against the live path to
    type each segment position and gate the `+` append affordance."
   [fn-name fn-def primary-parent parent-info free-args
-   computed-return effects own-resolved slot-types nav-types]
+   computed-return effects own-resolved slot-types nav-types drift]
   (let [expected (some-> fn-def :expects-effects set)
         resolved (merge (:resolved-bindings parent-info {}) own-resolved)]
     (registry/record-rich-types-raw!
@@ -1160,6 +1274,7 @@
         primary-parent    (assoc :primary-parent primary-parent)
         (seq effects)     (assoc :effects effects)
         expected          (assoc :expects-effects expected)
+        drift             (assoc :return-type-drift drift)
         ;; Surface description so the inline-expand panel can show
         ;; a human-readable hint under the type name.
         (and (:description fn-def)
@@ -1266,6 +1381,54 @@
     (or declared computed-return)))
 
 
+(defn- return-type-drift
+  "Return-type drift detection — advisory, NOT a reject.
+
+   When a fn-def author pinned `:return-type T` AND the rule-computed
+   return is STRICTLY narrower (computed ⊊ declared — both
+   `computed ⊆ declared` AND NOT `declared ⊆ computed`), the author
+   has declared a wider contract than the actual computed shape.
+   This is sometimes intentional (the author wants to keep the
+   contract loose so future tightenings don't break downstream
+   consumers), sometimes stale (the rule got more precise and the
+   declaration was never updated).
+
+   Returns `{:declared D :computed C}` for surfacing into the
+   registry + `/api/types/drift` (consumed by the `bb types-drift`
+   task and the editor). nil when no drift OR when no `:return-type`
+   was declared at all.
+
+   Type-vars on both sides are treated as opaque — a parametric
+   `[:fn {:arg a} b]` doesn't drift against another parametric
+   form. Drift comparison only fires when both sides are
+   concrete-enough that `subtype?` decides them definitively."
+  [fn-def computed-return]
+  (let [declared (some-> fn-def :return-type types/resolve-alias)]
+    (when (and declared
+               (not= declared computed-return)
+               (types/subtype? computed-return declared)
+               (not (types/subtype? declared computed-return)))
+      {:declared declared :computed computed-return})))
+
+
+(defn- log-return-type-drift!
+  "Emit a sync-time WARN for return-type drift. Mirrors the channel
+   `:expects-effects` drift already uses, so authors see both kinds
+   of drift in the same `bb rebuild` output. Includes file:line from
+   `*source-info*` when available."
+  [fn-name fn-def {:keys [declared computed]}]
+  (let [{:keys [source-file source-line]} (source-info-for fn-def)
+        where (cond
+                (and source-file source-line) (str source-file ":" source-line)
+                source-file                   source-file
+                :else                         "<unknown>")]
+    (log/warnf "type-drift: fn-def %s declares :return-type %s but the computed return is strictly narrower: %s — consider tightening the declaration (or accept it as a deliberately-wide contract). at %s"
+               (pr-str fn-name)
+               (pr-str declared)
+               (pr-str computed)
+               where)))
+
+
 (defn check-fn-def!
   "Type-check a single fn-def against its parent's signature
    (whether that parent is a base-fn or a previously-checked
@@ -1286,7 +1449,8 @@
   [{fn-name :name :as fn-def}]
   (when-let [{:keys [primary-parent parent-info]} (resolve-parent-info fn-def)]
     (binding [*source-info* (source-info-for fn-def)]
-      (check-required-widening! fn-def primary-parent)
+      (let [parent-args (:args parent-info)]
+        (check-binding-monotonicity! fn-def primary-parent parent-args))
       (let [parent-args (:args parent-info)
             ;; Effective parent-args includes resolved bindings from
             ;; further up the chain — gives rules a transitive view of
@@ -1334,11 +1498,13 @@
             computed-return (compute-return-type fn-def primary-parent
                                                  effective-parent static-ret)
             recorded-return (enforce-declared-return! fn-name fn-def computed-return)
+            drift (return-type-drift fn-def computed-return)
             effects (compute-effects (:args fn-def) parent-info)]
+        (when drift (log-return-type-drift! fn-name fn-def drift))
         (check-effects-policy! fn-name fn-def effects)
         (record-result! fn-name fn-def primary-parent parent-info
                         free-args recorded-return effects own-bindings
-                        slot-types nav-types)
+                        slot-types nav-types drift)
         subst))))
 
 

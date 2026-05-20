@@ -299,30 +299,6 @@ function getBindingForFnSlot(fnId, slotId) {
   return lookups.bindingByFnSlot.get(fnId + '|' + slotId) || null;
 }
 
-// Get the closest binding for a slot walking the fn's inheritance
-// chain (fn first, then ancestors via :parent-ids). Mirrors the
-// backend's effective-binding lookup. Returns null when no binding
-// in the chain touches the slot.
-function getEffectiveBinding(fnId, slotId) {
-  if (!lookups || !lookups.fnMap) return null;
-  const visited = new Set();
-  const queue = [fnId];
-  while (queue.length) {
-    const fid = queue.shift();
-    if (visited.has(fid)) continue;
-    visited.add(fid);
-    const b = getBindingForFnSlot(fid, slotId);
-    if (b) return b;
-    const fn = lookups.fnMap.get(fid);
-    if (fn && Array.isArray(fn['parent-ids'])) {
-      for (const pid of fn['parent-ids']) {
-        if (!visited.has(pid)) queue.push(pid);
-      }
-    }
-  }
-  return null;
-}
-
 // Effective name of a slot at a particular fn — walks the
 // inheritance chain (closest-first) looking for an own renamed-view
 // slot whose `source-slot-id` FK matches; the renamed slot's name
@@ -410,25 +386,6 @@ function argRowFromNode(nodeData) {
   };
 }
 
-
-// Slots owned by `fn-id`'s root (the base-fn at the top of the
-// inheritance chain). These are the parameters the impl receives.
-function getRootSlots(fnId) {
-  if (!lookups || !lookups.fnMap) return [];
-  // Walk parent chain to find the fn with empty parent-ids.
-  const chain = getInheritanceChain(fnId);
-  let root = null;
-  for (const fid of chain) {
-    const fn = lookups.fnMap.get(fid);
-    if (fn && (!fn['parent-ids'] || fn['parent-ids'].length === 0)) {
-      root = fid;
-      break;
-    }
-  }
-  if (!root) return [];
-  const fnSlots = (lookups.fnSlotsByFn?.get(root)) || [];
-  return fnSlots.map(fs => lookups.slotMap.get(fs['slot-id'])).filter(Boolean);
-}
 
 // Editability gate — mirror of the backend's "fn-in-use-reason" delete
 // check: a fn can be edited inline only if it's not used as a parent
@@ -530,19 +487,6 @@ function getInheritanceChain(fnId) {
 // ARG RESOLUTION
 // ============================================================================
 
-// Resolve the effective name of an arg's slot at its fn — closest
-// `:rename-to` in the chain, or the slot's own name. Replaces the
-// legacy source-id walk that stitched arg names through the synth
-// chain; in the slot/binding model the answer is just one binding
-// lookup per ancestor.
-function resolveArgName(arg) {
-  if (!arg) return null;
-  if (arg.name) return arg.name;
-  const fnId = arg['fn-id'], slotId = arg['slot-id'];
-  if (!fnId || !slotId) return null;
-  return getEffectiveSlotName(fnId, slotId);
-}
-
 // Check if fn sets any of its slots — a binding row with a value,
 // a ref, or list-append. These are the bindings that make ancestor
 // rows "interesting" enough to render as their own group on the
@@ -554,18 +498,6 @@ function fnSetsArgs(fnId) {
     const hasRef = !!b['ref-fn-id'];
     const hasItems = !!b['list-append'];
     return hasValue || hasRef || hasItems;
-  });
-}
-
-// Check if fn has any ref-fn-id bindings or sequence items pointing
-// at other fns — those are the "clickable" ancestors whose expansion
-// produces new graph nodes.
-function fnHasRefArgs(fnId) {
-  const bindings = (lookups.bindingsByFn?.get(fnId)) || [];
-  if (bindings.some(b => !!b['ref-fn-id'])) return true;
-  return bindings.some(b => {
-    const items = lookups.itemsByBinding?.get(b.id);
-    return items?.some(it => !!it['ref-fn-id']);
   });
 }
 

@@ -471,12 +471,41 @@ body.sidebar-collapsed .sidebar-expand-floating {
   background: var(--card-bg);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Flex variant used when the strip wraps the display text in a span so
+   a trailing provenance button stays hit-testable past long types. The
+   text span takes the remaining width with its own ellipsis; the
+   button is a non-shrinking sibling at the end. */
+.return-type-strip-flex {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.return-type-strip-flex .return-type-strip-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .return-type-strip-editable {
   cursor: pointer;
 }
 .return-type-strip-editable:hover {
   background: var(--hover-bg);
   color: var(--fg);
+}
+/* Refinement variant: stack `(constraint)` under the base in the same
+ * spirit as the arg-overlay's stacked refinement chip. Arrow + base sit
+ * on the first text run; the constraint span wraps to a second line at
+ * smaller weight + reduced opacity. */
+.return-type-strip-refine .return-type-strip-arrow,
+.return-type-strip-refine .return-type-strip-base {
+  display: inline;
+}
+.return-type-strip-refine .return-type-strip-constraint {
+  display: block;
+  padding-left: 1em;
+  font-size: 9px;
+  opacity: 0.7;
 }
 
 /* Edit-this-type-row strip — peer of `.return-type-strip-editable`,
@@ -537,7 +566,6 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .effects-chip-io      { background: var(--effect-chip-io); }       /* file/classpath */
 .effects-chip-network { background: var(--effect-chip-network); }  /* HTTP socket */
 .effects-chip-time    { background: var(--effect-chip-time); }     /* wall-clock */
-.effects-chip-effect  { background: var(--effect-chip-misc); }     /* legacy generic tag */
 .effects-chip-random  { background: var(--effect-chip-random); }   /* non-determinism */
 
 /* Drift = computed effect that the author DIDN'T declare in
@@ -737,7 +765,6 @@ body.sidebar-collapsed .sidebar-expand-floating {
    so a future popover only needs to set its own min-width and
    accent. */
 .arg-value-edit-popover,
-.parent-set-editor,
 .fn-picker-popover {
   position: fixed; z-index: 10001;
   background: var(--card-bg); color: var(--card-fg);
@@ -948,6 +975,66 @@ textarea.arg-value-edit-input {
 }
 .arg-type-chip-readonly:hover { opacity: 1; }
 
+/* Effect-constraint summary row inside a fn-type inline-expand panel.
+ * Shows the slot's allowed effect-set ("eff: pure" or "eff: <chips>")
+ * in read-only mode — separate from the editable tightening widgets
+ * that live below it when the binding is mutable. */
+.type-inline-effects-readonly {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px;
+  font-size: 10px;
+  color: var(--muted-fg);
+}
+.type-inline-effects-label {
+  font-style: italic;
+  opacity: 0.8;
+}
+.type-inline-effects-pure {
+  font-size: 9px;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  opacity: 0.85;
+  color: var(--fg);
+  background: var(--sidebar-bg);
+}
+
+/* Refinement chip — stacked two-line variant. The base type sits on
+ * top at the chip's normal weight; the constraint sits below at a
+ * smaller weight + reduced opacity so the visual reads "this is a
+ * subtype of <base>, narrowed by <constraint>" without forcing the
+ * eye to parse `int (> 0)` as a single phrase. */
+.arg-type-chip-refine {
+  flex-direction: column;
+  line-height: 11px;
+  padding: 1px 4px;
+}
+.arg-type-chip-refine .arg-type-chip-refine-base {
+  font-size: 9px;
+}
+.arg-type-chip-refine .arg-type-chip-refine-constraint {
+  font-size: 8px;
+  opacity: 0.7;
+  margin-top: -1px;
+}
+
+/* Narrowed chip — when a binding-level override / inherited override /
+ * ref-return narrowing produced a type whose declared slot-base is
+ * different from the displayed text, append a `< :base` line below the
+ * chip. Same column layout as the refinement variant so the visual
+ * grammar stays consistent ("this is a subtype of X" reads top→bottom). */
+.arg-type-chip-narrowed {
+  flex-direction: column;
+  line-height: 11px;
+  padding: 1px 4px;
+}
+.arg-type-chip-narrowed .arg-type-chip-narrowed-base {
+  font-size: 8px;
+  opacity: 0.7;
+  margin-top: -1px;
+  font-style: italic;
+}
+
 /* Sequence-item bracket chrome — wraps an `.arg-type-chip` so it reads
    as `[elem-type]` (graphden's `[:list T]` structural notation) when
    the edge represents one item of a sequence-bound slot. The brackets
@@ -1006,30 +1093,6 @@ textarea.arg-value-edit-input {
   font-size: 16px; line-height: 1;
 }
 .type-create-close:hover { opacity: 0.7; }
-.type-create-kinds {
-  display: flex; flex-direction: column; gap: 1px;
-  padding: 6px;
-}
-.type-create-kind {
-  display: flex; flex-direction: column; align-items: stretch;
-  gap: 2px;
-  padding: 6px 8px;
-  background: transparent;
-  color: var(--card-fg);
-  border: 1px solid transparent;
-  border-radius: 3px;
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-}
-.type-create-kind:hover,
-.type-create-kind:focus-visible {
-  background: var(--hover-bg);
-  border-color: var(--light-border);
-  outline: none;
-}
-.type-create-kind-label { font-weight: 600; font-size: 11px; }
-.type-create-kind-hint { font-size: 10px; color: var(--muted-fg); }
 .type-create-form {
   display: flex; flex-direction: column; gap: 8px;
   padding: 8px;
@@ -1254,6 +1317,31 @@ textarea.arg-value-edit-input {
   font-size: 10px;
   color: var(--card-fg);
 }
+/* Cycle indicator — a chip rendered in place of an expandable one
+   when the type would recurse back to an ancestor in the open chain
+   (e.g. `:tree = [:list :tree]`). Read-only; clicking does nothing,
+   the `↻` glyph + name says "you've seen this; the loop closes here". */
+.type-inline-chip-cycle {
+  font-style: italic;
+  color: var(--muted-fg);
+  border-color: var(--light-border);
+  background: var(--card-row-highlight);
+  cursor: default;
+}
+
+/* Structural kind tag — Map / Record / Tuple / Refinement / Union /
+   Function. Sits next to the name in the inline-expand header so an
+   anonymous structural type isn't mistaken for the other kinds with
+   similar-looking expanded bodies. */
+.type-inline-header-kind {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-fg);
+  padding: 0 4px;
+  border: 1px solid var(--light-border);
+  border-radius: 2px;
+}
 .type-inline-header-edit {
   padding: 1px 6px;
   font-size: 9px;
@@ -1271,6 +1359,29 @@ textarea.arg-value-edit-input {
   outline: none;
 }
 .type-inline-header-edit:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+/* "↳ provenance" link in the inline-panel header — opens the
+   dedicated provenance popover. Same baseline as the Change-type
+   button but reads as a link (text-coloured, no border) since it
+   navigates rather than mutates. */
+.type-inline-header-provenance {
+  padding: 1px 6px;
+  font-size: 9px;
+  font-family: inherit;
+  line-height: 1.2;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+.type-inline-header-provenance:hover,
+.type-inline-header-provenance:focus-visible {
+  background: var(--hover-bg);
+  text-decoration: underline;
+  outline: none;
+}
+.type-inline-header-provenance:focus-visible {
   box-shadow: 0 0 0 2px var(--accent);
 }
 .type-inline-description {
@@ -1325,6 +1436,29 @@ textarea.arg-value-edit-input {
   white-space: nowrap;
   color: var(--muted-fg);
 }
+
+/* Refinement-chain breadcrumb inside an inline-expand panel — one
+   single-line view of `:user-port ⊂ :int ⊂ :numeric` joined by ⊂
+   glyphs. Each name is clickable when a named type-row backs it;
+   constraints surface on hover so the row stays compact. */
+.type-inline-refinement-chain {
+  margin-top: 4px;
+  margin-bottom: 6px;
+  padding: 2px 0;
+}
+.type-inline-refinement-chain-row {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px;
+  font-size: 10px;
+  color: var(--muted-fg);
+}
+.type-inline-refinement-chain-sep {
+  color: var(--light-fg);
+  font-size: 10px;
+}
+.type-inline-refinement-chain-anon {
+  font-style: italic;
+  color: var(--light-fg);
+}
 .type-inline-resolution-active {
   color: var(--fg);
   font-weight: 600;
@@ -1336,8 +1470,37 @@ textarea.arg-value-edit-input {
   color: var(--light-fg);
 }
 .type-inline-resolution-active .type-inline-resolution-mark { color: var(--accent); }
-.type-inline-resolution-label { flex: 1 1 auto; }
+.type-inline-resolution-label { flex: 0 1 auto; }
+.type-inline-resolution-sep { flex: 0 0 auto; color: var(--light-fg); }
+/* Clickable source-fn / ancestor link inside a resolution row. Reset
+   default anchor underline + colour; keep it muted so it doesn't
+   compete with the winning-tier highlight. */
+.type-inline-resolution-link {
+  flex: 0 1 auto;
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.type-inline-resolution-link:hover { text-decoration: underline; }
+.type-inline-resolution-active .type-inline-resolution-link { color: var(--accent); }
 .type-inline-resolution-active .type-inline-resolution-type { color: var(--accent); }
+
+/* Multi-override inheritance — when ≥ 2 ancestors carry a type-
+   override for the same slot, the FIRST (closer-fn-wins) entry
+   gets emphasised and tagged "(chosen)"; the rest dim out and
+   read "(also by)" so the shadow-override decision is visible. */
+.type-inline-resolution-chain-winner { color: var(--fg); font-weight: 600; }
+.type-inline-resolution-chain-winner .type-inline-resolution-mark { color: var(--accent); }
+.type-inline-resolution-chain-also   { color: var(--light-fg); }
+.type-inline-resolution-chain-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-style: italic;
+  color: var(--light-fg);
+}
+.type-inline-resolution-chain-winner .type-inline-resolution-chain-tag {
+  color: var(--accent);
+}
 
 .type-inline-usages {
   margin-top: 6px;
@@ -1718,14 +1881,6 @@ textarea.arg-value-edit-input {
      viewports we may want icon-only. Keep it visible by default and
      hide it via the touch-narrow override below if needed. */
 }
-.fn-action-btn-danger {
-  color: var(--error-fg);
-  border-color: color-mix(in srgb, var(--error-fg) 40%, var(--card-border));
-}
-.fn-action-btn-danger:hover {
-  background: color-mix(in srgb, var(--error-fg) 12%, transparent);
-}
-
 /* Edit-parents strip — same layout as return-type strip but distinct
    text colour so the two affordances on the root card don't blur. */
 .reparent-strip {
@@ -1739,40 +1894,6 @@ textarea.arg-value-edit-input {
 .reparent-strip:hover {
   background: color-mix(in srgb, var(--fg) 6%, var(--card-bg));
 }
-
-/* Parent-set editor — popover with chip list + add/save controls. */
-.parent-set-editor {
-  /* Reparent popover is wider than arg-value because it lists chips
-     for every existing parent + an "+ add parent" button. */
-  min-width: 280px; max-width: 380px;
-}
-.parent-set-editor-title {
-  font-size: 11px; font-weight: 600;
-  color: var(--muted-fg);
-  border-bottom: 1px solid var(--card-border);
-  padding-bottom: 4px;
-}
-.parent-set-editor-chips {
-  display: flex; flex-direction: column; gap: 4px;
-  min-height: 24px;
-}
-.parent-set-editor-empty {
-  font-size: 11px; opacity: 0.6; font-style: italic;
-}
-.parent-set-editor-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 2px 8px; border-radius: 3px;
-  border: 1px solid var(--card-border);
-  background: var(--bg);
-  font-size: 11px;
-}
-.parent-set-editor-chip-remove {
-  background: transparent; border: 0;
-  color: var(--fg);
-  cursor: pointer; opacity: 0.6; font-size: 14px; padding: 0 2px;
-  line-height: 1;
-}
-.parent-set-editor-chip-remove:hover { opacity: 1; }
 
 /* In-tooltip dismiss — the × button is the obvious affordance for
    touch users; the document-level pointerdown handler is a fallback
@@ -1909,7 +2030,6 @@ textarea.arg-value-edit-input {
    though they're temporarily disabled by the buttons themselves. */
 body.editor-busy { cursor: progress; }
 body.editor-busy .arg-value-edit-popover,
-body.editor-busy .parent-set-editor,
 body.editor-busy .fn-picker-popover,
 body.editor-busy .fn-action-toolbar { cursor: progress; }
 
@@ -1998,10 +2118,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   display: flex; flex-wrap: wrap; gap: 4px 10px;
   margin-bottom: 6px;
 }
-.type-explainer-tighten-typerow {
-  display: flex; align-items: center; gap: 6px;
-  margin: 4px 0;
-}
 .type-explainer-tighten-select {
   font-family: inherit; font-size: 11px;
   padding: 2px 4px; border-radius: 3px;
@@ -2087,6 +2203,47 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   color: var(--card-fg);
 }
 
+/* Leaf-level disagreement section — points at the EXACT failing
+   field / element when expected and actual are structurally
+   compatible at the top level but diverge inside. */
+.mismatch-explainer-leaves {
+  margin: 6px 0 4px;
+  padding: 6px 0;
+  border-top: 1px dashed var(--light-border);
+}
+.mismatch-explainer-leaves-head {
+  font-size: 11px;
+  color: var(--muted-fg);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.mismatch-explainer-leaf {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.mismatch-explainer-leaf-path {
+  color: var(--card-fg);
+  font-weight: 600;
+}
+.mismatch-explainer-leaf-sep {
+  color: var(--muted-fg);
+}
+.mismatch-explainer-leaf-expected {
+  color: var(--success-fg, currentcolor);
+}
+.mismatch-explainer-leaf-actual {
+  color: var(--error-fg);
+}
+.mismatch-explainer-leaf-more {
+  font-size: 11px;
+  color: var(--muted-fg);
+  font-style: italic;
+  margin-top: 3px;
+}
+
 .mismatch-explainer-actions {
   display: flex; gap: 8px; align-items: center;
   margin-top: 8px; padding-top: 6px;
@@ -2139,6 +2296,160 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   flex: 0 0 auto;
 }
 .arg-source-link:hover { color: var(--accent); }
+
+/* Type-narrowing provenance — a ↳ pinned right after a type-chip when
+ * the binding carries a :type-override-fn-id that's tighter than the
+ * inherited slot type. Read-only informational badge; tooltip names the
+ * fn that introduced the narrowing. Kept subdued so the chip itself
+ * stays the primary focus. */
+.arg-type-provenance {
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-left: 2px;
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 9px; line-height: 14px;
+  color: var(--muted-fg);
+  cursor: pointer;
+  user-select: none;
+}
+.arg-type-provenance:hover { color: var(--accent); }
+.arg-type-provenance:focus-visible {
+  outline: 1px solid var(--accent);
+  border-radius: 2px;
+}
+
+/* =========================================================================
+ * PROVENANCE POPOVER — anchored to the `↳` badge on a type-chip. Shows
+ * the FULL narrowing chain (4-tier resolution + inheritance steps) with
+ * clickable source-fn names. Built fresh per arg in
+ * editor-provenance-popover.js.
+ * ========================================================================= */
+.provenance-popover {
+  position: fixed; z-index: 10001;
+  display: none;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  padding: 8px 10px;
+  min-width: 240px; max-width: 380px;
+  font-family: inherit; font-size: 12px; line-height: 1.4;
+}
+.provenance-popover.visible { display: block; }
+
+.provenance-popover-header {
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--light-border);
+  margin-bottom: 6px; padding-bottom: 4px;
+}
+.provenance-popover-title {
+  font-weight: 600; font-size: 12px;
+  color: var(--accent);
+}
+.provenance-popover-close {
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; color: var(--card-fg);
+  border: 0; border-radius: 3px;
+  font-size: 18px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0.65;
+}
+.provenance-popover-close:hover {
+  opacity: 1; background: var(--overlay-pressed);
+}
+/* Inside the popover the resolution rows are the primary content (not
+   a secondary footer), so drop the top border + spacer that the inline
+   panel adds for visual separation from the type structure above. */
+.provenance-popover .type-inline-resolution {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* Prose intro line in the type-rule variant of the popover —
+   "Return type computed by :<parent>'s :return-type-rule" — reads as
+   a sentence, not a key-value row. */
+.provenance-popover-intro {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--card-fg);
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+/* Per-rule one-line interpretation, e.g. for :assoc — "Literal key
+   \"name\", value typed :int — added field \"name\": :int to map's
+   record shape". Distinguishes the INTERPRETATION (what the rule
+   did) from the raw inputs table below. */
+.provenance-popover-narrative {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted-fg);
+  margin-bottom: 8px;
+  padding: 4px 6px;
+  background: var(--card-row-highlight);
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+  overflow-wrap: anywhere;
+}
+
+/* Closed-enum reveal — when the resolved slot type is a refinement
+   pinning the value to a finite literal set, list every member as a
+   read-only chip in the provenance popover. The value-edit popover
+   is where the user PICKS one; here we just surface the choices. */
+.provenance-popover-enum {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--light-border);
+}
+
+/* Slot-effect-bound reveal — when the resolved fn-typed slot has a
+   concrete effect constraint, surface it in the provenance popover
+   so the reader sees the bound directly (without opening `▸/▾`). */
+.provenance-popover-effects {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--light-border);
+}
+.provenance-popover-enum-list {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-top: 2px;
+}
+.provenance-popover-enum-chip {
+  display: inline-block;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: monospace;
+  background: var(--card-row-highlight);
+  border: 1px solid var(--light-border);
+  border-radius: 2px;
+  color: var(--card-fg);
+}
+
+/* Type-rule provenance trigger on a fn-card's return-type strip.
+   Mirrors the arg-overlay's `.arg-type-provenance` glyph so the two
+   surfaces look like siblings — same `↳` character, same hit area. */
+.return-type-strip-provenance {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding: 0 2px;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 9px; line-height: 14px;
+  color: var(--muted-fg);
+  cursor: pointer;
+  user-select: none;
+}
+.return-type-strip-provenance:hover { color: var(--accent); }
+.return-type-strip-provenance:focus-visible {
+  outline: 1px solid var(--accent);
+  border-radius: 2px;
+}
 
 /* =========================================================================
  * TOUCH-DEVICE OVERRIDES — fires on iPad / phones / any pointer-coarse
@@ -2217,7 +2528,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   .arg-type-chip,
   .arg-type-chip-readonly,
   .description-tooltip-close,
-  .parent-set-editor-chip-remove,
   .arg-value-edit-btn,
   .description-tooltip-btn,
   .placeholder-binder {
@@ -2286,18 +2596,10 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
      too — applies to every button created by openInlineEditPopover
      plus the description tooltip's Save/Cancel pair. */
   .arg-value-edit-btn,
-  .description-tooltip-btn,
-  .parent-set-editor-chip-remove {
+  .description-tooltip-btn {
     min-height: var(--touch-target);
     padding: 6px 14px;
     font-size: 13px;
-  }
-  /* The chip's × is a tap-and-remove glyph, not a labelled action;
-     keep its visual size compact while extending the hit area via
-     min-width. */
-  .parent-set-editor-chip-remove {
-    padding: 0 8px;
-    min-width: var(--touch-target-min);
   }
 }
 

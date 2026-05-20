@@ -526,7 +526,7 @@
   [anchor slot-name arg-map]
   (let [items (walk-anchor-chain anchor arg-map)]
     (if (empty? items)
-      [(merge {:type :unset :arg-name slot-name
+      [(merge {:kind :unset :arg-name slot-name
                :arg-type (:type anchor) :arg-id (:id anchor)
                :sequence-anchor? true}
               (arg-ids-from anchor))]
@@ -537,18 +537,20 @@
                       ids (arg-ids-from item)]
                   (cond
                     (some? (:ref-id item))
-                    (merge {:type :ref :arg-name lbl
+                    (merge {:kind :ref :arg-name lbl
+                            :arg-type (:type item)
                             :ref-id (:ref-id item) :arg-id (:id item)
                             :is-binding false}
                            ids)
 
                     (some? (:value item))
-                    (merge {:type :value :arg-name lbl
+                    (merge {:kind :value :arg-name lbl
+                            :arg-type (:type item)
                             :value (:value item) :arg-id (:id item)}
                            ids)
 
                     :else
-                    (merge {:type :unset :arg-name lbl
+                    (merge {:kind :unset :arg-name lbl
                             :arg-type (:type item) :arg-id (:id item)}
                            ids)))))
             items))))
@@ -626,13 +628,19 @@
 
 
 (defn- record-optional-unset!
-  "Append `arg-name` to `state.optional-unsets-by-node[node-id]`. Used
-   to populate a node's `+default, +else` badge with the names of
-   unbound optional args the caller chose to leave blank."
-  [state node-id arg-name]
+  "Append `{:name arg-name :slot-id slot-id}` to `state.optional-unsets-
+   by-node[node-id]`. Used to populate a node's `+default, +else` badge
+   with the names of unbound optional args the caller chose to leave
+   blank. `slot-id` is carried so the editor can resolve the ancestor
+   that declared the slot (and surface it in the strip's per-name
+   tooltip) without re-walking the inheritance chain in two places."
+  [state node-id arg-name slot-id]
   (when (and node-id arg-name)
     (swap! state update-in [:optional-unsets-by-node node-id]
-           (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
+           (fn [xs]
+             (let [entry (cond-> {:name arg-name}
+                           slot-id (assoc :slot-id slot-id))]
+               (if xs (conj xs entry) [entry]))))))
 
 
 (defn- record-hof-captured!
@@ -651,12 +659,21 @@
    real binding row through /api/entities/binding/:id without going
    through a synth-arg-id reverse-lookup."
   [arg]
+  ;; `:arg-type` carries the slot's resolved type-kw on every shape
+  ;; (anchor rows AND binding-classifier kind-marker maps). `:type` on
+  ;; anchor rows still IS that same type-kw; it's read here as a
+  ;; back-compat fallback for callers that build anchor-shaped maps
+  ;; inline without the explicit `:arg-type` field. Classifier maps
+  ;; (`:kind :value/:ref/:unset`) always carry `:arg-type` directly,
+  ;; so the fallback never sees a kind discriminator.
   (cond-> {}
     (:slot-id arg)    (assoc :slotId    (str (:slot-id arg)))
     (:binding-id arg) (assoc :bindingId (str (:binding-id arg)))
     (:item-id arg)    (assoc :itemId    (str (:item-id arg)))
     (:fn-id arg)      (assoc :fnId      (str (:fn-id arg)))
-    (:type arg)       (assoc :argType   (-> arg :type name))))
+    (:arg-type arg)   (assoc :argType   (-> arg :arg-type name))
+    (and (:type arg) (not (:arg-type arg)))
+    (assoc :argType (-> arg :type name))))
 
 
 (defn- arg-source-fn-fields
@@ -797,8 +814,11 @@
 
 (defn- collect-fn-args
   "Collect renderable arg entries for `fn-id` given the active
-   `bindings` map. Each entry is `{:type :ref|:value|:unset :arg-name
-   :arg-id …}`. Pure — no state mutation.
+   `bindings` map. Each entry is `{:kind :ref|:value|:unset :arg-name
+   :arg-id :arg-type …}` — `:kind` is the binding-kind discriminator,
+   `:arg-type` carries the slot's resolved type-kw separately so the
+   wire `:argType` field never collides with the kind marker. Pure —
+   no state mutation.
 
    Options:
      :is-structural          — true for structural nodes inside an
@@ -880,7 +900,8 @@
                            (cond
                              (or (and has-ref defines-own-ref)
                                  (and bnd (:ref-id bnd) (= (:ref-id bnd) (:ref-id arg))))
-                             (merge {:type :ref :arg-name arg-name
+                             (merge {:kind :ref :arg-name arg-name
+                                     :arg-type (:type arg)
                                      :ref-id (:ref-id arg) :arg-id (:id arg)
                                      :is-binding false}
                                     (arg-ids-from arg))
@@ -888,29 +909,33 @@
                              (and bnd (:ref-id bnd)
                                   (or (and has-ref (not= (:ref-id bnd) (:ref-id arg)))
                                       (and (not has-ref) (not has-value))))
-                             (merge {:type :ref :arg-name (:arg-name bnd)
+                             (merge {:kind :ref :arg-name (:arg-name bnd)
+                                     :arg-type (:type arg)
                                      :ref-id (:ref-id bnd) :arg-id (:arg-id bnd)
                                      :is-binding true}
                                     (arg-ids-from bnd))
 
                              (and bnd (some? (:value bnd)))
-                             (merge {:type :value :arg-name (:arg-name bnd)
+                             (merge {:kind :value :arg-name (:arg-name bnd)
+                                     :arg-type (:type arg)
                                      :value (:value bnd) :arg-id (:arg-id bnd)}
                                     (arg-ids-from bnd))
 
                              (and has-ref (not is-structural))
-                             (merge {:type :ref :arg-name arg-name
+                             (merge {:kind :ref :arg-name arg-name
+                                     :arg-type (:type arg)
                                      :ref-id (:ref-id arg) :arg-id (:id arg)
                                      :is-binding false}
                                     (arg-ids-from arg))
 
                              (and has-ref is-structural (not defines-own-ref))
-                             (merge {:type :unset :arg-name arg-name
+                             (merge {:kind :unset :arg-name arg-name
                                      :arg-type (:type arg) :arg-id (:id arg)}
                                     (arg-ids-from arg))
 
                              has-value
-                             (merge {:type :value :arg-name arg-name
+                             (merge {:kind :value :arg-name arg-name
+                                     :arg-type (:type arg)
                                      :value (:value arg) :arg-id (:id arg)}
                                     (arg-ids-from arg))
 
@@ -918,7 +943,7 @@
                              nil
 
                              :else
-                             (merge {:type :unset :arg-name arg-name
+                             (merge {:kind :unset :arg-name arg-name
                                      :arg-type (:type arg) :arg-id (:id arg)}
                                     (arg-ids-from arg)))))
                        args)
@@ -938,7 +963,7 @@
                     (let [terminal-id (terminal-source-of arg-map (:id a))]
                       (when-not (contains? @seen-terminals terminal-id)
                         (swap! seen-terminals conj terminal-id)
-                        (merge {:type :ref
+                        (merge {:kind :ref
                                 :arg-name (resolve-arg-name a arg-map)
                                 :ref-id (:ref-id a)
                                 :arg-id (:id a)
@@ -954,8 +979,8 @@
                             (when terminal-id (swap! seen conj terminal-id))
                             arg))))
                 (into (filterv some? all-args) inherited-ref-args)))
-        type-order {:ref 0 :value 1 :unset 2}
-        sorted-args (sort-by #(get type-order (:type %) 3) deduped-args)]
+        kind-order {:ref 0 :value 1 :unset 2}
+        sorted-args (sort-by #(get kind-order (:kind %) 3) deduped-args)]
     (into (vec sorted-args) sequence-slot-entries)))
 
 
@@ -1048,19 +1073,21 @@
                     ids (arg-ids-from arg)]
                 (cond
                   has-ref
-                  (swap! fn-refs conj (merge {:type :ref :arg-name arg-name
+                  (swap! fn-refs conj (merge {:kind :ref :arg-name arg-name
+                                              :arg-type (:type arg)
                                               :ref-id (:ref-id arg) :arg-id arg-id
                                               :from-ancestor from-ancestor}
                                              ids))
 
                   has-value
-                  (swap! fn-values conj (merge {:type :value :arg-name arg-name
+                  (swap! fn-values conj (merge {:kind :value :arg-name arg-name
+                                                :arg-type (:type arg)
                                                 :value (:value arg) :arg-id arg-id
                                                 :from-ancestor from-ancestor}
                                                ids))
 
                   :else
-                  (swap! fn-unsets conj (merge {:type :unset :arg-name arg-name
+                  (swap! fn-unsets conj (merge {:kind :unset :arg-name arg-name
                                                 :arg-type (:type arg) :arg-id arg-id
                                                 :from-ancestor from-ancestor}
                                                ids)))))))
@@ -1094,11 +1121,11 @@
       (into []
             (keep (fn [arg]
                     (let [t (slot-id-of (:arg-id arg))
-                          k (case (:type arg)
+                          k (case (:kind arg)
                               :ref [t :ref (:ref-id arg)]
                               :value [t :value (:value arg)]
                               :unset [t :unset]
-                              [t (:type arg)])]
+                              [t (:kind arg)])]
                       (when-not (contains? @seen k)
                         (swap! seen conj k)
                         arg))))
@@ -1387,7 +1414,7 @@
        nil
 
        optional?
-       (record-optional-unset! state source-node-id displayed-name)
+       (record-optional-unset! state source-node-id displayed-name (:slot-id arg-rec))
 
        is-hof
        (if-let [bound (caller-bound-arg arg-map inverse-source-map arg-id)]
@@ -1769,12 +1796,12 @@
                           filtered-args
                           (filterv (fn [arg]
                                      (and (not (synth-slot? arg))
-                                          (if (= :unset (:type arg))
+                                          (if (= :unset (:kind arg))
                                             (not (ancestor-bound? (:arg-id arg)))
                                             true)))
                                    all-args)]
                       (doseq [arg filtered-args]
-                        (case (:type arg)
+                        (case (:kind arg)
                           :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
                                      ref-bindings bindings]
                                  (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} (child-hof arg-map (:arg-id arg) is-hof)))
@@ -1851,18 +1878,18 @@
                         ;; closure. Bindings in ref-id targets are NOT considered
                         ;; (they're scoped to the ref's call context).
                         all-args (filterv (fn [arg]
-                                            (if (= :unset (:type arg))
+                                            (if (= :unset (:kind arg))
                                               (not (arg-determined? arg-map parent-bound-terminals (:arg-id arg)))
                                               true))
                                           raw-args)
-                        ;; Separate by type and origin
-                        ancestor-refs (filter #(and (:from-ancestor %) (= (:type %) :ref)) all-args)
-                        ancestor-values (filter #(and (:from-ancestor %) (= (:type %) :value)) all-args)
-                        ancestor-unsets (filter #(and (:from-ancestor %) (= (:type %) :unset)) all-args)
+                        ;; Separate by kind and origin
+                        ancestor-refs (filter #(and (:from-ancestor %) (= (:kind %) :ref)) all-args)
+                        ancestor-values (filter #(and (:from-ancestor %) (= (:kind %) :value)) all-args)
+                        ancestor-unsets (filter #(and (:from-ancestor %) (= (:kind %) :unset)) all-args)
                         level-0-args (remove :from-ancestor all-args)
-                        level-0-refs (filter #(= (:type %) :ref) level-0-args)
-                        level-0-values (filter #(= (:type %) :value) level-0-args)
-                        level-0-unsets (filter #(= (:type %) :unset) level-0-args)
+                        level-0-refs (filter #(= (:kind %) :ref) level-0-args)
+                        level-0-values (filter #(= (:kind %) :value) level-0-args)
+                        level-0-unsets (filter #(= (:kind %) :unset) level-0-args)
 
                         has-ancestor-refs (seq ancestor-refs)
 
@@ -1999,12 +2026,12 @@
                                 (add-unset-arg-node state lookups inverse-source-map
                                                     (:arg-name arg) (:arg-type arg)
                                                     (:arg-id arg) node-id expand-set is-hof))))]
-                      (doseq [arg (filter #(= (:type %) :ref) level-0-stay)]
+                      (doseq [arg (filter #(= (:kind %) :ref) level-0-stay)]
                         (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set (child-hof arg-map (:arg-id arg) is-hof)))
 
                       (doseq [arg level-0-unsets] (render-unset arg))
 
-                      (doseq [arg (filter #(= (:type %) :value) level-0-stay)]
+                      (doseq [arg (filter #(= (:kind %) :value) level-0-stay)]
                         (add-arg-value-node state lookups arg node-id expand-set))
 
                       ;; Ancestor refs: pass ONLY their migrated bindings (if
@@ -2111,14 +2138,32 @@
                                                     {:arg-id (:id arg)
                                                      :arg-name (resolve-arg-name arg arg-map)
                                                      :value (:value arg)
-                                                     :type (:type arg)
+                                                     :arg-type (:type arg)
                                                      :slot-id (:slot-id arg)
                                                      :binding-id (:binding-id arg)
                                                      :item-id (:item-id arg)
                                                      :fn-id (:fn-id arg)}
                                                     node-id #{fn-id}))
 
-                              (and migrated (:ref-id migrated))
+                              ;; Skip the migration recursion when the
+                              ;; migrated binding's ref-id IS the leaf
+                              ;; itself: a caller binding `:map → :foo`
+                              ;; describes the caller's :map slot, not a
+                              ;; sub-binding inside :foo. Without this
+                              ;; guard, descending into :foo would re-
+                              ;; apply the same migration via :foo's own
+                              ;; inherited :map slot and recurse
+                              ;; forever (StackOverflow seen on
+                              ;; `:health-status :map → :health-status-base`,
+                              ;; whose ancestor `:assoc` defines `:map`
+                              ;; as one of its slots so the slot-id
+                              ;; matches at both levels).
+                              ;;
+                              ;; Same fn-id check also covers the
+                              ;; degenerate cycle where the leaf points
+                              ;; back at itself through any path.
+                              (and migrated (:ref-id migrated)
+                                   (not= (:ref-id migrated) fn-id))
                               (when (mark-once! [terminal :ref (:ref-id migrated)])
                                 (process-any-fn (:ref-id migrated) node-id
                                                 (or (:arg-name migrated)
@@ -2133,7 +2178,7 @@
                                                            :arg-id (:id arg)
                                                            :arg-name (or (:arg-name migrated)
                                                                          (resolve-arg-name arg arg-map))
-                                                           :type (:type arg)
+                                                           :arg-type (:type arg)
                                                            :fn-id (:fn-id arg))
                                                     node-id #{fn-id}))
 

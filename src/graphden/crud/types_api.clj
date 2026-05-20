@@ -78,6 +78,29 @@
       :else                                      :primitive)))
 
 
+(defn project-rich-type-entry
+  "Strip the backend-only per-base-fn type-rule fns from a single
+   registry entry and replace each with a JSON-safe boolean flag.
+
+   Why: the rule values themselves are Clojure functions (not JSON-
+   encodable) and the editor never needs them; it reads only
+   :return / :args / :effects / :description. The flag preserves the
+   *fact* of a rule's presence so the editor's return-type provenance
+   popover can attribute computed return-types to the originating
+   base-fn without round-tripping the (non-serializable) impl.
+
+   Exposed for tests — the wire shape of `/api/types` depends on this
+   projector being applied to every entry."
+  [entry]
+  (cond-> entry
+    (:return-type-rule entry)
+    (-> (dissoc :return-type-rule) (assoc :has-return-type-rule? true))
+    (:slot-types-rule entry)
+    (-> (dissoc :slot-types-rule) (assoc :has-slot-types-rule? true))
+    (:nav-types-rule entry)
+    (-> (dissoc :nav-types-rule) (assoc :has-nav-types-rule? true))))
+
+
 (defn rich-types-with-type-rows
   "Augment the in-memory rich-type registry with structural definitions
    for storage-only type-rows (refinements, list types, records). The
@@ -88,13 +111,8 @@
    up `:port` → expect `[:refine :int [:and [:>= 1] [:<= 65535]]]`,
    so we expose the structural form alongside the existing entries."
   [ctx]
-  (let [;; Strip the backend-only per-base-fn type-rule fns from each
-        ;; registry entry — they are Clojure functions (not JSON-
-        ;; encodable) and the editor never needs them; it reads only
-        ;; :return / :args / :effects / :description.
-        snapshot (update-vals (registry/rich-types-snapshot)
-                              #(dissoc % :return-type-rule
-                                       :slot-types-rule :nav-types-rule))
+  (let [snapshot (update-vals (registry/rich-types-snapshot)
+                              project-rich-type-entry)
         ;; Reuse the shared graph-cache instead of re-querying :fn —
         ;; chain walks over `:base-fn-id` / `:element-fn-id` resolve
         ;; in memory via `fns-by-id`.

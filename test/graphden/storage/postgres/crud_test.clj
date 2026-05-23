@@ -982,3 +982,142 @@
           (is (= "Alice" (:name (first result)))))
         (finally
           (sp/close storage))))))
+
+
+;; ============================================================================
+;; query-entities 4-arg (opts) — :order-by / :limit / :offset
+;;
+;; The protocol's 4-arg variant lets callers push ORDER BY / LIMIT /
+;; OFFSET into the SQL query instead of fetching everything and
+;; paging in Clojure. Used by `resolve-fn-version-id` to grab the
+;; latest version in O(1).
+;; ============================================================================
+
+(defn- seed-users
+  [storage names-and-bios]
+  (let [schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                               :type :text}
+                                        :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                              :type :text
+                                              :nullable? true}})]
+    (sp/initialize storage schema)
+    (doseq [[n bio] names-and-bios]
+      (sp/create-entity storage :user {:name n :bio bio}))))
+
+
+(deftest query-entities-opts-order-by-asc-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (seed-users storage [["Charlie" "c"] ["Alice" "a"] ["Bob" "b"]])
+      (let [result (sp/query-entities storage :user {}
+                                      {:order-by [[:name :asc]]})]
+        (testing ":order-by [[:name :asc]] sorts alphabetically"
+          (is (= ["Alice" "Bob" "Charlie"] (mapv :name result)))))
+      (finally (sp/close storage)))))
+
+
+(deftest query-entities-opts-order-by-desc-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (seed-users storage [["Alice" "a"] ["Bob" "b"] ["Charlie" "c"]])
+      (let [result (sp/query-entities storage :user {}
+                                      {:order-by [[:name :desc]]})]
+        (testing ":order-by [[:name :desc]] sorts reverse-alphabetically"
+          (is (= ["Charlie" "Bob" "Alice"] (mapv :name result)))))
+      (finally (sp/close storage)))))
+
+
+(deftest query-entities-opts-limit-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (seed-users storage [["Alice" "a"] ["Bob" "b"] ["Charlie" "c"]])
+      (let [result (sp/query-entities storage :user {}
+                                      {:order-by [[:name :asc]] :limit 2})]
+        (testing ":limit caps row count"
+          (is (= 2 (count result)))
+          (is (= ["Alice" "Bob"] (mapv :name result)))))
+      (finally (sp/close storage)))))
+
+
+(deftest query-entities-opts-offset-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (seed-users storage [["Alice" "a"] ["Bob" "b"] ["Charlie" "c"]])
+      (let [result (sp/query-entities storage :user {}
+                                      {:order-by [[:name :asc]] :offset 1})]
+        (testing ":offset skips the first N rows"
+          (is (= ["Bob" "Charlie"] (mapv :name result)))))
+      (finally (sp/close storage)))))
+
+
+(deftest query-entities-opts-pagination-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (seed-users storage [["a1" "x"] ["a2" "x"] ["a3" "x"] ["a4" "x"] ["a5" "x"]])
+      (testing "page 1 of 2 (limit=2, offset=0)"
+        (is (= ["a1" "a2"]
+               (mapv :name
+                     (sp/query-entities storage :user {}
+                                        {:order-by [[:name :asc]]
+                                         :limit 2 :offset 0})))))
+      (testing "page 2 (limit=2, offset=2)"
+        (is (= ["a3" "a4"]
+               (mapv :name
+                     (sp/query-entities storage :user {}
+                                        {:order-by [[:name :asc]]
+                                         :limit 2 :offset 2})))))
+      (testing "page 3 (limit=2, offset=4) — partial"
+        (is (= ["a5"]
+               (mapv :name
+                     (sp/query-entities storage :user {}
+                                        {:order-by [[:name :asc]]
+                                         :limit 2 :offset 4})))))
+      (finally (sp/close storage)))))
+
+
+(deftest query-entities-opts-combined-with-where-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (seed-users storage [["Alice" "x"] ["Bob" "y"] ["Charlie" "x"]])
+      (let [result (sp/query-entities storage :user {:bio "x"}
+                                      {:order-by [[:name :asc]]})]
+        (testing "opts compose with the where filter"
+          (is (= ["Alice" "Charlie"] (mapv :name result)))))
+      (finally (sp/close storage)))))
+
+
+(deftest query-entities-opts-nil-passes-through-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (seed-users storage [["A" "a"] ["B" "b"]])
+      (testing "nil opts behaves like the 3-arg form"
+        (is (= 2 (count (sp/query-entities storage :user {} nil)))))
+      (testing "empty-map opts behaves like the 3-arg form"
+        (is (= 2 (count (sp/query-entities storage :user {} {})))))
+      (finally (sp/close storage)))))
+
+
+(deftest query-entities-opts-validation-rejects-bad-shape-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (seed-users storage [["A" "a"]])
+      (testing "unknown key rejected"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown :opts key"
+              (sp/query-entities storage :user {} {:bogus 1}))))
+      (testing ":limit must be non-negative integer"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #":limit must be"
+              (sp/query-entities storage :user {} {:limit -1})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #":limit must be"
+              (sp/query-entities storage :user {} {:limit "10"}))))
+      (testing ":offset must be non-negative integer"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #":offset must be"
+              (sp/query-entities storage :user {} {:offset -5}))))
+      (testing ":order-by must be vec of [col :asc/:desc] pairs"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #":order-by must be"
+              (sp/query-entities storage :user {} {:order-by [[:name :sideways]]})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #":order-by must be"
+              (sp/query-entities storage :user {} {:order-by [["name" :asc]]}))))
+      (testing "opts must be a map"
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #":opts must be a map"
+              (sp/query-entities storage :user {} [:not :a :map]))))
+      (finally (sp/close storage)))))

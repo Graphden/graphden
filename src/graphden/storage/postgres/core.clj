@@ -228,6 +228,13 @@
                          (get-entity-fields pool metadata-cache rw-lock entity-name)))
 
 
+  (query-entities
+    [_this entity-name where opts]
+    (crud/query-entities pool entity-name where
+                         (get-entity-fields pool metadata-cache rw-lock entity-name)
+                         opts))
+
+
   sp/StorageBatchCRUD
 
   (create-entities

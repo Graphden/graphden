@@ -62,6 +62,24 @@ async function authFetch(url, opts = {}) {
   return response;
 }
 
+// Build a user-facing error message for a non-OK `authFetch` response.
+// 401 is the load-bearing case: a bare "HTTP 401" tells the user
+// nothing actionable — every call site needs to point at the toolbar
+// lock icon. `opts.authExpired` lets the caller supply context-specific
+// recovery guidance (e.g. "the run continues in the background");
+// `opts.fallback` overrides the generic "HTTP <status>" for non-401s,
+// either as a string or a (response) => string.
+function authFetchErrorMessage(response, opts) {
+  const o = opts || {};
+  if (response && response.status === 401) {
+    return o.authExpired
+      || 'Sign-in expired. Click the lock icon in the toolbar to re-authenticate.';
+  }
+  if (typeof o.fallback === 'function') return o.fallback(response);
+  if (o.fallback) return o.fallback;
+  return 'HTTP ' + (response ? response.status : '?');
+}
+
 // Convenience wrapper for the typical mutating call shape: form-urlencoded
 // body, server returns 2xx/4xx. `fields` is either an object that gets
 // URL-encoded (skipping nullish/empty values), a pre-encoded string, or

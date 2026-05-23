@@ -200,9 +200,10 @@ async function pollOnce(execId, resultHostEl) {
                               { method: 'GET' });
     if (!r.ok) {
       resultHostEl.textContent = '';
-      const msg = r.status === 401
-        ? 'Sign-in expired during polling. Re-authenticate via the toolbar lock icon; the run continues in the background and can be reopened from History.'
-        : ('Polling failed: HTTP ' + r.status);
+      const msg = authFetchErrorMessage(r, {
+        authExpired: 'Sign-in expired during polling. Re-authenticate via the toolbar lock icon; the run continues in the background and can be reopened from History.',
+        fallback: (resp) => 'Polling failed: HTTP ' + resp.status,
+      });
       resultHostEl.appendChild(renderErrorPane(msg));
       stopPolling();
       return;
@@ -254,10 +255,7 @@ function startPolling(execId, resultHostEl) {
 
 async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn) {
   resultHostEl.textContent = '';
-  const spin = document.createElement('div');
-  spin.className = 'execute-submit-spinner';
-  spin.textContent = 'Submitting…';
-  resultHostEl.appendChild(spin);
+  resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
   try {
     const r = await authFetch('/api/execute', {
       method: 'POST',
@@ -269,11 +267,10 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
     const body = await r.json().catch(() => null);
     resultHostEl.textContent = '';
     if (!r.ok) {
-      // 401 = session expired / token rotated mid-popover. Plain
-      // "HTTP 401" is opaque — tell the user what to do next.
-      const msg = r.status === 401
-        ? 'Sign-in expired. Click the lock icon in the toolbar to re-authenticate, then try Run again.'
-        : (body?.error || 'HTTP ' + r.status);
+      const msg = authFetchErrorMessage(r, {
+        authExpired: 'Sign-in expired. Click the lock icon in the toolbar to re-authenticate, then try Run again.',
+        fallback: body?.error,
+      });
       resultHostEl.appendChild(renderErrorPane(msg, body?.['error-data']));
       return;
     }
@@ -494,10 +491,7 @@ async function showExecutePopover(fnEntity, anchorEl) {
     historyBtn.setAttribute('aria-expanded', 'true');
     if (!historyLoaded) {
       historyHost.textContent = '';
-      const spin = document.createElement('div');
-      spin.className = 'execute-submit-spinner';
-      spin.textContent = 'Loading history…';
-      historyHost.appendChild(spin);
+      historyHost.appendChild(renderSubmitSpinner('Loading history…'));
       const panel = await buildHistoryPanel(fnEntity, resultHost);
       historyHost.textContent = '';
       historyHost.appendChild(panel);
@@ -523,10 +517,7 @@ async function showExecutePopover(fnEntity, anchorEl) {
     historyLoaded = false;
     if (historyHost.style.display !== 'none') {
       historyHost.textContent = '';
-      const spin = document.createElement('div');
-      spin.className = 'execute-submit-spinner';
-      spin.textContent = 'Refreshing history…';
-      historyHost.appendChild(spin);
+      historyHost.appendChild(renderSubmitSpinner('Refreshing history…'));
       const panel = await buildHistoryPanel(fnEntity, resultHost);
       historyHost.textContent = '';
       historyHost.appendChild(panel);

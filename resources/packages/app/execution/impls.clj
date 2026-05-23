@@ -75,18 +75,23 @@
 
 ;; --- GET /api/executions?fn-id=X ---
 
+(defn- query-param
+  "Pull a named query-string parameter from `request`, tolerating both
+   reitit's enriched shapes (`:query-params` keyed by string OR
+   keyword) AND raw http-kit requests that haven't gone through the
+   enrich middleware — those land here with just `:query-string`.
+   Returns the raw string value, or nil when the param isn't present."
+  [request param-name]
+  (or (get-in request [:query-params param-name])
+      (get-in request [:query-params (keyword param-name)])
+      (some->> (:query-string request)
+               (re-find (re-pattern (str "(?:^|&)" param-name "=([^&]+)")))
+               second)))
+
+
 (defn- query-fn-id
-  "Reitit puts query params under `:query-params` as a string-keyed
-   map. Fallback to manual URI parsing for handlers reached without
-   reitit's enrich (same pattern as path-id above)."
   [request]
-  (let [raw (or (get-in request [:query-params "fn-id"])
-                (get-in request [:query-params :fn-id])
-                ;; raw query-string parse, e.g. "?fn-id=abc"
-                (some->> (:query-string request)
-                         (re-find #"(?:^|&)fn-id=([^&]+)")
-                         second))]
-    (request/parse-uuid-or-clear raw)))
+  (request/parse-uuid-or-clear (query-param request "fn-id")))
 
 
 (defn- query-limit
@@ -94,14 +99,9 @@
    crud layer applies clamping + the default. Tolerates malformed
    input (non-numeric → nil) so a bad query never 500s."
   [request]
-  (let [raw (or (get-in request [:query-params "limit"])
-                (get-in request [:query-params :limit])
-                (some->> (:query-string request)
-                         (re-find #"(?:^|&)limit=([^&]+)")
-                         second))]
-    (when raw
-      (try (Long/parseLong (str raw))
-           (catch NumberFormatException _ nil)))))
+  (when-let [raw (query-param request "limit")]
+    (try (Long/parseLong (str raw))
+         (catch NumberFormatException _ nil))))
 
 
 (defbase _list-executions-by-fn

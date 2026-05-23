@@ -166,10 +166,7 @@ async function buildHistoryPanel(fnEntity, resultHostEl) {
   }
   const onExpand = async (execId) => {
     resultHostEl.textContent = '';
-    const spin = document.createElement('div');
-    spin.className = 'execute-submit-spinner';
-    spin.textContent = 'Loading…';
-    resultHostEl.appendChild(spin);
+    resultHostEl.appendChild(renderSubmitSpinner('Loading…'));
     try {
       const r = await authFetch('/api/execute/' + encodeURIComponent(execId),
                                 { method: 'GET' });

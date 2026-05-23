@@ -184,41 +184,58 @@
    Throws :table-not-found if entity table doesn't exist.
    Throws :invalid-where-clause if where is not nil or a map.
 
+   Optional `opts` (4-arg form):
+     :order-by  [[:column :asc-or-:desc] ...]
+     :limit     non-negative int
+     :offset    non-negative int
+   Column keywords in :order-by are translated through snake-case the
+   same way `where` keys are.
+
    Note: Empty where clause ({} or nil) returns all entities (full table scan).
    This is logged at DEBUG level to help identify unintended full scans."
-  [ds entity-name where fields]
-  (sp/standard-query-validations! entity-name fields where)
-  (let [table-name (keyword (util/kw->snake-case entity-name))
-        where-clause (when (seq where)
-                       (into [:and]
-                             (map (fn [[k v]]
-                                    (let [col (keyword (util/kw->snake-case k))
-                                          field-spec (get fields k)
-                                          encoded-v (codec/encode-value v field-spec)]
-                                      (cond
-                                        (nil? encoded-v)
-                                        [:is col nil]
+  ([ds entity-name where fields]
+   (query-entities ds entity-name where fields nil))
+  ([ds entity-name where fields opts]
+   (sp/standard-query-validations! entity-name fields where)
+   (sp/validate-query-opts! entity-name opts)
+   (let [table-name (keyword (util/kw->snake-case entity-name))
+         where-clause (when (seq where)
+                        (into [:and]
+                              (map (fn [[k v]]
+                                     (let [col (keyword (util/kw->snake-case k))
+                                           field-spec (get fields k)
+                                           encoded-v (codec/encode-value v field-spec)]
+                                       (cond
+                                         (nil? encoded-v)
+                                         [:is col nil]
 
-                                        ;; Collection = IN clause (for batch lookups)
-                                        (and (or (vector? v) (set? v) (seq? v))
-                                             (not (map? v)))
-                                        [:in col (vec (map #(codec/encode-value % field-spec) v))]
+                                         ;; Collection = IN clause (for batch lookups)
+                                         (and (or (vector? v) (set? v) (seq? v))
+                                              (not (map? v)))
+                                         [:in col (vec (map #(codec/encode-value % field-spec) v))]
 
-                                        :else
-                                        [:= col encoded-v])))
-                                  where)))
-        query (sql/format (cond-> {:select [:*]
-                                   :from [table-name]}
-                            where-clause (assoc :where where-clause))
-                          {:quoted true})]
-    (when-not where-clause
-      (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
-    (util/with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where}
-                                  (let [rows (jdbc/execute! ds query (util/query-opts))
-                                        records (mapv #(codec/row->entity % fields) rows)]
-                                    (if (and fields (junction/has-ref-many? fields))
-                                      (junction/populate-ref-many-fields ds entity-name records fields)
-                                      records)))))
+                                         :else
+                                         [:= col encoded-v])))
+                                   where)))
+         order-by (when-let [ob (:order-by opts)]
+                    (mapv (fn [[col dir]]
+                            [(keyword (util/kw->snake-case col)) dir])
+                          ob))
+         query (sql/format (cond-> {:select [:*]
+                                    :from [table-name]}
+                             where-clause (assoc :where where-clause)
+                             order-by (assoc :order-by order-by)
+                             (:limit opts) (assoc :limit (:limit opts))
+                             (:offset opts) (assoc :offset (:offset opts)))
+                           {:quoted true})]
+     (when-not where-clause
+       (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
+     (util/with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where :opts opts}
+                                   (let [rows (jdbc/execute! ds query (util/query-opts))
+                                         records (mapv #(codec/row->entity % fields) rows)]
+                                     (if (and fields (junction/has-ref-many? fields))
+                                       (junction/populate-ref-many-fields ds entity-name records fields)
+                                       records))))))
 
 
 ;; === Batch CRUD operations ===

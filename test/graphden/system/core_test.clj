@@ -38,6 +38,10 @@
       [_ entity-type _]
       (when (= entity-type :service) service-rows))
 
+    (query-entities
+      [this entity-type where _opts]
+      (sp/query-entities this entity-type where))
+
     (read-entity [_ _ _] nil)
 
     (create-entity [_ _ _] nil)

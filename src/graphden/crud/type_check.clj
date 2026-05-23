@@ -16,26 +16,11 @@
    in the crud.* layering; it has no crud.* require of its own."
   (:require
     [clojure.string :as str]
+    [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
     [graphden.types.core :as types]))
-
-
-(defn- query-fn-by-name
-  "Look up a fn by `:name`, tolerating the enum-typed `fn.name` column.
-   A name that was never created is not a valid enum value, so the
-   storage codec raises `:validation-error/type-mismatch` on the
-   query itself. Swallow exactly that — it just means \"no such fn\"
-   — but rethrow anything else. Mirrors
-   `compile-runtime/query-fn-by-name`."
-  [storage value]
-  (try
-    (first (sp/query-entities storage :fn {:name value}))
-    (catch clojure.lang.ExceptionInfo e
-      (when-not (= :validation-error/type-mismatch (:type (ex-data e)))
-        (throw e))
-      nil)))
 
 
 (defn resolve-type-fn-id
@@ -48,8 +33,7 @@
   [storage v]
   (when-not (str/blank? v)
     (or (try (java.util.UUID/fromString v) (catch Exception _ nil))
-        (let [match (or (query-fn-by-name storage v)
-                        (query-fn-by-name storage (keyword v)))]
+        (let [match (lookup/query-fn-by-name storage v)]
           (or (:id match)
               (throw (ex-info (str "Unknown type reference: " (pr-str v)
                                    " — no fn with that name exists yet")

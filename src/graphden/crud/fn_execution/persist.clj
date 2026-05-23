@@ -105,6 +105,34 @@
   (and (map? v) (contains? v :ref)))
 
 
+(defn parse-ref-fn-id
+  "`{:ref \"uuid-str\"}` → fn-id UUID (or nil for missing/malformed
+   `:ref`). Pure transform — no DB access. Used by `apply-execute` to
+   strip the ref-wrapper before handing args to the executor."
+  [ref-value]
+  (some-> (:ref ref-value) request/parse-uuid-or-clear))
+
+
+(defn snapshot-runtime-effects
+  "Read the captured effect-set from `trace-atom` and convert to the
+   wire shape — vec of strings — that ends up on the row's
+   `:runtime-effects` field. Returns nil for an empty or absent trace
+   so callers can `(when …)` over it without distinguishing the two."
+  [trace-atom]
+  (when trace-atom
+    (some-> @trace-atom seq (->> (mapv name)))))
+
+
+(defn resolve-ref-version-id
+  "`{:ref \"uuid-str\"}` → current `:fn-version-id` for that fn (or nil
+   if the fn has no version row). Used by `persist-args!` to write
+   `:ref-fn-version-id` on arg rows so historical executions stay
+   pinned to the version they ran against."
+  [storage ref-value]
+  (some->> (parse-ref-fn-id ref-value)
+           (lookup/resolve-fn-version-id {:storage storage})))
+
+
 ;; =============================================================================
 ;; Row writes — pending → terminal state transitions.
 ;; =============================================================================
@@ -133,14 +161,11 @@
     (cond
       ;; Single ref
       (ref-arg? v)
-      (let [ref-fn-id (some-> (:ref v) request/parse-uuid-or-clear)
-            version-id (some->> ref-fn-id (lookup/resolve-fn-version-id
-                                            {:storage storage}))]
-        (sp/create-entity storage :fn-execution-arg
-                          {:execution-id execution-id
-                           :slot-id slot-id
-                           :value nil
-                           :ref-fn-version-id version-id}))
+      (sp/create-entity storage :fn-execution-arg
+                        {:execution-id execution-id
+                         :slot-id slot-id
+                         :value nil
+                         :ref-fn-version-id (resolve-ref-version-id storage v)})
 
       ;; List — create the arg row + per-item rows
       (sequential? v)
@@ -150,18 +175,13 @@
                                        :value nil
                                        :ref-fn-version-id nil})]
         (doseq [[idx item] (map-indexed vector v)]
-          (cond
-            (ref-arg? item)
-            (let [ref-fn-id (some-> (:ref item) request/parse-uuid-or-clear)
-                  version-id (some->> ref-fn-id
-                                      (lookup/resolve-fn-version-id
-                                        {:storage storage}))]
-              (sp/create-entity storage :fn-execution-arg-item
-                                {:execution-arg-id (:id arg-row)
-                                 :position idx
-                                 :value nil
-                                 :ref-fn-version-id version-id}))
-            :else
+          (if (ref-arg? item)
+            (sp/create-entity storage :fn-execution-arg-item
+                              {:execution-arg-id (:id arg-row)
+                               :position idx
+                               :value nil
+                               :ref-fn-version-id (resolve-ref-version-id
+                                                    storage item)})
             (sp/create-entity storage :fn-execution-arg-item
                               {:execution-arg-id (:id arg-row)
                                :position idx
@@ -187,6 +207,17 @@
                      :status :pending
                      :declared-effects declared-effects
                      :user-id user-id}))
+
+
+(defn create-pending-with-args!
+  "Atomic: create a `:pending` row + write the per-arg rows. Returns
+   the parent row. Used by both `apply-execute` pre-persist and lazy-
+   persist branches; the future registration happens at the callsite
+   because the two paths sequence it differently."
+  [storage fn-version-id declared-effects user-id args free-slots]
+  (let [r (create-pending-row! storage fn-version-id declared-effects user-id)]
+    (persist-args! storage (:id r) args free-slots)
+    r))
 
 
 (defn write-finished!
@@ -273,16 +304,14 @@
   (future
     (try
       (let [result @fut
-            runtime-eff (when trace-atom
-                          (some-> @trace-atom seq (->> (mapv name))))]
+            runtime-eff (snapshot-runtime-effects trace-atom)]
         (log-effect-drift! execution-id declared-effects runtime-eff)
         (write-finished! storage execution-id
                          (cond-> {:status :succeeded :result result}
                            runtime-eff (assoc :runtime-effects runtime-eff))))
       (catch java.util.concurrent.ExecutionException ee
         (let [cause (java.util.concurrent.ExecutionException/.getCause ee)
-              runtime-eff (when trace-atom
-                            (some-> @trace-atom seq (->> (mapv name))))]
+              runtime-eff (snapshot-runtime-effects trace-atom)]
           (log-effect-drift! execution-id declared-effects runtime-eff)
           (if (instance? InterruptedException cause)
             (write-finished! storage execution-id

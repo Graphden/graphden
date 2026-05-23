@@ -134,7 +134,19 @@
 
   (query-entities
     [this entity-name where]
-    "Queries entities matching the given criteria."))
+    [this entity-name where opts]
+    "Queries entities matching the given criteria.
+
+     Three-arg form is the original predicate-only query.
+
+     Four-arg form additionally accepts `opts`:
+       {:order-by [[:column :asc|:desc] ...]   ; nil → unordered
+        :limit    n                            ; nil → unbounded
+        :offset   n}                           ; nil → 0
+     `opts` may be nil or empty. Backends that wrap a base storage
+     (e.g. VersionedStorage) MAY refuse `opts` on entities whose
+     semantics require post-query resolution (currently versioned
+     entities) by throwing `:storage-error/unsupported-opts`."))
 
 
 (defprotocol StorageBatchCRUD
@@ -622,6 +634,45 @@
   (when fields
     (validate-where-clause-fields! entity-name fields where)
     (validate-where-clause-types! entity-name fields where)))
+
+
+(defn- valid-opts-key?
+  [k]
+  (#{:order-by :limit :offset} k))
+
+
+(defn validate-query-opts!
+  "Validate the optional 4-th arg `opts` map of `query-entities`.
+   Allowed keys: `:order-by` `:limit` `:offset`. Throws an
+   `ExceptionInfo` with `:type :storage-error/invalid-opts` on a bad
+   shape. nil/empty opts pass."
+  [entity-name opts]
+  (when (some? opts)
+    (when-not (map? opts)
+      (throw (ex-info ":opts must be a map (or nil)"
+                      {:type :storage-error/invalid-opts
+                       :entity-name entity-name :opts opts})))
+    (doseq [k (keys opts)]
+      (when-not (valid-opts-key? k)
+        (throw (ex-info (str "Unknown :opts key " k)
+                        {:type :storage-error/invalid-opts
+                         :entity-name entity-name :opts opts :bad-key k}))))
+    (when-let [ob (:order-by opts)]
+      (when-not (and (sequential? ob)
+                     (every? (fn [pair]
+                               (and (sequential? pair) (= 2 (count pair))
+                                    (keyword? (first pair))
+                                    (#{:asc :desc} (second pair))))
+                             ob))
+        (throw (ex-info ":order-by must be a seq of [column :asc/:desc] pairs"
+                        {:type :storage-error/invalid-opts
+                         :entity-name entity-name :order-by ob}))))
+    (doseq [k [:limit :offset]]
+      (when-let [v (get opts k)]
+        (when-not (and (integer? v) (not (neg? v)))
+          (throw (ex-info (str k " must be a non-negative integer")
+                          {:type :storage-error/invalid-opts
+                           :entity-name entity-name k v})))))))
 
 
 (defn standard-batch-validations!

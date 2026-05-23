@@ -99,8 +99,8 @@
    foot-gun where clicking ▶ on :web-server tries to re-bind its
    already-occupied port."
   [storage fn-id]
-  (or (when-let [svc (some #(when (:enabled? %) %)
-                           (sp/query-entities storage :service {:fn-id fn-id}))]
+  (or (when-let [svc (first (sp/query-entities storage :service
+                                               {:fn-id fn-id :enabled? true}))]
         {:source :service :service-id (:id svc)})
       (when-let [handle @services-recon/legacy-handle]
         (when (= fn-id (:fn-id handle))
@@ -186,9 +186,13 @@
      writing a row."
   [ctx parsed]
   (let [storage (request/require-storage ctx)
-        fn-id (lookup/resolve-fn-id storage parsed)
+        ;; Single round-trip for both `:id` and `:name`; the older
+        ;; flow did `resolve-fn-id` + a separate `read-entity` to pull
+        ;; the name.
+        fn-row (lookup/resolve-fn storage parsed)
+        fn-id (:id fn-row)
+        fn-name (:name fn-row)
         fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
-        fn-name (some-> (sp/read-entity storage :fn fn-id) :name)
         free-slots (lookup/free-arg-slot-map ctx fn-id)
         declared-eff (persist/declared-effects-of fn-name)
         need-persist? (or (:persist? parsed) (seq declared-eff))
@@ -197,30 +201,33 @@
                                     (when (contains? free-slots (keyword k))
                                       [(keyword k)
                                        (if (persist/ref-arg? v)
-                                         (some-> (:ref v) request/parse-uuid-or-clear)
+                                         (persist/parse-ref-fn-id v)
                                          v)])))
                             (:args parsed))
         cancel-flag (atom false)
         pre-persisted? need-persist?
         row (when pre-persisted?
-              (let [r (persist/create-pending-row!
-                        storage fn-version-id declared-eff (:user-id parsed))]
-                (persist/persist-args! storage (:id r) (:args parsed) free-slots)
-                r))
+              (persist/create-pending-with-args!
+                storage fn-version-id declared-eff
+                (:user-id parsed) (:args parsed) free-slots))
         [fut trace] (persist/run-future ctx fn-id executor-args cancel-flag)
         _   (when row (persist/register-future! (:id row) fut cancel-flag))
         result (try (deref fut (:timeout-ms parsed) ::pending)
                     (catch java.util.concurrent.ExecutionException ee
                       {::ex (java.util.concurrent.ExecutionException/.getCause ee)}))
-        runtime-eff (fn [] (some-> @trace seq (->> (mapv name))))]
+        ;; Closure (not eager) — only the inline-success/failure
+        ;; branches snapshot the trace; timeout branches hand the atom
+        ;; off to `record-completion!` which snapshots when the future
+        ;; resolves.
+        runtime-eff (fn [] (persist/snapshot-runtime-effects trace))]
     (cond
       ;; Timeout AND we haven't pre-persisted — persist lazily so the
       ;; client gets an id to poll. record-completion! tails the future
       ;; to update the row when it finally resolves.
       (and (= ::pending result) (not pre-persisted?))
-      (let [r (persist/create-pending-row!
-                storage fn-version-id declared-eff (:user-id parsed))]
-        (persist/persist-args! storage (:id r) (:args parsed) free-slots)
+      (let [r (persist/create-pending-with-args!
+                storage fn-version-id declared-eff
+                (:user-id parsed) (:args parsed) free-slots)]
         (persist/register-future! (:id r) fut cancel-flag)
         (persist/record-completion! storage (:id r) fut trace declared-eff)
         {:status :pending :execution-id (str (:id r))})
@@ -272,9 +279,14 @@
   [storage execution-id]
   (let [arg-rows (sp/query-entities storage :fn-execution-arg
                                     {:execution-id execution-id})
-        items-by-arg (group-by :execution-arg-id
-                               (sp/query-entities storage :fn-execution-arg-item
-                                                  {}))]
+        ;; Push the arg-id set into storage as a SQL IN clause; the
+        ;; alternative — full-table-scanning :fn-execution-arg-item and
+        ;; grouping in memory — is fine for one row but quadratic when
+        ;; GET /api/execute/:id is hit by the polling loop.
+        item-rows (when (seq arg-rows)
+                    (sp/query-entities storage :fn-execution-arg-item
+                                       {:execution-arg-id (mapv :id arg-rows)}))
+        items-by-arg (group-by :execution-arg-id item-rows)]
     (mapv (fn [a]
             (assoc a :items
                    (->> (get items-by-arg (:id a) [])
@@ -322,11 +334,15 @@
                (> limit max-history-limit) max-history-limit
                :else (long limit))
          versions (sp/query-entities storage :fn-version {:fn-id fn-id})
-         version-ids (set (map :id versions))]
+         version-ids (mapv :id versions)]
      (if (empty? version-ids)
        []
-       (->> (sp/query-entities storage :fn-execution {})
-            (filter #(version-ids (:fn-version-id %)))
+       ;; Push the fn-version-id set into the storage query — collection
+       ;; values resolve to a SQL `IN` clause (see
+       ;; storage.postgres.crud/query-entities). Avoids the full-table
+       ;; scan + in-memory filter we'd do otherwise.
+       (->> (sp/query-entities storage :fn-execution
+                               {:fn-version-id version-ids})
             (sort-by :started-at)
             reverse
             (take lim)

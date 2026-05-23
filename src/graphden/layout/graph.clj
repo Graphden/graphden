@@ -60,26 +60,57 @@
                             (java.util.UUID/.getLeastSignificantBits slot-id))))
 
 
-(defn- chain-of
-  "BFS of an fn's parent-id closure (self first, ancestors after).
-   Inlined here so this helper runs before the rest of the file's
-   inheritance walkers are declared."
-  [fn-by-id fn-id]
-  (loop [acc [fn-id], seen #{fn-id},
-         queue (vec (->> (get-in fn-by-id [fn-id :parent-ids])
-                         (remove nil?)))]
-    (if (empty? queue)
-      acc
-      (let [fid (first queue)
-            rest-q (subvec queue 1)]
-        (if (contains? seen fid)
-          (recur acc seen rest-q)
-          (let [pids (->> (get-in fn-by-id [fid :parent-ids])
-                          (remove nil?)
-                          (remove seen))]
-            (recur (conj acc fid)
-                   (conj seen fid)
-                   (into rest-q pids))))))))
+(defn- get-inheritance-levels
+  "Get inheritance as BFS layers from fn-id.
+   Returns a vector of vectors: [[fn-id] [parent1 parent2 ...] [gp1 gp2 ...] ...]
+   Each layer contains all fns reachable in exactly N parent-hops, deduped
+   so each fn appears only at its shallowest level. Stops when no new fns
+   are discovered."
+  [fn-id fn-map]
+  (loop [current-level [fn-id]
+         visited #{fn-id}
+         levels []]
+    (if (empty? current-level)
+      levels
+      (let [next-level (->> current-level
+                            (mapcat (fn [fid]
+                                      (when-let [f (get fn-map fid)]
+                                        (:parent-ids f))))
+                            (remove nil?)
+                            (remove visited)
+                            distinct
+                            vec)
+            new-visited (into visited next-level)]
+        (recur next-level new-visited (conj levels current-level))))))
+
+
+(defn- get-inheritance-chain
+  "Flat list of all ancestor fn-ids reachable from fn-id (including fn-id itself).
+   Order is BFS, with each fn appearing exactly once at its shallowest depth.
+   Use get-inheritance-levels when you need the per-level structure."
+  [fn-id fn-map]
+  (vec (mapcat identity (get-inheritance-levels fn-id fn-map))))
+
+
+(defn- get-inheritance-chain*
+  "Memoised variant of `get-inheritance-chain`. Reads from / writes
+   through `:chain-cache` on the lookups map. Mirrors the
+   `executor.compile.lookups/inheritance-chain*` pattern. Falls back
+   to a fresh walk when `:chain-cache` isn't present so tests that
+   hand-build a lookups map outside `build-lookups` still get correct
+   behaviour.
+
+   `build-graph-elements` calls this per ref / per ancestor / per
+   binding-classification — the dominant call sites all share a
+   single lookups map for one layout request, so the cache pays back
+   across the whole pipeline run."
+  [fn-id {:keys [fn-map chain-cache]}]
+  (if chain-cache
+    (or (get @chain-cache fn-id)
+        (let [chain (get-inheritance-chain fn-id fn-map)]
+          (swap! chain-cache assoc fn-id chain)
+          chain))
+    (get-inheritance-chain fn-id fn-map)))
 
 
 (defn- substitution-context-bindings-by-fn
@@ -96,7 +127,7 @@
   [fn-by-id slot-owner-by-id bindings]
   (reduce
     (fn [acc b]
-      (let [pchain (set (chain-of fn-by-id (:fn-id b)))
+      (let [pchain (set (get-inheritance-chain (:fn-id b) fn-by-id))
             owner (get slot-owner-by-id (:slot-id b))]
         (if (or (nil? owner) (contains? pchain owner))
           acc
@@ -173,7 +204,7 @@
   [fn-id
    {:keys [fn-by-id slot-by-id] :as anchor-ctx}
    own-fn-slots binding-extra-by-fn]
-  (let [chain (chain-of fn-by-id fn-id)
+  (let [chain (get-inheritance-chain fn-id fn-by-id)
         seen-slots (volatile! #{})
         rows (volatile! [])
         emit (fn [inherits-from-fid sid]
@@ -369,43 +400,21 @@
      :binding-by-fn-slot binding-by-fn-slot
      :bindings-by-fn bindings-by-fn
      :items-by-binding items-by-binding
-     :slot-owner slot-owner}))
+     :slot-owner slot-owner
+     ;; Per-request inheritance-chain memo. `build-graph-elements`
+     ;; hits get-inheritance-chain dozens of times for the same
+     ;; fn-ids; cache the BFS walk for the lifetime of one layout
+     ;; request via this atom.
+     :chain-cache (atom {})}))
 
 
 ;; =============================================================================
 ;; INHERITANCE & ARG RESOLUTION
+;;
+;; `get-inheritance-levels` + `get-inheritance-chain` live near the top
+;; of the file (above the early bindings-resolution code that needs
+;; them).
 ;; =============================================================================
-
-(defn- get-inheritance-levels
-  "Get inheritance as BFS layers from fn-id.
-   Returns a vector of vectors: [[fn-id] [parent1 parent2 ...] [gp1 gp2 ...] ...]
-   Each layer contains all fns reachable in exactly N parent-hops, deduped
-   so each fn appears only at its shallowest level. Stops when no new fns
-   are discovered."
-  [fn-id fn-map]
-  (loop [current-level [fn-id]
-         visited #{fn-id}
-         levels []]
-    (if (empty? current-level)
-      levels
-      (let [next-level (->> current-level
-                            (mapcat (fn [fid]
-                                      (when-let [f (get fn-map fid)]
-                                        (:parent-ids f))))
-                            (remove nil?)
-                            (remove visited)
-                            distinct
-                            vec)
-            new-visited (into visited next-level)]
-        (recur next-level new-visited (conj levels current-level))))))
-
-
-(defn- get-inheritance-chain
-  "Flat list of all ancestor fn-ids reachable from fn-id (including fn-id itself).
-   Order is BFS, with each fn appearing exactly once at its shallowest depth.
-   Use get-inheritance-levels when you need the per-level structure."
-  [fn-id fn-map]
-  (vec (mapcat identity (get-inheritance-levels fn-id fn-map))))
 
 
 (defn- resolve-arg-name
@@ -749,7 +758,7 @@
   (let [{:keys [fn-map slot-owner]} lookups
         owner (when (:source-id arg) (get slot-owner (:slot-id arg)))]
     (if (and owner (not= owner (:fn-id arg)))
-      (let [ancestor-fns (loop [acc [], cs (rest (chain-of fn-map (:fn-id arg)))]
+      (let [ancestor-fns (loop [acc [], cs (rest (get-inheritance-chain* (:fn-id arg) lookups))]
                            (cond
                              (empty? cs)          acc
                              (= (first cs) owner) (conj acc owner)
@@ -966,8 +975,8 @@
                                 `child-covered-sources-for-fn`."
   [lookups fn-id bindings & {:keys [is-structural displayed-ref-arg-ids expansion-root-chain]
                              :or {is-structural false displayed-ref-arg-ids #{} expansion-root-chain #{}}}]
-  (let [{:keys [fn-map arg-map args-by-fn]} lookups
-        fn-ancestry (set (get-inheritance-chain fn-id fn-map))
+  (let [{:keys [arg-map args-by-fn]} lookups
+        fn-ancestry (set (get-inheritance-chain* fn-id lookups))
         ;; A binding "applies" when its owning fn is in `fn-id`'s
         ;; inheritance closure AND it targets the same slot the arg
         ;; under inspection lives on. With slots as terminal identity
@@ -1021,7 +1030,7 @@
         inherited-ref-args
         (if-not is-structural
           []
-          (let [ancestor-fns (rest (get-inheritance-chain fn-id fn-map))
+          (let [ancestor-fns (rest (get-inheritance-chain* fn-id lookups))
                 seen-terminals (atom own-slot-terminals)]
             (vec
               (keep
@@ -1201,7 +1210,7 @@
    inherited). `expansion-root-chain` slots are excluded — those are
    shared-ancestor slots, rendered at the parent regardless."
   [lookups fn-id & {:keys [expansion-root-chain] :or {expansion-root-chain #{}}}]
-  (let [{:keys [fn-map args-by-fn fn-slots-by-fn]} lookups
+  (let [{:keys [args-by-fn fn-slots-by-fn]} lookups
         fn-args (get args-by-fn fn-id [])
         child-ref-ids (keep :ref-id fn-args)
         expansion-chain-slot-ids (when (seq expansion-root-chain)
@@ -1211,7 +1220,7 @@
                                                 expansion-root-chain)))
         slot-ids-of-fn-closure
         (fn [root-fn-id]
-          (->> (get-inheritance-chain root-fn-id fn-map)
+          (->> (get-inheritance-chain* root-fn-id lookups)
                (mapcat (fn [fid] (map :slot-id (get fn-slots-by-fn fid []))))
                (remove (fn [sid]
                          (and expansion-chain-slot-ids
@@ -1415,7 +1424,7 @@
                                  (some (fn [pid]
                                          (when-let [p (get fn-map pid)]
                                            (when (:name p) (name (:name p)))))
-                                       (rest (get-inheritance-chain fid fn-map))))
+                                       (rest (get-inheritance-chain* fid lookups))))
                                (if top-level? "" "(anonymous)"))))
             visible-levels (take (inc max-visible-ancestors) levels)
             raw-lines (vec
@@ -1764,16 +1773,16 @@
                                               (when-let [b (get bindings (:slot-id arg))]
                                                 (:ref-id b)))
                                             fn-args)))
-                    expansion-chain-fns (set (get-inheritance-chain expansion-root fn-map))]
+                    expansion-chain-fns (set (get-inheritance-chain* expansion-root lookups))]
                 (set (mapcat (fn [ref-fn-id]
-                               (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
+                               (let [ref-chain (get-inheritance-chain* ref-fn-id lookups)]
                                  (mapcat (fn [rfn-id]
                                            (when-not (contains? expansion-chain-fns rfn-id)
                                              (map :slot-id (get fn-slots-by-fn rfn-id []))))
                                          ref-chain)))
                              ref-fn-ids))))
             exp-root-chain (when expansion-root
-                             (set (get-inheritance-chain expansion-root fn-map)))
+                             (set (get-inheritance-chain* expansion-root lookups)))
             all-args (collect-fn-args lookups display-fn-id bindings
                                       :is-structural (some? expansion-root)
                                       :displayed-ref-arg-ids (or displayed-ref-arg-ids #{})
@@ -1885,7 +1894,7 @@
           fn-id->ancestor-ref-fn-id
           (into {}
                 (mapcat (fn [ref-arg]
-                          (let [chain (get-inheritance-chain (:ref-id ref-arg) fn-map)]
+                          (let [chain (get-inheritance-chain* (:ref-id ref-arg) lookups)]
                             (map (fn [fid] [fid (:ref-id ref-arg)]) chain))))
                 ancestor-refs)
 
@@ -1896,9 +1905,9 @@
                                        ((:slot-owner lookups)))]
                 (or (when slot-owner
                       (some fn-id->ancestor-ref-fn-id
-                            (get-inheritance-chain slot-owner fn-map)))
+                            (get-inheritance-chain* slot-owner lookups)))
                     (some fn-id->ancestor-ref-fn-id
-                          (get-inheritance-chain (:fn-id a) fn-map))))))
+                          (get-inheritance-chain* (:fn-id a) lookups))))))
 
           classified
           (reduce

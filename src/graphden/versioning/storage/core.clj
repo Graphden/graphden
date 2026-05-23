@@ -212,6 +212,28 @@
         (res/resolve-all-entities base-storage entity-name branch-id where))))
 
 
+  (query-entities
+    [this entity-name where opts]
+    (cond
+      (or (nil? opts) (empty? opts))
+      (sp/query-entities this entity-name where)
+
+      (res/versioned-entity? entity-name)
+      ;; Versioned reads run a deduplicate-by-id resolver that
+      ;; collapses N version rows into ≤ N base rows. Applying
+      ;; ORDER BY / LIMIT at the SQL layer would happen BEFORE that
+      ;; dedup and silently return the wrong page. Refuse rather
+      ;; than mislead — callers that need pagination over a
+      ;; versioned table should fetch + page in memory.
+      (throw (ex-info (str "query-entities :opts not supported on versioned entity "
+                           entity-name " — pagination must run after version resolution")
+                      {:type :storage-error/unsupported-opts
+                       :entity-name entity-name :opts opts}))
+
+      :else
+      (sp/query-entities base-storage entity-name where opts)))
+
+
   sp/StorageBatchCRUD
 
   (create-entities

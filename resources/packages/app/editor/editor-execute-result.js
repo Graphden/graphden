@@ -111,6 +111,18 @@ function renderResultBody(result, opts) {
 }
 
 
+// Inline busy indicator used by the execute orchestrator and the
+// history panel — shown in `resultHostEl` / `historyHostEl` while a
+// fetch is in flight. Distinct visually from `execute-pending-pane`
+// below, which is the post-submit polling state for an :id-bound run.
+function renderSubmitSpinner(text) {
+  const spin = document.createElement('div');
+  spin.className = 'execute-submit-spinner';
+  spin.textContent = text;
+  return spin;
+}
+
+
 function renderPendingPane(execId) {
   const pane = document.createElement('div');
   pane.className = 'execute-pending-pane';

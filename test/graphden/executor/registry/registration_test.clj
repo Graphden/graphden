@@ -263,6 +263,10 @@
                       [_ entity-name where]
                       (sp/query-entities storage entity-name where))
 
+                    (query-entities
+                      [_ entity-name where opts]
+                      (sp/query-entities storage entity-name where opts))
+
 
                     sp/StorageBatchCRUD
 

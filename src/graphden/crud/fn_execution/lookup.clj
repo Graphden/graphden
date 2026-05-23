@@ -15,18 +15,22 @@
   "Find the current `:fn-version-id` for logical `fn-id` on the active
    branch. Latest version by `:created-at`. Returns nil when the fn
    has no version row (shouldn't happen for any loaded fn — every
-   create goes through the versioned-storage decorator)."
+   create goes through the versioned-storage decorator).
+
+   Pushes ORDER BY created-at DESC LIMIT 1 into the storage query
+   (:fn-version is not a versioned entity, so VersionedStorage
+   forwards opts straight through). Avoids pulling and sorting all
+   versions in memory."
   [ctx fn-id]
   (let [storage (request/require-storage ctx)
         branch-id (when (vs/versioned-storage? storage)
                     (vs/current-branch-id storage))
         query (cond-> {:fn-id fn-id}
                 branch-id (assoc :branch-id branch-id))
-        versions (sp/query-entities storage :fn-version query)]
-    (->> versions
-         (sort-by :created-at)
-         last
-         :id)))
+        versions (sp/query-entities storage :fn-version query
+                                    {:order-by [[:created-at :desc]]
+                                     :limit 1})]
+    (:id (first versions))))
 
 
 (defn query-fn-by-name
@@ -57,15 +61,37 @@
     :else nil))
 
 
+(defn resolve-fn
+  "Like `resolve-fn-id` but returns the full :fn row in a single
+   storage round-trip. Use this when the caller needs both `:id` AND
+   `:name` (or other columns) — saves the extra `read-entity` you'd
+   otherwise chain after `resolve-fn-id`. Returns nil if neither
+   identifier resolves."
+  [storage parsed]
+  (cond
+    (:fn-id parsed)   (sp/read-entity storage :fn (:fn-id parsed))
+    (:fn-name parsed) (query-fn-by-name storage (:fn-name parsed))
+    :else nil))
+
+
 (defn- inheritance-chain
-  "Transitive parents of `fn-id`, including `fn-id` itself. BFS order."
+  "Transitive parents of `fn-id`, including `fn-id` itself. BFS order.
+
+   Batched per-level — one `query-entities :fn {:id frontier}` round-
+   trip per inheritance depth instead of one `read-entity` per
+   ancestor. The chain is unbounded by graph constraints but in
+   practice ≤ 5–10 deep, so we go batch wide rather than recurse."
   [storage fn-id]
-  (loop [acc [fn-id] queue [fn-id]]
-    (if-let [fid (first queue)]
-      (let [fn-row (sp/read-entity storage :fn fid)
-            pids (remove (set acc) (or (:parent-ids fn-row) []))]
-        (recur (into acc pids) (into (rest queue) pids)))
-      acc)))
+  (loop [acc [fn-id] frontier #{fn-id}]
+    (if (empty? frontier)
+      acc
+      (let [rows (sp/query-entities storage :fn {:id (vec frontier)})
+            visited (set acc)
+            next-frontier (->> rows
+                               (mapcat :parent-ids)
+                               (remove visited)
+                               set)]
+        (recur (into acc next-frontier) next-frontier)))))
 
 
 (defn- free-args-via

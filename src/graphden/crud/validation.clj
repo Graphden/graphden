@@ -154,28 +154,37 @@
   "Walk the PARENT chain of `fn-id` (skipping fn-id's own bindings)
    and return true iff any ancestor's binding on `slot-id` has
    `(flag-key ancestor-binding) = true`. Used to gate `:terminal`
-   and `:list-closed` enforcement."
+   and `:list-closed` enforcement.
+
+   BFS by frontier level: two batched storage queries per level
+   (`:fn {:id frontier}` for the next layer's parent-ids; `:binding
+   {:fn-id frontier :slot-id slot-id}` for any flagged ancestor on
+   the way up). Avoids the O(depth) read-entity + per-ancestor
+   binding-query N+1 — same shape as the inheritance-chain batcher
+   in `crud.fn-execution.lookup`."
   [storage fn-id slot-id flag-key]
-  (let [fn-row (when fn-id (sp/read-entity storage :fn fn-id))]
-    (loop [queue (filterv some? (or (:parent-ids fn-row) []))
+  (let [seed (when fn-id (sp/read-entity storage :fn fn-id))]
+    (loop [frontier (->> (:parent-ids seed)
+                         (remove nil?)
+                         distinct
+                         vec)
            seen #{}]
-      (cond
-        (empty? queue) false
-        (seen (peek queue)) (recur (pop queue) seen)
-        :else
-        (let [fid (peek queue)
-              rest-queue (pop queue)
-              parent-fn (sp/read-entity storage :fn fid)
-              ;; query for the ONE binding on (parent-fn, slot)
-              own-bindings (sp/query-entities storage :binding
-                                              {:fn-id fid :slot-id slot-id})
-              flagged? (some #(true? (get % flag-key)) own-bindings)]
+      (if (empty? frontier)
+        false
+        (let [bindings (sp/query-entities storage :binding
+                                          {:fn-id frontier :slot-id slot-id})
+              flagged? (some #(true? (get % flag-key)) bindings)]
           (if flagged?
             true
-            (recur (into rest-queue
-                         (filterv (complement seen)
-                                  (or (:parent-ids parent-fn) [])))
-                   (conj seen fid))))))))
+            (let [fn-rows (sp/query-entities storage :fn {:id frontier})
+                  seen' (into seen frontier)
+                  next-frontier (->> fn-rows
+                                     (mapcat :parent-ids)
+                                     (remove nil?)
+                                     (remove seen')
+                                     distinct
+                                     vec)]
+              (recur next-frontier seen'))))))))
 
 
 (defn terminal-rej

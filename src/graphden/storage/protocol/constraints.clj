@@ -69,19 +69,23 @@
 ;; === Shared constraint validation functions ===
 
 (defn validate-no-dependency-cycle-impl
-  "Shared implementation of no-dependency-cycle validation.
+  "Shared implementation of no-dependency-cycle validation —
+   PER-BINDING write-time check.
 
-   Self-reference (`owner = ref`) IS allowed by design — the docs
-   (`CONSTRAINTS.md § Self-reference`, CLAUDE.md constraint list)
-   explicitly carve it out so recursion stays expressible. The
-   executor's `*max-depth*` / `*max-graph-iterations*` bound the
-   recursion at runtime; the storage protocol doesn't second-guess
-   it. Without this, you couldn't write a recursive fn-def at all.
+   Self-reference (`owner == ref`) passes this check by the
+   `(not= owner-fn-id ref-fn-id)` guard. Originally carved out to
+   keep recursion expressible at the storage layer; in practice
+   the higher-level `executor.composition.deps/topological-sort`
+   runs at sync time across the whole fn-def set and rejects bare
+   self-refs anyway (no valid compile order exists for a self-
+   referential closure). Graph-level recursion is therefore
+   structurally impossible today — see `docs/ARCHITECTURE.md § Part
+   3 — Recursion and Cycles` for the empirical demonstration and
+   the planned `:fix`-based path forward.
 
-   Cycles longer than 1 (`A → B → A`) are still rejected — those
-   would be infinite-recursion-with-no-base-case at the storage
-   level since two distinct fn-rows pointing at each other have no
-   case-analysis primitive to terminate.
+   Cycles longer than 1 (`A → B → A`) are rejected here directly;
+   the chain walk follows `ref-fn-id` + `parent-fn-ids` +
+   `type-override-fn-id` + `binding-list-item.ref-fn-id` edges.
 
    Arguments:
    - collect-dependency-chain-fn: function (fn [helpers fn-id] -> #{dep-fn-ids})

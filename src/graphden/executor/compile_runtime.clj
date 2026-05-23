@@ -304,6 +304,57 @@
 
 
 ;; =============================================================================
+;; Cancellation
+;; =============================================================================
+
+(def ^:dynamic *cancel-check*
+  "Hook called at each caller→callee transition inside `execute`.
+   Bound by `crud.fn-execution/run-future` to a closure that reads
+   the per-execution cancel-flag atom; `nil` (default) means no
+   cancellation context — every call is a no-op.
+
+   Best-effort: blocking JDBC / IO inside a base-fn impl won't react
+   to an interrupt without explicit `Statement.cancel()` / equivalent;
+   the throw fires at the next executor invocation boundary."
+  nil)
+
+
+(defn check-cancel!
+  "Public helper for impls that want to participate in cooperative
+   cancellation between long internal loops. Currently nothing in
+   stdlib calls this — wired only by `execute` itself."
+  []
+  (when *cancel-check* (*cancel-check*)))
+
+
+;; =============================================================================
+;; Runtime effect tracing
+;; =============================================================================
+
+(def ^:dynamic *effect-trace*
+  "Atom holding a set of observed effect-category keywords (e.g.
+   `#{:env :io}`), bound by the fn-execution future wrapper. `nil` (the
+   default) means no tracing context — `record-effect!` is a no-op.
+
+   Effectful base-fn impls call `(record-effect! :env)` etc. to declare
+   the side effect they're about to perform. Comparison against the
+   row's `:declared-effects` after run lets the editor surface drift
+   between the static effect-type declaration and what the impl
+   actually did."
+  nil)
+
+
+(defn record-effect!
+  "Record that the calling impl is about to perform an effect of
+   `category` (one of :env, :db, :io, :network, :time, :random — same
+   vocabulary as rich-type-of `:effects`). No-op outside an execution
+   trace context."
+  [category]
+  (when *effect-trace*
+    (swap! *effect-trace* conj category)))
+
+
+;; =============================================================================
 ;; Execute
 ;; =============================================================================
 
@@ -315,8 +366,15 @@
    `rt/hof-callable`) rather than a UUID and hand it back in through
    this same entry point. For single-entry args the value is unwrapped
    from the map; for empty or multi-entry args the whole map is passed
-   through."
+   through.
+
+   Cancellation: when `*cancel-check*` is bound (by the fn-execution
+   harness), it's called at the top of each invocation — if the
+   per-execution flag flipped, an `InterruptedException` propagates
+   up through the call stack and is caught by the fn-execution
+   reaper which writes `:status :cancelled`."
   [ctx fn-id named-args]
+  (check-cancel!)
   (if (fn? fn-id)
     (let [args (or named-args {})]
       (if (= 1 (count args))

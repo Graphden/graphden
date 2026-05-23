@@ -237,6 +237,40 @@
    :parent :post-route
    :args {:path "/value-form" :handler :value-form-handler}}
 
+  ;; --- /api/execute — submit, poll, cancel fn runs ---
+
+  {:name :api-execute
+   :description "POST /api/execute — submit a fn-graph run. Body `{fn-id|fn-name, args, timeout-ms?, persist??}`. Returns inline `{status: succeeded, result}` for fast pure fns or `{status: pending, execution-id}` when timeout fires / effects ≠ #{} / persist? true. Auth-required."
+   :parent :post
+   :args {:path "/execute" :handler :execute-handler}}
+
+  {:name :api-execution-by-id
+   :description "GET /api/execute/:id — read a persisted execution row (status, result/error, declared-effects, started/finished-at, nested args). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/execute/:id" :handler :get-execution-handler}}
+
+  {:name :api-execution-cancel
+   :description "POST /api/execute/:id/cancel — soft-cancel an in-flight execution. Sets the row's :cancel-requested? flag + future-cancel. Best-effort (blocking IO won't respect interrupt without explicit Statement.cancel())."
+   :parent :post
+   :args {:path "/execute/:id/cancel" :handler :cancel-execution-handler}}
+
+  {:name :api-executions-list
+   :description "GET /api/executions?fn-id=X — list last 20 executions for one fn (across all of its versions). Each row summarises status / timestamps / declared-effects; nested args are NOT included (call GET /api/execute/:id to expand a row). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/executions" :handler :list-executions-handler}}
+
+  ;; --- /api/services/reconcile — Phase 1 hot-reload trigger ---
+
+  {:name :api-services-reconcile
+   :description "POST /api/services/reconcile — trigger the service reconciler. Reads enabled :service rows, starts missing + stops removed. Admin calls this after CREATE/UPDATE/DELETE on a :service row so the in-process state catches up without a pod restart. Phase 1 only — periodic poll arrives with Phase 3 (multi-pod). Auth-required."
+   :parent :post
+   :args {:path "/services/reconcile" :handler :reconcile-services-handler}}
+
+  {:name :api-services-list
+   :description "GET /api/services — list every :service row joined with its in-process running state (started-at, attempts, give-up marker) and the legacy fallback if active. Editor reads this to drive the sidebar 'Only services' filter, the row-actions 'Make service' popover, and the per-fn status badge. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/services" :handler :list-services-handler}}
+
   ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
   {:name :api-routes
@@ -250,4 +284,10 @@
                   :graph-routes
                   :api-value-kinds
                   :api-value-form
+                  :api-execute
+                  :api-execution-by-id
+                  :api-execution-cancel
+                  :api-executions-list
+                  :api-services-reconcile
+                  :api-services-list
                   :auth-check]}}]}

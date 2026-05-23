@@ -8,6 +8,7 @@
    `{:impl … :return-type-rule …}`."
   (:require
     [cheshire.core :as json]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.types.core :as types])
   (:import
@@ -38,6 +39,7 @@
 ;; === System Information ===
 
 (defbase jvm-version []
+  (cr/record-effect! :io)
   (let [runtime-bean (ManagementFactory/getRuntimeMXBean)]
     {:name (System/getProperty "java.vm.name")
      :version (System/getProperty "java.version")
@@ -45,6 +47,7 @@
 
 
 (defbase heap-memory []
+  (cr/record-effect! :io)
   (let [runtime (Runtime/getRuntime)
         heap (MemoryMXBean/.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))]
     {:heap-used (MemoryUsage/.getUsed heap)
@@ -68,10 +71,12 @@
 
 
 (defbase current-time-ms []
+  (cr/record-effect! :time)
   (System/currentTimeMillis))
 
 
 (defbase env-fn [name]
+  (cr/record-effect! :env)
   (System/getenv name))
 
 
@@ -95,6 +100,7 @@
    (fn-def) pairs this with :if + :throw to surface a clear error when
    the path is missing."
   [path]
+  (cr/record-effect! :io)
   (when-let [r (clojure.java.io/resource path)]
     (clojure.core/slurp r)))
 
@@ -107,8 +113,19 @@
   (func arg))
 
 
+(defbase call-noargs-fn
+  "Invoke a 0-arg callable. `:func`'s structural type `[:fn {} a]`
+   makes the binding-site hof-wrap; the wrap produces a variadic-
+   ignore callable closing over the outer free-args. Companion to
+   `:call` for fire-and-forget triggers (cron, signal handlers,
+   scheduled cleanup)."
+  [func]
+  (func))
+
+
 (defbase slurp-fn [input]
   (when (instance? java.io.InputStream input)
+    (cr/record-effect! :io)
     (clojure.core/slurp input)))
 
 
@@ -155,5 +172,6 @@
    :read-resource-or-nil read-resource-or-nil
    :invoke {:impl invoke-fn :return-type-rule invoke-return-rule}
    :call invoke-fn
+   :call-noargs call-noargs-fn
    :slurp slurp-fn
    :sha256-hex sha256-hex-fn})

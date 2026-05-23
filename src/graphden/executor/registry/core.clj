@@ -176,7 +176,11 @@
    shape.
 
    `:effects` is recorded straight from the fn-def as a set of keyword
-   tags (`:db` / `:env` / `:io` / `:network` / `:time` / `:random`).
+   tags (`:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
+   `:process`). `:process` is the service-eligibility marker —
+   declares 'spawns supervised background work'; required by
+   `crud.entities/validate-create` when admins make a fn into a
+   `:service`.
    The legacy generic `:effectful? true` boolean / `:effect` tag have
    been retired — every base-fn that produces side effects names a
    specific category. `:description` is propagated so the editor's

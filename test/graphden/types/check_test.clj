@@ -1092,32 +1092,52 @@
       (is (contains? args :b) ":b (unbound by every parent) stays free"))))
 
 
-(deftest ref-on-fn-slot-is-a-hof-boundary
-  ;; `:hb-parent` exposes a :fn-typed slot (:func) and a plain one
-  ;; (:coll); `:hb-ref` is a fn with a free arg :r-free.
+(deftest hof-slot-ref-free-args-split-call-site-vs-captured
+  ;; Closure-capture (docs/CLOSURE_CAPTURE.md commits 2–4):
+  ;; - call-site args of an HOF slot (declared in the slot's structural
+  ;;   `[:fn {ARGS} _]` shape) are supplied per-invocation by the
+  ;;   parent's impl and DO NOT lift.
+  ;; - everything else in the wrapped ref's free args is CAPTURED and
+  ;;   DOES lift onto the outer fn-def's surface.
+  ;; - bare `:fn` primitive has no structural shape → call-site is
+  ;;   empty → every free arg is captured.
   (registry/record-rich-types-raw!
-    :hb-parent {:return :any :args {:func :fn :coll :any}})
+    :hb-parent-bare {:return :any :args {:func :fn :coll :any}})
   (registry/record-rich-types-raw!
-    :hb-ref {:return :bool :args {:r-free :int}})
-  (testing "a ref bound to a :fn slot does NOT leak its free args"
-    ;; The executor's hof-wrap consumes a HOF callable's leftover free
-    ;; args per call, so they must not widen the calling fn-def's own
-    ;; free-arg surface — mirrors `compile.renames/deep-free-ext-names`,
-    ;; which stops at `:is-fn` refs.
-    (check/check-fn-def! {:name :hb-on-fn-slot
-                          :parent :hb-parent
-                          :args {:func :hb-ref}})
-    (let [args (:args (registry/rich-type-of :hb-on-fn-slot))]
-      (is (not (contains? args :r-free))
-          ":hb-ref's free arg is consumed by hof-wrap, not lifted")
+    :hb-parent-struct {:return :any
+                       :args {:func [:fn {:item :int} :bool] :coll :any}})
+  (registry/record-rich-types-raw!
+    :hb-ref-cap-only {:return :bool :args {:r-free :int}})
+  (registry/record-rich-types-raw!
+    :hb-ref-with-callsite {:return :bool
+                           :args {:item :int :r-free :int}})
+
+  (testing "bare :fn slot — ref's free args are ALL captured and lift"
+    (check/check-fn-def! {:name :hb-on-bare-fn-slot
+                          :parent :hb-parent-bare
+                          :args {:func :hb-ref-cap-only}})
+    (let [args (:args (registry/rich-type-of :hb-on-bare-fn-slot))]
+      (is (contains? args :r-free)
+          "bare :fn has empty structural shape → all ref args captured")
       (is (contains? args :coll) "the unbound non-fn slot stays free")))
-  (testing "a ref bound to a NON-fn slot DOES lift its free args (contrast)"
+
+  (testing "structural [:fn {ARGS} _] slot — call-site args do NOT lift"
+    (check/check-fn-def! {:name :hb-on-struct-fn-slot
+                          :parent :hb-parent-struct
+                          :args {:func :hb-ref-with-callsite}})
+    (let [args (:args (registry/rich-type-of :hb-on-struct-fn-slot))]
+      (is (not (contains? args :item))
+          ":item is in slot's call-site shape → consumed by hof-wrap")
+      (is (contains? args :r-free)
+          ":r-free is NOT in slot's call-site shape → captured, lifts")))
+
+  (testing "ref bound to a NON-fn slot lifts all its free args (contrast)"
     (check/check-fn-def! {:name :hb-on-coll-slot
-                          :parent :hb-parent
-                          :args {:coll :hb-ref}})
+                          :parent :hb-parent-bare
+                          :args {:coll :hb-ref-cap-only}})
     (let [args (:args (registry/rich-type-of :hb-on-coll-slot))]
       (is (contains? args :r-free)
-          "a non-HOF ref propagates its free args up to the caller"))))
+          "non-HOF slot — closure-capture doesn't apply, all args lift"))))
 
 
 (deftest get-real-path-rejects-missing-record-field-typo

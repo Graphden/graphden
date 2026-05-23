@@ -12,10 +12,18 @@ async function initGraph() {
   // Load entities + the rich-type registry in parallel. Types feed
   // the in-place edit popovers' "Expected: <type>" hints, so they
   // need to be ready before the user opens any editor.
+  //
+  // /api/services is loaded eagerly too — auth-required, so anonymous
+  // visitors see no service badges (loadServicesEager swallows the
+  // 401 silently). Cheap (<30B per row) and primed before the first
+  // overlay render so the badge has data on first paint.
   const [entResp, typeResp, vkResp] = await Promise.all([
     fetch('/api/graph/entities'),
     fetch('/api/types').catch(() => null),
-    fetch('/api/value-kinds').catch(() => null)
+    fetch('/api/value-kinds').catch(() => null),
+    (typeof loadServicesEager === 'function')
+      ? loadServicesEager().catch(() => null)
+      : null,
   ]);
   graphData = await entResp.json();
   lookups = buildLookups(graphData);

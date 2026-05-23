@@ -36,8 +36,18 @@
  {:context #ig/ref :exec/context
   :_fn-entities #ig/ref :exec/fn-entities}
 
- :http/server
+ ;; Phase 1 service registry: reads :service rows on startup, starts
+ ;; enabled ones. Falls back to packages' :startup-fn when no rows
+ ;; exist (preserves the old single-web-server behaviour for fresh
+ ;; deploys). See system/core.clj for the full lifecycle.
+ :exec/service-reconciler
  {:context #ig/ref :exec/context
   :packages #ig/ref :app/packages
-  :port #long #or [#env PORT "8080"]
-  :_compiled-registry #ig/ref :exec/compiled-registry}}
+  :_compiled-registry #ig/ref :exec/compiled-registry}
+
+ ;; Hourly sweep of :fn-execution rows past per-status TTL.
+ ;; period-ms overridable via env (e.g. 600000 for 10-min sweeps in
+ ;; staging). Independent of HTTP — runs even when nobody hits /api.
+ :exec/cleanup-scheduler
+ {:context #ig/ref :exec/context
+  :period-ms #long #or [#env CLEANUP_PERIOD_MS "3600000"]}}

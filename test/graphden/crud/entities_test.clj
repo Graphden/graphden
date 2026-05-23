@@ -56,6 +56,19 @@
                                                 :position "3"}))))))
 
 
+(deftest parse-service-from-form-test
+  (testing ":fn-id coerced; :enabled? strict true/false; :restart-policy keywordised"
+    (let [f (random-uuid)]
+      (is (= {:fn-id f :enabled? true :restart-policy :always}
+             (entities/parse-service-from-form {:fn-id (str f)
+                                                :enabled? "true"
+                                                :restart-policy "always"})))
+      (is (= {:enabled? false} (entities/parse-service-from-form {:enabled? "false"})))
+      (is (= {:restart-policy :on-failure}
+             (entities/parse-service-from-form {:restart-policy "on-failure"})))
+      (is (= {} (entities/parse-service-from-form {}))))))
+
+
 (deftest parse-binding-from-form-test
   (testing "value JSON-decoded (empty → nil), boolean flags strict, override-kind keywordised"
     (let [f (random-uuid) s (random-uuid)]

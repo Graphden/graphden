@@ -4,6 +4,7 @@
    Thin wrappers around http-kit. Request adaptation, header merging,
    and auth are composed from fn-defs elsewhere."
   (:require
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [org.httpkit.server :as http-kit]))
 
@@ -31,6 +32,11 @@
 
 (defbase http-server
   [handler port]
+  (cr/record-effect! :network)
+  ;; :process — http-kit spawns a listener thread that lives past
+  ;; this call. The returned stopper kills it; service registry's
+  ;; validate-create requires :process for service-eligibility.
+  (cr/record-effect! :process)
   (http-kit/run-server
     (fn [req] (stringify-response-headers (handler req)))
     {:port port}))
@@ -38,6 +44,7 @@
 
 (defbase http-stop
   [server]
+  (cr/record-effect! :network)
   (when server (server) nil))
 
 

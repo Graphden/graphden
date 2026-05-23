@@ -1,6 +1,7 @@
 // Editor Effect Explainer — click-driven popover that explains what a
-// tracked side-effect (db / env / io / network / time / random) means
-// in plain English. Triggered by tapping an effect-chip on a fn-card.
+// tracked side-effect (db / env / io / network / time / random /
+// process) means in plain English. Triggered by tapping an
+// effect-chip on a fn-card.
 //
 // Formerly editor-type-explainer.js: the type-chip explainer flow
 // moved into editor-overlay-type-expand.js's inline expansion panel,
@@ -106,6 +107,7 @@ const EFFECT_DESCRIPTIONS = {
   network: 'Makes outbound HTTP / network calls.',
   time:    'Uses wall-clock time — call returns a different value over time.',
   random:  'Generates random or otherwise non-deterministic values.',
+  process: 'Spawns supervised background work (thread / loop / listener) that lives past the call and needs explicit stopping. Required for a fn to become a :service.',
 };
 
 function showEffectExplainer({ effect, anchorEl }) {

@@ -1,0 +1,137 @@
+{:namespace "app.execution"
+ :description "Fn-execution endpoints: POST /api/execute (submit a run), GET /api/execute/:id (poll status), POST /api/execute/:id/cancel (soft cancel). The parse/validate/apply stages delegate to graphden.crud.fn-execution; the apply stage submits the user's fn-graph to a future and either returns the inline result (when it finishes within `:timeout-ms`) or persists a :fn-execution row + returns `{:status :pending :execution-id}` for the client to poll."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; Output shapes
+  ;; ---------------------------------------------------------------------
+
+  {:name :_execute-parsed-shape
+   :description "Output of `:_execute-parsed` — the request body normalised to `{:fn-id :fn-name :args :timeout-ms :persist?}`."
+   :type {:fn-id      :uuid
+          :fn-name    :text
+          :args       :jsonb
+          :timeout-ms :int
+          :persist?   :bool}}
+
+  {:name :_execute-rejection-shape
+   :description "Output of `:_execute-validation` — `{:ok false :error :error-data}` rejection or nil."
+   :type {:ok :bool :error :text :error-data :jsonb}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Base-fns — stage shims
+  ;; ---------------------------------------------------------------------
+
+  {:name :_execute-parsed
+   :description "Stage 1 — JSON body → `{:fn-id :fn-name :args :timeout-ms :persist?}`. No DB."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :_execute-parsed-shape}
+
+  {:name :_execute-validation
+   :description "Stage 2 — fn-id/name resolves, args within size cap, timeout in [1, 60000], every arg name is a real free-arg. Returns `{:ok false :error}` rejection, or nil when well-formed."
+   :args {:parsed {:type :_execute-parsed-shape}}
+   :return-type :_execute-rejection-shape
+   :effects #{:db}}
+
+  {:name :_execute-apply
+   :description "Stage 3 — submit future, deref with timeout. Returns inline `{:status :succeeded :result …}` for fast pure fns, or `{:status :pending :execution-id}` when timeout/effects/persist? forced async."
+   :args {:parsed {:type :_execute-parsed-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_execute-rejected?
+   :description "True when `:_execute-validation` produced a rejection."
+   :args {:validation {:type [:union :_execute-rejection-shape :null]}}
+   :return-type :bool}
+
+  ;; ---------------------------------------------------------------------
+  ;; Composed: parse → (if rejected then rejection else apply)
+  ;; ---------------------------------------------------------------------
+
+  {:name :execute
+   :description "POST /api/execute pipeline. Parse → validate → on success apply."
+   :parent :if
+   :args {:test :_execute-rejected?
+          :then :_execute-validation
+          :else :_execute-apply
+          :validation :_execute-validation
+          :parsed :_execute-parsed}}
+
+  {:name :execute-handler
+   :description "Ring handler for POST /api/execute — wraps `:execute` in a JSON 200 response."
+   :parent :json-handler
+   :args {:data :execute}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/execute/:id — read a persisted row
+  ;; ---------------------------------------------------------------------
+
+  {:name :_get-execution
+   :description "Lookup an execution row by :id from the request's path-params. Returns the row + nested args, or `{:ok false :error}` when not found."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :get-execution-handler
+   :description "Ring handler for GET /api/execute/:id."
+   :parent :json-handler
+   :args {:data :_get-execution}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/execute/:id/cancel — soft cancel an in-flight execution
+  ;; ---------------------------------------------------------------------
+
+  {:name :_cancel-execution
+   :description "Set `:cancel-requested?` on the row + `future-cancel` if the in-process registry still has its handle. Best-effort — JDBC/blocking-IO inside a base-fn won't react to interrupt without explicit support."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :cancel-execution-handler
+   :description "Ring handler for POST /api/execute/:id/cancel."
+   :parent :json-handler
+   :args {:data :_cancel-execution}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/executions?fn-id=X — list recent runs for one fn
+  ;; ---------------------------------------------------------------------
+
+  {:name :_list-executions-by-fn
+   :description "Pull the `?fn-id=X` query param and return the last 20 :fn-execution rows for that logical fn (across all of its versions), ordered by started-at desc. Used by the editor's history panel."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :list-executions-handler
+   :description "Ring handler for GET /api/executions."
+   :parent :json-handler
+   :args {:data :_list-executions-by-fn}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/services/reconcile — Phase 1 hot-reload trigger
+  ;; ---------------------------------------------------------------------
+
+  {:name :_reconcile-services
+   :description "Read enabled :service rows, diff against the in-process running atom, start missing + stop removed. Returns `{:ok true :reconcile {:started [ids] :stopped [ids]}}`. Admin calls this after creating/modifying :service rows so the change takes effect without a pod restart."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db :io}}
+
+  {:name :reconcile-services-handler
+   :description "Ring handler for POST /api/services/reconcile."
+   :parent :json-handler
+   :args {:data :_reconcile-services}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/services — list service rows + in-process running state
+  ;; ---------------------------------------------------------------------
+
+  {:name :_list-services
+   :description "Read every :service row from storage + join with the in-process running atom (start time, attempts, give-up marker). Used by the editor's sidebar 'Only services' filter, the row-actions 'Make service' popover, and the per-fn service badge."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :list-services-handler
+   :description "Ring handler for GET /api/services."
+   :parent :json-handler
+   :args {:data :_list-services}}]}

@@ -84,6 +84,7 @@
   --effect-chip-time: #facc15;
   --effect-chip-misc: #ccc;
   --effect-chip-random: #f0abfc;
+  --effect-chip-process: #94a3b8;
 }
 body.theme-dark {
   --bg: #1a1a1a;
@@ -213,9 +214,21 @@ body.sidebar-collapsed .sidebar-expand-floating {
 }
 #sidebar-resizer:hover { background: var(--overlay-hover); }
 
-/* Search bar */
+/* Search bar — input + clear on row 1, "Only services" toggle wraps
+ * to row 2 below. Wrap-flex avoids competing with the input for
+ * horizontal real estate on narrow sidebars. */
 #search-bar { display: flex; padding: 6px 8px;
-  border-bottom: 1px solid var(--light-border); gap: 4px; }
+  border-bottom: 1px solid var(--light-border); gap: 4px;
+  flex-wrap: wrap; }
+.filter-toggle-label {
+  flex: 1 1 100%;
+  display: flex; align-items: center;
+  font-size: 11px; color: var(--muted-fg);
+  padding: 2px 0;
+  cursor: pointer;
+}
+.filter-toggle-label input { margin-right: 4px; }
+.filter-toggle-label:hover { color: var(--fg); }
 #search-input {
   flex: 1; min-width: 0; padding: 4px 8px;
   border: 1px solid var(--input-border); border-radius: 3px;
@@ -567,6 +580,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .effects-chip-network { background: var(--effect-chip-network); }  /* HTTP socket */
 .effects-chip-time    { background: var(--effect-chip-time); }     /* wall-clock */
 .effects-chip-random  { background: var(--effect-chip-random); }   /* non-determinism */
+.effects-chip-process { background: var(--effect-chip-process); }  /* spawns supervised background work */
 
 /* Drift = computed effect that the author DIDN'T declare in
    `:expects-effects`. Ring it red so it stands out without changing
@@ -2620,4 +2634,505 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   :root {
     --sidebar-width: min(280px, 80vw);
   }
+}
+
+
+/* =========================================================================
+ * EXECUTE POPOVER — anchored to the ▶ button on a fn-card root row. Hosts
+ * the type-aware free-arg form (via /api/value-form) + effect-warning chips
+ * + Run/Cancel buttons + result pane. Singleton, dismissed on outside-click
+ * or Esc. See editor-execute.js.
+ * ========================================================================= */
+.execute-popover {
+  position: fixed; z-index: 10002;
+  display: none;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px;
+  min-width: 360px; max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  font-family: inherit; font-size: 12px; line-height: 1.4;
+}
+.execute-popover.visible { display: block; }
+
+.execute-popover-header {
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--light-border);
+  margin-bottom: 8px; padding-bottom: 4px;
+}
+.execute-popover-title {
+  font-weight: 600; font-size: 13px;
+  color: var(--accent);
+}
+/* History toggle in the header — sits between title and ×.
+ * Plain text-link styling so it doesn't compete with title weight. */
+.execute-history-toggle {
+  font-family: inherit; font-size: 11px;
+  background: transparent; border: 0;
+  color: var(--accent);
+  padding: 2px 6px; margin-right: auto; margin-left: 8px;
+  cursor: pointer; border-radius: 3px;
+}
+.execute-history-toggle:hover { background: var(--hover-bg); }
+.execute-history-toggle[aria-expanded="true"] {
+  background: var(--card-row-highlight);
+  font-weight: 600;
+}
+
+.execute-popover-close {
+  width: 22px; height: 22px; padding: 0;
+  background: transparent; color: var(--card-fg);
+  border: 0; border-radius: 3px;
+  font-size: 20px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0.65;
+}
+.execute-popover-close:hover {
+  opacity: 1; background: var(--overlay-pressed);
+}
+
+/* Effect-warning banner — only rendered when the fn declares effects.
+ * Reuses --error-fg as the warning color (red); a dedicated warning-
+ * fg token doesn't exist yet in the editor theme, and red on the
+ * "side effects" label is the right severity signal anyway. */
+.execute-effects-warning {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: var(--card-row-highlight);
+  border-left: 2px solid var(--error-fg);
+  border-radius: 2px;
+  font-size: 11px;
+}
+.execute-effects-warning-label {
+  font-weight: 600;
+  color: var(--error-fg);
+  margin-right: 2px;
+}
+
+/* Runtime-effects strip — shown below the result pane when the
+ * fn-execution row carries an observed `:runtime-effects` set.
+ * Subtler than the declared-effects banner (it's an audit/info
+ * artifact, not a gate); muted background + chips. Drift chips
+ * carry a red dashed outline so widening impls are visible. */
+.execute-runtime-effects-strip {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+  margin-top: 8px;
+  padding: 4px 6px;
+  background: var(--card-row-highlight);
+  border-radius: 2px;
+  font-size: 10px;
+  color: var(--muted-fg);
+}
+.execute-runtime-effects-label {
+  font-weight: 600;
+  margin-right: 2px;
+}
+.execute-effects-drift {
+  outline: 1px dashed var(--error-fg);
+  outline-offset: 1px;
+}
+/* "Declared but not observed at runtime" — fn-def promised this
+ * effect but the actual run didn't fire it. Could be a conditional
+ * branch that wasn't taken (legitimate) OR an over-declaration in
+ * the rich-type (cleanup signal). Greyed-out + dashed outline
+ * distinguishes from the red-outline runtime-drift case above. */
+.execute-effects-unobserved {
+  outline: 1px dashed var(--muted-fg);
+  outline-offset: 1px;
+  opacity: 0.45;
+}
+
+/* Service settings popover — anchored from the ⚙ button in the
+ * row-actions popover. Compact form for managing a :service row
+ * (declare / edit / delete / reconcile). Visual language matches
+ * the execute popover so the two read as siblings. */
+.service-popover {
+  position: fixed; z-index: 10002;
+  display: none;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  padding: 10px 12px;
+  min-width: 280px; max-width: 360px;
+  font-family: inherit; font-size: 12px; line-height: 1.4;
+}
+.service-popover.visible { display: block; }
+
+.service-popover-header {
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--light-border);
+  margin-bottom: 8px; padding-bottom: 4px;
+}
+.service-popover-title {
+  font-weight: 600; font-size: 13px;
+  color: var(--accent);
+}
+.service-popover-close {
+  width: 22px; height: 22px; padding: 0;
+  background: transparent; color: var(--card-fg);
+  border: 0; border-radius: 3px;
+  font-size: 20px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0.65;
+}
+.service-popover-close:hover {
+  opacity: 1; background: var(--overlay-pressed);
+}
+
+.service-popover-status {
+  font-size: 11px;
+  color: var(--muted-fg);
+  margin-bottom: 8px;
+  padding: 4px 6px;
+  background: var(--card-row-highlight);
+  border-radius: 2px;
+}
+
+.service-popover-option {
+  display: flex; align-items: center;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.service-popover-policy {
+  margin: 8px 0;
+}
+.service-popover-policy-label {
+  font-weight: 600;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.service-popover-policy-option {
+  display: inline-flex; align-items: center;
+  margin-right: 10px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.service-popover-actions {
+  display: flex; gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--light-border);
+}
+.service-popover-save-btn,
+.service-popover-delete-btn {
+  font-family: inherit; font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.service-popover-save-btn {
+  background: var(--accent); color: var(--card-bg);
+  border: 1px solid var(--accent);
+}
+.service-popover-save-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.service-popover-save-btn:disabled {
+  opacity: 0.6; cursor: not-allowed;
+}
+.service-popover-delete-btn {
+  background: transparent; color: var(--error-fg);
+  border: 1px solid var(--error-fg);
+}
+.service-popover-delete-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error-fg) 12%, transparent);
+}
+.service-popover-delete-btn:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+
+/* Service badge — small status dot on the root row of any fn-card
+ * whose fn is declared as a :service. Sits between the fn name and
+ * the row-actions trigger; click opens the service settings popover.
+ * Colors reuse design tokens used elsewhere for analogous status
+ * (success / error / muted) so themes stay coherent. */
+/* Floated over the row's left edge (next to the fn name) instead of
+ * inserted into the flex flow — avoids ellipsizing long fn names
+ * just to make room for a 9-px dot. Z-indexed above the row bg
+ * stripe; pointer events kept on so clicks still open the popover. */
+.service-badge {
+  position: absolute;
+  left: 2px; top: 50%;
+  transform: translateY(-50%);
+  width: 8px; height: 8px;
+  font-size: 9px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  user-select: none;
+  z-index: 1;
+}
+.service-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.service-badge-running  { color: var(--success-fg); }
+.service-badge-failed   { color: var(--error-fg); }
+.service-badge-disabled { color: var(--muted-fg); opacity: 0.65; }
+.service-badge-pending  {
+  color: var(--muted-fg);
+  animation: service-badge-pulse 1.5s ease-in-out infinite;
+}
+@keyframes service-badge-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+
+.execute-popover-body {
+  margin-bottom: 10px;
+}
+.execute-no-args-note {
+  font-style: italic;
+  color: var(--muted-fg);
+  padding: 4px 0;
+}
+
+.execute-arg-row {
+  margin-bottom: 8px;
+}
+.execute-arg-label {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--muted-fg);
+  margin-bottom: 2px;
+}
+.execute-arg-form {
+  padding: 4px 6px;
+  background: var(--card-row-highlight);
+  border: 1px solid var(--light-border);
+  border-radius: 2px;
+}
+.execute-arg-form-error {
+  color: var(--error-fg);
+  font-style: italic;
+}
+
+.execute-options-row {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-bottom: 8px;
+}
+.execute-option-label {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px;
+  color: var(--muted-fg);
+  cursor: pointer;
+  user-select: none;
+}
+.execute-option-label input[type="checkbox"] { margin: 0; }
+/* Confirm-effects checkbox sits in red so the gate is hard to miss
+ * when the run will produce side effects. */
+.execute-confirm-label { color: var(--error-fg); font-weight: 600; }
+.execute-option-label-locked {
+  cursor: help;
+  opacity: 0.7;
+}
+
+.execute-action-bar {
+  display: flex; gap: 8px;
+  margin-bottom: 8px;
+}
+.execute-run-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.execute-run-btn, .execute-cancel-btn {
+  padding: 4px 12px;
+  font-family: inherit; font-size: 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  background: var(--card-bg); color: var(--card-fg);
+  cursor: pointer;
+}
+.execute-run-btn {
+  background: var(--accent);
+  color: var(--card-bg);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.execute-run-btn:hover { opacity: 0.9; }
+.execute-cancel-btn:hover { background: var(--hover-bg); }
+
+.execute-result-host {
+  border-top: 1px solid var(--light-border);
+  padding-top: 8px;
+}
+.execute-submit-spinner, .execute-pending-pane {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px;
+  color: var(--muted-fg);
+}
+.execute-pending-spinner {
+  font-size: 14px;
+  color: var(--accent);
+}
+.execute-pending-text { font-family: inherit; }
+
+.execute-result-pane {
+  font-family: monospace; font-size: 11.5px;
+  overflow-x: auto;
+}
+.execute-result-scalar {
+  padding: 6px 8px;
+  background: var(--card-row-highlight);
+  border-radius: 2px;
+  font-weight: 600;
+}
+.execute-result-list {
+  list-style: disc inside;
+  padding-left: 4px;
+  margin: 0;
+}
+.execute-result-list li { padding: 2px 0; }
+.execute-result-list-more {
+  list-style: none;
+  font-style: italic;
+  color: var(--muted-fg);
+}
+.execute-result-record {
+  border-collapse: collapse;
+  width: 100%;
+}
+.execute-result-record th, .execute-result-record td {
+  text-align: left; padding: 3px 6px;
+  border-bottom: 1px solid var(--light-border);
+  vertical-align: top;
+}
+.execute-result-record th {
+  font-weight: 600;
+  color: var(--muted-fg);
+  width: 30%;
+}
+.execute-result-record pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.execute-result-json {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  padding: 6px 8px;
+  background: var(--card-row-highlight);
+  border-radius: 2px;
+}
+.execute-result-truncated {
+  padding: 4px 6px;
+  margin-bottom: 6px;
+  background: var(--card-row-highlight);
+  border-left: 2px solid var(--error-fg);
+  border-radius: 2px;
+  font-style: italic;
+  font-size: 11px;
+  color: var(--muted-fg);
+}
+.execute-cancelled {
+  padding: 4px 6px;
+  font-style: italic;
+  color: var(--muted-fg);
+}
+
+.execute-error-pane {
+  padding: 6px 8px;
+  background: var(--card-row-highlight);
+  border-left: 2px solid var(--error-fg);
+  border-radius: 2px;
+}
+.execute-error-head {
+  font-weight: 600;
+  color: var(--error-fg);
+  margin-bottom: 4px;
+}
+.execute-error-data {
+  margin: 0;
+  font-family: monospace; font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+
+/* History panel — collapsible list of persisted runs for the
+ * current fn. Each row shows status / timestamp / duration /
+ * result preview. Click a row to expand its full result into the
+ * main result host; Repeat re-fills the form with that run's args. */
+.execute-history-host {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  background: var(--card-row-highlight);
+  border-left: 2px solid var(--accent);
+  border-radius: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.execute-history-empty {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted-fg);
+}
+.execute-history-panel {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.execute-history-row {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--light-border);
+  cursor: pointer;
+}
+.execute-history-row:last-child { border-bottom: 0; }
+.execute-history-row:hover { background: var(--hover-bg); }
+.execute-history-row-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.execute-history-status {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.execute-history-status-succeeded {
+  color: var(--success-fg);
+  background: color-mix(in srgb, var(--success-fg) 15%, transparent);
+}
+.execute-history-status-failed {
+  color: var(--error-fg);
+  background: color-mix(in srgb, var(--error-fg) 15%, transparent);
+}
+.execute-history-status-cancelled, .execute-history-status-pending {
+  color: var(--muted-fg);
+  background: var(--light-border);
+}
+.execute-history-ts {
+  color: var(--muted-fg);
+  font-family: monospace;
+}
+.execute-history-duration {
+  color: var(--muted-fg);
+  font-style: italic;
+}
+.execute-history-repeat-btn {
+  margin-left: auto;
+  padding: 1px 6px;
+  font-family: inherit; font-size: 10px;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.execute-history-repeat-btn:hover { background: var(--hover-bg); }
+.execute-history-preview {
+  font-family: monospace; font-size: 10.5px;
+  color: var(--card-fg);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

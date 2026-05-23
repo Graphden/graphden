@@ -267,7 +267,9 @@
       ;; Forward `:effects` (set of category tags). The legacy
       ;; `:effectful? true` shim has been retired — every effectful
       ;; base-fn now names its specific category
-      ;; (`:db` / `:env` / `:io` / `:network` / `:time` / `:random`).
+      ;; (`:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
+      ;; `:process`). `:process` = spawns supervised background work
+      ;; (service-eligibility marker).
       (:effects fn-def)     (assoc :effects (set (:effects fn-def)))
       ;; Per-base-fn type-rules — only present when the impls.clj
       ;; declared them on the entry map.

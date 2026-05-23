@@ -20,7 +20,12 @@
   hiccup/hiccup {:mvn/version "2.0.0"}
   ;; System lifecycle
   integrant/integrant {:mvn/version "1.0.1"}
-  aero/aero {:mvn/version "1.1.6"}}
+  aero/aero {:mvn/version "1.1.6"}
+  ;; Cron expression parser — used by the :cron-next-after base-fn
+  ;; (org.quartz.CronExpression). We only depend on the cron-parser
+  ;; class, not the Quartz scheduler runtime — graphden's own
+  ;; :future + :loop-until-interrupted primitives drive the firing.
+  org.quartz-scheduler/quartz {:mvn/version "2.5.2"}}
 
  :aliases
  {:test

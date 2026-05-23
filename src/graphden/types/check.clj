@@ -888,13 +888,24 @@
 (defn- hof-slot?
   "True iff slot `arg-name` is declared as a callable — the bare `:fn`
    primitive or a structural `[:fn …]`. A ref bound to such a slot is
-   a HOF lambda: the executor's `hof-wrap` consumes that ref's leftover
-   free args per-call, so they must NOT widen the calling fn-def's own
-   free-arg surface. Mirrors `compile.renames/deep-free-ext-names`,
-   which stops at `:is-fn` refs for the same reason."
+   HOF-wrapped: the executor's `hof-wrap` consumes the slot's
+   declared call-site args per-invocation. The OTHER free args of the
+   wrapped fn-graph (captured args, per docs/CLOSURE_CAPTURE.md) DO
+   propagate as free args of the outer fn-def — see `ref-free-args`."
   [parent-args arg-name]
   (let [t (get parent-args arg-name)]
     (or (= :fn t) (types/fn-type? t))))
+
+
+(defn- hof-call-site-arg-names
+  "Set of keys in the slot's structural `[:fn {ARGS} RET EFFS]` shape
+   — the call-site args supplied by the parent fn's impl at every
+   invocation. The bare `:fn` primitive has no structural shape (the
+   slot accepts any callable), so call-site is empty there — every
+   free arg of the wrapped fn-graph becomes captured."
+  [parent-args arg-name]
+  (let [t (get parent-args arg-name)]
+    (set (keys (or (types/fn-args t) {})))))
 
 
 (defn- ref-free-args
@@ -903,27 +914,38 @@
    both exposing `'a` would collide. `types/freshen-args` renames
    each var to a unique `'a-<n>` while keeping sharing within one ref.
 
-   A ref bound to a HOF slot (`hof-slot?`) is a boundary — its free
-   args are consumed by the inner `hof-wrap` and are NOT lifted."
+   For a ref bound to a HOF slot, the lifted set is the ref's free
+   args MINUS the slot's structural call-site arg names. Closure-
+   capture semantics (docs/CLOSURE_CAPTURE.md § Implementation
+   Contract): call-site args are supplied per invocation by the
+   parent's impl; captured args must come from the outer binding-
+   chain and therefore widen the calling fn-def's free-arg surface."
   [args parent-args]
   (let [fresh (fn [fn-name]
                 (when-let [ents (:args (registry/rich-type-of fn-name))]
-                  (types/freshen-args ents)))]
+                  (types/freshen-args ents)))
+        lift-for-slot (fn [arg-name ref-args]
+                        (if (hof-slot? parent-args arg-name)
+                          (apply dissoc ref-args
+                                 (hof-call-site-arg-names parent-args arg-name))
+                          ref-args))]
     (reduce-kv (fn [acc arg-name b-form]
-                 (if (hof-slot? parent-args arg-name)
-                   acc
-                   (cond
-                     (keyword? b-form)
-                     (merge acc (or (fresh b-form) {}))
+                 (cond
+                   (keyword? b-form)
+                   (merge acc (lift-for-slot arg-name (or (fresh b-form) {})))
 
-                     (and (map? b-form) (contains? b-form :ref))
-                     (merge acc (or (fresh (:ref b-form)) {}))
+                   (and (map? b-form) (contains? b-form :ref))
+                   (merge acc (lift-for-slot arg-name
+                                             (or (fresh (:ref b-form)) {})))
 
-                     (vector? b-form)
-                     (reduce (fn [a item] (merge a (item-free-args item)))
-                             acc b-form)
+                   ;; List items aren't HOF-wrapped — they're inlined
+                   ;; into the outer evaluation context, so ALL their
+                   ;; free args lift regardless of the slot's HOF-ness.
+                   (vector? b-form)
+                   (reduce (fn [a item] (merge a (item-free-args item)))
+                           acc b-form)
 
-                     :else acc)))
+                   :else acc))
                {}
                args)))
 

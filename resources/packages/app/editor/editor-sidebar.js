@@ -19,6 +19,29 @@ const expandedNamespaces = new Set();
 // Current search/filter text (lowercase)
 let searchFilter = '';
 
+// "Only services" filter — when true, sidebar tree is pruned to
+// only fns that are :service targets. The fn-id Set is lazy-loaded
+// the first time the user flips the checkbox on (and refreshed on
+// every flip-on after that so newly-declared services show up).
+let onlyServicesFilter = false;
+let serviceFnIds = new Set();
+
+
+// Drop everything except fns whose id is in `keepIds`. Mirrors the
+// shape filterNsNode returns (children Map + fns array). Empty
+// branches are pruned recursively so the user never sees an empty
+// namespace row when nothing inside it survives the filter.
+function filterToFnIds(node, keepIds) {
+  const filteredChildren = new Map();
+  for (const [childName, childNode] of node.children) {
+    const filtered = filterToFnIds(childNode, keepIds);
+    if (filtered) filteredChildren.set(childName, filtered);
+  }
+  const filteredFns = node.fns.filter((fn) => keepIds.has(fn.id));
+  if (filteredChildren.size === 0 && filteredFns.length === 0) return null;
+  return {children: filteredChildren, fns: filteredFns};
+}
+
 /**
  * Build a tree from fns grouped by namespace path.
  * Returns: { children: Map<string, subtree>, fns: [fn, ...] }
@@ -285,6 +308,19 @@ function clearSearch() {
   updateEntityList(graphData);
 }
 
+
+// "Only services" filter toggle handler — wired from the
+// checkbox in #search-bar. Lazy-loads the fn-id set on first
+// flip-on (and refreshes on every flip-on after so newly-added
+// services appear without page reload).
+async function setOnlyServicesFilter(checked) {
+  onlyServicesFilter = !!checked;
+  if (onlyServicesFilter && typeof loadAllServiceFnIds === 'function') {
+    serviceFnIds = await loadAllServiceFnIds();
+  }
+  updateEntityList(graphData);
+}
+
 /**
  * Update the entity list in sidebar as a namespace tree
  */
@@ -294,6 +330,12 @@ function updateEntityList(data) {
 
   let tree = buildNsTree(data);
 
+  // Apply "only services" filter first — fn-id set match, no text.
+  // Order with search filter: services first, then text — the result
+  // is "services whose name contains the text" when both are active.
+  if (onlyServicesFilter) {
+    tree = filterToFnIds(tree, serviceFnIds) || {children: new Map(), fns: []};
+  }
   // Apply search filter
   if (searchFilter) {
     tree = filterNsNode(tree, searchFilter, null) || { children: new Map(), fns: [] };

@@ -662,14 +662,20 @@
    SLOT (sup) arity — which fixes the calling convention the
    executor's `hof-wrap` uses for a bound callable:
 
-   - sup arity ≤ 1 → single-arg (or input-ignoring) callable; the
-     impl invokes it positionally as `(f v)`. Parameter NAMES are
-     local bound variables — alpha-equivalent — so the lone arg pair
-     is compared by POSITION, not by name. A callee with extra free
-     args (optional slots / env-captured names) still satisfies a
-     1-arg slot: hof-wrap captures the rest, and the slot's single
-     param is matched to the callee arg of the same name. A 0-arg
-     callee satisfies a 1-arg slot too — it just ignores the value.
+   - sup arity = 0 → variadic-ignore callable; the impl invokes it
+     as `(f)` and the wrap passes no per-call args. The callee's
+     free args (if any) are CAPTURED from the binding-chain at wrap
+     time (closure-capture; docs/CLOSURE_CAPTURE.md). Any sub arity
+     accepts.
+
+   - sup arity = 1 → single-arg callable; the impl invokes as
+     `(f v)`. Parameter NAMES are local bound variables —
+     alpha-equivalent — so the lone arg pair is compared by
+     POSITION, not by name. A callee with extra free args
+     (optional / captured) still satisfies a 1-arg slot: hof-wrap
+     supplies the lone call-site value to the callee's first free
+     arg name; the rest are captured. A 0-arg callee satisfies a
+     1-arg slot too — the value is just ignored.
 
    - sup arity ≥ 2 → map-callable; `hof-wrap` fills the callee's free
      args BY NAME (`(f {:k v …})`), so names ARE significant. Every
@@ -681,6 +687,11 @@
    Contravariance: `sup-arg ⊆ sub-arg`."
   [a b]
   (cond
+    ;; 0-arg slot — wrap passes nothing per call. Closure-capture
+    ;; handles every sub free arg as captured; any sub arity OK.
+    (zero? (count b))
+    true
+
     ;; Map-callable slot — by name.
     (>= (count b) 2)
     (every? (fn [[k bt]]

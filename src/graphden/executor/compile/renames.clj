@@ -141,18 +141,39 @@
           fn-ids)))
 
 
-(defn hof-lambda-params
-  "Lambda-param names of HOF target `r-fn-id` when invoked from
-   `f-fn-id`. A deep-free name of R is a LAMBDA PARAM iff nothing in
-   F's inheritance chain or descendant set supplies a value for that
-   slot. Names a chain-ancestor or inheriting descendant binds flow
-   into outer-free-args at runtime and must be captured (Clojure-
-   closure semantics — without that classification the lambda sees
-   them as per-call params and the impl's `(f val)` invocation loses
-   the captured value).
+(defn- slot-structural-call-site-args
+  "Returns the SET of arg-names declared in the slot's structural
+   `[:fn {ARGS} RET …]` type, or nil when the slot has no structural
+   shape (bare `:fn` primitive, or non-HOF type). Mirrors the
+   effective-type resolution in `compile.bindings/fn-typed-slot?` —
+   prefer the binding's `:type-override-fn-id`, then walk the chain
+   for any override, then fall back to the slot's own `:type-fn-id`.
 
-   `hof-wrap` picks its call shape from `(count lambda-params)`:
-   0/1/N → variadic / single-arg / map-callable."
+   The non-nil return reflects closure-capture semantics
+   (docs/CLOSURE_CAPTURE.md): R's free args INSIDE the set are
+   call-site lambda-params, R's free args OUTSIDE are captured. When
+   nil (bare `:fn` slot), the legacy heuristic in `hof-lambda-params`
+   takes over — it deduces captured-vs-call-site from F's chain
+   bindings."
+  [slot-id b-row f-fn-id {:keys [slot-map fn-map binding-by-fn-slot] :as lookups}]
+  (let [override (or (:type-override-fn-id b-row)
+                     (some (fn [fid]
+                             (when-let [b (get binding-by-fn-slot [fid slot-id])]
+                               (:type-override-fn-id b)))
+                           (l/inheritance-chain* f-fn-id lookups)))
+        type-fn-id (or override (some-> (get slot-map slot-id) :type-fn-id))
+        constraint (some-> (get fn-map type-fn-id) :constraint)]
+    (when (and (vector? constraint) (= :fn (first constraint)))
+      (set (keys (or (second constraint) {}))))))
+
+
+(defn- legacy-lambda-params
+  "Pre-closure-capture heuristic: a deep-free name of R is a lambda-
+   param iff nothing in F's chain or descendants supplies a value for
+   that slot. Used for bare `:fn` slots (no structural shape) and for
+   single-arg structural slots where positional alpha-equivalence
+   matters (`:filter :pred :some?` — sub's `:value` is the lambda-
+   param even though slot declares `:item`)."
   [r-fn-id f-fn-id lookups]
   (let [r-frees (deep-free-ext-names r-fn-id lookups)
         f-bindings (b/collect-bindings f-fn-id lookups)
@@ -169,6 +190,55 @@
                            r-frees)
         captured (into static-captured env-captured)]
     (vec (remove captured r-frees))))
+
+
+(defn hof-lambda-params
+  "Lambda-param names of HOF target `r-fn-id` when invoked from
+   `f-fn-id` through the binding `b-row`. Dispatched on the slot's
+   structural `[:fn {ARGS} _]` shape (closure-capture;
+   docs/CLOSURE_CAPTURE.md):
+
+   - 0-arg slot (`{}`)        → []
+     Variadic-ignore wrap; R's free args are all captured at wrap
+     time (the cron case: `:future :body` and
+     `:loop-until-interrupted :body`).
+   - 1-arg slot (`{:x T}`)    → legacy heuristic
+     Positional alpha-equivalence — the sub's lambda-param name may
+     differ from the slot's structural name (`:filter :pred :some?`
+     binds `:value` even though the slot calls it `:item`).
+   - 2+-arg slot (`{…N keys}`) → R's free args matching the slot's
+     structural ARGS by NAME
+     Map-callable wrap (`:wrap-middleware` :handler:
+     `{:request _ :next-handler _}`).
+   - bare `:fn` primitive (no structural shape) → legacy heuristic
+     Slot accepts any callable; arity inferred from F's binding
+     chain.
+
+   `hof-wrap` picks its call shape from `(count lambda-params)`:
+   0/1/N → variadic / single-arg / map-callable."
+  [r-fn-id slot-id b-row f-fn-id lookups]
+  (let [structural-args (slot-structural-call-site-args slot-id b-row f-fn-id
+                                                        lookups)]
+    (cond
+      ;; Bare :fn slot — no structural shape to constrain on.
+      (nil? structural-args)
+      (legacy-lambda-params r-fn-id f-fn-id lookups)
+
+      ;; 0-arg structural slot — variadic-ignore wrap; everything
+      ;; captured (cron / future / loop-until-interrupted case).
+      (zero? (count structural-args))
+      []
+
+      ;; 1-arg structural slot — positional. Sub's lambda-param name
+      ;; may differ from slot's (alpha-equivalence). Legacy heuristic
+      ;; picks the right single name from R's non-captured free args.
+      (= 1 (count structural-args))
+      (legacy-lambda-params r-fn-id f-fn-id lookups)
+
+      ;; Map-callable structural slot — names must match. Sub free
+      ;; args outside structural-args are captured.
+      :else
+      (filterv structural-args (deep-free-ext-names r-fn-id lookups)))))
 
 
 (defn build-ref-renames

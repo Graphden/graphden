@@ -173,6 +173,41 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 
 ## Future Work
 
+### Graph-level Recursion
+
+**Status**: design / roadmap — no implementation. The current
+constraint layers (per-binding cycle check + sync-time
+topological-sort) reject all self/mutual ref patterns;
+`exec/execute-by-name` from inside a base-fn impl is the only
+escape hatch, and it violates Code = Graph.
+
+**Goal**: make recursion expressible in the fn-graph itself —
+tree-walk (JSON / hiccup / AST visitor) is the bread-and-butter
+practical case currently blocked.
+
+**Two viable approaches**, both fully specified in
+[RECURSION.md](RECURSION.md):
+
+| | Approach A — `:fix` | Approach B — Lazy ref resolution |
+|---|---|---|
+| New entities | 1 base-fn | 0 (optional `:recursive?` flag on fn-row) |
+| Cycle invariant | Preserved | Relaxed for opt-in fns |
+| Mutual recursion | Tag-dispatch convention | Natural |
+| Effort | ~3 hours | ~1-2 days |
+| Risk | Minimal | Touches compile pipeline + delta-recompile |
+
+**Recommended order**: ship A first (leverages already-shipped
+closure-capture; covers ~80% of practical use cases). Revisit B
+only if A's mutual-recursion ergonomics prove insufficient. After
+A lands, `exec/execute-by-name` from inside an impl moves from
+"escape hatch" to explicit anti-pattern.
+
+**See**: [RECURSION.md](RECURSION.md) for the full design + impl
+sketches + open questions, [ARCHITECTURE.md § Part 3](ARCHITECTURE.md#part-3-recursion-and-cycles)
+for the current-state writeup.
+
+---
+
 ### Distributed Execution
 
 **Goal**: Automatic parallelization and distribution of computations across multiple executors.

@@ -1,0 +1,82 @@
+(ns graphden.packages.core.system-test
+  "Unit tests for `core.system` base-fn impls — focused on the
+   no-arg invocation primitive `:call-noargs` (companion to `:call` /
+   `:invoke`; ships in the same module as part of the closure-capture
+   work that re-composed `:schedule` as a fn-def).
+
+   Mirrors `refinements_test` / `concurrency_test`: the package's
+   impls.clj is slurp+eval'd via the loader's private
+   `load-module-impls` so the defbase-generated symbols become
+   reachable WITHOUT a normal require — same path the runtime takes."
+  (:require
+    [clojure.test :refer [deftest is testing use-fixtures]]))
+
+
+(def ^:dynamic *impls* nil)
+
+
+(defn- load-system-impls-fixture
+  [f]
+  (binding [*impls* ((requiring-resolve 'graphden.packages.loader/load-module-impls)
+                     "core" "system")]
+    (f)))
+
+
+(use-fixtures :once load-system-impls-fixture)
+
+
+(defn- impl-of
+  [kw]
+  (let [entry (get *impls* kw)]
+    (or (and (map? entry) (:impl entry))
+        (and (fn? entry) entry)
+        (throw (ex-info (str "No impl for " kw) {:available (keys *impls*)})))))
+
+
+;; ============================================================================
+;; :call-noargs — invoke a 0-arg callable
+;;
+;; Companion to `:call` / `:invoke` for the no-arg case. The slot's
+;; structural type `[:fn {} a]` makes the binding-site hof-wrap with
+;; variadic-ignore semantics (closure-capture; docs/CLOSURE_CAPTURE.md).
+;; This unit test exercises the impl in isolation — the wrap mechanism
+;; is covered by cron-schedule-runtime-test.
+;; ============================================================================
+
+(deftest call-noargs-invokes-the-callable-test
+  (testing "(func) is invoked; its return is the impl's return"
+    (let [impl (impl-of :call-noargs)
+          callable (fn [] :ok)]
+      (is (= :ok (impl {:func (delay callable)} nil))))))
+
+
+(deftest call-noargs-propagates-callable-return-test
+  (testing "return value is whatever the callable returns — any shape"
+    (let [impl (impl-of :call-noargs)]
+      (is (= 42 (impl {:func (delay (fn [] 42))} nil)))
+      (is (= [1 2 3] (impl {:func (delay (fn [] [1 2 3]))} nil)))
+      (is (nil? (impl {:func (delay (fn [] nil))} nil)))
+      (is (= {:a 1} (impl {:func (delay (fn [] {:a 1}))} nil))))))
+
+
+(deftest call-noargs-propagates-callable-exception-test
+  (testing "if the callable throws, the impl re-throws (no swallow)"
+    (let [impl (impl-of :call-noargs)
+          thrown (try (impl {:func (delay (fn [] (throw (ex-info "boom" {:k 1}))))}
+                            nil)
+                      :no-throw
+                      (catch clojure.lang.ExceptionInfo e
+                        (ex-data e)))]
+      (is (= {:k 1} thrown) "boom's ex-data reaches the caller"))))
+
+
+(deftest call-noargs-invokes-fresh-each-time-test
+  (testing "each invocation calls the callable again — no result caching"
+    (let [impl (impl-of :call-noargs)
+          counter (atom 0)
+          ticking (fn [] (swap! counter inc))]
+      (impl {:func (delay ticking)} nil)
+      (impl {:func (delay ticking)} nil)
+      (impl {:func (delay ticking)} nil)
+      (is (= 3 @counter)
+          "3 invocations → 3 calls; impl itself doesn't memoise"))))

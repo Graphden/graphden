@@ -106,7 +106,12 @@
               f-fn   (setup/build-fn! storage
                                       {:name "hlp-f" :parent base-f})]
           ;; Nothing in F's world supplies x → x is a per-call lambda-param.
+          ;; Pass nil slot-id/b-row — neither r-fn nor f-fn carries a
+          ;; bound slot at this test boundary (we're directly probing
+          ;; the helper, not exercising a real bind site). nil slot-id
+          ;; falls back to the legacy heuristic (no structural shape).
           (is (= [:x] (r/hof-lambda-params (-> r-fn :fn :id)
+                                           nil nil
                                            (-> f-fn :fn :id)
                                            (lookups-for storage)))))
         (finally (sp/close storage)))))
@@ -125,6 +130,7 @@
                                      :bindings {"x" {:value 99}}})]
           ;; f binds x → x flows in from the closure → no lambda-params.
           (is (= [] (r/hof-lambda-params (-> r-fn :fn :id)
+                                         nil nil
                                          (-> f-fn :fn :id)
                                          (lookups-for storage)))))
         (finally (sp/close storage))))))
@@ -166,7 +172,7 @@
             ;; supplies `inner-free`, so it becomes a lambda-param of T
             ;; when called from F.
             (is (= [:inner-free]
-                   (r/hof-lambda-params (:id t-fn) (:id f-fn)
+                   (r/hof-lambda-params (:id t-fn) nil nil (:id f-fn)
                                         (lookups-for storage))))))
         (finally (sp/close storage))))))
 

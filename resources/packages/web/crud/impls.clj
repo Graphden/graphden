@@ -13,6 +13,7 @@
     [graphden.crud.entities :as entities]
     [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.schema.graph.schema :as graph-schema]))
 
@@ -21,26 +22,31 @@
 
 (defbase list-entities
   [entity-type where]
+  (cr/record-effect! :db)
   (entities/list-entities entity-type where ctx))
 
 
 (defbase get-entity
   [entity-type id]
+  (cr/record-effect! :db)
   (entities/get-entity entity-type id ctx))
 
 
 (defbase create-entity
   [entity-type data]
+  (cr/record-effect! :db)
   (entities/create-entity entity-type data ctx))
 
 
 (defbase update-entity
   [entity-type id data]
+  (cr/record-effect! :db)
   (entities/update-entity entity-type id data ctx))
 
 
 (defbase delete-entity
   [entity-type id]
+  (cr/record-effect! :db)
   (entities/delete-entity entity-type id ctx))
 
 

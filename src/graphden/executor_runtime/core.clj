@@ -13,7 +13,12 @@
    :exec/base-fns    → Base function registry
    :exec/fn-entities → Fn definitions (web server routes)
    :exec/context     → Executor context
-   :http/server      → HTTP server
+   :exec/compiled-registry  → Compiled-at-startup closures (hot path)
+   :exec/service-reconciler → Supervises enabled :service rows
+                              (replaces standalone :http/server;
+                              legacy fallback spawns the package's
+                              :startup-fn when no :service rows exist)
+   :exec/cleanup-scheduler  → Hourly :fn-execution TTL sweep
 
    ## Configuration
 

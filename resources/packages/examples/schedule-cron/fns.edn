@@ -1,0 +1,50 @@
+;; `:schedule` — cron-driven supervised loop, expressed as a derived
+;; fn-def. Showcases the closure-capture model (see
+;; docs/CLOSURE_CAPTURE.md): `:cron` (a value) and `:fn` (a callable)
+;; both surface as captured args of `:schedule`, flow through three
+;; HOF boundaries (`:future :body` → `:loop-until-interrupted :body`
+;; → `:do :steps`'s list-item ref), and reach `:_fire-target` inside
+;; the daemon-thread loop without any per-iteration plumbing.
+;;
+;; An admin binds both args at this level → the derived fn-def is
+;; service-eligible (zero free args, inherits `:process` effect via
+;; `:future`). Declare a `:service` row pointing at this fn-id and
+;; the reconciler will spawn it at startup, halt it at shutdown.
+
+
+{:namespace "examples.schedule-cron"
+ :description "Derived `:schedule` over an existing 0-arg fn — the canonical pattern for admin-declared cron services."
+ :fns
+ [;; ----------------------------------------------------------------
+  ;; The fire target — any 0-arg callable. For the example we use
+  ;; `:current-time-ms` (already a base-fn, has :time effect, no args)
+  ;; so the schedule is observable through executions / logs without
+  ;; needing a side-effect channel.
+  ;; ----------------------------------------------------------------
+  {:name :ex-cron-heartbeat-tick
+   :description "Heartbeat target — read & return the current epoch-ms. The cron loop fires this on every cron schedule tick; the value lands in the executor's per-call result (visible in execution rows / logs if persisted). Any 0-arg fn-ref works here."
+   :parent :current-time-ms
+   :args {}}
+
+  ;; ----------------------------------------------------------------
+  ;; The derived schedule — admin's `:my-cron` shape. Binding both
+  ;; captured args collapses the fn-def's free-arg surface to empty,
+  ;; making it service-eligible.
+  ;;
+  ;; To run as a managed service:
+  ;;   POST /api/entities/service
+  ;;     {:fn-id <id-of :ex-cron-heartbeat>, :enabled? true}
+  ;;   POST /api/services/reconcile
+  ;; The reconciler will spawn the future, the loop will invoke
+  ;; `:ex-cron-heartbeat-tick` every 5 seconds, the stopper unwinds
+  ;; on `/api/services/reconcile` after disabling the row.
+  ;;
+  ;; Cron syntax is Quartz-6: `sec min hr day-of-month mon day-of-week`.
+  ;; `?` means "no specific value" (required for one of dom/dow when
+  ;; the other is `*`).
+  ;; ----------------------------------------------------------------
+  {:name :ex-cron-heartbeat
+   :description "Heartbeat cron — fires `:ex-cron-heartbeat-tick` every 5 seconds. Demonstrates the canonical admin-derivation pattern for `:schedule`: bind `:cron` (a Quartz cron-6 string) and `:fn` (a 0-arg callable), get back a service-eligible fn-def."
+   :parent :schedule
+   :args {:cron "*/5 * * * * ?"
+          :fn :ex-cron-heartbeat-tick}}]}

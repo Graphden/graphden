@@ -43,6 +43,10 @@
                   "packages/app/editor/editor-edit-validation.js"
                   "packages/app/editor/editor-edit-modes.js"
                   "packages/app/editor/editor-edit-reparent.js"
+                  "packages/app/editor/editor-execute-result.js"
+                  "packages/app/editor/editor-execute-history.js"
+                  "packages/app/editor/editor-execute.js"
+                  "packages/app/editor/editor-service-popover.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"
                   "packages/app/editor/editor-overlay-type-expand.js"
@@ -112,7 +116,12 @@
               [:input {:id "search-input" :type "text" :placeholder "Filter..."
                        :aria-label "Filter functions"
                        :oninput "onSearchInput(this.value)"}]
-              [:button {:id "search-clear" :onclick "clearSearch()" :aria-label "Clear filter"} "\u00D7"]]
+              [:button {:id "search-clear" :onclick "clearSearch()" :aria-label "Clear filter"} "\u00D7"]
+              [:label {:id "only-services-label" :class "filter-toggle-label"
+                       :title "Hide fns that are not declared as :service rows"}
+               [:input {:id "only-services-toggle" :type "checkbox"
+                        :onchange "setOnlyServicesFilter(this.checked)"}]
+               " Only services"]]
              [:nav {:id "entity-list" :aria-label "Namespace tree"}]]
             ;; Graph container \u2014 <main> landmark
             ;; `#cy` is a `group`, not an `img`: it hosts the cytoscape

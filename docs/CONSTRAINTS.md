@@ -46,8 +46,16 @@ fn multiply-numbers
   binding {slot s-other, ref-fn-id add-numbers}    ✗ dependency-cycle
 ```
 
-**Self-reference:** allowed — recursion is bounded by the executor's
-depth limit, not by the storage protocol.
+**Self-reference at the per-binding layer:** `validate-no-dependency-
+cycle-impl` carves out `owner-fn-id == ref-fn-id` — the bare self-ref
+write doesn't throw at this check. HOWEVER the higher-level
+`topological-sort` (`executor/composition/deps.clj`) runs over the
+whole fn-def set at sync time and rejects any cycle, including bare
+self-refs. End result: **graph-level recursion is structurally
+impossible today** — neither self-ref nor mutual-ref nor any
+parent+ref combination passes both checks. See
+`docs/ARCHITECTURE.md § Part 3 — Recursion and Cycles` for the
+empirical demonstration and the planned `:fix`-based path forward.
 
 **Error:** `:constraint-violation/dependency-cycle`
 

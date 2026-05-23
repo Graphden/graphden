@@ -51,7 +51,11 @@
       (is (map? config))
       (is (contains? config :db/schema))
       (is (contains? config :db/postgres))
-      (is (contains? config :http/server)))))
+      ;; Phase 1 service registry replaced :http/server with the
+      ;; service reconciler — the supervisor reads enabled :service
+      ;; rows and falls back to package-declared :startup-fn when no
+      ;; rows exist (see docs/SERVICES.md).
+      (is (contains? config :exec/service-reconciler)))))
 
 
 (deftest config-dependencies-test

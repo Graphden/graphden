@@ -749,11 +749,41 @@ function renderSingleFnRow(line, levelInfo, ctx) {
         }));
       }
     } else if (rootAffordancesVisible && lineFnEntity) {
-      // Root row's per-fn actions: rename, extend, delete. Always
-      // rendered when the user is signed in — when the fn can't be
-      // edited (it's referenced elsewhere), each icon goes into a
-      // disabled-with-reason state so a click reveals WHY instead of
-      // the user wondering whether the affordance just isn't there.
+      // Root row's per-fn actions: run, rename, extend, delete. Run
+      // (▶) goes first — it's the highest-leverage action on a fn
+      // card (read-only users will see no actions at all). When the
+      // fn can't be edited (referenced elsewhere), each EDIT icon
+      // goes into a disabled-with-reason state; ▶ stays enabled
+      // because executing doesn't mutate the fn itself.
+      if (typeof showExecutePopover === 'function') {
+        host.appendChild(createPinnedIconButton({
+          glyph: '▶',
+          title: 'Run this function',
+          inline: true,
+          onClick: (anchor) => showExecutePopover(lineFnEntity, anchor)
+        }));
+      }
+      // ⚙ — service settings. Phase 1 contract: a service needs zero
+      // free args. The check happens at server-validate-create time,
+      // but we surface the constraint here too: button disabled +
+      // explanatory title when the fn has any unbound slot. Hides
+      // entirely when the helper isn't loaded (defensive).
+      if (typeof showServicePopover === 'function'
+          && typeof freeArgsOf === 'function') {
+        const freeArgs = freeArgsOf(lineFnEntity);
+        const blocked = freeArgs.length > 0;
+        host.appendChild(createPinnedIconButton({
+          glyph: '⚙',
+          title: 'Service settings (declare / edit / delete a :service row)',
+          inline: true,
+          disabledReason: blocked
+            ? ('Can\'t make a service — fn has free args: '
+               + freeArgs.map((a) => ':' + a.name).join(' ')
+               + '. Bind them in a derived fn-def first.')
+            : null,
+          onClick: (anchor) => showServicePopover(lineFnEntity, anchor)
+        }));
+      }
       const editBtn = createEditPencilButton({
         onClick: (anchor) => enterFnRenameEditMode(lineFnEntity, anchor),
         disabledReason: lineEditBlockReason
@@ -806,6 +836,38 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       }));
     }
   };
+  // Service badge — only on the root row of an fn-card the cache
+  // knows about. Click opens the same service popover the ⚙ button
+  // does; users see "this fn is running as a service" at-a-glance
+  // without opening the actions popover.
+  if (lineIsRoot && lineFnEntity
+      && typeof getServiceForFnId === 'function'
+      && typeof serviceBadgeState === 'function') {
+    const svc = getServiceForFnId(lineFnEntity.id);
+    const state = serviceBadgeState(svc);
+    if (state) {
+      const badge = document.createElement('span');
+      badge.className = 'service-badge service-badge-' + state;
+      badge.textContent = '●';
+      const stateLabels = {
+        running:  'Running as a service',
+        failed:   'Service start failed — exhausted retries',
+        disabled: 'Service declared but disabled',
+        pending:  'Service enabled but not yet running — reconcile to start',
+      };
+      badge.title = stateLabels[state] + '. Click for settings.';
+      badge.setAttribute('role', 'button');
+      badge.setAttribute('tabindex', '0');
+      badge.style.cursor = 'pointer';
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof showServicePopover === 'function') {
+          showServicePopover(lineFnEntity, badge);
+        }
+      });
+      line.appendChild(badge);
+    }
+  }
   if (typeof createMoreActionsTrigger === 'function') {
     const trigger = createMoreActionsTrigger({
       onEnter: lineClearPreview,

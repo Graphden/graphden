@@ -14,6 +14,7 @@
     [clojure.set]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.fn-execution.lookup :as fn-exec-lookup]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
@@ -695,6 +696,25 @@
                        (= "true" (:required form-data))))))
 
 
+(defn parse-service-from-form
+  "Form-data → :service-row fields. `:fn-id` is required on create.
+   Services have NO args of their own — the fn at :fn-id must have
+   zero free arguments (enforced at validate-create time). See
+   `schema/services/schema.clj` for the full rationale.
+
+   Non-versioned — UPDATE on (:id …) mutates in place; the row's
+   contents become the only truth. Admins disable a service by
+   flipping `:enabled?` to false then calling /api/services/reconcile."
+  [form-data]
+  (cond-> {}
+    (contains? form-data :fn-id)
+    (assoc :fn-id (request/parse-uuid-or-clear (:fn-id form-data)))
+    (contains? form-data :enabled?)
+    (assoc :enabled? (= "true" (:enabled? form-data)))
+    (contains? form-data :restart-policy)
+    (assoc :restart-policy (keyword (:restart-policy form-data)))))
+
+
 (defn parse-binding-list-item-from-form
   "Form-data → binding-list-item row fields. `:binding-id` and
    `:position` are required for create; the value is either a literal
@@ -794,6 +814,7 @@
                  "fn-slot" (parse-fn-slot-from-form form-data)
                  "binding" (parse-binding-from-form form-data)
                  "binding-list-item" (parse-binding-list-item-from-form form-data)
+                 "service" (parse-service-from-form form-data)
                  nil))
         ;; Catch EVERYTHING, not just ExceptionInfo — the parsers throw
         ;; IllegalArgumentException on a bad UUID, JsonParseException on
@@ -835,6 +856,60 @@
                     " can only own slots that rename an inherited slot "
                     "(set :source-slot-id). To add a new arg create a "
                     "new fn-def with this one as parent.")})))
+        ;; A :service may only target a fn whose every slot is bound
+        ;; — the runtime invokes the fn with empty args, so any
+        ;; remaining free arg would crash at startup. Better to refuse
+        ;; here than to let the supervisor record a doomed retry loop.
+        ;; To run the same impl with different params, the admin
+        ;; creates a derived fn-def that binds the free slot, then
+        ;; declares a :service for it.
+        (when (and entity-data (= type-str "service")
+                   (:fn-id entity-data))
+          (let [free (fn-exec-lookup/free-arg-slot-map ctx (:fn-id entity-data))]
+            (when (seq free)
+              {:reason
+               (str "Cannot make a :service for a fn that has free args: "
+                    (vec (keys free))
+                    ". Create a derived fn-def that binds them, then "
+                    "declare a :service for the derived fn.")})))
+        ;; A :service must target a fn declared with the :process effect
+        ;; — the contract is "this fn spawns supervised background work
+        ;; that needs explicit stopping". Without :process, the type
+        ;; system can't structurally tell a stopper-returning fn from a
+        ;; pure thunk like `(fn [] 42)`; the effect declaration is the
+        ;; admin's (or library author's) intent marker.
+        ;;
+        ;; Composed fn-defs inherit parent effects through the type-
+        ;; checker, but some fn-defs fail type-check at sync time and
+        ;; therefore have no rich-type entry registered. To handle that
+        ;; case correctly, we walk the parent chain ourselves and check
+        ;; every ancestor's declared effects — if ANY ancestor declares
+        ;; `:process`, the composed fn is service-eligible.
+        (when (and entity-data (= type-str "service")
+                   (:fn-id entity-data))
+          (let [chain-has-process?
+                (fn walk
+                  [fn-id seen]
+                  (when-not (contains? seen fn-id)
+                    (let [row (sp/read-entity storage :fn fn-id)
+                          nm (some-> row :name name)
+                          eff (some-> (registry/rich-type-of (keyword nm))
+                                      :effects)]
+                      (or (contains? (or eff #{}) :process)
+                          (some #(walk % (conj seen fn-id))
+                                (:parent-ids row))))))
+                fn-name (some-> (sp/read-entity storage :fn (:fn-id entity-data))
+                                :name name)]
+            (when-not (chain-has-process? (:fn-id entity-data) #{})
+              {:reason
+               (str "Cannot make a :service for fn " (pr-str fn-name)
+                    " — neither it nor any ancestor declares the "
+                    ":process effect. :service is reserved for fns that "
+                    "spawn supervised background work (long-running "
+                    "listeners, scheduled loops, etc.). Either add "
+                    "`:effects #{:process …}` to the fn-def if it really "
+                    "does spawn a background process, or wrap a one-shot "
+                    "fn in :schedule to get cron-style execution.")})))
         ;; Cycle / MI / :terminal / :list-closed write-time guards. The
         ;; editor runs `wouldCycle` + `miCollisionCheck` client-side;
         ;; the rest are server-only — non-editor API consumers need
@@ -955,6 +1030,7 @@
                  "fn-slot" (parse-fn-slot-from-form form-data)
                  "binding" (parse-binding-from-form form-data)
                  "binding-list-item" (parse-binding-list-item-from-form form-data)
+                 "service" (parse-service-from-form form-data)
                  nil))
         ;; A bad UUID / malformed JSON must be a 400, not a 500.
         (catch Exception e

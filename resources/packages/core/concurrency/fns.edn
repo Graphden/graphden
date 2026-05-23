@@ -1,0 +1,165 @@
+;; Concurrency / time primitives — atomic base-fns wrapping single
+;; Clojure / Java primitives. Used to compose long-running patterns
+;; (cron schedule, file watcher, queue consumer, websocket listener,
+;; …) at the fn-def layer instead of monolithic base-fns.
+;;
+;; The vocabulary intentionally mirrors Clojure core: `:do` (sequence
+;; effects), `:sleep` (Thread/sleep), `:future` (spawn daemon thread),
+;; `:loop-until-interrupted` (cooperative-shutdown loop). When a future
+;; pattern emerges we add another small primitive instead of a
+;; pattern-specific base-fn.
+;;
+;; Effect declarations:
+;; - `:sleep`   → `:time`
+;; - `:future`  → `:process` (spawns supervised background work —
+;;                this is the service-eligibility marker)
+;; - `:do`, `:loop-until-interrupted` declare no effects of their
+;;   own; they inherit whatever their body composes.
+
+
+{:namespace "core.concurrency"
+ :description "Concurrency / time primitives: sequencing, sleep, future spawning, interruption-bounded loops."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; :do — sequential evaluation of `:steps`; returns the LAST.
+  ;;
+  ;; `:steps` is `:lazy-seq-args` so each item arrives as a delay; the
+  ;; impl forces them in declaration order, guaranteeing side effects
+  ;; fire left-to-right. Without this, the executor is free to resolve
+  ;; in parallel and the ordering would be undefined.
+  ;; ---------------------------------------------------------------------
+  {:name :do
+   :description "Evaluate `:steps` in declaration order (left-to-right) and return the LAST. Use when a fn-graph needs explicit sequencing of effectful steps — e.g. inside a cron loop: `(do (sleep until-next) (invoke target))`."
+   :args {:steps {:type [:list :any]
+                  :description "Vector of values evaluated in order. Each may be a literal or a fn-ref. Side effects fire left-to-right; the result of the LAST entry is returned."}}
+   :return-type :any}
+
+  ;; ---------------------------------------------------------------------
+  ;; :sleep — Thread/sleep wrapper. Honors Thread.interrupt so cooperative
+  ;; shutdown from :future's stopper can unwind a sleeping loop cleanly.
+  ;; ---------------------------------------------------------------------
+  {:name :sleep
+   :description "Block the current thread for `:ms` milliseconds. Honors Thread.interrupt — InterruptedException propagates so a cron loop's `:sleep` can be cut short when the parent :future's stopper fires. Returns nil. Non-positive `:ms` is treated as no-op."
+   :args {:ms {:type :int
+               :description "Milliseconds to block. Non-positive → returns immediately."}}
+   :return-type :null
+   :effects #{:time}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :sleep-until-ms — block until a wall-clock target. Companion to
+  ;; :sleep — composes cleanly with :cron-next-after (which returns an
+  ;; epoch-ms target) without needing intermediate arithmetic.
+  ;; ---------------------------------------------------------------------
+  {:name :sleep-until-ms
+   :description "Block until the given epoch-ms target — or return immediately if already past. Honors Thread.interrupt. Composes with `:cron-next-after` for cron-driven loops: target = next-fire-ms, no subtraction required."
+   :args {:target-ms {:type :int
+                      :description "Wall-clock target in epoch milliseconds."}}
+   :return-type :null
+   :effects #{:time}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :future — spawn body in a daemon thread; return stopper-thunk.
+  ;;
+  ;; The returned `[:fn {} :null]` callable, when invoked, interrupts
+  ;; the spawned thread. This is what makes any composition built on
+  ;; `:future` service-eligible — declares the `:process` effect AND
+  ;; returns the right callable shape for the service registry.
+  ;; ---------------------------------------------------------------------
+  {:name :future
+   :description "Spawn `:body` in a daemon thread, return a stopper-thunk. The returned `(fn [] ...)` interrupts the thread when invoked — InterruptedException propagates through any blocking call (`:sleep`, IO with interrupt support) inside the body. Body errors are logged but don't crash the spawner."
+   :args {:body {:type [:fn {} :any]
+                 :description "Zero-arg callable to run in the background thread. Typically wraps `:loop-until-interrupted` for long-lived patterns."}}
+   :return-type [:fn {} :null]
+   :effects #{:process}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :loop-until-interrupted — body runs while !Thread.isInterrupted.
+  ;;
+  ;; Cooperative shutdown: the parent :future's stopper interrupts the
+  ;; thread; the next `(.isInterrupted ...)` check or a thrown
+  ;; InterruptedException from inside the body breaks the loop. Catches
+  ;; the exception so unwinding is clean.
+  ;; ---------------------------------------------------------------------
+  {:name :loop-until-interrupted
+   :description "Run `:body` repeatedly while `(Thread/isInterrupted)` is false. Exits cleanly when the parent :future's stopper interrupts the thread — either at the next loop boundary or via InterruptedException thrown from inside the body (e.g. by `:sleep`). Catches the exception so shutdown is clean."
+   :args {:body {:type [:fn {} :any]
+                 :description "Zero-arg callable invoked each iteration."}}
+   :return-type :null}
+
+  ;; ---------------------------------------------------------------------
+  ;; :cron-next-after — pure cron-arithmetic primitive.
+  ;;
+  ;; Wraps `org.quartz.CronExpression.getNextValidTimeAfter` — Quartz's
+  ;; well-tested cron parser. We depend on the cron-parser class only;
+  ;; no Quartz scheduler runtime is used. Graphden's own :future +
+  ;; :loop-until-interrupted drive the firing loop.
+  ;;
+  ;; Cron-6 syntax (Quartz): `sec min hr day-of-month mon day-of-week`,
+  ;; e.g. `"0 */5 * * * ?"` = every 5 minutes, `"0 0 9 * * ?"` = 9am
+  ;; daily. The `?` in day-of-week / day-of-month is "no specific value"
+  ;; — Quartz requires it when one of the two is `*`.
+  ;; ---------------------------------------------------------------------
+  {:name :cron-next-after
+   :description "Pure cron arithmetic — given a cron-6 expression and a current epoch-ms, return the NEXT epoch-ms that satisfies the cron. Use with `:current-time-ms` + `:sub` + `:sleep` to drive a cron loop. Throws `:cron/parse-error` on a malformed expression."
+   :args {:cron {:type :text
+                 :description "Quartz cron-6 expression: `sec min hr day-of-month mon day-of-week`."}
+          :now-ms {:type :int
+                   :description "Current epoch milliseconds (from `:current-time-ms`)."}}
+   :return-type :int}
+
+  ;; ---------------------------------------------------------------------
+  ;; :schedule — pure fn-def composition over the concurrency primitives.
+  ;;
+  ;; A cron-driven supervised loop. Each tick computes the delay to the
+  ;; next cron fire, sleeps, then invokes `:fn`. `:future` provides the
+  ;; daemon-thread spawn (and the `:process` effect that makes
+  ;; derivatives service-eligible); `:loop-until-interrupted` carries
+  ;; the cooperative-shutdown semantics so the parent future's stopper
+  ;; can unwind a sleeping iteration cleanly.
+  ;;
+  ;; Free args (closure-capture; see docs/CLOSURE_CAPTURE.md):
+  ;;   :cron — Quartz cron-6 expression (string)
+  ;;   :fn   — 0-arg callable to fire on each tick
+  ;;
+  ;; Both propagate up via:
+  ;;   :cron-next-after's :cron free arg → :_next-fire-ms → :_next-delay-
+  ;;   ms → :_sleep-to-next → list item in :_cron-step → captured-arg of
+  ;;   :_cron-loop (via :loop-until-interrupted :body HOF boundary) →
+  ;;   captured-arg of :schedule (via :future :body HOF boundary).
+  ;;   Same shape for :fn via :_fire-target's :func rename.
+  ;;
+  ;; Admin usage:
+  ;;   {:name :my-cron :parent :schedule :args {:cron "0 */5 * * * ?"
+  ;;                                              :fn :my-tick-fn}}
+  ;; Then `:my-cron` has zero free args and is service-eligible
+  ;; (inherits :process via :schedule → :future).
+  ;; ---------------------------------------------------------------------
+  {:name :schedule
+   :description "Run `:fn` on every fire of a cron schedule. Spawns a daemon thread (inherits `:process` effect from `:future`), loops with cooperative shutdown via Thread.interrupt. Derivatives that bind `:cron` and `:fn` are service-eligible."
+   :parent :future
+   :args {:body :_cron-loop}}
+
+  {:name :_cron-loop
+   :description "Cron-driven cooperative loop body — sleeps to the next fire then invokes the captured `:fn`, repeating until interrupted."
+   :parent :loop-until-interrupted
+   :args {:body :_cron-step}}
+
+  {:name :_cron-step
+   :description "One iteration of the cron loop: sleep until next fire, then invoke `:fn`. Steps fire left-to-right (:do's :lazy-seq-args semantics)."
+   :parent :do
+   :args {:steps [:_sleep-to-next :_fire-target]}}
+
+  {:name :_sleep-to-next
+   :description "Sleep until the next cron fire — `:sleep-until-ms` consumes `:_next-fire-ms` (epoch target). Honors Thread.interrupt so the parent :future's stopper can cut the sleep short."
+   :parent :sleep-until-ms
+   :args {:target-ms :_next-fire-ms}}
+
+  {:name :_next-fire-ms
+   :description "Epoch-ms of the next cron fire after the current time."
+   :parent :cron-next-after
+   :args {:now-ms :current-time-ms}}
+
+  {:name :_fire-target
+   :description "Invoke the captured `:fn` with no arguments. The slot's bare `[:fn {} a]` shape makes the binding-site hof-wrap, capturing the calling scope's `:fn` value."
+   :parent :call-noargs
+   :args {:func {:as :fn}}}]}

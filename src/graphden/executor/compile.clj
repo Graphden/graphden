@@ -120,7 +120,16 @@
    caller's chain via source-id. Lambda-param keys override on merge,
    so a name that happens to collide with an outer key still gets the
    per-call value (Clojure closure semantics: lambda-params shadow
-   outer)."
+   outer).
+
+   This function IS the wrap-time-capture half of graphden's closure-
+   capture model — see `docs/CLOSURE_CAPTURE.md`. Each invocation of
+   the parent fn snapshots `outer-free-args` at this point, and the
+   returned callable carries that snapshot forward (into a `:future`
+   thread, into `:map`'s lambda call site, etc.). The fn-graph it
+   wraps thus resolves CAPTURED arg names against the binding-chain
+   at wrap site, while CALL-SITE arg names flow in via the
+   lambda-param merge."
   [compiled lambda-params all-fns outer-free-args]
   (case (count lambda-params)
     0 (fn [& _] (compiled all-fns outer-free-args))
@@ -320,10 +329,13 @@
   "Attach `:hof-lambda-params` to `bnd` (a :ref binding with
    :is-fn=true). The list comes from `r/hof-lambda-params` —
    structurally-classified per-call slots of the HOF target as seen
-   from the caller `fn-id`."
+   from the caller `fn-id`. The slot id + binding row let
+   `hof-lambda-params` read the slot's structural `[:fn {ARGS} _]`
+   shape (when present) and use it as the authority for what's
+   call-site vs captured (closure-capture; docs/CLOSURE_CAPTURE.md)."
   [fn-id lookups bnd]
   (assoc bnd :hof-lambda-params
-         (r/hof-lambda-params (:ref-id bnd) fn-id lookups)))
+         (r/hof-lambda-params (:ref-id bnd) (:slot-id bnd) bnd fn-id lookups)))
 
 
 (defn- enrich-ref-bindings

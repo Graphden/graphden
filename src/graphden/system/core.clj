@@ -9,8 +9,11 @@
    :exec/base-fns    → [:db/versioned, :app/packages]
    :exec/fn-entities → [:db/versioned, :exec/base-fns, :app/packages]
    :exec/context     → [:db/versioned]
-   :http/server      → [:exec/context, :exec/fn-entities, :app/packages]"
+   :exec/compiled-registry  → [:exec/context, :exec/fn-entities]
+   :exec/service-reconciler → [:exec/context, :app/packages, :exec/compiled-registry]
+   :exec/cleanup-scheduler  → [:exec/context]"
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.deps :as deps]
@@ -20,11 +23,14 @@
     [graphden.executor.registry.interface :as registry]
     [graphden.packages.loader :as pkg]
     [graphden.packages.records :as records]
+    [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
+    [graphden.schema.services.schema :as svcs]
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
+    [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.core :as postgres]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
@@ -43,6 +49,14 @@
       (gds/extend-builder)
       (vts/extend-builder)
       (vds/extend-builder)
+      ;; Executions ref :fn-version (vds-registered above). Non-
+      ;; versioned (event-shaped, immutable), so they don't appear
+      ;; in versioning's entity-config.
+      (es/extend-builder)
+      ;; Services ref :fn (logical, not version). Also non-versioned —
+      ;; admin desired-state mutates in place; per-version trail is
+      ;; carried by the :fn-execution rows services SPAWN.
+      (svcs/extend-builder)
       (ds/build)))
 
 
@@ -330,30 +344,235 @@
 
 
 ;; =============================================================================
-;; HTTP Server (executed via compile-at-startup registry)
+;; Service reconciler (replaces :http/server)
+;;
+;; On start: read enabled :service rows; if none, fall back to the
+;; package-declared :startup-fn (single-shot, no supervision). When
+;; service rows exist they take priority — the legacy :startup-fn is
+;; ignored so an admin who switched to declarative services doesn't
+;; get a duplicate web-server bound to the same port.
+;;
+;; On halt: stop every running service (including the legacy fallback).
+;;
+;; Phase 1 is NOT periodic-poll: the in-process atom is only modified
+;; from CRUD endpoints (which call `recon/reconcile-once!` after
+;; writing) and from this init-key. Out-of-band DB edits (psql, other
+;; tools) won't be picked up until restart — acceptable for the admin
+;; workflow on Phase 1. Periodic poll arrives with multi-pod (Phase 3).
 ;; =============================================================================
 
-(defmethod ig/init-key :http/server [_ {:keys [context packages port]}]
-  (let [startup-fn-name (:startup-fn packages)]
-    (log/info "Starting HTTP server via" startup-fn-name "on port" port "...")
-    (let [server (cr/execute-by-name context (name startup-fn-name) nil)]
-      (log/info "HTTP server started on port" port)
-      server)))
+(defn- resolve-fn-id-by-name
+  "Best-effort fn-name → fn-id lookup. Storage codec ambiguity (text
+   vs enum-tagged) is handled by trying both forms — same pattern as
+   `fn-execution.lookup/query-fn-by-name` but inlined here to avoid
+   coupling the legacy-fallback path to crud machinery."
+  [storage fn-name]
+  (letfn [(try-one
+            [v]
+            (try (some-> (first (sp/query-entities storage :fn {:name v})) :id)
+                 (catch clojure.lang.ExceptionInfo _ nil)))]
+    (or (try-one fn-name)
+        (try-one (keyword fn-name)))))
 
 
-(defmethod ig/halt-key! :http/server [_ server]
-  (log/info "Stopping HTTP server...")
-  (when server
-    ;; http-kit server is a function - calling it stops the server
-    (server))
-  (log/info "HTTP server stopped"))
+(defn- start-legacy-fallback!
+  "When no :service rows exist, honour the package-declared
+   `:startup-fn` (single-shot, no supervisor). Returns the fn's
+   return value (a stopper for web-server-shape fns).
+
+   Also stashes `{:fn-id :stopper}` under `recon/legacy-handle` so:
+   - `validate-execute`'s `already-running-as-service?` can reject
+     ad-hoc Run on the same fn (clicking ▶ on the legacy web-server
+     would try to re-bind its port)
+   - `reconcile-once!`'s displacement step can stop the fallback
+     before starting a matching managed service"
+  [context packages]
+  (when-let [startup-fn-name (:startup-fn packages)]
+    (log/warn "no :service rows in DB — falling back to package :startup-fn"
+              startup-fn-name
+              "(declare a :service row to enable supervision; this code path goes away in Phase 2)")
+    (let [fn-id (resolve-fn-id-by-name (:storage context) (name startup-fn-name))
+          stopper (cr/execute-by-name context (name startup-fn-name) nil)]
+      (reset! recon/legacy-handle {:fn-id fn-id :stopper stopper})
+      stopper)))
 
 
-(defmethod ig/suspend-key! :http/server [_ server]
-  ;; Same as halt for HTTP server
-  (when server (server)))
+(defmethod ig/init-key :exec/service-reconciler [_ {:keys [context packages]}]
+  (log/info "Starting service reconciler...")
+  ;; Production singletons — clear any stale state from a previous run
+  ;; (e.g. test fixture or REPL reset) before reconciling.
+  (reset! recon/running {})
+  (reset! recon/legacy-handle nil)
+  (let [storage (:storage context)
+        enabled-services (sp/query-entities storage :service {:enabled? true})
+        ;; Legacy fallback lives OUTSIDE the reconciler's atom — if it
+        ;; was in there, every `/api/services/reconcile` would diff
+        ;; against the empty DB and stop the web-server. Stored in the
+        ;; component map; halt-key! drains it alongside `stop-all!`.
+        ;; Once an admin declares a real :service for :web-server, the
+        ;; bind will conflict (legacy still on the port). Phase 2's
+        ;; packages-based registration will retire this path entirely.
+        legacy-stopper (when (empty? enabled-services)
+                         (start-legacy-fallback! context packages))]
+    (when (seq enabled-services)
+      (log/info "reconciling" (count enabled-services) "enabled :service rows")
+      (recon/reconcile-once! context recon/running))
+    {:running recon/running
+     :context context
+     :legacy-stopper legacy-stopper}))
 
 
-(defmethod ig/resume-key :http/server [k opts _ _]
-  ;; Restart server with new context
-  (ig/init-key k opts))
+(defn- stop-legacy!
+  "Defensive: legacy-stopper is whatever the startup-fn returned —
+   usually a thunk, but we don't enforce it. Log unfamiliar shapes
+   instead of throwing, mirroring `reconciler/stop-service!`."
+  [legacy-stopper]
+  (try
+    (cond
+      (fn? legacy-stopper)  (do (log/info "stopping legacy fallback")
+                                (legacy-stopper))
+      (nil? legacy-stopper) nil
+      :else                 (log/warn "legacy fallback stopper is non-callable"
+                                      (type legacy-stopper)))
+    (catch Exception e
+      (log/error e "legacy fallback stopper threw"))))
+
+
+(defmethod ig/halt-key! :exec/service-reconciler [_ {:keys [running legacy-stopper]}]
+  (log/info "Stopping service reconciler...")
+  (when running (recon/stop-all! running))
+  ;; Two possible stoppers — `:legacy-stopper` in the component map
+  ;; (set by init-key) and the `:stopper` in `recon/legacy-handle`
+  ;; (set by start-legacy-fallback!). They're the same function but
+  ;; the handle may have been cleared by `maybe-displace-legacy!`
+  ;; already — calling the component-map one is the authoritative path.
+  (stop-legacy! legacy-stopper)
+  (reset! recon/legacy-handle nil)
+  (log/info "Service reconciler stopped"))
+
+
+(defmethod ig/suspend-key! :exec/service-reconciler [_ component]
+  ;; Same as halt — services don't have a suspend state distinct from
+  ;; stop in Phase 1.
+  (when-let [running (:running component)] (recon/stop-all! running))
+  (stop-legacy! (:legacy-stopper component)))
+
+
+;; =============================================================================
+;; Execution cleanup scheduler
+;;
+;; Runs hourly. Sweeps `:fn-execution` rows whose status + age exceeds
+;; the per-status TTL (see `crud.fn-execution` ns-docstring). Single
+;; scheduled-executor thread; halt-key shuts it down + awaits in-
+;; flight work.
+;; =============================================================================
+
+(defn- one-hour
+  []
+  (* 60 60 1000))
+
+
+(defn- as-instant
+  "Storage codec returns timestamptz columns in different shapes
+   depending on backend / driver / clj-reader (jdbc.next default is
+   `java.time.Instant`; the pg driver returns `java.sql.Timestamp` for
+   some configs; the EDN reader walks `#inst` literals as
+   `java.util.Date`; serialised forms come back as ISO-8601 or
+   SQL-style strings). Normalise to `java.time.Instant`."
+  [x]
+  (cond
+    (nil? x) nil
+    (instance? java.time.Instant x) x
+    ;; Both java.sql.Timestamp and java.util.Date expose toInstant().
+    (instance? java.util.Date x) (java.util.Date/.toInstant x)
+    :else
+    (let [s (str x)]
+      (try (java.time.Instant/parse s)
+           (catch java.time.format.DateTimeParseException _
+             ;; SQL-style `2026-05-21 12:00:00.0` — rewrite to ISO.
+             (let [iso (-> s
+                           (str/replace #" " "T")
+                           ;; drop trailing fractional-second zero pad
+                           ;; that may not parse without a Z
+                           (str/replace #"\.0+$" "")
+                           (str "Z"))]
+               (java.time.Instant/parse iso)))))))
+
+
+(defn sweep-executions!
+  "Delete `:fn-execution` rows past TTL; mark zombie `:pending` rows
+   older than 1h as `:cancelled` so the row stops blocking the
+   polling client.
+
+   `now` is an injectable `Instant` for deterministic tests; defaults
+   to wall-clock when omitted. Public (no `-` suffix) so tests can
+   exercise it without `#'`-style var lookups."
+  ([storage]
+   (sweep-executions! storage (java.time.Instant/now)))
+  ([storage now]
+   (let [now-ms (java.time.Instant/.toEpochMilli now)
+         ;; Per-status TTLs (in ms).
+         ttl-ms {"succeeded" (* 7  24 60 60 1000)
+                 "failed"    (* 30 24 60 60 1000)
+                 "cancelled" (* 7  24 60 60 1000)}
+         zombie-ms (one-hour)
+         all (sp/query-entities storage :fn-execution {})
+         age-of (fn [row stamp-key]
+                  (when-let [t (as-instant (get row stamp-key))]
+                    (- now-ms (java.time.Instant/.toEpochMilli t))))
+         ;; storage may return :status as the enum keyword `:succeeded`
+         ;; OR the bare string "succeeded" depending on codec; `name`
+         ;; normalises to the bare token both ways.
+         status-str (fn [row]
+                      (let [s (:status row)]
+                        (cond
+                          (keyword? s) (name s)
+                          (string? s) s
+                          :else (str s))))]
+     (doseq [row all]
+       (let [status (status-str row)]
+         (cond
+           ;; Zombie sweep: pending > 1h gets force-cancelled so the
+           ;; polling client stops waiting forever for a future that
+           ;; died with the JVM.
+           (and (= "pending" status)
+                (when-let [a (age-of row :started-at)] (> a zombie-ms)))
+           (sp/update-entity storage :fn-execution (:id row)
+                             {:status :cancelled
+                              :finished-at now
+                              :error "zombie: pending > 1h, swept"})
+
+           ;; TTL sweep: delete rows past per-status retention.
+           (when-let [limit (get ttl-ms status)]
+             (when-let [a (age-of row :finished-at)] (> a limit)))
+           (sp/delete-entity storage :fn-execution (:id row))))))))
+
+
+(defmethod ig/init-key :exec/cleanup-scheduler
+  [_ {:keys [context period-ms]}]
+  (let [storage (:storage context)
+        period (or period-ms (one-hour))
+        scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+    (log/info "Starting execution cleanup scheduler — period" period "ms")
+    (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
+      scheduler
+      ^Runnable (fn []
+                  ;; Catch Exception (not Throwable) — Errors should
+                  ;; propagate, the scheduler swallowing them is fine
+                  ;; for OOM / StackOverflow cases.
+                  (try (sweep-executions! storage)
+                       (catch Exception e
+                         (log/warn e "execution-cleanup sweep failed"))))
+      period period
+      java.util.concurrent.TimeUnit/MILLISECONDS)
+    scheduler))
+
+
+(defmethod ig/halt-key! :exec/cleanup-scheduler
+  [_ ^java.util.concurrent.ScheduledExecutorService scheduler]
+  (when scheduler
+    (log/info "Stopping execution cleanup scheduler...")
+    (java.util.concurrent.ExecutorService/.shutdown scheduler)
+    (try (java.util.concurrent.ExecutorService/.awaitTermination
+           scheduler 5 java.util.concurrent.TimeUnit/SECONDS)
+         (catch InterruptedException _ nil))))

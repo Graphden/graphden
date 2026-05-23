@@ -111,27 +111,47 @@ is uniform across storages.
 
 ## Part 3: Recursion and Cycles
 
-### Cyclic dependencies
+### The state of graph-level recursion (honest assessment)
 
-`validate-no-dependency-cycle!` rejects any binding whose
-`:ref-fn-id` would close a cycle through fn references — including
-the self-reference `owner-fn-id == ref-fn-id` (caught early in
-`validate-no-dependency-cycle-impl` before walking the dependency
-chain). The walk follows binding `ref-fn-id`,
-`type-override-fn-id`, and `binding-list-item.ref-fn-id` edges; any
-binding pointing at its own fn or at an ancestor in its ref-chain
-is a write-time error.
+Two enforcement layers reject recursive fn-defs at write/sync time;
+together they make graph-level recursion **structurally
+impossible** in the current architecture:
 
+1. **Lower-level — `validate-no-dependency-cycle-impl`**
+   (`storage/protocol/constraints.clj`). Per-binding write-time
+   check. Walks `ref-fn-id` + `parent-fn-ids` + `type-override-fn-id`
+   + `binding-list-item.ref-fn-id` edges from the bound ref. Rejects
+   when the chain closes back on the owner. Carves out
+   `owner == ref` (the bare self-reference) as allowed — but see
+   below: the higher-level check catches this anyway.
+
+2. **Higher-level — `topological-sort`**
+   (`executor/composition/deps.clj`). Sync-time check across the
+   whole fn-def set. Rejects ANY cycle, including bare self-refs.
+   Required because the executor compiles closures in topological
+   order and a cycle has no valid order.
+
+```edn
+;; Pattern A: bare self-ref — rejected by topological-sort even
+;; though the per-binding check carves it out.
+{:name :fact :parent :if :args {:test :_zero? :then 1 :else :fact}}
+;; → :fn-composition/circular-dependency on sync
+
+;; Pattern B: wrapper that decrements :n — rejected by the per-binding
+;; cycle check via parent+ref edges (parent :fact → ref :_mul-recurse
+;; → ref :_fact-tail → parent :fact closes the loop).
+{:name :_fact-tail :parent :fact :args {:n :_n-minus-1}}
+;; → :constraint-violation/dependency-cycle on storage write
 ```
-fn A binding {slot x, ref-fn-id B}
-fn B binding {slot y, ref-fn-id A}    ✗ dependency-cycle
-```
 
-### Recursion at runtime, not in the graph
+Empirically verified: both patterns are rejected. There is no
+combination of graph-only composition that expresses productive
+recursion today.
 
-Because graph-level cycles are forbidden, recursive Clojure
-functions don't bind themselves through `:ref-fn-id`. Instead, a
-base-fn impl re-enters the executor by name:
+### Current working pattern: runtime re-entry from a base-fn impl
+
+The only path that works today is escaping into Clojure inside a
+base-fn impl and calling back through the executor:
 
 ```clojure
 (defbase fact-step [n ctx]
@@ -141,21 +161,49 @@ base-fn impl re-enters the executor by name:
 ```
 
 The graph stores `fact-step` as a normal base-fn — no cycle to
-detect at write time. Recursion happens in the impl code; the
-executor's depth and timeout limits bound runaway.
+detect. Recursion happens entirely in the impl code; the executor's
+depth limit bounds runaway.
+
+**This pattern violates the Code = Graph principle** — the
+recursive structure lives in Clojure, invisible to the editor /
+type-checker / graph traversals. Acceptable as a short-term escape
+hatch for one-off recursive base-fns, but it's not a substitute for
+graph-level recursion.
 
 ### Mutual recursion
 
-Two fns calling each other go through the same runtime
-re-entry: each impl invokes the other by name. No graph-level
-cycle, no cycle-check rejection.
+Forbidden by the same two checks. Two fns calling each other form a
+cycle of length 2, rejected at topological-sort. The same runtime
+re-entry escape-hatch is the only option.
+
+### Roadmap
+
+Two viable approaches are fully specified in
+[RECURSION.md](RECURSION.md):
+
+- **Approach A — `:fix` (Y-combinator + closure-capture)**:
+  one new base-fn, leverages closure-capture (`:self` is a captured
+  arg synthesized at wrap time by `:fix`'s impl). Cycle invariant
+  preserved. Mutual recursion via tag-dispatch convention. ~3
+  hours estimated effort.
+- **Approach B — Lazy ref resolution**: relax the cycle check
+  (optionally gated by a `:recursive?` flag on fn-row), compiler
+  generates lazy thunks at every ref site. Natural mutual
+  recursion. ~1-2 days estimated effort — touches compile
+  pipeline + `delta-recompile!` + type-checker.
+
+**Recommended order**: ship A first; revisit B only if A's
+mutual-recursion ergonomics prove insufficient in practice. When A
+lands, `exec/execute-by-name` from inside an impl moves from
+"escape hatch" to explicit anti-pattern.
 
 ### Runtime safety
 
 The executor caps recursion through `:max-depth` and `:timeout-ms`
-on the execution context (defaults 1000 and 30 s). Storage-layer
-graph resolution caps walks via `*max-graph-iterations*` (default
-10000) when building closures.
+on the execution context (defaults 1000 and 30 s) — applies to BOTH
+the runtime re-entry pattern AND the future `:fix`-based pattern.
+Storage-layer graph resolution caps walks via
+`*max-graph-iterations*` (default 10000) when building closures.
 
 ---
 

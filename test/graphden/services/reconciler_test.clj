@@ -1,0 +1,524 @@
+(ns graphden.services.reconciler-test
+  "Tests for `graphden.services.reconciler` — the diff/start/stop
+   policy and the storage-driven reconcile pass.
+
+   The pure `diff-desired` is tested in isolation; the start/stop
+   pass uses a fixture-built storage + a synthetic base-fn whose
+   impl records its calls (via an atom) so we can assert that
+   reconcile-once! actually invoked the executor with the right
+   service-args and that stoppers fire on shutdown."
+  (:require
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.entities]
+    [graphden.executor.context :as ctx]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
+    [graphden.executor.test-setup :as setup]
+    [graphden.packages.records :as records]
+    [graphden.schema.executions.schema :as es]
+    [graphden.schema.graph.schema :as gds]
+    [graphden.schema.malli.core :as mds]
+    [graphden.schema.protocol.protocol :as ds]
+    [graphden.schema.services.schema :as svcs]
+    [graphden.schema.traits.schema :as vts]
+    [graphden.schema.versioned.schema :as vds]
+    [graphden.services.reconciler :as recon]
+    [graphden.storage.postgres.core :as pg]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.versioning.storage.core :as vs]))
+
+
+(use-fixtures :once (setup/create-container-fixture))
+
+
+(defn- full-schema
+  []
+  (-> (mds/create-builder)
+      (gds/extend-builder)
+      (vts/extend-builder)
+      (vds/extend-builder)
+      (es/extend-builder)
+      (svcs/extend-builder)
+      (ds/build)))
+
+
+(defn- create-full-storage
+  []
+  (pth/clean-database-fast! @(resolve 'graphden.executor.test-setup/*container*))
+  (let [container @(resolve 'graphden.executor.test-setup/*container*)
+        storage (pg/create-storage (pth/get-container-config container))]
+    (sp/initialize storage (full-schema))
+    (sp/upsert-entities storage :fn
+                        (mapv #(dissoc % :kind) (records/boot-primitive-records)))
+    (let [branch (sp/create-entity storage :branch
+                                   {:name "test-branch"
+                                    :created-at (java.time.Instant/now)})]
+      (vs/->VersionedStorage storage (:id branch)))))
+
+
+(defn- test-ctx
+  [storage]
+  (ctx/create-context {:storage storage :base-fns (exec/get-default-registry)}))
+
+
+;; ============================================================================
+;; Pure: diff-desired
+;; ============================================================================
+
+(deftest diff-desired-test
+  (testing "empty inputs → empty diff"
+    (is (= {:to-start [] :to-stop []}
+           (recon/diff-desired #{} #{}))))
+
+  (testing "enabled but not running → start"
+    (let [d (recon/diff-desired #{1 2 3} #{2})]
+      (is (= #{1 3} (set (:to-start d))))
+      (is (= [] (:to-stop d)))))
+
+  (testing "running but not enabled → stop"
+    (let [d (recon/diff-desired #{} #{1 2})]
+      (is (= [] (:to-start d)))
+      (is (= #{1 2} (set (:to-stop d))))))
+
+  (testing "intersection — already running + enabled stays untouched"
+    (let [d (recon/diff-desired #{1 2 3} #{2 3 4})]
+      (is (= [1] (:to-start d)))
+      (is (= [4] (:to-stop d))))))
+
+
+;; ============================================================================
+;; Storage-driven: reconcile-once! actually starts + stops
+;; ============================================================================
+
+(defn- make-trackable-fn!
+  "Register a no-arg base-fn whose impl records each invocation into
+   `calls` and returns a stopper-thunk that records its own invocation
+   into `stops`. Mirrors the http-kit shape (return value = stopper).
+   Services target fns with no free args; per-instance distinction is
+   via different fn-defs (different suffixes / impl-names), not via
+   per-call args."
+  [storage suffix calls stops]
+  (let [base-name (str "test-trackable-" suffix)
+        composed-name (str "my-test-trackable-" suffix)
+        impl-fn (fn [_args _ctx]
+                  (swap! calls conj {:suffix suffix})
+                  (fn [] (swap! stops conj {:suffix suffix})))]
+    (exec/register-base-fn! (keyword base-name) impl-fn)
+    (let [base (setup/create-base-fn! storage base-name :any)]
+      {:base base
+       :composed (setup/create-composed-fn! storage composed-name (:id base))})))
+
+
+(defn- make-service-row!
+  [storage fn-id enabled?]
+  (sp/create-entity storage :service
+                    {:fn-id fn-id
+                     :enabled? enabled?
+                     :restart-policy :always}))
+
+
+(deftest reconcile-once-starts-enabled-services-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed}
+        (make-trackable-fn! storage "start" calls stops)
+        svc (make-service-row! storage (:id composed) true)
+        c (test-ctx storage)
+        running (atom {})]
+    (try
+      (let [r (recon/reconcile-once! c running)]
+        (testing "diff classified the row as :to-start"
+          (is (= [(:id svc)] (:started r)))
+          (is (= [] (:stopped r))))
+        (testing "the impl was invoked once"
+          (is (= [{:suffix "start"}] @calls)))
+        (testing "running atom carries the entry"
+          (is (= 1 (count @running)))
+          (is (= (:id composed) (-> @running vals first :fn-id)))
+          (is (fn? (-> @running vals first :stopper)))))
+      (finally (sp/close storage)))))
+
+
+(deftest reconcile-once-stops-disabled-services-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed}
+        (make-trackable-fn! storage "stop-disabled" calls stops)
+        svc (make-service-row! storage (:id composed) true)
+        c (test-ctx storage)
+        running (atom {})]
+    (try
+      ;; First pass — starts the service.
+      (recon/reconcile-once! c running)
+      (is (= 1 (count @running)))
+
+      ;; Flip enabled? false — second pass should stop it.
+      (sp/update-entity storage :service (:id svc) {:enabled? false})
+      (let [r (recon/reconcile-once! c running)]
+        (testing "diff classified the row as :to-stop"
+          (is (= [] (:started r)))
+          (is (= [(:id svc)] (:stopped r))))
+        (testing "stopper was invoked"
+          (is (= [{:suffix "stop-disabled"}] @stops)))
+        (testing "running atom now empty"
+          (is (zero? (count @running)))))
+      (finally (sp/close storage)))))
+
+
+(deftest reconcile-once-idempotent-when-running-matches-desired-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed}
+        (make-trackable-fn! storage "idem" calls stops)]
+    (make-service-row! storage (:id composed) true)
+    (let [c (test-ctx storage)
+          running (atom {})]
+      (try
+        (recon/reconcile-once! c running)
+        (is (= 1 (count @calls)) "first pass started")
+        ;; Second pass — no DB changes, no work.
+        (let [r (recon/reconcile-once! c running)]
+          (is (= [] (:started r)))
+          (is (= [] (:stopped r))))
+        (is (= 1 (count @calls)) "impl was NOT re-invoked on second pass")
+        (is (= [] @stops) "no stopper fired")
+        (finally (sp/close storage))))))
+
+
+(deftest stop-all-drains-running-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        ;; Two DIFFERENT fns (different suffixes / impls) — the model
+        ;; says each "deployment" = its own fn-def, so simulating
+        ;; "two running services" means two fns + two services.
+        {a :composed} (make-trackable-fn! storage "drain-a" calls stops)
+        {b :composed} (make-trackable-fn! storage "drain-b" calls stops)]
+    (make-service-row! storage (:id a) true)
+    (make-service-row! storage (:id b) true)
+    (let [c (test-ctx storage)
+          running (atom {})]
+      (try
+        (recon/reconcile-once! c running)
+        (is (= 2 (count @running)))
+        (recon/stop-all! running)
+        (testing "all stoppers called, running cleared"
+          (is (zero? (count @running)))
+          (is (= #{"drain-a" "drain-b"} (set (map :suffix @stops)))))
+        (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; Generic CRUD smoke — :service is a regular entity, the standard
+;; storage protocol should handle it without per-type machinery. If
+;; this breaks, the admin's "POST /api/entities/service" workflow
+;; (Phase 1 has no /api/services CRUD endpoints) would silently break.
+;; ============================================================================
+
+(deftest service-roundtrips-through-generic-crud-test
+  (let [storage (create-full-storage)
+        {composed :composed}
+        (make-trackable-fn! storage "crud-rt" (atom []) (atom []))
+        svc-row (sp/create-entity storage :service
+                                  {:fn-id (:id composed)
+                                   :enabled? false
+                                   :restart-policy :on-failure})]
+    (try
+      (testing "create + read-back of :service preserves all fields"
+        (let [r (sp/read-entity storage :service (:id svc-row))]
+          (is (some? r))
+          (is (= (:id composed) (:fn-id r)))
+          (is (false? (:enabled? r)))
+          (is (#{:on-failure "on-failure"} (:restart-policy r)))))
+      (testing "update flips :enabled? in place (non-versioned)"
+        (sp/update-entity storage :service (:id svc-row) {:enabled? true})
+        (is (true? (:enabled? (sp/read-entity storage :service (:id svc-row))))))
+      (testing "query by :enabled? filters correctly"
+        (let [rows (sp/query-entities storage :service {:enabled? true})]
+          (is (= 1 (count rows)))
+          (is (= (:id svc-row) (-> rows first :id)))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; validate-create rejects :service when target fn has free args.
+;; The runtime invokes service fns with empty args — leaving a free
+;; slot guarantees startup crash, so we refuse upfront.
+;; ============================================================================
+
+(deftest validate-create-rejects-service-on-fn-with-free-args-test
+  (let [storage (create-full-storage)
+        ;; A base-fn with one declared but unbound slot — composed
+        ;; instance inherits the slot as a free arg.
+        base-name "test-needs-arg"
+        composed-name "my-test-needs-arg"
+        _impl (exec/register-base-fn! (keyword base-name) (fn [_ _] :ok))
+        base (setup/create-base-fn! storage base-name :any)
+        port-slot (setup/create-slot! storage "port" :int)
+        _ (setup/attach-slot! storage (:id base) (:id port-slot) 0)
+        composed (setup/create-composed-fn! storage composed-name (:id base))
+        c (test-ctx storage)]
+    (try
+      (testing "validate-create rejects with the free-args listed"
+        (let [parsed {:entity-type :service
+                      :type-str "service"
+                      :form-data {:fn-id (str (:id composed))
+                                  :enabled? "true"
+                                  :restart-policy "always"}
+                      :entity-data {:fn-id (:id composed)
+                                    :enabled? true
+                                    :restart-policy :always}}
+              rej (graphden.crud.entities/validate-create parsed c)]
+          (is (some? rej))
+          (is (re-find #"free args" (:reason rej)))
+          (is (re-find #":port" (:reason rej)))))
+      (testing "binding the slot AND declaring :process makes the fn service-eligible"
+        ;; Create a derived fn-def that binds :port — same impl, no
+        ;; free args anymore. Also register a rich-type WITH :process
+        ;; so the second validation gate passes.
+        (let [derived-name "my-test-needs-arg-bound"
+              derived (setup/create-composed-fn! storage
+                                                 derived-name
+                                                 (:id composed))]
+          (setup/bind-value! storage (:id derived) (:id port-slot) 8080)
+          (registry/record-rich-types-raw!
+            (keyword derived-name)
+            {:args {} :return [:fn {} :null] :effects #{:process}})
+          (let [parsed {:entity-type :service
+                        :type-str "service"
+                        :form-data {:fn-id (str (:id derived))
+                                    :enabled? "true"
+                                    :restart-policy "always"}
+                        :entity-data {:fn-id (:id derived)
+                                      :enabled? true
+                                      :restart-policy :always}}]
+            (is (nil? (graphden.crud.entities/validate-create parsed c))
+                "no rejection — slot is bound + :process declared"))
+          ;; Cleanup rich-type so it doesn't bleed into other tests.
+          (registry/record-rich-types-raw!
+            (keyword derived-name)
+            {:args {} :return :any :effects #{}})))
+      (testing "binding alone (without :process) still rejects"
+        (let [derived-name "my-test-needs-arg-bound-noeff"
+              derived (setup/create-composed-fn! storage
+                                                 derived-name
+                                                 (:id composed))]
+          (setup/bind-value! storage (:id derived) (:id port-slot) 8080)
+          (let [parsed {:entity-type :service
+                        :type-str "service"
+                        :form-data {:fn-id (str (:id derived))
+                                    :enabled? "true"
+                                    :restart-policy "always"}
+                        :entity-data {:fn-id (:id derived)
+                                      :enabled? true
+                                      :restart-policy :always}}
+                rej (graphden.crud.entities/validate-create parsed c)]
+            (is (some? rej) "rejected — fn has no :process effect declared")
+            (is (re-find #":process effect" (:reason rej))))))
+      (finally (sp/close storage)))))
+
+
+(deftest start-failure-is-recorded-as-nil-stopper-test
+  (testing "if the impl throws on start, the service is still tracked"
+    (let [storage (create-full-storage)
+          base-name "test-failing-svc"
+          composed-name "my-test-failing-svc"
+          impl-fn (fn [_args _ctx]
+                    (throw (ex-info "port in use" {:type :test/bind-err})))]
+      (exec/register-base-fn! (keyword base-name) impl-fn)
+      (let [base (setup/create-base-fn! storage base-name :any)
+            composed (setup/create-composed-fn! storage composed-name (:id base))
+            svc (sp/create-entity storage :service
+                                  {:fn-id (:id composed)
+                                   :enabled? true
+                                   :restart-policy :never})  ; no retries
+            c (test-ctx storage)
+            running (atom {})]
+        (try
+          (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})
+          (testing "service is registered in running with nil stopper"
+            (is (= 1 (count @running)))
+            (is (nil? (-> @running (get (:id svc)) :stopper)))
+            (is (some? (-> @running (get (:id svc)) :start-failed-at))
+                ":start-failed-at recorded so admin can see we gave up"))
+          (testing "subsequent stop is a logged no-op (does not throw)"
+            (is (some? (recon/stop-all! running)))
+            (is (zero? (count @running))))
+          (finally (sp/close storage)))))))
+
+
+;; ============================================================================
+;; Supervisor — `:restart-policy :always` / `:on-failure` retries start
+;; on exception (bounded). `:never` gives up after first attempt.
+;; ============================================================================
+
+(deftest supervisor-retries-on-start-failure-test
+  (let [storage (create-full-storage)
+        ;; Impl that fails the first N times then succeeds — lets us
+        ;; assert the supervisor's retry loop without sleeping real
+        ;; backoff time.
+        attempt-counter (atom 0)
+        fail-times 2
+        base-name "test-flaky-svc"
+        composed-name "my-test-flaky-svc"
+        impl-fn (fn [_args _ctx]
+                  (let [n (swap! attempt-counter inc)]
+                    (if (<= n fail-times)
+                      (throw (ex-info "transient failure" {:attempt n}))
+                      (fn [] :stopped))))]
+    (exec/register-base-fn! (keyword base-name) impl-fn)
+    (let [base (setup/create-base-fn! storage base-name :any)
+          composed (setup/create-composed-fn! storage composed-name (:id base))
+          svc (sp/create-entity storage :service
+                                {:fn-id (:id composed)
+                                 :enabled? true
+                                 :restart-policy :always})
+          c (test-ctx storage)
+          running (atom {})]
+      (try
+        ;; Backoff 0ms so the test is fast — supervisor still loops the
+        ;; specified max-retries times.
+        (recon/reconcile-once! c running {:max-retries 5 :backoff-ms 0})
+        (testing "the impl was retried until it succeeded"
+          (is (= 3 @attempt-counter)
+              "2 failures + 1 success = 3 invocations"))
+        (testing "running entry has the SUCCESSFUL stopper and start-attempts=3"
+          (let [entry (get @running (:id svc))]
+            (is (fn? (:stopper entry)))
+            (is (= 3 (:start-attempts entry)))
+            (is (nil? (:start-failed-at entry))
+                "no give-up marker — we eventually succeeded")))
+        (finally (sp/close storage))))))
+
+
+(deftest supervisor-respects-policy-never-test
+  (testing ":never policy → single attempt regardless of failure"
+    (let [storage (create-full-storage)
+          attempt-counter (atom 0)
+          base-name "test-fail-never-svc"
+          composed-name "my-test-fail-never-svc"
+          impl-fn (fn [_args _ctx]
+                    (swap! attempt-counter inc)
+                    (throw (ex-info "always fails" {})))]
+      (exec/register-base-fn! (keyword base-name) impl-fn)
+      (let [base (setup/create-base-fn! storage base-name :any)
+            composed (setup/create-composed-fn! storage composed-name (:id base))
+            svc (sp/create-entity storage :service
+                                  {:fn-id (:id composed)
+                                   :enabled? true
+                                   :restart-policy :never})
+            c (test-ctx storage)
+            running (atom {})]
+        (try
+          (recon/reconcile-once! c running {:max-retries 99 :backoff-ms 0})
+          (testing "exactly one call — max-retries ignored for :never"
+            (is (= 1 @attempt-counter)))
+          (testing "start-attempts=1, start-failed-at set"
+            (let [entry (get @running (:id svc))]
+              (is (= 1 (:start-attempts entry)))
+              (is (some? (:start-failed-at entry)))))
+          (finally (sp/close storage)))))))
+
+
+;; ============================================================================
+;; Legacy-to-managed displacement — when a managed :service row appears
+;; for the same fn-id the boot fallback is running, reconcile-once!
+;; stops the legacy first (freeing its port) before starting the
+;; managed one. Without this, both would try to bind the same port and
+;; the managed start would fail.
+;; ============================================================================
+
+(deftest reconcile-displaces-legacy-when-matching-service-appears-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        legacy-stops (atom [])
+        managed-stops (atom [])
+        {composed :composed}
+        (make-trackable-fn! storage "displace" calls managed-stops)
+        prior-handle @recon/legacy-handle]
+    (try
+      ;; Simulate the boot state: legacy fallback is running for
+      ;; `composed`'s fn-id. The stopper records into legacy-stops so
+      ;; we can verify it fires.
+      (reset! recon/legacy-handle
+              {:fn-id (:id composed)
+               :stopper (fn [] (swap! legacy-stops conj :legacy-stopped))})
+      ;; Now admin declares a managed :service for the same fn.
+      (let [_svc (make-service-row! storage (:id composed) true)
+            c (test-ctx storage)
+            running (atom {})
+            summary (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})]
+        (testing "reconcile summary flags the displacement"
+          (is (true? (:legacy-displaced? summary))))
+        (testing "legacy stopper was invoked"
+          (is (= [:legacy-stopped] @legacy-stops)))
+        (testing "legacy-handle was cleared"
+          (is (nil? @recon/legacy-handle)))
+        (testing "managed service started"
+          (is (= [{:suffix "displace"}] @calls))))
+      (finally
+        (reset! recon/legacy-handle prior-handle)
+        (sp/close storage)))))
+
+
+(deftest reconcile-does-not-displace-legacy-for-unrelated-service-test
+  (testing "an enabled :service for a DIFFERENT fn-id leaves the legacy alone"
+    (let [storage (create-full-storage)
+          calls (atom [])
+          stops (atom [])
+          {composed :composed}
+          (make-trackable-fn! storage "no-displace" calls stops)
+          prior-handle @recon/legacy-handle
+          ;; Legacy is running for some OTHER fn (random uuid — never
+          ;; reached by the service we'll declare).
+          unrelated-fn-id (random-uuid)]
+      (try
+        (reset! recon/legacy-handle
+                {:fn-id unrelated-fn-id :stopper (fn [] (swap! stops conj :must-not-fire))})
+        (make-service-row! storage (:id composed) true)
+        (let [c (test-ctx storage)
+              running (atom {})
+              summary (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})]
+          (testing "no displacement happened"
+            (is (false? (:legacy-displaced? summary))))
+          (testing "legacy-handle is untouched"
+            (is (= unrelated-fn-id (:fn-id @recon/legacy-handle))))
+          (testing "legacy stopper was NOT called"
+            (is (not-any? #{:must-not-fire} @stops))))
+        (finally
+          (reset! recon/legacy-handle prior-handle)
+          (sp/close storage))))))
+
+
+(deftest supervisor-exhausts-retries-and-gives-up-test
+  (testing "permanently-failing :always service → bounded attempts, then give up"
+    (let [storage (create-full-storage)
+          attempt-counter (atom 0)
+          base-name "test-permafail-svc"
+          composed-name "my-test-permafail-svc"
+          impl-fn (fn [_args _ctx]
+                    (swap! attempt-counter inc)
+                    (throw (ex-info "permafail" {})))]
+      (exec/register-base-fn! (keyword base-name) impl-fn)
+      (let [base (setup/create-base-fn! storage base-name :any)
+            composed (setup/create-composed-fn! storage composed-name (:id base))
+            svc (sp/create-entity storage :service
+                                  {:fn-id (:id composed)
+                                   :enabled? true
+                                   :restart-policy :always})
+            c (test-ctx storage)
+            running (atom {})]
+        (try
+          (recon/reconcile-once! c running {:max-retries 3 :backoff-ms 0})
+          (testing "exactly 1 + max-retries = 4 attempts before giving up"
+            (is (= 4 @attempt-counter)))
+          (testing "entry exists with :start-failed-at + nil stopper"
+            (let [entry (get @running (:id svc))]
+              (is (= 4 (:start-attempts entry)))
+              (is (nil? (:stopper entry)))
+              (is (some? (:start-failed-at entry)))))
+          (finally (sp/close storage)))))))

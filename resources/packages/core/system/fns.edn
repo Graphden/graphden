@@ -297,6 +297,18 @@
           :arg {:type a :description "Single argument passed to the callable."}}
    :return-type b}
 
+  ;; Call a fn-graph-as-callable with NO args. `:func [:fn {} a]` —
+  ;; bare-shape HOF slot. The ref is hof-wrap'd; with zero call-site
+  ;; lambda-params, the wrap produces a variadic-ignore callable
+  ;; that closes over the outer free-args (closure-capture; see
+  ;; docs/CLOSURE_CAPTURE.md). Companion to `:call` (1-arg) for
+  ;; cases where the target takes no per-invocation input — e.g.
+  ;; cron fire-targets, signal handlers, scheduled cleanup tasks.
+  {:name :call-noargs
+   :description "Invoke a fn-graph (hof-wrap'd into a 0-arg callable) with no arguments. Use when `:func` IS a callable that takes nothing. Mirrors `:call` for the no-arg case."
+   :args {:func {:type [:fn {} a] :description "Fn-graph wrapped as a 0-arg callable. Captured args resolve from the calling fn's binding-chain at wrap time."}}
+   :return-type a}
+
   ;; Read an InputStream/Reader to string
   {:name :slurp
    :description "Read an InputStream/Reader to a string (Clojure's `slurp`). Used to materialise Ring request bodies."

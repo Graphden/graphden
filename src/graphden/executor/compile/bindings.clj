@@ -169,11 +169,17 @@
 
 (defn- classify-slot
   "Classify one root slot. Returns one of:
-     {:kind :value :base-name K :ext-name K :value V}
-     {:kind :ref   :base-name K :ext-name K :ref-id UUID :is-fn BOOL
-                   :produces-callable? BOOL}
-     {:kind :seq   :base-name K :ext-name K :items [...] :lazy-seq? BOOL}
-     {:kind :free  :base-name K :ext-name K :required true}"
+     {:kind :value :base-name K :ext-name K :slot-id UUID :value V}
+     {:kind :ref   :base-name K :ext-name K :slot-id UUID :ref-id UUID
+                   :is-fn BOOL :produces-callable? BOOL}
+     {:kind :seq   :base-name K :ext-name K :slot-id UUID :items […]
+                   :lazy-seq? BOOL}
+     {:kind :free  :base-name K :ext-name K :slot-id UUID :required true}
+
+   `:slot-id` is the owning-slot's id; consumers that need to read
+   the slot's structural type (e.g. `hof-lambda-params` for closure-
+   capture; docs/CLOSURE_CAPTURE.md) use it to resolve the slot's
+   `:type-fn-id` to its anonymous fn-row + `:constraint`."
   [slot fn-id lookups fn-typed-fn-ids lazy-seq-args]
   (let [base-name (keyword (:name slot))
         slot-id (:id slot)
@@ -181,21 +187,22 @@
         b (effective-binding fn-id slot-id lookups)]
     (cond
       (value-binding? b)
-      {:kind :value :base-name base-name :ext-name ext-name :value (:value b)}
+      {:kind :value :base-name base-name :ext-name ext-name :slot-id slot-id
+       :value (:value b)}
 
       (ref-binding? b)
-      {:kind :ref :base-name base-name :ext-name ext-name
+      {:kind :ref :base-name base-name :ext-name ext-name :slot-id slot-id
        :ref-id (:ref-fn-id b)
        :is-fn (fn-typed-slot? slot b fn-typed-fn-ids fn-id lookups)
        :produces-callable? (ref-produces-callable? (:ref-fn-id b) lookups)}
 
       (list-binding? b)
-      {:kind :seq :base-name base-name :ext-name ext-name
+      {:kind :seq :base-name base-name :ext-name ext-name :slot-id slot-id
        :items (list-items-for fn-id slot-id lookups)
        :lazy-seq? (contains? (or lazy-seq-args #{}) base-name)}
 
       :else
-      {:kind :free :base-name base-name :ext-name ext-name
+      {:kind :free :base-name base-name :ext-name ext-name :slot-id slot-id
        ;; Effective required = slot's own :required (default true)
        ;; OR'd with any binding `:required true` along the inheritance
        ;; chain. Lets a descendant fn-def narrow an inherited optional

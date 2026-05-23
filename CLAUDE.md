@@ -93,6 +93,10 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Implementation status, future plans | For project planning |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
+| [docs/EXECUTION.md](docs/EXECUTION.md) | Function execution feature: schema, HTTP API, cancel/TTL/UI | When touching `/api/execute*` or the editor's Run popover |
+| [docs/SERVICES.md](docs/SERVICES.md) | Phase 1 service registry: `:service` schema, reconciler, supervisor, HTTP API, legacy fallback + displacement, roadmap to cron + multi-pod | When touching `services/`, `:exec/service-reconciler`, or anything that needs to know what services are |
+| [docs/CLOSURE_CAPTURE.md](docs/CLOSURE_CAPTURE.md) | Closure-capture extension to the fn-graph model: call-site vs captured args, wrap-time capture contract, type-checker propagation, as-shipped commit map | Before touching `hof-wrap` / `hof-lambda-params` / `ref-free-args` / `free-arg-slot-map`; needed to understand why `:schedule` works |
+| [docs/RECURSION.md](docs/RECURSION.md) | Design space for graph-level recursion (approaches A `:fix` vs B lazy ref resolution), per-approach impl sketches, recommended order. Roadmap — neither approach implemented yet | When considering recursion-related work; current state of recursion is in ARCHITECTURE.md § Part 3 |
 
 ## Common Commands
 
@@ -202,6 +206,9 @@ The editor frontend is split into modules for better maintainability:
 | `editor-edit-validation.js` | Structural pre-checks: `wouldCycle`, `miCollisionCheck` |
 | `editor-edit-modes.js` | Inline edit popovers (arg-value / rename / type / free-arg-bind / sequence add-remove / namespace-move) |
 | `editor-edit-reparent.js` | Phase 3 re-parent cascade + parent-set editor popover |
+| `editor-execute-result.js` | Pure render helpers shared by the execute popover — scalar / list / record / pending / error / oversize JSON panes. No state. |
+| `editor-execute-history.js` | Execute popover history panel — `/api/executions` fetch, summary row builder, Repeat re-fill via the orchestrator's `argFormHosts`. |
+| `editor-execute.js` | Execute popover orchestrator — ▶ button entry, free-arg lookup, value-form mount, polling state machine, Run / Cancel, effects gate + persist toggle. |
 | `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
 | `editor-effect-explainer.js` | Singleton popover shown on click of an effect-chip — plain-English description of a tracked side-effect (db / env / io / network / time / random) + the canonical effect tag |
 | `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom. Fn-type panels include a read-only `eff: pure / <chips>` row (`makeEffectsReadOnly`) showing the slot-level effect constraint — separate from the editable tightening widgets below. Exports `appendResolutionSection(host, prov, opts?)` — the shared 4-tier + inheritance-chain renderer; `opts.onNavigate(fnId)` makes ancestor / source-fn labels clickable links |
@@ -217,7 +224,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 
@@ -413,9 +420,15 @@ See [docs/EXTENDING.md](docs/EXTENDING.md) for details.
 
 Enforced at write time:
 
-1. **No dependency cycles** — A→B→A forbidden via the `binding.ref-fn-id` graph
-   (self-recursion allowed; the executor's depth limit handles it). Implemented by
-   the `GraphConstraints` protocol.
+1. **No dependency cycles** — any cycle through `binding.ref-fn-id`
+   + `parent-fn-ids` + `type-override-fn-id` + `binding-list-item.ref-fn-id`
+   edges is rejected. Two layers: the per-binding write-time
+   `GraphConstraints` check, AND the sync-time topological-sort over
+   the whole fn-def set. Bare self-ref (`owner == ref`) passes the
+   per-binding layer but is rejected by topological-sort — so
+   graph-level recursion is structurally impossible today
+   (`docs/ARCHITECTURE.md § Part 3` for the empirical demo + planned
+   `:fix`-based path forward).
 2. **Schema-level uniqueness** — `UNIQUE` keys on `fn.name` (NULL allowed),
    `fn-slot(fn-id, slot-id)`, `binding(fn-id, slot-id)`, and
    `binding-list-item(binding-id, position)`.

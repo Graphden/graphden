@@ -30,7 +30,14 @@
           :port {:type :port
                  :description "TCP port to listen on (e.g., 8080) — refinement narrows :int to 1..65535."}}
    :return-type :http-server-handle
-   :effects #{:network}}
+   ;; :process marks this fn as service-eligible: it spawns a
+   ;; supervised background listener that lives past the call and
+   ;; requires explicit stopping. validate-create's :service branch
+   ;; consults this set; without :process, /api/entities/service is
+   ;; rejected with a "must declare :process" message. :http-stop
+   ;; stays :network-only — it kills the server but doesn't spawn
+   ;; anything itself.
+   :effects #{:network :process}}
 
   {:name :http-stop
    :description "Stop a running http-kit server returned by `:http-server`."

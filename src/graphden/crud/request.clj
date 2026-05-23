@@ -12,11 +12,17 @@
 
 (defn parse-query-string
   [s]
+  ;; URL-decode BOTH keys and values. Without key-decoding, fields
+  ;; like `:enabled?` arrive as `enabled%3F` from URLSearchParams-
+  ;; encoded bodies (browser default) and the parser silently fails to
+  ;; bind the field — caller's downstream code throws "Required field
+  ;; ':enabled?' is missing".
   (when (and s (not (str/blank? s)))
     (into {} (for [pair (str/split s #"&")
                    :let [[k v] (str/split pair #"=" 2)]
                    :when k]
-               [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
+               [(java.net.URLDecoder/decode k "UTF-8")
+                (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
 
 
 (defn require-storage
@@ -35,6 +41,7 @@
     "fn-slot" :fn-slot
     "binding" :binding
     "binding-list-item" :binding-list-item
+    "service" :service
     nil))
 
 

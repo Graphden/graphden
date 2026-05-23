@@ -80,6 +80,33 @@ function authFetchErrorMessage(response, opts) {
   return 'HTTP ' + (response ? response.status : '?');
 }
 
+// Like authFetchErrorMessage but for write-side handlers that need to
+// READ the response body — the backend wraps write-rejection reasons in
+// `<p class="error">…</p>`, and the popover shows the bare reason. Uses
+// the DOM parser (not a regex) so HTML entities decode correctly.
+//
+// `opts.authExpired` short-circuits to a recovery message for 401
+// without reading the body. `opts.fallback` overrides the generic
+// "HTTP <status>" when the body is empty or unparseable.
+async function extractResponseError(response, opts) {
+  const o = opts || {};
+  if (response && response.status === 401 && o.authExpired) {
+    return o.authExpired;
+  }
+  if (response && response.status === 401) {
+    return 'Sign-in expired. Click the lock icon in the toolbar to re-authenticate.';
+  }
+  let raw = '';
+  try { raw = await response.text(); } catch (_) {}
+  if (raw) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = raw;
+    const text = (tmp.textContent || '').trim();
+    if (text) return text;
+  }
+  return o.fallback || ('HTTP ' + (response ? response.status : '?'));
+}
+
 // Convenience wrapper for the typical mutating call shape: form-urlencoded
 // body, server returns 2xx/4xx. `fields` is either an object that gets
 // URL-encoded (skipping nullish/empty values), a pre-encoded string, or

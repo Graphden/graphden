@@ -30,18 +30,6 @@ async function postEntity(type, fields) {
   return authMutate('POST', '/api/entities/' + type, fields);
 }
 
-// Pull a human-readable reason out of a non-2xx response. The backend
-// wraps reasons in `<p class="error">…</p>`; we strip the wrapping
-// (and any other HTML) so the user reads the actual message instead
-// of `<p class="error">Failed to create fn: {:name "foo", :namespa`.
-async function extractErrorMessage(response) {
-  const raw = await response.text().catch(() => '');
-  if (!raw) return 'Status ' + response.status;
-  const tmp = document.createElement('div');
-  tmp.innerHTML = raw;
-  const text = (tmp.textContent || '').trim();
-  return text || ('Status ' + response.status);
-}
 
 async function deleteEntity(type, id) {
   return authMutate('DELETE', '/api/entities/' + type + '/' + id);
@@ -392,7 +380,7 @@ function buildCreateRow(indent) {
           selectFnByName(name);
         }
       } else {
-        throw new Error(await extractErrorMessage(response));
+        throw new Error(await extractResponseError(response));
       }
     },
     onCancel: clearActiveCreate
@@ -428,7 +416,7 @@ function startNsRename(headerEl, nsId, nsPath) {
       if (response.status >= 200 && response.status < 300) {
         await initGraph();
       } else {
-        throw new Error(await extractErrorMessage(response));
+        throw new Error(await extractResponseError(response));
       }
     },
     onCancel: () => {
@@ -461,7 +449,7 @@ function startFnRename(itemEl, fnId, currentName) {
       if (response.status >= 200 && response.status < 300) {
         await initGraph();
       } else {
-        throw new Error(await extractErrorMessage(response));
+        throw new Error(await extractResponseError(response));
       }
     },
     onCancel: () => {

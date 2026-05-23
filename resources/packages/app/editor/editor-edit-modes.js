@@ -242,17 +242,16 @@ function makeLegacyControl(host, arg, expected, statusEl) {
   }
 }
 
-// Turn a failed mutation `Response` into a user-facing message. The
-// backend renders a write rejection as `<p class="error">reason</p>`
-// — strip the tags so the popover shows the bare reason (e.g. a
-// type-mismatch). 401 is the auth case.
+// Wrap the shared `extractResponseError` (editor-auth.js) with this
+// module's mutation-specific 401 message + offline-network fallback.
+// The shared helper uses the DOM parser so HTML entities decode
+// correctly (vs the old regex strip).
 async function responseError(r) {
   if (!r) return 'Save failed — network error.';
-  if (r.status === 401) return 'Sign in to save this value.';
-  let body = '';
-  try { body = await r.text(); } catch (_) {}
-  const stripped = body.replace(/<[^>]*>/g, '').trim();
-  return stripped || ('Save failed (HTTP ' + r.status + ').');
+  return extractResponseError(r, {
+    authExpired: 'Sign in to save this value.',
+    fallback: 'Save failed (HTTP ' + r.status + ').',
+  });
 }
 
 // Slot/binding-aware writer: PUT /api/entities/binding/:id when the

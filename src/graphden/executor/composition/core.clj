@@ -120,12 +120,18 @@
     (let [declared-fn-slot-ids (into #{} (map :id) declared-fn-slots)
           declared-binding-ids (into #{} (map :id) declared-bindings)
           declared-item-ids    (into #{} (map :id) declared-items)
-          owns-fn? (fn [row] (contains? synced-fn-ids (:fn-id row)))
-          existing-fn-slots (filterv owns-fn? (sp/query-entities storage :fn-slot {}))
-          existing-bindings (filterv owns-fn? (sp/query-entities storage :binding {}))
-          owned-binding-ids (into #{} (map :id) existing-bindings)
-          existing-items    (filterv #(contains? owned-binding-ids (:binding-id %))
-                                     (sp/query-entities storage :binding-list-item {}))
+          ;; Push the synced-fn-ids set into the storage query so the
+          ;; backend filters via SQL IN — earlier this full-scanned
+          ;; :fn-slot / :binding / :binding-list-item and dropped 99%
+          ;; in memory.
+          fn-id-vec (vec synced-fn-ids)
+          existing-fn-slots (sp/query-entities storage :fn-slot {:fn-id fn-id-vec})
+          existing-bindings (sp/query-entities storage :binding {:fn-id fn-id-vec})
+          owned-binding-ids (mapv :id existing-bindings)
+          existing-items    (if (empty? owned-binding-ids)
+                              []
+                              (sp/query-entities storage :binding-list-item
+                                                 {:binding-id owned-binding-ids}))
           stale-ids (fn [rows declared-ids]
                       (into [] (comp (remove #(contains? declared-ids (:id %)))
                                      (map :id))
@@ -195,29 +201,23 @@
   (write-records! storage (records/boot-primitive-records) {}))
 
 
-(defn- existing-name->id
-  "Discover the name→id map for fn-rows already in storage. Lets
-   `sync-fns-to-storage!` resolve cross-module references without
-   the caller threading them in by hand."
-  [storage]
+(defn- name->id-from-fns
+  "Pure: project a vector of `:fn` rows to the name→id map."
+  [fns]
   (into {}
         (keep (fn [f]
                 (when-let [n (:name f)]
                   [(keyword n) (:id f)])))
-        (sp/query-entities storage :fn {})))
+        fns))
 
 
-(defn- existing-defs-by-name
-  "Reconstruct minimal fn-def shapes for every fn-row already in
-   storage so the records-parser's slot resolver can reach base-fn
-   args. We only need the `:args`-map (set of slot names) so the
-   `type-row-arg-names` check fires on inheritance walks; everything
-   else can stay nil."
-  [storage]
-  (let [fns (sp/query-entities storage :fn {})
-        slots (sp/query-entities storage :slot {})
-        fn-slots (sp/query-entities storage :fn-slot {})
-        slot-by-id (into {} (map (juxt :id identity)) slots)
+(defn- defs-by-name-from-rows
+  "Pure: given pre-fetched fn / slot / fn-slot rows, reconstruct the
+   minimal fn-def shapes the records-parser's slot resolver needs.
+   We only carry `:args`-map (set of slot names) so the
+   `type-row-arg-names` check fires on inheritance walks."
+  [fns slots fn-slots]
+  (let [slot-by-id (into {} (map (juxt :id identity)) slots)
         slots-by-fn (reduce (fn [acc fs]
                               (if-let [s (get slot-by-id (:slot-id fs))]
                                 (update acc (:fn-id fs) (fnil conj #{}) (keyword (:name s)))
@@ -247,6 +247,30 @@
           fns)))
 
 
+(defn- existing-defs-by-name
+  "Reconstruct minimal fn-def shapes for every fn-row already in
+   storage so the records-parser's slot resolver can reach base-fn
+   args."
+  [storage]
+  (defs-by-name-from-rows (sp/query-entities storage :fn {})
+    (sp/query-entities storage :slot {})
+    (sp/query-entities storage :fn-slot {})))
+
+
+(defn- discover-existing-state
+  "One-shot fetch of the bits both convenience arities of
+   `sync-fns-to-storage!` need from storage. Two adjacent helpers
+   used to query `:fn {}` independently — this collapses to a single
+   shared read, which matters on cold-start packages with hundreds
+   of fns."
+  [storage]
+  (let [fns (sp/query-entities storage :fn {})
+        slots (sp/query-entities storage :slot {})
+        fn-slots (sp/query-entities storage :fn-slot {})]
+    {:name->id (name->id-from-fns fns)
+     :defs-by-name (defs-by-name-from-rows fns slots fn-slots)}))
+
+
 (defn sync-fns-to-storage!
   "Top-level sync for a list of fn-defs. See arity-5 for full
    signature; convenience arities auto-discover `extra-name->id` from
@@ -258,11 +282,11 @@
    binding `:m` on a slot owned by a base-fn synced earlier won't
    resolve."
   ([storage fn-defs]
-   (sync-fns-to-storage! storage fn-defs {} (existing-name->id storage)
-                         (existing-defs-by-name storage)))
+   (let [{:keys [name->id defs-by-name]} (discover-existing-state storage)]
+     (sync-fns-to-storage! storage fn-defs {} name->id defs-by-name)))
   ([storage fn-defs ns-id-map]
-   (sync-fns-to-storage! storage fn-defs ns-id-map (existing-name->id storage)
-                         (existing-defs-by-name storage)))
+   (let [{:keys [name->id defs-by-name]} (discover-existing-state storage)]
+     (sync-fns-to-storage! storage fn-defs ns-id-map name->id defs-by-name)))
   ([storage fn-defs ns-id-map extra-name->id]
    (sync-fns-to-storage! storage fn-defs ns-id-map extra-name->id
                          (existing-defs-by-name storage)))

@@ -206,9 +206,12 @@
 
 (defn rebuild!
   "Rebuild the compiled registry in `ctx` from whatever the slot/binding
-   tables currently hold. Also primes `:graph-cache` and `:compile-deps`
-   with the same data so read-heavy consumers (layout API, editor) and
-   the delta-invalidation path stay in sync. Call at startup and on
+   tables currently hold. Also primes `:graph-cache`, `:compile-deps`
+   AND `:compiled-templates` (when present) so read-heavy consumers
+   stay in sync. The `:compiled-templates` atom holds the
+   ctx-independent `{fn-id → ctx-taker}` map — sister branches with
+   the same graph view can re-use it via `instantiate-from-templates!`
+   instead of repeating the full compile pass. Call at startup and on
    full invalidation."
   [ctx]
   (let [storage (:storage ctx)
@@ -216,10 +219,41 @@
         _ (register-type-aliases-from-db! graph)
         base-fns (:base-fns ctx)]
     (prime-always-fresh! (:fns graph))
-    (let [compiled (compile/compile-all (assoc graph :base-fns base-fns) ctx)]
+    (let [templates (compile/compile-all-templates (assoc graph :base-fns base-fns))
+          compiled (compile/instantiate-templates templates ctx)]
+      (when-let [t-holder (:compiled-templates ctx)]
+        (reset! t-holder templates))
       (reset! (:compiled-registry ctx) compiled)
       (prime-graph-cache! ctx graph)
       (prime-compile-deps! ctx graph)
+      compiled)))
+
+
+(defn instantiate-from-templates!
+  "Hydrate `dst-ctx`'s `:compiled-registry` by instantiating templates
+   from `src-ctx`. Used by the branch-router's lazy-compile fast path:
+   when a non-default branch is graph-identical to its base (no own
+   version rows + no merge edges landing on it), the base's templates
+   are the same templates the branch would compile from scratch — so
+   we skip the ~700-fn compile pass and just allocate ~700 small
+   closures. Cost goes from ~100ms to ~ms.
+
+   Returns the new instantiated registry. Returns nil when `src-ctx`
+   has no usable templates (e.g. fresh context never went through
+   `rebuild!`)."
+  [src-ctx dst-ctx]
+  (when-let [templates (some-> (:compiled-templates src-ctx) deref)]
+    (let [compiled (compile/instantiate-templates templates dst-ctx)]
+      (reset! (:compiled-registry dst-ctx) compiled)
+      ;; The graph-cache / compile-deps are derived from the SAME graph
+      ;; (since templates were built from src's graph and we're reusing
+      ;; them, the dst sees the same shape). Copy them over so reads
+      ;; that go through cached-graph hit warm.
+      (when-let [src-graph (some-> (:graph-cache src-ctx) deref)]
+        (prime-graph-cache! dst-ctx src-graph))
+      (when-let [src-deps (some-> (:compile-deps src-ctx) deref)]
+        (when-let [holder (:compile-deps dst-ctx)]
+          (reset! holder src-deps)))
       compiled)))
 
 
@@ -255,21 +289,35 @@
                       (into {} (map (juxt :id identity)) (:fns graph)))
             _ (prime-always-fresh! (vals fns-map))
             blast (compile/transitive-blast deps changed-fn-ids)
-            lookups (assoc (l/build-lookups graph) :base-fns base-fns)
+            lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)
             compilable? (fn [f]
                           (let [root (l/root-fn (:id f) (:fn-map lookups) lookups)
                                 root-name (some-> (:name root) keyword)]
                             (and root-name (contains? base-fns root-name))))
-            new-entries (into {}
-                              (keep (fn [fn-id]
-                                      (when-let [f (get fns-map fn-id)]
-                                        (when (compilable? f)
-                                          [fn-id (compile/compile-fn fn-id lookups ctx)]))))
-                              blast)
+            new-templates (into {}
+                                (keep (fn [fn-id]
+                                        (when-let [f (get fns-map fn-id)]
+                                          (when (compilable? f)
+                                            [fn-id (compile/compile-fn-template
+                                                     fn-id lookups)]))))
+                                blast)
+            new-entries (compile/instantiate-templates new-templates ctx)
             cleaned (into {}
                           (filter (fn [[k _]] (contains? fns-map k)))
                           @holder)]
         (reset! holder (merge cleaned new-entries))
+        ;; Merge fresh templates into the shared template atom so
+        ;; sister branches that resync see the post-mutation shape.
+        ;; A delta-recompile can shrink the registry (deleted fns)
+        ;; — strip those from templates too.
+        (when-let [t-holder (:compiled-templates ctx)]
+          (swap! t-holder (fn [old-templates]
+                            (let [base (or old-templates {})
+                                  pruned (into {}
+                                               (filter (fn [[k _]]
+                                                         (contains? fns-map k)))
+                                               base)]
+                              (merge pruned new-templates)))))
         (prime-graph-cache! ctx graph)
         (prime-compile-deps! ctx graph)
         @holder))))
@@ -296,7 +344,7 @@
   [ctx fn-id]
   (let [storage (:storage ctx)
         graph (read-graph storage)
-        lookups (assoc (l/build-lookups graph)
+        lookups (assoc (l/cached-build-lookups graph)
                        :base-fns (:base-fns ctx))]
     (mapv :ext-name
           (filter #(= :free (:kind %))

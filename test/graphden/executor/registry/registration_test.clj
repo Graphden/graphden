@@ -291,7 +291,11 @@
                       ;; Fail on fn upsert to trigger error path
                       (if (= entity-name :fn)
                         (throw (ex-info "Simulated failure" {:type :test-error}))
-                        (sp/upsert-entities storage entity-name data-seq))))]
+                        (sp/upsert-entities storage entity-name data-seq)))
+
+                    (query-ref-many-owners
+                      [_ entity-name field-name target-id]
+                      (sp/query-ref-many-owners storage entity-name field-name target-id)))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Simulated failure"
             (registry/initialize-with-base-fns! wrapped)))
       ;; Verify close was called

@@ -3,7 +3,12 @@
 
    Pure functions on maps — no side effects, no dependency on the compile
    driver. Shared by `compile` (binding resolution, ref rewriting) and
-   `compile-runtime` (mapping ext-names back to slots).")
+   `compile-runtime` (mapping ext-names back to slots).
+
+   `cached-build-lookups` wraps `build-lookups` with a process-wide
+   reference-identity cache (bounded LRU, ~8 entries). Hits when the
+   SAME graph map is passed — stable across calls in one ctx between
+   mutations. Different per-branch ctxs each get their own entry.")
 
 
 (defn build-lookups
@@ -82,6 +87,45 @@
      :binding-by-fn-slot binding-by-fn-slot
      :items-by-binding   items-by-binding
      :chain-cache        (atom {})}))
+
+
+(def ^:private cached-build-lookups-max-size
+  "Bound on the identity-keyed cache. Sized to comfortably cover the
+   handful of active per-branch ctxs typical of dev workflows; one
+   entry per ctx's current graph snapshot. Same magnitude as the
+   branch-router's default cache."
+  8)
+
+
+(defonce ^:private cached-build-lookups-state
+  ;; Bounded LRU as a plain vector of `[graph-ref lookups]` pairs.
+  ;; Reference-identity comparison via `identical?` — two same-CONTENT
+  ;; graphs from different ctxs each get their own entry, which is
+  ;; correct (chain-caches are per-entry, and an unrelated ctx
+  ;; shouldn't share them).
+  (atom []))
+
+
+(defn cached-build-lookups
+  "Reference-identity-memoised wrapper over `build-lookups`. Returns
+   the same lookups map (including the chain-cache atom) for repeated
+   calls with the same graph map identity — so a sibling caller that
+   walks `inheritance-chain*` benefits from prior calls' BFS results.
+
+   Cache miss recomputes. Bounded LRU at
+   `cached-build-lookups-max-size`; the oldest entry is evicted on
+   overflow."
+  [graph]
+  (or (some (fn [[g l]] (when (identical? g graph) l))
+            @cached-build-lookups-state)
+      (let [lookups (build-lookups graph)]
+        (swap! cached-build-lookups-state
+               (fn [v]
+                 (let [pruned (filterv (fn [[g _]] (not (identical? g graph))) v)
+                       capped (vec (take-last (dec cached-build-lookups-max-size)
+                                              pruned))]
+                   (conj capped [graph lookups]))))
+        lookups)))
 
 
 (defn inheritance-chain

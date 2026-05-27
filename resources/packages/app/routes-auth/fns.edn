@@ -25,4 +25,9 @@
   {:name :put
    :description "PUT route template wired with `auth-required-middleware`. Caller provides `:path` and `:handler`. Used for entity updates (rename, etc.)."
    :parent :put-route-with-middleware
+   :args {:middleware :_middleware-list}}
+
+  {:name :delete
+   :description "DELETE route template wired with `auth-required-middleware`. Caller provides `:path` and `:handler`. Used by `app.branches/api-branch-delete`."
+   :parent :delete-route-with-middleware
    :args {:middleware :_middleware-list}}]}

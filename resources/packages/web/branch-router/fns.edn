@@ -1,0 +1,36 @@
+;; Branch-aware Ring middleware.
+;;
+;; `:branch-routing-wrap` takes a `:fn`-typed `:base-handler` and
+;; returns a Ring callable that dispatches per branch — header
+;; `X-Graphden-Branch: <name>` or query `?branch=<name>` picks the
+;; per-branch ExecutionContext, builds a fresh compiled registry on
+;; first hit (cached), and runs the SAME compiled handler (here,
+;; `:_app-ring-response`) against that branch's storage view.
+;;
+;; The wrap delegates to `graphden.system.branch-router/dispatch`.
+;; When no active router is installed (startup before
+;; `:exec/branch-router` init-key, test paths that strip the system
+;; layer), the wrap calls the base-handler directly — graceful
+;; fallback that matches single-branch behaviour.
+
+
+{:namespace "web.branch-router"
+ :description "Branch-aware Ring middleware — wraps a top-level Ring handler with per-branch dispatch."
+ :fns
+ [{:name :branch-routing-wrap
+   :description "Per-request branch dispatcher. Receives the Ring request directly (free arg `:request`) plus a `:fn`-typed `:base-handler` (the main-branch handler used as fallback). Asks `graphden.system.branch-router/current-router` which branch to serve, then either runs `:base-handler` (no active router, or default branch) or delegates to the per-branch handler the router has cached."
+   ;; `:base-handler` deliberately uses the loose `:fn` slot type
+   ;; rather than a structural `[:fn {:request …} :ring-response-shape]`.
+   ;; The type-checker's fn-def-as-callable model derives its
+   ;; structural shape from the registry's `:args` map, which mixes
+   ;; bound + free args (same shape `:router-ring-response` /
+   ;; `:merge-in` produce). A tightened slot type would WARN on EVERY
+   ;; fn-graph bound here even though runtime is well-formed (the impl
+   ;; just does `(base-handler request)`, hof-wrap pads it). Matches
+   ;; `:http-server.handler` which also stays loose for the same
+   ;; reason. See `docs/VERSIONING.md` § Known gaps for the deeper
+   ;; type-checker limitation.
+   :args {:base-handler :fn
+          :request {:type :ring-request-shape}}
+   :return-type :ring-response-shape
+   :effects #{:network}}]}

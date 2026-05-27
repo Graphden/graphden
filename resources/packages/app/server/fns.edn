@@ -68,11 +68,21 @@
    :args {:routes :all}}
 
   {:name :_app-ring-response
-   :description "Final Ring handler — invokes the router on the parsed request and merges default security headers. Bound to `:http-server.handler`."
+   :description "Final Ring handler — invokes the router on the parsed request and merges default security headers. Wrapped by `:_branch-routed-handler` before reaching http-kit."
    :parent :router-ring-response
    :args {:func :_router}}
 
+  ;; Branch dispatch wraps the compiled main handler. At runtime, the
+  ;; wrap reads `X-Graphden-Branch` / `?branch=` from the request,
+  ;; resolves the branch, and routes to a per-branch
+  ;; ExecutionContext (lazy-built + cached by
+  ;; `graphden.system.branch-router`). Missing branch ref → main.
+  {:name :_branch-routed-handler
+   :description "`:_app-ring-response` wrapped with per-branch dispatch. Bound to `:http-server.handler` so EVERY request flows through the branch router."
+   :parent :branch-routing-wrap
+   :args {:base-handler :_app-ring-response}}
+
   {:name :web-server
-   :description "Application root — starts the http-kit server on port 8080 with this app's full Ring handler chain."
+   :description "Application root — starts the http-kit server on port 8080 with the branch-aware Ring handler chain."
    :parent :http-server
-   :args {:handler :_app-ring-response :port 8080}}]}
+   :args {:handler :_branch-routed-handler :port 8080}}]}

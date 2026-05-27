@@ -95,6 +95,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
 | [docs/EXECUTION.md](docs/EXECUTION.md) | Function execution feature: schema, HTTP API, cancel/TTL/UI | When touching `/api/execute*` or the editor's Run popover |
 | [docs/SERVICES.md](docs/SERVICES.md) | Phase 1 service registry: `:service` schema, reconciler, supervisor, HTTP API, legacy fallback + displacement, roadmap to cron + multi-pod | When touching `services/`, `:exec/service-reconciler`, or anything that needs to know what services are |
+| [docs/VERSIONING.md](docs/VERSIONING.md) | Branches surface — per-branch ExecutionContext routing, HTTP API (`/api/branches`, diff, merge, conflicts), editor UI (branch chip + popover + ⌛ history + conflict modal), demo seeder + env toggle, known gaps | When touching `system/branch_router`, `crud/branches`, `web.branch-router`, `app.branches`, `editor-branches.js`, `editor-fn-versions.js`, or the demo seeder |
 | [docs/CLOSURE_CAPTURE.md](docs/CLOSURE_CAPTURE.md) | Closure-capture extension to the fn-graph model: call-site vs captured args, wrap-time capture contract, type-checker propagation, as-shipped commit map | Before touching `hof-wrap` / `hof-lambda-params` / `ref-free-args` / `free-arg-slot-map`; needed to understand why `:schedule` works |
 | [docs/RECURSION.md](docs/RECURSION.md) | Design space for graph-level recursion (approaches A `:fix` vs B lazy ref resolution), per-approach impl sketches, recommended order. Roadmap — neither approach implemented yet | When considering recursion-related work; current state of recursion is in ARCHITECTURE.md § Part 3 |
 
@@ -190,6 +191,8 @@ The editor frontend is split into modules for better maintainability:
 | `editor-busy.js` | Visible feedback for multi-step user actions (reparent / extend / delete cascades) — `withBusy(opKey, label, fn)` helper + bottom-centre banner |
 | `editor-prefs.js` | Theme + sidebar-collapsed prefs (localStorage) |
 | `editor-auth.js` | `authFetch`, `isAuthenticated`, login popover |
+| `editor-branches.js` | Branch-aware fetch wrap (every `/api/*` call carries `X-Graphden-Branch`), current-branch state (URL `?branch=` + localStorage), top-bar branch chip + popover (list / create / switch / Δ diff / ⇢ merge / × delete), `switchToBranch` reloads to invalidate caches, conflict-resolution modal for `:reason :merge-conflict` merge responses |
+| `editor-branch-diff.js` | Full-viewport modal opened from the Δ button. Fetches `GET /api/branches/:current/diff?against=:other`, groups entries by `:change` (added-in-source / added-in-target / modified), renders per-entity-type previews; rows where entity-name is `:fn` are clickable and navigate to that fn via `selectFn` |
 | `editor-create.js` | Inline-input row helper, fn / namespace creation |
 | `editor-create-type.js` | Type-row creation popover (refinement / record / union / variant / list) |
 | `editor-data.js` | Data utilities, lookups, inheritance, free-args |
@@ -209,6 +212,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-execute-result.js` | Pure render helpers shared by the execute popover — scalar / list / record / pending / error / oversize JSON panes. No state. |
 | `editor-execute-history.js` | Execute popover history panel — `/api/executions` fetch, summary row builder, Repeat re-fill via the orchestrator's `argFormHosts`. |
 | `editor-execute.js` | Execute popover orchestrator — ▶ button entry, free-arg lookup, value-form mount, polling state machine, Run / Cancel, effects gate + persist toggle. |
+| `editor-fn-versions.js` | `⌛` history popover anchored to the fn-card root row. Fetches `GET /api/fns/:fn-id/versions`, renders a per-branch timeline (latest first), each row has a `switch` button that jumps the editor to that branch via `switchToBranch`. |
 | `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
 | `editor-effect-explainer.js` | Singleton popover shown on click of an effect-chip — plain-English description of a tracked side-effect (db / env / io / network / time / random) + the canonical effect tag |
 | `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom. Fn-type panels include a read-only `eff: pure / <chips>` row (`makeEffectsReadOnly`) showing the slot-level effect constraint — separate from the editable tightening widgets below. Exports `appendResolutionSection(host, prov, opts?)` — the shared 4-tier + inheritance-chain renderer; `opts.onNavigate(fnId)` makes ancestor / source-fn labels clickable links |
@@ -224,7 +228,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 

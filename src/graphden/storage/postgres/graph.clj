@@ -140,11 +140,17 @@
                            (sp/query-entities storage :binding-list-item
                                               {:binding-id binding-ids})
                            [])
-            ;; Match generic resolver: ALL slot rows. Slot.type-fn-id
-            ;; references aren't followed in the CTE (parity with
-            ;; the generic BFS), so the bulk-load is the safety net
-            ;; that keeps the type-checker's slot lookups complete.
-            slots        (sp/query-entities storage :slot {})
+            ;; Slot rows the closure can REACH = those named by the
+            ;; loaded fn-slots' :slot-id. Every downstream consumer
+            ;; (lookups/build-lookups, executor/composition) looks
+            ;; slots up only via `(get slot-map (:slot-id fs))` —
+            ;; nothing reaches a slot outside the fn-slot junction
+            ;; set, so the narrower query is sufficient. Pre-fix this
+            ;; loaded EVERY slot on every recursive-CTE resolve.
+            slot-ids     (into #{} (keep :slot-id) fn-slots)
+            slots        (if (seq slot-ids)
+                           (sp/query-entities storage :slot {:id (vec slot-ids)})
+                           [])
             fns-map      (into {} (map (juxt :id identity)) fns)]
         (graph/->execution-graph
           {:fns fns-map

@@ -7,9 +7,12 @@
    Uses the shared container plus a real `ExecutionContext` so the
    `invalidate!` path exercises against live storage."
   (:require
+    [cheshire.core :as cheshire]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.type-check :as tc]
     [graphden.executor.context :as ctx]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
@@ -977,4 +980,248 @@
           (is (string? (:error res)))
           (is (= before (count (sp/query-entities storage :fn {})))
               "cleanup removed the partially-created list fn-row")))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; tighten-fn-type-impl! — fn-typed binding narrowing
+;;
+;; Each test constructs a slot whose effective type is a callable fn-row
+;; (`:constraint [:fn args ret eff]`), a binding pointing at that slot,
+;; and exercises one branch of the impl's `cond` chain. The bound-callable
+;; effect-escape check needs a referenced fn registered in the rich-types
+;; registry, so those tests redef registry/rich-type-of to control it.
+;; ============================================================================
+
+(defn- make-callable-type-fn!
+  "Insert a fn-row whose `:constraint` is the requested fn-type shape.
+   Returns the new fn-id. Used as the `:type-fn-id` of a slot so the
+   slot's effective type IS that constraint."
+  [storage type-name constraint]
+  (:id (sp/create-entity storage :fn
+                         {:name type-name
+                          :parent-ids []
+                          :impl-hash nil
+                          :constraint constraint})))
+
+
+(defn- make-binding-on-fn-typed-slot!
+  "Build a composed-fn + an fn-typed slot + the binding row pointing
+   at the slot. Returns the binding-id so tighten-fn-type-impl! can
+   target it."
+  [storage suffix constraint]
+  (let [cb-fn-id (make-callable-type-fn! storage (str "th-cb-" suffix) constraint)
+        base-fn (sp/create-entity storage :fn
+                                  {:name (str "th-base-" suffix)
+                                   :parent-ids []
+                                   :impl-hash "stub"})
+        slot   (sp/create-entity storage :slot
+                                 {:name "cb" :type-fn-id cb-fn-id})
+        _      (sp/create-entity storage :fn-slot
+                                 {:fn-id (:id base-fn)
+                                  :slot-id (:id slot) :position 0})
+        comp-fn (sp/create-entity storage :fn
+                                  {:name (str "th-f-" suffix)
+                                   :parent-ids [(:id base-fn)]})
+        bnd (sp/create-entity storage :binding
+                              {:fn-id (:id comp-fn)
+                               :slot-id (:id slot)
+                               :value nil
+                               :override-kind :fixed})]
+    [(:id bnd) (:id comp-fn)]))
+
+
+(deftest tighten-fn-type-impl-missing-binding-404
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [r (entities/tighten-fn-type-impl! storage (random-uuid)
+                                              {:effects ["io"]})]
+        (is (= 404 (:status r)))
+        (is (re-find #"not found" (:reason r))))
+      (finally (sp/close storage)))))
+
+
+(deftest tighten-fn-type-impl-non-fn-type-400
+  ;; Slot's effective type is a plain `:int` (not [:fn ...]) — can't
+  ;; tighten because there's nothing fn-shaped to narrow.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base    (setup/create-base-fn! storage "tnf-base")
+            slot    (setup/create-slot! storage "x" :int)
+            _       (setup/attach-slot! storage (:id base) (:id slot) 0)
+            comp-fn (setup/create-composed-fn! storage "tnf-f" (:id base))
+            bnd     (sp/create-entity storage :binding
+                                      {:fn-id (:id comp-fn) :slot-id (:id slot)
+                                       :value 1 :override-kind :fixed})
+            r (entities/tighten-fn-type-impl! storage (:id bnd)
+                                              {:effects ["io"]})]
+        (is (= 400 (:status r)))
+        (is (re-find #"not an fn-type" (:reason r))))
+      (finally (sp/close storage)))))
+
+
+(deftest tighten-fn-type-impl-rejects-widening
+  ;; Current effective type is [:fn {} :any #{:io}]. Asking for #{:io :db}
+  ;; would widen → reject.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [[bid] (make-binding-on-fn-typed-slot!
+                    storage "widen" [:fn {} :any #{:io}])
+            r (entities/tighten-fn-type-impl! storage bid {:effects ["io" "db"]})]
+        (is (= 400 (:status r)))
+        (is (re-find #"not a narrowing" (:reason r))))
+      (finally (sp/close storage)))))
+
+
+(deftest tighten-fn-type-impl-happy-effects-narrowing
+  ;; Current type [:fn {} :any #{:io :db}]; tighten to #{:io}.
+  ;; No ref-fn-id on the binding → bound-callable check trivially
+  ;; passes. The post-write type-check on the owning fn also passes
+  ;; because there's nothing for it to complain about.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [[bid] (make-binding-on-fn-typed-slot!
+                    storage "narrow" [:fn {} :any #{:io :db}])
+            r (entities/tighten-fn-type-impl! storage bid {:effects ["io"]})]
+        (is (= 200 (:status r)))
+        (is (some? (-> r :result :type-override-fn-id))
+            "binding's :type-override-fn-id now points at the new constraint fn"))
+      (finally (sp/close storage)))))
+
+
+(deftest tighten-effects-impl-thin-wrapper-test
+  ;; tighten-effects-impl! just forwards to tighten-fn-type-impl! with
+  ;; only :effects filled in — covers the wrapper line.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [[bid] (make-binding-on-fn-typed-slot!
+                    storage "wrap" [:fn {} :any #{:io :env}])
+            r (entities/tighten-effects-impl! storage bid ["io"])]
+        (is (= 200 (:status r))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; parse-tighten-request — additional shapes beyond the existing test
+;; ============================================================================
+
+(deftest parse-tighten-request-bad-uuid-returns-nil-binding
+  ;; Non-UUID path-param → :binding-id nil so the apply-tighten guard
+  ;; rejects upfront. Covers the `(catch Exception _ nil)` branch.
+  (let [parsed (entities/parse-tighten-request
+                 {:uri "/api/bindings/not-a-uuid/tighten-fn-effects"
+                  :body (cheshire/generate-string {:effects ["io"]})})]
+    (is (nil? (:binding-id parsed)))
+    (is (= {:effects ["io"]} (:delta parsed)))))
+
+
+(deftest parse-tighten-request-args-and-ret-included-in-delta
+  (let [bid (random-uuid)
+        parsed (entities/parse-tighten-request
+                 {:uri (str "/api/bindings/" bid "/tighten-fn-effects")
+                  :body (cheshire/generate-string
+                          {:args {:x "int"} :ret "text"})})]
+    (is (= bid (:binding-id parsed)))
+    (is (= {:args {:x "int"} :ret "text"} (:delta parsed)))
+    (is (= {:x "int"} (:args-val parsed)))
+    (is (= "text" (:ret-val parsed)))))
+
+
+;; ============================================================================
+;; tighten — extended coverage: rollback, bound-callable escape, apply-tighten
+;;
+;; The basic happy/reject branches of `tighten-fn-type-impl!` were
+;; covered above; these tests close the remaining branches:
+;;   - commit-tighten! rollback path (post-write type-check fails)
+;;   - bound-callable effect escape (ref-fn effects exceed new constraint)
+;;   - apply-tighten end-to-end (json envelope + invalidate! call)
+;; ============================================================================
+
+(deftest commit-tighten-rollback-on-post-write-type-check-fail-test
+  ;; Stub `type-check-fn-after-mutation!` to always reject so the
+  ;; post-commit roll-back path fires — the binding's
+  ;; `:type-override-fn-id` must end up back at its pre-tighten value.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [[bid] (make-binding-on-fn-typed-slot!
+                    storage "rb" [:fn {} :any #{:io :db}])
+            before (sp/read-entity storage :binding bid)
+            r (with-redefs [tc/type-check-fn-after-mutation!
+                            (fn [_ _] {:reason "synthetic rejection"})]
+                (entities/tighten-fn-type-impl! storage bid {:effects ["io"]}))
+            after (sp/read-entity storage :binding bid)]
+        (is (= 400 (:status r)))
+        (is (re-find #"post-write type-check" (:reason r)))
+        (is (= (:type-override-fn-id before)
+               (:type-override-fn-id after))
+            "rollback restored the pre-tighten override pointer"))
+      (finally (sp/close storage)))))
+
+
+(deftest tighten-rejects-when-bound-callable-effects-exceed-new-constraint-test
+  ;; Binding has a :ref-fn-id pointing at a fn whose registry
+  ;; rich-type declares :io effect. The proposed constraint forbids
+  ;; :io → reject with "produces effects … forbids" message.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [[bid comp-fn-id] (make-binding-on-fn-typed-slot!
+                               storage "esc" [:fn {} :any #{:io :db}])
+            ;; A REAL ref-fn-id row registered in rich-types with :io.
+            ref-fn (sp/create-entity storage :fn
+                                     {:name "esc-effectful"
+                                      :parent-ids []
+                                      :impl-hash "stub"})
+            _ (sp/update-entity storage :binding bid
+                                {:ref-fn-id (:id ref-fn)})
+            r (with-redefs [registry/rich-type-of
+                            (fn [n]
+                              (when (= :esc-effectful n)
+                                {:effects #{:io}}))]
+                ;; Tighten to {:db} — :io must escape → reject.
+                (entities/tighten-fn-type-impl! storage bid {:effects ["db"]}))]
+        (is (= 400 (:status r)))
+        (is (re-find #"produces effects" (:reason r)))
+        (is (re-find #":io" (:reason r))
+            "the reject message names the escaping effect")
+        ;; Use comp-fn-id so the let-binding isn't dead code.
+        (is (some? comp-fn-id)))
+      (finally (sp/close storage)))))
+
+
+(deftest apply-tighten-end-to-end-success-test
+  ;; Wire apply-tighten (the Ring-shaped wrapper) end-to-end and
+  ;; assert the JSON envelope + invalidate! call. invalidate! is
+  ;; exercised against a real ExecutionContext so the cache-poke
+  ;; path doesn't crash.
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (let [[bid comp-fn-id] (make-binding-on-fn-typed-slot!
+                               storage "app" [:fn {} :any #{:io :db}])
+            resp (entities/apply-tighten
+                   {:binding-id bid :delta {:effects ["io"]}}
+                   c)]
+        (is (= 200 (:status resp)))
+        (is (= "application/json" (get-in resp [:headers "Content-Type"])))
+        (let [body (cheshire/parse-string (:body resp) true)]
+          (is (= (str comp-fn-id) (:fn-id body)))
+          (is (some? (:type-override-fn-id body)))
+          (is (= ["fn" {} "any" ["io"]] (:constraint body))
+              "constraint round-trips as JSON arrays of stringified keywords")))
+      (finally (sp/close storage)))))
+
+
+(deftest apply-tighten-propagates-reject-as-error-body-test
+  ;; When tighten-fn-type-impl! returns a non-200, apply-tighten
+  ;; wraps the reason in an HTML error fragment + propagates the
+  ;; status. Covers the `else` branch of apply-tighten's `if`.
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)]
+    (try
+      (let [resp (entities/apply-tighten
+                   {:binding-id (random-uuid) :delta {:effects ["io"]}}
+                   c)]
+        (is (= 404 (:status resp)))
+        (is (re-find #"error" (:body resp)))
+        (is (re-find #"not found" (:body resp))))
       (finally (sp/close storage)))))

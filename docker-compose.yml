@@ -33,6 +33,11 @@ services:
       DB_PASSWORD: graphden
       DB_POOL_SIZE: 10
       AUTH_TOKEN: ${AUTH_TOKEN:-}
+      # Opt-in seed of demo branches for the versioning UI. Default
+      # disabled in real prod (compose unset → empty → init-key
+      # short-circuits). Local docker workflow sets this in `.env`
+      # so demos appear out of the box.
+      GRAPHDEN_DEMO_BRANCHES_ENABLED: ${GRAPHDEN_DEMO_BRANCHES_ENABLED:-}
     ports:
       - "9002:8080"
     restart: unless-stopped

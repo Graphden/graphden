@@ -216,3 +216,131 @@
                  (r/deep-free-ext-names (:id f-fn) (lookups-for storage)))
               "literal :as maps surface; :literal=true items are excluded"))
         (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; hof-lambda-params — structural-slot dispatch (0-arg / 2+-arg branches)
+;;
+;; The 1-arg + nil-structural paths are exercised by the tests above; the
+;; remaining two arms of the `cond` need a slot whose `:type-fn-id` points
+;; at a fn with a `[:fn {ARGS} ret]` constraint. We synthesise that fn
+;; directly here rather than going through a real type-row builder.
+;; ============================================================================
+
+(defn- create-callable-type!
+  "Insert a fn-row whose `:constraint` shape claims it's a callable
+   with the given arg-spec map. Returns the new fn-id."
+  [storage type-name args-spec]
+  (:id (sp/create-entity storage :fn
+                         {:name type-name
+                          :parent-ids []
+                          :impl-hash nil
+                          :constraint [:fn args-spec :any]})))
+
+
+(deftest hof-lambda-params-zero-arg-structural-slot-test
+  ;; Slot typed `[:fn {} ret]` — variadic-ignore wrap; whatever R's
+  ;; frees are, they're ALL captured at wrap time → 0 lambda-params.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base-r (setup/build-fn! storage
+                                    {:name "hlp0-base-r"
+                                     :slots [{:name "x" :type :int}]})
+            r-fn   (setup/build-fn! storage
+                                    {:name "hlp0-r" :parent base-r})
+            ;; Make a callable type fn with EMPTY args-spec.
+            callable-fn-id (create-callable-type! storage "hlp0-callable" {})
+            ;; F's slot is typed at that fn → structural args = #{}.
+            base-f (setup/create-base-fn! storage "hlp0-base-f")
+            s-cb   (setup/create-slot! storage "cb" callable-fn-id)
+            _      (setup/attach-slot! storage (:id base-f) (:id s-cb) 0)
+            f-fn   (setup/create-composed-fn! storage "hlp0-f" (:id base-f))
+            b-row  (setup/bind-ref! storage (:id f-fn) (:id s-cb) (-> r-fn :fn :id))]
+        (is (= [] (r/hof-lambda-params (-> r-fn :fn :id)
+                                       (:id s-cb) b-row (:id f-fn)
+                                       (lookups-for storage)))
+            "0-arg structural slot → empty lambda-params (variadic-ignore wrap)"))
+      (finally (sp/close storage)))))
+
+
+(deftest hof-lambda-params-map-callable-structural-slot-test
+  ;; Slot typed `[:fn {:request :any :next-handler :any} ret]` — map-callable
+  ;; wrap; R's frees that match those structural names are lambda-params,
+  ;; the rest are captured.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base-r (setup/build-fn! storage
+                                    {:name "hlp2-base-r"
+                                     :slots [{:name "request" :type :int}
+                                             {:name "next-handler" :type :int}
+                                             {:name "other" :type :int}]})
+            r-fn   (setup/build-fn! storage
+                                    {:name "hlp2-r" :parent base-r})
+            callable-fn-id (create-callable-type! storage "hlp2-callable"
+                                                  {:request :any :next-handler :any})
+            base-f (setup/create-base-fn! storage "hlp2-base-f")
+            s-cb   (setup/create-slot! storage "cb" callable-fn-id)
+            _      (setup/attach-slot! storage (:id base-f) (:id s-cb) 0)
+            f-fn   (setup/create-composed-fn! storage "hlp2-f" (:id base-f))
+            b-row  (setup/bind-ref! storage (:id f-fn) (:id s-cb) (-> r-fn :fn :id))
+            out    (r/hof-lambda-params (-> r-fn :fn :id)
+                                        (:id s-cb) b-row (:id f-fn)
+                                        (lookups-for storage))]
+        (is (= #{:request :next-handler} (set out))
+            ":request and :next-handler match the slot's structural args → lambda-params")
+        (is (not (contains? (set out) :other))
+            ":other isn't in the structural args → captured, not lambda-param"))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; build-ref-renames — translates F's rename-bindings into the map that
+;; rewrites R's incoming free-arg names.
+;; ============================================================================
+
+(deftest build-ref-renames-empty-when-no-rename-overlap
+  ;; R exposes :a but F has no rename binding for it → empty rename map.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base-r (setup/build-fn! storage
+                                    {:name "brr0-base-r"
+                                     :slots [{:name "a" :type :int}]})
+            r-fn   (setup/build-fn! storage
+                                    {:name "brr0-r" :parent base-r})
+            base-f (setup/create-base-fn! storage "brr0-base-f")
+            f-fn   (setup/create-composed-fn! storage "brr0-f" (:id base-f))]
+        (is (= {} (r/build-ref-renames (-> r-fn :fn :id) (:id f-fn)
+                                       (lookups-for storage)))))
+      (finally (sp/close storage)))))
+
+
+(deftest build-ref-renames-translates-renamed-slot
+  ;; F's slot `inner` is exposed under the external name `outer`
+  ;; (via slot.source-slot-id → rename). R has a free arg :inner. The
+  ;; rename map should produce {:inner :outer}.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [;; R has a free :inner.
+            base-r (setup/build-fn! storage
+                                    {:name "brr1-base-r"
+                                     :slots [{:name "inner" :type :int}]})
+            r-fn   (setup/build-fn! storage
+                                    {:name "brr1-r" :parent base-r})
+            ;; F is a fresh composed fn that owns a rename-slot:
+            ;; a NEW slot named "outer" whose :source-slot-id points
+            ;; at R-base's "inner" slot. That makes F's binding view
+            ;; treat :outer as the renamed external of :inner.
+            base-f (setup/build-fn! storage
+                                    {:name "brr1-base-f"
+                                     :slots [{:name "inner" :type :int}]})
+            f-fn   (setup/create-composed-fn! storage "brr1-f" (:id (:fn base-f)))
+            rename-slot (sp/create-entity storage :slot
+                                          {:name "outer"
+                                           :type-fn-id (-> base-f :slots (get "inner") :type-fn-id)
+                                           :source-slot-id (-> base-f :slots (get "inner") :id)})
+            _ (setup/attach-slot! storage (:id f-fn) (:id rename-slot) 0)
+            out (r/build-ref-renames (-> r-fn :fn :id) (:id f-fn)
+                                     (lookups-for storage))]
+        (is (= {:inner :outer} out)
+            ":inner (R's free) maps to :outer (F's rename ext-name)"))
+      (finally (sp/close storage)))))

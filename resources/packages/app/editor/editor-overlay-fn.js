@@ -763,6 +763,15 @@ function renderSingleFnRow(line, levelInfo, ctx) {
           onClick: (anchor) => showExecutePopover(lineFnEntity, anchor)
         }));
       }
+      // ⌛ — version history across all branches.
+      if (typeof showFnVersionsPopover === 'function') {
+        host.appendChild(createPinnedIconButton({
+          glyph: '⌛',
+          title: 'Version history across branches',
+          inline: true,
+          onClick: (anchor) => showFnVersionsPopover(lineFnEntity, anchor)
+        }));
+      }
       // ⚙ — service settings. Phase 1 contract: a service needs zero
       // free args. The check happens at server-validate-create time,
       // but we surface the constraint here too: button disabled +

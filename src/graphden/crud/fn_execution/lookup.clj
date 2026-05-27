@@ -8,29 +8,32 @@
   (:require
     [graphden.crud.request :as request]
     [graphden.storage.protocol.core :as sp]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as res]))
 
 
 (defn resolve-fn-version-id
   "Find the current `:fn-version-id` for logical `fn-id` on the active
-   branch. Latest version by `:created-at`. Returns nil when the fn
-   has no version row (shouldn't happen for any loaded fn — every
-   create goes through the versioned-storage decorator).
+   branch. Walks the branch chain (+ branch-merge records) via the
+   versioned-storage resolver, so a fn inherited from a parent
+   branch without an own override on the current branch correctly
+   resolves to the parent's version. Returns nil when the fn has no
+   version row visible on this branch (shouldn't happen for any
+   loaded fn — every create goes through the versioned-storage
+   decorator).
 
-   Pushes ORDER BY created-at DESC LIMIT 1 into the storage query
-   (:fn-version is not a versioned entity, so VersionedStorage
-   forwards opts straight through). Avoids pulling and sorting all
-   versions in memory."
+   Pre-fix this filtered by `:branch-id` direct-match only, so
+   inherited-from-main fns on branch X returned nil — every
+   fn-execution write on a non-creator branch then had a nil
+   version-id, breaking history filtering."
   [ctx fn-id]
-  (let [storage (request/require-storage ctx)
-        branch-id (when (vs/versioned-storage? storage)
-                    (vs/current-branch-id storage))
-        query (cond-> {:fn-id fn-id}
-                branch-id (assoc :branch-id branch-id))
-        versions (sp/query-entities storage :fn-version query
-                                    {:order-by [[:created-at :desc]]
-                                     :limit 1})]
-    (:id (first versions))))
+  (let [storage (request/require-storage ctx)]
+    (when (vs/versioned-storage? storage)
+      (let [base (vs/unwrap storage)
+            branch-id (vs/current-branch-id storage)]
+        ;; Chain cache is now process-wide (`global-chain-cache`);
+        ;; no per-call binding needed.
+        (:id (res/resolve-version base :fn fn-id branch-id))))))
 
 
 (defn query-fn-by-name
@@ -74,21 +77,73 @@
     :else nil))
 
 
-(defn- inheritance-chain
-  "Transitive parents of `fn-id`, including `fn-id` itself. BFS order.
+(defn- collect-reachable-graph
+  "BFS from `fn-id` over parent-ids + ref-fn-id edges, loading only
+   the rows that are actually reachable. Pre-fix this loaded the
+   ENTIRE :slot / :binding / :binding-list-item / :fn-slot tables on
+   every /api/execute request — for a project with thousands of
+   unrelated fns under a single root, that's ~10000× the rows we
+   actually need.
 
-   Batched per-level — one `query-entities :fn {:id frontier}` round-
-   trip per inheritance depth instead of one `read-entity` per
-   ancestor. The chain is unbounded by graph constraints but in
-   practice ≤ 5–10 deep, so we go batch wide rather than recurse."
-  [storage fn-id]
+   The BFS converges in 1–3 iterations for typical fns because most
+   fn-graphs reach only a small connected component."
+  [storage root-fn-id]
+  (loop [seen #{}
+         frontier #{root-fn-id}
+         fn-rows []
+         fn-slots []
+         bindings []
+         list-items []]
+    (if (empty? frontier)
+      ;; Closure complete — fetch the slot rows for everything we
+      ;; collected in one final batch.
+      (let [slot-ids (into #{} (map :slot-id) fn-slots)
+            slot-rows (if (empty? slot-ids)
+                        {}
+                        (sp/read-entities storage :slot (vec slot-ids)))]
+        {:fns-by-id (into {} (map (juxt :id identity)) fn-rows)
+         :slots-by-id (into {} (map (juxt :id identity)) (vals slot-rows))
+         :all-bindings bindings
+         :all-list-items list-items
+         :all-fn-slots fn-slots})
+      (let [front-vec (vec frontier)
+            ;; One round-trip per entity type, narrowed by frontier.
+            new-fns (sp/query-entities storage :fn {:id front-vec})
+            new-fn-slots (sp/query-entities storage :fn-slot {:fn-id front-vec})
+            new-bindings (sp/query-entities storage :binding {:fn-id front-vec})
+            new-binding-ids (mapv :id new-bindings)
+            new-list-items (if (empty? new-binding-ids)
+                             []
+                             (sp/query-entities storage :binding-list-item
+                                                {:binding-id new-binding-ids}))
+            seen' (into seen frontier)
+            ;; Fns reachable next level: ancestors + ref-targets.
+            next-fn-ids (into #{}
+                              (comp cat
+                                    (remove seen')
+                                    (remove nil?))
+                              [(mapcat :parent-ids new-fns)
+                               (keep :ref-fn-id new-bindings)
+                               (keep :ref-fn-id new-list-items)])]
+        (recur seen'
+               next-fn-ids
+               (into fn-rows new-fns)
+               (into fn-slots new-fn-slots)
+               (into bindings new-bindings)
+               (into list-items new-list-items))))))
+
+
+(defn- inheritance-chain-in-memory
+  "Transitive parents of `fn-id` walked from the pre-loaded
+   `fns-by-id` map. Identical semantics to the old storage-backed
+   `inheritance-chain` but with zero round-trips."
+  [fn-id fns-by-id]
   (loop [acc [fn-id] frontier #{fn-id}]
     (if (empty? frontier)
       acc
-      (let [rows (sp/query-entities storage :fn {:id (vec frontier)})
-            visited (set acc)
-            next-frontier (->> rows
-                               (mapcat :parent-ids)
+      (let [visited (set acc)
+            next-frontier (->> frontier
+                               (mapcat #(:parent-ids (get fns-by-id %)))
                                (remove visited)
                                set)]
         (recur (into acc next-frontier) next-frontier)))))
@@ -99,14 +154,16 @@
    ref-fn-id bindings transitively. `visited` guards against cycles
    (GraphConstraints forbid them already, defence-in-depth).
 
-   Bulk-queried entities are threaded as `db` so the recursion doesn't
-   re-fetch."
-  [fn-id visited storage db]
+   `db` is the pre-loaded reachable-closure from
+   `collect-reachable-graph` — every storage round-trip happened
+   upfront, so the recursive resolution is pure in-memory."
+  [fn-id visited db]
   (if (contains? visited fn-id)
     {}
-    (let [{:keys [slots-by-id all-bindings all-list-items all-fn-slots]} db
+    (let [{:keys [fns-by-id slots-by-id all-bindings all-list-items
+                  all-fn-slots]} db
           visited' (conj visited fn-id)
-          chain-fns (set (inheritance-chain storage fn-id))
+          chain-fns (set (inheritance-chain-in-memory fn-id fns-by-id))
           chain-fn-slots (filter #(chain-fns (:fn-id %)) all-fn-slots)
           chain-bindings (filter #(chain-fns (:fn-id %)) all-bindings)
           chain-binding-ids (set (map :id chain-bindings))
@@ -132,7 +189,7 @@
                      (concat (keep :ref-fn-id chain-bindings)
                              (keep :ref-fn-id chain-list-items)))
           transitive (reduce (fn [acc rfid]
-                               (merge acc (free-args-via rfid visited' storage db)))
+                               (merge acc (free-args-via rfid visited' db)))
                              {}
                              ref-fids)
           ;; A slot bound at THIS level removes that slot from the
@@ -167,9 +224,5 @@
    `hof-callable` (3) and type-checker propagation (4) on top."
   [ctx fn-id]
   (let [storage (request/require-storage ctx)
-        db {:slots-by-id (into {} (map (juxt :id identity))
-                               (sp/query-entities storage :slot {}))
-            :all-bindings (sp/query-entities storage :binding {})
-            :all-list-items (sp/query-entities storage :binding-list-item {})
-            :all-fn-slots (sp/query-entities storage :fn-slot {})}]
-    (free-args-via fn-id #{} storage db)))
+        db (collect-reachable-graph storage fn-id)]
+    (free-args-via fn-id #{} db)))

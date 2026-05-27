@@ -295,5 +295,6 @@ function createEdgeLabelOverlay(edge, container) {
     }
   }
 
+  registerEdgeOverlay(overlay);
   container.appendChild(overlay);
 }

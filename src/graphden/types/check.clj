@@ -607,7 +607,7 @@
          :args     (reduce dissoc
                            (apply merge (mapv #(:args % {}) infos))
                            bound)
-         :effects  (reduce into #{} (mapv #(:effects % #{}) infos))
+         :effects  (into #{} (mapcat #(:effects % #{})) infos)
          :resolved-bindings (apply merge
                                    (mapv #(:resolved-bindings % {}) infos))}))))
 
@@ -956,48 +956,46 @@
    transitive ref-free args (freshened per ref)."
   [fn-def parent-args subst]
   (let [args (:args fn-def)
+        ;; Single pass over `args` partitions every binding into the
+        ;; four categories the rest of the algorithm needs.
+        ;; Pre-fix this iterated `args` FOUR times (once per `into`
+        ;; over a `keep`). Type-checker runs once per fn-def at sync
+        ;; AND per call on /api/types/candidates + /api/types/compatible.
+        ;;
         ;; Rename-bindings and type-only bindings BOTH leave the slot
         ;; free at this fn-def level — neither carries a `:value` /
         ;; `:ref`, they only annotate (new name / pinned type). Keep
         ;; them out of `real-bound` so the slot still surfaces on the
         ;; free-arg interface.
-        free-shape? (fn [b]
-                      (or (rename-binding? b)
-                          (type-only-binding? b)))
-        real-bound (into #{}
-                         (keep (fn [[a b]]
-                                 (when-not (free-shape? b) a)))
-                         args)
-        renamed-original-names (into #{}
-                                     (keep (fn [[k b]]
-                                             (when (rename-binding? b) k)))
-                                     args)
-        renamed (into {}
-                      (keep (fn [[a b]]
-                              (when (rename-binding? b)
-                                ;; A rename can locally override the slot's
-                                ;; type via `{:as :name :type T}` — used by
-                                ;; `:assoc-fn` (pinning `:value` to `:fn`)
-                                ;; and by record-constructor templates that
-                                ;; want each lifted field to carry the
-                                ;; record's field-type. Without honouring
-                                ;; `:type`, the free-arg surface would show
-                                ;; the parent's looser slot type.
-                                [(:as b)
-                                 (or (some-> (:type b) types/resolve-alias)
-                                     (types/resolve subst
-                                                    (or (get parent-args a) :any)))])))
-                      args)
+        ;;
+        ;; A rename can locally override the slot's type via
+        ;; `{:as :name :type T}` — used by `:assoc-fn` (pinning
+        ;; `:value` to `:fn`) and by record-constructor templates that
+        ;; want each lifted field to carry the record's field-type.
+        ;; Without honouring `:type`, the free-arg surface would show
+        ;; the parent's looser slot type.
+        ;;
         ;; Type-only bindings pin the free-arg's type to the author's
-        ;; override (same idea as rename-with-:type, but the public name
-        ;; stays the same — no rename involved). Without this entry the
-        ;; slot would surface on `local-free` below with the parent's
-        ;; looser declared type, defeating the override.
-        type-pinned (into {}
-                          (keep (fn [[a b]]
-                                  (when (type-only-binding? b)
-                                    [a (some-> (:type b) types/resolve-alias)])))
-                          args)
+        ;; override (same idea as rename-with-:type, but the public
+        ;; name stays the same — no rename involved).
+        {:keys [real-bound renamed-original-names renamed type-pinned]}
+        (reduce-kv
+          (fn [acc a b]
+            (cond
+              (rename-binding? b)
+              (let [t (or (some-> (:type b) types/resolve-alias)
+                          (types/resolve subst (or (get parent-args a) :any)))]
+                (-> acc
+                    (update :renamed-original-names conj a)
+                    (update :renamed assoc (:as b) t)))
+
+              (type-only-binding? b)
+              (update acc :type-pinned assoc a (some-> (:type b) types/resolve-alias))
+
+              :else
+              (update acc :real-bound conj a)))
+          {:real-bound #{} :renamed-original-names #{} :renamed {} :type-pinned {}}
+          args)
         local-free (into (merge renamed type-pinned)
                          (keep (fn [[a t]]
                                  (when-not (or (contains? real-bound a)
@@ -1165,9 +1163,10 @@
                              ;; union their record fields). The lubbed
                              ;; `:type` keeps the shape every other
                              ;; rule already reads.
-                             {:type [:list (types/coarse-lub (vector-binding-elem-types b-form))]
-                              :elem-types (vector-binding-elem-types b-form)
-                              :value b-form}
+                             (let [et (vector-binding-elem-types b-form)]
+                               {:type [:list (types/coarse-lub et)]
+                                :elem-types et
+                                :value b-form})
 
                              (keyword? b-form)
                              {:type :any :value b-form}

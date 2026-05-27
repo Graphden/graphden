@@ -13,6 +13,32 @@ function truncateLabel(label, maxLen) {
 }
 
 
+// Structural deep-equality for JSON-shaped values (primitives,
+// arrays, plain objects). Used by clientSubtype / clientConstraintImplies
+// in place of `JSON.stringify(a) === JSON.stringify(b)` — the
+// stringify path allocated two strings AND walked the structure
+// twice (once per side); deep refinement chains paid the cost in
+// every recursion frame.
+function structEq(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== typeof b) return false;
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!structEq(a[i], b[i])) return false;
+    return true;
+  }
+  if (typeof a === 'object') {
+    if (Array.isArray(b)) return false;
+    const ak = Object.keys(a);
+    if (ak.length !== Object.keys(b).length) return false;
+    for (const k of ak) if (!structEq(a[k], b[k])) return false;
+    return true;
+  }
+  return false;
+}
+
+
 // ============================================================================
 // CLIENT-SIDE SUBTYPE CHECK
 // ============================================================================
@@ -47,7 +73,7 @@ function clientAtomImplies(a, b) {
   const ak = a[0], av = a.length >= 2 ? a[1] : undefined;
   const bk = b[0], bv = b.length >= 2 ? b[1] : undefined;
   const numeric = typeof av === 'number' && typeof bv === 'number';
-  if (JSON.stringify(a) === JSON.stringify(b)) return true;
+  if (structEq(a, b)) return true;
   if (ak === '=' && numeric) {
     switch (bk) {
       case '=':    return av === bv;
@@ -74,7 +100,7 @@ function clientAtomImplies(a, b) {
   if (ak === '=' && bk === 'in')  return has(bv, av);
   if (ak === 'in' && bk === 'in') return Array.isArray(av) && av.every(e => has(bv, e));
   if (ak === 'in' && bk === '=')  return Array.isArray(av) && av.length === 1 && has(av, bv);
-  if (ak === '=' && bk === 'not=') return JSON.stringify(av) !== JSON.stringify(bv);
+  if (ak === '=' && bk === 'not=') return !structEq(av, bv);
   if (ak === 'in' && bk === 'not=') return Array.isArray(av) && !has(av, bv);
   return null;
 }
@@ -83,7 +109,7 @@ function clientAtomImplies(a, b) {
 // satisfying refinement constraint `a` also satisfies `b`. Recurses
 // through `[:and …]` / `[:or …]`; leaves go to `clientAtomImplies`.
 function clientConstraintImplies(a, b) {
-  if (JSON.stringify(a) === JSON.stringify(b)) return true;
+  if (structEq(a, b)) return true;
   if (a == null || b == null) return false;
   if (Array.isArray(b) && b[0] === 'and') {
     return b.slice(1).every(x => clientConstraintImplies(a, x));
@@ -104,7 +130,7 @@ function clientSubtype(sub, sup) {
   sub = clientNormalise(sub);
   sup = clientNormalise(sup);
   if (sub == null || sup == null) return true;
-  if (JSON.stringify(sub) === JSON.stringify(sup)) return true;
+  if (structEq(sub, sup)) return true;
   if (sup === 'any')  return true;
   if (sub === 'any')  return false;
   // Union LHS: every member must subtype.
@@ -238,6 +264,11 @@ function buildLookups(data) {
       bindingByFnSlot.set(fnId + '|' + b['slot-id'], b);
     }
   });
+  // Flat {item-id -> item-row} index sits next to itemsByBinding so
+  // argRowFromNode can resolve an arg by `itemId` in O(1) — the
+  // previous code looped EVERY bindings' item array (O(N×M) per
+  // arg-overlay render).
+  const itemByItemId = new Map();
   const sortedItems = (data['list-items'] || []).slice()
     .sort((a, b) => (a.position || 0) - (b.position || 0));
   sortedItems.forEach(it => {
@@ -245,6 +276,7 @@ function buildLookups(data) {
     if (!bid) return;
     if (!itemsByBinding.has(bid)) itemsByBinding.set(bid, []);
     itemsByBinding.get(bid).push(it);
+    if (it.id) itemByItemId.set(it.id, it);
   });
 
   // Build namespace maps
@@ -279,11 +311,16 @@ function buildLookups(data) {
   (data['list-items'] || []).forEach(it => bump(fnUsedAsRef, it['ref-fn-id']));
   (data.namespaces || []).forEach(ns => bump(nsHasChildNs, ns['parent-id']));
 
+  // Per-lookups cache for getInheritanceLevels — auto-invalidated
+  // whenever buildLookups runs again (graph mutation refresh).
+  const inheritanceLevelsCache = new Map();
+
   return { fnMap,
            slotMap, fnSlotsByFn, slotByFnAndName, slotByFnSourceSlot,
-           bindingMap, bindingsByFn, bindingByFnSlot, itemsByBinding,
+           bindingMap, bindingsByFn, bindingByFnSlot, itemsByBinding, itemByItemId,
            nsMap, nsPathMap,
-           fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn };
+           fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn,
+           inheritanceLevelsCache };
 }
 
 
@@ -349,13 +386,7 @@ function argRowFromNode(nodeData) {
   if (!argId && !slotId && !bindingId) return null;
   const slot = slotId && lookups && lookups.slotMap && lookups.slotMap.get(slotId);
   const binding = bindingId && lookups && lookups.bindingMap && lookups.bindingMap.get(bindingId);
-  const item = itemId && (() => {
-    if (!lookups || !lookups.itemsByBinding) return null;
-    for (const items of lookups.itemsByBinding.values()) {
-      for (const it of items) if (it.id === itemId) return it;
-    }
-    return null;
-  })();
+  const item = itemId && lookups?.itemByItemId?.get(itemId);
   const effName = fnId && slotId && (typeof getEffectiveSlotName === 'function')
                   ? getEffectiveSlotName(fnId, slotId) : null;
   // A `literal: true` row stores a keyword as a bare string (the colon
@@ -454,7 +485,15 @@ function displayLabel(name) {
 // Get inheritance as BFS layers: [[fnId], [parent1, parent2, ...], [gp1, gp2, ...], ...]
 // Each layer holds all fns reachable in exactly N parent-hops, deduped so each
 // fn appears only at its shallowest depth.
+//
+// Memoised in `lookups.inheritanceLevelsCache` for the lifetime of
+// the current lookups object — fn-overlay rendering calls this many
+// times for the same fn-id (once per render + once per anonymous
+// ancestor in buildAncestorLevels). The cache turns repeated BFS
+// walks into single Map.get() calls.
 function getInheritanceLevels(fnId) {
+  const cache = lookups?.inheritanceLevelsCache;
+  if (cache?.has(fnId)) return cache.get(fnId);
   const levels = [];
   let currentLevel = [fnId];
   const visited = new Set([fnId]);
@@ -474,6 +513,7 @@ function getInheritanceLevels(fnId) {
     }
     currentLevel = nextLevel;
   }
+  if (cache) cache.set(fnId, levels);
   return levels;
 }
 

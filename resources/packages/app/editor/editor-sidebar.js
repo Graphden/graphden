@@ -347,10 +347,45 @@ function updateEntityList(data) {
     renderNsNode(list, name, node, '');
   }
 
-  // Top-level fns without namespace
+  // Top-level fns without a namespace — usually the primitive type-
+  // rows seeded at boot (any, bool, int, …) plus the occasional
+  // user-created top-level fn. Wrap them in a collapsible `_types`
+  // group (default collapsed) so they don't dwarf the namespace
+  // tree visually. The expandedNamespaces machinery from
+  // `renderNsNode` is reused via a synthesised path.
   const sortedFns = [...tree.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
-  for (const fn of sortedFns) {
-    list.appendChild(buildFnItem(fn));
+  if (sortedFns.length > 0) {
+    const groupPath = '_types';
+    const isOpen = expandedNamespaces.has(groupPath);
+    const header = document.createElement('div');
+    header.className = 'ns-header ns-header-pseudo';
+    const arrow = document.createElement('span');
+    arrow.className = 'ns-arrow' + (isOpen ? '' : ' collapsed');
+    arrow.textContent = isOpen ? '▼' : '▶';
+    header.appendChild(arrow);
+    const label = document.createElement('span');
+    label.className = 'ns-label';
+    label.textContent = 'types';
+    header.appendChild(label);
+    const count = document.createElement('span');
+    count.className = 'ns-count';
+    count.textContent = sortedFns.length;
+    header.appendChild(count);
+    header.onclick = (e) => {
+      e.stopPropagation();
+      if (isOpen) expandedNamespaces.delete(groupPath);
+      else expandedNamespaces.add(groupPath);
+      updateEntityList(graphData);
+    };
+    list.appendChild(header);
+    if (isOpen) {
+      const childGroup = document.createElement('div');
+      childGroup.className = 'ns-children';
+      for (const fn of sortedFns) {
+        childGroup.appendChild(buildFnItem(fn));
+      }
+      list.appendChild(childGroup);
+    }
   }
 
   if (list.children.length === 0) {

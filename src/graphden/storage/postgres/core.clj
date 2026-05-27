@@ -14,6 +14,7 @@
     [graphden.storage.postgres.crud :as crud]
     [graphden.storage.postgres.graph :as graph]
     [graphden.storage.postgres.introspection :as introspection]
+    [graphden.storage.postgres.junction :as junction]
     [graphden.storage.postgres.metadata :as metadata]
     [graphden.storage.postgres.migration :as migration]
     [graphden.storage.postgres.pool :as pool]
@@ -264,6 +265,11 @@
   (delete-entities
     [_this entity-name ids]
     (crud/delete-entities pool entity-name ids))
+
+
+  (query-ref-many-owners
+    [_this entity-name field-name target-id]
+    (junction/read-junction-owners pool entity-name field-name target-id))
 
 
   sp/GraphConstraints

@@ -542,8 +542,15 @@
                       :literal {:uuid binding-list-item-literal-field-uuid
                                 :type :bool
                                 :nullable? true}})
-      (ds/add-constraint :binding-list-item
-                         {:type :unique :fields [:binding-id :position]})
+      ;; NOTE — `(binding-id, position)` UNIQUE was retired in favour of
+      ;; a per-branch resolved-view check in `VersionedStorage`. The base
+      ;; identity row represents cross-branch identity; multiple branches
+      ;; can legitimately hold different items at the same `(binding-id,
+      ;; position)` (the resolver disambiguates by branch). Within a
+      ;; single branch, position uniqueness is enforced in
+      ;; `versioning.storage.core/check-list-item-position-collision!`.
+      ;; Existing DBs get the legacy index dropped by
+      ;; `storage.postgres.migration/drop-retired-indexes!`.
 
       ;; -----------------------------------------------------------------
       ;; Retired fields (Phase 6e — drop binding.rename-to)

@@ -27,6 +27,8 @@
                   "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"
                   "packages/app/editor/editor-auth.js"
+                  "packages/app/editor/editor-branches.js"
+                  "packages/app/editor/editor-branch-diff.js"
                   "packages/app/editor/editor-create.js"
                   "packages/app/editor/editor-create-type.js"
                   "packages/app/editor/editor-data.js"
@@ -46,6 +48,7 @@
                   "packages/app/editor/editor-execute-result.js"
                   "packages/app/editor/editor-execute-history.js"
                   "packages/app/editor/editor-execute.js"
+                  "packages/app/editor/editor-fn-versions.js"
                   "packages/app/editor/editor-service-popover.js"
                   "packages/app/editor/editor-mismatch-explainer.js"
                   "packages/app/editor/editor-effect-explainer.js"
@@ -110,6 +113,7 @@
               ;; bottom of `#entity-list`.
               [:div {:class "menu-header-actions"}
                [:div {:id "prefs-mount"}]
+               [:div {:id "branch-mount"}]
                [:div {:id "auth-mount"}]]]
              [:div {:id "search-bar" :role "search"}
               [:label {:for "search-input" :class "visually-hidden"} "Filter functions"]

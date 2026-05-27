@@ -12,6 +12,11 @@
 // the editor JS bundle concatenates these scripts into one scope so
 // the `let` survives. No own state.
 
+// Hoisted from a per-row literal — the timestamp shape is fixed and
+// the same regex object can match every row. Saves a compile per
+// history row on each panel render.
+const HISTORY_TS_REGEX = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})/;
+
 
 async function fetchHistory(fnId) {
   try {
@@ -105,7 +110,7 @@ function buildHistoryRow(fnEntity, row, resultHostEl, onExpand) {
   // for older runs include date ("05-20 15:03") so a yesterday run
   // doesn't masquerade as today.
   const tStr = row['started-at'] || '';
-  const m = tStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})/);
+  const m = tStr.match(HISTORY_TS_REGEX);
   if (m) {
     const todayIso = new Date().toISOString().slice(0, 10);
     const rowDate = m[1] + '-' + m[2] + '-' + m[3];

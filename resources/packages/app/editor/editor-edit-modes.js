@@ -638,15 +638,12 @@ async function populateCompatibleTypes(arg, select, cur, loadingOpt) {
   const aliases = Object.keys(richEntries)
     .filter(k => richEntries[k] && richEntries[k]['type-row?'] === true);
   const allNames = Array.from(new Set([...primitives, ...aliases]));
+  // typesCompatible (editor-literal-types.js) memoises the result per
+  // (expected, candidate) pair across the session — repeat opens of
+  // the type-select popover skip the backend entirely.
   const results = await Promise.all(allNames.map(async name => {
-    try {
-      const r = await fetch('/api/types/compatible', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expected, candidate: name })
-      }).then(r => r.json());
-      return { name, ok: !!r.ok };
-    } catch (_) { return { name, ok: false }; }
+    const ok = await typesCompatible(expected, name);
+    return { name, ok };
   }));
   const valid = results
     .filter(r => r.ok && r.name !== cur)

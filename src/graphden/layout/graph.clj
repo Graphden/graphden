@@ -282,14 +282,27 @@
   [{:keys [fns slots fn-slots bindings list-items]}]
   (let [fn-by-id (into {} (map (juxt :id identity)) fns)
         slot-by-id (into {} (map (juxt :id identity)) slots)
-        own-fn-slots (group-by :fn-id fn-slots)
+        ;; Single pass over fn-slots populates both indexes via
+        ;; transients — the previous code walked the vector twice
+        ;; (group-by + into-map).
+        [own-fn-slots slot-owner-by-id]
+        (let [own (volatile! (transient {}))
+              owners (volatile! (transient {}))]
+          (run! (fn [fs]
+                  (let [fid (:fn-id fs)
+                        sid (:slot-id fs)]
+                    (vswap! own (fn [m]
+                                  (assoc! m fid
+                                          (conj (or (get m fid) []) fs))))
+                    (vswap! owners assoc! sid fid)))
+                fn-slots)
+          [(persistent! @own) (persistent! @owners)])
         binding-by (into {} (map (juxt (juxt :fn-id :slot-id) identity)) bindings)
         items-by-binding (->> list-items
                               (sort-by :position)
                               (reduce (fn [acc i]
                                         (update acc (:binding-id i) (fnil conj []) i))
                                       {}))
-        slot-owner-by-id (into {} (map (juxt :slot-id :fn-id)) fn-slots)
         binding-extra-by-fn (substitution-context-bindings-by-fn
                               fn-by-id slot-owner-by-id bindings)
         anchor-ctx {:fn-by-id fn-by-id :slot-by-id slot-by-id
@@ -406,6 +419,31 @@
      ;; fn-ids; cache the BFS walk for the lifetime of one layout
      ;; request via this atom.
      :chain-cache (atom {})}))
+
+
+(def ^:private cached-build-lookups-max-size 8)
+
+
+(defonce ^:private cached-build-lookups-state (atom []))
+
+
+(defn cached-build-lookups
+  "Reference-identity-memoised wrapper over `build-lookups`. Layout
+   recomputes ~8 in-memory indexes per request (~5-10ms each); when
+   the same graph map is passed (cached-or-load-graph between
+   mutations), reuses the result. Bounded LRU; identical to the
+   policy used in `graphden.executor.compile.lookups`."
+  [graph]
+  (or (some (fn [[g l]] (when (identical? g graph) l))
+            @cached-build-lookups-state)
+      (let [lookups (build-lookups graph)]
+        (swap! cached-build-lookups-state
+               (fn [v]
+                 (let [pruned (filterv (fn [[g _]] (not (identical? g graph))) v)
+                       capped (vec (take-last (dec cached-build-lookups-max-size)
+                                              pruned))]
+                   (conj capped [graph lookups]))))
+        lookups)))
 
 
 ;; =============================================================================
@@ -2179,12 +2217,25 @@
    Returns `{:nodes deduped :edges deduped}`."
   [nodes edges arg-map]
   (let [arg-node? (fn [n] (= "arg" (get-in n [:data :type])))
-        edges-by-target (group-by #(get-in % [:data :target]) edges)
-        source-of (fn [node-id]
-                    (some-> (first (edges-by-target node-id))
-                            :data :source))
-        depth-of (fn [node-id]
-                   (count (filter #{\-} (or node-id ""))))
+        ;; Direct {target-id -> first source-id} index — `edges-by-target`
+        ;; only ever read via `(first … :source)`, so collapse one level
+        ;; of map+seq lookup into one hash hit per node scored.
+        source-by-target (persistent!
+                           (reduce (fn [acc e]
+                                     (let [t (get-in e [:data :target])]
+                                       (if (contains? acc t)
+                                         acc
+                                         (assoc! acc t (get-in e [:data :source])))))
+                                   (transient {})
+                                   edges))
+        depth-of (fn ^long [^String node-id]
+                   (if (nil? node-id)
+                     0
+                     (loop [i 0 n 0]
+                       (if (= i (String/.length node-id))
+                         n
+                         (recur (inc i)
+                                (if (= \- (String/.charAt node-id i)) (inc n) n))))))
         dedupe-groups (->> nodes
                            (filter arg-node?)
                            (group-by (fn [n]
@@ -2196,14 +2247,21 @@
         drop-node-ids (->> dedupe-groups
                            (mapcat (fn [[[terminal _] members]]
                                      (when (and terminal (> (count members) 1))
-                                       (let [scored (mapv (fn [n]
-                                                            [(depth-of (source-of (get-in n [:data :id]))) n])
-                                                          members)
-                                             max-depth (apply max (map first scored))
-                                             losers (->> scored
-                                                         (remove #(= max-depth (first %)))
-                                                         (map (comp #(get-in % [:data :id]) second)))]
-                                         losers))))
+                                       ;; Single pass over members: build
+                                       ;; [id depth] pairs while tracking
+                                       ;; max-depth, then collect non-max.
+                                       (let [pairs (mapv (fn [n]
+                                                           (let [id (get-in n [:data :id])
+                                                                 src (get source-by-target id)]
+                                                             [id (depth-of src)]))
+                                                         members)
+                                             max-depth (reduce (fn [^long m [_ ^long d]]
+                                                                 (if (> d m) d m))
+                                                               Long/MIN_VALUE
+                                                               pairs)]
+                                         (keep (fn [[id ^long d]]
+                                                 (when (not= d max-depth) id))
+                                               pairs)))))
                            set)]
     {:nodes (filterv (fn [n]
                        (not (contains? drop-node-ids

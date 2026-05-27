@@ -3,6 +3,63 @@
 // `updateOverlayPositions` lifecycle.
 // Depends on: editor-state.js, editor-data.js, editor-drag.js.
 
+// ============================================================================
+// OVERLAY REGISTRY
+// ============================================================================
+//
+// Cytoscape fires `pan zoom` events at high rate (every wheel tick,
+// every drag delta), and updateOverlayPositions also runs every frame
+// inside the RAF loop in editor-cytoscape.js. `document.querySelectorAll(
+// '.node-overlay')` on every tick scans the entire DOM and rebuilds a
+// fresh NodeList — for a graph with 200 overlays this is ~12k DOM
+// hits/sec just for the position update. Cache the elements in Maps
+// keyed by their identity (cy node-id / edge-id) so position updates
+// iterate a hashmap instead of touching the DOM.
+//
+// `registerNodeOverlay` / `registerEdgeOverlay` are called by every
+// overlay-creation site (createOverlay factory + placeholder +
+// edge-label). `unregisterOverlay` is called from removal sites in
+// editor-cytoscape.js. `removeAllOverlays` skips the optional
+// "preserved" id (the overlay the user is currently hovering, which
+// we keep across rebuilds so mouseleave doesn't fire).
+const _overlaysByNodeId = new Map();
+const _edgeOverlaysByEdgeId = new Map();
+
+function registerNodeOverlay(el) {
+  const id = el.dataset.nodeId;
+  if (id) _overlaysByNodeId.set(id, el);
+}
+
+function registerEdgeOverlay(el) {
+  const id = el.dataset.edgeId;
+  if (id) _edgeOverlaysByEdgeId.set(id, el);
+}
+
+function unregisterNodeOverlay(nodeId) {
+  const el = _overlaysByNodeId.get(nodeId);
+  if (el) {
+    el.remove();
+    _overlaysByNodeId.delete(nodeId);
+  }
+}
+
+function getNodeOverlay(nodeId) {
+  return _overlaysByNodeId.get(nodeId);
+}
+
+function _removeAllNodeOverlays(preservedNodeId) {
+  for (const [nodeId, el] of _overlaysByNodeId) {
+    if (nodeId === preservedNodeId) continue;
+    el.remove();
+    _overlaysByNodeId.delete(nodeId);
+  }
+}
+
+function _removeAllEdgeOverlays() {
+  for (const [, el] of _edgeOverlaysByEdgeId) el.remove();
+  _edgeOverlaysByEdgeId.clear();
+}
+
 /**
  * Create overlay element with common styles
  */
@@ -10,6 +67,7 @@ function createOverlay(nodeId, options = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'node-overlay';
   overlay.dataset.nodeId = nodeId;
+  _overlaysByNodeId.set(nodeId, overlay);
   Object.assign(overlay.style, {
     position: 'absolute',
     pointerEvents: 'auto',
@@ -95,6 +153,7 @@ function createPlaceholderOverlay(node, container) {
   });
   btn.style.pointerEvents = 'auto';
   wrap.appendChild(btn);
+  registerNodeOverlay(wrap);
   container.appendChild(wrap);
 }
 
@@ -114,14 +173,9 @@ function createNodeOverlays() {
     preservedOverlayId = previewState.keys().next().value;
   }
 
-  // Remove overlays except the preserved one
-  document.querySelectorAll('.node-overlay').forEach(el => {
-    if (el.dataset.nodeId === preservedOverlayId) {
-      // Keep this overlay - it's the one user is hovering over
-      return;
-    }
-    el.remove();
-  });
+  // Remove overlays except the preserved one (registry-backed; replaces
+  // a full-DOM querySelectorAll scan).
+  _removeAllNodeOverlays(preservedOverlayId);
 
   if (!cy) return;
 
@@ -130,10 +184,7 @@ function createNodeOverlays() {
   // Fn nodes (with ancestor list)
   cy.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
     // Skip if overlay already exists (preserved)
-    if (node.id() === preservedOverlayId) {
-      const existingOverlay = document.querySelector(`.node-overlay[data-node-id="${node.id()}"]`);
-      if (existingOverlay) return;
-    }
+    if (node.id() === preservedOverlayId && getNodeOverlay(node.id())) return;
     createFnOverlay(node, container);
   });
 
@@ -147,8 +198,8 @@ function createNodeOverlays() {
     createPlaceholderOverlay(node, container);
   });
 
-  // Remove any stale edge label overlays then create fresh ones
-  document.querySelectorAll('.edge-label-overlay').forEach(el => el.remove());
+  // Remove any stale edge label overlays then create fresh ones.
+  _removeAllEdgeOverlays();
   cy.edges().forEach(edge => {
     if (edge.data('argName')) createEdgeLabelOverlay(edge, container);
   });
@@ -165,12 +216,9 @@ function updateOverlayPositions() {
   const pan = cy.pan();
   const zoom = cy.zoom();
 
-  document.querySelectorAll('.node-overlay').forEach(overlay => {
-    const nodeId = overlay.dataset.nodeId;
-    if (!nodeId) return;
-
+  for (const [nodeId, overlay] of _overlaysByNodeId) {
     const node = cy.getElementById(nodeId);
-    if (!node.length) return;
+    if (!node.length) continue;
 
     const pos = node.position();
     // Use width()/height() (content size, no padding) to match calculateNodeSize
@@ -189,7 +237,7 @@ function updateOverlayPositions() {
     overlay.style.minHeight = height + 'px';
     overlay.style.transform = 'scale(' + zoom + ')';
     overlay.style.transformOrigin = 'top left';
-  });
+  }
 
   // Position edge label overlays. Anchor: visual right edge sits 6px to the
   // left of target's left edge, vertically centered on the target.
@@ -197,11 +245,9 @@ function updateOverlayPositions() {
   // transforms) and compute pixel positions so the visual top-left lands at
   // (screenRight - w*zoom, screenMid - h*zoom/2). Origin 'top left' means
   // scaling around the top-left corner — the corner stays at left/top.
-  document.querySelectorAll('.edge-label-overlay').forEach(overlay => {
-    const edgeId = overlay.dataset.edgeId;
-    if (!edgeId) return;
+  for (const [edgeId, overlay] of _edgeOverlaysByEdgeId) {
     const edge = cy.getElementById(edgeId);
-    if (!edge.length) return;
+    if (!edge.length) continue;
     const target = edge.target();
     const source = edge.source();
     if (!target.length) return;
@@ -262,5 +308,5 @@ function updateOverlayPositions() {
     overlay.style.left = leftPx + 'px';
     overlay.style.top = (screenMid - h * zoom / 2) + 'px';
     overlay.style.transform = 'scale(' + zoom + ')';
-  });
+  }
 }

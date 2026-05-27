@@ -34,16 +34,19 @@
   [base-storage source-branch-id target-branch-id]
   (let [source-branch (sp/read-entity base-storage :branch source-branch-id)
         branch-created (:created-at source-branch)
-        ;; Find previous merges between these branches (in either direction)
-        merges-to-target (sp/query-entities base-storage :branch-merge
-                                            {:source-branch-id source-branch-id
-                                             :target-branch-id target-branch-id})
-        merges-to-source (sp/query-entities base-storage :branch-merge
-                                            {:source-branch-id target-branch-id
-                                             :target-branch-id source-branch-id})
-        all-merge-times (concat
-                          (map :target-timestamp merges-to-target)
-                          (map :target-timestamp merges-to-source))
+        ;; Previous merges between these branches in EITHER direction.
+        ;; One SQL roundtrip via `WHERE source IN (a, b) AND target IN
+        ;; (a, b)` covers the 4 (source,target) combos; in-memory we
+        ;; reject the two self-pair cases (a,a) / (b,b).
+        pair (vec (distinct [source-branch-id target-branch-id]))
+        candidate-merges (sp/query-entities base-storage :branch-merge
+                                            {:source-branch-id pair
+                                             :target-branch-id pair})
+        between-branches (filter (fn [m]
+                                   (not= (:source-branch-id m)
+                                         (:target-branch-id m)))
+                                 candidate-merges)
+        all-merge-times (map :target-timestamp between-branches)
         latest-merge (when (seq all-merge-times)
                        (reduce (fn [a b] (if (pos? (compare b a)) b a))
                                (first all-merge-times)
@@ -74,20 +77,21 @@
   "Resolve every `entity-id` of every `entity-name` on `branch-id` in
    one query per type. Returns `{[entity-name entity-id] resolved}`."
   [base-storage entity-name->ids branch-id]
-  (binding [res/*branch-chain-cache* (atom {})]
-    (reduce-kv
-      (fn [acc entity-name ids]
-        (if (empty? ids)
-          acc
-          (let [identity-records (vals (sp/read-entities base-storage
-                                                         entity-name (vec ids)))
-                resolved (res/resolve-entities-batch base-storage entity-name
-                                                     identity-records branch-id)]
-            (reduce-kv (fn [m eid r] (assoc m [entity-name eid] r))
-                       acc
-                       resolved))))
-      {}
-      entity-name->ids)))
+  ;; Chain cache is process-wide (`resolution/global-chain-cache`)
+  ;; — no per-call binding required.
+  (reduce-kv
+    (fn [acc entity-name ids]
+      (if (empty? ids)
+        acc
+        (let [identity-records (vals (sp/read-entities base-storage
+                                                       entity-name (vec ids)))
+              resolved (res/resolve-entities-batch base-storage entity-name
+                                                   identity-records branch-id)]
+          (reduce-kv (fn [m eid r] (assoc m [entity-name eid] r))
+                     acc
+                     resolved))))
+    {}
+    entity-name->ids))
 
 
 (defn detect-conflicts
@@ -193,6 +197,135 @@
           conflicts)]
     (doseq [[version-entity records] by-version-entity]
       (sp/create-entities base-storage version-entity records))))
+
+
+(defn- branch-ancestor-ids
+  "Set of branch-ids along the inheritance chain from `branch-id`
+   upward (inclusive). Used by `diff-branches` to decide whether a
+   modification visible on one branch was actually authored there or
+   inherited from an ancestor."
+  [base-storage branch-id]
+  (loop [acc #{} cur branch-id]
+    (if (or (nil? cur) (contains? acc cur))
+      acc
+      (let [b (sp/read-entity base-storage :branch cur)]
+        (recur (conj acc cur) (:base-branch-id b))))))
+
+
+(defn- branch-visibility-ids
+  "Set of branch-ids whose version rows may appear in `branch-id`'s
+   resolved view. Includes the ancestor chain plus the source-branch
+   of every `branch-merge` whose target lands on some ancestor in
+   that chain — mirrors the resolver's two-hop algorithm in
+   `resolution.clj/resolve-version` (own → merges-into-this →
+   recurse-to-parent). Without this, post-merge diffs would
+   understate the visible-via-merge entity set."
+  [base-storage branch-id]
+  (let [ancestor-set (branch-ancestor-ids base-storage branch-id)
+        merge-sources (when (seq ancestor-set)
+                        (->> (sp/query-entities base-storage :branch-merge
+                                                {:target-branch-id (vec ancestor-set)})
+                             (map :source-branch-id)
+                             (filter some?)
+                             set))]
+    (set/union ancestor-set (or merge-sources #{}))))
+
+
+(defn- touched-entities-by-side
+  "Combined source+target visibility scan. ONE query per entity-type
+   (4 total) against `WHERE :branch-id IN (source-vis ∪ target-vis)`,
+   then partitions client-side. Pre-fix the diff did 4 + 4 = 8
+   queries (one per side). Rows on branches present in BOTH chains
+   (e.g. the shared `main` ancestor) contribute to both sides
+   correctly. Returns `{entity-name {:source #{eid} :target #{eid}}}`."
+  [base-storage source-vis target-vis]
+  (let [union-branches (vec (set/union source-vis target-vis))]
+    (reduce-kv
+      (fn [acc entity-name {:keys [version-entity version-id-field]}]
+        (let [vs (sp/query-entities base-storage version-entity
+                                    {:branch-id union-branches})
+              partitioned
+              (reduce
+                (fn [m v]
+                  (let [eid (get v version-id-field)
+                        bid (:branch-id v)
+                        m (if (contains? source-vis bid)
+                            (update m :source conj eid)
+                            m)]
+                    (if (contains? target-vis bid)
+                      (update m :target conj eid)
+                      m)))
+                {:source #{} :target #{}}
+                vs)]
+          (assoc acc entity-name partitioned)))
+      {}
+      res/entity-config)))
+
+
+(defn diff-branches
+  "Resolved-view diff between `source-branch-id` and `target-branch-id`.
+
+   For every versioned entity-type, finds every entity-id that has at
+   least one version record on EITHER branch's ancestor chain, then
+   resolves each on both branches. An entry is included only when the
+   resolved views actually differ.
+
+   `resolve-entities-batch` returns the bare identity row when an
+   entity has no version on the chain (used by the executor for
+   base-fns); we treat that as `nil` here so a fn that exists only on
+   one branch reports `:added-in-source` / `:added-in-target` rather
+   than `:modified`.
+
+   Returns:
+     {:source-branch-id <uuid>
+      :target-branch-id <uuid>
+      :diffs [{:entity-name :fn
+               :entity-id   <uuid>
+               :source-version <resolved map or nil>
+               :target-version <resolved map or nil>
+               :change      :added-in-source | :added-in-target | :modified}
+              …]}
+
+   Branch-symmetric: doesn't privilege the source as the side bringing
+   in changes (use `detect-conflicts` for the merge-oriented framing).
+
+   `branch-merge` records contribute to visibility — each branch's
+   visibility set is its ancestor chain PLUS the source-branch of
+   every merge that landed on any ancestor. Mirrors the resolver's
+   two-hop algorithm exactly."
+  [base-storage source-branch-id target-branch-id]
+  (let [source-vis (branch-visibility-ids base-storage source-branch-id)
+        target-vis (branch-visibility-ids base-storage target-branch-id)
+        touched (touched-entities-by-side base-storage source-vis target-vis)
+        touched-source (reduce-kv (fn [m k v] (assoc m k (:source v))) {} touched)
+        touched-target (reduce-kv (fn [m k v] (assoc m k (:target v))) {} touched)
+        all-touched (merge-with set/union touched-source touched-target)
+        source-resolved (batch-resolve base-storage all-touched source-branch-id)
+        target-resolved (batch-resolve base-storage all-touched target-branch-id)
+        in-chain? (fn [touched ename eid]
+                    (contains? (get touched ename #{}) eid))
+        diffs (for [[entity-name ids] all-touched
+                    eid ids
+                    :let [sv (when (in-chain? touched-source entity-name eid)
+                               (get source-resolved [entity-name eid]))
+                          tv (when (in-chain? touched-target entity-name eid)
+                               (get target-resolved [entity-name eid]))
+                          ;; created-at differs on every version row; comparing
+                          ;; data-only avoids spurious entries.
+                          sv-data (some-> sv (dissoc :created-at))
+                          tv-data (some-> tv (dissoc :created-at))]
+                    :when (not= sv-data tv-data)]
+                {:entity-name entity-name
+                 :entity-id eid
+                 :source-version sv
+                 :target-version tv
+                 :change (cond
+                           (and (nil? tv) (some? sv)) :added-in-source
+                           (and (nil? sv) (some? tv)) :added-in-target
+                           :else :modified)})]
+    {:source-branch-id source-branch-id
+     :target-branch-id target-branch-id
+     :diffs (vec diffs)}))
 
 
 (defn merge-branch!

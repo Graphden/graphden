@@ -39,14 +39,45 @@
  {:context #ig/ref :exec/context
   :_fn-entities #ig/ref :exec/fn-entities}
 
+ ;; Per-branch ExecutionContext registry + Ring dispatcher. Same as
+ ;; in system-prod.edn — see comment there.
+ :exec/branch-router
+ {:context #ig/ref :exec/context
+  :_compiled-registry #ig/ref :exec/compiled-registry}
+
  ;; Phase 1 service registry — see system-prod.edn for the full
  ;; rationale. Fallback to packages' :startup-fn when no rows exist.
  :exec/service-reconciler
  {:context #ig/ref :exec/context
   :packages #ig/ref :app/packages
-  :_compiled-registry #ig/ref :exec/compiled-registry}
+  :_compiled-registry #ig/ref :exec/compiled-registry
+  :_branch-router #ig/ref :exec/branch-router}
 
  ;; Hourly sweep of :fn-execution rows past per-status TTL.
  :exec/cleanup-scheduler
  {:context #ig/ref :exec/context
-  :period-ms 3600000}}
+  :period-ms 3600000}
+
+ ;; Demo branches for the versioning UI. OPT-IN via env — see the
+ ;; matching block in system-prod.edn for the full rationale. Dev
+ ;; defaults to enabled when the env var is unset (this is dev — if
+ ;; you wanted them off you'd explicitly say so).
+ :exec/demo-branches
+ {:context #ig/ref :exec/context
+  :_after-router #ig/ref :exec/branch-router
+  :enabled? #or [#env GRAPHDEN_DEMO_BRANCHES_ENABLED "1"]
+  :branches
+  [{:name "demo-edit-description"
+    :description "Lightweight demo — only `add`'s description differs"
+    :mutations
+    [{:type :update-fn-description
+      :fn-name "add"
+      :description "Sum a vector of numbers (edited on demo-edit-description)"}]}
+
+   {:name "demo-new-fn"
+    :description "Carries a fn (`demo-twice`) that does NOT exist on main"
+    :mutations
+    [{:type :create-fn
+      :name "demo-twice"
+      :parent "add"
+      :description "Demo-only `add` clone — shows up as `:added-in-source` in the diff"}]}]}}

@@ -80,14 +80,8 @@ async function populateNarrowerOptions(select, currentType) {
   if (aliases.length === 0) return;
   try {
     const results = await Promise.all(aliases.map(async name => {
-      try {
-        const r = await fetch('/api/types/compatible', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ expected: currentType, candidate: name })
-        }).then(r => r.json());
-        return { name, ok: !!r.ok };
-      } catch (_) { return { name, ok: false }; }
+      const ok = await typesCompatible(currentType, name);
+      return { name, ok };
     }));
     for (const r of results) {
       if (r.ok && r.name !== curVal) {

@@ -38,4 +38,9 @@
   {:name :put-route-with-middleware
    :description "Method template for `PUT` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
    :parent :route-with-middleware
-   :args {:method "put"}}]}
+   :args {:method "put"}}
+
+  {:name :delete-route-with-middleware
+   :description "Method template for `DELETE` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
+   :parent :route-with-middleware
+   :args {:method "delete"}}]}

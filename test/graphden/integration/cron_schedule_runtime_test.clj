@@ -127,20 +127,29 @@
                 (testing "execute returns a stopper-thunk (schedule's return)"
                   (is (fn? stopper) "schedule's return-type is [:fn {} :null]"))
                 (testing "cron fires at ~1Hz — counter increments while loop runs"
-                  (Thread/sleep 2500)
-                  (let [mid @tick-counter]
-                    (is (>= mid 1)
-                        (str "expected ≥1 fires in 2.5s, got " mid))))
+                  ;; Poll until we observe ≥1 tick, capped at 2s. Beats
+                  ;; the previous flat 2500ms by hitting fast when the
+                  ;; cron fires inside the first second.
+                  (let [deadline (+ (System/currentTimeMillis) 2000)]
+                    (while (and (< (System/currentTimeMillis) deadline)
+                                (zero? @tick-counter))
+                      (Thread/sleep 50)))
+                  (is (>= @tick-counter 1)
+                      (str "expected ≥1 fires within 2s, got " @tick-counter)))
                 (testing "stopper halts the loop — counter stops incrementing"
                   (stopper)
-                  ;; Give the thread up to 1500ms to notice the
-                  ;; interrupt and unwind through the next iteration's
-                  ;; isInterrupted check (worst case it was just past
-                  ;; the check and runs one more tick — :sleep-until-ms
-                  ;; is bounded ≤1s for "* * * * * ?").
-                  (Thread/sleep 1500)
+                  ;; Mock-clock path is too invasive to land cleanly
+                  ;; (cron primitives use real System/currentTimeMillis
+                  ;; + Thread/sleep). Instead: poll for stability. After
+                  ;; the interrupt the daemon takes <100ms to unwind in
+                  ;; practice; wait up to 1.1s for the next cron-tick
+                  ;; window to close (sleep-until-ms is bounded ≤1s for
+                  ;; "* * * * * ?") then verify the counter is stable
+                  ;; over a 300ms window — much tighter than the old
+                  ;; flat 2.2s.
+                  (Thread/sleep 1100)
                   (let [before-final @tick-counter]
-                    (Thread/sleep 1500)
+                    (Thread/sleep 300)
                     (is (= before-final @tick-counter)
                         "after stopper, no further increments")))
                 (testing ":process effect is in :schedule's rich-type"

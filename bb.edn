@@ -123,6 +123,66 @@
   {:doc "Run all tests"
    :task (clojure "-M:dev:test -m kaocha.runner")}
 
+  ;; Parallel test runner — splits test namespaces across N worker JVMs
+  ;; (default 4). Each worker spins up its OWN testcontainer (via the
+  ;; shared-container plugin in tests.edn — shared inside a worker, not
+  ;; across workers), so tests run isolated from each other. Worth ~3x
+  ;; speedup on a quad-core dev box; the per-worker JVM + container
+  ;; startup overhead (~6-8s) eats into the savings for very small test
+  ;; subsets, so `bb test` stays the canonical single-process runner.
+  ;; Default N picked to match the ~4 cores typical of dev boxes; CI
+  ;; may override via the first argument: `bb test-parallel 8`.
+  test-parallel
+  {:doc "Run tests in parallel (N=4 by default; arg overrides)."
+   :task (let [n (or (some-> (first *command-line-args*) Long/parseLong)
+                     4)
+               file->ns (fn [path]
+                          (-> (str path)
+                              (str/replace (re-pattern "^test/") "")
+                              (str/replace (re-pattern "\\.clj$") "")
+                              (str/replace "_" "-")
+                              (str/replace "/" ".")))
+               test-files (->> (fs/glob "test" "**/*_test.clj")
+                               (map file->ns)
+                               sort)
+               ;; Stable round-robin assignment so total time is
+               ;; balanced even when one chunk happens to land all the
+               ;; slow integration tests.
+               chunks (->> test-files
+                           (map-indexed (fn [i ns] [(mod i n) ns]))
+                           (group-by first)
+                           (sort-by key)
+                           vals
+                           (map (fn [pairs] (map second pairs))))
+               start (System/currentTimeMillis)
+               procs (mapv (fn [chunk]
+                             (let [focus-args (mapcat (fn [ns] ["--focus" ns]) chunk)
+                                   args (concat ["clojure" "-M:dev:test"
+                                                 "-m" "kaocha.runner"
+                                                 "--reporter" "kaocha.report/dots"]
+                                                focus-args)]
+                               (apply p/process {:out :string :err :string} args)))
+                           chunks)
+               results (mapv deref procs)
+               total-ms (- (System/currentTimeMillis) start)
+               failures (filter (fn [r] (not= 0 (:exit r))) results)]
+           (println (str cyan "Workers: " (count procs) "  Wall: "
+                         (format "%.1fs" (/ total-ms 1000.0)) reset))
+           (doseq [[i r] (map-indexed vector results)]
+             (let [tail (->> (str/split-lines (:out r))
+                             (filter (fn [line]
+                                       (re-find (re-pattern "tests, .*assertions|FAIL|ERROR")
+                                                line)))
+                             last)]
+               (println (str (if (zero? (:exit r)) green red)
+                             "  worker " i ": " (or tail "(no summary)") reset))))
+           (when (seq failures)
+             (println (str red "✗ " (count failures) " worker(s) failed" reset))
+             (doseq [{:keys [out err]} failures]
+               (println out)
+               (when (seq err) (println err)))
+             (System/exit 1)))}
+
   coverage
   {:doc "Run tests with coverage report"
    :task (clojure "-M:dev:test:cloverage --src-ns-path src --test-ns-path test --ns-regex \"graphden\\..*\" --ns-exclude-regex \".*-test\" --ns-exclude-regex \".*contract-tests\" --ns-exclude-regex \".*test-helpers\" --ns-exclude-regex \".*test-mocks\"")}

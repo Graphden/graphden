@@ -33,6 +33,8 @@
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.core :as postgres]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.branch-router :as br]
+    [graphden.system.demo-branches :as demo]
     [graphden.types.check :as types-check]
     [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs]
@@ -308,13 +310,25 @@
     ;; couldn't propagate, leaving composed fn-defs absent or
     ;; mis-typed). A fn-def that throws here is genuinely absent from
     ;; the rich-type registry — the editor would miss its effect strip
-    ;; / computed return — so it's logged. The per-fn-def try/catch
-    ;; keeps one mismatch from aborting the rest of the sweep.
-    (doseq [fd (deps/topological-sort fn-defs)]
-      (try (types-check/check-fn-def! fd)
-           (catch Exception e
-             (log/warn "Type-check failed for fn-def" (:name fd) "—"
-                       (ex-message e)))))
+    ;; / computed return — so the per-failure detail is logged at
+    ;; DEBUG and a single summary WARN runs at the end. Per-fn-def
+    ;; WARNs were too noisy in prod startup logs (~22 baseline
+    ;; entries from `:router-result` / `:merge-in` / friends whose
+    ;; producer-of-callable shape the typchecker can't unify yet —
+    ;; runtime behaviour is correct, the editor just doesn't get a
+    ;; computed return-type for those slots). DEBUG keeps the signal
+    ;; available; the summary count makes regressions visible.
+    (let [failures (atom 0)]
+      (doseq [fd (deps/topological-sort fn-defs)]
+        (try (types-check/check-fn-def! fd)
+             (catch Exception e
+               (swap! failures inc)
+               (log/debug "Type-check failed for fn-def" (:name fd) "—"
+                          (ex-message e)))))
+      (when (pos? @failures)
+        (log/warn "Type-check sweep: " @failures
+                  "fn-defs failed (DEBUG-logged) — runtime unaffected,"
+                  " editor effect/return strips may be missing for those names")))
     (log/info "Fn entities created:" (count fns))
     fns))
 
@@ -341,6 +355,77 @@
   (let [registry (cr/rebuild! context)]
     (log/info "Compiled registry built:" (count registry) "fns")
     registry))
+
+
+;; =============================================================================
+;; Branch router — per-branch ExecutionContext + Ring dispatch
+;; =============================================================================
+;;
+;; Each non-default branch needs its OWN compiled registry — the
+;; executor closes over ctx at compile-time and a branch's bindings
+;; can diverge from main. Lazy build on first request; cached
+;; afterwards. Mutations call `invalidate-graph-cache!` on the per-
+;; branch ctx via the standard executor invalidation path, so a
+;; write on branch X clears X's registry without touching main's.
+;;
+;; The router lives in a process-wide atom
+;; (`branch-router/active-router`) because the wrap base-fn impl
+;; runs inside compiled closures that already closed over a fixed
+;; ctx — same pattern as `services.reconciler/legacy-handle`.
+
+(defmethod ig/init-key :exec/branch-router [_ {:keys [context]}]
+  (log/info "Initialising branch router...")
+  (let [router (br/create-router context "_app-ring-response")]
+    (br/set-active-router! router)
+    router))
+
+
+(defmethod ig/halt-key! :exec/branch-router [_ _router]
+  (br/clear-active-router!))
+
+
+;; =============================================================================
+;; Demo branches (dev only — no-op in prod when `:branches` is absent/empty)
+;; =============================================================================
+;;
+;; Pre-bakes a couple of versioning-UI demo branches after package sync
+;; finishes. Idempotent: existing branches with the same name are left
+;; alone, so a JVM restart doesn't double-write. `bb deploy` wipes the
+;; DB, sync re-runs, and the demo branches reappear.
+;;
+;; See `graphden.system.demo-branches` for the declaration shape.
+
+(defn- demo-branches-enabled?
+  "Parse the `:enabled?` flag from the system config. Accepts a few
+   wire-friendly shapes: the EDN literal `true`, or any of
+   `\"1\" \"true\" \"yes\" \"on\"` (case-insensitive) when the value
+   came through an env var. Anything else (including the empty
+   string from an unset env in `system-prod.edn`) means OFF."
+  [raw]
+  (cond
+    (true? raw)                  true
+    (or (false? raw) (nil? raw)) false
+    (string? raw)                (contains? #{"1" "true" "yes" "on"}
+                                            (str/lower-case raw))
+    :else                        (boolean raw)))
+
+
+(defmethod ig/init-key :exec/demo-branches [_ {:keys [context enabled? branches]}]
+  (let [on? (demo-branches-enabled? enabled?)]
+    (cond
+      (not on?)
+      (log/info "[demo-branches] disabled"
+                "— set GRAPHDEN_DEMO_BRANCHES_ENABLED=1 to seed demo branches")
+
+      (seq branches)
+      (demo/seed! (:storage context) branches)
+
+      :else
+      (log/info "[demo-branches] enabled but :branches is empty — nothing to seed"))
+    ;; Returning state keeps it visible in the system map for any
+    ;; future REPL-driven re-seed.
+    {:enabled? on?
+     :branches (vec (or branches []))}))
 
 
 ;; =============================================================================

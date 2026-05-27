@@ -171,7 +171,18 @@
 
   (delete-entities
     [this entity-name ids]
-    "Deletes multiple entity records."))
+    "Deletes multiple entity records.")
+
+  (query-ref-many-owners
+    [this entity-name field-name target-id]
+    "For a `:ref-many` `field-name` on `entity-name`, return the
+     vector of OWNER ids that have `target-id` in that field's
+     junction table. Backed by the reverse junction-table index
+     (`idx_<jt>_target`) so it's O(log n) on the target column instead
+     of an O(N) entity-table scan.
+
+     Used by reverse-dependency checks (`fn-in-use-reason`) and
+     anywhere else that needs to walk a ref-many edge upstream."))
 
 
 (defprotocol GraphConstraints

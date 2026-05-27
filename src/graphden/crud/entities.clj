@@ -1117,10 +1117,12 @@
    replace arg-rows for ref tracking, with list-items handling
    sequence-element refs."
   [storage fn-id]
-  (let [used-as-parent (count (filter (fn [f]
-                                        (and (not= (:id f) fn-id)
-                                             (some #(= % fn-id) (:parent-ids f))))
-                                      (sp/query-entities storage :fn {})))
+  (let [;; Reverse junction lookup — `idx_fn__parent_ids_target` hits
+        ;; the indexed column. Pre-fix this loaded EVERY fn row and
+        ;; filtered in-memory (O(N) on the entity table).
+        parent-owners (remove #(= % fn-id)
+                              (sp/query-ref-many-owners storage :fn :parent-ids fn-id))
+        used-as-parent (count parent-owners)
         ref-bindings (count (sp/query-entities storage :binding {:ref-fn-id fn-id}))
         ref-items (count (sp/query-entities storage :binding-list-item {:ref-fn-id fn-id}))
         refs (+ ref-bindings ref-items)]
@@ -1303,20 +1305,17 @@
       :else
       (if-let [seq-binding (ensure-sequence-binding ctx fn-id)]
         (let [binding-id (:id seq-binding)
-              ;; A new item's `:position` must clear the BASE
-              ;; `binding_list_item` table, not just the resolved
-              ;; view. A soft-deleted item leaves its base row (the
-              ;; cross-branch identity) still holding `(binding_id,
-              ;; position)`, and that row's UNIQUE index rejects a
-              ;; colliding insert. The resolved view hides those
-              ;; orphans — query the base storage so they count.
-              base-storage (or (:base-storage storage) storage)
+              ;; Next position = one past the max in the per-branch
+              ;; resolved view. The pre-versioning workaround also
+              ;; queried the base identity table to dodge orphan-row
+              ;; collisions under the now-retired
+              ;; `UNIQUE (binding_id, position)` index. With the
+              ;; constraint dropped (and per-branch uniqueness
+              ;; enforced in `VersionedStorage`), the resolved view
+              ;; IS the only thing that matters.
               used-pos (map :position
-                            (concat
-                              (sp/query-entities base-storage :binding-list-item
-                                                 {:binding-id binding-id})
-                              (sp/query-entities storage :binding-list-item
-                                                 {:binding-id binding-id})))
+                            (sp/query-entities storage :binding-list-item
+                                               {:binding-id binding-id}))
               new-pos (inc (apply max -1 used-pos))
               payload (resolve-sequence-payload storage body)
               new-item (merge {:id (random-uuid)

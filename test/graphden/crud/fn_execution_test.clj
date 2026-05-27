@@ -35,10 +35,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.core :as sys]
-    [graphden.versioning.storage.core :as vs]))
-
-
-(use-fixtures :once (setup/create-container-fixture))
+    [graphden.versioning.storage.core :as vs]
+    [next.jdbc :as jdbc]))
 
 
 (defn- full-schema
@@ -54,12 +52,72 @@
       (ds/build)))
 
 
-(defn- create-full-storage
+;; Shared-storage fixture: 52 tests in this ns used to drop+recreate
+;; the public schema and re-run sp/initialize PER TEST (~14 CREATE
+;; TABLE + 25 indexes worth of DDL). Now the heavy init runs once for
+;; the whole ns; tests get a fresh-data view via TRUNCATE + reseed.
+;; The shared atom is wiped at ns-end so other ns's fixtures don't
+;; observe leaked state. Stop ~10s of repeated DDL per `bb test`.
+
+(def ^:private shared-storage (atom nil))
+
+
+(defn- init-shared-storage!
   []
-  (pth/clean-database-fast! @(resolve 'graphden.executor.test-setup/*container*))
-  (let [container @(resolve 'graphden.executor.test-setup/*container*)
-        storage (pg/create-storage (pth/get-container-config container))]
-    (sp/initialize storage (full-schema))
+  (let [container @(resolve 'graphden.executor.test-setup/*container*)]
+    (pth/clean-database-fast! container)
+    (let [storage (pg/create-storage (pth/get-container-config container))]
+      (sp/initialize storage (full-schema))
+      (reset! shared-storage storage))))
+
+
+(defn- close-shared-storage!
+  []
+  (when-let [s @shared-storage]
+    (sp/close s)
+    (reset! shared-storage nil)))
+
+
+(use-fixtures :once
+  (setup/create-container-fixture)
+  (fn [f]
+    (init-shared-storage!)
+    (try (f)
+         (finally (close-shared-storage!)))))
+
+
+(defn- truncate-data-tables!
+  "Wipe all user-row data between tests, but keep the schema itself
+   (`sp/initialize` already ran in the :once fixture). Cheaper than
+   DROP SCHEMA + reinit. CASCADE handles FK chains."
+  [storage]
+  (let [{:keys [jdbc-url username password]} (pth/get-container-config
+                                               @(resolve 'graphden.executor.test-setup/*container*))]
+    (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
+                                           :user username
+                                           :password password})]
+      ;; Truncate every user table. `pg_tables` filters out PG system
+      ;; tables. RESTART IDENTITY is unnecessary here (we use uuid
+      ;; ids) but doesn't cost anything to specify.
+      (let [tables (->> (jdbc/execute! conn
+                                       [(str "SELECT tablename FROM pg_tables "
+                                             "WHERE schemaname = 'public' "
+                                             "AND tablename != '_schema_metadata'")])
+                        (map :pg_tables/tablename))]
+        (when (seq tables)
+          (let [joined (str/join ", " (map #(str "\"" % "\"") tables))]
+            (jdbc/execute! conn [(str "TRUNCATE TABLE " joined
+                                      " RESTART IDENTITY CASCADE")]))))))
+  storage)
+
+
+(defn- create-full-storage
+  "Returns a fresh VersionedStorage wrapper pointed at a freshly-created
+   test-branch. Reuses the ns-level shared base storage; only the row
+   contents (and the wrapper's branch-id) change per test."
+  []
+  (let [storage (or @shared-storage (init-shared-storage!))]
+    (truncate-data-tables! storage)
     (sp/upsert-entities storage :fn
                         (mapv #(dissoc % :kind) (records/boot-primitive-records)))
     ;; Wrap in versioned-storage so fn-version rows get created on every
@@ -139,7 +197,7 @@
                   c {:args {} :timeout-ms 1000 :persist? false})]
         (is (false? (:ok rej)))
         (is (= :no-fn (-> rej :error-data :reason))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest validate-rejects-unknown-fn-name-test
@@ -151,7 +209,7 @@
                      :args {} :timeout-ms 1000 :persist? false})]
         (is (false? (:ok rej)))
         (is (= :fn-not-found (-> rej :error-data :reason))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest validate-rejects-timeout-out-of-range-test
@@ -171,7 +229,7 @@
                        :args {} :timeout-ms 999999 :persist? false})]
           (is (false? (:ok rej)))
           (is (= :timeout-out-of-range (-> rej :error-data :reason)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest validate-rejects-unknown-arg-test
@@ -186,7 +244,7 @@
         (is (false? (:ok rej)))
         (is (= :unknown-arg (-> rej :error-data :reason)))
         (is (some #{:not-a-real-slot} (-> rej :error-data :unknown))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest validate-rejects-already-running-as-service-test
@@ -219,7 +277,7 @@
                       c {:fn-id (:id composed)
                          :args {:a 1 :b 2} :timeout-ms 5000 :persist? false}))
               "validation passes once :enabled? is false")))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest validate-rejects-already-running-as-legacy-fallback-test
@@ -249,8 +307,7 @@
                        :args {:a 1 :b 2} :timeout-ms 5000 :persist? false})]
           (is (re-find #"boot fallback|Pod restart" (:error rej)))))
       (finally
-        (reset! services-recon/legacy-handle prior)
-        (sp/close storage)))))
+        (reset! services-recon/legacy-handle prior)))))
 
 
 (deftest validate-passes-well-formed-test
@@ -262,7 +319,7 @@
                   c {:fn-id (:id composed)
                      :args {:a 1 :b 2}
                      :timeout-ms 5000 :persist? false})))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -284,7 +341,7 @@
         (is (nil? (:execution-id result)))
         (testing "no fn-execution row was persisted (pure + ¬persist?)"
           (is (empty? (sp/query-entities storage :fn-execution {})))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest apply-persists-when-persist-flag-test
@@ -303,7 +360,7 @@
       (testing "row exists in storage"
         (let [rows (sp/query-entities storage :fn-execution {})]
           (is (= 1 (count rows)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest apply-persists-args-rows-test
@@ -321,7 +378,7 @@
                                           {:execution-id exec-id})]
           (is (= 2 (count arg-rows)))
           (is (= #{7 8} (set (map :value arg-rows))))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -348,7 +405,7 @@
           (is (= #{10 20} (set (map :value (:args row)))))))
       (testing "missing id → nil"
         (is (nil? (fn-exec/get-execution c (random-uuid)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -372,7 +429,7 @@
           (is (true? (:cancel-requested? row)))))
       (testing "cancel on a non-existent id is a no-op (nil)"
         (is (nil? (fn-exec/cancel-execution! c (random-uuid)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -404,7 +461,7 @@
       (testing "row's :cancel-requested? flag flipped"
         (let [updated (sp/read-entity storage :fn-execution (:id row))]
           (is (true? (:cancel-requested? updated)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -481,7 +538,7 @@
               "row's :status flipped to :cancelled after cancel")
           (is (some? (:finished-at row))
               "finished-at set when the future is reaped")))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -552,7 +609,7 @@
               ":finished-at populated by reaper")
           (is (#{:done "done"} (:result row))
               ":result roundtrips from the impl's return value")))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest list-executions-empty-test
@@ -562,7 +619,7 @@
     (try
       (is (= [] (fn-exec/list-executions-for-fn c (:id composed)))
           "fn that was never run has no history rows")
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest list-executions-returns-recent-runs-test
@@ -585,7 +642,61 @@
         (testing "rows carry :status and :result"
           (is (every? #(#{:succeeded "succeeded"} (:status %)) rows))
           (is (= #{11 21 31} (set (map :result rows))))))
-      (finally (sp/close storage)))))
+      (finally nil))))
+
+
+(deftest list-executions-isolates-by-branch-version-test
+  ;; Pre-fix this returned executions for ALL versions of the fn-id
+  ;; regardless of branch. Per the versioning UI model, the execute
+  ;; popover should only show runs of the version that resolves on
+  ;; the CURRENT branch — older versions live behind the `⌛` panel.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "list-branch-iso")
+        parent-ctx (test-ctx storage)
+        ;; one run on the parent (test-branch)
+        _ (fn-exec/apply-execute parent-ctx {:fn-id (:id composed)
+                                             :args {:a 1 :b 1}
+                                             :timeout-ms 5000 :persist? true})
+        child-branch (vs/create-branch! storage "list-iso-child")
+        child-storage (vs/switch-branch storage (:id child-branch))]
+    (try
+      (testing "before child override: child inherits parent's version → sees the run"
+        (let [rows (fn-exec/list-executions-for-fn
+                     (test-ctx child-storage) (:id composed))]
+          (is (= 1 (count rows))
+              "no own version yet → resolves to parent's version → shared run")))
+
+      ;; Edit fn on child → new version anchors subsequent runs.
+      (sp/update-entity child-storage :fn (:id composed)
+                        {:description "edited on child"})
+      (let [child-ctx (test-ctx child-storage)]
+        (fn-exec/apply-execute child-ctx {:fn-id (:id composed)
+                                          :args {:a 2 :b 2}
+                                          :timeout-ms 5000 :persist? true}))
+
+      (testing "after child override: parent still sees only its own version's run"
+        (let [parent-rows (fn-exec/list-executions-for-fn parent-ctx (:id composed))]
+          (is (= 1 (count parent-rows)))
+          (is (= 2 (:result (first parent-rows))) "1 + 1 from parent run")))
+
+      (testing "child sees only its own version's run, not the parent's"
+        (let [child-rows (fn-exec/list-executions-for-fn
+                           (test-ctx child-storage) (:id composed))]
+          (is (= 1 (count child-rows)))
+          (is (= 4 (:result (first child-rows))) "2 + 2 from child run")))
+
+      (testing "list-executions-for-fn-version explicitly targets a version row"
+        (let [parent-vid (lookup/resolve-fn-version-id parent-ctx (:id composed))
+              child-vid (lookup/resolve-fn-version-id
+                          (test-ctx child-storage) (:id composed))]
+          (is (not= parent-vid child-vid))
+          (is (= 2 (:result (first (fn-exec/list-executions-for-fn-version
+                                     parent-ctx parent-vid))))
+              "parent version's run")
+          (is (= 4 (:result (first (fn-exec/list-executions-for-fn-version
+                                     parent-ctx child-vid))))
+              "child version's run is reachable from EITHER ctx by explicit version-id")))
+      (finally nil))))
 
 
 (deftest list-executions-caps-at-twenty-test
@@ -609,7 +720,7 @@
         (is (= 20 (count (fn-exec/list-executions-for-fn c (:id composed) 0))))
         (is (= 20 (count (fn-exec/list-executions-for-fn c (:id composed) -5))))
         (is (= 20 (count (fn-exec/list-executions-for-fn c (:id composed) nil)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -670,7 +781,7 @@
           "succeeded row > 7d gone")
       (is (some? (sp/read-entity storage :fn-execution fresh-id))
           "succeeded row < 7d kept")
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest sweep-deletes-failed-past-30d-test
@@ -689,7 +800,7 @@
           "failed row > 30d gone")
       (is (some? (sp/read-entity storage :fn-execution fresh-id))
           "failed row < 30d kept (within failed's longer retention)")
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest sweep-zombie-pending-flips-to-cancelled-test
@@ -721,7 +832,7 @@
       (testing "recent pending untouched"
         (let [row (sp/read-entity storage :fn-execution (:id fresh-row))]
           (is (#{:pending "pending"} (:status row)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -769,7 +880,7 @@
           (is (some? (:finished-at row)))
           (is (#{:test/boom-err "test/boom-err"}
                (-> row :error-data :type)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest apply-failed-path-truncates-error-data-test
@@ -795,7 +906,7 @@
                   "truncation flag set when oversize")
               (is (nil? (:context ed))
                   ":context discarded when over cap")))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -820,7 +931,7 @@
         (is (= :args-too-large (-> rej :error-data :reason)))
         (is (pos? (-> rej :error-data :bytes))
             "bytes count reported in error-data"))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -865,7 +976,7 @@
               ":result dropped when over cap")
           (is (true? (:result-truncated? row))
               ":result-truncated? flag set on oversize")))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -908,7 +1019,7 @@
           (is (some? row))
           (is (= #{"env" "io"}
                  (set (:runtime-effects row))))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -967,8 +1078,7 @@
         ;; the closest no-op restoration.
         (registry/record-rich-types-raw!
           (keyword composed-name)
-          {:args {} :return :keyword :effects #{}})
-        (sp/close storage)))))
+          {:args {} :return :keyword :effects #{}})))))
 
 
 ;; ============================================================================
@@ -1018,7 +1128,7 @@
           (is (= 3 (count (:items list-arg))))
           (is (= [10 20 30] (mapv :value (:items list-arg)))
               "items array on the response carries positional order")))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest apply-pure-fn-has-no-runtime-effects-test
@@ -1036,7 +1146,7 @@
       (testing "row has :runtime-effects nil (no record-effect! calls)"
         (let [row (sp/read-entity storage :fn-execution exec-id)]
           (is (nil? (:runtime-effects row)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -1123,7 +1233,7 @@
             (is (some? (:result row)))
             (is (some? (:started-at row)))
             (is (some? (:fn-version-id row))))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest list-executions-http-envelope-empty-fn-test
@@ -1138,7 +1248,7 @@
         (is (true? (:ok wire)))
         (is (vector? (:executions wire)))
         (is (zero? (count (:executions wire)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest list-executions-filters-other-fns-test
@@ -1158,7 +1268,7 @@
                                   :persist? true}))
       (is (= 2 (count (fn-exec/list-executions-for-fn c (:id a-composed)))))
       (is (= 3 (count (fn-exec/list-executions-for-fn c (:id b-composed)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -1199,7 +1309,7 @@
           (let [b-row (get by-slot (:id slot-b))]
             (is (= 42 (:value b-row)))
             (is (nil? (:ref-fn-version-id b-row))))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest persist-args-ref-with-unresolvable-fn-id-test
@@ -1222,7 +1332,7 @@
           (is (nil? (:value a-row)))
           (is (nil? (:ref-fn-version-id a-row))
               "no version row → version-id resolves to nil, row still written")))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest persist-args-list-with-ref-items-test
@@ -1268,7 +1378,7 @@
             (is (nil? (:value i3))) (is (some? (:ref-fn-version-id i3)))
             (is (not= (:ref-fn-version-id i1) (:ref-fn-version-id i3))
                 "two different targets resolve to two different version-ids"))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest persist-args-skips-unknown-slot-names-test
@@ -1288,7 +1398,7 @@
                                           {:execution-id (:id exec-row)})]
           (is (= 2 (count arg-rows))
               "only :a and :b rows written; :unknown filtered by :when slot-id")))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 ;; ============================================================================
@@ -1317,7 +1427,7 @@
           (is (nil? (:result row)))
           (is (nil? (:error row)))
           (is (nil? (:runtime-effects row)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
 
 
 (deftest write-finished-cancelled-with-runtime-effects-test
@@ -1334,7 +1444,55 @@
         (testing ":runtime-effects merged into row alongside :cancelled"
           (is (= :cancelled (:status row)))
           (is (= ["db" "time"] (:runtime-effects row)))))
-      (finally (sp/close storage)))))
+      (finally nil))))
+
+
+;; ============================================================================
+;; resolve-fn-version-id — branch chain walk
+;; ============================================================================
+;;
+;; A fn created on the parent branch (no version row on the child)
+;; must still resolve to the parent's :fn-version-id when the child
+;; ctx asks for it. Pre-fix the helper did a direct :branch-id
+;; filter, so inherited fns returned nil — every fn-execution write
+;; on a non-creator branch then had a nil version-id, breaking the
+;; current-branch history filter and the per-version executions UI.
+
+(deftest resolve-fn-version-id-walks-branch-chain-test
+  (let [storage (create-full-storage)
+        ;; create-full-storage wraps the PG storage in a versioned-
+        ;; storage pointing at "test-branch"; treat that as the parent
+        ;; for this test, then fork off a child.
+        {composed :composed} (make-pure-add-fn! storage "chain-walk")
+        parent-version-id (lookup/resolve-fn-version-id
+                            (test-ctx storage) (:id composed))
+        child-branch (vs/create-branch! storage "chain-walk-child")
+        child-storage (vs/switch-branch storage (:id child-branch))]
+    (try
+      (testing "own-branch version resolves directly"
+        (is (some? parent-version-id)))
+
+      (testing "inherited-from-parent version resolves through chain walk"
+        (let [child-ctx (test-ctx child-storage)
+              resolved (lookup/resolve-fn-version-id child-ctx (:id composed))]
+          (is (some? resolved)
+              "child must NOT return nil for a fn it inherits from parent")
+          (is (= parent-version-id resolved)
+              "the same fn-version-id surfaces on both branches because the
+               child has no override")))
+
+      (testing "child override shadows the inherited version on child only"
+        (sp/update-entity child-storage :fn (:id composed)
+                          {:description "edited on child"})
+        (let [child-resolved (lookup/resolve-fn-version-id
+                               (test-ctx child-storage) (:id composed))
+              parent-resolved (lookup/resolve-fn-version-id
+                                (test-ctx storage) (:id composed))]
+          (is (not= parent-version-id child-resolved)
+              "child sees its newly-written version")
+          (is (= parent-version-id parent-resolved)
+              "parent's view is untouched")))
+      (finally nil))))
 
 
 (deftest write-finished-succeeded-with-runtime-effects-test
@@ -1353,7 +1511,162 @@
         (is (= 42 (:result row)))
         (is (false? (:result-truncated? row)))
         (is (= ["env"] (:runtime-effects row))))
-      (finally (sp/close storage)))))
+      (finally nil))))
+
+
+;; ============================================================================
+;; write-finished! — :failed branch (covers the `case :failed` arm of
+;; the body construction + the `cond-> body` runtime-effects merge for
+;; the failed path).
+;; ============================================================================
+
+(deftest write-finished-failed-without-effects-test
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "wf-fail")
+        c (test-ctx storage)
+        version-id (lookup/resolve-fn-version-id c (:id composed))
+        exec-row (persist/create-pending-row! storage version-id nil nil)]
+    (try
+      (persist/write-finished! storage (:id exec-row)
+                               {:status :failed
+                                :error "boom"
+                                :error-data {:type :exec/oops :extra "details"}})
+      (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
+        (is (= :failed (:status row)))
+        (is (= "boom" (:error row)))
+        (is (= {:type :exec/oops :extra "details"} (:error-data row))
+            "small error-data passes through verbatim (jsonb keywordize roundtrip)")
+        (is (nil? (:result row))))
+      (finally nil))))
+
+
+(deftest write-finished-failed-with-runtime-effects-test
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "wf-fail-eff")
+        c (test-ctx storage)
+        version-id (lookup/resolve-fn-version-id c (:id composed))
+        exec-row (persist/create-pending-row! storage version-id nil nil)]
+    (try
+      (persist/write-finished! storage (:id exec-row)
+                               {:status :failed
+                                :error "io error"
+                                :error-data {:type :exec/io-fail}
+                                :runtime-effects ["io" "db"]})
+      (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
+        (is (= :failed (:status row)))
+        (is (= ["io" "db"] (:runtime-effects row))
+            "runtime-effects merge fires for :failed too, not just :cancelled"))
+      (finally nil))))
+
+
+(deftest write-finished-succeeded-without-runtime-effects-test
+  ;; Covers the `:succeeded` arm of `case` when runtime-effects is
+  ;; absent — the `cond->` doesn't fire. Pre-fix only the with-effects
+  ;; variant was tested for :succeeded.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "wf-succ-no-eff")
+        c (test-ctx storage)
+        version-id (lookup/resolve-fn-version-id c (:id composed))
+        exec-row (persist/create-pending-row! storage version-id nil nil)]
+    (try
+      (persist/write-finished! storage (:id exec-row)
+                               {:status :succeeded :result {:hello "world"}})
+      (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
+        (is (= :succeeded (:status row)))
+        (is (= {:hello "world"} (:result row)))
+        (is (false? (:result-truncated? row)))
+        (is (nil? (:runtime-effects row))))
+      (finally nil))))
+
+
+;; ============================================================================
+;; create-pending-with-args! — atomic helper (pending row + arg rows in
+;; one call). Used by lazy-persist + pre-persist paths in fn-execution.
+;; ============================================================================
+
+(deftest create-pending-with-args-creates-row-and-args-test
+  (let [storage (create-full-storage)
+        {composed :composed slot-a :slot-a slot-b :slot-b}
+        (make-pure-add-fn! storage "cpwa")
+        c (test-ctx storage)
+        version-id (lookup/resolve-fn-version-id c (:id composed))
+        free-slots {:a (:id slot-a) :b (:id slot-b)}
+        row (persist/create-pending-with-args! storage version-id
+                                               ["db"] (random-uuid)
+                                               {:a 1 :b 2}
+                                               free-slots)]
+    (testing "parent row carries :status :pending"
+      (is (= :pending (:status row)))
+      (is (= ["db"] (:declared-effects row))))
+    (testing "per-arg rows written"
+      (let [args (sp/query-entities storage :fn-execution-arg
+                                    {:execution-id (:id row)})]
+        (is (= 2 (count args)))
+        (is (= #{1 2} (set (map :value args))))))))
+
+
+;; ============================================================================
+;; record-completion! — reaper paths
+;;
+;; The integration apply-* tests above exercise these indirectly, but
+;; the failed-future branch with a plain (non-ex-info) cause and the
+;; reaper's outermost `catch Exception` (write-finished itself throws)
+;; aren't covered. These tests drive record-completion! directly with
+;; pre-resolved/pre-failed futures so the catch arms run synchronously.
+;; ============================================================================
+
+(deftest record-completion-failed-future-writes-failed-row-test
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "rc-fail")
+        c (test-ctx storage)
+        version-id (lookup/resolve-fn-version-id c (:id composed))
+        exec-row (persist/create-pending-row! storage version-id nil nil)
+        ;; A future that throws on @deref — ExecutionException with the
+        ;; original RuntimeException as cause.
+        fut (future (throw (RuntimeException. "boom-fail")))
+        reaper (persist/record-completion! storage (:id exec-row)
+                                           fut (atom #{}) nil)]
+    ;; reaper itself is a future; wait for it to finish.
+    @reaper
+    (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
+      (is (= :failed (:status row)))
+      (is (re-find #"boom-fail" (str (:error row))))
+      (is (some? (:finished-at row))))))
+
+
+(deftest record-completion-cancelled-future-writes-cancelled-row-test
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "rc-cancel")
+        c (test-ctx storage)
+        version-id (lookup/resolve-fn-version-id c (:id composed))
+        exec-row (persist/create-pending-row! storage version-id nil nil)
+        ;; Wrap an InterruptedException in an ExecutionException — that
+        ;; matches the `(instance? InterruptedException cause)` branch.
+        fut (future (throw (InterruptedException. "cancelled")))
+        reaper (persist/record-completion! storage (:id exec-row)
+                                           fut (atom #{}) nil)]
+    @reaper
+    (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
+      (is (= :cancelled (:status row)))
+      (is (nil? (:error row)) ":cancelled does not stash an error message"))))
+
+
+(deftest record-completion-success-with-runtime-effects-test
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "rc-ok")
+        c (test-ctx storage)
+        version-id (lookup/resolve-fn-version-id c (:id composed))
+        exec-row (persist/create-pending-row! storage version-id nil nil)
+        trace (atom #{:io})
+        fut (future :result-value)
+        reaper (persist/record-completion! storage (:id exec-row)
+                                           fut trace ["io"])]
+    @reaper
+    (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
+      (is (= :succeeded (:status row)))
+      (is (= :result-value (:result row))
+          "future's keyword result roundtrips through jsonb")
+      (is (= ["io"] (:runtime-effects row))))))
 
 
 ;; ============================================================================

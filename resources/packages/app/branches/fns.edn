@@ -1,0 +1,136 @@
+;; Read-side fn-defs for the /api/branches/* and
+;; /api/fns/:fn-id/versions endpoints.
+;;
+;; Each `_*-data` base-fn returns the JSON-shape payload; the
+;; matching `*-handler` wraps it with the `:json-handler` template
+;; (200 application/json). Concrete routes live in `app.routes`.
+;;
+;; All four endpoints are read-only — handlers stay unauthenticated
+;; for now (mirrors GET /api/graph/entities). Write endpoints
+;; (POST/DELETE/merge) land in a follow-up commit and inherit the
+;; auth-required preset.
+
+
+{:namespace "app.branches"
+ :description "Read-side endpoints for the versioning UI — list branches, look up one branch, list a fn's version history, diff two branches. Backed by `graphden.crud.branches` + `graphden.versioning.storage.{core,merge}`. Concrete routes are wired in `app.routes`."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; GET /api/branches — list every branch row, ordered by created-at.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_list-branches-data
+   :description "Reads every :branch row off base storage, shapes them for JSON (UUIDs as strings, timestamps as ISO-8601). Used by the editor's branch picker."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :list-branches-handler
+   :description "Ring handler for GET /api/branches."
+   :parent :json-handler
+   :args {:data :_list-branches-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/branches/:ref — one branch (by UUID or name).
+  ;; ---------------------------------------------------------------------
+
+  {:name :_get-branch-data
+   :description "Pulls the trailing path segment (`:ref`) from the URI and reads the matching :branch row. `:ref` may be either a stringified UUID or a branch name. Returns `{:ok false :error}` when not found."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :get-branch-handler
+   :description "Ring handler for GET /api/branches/:ref."
+   :parent :json-handler
+   :args {:data :_get-branch-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/fns/:fn-id/versions — history of one fn across branches.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_list-fn-versions-data
+   :description "Pulls `:fn-id` from the URI (path segment between `/api/fns/` and `/versions`) and returns every :fn-version row for that logical fn, joined with the branch name. Latest first. Used by the fn-card History panel."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :list-fn-versions-handler
+   :description "Ring handler for GET /api/fns/:fn-id/versions."
+   :parent :json-handler
+   :args {:data :_list-fn-versions-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/branches/:ref/diff?against=<source-ref> — resolved-view
+  ;; diff between two branches.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_diff-branches-data
+   :description "Pulls the target branch from the URI (`:ref`) and the source from the `?against=<ref>` query param, then computes a per-entity diff. Each entry carries source-version, target-version, and a `:change` tag (`:added-in-source` / `:added-in-target` / `:modified`). Used by the editor's branch-compare view."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :diff-branches-handler
+   :description "Ring handler for GET /api/branches/:ref/diff."
+   :parent :json-handler
+   :args {:data :_diff-branches-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/branches — create a new branch.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_create-branch-data
+   :description "Parses the JSON body `{:name :base-branch-id?}` and creates a new :branch row forked from `:base-branch-id` (or `main` when absent). Returns the created row, or `{:ok false :error}` when name is missing / taken / base ref doesn't exist."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :create-branch-handler
+   :description "Ring handler for POST /api/branches (auth-required)."
+   :parent :json-handler
+   :args {:data :_create-branch-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; DELETE /api/branches/:ref — delete branch + all its version rows.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_delete-branch-data
+   :description "Pulls the trailing branch ref from the URI and deletes the branch. Rejects `main` (`:reason :main-branch-undeletable`) and branches with children (`:reason :branch-has-children` + `:child-branch-ids`)."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :delete-branch-handler
+   :description "Ring handler for DELETE /api/branches/:ref (auth-required)."
+   :parent :json-handler
+   :args {:data :_delete-branch-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/branches/:ref/conflicts?source=<ref> — preview merge conflicts.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_preview-conflicts-data
+   :description "Read-only `detect-conflicts` wrapper. Returns `{:ok true :conflicts […]}` so the editor can choose whether to open the merge-conflict modal before actually issuing a merge."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :preview-conflicts-handler
+   :description "Ring handler for GET /api/branches/:ref/conflicts."
+   :parent :json-handler
+   :args {:data :_preview-conflicts-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/branches/:ref/merge — merge source into target.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_merge-branch-data
+   :description "Parses the JSON body `{:source :conflict-resolutions?}` and merges `:source` into the URI branch. On unresolved conflicts returns `{:ok false :reason :merge-conflict :conflicts […]}` so the client can present the resolution UI and re-submit."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :merge-branch-handler
+   :description "Ring handler for POST /api/branches/:ref/merge (auth-required)."
+   :parent :json-handler
+   :args {:data :_merge-branch-data}}]}

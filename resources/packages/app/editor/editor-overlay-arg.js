@@ -453,6 +453,18 @@ function createTypeChip(arg, options) {
   } else {
     chip.textContent = display;
   }
+  // Always surface the FULL type on hover — `compactTypeChipText`
+  // truncates fn-shape types aggressively (`(request)→ring-res…`),
+  // and before this fix there was no way to discover what got cut.
+  // `formatTypeHumanReadable` spells out the rich structure verbosely
+  // (`(request: ring-request-shape) → ring-response-shape`); falls
+  // back to the flat type name when no rich type is available.
+  if (!chip.title) {
+    const tip = (richType && typeof formatTypeHumanReadable === 'function')
+      ? formatTypeHumanReadable(richType)
+      : flatType;
+    if (tip && tip !== display) chip.title = tip;
+  }
   // Inline subtype-of line for binding-level narrowing — when the
   // slot's declared base differs from what's displayed (because an
   // override or an inherited binding narrowed it), append a small

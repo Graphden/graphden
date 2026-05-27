@@ -1,0 +1,459 @@
+(ns graphden.system.branch-router
+  "Per-branch ExecutionContext registry + Ring dispatcher for the
+   versioning UI.
+
+   The compiled executor closes over a specific ExecutionContext at
+   compile-time (see `executor.compile/build-closure` line ~471 —
+   `(impl args ctx)`). That ctx carries a VersionedStorage bound to
+   one branch, plus its own compiled-registry / graph-cache atoms.
+   So serving requests on a non-main branch needs ITS OWN ctx with
+   ITS OWN compiled registry — same fn-graph, but bound to a
+   storage wrapper pointing at the requested branch.
+
+   This namespace holds the atom of per-branch ctx + Ring callable,
+   and the dispatcher that the `web.ring-adapter/branch-routing-wrap`
+   base-fn delegates to. Lazy build on first request; invalidation
+   piggybacks on the existing `invalidate-graph-cache!` (the branch
+   ctx's compiled-registry atom is cleared, and our cached Ring
+   callable re-reads the registry on every call so the next request
+   picks up a fresh rebuild)."
+  (:require
+    [clojure.string :as str]
+    [clojure.tools.logging :as log]
+    [graphden.executor.context :as ctx]
+    [graphden.versioning.storage.core :as vs]))
+
+
+;; =============================================================================
+;; Header / query extraction
+;; =============================================================================
+
+(def header-name
+  "Lowercased Ring-style header key the dispatcher reads."
+  "x-graphden-branch")
+
+
+(def query-param
+  "URL query-string key the dispatcher reads when no header is set."
+  "branch")
+
+
+(defn- parse-branch-from-query
+  [query-string]
+  (when (and query-string (not (str/blank? query-string)))
+    (some (fn [pair]
+            (let [[k v] (str/split pair #"=" 2)]
+              (when (= query-param (java.net.URLDecoder/decode k "UTF-8"))
+                (some-> v (java.net.URLDecoder/decode "UTF-8")))))
+          (str/split query-string #"&"))))
+
+
+(defn extract-branch-ref
+  "Returns the branch ref the request asks for, or nil for default.
+   Header wins over query param — explicit programmatic API beats
+   shareable-URL convenience. Empty / blank values count as nil."
+  [request]
+  (let [hdr (get-in request [:headers header-name])
+        qs (parse-branch-from-query (:query-string request))
+        chosen (or (some-> hdr (str/trim) (#(when-not (str/blank? %) %)))
+                   (some-> qs (str/trim) (#(when-not (str/blank? %) %))))]
+    chosen))
+
+
+;; =============================================================================
+;; Per-branch ctx + Ring callable cache
+;; =============================================================================
+
+(def ^:private default-max-cached-branches
+  "Soft cap on the number of per-branch ctx entries kept warm. The
+   LRU evicts the least-recently-used non-default entry when adding
+   would exceed this. 16 covers a dev workflow with a handful of
+   active feature branches comfortably; production multi-tenant
+   would tune this through the `:max-size` arg to `create-router`."
+  16)
+
+
+(defrecord BranchRouter
+  [base-ctx default-branch-id handlers handler-fn-id])
+
+
+;; `handlers` is an atom of `{branch-id → {:ctx ExecutionContext :handler ring-fn :built-at Instant :last-used long-ms}}`.
+;; `default-branch-id` is the main-branch id — requests that don't pick a branch land here.
+;; `handler-fn-id` is the compiled fn-id of the top-level Ring handler
+;; (`_app-ring-response`) — resolved once at construction so per-request
+;; dispatch is just a map lookup.
+;; `:max-size` (assoc'd onto the record, see `create-router`) caps the
+;; cache; LRU evicts the oldest non-default entry on overflow.
+
+
+(defn- build-branch-ctx
+  "Create a fresh ExecutionContext bound to `branch-id`. Each branch
+   gets its own atoms (compiled-registry / graph-cache / compile-deps)
+   so writes invalidate the right slice — `invalidate-graph-cache!`
+   takes a ctx and only touches that ctx's caches."
+  [base-ctx branch-id]
+  (let [base-storage (vs/unwrap (:storage base-ctx))
+        branch-storage (vs/->VersionedStorage base-storage branch-id)]
+    (ctx/create-context {:storage branch-storage
+                         :base-fns (:base-fns base-ctx)
+                         :clock (:clock base-ctx)})))
+
+
+(defn- ring-callable-for-ctx
+  "Returns a `(fn [request])` callable that delegates to the compiled
+   closure for `handler-fn-id` in `branch-ctx`. The registry is
+   re-read on every invocation via `requiring-resolve` to avoid a
+   circular require (compile-runtime → context → branch-router)."
+  [branch-ctx handler-fn-id]
+  (let [registry (requiring-resolve 'graphden.executor.compile-runtime/registry)]
+    (fn [request]
+      (let [reg (registry branch-ctx)
+            closure (get reg handler-fn-id)]
+        (when-not closure
+          (throw (ex-info "Branch handler closure missing"
+                          {:type :execution-error/fn-not-found
+                           :fn-id handler-fn-id
+                           :branch-id (vs/current-branch-id
+                                        (:storage branch-ctx))})))
+        (closure reg {:request request})))))
+
+
+(defn- now-ms
+  []
+  (System/currentTimeMillis))
+
+
+(defn- touch!
+  "Update the cache entry's `:last-used` so subsequent eviction
+   decisions see the recent access. Idempotent — if the entry is
+   gone (raced with a concurrent invalidate / eviction) the swap is
+   a no-op."
+  [handlers branch-id]
+  (swap! handlers
+         (fn [m]
+           (if-let [entry (get m branch-id)]
+             (assoc m branch-id (assoc entry :last-used (now-ms)))
+             m))))
+
+
+(defn- evict-lru-if-full
+  "If the cache is at `max-size` AND inserting `new-id` would push
+   it past, drop the oldest non-default entry. The default-branch
+   entry is pinned (it's seeded eagerly and represents the hottest
+   path). `new-id` is also excluded from consideration — if the
+   caller is replacing an existing entry, no eviction is needed."
+  [m max-size default-branch-id new-id]
+  (let [evictable (-> m (dissoc default-branch-id new-id))]
+    (if (and (>= (count m) max-size)
+             (not (contains? m new-id))
+             (seq evictable))
+      (let [oldest-id (->> evictable
+                           (sort-by (fn [[_ v]] (or (:last-used v) 0)))
+                           ffirst)]
+        (dissoc m oldest-id))
+      m)))
+
+
+(defn- branch-monitor
+  "Per-branch reentrant monitor used to dedupe concurrent build-and-
+   cache! callers for the same cold branch. Stored on the router as a
+   ConcurrentHashMap so distinct branch-ids never block each other —
+   only same-branch contenders serialize. The first arrival builds,
+   the rest acquire the lock, double-check, and find the entry the
+   first arrival wrote."
+  [router branch-id]
+  (when-let [monitors (:build-monitors router)]
+    (java.util.concurrent.ConcurrentHashMap/.computeIfAbsent
+      monitors
+      branch-id
+      (reify java.util.function.Function
+        (apply [_ _] (Object.))))))
+
+
+(defn- branch-has-own-content?
+  "True iff `branch-id` has at least one own version row OR is the
+   target of at least one branch-merge. When neither is the case the
+   branch's resolved view is identical to its base, so we can skip
+   the full compile and reuse the base ctx's templates.
+
+   Each probe runs with `:limit 1` so the version tables don't
+   marshal thousands of rows back to Clojure just to check
+   existence — `or` short-circuits on the first hit anyway, but
+   without the limit a single hit on `:fn-version` for a branch
+   with 10k own version rows would return all 10k."
+  [base-storage branch-id]
+  (let [sp-query (requiring-resolve 'graphden.storage.protocol.core/query-entities)
+        any-row? (fn [entity where]
+                   (boolean (seq (sp-query base-storage entity where {:limit 1}))))]
+    (or (any-row? :fn-version {:branch-id branch-id})
+        (any-row? :fn-slot-version {:branch-id branch-id})
+        (any-row? :binding-version {:branch-id branch-id})
+        (any-row? :binding-list-item-version {:branch-id branch-id})
+        (any-row? :branch-merge {:target-branch-id branch-id}))))
+
+
+(defn- build-actual-entry!
+  "Lazy-compile per-branch ctx + Ring callable. Fast path: when the
+   branch is graph-identical to its base (no own version rows, no
+   merge edges) we INSTANTIATE the base ctx's templates against the
+   branch's ctx — ~700 closure allocations vs a ~700-fn compile
+   pass. Slow path: full `rebuild!` for the branch.
+
+   No atom writes; caller installs the result."
+  [{:keys [base-ctx handler-fn-id]} branch-id]
+  (let [rebuild! (requiring-resolve 'graphden.executor.compile-runtime/rebuild!)
+        instantiate (requiring-resolve
+                      'graphden.executor.compile-runtime/instantiate-from-templates!)
+        branch-ctx (build-branch-ctx base-ctx branch-id)
+        base-storage (vs/unwrap (:storage base-ctx))
+        own-content? (branch-has-own-content? base-storage branch-id)
+        base-templates (some-> (:compiled-templates base-ctx) deref)]
+    (if (and (not own-content?) base-templates)
+      ;; Fast path: graph identical → reuse base templates.
+      (instantiate base-ctx branch-ctx)
+      ;; Slow path: branch differs from base → full compile.
+      (rebuild! branch-ctx))
+    {:ctx branch-ctx
+     :handler (ring-callable-for-ctx branch-ctx handler-fn-id)
+     :built-at (java.time.Instant/now)
+     :last-used (now-ms)}))
+
+
+(defn- build-and-cache!
+  "Build the per-branch ctx + Ring callable and cache it. Cold-branch
+   thundering-herd safe — concurrent callers for the same branch-id
+   serialize on `branch-monitor`, double-check inside the lock, and
+   share the single rebuild!. LRU evicts the oldest non-default
+   entry if the cache is at `:max-size`."
+  [{:keys [handlers default-branch-id] :as router} branch-id]
+  (let [max-size (or (:max-size router) default-max-cached-branches)]
+    (if-let [monitor (branch-monitor router branch-id)]
+      (locking monitor
+        (or (get @handlers branch-id)
+            (let [entry (build-actual-entry! router branch-id)]
+              (swap! handlers
+                     (fn [m]
+                       (-> m
+                           (evict-lru-if-full max-size default-branch-id branch-id)
+                           (assoc branch-id entry))))
+              entry)))
+      ;; No monitor map → test path with a hand-constructed router.
+      ;; Best-effort: just swap, accepting the rare duplicate build.
+      (let [entry (build-actual-entry! router branch-id)]
+        (swap! handlers
+               (fn [m]
+                 (-> m
+                     (evict-lru-if-full max-size default-branch-id branch-id)
+                     (assoc branch-id entry))))
+        entry))))
+
+
+(defn handler-for
+  "Return the Ring callable for `branch-id`, building lazily on miss.
+   Falls back to the cached default-branch entry when `branch-id` is
+   nil or matches the default. Records the access via `touch!` on
+   cache hits so the LRU eviction sees the freshest order."
+  [{:keys [default-branch-id handlers] :as router} branch-id]
+  (let [effective (or branch-id default-branch-id)
+        cached (get @handlers effective)]
+    (when (and cached (not= effective default-branch-id))
+      (touch! handlers effective))
+    (:handler (or cached (build-and-cache! router effective)))))
+
+
+(defn ctx-for
+  "Return the per-branch ExecutionContext for `branch-id`, building
+   lazily on miss. Useful for CRUD impls that need to call
+   `invalidate-graph-cache!` after a write."
+  [{:keys [default-branch-id handlers] :as router} branch-id]
+  (let [effective (or branch-id default-branch-id)
+        cached (get @handlers effective)]
+    (when (and cached (not= effective default-branch-id))
+      (touch! handlers effective))
+    (:ctx (or cached (build-and-cache! router effective)))))
+
+
+(defn- forget-ref-cache-for-branch!
+  "Drop every `ref → id` entry that points at `branch-id`. Called from
+   `invalidate!` so a delete-branch! followed by a re-create with the
+   same name doesn't surface a stale id."
+  [router branch-id]
+  (when-let [ref-cache (:ref-cache router)]
+    (swap! ref-cache
+           (fn [m]
+             (reduce-kv (fn [acc k v]
+                          (if (= v branch-id) acc (assoc acc k v)))
+                        {}
+                        m)))))
+
+
+(defn invalidate!
+  "Drop the cached entry for one branch + every ref → id mapping that
+   points at it. Called after a write — the next request rebuilds.
+   Mainly used after `delete-branch!` so the ctx doesn't outlive its
+   branch row."
+  [{:keys [handlers build-monitors] :as router} branch-id]
+  (swap! handlers dissoc branch-id)
+  (forget-ref-cache-for-branch! router branch-id)
+  (when build-monitors
+    (java.util.concurrent.ConcurrentHashMap/.remove build-monitors branch-id)))
+
+
+(defn invalidate-all!
+  "Drop every cached per-branch entry + the entire ref-cache. Used by
+   schema-migration paths that change the executor's shape under all
+   branches."
+  [{:keys [handlers ref-cache build-monitors]}]
+  (reset! handlers {})
+  (when ref-cache (reset! ref-cache {}))
+  (when build-monitors
+    (java.util.concurrent.ConcurrentHashMap/.clear build-monitors)))
+
+
+;; =============================================================================
+;; Construction + dispatch
+;; =============================================================================
+
+(defn- resolve-handler-fn-id
+  "Look up the top-level Ring handler fn by name in base storage.
+   Codec ambiguity (text vs enum-tagged) is handled by trying both
+   forms — same pattern as `system/core/resolve-fn-id-by-name`."
+  [base-storage handler-fn-name]
+  (let [storage (vs/unwrap base-storage)
+        sp-query (requiring-resolve 'graphden.storage.protocol.core/query-entities)
+        try-one (fn [v]
+                  (try (some-> (first (sp-query storage :fn {:name v})) :id)
+                       (catch clojure.lang.ExceptionInfo _ nil)))]
+    (or (try-one handler-fn-name)
+        (try-one (keyword handler-fn-name)))))
+
+
+(defn create-router
+  "Construct a BranchRouter. `handler-fn-name` is the string name of
+   the top-level Ring handler fn-def (typically
+   `\"_app-ring-response\"`). The default-branch entry is seeded
+   eagerly so the very first request doesn't pay a compile pass.
+
+   Options:
+     :max-size  — soft cap on the cached per-branch ctx count, default
+                  `default-max-cached-branches` (16). LRU evicts the
+                  oldest non-default entry on overflow."
+  ([base-ctx handler-fn-name]
+   (create-router base-ctx handler-fn-name nil))
+  ([base-ctx handler-fn-name {:keys [max-size]}]
+   (let [default-branch-id (vs/current-branch-id (:storage base-ctx))
+         handler-fn-id (resolve-handler-fn-id (:storage base-ctx) handler-fn-name)]
+     (when-not handler-fn-id
+       (throw (ex-info (str "Handler fn-def not found: " handler-fn-name)
+                       {:type :branch-router/handler-not-found
+                        :name handler-fn-name})))
+     (let [router (cond-> (->BranchRouter base-ctx default-branch-id
+                                          (atom {}) handler-fn-id)
+                    true (assoc :ref-cache (atom {})
+                                :build-monitors (java.util.concurrent.ConcurrentHashMap.))
+                    max-size (assoc :max-size max-size))]
+       ;; Eager seed for the default branch: reuse the base-ctx (which
+       ;; already has its compiled-registry primed by
+       ;; `:exec/compiled-registry`) rather than building a fresh ctx
+       ;; and re-compiling.
+       (swap! (:handlers router)
+              assoc default-branch-id
+              {:ctx base-ctx
+               :handler (ring-callable-for-ctx base-ctx handler-fn-id)
+               :built-at (java.time.Instant/now)
+               :last-used (now-ms)})
+       (log/info "Branch router ready" {:default-branch-id default-branch-id
+                                        :handler-fn-name handler-fn-name
+                                        :max-size (or max-size
+                                                      default-max-cached-branches)})
+       router))))
+
+
+(defn- resolve-branch-id-uncached
+  [{:keys [base-ctx]} branch-ref]
+  (let [base (vs/unwrap (:storage base-ctx))
+        sp-read (requiring-resolve 'graphden.storage.protocol.core/read-entity)
+        sp-query (requiring-resolve 'graphden.storage.protocol.core/query-entities)]
+    (or (try (some->> branch-ref java.util.UUID/fromString
+                      (sp-read base :branch)
+                      :id)
+             (catch IllegalArgumentException _ nil))
+        (:id (first (sp-query base :branch {:name branch-ref}))))))
+
+
+(defn resolve-branch-id
+  "Translate a user-supplied branch ref (UUID string or branch name)
+   to the branch-id in base storage. Returns the row's `:id`, or nil
+   when the ref doesn't resolve. Nil ref returns the default-branch-id
+   (handler-for then short-circuits to the seeded entry).
+
+   Result is cached on the router's `:ref-cache` atom keyed by the
+   ref string — a non-default branch name resolves once per process
+   lifetime (per name). The cache is invalidated by `invalidate!`
+   (for a specific branch-id) and `invalidate-all!`. Misses
+   (unresolved refs) are NOT cached so a typo never sticks."
+  [{:keys [default-branch-id ref-cache] :as router} branch-ref]
+  (cond
+    (or (nil? branch-ref) (str/blank? branch-ref))
+    default-branch-id
+
+    ;; Cache hit.
+    (and ref-cache (contains? @ref-cache branch-ref))
+    (get @ref-cache branch-ref)
+
+    :else
+    (when-let [id (resolve-branch-id-uncached router branch-ref)]
+      (when ref-cache (swap! ref-cache assoc branch-ref id))
+      id)))
+
+
+(defn dispatch
+  "Top-level Ring middleware. Reads `extract-branch-ref` off the
+   request, resolves the branch, and delegates to the per-branch
+   handler. Unknown branch refs surface a 400 rather than silently
+   misrouting."
+  [router request]
+  (let [branch-ref (extract-branch-ref request)
+        branch-id (resolve-branch-id router branch-ref)]
+    (cond
+      (and (some? branch-ref) (nil? branch-id))
+      {:status 400
+       :headers {"Content-Type" "application/json"}
+       :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
+
+      :else
+      (let [handler (handler-for router branch-id)]
+        (handler request)))))
+
+
+;; =============================================================================
+;; Process-wide singleton — the only knob `web.ring-adapter/branch-routing-wrap`
+;; base-fn impl needs to reach the router from inside a compiled fn-graph.
+;; Mirrors the pattern used by `graphden.services.reconciler` for its
+;; `running` / `legacy-handle` atoms — system-level state that doesn't fit
+;; cleanly inside ctx (because the ctx is closed in at compile time, before
+;; the router exists).
+;; =============================================================================
+
+(defonce ^{:doc "Active BranchRouter for this JVM. Set by the
+                 `:exec/branch-router` init-key on startup, cleared on
+                 halt. `nil` outside a running system — base-fn impls
+                 short-circuit to a single-branch behaviour in that
+                 case so tests don't have to set this up."}
+  active-router
+  (atom nil))
+
+
+(defn set-active-router!
+  [router]
+  (reset! active-router router))
+
+
+(defn clear-active-router!
+  []
+  (reset! active-router nil))
+
+
+(defn current-router
+  []
+  @active-router)

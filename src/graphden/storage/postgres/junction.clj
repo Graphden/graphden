@@ -91,6 +91,23 @@
                                     (mapv :target_id rows)))))
 
 
+(defn read-junction-owners
+  "Reverse junction lookup: returns vector of owner-ids whose junction
+   row has `target-id`. Hits the `idx_<jt>_target` index installed by
+   `create-junction-table!` — O(log n) on the target column.
+
+   Used by reverse-dependency checks (e.g. \"which fns name this fn
+   as a parent?\") that previously had to full-scan the owner table."
+  [ds entity-name field-name target-id]
+  (let [jt (ddl/junction-table-name entity-name field-name)]
+    (util/with-sql-error-handling "Database error" :read-junction-owners
+                                  {:entity-name entity-name :field-name field-name :target-id target-id}
+                                  (let [rows (jdbc/execute! ds
+                                                            [(str "SELECT DISTINCT owner_id FROM \"" jt "\" WHERE target_id = ?") target-id]
+                                                            (util/query-opts))]
+                                    (mapv :owner_id rows)))))
+
+
 (defn read-junction-rows-batch
   "Returns map of {owner-id [target-uuids...]} for multiple owner-ids in one query.
    Used for batch reads to avoid N+1."

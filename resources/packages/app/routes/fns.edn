@@ -271,6 +271,85 @@
    :parent :get-auth-required
    :args {:path "/services" :handler :list-services-handler}}
 
+  ;; --- /api/branches — branch lifecycle + diff/merge. All entries
+  ;; are auth-required (matches /api/services pattern). Same path on
+  ;; multiple methods → reitit needs ONE entry with the method-data
+  ;; merged, like `:entity-by-id`. ---
+
+  ;; GET /api/branches (list) + POST /api/branches (create) — same path.
+  {:name :branches-list-data
+   :description "Method-data for GET on `/api/branches`. Combined into `:api-branches-root`. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "get"
+          :handler :list-branches-handler
+          :middleware :_middleware-list}}
+
+  {:name :branches-create-data
+   :description "Method-data for POST on `/api/branches` — body `{name, base-branch-id?}`. Combined into `:api-branches-root`. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "post"
+          :handler :create-branch-handler
+          :middleware :_middleware-list}}
+
+  {:name :_branches-root-methods
+   :description "Merged method-data — `{:get … :post …}` — for `/api/branches`."
+   :parent :merge
+   :args {:maps [:branches-list-data :branches-create-data]}}
+
+  {:name :api-branches-root
+   :description "Multi-method route entry `[\"/branches\" {:get … :post …}]`."
+   :parent :list
+   :args {:items ["/branches" :_branches-root-methods]}}
+
+  ;; GET /api/branches/:ref (one branch) + DELETE /api/branches/:ref — same path.
+  {:name :branches-by-ref-get-data
+   :description "Method-data for GET on `/api/branches/:ref`. Combined into `:api-branch-by-ref-methods`. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "get"
+          :handler :get-branch-handler
+          :middleware :_middleware-list}}
+
+  {:name :branches-by-ref-delete-data
+   :description "Method-data for DELETE on `/api/branches/:ref` — rejects `main` and branches with children. Combined into `:api-branch-by-ref-methods`. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "delete"
+          :handler :delete-branch-handler
+          :middleware :_middleware-list}}
+
+  {:name :_branches-by-ref-methods
+   :description "Merged method-data — `{:get … :delete …}` — for `/api/branches/:ref`."
+   :parent :merge
+   :args {:maps [:branches-by-ref-get-data :branches-by-ref-delete-data]}}
+
+  {:name :api-branch-by-ref
+   :description "Multi-method route entry `[\"/branches/:ref\" {:get … :delete …}]`."
+   :parent :list
+   :args {:items ["/branches/:ref" :_branches-by-ref-methods]}}
+
+  ;; Single-method branch sub-paths.
+
+  {:name :api-branch-diff
+   :description "GET /api/branches/:ref/diff?against=<source-ref> — resolved-view diff between two branches. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/branches/:ref/diff" :handler :diff-branches-handler}}
+
+  {:name :api-branch-conflicts
+   :description "GET /api/branches/:ref/conflicts?source=<ref> — preview merge conflicts without applying. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/branches/:ref/conflicts" :handler :preview-conflicts-handler}}
+
+  {:name :api-branch-merge
+   :description "POST /api/branches/:ref/merge — merge source branch into the URI branch. Body `{source, conflict-resolutions?}`. Auth-required."
+   :parent :post
+   :args {:path "/branches/:ref/merge" :handler :merge-branch-handler}}
+
+  ;; --- /api/fns/:fn-id/versions — history of one fn across branches ---
+
+  {:name :api-fn-versions
+   :description "GET /api/fns/:fn-id/versions — every :fn-version row for one fn, joined with branch name. Used by the fn-card History panel. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/fns/:fn-id/versions" :handler :list-fn-versions-handler}}
+
   ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
   {:name :api-routes
@@ -290,4 +369,10 @@
                   :api-executions-list
                   :api-services-reconcile
                   :api-services-list
+                  :api-branches-root
+                  :api-branch-by-ref
+                  :api-branch-diff
+                  :api-branch-conflicts
+                  :api-branch-merge
+                  :api-fn-versions
                   :auth-check]}}]}

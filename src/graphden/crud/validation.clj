@@ -83,6 +83,32 @@
       chain)))
 
 
+(defn- collect-ancestor-closure
+  "BFS via `read-entities` batches: starting from `pids`, walk up
+   `:parent-ids` until we've seen every ancestor. Returns a vector
+   of fn rows (each carrying its `:parent-ids` so `inheritance-chain*`
+   can keep walking in-memory).
+
+   Why batch: the previous full-table scan loaded EVERY fn from
+   storage to feed MI validation. For a project with thousands of
+   unrelated fns under a few-deep MI chain, that's ~1000× the data
+   we actually need."
+  [storage pids]
+  (loop [seen #{} acc [] frontier (vec pids)]
+    (if (empty? frontier)
+      acc
+      (let [to-fetch (vec (remove seen frontier))
+            new-rows (if (empty? to-fetch)
+                       []
+                       (vals (sp/read-entities storage :fn to-fetch)))
+            next-frontier (into #{}
+                                (mapcat :parent-ids)
+                                new-rows)]
+        (recur (into seen to-fetch)
+               (into acc new-rows)
+               (vec next-frontier))))))
+
+
 (defn mi-collision-check
   "Check whether the candidate `parent-ids` set introduces an arg-name
    collision (two different slots from different parents under the
@@ -92,11 +118,27 @@
   [storage parent-ids]
   (let [pids (filterv some? (or parent-ids []))]
     (when (>= (count pids) 2)
-      (let [graph {:fns        (sp/query-entities storage :fn {})
-                   :slots      (sp/query-entities storage :slot {})
-                   :fn-slots   (sp/query-entities storage :fn-slot {})
+      (let [ancestor-fns (collect-ancestor-closure storage pids)
+            ancestor-ids (mapv :id ancestor-fns)
+            ;; fn-slot rows for the ancestor closure — bounded by the
+            ;; closure size, NOT the whole table.
+            fn-slots (if (empty? ancestor-ids)
+                       []
+                       (sp/query-entities storage :fn-slot
+                                          {:fn-id ancestor-ids}))
+            slot-ids (into [] (comp (map :slot-id) (distinct)) fn-slots)
+            slots (if (empty? slot-ids)
+                    []
+                    (vals (sp/read-entities storage :slot slot-ids)))
+            graph {:fns        ancestor-fns
+                   :slots      slots
+                   :fn-slots   fn-slots
                    :bindings   []
                    :list-items []}
+            ;; Narrow graph built from the ancestor closure only —
+            ;; identity-keyed cache would never hit (each closure is
+            ;; per-call), so use the uncached path. The closure is
+            ;; small enough that re-building lookups is cheap.
             lookups (l/build-lookups graph)
             per-parent (mapv #(visible-slot-names % lookups) pids)
             ;; Group slot-ids by name across all parents.

@@ -77,7 +77,14 @@
                                            :password password})]
       (jdbc/execute! conn ["DROP SCHEMA public CASCADE"])
       (jdbc/execute! conn ["CREATE SCHEMA public"])
-      (jdbc/execute! conn ["GRANT ALL ON SCHEMA public TO PUBLIC"]))))
+      (jdbc/execute! conn ["GRANT ALL ON SCHEMA public TO PUBLIC"])))
+  ;; In-memory caches survive schema drops — clear them so cached
+  ;; branch chains from a previous test fixture don't leak into the
+  ;; fresh DB. (UUID collisions are improbable but the chains also
+  ;; reference nonexistent ancestors after this point, so even a
+  ;; hypothetical miss isn't worth risking.)
+  (require 'graphden.versioning.storage.resolution)
+  ((resolve 'graphden.versioning.storage.resolution/invalidate-chain-cache!)))
 
 
 (defn clean-database-iterative!

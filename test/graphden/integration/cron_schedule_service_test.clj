@@ -118,10 +118,13 @@
                 (is (fn? (-> @running vals first :stopper))
                     "stopper-thunk captured from :schedule's return")))
             (testing "cron fires under reconciler supervision"
-              (Thread/sleep 2500)
-              (let [mid @tick-counter]
-                (is (>= mid 1)
-                    (str "expected ≥1 fires in 2.5s, got " mid))))
+              ;; Poll until we observe ≥1 tick, capped at 2s.
+              (let [deadline (+ (System/currentTimeMillis) 2000)]
+                (while (and (< (System/currentTimeMillis) deadline)
+                            (zero? @tick-counter))
+                  (Thread/sleep 50)))
+              (is (>= @tick-counter 1)
+                  (str "expected ≥1 fires within 2s, got " @tick-counter)))
             (testing "disabling the :service row + reconcile-once! stops it"
               (sp/update-entity storage :service (:id service-row)
                                 {:enabled? false})
@@ -131,13 +134,12 @@
                 (is (zero? (count @running))
                     "running atom drained")))
             (testing "after stop, cron no longer fires"
-              ;; Give the daemon thread up to 1500ms to notice the
-              ;; interrupt + unwind through the next isInterrupted
-              ;; check. (Same allowance as cron-schedule-runtime-test
-              ;; — at "* * * * * ?" :sleep-until-ms blocks ≤1s.)
-              (Thread/sleep 1500)
+              ;; Same shape as cron-schedule-runtime-test's stop check:
+              ;; 1.1s for the in-flight :sleep-until-ms (≤1s for
+              ;; "* * * * * ?") to unblock + 300ms stability window.
+              (Thread/sleep 1100)
               (let [before-final @tick-counter]
-                (Thread/sleep 1500)
+                (Thread/sleep 300)
                 (is (= before-final @tick-counter)
                     "after reconciler-driven stop, no further increments"))))
           (finally (sys/stop! system)))))))

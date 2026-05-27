@@ -164,9 +164,36 @@
    {:columns-cache (atom {})}})
 
 
+;; === Legacy index cleanup ===
+;;
+;; Constraint declarations are processed declaratively, but the
+;; migration framework has no "the schema no longer declares this
+;; constraint, drop it" step — constraints are only created on entity
+;; creation. When we retire a UNIQUE we have to drop the PG index by
+;; name explicitly. Keep this list small; each entry corresponds to a
+;; documented retirement in the schema files.
+
+(def ^:private retired-indexes
+  "Indexes that the schema USED to declare and no longer does. Dropped
+   idempotently on every migration pass so cross-version dev DBs stay
+   clean. See the matching `NOTE — … was retired` comment in the
+   schema file for each entry."
+  ["idx_binding_list_item_binding_id_position_unique"])
+
+
+(defn- drop-retired-indexes!
+  "Issue `DROP INDEX IF EXISTS` for every entry in `retired-indexes`.
+   Safe on a fresh DB (the index doesn't exist), safe on a migrated DB
+   that already dropped it (idempotent)."
+  [tx]
+  (doseq [idx-name retired-indexes]
+    (jdbc/execute! tx [(str "DROP INDEX IF EXISTS \"" idx-name "\"")])))
+
+
 (defn do-migration!
   "Performs schema migration within a transaction."
   [tx schema old-metadata]
+  (drop-retired-indexes! tx)
   (gm/do-migration! (make-postgres-callbacks tx) old-metadata schema))
 
 

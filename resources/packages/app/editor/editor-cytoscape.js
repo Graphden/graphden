@@ -505,12 +505,17 @@ async function renderGraph(shouldFit = true) {
     }
     el.data(newData);
   };
+  // O(N) update via pre-indexed maps. The previous .find() per
+  // cy node was O(N²) — visible jitter on graphs with ~200 nodes
+  // every time the user expanded / collapsed.
+  const nodesById = new Map(nodes.map(n => [n.data.id, n]));
+  const edgesById = new Map(edges.map(e => [e.data.id, e]));
   cy.nodes().forEach(node => {
-    const fresh = nodes.find(n => n.data.id === node.id());
+    const fresh = nodesById.get(node.id());
     if (fresh) replaceData(node, fresh.data);
   });
   cy.edges().forEach(edge => {
-    const fresh = edges.find(e => e.data.id === edge.id());
+    const fresh = edgesById.get(edge.id());
     if (fresh) replaceData(edge, fresh.data);
   });
 
@@ -522,8 +527,12 @@ async function renderGraph(shouldFit = true) {
     // On commit, entries are cleared via savedUserPositions.clear().
     const isPreview = previewState.size > 0;
     nodesToRemove.forEach(node => {
-      const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + node.data('originalFnId') + '"]');
-      if (overlay) overlay.remove();
+      // Registry-backed lookup: avoids constructing a CSS selector +
+      // scanning the DOM per removed node. The overlay's nodeId is
+      // the cy node id, so look up directly. (Previously matched on
+      // data-original-fn-id, which returned the FIRST overlay sharing
+      // an originalFnId — buggy when multiple copies coexist.)
+      unregisterNodeOverlay(node.id());
       if (!isPreview) {
         userMovedNodes.delete(node.id());
         savedUserPositions.delete(node.id());
@@ -613,8 +622,7 @@ async function renderGraph(shouldFit = true) {
   if (nodesToRemove.length > 0) {
     const removeAnims = [];
     nodesToRemove.forEach(node => {
-      const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + node.data('originalFnId') + '"]');
-      if (overlay) overlay.remove();
+      unregisterNodeOverlay(node.id());
 
       const parentEdge = cy.edges().filter(e => e.data('target') === node.id());
       if (parentEdge.length > 0) {

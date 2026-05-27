@@ -47,10 +47,17 @@ async function initGraph() {
 // HISTORY NAVIGATION
 // ============================================================================
 
-window.addEventListener('popstate', () => {
+// `popstate` covers browser back/forward. `hashchange` covers direct
+// URL-bar edits and `location.hash = '…'` assignments — popstate does
+// NOT fire for those, so without hashchange a bookmark / shared link
+// pasted into the address bar after the editor is loaded would do
+// nothing.
+function _onHashNav() {
   const hash = window.location.hash.slice(1);
   if (hash && graphData) selectFnByName(decodeURIComponent(hash), false);
-});
+}
+window.addEventListener('popstate', _onHashNav);
+window.addEventListener('hashchange', _onHashNav);
 
 // ============================================================================
 // DOM READY
@@ -64,5 +71,6 @@ if (typeof initPrefsEarly === 'function') initPrefsEarly();
 document.addEventListener('DOMContentLoaded', () => {
   initPrefsLate();
   initAuthLock();
+  if (typeof initBranchSelector === 'function') initBranchSelector();
   initGraph();
 });

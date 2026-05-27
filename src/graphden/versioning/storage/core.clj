@@ -72,6 +72,63 @@
     (sp/create-entity base-storage (:version-entity config) version-data)))
 
 
+(defn- check-list-item-position-collision!
+  "Per-branch resolved-view check: throw if another item-id resolves
+   to the SAME `(binding-id, position)` on this branch. Replaces the
+   pre-versioning base-table `UNIQUE (binding_id, position)` index
+   (retired so cross-branch divergence isn't blocked) — the
+   identity-row constraint mis-modelled the invariant; uniqueness is
+   a per-branch resolved-view property, not a cross-branch one.
+
+   Skips when `entity-name` isn't `:binding-list-item`. Cheap: one
+   query against the version table on the branch chain, then in-memory
+   resolve of just the items that COULD collide."
+  [base-storage branch-id entity-name new-data]
+  (when (= :binding-list-item entity-name)
+    (let [{:keys [binding-id position id]} new-data]
+      (when (and binding-id (some? position))
+        (let [chain (#'res/collect-branch-chain base-storage branch-id)
+              ;; Every item-version on the binding's chain. The
+              ;; SQL WHERE narrows to the binding so we don't scan
+              ;; the whole version table.
+              versions (sp/query-entities base-storage :binding-list-item-version
+                                          {:binding-id binding-id
+                                           :branch-id (vec chain)})
+              touched-ids (into #{} (map :item-id) versions)
+              ;; Resolve each touched item on this branch — collision
+              ;; rule applies to the LIVE view, not raw version rows.
+              identity-records (vals (sp/read-entities base-storage
+                                                       :binding-list-item
+                                                       (vec touched-ids)))
+              resolved (res/resolve-entities-batch base-storage
+                                                   :binding-list-item
+                                                   identity-records branch-id)
+              touched-on-chain? (fn [eid]
+                                  ;; resolve-entities-batch returns the bare
+                                  ;; identity row for entities WITHOUT a
+                                  ;; version on the chain (parity with the
+                                  ;; executor's base-fn reads); filter those
+                                  ;; out — only items that actually live on
+                                  ;; this branch can collide.
+                                  (contains? touched-ids eid))
+              collisions (for [[item-id row] resolved
+                               :when (and (some? row)
+                                          (not= item-id id)
+                                          (touched-on-chain? item-id)
+                                          (= position (:position row)))]
+                           item-id)]
+          (when (seq collisions)
+            (throw (ex-info (str "Position " position
+                                 " is already taken in this binding on branch "
+                                 branch-id)
+                            {:type :constraint-violation/position-collision
+                             :entity-name :binding-list-item
+                             :binding-id binding-id
+                             :position position
+                             :branch-id branch-id
+                             :colliding-item-ids (vec collisions)}))))))))
+
+
 ;; === VersionedStorage Record ===
 
 (defrecord VersionedStorage
@@ -128,6 +185,8 @@
       ;; calling `resolve-entity` (which would re-fetch identity).
       (let [id (or (:id data) (random-uuid))
             full-data (assoc data :id id)
+            _ (check-list-item-position-collision! base-storage branch-id
+                                                   entity-name full-data)
             existing (sp/read-entity base-storage entity-name id)]
         (when-not existing
           (sp/create-entity base-storage entity-name full-data))
@@ -166,6 +225,9 @@
                            :entity-name entity-name
                            :id id})))
         (let [merged (merge current data)
+              _ (check-list-item-position-collision! base-storage branch-id
+                                                     entity-name
+                                                     (assoc merged :id id))
               ;; Only compare version-controlled fields, not :id
               {:keys [version-data-fields]} (get res/entity-config entity-name)
               current-data (select-keys current version-data-fields)
@@ -207,9 +269,9 @@
     [_ entity-name where]
     (if-not (res/versioned-entity? entity-name)
       (sp/query-entities base-storage entity-name where)
-      ;; Use branch-chain cache to avoid N+1 queries for branch hierarchy
-      (binding [res/*branch-chain-cache* (atom {})]
-        (res/resolve-all-entities base-storage entity-name branch-id where))))
+      ;; Branch chain cache is process-wide (`global-chain-cache`)
+      ;; — no per-call binding needed.
+      (res/resolve-all-entities base-storage entity-name branch-id where)))
 
 
   (query-entities
@@ -244,6 +306,32 @@
       (let [data-with-ids (mapv (fn [data]
                                   (if (:id data) data (assoc data :id (random-uuid))))
                                 data-seq)
+            ;; Per-item position-collision check, mirroring the singular
+            ;; create-entity. The check also catches INTRA-batch
+            ;; duplicates implicitly: two items in the same batch
+            ;; sharing `(binding-id, position)` will both pass the
+            ;; against-storage check (neither is committed yet), but
+            ;; the duplicate-position-within-data-seq check below
+            ;; rejects upfront so batch import doesn't silently land
+            ;; in a broken state.
+            _ (doseq [d data-with-ids]
+                (check-list-item-position-collision! base-storage branch-id
+                                                     entity-name d))
+            _ (when (= :binding-list-item entity-name)
+                (let [by-key (group-by (juxt :binding-id :position) data-with-ids)
+                      dupe (some (fn [[k items]]
+                                   (when (and (some? (first k))
+                                              (some? (second k))
+                                              (> (count items) 1))
+                                     [k items]))
+                                 by-key)]
+                  (when dupe
+                    (throw (ex-info "Batch contains items with duplicate (binding-id, position)"
+                                    {:type :constraint-violation/position-collision
+                                     :entity-name :binding-list-item
+                                     :binding-id (ffirst dupe)
+                                     :position (second (first dupe))
+                                     :colliding-item-ids (mapv :id (second dupe))})))))
             ids (mapv :id data-with-ids)
             ;; Find which base records don't exist yet
             existing-ids (set (keys (sp/read-entities base-storage entity-name ids)))
@@ -288,6 +376,18 @@
                           {:type :not-found
                            :entity-name entity-name
                            :missing-ids (vec missing-ids)})))
+        ;; Per-item position-collision check, mirroring the singular
+        ;; update-entity. Uses the merged shape (current + incoming
+        ;; partial update) so a position-only update is checked against
+        ;; the rest of the binding's items on the chain.
+        (doseq [data data-seq
+                :let [id (:id data)
+                      current (get current-by-id id)
+                      merged (merge current data)]
+                :when current]
+          (check-list-item-position-collision! base-storage branch-id
+                                               entity-name
+                                               (assoc merged :id id)))
         ;; Compute merged versions and filter to only changed ones
         (let [{:keys [version-entity version-data-fields] :as config}
               (get res/entity-config entity-name)
@@ -374,6 +474,14 @@
         (count deleted-entity-ids))))
 
 
+  (query-ref-many-owners
+    [_ entity-name field-name target-id]
+    ;; Junction tables are NOT versioned (the model versions :parent-ids
+    ;; only via fn re-creation, not a separate junction-version table).
+    ;; Pass straight through to the base storage.
+    (sp/query-ref-many-owners base-storage entity-name field-name target-id))
+
+
   sp/GraphConstraints
 
   (validate-no-dependency-cycle!
@@ -385,16 +493,15 @@
 
   (resolve-execution-graph
     [_ fn-id]
-    ;; Use batch resolution: loads all data in 4 queries, then BFS in memory
-    ;; This avoids the N+1 query problem (~400 queries → 4 queries)
-    ;; Use branch-chain cache to avoid repeated branch hierarchy lookups
-    (binding [res/*branch-chain-cache* (atom {})]
-      (let [result (res/resolve-execution-graph-batch base-storage fn-id branch-id)]
-        (when (empty? (:fns result))
-          (throw (ex-info "Function not found"
-                          {:type :not-found
-                           :fn-id fn-id})))
-        (graph/->execution-graph result)))))
+    ;; Batch resolution loads all data in 4 queries + BFS in memory
+    ;; (avoiding the N+1 ~400-query path). Chain hierarchy lookups
+    ;; consult the process-wide `global-chain-cache` directly.
+    (let [result (res/resolve-execution-graph-batch base-storage fn-id branch-id)]
+      (when (empty? (:fns result))
+        (throw (ex-info "Function not found"
+                        {:type :not-found
+                         :fn-id fn-id})))
+      (graph/->execution-graph result))))
 
 
 ;; === Branch Operations ===
@@ -578,6 +685,10 @@
         (sp/delete-entities base :branch-merge merge-ids)))
     ;; Delete the branch record
     (sp/delete-entity base :branch branch-id)
+    ;; Drop any cached chain that referenced this branch as an
+    ;; ancestor — globals survive across CRUD calls and would
+    ;; otherwise still hand back the pre-delete chain.
+    (res/invalidate-chain-cache! branch-id)
     true))
 
 
@@ -590,10 +701,10 @@
             :list-items [...]}."
   [versioned-storage]
   (let [{:keys [base-storage branch-id]} versioned-storage]
-    (binding [res/*branch-chain-cache* (atom {})]
-      {:fns        (vec (res/resolve-all-entities base-storage :fn branch-id {}))
-       :slots      (vec (sp/query-entities base-storage :slot {}))
-       :fn-slots   (vec (res/resolve-all-entities base-storage :fn-slot branch-id {}))
-       :bindings   (vec (res/resolve-all-entities base-storage :binding branch-id {}))
-       :list-items (vec (res/resolve-all-entities base-storage :binding-list-item
-                                                  branch-id {}))})))
+    ;; Chain cache is process-wide; no per-call binding required.
+    {:fns        (vec (res/resolve-all-entities base-storage :fn branch-id {}))
+     :slots      (vec (sp/query-entities base-storage :slot {}))
+     :fn-slots   (vec (res/resolve-all-entities base-storage :fn-slot branch-id {}))
+     :bindings   (vec (res/resolve-all-entities base-storage :binding branch-id {}))
+     :list-items (vec (res/resolve-all-entities base-storage :binding-list-item
+                                                branch-id {}))}))

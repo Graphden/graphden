@@ -72,6 +72,10 @@
      :else
      (do
        (reset! (:compiled-registry ctx) nil)
+       ;; Templates are also derived from storage; drop them so the
+       ;; next rebuild doesn't reuse stale ctx-takers built off the
+       ;; pre-invalidation graph.
+       (when-let [t (:compiled-templates ctx)] (reset! t nil))
        (when-let [refresh (requiring-resolve
                             'graphden.executor.compile-runtime/refresh-type-registries-from-storage!)]
          (refresh ctx))))))
@@ -124,12 +128,20 @@
                 deterministic time."
   [{:keys [storage base-fns clock]}]
   (validate-context-options! storage)
-  (->ExecutionContext storage
-                      (or base-fns (registry/get-default-registry))
-                      (or clock #(System/currentTimeMillis))
-                      (atom nil)
-                      (atom nil)
-                      (atom nil)))
+  (-> (->ExecutionContext storage
+                          (or base-fns (registry/get-default-registry))
+                          (or clock #(System/currentTimeMillis))
+                          (atom nil)
+                          (atom nil)
+                          (atom nil))
+      ;; `:compiled-templates` is an extra-key atom (not a positional
+      ;; field) so we don't bump every `->ExecutionContext` callsite.
+      ;; Holds the ctx-INDEPENDENT `{fn-id → ctx-taker}` templates
+      ;; alongside the ctx-specific `:compiled-registry`. Sibling
+      ;; branches with identical graph views skip the heavy compile
+      ;; by reusing this atom via
+      ;; `compile-runtime/instantiate-from-templates!`.
+      (assoc :compiled-templates (atom nil))))
 
 
 (defn current-time-ms

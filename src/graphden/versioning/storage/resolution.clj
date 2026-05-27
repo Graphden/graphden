@@ -18,12 +18,54 @@
 
 
 ;; === Branch Chain Cache ===
-;; Thread-local cache for branch chains within a request.
-;; Prevents N+1 queries when resolving multiple entity types.
+;;
+;; Branch chains are immutable for a branch's lifetime: `:base-branch-id`
+;; is set at branch-creation and never updated, and a branch with
+;; child branches can't be deleted. So once we've walked
+;; `b -> parent -> ... -> root` once, the result stays valid until
+;; `delete-branch!` removes one of those nodes.
+;;
+;; A process-wide atom replaces the old per-request dynamic-var
+;; binding: chain walks cross HTTP requests (every versioned CRUD
+;; call on a non-default branch walks the chain), so the cache pays
+;; off most when shared across calls. The dynamic var is kept as an
+;; OPTIONAL override — when bound it wins over the global, so test
+;; setups that need an isolated cache can still scope one. Standard
+;; CRUD paths simply omit the binding and hit the global cache.
+
+(defonce ^:private global-chain-cache
+  ;; {branch-id -> [branch-id, ..., root-id]}. Cleared on branch
+  ;; delete + on the test harness's database-wipe.
+  (atom {}))
+
 
 (def ^:dynamic *branch-chain-cache*
-  "Thread-local cache: {branch-id -> [branch-chain]}"
+  "Optional per-call override: when bound to an atom, `collect-branch-chain`
+   uses it instead of the global cache. Test harnesses can bind this
+   when they need to observe / clear the cache without disturbing
+   other concurrent calls."
   nil)
+
+
+(defn invalidate-chain-cache!
+  "Drop cached chains for a branch (or all branches when called with
+   no args). Call after `delete-branch!` to clear stale entries that
+   referenced the deleted branch as an ancestor.
+
+   Also called by the test harness after wiping the DB so cached
+   chains don't survive into a fresh schema. UUID collisions across
+   test cycles are essentially impossible, but the cache also grows
+   unboundedly without periodic clearing — better to drop it on
+   schema reset."
+  ([] (reset! global-chain-cache {}))
+  ([branch-id]
+   ;; Drop the branch itself + any cached chain that included it
+   ;; (i.e. any descendant branch's chain).
+   (swap! global-chain-cache
+          (fn [m]
+            (into {} (remove (fn [[_ chain]]
+                               (some #(= % branch-id) chain)))
+                  m)))))
 
 
 ;; Forward declarations for batch resolution functions used by resolve-all-entities
@@ -148,10 +190,17 @@
 
 
 (defn- parent-branch-id
-  "The base-branch-id of `branch-id`, or nil at the root."
+  "The base-branch-id of `branch-id`, or nil at the root.
+
+   Backed by the same `global-chain-cache` as `collect-branch-chain`
+   — the cached `[branch-id parent-id ...]` chain encodes parent for
+   every ancestor in one walk. Avoids an `sp/read-entity` per
+   recursive `resolve-version` step (3+ PG roundtrips per chain
+   walk eliminated for a 3-deep branch hierarchy)."
   [base-storage branch-id]
-  (some-> (sp/read-entity base-storage :branch branch-id)
-          :base-branch-id))
+  (let [chain (collect-branch-chain base-storage branch-id)]
+    (when (> (count chain) 1)
+      (second chain))))
 
 
 (defn resolve-version
@@ -263,18 +312,17 @@
 
 
 (defn- collect-branch-chain
-  "Returns vector of branch-ids from current to root (for inheritance lookup).
-   Uses thread-local cache when *branch-chain-cache* is bound."
+  "Returns vector of branch-ids from current to root (for inheritance
+   lookup). When `*branch-chain-cache*` is bound it wins (test
+   isolation); otherwise consults the process-wide
+   `global-chain-cache`, populating on miss."
   [base-storage branch-id]
-  (if *branch-chain-cache*
-    ;; Use cached value if available
-    (if-let [cached (get @*branch-chain-cache* branch-id)]
+  (let [cache (or *branch-chain-cache* global-chain-cache)]
+    (if-let [cached (get @cache branch-id)]
       cached
       (let [chain (collect-branch-chain-impl base-storage branch-id)]
-        (swap! *branch-chain-cache* assoc branch-id chain)
-        chain))
-    ;; No cache - compute directly
-    (collect-branch-chain-impl base-storage branch-id)))
+        (swap! cache assoc branch-id chain)
+        chain))))
 
 
 (defn- load-all-versions-for-ids

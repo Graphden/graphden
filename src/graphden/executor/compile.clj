@@ -442,43 +442,51 @@
       propagate free-arg names outward).
    5. Reset `fa-ref` to the final map so the thunks / wraps created in
       step 3 see the complete lexical environment when they fire."
-  [impl bindings env-bindings ctx]
-  (wrap-top-level
-    (fn [all-fns free-args]
-      (let [fa-ref (volatile! free-args)
-            fa-base (if (seq env-bindings)
-                      (augment-env env-bindings all-fns free-args fa-ref)
-                      free-args)
-            _ (vreset! fa-ref fa-base)
-            {:keys [args aug]} (build-args-and-aug bindings all-fns fa-ref)
-            ;; Primary bindings go into aug keyed by ext-name so inner
-            ;; refs that reference a parameter by its external name see
-            ;; the value. We merge WITHOUT shadowing entries already in
-            ;; fa-base: a caller-provided free-arg wins over a local
-            ;; primary binding that happens to use the same ext-name.
-            ;; This matters for chains like :_router-compiled binding
-            ;; `:routes :_router-normalized-routes` — the outer
-            ;; :routes (the actual routes list from :_router) must
-            ;; still flow through to the inner filter, otherwise the
-            ;; primary-binding creates a cycle (inner filter sees the
-            ;; thunk that computes `normalized-routes`, which itself
-            ;; needs routes, which resolves back to the same thunk).
-            final-fa (reduce-kv (fn [acc k v]
-                                  (if (contains? acc k) acc (assoc acc k v)))
-                                fa-base
-                                aug)]
-        (vreset! fa-ref final-fa)
-        (impl args ctx)))))
+  [impl bindings env-bindings]
+  ;; Closure TEMPLATE — `ctx` is supplied at instantiation time (the
+  ;; returned outer fn), not capture-time. Lets the SAME template
+  ;; serve multiple per-branch ExecutionContexts: the heavy compile
+  ;; work (ref-resolution, binding chain assembly) runs once; each
+  ;; per-branch instantiation is just a closure allocation.
+  (fn instantiate
+    [ctx]
+    (wrap-top-level
+      (fn [all-fns free-args]
+        (let [fa-ref (volatile! free-args)
+              fa-base (if (seq env-bindings)
+                        (augment-env env-bindings all-fns free-args fa-ref)
+                        free-args)
+              _ (vreset! fa-ref fa-base)
+              {:keys [args aug]} (build-args-and-aug bindings all-fns fa-ref)
+              ;; Primary bindings go into aug keyed by ext-name so inner
+              ;; refs that reference a parameter by its external name see
+              ;; the value. We merge WITHOUT shadowing entries already in
+              ;; fa-base: a caller-provided free-arg wins over a local
+              ;; primary binding that happens to use the same ext-name.
+              ;; This matters for chains like :_router-compiled binding
+              ;; `:routes :_router-normalized-routes` — the outer
+              ;; :routes (the actual routes list from :_router) must
+              ;; still flow through to the inner filter, otherwise the
+              ;; primary-binding creates a cycle (inner filter sees the
+              ;; thunk that computes `normalized-routes`, which itself
+              ;; needs routes, which resolves back to the same thunk).
+              final-fa (reduce-kv (fn [acc k v]
+                                    (if (contains? acc k) acc (assoc acc k v)))
+                                  fa-base
+                                  aug)]
+          (vreset! fa-ref final-fa)
+          (impl args ctx))))))
 
 
-(defn compile-fn
-  "Produce the compiled closure for a single fn-id.
+(defn compile-fn-template
+  "Produce a ctx-independent closure TEMPLATE for `fn-id` — a fn that
+   takes an `ExecutionContext` and returns the actual compiled
+   `(fn [all-fns free-args])` closure. Sharing templates across
+   branches lets the heavy compile work run once and per-branch
+   ctx-instantiation stay cheap.
 
-   `lookups` must already carry `:base-fns`. `ctx` is the execution-
-   context the impl will receive as its second arg.
-
-   Returns `(fn [all-fns free-args])`."
-  [fn-id lookups ctx]
+   `lookups` must already carry `:base-fns`."
+  [fn-id lookups]
   (let [impl (resolve-impl fn-id lookups)
         bindings (enrich-ref-bindings fn-id (b/collect-bindings fn-id lookups) lookups)
         env-bindings (mapv (fn [b]
@@ -486,25 +494,29 @@
                                (enrich-is-fn-ref fn-id lookups b)
                                b))
                            (b/collect-env-bindings fn-id lookups))]
-    (build-closure impl bindings env-bindings ctx)))
+    (build-closure impl bindings env-bindings)))
+
+
+(defn compile-fn
+  "Backward-compat wrapper around `compile-fn-template` — instantiates
+   immediately against `ctx`. Returns `(fn [all-fns free-args])`."
+  [fn-id lookups ctx]
+  ((compile-fn-template fn-id lookups) ctx))
 
 
 ;; =============================================================================
 ;; Entry point
 ;; =============================================================================
 
-(defn compile-all
-  "Compile every fn into a map `{fn-id → compiled-closure}`.
-
-   Input: `{:fns :slots :fn-slots :bindings :list-items :base-fns}` —
-   the slot/fn-slot/binding model entities plus the impl registry.
-   `ctx` is the execution-context impls will receive.
+(defn compile-all-templates
+  "Compile every fn into a TEMPLATE map `{fn-id → ctx → closure}`.
+   Pair with `instantiate-templates` to materialise the actual
+   `{fn-id → closure}` registry against a specific ctx.
 
    Skips fns whose root has no impl (anonymous types, primitives) —
-   those aren't directly executable. They still get stored as data in
-   the graph for type-checking and editor display."
-  [{:keys [fns base-fns] :as graph} ctx]
-  (let [lookups (assoc (l/build-lookups graph) :base-fns base-fns)
+   those aren't directly executable."
+  [{:keys [fns base-fns] :as graph}]
+  (let [lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)
         compilable? (fn [f]
                       (let [root (l/root-fn (:id f) (:fn-map lookups))
                             root-name (some-> (:name root) keyword)]
@@ -512,8 +524,27 @@
     (into {}
           (keep (fn [f]
                   (when (compilable? f)
-                    [(:id f) (compile-fn (:id f) lookups ctx)])))
+                    [(:id f) (compile-fn-template (:id f) lookups)])))
           fns)))
+
+
+(defn instantiate-templates
+  "Materialise `{fn-id → template}` against `ctx` → `{fn-id → closure}`.
+   O(N) wrappers, each ~free. The per-branch hot-path read of the
+   compiled-registry stays unchanged."
+  [templates ctx]
+  (reduce-kv
+    (fn [acc fn-id template] (assoc acc fn-id (template ctx)))
+    {}
+    templates))
+
+
+(defn compile-all
+  "Backward-compat: produce `{fn-id → closure}` for a specific `ctx`.
+   New callers should split into `compile-all-templates` +
+   `instantiate-templates` so templates can be reused across branches."
+  [graph ctx]
+  (instantiate-templates (compile-all-templates graph) ctx))
 
 
 ;; =============================================================================

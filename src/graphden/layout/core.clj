@@ -332,7 +332,7 @@
    Throws `:execution-error/not-found` when `root-id` isn't in the
    graph."
   [graph-entities root-id expansions]
-  (let [lookups (lgraph/build-lookups graph-entities)]
+  (let [lookups (lgraph/cached-build-lookups graph-entities)]
     (when-not (get (:fn-map lookups) root-id)
       (throw (ex-info "Root function not found"
                       {:type :execution-error/not-found

@@ -17,7 +17,7 @@
 | Integrant System | Done | Component lifecycle management |
 | Logging | Done | Structured logging with MDC |
 | Web Server | Done | http-kit + Reitit router |
-| Versioning | Done | VersionedStorage decorator (fn / fn-slot / binding / binding-list-item) |
+| Versioning | Done | VersionedStorage + HTTP API + editor UI + per-branch executor routing (see [VERSIONING.md](VERSIONING.md)) |
 | Type System (refinements / records / lists / unions / variants) | Done | Save-time check; rich-type registry |
 | Editor UI | Done | Cytoscape-based with server-computed layout, inline edit popovers |
 | REST API | Done | `/api/graph/entities`, `/api/graph/layout`, `/api/entities/<entity>/*`, `/api/sequence/append/:fn-id`, `/api/sequence/item/:item-id` |
@@ -402,27 +402,67 @@ no new entity kinds.
 - Breaking changes (removed arg, changed type): register new fn name (e.g., `map-v2`), old code remains functional
 - Implementation-only changes (bug fix, same signature): all users get the new code automatically (Clojure runtime is shared), `impl_hash` updated on platform branch
 
-**Known issue — base-table `(binding_id, position)` unique constraint
-vs versioning:**
+**Branch-aware request routing [DONE — `feat/versioning`]:**
 
-`binding_list_item` (the stable identity table) carries a pre-versioning
-`UNIQUE (binding_id, position)` index, but `position` is versioned data.
-This conflicts with the two-table model in two ways:
+- `:exec/branch-router` init-key holds an atom of
+  `{branch-id → ExecutionContext}` — each non-default branch gets
+  its OWN compiled registry because `(impl args ctx)` closes ctx in
+  at compile time and branch bindings can diverge.
+- Per-request branch selection via `X-Graphden-Branch` header or
+  `?branch=<name>` query. Default = main.
+- Lazy-build on first request, cached afterwards; invalidation
+  piggybacks on the existing `invalidate-graph-cache!` (writes on
+  branch X clear X's registry without touching main).
+- Ring callable re-reads the registry atom on every invocation so
+  the cached handler picks up post-write rebuilds without explicit
+  reattach.
+- Front of the wire: `:branch-routing-wrap` base-fn (in
+  `web.branch-router`) wraps the compiled `:_app-ring-response` and
+  delegates to the router. No active router (test paths / startup
+  race) → call the wrapped base-handler directly.
 
-1. **Soft-delete orphans a position.** `delete-entity` removes an item's
-   *version* rows but keeps its base identity row (correct — the item may
-   still live on another branch). The orphan base row keeps occupying
-   `(binding_id, position)` in the unique index forever.
-2. **Cross-branch divergence collides.** Two branches independently adding
-   a different item at the same sequence position both need a base row at
-   `(binding_id, position)` — the second insert is rejected.
+**HTTP surface [DONE — see `docs/VERSIONING.md`]:**
 
-`process-sequence-append` works around (1) by choosing a position that
-clears the *base* table, not just the resolved view. The deeper fix is to
-stop enforcing `position` uniqueness on the identity table — position is a
-resolved-view property, so its uniqueness is an application-level
-invariant, not a base-row one. Deferred until cross-branch sequence
-editing is actually exercised.
+| Verb   | Path                                     | Notes |
+|--------|------------------------------------------|-------|
+| GET    | `/api/branches`                          | List |
+| GET    | `/api/branches/:ref`                     | One (UUID or name) |
+| POST   | `/api/branches`                          | Create (forks from current) |
+| DELETE | `/api/branches/:ref`                     | Rejects `main` and branches with children |
+| GET    | `/api/branches/:ref/diff?against=…`      | Resolved-view diff |
+| GET    | `/api/branches/:ref/conflicts?source=…`  | Preview conflicts before merge |
+| POST   | `/api/branches/:ref/merge`               | Body `{source, conflict-resolutions?}` |
+| GET    | `/api/fns/:fn-id/versions`               | History per fn |
+
+**Editor UI [DONE]:** branch chip + popover in the menu-header
+(`editor-branches.js`), `⌛` history popover on each fn-card
+(`editor-fn-versions.js`), inline merge button + conflict-resolution
+modal. `window.fetch` is wrapped at load so every `/api/*` call
+picks up the current branch automatically.
+
+**Demo seeder [DONE]:** `:exec/demo-branches` init-key ensures a
+small set of pre-baked branches exists on every startup so the UI
+has something to demo (diff, merge, switching). Idempotent — already-
+existing branches are left untouched. Opt-in via
+`GRAPHDEN_DEMO_BRANCHES_ENABLED=1`; off by default in prod.
+
+**Known issue — base-table `(binding_id, position)` unique constraint [FIXED]:**
+
+The pre-versioning `UNIQUE (binding_id, position)` index on
+`binding_list_item` (the identity table) was retired in
+`feat/versioning` — position is a resolved-view property, not a
+cross-branch identity property. The invariant now lives at the
+per-branch resolved view in
+`VersionedStorage/check-list-item-position-collision!`. Existing
+DBs get the legacy index dropped by `migration/drop-retired-indexes!`
+on the next migration pass.
+
+**Remaining gaps:**
+
+- The `diff-branches` walker only considers each branch's ancestor
+  chain, NOT `branch_merge` edges. Branches that have been merged
+  in either direction need a follow-up — until then, post-merge
+  diffs may understate the visible-via-merge surface.
 
 ---
 

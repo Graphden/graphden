@@ -329,6 +329,19 @@ async function showExecutePopover(fnEntity, anchorEl) {
   title.className = 'execute-popover-title';
   title.textContent = 'Run :' + (fnEntity.name || '(anonymous)');
   head.appendChild(title);
+  // Branch indicator — non-default-branch users SHOULD see at-a-glance
+  // that ▶ won't run main's version. Inverted-pill style mirrors the
+  // top-bar chip's "on a feature branch" affordance.
+  if (typeof isOnDefaultBranch === 'function' && !isOnDefaultBranch()) {
+    const branchPill = document.createElement('span');
+    branchPill.className = 'execute-popover-branch';
+    const branchName = typeof getCurrentBranchName === 'function'
+      ? getCurrentBranchName() : '?';
+    branchPill.textContent = 'on ' + branchName;
+    branchPill.title = 'Run resolves to this fn as seen on branch "'
+                       + branchName + '"; switch branches to run a different version';
+    head.appendChild(branchPill);
+  }
   // History toggle — toggles a collapsible panel listing persisted
   // runs for this fn. Lazy fetch on first open so the header doesn't
   // pay an HTTP roundtrip every time the popover opens.
@@ -388,8 +401,15 @@ async function showExecutePopover(fnEntity, anchorEl) {
     note.textContent = 'No free arguments — click Run to invoke.';
     body.appendChild(note);
   }
-  for (const slot of frees) {
-    const section = await buildArgFormSection(fnEntity, slot);
+  // Fetch every free-arg's value-form in parallel — sequential await
+  // serialised the N HTTP roundtrips, making popover-open scale O(N)
+  // in wall time for fns with multiple free args.
+  const sections = await Promise.all(
+    frees.map((slot) => buildArgFormSection(fnEntity, slot)),
+  );
+  for (let i = 0; i < frees.length; i++) {
+    const slot = frees[i];
+    const section = sections[i];
     argFormHosts.push({ slotName: slot.name, slotId: slot.id, hostEl: section.host,
                          read: section.read });
     body.appendChild(makeRow(slot.name, section.host));

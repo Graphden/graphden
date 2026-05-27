@@ -314,39 +314,55 @@
 (def ^:private max-history-limit 100)
 
 
-(defn list-executions-for-fn
-  "Return up to `limit` (default 20, cap 100) :fn-execution rows whose
-   fn-version belongs to logical `fn-id` (i.e. any version of that
-   base fn), ordered by `:started-at` desc. Each row carries the
-   SUMMARY shape the history panel renders — no nested args (call
-   get-execution when the user expands a row).
+(defn- clamp-history-limit
+  [limit]
+  (cond
+    (or (nil? limit) (not (number? limit)) (< limit 1)) default-history-limit
+    (> limit max-history-limit)                         max-history-limit
+    :else                                               (long limit)))
 
-   `limit` is clamped to `[1, max-history-limit]`; nil / non-positive
-   values fall back to `default-history-limit`. Returns `[]` when no
-   rows match (incl. when the fn was never run)."
+
+(defn list-executions-for-fn-version
+  "Return up to `limit` :fn-execution rows for the SPECIFIC
+   `fn-version-id`, latest first. Drives the `⌛` fn-versions panel's
+   per-version expand-to-see-runs UI."
+  ([ctx fn-version-id]
+   (list-executions-for-fn-version ctx fn-version-id nil))
+  ([ctx fn-version-id limit]
+   (let [storage (request/require-storage ctx)
+         lim (clamp-history-limit limit)]
+     (->> (sp/query-entities storage :fn-execution
+                             {:fn-version-id fn-version-id})
+          (sort-by :started-at)
+          reverse
+          (take lim)
+          vec))))
+
+
+(defn list-executions-for-fn
+  "Return up to `limit` (default 20, cap 100) :fn-execution rows for
+   logical `fn-id` AS IT RESOLVES ON THE CURRENT BRANCH — i.e. only
+   runs of the version the editor would actually execute if the user
+   clicked ▶ right now. Ordered by `:started-at` desc.
+
+   This MATCHES the editor's mental model: branch X is a coherent
+   functional view; executions of OTHER versions live behind the `⌛`
+   history panel where each version row carries its own count + an
+   expand-to-see-runs affordance. Pre-fix this returned `:fn-execution`
+   rows for EVERY version of the fn-id regardless of branch, which
+   conflated runs that may have had different arg shapes / behaviour
+   into one list (and broke Repeat for runs whose arg-shape no longer
+   matched the current version).
+
+   Returns `[]` when the fn has no version visible on the current
+   branch (e.g. fn never created here AND not inherited) or no runs
+   yet."
   ([ctx fn-id]
    (list-executions-for-fn ctx fn-id nil))
   ([ctx fn-id limit]
-   (let [storage (request/require-storage ctx)
-         lim (cond
-               (or (nil? limit) (not (number? limit)) (< limit 1))
-               default-history-limit
-               (> limit max-history-limit) max-history-limit
-               :else (long limit))
-         versions (sp/query-entities storage :fn-version {:fn-id fn-id})
-         version-ids (mapv :id versions)]
-     (if (empty? version-ids)
-       []
-       ;; Push the fn-version-id set into the storage query — collection
-       ;; values resolve to a SQL `IN` clause (see
-       ;; storage.postgres.crud/query-entities). Avoids the full-table
-       ;; scan + in-memory filter we'd do otherwise.
-       (->> (sp/query-entities storage :fn-execution
-                               {:fn-version-id version-ids})
-            (sort-by :started-at)
-            reverse
-            (take lim)
-            vec)))))
+   (if-let [version-id (lookup/resolve-fn-version-id ctx fn-id)]
+     (list-executions-for-fn-version ctx version-id limit)
+     [])))
 
 
 ;; =============================================================================

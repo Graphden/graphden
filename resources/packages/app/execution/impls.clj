@@ -94,6 +94,11 @@
   (request/parse-uuid-or-clear (query-param request "fn-id")))
 
 
+(defn- query-fn-version-id
+  [request]
+  (request/parse-uuid-or-clear (query-param request "fn-version-id")))
+
+
 (defn- query-limit
   "Optional `?limit=N` query param. Returns parsed long or nil — the
    crud layer applies clamping + the default. Tolerates malformed
@@ -106,11 +111,27 @@
 
 (defbase _list-executions-by-fn
   [request]
-  (let [fn-id (query-fn-id request)
+  ;; Two query shapes share this endpoint:
+  ;;   ?fn-id=X         → executions of X as it resolves on the current
+  ;;                      branch (drives the execute popover's history)
+  ;;   ?fn-version-id=Y → executions of the SPECIFIC version row Y
+  ;;                      (drives the `⌛` panel's per-version expand)
+  ;; If both are present `fn-version-id` wins — the caller asked for a
+  ;; specific anchor and the fn-id is redundant.
+  (let [version-id (query-fn-version-id request)
+        fn-id (query-fn-id request)
         limit (query-limit request)]
-    (if fn-id
-      {:ok true :executions (fn-exec/list-executions-for-fn ctx fn-id limit)}
-      {:ok false :error "missing or invalid ?fn-id query parameter"})))
+    (cond
+      version-id
+      {:ok true
+       :executions (fn-exec/list-executions-for-fn-version ctx version-id limit)}
+
+      fn-id
+      {:ok true
+       :executions (fn-exec/list-executions-for-fn ctx fn-id limit)}
+
+      :else
+      {:ok false :error "missing or invalid ?fn-id / ?fn-version-id query parameter"})))
 
 
 ;; --- POST /api/services/reconcile ---

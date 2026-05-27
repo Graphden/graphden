@@ -101,6 +101,19 @@
     (-> (dissoc :nav-types-rule) (assoc :has-nav-types-rule? true))))
 
 
+(defonce ^:private rich-types-with-type-rows-cache
+  ;; Single-entry identity-keyed cache. Holds `[raw-snapshot graph result]`.
+  ;; Both inputs are atom-deref'd values that stay reference-stable
+  ;; between their respective invalidations (rich-types registry
+  ;; reset / graph-cache reload), so adjacent
+  ;; `/api/types/candidates` calls during one mutation window hit
+  ;; the cache. Cache miss is the same cost as the uncached path.
+  (atom nil))
+
+
+(declare ^:private rich-types-with-type-rows-uncached)
+
+
 (defn rich-types-with-type-rows
   "Augment the in-memory rich-type registry with structural definitions
    for storage-only type-rows (refinements, list types, records). The
@@ -111,12 +124,19 @@
    up `:port` → expect `[:refine :int [:and [:>= 1] [:<= 65535]]]`,
    so we expose the structural form alongside the existing entries."
   [ctx]
-  (let [snapshot (update-vals (registry/rich-types-snapshot)
-                              project-rich-type-entry)
-        ;; Reuse the shared graph-cache instead of re-querying :fn —
-        ;; chain walks over `:base-fn-id` / `:element-fn-id` resolve
-        ;; in memory via `fns-by-id`.
+  (let [raw-snapshot (registry/rich-types-snapshot)
         graph (cached-or-load-graph ctx)
+        [cs cg cr] @rich-types-with-type-rows-cache]
+    (if (and (identical? cs raw-snapshot) (identical? cg graph))
+      cr
+      (let [result (rich-types-with-type-rows-uncached raw-snapshot graph)]
+        (reset! rich-types-with-type-rows-cache [raw-snapshot graph result])
+        result))))
+
+
+(defn- rich-types-with-type-rows-uncached
+  [raw-snapshot graph]
+  (let [snapshot (update-vals raw-snapshot project-rich-type-entry)
         fns (:fns graph)
         slots (:slots graph)
         fn-slots (:fn-slots graph)

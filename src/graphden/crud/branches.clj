@@ -149,6 +149,40 @@
    :target-version (stringify-uuids target-version)})
 
 
+(defn parse-diff-branches-request
+  "Parse `GET /api/branches/:target/diff?against=<source>` into the
+   bundle the C12 `:cond` graph fn-def consumes."
+  [target-ref against-ref]
+  {:target-ref target-ref :against-ref against-ref})
+
+
+(defn diff-target-branch
+  "C12 sub-result — resolve the target branch by ref. Shared by the
+   not-found guard + apply."
+  [parsed ctx]
+  (resolve-branch-ref (base-storage ctx) (:target-ref parsed)))
+
+
+(defn diff-source-branch
+  "C12 sub-result — resolve the source branch when an `?against=`
+   query was supplied; nil otherwise."
+  [parsed ctx]
+  (when-let [src-ref (:against-ref parsed)]
+    (resolve-branch-ref (base-storage ctx) src-ref)))
+
+
+(defn apply-diff-branches
+  "C12 success branch — compute the diff between target + source."
+  [_parsed target source ctx]
+  (let [{:keys [diffs]} (mrg/diff-branches (base-storage ctx)
+                                           (:id source) (:id target))]
+    {:ok true
+     :target (as-json-branch target)
+     :source (as-json-branch source)
+     :count (count diffs)
+     :diffs (mapv prepare-diff-entry diffs)}))
+
+
 (defn diff-branches
   "Resolved-view diff between target branch and `against`. Both refs
    can be either a UUID or a name. Returns `{:ok true :target :source
@@ -179,6 +213,46 @@
 ;; =============================================================================
 ;; POST /api/branches — create a new branch
 ;; =============================================================================
+
+(defn parse-create-branch-request
+  "Parse the JSON body of `POST /api/branches` into `{:branch-name
+   :base-ref}`."
+  [body]
+  {:branch-name (some-> body :name str/trim)
+   :base-ref (when-let [v (:base-branch-id body)]
+               (when-not (str/blank? (str v)) (str v)))})
+
+
+(defn create-branch-name-taken?
+  "C13 guard — a branch with the same name already exists."
+  [parsed ctx]
+  (seq (sp/query-entities (vs/unwrap (request/require-storage ctx))
+                          :branch {:name (:branch-name parsed)})))
+
+
+(defn create-branch-resolved-parent
+  "C13 sub-result — resolve the base-branch ref to a row. When no
+   `:base-ref` was supplied, defaults to the wrapper's current
+   branch (= main). Returns nil when the supplied ref doesn't
+   resolve, distinguishable from the default-main case via
+   `:base-ref`-non-nil + result-nil."
+  [parsed ctx]
+  (let [storage (request/require-storage ctx)
+        base (vs/unwrap storage)]
+    (if-let [base-ref (:base-ref parsed)]
+      (resolve-branch-ref base base-ref)
+      (sp/read-entity base :branch (vs/current-branch-id storage)))))
+
+
+(defn apply-create-branch
+  "C13 success branch — `vs/create-branch!` with the resolved parent's
+   id."
+  [parsed parent ctx]
+  (let [row (vs/create-branch! (request/require-storage ctx)
+                               (:branch-name parsed)
+                               {:base-branch-id (:id parent)})]
+    {:ok true :branch (as-json-branch row)}))
+
 
 (defn create-branch
   "Create a new branch. `body` is the parsed JSON `{:name :base-branch-id?}`.
@@ -215,6 +289,49 @@
 ;; =============================================================================
 ;; DELETE /api/branches/:ref
 ;; =============================================================================
+
+(defn parse-delete-branch-request
+  "Parse `DELETE /api/branches/:ref` URL into `{:branch-ref}`."
+  [branch-ref]
+  {:branch-ref branch-ref})
+
+
+(defn delete-branch-resolved
+  "C14 sub-result — resolve the branch ref to a row. Shared by the
+   not-found guard + apply."
+  [parsed ctx]
+  (resolve-branch-ref (vs/unwrap (request/require-storage ctx))
+                      (:branch-ref parsed)))
+
+
+(defn apply-delete-branch
+  "C14 success branch — `vs/delete-branch!` with the resolved row's
+   id. Caught :constraint-violation exceptions (main / has-children)
+   are translated to specific JSON-shaped rejections; other failures
+   surface as generic `{:ok false :error}`."
+  [parsed branch-row ctx]
+  (let [storage (request/require-storage ctx)]
+    (try
+      (vs/delete-branch! storage (:id branch-row))
+      {:ok true :id (str (:id branch-row)) :name (:name branch-row)}
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (case (:type data)
+            :constraint-violation/main-branch-undeletable
+            {:ok false :reason :main-branch-undeletable
+             :error "Cannot delete the main branch"}
+
+            :constraint-violation/branch-has-children
+            {:ok false :reason :branch-has-children
+             :error "Branch has children — delete or re-parent them first"
+             :child-branch-ids (mapv str (:child-branch-ids data))}
+
+            :not-found
+            {:ok false :reason :not-found
+             :error (str "Branch not found: " (:branch-ref parsed))}
+
+            {:ok false :error (or (ex-message e) "Unknown error")}))))))
+
 
 (defn delete-branch
   "Deletes every version record on the branch + the branch row.
@@ -259,6 +376,36 @@
    :entity-id (str entity-id)
    :source-version (stringify-uuids source-version)
    :target-version (stringify-uuids target-version)})
+
+
+(defn parse-preview-conflicts-request
+  "Parse `GET /api/branches/:target/conflicts?source=<ref>` into
+   `{:target-ref :source-ref}`."
+  [target-ref source-ref]
+  {:target-ref target-ref :source-ref source-ref})
+
+
+(defn preview-conflicts-target
+  [parsed ctx]
+  (resolve-branch-ref (base-storage ctx) (:target-ref parsed)))
+
+
+(defn preview-conflicts-source
+  [parsed ctx]
+  (when-let [s (:source-ref parsed)]
+    (resolve-branch-ref (base-storage ctx) s)))
+
+
+(defn apply-preview-conflicts
+  [target source ctx]
+  (let [{:keys [conflicts fork-point]}
+        (mrg/detect-conflicts (base-storage ctx) (:id source) (:id target))]
+    {:ok true
+     :target (as-json-branch target)
+     :source (as-json-branch source)
+     :fork-point (some-> fork-point str)
+     :count (count conflicts)
+     :conflicts (mapv prepare-conflict-entry conflicts)}))
 
 
 (defn preview-conflicts
@@ -306,6 +453,55 @@
                     (when (and ename eid (#{:source :target} choice))
                       [[ename eid] choice]))))
           resolutions)))
+
+
+(defn parse-merge-branch-request
+  "Parse `POST /api/branches/:target/merge` URL + body into
+   `{:target-ref :source-ref :resolutions}`."
+  [target-ref body]
+  {:target-ref target-ref
+   :source-ref (some-> (:source body) str)
+   :resolutions (coerce-resolutions (:conflict-resolutions body))})
+
+
+(defn merge-target-branch
+  [parsed ctx]
+  (resolve-branch-ref (vs/unwrap (request/require-storage ctx))
+                      (:target-ref parsed)))
+
+
+(defn merge-source-branch
+  [parsed ctx]
+  (when-let [s (:source-ref parsed)]
+    (resolve-branch-ref (vs/unwrap (request/require-storage ctx)) s)))
+
+
+(defn apply-merge-branch
+  "C16 success branch — `vs/merge-branch!`. Catches the
+   `:merge-conflict` exception and reshapes it into a JSON-friendly
+   409-style payload; other failures surface as generic
+   `{:ok false :error}`."
+  [target source resolutions ctx]
+  (let [storage (request/require-storage ctx)]
+    (try
+      (let [target-storage (vs/switch-branch storage (:id target))
+            record (vs/merge-branch! target-storage (:id source)
+                                     {:conflict-resolutions resolutions})]
+        {:ok true
+         :merge {:id (str (:id record))
+                 :source-branch-id (str (:source-branch-id record))
+                 :target-branch-id (str (:target-branch-id record))
+                 :created-at (some-> (:created-at record) str)}})
+      (catch clojure.lang.ExceptionInfo e
+        (if (= :merge-conflict (:type (ex-data e)))
+          {:ok false
+           :reason :merge-conflict
+           :error "Merge has unresolved conflicts"
+           :target (as-json-branch target)
+           :source (as-json-branch source)
+           :conflicts (mapv prepare-conflict-entry
+                            (:conflicts (ex-data e)))}
+          {:ok false :error (or (ex-message e) "Unknown error")})))))
 
 
 (defn merge-branch

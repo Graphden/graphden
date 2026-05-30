@@ -64,11 +64,76 @@
   ;; diff between two branches.
   ;; ---------------------------------------------------------------------
 
-  {:name :_diff-branches-data
-   :description "Pulls the target branch from the URI (`:ref`) and the source from the `?against=<ref>` query param, then computes a per-entity diff. Each entry carries source-version, target-version, and a `:change` tag (`:added-in-source` / `:added-in-target` / `:modified`). Used by the editor's branch-compare view."
+  ;; --- C12 atoms: diff-branches variant-2.
+  {:name :_diff-parsed
+   :description "Parse `GET /api/branches/:target/diff?against=<source>` into `{:target-ref :against-ref}`."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
+   :effects #{}}
+
+  {:name :_diff-target-branch
+   :description "Resolve the target branch by ref; nil when missing."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_diff-source-branch
+   :description "Resolve the source branch when `?against=` was supplied; nil otherwise."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_diff-target-missing?
+   :description "Guard #1 — target branch not found."
+   :args {:target-branch {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_diff-against-missing?
+   :description "Guard #2 — `?against=` query param not supplied."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_diff-source-missing?
+   :description "Guard #3 — source branch ref supplied but resolves to nil."
+   :args {:source-branch {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_diff-err-target-missing
+   :description "Dynamic error — cites the raw target-ref."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_diff-err-against-missing
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:ok false :error "Query parameter 'against' is required"}}}
+
+  {:name :_diff-err-source-missing
+   :description "Dynamic error — cites the raw against-ref."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_diff-apply
+   :description "Success branch — compute the per-entity diff."
+   :args {:parsed {:type :jsonb} :target-branch {:type :jsonb} :source-branch {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_diff-branches-data
+   :description "GET /api/branches/:ref/diff?against=<source> — flat `:cond` of 3 guards + apply."
+   :parent :cond
+   :args {:clauses [:_diff-target-missing?  :_diff-err-target-missing
+                    :_diff-against-missing? :_diff-err-against-missing
+                    :_diff-source-missing?  :_diff-err-source-missing
+                    {:value true}           :_diff-apply]
+          :parsed :_diff-parsed
+          :target-branch :_diff-target-branch
+          :source-branch :_diff-source-branch}}
 
   {:name :diff-branches-handler
    :description "Ring handler for GET /api/branches/:ref/diff."
@@ -79,11 +144,70 @@
   ;; POST /api/branches — create a new branch.
   ;; ---------------------------------------------------------------------
 
-  {:name :_create-branch-data
-   :description "Parses the JSON body `{:name :base-branch-id?}` and creates a new :branch row forked from `:base-branch-id` (or `main` when absent). Returns the created row, or `{:ok false :error}` when name is missing / taken / base ref doesn't exist."
+  ;; --- C13 atoms: create-branch variant-2.
+  {:name :_create-branch-parsed
+   :description "Parse POST /api/branches body into `{:branch-name :base-ref}`."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
+   :effects #{}}
+
+  {:name :_create-branch-name-blank?
+   :description "Guard #1 — `:name` missing or blank."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_create-branch-name-taken?
+   :description "Guard #2 — a branch with this name already exists."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
    :effects #{:db}}
+
+  {:name :_create-branch-resolved-parent
+   :description "Resolve `:base-ref` to a branch row, defaulting to the wrapper's current branch (= main) when absent."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_create-branch-base-missing?
+   :description "Guard #3 — base-ref supplied but resolves to nil."
+   :args {:parsed {:type :jsonb} :resolved-parent {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_create-branch-err-name-blank
+   :description "Builds the name-blank error."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_create-branch-err-name-taken
+   :description "Dynamic error — cites the rejected name."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_create-branch-err-base-missing
+   :description "Dynamic error — cites the base-ref that didn't resolve."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_create-branch-apply
+   :description "Success branch — `vs/create-branch!` with the resolved parent's id."
+   :args {:parsed {:type :jsonb} :resolved-parent {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_create-branch-data
+   :description "POST /api/branches — flat `:cond` of `[name-blank? → 400, name-taken? → 400-dynamic, base-missing? → 400-dynamic, true → apply]`."
+   :parent :cond
+   :args {:clauses [:_create-branch-name-blank?  :_create-branch-err-name-blank
+                    :_create-branch-name-taken?  :_create-branch-err-name-taken
+                    :_create-branch-base-missing? :_create-branch-err-base-missing
+                    {:value true}                 :_create-branch-apply]
+          :parsed :_create-branch-parsed
+          :resolved-parent :_create-branch-resolved-parent}}
 
   {:name :create-branch-handler
    :description "Ring handler for POST /api/branches (auth-required)."
@@ -94,11 +218,44 @@
   ;; DELETE /api/branches/:ref — delete branch + all its version rows.
   ;; ---------------------------------------------------------------------
 
-  {:name :_delete-branch-data
-   :description "Pulls the trailing branch ref from the URI and deletes the branch. Rejects `main` (`:reason :main-branch-undeletable`) and branches with children (`:reason :branch-has-children` + `:child-branch-ids`)."
+  ;; --- C14 atoms: delete-branch variant-2.
+  {:name :_delete-branch-parsed
+   :description "Parse DELETE /api/branches/:ref URL into `{:branch-ref}`."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
+   :effects #{}}
+
+  {:name :_delete-branch-resolved
+   :description "Resolve the branch ref to a row; nil when missing."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_delete-branch-missing?
+   :description "Guard — branch not found."
+   :args {:resolved {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_delete-branch-err-missing
+   :description "Dynamic error — cites the raw branch-ref."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_delete-branch-apply
+   :description "Success branch — `vs/delete-branch!`. The :main / :has-children / :not-found rejection cases stay inside apply because they're exception-surfaced from the underlying delete."
+   :args {:parsed {:type :jsonb} :resolved {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_delete-branch-data
+   :description "DELETE /api/branches/:ref — flat `:cond` of `[branch-missing? → 404-shape, true → apply]`. The constraint-rejection cases (main / has-children) come from apply."
+   :parent :cond
+   :args {:clauses [:_delete-branch-missing? :_delete-branch-err-missing
+                    {:value true}            :_delete-branch-apply]
+          :parsed :_delete-branch-parsed
+          :resolved :_delete-branch-resolved}}
 
   {:name :delete-branch-handler
    :description "Ring handler for DELETE /api/branches/:ref (auth-required)."
@@ -109,11 +266,76 @@
   ;; GET /api/branches/:ref/conflicts?source=<ref> — preview merge conflicts.
   ;; ---------------------------------------------------------------------
 
-  {:name :_preview-conflicts-data
-   :description "Read-only `detect-conflicts` wrapper. Returns `{:ok true :conflicts […]}` so the editor can choose whether to open the merge-conflict modal before actually issuing a merge."
+  ;; --- C15 atoms: preview-conflicts variant-2.
+  {:name :_conflicts-parsed
+   :description "Parse GET /api/branches/:target/conflicts?source=<source> into `{:target-ref :source-ref}`."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
+   :effects #{}}
+
+  {:name :_conflicts-target
+   :description "Resolve the target branch by ref; nil when missing."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_conflicts-source
+   :description "Resolve the source branch when supplied; nil otherwise."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_conflicts-target-missing?
+   :description "Guard #1 — target branch not found."
+   :args {:target {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_conflicts-source-not-supplied?
+   :description "Guard #2 — `?source=` query param missing."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_conflicts-source-missing?
+   :description "Guard #3 — source supplied but doesn't resolve."
+   :args {:source {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_conflicts-err-target-missing
+   :description "Dynamic error — cites the raw target-ref."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_conflicts-err-source-supplied-missing
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:ok false :error "Query parameter 'source' is required"}}}
+
+  {:name :_conflicts-err-source-missing
+   :description "Dynamic error — cites the raw source-ref."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_conflicts-apply
+   :description "Success branch — `detect-conflicts` between target + source."
+   :args {:target {:type :jsonb} :source {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_preview-conflicts-data
+   :description "GET /api/branches/:target/conflicts?source=<source> — flat `:cond` of 3 guards + apply."
+   :parent :cond
+   :args {:clauses [:_conflicts-target-missing?      :_conflicts-err-target-missing
+                    :_conflicts-source-not-supplied? :_conflicts-err-source-supplied-missing
+                    :_conflicts-source-missing?      :_conflicts-err-source-missing
+                    {:value true}                    :_conflicts-apply]
+          :parsed :_conflicts-parsed
+          :target :_conflicts-target
+          :source :_conflicts-source}}
 
   {:name :preview-conflicts-handler
    :description "Ring handler for GET /api/branches/:ref/conflicts."
@@ -124,11 +346,90 @@
   ;; POST /api/branches/:ref/merge — merge source into target.
   ;; ---------------------------------------------------------------------
 
-  {:name :_merge-branch-data
-   :description "Parses the JSON body `{:source :conflict-resolutions?}` and merges `:source` into the URI branch. On unresolved conflicts returns `{:ok false :reason :merge-conflict :conflicts […]}` so the client can present the resolution UI and re-submit."
+  ;; --- C16 atoms: merge-branch variant-2. The :merge-conflict
+  ;; rejection case stays inside apply (exception-surfaced from
+  ;; `vs/merge-branch!`).
+  {:name :_merge-parsed
+   :description "Parse POST /api/branches/:target/merge URL + body into `{:target-ref :source-ref :resolutions}`."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
+   :effects #{}}
+
+  {:name :_merge-target
+   :description "Resolve target branch by ref; nil when missing."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_merge-source
+   :description "Resolve source branch when supplied; nil otherwise."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_merge-target-missing?
+   :description "Guard #1 — target branch not found."
+   :args {:target {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_merge-source-not-supplied?
+   :description "Guard #2 — `:source` missing in body."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_merge-source-missing?
+   :description "Guard #3 — source supplied but doesn't resolve."
+   :args {:source {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_merge-same?
+   :description "Guard #4 — source and target are the same branch."
+   :args {:target {:type :jsonb} :source {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_merge-err-target-missing
+   :description "Dynamic error — cites the raw target-ref."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_merge-err-source-not-supplied
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:ok false :error "Required field ':source' is missing"}}}
+
+  {:name :_merge-err-source-missing
+   :description "Dynamic error — cites the raw source-ref."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_merge-err-same
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:ok false :error "Source and target branches must differ"}}}
+
+  {:name :_merge-apply
+   :description "Success branch — `vs/merge-branch!`. Catches :merge-conflict exception and reshapes it into a JSON-friendly 409-style payload; other failures surface as generic `{:ok false :error}`."
+   :args {:parsed {:type :jsonb} :target {:type :jsonb} :source {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_merge-branch-data
+   :description "POST /api/branches/:target/merge — flat `:cond` of 4 guards + apply. The :merge-conflict rejection comes from apply."
+   :parent :cond
+   :args {:clauses [:_merge-target-missing?      :_merge-err-target-missing
+                    :_merge-source-not-supplied? :_merge-err-source-not-supplied
+                    :_merge-source-missing?      :_merge-err-source-missing
+                    :_merge-same?                :_merge-err-same
+                    {:value true}                :_merge-apply]
+          :parsed :_merge-parsed
+          :target :_merge-target
+          :source :_merge-source}}
 
   {:name :merge-branch-handler
    :description "Ring handler for POST /api/branches/:ref/merge (auth-required)."

@@ -95,11 +95,49 @@
   ;; GET /api/executions?fn-id=X — list recent runs for one fn
   ;; ---------------------------------------------------------------------
 
-  {:name :_list-executions-by-fn
-   :description "Pull the `?fn-id=X` query param and return the last 20 :fn-execution rows for that logical fn (across all of its versions), ordered by started-at desc. Used by the editor's history panel."
+  ;; --- C6 atoms: parse / no-anchor? / by-version? / two apply paths.
+  {:name :_list-exec-parsed
+   :description "Parse `GET /api/executions` query-string into `{:fn-id :version-id :limit}`."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
+   :effects #{}}
+
+  {:name :_list-exec-no-anchor?
+   :description "Guard — neither `?fn-id` nor `?fn-version-id` was supplied."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_list-exec-by-version?
+   :description "Dispatch — `?fn-version-id` supplied. Wins over `?fn-id` when both are present."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_list-exec-apply-by-version
+   :description "Return executions for the specific `:fn-version-id`."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_list-exec-apply-by-fn
+   :description "Return executions for the logical `:fn-id` (current branch's resolved version)."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_list-exec-err-no-anchor
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:ok false :error "missing or invalid ?fn-id / ?fn-version-id query parameter"}}}
+
+  {:name :_list-executions-by-fn
+   :description "GET /api/executions — flat `:cond` of `[no-anchor? → err, by-version? → version-apply, true → fn-apply]`. `:cond` is lazy, so each apply runs only on its branch. `parsed` is bound once at the `:cond` fn-def."
+   :parent :cond
+   :args {:clauses [:_list-exec-no-anchor? :_list-exec-err-no-anchor
+                    :_list-exec-by-version? :_list-exec-apply-by-version
+                    {:value true}            :_list-exec-apply-by-fn]
+          :parsed :_list-exec-parsed}}
 
   {:name :list-executions-handler
    :description "Ring handler for GET /api/executions."

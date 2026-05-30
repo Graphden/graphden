@@ -372,6 +372,51 @@
 
 
 ;; =============================================================================
+;; GET /api/executions parsing (C6 atoms)
+;; =============================================================================
+
+(defn- query-param
+  "Pull a named query-string parameter from `request`, tolerating both
+   reitit's enriched shapes AND raw http-kit requests that haven't
+   gone through the enrich middleware."
+  [request param-name]
+  (or (get-in request [:query-params param-name])
+      (get-in request [:query-params (keyword param-name)])
+      (some->> (:query-string request)
+               (re-find (re-pattern (str "(?:^|&)" param-name "=([^&]+)")))
+               second)))
+
+
+(defn parse-list-executions-request
+  "Parse the `GET /api/executions` query-string into the bundle the C6
+   `:cond` graph fn-def consumes — `{:fn-id :version-id :limit}`. No
+   validation here; the `_list-exec-no-anchor?` guard rejects when
+   both id-shaped params are nil."
+  [request]
+  {:fn-id (request/parse-uuid-or-clear (query-param request "fn-id"))
+   :version-id (request/parse-uuid-or-clear (query-param request "fn-version-id"))
+   :limit (when-let [raw (query-param request "limit")]
+            (try (Long/parseLong (str raw))
+                 (catch NumberFormatException _ nil)))})
+
+
+(defn apply-list-executions-by-version
+  "Success branch — `?fn-version-id` was supplied (and won the cond
+   dispatch over `?fn-id`)."
+  [parsed ctx]
+  {:ok true
+   :executions (list-executions-for-fn-version ctx (:version-id parsed)
+                                               (:limit parsed))})
+
+
+(defn apply-list-executions-by-fn
+  "Success branch — `?fn-id` was supplied (no `?fn-version-id`)."
+  [parsed ctx]
+  {:ok true
+   :executions (list-executions-for-fn ctx (:fn-id parsed) (:limit parsed))})
+
+
+;; =============================================================================
 ;; POST /api/execute/:id/cancel
 ;; =============================================================================
 

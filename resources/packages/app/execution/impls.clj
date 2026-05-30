@@ -73,65 +73,38 @@
                                (get-in request [:path-params :id]))})))
 
 
-;; --- GET /api/executions?fn-id=X ---
+;; --- GET /api/executions?fn-id=X (C6 atoms) ---
+;; Two query shapes share this endpoint:
+;;   ?fn-id=X         → executions of X as it resolves on the current
+;;                      branch (drives the execute popover's history)
+;;   ?fn-version-id=Y → executions of the SPECIFIC version row Y
+;;                      (drives the `⌛` panel's per-version expand)
+;; If both are present `fn-version-id` wins. `:_list-executions-by-fn`
+;; is now a `:cond` graph fn-def in fns.edn composing these atoms.
 
-(defn- query-param
-  "Pull a named query-string parameter from `request`, tolerating both
-   reitit's enriched shapes (`:query-params` keyed by string OR
-   keyword) AND raw http-kit requests that haven't gone through the
-   enrich middleware — those land here with just `:query-string`.
-   Returns the raw string value, or nil when the param isn't present."
-  [request param-name]
-  (or (get-in request [:query-params param-name])
-      (get-in request [:query-params (keyword param-name)])
-      (some->> (:query-string request)
-               (re-find (re-pattern (str "(?:^|&)" param-name "=([^&]+)")))
-               second)))
-
-
-(defn- query-fn-id
+(defbase _list-exec-parsed
   [request]
-  (request/parse-uuid-or-clear (query-param request "fn-id")))
+  (fn-exec/parse-list-executions-request request))
 
 
-(defn- query-fn-version-id
-  [request]
-  (request/parse-uuid-or-clear (query-param request "fn-version-id")))
+(defbase _list-exec-no-anchor?
+  [parsed]
+  (and (nil? (:version-id parsed)) (nil? (:fn-id parsed))))
 
 
-(defn- query-limit
-  "Optional `?limit=N` query param. Returns parsed long or nil — the
-   crud layer applies clamping + the default. Tolerates malformed
-   input (non-numeric → nil) so a bad query never 500s."
-  [request]
-  (when-let [raw (query-param request "limit")]
-    (try (Long/parseLong (str raw))
-         (catch NumberFormatException _ nil))))
+(defbase _list-exec-by-version?
+  [parsed]
+  (some? (:version-id parsed)))
 
 
-(defbase _list-executions-by-fn
-  [request]
-  ;; Two query shapes share this endpoint:
-  ;;   ?fn-id=X         → executions of X as it resolves on the current
-  ;;                      branch (drives the execute popover's history)
-  ;;   ?fn-version-id=Y → executions of the SPECIFIC version row Y
-  ;;                      (drives the `⌛` panel's per-version expand)
-  ;; If both are present `fn-version-id` wins — the caller asked for a
-  ;; specific anchor and the fn-id is redundant.
-  (let [version-id (query-fn-version-id request)
-        fn-id (query-fn-id request)
-        limit (query-limit request)]
-    (cond
-      version-id
-      {:ok true
-       :executions (fn-exec/list-executions-for-fn-version ctx version-id limit)}
+(defbase _list-exec-apply-by-version
+  [parsed]
+  (fn-exec/apply-list-executions-by-version parsed ctx))
 
-      fn-id
-      {:ok true
-       :executions (fn-exec/list-executions-for-fn ctx fn-id limit)}
 
-      :else
-      {:ok false :error "missing or invalid ?fn-id / ?fn-version-id query parameter"})))
+(defbase _list-exec-apply-by-fn
+  [parsed]
+  (fn-exec/apply-list-executions-by-fn parsed ctx))
 
 
 ;; --- POST /api/services/reconcile ---
@@ -200,6 +173,10 @@
    :_execute-rejected?       _execute-rejected?
    :_get-execution           _get-execution
    :_cancel-execution        _cancel-execution
-   :_list-executions-by-fn   _list-executions-by-fn
+   :_list-exec-parsed        _list-exec-parsed
+   :_list-exec-no-anchor?    _list-exec-no-anchor?
+   :_list-exec-by-version?   _list-exec-by-version?
+   :_list-exec-apply-by-version _list-exec-apply-by-version
+   :_list-exec-apply-by-fn   _list-exec-apply-by-fn
    :_reconcile-services      _reconcile-services
    :_list-services           _list-services})

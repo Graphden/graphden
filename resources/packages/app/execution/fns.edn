@@ -65,11 +65,46 @@
   ;; GET /api/execute/:id — read a persisted row
   ;; ---------------------------------------------------------------------
 
-  {:name :_get-execution
-   :description "Lookup an execution row by :id from the request's path-params. Returns the row + nested args, or `{:ok false :error}` when not found."
+  ;; --- C18 atoms: get-execution + cancel-execution variant-2.
+  ;; Shared parse (`_exec-id-parsed`) + shared 404 builder
+  ;; (`_exec-err-not-found`).
+  {:name :_exec-id-parsed
+   :description "Parse the `:id` path segment for both `/api/execute/:id` and `/api/execute/:id/cancel` into `{:id <uuid|nil> :id-raw <raw>}`. Raw form preserved for the dynamic 404 message."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
+   :effects #{}}
+
+  {:name :_exec-err-not-found
+   :description "Dynamic 404 builder — cites the raw id-segment. Shared between get + cancel."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_get-exec-loaded
+   :description "Load the persisted execution row by id; nil when not found."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_get-exec-missing?
+   :description "Guard — load returned nil."
+   :args {:loaded {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_get-exec-apply
+   :description "Success branch — return the loaded row verbatim."
+   :args {:loaded {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_get-execution
+   :description "GET /api/execute/:id — flat `:cond` of `[exec-missing? → 404-dynamic, true → return-loaded]`. `parsed` + `loaded` are shared sub-results bound once at the `:cond` fn-def."
+   :parent :cond
+   :args {:clauses [:_get-exec-missing? :_exec-err-not-found
+                    {:value true}        :_get-exec-apply]
+          :parsed :_exec-id-parsed
+          :loaded :_get-exec-loaded}}
 
   {:name :get-execution-handler
    :description "Ring handler for GET /api/execute/:id."
@@ -80,11 +115,31 @@
   ;; POST /api/execute/:id/cancel — soft cancel an in-flight execution
   ;; ---------------------------------------------------------------------
 
-  {:name :_cancel-execution
-   :description "Set `:cancel-requested?` on the row + `future-cancel` if the in-process registry still has its handle. Best-effort — JDBC/blocking-IO inside a base-fn won't react to interrupt without explicit support."
-   :args {:request {:type :ring-request-shape}}
+  {:name :_cancel-exec-applied
+   :description "Call `cancel-execution!` — no-op (returns nil) when id is invalid OR no row matches. Otherwise sets `:cancel-requested?` on the row + `future-cancel`s the in-process handle."
+   :args {:parsed {:type :jsonb}}
    :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_cancel-exec-missing?
+   :description "Guard — cancel returned nil (bad id OR no row)."
+   :args {:applied {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_cancel-exec-apply
+   :description "Success branch — return the cancel-result-map verbatim."
+   :args {:applied {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_cancel-execution
+   :description "POST /api/execute/:id/cancel — flat `:cond` of `[cancel-missing? → 404-dynamic, true → return-applied]`. Reuses C18's `_exec-id-parsed` parser + `_exec-err-not-found` builder."
+   :parent :cond
+   :args {:clauses [:_cancel-exec-missing? :_exec-err-not-found
+                    {:value true}           :_cancel-exec-apply]
+          :parsed :_exec-id-parsed
+          :applied :_cancel-exec-applied}}
 
   {:name :cancel-execution-handler
    :description "Ring handler for POST /api/execute/:id/cancel."
@@ -163,13 +218,50 @@
   ;; GET /api/services — list service rows + in-process running state
   ;; ---------------------------------------------------------------------
 
-  {:name :_list-services
-   :description "Read every :service row from storage + join with the in-process running atom (start time, attempts, give-up marker). Used by the editor's sidebar 'Only services' filter, the row-actions 'Make service' popover, and the per-fn service badge."
+  ;; --- C17 atoms: list-services linear ETL decomposition.
+  ;; Five named stages glued by a non-:cond graph (pure variant-1
+  ;; data composition). Each stage's purpose is visible at the
+  ;; graph level instead of buried in a 20-line `defbase` body.
+  {:name :_list-services-rows
+   :description "Stage 1 — load every `:service` row from storage."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
    :effects #{:db}}
 
+  {:name :_list-services-fn-names
+   :description "Stage 2 — build `{fn-id → name}` index over `:fn` rows (one query, constant-time lookups for the join below)."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_list-services-enriched
+   :description "Stage 3 — `mapv` each service row to the JSON-safe shape (`:fn-name` joined from the index, `:running` snapshot from the in-process atom)."
+   :args {:rows {:type :jsonb} :names {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_list-services-legacy
+   :description "Stage 4 — single-pod legacy `web-server` running outside the `:service` table; nil when displaced by a real `:service` row."
+   :args {:names {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_list-services
+   :description "Stage 5 — wrap enriched-services + legacy-fallback into the final `{:ok true :services :legacy-fallback}` response."
+   :args {:enriched {:type :jsonb} :legacy {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_list-services-data
+   :description "GET /api/services — Stage-5 wrap of the enriched-services + legacy-fallback sub-results. Each stage is named in fns.edn so the editor's graph view surfaces the pipeline."
+   :parent :_list-services
+   :args {:enriched :_list-services-enriched
+          :legacy :_list-services-legacy
+          ;; Sub-results fed into the enrichment + join.
+          :rows :_list-services-rows
+          :names :_list-services-fn-names}}
+
   {:name :list-services-handler
    :description "Ring handler for GET /api/services."
    :parent :json-handler
-   :args {:data :_list-services}}]}
+   :args {:data :_list-services-data}}]}

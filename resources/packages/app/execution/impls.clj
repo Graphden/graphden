@@ -55,22 +55,58 @@
     (request/parse-uuid-or-clear raw)))
 
 
-(defbase _get-execution
+;; --- C18 atoms: get-execution + cancel-execution variant-2.
+;; Both handlers share the path-id parser AND the dynamic 404
+;; builder (same text either way); each has its own apply
+;; (read vs cancel-mutation).
+
+(defbase _exec-id-parsed
   [request]
-  (let [id (path-id request)]
-    (or (when id (fn-exec/get-execution ctx id))
-        {:ok false :error (str "Execution not found: "
-                               (get-in request [:path-params :id]))})))
+  {:id (path-id request)
+   :id-raw (or (get-in request [:path-params :id])
+               (let [segs (-> (:uri request "") (clojure.string/split #"/"))]
+                 (get (vec (remove empty? segs)) 2)))})
 
 
-;; --- POST /api/execute/:id/cancel ---
+(defbase _exec-err-not-found
+  [parsed]
+  {:ok false :error (str "Execution not found: " (:id-raw parsed))})
 
-(defbase _cancel-execution
-  [request]
-  (let [id (path-id request)]
-    (or (when id (fn-exec/cancel-execution! ctx id))
-        {:ok false :error (str "Execution not found: "
-                               (get-in request [:path-params :id]))})))
+
+;; GET /api/execute/:id atoms
+
+(defbase _get-exec-loaded
+  [parsed]
+  (when-let [id (:id parsed)]
+    (fn-exec/get-execution ctx id)))
+
+
+(defbase _get-exec-missing?
+  [loaded]
+  (nil? loaded))
+
+
+(defbase _get-exec-apply
+  [loaded]
+  loaded)
+
+
+;; POST /api/execute/:id/cancel atoms
+
+(defbase _cancel-exec-applied
+  [parsed]
+  (when-let [id (:id parsed)]
+    (fn-exec/cancel-execution! ctx id)))
+
+
+(defbase _cancel-exec-missing?
+  [applied]
+  (nil? applied))
+
+
+(defbase _cancel-exec-apply
+  [applied]
+  applied)
 
 
 ;; --- GET /api/executions?fn-id=X (C6 atoms) ---
@@ -144,26 +180,48 @@
   (into {} (map (juxt :id :name)) (sp/query-entities storage :fn {})))
 
 
-(defbase _list-services
+;; --- C17 atoms: list-services linear ETL decomposition.
+;; Five named steps glued by a `:cond`-free graph fn-def — pure
+;; variant-1 data composition so each stage is visible. The
+;; previously-monolithic 20-line body splits into the conceptual
+;; pipeline: load services + fn-name-index → enrich each → maybe
+;; build legacy fallback → wrap as final response. Each atom is a
+;; 1-3-line wrap over the helpers above.
+
+(defbase _list-services-rows
   [_request]
-  (let [storage  (request/require-storage ctx)
-        services (sp/query-entities storage :service {})
-        names    (fn-name-by-id storage)
-        rows     (mapv
-                   (fn [s]
-                     {:id (:id s)
-                      :fn-id (:fn-id s)
-                      :fn-name (get names (:fn-id s))
-                      :enabled? (:enabled? s)
-                      :restart-policy (:restart-policy s)
-                      :running (enrich-running (:id s))})
-                   services)
-        legacy   (when-let [h @recon/legacy-handle]
-                   {:fn-id (:fn-id h)
-                    :fn-name (get names (:fn-id h))})]
-    {:ok true
-     :services rows
-     :legacy-fallback legacy}))
+  (sp/query-entities (request/require-storage ctx) :service {}))
+
+
+(defbase _list-services-fn-names
+  [_request]
+  (fn-name-by-id (request/require-storage ctx)))
+
+
+(defbase _list-services-enriched
+  [rows names]
+  (mapv (fn [s]
+          {:id (:id s)
+           :fn-id (:fn-id s)
+           :fn-name (get names (:fn-id s))
+           :enabled? (:enabled? s)
+           :restart-policy (:restart-policy s)
+           :running (enrich-running (:id s))})
+        rows))
+
+
+(defbase _list-services-legacy
+  [names]
+  (when-let [h @recon/legacy-handle]
+    {:fn-id (:fn-id h)
+     :fn-name (get names (:fn-id h))}))
+
+
+(defbase _list-services
+  [enriched legacy]
+  {:ok true
+   :services enriched
+   :legacy-fallback legacy})
 
 
 (def impls
@@ -171,12 +229,22 @@
    :_execute-validation      _execute-validation
    :_execute-apply           _execute-apply
    :_execute-rejected?       _execute-rejected?
-   :_get-execution           _get-execution
-   :_cancel-execution        _cancel-execution
+   :_exec-id-parsed          _exec-id-parsed
+   :_exec-err-not-found      _exec-err-not-found
+   :_get-exec-loaded         _get-exec-loaded
+   :_get-exec-missing?       _get-exec-missing?
+   :_get-exec-apply          _get-exec-apply
+   :_cancel-exec-applied     _cancel-exec-applied
+   :_cancel-exec-missing?    _cancel-exec-missing?
+   :_cancel-exec-apply       _cancel-exec-apply
    :_list-exec-parsed        _list-exec-parsed
    :_list-exec-no-anchor?    _list-exec-no-anchor?
    :_list-exec-by-version?   _list-exec-by-version?
    :_list-exec-apply-by-version _list-exec-apply-by-version
    :_list-exec-apply-by-fn   _list-exec-apply-by-fn
    :_reconcile-services      _reconcile-services
+   :_list-services-rows      _list-services-rows
+   :_list-services-fn-names  _list-services-fn-names
+   :_list-services-enriched  _list-services-enriched
+   :_list-services-legacy    _list-services-legacy
    :_list-services           _list-services})

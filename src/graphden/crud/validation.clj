@@ -9,8 +9,10 @@
    Depends only on `graphden.crud.request` from the crud.* tree."
   (:require
     [graphden.executor.compile.lookups :as l]
+    [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
-    [graphden.types.check :as types-check]))
+    [graphden.types.check :as types-check]
+    [graphden.types.core :as types]))
 
 
 ;; === Cycle-check on writes ==================================================
@@ -456,6 +458,41 @@
                               " is not legal on base type :" (name base-name))}))))))))
 
 
+(defn- secret-path-rej
+  "Followup-4: refuse `:override-kind :secret-path` on bindings whose
+   slot's effective rich-type doesn't carry a `:secret` marker.
+   Without this gate, a user could mark any plain `:text`-typed
+   binding as secret-path, the executor would dereference via vault,
+   and the secret value would silently flow into a non-secret slot —
+   bypassing T1's structural enforcement.
+
+   The slot's `:type-fn-id` foreign key is STRUCTURAL — `[:secret T]`
+   stores as the inner `T`'s fn-id (see
+   `packages/records/types.clj`), so the marker is lost at storage
+   level. The MARKER lives in the rich-types registry on the slot-
+   owning fn-row's args. We walk:
+     binding.slot-id → fn-slot.fn-id → fn.name → rich-types[name]
+     → :args → slot-name keyword → arg-info → :type
+   …and ask `contains-secret?` on that type."
+  [storage entity-type entity-data]
+  (when (and (= entity-type :binding)
+             (= :secret-path (:override-kind entity-data)))
+    (let [slot-id (:slot-id entity-data)
+          slot (when slot-id (sp/read-entity storage :slot slot-id))
+          slot-name (some-> slot :name keyword)
+          owning-junction (when slot-id
+                            (first (sp/query-entities storage :fn-slot {:slot-id slot-id})))
+          owner-fn (when owning-junction
+                     (sp/read-entity storage :fn (:fn-id owning-junction)))
+          owner-name (some-> owner-fn :name keyword)
+          owner-rich (when owner-name (registry/rich-type-of owner-name))
+          arg-info (when (and owner-rich slot-name)
+                     (get-in owner-rich [:args slot-name]))
+          arg-type (or (:type arg-info) arg-info)]
+      (when-not (types/contains-secret? (or arg-type :any))
+        {:reason ":override-kind :secret-path requires the slot's effective type to carry a `:secret` marker — without it the dereferenced value would silently flow into a non-secret slot, defeating the type-system enforcement"}))))
+
+
 (defn write-rej
   "Run every server-side write-time guard against the proposed row.
    Returns the first `{:reason :type}` rejection or nil if all pass.
@@ -472,4 +509,6 @@
       (some-> (terminal-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/terminal-binding))
       (some-> (list-closed-rej storage entity-type entity-data)
-              (assoc :type :constraint-violation/list-closed))))
+              (assoc :type :constraint-violation/list-closed))
+      (some-> (secret-path-rej storage entity-type entity-data)
+              (assoc :type :capability/secret-path-on-non-secret-slot))))

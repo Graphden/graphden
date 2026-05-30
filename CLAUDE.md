@@ -34,10 +34,10 @@ Graphden is a visual functional programming environment where functions and thei
 - **Storage backend** — PostgreSQL with recursive CTE for graph traversal
 
 **Core entities** (slot/binding model):
-- `fn` — function entity OR type-row. Inheritance via `parent-fn-ids` (many-to-many).
-  - empty `parent-fn-ids` + `impl-hash` set → base-fn (Clojure impl)
-  - empty `parent-fn-ids` + `impl-hash=nil` + slots/refine/list → type-row
-  - non-empty `parent-fn-ids` → composed fn
+- `fn` — function entity OR type-row. Inheritance via `parent-ids` (many-to-many).
+  - empty `parent-ids` + `impl-hash` set → base-fn (Clojure impl)
+  - empty `parent-ids` + `impl-hash=nil` + slots/refine/list → type-row
+  - non-empty `parent-ids` → composed fn
   - `name=nil` → anonymous (deduped via `anonymous-hash`)
 - `slot` — atomic `(name, type-fn-id)` pair, immutable post-create. Shared across fns through `fn-slot`.
 - `fn-slot` — junction `(fn-id, slot-id, position)`. "Which slots does this fn expose, in what order."
@@ -47,22 +47,22 @@ Graphden is a visual functional programming environment where functions and thei
 
 ## Core Concept: Inheritance Model
 
-A composed fn inherits its parents' slots through `parent-fn-ids` BFS closure. Each
+A composed fn inherits its parents' slots through `parent-ids` BFS closure. Each
 slot in that closure is exposed once at the descendant; bindings overlay closer-fn-wins.
 
 **Base function (no parents, has impl):**
 ```
 fn: add
-  parent-fn-ids: []
+  parent-ids: []
   impl-hash: "sha256..."   ; links to Clojure impl
 fn-slot: {fn-id: add, slot-id: nums, position: 0}
 slot: {id: nums, name: "nums", type-fn-id: sequence}
 ```
 
-**Composed function (parent-fn-ids set):**
+**Composed function (parent-ids set):**
 ```
 fn: add-10
-  parent-fn-ids: [add]     ; inherits add's :nums slot
+  parent-ids: [add]     ; inherits add's :nums slot
 binding: {fn-id: add-10, slot-id: nums, list-append: true}
 binding-list-item: {binding-id: ..., position: 0, value: 10}
 ```
@@ -98,6 +98,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/VERSIONING.md](docs/VERSIONING.md) | Branches surface — per-branch ExecutionContext routing, HTTP API (`/api/branches`, diff, merge, conflicts), editor UI (branch chip + popover + ⌛ history + conflict modal), demo seeder + env toggle, known gaps | When touching `system/branch_router`, `crud/branches`, `web.branch-router`, `app.branches`, `editor-branches.js`, `editor-fn-versions.js`, or the demo seeder |
 | [docs/CLOSURE_CAPTURE.md](docs/CLOSURE_CAPTURE.md) | Closure-capture extension to the fn-graph model: call-site vs captured args, wrap-time capture contract, type-checker propagation, as-shipped commit map | Before touching `hof-wrap` / `hof-lambda-params` / `ref-free-args` / `free-arg-slot-map`; needed to understand why `:schedule` works |
 | [docs/RECURSION.md](docs/RECURSION.md) | Design space for graph-level recursion (approaches A `:fix` vs B lazy ref resolution), per-approach impl sketches, recommended order. Roadmap — neither approach implemented yet | When considering recursion-related work; current state of recursion is in ARCHITECTURE.md § Part 3 |
+| [docs/SECRETS.md](docs/SECRETS.md) | `:secret` information-flow type-marker — asymmetric subtyping (`T ⊆ [:secret T]` but NOT `[:secret T] ⊆ T`), per-base-fn `:return-type-rule` propagation (`taint-with-secret-if-tainted` / `wrap-with-taint`), executor-side `/api/execute` hide on `:secret`-marked return, editor "Result hidden" pane + history badge, current Secrets-panel admin UX (creating fn-defs with `parent :vault-get`), audit of which base-fns propagate vs not | When touching `types/core` secret-type code, adding a new base-fn that handles user data, marking a sink's slot as `[:secret …]`, or wiring secret-flow protection in a new place |
 
 ## Common Commands
 
@@ -213,6 +214,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-execute-history.js` | Execute popover history panel — `/api/executions` fetch, summary row builder, Repeat re-fill via the orchestrator's `argFormHosts`. |
 | `editor-execute.js` | Execute popover orchestrator — ▶ button entry, free-arg lookup, value-form mount, polling state machine, Run / Cancel, effects gate + persist toggle. |
 | `editor-fn-versions.js` | `⌛` history popover anchored to the fn-card root row. Fetches `GET /api/fns/:fn-id/versions`, renders a per-branch timeline (latest first), each row has a `switch` button that jumps the editor to that branch via `switchToBranch`. |
+| `editor-secrets.js` | Admin Secrets-panel CRUD — collapsible section at the top of the sidebar listing every fn-def whose parents are exactly `[:vault-get]`. Per-row rotate (↻) + delete (×) actions, header `+` opens the New-secret form (name + path + value + description, value is write-only). Exposes `isSecretFn(fn)` so `editor-sidebar.js` can put a 🔒 badge on the SAME fn when it appears in the namespace tree. Backed by `/api/secrets/*`. |
 | `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
 | `editor-effect-explainer.js` | Singleton popover shown on click of an effect-chip — plain-English description of a tracked side-effect (db / env / io / network / time / random) + the canonical effect tag |
 | `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom. Fn-type panels include a read-only `eff: pure / <chips>` row (`makeEffectsReadOnly`) showing the slot-level effect constraint — separate from the editable tightening widgets below. Exports `appendResolutionSection(host, prov, opts?)` — the shared 4-tier + inheritance-chain renderer; `opts.onNavigate(fnId)` makes ancestor / source-fn labels clickable links |
@@ -228,7 +230,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → secrets → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 
@@ -425,7 +427,7 @@ See [docs/EXTENDING.md](docs/EXTENDING.md) for details.
 Enforced at write time:
 
 1. **No dependency cycles** — any cycle through `binding.ref-fn-id`
-   + `parent-fn-ids` + `type-override-fn-id` + `binding-list-item.ref-fn-id`
+   + `parent-ids` + `type-override-fn-id` + `binding-list-item.ref-fn-id`
    edges is rejected. Two layers: the per-binding write-time
    `GraphConstraints` check, AND the sync-time topological-sort over
    the whole fn-def set. Bare self-ref (`owner == ref`) passes the

@@ -218,18 +218,23 @@
 ;; === Registry ===
 ;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map.
 
+;; Every logic op is content-passing — `:and` / `:or` / `:coalesce`
+;; return their input; `:if` / `:cond` / `:case` pick a branch and
+;; expose its result; `:not` / `:some?` / `:nil?` / `:equal?` return
+;; bools but the SHAPE of the bool is sensitive to secret content.
+;; All wrap their existing rule (or get a bare propagator) so a
+;; tainted input lifts the result into `[:secret …]`.
 (def impls
-  "Map of fn-name → impl-fn (or `{:impl … :*-rule …}`)"
-  {:and and-fn
-   :or or-fn
-   :not not-fn
-   :some? some?-fn
-   :nil? nil?-fn
-   :if if-fn
+  {:and {:impl and-fn :return-type-rule (types/wrap-with-taint nil)}
+   :or {:impl or-fn :return-type-rule (types/wrap-with-taint nil)}
+   :not {:impl not-fn :return-type-rule (types/wrap-with-taint nil)}
+   :some? {:impl some?-fn :return-type-rule (types/wrap-with-taint nil)}
+   :nil? {:impl nil?-fn :return-type-rule (types/wrap-with-taint nil)}
+   :if {:impl if-fn :return-type-rule (types/wrap-with-taint nil)}
    :cond {:impl cond-fn
-          :return-type-rule cond-return-rule
+          :return-type-rule (types/wrap-with-taint cond-return-rule)
           :lazy-seq-args #{:clauses}}
-   :case {:impl case-fn :return-type-rule case-return-rule}
-   :coalesce {:impl coalesce :return-type-rule coalesce-return-rule}
-   :const {:impl const :return-type-rule const-return-rule}
-   :equal? equal?-fn})
+   :case {:impl case-fn :return-type-rule (types/wrap-with-taint case-return-rule)}
+   :coalesce {:impl coalesce :return-type-rule (types/wrap-with-taint coalesce-return-rule)}
+   :const {:impl const :return-type-rule (types/wrap-with-taint const-return-rule)}
+   :equal? {:impl equal?-fn :return-type-rule (types/wrap-with-taint nil)}})

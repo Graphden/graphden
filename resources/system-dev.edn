@@ -29,8 +29,15 @@
   :packages #ig/ref :app/packages
   :base-fns #ig/ref :exec/base-fns}
 
+ ;; OpenBao / Vault KV v2 client. See system-prod.edn for the full
+ ;; rationale — defaults to the docker-compose openbao listener.
+ :vault/client
+ {:address #or [#env VAULT_ADDR ""]
+  :token #or [#env VAULT_TOKEN ""]}
+
  :exec/context
- {:storage #ig/ref :db/versioned}
+ {:storage #ig/ref :db/versioned
+  :vault-client #ig/ref :vault/client}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on
  ;; fn-entities so every composed fn is already in storage before we

@@ -217,6 +217,18 @@
    :args {:func :read-resource
           :coll {:as :paths}}}
 
+  ;; ---------------------------------------------------------------------
+  ;; :parse-int — text → int via Long/parseLong. Throws
+  ;; NumberFormatException on a malformed input. Pair with `:if`/
+  ;; `:try` once a try-base-fn exists; for now a malformed string
+  ;; surfaces as an execution-error in the editor's result pane.
+  ;; ---------------------------------------------------------------------
+  {:name :parse-int
+   :description "Parse a base-10 integer out of `:s`. Backed by Long/parseLong — accepts an optional leading `-`, rejects whitespace / decimal points / non-digit characters with NumberFormatException."
+   :args {:s {:type :text
+              :description "Text containing the integer literal, e.g. \"8081\"."}}
+   :return-type :int}
+
   ;; SHA-256 of a UTF-8 string, returned as 64 hex chars. Used as a
   ;; lower-level primitive when a one-off content hash is needed
   ;; somewhere; deploy verification uses the build-time hash below

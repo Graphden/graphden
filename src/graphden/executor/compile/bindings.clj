@@ -186,6 +186,14 @@
         ext-name (l/rename-for-slot fn-id slot-id lookups)
         b (effective-binding fn-id slot-id lookups)]
     (cond
+      ;; Followup-4: a value-binding marked `:override-kind :secret-path`
+      ;; carries a vault PATH in `:value`. The executor auto-derefs
+      ;; via `clients.vault/get-secret` at arg-resolution time; the
+      ;; actual secret value never appears in graphden storage.
+      (and (value-binding? b) (= :secret-path (:override-kind b)))
+      {:kind :secret-value :base-name base-name :ext-name ext-name
+       :slot-id slot-id :path (:value b)}
+
       (value-binding? b)
       {:kind :value :base-name base-name :ext-name ext-name :slot-id slot-id
        :value (:value b)}

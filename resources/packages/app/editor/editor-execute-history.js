@@ -43,6 +43,9 @@ function shortDuration(startedAt, finishedAt) {
 
 
 function shortPreview(row) {
+  if (typeof isTaintedExecuteResponse === 'function' && isTaintedExecuteResponse(row)) {
+    return 'hidden — secret-typed';
+  }
   if (row.status === 'succeeded' || row.status === ':succeeded') {
     const s = JSON.stringify(row.result);
     return s == null ? '' : (s.length > 60 ? s.slice(0, 60) + '…' : s);
@@ -92,6 +95,7 @@ async function applyHistoryArgs(fnEntity, execId) {
 function buildHistoryRow(fnEntity, row, resultHostEl, onExpand) {
   const wrap = document.createElement('div');
   wrap.className = 'execute-history-row';
+  wrap.dataset.executionId = row.id;
   const status = String(row.status || '').replace(/^:/, '');
   wrap.classList.add('execute-history-row-' + status);
 
@@ -102,6 +106,28 @@ function buildHistoryRow(fnEntity, row, resultHostEl, onExpand) {
   statusChip.className = 'execute-history-status execute-history-status-' + status;
   statusChip.textContent = status;
   head.appendChild(statusChip);
+
+  if (typeof isTaintedExecuteResponse === 'function' && isTaintedExecuteResponse(row)) {
+    const lock = document.createElement('span');
+    lock.className = 'execute-history-tainted-badge';
+    lock.textContent = '🔒'; // 🔒
+    lock.title = 'Run returned a secret — result hidden';
+    head.appendChild(lock);
+  }
+
+  // Followup-A4: audit-trail badge. Distinct from the tainted-result
+  // badge above: `:touched-secret?` fires whenever the fn's
+  // rich-type touches `:secret` ANYWHERE (input OR return) AND the
+  // run observed side-effects. `:sql-exec` with a secret password
+  // and an `:int` return trips this without tripping the tainted
+  // result-hide. Click the badge to filter the panel by it.
+  if (row['touched-secret?']) {
+    const audit = document.createElement('span');
+    audit.className = 'execute-history-audit-badge';
+    audit.textContent = 'audit';
+    audit.title = 'Audit: run touched a secret AND observed a side-effect';
+    head.appendChild(audit);
+  }
 
   const ts = document.createElement('span');
   ts.className = 'execute-history-ts';
@@ -158,6 +184,35 @@ function buildHistoryRow(fnEntity, row, resultHostEl, onExpand) {
 }
 
 
+// Followup-A4: when at least one row in the panel has the audit
+// flag, surface a filter chip at the top so an admin can quickly
+// page just the audit-relevant rows.
+function buildAuditFilterChip(panel, rows) {
+  const wrap = document.createElement('label');
+  wrap.className = 'execute-history-audit-filter';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  const txt = document.createElement('span');
+  txt.textContent = 'Only audit-relevant runs';
+  wrap.appendChild(cb);
+  wrap.appendChild(txt);
+  const auditCount = rows.filter(r => r['touched-secret?']).length;
+  const cnt = document.createElement('span');
+  cnt.className = 'execute-history-audit-filter-count';
+  cnt.textContent = '(' + auditCount + ')';
+  wrap.appendChild(cnt);
+  cb.addEventListener('change', () => {
+    panel.querySelectorAll('.execute-history-row').forEach((rowEl) => {
+      const id = rowEl.dataset.executionId;
+      const row = rows.find(r => r.id === id);
+      const keep = !cb.checked || row?.['touched-secret?'];
+      rowEl.style.display = keep ? '' : 'none';
+    });
+  });
+  return wrap;
+}
+
+
 async function buildHistoryPanel(fnEntity, resultHostEl) {
   const panel = document.createElement('div');
   panel.className = 'execute-history-panel';
@@ -168,6 +223,9 @@ async function buildHistoryPanel(fnEntity, resultHostEl) {
     empty.textContent = 'No saved runs yet. Tick "Save to history" before clicking Run to populate.';
     panel.appendChild(empty);
     return panel;
+  }
+  if (rows.some(r => r['touched-secret?'])) {
+    panel.appendChild(buildAuditFilterChip(panel, rows));
   }
   const onExpand = async (execId) => {
     resultHostEl.textContent = '';

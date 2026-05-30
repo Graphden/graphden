@@ -7,7 +7,8 @@
    mirrors the type-checker's sync-time rejection so callers can
    catch one error mode regardless of when the violation surfaces."
   (:require
-    [graphden.executor.defbase :refer [defbase]]))
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.types.core :as types]))
 
 
 (defn- violated!
@@ -69,11 +70,13 @@
     (violated! :positive-numeric [:> 0] value)))
 
 
+;; Runtime narrowing fns: input flows through to result (just typed
+;; narrower). If a secret arrives, its taint must follow.
 (def impls
-  {:ensure-positive-int      ensure-positive-int
-   :ensure-non-negative-int  ensure-non-negative-int
-   :ensure-negative-int      ensure-negative-int
-   :ensure-non-empty-text    ensure-non-empty-text
-   :ensure-non-blank-text    ensure-non-blank-text
-   :ensure-url               ensure-url
-   :ensure-positive-numeric  ensure-positive-numeric})
+  {:ensure-positive-int      {:impl ensure-positive-int     :return-type-rule (types/wrap-with-taint nil)}
+   :ensure-non-negative-int  {:impl ensure-non-negative-int :return-type-rule (types/wrap-with-taint nil)}
+   :ensure-negative-int      {:impl ensure-negative-int     :return-type-rule (types/wrap-with-taint nil)}
+   :ensure-non-empty-text    {:impl ensure-non-empty-text   :return-type-rule (types/wrap-with-taint nil)}
+   :ensure-non-blank-text    {:impl ensure-non-blank-text   :return-type-rule (types/wrap-with-taint nil)}
+   :ensure-url               {:impl ensure-url              :return-type-rule (types/wrap-with-taint nil)}
+   :ensure-positive-numeric  {:impl ensure-positive-numeric :return-type-rule (types/wrap-with-taint nil)}})

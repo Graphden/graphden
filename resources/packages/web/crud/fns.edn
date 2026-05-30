@@ -314,31 +314,274 @@
    :args {:validation {:type :_rejection-shape :description "A `{:reason …}` rejection map."}}
    :return-type :_partial-response-shape}
 
-  {:name :process-delete-entity
-   :description "Parse a Ring request, delete the entity it identifies, return a partial Ring response."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+  ;; --- delete-entity primitives (C5 decomposition). The handler
+  ;; itself is the `:process-delete-entity` `:cond` graph fn-def below.
+  ;; Four rejection paths with mixed static / dynamic-reason 409s, plus
+  ;; the success path. The two dynamic-reason 409s share their reason
+  ;; via a separate "compute reason once" base-fn fed into BOTH the
+  ;; predicate and the error-builder.
+  {:name :_delete-parsed
+   :description "Parse `DELETE /api/entities/:type/:id` into `{:entity-type <kw|nil> :id <uuid|nil>}`."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_delete-request-invalid?
+   :description "Guard #1 — entity-type or id is missing / malformed in the URL."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_delete-fn-is-secret?
+   :description "Guard #2 — the targeted entity is a secret-shaped fn-def (`:vault-get` / `:secret-leaf`). Bounce to `DELETE /api/secrets/:fn-id` so OpenBao stays in sync."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{:db}}
+
+  {:name :_delete-fn-in-use-reason
+   :description "Compute the human-readable reason when a fn-def delete is rejected for being referenced; nil otherwise. Shared by the predicate + the dynamic-reason error builder."
+   :args {:parsed {:type :jsonb}}
+   :return-type :nullable-text
+   :effects #{:db}}
+
+  {:name :_delete-fn-in-use?
+   :description "Guard #3 — the fn-in-use reason is non-nil."
+   :args {:fn-in-use-reason {:type :nullable-text}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_delete-err-fn-in-use
+   :description "Wrap the precomputed in-use reason in a 409 partial response."
+   :args {:fn-in-use-reason {:type :nullable-text}}
+   :return-type :_partial-response-shape
+   :effects #{}}
+
+  {:name :_delete-ns-non-empty-reason
+   :description "Compute the human-readable reason when a namespace delete is rejected for being non-empty; nil otherwise."
+   :args {:parsed {:type :jsonb}}
+   :return-type :nullable-text
+   :effects #{:db}}
+
+  {:name :_delete-ns-non-empty?
+   :description "Guard #4 — the ns-non-empty reason is non-nil."
+   :args {:ns-non-empty-reason {:type :nullable-text}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_delete-err-ns-non-empty
+   :description "Wrap the precomputed ns-non-empty reason in a 409 partial response."
+   :args {:ns-non-empty-reason {:type :nullable-text}}
+   :return-type :_partial-response-shape
+   :effects #{}}
+
+  {:name :_delete-apply
+   :description "Success branch — pre-read the snapshot for invalidate seeds where the row's foreign keys are needed (`:binding-list-item` and others), delete, invalidate, return 200."
+   :args {:parsed {:type :jsonb}}
    :return-type :_partial-response-shape
    :effects #{:db}}
+
+  {:name :_delete-err-invalid-request
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 400 :body "<p class=\"error\">Invalid request</p>"}}}
+
+  {:name :_delete-err-secret-fn
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 409 :body "<p class=\"error\">Secret fn-defs must be deleted via DELETE /api/secrets/:fn-id (cleans up OpenBao alongside the row)</p>"}}}
+
+  {:name :process-delete-entity
+   :description "DELETE /api/entities/:type/:id — flat `:cond` of `[invalid-request? → 400, secret-fn? → 409, fn-in-use? → 409, ns-non-empty? → 409, true → apply]`. `:cond` is lazy, so the delete + invalidate (and the secret-shape DB lookup) only run when every guard up to that point passes. `parsed`, `fn-in-use-reason`, `ns-non-empty-reason` are shared sub-results bound once at the `:cond` fn-def — the two dynamic-reason error builders consume the same reason their predicate observed."
+   :parent :cond
+   :args {:clauses [:_delete-request-invalid? :_delete-err-invalid-request
+                    :_delete-fn-is-secret?    :_delete-err-secret-fn
+                    :_delete-fn-in-use?       :_delete-err-fn-in-use
+                    :_delete-ns-non-empty?    :_delete-err-ns-non-empty
+                    {:value true}             :_delete-apply]
+          :parsed :_delete-parsed
+          :fn-in-use-reason :_delete-fn-in-use-reason
+          :ns-non-empty-reason :_delete-ns-non-empty-reason}}
 
   ;; Sequence operations: append/remove items of a sequence arg on any fn
   ;; that has a `:sequence`-typed anchor (e.g. :list, :pairs->map children).
-  {:name :process-sequence-append
-   :description "Append an item to a `:sequence`-typed arg on the fn identified by the request. Returns a partial Ring response."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+
+  ;; --- sequence-append primitives (C3 decomposition). The handler
+  ;; itself is the `:process-sequence-append` `:cond` graph fn-def
+  ;; below; these are its atoms.
+  {:name :_seq-append-parsed
+   :description "Parse the URI + body of `POST /api/sequence/append/:fn-id` into `{:fn-id <uuid|nil> :body <map|nil>}`."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_seq-append-fn-id-invalid?
+   :description "Guard #1 — the fn-id path-segment didn't parse as a UUID."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_seq-append-body-invalid?
+   :description "Guard #2 — the request body didn't parse as JSON."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_seq-append-load-binding
+   :description "Read-only sequence-binding lookup. Returns the existing binding row, a synthetic placeholder (materialized by apply), or nil when the fn has no sequence slot."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_seq-append-no-seq-slot?
+   :description "Guard #3 — the target fn has no sequence-typed slot in its inheritance closure."
+   :args {:seq-binding {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_seq-append-apply
+   :description "Success branch — materializes a synthetic binding if needed, appends the item, invalidates caches. Either 200 (with JSON `{:item-id :position}`) or 400 with the write-rej reason (data-dependent, can't be a `:const`)."
+   :args {:parsed {:type :jsonb} :seq-binding {:type :jsonb}}
    :return-type :_partial-response-shape
    :effects #{:db}}
+
+  {:name :_seq-append-err-invalid-fn-id
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 400 :body "<p class=\"error\">Invalid fn-id</p>"}}}
+
+  {:name :_seq-append-err-invalid-body
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 400 :body "<p class=\"error\">JSON body required</p>"}}}
+
+  {:name :_seq-append-err-no-seq-slot
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 404 :body "<p class=\"error\">Fn has no sequence slot</p>"}}}
+
+  {:name :process-sequence-append
+   :description "POST /api/sequence/append/:fn-id — append an item to a `:sequence`-typed arg. Validation guards + success path are a flat `:cond` — `[invalid-fn-id? → 400, invalid-body? → 400, no-seq-slot? → 404, true → apply]`. `:cond` is lazy, so the synthetic-binding materialization + the item write only run when every guard passes. `parsed` + `seq-binding` are shared sub-results bound once at the `:cond` fn-def."
+   :parent :cond
+   :args {:clauses [:_seq-append-fn-id-invalid?  :_seq-append-err-invalid-fn-id
+                    :_seq-append-body-invalid?   :_seq-append-err-invalid-body
+                    :_seq-append-no-seq-slot?    :_seq-append-err-no-seq-slot
+                    {:value true}                :_seq-append-apply]
+          :parsed :_seq-append-parsed
+          :seq-binding :_seq-append-load-binding}}
+
+  ;; --- sequence-remove primitives (C2 decomposition). The handler
+  ;; itself is the `:process-sequence-remove` `:cond` graph fn-def
+  ;; below; these are its atoms.
+  {:name :_seq-remove-parsed
+   :description "Parse the URI path of `DELETE /api/sequence/item/:item-id` into `{:item-id <uuid|nil>}`."
+   :args {:request {:type :ring-request-shape}}
+   :return-type {:item-id :uuid}
+   :effects #{}}
+
+  {:name :_seq-remove-item-id-invalid?
+   :description "Guard #1 — the item-id path-segment didn't parse as a UUID."
+   :args {:parsed {:type {:item-id :uuid}}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_seq-remove-load-item
+   :description "Read the binding-list-item row for the parsed item-id. Returns nil when the id is invalid (caught by guard #1) OR when no row matches."
+   :args {:parsed {:type {:item-id :uuid}}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_seq-remove-item-not-found?
+   :description "Guard #2 — no binding-list-item matches the parsed id."
+   :args {:item {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_seq-remove-apply
+   :description "Success branch — delete the row, invalidate caches, return 200."
+   :args {:parsed {:type {:item-id :uuid}} :item {:type :jsonb}}
+   :return-type :_partial-response-shape
+   :effects #{:db}}
+
+  {:name :_seq-remove-err-invalid-item-id
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 400 :body "<p class=\"error\">Invalid item-id</p>"}}}
+
+  {:name :_seq-remove-err-not-found
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 404 :body "<p class=\"error\">Item not found</p>"}}}
 
   {:name :process-sequence-remove
-   :description "Remove an item from a `:sequence`-typed arg by item id. Returns a partial Ring response."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+   :description "DELETE /api/sequence/item/:item-id — remove one binding-list-item. The two validation guards and the success path are a flat `:cond` — `[invalid-id? → 400, not-found? → 404, true → apply]`. `:cond` is lazy, so the DB delete runs only when both guards pass. `parsed` + `item` are shared sub-results bound once at the `:cond` fn-def."
+   :parent :cond
+   :args {:clauses [:_seq-remove-item-id-invalid?  :_seq-remove-err-invalid-item-id
+                    :_seq-remove-item-not-found?   :_seq-remove-err-not-found
+                    {:value true}                  :_seq-remove-apply]
+          :parsed :_seq-remove-parsed
+          :item :_seq-remove-load-item}}
+
+  ;; --- sequence-update primitives (C4 decomposition).
+  {:name :_seq-update-parsed
+   :description "Parse `PUT /api/sequence/item/:item-id` into `{:item-id <uuid|nil> :body <map|nil>}`."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :jsonb
+   :effects #{}}
+
+  {:name :_seq-update-item-id-invalid?
+   :description "Guard #1 — bad UUID in the path-segment."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_seq-update-body-invalid?
+   :description "Guard #2 — the request body didn't parse as JSON."
+   :args {:parsed {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_seq-update-load-item
+   :description "Read the binding-list-item row for the parsed id."
+   :args {:parsed {:type :jsonb}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_seq-update-item-not-found?
+   :description "Guard #3 — no binding-list-item matches the parsed id."
+   :args {:item {:type :jsonb}}
+   :return-type :bool
+   :effects #{}}
+
+  {:name :_seq-update-apply
+   :description "Success branch — resolve body payload, run write-rej, update the row. Returns 200 or 400 with the data-dependent rejection reason."
+   :args {:parsed {:type :jsonb} :item {:type :jsonb}}
    :return-type :_partial-response-shape
    :effects #{:db}}
 
-  {:name :process-sequence-update
-   :description "Update an existing `:sequence`-arg item by item id (PUT /api/sequence/item/:item-id) — replaces its `:value` or `:ref-fn-id`. Returns a partial Ring response."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
+  {:name :_seq-update-err-invalid-item-id
+   :parent :const
    :return-type :_partial-response-shape
-   :effects #{:db}}
+   :args {:value {:status 400 :body "<p class=\"error\">Invalid item-id</p>"}}}
+
+  {:name :_seq-update-err-invalid-body
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 400 :body "<p class=\"error\">JSON body required</p>"}}}
+
+  {:name :_seq-update-err-not-found
+   :parent :const
+   :return-type :_partial-response-shape
+   :args {:value {:status 404 :body "<p class=\"error\">Item not found</p>"}}}
+
+  {:name :process-sequence-update
+   :description "PUT /api/sequence/item/:item-id — replace the value/ref of one existing binding-list-item. Validation guards + success path are a flat `:cond` — `[invalid-id? → 400, invalid-body? → 400, item-not-found? → 404, true → apply]`. `:cond` is lazy, so the DB update + write-rej payload-resolution only run when every guard passes."
+   :parent :cond
+   :args {:clauses [:_seq-update-item-id-invalid?  :_seq-update-err-invalid-item-id
+                    :_seq-update-body-invalid?     :_seq-update-err-invalid-body
+                    :_seq-update-item-not-found?   :_seq-update-err-not-found
+                    {:value true}                  :_seq-update-apply]
+          :parsed :_seq-update-parsed
+          :item :_seq-update-load-item}}
 
   ;; --- tighten-fn-effects primitives. The handler itself is a
   ;; `:cond` graph fn-def (`:process-tighten-binding-effects` below);

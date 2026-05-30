@@ -101,7 +101,7 @@
 
 
 (defn create-composed-fn!
-  "Creates a composed fn (has parent-fn-ids). Returns the row.
+  "Creates a composed fn (has parent-ids). Returns the row.
 
    Either pass a single parent uuid via the 3-arity or a vector via
    the 3-arity (vector form covers the MI case)."

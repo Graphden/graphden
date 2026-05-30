@@ -16,6 +16,7 @@
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as fn-exec-lookup]
     [graphden.crud.request :as request]
+    [graphden.crud.secret-shape :as secret-shape]
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
@@ -90,6 +91,35 @@
   (sp/read-entity (request/require-storage ctx) (keyword entity-type) id))
 
 
+(defn- vault-get-capability-rej
+  "Refuse :fn creates whose parent-ids touches ANY admin-only vault
+   base-fn (see `secret-shape/admin-only-vault-base-fn-names`),
+   UNLESS the data carries `:_admin-secret-create true`. The admin
+   path (`crud.secrets/create-secret`) sets the marker and strips
+   it before calling the storage layer; any other path (the
+   generic `/api/entities/fn` endpoint, ad-hoc API clients, etc.)
+   reaches this gate WITHOUT the marker and gets bounced through
+   `/api/secrets`.
+
+   Followup-A6 expansion: the gate now covers `:vault-put`,
+   `:vault-delete`, `:vault-metadata-put` in addition to the
+   original `:vault-get` / `:secret-leaf` pair. These three are
+   admin-side write operations that mutate OpenBao state; user
+   fn-defs that compose them would bypass the audited
+   `/api/secrets` flow. `:vault-metadata-get` (read-only) is NOT
+   gated — metadata isn't a secret value.
+
+   Returns a rejection map or nil. Mirrors the shape `write-rej`
+   returns so the existing error-throw branch handles both."
+  [storage data]
+  (let [gated-ids (secret-shape/find-admin-only-vault-base-fn-ids storage)
+        parents-set (set (:parent-ids data))]
+    (when (seq (clojure.set/intersection gated-ids parents-set))
+      (when-not (:_admin-secret-create data)
+        {:type :capability/vault-get-restricted
+         :reason "fn-defs with parent on an admin-only vault base-fn (:vault-get / :secret-leaf / :vault-put / :vault-delete / :vault-metadata-put) can only be created via POST /api/secrets — the admin path that also writes the value to OpenBao. Use the Secrets sidebar panel in the editor, or call /api/secrets directly."}))))
+
+
 (defn create-entity
   [entity-type data ctx]
   (let [storage (request/require-storage ctx)
@@ -99,14 +129,23 @@
         ;; know who's "owner"). Synthesize one so the check sees a
         ;; stable owner — `sp/create-entity` honours a pre-supplied
         ;; `:id` so the synthesized value is what lands in storage.
-        data' (if (and (= et :fn) (nil? (:id data)))
-                (assoc data :id (random-uuid))
-                data)]
+        data' (cond-> data
+                (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))]
+    ;; Capability gate: secret-shaped fn-defs are admin-only — see
+    ;; `vault-get-capability-rej` for the rationale. The marker is
+    ;; an in-memory contract between `crud.secrets` and this fn; it
+    ;; never reaches storage.
+    (when (= et :fn)
+      (when-let [rej (vault-get-capability-rej storage data')]
+        (throw (ex-info (:reason rej)
+                        {:type (:type rej)
+                         :entity-type et
+                         :data (dissoc data' :_admin-secret-create)}))))
     (when-let [rej (validation/write-rej storage et data')]
       (throw (ex-info (:reason rej)
                       {:type (:type rej)
                        :entity-type et :data data'})))
-    (let [result (sp/create-entity storage et data')]
+    (let [result (sp/create-entity storage et (dissoc data' :_admin-secret-create))]
       (invalidate! ctx storage et result)
       result)))
 
@@ -739,7 +778,7 @@
 (defn ensure-rename-slot!
   "Phase 6b — keep UI rename atomically consistent with EDN parser
    output. When a binding write carries a non-blank `:rename-to=X`
-   AND the binding's owner fn is composed (parent-fn-ids non-empty),
+   AND the binding's owner fn is composed (parent-ids non-empty),
    the EDN parser would have ALSO emitted an own-slot row + fn-slot
    junction so descendants binding `X` find a slot identity to
    target. UI today writes only the binding row; this helper fills
@@ -841,7 +880,7 @@
       :else
       (or
         ;; Phase 6e — a direct `POST /api/entities/fn-slot` may not
-        ;; attach an own-slot to a composed fn (parent-fn-ids non-empty)
+        ;; attach an own-slot to a composed fn (parent-ids non-empty)
         ;; unless the slot renames an inherited one (`:source-slot-id`
         ;; set). Internal flows write via `sp/create-entity` directly
         ;; and bypass this; only HTTP CRUD requests land here.
@@ -944,11 +983,22 @@
               (str (name entity-type) " already exists with these fields")
               :else (or (some-> (ex-data e) :reason) msg
                         (str "Failed to create " type-str)))))
-        create-result (try {:created (sp/create-entity storage entity-type entity-data)}
-                           (catch Exception e
-                             (log/error e "create-entity failed for"
-                                        entity-type entity-data)
-                             {:error (humanise e)}))]
+        ;; Capability gate — secret-shaped fn-defs (parent=[:vault-get])
+        ;; can only be created via /api/secrets, which sets the
+        ;; in-memory `:_admin-secret-create` marker. The form-driven
+        ;; path here never carries the marker, so any attempt to
+        ;; sneak a `parent :vault-get` fn-def through /api/entities/fn
+        ;; bounces with a 409. Closes the orthogonal hole to the
+        ;; delete-side guard at `process-delete-entity`.
+        cap-rej (when (= entity-type :fn)
+                  (vault-get-capability-rej storage entity-data))
+        create-result (cond
+                        cap-rej {:error (:reason cap-rej)}
+                        :else (try {:created (sp/create-entity storage entity-type entity-data)}
+                                   (catch Exception e
+                                     (log/error e "create-entity failed for"
+                                                entity-type entity-data)
+                                     {:error (humanise e)})))]
     ;; Phase 6c — forward a form `:rename-to` to the dedicated
     ;; renamed-view slot. A failure here is logged, not fatal — the
     ;; binding is still useful without the rename slot.
@@ -1135,46 +1185,83 @@
            " — remove the dependents first."))))
 
 
-(defn process-delete-entity
-  [request ctx]
+(defn parse-delete-entity-request
+  "Parse a `DELETE /api/entities/:type/:id` request into the bundle
+   the C5 `:cond` graph fn-def consumes — `{:entity-type <kw|nil>
+   :id <uuid|nil>}`. No validation here; guards live in
+   `:process-delete-entity`'s clause chain."
+  [request]
+  (let [{:keys [entity-type id-str]} (request/extract-entity-params request)
+        id (when id-str
+             (try (java.util.UUID/fromString id-str)
+                  (catch Exception _ nil)))]
+    {:entity-type entity-type :id id}))
+
+
+(defn delete-ns-non-empty-reason
+  "C5 guard support — returns the human-readable reason string ONLY
+   when `(:entity-type parsed)` is `:ns` AND that namespace still
+   contains content; nil otherwise (so the predicate
+   `:_delete-ns-non-empty?` can simply check `some?`, and the
+   `:_delete-err-ns-non-empty` dynamic error builder can re-use the
+   computed reason without re-querying)."
+  [parsed ctx]
+  (when (and (= :ns (:entity-type parsed)) (:id parsed))
+    (ns-non-empty-reason (request/require-storage ctx) (:id parsed))))
+
+
+(defn delete-fn-secret?
+  "C5 guard — true when the parsed delete targets a fn-def whose
+   shape is a secret (`:vault-get` legacy or `:secret-leaf`
+   followup-4). The admin path
+   (`DELETE /api/secrets/:fn-id`) cleans up the OpenBao value
+   alongside the graphden row; deleting through this generic
+   endpoint would orphan the secret in vault."
+  [parsed ctx]
+  (and (= :fn (:entity-type parsed)) (:id parsed)
+       (let [storage (request/require-storage ctx)
+             vault-get-id (secret-shape/find-vault-get-fn-id storage)
+             secret-leaf-id (secret-shape/find-secret-leaf-fn-id storage)]
+         (secret-shape/secret-fn? (sp/read-entity storage :fn (:id parsed))
+                                  vault-get-id secret-leaf-id))))
+
+
+(defn delete-fn-in-use-reason
+  "C5 guard support — returns the in-use reason string only when the
+   parsed delete targets a referenced fn-def; nil otherwise. NB:
+   the secret-shape guard `:_delete-fn-is-secret?` runs FIRST so a
+   secret-fn that's also in use surfaces as the secret-shape 409,
+   not the in-use 409."
+  [parsed ctx]
+  (when (and (= :fn (:entity-type parsed)) (:id parsed))
+    (fn-in-use-reason (request/require-storage ctx) (:id parsed))))
+
+
+(defn apply-delete-entity
+  "Success branch of delete-entity — reached only after the `:cond`
+   validation clauses pass. For `:binding-list-item` (and any other
+   entity whose `invalidate-seed` needs the row's foreign keys) we
+   pre-read so the seed survives the delete; for `:ns` / `:fn` the
+   id IS the seed."
+  [parsed ctx]
   (let [storage (request/require-storage ctx)
-        {:keys [entity-type id-str]} (request/extract-entity-params request)
-        id (when id-str (try (java.util.UUID/fromString id-str)
-                             (catch Exception _ nil)))]
-    (cond
-      (or (nil? entity-type) (nil? id))
-      {:status 400 :body "<p class=\"error\">Invalid request</p>"}
+        et (:entity-type parsed)
+        id (:id parsed)
+        snapshot (when-not (#{:ns :fn} et)
+                   (try (sp/read-entity storage et id)
+                        (catch Exception _ nil)))]
+    (sp/delete-entity storage et id)
+    (invalidate! ctx storage et (or snapshot {:id id}))
+    {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""}))
 
-      ;; Namespace delete — must be empty.
-      (= entity-type :ns)
-      (if-let [reason (ns-non-empty-reason storage id)]
-        {:status 409 :body (str "<p class=\"error\">" reason "</p>")}
-        (do (sp/delete-entity storage entity-type id)
-            ;; ns rename / delete doesn't reach into closures; full
-            ;; clear is overkill but `affected-fn-ids` returns nil
-            ;; for `:ns` so `invalidate!` falls through to that path
-            ;; today. Acceptable until we audit per-ns descendants.
-            (invalidate! ctx storage entity-type {:id id})
-            {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""}))
 
-      ;; Fn delete — must be unreferenced.
-      (= entity-type :fn)
-      (if-let [reason (fn-in-use-reason storage id)]
-        {:status 409 :body (str "<p class=\"error\">" reason "</p>")}
-        (do (sp/delete-entity storage entity-type id)
-            (invalidate! ctx storage entity-type {:id id})
-            {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""}))
-
-      ;; Other entity types (slot/fn-slot/binding/binding-list-item) —
-      ;; no extra constraint. Pre-read so we still know the parent
-      ;; fn-id after the row is gone (binding-list-item especially —
-      ;; we'd otherwise lose the binding-id needed to derive fn-id).
-      :else
-      (let [snapshot (try (sp/read-entity storage entity-type id)
-                          (catch Exception _ nil))]
-        (sp/delete-entity storage entity-type id)
-        (invalidate! ctx storage entity-type (or snapshot {:id id}))
-        {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""}))))
+(defn delete-err-with-reason
+  "Wrap a 409 `<p class=\"error\">…</p>` body around a precomputed
+   reason string. Shared by `:_delete-err-ns-non-empty` and
+   `:_delete-err-fn-in-use` — both reasons are dynamic so they
+   can't be `:const`."
+  [reason]
+  {:status 409 :body (str "<p class=\"error\">" reason "</p>")})
 
 
 ;; === Sequence operations =====================================================
@@ -1284,115 +1371,169 @@
                     {:type :sequence-op/invalid-body :body body}))))
 
 
-(defn process-sequence-append
-  "POST /api/sequence/append/:fn-id
-   Appends one item to the sequence binding of fn :fn-id."
-  [request ctx]
-  (let [storage (request/require-storage ctx)
-        fn-id-str (or (get-in request [:path-params :fn-id])
+(defn parse-seq-append-request
+  "Parse `POST /api/sequence/append/:fn-id` into the bundle the C3
+   `:cond` graph fn-def consumes — `{:fn-id <uuid|nil> :body <map|nil>}`.
+   No validation here; guards live in the
+   `:process-sequence-append` fn-def's clause chain."
+  [request]
+  (let [fn-id-str (or (get-in request [:path-params :fn-id])
                       (:fn-id-str (request/parse-uri-segments (:uri request))))
-        fn-id (try (java.util.UUID/fromString fn-id-str) (catch Exception _ nil))
+        fn-id (try (java.util.UUID/fromString fn-id-str)
+                   (catch Exception _ nil))
         raw-body (:body request)
         body-str (cond
                    (string? raw-body) raw-body
-                   (instance? java.io.InputStream raw-body) (clojure.core/slurp raw-body)
+                   (instance? java.io.InputStream raw-body)
+                   (clojure.core/slurp raw-body)
                    :else nil)
         body (when body-str
-               (try (json/parse-string body-str true) (catch Exception _ nil)))]
-    (cond
-      (nil? fn-id) {:status 400 :body "<p class=\"error\">Invalid fn-id</p>"}
-      (nil? body)  {:status 400 :body "<p class=\"error\">JSON body required</p>"}
-      :else
-      (if-let [seq-binding (ensure-sequence-binding ctx fn-id)]
-        (let [binding-id (:id seq-binding)
-              ;; Next position = one past the max in the per-branch
-              ;; resolved view. The pre-versioning workaround also
-              ;; queried the base identity table to dodge orphan-row
-              ;; collisions under the now-retired
-              ;; `UNIQUE (binding_id, position)` index. With the
-              ;; constraint dropped (and per-branch uniqueness
-              ;; enforced in `VersionedStorage`), the resolved view
-              ;; IS the only thing that matters.
-              used-pos (map :position
-                            (sp/query-entities storage :binding-list-item
-                                               {:binding-id binding-id}))
-              new-pos (inc (apply max -1 used-pos))
-              payload (resolve-sequence-payload storage body)
-              new-item (merge {:id (random-uuid)
-                               :binding-id binding-id
-                               :position new-pos}
-                              payload)
-              ;; Same write-time guards as the regular binding-list-
-              ;; item create path: cycle through `:ref-fn-id`, plus
-              ;; `:list-closed` enforcement so a sealed list can't
-              ;; be extended via `/api/sequence/append`.
-              pre-rej (validation/write-rej storage :binding-list-item new-item)]
-          (if pre-rej
-            {:status 400 :body (str "<p class=\"error\">" (:reason pre-rej) "</p>")}
-            (do (sp/create-entity storage :binding-list-item new-item)
-                ;; The fn that owns the binding (and thus gets a fresh
-                ;; sequence-element bound into its closure) is the seed.
-                ;; Skip the binding-id round-trip — fn-id is right here.
-                (exec-ctx/invalidate-graph-cache! ctx #{fn-id})
-                {:status 200
-                 :headers {"Content-Type" "application/json"}
-                 :body (json/generate-string {:item-id (:id new-item)
-                                              :position new-pos})})))
-        {:status 404 :body "<p class=\"error\">Fn has no sequence slot</p>"}))))
+               (try (json/parse-string body-str true)
+                    (catch Exception _ nil)))]
+    {:fn-id fn-id :body body}))
 
 
-(defn process-sequence-remove
-  "DELETE /api/sequence/item/:item-id
-   Removes one binding-list-item."
-  [request ctx]
+(defn find-seq-append-binding
+  "Read-only sequence-binding resolution for the C3 graph. Returns
+   `find-sequence-binding`'s result (existing binding | synthetic
+   placeholder | nil) — does NOT materialize a synthetic binding;
+   `apply-seq-append` runs that write only after every guard passes."
+  [parsed ctx]
+  (when-let [fn-id (:fn-id parsed)]
+    (find-sequence-binding ctx fn-id)))
+
+
+(defn apply-seq-append
+  "Success branch of sequence-append — reached only after the `:cond`
+   validation clauses pass (fn-id, body, sequence-slot guards).
+   Materializes a synthetic binding if needed, computes the next
+   position, runs the same `:binding-list-item` write-time guards as
+   the regular create path (cycle + list-closed), and either appends
+   the row + invalidates caches (200 with JSON body) or returns the
+   400 with the rejection reason (which is data-dependent, so it
+   can't be a `:const` upstream)."
+  [parsed seq-binding ctx]
   (let [storage (request/require-storage ctx)
-        item-id-str (or (get-in request [:path-params :item-id])
-                        (:item-id-str (request/parse-uri-segments (:uri request))))
-        item-id (try (java.util.UUID/fromString item-id-str) (catch Exception _ nil))]
-    (cond
-      (nil? item-id) {:status 400 :body "<p class=\"error\">Invalid item-id</p>"}
-      :else
-      (let [item (sp/read-entity storage :binding-list-item item-id)]
-        (if (nil? item)
-          {:status 404 :body "<p class=\"error\">Item not found</p>"}
-          (do (sp/delete-entity storage :binding-list-item item-id)
-              ;; Item carries `:binding-id`; `affected-fn-ids` follows
-              ;; that to the binding's `:fn-id` for the seed.
-              (invalidate! ctx storage :binding-list-item item)
-              {:status 200 :body ""}))))))
+        fn-id (:fn-id parsed)
+        body  (:body parsed)
+        ;; Synthetic? Materialize now (mirrors the legacy
+        ;; `ensure-sequence-binding` write path).
+        seq-binding (if (:synthetic seq-binding)
+                      (sp/create-entity storage :binding
+                                        {:fn-id (:fn-id seq-binding)
+                                         :slot-id (:slot-id seq-binding)
+                                         :list-append true})
+                      seq-binding)
+        binding-id (:id seq-binding)
+        used-pos (map :position
+                      (sp/query-entities storage :binding-list-item
+                                         {:binding-id binding-id}))
+        new-pos (inc (apply max -1 used-pos))
+        payload (resolve-sequence-payload storage body)
+        new-item (merge {:id (random-uuid)
+                         :binding-id binding-id
+                         :position new-pos}
+                        payload)
+        pre-rej (validation/write-rej storage :binding-list-item new-item)]
+    (if pre-rej
+      {:status 400 :body (str "<p class=\"error\">" (:reason pre-rej) "</p>")}
+      (do (sp/create-entity storage :binding-list-item new-item)
+          ;; The fn that owns the binding (and thus gets a fresh
+          ;; sequence-element bound into its closure) is the seed.
+          ;; Skip the binding-id round-trip — fn-id is right here.
+          (exec-ctx/invalidate-graph-cache! ctx #{fn-id})
+          {:status 200
+           :headers {"Content-Type" "application/json"}
+           :body (json/generate-string {:item-id (:id new-item)
+                                        :position new-pos})}))))
 
 
-(defn process-sequence-update
-  "PUT /api/sequence/item/:item-id
-   Replaces the value/ref of one existing binding-list-item."
-  [request ctx]
-  (let [storage (request/require-storage ctx)
-        item-id-str (or (get-in request [:path-params :item-id])
+(defn parse-seq-remove-request
+  "Parse a `DELETE /api/sequence/item/:item-id` request into the bundle
+   the C2 `:cond` graph fn-def consumes — `{:item-id <uuid|nil>}`.
+   No validation here; guards live in the `:process-sequence-remove`
+   fn-def's clause chain."
+  [request]
+  (let [item-id-str (or (get-in request [:path-params :item-id])
                         (:item-id-str (request/parse-uri-segments (:uri request))))
-        item-id (try (java.util.UUID/fromString item-id-str) (catch Exception _ nil))
+        item-id (try (java.util.UUID/fromString item-id-str)
+                     (catch Exception _ nil))]
+    {:item-id item-id}))
+
+
+(defn load-seq-remove-item
+  "Resolve the binding-list-item row for a parsed sequence-remove
+   request. Returns nil when the item-id is invalid OR when no row
+   matches — the `:cond` graph fn-def's not-found guard rejects in
+   both cases (the invalid-item-id guard runs first, so by the time
+   this fires the id is well-formed)."
+  [parsed ctx]
+  (when-let [item-id (:item-id parsed)]
+    (sp/read-entity (request/require-storage ctx) :binding-list-item item-id)))
+
+
+(defn apply-seq-remove
+  "Success branch of sequence-remove — reached only after the `:cond`
+   validation clauses pass. Deletes the item row, invalidates caches
+   via the snapshot (so `affected-fn-ids` walks `:binding-id` → `:fn-id`),
+   returns the 200 partial Ring response."
+  [parsed item ctx]
+  (let [storage (request/require-storage ctx)]
+    (sp/delete-entity storage :binding-list-item (:item-id parsed))
+    (invalidate! ctx storage :binding-list-item item)
+    {:status 200 :body ""}))
+
+
+(defn parse-seq-update-request
+  "Parse `PUT /api/sequence/item/:item-id` into the bundle the C4
+   `:cond` graph fn-def consumes — `{:item-id <uuid|nil>
+   :body <map|nil>}`."
+  [request]
+  (let [item-id-str (or (get-in request [:path-params :item-id])
+                        (:item-id-str (request/parse-uri-segments (:uri request))))
+        item-id (try (java.util.UUID/fromString item-id-str)
+                     (catch Exception _ nil))
         raw-body (:body request)
         body-str (cond
                    (string? raw-body) raw-body
-                   (instance? java.io.InputStream raw-body) (clojure.core/slurp raw-body)
+                   (instance? java.io.InputStream raw-body)
+                   (clojure.core/slurp raw-body)
                    :else nil)
         body (when body-str
-               (try (json/parse-string body-str true) (catch Exception _ nil)))]
-    (cond
-      (nil? item-id) {:status 400 :body "<p class=\"error\">Invalid item-id</p>"}
-      (nil? body)    {:status 400 :body "<p class=\"error\">JSON body required</p>"}
-      :else
-      (let [item (sp/read-entity storage :binding-list-item item-id)]
-        (if (nil? item)
-          {:status 404 :body "<p class=\"error\">Item not found</p>"}
-          (let [payload (resolve-sequence-payload storage body)
-                changes (merge {:value nil :ref-fn-id nil :literal nil} payload)
-                pre-rej (validation/write-rej storage :binding-list-item
-                                              (merge item changes {:id item-id}))]
-            (if pre-rej
-              {:status 400 :body (str "<p class=\"error\">" (:reason pre-rej) "</p>")}
-              (do (sp/update-entity storage :binding-list-item item-id changes)
-                  (invalidate! ctx storage :binding-list-item item)
-                  {:status 200 :body ""}))))))))
+               (try (json/parse-string body-str true)
+                    (catch Exception _ nil)))]
+    {:item-id item-id :body body}))
+
+
+(defn load-seq-update-item
+  "Read the binding-list-item row for a parsed sequence-update
+   request. Returns nil when the id is invalid (guard #1 catches it
+   first) OR when no row matches (`:_seq-update-item-not-found?`
+   catches that)."
+  [parsed ctx]
+  (when-let [item-id (:item-id parsed)]
+    (sp/read-entity (request/require-storage ctx) :binding-list-item item-id)))
+
+
+(defn apply-seq-update
+  "Success branch of sequence-update — reached only after the three
+   `:cond` guards pass. Resolves the body payload, runs the same
+   write-time guards as the regular binding-list-item update path
+   (cycle through `:ref-fn-id`, plus closed-list / type-check), and
+   either updates + invalidates (200) or returns the 400 with the
+   write-rej reason (data-dependent, can't be a `:const` upstream)."
+  [parsed item ctx]
+  (let [storage (request/require-storage ctx)
+        item-id (:item-id parsed)
+        payload (resolve-sequence-payload storage (:body parsed))
+        changes (merge {:value nil :ref-fn-id nil :literal nil} payload)
+        pre-rej (validation/write-rej storage :binding-list-item
+                                      (merge item changes {:id item-id}))]
+    (if pre-rej
+      {:status 400 :body (str "<p class=\"error\">" (:reason pre-rej) "</p>")}
+      (do (sp/update-entity storage :binding-list-item item-id changes)
+          (invalidate! ctx storage :binding-list-item item)
+          {:status 200 :body ""}))))
 
 
 ;; === Tighten fn-typed binding effects =====================================

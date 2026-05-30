@@ -1,0 +1,111 @@
+;; Vault / OpenBao KV v2 client base functions.
+;;
+;; Read-side (`:vault-get`) is user-facing — fn-graphs read secrets
+;; through it instead of `:env`. Write / delete / metadata sides are
+;; admin-only by convention (the UI's secrets-CRUD calls them via
+;; dedicated /api/secrets endpoints); there's no hard capability gate
+;; today, so any fn-def CAN reference them — `D1` enforces the
+;; convention on the editor side.
+;;
+;; The vault address + root token come from the executor context
+;; (set by the `:vault/client` integrant key from `system-*.edn`),
+;; so user-facing fn-defs never see them — only the KV path.
+
+
+{:namespace "web.vault"
+ :description "OpenBao / HashiCorp Vault KV v2 client — read / write / delete / metadata."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; :vault-get — pull `secret/data/<path>` from the KV v2 mount.
+  ;;
+  ;; Convention: each secret stored as `{data: {value: "<string>"}}`,
+  ;; so we return just the inner string. The single-value-per-path
+  ;; shape keeps the user fn-graph simple — no `:get` chain to
+  ;; unwrap a record. Multi-field secrets would land at separate
+  ;; paths (e.g. `db/url`, `db/user`, `db/password`).
+  ;;
+  ;; Effects: `:io` — synchronous network read against vault. Not
+  ;; `:network` (which marks user-controllable outbound HTTP); vault
+  ;; is infra plumbing, the user never picks the URL.
+  ;; ---------------------------------------------------------------------
+  {:name :vault-get
+   :description "Legacy: read a KV v2 secret from the configured OpenBao/Vault server, given a plain `:text` path arg. Kept for fn-defs from before Followup-4; new admin-side secret creation goes through `:secret-leaf` which uses the binding-IS-secret model (a `:override-kind :secret-path` binding that the executor auto-derefs). The path is `secret/data/<:path>`; the secret must be stored as `{value: \"<string>\"}` and the value is returned as text wrapped in `[:secret …]`. Throws `vault/not-configured` when the integrant key set no address, and `vault/lookup-failed` on any non-200 response."
+   :args {:path {:type :text
+                 :description "KV v2 path under the `secret/` mount, e.g. `user-db/password` (no leading slash, no `secret/data/` prefix)."}}
+   :return-type [:secret :text]
+   :effects #{:io}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :secret-leaf — binding-IS-secret model (Followup-4).
+  ;;
+  ;; Has a single `[:secret :text]` slot that the executor
+  ;; auto-derefs through `clients/vault/get-secret` at
+  ;; arg-resolution time when the binding's `:override-kind` is
+  ;; `:secret-path` (the binding's `:value` carries the OpenBao
+  ;; path; the actual secret value never appears in graphden
+  ;; storage). Impl is a pure passthrough — the executor has
+  ;; already produced the secret value, the impl just returns it.
+  ;;
+  ;; The Secrets sidebar panel writes fn-defs with
+  ;; `parent :secret-leaf` going forward; existing
+  ;; `parent :vault-get` fn-defs remain readable for backwards
+  ;; compatibility but are not produced by any admin flow.
+  ;; ---------------------------------------------------------------------
+  {:name :secret-leaf
+   :description "Binding-IS-secret leaf. Pure passthrough: the executor reads the binding's `:override-kind :secret-path` shape, dereferences the vault path, and feeds the value to this impl which just returns it. The slot type `[:secret :text]` carries the marker downstream. Use the Secrets sidebar panel to create one — its admin flow writes the path to OpenBao and creates this fn-def + secret-path binding atomically."
+   :args {:in {:type [:secret :text]
+               :description "Auto-resolved by the executor from a `:override-kind :secret-path` binding whose `:value` is the OpenBao path. Sync-time validation refuses any other binding shape on this slot — see `crud.validation/secret-path-rej`."}}
+   :return-type [:secret :text]
+   :effects #{:io}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :vault-put — write/overwrite a single-value KV v2 secret.
+  ;; Creates a new version (KV v2 keeps history); previous versions
+  ;; remain readable via `?version=N` until metadata is deleted.
+  ;; ---------------------------------------------------------------------
+  {:name :vault-put
+   :description "Write a KV v2 secret at `secret/data/<:path>` as `{value: <:value>}`. Creates a new version if the path already exists (KV v2 retains history). Returns nil. Errors via `:vault/lookup-failed` (network / auth) or `:vault/not-configured`."
+   :args {:path {:type :text
+                 :description "KV v2 path under the `secret/` mount."}
+          :value {:type [:secret :text]
+                  :description "Secret value to store. Slot is `[:secret :text]` — accepts a `:vault-get` ref directly (rotate one secret from another), a plain literal (auto-promoted), or any propagated text. Plain `:text` slots downstream cannot reuse this value: the secret marker enforces value-laundering through the type system. Lives only in OpenBao — never persisted to graphden's DB."}}
+   :return-type :null
+   :effects #{:io}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :vault-delete — permanent delete (all versions + metadata).
+  ;; Uses /metadata not /data because /data only soft-deletes the
+  ;; latest version.
+  ;; ---------------------------------------------------------------------
+  {:name :vault-delete
+   :description "Permanently delete a KV v2 secret at `<:path>` (every version + custom metadata). Uses the metadata endpoint — `DELETE /v1/secret/metadata/<path>` — because `DELETE /v1/secret/data/...` only soft-deletes the latest version. Returns nil."
+   :args {:path {:type :text
+                 :description "KV v2 path to remove. Idempotent — Vault returns 204 even if the path was already gone."}}
+   :return-type :null
+   :effects #{:io}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :vault-metadata-get — created_time / current_version /
+  ;; custom_metadata. Used to enrich the secrets list with
+  ;; provenance info.
+  ;; ---------------------------------------------------------------------
+  {:name :vault-metadata-get
+   :description "Read KV v2 metadata at `<:path>` — `created_time`, `current_version`, `custom_metadata`. Returns the inner `:data` map (JSON-decoded with keyword keys). Throws `:vault/lookup-failed` if the path is missing."
+   :args {:path {:type :text
+                 :description "KV v2 path to introspect."}}
+   :return-type :jsonb
+   :effects #{:io}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :vault-metadata-put — replaces custom_metadata wholesale (Vault
+  ;; doesn't support partial updates). Callers must read-modify-write
+  ;; when preserving existing keys.
+  ;; ---------------------------------------------------------------------
+  {:name :vault-metadata-put
+   :description "Set `custom_metadata` (a map of string→string) on the KV v2 path. Replaces the entire custom_metadata map — partial updates require read-modify-write at the caller. Returns nil. Vault rejects non-string values, so stringify before calling."
+   :args {:path {:type :text
+                 :description "KV v2 path whose metadata to update."}
+          :metadata {:type :jsonb
+                     :description "Map of string→string. Becomes `custom_metadata` on the path."}}
+   :return-type :null
+   :effects #{:io}}]}

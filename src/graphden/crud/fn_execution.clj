@@ -229,24 +229,29 @@
                 storage fn-version-id declared-eff
                 (:user-id parsed) (:args parsed) free-slots)]
         (persist/register-future! (:id r) fut cancel-flag)
-        (persist/record-completion! storage (:id r) fut trace declared-eff)
+        (persist/record-completion! storage (:id r) fn-name fut trace declared-eff)
         {:status :pending :execution-id (str (:id r))})
 
       ;; Timeout AND we pre-persisted — record-completion's tail-future
       ;; fills in :result; client polls our row.
       (= ::pending result)
-      (do (persist/record-completion! storage (:id row) fut trace declared-eff)
+      (do (persist/record-completion! storage (:id row) fn-name fut trace declared-eff)
           {:status :pending :execution-id (str (:id row))})
 
       ;; Inline failure — write outcome to the row synchronously (if
-      ;; persisted) so the polling-by-id case is consistent.
+      ;; persisted) so the polling-by-id case is consistent. Redaction
+      ;; lifts a tainted fn-def's :error/:error-data into a generic
+      ;; hidden form so the secret doesn't leak via the exception
+      ;; message (a string that may have wrapped the value).
       (and (map? result) (::ex result))
       (let [cause (::ex result)
             eff (runtime-eff)
-            outcome (cond-> {:status :failed
-                             :error (or (ex-message cause) (str cause))
-                             :error-data (ex-data cause)}
-                      eff (assoc :runtime-effects eff))]
+            outcome (->> (cond-> {:status :failed
+                                  :error (or (ex-message cause) (str cause))
+                                  :error-data (ex-data cause)}
+                           eff (assoc :runtime-effects eff))
+                         (persist/stamp-touched-secret fn-name)
+                         (persist/redact-outcome fn-name))]
         (persist/log-effect-drift! (some-> row :id) declared-eff eff)
         (when row
           (persist/write-finished! storage (:id row) outcome)
@@ -255,19 +260,20 @@
           row (assoc :execution-id (str (:id row)))))
 
       ;; Inline success — same: write synchronously so the GET endpoint
-      ;; immediately returns :succeeded, no race window.
+      ;; immediately returns :succeeded, no race window. Redaction
+      ;; lifts a tainted fn-def's :result into nil + `:tainted? true`
+      ;; so the JSON response carries metadata only.
       :else
-      (let [eff (runtime-eff)]
+      (let [eff (runtime-eff)
+            outcome (->> (cond-> {:status :succeeded :result result}
+                           eff (assoc :runtime-effects eff))
+                         (persist/stamp-touched-secret fn-name)
+                         (persist/redact-outcome fn-name))]
         (persist/log-effect-drift! (some-> row :id) declared-eff eff)
         (when row
-          (persist/write-finished! storage (:id row)
-                                   (cond-> {:status :succeeded :result result}
-                                     eff (assoc :runtime-effects eff)))
+          (persist/write-finished! storage (:id row) outcome)
           (persist/unregister-future! (:id row)))
-        (cond-> {:status :succeeded
-                 :result result
-                 :declared-effects declared-eff}
-          eff (assoc :runtime-effects eff)
+        (cond-> (assoc outcome :declared-effects declared-eff)
           row (assoc :execution-id (str (:id row))))))))
 
 

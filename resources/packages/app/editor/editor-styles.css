@@ -3595,3 +3595,205 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* =========================================================================
+   SECRETS — sidebar section + 🔒 indicator + create / rotate popover.
+   ========================================================================= */
+
+.sidebar-secrets { display: block; }
+
+#entity-list .entity-secret { display: flex; align-items: center; gap: 4px; }
+#entity-list .entity-secret .name { flex: 0 0 auto; }
+#entity-list .entity-secret .secret-path {
+  flex: 1 1 auto;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--card-fg);
+  opacity: 0.7;
+  margin-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.secret-lock-icon {
+  font-size: 11px;
+  margin-right: 2px;
+  flex: 0 0 auto;
+}
+
+.secrets-popover {
+  position: absolute;
+  z-index: 1000;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  padding: 12px;
+  box-shadow: var(--shadow-lg);
+  min-width: 280px;
+}
+
+.secrets-popover .popover-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--card-fg);
+}
+
+.secrets-popover .popover-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--card-fg);
+}
+
+.secrets-popover .popover-label .muted {
+  color: var(--muted-fg);
+  font-weight: normal;
+}
+
+.secrets-popover input {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: 4px 6px;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  border: 1px solid var(--input-border);
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.secrets-popover .muted {
+  color: var(--muted-fg);
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.secrets-popover .popover-error {
+  color: var(--error-fg);
+  font-size: 11px;
+  margin: 4px 0 8px;
+}
+
+.secrets-popover .popover-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.secrets-popover .popover-buttons button {
+  padding: 4px 10px;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.secrets-popover .popover-buttons button.primary {
+  background: var(--accent);
+  color: var(--header-fg);
+  border-color: var(--accent);
+}
+
+.secrets-ns-chip {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 3px 8px;
+  background: var(--card-bg);
+  color: var(--card-fg);
+  border: 1px solid var(--input-border);
+  border-radius: 12px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  min-width: 80px;
+}
+
+.secrets-ns-chip:hover {
+  background: var(--hover-bg);
+}
+
+/* =========================================================================
+   TAINTED EXECUTE — Result pane + History badge for :secret-typed runs.
+   Shown when the fn's effective return-type carries the :secret marker;
+   the backend redacts the value and the editor refuses to surface
+   anything (even an attempt at rendering the null result body — the
+   tainted pane stands in for the result entirely).
+   ========================================================================= */
+
+.execute-result-tainted {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  border-radius: 4px;
+}
+
+.execute-tainted-icon {
+  font-size: 18px;
+  line-height: 1;
+  margin-top: 1px;
+  flex: 0 0 auto;
+}
+
+.execute-tainted-text {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--card-fg);
+}
+
+.execute-tainted-head {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.execute-tainted-body {
+  color: var(--muted-fg);
+}
+
+.execute-history-tainted-badge {
+  margin-left: 6px;
+  font-size: 11px;
+}
+
+/* Audit trail badge + filter (Followup-A4). Distinct from the
+   tainted-result badge above — fires when the fn touched a secret
+   AND observed a side-effect, even if its return-type is plain. */
+
+.execute-history-audit-badge {
+  margin-left: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  background: var(--effect-chip-misc);
+  color: var(--effect-chip-fg);
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.execute-history-audit-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted-fg);
+  user-select: none;
+  cursor: pointer;
+}
+
+.execute-history-audit-filter-count {
+  color: var(--muted-fg);
+  font-size: 11px;
+}
+
+
+

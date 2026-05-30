@@ -2,4 +2,4 @@
  :version "1.0.0"
  :description "Web primitives: HTTP, routing, HTML, CRUD."
  :dependencies ["core"]
- :modules ["http" "reitit" "reitit-text" "html" "crud" "ring-adapter" "branch-router"]}
+ :modules ["http" "http-client" "vault" "sql" "reitit" "reitit-text" "html" "crud" "ring-adapter" "branch-router"]}

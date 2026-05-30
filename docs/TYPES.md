@@ -817,7 +817,7 @@ to emit for `{:type :any}` overrides.
 ### What is stored in DB
 
 A slot's effective type comes from `slot.type-fn-id` overlayed by
-the closest `binding.type-override-fn-id` along the `parent-fn-ids`
+the closest `binding.type-override-fn-id` along the `parent-ids`
 inheritance closure. Refinement narrowing flows through the
 type-row chain (`fn.base-fn-id` for `:refine`, `fn.element-fn-id`
 for `:list`, `fn.constraint` for predicates).

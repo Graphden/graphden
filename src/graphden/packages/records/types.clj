@@ -86,6 +86,11 @@
       :map    (ids/primitive-fn-id :jsonb)
       :tuple  (ids/primitive-fn-id :sequence)
       :refine (recur (second t) name->id)
+      ;; `[:secret <inner>]` is an information-flow marker — at storage
+      ;; layer it's structurally identical to its inner type (the wire
+      ;; format stores the path/text, not the taint flag; the marker
+      ;; lives in the rich-types registry alongside the structural form).
+      :secret (recur (second t) name->id)
       :union  (ids/primitive-fn-id :any)
       (throw (ex-info (str "Unsupported structural type: " (pr-str t))
                       {:type :records/unsupported-type-ref

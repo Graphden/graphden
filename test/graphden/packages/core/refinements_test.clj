@@ -39,8 +39,12 @@
 
 (defn- impl-of
   [kw]
-  (or (get *impls* kw)
-      (throw (ex-info (str "No impl for " kw) {:available (keys *impls*)}))))
+  (let [entry (or (get *impls* kw)
+                  (throw (ex-info (str "No impl for " kw) {:available (keys *impls*)})))]
+    ;; impls.clj values are either a bare impl-fn or a
+    ;; `{:impl … :return-type-rule …}` map (every fn that participates
+    ;; in `:secret`-taint propagation moved to the map form in T3).
+    (if (map? entry) (:impl entry) entry)))
 
 
 (defn- call
@@ -141,5 +145,5 @@
   (testing ":ensure-url and :ensure-non-blank-text are in the impls map"
     (is (contains? *impls* :ensure-url))
     (is (contains? *impls* :ensure-non-blank-text))
-    (is (fn? (:ensure-url *impls*)))
-    (is (fn? (:ensure-non-blank-text *impls*)))))
+    (is (fn? (impl-of :ensure-url)))
+    (is (fn? (impl-of :ensure-non-blank-text)))))

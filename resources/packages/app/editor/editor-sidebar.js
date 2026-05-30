@@ -148,7 +148,18 @@ function buildFnItem(fn) {
   const item = document.createElement('div');
   item.className = 'entity-item';
   if (fn.id === selectedFnId) item.className += ' selected';
+  if (typeof isSecretFn === 'function' && isSecretFn(fn)) {
+    item.className += ' entity-secret';
+  }
   item.dataset.fnId = fn.id;
+
+  if (typeof isSecretFn === 'function' && isSecretFn(fn)) {
+    const lock = document.createElement('span');
+    lock.className = 'secret-lock-icon';
+    lock.textContent = '🔒'; // 🔒
+    lock.title = 'Secret — managed via the Secrets sidebar section';
+    item.appendChild(lock);
+  }
 
   const nameSpan = document.createElement('span');
   nameSpan.className = 'name';
@@ -339,6 +350,14 @@ function updateEntityList(data) {
   // Apply search filter
   if (searchFilter) {
     tree = filterNsNode(tree, searchFilter, null) || { children: new Map(), fns: [] };
+  }
+
+  // Secrets section — collapsible block ABOVE the namespace tree.
+  // Self-loading: when the user expands it the first time, it kicks
+  // off `loadSecrets()` + a re-render. Skipped while a filter is
+  // active so the section doesn't get pruned visually.
+  if (!searchFilter && !onlyServicesFilter && typeof buildSecretsSection === 'function') {
+    list.appendChild(buildSecretsSection());
   }
 
   // Render top-level namespaces (sorted)

@@ -31,6 +31,14 @@
    :args {:func :str-upper}}
 
   ;; :filter with a built-in predicate (`:some?` is `value → bool`).
+  ;; KNOWN LIMIT (docs/TYPE_CHECK_BACKLOG.md § B8.3): the
+  ;; type-checker doesn't unify a literal-element typevar `a` against
+  ;; a heterogeneous-element classification (`[:list :any]`), nor
+  ;; against a binding-type override widening (`[:list [:union :null
+  ;; :int]]` is rejected as "widening the inherited [:list a]" even
+  ;; though concrete-into-typevar is meant to NARROW). The example's
+  ;; nil-dropping intent stays — it's the demo's whole point — and the
+  ;; sweep failure is tracked alongside the four HOF cases.
   {:name :ex-only-some
    :description "Drop nils from a vector. `:some?` is the predicate; hof-wrapped over its single `:value` arg."
    :parent :filter

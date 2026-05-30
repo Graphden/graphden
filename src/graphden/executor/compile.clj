@@ -23,6 +23,7 @@
    HOF `:fn` args (Stage 5) still throw today; they pass the compiled
    closure raw without the thunk wrap."
   (:require
+    [graphden.clients.vault :as vault]
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
@@ -283,15 +284,32 @@
    `:fn`-type refs (HOF) go through `hof-wrap` for HOF-style invoke.
 
    `:seq` bindings (linked-list-encoded sequences) materialise the item
-   chain under a thunk wrapper for lazy access."
-  [bindings all-fns fa-ref]
+   chain under a thunk wrapper for lazy access.
+
+   `ctx` carries the executor context — needed by the `:secret-value`
+   case (Followup-4), which calls `graphden.clients.vault/get-secret`
+   off `(:vault ctx)` at arg-resolution time. The other cases ignore
+   `ctx`."
+  [bindings all-fns fa-ref ctx]
   (let [env-fn #(deref fa-ref)]
     (reduce
       (fn [{:keys [args aug] :as acc}
-           {:keys [kind base-name ext-name value items] :as b}]
+           {:keys [kind base-name ext-name value items path] :as b}]
         (case kind
           :value {:args (assoc args base-name value)
                   :aug (assoc aug ext-name value)}
+
+          :secret-value
+          (let [vault-client (:vault ctx)
+                _ (when-not vault-client
+                    (throw (ex-info "Vault client not configured — set VAULT_ADDR / VAULT_TOKEN"
+                                    {:type :vault/not-configured})))
+                secret-value (vault/get-secret vault-client path)]
+            ;; Deref'd into both args (what the impl sees) and aug
+            ;; (so inner ref-chains that reference this slot by
+            ;; ext-name receive the same value).
+            {:args (assoc args base-name secret-value)
+             :aug (assoc aug ext-name secret-value)})
 
           :free (let [fa @fa-ref]
                   (if (contains? fa ext-name)
@@ -457,7 +475,7 @@
                         (augment-env env-bindings all-fns free-args fa-ref)
                         free-args)
               _ (vreset! fa-ref fa-base)
-              {:keys [args aug]} (build-args-and-aug bindings all-fns fa-ref)
+              {:keys [args aug]} (build-args-and-aug bindings all-fns fa-ref ctx)
               ;; Primary bindings go into aug keyed by ext-name so inner
               ;; refs that reference a parameter by its external name see
               ;; the value. We merge WITHOUT shadowing entries already in

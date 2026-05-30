@@ -233,9 +233,9 @@
    :args {:string :authorization-header :prefix "Bearer "}}
 
   {:name :bearer-token-raw
-   :description "Substring of the `Authorization` header after the `\"Bearer \"` prefix — only meaningful when `:has-bearer-prefix?` is true."
+   :description "Substring of the `Authorization` header after the `\"Bearer \"` prefix — only meaningful when `:has-bearer-prefix?` is true. The `:subs` parent returns plain `:text` (no `:null` branch — `(subs nil 7)` throws NPE, doesn't return nil), so declare matching narrow type to avoid the type-drift sweep warning."
    :parent :subs
-   :return-type :nullable-text
+   :return-type :text
    :args {:string :authorization-header :start 7}}
 
   {:name :bearer-token

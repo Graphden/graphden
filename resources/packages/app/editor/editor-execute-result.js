@@ -73,6 +73,45 @@ function renderRecordResult(value) {
 }
 
 
+// Detect a `:secret`-typed return — both the inline POST response
+// (`{tainted?: true}`) and the persisted row read back via GET
+// (`{result: null, error-data: {reason: "tainted"}}`) get the same
+// treatment: no value is shown, regardless of what `result` happens
+// to be. Mirrors the backend's `redact-outcome` so the editor can't
+// accidentally surface a value the server tried to hide.
+function isTaintedExecuteResponse(body) {
+  if (!body) return false;
+  if (body['tainted?'] === true) return true;
+  const ed = body['error-data'];
+  if (ed && (ed.reason === 'tainted' || ed.reason === ':tainted')) return true;
+  return false;
+}
+
+
+function renderTaintedPane() {
+  const pane = document.createElement('div');
+  pane.className = 'execute-result-pane execute-result-tainted';
+  const icon = document.createElement('span');
+  icon.className = 'execute-tainted-icon';
+  icon.textContent = '🔒'; // 🔒
+  pane.appendChild(icon);
+  const txt = document.createElement('div');
+  txt.className = 'execute-tainted-text';
+  const head = document.createElement('div');
+  head.className = 'execute-tainted-head';
+  head.textContent = 'Result hidden';
+  txt.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'execute-tainted-body';
+  body.textContent =
+    "This fn's return type is :secret — the value never reaches the browser. "
+    + 'Swap the secret-bound argument for a plain literal to debug visibly.';
+  txt.appendChild(body);
+  pane.appendChild(txt);
+  return pane;
+}
+
+
 function renderResultBody(result, opts) {
   const pane = document.createElement('div');
   pane.className = 'execute-result-pane';

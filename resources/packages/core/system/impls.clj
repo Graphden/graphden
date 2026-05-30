@@ -129,6 +129,10 @@
     (clojure.core/slurp input)))
 
 
+(defbase parse-int [s]
+  (Long/parseLong s))
+
+
 (defbase sha256-hex-fn [s]
   (when s
     (let [md (java.security.MessageDigest/getInstance "SHA-256")
@@ -158,20 +162,31 @@
 ;; === Registry ===
 ;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map.
 
+;; System base-fns are mixed: content-passing transforms
+;; (`:to-json-string`, `:parse-json`, `:parse-int`, `:sha256-hex`,
+;; `:slurp`, `:ex-info`, `:throw`, `:invoke`, `:call`, `:call-noargs`)
+;; potentially expose a secret in their result and must propagate;
+;; pure environment readers (`:jvm-version`, `:heap-memory`,
+;; `:thread-count`, `:os-info`, `:current-time-ms`, `:env`,
+;; `:read-resource-or-nil`) take no user input so taint can't enter
+;; through them — left bare. `:sha256-hex` deserves special note:
+;; even a HASH of a secret leaks the value (rainbow tables, length
+;; oracles), so the propagator is mandatory here.
 (def impls
-  {:to-json-string to-json-string
-   :parse-json parse-json
+  {:to-json-string {:impl to-json-string :return-type-rule (types/wrap-with-taint nil)}
+   :parse-json {:impl parse-json :return-type-rule (types/wrap-with-taint nil)}
    :jvm-version jvm-version
    :heap-memory heap-memory
    :thread-count thread-count
    :os-info os-info
    :current-time-ms current-time-ms
    :env env-fn
-   :ex-info ex-info-fn
-   :throw throw-fn
+   :ex-info {:impl ex-info-fn :return-type-rule (types/wrap-with-taint nil)}
+   :throw {:impl throw-fn :return-type-rule (types/wrap-with-taint nil)}
    :read-resource-or-nil read-resource-or-nil
-   :invoke {:impl invoke-fn :return-type-rule invoke-return-rule}
-   :call invoke-fn
-   :call-noargs call-noargs-fn
-   :slurp slurp-fn
-   :sha256-hex sha256-hex-fn})
+   :invoke {:impl invoke-fn :return-type-rule (types/wrap-with-taint invoke-return-rule)}
+   :call {:impl invoke-fn :return-type-rule (types/wrap-with-taint nil)}
+   :call-noargs {:impl call-noargs-fn :return-type-rule (types/wrap-with-taint nil)}
+   :slurp {:impl slurp-fn :return-type-rule (types/wrap-with-taint nil)}
+   :parse-int {:impl parse-int :return-type-rule (types/wrap-with-taint nil)}
+   :sha256-hex {:impl sha256-hex-fn :return-type-rule (types/wrap-with-taint nil)}})

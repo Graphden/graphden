@@ -328,18 +328,45 @@
       (when (pos? @failures)
         (log/warn "Type-check sweep: " @failures
                   "fn-defs failed (DEBUG-logged) — runtime unaffected,"
-                  " editor effect/return strips may be missing for those names")))
+                  " editor effect/return strips may be missing for those names —"
+                  " docs/TYPE_CHECK_BACKLOG.md")))
     (log/info "Fn entities created:" (count fns))
     fns))
+
+
+;; =============================================================================
+;; Vault client (OpenBao / Vault KV v2)
+;; =============================================================================
+;;
+;; Infrastructure-level secrets handle. The :vault-get base-fn pulls
+;; this off the executor context to talk to KV v2. Address + token
+;; live in `system-*.edn` (and ultimately env), NEVER exposed to the
+;; user fn-graph — that's the whole point of routing user secrets
+;; through `:vault-get` instead of `:env`.
+;;
+;; Optional: when address is blank, the key returns nil and
+;; `:vault-get` raises a clear "vault not configured" error on first
+;; use. Lets tests skip the openbao container.
+
+(defmethod ig/init-key :vault/client [_ {:keys [address token]}]
+  (if (and (string? address) (not (str/blank? address)))
+    (do (log/info "Vault client configured for" address)
+        {:address address :token token})
+    (do (log/info "Vault client disabled (no :address) — :vault-get will throw on use")
+        nil)))
 
 
 ;; =============================================================================
 ;; Executor Context
 ;; =============================================================================
 
-(defmethod ig/init-key :exec/context [_ {:keys [storage]}]
+(defmethod ig/init-key :exec/context [_ {:keys [storage vault-client]}]
   (log/info "Creating executor context...")
-  (exec/create-context {:storage storage}))
+  ;; `assoc` (not the constructor's named opts) — the ExecutionContext
+  ;; record stays narrow; vault rides on the extra-key surface
+  ;; alongside `:compiled-templates`. Impls grab it via `(:vault ctx)`.
+  (cond-> (exec/create-context {:storage storage})
+    vault-client (assoc :vault vault-client)))
 
 
 ;; =============================================================================

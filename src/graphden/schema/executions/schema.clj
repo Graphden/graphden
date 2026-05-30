@@ -122,6 +122,15 @@
   #uuid "13aacbf1-e4b1-4411-a46a-202f88fc633c")
 
 
+(def ^:private fn-execution-touched-secret-field-uuid
+  ;; Followup-3 audit trail: true when the executed fn-def either
+  ;; declared a `:secret`-typed slot OR computed a `:secret`-returning
+  ;; signature. Set on rows whose `runtime-effects` is also non-empty
+  ;; — that's the combination that means a secret was both consumed
+  ;; AND observably acted upon (network / io / db side effect).
+  #uuid "5d9b6c0a-c3f4-49a8-9c01-0b1e8b5e4a2c")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :fn-execution-arg
 ;; =============================================================================
@@ -253,7 +262,19 @@
                       ;; on the next executor invocation step.
                       :cancel-requested? {:uuid fn-execution-cancel-requested-field-uuid
                                           :type :bool
-                                          :nullable? true}})
+                                          :nullable? true}
+                      ;; Audit trail (Followup-3). True iff the
+                      ;; executed fn-def's rich-type carries the
+                      ;; `:secret` marker on its return OR on any
+                      ;; arg slot — combined with a non-empty
+                      ;; `:runtime-effects`, this row recorded a
+                      ;; secret crossing into a side-effecting
+                      ;; sink (the kind GitHub Actions audits via
+                      ;; mask logs). Read-side filter for the
+                      ;; future Secret-flows history tab.
+                      :touched-secret? {:uuid fn-execution-touched-secret-field-uuid
+                                        :type :bool
+                                        :nullable? true}})
 
       ;; -----------------------------------------------------------------
       ;; :fn-execution-arg — one row per free-arg the executor was

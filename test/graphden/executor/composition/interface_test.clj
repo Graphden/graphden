@@ -1,7 +1,7 @@
 (ns ^:integration graphden.executor.composition.interface-test
   "Tests for fn composition sync against the slot/binding model.
 
-   A composed fn carries `:parent-fn-ids` and `:binding` rows that
+   A composed fn carries `:parent-ids` and `:binding` rows that
    overlay the inherited slots; sync turns the EDN `:args` shape
    into binding/list-item rows."
   (:require

@@ -100,7 +100,7 @@ Following SICP, a language has three aspects:
 In graphden:
 - **Primitives**: Five entity types — fn, slot, fn-slot, binding, binding-list-item (see [§ Language Aspects](#language-aspects-sicp) for the full breakdown)
 - **Combination**: Parent-fn-ids inheritance + binding overlays (`value` / `ref-fn-id`); `binding-list-item.position` for ordered chains
-- **Abstraction**: Base functions (Clojure implementations) and composed functions (`parent-fn-ids` inheritance + bindings)
+- **Abstraction**: Base functions (Clojure implementations) and composed functions (`parent-ids` inheritance + bindings)
 
 **We resist adding new entity types or edge types.** Every addition increases cognitive load and implementation complexity.
 
@@ -108,7 +108,7 @@ In graphden:
 
 Abstractions must minimize the need to define anything twice:
 - Result caching (by `ref-fn-id` within execution) enables sharing computed results
-- Composed functions (via `parent-fn-ids` + bindings) enable reuse without duplication
+- Composed functions (via `parent-ids` + bindings) enable reuse without duplication
 - Base functions provide reusable implementations
 - UI can offer "create based on" = copying with ability to change
 
@@ -143,7 +143,7 @@ Five entity types, with deliberate roles:
 
 | Entity | Purpose |
 |--------|---------|
-| `fn` | Function entity OR type-row. Inheritance via `parent-fn-ids` (M:N). |
+| `fn` | Function entity OR type-row. Inheritance via `parent-ids` (M:N). |
 | `slot` | Atomic `(name, type-fn-id)` pair. Immutable post-create; shared across fns. |
 | `fn-slot` | Junction: which slots a fn exposes, with `position`. |
 | `binding` | Per-`(fn, slot)` overlay (value, ref, rename, type-override, terminal, list flags). |
@@ -318,7 +318,7 @@ This section maps each system component to the principles it serves. Use this to
 
 | Entity | Principles Served | How |
 |--------|-------------------|-----|
-| `fn` | Minimal entities, Expressiveness, DRY | Function or type-row; M:N inheritance via `parent-fn-ids` |
+| `fn` | Minimal entities, Expressiveness, DRY | Function or type-row; M:N inheritance via `parent-ids` |
 | `slot` | Minimal entities, Explicit | Atomic identity for a parameter; sharing enables MI |
 | `fn-slot` | Locality, Explicit | Which fn exposes which slot in what order |
 | `binding` | Locality, Explicit | Per-`(fn, slot)` overlay; closer-fn-wins makes inheritance lookups O(chain length) |

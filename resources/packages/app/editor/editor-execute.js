@@ -212,7 +212,9 @@ async function pollOnce(execId, resultHostEl) {
     const status = String(row.status || '').replace(/^:/, '');
     if (status === 'succeeded' || status === 'failed' || status === 'cancelled') {
       resultHostEl.textContent = '';
-      if (status === 'succeeded') {
+      if (isTaintedExecuteResponse(row)) {
+        resultHostEl.appendChild(renderTaintedPane());
+      } else if (status === 'succeeded') {
         resultHostEl.appendChild(renderResultBody(row.result,
                                                   { truncated: row['result-truncated?'] }));
       } else if (status === 'failed') {
@@ -282,6 +284,8 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
       cancelBtn.style.display = '';
       cancelBtn.dataset.execId = body['execution-id'];
       startPolling(body['execution-id'], resultHostEl);
+    } else if (isTaintedExecuteResponse(body)) {
+      resultHostEl.appendChild(renderTaintedPane());
     } else if (status === 'succeeded') {
       resultHostEl.appendChild(renderResultBody(body.result,
                                                 { truncated: body['result-truncated?'] }));

@@ -267,38 +267,191 @@
    :body (str "<p class=\"error\">" (:reason validation) "</p>")})
 
 
-(defbase process-delete-entity
+;; === Delete-entity primitives (C5 decomposition) ===
+;; `:process-delete-entity` is now a `:cond` graph fn-def in fns.edn.
+;; Four distinct rejection paths + the success path:
+;;
+;; - 400 invalid request (entity-type or id parse fail)
+;; - 409 secret fn-def (admin path goes through /api/secrets/:fn-id)
+;; - 409 fn in use (other fns reference it)
+;; - 409 ns non-empty (still has sub-ns or fns)
+;; - 200 delete + invalidate
+;;
+;; The two 409-with-dynamic-reason rejections (fn-in-use, ns-non-empty)
+;; have a separate "reason-or-nil" base-fn fed into a predicate AND
+;; into the error-builder base-fn — so the reason computes once and
+;; is shared by both consumers.
+
+(defbase _delete-parsed
   [request]
-  (entities/process-delete-entity request ctx))
+  (entities/parse-delete-entity-request request))
+
+
+(defbase _delete-request-invalid?
+  [parsed]
+  (or (nil? (:entity-type parsed)) (nil? (:id parsed))))
+
+
+(defbase _delete-fn-is-secret?
+  [parsed]
+  (entities/delete-fn-secret? parsed ctx))
+
+
+(defbase _delete-fn-in-use-reason
+  [parsed]
+  (entities/delete-fn-in-use-reason parsed ctx))
+
+
+(defbase _delete-fn-in-use?
+  [fn-in-use-reason]
+  (some? fn-in-use-reason))
+
+
+(defbase _delete-err-fn-in-use
+  [fn-in-use-reason]
+  (entities/delete-err-with-reason fn-in-use-reason))
+
+
+(defbase _delete-ns-non-empty-reason
+  [parsed]
+  (entities/delete-ns-non-empty-reason parsed ctx))
+
+
+(defbase _delete-ns-non-empty?
+  [ns-non-empty-reason]
+  (some? ns-non-empty-reason))
+
+
+(defbase _delete-err-ns-non-empty
+  [ns-non-empty-reason]
+  (entities/delete-err-with-reason ns-non-empty-reason))
+
+
+(defbase _delete-apply
+  [parsed]
+  (entities/apply-delete-entity parsed ctx))
 
 
 ;; === Sequence operations ===
 
-(defbase process-sequence-append
-  "POST /api/sequence/append/:fn-id
-   Body: {\"ref\"|\"ref-name\"|\"value\": …}
-   Appends one item to the sequence binding of fn :fn-id. Creates an
-   empty `:list-append true` binding if the fn doesn't yet have one."
+;; === Sequence-append primitives (C3 decomposition) ===
+;; `:process-sequence-append` is now a `:cond` graph fn-def in fns.edn
+;; that composes these atoms. Same shape as C2 (sequence-remove): one
+;; parse, two upfront guard predicates, one read-only loader + a
+;; not-found predicate over its result, and a single apply that runs
+;; the side-effecting body. Lazy `:cond` means the synthetic-binding
+;; materialization + the actual append only run when every guard
+;; passes.
+;;
+;; - `_seq-append-parsed`         — `{:fn-id <uuid|nil> :body <map|nil>}`.
+;; - `_seq-append-fn-id-invalid?` — guard #1, 400.
+;; - `_seq-append-body-invalid?`  — guard #2, 400.
+;; - `_seq-append-load-binding`   — read-only sequence-binding resolution.
+;; - `_seq-append-no-seq-slot?`   — guard #3, 404.
+;; - `_seq-append-apply`          — materialize-if-synthetic + write + 200
+;;                                  (or data-dependent 400 from write-rej).
+
+(defbase _seq-append-parsed
   [request]
-  (entities/process-sequence-append request ctx))
+  (entities/parse-seq-append-request request))
 
 
-(defbase process-sequence-remove
-  "DELETE /api/sequence/item/:item-id
-   Removes one binding-list-item. Positions of remaining items are
-   left as-is (no compaction); editor reads items sorted by position
-   so a hole is harmless."
+(defbase _seq-append-fn-id-invalid?
+  [parsed]
+  (nil? (:fn-id parsed)))
+
+
+(defbase _seq-append-body-invalid?
+  [parsed]
+  (nil? (:body parsed)))
+
+
+(defbase _seq-append-load-binding
+  [parsed]
+  (entities/find-seq-append-binding parsed ctx))
+
+
+(defbase _seq-append-no-seq-slot?
+  [seq-binding]
+  (nil? seq-binding))
+
+
+(defbase _seq-append-apply
+  [parsed seq-binding]
+  (entities/apply-seq-append parsed seq-binding ctx))
+
+
+;; === Sequence-remove primitives (C2 decomposition) ===
+;; `:process-sequence-remove` is now a `:cond` graph fn-def in fns.edn
+;; that composes these atoms. Each clause is `[predicate 400/404-response]`;
+;; the trailing `[:value true]` clause runs `:_seq-remove-apply`. `:cond`
+;; is lazy, so the DB delete runs only when both guards pass.
+;;
+;; - `_seq-remove-parsed` — `{:item-id <uuid|nil>}` from the URI path.
+;; - `_seq-remove-item-id-invalid?` — guard #1, 400.
+;; - `_seq-remove-load-item`        — load the binding-list-item row.
+;; - `_seq-remove-item-not-found?`  — guard #2, 404.
+;; - `_seq-remove-apply`            — delete + invalidate, 200.
+
+(defbase _seq-remove-parsed
   [request]
-  (entities/process-sequence-remove request ctx))
+  (entities/parse-seq-remove-request request))
 
 
-(defbase process-sequence-update
-  "PUT /api/sequence/item/:item-id
-   Body: {\"ref\"|\"ref-name\"|\"value\": …}
-   Replaces the value/ref of one existing binding-list-item — the
-   in-place edit counterpart of append/remove."
+(defbase _seq-remove-item-id-invalid?
+  [parsed]
+  (nil? (:item-id parsed)))
+
+
+(defbase _seq-remove-load-item
+  [parsed]
+  (entities/load-seq-remove-item parsed ctx))
+
+
+(defbase _seq-remove-item-not-found?
+  [item]
+  (nil? item))
+
+
+(defbase _seq-remove-apply
+  [parsed item]
+  (entities/apply-seq-remove parsed item ctx))
+
+
+;; === Sequence-update primitives (C4 decomposition) ===
+;; `:process-sequence-update` is now a `:cond` graph fn-def in fns.edn.
+;; Same shape as C2 + C3 — parse / two upfront guards / read-only load
+;; / not-found guard / apply (which carries the data-dependent write-rej
+;; 400 internally).
+
+(defbase _seq-update-parsed
   [request]
-  (entities/process-sequence-update request ctx))
+  (entities/parse-seq-update-request request))
+
+
+(defbase _seq-update-item-id-invalid?
+  [parsed]
+  (nil? (:item-id parsed)))
+
+
+(defbase _seq-update-body-invalid?
+  [parsed]
+  (nil? (:body parsed)))
+
+
+(defbase _seq-update-load-item
+  [parsed]
+  (entities/load-seq-update-item parsed ctx))
+
+
+(defbase _seq-update-item-not-found?
+  [item]
+  (nil? item))
+
+
+(defbase _seq-update-apply
+  [parsed item]
+  (entities/apply-seq-update parsed item ctx))
 
 
 ;; === Tighten fn-typed binding effects ===
@@ -402,10 +555,33 @@
    :_update-apply _update-apply
    :_rejected? _rejected?
    :_rejection-response _rejection-response
-   :process-delete-entity process-delete-entity
-   :process-sequence-append process-sequence-append
-   :process-sequence-remove process-sequence-remove
-   :process-sequence-update process-sequence-update
+   :_delete-parsed _delete-parsed
+   :_delete-request-invalid? _delete-request-invalid?
+   :_delete-fn-is-secret? _delete-fn-is-secret?
+   :_delete-fn-in-use-reason _delete-fn-in-use-reason
+   :_delete-fn-in-use? _delete-fn-in-use?
+   :_delete-err-fn-in-use _delete-err-fn-in-use
+   :_delete-ns-non-empty-reason _delete-ns-non-empty-reason
+   :_delete-ns-non-empty? _delete-ns-non-empty?
+   :_delete-err-ns-non-empty _delete-err-ns-non-empty
+   :_delete-apply _delete-apply
+   :_seq-append-parsed _seq-append-parsed
+   :_seq-append-fn-id-invalid? _seq-append-fn-id-invalid?
+   :_seq-append-body-invalid? _seq-append-body-invalid?
+   :_seq-append-load-binding _seq-append-load-binding
+   :_seq-append-no-seq-slot? _seq-append-no-seq-slot?
+   :_seq-append-apply _seq-append-apply
+   :_seq-remove-parsed _seq-remove-parsed
+   :_seq-remove-item-id-invalid? _seq-remove-item-id-invalid?
+   :_seq-remove-load-item _seq-remove-load-item
+   :_seq-remove-item-not-found? _seq-remove-item-not-found?
+   :_seq-remove-apply _seq-remove-apply
+   :_seq-update-parsed _seq-update-parsed
+   :_seq-update-item-id-invalid? _seq-update-item-id-invalid?
+   :_seq-update-body-invalid? _seq-update-body-invalid?
+   :_seq-update-load-item _seq-update-load-item
+   :_seq-update-item-not-found? _seq-update-item-not-found?
+   :_seq-update-apply _seq-update-apply
    :_tighten-parsed _tighten-parsed
    :_tighten-binding-id-invalid? _tighten-binding-id-invalid?
    :_tighten-effects-invalid? _tighten-effects-invalid?

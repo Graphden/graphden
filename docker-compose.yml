@@ -19,12 +19,97 @@ services:
       retries: 5
       start_period: 10s
 
+  # "User-side" Postgres — simulates a tenant DB the graphden user
+  # owns. Their fn-graph reaches it through :sql-exec / :sql-query
+  # with credentials pulled from openbao, NOT from any env they read
+  # directly. Lives on a SEPARATE container so the tutorial graph
+  # can't accidentally touch graphden's own schema.
+  user-postgres:
+    image: postgres:16-alpine
+    container_name: graphden-user-postgres
+    environment:
+      POSTGRES_DB: userdb
+      POSTGRES_USER: userapp
+      POSTGRES_PASSWORD: userpass
+    volumes:
+      - user_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5436:5432"  # Exposed for host-side inspection (psql -h localhost -p 5436 -U userapp userdb)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U userapp -d userdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # OpenBao (OSS fork of HashiCorp Vault, Linux Foundation) in dev
+  # mode — in-memory KV v2 store, single root token, restarts to a
+  # blank slate. Used as the user-facing secrets API: their fn-graph
+  # calls :vault-get on a path; graphden's :vault/client integrant
+  # key holds the (infra-only) root token. No user-visible :env reads.
+  openbao:
+    image: quay.io/openbao/openbao:latest
+    container_name: graphden-openbao
+    cap_add:
+      - IPC_LOCK
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: root
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    command: server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200
+    ports:
+      - "8200:8200"
+    healthcheck:
+      # /v1/sys/health returns 200 only when unsealed AND initialised.
+      # Dev mode satisfies both immediately on listener bind.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # One-shot seeder for the tutorial secrets. Idempotent — Vault KV
+  # v2 writes overwrite, so re-running `docker compose up` is safe.
+  # Pinning to a known curl image (curlimages/curl) keeps this off
+  # the openbao image's surface area.
+  openbao-seed:
+    image: curlimages/curl:8.11.1
+    container_name: graphden-openbao-seed
+    depends_on:
+      openbao:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        AUTH='X-Vault-Token: root'
+        CT='Content-Type: application/json'
+        BASE='http://openbao:8200/v1/secret/data'
+        put () {
+          path="$$1"; value="$$2"
+          curl -fsS -X POST -H "$$AUTH" -H "$$CT" \
+               -d "{\"data\": {\"value\": \"$$value\"}}" \
+               "$$BASE/$$path" > /dev/null
+          echo "seeded secret/$$path"
+        }
+        put user-db/url      "jdbc:postgresql://user-postgres:5432/userdb"
+        put user-db/user     "userapp"
+        put user-db/password "userpass"
+        put api/token        "fake-token-abc123"
+        put history-port     "8081"
+
   executor:
     build: .
     container_name: graphden-executor
     depends_on:
       postgres:
         condition: service_healthy
+      user-postgres:
+        condition: service_healthy
+      openbao:
+        condition: service_healthy
+      openbao-seed:
+        condition: service_completed_successfully
     environment:
       PORT: 8080
       STORAGE_TYPE: postgres
@@ -38,10 +123,19 @@ services:
       # short-circuits). Local docker workflow sets this in `.env`
       # so demos appear out of the box.
       GRAPHDEN_DEMO_BRANCHES_ENABLED: ${GRAPHDEN_DEMO_BRANCHES_ENABLED:-}
+      # OpenBao credentials — INFRASTRUCTURE-level, the user's
+      # fn-graph never reads these. The :vault/client integrant key
+      # consumes them once at startup; everything user-facing goes
+      # through the :vault-get base-fn.
+      VAULT_ADDR: http://openbao:8200
+      VAULT_TOKEN: root
     ports:
       - "9002:8080"
+      - "9081:8081"  # Tutorial: user-built history endpoint runs here
     restart: unless-stopped
 
 volumes:
   postgres_data:
     name: graphden-postgres-data
+  user_postgres_data:
+    name: graphden-user-postgres-data

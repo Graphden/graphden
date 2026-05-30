@@ -38,7 +38,7 @@
 ## Phase 1: Data Schema and Constraints [DONE]
 
 **1.1 graph-data-schema** — slot/binding model:
-- `fn` — function or type-row; M:N inheritance via `parent-fn-ids`
+- `fn` — function or type-row; M:N inheritance via `parent-ids`
 - `slot` — atomic `(name, type-fn-id)`; immutable post-create
 - `fn-slot` — junction `(fn-id, slot-id, position)`
 - `binding` — per-`(fn, slot)` overlay (value, ref, rename, type-override, terminal, list flags)
@@ -160,14 +160,18 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 - POST `/api/sequence/append/:fn-id` + DELETE
   `/api/sequence/item/:item-id` [DONE]
 - Bearer-token auth middleware on mutating routes [DONE]
-- POST `/execute` — run fn from UI [PLANNED]
+- POST `/api/execute` — run fn from UI [DONE — `docs/EXECUTION.md`,
+  `crud.fn_execution` + sibling `/cancel`, `/api/executions`,
+  `/api/execute/:id`]
 - WebSocket for live updates [PLANNED]
 
 **5.2 Web Interface [PARTIAL]**
 - Namespace-grouped entity list in sidebar [DONE]
 - Graph editor (Cytoscape-based, server-computed layout) [DONE]
 - Entity create/edit/delete modals [DONE]
-- Execute button with result display [PLANNED]
+- Execute button with result display [DONE — `editor-execute.js`
+  orchestrator, free-arg value-form, polling state machine, runtime
+  effects strip, Repeat-from-history]
 
 ---
 
@@ -371,7 +375,7 @@ no new entity kinds.
 | `binding` | Yes | value, ref-fn-id, rename-to, type-override-fn-id, description, terminal, list-{append,closed} |
 | `binding-list-item` | Yes | binding-id, position, value, ref-fn-id, literal |
 | `slot` | No | immutable post-create — name + type are the slot's identity |
-| `parent-fn-ids` | Junction (not versioned) | adding/removing parents creates new junction rows |
+| `parent-ids` | Junction (not versioned) | adding/removing parents creates new junction rows |
 
 **Branch operations:**
 

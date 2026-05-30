@@ -34,6 +34,33 @@ async function initGraph() {
     try { VALUE_KINDS = await vkResp.json(); } catch (_) { VALUE_KINDS = []; }
   }
   updateEntityList(graphData);
+  // First-load hash navigation: `#fn-name` in the URL (bookmark,
+  // shared link, page reload) must select the fn — `hashchange` /
+  // `popstate` only fire on AFTER-load changes, not the initial
+  // load. Without this, opening /#app.server.web-server (or any
+  // hashed URL) leaves the canvas blank until the user clicks the
+  // sidebar. Mirrors the same hash-handling that `loadGraphData()`
+  // does after a graph refresh.
+  const hash = window.location.hash.slice(1);
+  if (hash) {
+    selectFnByName(decodeURIComponent(hash), false);
+  }
+}
+
+
+// Re-fetch the graph state after a mutation (e.g. crud.secrets/create
+// → new fn-def + binding appear in `/api/graph/entities`). Callable
+// from editor-secrets.js etc. so the ns-tree / cytoscape pick up
+// the new entries without a full page reload. Kept as a separate
+// fn from `init()` so it doesn't also re-fire the auth / hash
+// navigation work.
+async function loadGraphData() {
+  const r = await fetch('/api/graph/entities');
+  if (!r.ok) return;
+  graphData = await r.json();
+  lookups = buildLookups(graphData);
+  updateEntityList(graphData);
+  if (typeof renderGraph === 'function') renderGraph(true);
 
   const hash = window.location.hash.slice(1);
   if (hash) {

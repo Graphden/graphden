@@ -1,0 +1,62 @@
+;; Outgoing HTTP client base function.
+;;
+;; Counterpart to web/http (server). Thin wrapper around
+;; org.httpkit.client/get — enough to demonstrate "call an external
+;; API from a fn-graph" and feed the response into downstream
+;; processing (parse-json, get, etc.). POST / PUT / DELETE can be
+;; added later as siblings if a tutorial needs them.
+
+
+{:namespace "web.http-client"
+ :description "Outgoing HTTP — GET an external URL with custom headers."
+ :fns
+ [;; Return shape: same keys http-kit emits, but stringified at the
+  ;; boundary so the fn-graph stays primitive-typed end-to-end. The
+  ;; record subtype rule (open) means downstream `:get` of `"body"`
+  ;; / `"status"` works directly without an extra adapter.
+  {:name :http-response-shape
+   :description "Result of `:http-get` — `{status, headers, body}` mirroring http-kit's response map (headers stringified, body slurped to text)."
+   :type {:status :int
+          :headers [:map :text :text]
+          :body :text}}
+
+  {:name :http-get
+   :description "Perform an HTTP GET against `:url` with the supplied `:headers` map. Returns `{:status :headers :body}` — body slurped to text, headers stringified. 10s connect+read timeout. Throws `http-client/request-failed` on transport errors (DNS, refused, timeout); non-2xx responses are returned with their actual status so callers can branch on it. The `:headers` slot is `[:map :text :text]` so it REFUSES secret-typed values structurally — use `:http-get-with-bearer` for any auth flow that pulls a token from `:vault-get`."
+   :args {:url {:type :text
+                :description "Absolute URL, e.g. `https://httpbin.org/bearer`."}
+          :headers {:type [:map :text :text]
+                    :value {}
+                    :description "Header map. Keys + values are strings, e.g. `{\"Authorization\" \"bearer …\"}`. Defaults to empty. Plain `:text` values only — secret-typed values are rejected at sync-time."}}
+   :return-type :http-response-shape
+   :effects #{:network}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :http-get-with-bearer — secret-aware variant of :http-get.
+  ;;
+  ;; Why a dedicated base-fn instead of letting the user wire the
+  ;; Authorization header themselves? Because the user-side flow
+  ;; would be:
+  ;;   _auth-header parent :str-concat args [["Bearer " <secret>]]
+  ;;     → return [:secret :text]    (propagator taints the result)
+  ;;   _my-call parent :http-get args {:headers {"Authorization" <ref>}}
+  ;;     → REJECTED at type-check    (headers slot refuses :secret value)
+  ;;
+  ;; Plain :http-get's `:headers` slot deliberately refuses secrets
+  ;; (so a literal map with a secret value can't compose-leak), which
+  ;; closes the leak path AND blocks the legitimate auth use case.
+  ;; This fn provides the legitimate path: token is `[:secret :text]`,
+  ;; the impl embeds it in the Authorization header internally so the
+  ;; secret never crosses a generic :map slot. Extra headers can still
+  ;; be supplied as plain text.
+  ;; ---------------------------------------------------------------------
+  {:name :http-get-with-bearer
+   :description "Variant of `:http-get` that takes a secret-typed `:token` and embeds it as `Authorization: Bearer <token>` internally. Use this whenever the bearer token comes from `:vault-get` (or any secret-propagating composition). Extra headers are merged on top. Same return shape, same 10s timeout, same `:network` effect as `:http-get`."
+   :args {:url {:type :text
+                :description "Absolute URL."}
+          :token {:type [:secret :text]
+                  :description "Bearer token. Slot is `[:secret :text]` — accepts a `:vault-get` ref, a plain literal (auto-promoted), or any propagated text. The token never crosses a non-secret-aware slot; the impl injects it directly into the request headers."}
+          :extra-headers {:type [:map :text :text]
+                          :value {}
+                          :description "Additional headers merged on top of the auth header. Must be plain text only — secrets here would leak through the generic `:map` shape."}}
+   :return-type :http-response-shape
+   :effects #{:network}}]}

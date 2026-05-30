@@ -26,8 +26,17 @@
   :packages #ig/ref :app/packages
   :base-fns #ig/ref :exec/base-fns}
 
+ ;; OpenBao / Vault KV v2 client. Address + token are INFRASTRUCTURE
+ ;; level — the user fn-graph never sees them; it calls `:vault-get`
+ ;; which pulls the client off the executor context. When VAULT_ADDR
+ ;; is unset the client returns nil and `:vault-get` errors on use.
+ :vault/client
+ {:address #or [#env VAULT_ADDR ""]
+  :token #or [#env VAULT_TOKEN ""]}
+
  :exec/context
- {:storage #ig/ref :db/versioned}
+ {:storage #ig/ref :db/versioned
+  :vault-client #ig/ref :vault/client}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on
  ;; fn-entities so every composed fn is already in storage before we

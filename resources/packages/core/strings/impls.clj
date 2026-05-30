@@ -1,11 +1,26 @@
 (ns graphden.packages.core.strings.impls
   "Implementations for core/strings base functions.
 
-   Migrated to `defbase` — arg symbols resolve at use site."
+   Migrated to `defbase` — arg symbols resolve at use site.
+
+   String fns are CONTENT-PASSING: anything that takes a `:text`
+   (or related) input and returns text / int / bool potentially
+   exposes the contents downstream. They register the standard
+   `:secret`-propagator from `graphden.types.core` so a secret input
+   taints the result. The propagator only changes type-level
+   metadata; impl bodies are unchanged."
   (:require
     [clojure.string :as str]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.core :as types]))
+
+
+(def ^:private taint
+  "Per-base-fn `:return-type-rule` that lifts the declared return into
+   `[:secret …]` iff any actual input carried the marker. Plug-in for
+   every content-passing string op below."
+  types/taint-with-secret-if-tainted)
 
 
 ;; === Validation Helpers ===
@@ -185,21 +200,34 @@
 ;; === Registry ===
 
 (def impls
-  {:str str-fn
-   :subs subs-fn
-   :str-len str-len-fn
-   :str-upper str-upper-fn
-   :str-lower str-lower-fn
-   :str-trim str-trim-fn
-   :str-split str-split-fn
-   :str-join str-join-fn
-   :str-to-keyword str-to-keyword-fn
-   :keyword-to-str keyword-to-str-fn
-   :pr-str pr-str-fn
-   :to-str to-str-fn
-   :parse-query-string parse-query-string-fn
-   :blank? blank?-fn
-   :url-decode url-decode-fn
-   :str-contains? str-contains?-fn
-   :str-starts-with? str-starts-with?-fn
-   :str-replace str-replace-fn})
+  ;; Every entry is a `{:impl … :return-type-rule taint}` map —
+  ;; secret-content-passing is the default for the strings package.
+  ;; Anything that takes a `:text` (or a record containing one) and
+  ;; returns text / int / bool potentially leaks the content via the
+  ;; result; the propagator marks the result `[:secret …]` so the
+  ;; downstream type-check refuses to drop the marker.
+  ;;
+  ;; The handful of fns that genuinely DON'T pass content
+  ;; (`:keyword-to-str`'s input is a `:keyword`, never a text-secret;
+  ;; `:parse-query-string`'s output is a record-of-strings that COULD
+  ;; carry secrets if the URL did — we taint conservatively) are
+  ;; still annotated, since the propagator is a no-op for plain
+  ;; inputs.
+  {:str                {:impl str-fn                :return-type-rule taint}
+   :subs               {:impl subs-fn               :return-type-rule taint}
+   :str-len            {:impl str-len-fn            :return-type-rule taint}
+   :str-upper          {:impl str-upper-fn          :return-type-rule taint}
+   :str-lower          {:impl str-lower-fn          :return-type-rule taint}
+   :str-trim           {:impl str-trim-fn           :return-type-rule taint}
+   :str-split          {:impl str-split-fn          :return-type-rule taint}
+   :str-join           {:impl str-join-fn           :return-type-rule taint}
+   :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule taint}
+   :keyword-to-str     {:impl keyword-to-str-fn     :return-type-rule taint}
+   :pr-str             {:impl pr-str-fn             :return-type-rule taint}
+   :to-str             {:impl to-str-fn             :return-type-rule taint}
+   :parse-query-string {:impl parse-query-string-fn :return-type-rule taint}
+   :blank?             {:impl blank?-fn             :return-type-rule taint}
+   :url-decode         {:impl url-decode-fn         :return-type-rule taint}
+   :str-contains?      {:impl str-contains?-fn      :return-type-rule taint}
+   :str-starts-with?   {:impl str-starts-with?-fn   :return-type-rule taint}
+   :str-replace        {:impl str-replace-fn        :return-type-rule taint}})

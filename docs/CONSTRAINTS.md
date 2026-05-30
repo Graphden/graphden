@@ -8,7 +8,7 @@ explicit code is dependency-cycle detection.
 
 ## Entities
 
-- **fn** — function or type-row. Inheritance via `parent-fn-ids`
+- **fn** — function or type-row. Inheritance via `parent-ids`
   (many-to-many junction).
 - **slot** — atomic `(name, type-fn-id)` pair, immutable post-create.
 - **fn-slot** — junction: which slots a fn exposes, with position.

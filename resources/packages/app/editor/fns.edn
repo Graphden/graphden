@@ -59,6 +59,7 @@
                   "packages/app/editor/editor-overlay-fn.js"
                   "packages/app/editor/editor-overlay-strips.js"
                   "packages/app/editor/editor-overlay-manager.js"
+                  "packages/app/editor/editor-secrets.js"
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"

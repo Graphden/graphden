@@ -1,0 +1,52 @@
+;; Direct JDBC base functions — execute SQL against any reachable
+;; database with credentials passed per call.
+;;
+;; Built for the secrets-driven tutorial: the user reads connection
+;; params from `:vault-get` and passes them in. NOT for production
+;; multi-call workloads — every call opens a new connection. A
+;; pooled variant can be added later if a use case appears.
+
+
+{:namespace "web.sql"
+ :description "Raw JDBC: run SQL (DDL / INSERT / UPDATE / DELETE / SELECT) against a JDBC URL with explicit credentials."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; :sql-exec — DDL or mutation. Returns affected row count.
+  ;;
+  ;; Why a single return-type? `execute-one!` on a mutation returns
+  ;; `{:next.jdbc/update-count N}`; DDL returns 0. We surface the
+  ;; count as a plain int so downstream `:if` / `:>` can branch on
+  ;; it without record-shape acrobatics.
+  ;; ---------------------------------------------------------------------
+  {:name :sql-exec
+   :description "Execute a non-SELECT SQL statement (DDL / INSERT / UPDATE / DELETE) on the JDBC URL and return the affected row count (0 for DDL)."
+   :args {:url {:type :text :description "JDBC URL, e.g. `jdbc:postgresql://user-postgres:5432/userdb`."}
+          :user {:type :text :description "Database user."}
+          :password {:type [:secret :text]
+                     :description "Database password. Slot is `[:secret :text]` — only `[:secret :text]`-typed values flow in. Plain text auto-promotes (the slot tags it as a secret on entry); a stripped attempt downstream is rejected at type-check, and an inline `▶ Run` of any composition that touches this slot is hidden by the executor."}
+          :sql {:type :text :description "A single SQL statement. Parametrise inputs with `?` and supply them via `:params` — never interpolate untrusted values into the SQL string."}
+          :params {:type [:list :jsonb]
+                   :value []
+                   :description "Positional parameters for the `?` placeholders. Each item may be any JSON-encodable value (or a fn-ref). Default empty."}}
+   :return-type :int
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :sql-query — SELECT. Returns a list of rows-as-maps.
+  ;;
+  ;; Each row arrives as `{:column-name value ...}` (next.jdbc's
+  ;; default `as-unqualified-maps` snake-case keys). For consumers
+  ;; that just want JSON, `:jsonb` per item is the right shape.
+  ;; ---------------------------------------------------------------------
+  {:name :sql-query
+   :description "Execute a SELECT and return a list of rows. Each row is a `{column → value}` map (column names lower-snake_case, as Postgres reports them)."
+   :args {:url {:type :text :description "JDBC URL."}
+          :user {:type :text :description "Database user."}
+          :password {:type [:secret :text]
+                     :description "Database password. Slot is `[:secret :text]` — only `[:secret :text]`-typed values flow in. Plain text auto-promotes (the slot tags it as a secret on entry); a stripped attempt downstream is rejected at type-check, and an inline `▶ Run` of any composition that touches this slot is hidden by the executor."}
+          :sql {:type :text :description "A SELECT statement. Use `?` placeholders for inputs."}
+          :params {:type [:list :jsonb]
+                   :value []
+                   :description "Positional parameters for the `?` placeholders. Default empty."}}
+   :return-type [:list :jsonb]
+   :effects #{:db}}]}

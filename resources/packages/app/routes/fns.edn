@@ -350,6 +350,55 @@
    :parent :get-auth-required
    :args {:path "/fns/:fn-id/versions" :handler :list-fn-versions-handler}}
 
+  ;; --- /api/secrets — admin Secrets CRUD. All auth-required (matches
+  ;; /api/branches pattern). GET+POST share /secrets, so they merge
+  ;; method-maps into one reitit entry; DELETE on /secrets/:fn-id and
+  ;; PUT on /secrets/:fn-id/value are single-method leaves. ---
+
+  {:name :secrets-list-data
+   :description "Method-data for GET on `/api/secrets`. Combined into `:api-secrets-root`."
+   :parent :_method-map-with-middleware
+   :args {:method "get"
+          :handler :list-secrets-handler
+          :middleware :_middleware-list}}
+
+  {:name :secrets-create-data
+   :description "Method-data for POST on `/api/secrets` — body `{name, path, value, namespace-id?, description?}`. Combined into `:api-secrets-root`."
+   :parent :_method-map-with-middleware
+   :args {:method "post"
+          :handler :create-secret-handler
+          :middleware :_middleware-list}}
+
+  {:name :_secrets-root-methods
+   :description "Merged method-data — `{:get … :post …}` — for `/api/secrets`."
+   :parent :merge
+   :args {:maps [:secrets-list-data :secrets-create-data]}}
+
+  {:name :api-secrets-root
+   :description "Multi-method route entry `[\"/secrets\" {:get … :post …}]`."
+   :parent :list
+   :args {:items ["/secrets" :_secrets-root-methods]}}
+
+  {:name :api-secret-delete
+   :description "DELETE /api/secrets/:fn-id — hard delete + OpenBao cleanup. Rejected with 409-shape `{ok:false, reason:secret-in-use, usages:[…]}` when referenced. Auth-required."
+   :parent :delete
+   :args {:path "/secrets/:fn-id" :handler :delete-secret-handler}}
+
+  {:name :api-secret-inline-binding
+   :description "POST /api/secret-bindings — inline `:secret-path` binding for editor value-form. Body `{fn-id, slot-id, path, value}`. Auth-required. Distinct path from /api/secrets/:fn-id to avoid reitit literal-vs-param conflict."
+   :parent :post
+   :args {:path "/secret-bindings" :handler :create-inline-binding-handler}}
+
+  {:name :api-secret-rotate-value
+   :description "PUT /api/secrets/:fn-id/value — body `{value:\"…\"}`. Writes a new KV v2 version at the secret's existing path. Auth-required."
+   :parent :put
+   :args {:path "/secrets/:fn-id/value" :handler :rotate-secret-handler}}
+
+  {:name :api-secret-migrate
+   :description "POST /api/secrets/:fn-id/migrate — convert legacy :vault-get-shaped secret to :secret-leaf shape. Vault path/value preserved. Auth-required."
+   :parent :post
+   :args {:path "/secrets/:fn-id/migrate" :handler :migrate-secret-handler}}
+
   ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
   {:name :api-routes
@@ -375,4 +424,9 @@
                   :api-branch-conflicts
                   :api-branch-merge
                   :api-fn-versions
+                  :api-secrets-root
+                  :api-secret-inline-binding
+                  :api-secret-delete
+                  :api-secret-rotate-value
+                  :api-secret-migrate
                   :auth-check]}}]}

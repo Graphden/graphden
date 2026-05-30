@@ -20,7 +20,7 @@
 
    ## Role determined by field-presence (no `kind` discriminator)
 
-   | parent-fn-ids | impl-hash | base-fn-id | element-fn-id | constraint | fn-slot rows | Role |
+   | parent-ids | impl-hash | base-fn-id | element-fn-id | constraint | fn-slot rows | Role |
    |---|---|---|---|---|---|---|
    | empty | NOT NULL | NULL | NULL | NULL | * | base-fn (Clojure impl) |
    | empty | NULL | NULL | NULL | NULL | NOT empty | record-type (auto-builder) |
@@ -34,7 +34,7 @@
    The previous `arg` entity with `source-id` / `prev-arg-id` /
    `next-arg-id` chain is gone. Inheritance no longer materializes
    per-slot rows on each child fn — free args are computed by walking
-   parent-fn-ids chain and subtracting bound slots. Sequences live as
+   parent-ids chain and subtracting bound slots. Sequences live as
    list-typed slots with `binding-list-item` rows."
   (:require
     [graphden.schema.fields.types :as ft]
@@ -78,15 +78,24 @@
 
 
 ;; Override-kind enum — policy для binding'а value/ref:
-;;   :fixed   — descendants не могут override этот binding (default).
-;;   :default — это «дефолт», descendant может полностью заменить.
+;;   :fixed       — descendants не могут override этот binding (default).
+;;   :default     — это «дефолт», descendant может полностью заменить.
+;;   :secret-path — Followup-4: binding.value is a vault PATH; the
+;;                  executor auto-dereferences via clients/vault at
+;;                  arg-resolution time. The actual secret value
+;;                  never appears in graphden storage. Sync-time
+;;                  validation refuses this kind on slots whose
+;;                  effective type doesn't carry a `:secret` marker
+;;                  (so it can't be used to launder a vault path
+;;                  into a non-secret slot).
 (def ^:private override-kind-enum-uuid
   #uuid "8199ca93-0a28-403a-8625-69c6a801d0c4")
 
 
 (def ^:private override-kind-values
-  {:fixed   #uuid "902c5068-8162-493d-b9d0-3590efb4d30c"
-   :default #uuid "e0f08934-335a-4724-9ac0-de7256c4a55d"})
+  {:fixed       #uuid "902c5068-8162-493d-b9d0-3590efb4d30c"
+   :default     #uuid "e0f08934-335a-4724-9ac0-de7256c4a55d"
+   :secret-path #uuid "9b3f2e84-7c4a-4dd1-b15e-3a82c9f8b7d6"})
 
 
 ;; =============================================================================

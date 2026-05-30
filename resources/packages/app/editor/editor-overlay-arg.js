@@ -476,7 +476,7 @@ function createTypeChip(arg, options) {
   // info isn't available (read-only arg-overlay without binding).
   if (!refineConstraint && typeof getTypeNarrowingInfo === 'function') {
     const narrow = getTypeNarrowingInfo(arg);
-    if (narrow && narrow.baseTypeName && narrow.baseTypeName !== display) {
+    if (narrow?.baseTypeName && narrow.baseTypeName !== display) {
       chip.classList.add('arg-type-chip-narrowed');
       const subOf = document.createElement('span');
       subOf.className = 'arg-type-chip-narrowed-base';

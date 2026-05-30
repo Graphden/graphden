@@ -24,13 +24,13 @@
 The graph is built from five entity types arranged in a small,
 purposeful set:
 
-- **fn** — function or type-row. Inheritance via `parent-fn-ids`
+- **fn** — function or type-row. Inheritance via `parent-ids`
   (many-to-many junction). A fn has different roles depending on
   which fields are set:
-  - `parent-fn-ids` empty + `impl-hash` set → base-fn (Clojure impl)
-  - `parent-fn-ids` empty + `impl-hash=nil` + slots/refine/list →
+  - `parent-ids` empty + `impl-hash` set → base-fn (Clojure impl)
+  - `parent-ids` empty + `impl-hash=nil` + slots/refine/list →
     type-row (record / refinement / list)
-  - `parent-fn-ids` non-empty → composed fn
+  - `parent-ids` non-empty → composed fn
   - `name=nil` → anonymous (deduped via `anonymous-hash`)
 - **slot** — atomic `(name, type-fn-id)` pair, immutable
   post-create. The same slot may be exposed by many fns through
@@ -46,19 +46,19 @@ purposeful set:
   binding, ordered by `position`.
 
 The shape lets composition happen entirely at the data layer: a
-composed fn is "a `parent-fn-ids` plus zero or more bindings on the
+composed fn is "a `parent-ids` plus zero or more bindings on the
 inherited slots." No runtime arg injection.
 
 **Example: an `add-10` that pre-fills the first number:**
 
 ```
-fn add  (base-fn, parent-fn-ids: [], impl-hash: <hash of `+`>)
+fn add  (base-fn, parent-ids: [], impl-hash: <hash of `+`>)
 slot s-a  (name: "a", type-fn-id: int)
 slot s-b  (name: "b", type-fn-id: int)
 fn-slot {fn-id: add, slot-id: s-a, position: 0}
 fn-slot {fn-id: add, slot-id: s-b, position: 1}
 
-fn add-10  (parent-fn-ids: [add])
+fn add-10  (parent-ids: [add])
 binding {fn-id: add-10, slot-id: s-a, value: 10}
 ;; s-b is not bound — it surfaces as `add-10`'s free input
 ```
@@ -119,7 +119,7 @@ impossible** in the current architecture:
 
 1. **Lower-level — `validate-no-dependency-cycle-impl`**
    (`storage/protocol/constraints.clj`). Per-binding write-time
-   check. Walks `ref-fn-id` + `parent-fn-ids` + `type-override-fn-id`
+   check. Walks `ref-fn-id` + `parent-ids` + `type-override-fn-id`
    + `binding-list-item.ref-fn-id` edges from the bound ref. Rejects
    when the chain closes back on the owner. Carves out
    `owner == ref` (the bare self-reference) as allowed — but see
@@ -216,7 +216,7 @@ Storage-layer graph resolution caps walks via
 | id                  uuid PK                                |
 | name                text NULL (NULL → anonymous)           |
 | namespace-id        ref<ns> NULL                           |
-| parent-fn-ids       ref-many<fn>  -- inheritance closure   |
+| parent-ids       ref-many<fn>  -- inheritance closure   |
 | impl-hash           text NULL    -- base-fn marker         |
 | base-fn-id          ref<fn> NULL -- :refine target         |
 | element-fn-id       ref<fn> NULL -- :list element type     |
@@ -285,7 +285,7 @@ Storage-layer graph resolution caps walks via
 ### Inheritance model
 
 A composed fn `F` inherits its parents' slots through the
-`parent-fn-ids` BFS closure. Each slot in that closure is exposed
+`parent-ids` BFS closure. Each slot in that closure is exposed
 once at `F`; if multiple parents expose the same `slot-id`, that's
 sharing (fine). If they expose different slot-ids with the same
 `slot.name`, that's a name collision (rejected at write time by
@@ -413,11 +413,11 @@ To call the same base-fn with different inputs at different sites,
 create a composed fn per site:
 
 ```
-fn add-10-20  (parent-fn-ids: [add])
+fn add-10-20  (parent-ids: [add])
 binding {slot s-a, value 10}
 binding {slot s-b, value 20}
 
-fn add-30-40  (parent-fn-ids: [add])
+fn add-30-40  (parent-ids: [add])
 binding {slot s-a, value 30}
 binding {slot s-b, value 40}
 ```

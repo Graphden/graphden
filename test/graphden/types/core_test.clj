@@ -724,3 +724,134 @@
       ;; tag isn't pinned to any specific keyword.
       (let [unpinned {:tag :keyword :value :int}]
         (is (false? (t/subtype? unpinned result)))))))
+
+
+;; -----------------------------------------------------------------------------
+;; Secret type — monotone information-flow marker
+;; -----------------------------------------------------------------------------
+
+(deftest secret-predicates-test
+  (testing "secret-type? recognises only the canonical 2-element shape"
+    (is (t/secret-type? [:secret :text]))
+    (is (t/secret-type? [:secret [:list :int]]))
+    (is (not (t/secret-type? [:secret])))           ; missing inner
+    (is (not (t/secret-type? [:secret :text :extra])))
+    (is (not (t/secret-type? [:refine :text [:not= ""]])))
+    (is (not (t/secret-type? :text))))
+
+  (testing "secret-inner returns nil for non-secret types"
+    (is (= :text (t/secret-inner [:secret :text])))
+    (is (nil? (t/secret-inner :text))))
+
+  (testing "make-secret-type is idempotent (no double-wrap)"
+    (is (= [:secret :text] (t/make-secret-type :text)))
+    (is (= [:secret :text] (t/make-secret-type [:secret :text])))))
+
+
+(deftest secret-well-formed-test
+  (is (t/well-formed? [:secret :text]))
+  (is (t/well-formed? [:secret [:list :int]]))
+  ;; Inner must itself be well-formed.
+  (is (not (t/well-formed? [:secret :nope]))))
+
+
+(deftest secret-subtype-asymmetric-test
+  (testing "secret(T) ⊆ secret(T) — reflexive"
+    (is (t/subtype? [:secret :text] [:secret :text])))
+
+  (testing "secret(T) ⊆ secret(T') iff T ⊆ T' — covariant inside"
+    (is (t/subtype? [:secret :int] [:secret :numeric]))
+    (is (not (t/subtype? [:secret :numeric] [:secret :int]))))
+
+  (testing "secret(T) ⊄ T — CANNOT strip the taint (the whole point)"
+    (is (not (t/subtype? [:secret :text] :text)))
+    (is (not (t/subtype? [:secret :int] :int)))
+    (is (not (t/subtype? [:secret :int] :numeric))))
+
+  (testing "T ⊆ secret(T) — auto-promote into a secret-typed slot is OK"
+    ;; Monotone direction — once you say a slot holds a secret, any
+    ;; plain value flowing in is tainted on entry. This is what lets
+    ;; ordinary string fns (`:substring`, etc.) declare
+    ;; `:secret(:text)` slots and still accept both kinds of input;
+    ;; the `:return-type-rule` then taints the result iff the actual
+    ;; binding was already secret-marked.
+    (is (t/subtype? :text [:secret :text]))
+    (is (t/subtype? :int [:secret :int]))
+    (testing "promotion still respects inner subtyping"
+      (is (t/subtype? :int [:secret :numeric]))
+      (is (not (t/subtype? :text [:secret :int])))))
+
+  (testing "secret(T) ⊆ :any (the topmost type) — known escape hatch"
+    ;; Documented gap: :any-typed slots accept secrets and lose the
+    ;; marker. T3 audit identifies which :any slots should become
+    ;; secret-aware. For T1 we preserve current top-type semantics.
+    (is (t/subtype? [:secret :text] :any)))
+
+  (testing "secret(T) ⊄ :jsonb — jsonb wildcard doesn't auto-launder"
+    (is (not (t/subtype? [:secret :text] :jsonb)))))
+
+
+(deftest secret-resolve-alias-recurses-test
+  ;; A registered alias inside `[:secret ...]` expands like in any
+  ;; other compound — `well-formed?` would otherwise reject the inner
+  ;; keyword as unknown.
+  (t/clear-aliases!)
+  (try
+    (t/register-type-alias! :my-pwd-base :text)
+    (is (= [:secret :text]
+           (t/resolve-alias [:secret :my-pwd-base])))
+    (finally (t/clear-aliases!))))
+
+
+(deftest secret-freshen-recurses-test
+  (testing "freshen-args walks inside :secret"
+    (let [fresh (t/freshen-args {:s [:secret 'a]})
+          [_ inner] (:s fresh)]
+      (is (not= 'a inner))
+      (is (re-matches #"a-\d+" (name inner))))))
+
+
+(deftest contains-secret-recursive-test
+  (testing "top-level secret is detected"
+    (is (t/contains-secret? [:secret :text])))
+  (testing "secret inside compound shapes propagates"
+    (is (t/contains-secret? [:list [:secret :text]]))
+    (is (t/contains-secret? [:tuple :int [:secret :text]]))
+    (is (t/contains-secret? {:user :text :password [:secret :text]}))
+    (is (t/contains-secret? [:union :null [:secret :text]]))
+    (is (t/contains-secret? [:map :keyword [:secret :int]]))
+    (is (t/contains-secret? [:fn {:tok [:secret :text]} :int])))
+  (testing "no secret anywhere → false"
+    (is (not (t/contains-secret? :text)))
+    (is (not (t/contains-secret? [:list :int])))
+    (is (not (t/contains-secret? {:a :int :b :text})))
+    (is (not (t/contains-secret? [:refine :text [:not= ""]])))
+    (is (not (t/contains-secret? :any)))))
+
+
+(deftest taint-with-secret-if-tainted-propagation-test
+  (testing "no secret inputs → static return unchanged"
+    (is (= :text (t/taint-with-secret-if-tainted
+                   {:s {:type :text} :start {:type :int}}
+                   :text))))
+  (testing "any secret input → return wrapped"
+    (is (= [:secret :text]
+           (t/taint-with-secret-if-tainted
+             {:s {:type [:secret :text]} :start {:type :int}}
+             :text))))
+  (testing "deeply-nested secret (inside :list) also propagates"
+    (is (= [:secret :int]
+           (t/taint-with-secret-if-tainted
+             {:xs {:type [:list [:secret :text]]}}
+             :int))))
+  (testing "idempotent — static return that's already :secret stays :secret"
+    (is (= [:secret :text]
+           (t/taint-with-secret-if-tainted
+             {:s {:type :text}}
+             [:secret :text])))
+    (is (= [:secret :text]
+           (t/taint-with-secret-if-tainted
+             {:s {:type [:secret :text]}}
+             [:secret :text]))))
+  (testing "empty bindings-info — no taint, no wrap"
+    (is (= :text (t/taint-with-secret-if-tainted {} :text)))))

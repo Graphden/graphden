@@ -21,7 +21,8 @@
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.core :as types]))
 
 
 ;; =============================================================================
@@ -220,20 +221,108 @@
     r))
 
 
+(defn tainted-fn?
+  "True iff `fn-name`'s registered effective return-type carries a
+   `:secret` marker anywhere in its structure. Looked up against the
+   rich-types registry — same place the type-checker consults. Pure
+   data lookup, no name-dispatch on behaviour: every call walks the
+   computed type, not a hard-coded fn-name list.
+
+   `fn-name` arrives from storage as a string (the `:fn.name` field
+   is `:text`); the registry keys on keywords, mirroring
+   `declared-effects-of` just above."
+  [fn-name]
+  (and fn-name
+       (when-let [ret (:return (registry/rich-type-of (keyword fn-name)))]
+         (types/contains-secret? ret))))
+
+
+(defn touches-secret?
+  "True iff `fn-name`'s rich-type carries the `:secret` marker on
+   its return OR on any of its declared arg slots. Broader than
+   `tainted-fn?`: `tainted-fn?` only fires when the fn RETURNS a
+   secret; `touches-secret?` also fires when the fn CONSUMES one
+   (e.g. `:sql-exec` whose `:password` slot is `[:secret :text]`
+   but whose return is plain `:int`). Used by the audit trail to
+   flag executions that fed a secret into a side-effecting sink."
+  [fn-name]
+  (when fn-name
+    (when-let [rt (registry/rich-type-of (keyword fn-name))]
+      (boolean
+        (or (types/contains-secret? (or (:return rt) :any))
+            (some (fn [[_ arg-entry]]
+                    (types/contains-secret?
+                      (or (some-> arg-entry :type) arg-entry)))
+                  (:args rt)))))))
+
+
+(defn stamp-touched-secret
+  "Followup-3 audit trail: set `:touched-secret? true` on `outcome`
+   when (a) the fn-def's rich-type touches a `:secret` AND (b) the
+   runtime observed at least one side-effect. Both halves matter:
+   a pure tainted-aware run isn't an audit event; a runtime-side-
+   effect on a fn that never saw a secret isn't either. The
+   intersection is the row admins want to review.
+
+   Returns the outcome unchanged when one or both halves are false."
+  [fn-name outcome]
+  (cond-> outcome
+    (and (touches-secret? fn-name)
+         (seq (:runtime-effects outcome)))
+    (assoc :touched-secret? true)))
+
+
+(defn redact-outcome
+  "If `fn-name` is tainted (per `tainted-fn?`), strip the secret value
+   from a succeeded/failed outcome — the result body and the error
+   message can both carry the secret in plain text. Replaces them with
+   `:tainted?` markers so the caller (and the persisted row) hide the
+   value entirely instead of relying on string-matching masks.
+
+   Cancelled outcomes pass through (no value attached). Non-tainted
+   outcomes pass through unchanged."
+  [fn-name outcome]
+  (if (tainted-fn? fn-name)
+    (case (:status outcome)
+      :succeeded (-> outcome
+                     (assoc :result nil :tainted? true)
+                     (dissoc :error :error-data))
+      :failed    (-> outcome
+                     (assoc :tainted? true
+                            :error "Result hidden: fn return-type carries :secret marker.")
+                     (assoc :error-data {:reason :tainted}))
+      outcome)
+    outcome))
+
+
 (defn write-finished!
   "Update an existing row with the future's outcome.
    `outcome` is one of:
      {:status :succeeded :result V [:runtime-effects [\"env\" …]]}
      {:status :failed :error E :error-data ED [:runtime-effects …]}
-     {:status :cancelled [:runtime-effects …]}"
+     {:status :cancelled [:runtime-effects …]}
+
+   When the row's fn-def is tainted, `:result` is persisted as nil
+   and a `:tainted? true` flag rides alongside the row's other
+   metadata. Pass the outcome through `redact-outcome` BEFORE calling
+   this fn."
   [storage execution-id outcome]
   (let [base {:finished-at (java.time.Instant/now)
               :status (:status outcome)}
         body (case (:status outcome)
-               :succeeded (let [[ok? v] (jsonize-result (:result outcome))]
+               :succeeded (if (:tainted? outcome)
+                            ;; Hidden — :result stays nil on the row.
+                            ;; The error-data sidecar carries the
+                            ;; tainted flag so the GET endpoint can
+                            ;; surface it without re-reading the
+                            ;; rich-types registry on every poll.
                             (assoc base
-                                   :result v
-                                   :result-truncated? (not ok?)))
+                                   :result nil
+                                   :error-data {:reason :tainted})
+                            (let [[ok? v] (jsonize-result (:result outcome))]
+                              (assoc base
+                                     :result v
+                                     :result-truncated? (not ok?))))
                :failed (assoc base
                               :error (truncate-error (:error outcome))
                               :error-data (jsonize-error-data
@@ -241,7 +330,9 @@
                :cancelled base)
         body (cond-> body
                (:runtime-effects outcome)
-               (assoc :runtime-effects (:runtime-effects outcome)))]
+               (assoc :runtime-effects (:runtime-effects outcome))
+               (:touched-secret? outcome)
+               (assoc :touched-secret? true))]
     (sp/update-entity storage :fn-execution execution-id body)))
 
 
@@ -299,16 +390,24 @@
    write outcome to the row + clean up registry. `trace-atom` is the
    `*effect-trace*` atom from `run-future`; we snapshot it onto the
    row's `:runtime-effects` field alongside the terminal status, and
-   warn-log if it diverges from `declared-effects`."
-  [storage execution-id ^java.util.concurrent.Future fut trace-atom declared-effects]
+   warn-log if it diverges from `declared-effects`.
+
+   `fn-name` is consulted by `redact-outcome` to hide the result body
+   when the fn-def's effective return-type is `:secret`-marked. This
+   is the async-completion path; the sync inline-success path in
+   `apply-execute` redacts independently. Both write the same shape
+   to the row."
+  [storage execution-id fn-name ^java.util.concurrent.Future fut trace-atom declared-effects]
   (future
     (try
       (let [result @fut
             runtime-eff (snapshot-runtime-effects trace-atom)]
         (log-effect-drift! execution-id declared-effects runtime-eff)
         (write-finished! storage execution-id
-                         (cond-> {:status :succeeded :result result}
-                           runtime-eff (assoc :runtime-effects runtime-eff))))
+                         (->> (cond-> {:status :succeeded :result result}
+                                runtime-eff (assoc :runtime-effects runtime-eff))
+                              (stamp-touched-secret fn-name)
+                              (redact-outcome fn-name))))
       (catch java.util.concurrent.ExecutionException ee
         (let [cause (java.util.concurrent.ExecutionException/.getCause ee)
               runtime-eff (snapshot-runtime-effects trace-atom)]
@@ -318,11 +417,13 @@
                              (cond-> {:status :cancelled}
                                runtime-eff (assoc :runtime-effects runtime-eff)))
             (write-finished! storage execution-id
-                             (cond-> {:status :failed
-                                      :error (or (ex-message cause) (str cause))
-                                      :error-data (when (ex-data cause)
-                                                    (ex-data cause))}
-                               runtime-eff (assoc :runtime-effects runtime-eff))))))
+                             (->> (cond-> {:status :failed
+                                           :error (or (ex-message cause) (str cause))
+                                           :error-data (when (ex-data cause)
+                                                         (ex-data cause))}
+                                    runtime-eff (assoc :runtime-effects runtime-eff))
+                                  (stamp-touched-secret fn-name)
+                                  (redact-outcome fn-name))))))
       (catch java.util.concurrent.CancellationException _
         (write-finished! storage execution-id {:status :cancelled}))
       (catch Exception e

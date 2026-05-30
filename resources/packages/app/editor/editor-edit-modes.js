@@ -160,6 +160,16 @@ function enterArgValueEditMode(arg, anchorEl) {
   if (!arg) return;
   const expected = (typeof expectedSlotType === 'function')
                    ? expectedSlotType(arg) : null;
+  // Secret-typed slot (e.g. `:sql-exec/:password`): skip the generic
+  // value-form and open a 2-field path+value popover that writes a
+  // `:secret-path`-kinded binding via POST /api/secrets/binding. Only
+  // for the create-new case — when a binding already exists, the user
+  // must delete it first (the regular popover handles that).
+  if (typeof isSecretType === 'function' && isSecretType(expected)
+      && !arg['binding-id']) {
+    enterSecretBindingEditMode(arg, anchorEl);
+    return;
+  }
   openInlineEditPopover({
     anchorEl,
     ariaLabel: 'Edit arg value',
@@ -218,6 +228,85 @@ function enterArgValueEditMode(arg, anchorEl) {
               : null
   });
 }
+
+// Inline `:secret-path` form for a `[:secret T]`-typed slot. Two
+// fields: vault path + initial value. Submit posts to
+// /api/secrets/binding, which atomically writes the value to vault and
+// creates a `:secret-path`-kinded binding on (fn-id, slot-id). On
+// success the graph reloads so the new binding appears immediately on
+// the slot's edge.
+function enterSecretBindingEditMode(arg, anchorEl) {
+  if (!arg) return;
+  openInlineEditPopover({
+    anchorEl,
+    ariaLabel: 'Bind secret to slot',
+    makeControl(root) {
+      // Wrap in a div so `openInlineEditPopover`'s `control.focus()`,
+      // `control.addEventListener('keydown', …)` calls work — they
+      // expect an Element. The wrapper also lets `doSave` look up the
+      // two inputs by `data-secret-field`.
+      const wrap = document.createElement('div');
+      wrap.className = 'arg-value-edit-secret-form';
+      wrap.tabIndex = -1;
+      const hint = document.createElement('div');
+      hint.className = 'arg-value-edit-hint';
+      hint.textContent = 'Secret-typed slot — value goes to OpenBao at the path below.';
+      wrap.appendChild(hint);
+      const pathLbl = document.createElement('label');
+      pathLbl.className = 'arg-value-edit-hint';
+      pathLbl.textContent = 'Vault path';
+      wrap.appendChild(pathLbl);
+      const pathInput = document.createElement('input');
+      pathInput.type = 'text';
+      pathInput.className = 'arg-value-edit-input';
+      pathInput.placeholder = 'e.g. postgres/password';
+      pathInput.dataset.secretField = 'path';
+      wrap.appendChild(pathInput);
+      const valLbl = document.createElement('label');
+      valLbl.className = 'arg-value-edit-hint';
+      valLbl.textContent = 'Initial value (never displayed again)';
+      wrap.appendChild(valLbl);
+      const valInput = document.createElement('input');
+      valInput.type = 'password';
+      valInput.className = 'arg-value-edit-input';
+      valInput.dataset.secretField = 'value';
+      wrap.appendChild(valInput);
+      root.appendChild(wrap);
+      setTimeout(() => { try { pathInput.focus(); } catch (_) {} }, 0);
+      return wrap;
+    },
+    async doSave(wrap) {
+      const pathInput = wrap.querySelector('[data-secret-field="path"]');
+      const valInput = wrap.querySelector('[data-secret-field="value"]');
+      const path = (pathInput?.value || '').trim();
+      const value = valInput?.value || '';
+      if (!path) return { ok: false, error: 'Vault path is required.' };
+      if (!value) return { ok: false, error: 'Initial value is required.' };
+      try {
+        const r = await authFetch('/api/secret-bindings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            'fn-id': arg['fn-id'],
+            'slot-id': arg['slot-id'],
+            path,
+            value,
+          }),
+        });
+        if (r?.ok) {
+          const body = await r.json().catch(() => null);
+          if (body?.ok === false) return { ok: false, error: body.error || 'Save failed.' };
+          return { ok: true };
+        }
+        return { ok: false, error: await responseError(r) };
+      } catch (_) {
+        return { ok: false, error: 'Save failed — network error.' };
+      }
+    },
+    onSaved() { if (typeof initGraph === 'function') initGraph(); }
+  });
+}
+
 
 // Legacy fallback control — a single text input, used ONLY when
 // `/api/value-form` is unreachable. It carries the same `data-*`

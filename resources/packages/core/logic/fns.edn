@@ -67,15 +67,16 @@
   {:name :case
    :description "Constant-time dispatch on `value` via a `{match-value result}` map (Clojure's `(get clauses value default)`). Falls back to `:default` when the value isn't a key. Note: keys in a literal `:clauses` map come back keywordized after JSONB roundtrip — use string keys when matching against caller-supplied strings."
    :args {:value {:type :any :description "Value to look up in the clauses map."}
-          ;; `:clauses` is `[:map a :any]` — the dispatch table is a map,
-          ;; not an arbitrary jsonb value. `:any` on the value side keeps
-          ;; heterogeneous result-types (which case-return-rule then
-          ;; unions); the `a` key-type binds to whatever the matched
-          ;; keys classify as.
-          :clauses {:type [:map a :any] :description "Map of `{match-value result}` — the dispatch table. Pass either a literal map or a fn-ref that returns one."}
-          :default {:type a :required false
-                    :description "Fallback when `value` isn't a key in `:clauses`. Defaults to nil."}}
-   :return-type a}
+          ;; `:clauses` is `[:map a b]` — `a` is the key (dispatch) type,
+          ;; `b` is the result type. `case-return-rule` unions concrete
+          ;; clause-value types from a literal map with `:default`'s
+          ;; type, so heterogeneous clause values are preserved as a
+          ;; `[:union ...]` return; when `:clauses` is an opaque ref the
+          ;; return falls back to `b`.
+          :clauses {:type [:map a b] :description "Map of `{match-value result}` — the dispatch table. Pass either a literal map or a fn-ref that returns one."}
+          :default {:type b :required false
+                    :description "Fallback returned when `value` isn't a key in `:clauses`. Same type as the clause results. Defaults to nil."}}
+   :return-type b}
 
   ;; === Defaults ===
   ;; `:coalesce` is the null-eliminator. `:value` is `:any` — any

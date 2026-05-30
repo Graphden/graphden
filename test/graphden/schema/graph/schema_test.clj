@@ -30,7 +30,7 @@
       (is (contains? enums :override-kind))
       (is (= (into #{:null :any :fn} ft/supported-types)
              (set (keys (:values (get enums :value-kind))))))
-      (is (= #{:fixed :default}
+      (is (= #{:fixed :default :secret-path}
              (set (keys (:values (get enums :override-kind)))))))))
 
 

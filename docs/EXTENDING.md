@@ -141,21 +141,21 @@ for the up-to-date field list.
 
 | Entity | Notes |
 |---|---|
-| `fn` | function or type-row; `parent-fn-ids` ref-many for inheritance |
+| `fn` | function or type-row; `parent-ids` ref-many for inheritance |
 | `slot` | atomic `(name, type-fn-id)`; immutable post-create |
 | `fn-slot` | junction `(fn-id, slot-id, position)` |
 | `binding` | per-`(fn, slot)` overlay (value, ref-fn-id, rename-to, type-override-fn-id, terminal, list-{append,closed}, description) |
 | `binding-list-item` | sequence content under a list-typed binding |
 
-### Inheritance through parent-fn-ids
+### Inheritance through parent-ids
 
-A composed fn carries `parent-fn-ids` and a binding shadows the
+A composed fn carries `parent-ids` and a binding shadows the
 inherited slot:
 
 ```clojure
 ;; Base fn `add` has slot `a` (type :int)
 (sp/create-entity storage :fn
-                  {:name "add" :parent-fn-ids [] :impl-hash "<sha256>"})
+                  {:name "add" :parent-ids [] :impl-hash "<sha256>"})
 (let [slot-a (sp/create-entity storage :slot
                                 {:name "a" :type-fn-id int-fn-id})]
   (sp/create-entity storage :fn-slot
@@ -163,7 +163,7 @@ inherited slot:
 
   ;; Composed fn that binds a=5
   (let [add-5 (sp/create-entity storage :fn
-                                {:name "add-5" :parent-fn-ids [add-id]})]
+                                {:name "add-5" :parent-ids [add-id]})]
     (sp/create-entity storage :binding
                       {:fn-id (:id add-5) :slot-id (:id slot-a) :value 5})))
 ```

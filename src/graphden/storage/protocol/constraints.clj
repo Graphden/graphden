@@ -84,7 +84,7 @@
    the planned `:fix`-based path forward.
 
    Cycles longer than 1 (`A → B → A`) are rejected here directly;
-   the chain walk follows `ref-fn-id` + `parent-fn-ids` +
+   the chain walk follows `ref-fn-id` + `parent-ids` +
    `type-override-fn-id` + `binding-list-item.ref-fn-id` edges.
 
    Arguments:

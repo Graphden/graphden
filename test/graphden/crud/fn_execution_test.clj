@@ -344,6 +344,107 @@
       (finally nil))))
 
 
+(deftest apply-stamps-touched-secret-on-rows-that-feed-side-effecting-sinks-test
+  ;; Followup-3 audit trail: a row carries `:touched-secret? true`
+  ;; iff (a) the fn-def's rich-type contains a `:secret` marker
+  ;; anywhere AND (b) the runtime observed at least one effect.
+  ;; Both halves matter — a pure tainted-aware run isn't an audit
+  ;; event; a runtime-side-effect on a fn that never saw a secret
+  ;; isn't either.
+  (let [storage (create-full-storage)
+        base-name "audit-sink"
+        composed-name "audit-composed"
+        ;; The base-fn's impl records an :io effect AND is declared
+        ;; with a `[:secret :text]` slot — so `touches-secret?`
+        ;; returns true and the run will have non-empty
+        ;; runtime-effects.
+        _ (exec/register-base-fn! (keyword base-name)
+                                  (fn [_args _ctx]
+                                    (graphden.executor.compile-runtime/record-effect! :io)
+                                    42))
+        _ (registry/record-rich-types! (keyword base-name)
+                                       {:args {:secret-arg {:type [:secret :text]}}
+                                        :return-type :int
+                                        :effects #{:io}})
+        base (setup/create-base-fn! storage base-name :int)
+        composed (setup/create-composed-fn! storage composed-name (:id base))
+        _ (registry/record-rich-types! (keyword composed-name)
+                                       {:args {:secret-arg {:type [:secret :text]}}
+                                        :return-type :int
+                                        :effects #{:io}})
+        c (test-ctx storage)]
+    (testing "execute → row carries :touched-secret? true"
+      (let [r (fn-exec/apply-execute
+                c {:fn-id (:id composed)
+                   :args {:secret-arg "literal-auto-promoted-to-secret"}
+                   :timeout-ms 5000 :persist? true})
+            row (sp/read-entity storage :fn-execution
+                                (java.util.UUID/fromString (:execution-id r)))]
+        (is (= :succeeded (:status r)))
+        (is (true? (:touched-secret? r))
+            "the inline response must carry :touched-secret? true")
+        (is (true? (:touched-secret? row))
+            "the persisted row must carry :touched-secret? true")))))
+
+
+(deftest apply-leaves-touched-secret-nil-for-non-secret-fns-test
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "no-secret")
+        c (test-ctx storage)
+        r (fn-exec/apply-execute
+            c {:fn-id (:id composed)
+               :args {:a 1 :b 2}
+               :timeout-ms 5000 :persist? true})
+        row (sp/read-entity storage :fn-execution
+                            (java.util.UUID/fromString (:execution-id r)))]
+    (testing "non-secret fn-defs don't trip the audit flag"
+      (is (nil? (:touched-secret? r)))
+      (is (nil? (:touched-secret? row))))))
+
+
+(deftest apply-hides-result-for-tainted-fn-test
+  ;; A fn-def whose registered :return carries the `:secret` marker
+  ;; must NOT leak its computed value through `/api/execute`. The
+  ;; response shape becomes `{status: succeeded, result: nil,
+  ;; tainted?: true}` — the metadata still confirms success, but
+  ;; the value lives only inside the JVM.
+  (let [storage (create-full-storage)
+        ;; Register a base-fn whose impl returns the literal secret
+        ;; value. Its rich-types signature pins return to
+        ;; `[:secret :text]` so `tainted-fn?` sees the marker.
+        base-name "tainted-base"
+        composed-name "tainted-composed"
+        _ (exec/register-base-fn! (keyword base-name)
+                                  (fn [_ _ctx] "hunter2"))
+        _ (registry/record-rich-types! (keyword base-name)
+                                       {:args {}
+                                        :return-type [:secret :text]})
+        base (setup/create-base-fn! storage base-name :text)
+        composed (setup/create-composed-fn! storage composed-name (:id base))
+        _ (registry/record-rich-types! (keyword composed-name)
+                                       {:args {}
+                                        :return-type [:secret :text]})
+        c (test-ctx storage)]
+    (testing "inline succeeded response carries :tainted? without value"
+      (let [r (fn-exec/apply-execute
+                c {:fn-id (:id composed)
+                   :args {}
+                   :timeout-ms 5000 :persist? false})]
+        (is (= :succeeded (:status r)))
+        (is (nil? (:result r)) "secret value MUST NOT appear in response")
+        (is (true? (:tainted? r)))))
+
+    (testing "persisted execution row also stores nil + tainted marker"
+      (let [r (fn-exec/apply-execute
+                c {:fn-id (:id composed)
+                   :args {}
+                   :timeout-ms 5000 :persist? true})
+            row (sp/read-entity storage :fn-execution
+                                (java.util.UUID/fromString (:execution-id r)))]
+        (is (nil? (:result row)) "persisted :result must be nil")
+        (is (= :tainted (:reason (:error-data row))))))))
+
+
 (deftest apply-persists-when-persist-flag-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "persist")
@@ -1625,7 +1726,7 @@
         ;; original RuntimeException as cause.
         fut (future (throw (RuntimeException. "boom-fail")))
         reaper (persist/record-completion! storage (:id exec-row)
-                                           fut (atom #{}) nil)]
+                                           nil fut (atom #{}) nil)]
     ;; reaper itself is a future; wait for it to finish.
     @reaper
     (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
@@ -1644,7 +1745,7 @@
         ;; matches the `(instance? InterruptedException cause)` branch.
         fut (future (throw (InterruptedException. "cancelled")))
         reaper (persist/record-completion! storage (:id exec-row)
-                                           fut (atom #{}) nil)]
+                                           nil fut (atom #{}) nil)]
     @reaper
     (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
       (is (= :cancelled (:status row)))
@@ -1660,7 +1761,7 @@
         trace (atom #{:io})
         fut (future :result-value)
         reaper (persist/record-completion! storage (:id exec-row)
-                                           fut trace ["io"])]
+                                           nil fut trace ["io"])]
     @reaper
     (let [row (sp/read-entity storage :fn-execution (:id exec-row))]
       (is (= :succeeded (:status row)))

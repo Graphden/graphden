@@ -62,9 +62,12 @@
    instead of silently failing `:jsonb ⊄ <record>`.
 
    - keyword-keyed non-empty map → record-type `{k (classify v) …}`
-   - string/mixed-keyed map, or empty map → `:jsonb` (a genuine
-     generic JSON object — graphden record-types are keyword-keyed,
-     and an empty literal carries no field evidence)
+   - string-keyed map with homogeneous value type → `[:map :text V]`
+     (e.g. `{\"Content-Type\" \"text/html\"}` → `[:map :text :text]`).
+     Lets header-map literals type-check against `:ring-response`'s
+     `[:map :text :text]` slot.
+   - mixed-keyed map, or empty map → `:jsonb` (a genuine generic
+     JSON object — neither shape carries enough evidence)
    - vector → `[:list T]` where T is the least-upper-bound of the
      items' types (`:any` when items disagree or the vector is empty)
 
@@ -79,12 +82,20 @@
     (string? v)      :text
     (keyword? v)     :keyword
     (uuid? v)        :uuid
-    (map? v)         (if (and (seq v) (every? keyword? (keys v)))
+    (map? v)         (cond
+                       (empty? v) :jsonb
+                       (every? keyword? (keys v))
                        (into {}
                              (map (fn [[k fv]]
                                     [k (or (classify-literal fv) :any)]))
                              v)
-                       :jsonb)
+                       (every? string? (keys v))
+                       (let [val-types (into #{} (map #(or (classify-literal %) :any))
+                                             (vals v))]
+                         (if (= 1 (count val-types))
+                           [:map :text (first val-types)]
+                           :jsonb))
+                       :else :jsonb)
     (vector? v)      (let [elems (into #{} (map #(or (classify-literal %) :any)) v)]
                        [:list (if (= 1 (count elems)) (first elems) :any)])
     :else            nil))
@@ -303,8 +314,42 @@
                                (has-type-var? (types/map-val t)))
     (types/tuple-type? t)  (some has-type-var? (types/tuple-elems t))
     (types/refine-type? t) (has-type-var? (types/refine-base t))
+    (types/secret-type? t) (has-type-var? (types/secret-inner t))
     (types/union-type? t)  (some has-type-var? (types/union-members t))
     (types/record-type? t) (some has-type-var? (vals t))
+    :else                  false))
+
+
+(defn- any-shape?
+  "True iff `t` is `:any` OR a structural form whose every reasoned
+   position is `:any`. Such a value carries no more information than
+   the bare `:any` does, so the type-system's existing
+   `(= actual :any) → silent pass` escape hatch extends to it
+   consistently:
+   - `[:map :any :any]` — output of `merge` when sources disagree on
+     inner types; the runtime might be tighter (the author's intent),
+     but statically the shape is uninformative.
+   - `[:list :any]` — same story for sequence-producing rules that
+     widen when sources disagree.
+   - structural fn-type / tuple — analogous.
+
+   Without this hatch, a `:get`'s `:any` return (default when source
+   shape is unknown) propagates through `:merge` / `:update-in` to
+   produce `[:map :any :any]` / `:any` returns, which then strict-
+   reject against tighter declared / slot types downstream
+   (`[:map :text :text]`, `:ring-response-shape`). The author already
+   has an out for the bare-`:any` case; structural-any plugs the
+   remaining surface where return-rule chains land short of the
+   real runtime shape."
+  [t]
+  (cond
+    (= t :any)             true
+    (types/list-type? t)   (any-shape? (types/list-elem t))
+    (types/map-type? t)    (and (any-shape? (types/map-key t))
+                                (any-shape? (types/map-val t)))
+    (types/tuple-type? t)  (every? any-shape? (types/tuple-elems t))
+    (types/fn-type? t)     (and (every? any-shape? (vals (types/fn-args t)))
+                                (any-shape? (types/fn-ret t)))
     :else                  false))
 
 
@@ -495,14 +540,15 @@
    needed."
   [parent-name arg-name expected actual subst fn-name b-form]
   (cond
-    ;; `:any` is the doc's static escape hatch — it passes through
-    ;; silently. (`:null` used to pass too, as a blanket runtime
-    ;; escape hatch. Now that nil-producing base-fns are typed
-    ;; `[:union :null T]`, a bare `:null` actual is checked normally:
-    ;; it satisfies a nullable / `:any` / type-var slot via subtype?
-    ;; / unify, and is correctly REJECTED by a concrete non-null slot
-    ;; — that rejection is the point of the nullability work.)
-    (= actual :any)
+    ;; `:any` (or structural-`:any` like `[:map :any :any]` /
+    ;; `[:list :any]`) — the doc's static escape hatch. Carries no
+    ;; static information either way, so silent-pass. (`:null` used
+    ;; to pass too, as a blanket runtime escape hatch. Now that
+    ;; nil-producing base-fns are typed `[:union :null T]`, a bare
+    ;; `:null` actual is checked normally: it satisfies a nullable /
+    ;; `:any` / type-var slot via subtype? / unify, and is correctly
+    ;; REJECTED by a concrete non-null slot.)
+    (any-shape? actual)
     subst
 
     ;; `:never` (bottom) actual — a divergent `:throw` branch. It fits
@@ -720,9 +766,15 @@
         (let [inherited (some-> (get parent-args arg-name) types/resolve-alias)
               override' (types/resolve-alias override)]
           (when (and inherited
-                     ;; Type variables get unified later; skip them here.
-                     (not (types/type-var? inherited))
-                     (not (types/type-var? override'))
+                     ;; Type variables get unified later; skip ANY
+                     ;; type-var presence on either side (bare or
+                     ;; structural). A concrete override against an
+                     ;; inherited `[:fn {:arg a} b :any]` is a
+                     ;; narrowing via unify, but `subtype?` can't
+                     ;; reason about typevars so it would reject —
+                     ;; defer to the per-binding unify pass below.
+                     (not (has-type-var? inherited))
+                     (not (has-type-var? override'))
                      (not (types/subtype? override' inherited)))
             (throw-widening!
               fn-name parent-name arg-name b-form :type
@@ -764,13 +816,28 @@
 (defn- check-sequence-items
   "Walk every item in a literal-vector binding and unify against the
    slot's element type. `[1 \"two\" 3]` against `[:list :int]` fails
-   on the second item. A slot with `:any` elem-type accepts anything."
+   on the second item. A slot with `:any` elem-type accepts anything.
+
+   When the elem-type is a bare type-variable, classify every item
+   first and unify the var with the LEAST-UPPER-BOUND (a union) in
+   ONE pass — a per-item reduce would bind the var to the first
+   item's type and then reject any heterogeneous later item
+   (`[1 nil 2]` against `[:list a]` would fail on the nil even
+   though `a := [:union :int :null]` is the natural binding)."
   [primary-parent fn-name arg-name expected items subst]
   (let [elem-type (if (types/list-type? expected)
                     (types/list-elem expected)
                     :any)]
-    (if (= :any elem-type)
+    (cond
+      (= :any elem-type)
       subst
+
+      (types/type-var? elem-type)
+      (let [joined (types/make-union (mapv sequence-item-actual-type items))]
+        (check-binding! primary-parent arg-name elem-type
+                        joined subst fn-name {:value items}))
+
+      :else
       (reduce (fn [s item]
                 (check-binding! primary-parent arg-name elem-type
                                 (sequence-item-actual-type item)
@@ -1012,7 +1079,16 @@
 (defn- vector-binding-elem-types
   "Walk a literal-vector binding and produce the elem types — keyword
    items lift the ref's :return, map items handle :value/:ref, plain
-   items go through classify-literal."
+   items go through classify-literal.
+
+   Closure-capture items (`{:as :captured-name ...}`) are NOT literal
+   values — they're free-arg lift markers, the actual value comes
+   from the caller's scope at runtime. Type is therefore unknown
+   at this site (`:any`), mirroring `sequence-item-actual-type`.
+   Without this branch, the map gets classified as a record
+   (`{:as :keyword, :description :text}`) and downstream return-rules
+   (like `merge-return-rule`'s all-records branch) build the wrong
+   merged shape from these meta-fields."
   [items]
   (mapv (fn [item]
           (cond
@@ -1022,6 +1098,8 @@
             (or (classify-literal (:value item)) :any)
             (and (map? item) (contains? item :ref))
             (or (:return (registry/rich-type-of (:ref item))) :any)
+            (and (map? item) (contains? item :as))
+            :any
             :else
             (or (classify-literal item) :any)))
         items))
@@ -1384,10 +1462,46 @@
   "When a fn-def pins `:return-type T`, verify the computed return is a
    subtype of T. The declared T is then what the registry stores —
    downstream consumers see the declared contract, not the
-   possibly-tighter computed shape. Returns the recorded return."
+   possibly-tighter computed shape. Returns the recorded return.
+
+   Secret-taint propagation is allowed past the declared base type:
+   a computed `[:secret T]` against declared `T` is fine — the
+   marker is propagation metadata, not a widening, and the
+   *registered* return-type carries the marker so downstream
+   type-check sees the taint. The declared `T` documents the
+   underlying runtime contract; the rule lifts it to `[:secret T]`
+   when any input was tainted."
   [fn-name fn-def computed-return]
-  (let [declared (some-> fn-def :return-type types/resolve-alias)]
-    (when (and declared (not (types/subtype? computed-return declared)))
+  (let [declared (some-> fn-def :return-type types/resolve-alias)
+        computed-ok? (or (types/subtype? computed-return declared)
+                         (and (types/secret-type? computed-return)
+                              (types/subtype? (types/secret-inner computed-return)
+                                              declared))
+                         ;; Author-assertion mode: when the AUTHOR
+                         ;; declares a structural T (record, list,
+                         ;; map, fn, refinement, …) but the rule
+                         ;; chain bottoms out at `:any` /
+                         ;; `[:map :any :any]` / friends, accept the
+                         ;; assertion. Primitive declared types
+                         ;; (`:int`, `:text`, …) DON'T get this hatch
+                         ;; — those are typo-prone and the rejection
+                         ;; protects against "I said :int but my
+                         ;; computed is unconstrained". Structural
+                         ;; declared types are the contract-by-shape
+                         ;; case the author owns at runtime.
+                         (and (any-shape? computed-return)
+                              declared
+                              (not (types/primitive? declared))))
+        ;; When declared is plain `T` but computed is `[:secret T]`,
+        ;; record the tainted form — that's what downstream consumers
+        ;; need to see to refuse to drop the marker. Otherwise the
+        ;; declared form wins (downstream sees the author's contract,
+        ;; not a possibly-tighter computed shape).
+        recorded (if (or (nil? declared)
+                         (types/secret-type? computed-return))
+                   computed-return
+                   declared)]
+    (when (and declared (not computed-ok?))
       (throw (ex-info
                (str "type-check failed: " fn-name
                     " declares :return-type " (pr-str (:return-type fn-def))
@@ -1399,7 +1513,7 @@
                 :fn-name fn-name
                 :declared declared
                 :computed computed-return})))
-    (or declared computed-return)))
+    recorded))
 
 
 (defn- return-type-drift

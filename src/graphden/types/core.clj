@@ -143,6 +143,42 @@
   (and (vector? t) (= :refine (first t)) (= 3 (count t))))
 
 
+(defn secret-type?
+  "`[:secret <inner-type>]` — a monotone information-flow marker on
+   top of `<inner-type>`. Subtype-asymmetric: a secret value flows
+   only into another secret slot. The marker propagates through
+   composition via per-base-fn `:return-type-rule`s (see
+   `graphden.types.check`).
+
+   Distinct from refinements (which are subtypes of their base —
+   exactly the property we MUST NOT have for secrets, otherwise the
+   marker leaks)."
+  [t]
+  (and (vector? t) (= :secret (first t)) (= 2 (count t))))
+
+
+(defn secret-inner
+  "The inner type wrapped by `[:secret T]`."
+  [t]
+  (when (secret-type? t) (nth t 1)))
+
+
+(defn make-secret-type
+  "Smart constructor — idempotent: wrapping a value that's already
+   `[:secret T]` returns the same shape. Lets propagation rules
+   apply it blindly without producing `[:secret [:secret T]]`."
+  [inner]
+  (if (secret-type? inner)
+    inner
+    [:secret inner]))
+
+
+;; `contains-secret?` and `taint-with-secret-if-tainted` are defined
+;; further down — they need the compound-type accessors (fn-args,
+;; list-elem, refine-base, etc.) which appear after the predicate
+;; cluster above.
+
+
 (defn coarse-lub
   "Coarse least-upper-bound of a collection of types: all equal → that
    type, otherwise (or empty input) → `:any`. Used where a precise
@@ -295,8 +331,74 @@
     (map-type? t)    (and (well-formed? (map-key t)) (well-formed? (map-val t)))
     (tuple-type? t)  (every? well-formed? (tuple-elems t))
     (refine-type? t) (well-formed? (refine-base t))
+    (secret-type? t) (well-formed? (secret-inner t))
     (union-type? t)  (every? well-formed? (union-members t))
     :else            false))
+
+
+(defn contains-secret?
+  "True iff `t` contains a `[:secret …]` anywhere in its structure.
+   Used by `:return-type-rule` propagators: an arg whose type holds a
+   secret ANYWHERE (top-level, list element, record field, union
+   branch) taints the fn's return.
+
+   Mirrors the recursion shape of `well-formed?` / `occurs?` — a
+   missing arm here lets a secret slip through propagation silently,
+   so keep this in sync when adding new type-kinds."
+  [t]
+  (cond
+    (or (primitive? t) (type-var? t)) false
+    (secret-type? t)  true
+    (fn-type? t)      (or (some contains-secret? (vals (fn-args t)))
+                          (contains-secret? (fn-ret t)))
+    (list-type? t)    (contains-secret? (list-elem t))
+    (map-type? t)     (or (contains-secret? (map-key t))
+                          (contains-secret? (map-val t)))
+    (tuple-type? t)   (some contains-secret? (tuple-elems t))
+    (refine-type? t)  (contains-secret? (refine-base t))
+    (union-type? t)   (some contains-secret? (union-members t))
+    (record-type? t)  (some contains-secret? (vals t))
+    :else             false))
+
+
+(defn taint-with-secret-if-tainted
+  "Pluggable `:return-type-rule` propagator — if ANY arg in
+   `bindings-info` carries a `[:secret …]` anywhere in its type,
+   wrap the static return in `[:secret …]`. Otherwise return the
+   static return verbatim.
+
+   `bindings-info` is the shape `compute-return-type` passes to a
+   rule: `{slot-name {:type T :value V? :ref R? …}}`. We look at
+   `:type` only.
+
+   Base-fns with no other return-type-rule opt into propagation by
+   registering this fn directly. Base-fns that ALREADY have a
+   structural return-type-rule (`:first`, `:get`, etc.) wrap their
+   rule via `wrap-with-taint` so the structural computation runs
+   first AND the taint propagates if applicable."
+  [bindings-info default-ret]
+  (if (some (fn [[_slot info]] (contains-secret? (:type info))) bindings-info)
+    (make-secret-type default-ret)
+    default-ret))
+
+
+(defn wrap-with-taint
+  "Compose an existing `:return-type-rule` with taint propagation.
+   The wrapped rule runs `rule` to produce the structural return,
+   then taints the result if any input was already secret. When
+   `rule` is nil, returns the bare taint propagator.
+
+   Usage in `impls.clj`:
+     :first {:impl first-fn
+             :return-type-rule (types/wrap-with-taint first-return-rule)}
+
+   Keeps the existing structural narrowing (`:first` reads the elem
+   type out of `:coll`) AND adds the taint layer on top."
+  [rule]
+  (if rule
+    (fn [bindings-info default-ret]
+      (taint-with-secret-if-tainted bindings-info (rule bindings-info default-ret)))
+    taint-with-secret-if-tainted))
 
 
 (defn make-union
@@ -438,6 +540,7 @@
                             (tuple-elems t))
      (record-type? t) (into {} (map (fn [[k v]] [k (resolve-alias v seen)])) t)
      (refine-type? t) [:refine (resolve-alias (refine-base t) seen) (refine-constraint t)]
+     (secret-type? t) [:secret (resolve-alias (secret-inner t) seen)]
      (union-type? t)  (make-union (mapv #(resolve-alias % seen) (union-members t)))
      :else            t)))
 
@@ -564,6 +667,8 @@
     (map-type? t)    [:map (resolve subst (map-key t)) (resolve subst (map-val t))]
     (tuple-type? t)  (into [:tuple] (map #(resolve subst %)) (tuple-elems t))
     (record-type? t) (into {} (map (fn [[k v]] [k (resolve subst v)])) t)
+    (refine-type? t) [:refine (resolve subst (refine-base t)) (refine-constraint t)]
+    (secret-type? t) [:secret (resolve subst (secret-inner t))]
     (union-type? t)  (make-union (mapv #(resolve subst %) (union-members t)))
     :else t))
 
@@ -592,6 +697,7 @@
       (tuple-type? t') (some #(occurs? v % subst) (tuple-elems t'))
       (record-type? t') (some #(occurs? v % subst) (vals t'))
       (refine-type? t') (occurs? v (refine-base t') subst)
+      (secret-type? t') (occurs? v (secret-inner t') subst)
       (union-type? t') (some #(occurs? v % subst) (union-members t'))
       :else            false)))
 
@@ -696,7 +802,13 @@
     (>= (count b) 2)
     (every? (fn [[k bt]]
               (when-let [at (get a k)]
-                (subtype? bt at)))
+                ;; `:any` on the slot side is "no constraint" — the
+                ;; callee may narrow it freely (assertion-style:
+                ;; "I expect this loose slot to actually carry T").
+                ;; Without this, a slot declaring `:next-handler :any`
+                ;; rejects a callee whose body expects `[:fn ...]`,
+                ;; even though the slot promises nothing.
+                (or (= bt :any) (subtype? bt at))))
             b)
 
     ;; Single-arg / nullary slot, callee of the same arity — positional.
@@ -996,6 +1108,33 @@
       ;; SUB is not a refinement, SUP is — must NOT widen.
       false
 
+      ;; Secret: information-flow marker — asymmetric subtyping.
+      ;;
+      ;; `[:secret T] ⊆ [:secret T']` iff `T ⊆ T'` (covariant inside)
+      ;; `[:secret T] ⊆ T'`           NEVER       (can't STRIP the taint)
+      ;; `T ⊆ [:secret T']`           iff `T ⊆ T'` (auto-PROMOTE on entry
+      ;;                                            — monotone direction;
+      ;;                                            plain values can flow
+      ;;                                            into secret slots and
+      ;;                                            become tainted)
+      ;;
+      ;; Same shape rationale as `refine` above — the marker is opaque
+      ;; to the base type, but unlike `refine` the asymmetry is on
+      ;; LEAVING the marker: refine narrows (sub ⊆ base; strip allowed),
+      ;; secret labels (sub ⊄ base; strip forbidden). That's why we
+      ;; don't reuse `refine` — the subtype direction is the whole point
+      ;; of the abstraction.
+      (secret-type? sub)
+      (cond
+        (secret-type? sup) (subtype? (secret-inner sub) (secret-inner sup))
+        :else              false)
+
+      (secret-type? sup)
+      ;; Promotion: plain value into secret slot is fine; the value gets
+      ;; tainted on entry. This is what lets ordinary string fns declare
+      ;; `[:secret :text]` slots and still accept both kinds of input.
+      (subtype? sub (secret-inner sup))
+
       (and (record-type? sub) (record-type? sup))
       (record-subtype? sub sup)
       (and (list-type? sub) (list-type? sup))  (list-subtype? sub sup)
@@ -1248,6 +1387,7 @@
     (record-type? t) (into {} (map (fn [[k v]] [k (freshen* v subst)])) t)
     (refine-type? t) [:refine (freshen* (refine-base t) subst)
                       (refine-constraint t)]
+    (secret-type? t) [:secret (freshen* (secret-inner t) subst)]
     (union-type? t)  (make-union (mapv #(freshen* % subst) (union-members t)))
     :else            t))
 

@@ -69,8 +69,14 @@
     (is (= {:a :int}          (check/classify-literal {:a 1})))
     (is (= {:a :int :b :text} (check/classify-literal {:a 1 :b "x"})))
     (is (= {:a {:b :int}}     (check/classify-literal {:a {:b 1}})) "recurses"))
-  (testing "string/mixed-keyed maps and empty maps stay :jsonb"
-    (is (= :jsonb (check/classify-literal {"a" 1})))
+  (testing "string-keyed homogeneous-value maps classify as [:map :text V]"
+    (is (= [:map :text :int]  (check/classify-literal {"a" 1})))
+    (is (= [:map :text :text] (check/classify-literal {"Content-Type" "text/html"}))
+        "headers-shaped literal classifies against [:map :text :text]"))
+  (testing "string-keyed heterogeneous-value maps fall back to :jsonb"
+    (is (= :jsonb (check/classify-literal {"a" 1 "b" "x"}))
+        "values disagree → :jsonb, the conservative catch-all"))
+  (testing "mixed-keyed maps and empty maps stay :jsonb"
     (is (= :jsonb (check/classify-literal {:a 1 "b" 2})))
     (is (= :jsonb (check/classify-literal {})))))
 
@@ -1154,3 +1160,109 @@
             {:name :typo-get :parent :get
              :args {:coll {:value {:a 1}}
                     :key {:value :nope}}})))))
+
+
+;; ============================================================================
+;; Secret taint propagation (T2)
+;; ============================================================================
+
+(defn- register-propagate-stub!
+  "Canonical shape any T3 string-op will use: a slot declared as
+   `[:secret :text]` so BOTH plain `:text` and `[:secret :text]` can
+   flow in (the slot is secret-aware; plain values auto-promote on
+   entry), plus a `:return-type-rule` that propagates the taint to
+   the result iff any actual binding was already secret-marked."
+  []
+  (registry/record-rich-types! :propagate-stub
+                               {:args {:s {:type [:secret :text]}}
+                                :return-type :text
+                                :return-type-rule (fn [bi default-ret]
+                                                    (types-core/taint-with-secret-if-tainted
+                                                      bi default-ret))}))
+
+
+(deftest secret-tainted-input-bubbles-into-recorded-return
+  (testing "an arg ref'd to a :secret-returning fn taints the fn-def's return"
+    (registry/record-rich-types! :get-secret-stub
+                                 {:args {} :return-type [:secret :text]})
+    (register-propagate-stub!)
+
+    (check/check-fn-def! {:name :tainted-via-ref
+                          :parent :propagate-stub
+                          :args {:s :get-secret-stub}})
+
+    (testing "recorded return-type is :secret(:text) even though declared was :text"
+      (is (= [:secret :text]
+             (:return (registry/rich-type-of :tainted-via-ref)))))))
+
+
+(deftest secret-untainted-input-leaves-return-plain
+  (testing "no secret in inputs → static return verbatim, no auto-wrap"
+    (registry/record-rich-types! :clean-text-stub
+                                 {:args {} :return-type :text})
+    (register-propagate-stub!)
+    (check/check-fn-def! {:name :clean-via-ref
+                          :parent :propagate-stub
+                          :args {:s :clean-text-stub}})
+    (is (= :text (:return (registry/rich-type-of :clean-via-ref))))))
+
+
+(deftest enforce-declared-return-allows-secret-taint-over-plain-declaration
+  ;; Direct test of `enforce-declared-return!` semantics — a fn-def
+  ;; that PINS its declared return to plain `:text` MUST still type-check
+  ;; when the rule-computed return is `[:secret :text]`. The marker is
+  ;; propagation metadata, not a widening; without this exemption every
+  ;; tainted fn would have to declare `[:secret …]` explicitly, breaking
+  ;; the "declare base type, let propagation lift it" model.
+  (registry/record-rich-types! :get-secret-stub
+                               {:args {} :return-type [:secret :text]})
+  (register-propagate-stub!)
+  (check/check-fn-def! {:name :pinned-text-with-secret-input
+                        :parent :propagate-stub
+                        :return-type :text
+                        :args {:s :get-secret-stub}})
+  (is (= [:secret :text]
+         (:return (registry/rich-type-of :pinned-text-with-secret-input)))))
+
+
+(deftest secret-tainted-result-cannot-flow-into-plain-text-slot
+  ;; The downstream check — once a fn-def's return is `:secret(:text)`,
+  ;; passing IT as a binding to a slot typed plain `:text` must REJECT.
+  ;; This is the structural enforcement that closes the "compose with
+  ;; arbitrary string op, get secret in result" leak.
+  (registry/record-rich-types! :get-secret-stub
+                               {:args {} :return-type [:secret :text]})
+  (registry/record-rich-types! :plain-text-sink
+                               {:args {:s {:type :text}}
+                                :return-type :int})
+  (is (thrown-with-msg?
+        clojure.lang.ExceptionInfo #"(?i)type-check failed"
+        (check/check-fn-def! {:name :leak-attempt
+                              :parent :plain-text-sink
+                              :args {:s :get-secret-stub}}))))
+
+
+(deftest secret-tainted-result-flows-into-secret-aware-slot
+  ;; Inverse — a sink that DECLARES the slot as :secret(:text) accepts
+  ;; a secret-returning ref.
+  (registry/record-rich-types! :get-secret-stub
+                               {:args {} :return-type [:secret :text]})
+  (registry/record-rich-types! :secret-aware-sink
+                               {:args {:token {:type [:secret :text]}}
+                                :return-type :int})
+  (is (some? (check/check-fn-def! {:name :auth-call
+                                   :parent :secret-aware-sink
+                                   :args {:token :get-secret-stub}}))))
+
+
+(deftest plain-text-promotes-into-secret-aware-slot
+  ;; Auto-promote on entry — a sink with a `[:secret :text]` slot
+  ;; accepts a literal `:text` binding too, and the propagation rule
+  ;; correctly leaves the return untainted (the binding was actually
+  ;; plain; the slot's secret-typing only marks "this slot can hold
+  ;; secrets, treat its contents as such").
+  (register-propagate-stub!)
+  (check/check-fn-def! {:name :plain-into-secret-slot
+                        :parent :propagate-stub
+                        :args {:s {:value "literal-text"}}})
+  (is (= :text (:return (registry/rich-type-of :plain-into-secret-slot)))))

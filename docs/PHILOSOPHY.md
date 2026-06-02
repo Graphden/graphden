@@ -7,13 +7,79 @@
 
 ## Table of Contents
 
-1. [The Problem](#the-problem)
-2. [Why Graph?](#why-graph)
-3. [Design Principles](#design-principles)
-4. [Language Aspects (SICP)](#language-aspects-sicp)
-5. [Trade-offs and Constraints](#trade-offs-and-constraints)
-6. [Component-to-Principle Mapping](#component-to-principle-mapping)
-7. [Open Questions](#open-questions)
+1. [Positioning](#positioning)
+2. [The Problem](#the-problem)
+3. [Why Graph?](#why-graph)
+4. [Design Principles](#design-principles)
+5. [Language Aspects (SICP)](#language-aspects-sicp)
+6. [Trade-offs and Constraints](#trade-offs-and-constraints)
+7. [Component-to-Principle Mapping](#component-to-principle-mapping)
+8. [Open Questions](#open-questions)
+
+---
+
+## Positioning
+
+Graphden is built **first as the author's own tool** — to make day-to-day
+software work less annoying — and **only secondarily as a product**.
+This ordering is load-bearing for design decisions:
+
+- A complication is acceptable only if it removes a real pain the
+  author hits regularly.
+- "Enterprise" feature pressure that doesn't match the author's pain
+  is rejected by default. Compliance dashboards, configurable RBAC
+  matrices, audit-log retention policies, etc. don't qualify on their
+  own.
+- Self-hosted is a first-class deployment shape — the author and
+  developers like them must be able to run a complete copy on their
+  own machine. Multi-tenant cloud is a layer **on top**, not the only
+  shape.
+- The target domains are the author's actual workload: web services,
+  Telegram bots, data pipelines. Not gamedev, not embedded, not
+  kernel-level. Trade-offs are tuned for that workload.
+
+When evaluating a proposed change, the question is not "does someone
+want this?" but "does this remove a pain the author has, or does it
+unlock a deployment shape the author needs?". If neither — defer.
+
+### Trade-off Sovereignty
+
+In any popular system the trade-offs are chosen by someone else —
+language designer, framework author, vendor. Those choices often
+optimise for the chooser's pain, not the user's, and stay frozen
+long after the original constraint has passed (because too many
+downstream users now depend on them).
+
+Graphden is built so that **the source of trade-offs is the author**.
+Decisions about what to optimise for — readability vs. performance,
+expressiveness vs. minimal model, explicitness vs. brevity — are
+made internally and can be re-evaluated at any time, because no
+external party is locked into the previous choice.
+
+This is both a reason to build the tool from scratch (existing tools
+bake in someone else's trade-offs) and a guard rail for accepting
+external pressure: a contribution or feature request that would put
+someone else in vendor-position for the author is rejected by
+default.
+
+Practical consequences:
+
+- Features that look "industry standard" but serve a customer the
+  author doesn't have are **not built**. "Configurable RBAC matrix
+  because Retool has one" is not a reason. "The author wants per-fn
+  permissions because their own work needs them" is.
+- "Best practice" arguments are weighed against the practice's
+  original constraint, not its current popularity. A pattern adopted
+  because of a constraint that no longer applies is a candidate for
+  removal, not preservation.
+- Contributors are welcomed but **cannot create vendor obligations**:
+  a feature accepted into open core must not lock the author into
+  supporting a use case the author does not also have.
+
+This is the load-bearing reason for "tool for myself first, product
+second" — only the author-as-sole-source-of-trade-offs framing
+guarantees the author retains the ability to make this tool ever
+work the way it should.
 
 ---
 
@@ -38,10 +104,52 @@ Modern programming languages use **text** as the primary representation:
 2. **Human side**: Humans write and read text to express their thoughts. **This is where we see room for improvement.**
 
 Problems with text-based code:
-- **Reading is hard** — requires parsing symbols, understanding context, building mental model
-- **Writing is hard** — requires remembering syntax, conventions, boilerplate
-- **Editing is error-prone** — typos, missing brackets, wrong indentation
-- **Duplication** — copy-paste is the primary reuse mechanism in practice
+- **Reading is hard** — requires parsing symbols, understanding context, building mental model. Concrete instances: indentation in Python, paren balancing in Clojure, the various keyword/operator/annotation forms in other languages — all collapse to AST anyway, but the reader pays the cost of recognising them every time.
+- **Mental substitution between definition and call site** — to understand what a piece of code does, the reader jumps to each function's definition, mentally inlines its body with the actual arguments, then jumps back. This is the single largest cognitive cost of reading code, and it is not optional — it must be done every time.
+- **Writing is hard** — requires remembering syntax, conventions, boilerplate.
+- **Editing is error-prone** — typos, missing brackets, wrong indentation.
+- **Duplication** — copy-paste is the primary reuse mechanism in practice.
+- **`let` for single-use values** — Clojure (and most other languages) name intermediate values even when they are used exactly once, purely to shorten the surrounding form. The name has no semantic value; it is a layout device.
+
+### The Imports Problem
+
+Every file in a classical project starts with a block of imports
+declaring which namespaces / libraries / modules it depends on. The
+import block is **visual noise** that the system could derive from
+which names the file actually references — and indeed many IDEs
+auto-manage it. But the noise stays on screen.
+
+Worse, opening a library to understand or extend it is **a separate
+step** that requires navigating to that library's source, switching
+projects, possibly checking out a different repository. In practice
+this step is skipped: a library is treated as a black box documented
+by its README. Extending or improving a library while using it is
+rare even for one-line changes.
+
+Graphden's "code = graph in DB" removes both: there are no files, so
+no imports; libraries (packages) are graphs of fns in the same DB,
+visible and editable in the same UI as user code.
+
+### The Layered-Access Problem
+
+Production software has a chain of roles with very different
+technical depth (developer, integrator, domain expert, end user — see
+[§ Role Chain](#role-chain-and-extensibility) for the full breakdown).
+Classical languages give us **one knob to expose code**: source-code
+visibility. This forces a binary:
+
+- **Expose everything** — the domain expert can edit anything, but
+  can also break anything. Dangerous; demands code review or trust.
+- **Expose nothing** — build a custom admin UI for each project
+  describing what the domain expert is allowed to do. Expensive to
+  build, expensive to maintain, always one feature behind real needs.
+
+What we want is a graded surface where each role sees only the
+operations and primitives it needs, and adding a new operation does
+not require building a new UI from scratch. This is a top-level
+motivation for graphden, not just a feature — see
+[§ Role Chain and Extensibility](#role-chain-and-extensibility) for
+the design that addresses it.
 
 ---
 
@@ -307,6 +415,53 @@ versioning per-fn instead of per-binding, lost dedup).
 2. **Implicit behavior** — Everything should be explicit in the graph structure.
 
 3. **Magic** — No hidden transformations or special cases.
+
+### Patterns We Explicitly Don't Introduce
+
+These are recurring design temptations that look local-good but lose
+against principle 2 (Minimal entities). Recording them so future-us
+can re-derive the answer fast.
+
+#### Tests are not a new entity or field
+
+A test in graphden is **a fn-def with all free-args bound** —
+already expressible in the existing model. The temptation is to add
+`fn.is_test` (or a `test` entity), so the UI can filter tests out of
+the main list and tools can run them in batch. We reject that:
+
+- **Marker**: the **`tests/` namespace prefix**. Any fn whose
+  namespace starts with `tests/` is a test. Zero schema change.
+- **Querying** "all tests across the project" = "fns with namespace
+  prefix `tests/`" — same cost as a flag.
+- **What this loses**: a test cannot live in the same namespace as
+  the fn it tests. Accepted trade-off — segregating tests is the
+  common pattern anyway, and the namespace tree is the right place
+  to express that segregation.
+
+#### Workspaces / projects are not a new entity
+
+A workspace is **a set of namespaces visible together**. The
+temptation is to add a `workspace` entity + `fn↔workspace` M:N
+junction. We reject that:
+
+- **Marker**: namespace becomes **M:N self-referential** — `namespace`
+  gets a `parent_namespace_ids` junction, mirroring how `fn` already
+  has `parent-ids`. A "workspace" is just a namespace whose role is
+  to pull in other namespaces.
+- **One fn visible in multiple workspaces** = the fn's namespace has
+  multiple parent namespaces. No edge from fn itself to workspace.
+- **What this loses**: per-user "show me only these workspaces in
+  the sidebar" is a UI/user concern, NOT a graph property — it lives
+  in user prefs, not in graph entities.
+
+#### Per-fn debug/trace toggles are not a stored field
+
+Logging / intermediate-result capture is per-execution context, not
+per-fn state. The temptation is `fn.trace_enabled`. We reject that:
+trace is a runtime decoration applied by the executor when asked,
+not a property of the fn entity. See
+[§ Open Questions → Debugging](#debugging-and-observability) for the
+runtime constraints.
 
 ---
 
@@ -585,6 +740,119 @@ The ultimate goal: the system's own infrastructure is described in the same grap
 
 This is analogous to Lisp's self-hosting capability: the language is expressive enough to describe its own extensions. The practical limit is the bootstrapping boundary — a minimal Clojure core (executor + base CRUD) that cannot itself be a graph, because it's needed to execute graphs.
 
+#### UI as Graph — two-step roadmap
+
+The editor frontend today is *partially* graph-described: its JS and
+CSS are stored as `:const` fn-defs in `resources/packages/app/editor/`
+(big strings of source) and the route composition is a graph. But
+the **structure** of the UI — DOM tree, components, data bindings —
+is text inside those `:const` strings, not graph nodes.
+
+The author's eventual goal is a single fully graph-described UI.
+That is a large project, so we commit to it as a **two-step
+roadmap**, where each step delivers value on its own:
+
+**Step 1 — Make `:const` JS/CSS editable from inside the running
+editor.**
+
+- Pop-over editor for the body of `:const` JS/CSS fn-defs (proper
+  monospace edit surface, not the generic value form).
+- One-click "rebuild the bundle and reload" for the editor itself.
+- Optionally back the source blobs by S3 (or any blob store) instead
+  of the file system, so the deployed editor can store edits without
+  shipping a new jar.
+
+This step is small and removes the immediate pain: today, editing
+the editor's own JS/CSS requires going to disk and rebuilding the
+jar by hand.
+
+**Step 2 — Express UI structure as fn-defs.**
+
+- A small set of base-fns that produce DOM (hiccup-like):
+  `element`, `attrs`, `text`, plus a renderer that takes a fn-id and
+  produces the rendered HTML/HTMX/web-component.
+- UI components become fn-defs that compose those base-fns plus
+  references to data fn-defs for bindings.
+- Visual editing of UI lives in the same editor — a UI component is
+  just another fn-graph, edited like any other.
+
+Step 2 is the deeper ambition (think Clojurescript / Hyperfiddle /
+Electric Clojure but graph-native). It is **not** scheduled as a
+near-term feature; it is logged here so that step 1 is built without
+accidentally precluding step 2 — e.g. by hard-coupling the editor's
+DOM building to text-string `:const` blobs.
+
+#### Protocols via type-row + slot-typed `:fn`
+
+Clojure's `defprotocol` packs three concerns into one declaration:
+the **shape** of the contract, the **registration** of an
+implementation, and the **dispatch** at the call site. In graphden
+each of these falls out of existing mechanisms — **no protocol
+entity is added to the schema**.
+
+**Contract shape** — a **type-row** (a `fn` entity with no
+`impl-hash` and no `parent-ids`) whose slots are typed `:fn` declares
+the contract. Each `:fn`-typed slot is one abstract method; the
+slot's effective signature is the method signature.
+
+**Implementation** — a fn-def with `:parent <type-row>` and bindings
+from each abstract slot to a concrete callable IS an implementation.
+The existing sync-time type-check guarantees all required slots are
+bound and the bound callables match the slot's signature; no
+separate "extend-protocol" mechanism needed.
+
+**Dispatch — free-arg injection.** The canonical pattern is that a
+consumer graph carries a free-arg whose type is the type-row, and
+the concrete implementation is supplied at execution time or by a
+parent graph one level up. This keeps dispatch **explicit**: which
+implementation was used is visible in the graph structure, not in
+ambient runtime state. An ambient-singleton alternative ("the fn-def
+named `:current-storage`, referenced from anywhere") is technically
+possible but **violates Principle 3 (Explicit)** and is not the
+recommended pattern.
+
+**Contract verification** — protocol contract tests live in the
+`tests/` namespace ([§ Patterns We Don't Introduce](#patterns-we-explicitly-dont-introduce))
+under a sub-namespace named after the protocol. A test is a fn-def
+with one free-arg of the protocol's type and all other args bound;
+running the contract suite against a concrete implementation =
+passing that implementation as the free-arg's value. This mirrors
+how `graphden.storage.protocol.contract-tests` works at the Clojure
+level, lifted into the graph.
+
+Worked example — the storage swap path:
+
+```edn
+;; (a) Contract — type-row, declares the operations
+{:name :Storage
+ :slots [{:name :read  :type :fn}     ; (k -> v)
+         {:name :write :type :fn}     ; (k v -> nil)
+         {:name :query :type :fn}]}   ; (where -> [v])
+
+;; (b) Implementation — concrete impl over Postgres base-fns
+{:name :postgres-storage-impl
+ :parent :Storage
+ :args {:read  :pg-read-row
+        :write :pg-write-row
+        :query :pg-query-rows}}
+
+;; (c) Consumer — a route handler takes :storage as a free-arg
+{:name :user-profile-handler
+ :parent :route-handler
+ :args {:fetch (-> :storage :read :user-by-id …)}}
+
+;; (d) Wire-up at the top — bind storage once for the whole app
+{:name :web-server
+ :parent :http-server
+ :args {:handler :api-router
+        :storage :postgres-storage-impl}}
+```
+
+Swapping to a different backend = supplying a different fn-def to
+the top-level `:storage` arg. Nothing in `:user-profile-handler` or
+below needs to change. The consumer never names "postgres" — it
+only knows it has something of type `:Storage`.
+
 ---
 
 ## Open Questions
@@ -602,6 +870,38 @@ This is analogous to Lisp's self-hosting capability: the language is expressive 
 - Execution path (sequence of fn-ids traversed)
 - Node highlighting in visual UI
 - Time-travel debugging (replay execution with cached intermediate results)
+
+**Non-negotiable constraints when this lands** — captured early so a
+future implementation cannot accidentally make production
+unreliable:
+
+1. **Per-fn opt-in, not global switch.** A user enables capture on a
+   specific fn-id (or a small subtree they explicitly select). There
+   is no "trace everything" toggle reachable from the UI. The cost
+   of capture is paid only where the user knowingly asked for it.
+2. **Sampling by default.** When capture is enabled, the default
+   sample rate is well below 100% (target: ~1%, tunable per session,
+   never persisted as 100%). Full capture requires a second explicit
+   confirmation in the UI.
+3. **Confirm before full intermediate-result capture.** Storing the
+   per-step result of every sub-fn is the expensive case. The UI
+   must require an explicit "I really want this" interaction before
+   that mode engages, with an estimated cost displayed.
+4. **Auto-skip for `:secret`-typed values.** We already have the
+   `:secret` information-flow type-marker
+   ([SECRETS.md](SECRETS.md)). The capture pipeline reuses it:
+   any value whose static type is `:secret`-marked is **never** read
+   into the capture buffer. The fn that produced it shows as
+   "[hidden — secret]" in the trace.
+5. **Bounded by size and time, with auto-expire.** Capture buffers
+   have per-session size limits (e.g. 16 MB) and a TTL (e.g. 1 hour
+   after last view). Hitting either drops the oldest entries first;
+   the user is told. There is no path where "I clicked something and
+   now the DB is full of trace blobs from last week".
+
+These constraints together define the answer to "what stops a user
+from accidentally turning debug capture into a DoS on themselves" —
+which is the single failure mode that matters for this feature.
 
 ### Intermediate Value Naming
 

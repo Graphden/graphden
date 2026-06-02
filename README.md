@@ -33,8 +33,9 @@ Graphden separates **base functions** (Clojure implementations) from **fn entiti
     :parent :const
     :args {:x {:status 200 :body "Hello from Graphden!"}}}
 
-   ;; Build route map: {"handler" <fn>}
-   ;; Note: :hello-handler-fn is executed because assoc's :v arg has is-fn=false
+   ;; Build route map: {"handler" <handler-result>}
+   ;; :hello-handler-fn is EXECUTED here — assoc's :v slot is not :fn-typed,
+   ;; so the executor evaluates the ref and uses its result.
    {:name :hello-route-data-fn
     :parent :assoc
     :args {:m {}, :k "handler", :v :hello-handler-fn}}
@@ -45,13 +46,20 @@ Graphden separates **base functions** (Clojure implementations) from **fn entiti
     :args {:routes [["/" {:get :hello-route-data-fn}]]}}
 
    ;; Start HTTP server
+   ;; :router-fn is PASSED AS A FUNCTION here — http-server's :handler
+   ;; slot is :fn-typed, so the executor hands the fn-id over instead
+   ;; of executing it.
    {:name :web-server-fn
     :parent :http-server
     :args {:handler :router-fn
            :port 8080}}])
 
-;; Reference syntax: :fn-name creates ref to function
-;; Behavior (execute vs pass fn-id) is determined by is-fn field on parent arg
+;; Reference syntax: :fn-name creates a ref to another fn.
+;; Whether the executor executes the ref and uses its result, or
+;; passes the fn-id directly (HOF callable), is determined by the
+;; SLOT TYPE: `:fn`-typed slots receive the fn-id; everything else
+;; gets the executed result. One concept — the type chip in the
+;; editor — drives both the UI and the dispatch.
 ```
 
 The executor resolves this graph and starts a working HTTP server.
@@ -84,16 +92,15 @@ bb fix       # Auto-fix formatting
 │                    EXECUTOR LAYER                           │
 │  executor + base-functions + fn-registry + fn-composition   │
 ├─────────────────────────────────────────────────────────────┤
-│                     GRAPH LAYER                             │
-│  graph-data-schema: fn, fn-schema, arg-schema, arg-value    │
-│  graph-storage-age: Apache AGE graph storage                │
-├─────────────────────────────────────────────────────────────┤
-│                    STORAGE LAYER                            │
-│  storage-protocol: StorageCRUD, ExecutionGraph protocols    │
-│  postgres-storage: PostgreSQL backend                       │
+│                     STORAGE LAYER                           │
+│  storage-protocol: StorageCRUD, ExecutionGraph, Constraints │
+│  postgres-storage + VersionedStorage decorator (optional)   │
 ├─────────────────────────────────────────────────────────────┤
 │                  DATA SCHEMA LAYER                          │
-│  data-schema-protocol + malli-data-schema + field-types     │
+│  schemas: malli-data-schema, graph-data-schema              │
+│          (fn / slot / fn-slot / binding /                   │
+│           binding-list-item),                               │
+│          versioned-data-schema (branch + version tables)    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,14 +114,13 @@ bb fix       # Auto-fix formatting
 | `schema/protocol/` | DataSchema protocol for entity definitions |
 | `schema/fields/` | Supported data types (:int, :text, :bool, :jsonb, etc.) |
 | `schema/malli/` | Malli-based schema builder |
-| `schema/graph/` | Function graph entity schema (fn, fn-schema, arg-schema, arg-value) |
+| `schema/graph/` | Function graph entity schema (fn / slot / fn-slot / binding / binding-list-item) |
 
 ### Storage
 
 | Module | Description |
 |--------|-------------|
 | `storage/postgres/` | PostgreSQL storage backend |
-| `storage/age/` | Apache AGE graph storage (execution graph) |
 
 ### Execution
 
@@ -153,6 +159,8 @@ bb fix       # Auto-fix formatting
 | Document | Description |
 |----------|-------------|
 | [PHILOSOPHY.md](docs/PHILOSOPHY.md) | Core principles and design philosophy |
+| [DISTRIBUTION.md](docs/DISTRIBUTION.md) | License layout, deployment shapes, packages model, competitors, feature acceptance rules |
+| [tutorial/](docs/tutorial/) | Step-by-step lessons for new users — grows with every feature block |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions, data model, constraints, execution model |
 | [ROADMAP.md](docs/ROADMAP.md) | Implementation status, phases, future plans |
 | [CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications |
@@ -189,7 +197,9 @@ bb coverage                # Tests with coverage report
 open target/coverage/index.html
 ```
 
-Current: **667 tests, 90% forms / 95% lines coverage**
+Coverage is tracked per build — run `bb coverage` and open
+`target/coverage/index.html` for the current breakdown. The badge at
+the top of this file shows the latest CI value.
 
 ## License
 

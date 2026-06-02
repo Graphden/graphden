@@ -175,9 +175,119 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 
 ---
 
+## Roadmap by Blocks (current plan)
+
+This is the active forward plan, agreed with the author. See
+[PHILOSOPHY § Positioning](PHILOSOPHY.md#positioning) and
+[DISTRIBUTION § Author Horizon](DISTRIBUTION.md#author-horizon) for
+context. The plan supersedes the per-item entries in § Future Work
+below; those entries remain for historical context and as
+deeper-design references.
+
+**Path to MVP launch with external users**: Blocks 1 → 2 → 4 on the
+critical path, with Blocks 3 / 5 / 6 parallelizable. Estimated total
+**~14-15 weeks**, calibrated against velocity in Jan-May 2026
+(~150 commits/month sustained, e.g. full type-system overhaul in
+~3 weeks, versioning + branches in ~3-4 weeks).
+
+### Block 0 — Tutorial framework (continuous)
+
+- Initial framework + first lessons in `docs/tutorial/` — text only
+  for now; UI integration is a later decision
+- One new lesson added per feature block as that block ships
+- **Initial scope**: ~1 week; **ongoing**: ~0.5 week per block
+
+### Block 1 — Foundation (start immediately)
+
+Implements PHILOSOPHY § Self-Describing System "storage swap path"
+(S1+S2+S3 in the protocols staging).
+
+1. **Storage base-fns** — `:pg-query`, `:pg-execute`, `:pg-tx`, plus
+   HoneySQL helpers — ~1.5 weeks
+2. **API routes migrated** from direct Clojure storage to graph
+   fn-defs — ~2 weeks
+3. **Type-row `:Storage`** + `:postgres-storage-impl` + free-arg
+   injection at the web-server level — ~3-4 days
+
+Block total: **~4 weeks**
+
+### Block 2 — Multi-user readiness
+
+Enables external alpha users on either self-hosted or cloud-shared.
+
+1. **Organizations + Users** entity + UI — ~1-1.5 weeks
+2. **Postgres RLS** + policy-based isolation — ~1.5 weeks
+3. **Permissions** (per-fn, per-namespace, per-branch) — ~2 weeks
+4. **Package registry** (server + reference client, MVP — without
+   full dep resolution) — ~2 weeks
+
+Block total: **~6-7 weeks**
+
+### Block 3 — Personal QoL (parallel to Block 2)
+
+1. **Tests via `tests/` namespace** convention + UI filter in the
+   sidebar — ~3-4 days
+2. **Workspaces** (namespace M:N self-link + UI scoping) — ~1 week
+3. **Error tolerance** (type mismatches as derived diagnostics, not
+   silent swallow) — ~3-4 days. See § Future Work → Error Tolerance.
+4. **Debug/observability** with the PHILOSOPHY § Debugging
+   constraints (per-fn opt-in, sampling, `:secret` auto-skip,
+   size/TTL limits) — ~1.5 weeks
+5. **Free-arg aliases** — see § Future Work entry; status check,
+   finish if not already shipped
+
+Block total: **~4-5 weeks**
+
+### Block 4 — Ecosystem (after Block 1)
+
+Implements the MVP launch bar from [DISTRIBUTION § MVP Launch Bar](DISTRIBUTION.md#mvp-launch-bar).
+
+1. **Sidecar pattern** — `:python-call`, `:python-script`,
+   `:go-call` base-fns for cross-language reach — ~1.5 weeks
+2. **2-3 integration packages** — `telegram-bot`, `postgres-client`,
+   `openai-client` (or `http-client` if `openai-client` deferred) —
+   ~1 week each
+
+Block total: **~4-5 weeks**
+
+### Block 5 — Recursion (any window after Block 1)
+
+- **`:fix` base-fn** (Approach A from
+  [RECURSION.md](RECURSION.md)) — ~1 week
+
+### Block 6 — UI Step 1 (any window)
+
+- **Inline `:const` editor** for JS/CSS in the running editor +
+  rebuild trigger — ~1.5 weeks. See
+  [PHILOSOPHY § UI as Graph](PHILOSOPHY.md#ui-as-graph--two-step-roadmap).
+
+### Deprioritized (do when there's a slot, no critical path)
+
+- **Graph → Clojure export** — credibility / REPL escape hatch.
+  Useful but not on the daily-use path.
+- **Clojure → graph import** — needs a real migration target first.
+
+### Not planned
+
+- **Datomic** storage backend
+- **Executor rewrite** in another host language (Go / Python). See
+  PHILOSOPHY § Trade-off Sovereignty — would force two impls of
+  every base-fn forever.
+- **Multi-language fine-grained execution** — sidecar pattern
+  (Block 4) covers the use case at coarse granularity, which is the
+  only level where it's practical.
+- **UI Step 2** (full graph-described UI structure) — far future.
+- **Distributed execution** — kept on the existing § Future Work
+  list as a separate research thread, not part of this block plan.
+
+---
+
 ## Future Work
 
 ### Graph-level Recursion
+
+> Now scheduled in **Block 5**. The design details below remain
+> authoritative; the block schedule sets the order.
 
 **Status**: design / roadmap — no implementation. The current
 constraint layers (per-binding cycle check + sync-time
@@ -239,6 +349,9 @@ for the current-state writeup.
 
 ### Free Argument Aliases (UI-friendly names)
 
+> Now scheduled in **Block 3** (status check + finish if not done).
+> The design below remains authoritative.
+
 **Goal**: Human-readable names for free arguments in execution forms.
 
 **Problem**: When executing a function with free arguments via UI,
@@ -295,6 +408,8 @@ Execute function: calculate-report
 ---
 
 ### Error Tolerance (type errors as visible diagnostics)
+
+> Now scheduled in **Block 3**.
 
 **Goal**: A graph with type errors can be saved and iterated on — sketch
 the structure first, fix details later — without errors being silent.
@@ -471,6 +586,11 @@ on the next migration pass.
 ---
 
 ### User and Permission System
+
+> Now scheduled in **Block 2** (Organizations + Users + RLS +
+> per-fn / per-namespace / per-branch permissions). The
+> permission-model sketch below is a starting point; details will
+> be settled when implementing.
 
 **Goal**: Access control.
 

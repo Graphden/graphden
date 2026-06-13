@@ -140,16 +140,24 @@ extension (verified in commit 3).
 dispatcher. It reads the slot's structural shape (via
 `slot-structural-call-site-args`) and chooses:
 
-- **0-arg slot** (`{}`) → 0 lambda-params → variadic-ignore wrap. All
-  sub free-args captured. The cron / `:future :body` /
+- **0-arg slot** (`[:fn {} ret]`) → 0 lambda-params → variadic-ignore
+  wrap. All sub free-args captured. The cron / `:future :body` /
   `:loop-until-interrupted :body` path.
-- **1-arg slot** (`{:x T}`) → legacy heuristic. Positional
-  alpha-equivalence preserves `:filter :pred :some?` (binds
-  `:value` even though slot calls it `:item`).
-- **2+-arg slot** (`{…N keys}`) → sub free args matching slot's
-  structural names. Map-callable; covers `:wrap-middleware
-  :handler` (`{:request _ :next-handler _}`).
-- **Bare `:fn` primitive** (no structural shape) → legacy heuristic.
+- **1-arg slot** (`[:fn {:x T} ret]`) → structural name when R's free
+  args include it (the fast path — sub-fn was written to match the
+  slot, e.g. `:try`'s `:on-throw` typed `[:fn {:exception :any} a]`
+  with `_rollback` declaring `:exception`); otherwise the
+  alpha-equivalence resolver picks the lambda-param name from R's
+  non-captured frees — covers conventional positional callsites like
+  `:filter :pred :some?` (slot's positional `:item` vs `:some?`'s
+  domain-named `:value`).
+- **2+-arg slot** (`[:fn {:a A :b B} ret]`) → sub free args matching
+  slot's structural names. Map-callable; covers
+  `:wrap-middleware :handler` (`{:request _ :next-handler _}`).
+- **Bare `:fn` keyword constraint** → REJECTED at compile time. Every
+  HOF slot must declare its callable shape structurally as
+  `[:fn {ARGS} RET]` — gives the type-checker something to constrain
+  on and makes the wrap-time dispatch deterministic.
 
 Without this dispatcher rewrite, the cron's wrap would be built with
 sub's full free-arg count (e.g. 2-arg map-callable for `:_cron-step`),
@@ -210,6 +218,63 @@ Captured.
 
 **Rule:** captured arg resolution walks the standard binding-chain,
 same as any other resolved binding. Closer-fn-wins applies.
+
+### Cross-tree rename via ref-target chain
+
+```edn
+{:name :_html-error-body
+ :parent :str
+ :args {:parts [{:value "<p class=\"error\">"} {:as :reason} {:value "</p>"}]}}
+
+{:name :html-error-response
+ :parent :assoc
+ :args {:map {…}
+        :key {:value :body}
+        :value :_html-error-body}}     ; ← ref-target to :_html-error-body
+
+{:name :_delete-err-fn-in-use
+ :parent :html-error-response
+ :args {:status {:value 409}
+        :reason {:as :fn-in-use-reason}}}      ; ← renames R's free arg
+```
+
+`:_html-error-body` is reached via the `:value` ref-target of
+`:html-error-response`. Inside its `:str :parts` it positionally
+captures `{:as :reason}`, exposing `:reason` as a deep free arg
+of `:html-error-response`. The descendant `:_delete-err-fn-in-use`
+binds `:reason {:as :fn-in-use-reason}`, creating a renamed-view
+slot on the descendant whose `:source-slot-id` FK points at
+`:_html-error-body.reason`.
+
+**Rule:** at compile time, `build-ref-renames` (in
+`executor/compile/renames.clj`) resolves cross-tree renames in two
+passes:
+
+1. **Same-name binding rename** — F's collected bindings contain a
+   `:free` row with a renamed `:ext-name` matching one of R's deep
+   frees BY NAME. Covers e.g. `:_pocb-rows-consumer.func {:as
+   :storage-query}`, where F directly binds a slot R exposes under
+   the same name. Locked by
+   `executor.compile.renames-test/build-ref-renames-translates-
+   renamed-slot`.
+
+2. **Cross-tree slot-id rename** — for any R-free not covered by
+   pass 1, walk R's tree (inheritance + non-HOF ref-targets + seq
+   items) via `find-slot-id-in-tree` to find R's slot-id, then ask
+   F's inheritance chain via `l/rename-for-slot` whether it owns a
+   renamed-view slot whose `:source-slot-id` FK points at THAT
+   source. Picks up the `:html-error-response`-style case above —
+   where the rename's source slot lives on a fn reached via
+   ref-target, not via inheritance. Locked by
+   `executor.compile.renames-test/build-ref-renames-cross-tree-via-
+   slot-id`.
+
+The two passes are merged; the same-name pass wins on conflict.
+The cross-tree pass relies on the parser ALSO emitting the empty
+pure-rename binding row (signal that triggers
+`effective-binding`'s direct-inheritance rename path in
+`executor/compile/bindings.clj`); both mechanisms work side by
+side.
 
 ## Existing HOF behavior compatibility
 

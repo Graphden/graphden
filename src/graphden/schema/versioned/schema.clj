@@ -225,10 +225,6 @@
   #uuid "fda4de1c-2d46-4e6a-a233-bd9060af2b69")
 
 
-(def ^:private binding-version-terminal-field-uuid
-  #uuid "bda3dd0a-5c5e-4db5-b8cf-1999b80773bb")
-
-
 (def ^:private binding-version-list-append-field-uuid
   #uuid "fb84cff4-6f91-4396-b607-1b34cff9a40e")
 
@@ -423,8 +419,6 @@
                                             :type :uuid :nullable? true}
                       :description {:uuid binding-version-description-field-uuid
                                     :type :text :nullable? true}
-                      :terminal {:uuid binding-version-terminal-field-uuid
-                                 :type :bool :nullable? true}
                       :list-append {:uuid binding-version-list-append-field-uuid
                                     :type :bool :nullable? true}
                       :list-closed {:uuid binding-version-list-closed-field-uuid

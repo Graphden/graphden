@@ -66,14 +66,10 @@
     (throw (ex-info "fn-defs must be a vector/list"
                     {:type :fn-composition/invalid-defs
                      :fn-defs-type (type fn-defs)})))
-  (let [duplicates (loop [remaining (map :name fn-defs)
-                          seen #{}
-                          dups #{}]
-                     (if-let [n (first remaining)]
-                       (if (contains? seen n)
-                         (recur (rest remaining) seen (conj dups n))
-                         (recur (rest remaining) (conj seen n) dups))
-                       dups))]
+  (let [duplicates (->> fn-defs
+                        (map :name)
+                        frequencies
+                        (keep (fn [[n c]] (when (> c 1) n))))]
     (when (seq duplicates)
       (throw (ex-info "Duplicate fn names in definitions"
                       {:type :fn-composition/duplicate-names

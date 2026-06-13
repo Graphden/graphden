@@ -1,18 +1,41 @@
 #kaocha/v1
 {:tests
- [;; Unit tests - run in parallel, skip ^:integration
+ [;; Unit tests — skip ^:integration.
+  ;;
+  ;; `:kaocha/parallelism` is wired by `:kaocha.plugin/parallel` (see
+  ;; `test/kaocha/plugin/parallel.clj`). NSs that redef process-wide
+  ;; symbols (`jdbc/execute!`, `registry/rich-type-of`, ...) carry
+  ;; `^:serial` in their ns meta — those run sequentially BEFORE the
+  ;; parallel pool starts. Everything else runs on a fixed N-thread
+  ;; pool.
   {:id :unit
    :test-paths ["test"]
    :skip-meta [:integration]
-   :kaocha/parallelism 4}
+   :kaocha/parallelism 8}
 
-  ;; Integration tests - run sequentially, use shared container
+  ;; Integration tests — run against the shared PG container. Each NS
+  ;; fixture is scoped to its OWN logical DB on the cluster (see
+  ;; `graphden.test-infra.shared-container/shared-container-fixture` +
+  ;; `ensure-ns-database!`) so that whenever in-JVM parallelism is
+  ;; eventually un-blocked, the `DROP SCHEMA public CASCADE` between
+  ;; tests can't trample a concurrent NS's tables. Today still
+  ;; sequential — see the unit-suite note above for the blocker.
   {:id :integration
    :test-paths ["test"]
-   :focus-meta [:integration]}]
+   :focus-meta [:integration]
+   ;; Per-NS logical DBs (shared-container plugin) keep integration
+   ;; tests isolated even when their NSs run on parallel threads.
+   ;; N=4 (not 8) for integration: tests that boot their own
+   ;; testcontainers (e.g. `clients.vault-test` runs OpenBao) race
+   ;; on Docker daemon throughput when many concurrent
+   ;; `GenericContainer.start` calls land at once — the `Wait/forHttp`
+   ;; ready-check times out before the container actually boots.
+   ;; Constraint is on the Docker daemon, not our code.
+   :kaocha/parallelism 4}]
 
  ;; Plugins:
- ;; - profiling: Shows slowest tests
- ;; - shared-container: Manages global PostgreSQL container for integration tests
+ ;; - profiling: shows slowest tests
+ ;; - shared-container: singleton PG container + per-NS logical-DB lifecycle
  :plugins [:kaocha.plugin/profiling
+           :kaocha.plugin/parallel
            :kaocha.plugin/shared-container]}

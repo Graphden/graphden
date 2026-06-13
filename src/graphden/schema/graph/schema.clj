@@ -80,7 +80,7 @@
 ;; Override-kind enum — policy для binding'а value/ref:
 ;;   :fixed       — descendants не могут override этот binding (default).
 ;;   :default     — это «дефолт», descendant может полностью заменить.
-;;   :secret-path — Followup-4: binding.value is a vault PATH; the
+;;   :secret-path — binding.value is a vault PATH; the
 ;;                  executor auto-dereferences via clients/vault at
 ;;                  arg-resolution time. The actual secret value
 ;;                  never appears in graphden storage. Sync-time
@@ -296,10 +296,6 @@
 
 (def ^:private binding-description-field-uuid
   #uuid "0db6164f-137e-47bd-9be8-786a4d4ffe07")
-
-
-(def ^:private binding-terminal-field-uuid
-  #uuid "0a593316-21ae-4c6d-9131-8f13a001930e")
 
 
 (def ^:private binding-list-append-field-uuid
@@ -518,9 +514,6 @@
                       :description {:uuid binding-description-field-uuid
                                     :type :text
                                     :nullable? true}
-                      :terminal {:uuid binding-terminal-field-uuid
-                                 :type :bool
-                                 :nullable? true}
                       :list-append {:uuid binding-list-append-field-uuid
                                     :type :bool
                                     :nullable? true}

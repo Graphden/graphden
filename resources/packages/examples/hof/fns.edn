@@ -24,10 +24,12 @@
    :args {:func :str-upper
           :coll ["alpha" "beta" "gamma"]}}
 
-  ;; Transducer form — :coll omitted.
+  ;; Transducer form — dedicated `:map-xf` primitive (split from
+  ;; `:map` so the eager-with-coll path can't silently return a
+  ;; transducer when an upstream nil propagates).
   {:name :ex-upper-xf
-   :description "`(map str-upper)` — `:coll` omitted, so `:map` returns a TRANSDUCER object (Clojure stateful). Use it as input to `:transduce` or `:comp`. Demonstrates: optional args (see `:coll {:required false}` in `:map`'s spec) materially change the return type."
-   :parent :map
+   :description "`(map str-upper)` — `:map-xf` returns a TRANSDUCER object (Clojure stateful). Use it as input to `:transduce` or `:comp`. Counterpart to `:ex-upper`'s eager form."
+   :parent :map-xf
    :args {:func :str-upper}}
 
   ;; :filter with a built-in predicate (`:some?` is `value → bool`).
@@ -66,6 +68,6 @@
                       :ex-upper-xf]}}
 
   {:name :_ex-filter-a-xf
-   :description "Transducer form of `:filter` with the `a`-prefix predicate; mirrors `:ex-upper-xf` but for filtering."
-   :parent :filter
+   :description "Transducer form of `:filter` with the `a`-prefix predicate; mirrors `:ex-upper-xf` but for filtering. Uses `:filter-xf` (the dedicated transducer-form primitive)."
+   :parent :filter-xf
    :args {:pred :_ex-starts-with-a}}]}

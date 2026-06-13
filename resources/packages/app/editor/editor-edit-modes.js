@@ -299,7 +299,9 @@ function enterSecretBindingEditMode(arg, anchorEl) {
           return { ok: true };
         }
         return { ok: false, error: await responseError(r) };
-      } catch (_) {
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('value save fetch threw', err);
         return { ok: false, error: 'Save failed — network error.' };
       }
     },
@@ -368,7 +370,9 @@ async function writeBindingFields(arg, fields) {
                           '&slot-id=' + encodeURIComponent(slotId) +
                           (body ? '&' + body : ''));
     return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
-  } catch (_) {
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('binding save fetch threw', err);
     return { ok: false, error: 'Save failed — network error.' };
   }
 }
@@ -385,7 +389,9 @@ async function putSequenceItemValue(itemId, value) {
       body: JSON.stringify({ value: value })
     });
     return r?.ok ? { ok: true } : { ok: false, error: await responseError(r) };
-  } catch (_) {
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('binding save fetch threw', err);
     return { ok: false, error: 'Save failed — network error.' };
   }
 }
@@ -959,9 +965,16 @@ function enterNamespaceMoveEditMode(fn, anchorEl) {
     anchorEl,
     onPick: async (picked) => {
       try {
+        // (root) sentinel uses `namespace-id=` literal so the backend
+        // clears the FK column. `authMutate`'s field-map form strips
+        // empty-string values, so pass the pre-encoded body when the
+        // pick is the root namespace.
+        const body = picked.id
+          ? { 'namespace-id': picked.id }
+          : 'namespace-id=';
         const r = await authMutate('PUT',
                                    '/api/entities/fn/' + encodeURIComponent(fn.id),
-                                   { 'namespace-id': picked.id || '' });
+                                   body);
         if (r?.ok && typeof initGraph === 'function') initGraph();
       } catch (_) {}
     }

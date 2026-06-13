@@ -40,18 +40,34 @@
   "Storage schemas vary on whether `fn.name` is stored as text or as
    an enum (the package-loader codec roundtrip is sometimes one,
    sometimes the other). Try both shapes; swallow the
-   validation-error/type-mismatch from the side that doesn't fit."
-  [storage fn-name]
-  (letfn [(try-one
-            [v]
-            (try (first (sp/query-entities storage :fn {:name v}))
-                 (catch clojure.lang.ExceptionInfo e
-                   (when-not (= :validation-error/type-mismatch
-                                (:type (ex-data e)))
-                     (throw e))
-                   nil)))]
-    (or (try-one fn-name)
-        (try-one (keyword fn-name)))))
+   validation-error/type-mismatch from the side that doesn't fit.
+
+   `swallow-all?` — when true, swallow ANY ExceptionInfo (used by
+   seeder paths that just want to try a name and skip on any
+   failure). Defaults to swallowing only `:validation-error/type-
+   mismatch` — re-raise other errors so genuine storage failures
+   don't get silently dropped."
+  ([storage fn-name] (query-fn-by-name storage fn-name false))
+  ([storage fn-name swallow-all?]
+   (letfn [(try-one
+             [v]
+             (try (first (sp/query-entities storage :fn {:name v}))
+                  (catch clojure.lang.ExceptionInfo e
+                    (when-not (or swallow-all?
+                                  (= :validation-error/type-mismatch
+                                     (:type (ex-data e))))
+                      (throw e))
+                    nil)))]
+     (or (try-one fn-name)
+         (try-one (keyword fn-name))))))
+
+
+(defn query-fn-id-by-name
+  "Like `query-fn-by-name`, but returns just the fn `:id` (a UUID) or
+   nil. Used by seeder / branch-router paths that only need the id."
+  ([storage fn-name] (query-fn-id-by-name storage fn-name false))
+  ([storage fn-name swallow-all?]
+   (some-> (query-fn-by-name storage fn-name swallow-all?) :id)))
 
 
 (defn resolve-fn-id

@@ -1,0 +1,123 @@
+;; Bisection harness for the `:ring-router` decomp's postwalk-coercer
+;; pattern. Each example pins one layer of the eventual full chain so
+;; an integration test can isolate which step regresses.
+
+{:namespace "examples.postwalk-coercer"
+ :description "Step-by-step bisection of `:postwalk + :cond + inline-anon` patterns. Used by the decomp work on `:ring-router`."
+ :fns
+ [;; Step 1 — `:postwalk + :const` identity. If this passes, the
+  ;; HOF mechanism over `:postwalk` works at all.
+  {:name :ex-pw-identity
+   :description "Postwalk with `:const` callback — should return :data unchanged."
+   :parent :postwalk
+   :args {:coll {:as :data}
+          :f :const}}
+
+  ;; Calls postwalk-identity with a known map literal.
+  {:name :ex-pw-identity-call
+   :parent :ex-pw-identity
+   :args {:data {:value {:a 1 :b "two"}}}}
+
+
+  ;; Step 2 — `:postwalk + :cond` with passthrough-only clauses.
+  ;; If this passes, `:cond` + `{:as :value}` passthrough works
+  ;; inside a HOF callable.
+  {:name :_ex-pw-cond-passthrough
+   :description "Single-clause :cond `[true {:as :value}]` — identity via cond."
+   :parent :cond
+   :args {:clauses [true {:as :value}]}}
+
+  {:name :ex-pw-cond-identity
+   :description "Postwalk with `:cond`-based identity callback."
+   :parent :postwalk
+   :args {:coll {:as :data}
+          :f :_ex-pw-cond-passthrough}}
+
+  {:name :ex-pw-cond-identity-call
+   :parent :ex-pw-cond-identity
+   :args {:data {:value {:a 1 :b "two"}}}}
+
+
+  ;; Step 3 — `:cond` with `:is-a?` test + transform branch +
+  ;; passthrough else. Coerces keywords to strings, everything else
+  ;; passes through.
+  {:name :_ex-pw-kw-to-str-coercer
+   :description "Cond with keyword? guard — turns keywords into strings, else passthrough."
+   :parent :cond
+   :args {:clauses [{:parent :is-a? :args {:type {:value :keyword}}}
+                    {:parent :keyword-to-str :args {:keyword {:as :value}}}
+                    true
+                    {:as :value}]}}
+
+  {:name :ex-pw-kw-to-str
+   :description "Postwalk with keyword-to-string coercer."
+   :parent :postwalk
+   :args {:coll {:as :data}
+          :f :_ex-pw-kw-to-str-coercer}}
+
+  {:name :ex-pw-kw-to-str-call
+   :parent :ex-pw-kw-to-str
+   :args {:data {:value [:foo "bar" :baz]}}}
+
+
+  ;; Step 4 — FULL ring-router decomp pattern, but standalone. If
+  ;; this passes, the decomp logic itself is fine.
+  ;;   :cond [is-a-map? → update-keys (str → kw), is-a-seq? → vec, else → passthrough]
+  {:name :_ex-pw-router-coercer
+   :description "Full ring-router-style postwalk coercer: maps get string-key→keyword coercion, non-vector sequences get vec'd, scalars pass through."
+   :parent :cond
+   :args {:clauses [{:parent :is-a? :args {:type {:value :map}}}
+                    {:parent :update-keys
+                     :args {:m {:as :value}
+                            :f {:parent :if
+                                :args {:test {:parent :is-a? :args {:type {:value :text}}}
+                                       :then {:parent :str-to-keyword
+                                              :args {:string {:as :value}}}
+                                       :else {:as :value}}}}}
+                    {:parent :is-a? :args {:type {:value :sequence}}}
+                    {:parent :vec :args {:coll {:as :value}}}
+                    true
+                    {:as :value}]}}
+
+  {:name :ex-pw-router-style
+   :description "Postwalk with the full ring-router-style coercer."
+   :parent :postwalk
+   :args {:coll {:as :data}
+          :f :_ex-pw-router-coercer}}
+
+  ;; Mini reitit-shaped route fixture — string keys on the inner map,
+  ;; lazy-seq from `:list` at the outer level. Mimics what `:filter`
+  ;; produces in the real :ring-router chain.
+  {:name :ex-pw-router-call
+   :parent :ex-pw-router-style
+   :args {:data {:value [["/health" {"get" {"handler" "noop"}}]
+                         ["/version" {"get" {"handler" "version-handler"}}]]}}}
+
+
+  ;; Step 5 — Same coercer but input is a `:filter` result (lazy-seq),
+  ;; same as production. Verifies the lazy-seq path through postwalk
+  ;; matches expectations.
+  {:name :_ex-pw-router-filtered-data
+   :description "Lazy-seq input — `:filter :some?` over a literal vector. Mimics what `:_router-non-nil-routes` does in the real chain."
+   :parent :filter
+   :args {:pred :some?
+          :coll {:value [["/health" {"get" {"handler" "noop"}}]
+                         ["/version" {"get" {"handler" "version-handler"}}]
+                         nil]}}}
+
+  {:name :ex-pw-router-via-filter
+   :description "Full router-coerce of a `:filter`-produced lazy-seq."
+   :parent :postwalk
+   :args {:coll :_ex-pw-router-filtered-data
+          :f :_ex-pw-router-coercer}}
+
+
+  ;; Step 6 — Exercise the ACTUAL `:ring-router` decomp through the
+  ;; production chain shape (`:ring-router` → `:_ring-router-bare`).
+  ;; If step-4/5 pass but this fails, the issue is in `:ring-router`'s
+  ;; free-arg / slot name collision.
+  {:name :ex-via-ring-router-direct
+   :description "Direct `:ring-router` invocation, passing a literal route vector. Verifies the production decomp end-to-end."
+   :parent :ring-router
+   :args {:routes {:value [["/health" {"get" {"handler" "noop"}}]
+                           ["/version" {"get" {"handler" "version-handler"}}]]}}}]}

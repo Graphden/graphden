@@ -27,9 +27,20 @@
   ;; opaque runtime object. `:jsonb` is the tightest verifiable type:
   ;; the route list is built via `:list` (`:all`), whose return type
   ;; is `:jsonb`, so a more precise `[:list …]` can't type-check.
+  ;; ---------------------------------------------------------------------
+  ;; :ring-router — `reitit.ring/router` + graph→reitit coercion
+  ;; ---------------------------------------------------------------------
+  ;; The bare `:_ring-router-bare` base-fn is just `(ring/router routes)`.
+  ;; This public `:ring-router` wraps it with a `:postwalk`-based deep
+  ;; coercion: for each node, if it's a map → keywordize string keys
+  ;; (graph `:assoc` literals + JSONB roundtrip can leave string keys);
+  ;; if it's a non-vector sequence → `:vec` it (graph `:list` / `:seq`
+  ;; bindings are unchunked lazy-seqs but reitit wants vectors); else
+  ;; pass through. Everything stays in the graph via inline anons.
+
   {:name :ring-router
-   :description "Compile a vector of `[path method-data]` route entries into a reitit router. Wraps `reitit.ring/router`."
-   :args {:routes {:type :jsonb :description "Vector of `[path {:method {:handler …}}]` entries — already keywordized."}}
+   :description "Compile a vector of `[path method-data]` route entries into a reitit router. Wraps `reitit.ring/router`. Reitit expects vectors + keyword keys throughout; use `:_router-coerced-routes` (a graph-level `:postwalk`-based coercer below) before binding here if your route data has string keys or lazy `:seq` bindings."
+   :args {:routes {:type :jsonb :description "Already-shaped reitit route data — vectors + keyword keys throughout."}}
    :return-type :any}
 
   ;; Build a Ring handler reitit falls back to when no route matches.
@@ -117,12 +128,40 @@
    :args {:pred :some?
           :coll {:as :routes}}}
 
-  ;; Reitit needs keyword keys on route data; the `:ring-router` adapter
-  ;; deep-keywordizes internally (see web/reitit/impls.clj), so the
-  ;; graph hands it the filtered route vector as-is.
+  ;; ---------------------------------------------------------------------
+  ;; Route-data coercion at the graph level (was inline in the
+  ;; `ring-router-fn` base-fn). Walks `:_router-non-nil-routes`
+  ;; bottom-up; for each node:
+  ;;   - map → keywordize string keys (`:assoc` literals + JSONB
+  ;;     roundtrip can leave string keys; reitit wants keyword)
+  ;;   - non-vector sequence → `:vec` (graph `:list`/`:seq` are
+  ;;     unchunked lazy-seqs; reitit wants vectors)
+  ;;   - anything else → passthrough
+  ;; Inline anons (each `{:parent …}` map lifts to `_anon-<hash>` via
+  ;; the parser pre-pass) so the whole policy reads as one composition.
+
+  {:name :_router-coerced-routes
+   :description "Routes after the bottom-up reitit-shape coercion."
+   :parent :postwalk
+   :args {:coll :_router-non-nil-routes
+          :f {:parent :cond
+              :args {:clauses
+                     [{:parent :is-a? :args {:type {:value :map}}}
+                      {:parent :update-keys
+                       :args {:m {:as :value}
+                              :f {:parent :if
+                                  :args {:test {:parent :is-a? :args {:type {:value :text}}}
+                                         :then {:parent :str-to-keyword
+                                                :args {:string {:as :value}}}
+                                         :else {:as :value}}}}}
+                      {:parent :is-a? :args {:type {:value :sequence}}}
+                      {:parent :vec :args {:coll {:as :value}}}
+                      true
+                      {:as :value}]}}}}
+
   {:name :_router-compiled
    :parent :ring-router
-   :args {:routes :_router-non-nil-routes}}
+   :args {:routes :_router-coerced-routes}}
 
   ;; Default-handler: three response slots flow straight into the
   ;; adapter, which wraps each in `constantly` inside reitit's API.
@@ -139,7 +178,9 @@
    :description "Full router assembly — filter nils, keywordize keys, compile reitit router, and wire up a default-handler trio. Public free args: `:routes`, `:not-found-response`, `:method-not-allowed-response`, `:error-response`."
    :parent :ring-handler
    :args {:router :_router-compiled
-          :default-handler :_router-default-handler}}
+          :default-handler :_router-default-handler
+          :error-response {:type :ring-response-shape
+                           :description "Response served when reitit's no-per-method-handler slot fires (renamed from `:not-acceptable-response` deeper in the chain)."}}}
 
   ;; =============================================================================
   ;; ROUTER TEXT-DEFAULT PRESETS

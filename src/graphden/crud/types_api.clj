@@ -155,20 +155,28 @@
         (fn [f tag]
           (and (vector? (:constraint f))
                (= tag (first (:constraint f)))))
+        ;; Marker-bearing rows = `:base-fn-id` / `:element-fn-id` set,
+        ;; or a `:constraint` whose first element is one of the closed
+        ;; structural-type tags. `type-row?` reuses this set to decide
+        ;; inclusion; the reduce body below reuses it to decide whether
+        ;; `record-shape` is a safe interpretation or would mis-read a
+        ;; marker-bearing row as a record.
+        marker-type?
+        (fn [f]
+          (or (some? (:base-fn-id f))
+              (some? (:element-fn-id f))
+              (constraint-tagged? f :union)
+              (constraint-tagged? f :variant)
+              (constraint-tagged? f :fn)
+              (constraint-tagged? f :map)
+              (constraint-tagged? f :tuple)))
         type-row?
         (fn [f]
           (and (:name f)
-               (or (some? (:base-fn-id f))
-                   (some? (:element-fn-id f))
-                   (constraint-tagged? f :union)
-                   (constraint-tagged? f :variant)
-                   (constraint-tagged? f :fn)
-                   (constraint-tagged? f :map)
-                   (constraint-tagged? f :tuple)
+               (or (marker-type? f)
                    (and (empty? (:parent-ids f))
                         (nil? (:impl-hash f))
                         (seq (get slots-by-fn (:id f)))))))
-        type-rows (filter type-row? fns)
         record-shape
         (fn [f]
           (when-let [own (seq (get slots-by-fn (:id f)))]
@@ -181,64 +189,62 @@
                                                   keyword)]
                               [(keyword (:name s)) tn]))))
                   (sort-by :position own))))]
+    ;; Single pass: walk every fn, skip non-type-rows inline. Cache-
+    ;; miss path — acceptable perf — but one reduce reads cleaner
+    ;; than the prior filter-then-reduce two-walk.
     (reduce (fn [acc f]
-              (let [;; Marker-bearing rows (refinement / list / union /
-                    ;; variant) carry their structural form via
-                    ;; `rich-type-from-row` — `record-shape` would
-                    ;; misclassify e.g. `:positive-int` (which has a
-                    ;; synthesised `:value` slot for the inner-type
-                    ;; binding) as the record `{:value :int}`,
-                    ;; losing the refinement constraint. Only fall
-                    ;; back to `record-shape` when no marker FK / tag
-                    ;; is present — the genuine record case.
-                    marker? (or (:base-fn-id f)
-                                (:element-fn-id f)
-                                (constraint-tagged? f :union)
-                                (constraint-tagged? f :variant)
-                                (constraint-tagged? f :fn)
-                                (constraint-tagged? f :map)
-                                (constraint-tagged? f :tuple))
-                    structural (if marker?
-                                 (tc/rich-type-from-row f fns-by-id)
-                                 (or (record-shape f)
-                                     (tc/rich-type-from-row f fns-by-id)))
-                    n (some-> (:name f) keyword)
-                    existing (get acc n)
-                    ;; A real type-row's registry entry (when one
-                    ;; exists from a prior pass) has empty :args —
-                    ;; type-rows aren't called, they're just shapes.
-                    ;; Base-fns whose declared `:return-type :any`
-                    ;; would otherwise match the override criterion
-                    ;; (`:invoke`, `:call`, …) — they'd get clobbered
-                    ;; by the structural-shape override and lose
-                    ;; their real args. The empty-args guard keeps
-                    ;; them out.
-                    real-type-row? (or (nil? existing)
-                                       (and (= :any (:return existing))
-                                            (empty? (:args existing))))]
-                ;; Prefer the structural form ([:refine …] / [:list …]
-                ;; / record map) over a registry entry that just
-                ;; records `:return :any` — without that, the type-
-                ;; checker pass on a refinement / record type-row
-                ;; overwrites the structural entry with a stub and the
-                ;; editor loses constraint info.
-                ;;
-                ;; `:type-row? true` marks augmented entries so callers
-                ;; (e.g. `types-candidates`) can skip them — a type-row
-                ;; isn't itself callable, just a shape. Real fns whose
-                ;; declared return happens to be a structural type
-                ;; (`(:return-type :positive-int)` etc.) come through
-                ;; the original `record-rich-types-raw!` path and have
-                ;; no `:type-row?` flag, so they stay candidate-eligible.
-                (if (and n structural real-type-row?)
-                  (assoc acc n (cond-> {:return structural :args {} :effects #{}
-                                        :type-row? true}
-                                 (and (:description f)
-                                      (seq (:description f)))
-                                 (assoc :description (:description f))))
-                  acc)))
+              (if-not (type-row? f)
+                acc
+                (let [;; Marker-bearing rows (refinement / list / union /
+                      ;; variant) carry their structural form via
+                      ;; `rich-type-from-row` — `record-shape` would
+                      ;; misclassify e.g. `:positive-int` (which has a
+                      ;; synthesised `:value` slot for the inner-type
+                      ;; binding) as the record `{:value :int}`,
+                      ;; losing the refinement constraint. Only fall
+                      ;; back to `record-shape` when no marker FK / tag
+                      ;; is present — the genuine record case.
+                      structural (if (marker-type? f)
+                                   (tc/rich-type-from-row f fns-by-id)
+                                   (or (record-shape f)
+                                       (tc/rich-type-from-row f fns-by-id)))
+                      n (some-> (:name f) keyword)
+                      existing (get acc n)
+                      ;; A real type-row's registry entry (when one
+                      ;; exists from a prior pass) has empty :args —
+                      ;; type-rows aren't called, they're just shapes.
+                      ;; Base-fns whose declared `:return-type :any`
+                      ;; would otherwise match the override criterion
+                      ;; (`:invoke`, `:call`, …) — they'd get clobbered
+                      ;; by the structural-shape override and lose
+                      ;; their real args. The empty-args guard keeps
+                      ;; them out.
+                      real-type-row? (or (nil? existing)
+                                         (and (= :any (:return existing))
+                                              (empty? (:args existing))))]
+                  ;; Prefer the structural form ([:refine …] / [:list …]
+                  ;; / record map) over a registry entry that just
+                  ;; records `:return :any` — without that, the type-
+                  ;; checker pass on a refinement / record type-row
+                  ;; overwrites the structural entry with a stub and the
+                  ;; editor loses constraint info.
+                  ;;
+                  ;; `:type-row? true` marks augmented entries so callers
+                  ;; (e.g. `types-candidates`) can skip them — a type-row
+                  ;; isn't itself callable, just a shape. Real fns whose
+                  ;; declared return happens to be a structural type
+                  ;; (`(:return-type :positive-int)` etc.) come through
+                  ;; the original `record-rich-types-raw!` path and have
+                  ;; no `:type-row?` flag, so they stay candidate-eligible.
+                  (if (and n structural real-type-row?)
+                    (assoc acc n (cond-> {:return structural :args {} :effects #{}
+                                          :type-row? true}
+                                   (and (:description f)
+                                        (seq (:description f)))
+                                   (assoc :description (:description f))))
+                    acc))))
             snapshot
-            type-rows)))
+            fns)))
 
 
 ;; === Type-API helpers (Phase 1: type-aware UI integration) ===
@@ -509,9 +515,7 @@
   [request]
   (let [body (request/read-json-body request)
         target-id-raw (:type-fn-id body)]
-    {:target-id (when target-id-raw
-                  (try (java.util.UUID/fromString (str target-id-raw))
-                       (catch Exception _ nil)))}))
+    {:target-id (request/parse-uuid-or-clear (some-> target-id-raw str))}))
 
 
 (defn validate-types-usages

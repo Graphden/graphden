@@ -1,0 +1,632 @@
+(ns graphden.executor.compile-eager
+  "Eager compile pipeline — the executor's compile half.
+
+   Each fn-def compiles to an ordinary Clojure closure
+   `(fn [free-args ctx])`. On invocation the closure performs ONLY:
+
+     1. Read free-arg values by their final external names (renames
+        applied at compile time — there is no runtime rename pass).
+     2. Invoke pre-captured child callables (captured at compile time
+        by topological sort of the ref-DAG; no per-call registry
+        lookup).
+     3. Call the impl with a `defbase`-shaped args map.
+
+   Lazy semantics come from Clojure-native form evaluation — every
+   `:ref` arg is a `delay`, `resolve-arg` `@`-derefs it, so
+   `(if test then else)` only forces the picked branch. No
+   `:lazy-args` markers or other flags: lazy is built in.
+
+   `graphden.clients.vault` is resolved lazily in the
+   `:secret-value` arg-builder so test runs that never touch a
+   secret slot don't pay its load cost."
+  (:require
+    [graphden.executor.compile.bindings :as b]
+    [graphden.executor.compile.lookups :as l]
+    [graphden.executor.compile.renames :as r]
+    [graphden.executor.runtime :as rt]))
+
+
+;; =============================================================================
+;; Per-execute DRY memo
+;; =============================================================================
+;;
+;; One top-level closure invocation = one HashMap stored under
+;; `::call-cache` in `ctx`. Every sibling `:ref` invocation in the
+;; sub-tree hits the cache on `[ref-id fa]`, so a fn-def that pulls a
+;; ref TWICE — once for validation, once for the success branch — only
+;; fires the child ONCE. Without this, side-effecting impls like
+;; `:create-entity` insert twice → unique-violation; pure impls just
+;; waste work but still compute the right value.
+;;
+;; `always-fresh-fn-ids` carries impls whose `:effects` include `:time`
+;; or `:random` — these must fire fresh on every read even within one
+;; top-level call (two adjacent clock reads must see different values).
+;; `:env` / `:io` / `:db` / `:network` ARE cacheable within one
+;; top-level call (env values don't change mid-request, the txn sees a
+;; consistent DB snapshot, etc.).
+
+(def ^:private always-fresh-fn-ids (atom #{}))
+
+
+(defn set-always-fresh-fn-ids!
+  "Refresh the set of always-fresh (cache-bypass) fn-ids — anything
+   whose registered `:effects` intersects `#{:time :random}`. Called
+   by `compile_runtime`'s `rebuild!` / `delta-recompile!` after a
+   compile pass, since the set drives every `:ref` invocation."
+  [ids]
+  (reset! always-fresh-fn-ids (set ids)))
+
+
+(defn- call-with-cache
+  "Invoke `(child fa ctx)` through the per-execute memo. Cache miss /
+   absent cache / always-fresh fn-id all fall through to a fresh
+   call. `::nil` sentinel distinguishes a cached `nil` from miss."
+  [ref-id child fa ctx]
+  (let [^java.util.HashMap cache (::call-cache ctx)]
+    (if (or (nil? cache) (contains? @always-fresh-fn-ids ref-id))
+      (child fa ctx)
+      (let [k [ref-id fa]
+            cached (java.util.HashMap/.get cache k)]
+        (if (some? cached)
+          (when-not (identical? cached ::nil) cached)
+          (let [v (child fa ctx)]
+            (java.util.HashMap/.put cache k (if (nil? v) ::nil v))
+            v))))))
+
+
+(defn- has-impl?
+  "Root-fn carries a registered Clojure impl. Type-rows return false
+   and never enter the compile pipeline."
+  [fn-id {:keys [fn-map base-fns] :as lookups}]
+  (boolean (some-> (l/root-fn fn-id fn-map lookups)
+                   :name keyword
+                   base-fns)))
+
+
+(defn- supported-shapes?
+  "True iff every binding shape `fn-id` carries is supported by the
+   current compile-eager stage. With Stage 4 every classify-slot
+   kind (`:value` / `:free` / `:ref` / `:seq` / `:secret-value`)
+   has a builder, so every fn whose root has an impl is now
+   compilable — this check stays here as a guard against future
+   `classify-slot` additions until they get their builder."
+  [fn-id lookups]
+  (every? (fn [bnd]
+            (case (:kind bnd)
+              (:value :free :seq :ref :secret-value) true
+              false))
+          (b/collect-bindings fn-id lookups)))
+
+
+(defn- ref-deps
+  "Set of fn-ids that compile of `fn-id` depends on at runtime.
+
+   Looks at `b/collect-bindings` AND `b/collect-env-bindings`
+   (the SAME sources of truth `compile-fn` uses), so inherited
+   bindings and env-bindings (context-propagation slots like
+   `:base-handler`) are included. Anything ref'd inside a `:seq`
+   binding is included via the binding-list-item rows that
+   `collect-bindings` materialises under `:items`."
+  [fn-id lookups]
+  (let [from-bnd (fn [acc bnd]
+                   (case (:kind bnd)
+                     :ref (conj acc (:ref-id bnd))
+                     :seq (into acc (keep :ref-fn-id (:items bnd)))
+                     acc))]
+    (reduce from-bnd
+            (reduce from-bnd #{} (b/collect-bindings fn-id lookups))
+            (b/collect-env-bindings fn-id lookups))))
+
+
+(defn- resolve-impl
+  [fn-id {:keys [fn-map base-fns] :as lookups}]
+  (let [root-name (some-> (l/root-fn fn-id fn-map lookups) :name keyword)]
+    (or (get base-fns root-name)
+        (throw (ex-info (str "No impl for base-fn " (pr-str root-name))
+                        {:type :compile/missing-impl
+                         :fn-id fn-id :base-fn-name root-name})))))
+
+
+(defn- force-value
+  "Force a deferred value read out of `free-args`. Refs propagate
+   through `free-args` as `rt/thunk`s or `delay`s so the impl's
+   `resolve-arg` can short-circuit — anything BUT `resolve-arg`
+   that reads a free-arg value (seq item positional renames being
+   the only path) must force here so the consumer sees the
+   underlying value."
+  [v]
+  (cond
+    (rt/thunk? v) (v)
+    (instance? clojure.lang.IDeref v) @v
+    :else v))
+
+
+(defn- seq-item-builder
+  "Compile one `binding-list-item` row into a `(fn [fa ctx])`
+   producing the item's runtime value. Four shapes:
+     - `{:value {:as :name} :literal nil}` — positional free-arg
+       substitution (`:route :args :items [{:as :path} ...]`);
+       reads via `force-value` so a delay in `free-args` gets
+       forced before the consumer sees it.
+     - `:value` present — literal value.
+     - `:ref-fn-id` — invoke pre-compiled child callable.
+     - everything nil — literal `nil`."
+  [item child-callables]
+  (cond
+    (and (map? (:value item))
+         (:as (:value item))
+         (not (:literal item)))
+    (let [k (keyword (:as (:value item)))]
+      (fn [fa _ctx] (force-value (get fa k))))
+
+    (some? (:value item))
+    (constantly (:value item))
+
+    (:ref-fn-id item)
+    (let [ref-id (:ref-fn-id item)
+          child (or (get child-callables ref-id)
+                    (throw (ex-info "compile-eager: seq-item ref-target not compiled"
+                                    {:type :compile/missing-child :item item})))]
+      (fn [fa ctx] (call-with-cache ref-id child fa ctx)))
+
+    :else (constantly nil)))
+
+
+(defn make-shape-callable
+  "Build the Clojure callable a HOF expects, given a 0/1/many
+   `lambda-params` shape (see `r/hof-lambda-params` +
+   CLOSURE_CAPTURE.md):
+
+   - 0 → variadic-ignore: `:future :body` / `:loop-until-interrupted`.
+   - 1 → single-arg: caller passes one value, target sees it under
+         the lambda-param's name. `:map`'s `:func`, `:filter`'s `:pred`.
+   - 2+ → map-callable: caller passes `{lambda-name → value}`.
+
+   `invoke-with` is the bridge: it gets a Clojure map of the
+   per-call lambda values (`nil` for the 0-arg variant) and returns
+   the callable's return value. All three call sites in the executor
+   — root-binding `hof-wrap`, env-binding HOF case, and the public
+   `make-single-arg-callable` entry — feed different env sources
+   through this same shape decision."
+  [lambda-params invoke-with]
+  (case (count lambda-params)
+    0 (fn [& _] (invoke-with nil))
+    1 (let [k (first lambda-params)]
+        (fn [item] (invoke-with {k item})))
+    invoke-with))
+
+
+(defn- hof-wrap
+  "Root-binding HOF: returns a `(fn [fa ctx])` whose call yields the
+   callable. The callable closes over `fa` (the wrap-time snapshot of
+   the caller's env)."
+  [child lambda-params]
+  (fn [fa ctx]
+    (make-shape-callable lambda-params
+                         (fn [lambda-args]
+                           (child (if lambda-args (merge fa lambda-args) fa)
+                                  ctx)))))
+
+
+(def ^:private vault-get-secret
+  (delay (requiring-resolve 'graphden.clients.vault/get-secret)))
+
+
+(defn- lazy-seq-of-values
+  "Lazy-seq that materialises each item by calling its builder only
+   when the consumer pulls the cons-cell — matches Clojure-native
+   lazy seqs. This is what makes `:and` / `:or` short-circuit
+   through their `:items` seq slot: `every?` / `some` walk the seq
+   and stop at the first decisive element, so later builders never
+   fire."
+  [item-builders fa ctx]
+  (letfn [(walk
+            [i]
+            (lazy-seq
+              (when (< i (count item-builders))
+                (cons ((nth item-builders i) fa ctx)
+                      (walk (inc i))))))]
+    (walk 0)))
+
+
+(defn- arg-builder
+  "Return `(fn [free-args ctx])` producing the value for one
+   classified binding.
+
+   Lazy semantics are built into the model the way Clojure does
+   them — `:ref` bindings ALWAYS produce a `delay`, and the impl
+   reads the arg through `rt/resolve-arg` which auto-derefs
+   `IDeref`. Inside the impl, `(if test then else)` short-circuits
+   because Clojure's native `if` only evaluates the picked form,
+   so only its `resolve-arg` call runs, and only its delay forces.
+   The un-taken branch's `delay` stays unforced — its side-effects
+   never fire. No `:lazy?` flag, no `:lazy-args` registration:
+   ordinary Clojure evaluation does it.
+
+   `:seq` materialises as an unchunked lazy-seq of values
+   (Clojure-native short-circuit through `every?` / `some`).
+   `lazy-seq?` slots wrap each item in `delay` for consumers like
+   `cond-fn` that step past unforced items via `nnext`."
+  [fn-id
+   {:keys [kind ext-name value ref-id is-fn produces-callable? ref-renames
+           items lazy-seq? slot-id path]
+    :as bnd}
+   child-callables
+   lookups]
+  (case kind
+    :value (constantly value)
+    :free  (let [k ext-name] (fn [fa _ctx] (get fa k)))
+    :secret-value
+    (let [p path]
+      (fn [_fa ctx]
+        (rt/thunk
+          (fn []
+            (let [vault-client (or (:vault ctx)
+                                   (throw (ex-info "Vault client not configured — set VAULT_ADDR / VAULT_TOKEN"
+                                                   {:type :vault/not-configured})))]
+              (@vault-get-secret vault-client p))))))
+    :ref
+    (let [child (or (get child-callables ref-id)
+                    (throw (ex-info "compile-eager: ref-target not yet compiled"
+                                    {:type :compile/missing-child
+                                     :binding bnd :ref-id ref-id
+                                     :fn-id fn-id})))]
+      (cond
+        ;; HOF binding where the slot's structural shape is
+        ;; `[:fn {…} …]` and the target is NOT itself a callable-
+        ;; producer: build the Clojure closure the consumer will
+        ;; call positionally. Value-shape, not delay-shape — the
+        ;; impl invokes it directly.
+        (and is-fn (not produces-callable?))
+        (hof-wrap child (r/hof-lambda-params ref-id slot-id bnd fn-id lookups))
+
+        ;; Two collapse into one — both want "invoke child with the
+        ;; caller's env, wrap in a thunk for short-circuit":
+        ;; - `:produces-callable?`: target's fn-graph evaluates to a
+        ;;   Clojure callable (`:_router` → ring-handler). Wrapping
+        ;;   means the router builds only when the impl actually
+        ;;   reads the arg.
+        ;; - non-renamed plain ref: the common case — no caller→
+        ;;   callee free-arg translation needed.
+        ;;
+        ;; `rt/thunk` (a fn with `::thunk` meta) rather than `delay`
+        ;; here: `resolve-arg` auto-calls it for impls that read args
+        ;; via the `defbase` macro AND impls that read raw
+        ;; (`((:body args))` — the closure-capture acceptance test)
+        ;; can still invoke the value as a 0-arg fn.
+        (or produces-callable? (empty? ref-renames))
+        (fn [fa ctx]
+          (rt/thunk (fn [] (call-with-cache ref-id child fa ctx))))
+
+        :else
+        (fn [fa ctx]
+          (rt/thunk (fn []
+                      (call-with-cache
+                        ref-id child
+                        (reduce-kv (fn [acc callee-name caller-name]
+                                     (assoc acc callee-name (get fa caller-name)))
+                                   fa ref-renames)
+                        ctx))))))
+    :seq
+    (let [item-builders (mapv #(seq-item-builder % child-callables) items)]
+      (if lazy-seq?
+        (fn [fa ctx]
+          (map (fn [b] (delay (b fa ctx))) item-builders))
+        (fn [fa ctx]
+          (lazy-seq-of-values item-builders fa ctx))))
+    (throw (ex-info (str "compile-eager: unsupported binding kind " kind)
+                    {:type :compile/unsupported-kind :binding bnd}))))
+
+
+(defn- env-arg-builder
+  "Build the value that lands under one env-binding's env-name in
+   `fa'`. Different shape from `arg-builder` because env-bindings
+   need to participate in a SHARED env (sibling env-bindings can
+   reference each other in any order).
+
+   Returns `(fn [fa-ref ctx])` — a thunk that reads from the
+   volatile `fa-ref` at FORCE time, so the env map it sees is
+   the final one (all env-bindings populated), not the partial
+   snapshot at construction time. For `:value` bindings we just
+   return the literal — no closure needed."
+  [fn-id env-bnd child-callables lookups]
+  (case (:kind env-bnd)
+    :value (let [v (:value env-bnd)] (fn [_fa-ref _ctx] v))
+
+    :ref
+    (let [{:keys [ref-id is-fn produces-callable? slot-id]} env-bnd
+          child (or (get child-callables ref-id)
+                    (throw (ex-info "compile-eager: env-binding ref not yet compiled"
+                                    {:type :compile/missing-child
+                                     :env-binding env-bnd :fn-id fn-id})))]
+      (cond
+        ;; HOF env-binding whose target ISN'T itself a callable-
+        ;; producer: build the closure-captured Clojure callable.
+        ;; Reads `fa-ref` at FORCE time (sibling env-bindings may
+        ;; not have populated yet at construction).
+        (and is-fn (not produces-callable?))
+        (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)]
+          (fn [fa-ref ctx]
+            (make-shape-callable lambda-params
+                                 (fn [lambda-args]
+                                   (let [fa @fa-ref]
+                                     (child (if lambda-args (merge fa lambda-args) fa)
+                                            ctx))))))
+
+        ;; Target evaluates to a callable (`:_router` → reitit
+        ;; ring-handler). Same as the regular `arg-builder` :ref
+        ;; path: don't hof-wrap a positional callable.
+        produces-callable?
+        (fn [fa-ref ctx]
+          (rt/thunk (fn [] (call-with-cache ref-id child @fa-ref ctx))))
+
+        :else
+        (let [renames (r/build-ref-renames ref-id fn-id lookups)]
+          (if (empty? renames)
+            (fn [fa-ref ctx]
+              (rt/thunk (fn [] (call-with-cache ref-id child @fa-ref ctx))))
+            (fn [fa-ref ctx]
+              (rt/thunk (fn []
+                          (call-with-cache
+                            ref-id child
+                            (reduce-kv
+                              (fn [acc cn cln] (assoc acc cn (get @fa-ref cln)))
+                              @fa-ref
+                              renames)
+                            ctx))))))))))
+
+
+(defn compile-fn
+  "Return `(fn [free-args ctx])` for `fn-id`. `child-callables` is
+   `{fn-id → callable}` for ref-targets, populated in topological
+   order by `compile-all`.
+
+   Env-bindings (bindings on slots that AREN'T root slots — used to
+   propagate values like `:base-handler` through the ref-tree to
+   inner consumers) participate in a shared `fa-ref` volatile.
+   They evaluate to `delay`s whose closures read the volatile at
+   FORCE time, so an env-binding `A` that needs another env-binding
+   `B`'s value (forwards-reference, the order they're declared in
+   doesn't constrain dependencies) sees the final `fa'` map — same
+   semantics as the legacy compile's `augment-env`. Without this,
+   `:types-compatible`'s `:_rejected?` closure (which needs
+   `:validation` from the same env layer) sees an empty `:validation`
+   slot and reports every well-formed request as rejected, even
+   though the API path is correct."
+  ([fn-id lookups]
+   (compile-fn fn-id lookups {}))
+  ([fn-id lookups child-callables]
+   (let [impl (resolve-impl fn-id lookups)
+         enriched (mapv (fn [bnd]
+                          (if (and (= :ref (:kind bnd))
+                                   (not (:is-fn bnd)))
+                            (assoc bnd :ref-renames
+                                   (r/build-ref-renames (:ref-id bnd)
+                                                        fn-id
+                                                        lookups))
+                            bnd))
+                        (b/collect-bindings fn-id lookups))
+         builders (mapv #(arg-builder fn-id % child-callables lookups) enriched)
+         keys-vec (mapv :base-name enriched)
+         n (count builders)
+         env-bnds (b/collect-env-bindings fn-id lookups)
+         env-builders (mapv #(env-arg-builder fn-id % child-callables lookups)
+                            env-bnds)
+         env-names (mapv :env-name env-bnds)
+         env-n (count env-bnds)
+         ;; Compile-time-derived runtime aliasing for this fn's own
+         ;; rename slots. When a rename like `{:as :item}` surfaces
+         ;; a deep slot (`:branch-row` from the ref-tree) under a
+         ;; renamed outer name, downstream refs still read by the
+         ;; deep name — `apply-rename-aliases` copies the
+         ;; caller-supplied rename value back to the deep name so
+         ;; the lookup succeeds. Empty aliases (fns without own
+         ;; rename slots — the common case) short-circuit at apply.
+         rename-aliases (r/compute-rename-aliases fn-id lookups)]
+     ;; Top-level entry: install a fresh per-execute call-cache in
+     ;; ctx if none is in scope yet. Nested closure calls inherit
+     ;; the outer cache through ctx, so all siblings memoise on
+     ;; `(ref-id × fa)`. `HashMap` (not `clojure.lang.PersistentMap`)
+     ;; — one-cache-per-call, single-threaded read/write inside one
+     ;; top-level closure.
+     (fn [fa ctx]
+       (let [ctx (if (::call-cache ctx)
+                   ctx
+                   (assoc ctx ::call-cache (java.util.HashMap.)))
+             fa (r/apply-rename-aliases fa rename-aliases)
+             fa-ref (volatile! fa)
+             fa' (if (zero? env-n)
+                   fa
+                   (loop [m fa, i 0]
+                     (if (< i env-n)
+                       (recur (assoc m (nth env-names i)
+                                     ((nth env-builders i) fa-ref ctx))
+                              (inc i))
+                       m)))
+             _ (vreset! fa-ref fa')]
+         (impl (persistent!
+                 (loop [acc (transient {}), i 0]
+                   (if (< i n)
+                     (recur (assoc! acc
+                                    (nth keys-vec i)
+                                    ((nth builders i) fa' ctx))
+                            (inc i))
+                     acc)))
+               ctx))))))
+
+
+;; =============================================================================
+;; compile-all — topological pass over the whole graph
+;; =============================================================================
+
+(defn- topo-sort
+  "Kahn's algorithm over `{fn-id → #{dep-fn-id}}` — returns a vector
+   of fn-ids in compile order (deps first). Throws on cycles (which
+   storage-level constraints should already rule out — second line
+   of defence)."
+  [deps]
+  (let [in-deg (into {} (map (fn [[fid ds]] [fid (count ds)])) deps)
+        dependents-of (reduce-kv (fn [acc fid ds]
+                                   (reduce #(update %1 %2 (fnil conj []) fid) acc ds))
+                                 {}
+                                 deps)]
+    (loop [sorted (transient [])
+           in-deg in-deg
+           ready (into #{} (keep (fn [[k v]] (when (zero? v) k))) in-deg)]
+      (if (empty? ready)
+        (if (= (count sorted) (count deps))
+          (persistent! sorted)
+          (throw (ex-info "compile-eager: cycle in ref-DAG"
+                          {:type :compile/cycle
+                           :remaining (vec (remove (set (persistent! sorted)) (keys deps)))})))
+        (let [fid (first ready)
+              [in-deg' ready']
+              (reduce (fn [[id rd] d]
+                        (let [n (dec (get id d))]
+                          [(assoc id d n) (cond-> rd (zero? n) (conj d))]))
+                      [in-deg (disj ready fid)]
+                      (get dependents-of fid))]
+          (recur (conj! sorted fid) in-deg' ready'))))))
+
+
+(defn- reachable-targets
+  "Fixed-point: fn-id is `target` iff (a) its root carries an impl,
+   (b) every binding shape it uses is supported by this stage, and
+   (c) every fn-id it refs is also `target`. (c) makes the
+   exclusion of fns transitively dependent on an unsupported one
+   explicit; the seed covers (a) + (b)."
+  [lookups]
+  (let [seed (into #{}
+                   (comp (map :id)
+                         (filter #(and (has-impl? % lookups)
+                                       (supported-shapes? % lookups))))
+                   (vals (:fn-map lookups)))]
+    (loop [targets seed]
+      (let [next-targets (into #{}
+                               (filter (fn [fid]
+                                         (every? targets (ref-deps fid lookups))))
+                               targets)]
+        (if (= next-targets targets)
+          targets
+          (recur next-targets))))))
+
+
+(defn- compile-all*
+  [lookups]
+  (let [targets (reachable-targets lookups)
+        deps (into {}
+                   (map (fn [fid] [fid (ref-deps fid lookups)]))
+                   targets)
+        order (topo-sort deps)]
+    (reduce (fn [acc fid]
+              (assoc acc fid (compile-fn fid lookups acc)))
+            {}
+            order)))
+
+
+;; ============================================================================
+;; Process-wide cache for `compile-all` output
+;; ============================================================================
+;;
+;; compile-eager closures are ctx-INDEPENDENT (ctx arrives at execute time,
+;; not compile time), so two storages that present the same graph + the same
+;; base-fn registry compile to the SAME `{fn-id → closure}` map. Cache it
+;; per (graph-content × base-fn-name-set) — first JVM-wide call pays the
+;; full ~8 s compile pass; sister contexts (test ns's that bootstrap the
+;; same package set, sibling branches with identical graph views) hit warm
+;; in < 1 ms.
+;;
+;; Bounded LRU — 4 entries comfortably cover {dev system + a couple of
+;; branches + a test bootstrap} without holding stale registries forever.
+
+(def ^:private compile-all-cache-max-size 4)
+
+
+(def ^:private compile-all-cache
+  "Bounded LRU `[[key compiled] ...]` — head is freshest, tail is oldest."
+  (atom []))
+
+
+(defn- compile-all-cache-key
+  "Hash of (graph shape × base-fn name set). Same key ⇒ same compile
+   output. Picks the same per-entity field set the registry already
+   relies on for identity (mutable timestamps / generated UUIDs that
+   don't affect compile output stay out)."
+  [{:keys [fn-map slot-map fn-slots-by-fn bindings-by-fn items-by-binding
+           base-fns]}]
+  (hash [(set (vals fn-map))
+         (set (vals slot-map))
+         (set (mapcat val fn-slots-by-fn))
+         (set (mapcat val bindings-by-fn))
+         (set (mapcat val items-by-binding))
+         (set (keys base-fns))]))
+
+
+(defn compile-all
+  "Compile every fn-row whose ref-DAG bottoms out at base-fn impls.
+   Returns `{fn-id → (fn [free-args ctx])}`. Cycle in ref-DAG →
+   throws (second line of defence over the storage constraint).
+
+   `lookups` MUST already carry `:base-fns` (the impl registry).
+
+   Cached on a process-wide bounded LRU keyed by graph-shape +
+   base-fn name set — sister callers (test ns's that bootstrap the
+   same package set, sibling branches with identical graph views)
+   skip the compile pass entirely and just retrieve the
+   ctx-independent closure map."
+  [lookups]
+  (let [k (compile-all-cache-key lookups)
+        hit (some (fn [[ck cv]] (when (= ck k) cv)) @compile-all-cache)]
+    (or hit
+        (let [r (compile-all* lookups)]
+          (swap! compile-all-cache
+                 (fn [v]
+                   (let [pruned (filterv (fn [[ck _]] (not= ck k)) v)
+                         capped (vec (take-last (dec compile-all-cache-max-size)
+                                                pruned))]
+                     (conj capped [k r]))))
+          r))))
+
+
+(defn reset-compile-all-cache!
+  "Test hook — drop every cached entry. Useful for tests that
+   intentionally mutate the same graph mid-deftest to verify
+   compile-time re-classification, since the cache would otherwise
+   short-circuit a second compile pass."
+  []
+  (reset! compile-all-cache []))
+
+
+(defn compile-subset
+  "Recompile a SUBSET of fn-ids on top of `existing-registry`. Used
+   by `delta-recompile!`: only the blast radius needs new closures,
+   but those closures may reference each other AND existing entries
+   from outside the blast.
+
+   Topologically sorts the subset by inter-blast deps so a fn
+   compiled later in the subset sees freshly-built children, not
+   the pre-mutation copies. Subset entries dependent on each other
+   compile in dependency order; entries whose deps live outside
+   the subset pick those up from `existing-registry`.
+
+   Skips fn-ids whose root has no registered impl (type-rows,
+   anonymous incomplete rows)."
+  [lookups existing-registry subset-fn-ids]
+  (let [subset (into #{}
+                     (filter #(and (has-impl? % lookups)
+                                   (supported-shapes? % lookups)))
+                     subset-fn-ids)
+        ;; Restrict deps to subset members for topo-sort — deps
+        ;; outside the subset are pinned through `existing-registry`
+        ;; and don't constrain order.
+        deps (into {}
+                   (map (fn [fid]
+                          [fid (into #{}
+                                     (filter subset)
+                                     (ref-deps fid lookups))]))
+                   subset)
+        order (topo-sort deps)]
+    (reduce (fn [acc fid]
+              (assoc acc fid (compile-fn fid lookups acc)))
+            existing-registry
+            order)))

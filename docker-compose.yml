@@ -129,9 +129,13 @@ services:
       # through the :vault-get base-fn.
       VAULT_ADDR: http://openbao:8200
       VAULT_TOKEN: root
+      # Opt-in nREPL into the live executor. Unset → `-main` skips
+      # the start-server call entirely. Set in `.env` for dev debug.
+      GRAPHDEN_NREPL_PORT: ${GRAPHDEN_NREPL_PORT:-}
     ports:
       - "9002:8080"
       - "9081:8081"  # Tutorial: user-built history endpoint runs here
+      - "9099:7888"  # Opt-in nREPL — only listens when GRAPHDEN_NREPL_PORT=7888
     restart: unless-stopped
 
 volumes:

@@ -3,7 +3,8 @@
 
    Two consumers:
    - `graphden.packages.web.vault.impls` — wraps each fn in a `defbase`
-     so the user fn-graph can read secrets via `:vault-get`.
+     so the user fn-graph reads secrets via `:secret-leaf` (which
+     the executor auto-derefs through this client).
    - `graphden.crud.secrets` — uses the same fns to manage the
      admin-side Secrets CRUD (create / list / delete / rotate) over
      `/api/secrets/*`.
@@ -18,18 +19,49 @@
     [org.httpkit.client :as http]))
 
 
-(defn- data-url
-  [address path]
+(defn- require-path!
+  "Reject nil / non-string / blank paths upfront with a clean
+   `:vault/lookup-failed :reason :missing-path` ex-info. The string-
+   ops in `data-url` / `metadata-url` would otherwise NPE with no
+   `:type` tag — masking the real cause (binding misconfiguration
+   upstream) as a generic NullPointerException."
+  [path op]
+  (when (or (nil? path) (not (string? path)) (str/blank? path))
+    (throw (ex-info (str "Vault " op ": path is required and must be a non-blank string")
+                    {:type :vault/lookup-failed
+                     :reason :missing-path
+                     :op op
+                     :path path}))))
+
+
+(defn- vault-url
+  "Build a Vault KV v2 path-rooted URL. `kind` is `\"data\"`
+   (per-version value rows) or `\"metadata\"` (version index +
+   `custom_metadata`); same address/path normalisation applies to
+   both."
+  [address kind path]
   (str (str/replace address #"/+$" "")
-       "/v1/secret/data/"
+       "/v1/secret/" kind "/"
        (str/replace path #"^/+" "")))
 
 
-(defn- metadata-url
-  [address path]
-  (str (str/replace address #"/+$" "")
-       "/v1/secret/metadata/"
-       (str/replace path #"^/+" "")))
+(defn- request-opts
+  "Shared http-kit request options — token header, 5 s timeout, text
+   body. `extra` lets a writer add the JSON `Content-Type` + body."
+  [token & {:as extra}]
+  (merge {:headers {"X-Vault-Token" token}
+          :timeout 5000
+          :as :text}
+         extra))
+
+
+(defn- json-body
+  [token body]
+  {:headers {"X-Vault-Token" token
+             "Content-Type" "application/json"}
+   :timeout 5000
+   :as :text
+   :body (json/generate-string body)})
 
 
 (defn- check-status!
@@ -53,10 +85,8 @@
    string. Raises if missing or shape doesn't match the single-value
    convention."
   [{:keys [address token]} path]
-  (let [resp @(http/get (data-url address path)
-                        {:headers {"X-Vault-Token" token}
-                         :timeout 5000
-                         :as :text})
+  (require-path! path "get-secret")
+  (let [resp @(http/get (vault-url address "data" path) (request-opts token))
         _ (check-status! resp #{200} path "GET data")
         parsed (json/parse-string (:body resp) true)
         value (get-in parsed [:data :data :value])]
@@ -71,12 +101,9 @@
   "Write `secret/data/<path>` with `{value: <value>}`. Returns the
    new version number (KV v2 retains history)."
   [{:keys [address token]} path value]
-  (let [resp @(http/post (data-url address path)
-                         {:headers {"X-Vault-Token" token
-                                    "Content-Type" "application/json"}
-                          :body (json/generate-string {:data {:value value}})
-                          :timeout 5000
-                          :as :text})
+  (require-path! path "put-secret")
+  (let [resp @(http/post (vault-url address "data" path)
+                         (json-body token {:data {:value value}}))
         _ (check-status! resp #{200} path "POST data")
         parsed (json/parse-string (:body resp) true)]
     (get-in parsed [:data :version])))
@@ -87,10 +114,9 @@
    `DELETE /v1/secret/metadata/<path>` because the data endpoint
    only soft-deletes the latest version."
   [{:keys [address token]} path]
-  (let [resp @(http/delete (metadata-url address path)
-                           {:headers {"X-Vault-Token" token}
-                            :timeout 5000
-                            :as :text})]
+  (require-path! path "delete-secret")
+  (let [resp @(http/delete (vault-url address "metadata" path)
+                           (request-opts token))]
     (check-status! resp #{204} path "DELETE metadata")
     nil))
 
@@ -100,10 +126,9 @@
    list, etc. Returns the inner `:data` map (JSON-decoded, keyword
    keys). Raises with `:vault/lookup-failed` if the path is missing."
   [{:keys [address token]} path]
-  (let [resp @(http/get (metadata-url address path)
-                        {:headers {"X-Vault-Token" token}
-                         :timeout 5000
-                         :as :text})
+  (require-path! path "get-metadata")
+  (let [resp @(http/get (vault-url address "metadata" path)
+                        (request-opts token))
         _ (check-status! resp #{200} path "GET metadata")
         parsed (json/parse-string (:body resp) true)]
     (:data parsed)))
@@ -114,11 +139,8 @@
    Vault rejects non-string values, so callers must stringify
    before calling."
   [{:keys [address token]} path metadata]
-  (let [resp @(http/post (metadata-url address path)
-                         {:headers {"X-Vault-Token" token
-                                    "Content-Type" "application/json"}
-                          :body (json/generate-string {:custom_metadata metadata})
-                          :timeout 5000
-                          :as :text})]
+  (require-path! path "put-metadata")
+  (let [resp @(http/post (vault-url address "metadata" path)
+                         (json-body token {:custom_metadata metadata}))]
     (check-status! resp #{204} path "POST metadata")
     nil))

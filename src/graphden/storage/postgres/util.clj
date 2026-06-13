@@ -37,11 +37,15 @@
 
 
 (defn get-query-timeout-seconds
-  "Returns the current query timeout in seconds for JDBC calls.
-   Reads sp/*query-timeout-ms* and converts to seconds."
+  "Returns the current query timeout in seconds for JDBC calls. Thin
+   re-export over `protocol.config/get-query-timeout-seconds` —
+   centralises the timeout-shape conversion + safety validation
+   in one place. The pre-fix duplicate inlined `validate-query-timeout!`
+   + `quot` here; if the validator ever needed to add a new safety
+   check (max-timeout cap, NaN guard, etc.) the two copies would
+   silently drift."
   []
-  (sp/validate-query-timeout! sp/*query-timeout-ms*)
-  (quot sp/*query-timeout-ms* 1000))
+  (sp/get-query-timeout-seconds))
 
 
 ;; === Error handling (re-exports from errors.clj) ===

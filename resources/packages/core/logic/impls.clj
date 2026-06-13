@@ -22,6 +22,7 @@
    through the rich-types registry."
   (:require
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.executor.registry.core :as registry]
     [graphden.types.core :as types]))
 
 
@@ -45,6 +46,32 @@
 
 (defbase nil?-fn [value]
   (nil? value))
+
+
+;; === Type predicate ===
+;;
+;; ONE primitive instead of N per-type predicates. Dispatches on the
+;; `:type` arg (a canonical type-tag keyword like `:keyword` / `:int`
+;; / `:map`) to the runtime check in `types.core/runtime-predicates`.
+;; That map is the single source of truth — it's colocated with the
+;; `primitives` set in `types/core.clj` and a startup assert ensures
+;; coverage, so adding a new primitive type also requires adding the
+;; runtime check in one place.
+
+(defbase is-a?-fn
+  "True iff `value` is an instance of the primitive type `type`.
+   `type` is a canonical type-tag from
+   `graphden.types.core/runtime-predicates` — e.g. `:keyword`, `:int`,
+   `:numeric`, `:text`, `:map`, `:vector`, `:sequence`, `:bool`,
+   `:null`, `:any`. Throws on unknown tags so typos fail loudly."
+  [value type]
+  (let [pred (get types/runtime-predicates type)]
+    (when-not pred
+      (throw (ex-info (str "Unknown type tag: " (pr-str type))
+                      {:type :execution-error/unknown-type-tag
+                       :type-tag type
+                       :supported (set (keys types/runtime-predicates))})))
+    (boolean (pred value))))
 
 
 ;; === Conditionals ===
@@ -74,7 +101,7 @@
   (loop [s (seq clauses)]
     (when s
       (if (force (first s))
-        (force (first (next s)))
+        (force (fnext s))
         (recur (nnext s))))))
 
 
@@ -141,6 +168,125 @@
 ;; to the declared shape when `:clauses` is opaque (`:jsonb`, or a
 ;; ref whose return isn't a map).
 
+;; :if — when BOTH branches are non-negative integer literals, refine
+;; the union `[:union :int :int] = :int` into `:non-negative-int`
+;; (`:positive-int` when both are strictly positive). Matters at
+;; `:drop :count` (and similar) where the slot type is `:non-negative-int`
+;; and the inherited fn-def is a literal pick — without the refinement
+;; the `:int` computed return is correctly rejected as a widening, even
+;; though both literal branches DO satisfy the slot's constraint. Pure
+;; numeric refinement; secret-flow handled by `wrap-with-taint`.
+
+(defn- if-literal-int-branch
+  [info]
+  (let [lit (:value info)]
+    (when (integer? lit) lit)))
+
+
+(defn- root-base-fn-name
+  "Walk a fn-ref's `:primary-parent` chain to the root base-fn. Mirrors
+   `graphden.types.check/root-base-fn-name` but reusing the registry
+   only — no internal dependency on the type-checker namespace
+   (which would create a cycle: types.check → core/logic via the rule)."
+  [name]
+  (loop [n name seen #{}]
+    (cond
+      (or (nil? n) (contains? seen n)) n
+      :else (let [parent (:primary-parent (registry/rich-type-of n))]
+              (if (or (nil? parent) (= parent n))
+                n
+                (recur parent (conj seen n)))))))
+
+
+(defn- predicate-of-ref
+  "If `test-ref` (a fn-ref keyword) computes `(:some? :_x)` or
+   `(:nil? :_x)`, return `[:some? ref-keyword]` or
+   `[:nil? ref-keyword]`. Otherwise nil.
+
+   Walks the test-ref's `primary-parent` chain to find the root
+   base-fn (must be `:some?` / `:nil?`), then reads its `:value`
+   slot from `:resolved-bindings` and pulls the ref keyword from
+   `:ref`. The accumulated `:resolved-bindings` already inherits
+   from every parent in the chain (closer-fn-wins, per
+   `record-result!` in types/check.clj), so a multi-step shim like
+   `:_my-pred :parent :_some-x?-shim :parent :some?` is found
+   correctly at the deepest level."
+  [test-ref]
+  (when test-ref
+    (when-let [info (registry/rich-type-of test-ref)]
+      (let [root (root-base-fn-name test-ref)
+            rb (:resolved-bindings info {})
+            value-binding (get rb :value)
+            target (:ref value-binding)]
+        (when (and target (#{:some? :nil?} root))
+          [root target])))))
+
+
+(defn- strip-null-from-union
+  "Remove `:null` members from a top-level union. For non-union
+   inputs that are exactly `:null`, return `:never`. Anything else
+   passes through unchanged. Conservative: a `[:secret …]`-wrapped
+   nullable would NOT have `:null` at the top level (the secret
+   marker wraps the whole union), so this function leaves it intact
+   — no chance of accidentally stripping the taint marker."
+  [t]
+  (cond
+    (types/union-type? t)
+    (let [members (vec (remove #{:null} (types/union-members t)))]
+      (cond
+        (empty? members) :never
+        (= 1 (count members)) (first members)
+        :else (types/make-union members)))
+    (= t :null) :never
+    :else t))
+
+
+(defn if-return-rule
+  [bindings-info default-ret]
+  (let [then-info (get bindings-info :then)
+        else-info (get bindings-info :else)
+        then-lit (if-literal-int-branch then-info)
+        else-lit (if-literal-int-branch else-info)]
+    (cond
+      (and (integer? then-lit) (integer? else-lit) (pos? then-lit) (pos? else-lit))
+      :positive-int
+
+      (and (integer? then-lit) (integer? else-lit) (not (neg? then-lit)) (not (neg? else-lit)))
+      :non-negative-int
+
+      :else
+      ;; Flow-sensitive narrowing via `:some?` / `:nil?` predicate.
+      ;; When `:test` is `(:some? :_x)` AND `:then` is bound to
+      ;; `:_x` directly, narrow `:then`'s type by stripping `:null`
+      ;; (`:_x` is provably non-nil in the truthy branch). Symmetric
+      ;; for `:else`. Same for `:nil?`, flipped.
+      ;;
+      ;; Laziness is preserved — `if-fn` itself only evaluates the
+      ;; taken branch; this rule reasons about types only. Secret-
+      ;; tainted values stay tainted: a `[:secret [:union :null T]]`
+      ;; wraps `:null` inside the marker, so `strip-null-from-union`
+      ;; never reaches it (it only strips top-level union members).
+      (let [test-ref (:ref (get bindings-info :test))
+            pred (predicate-of-ref test-ref)]
+        (if pred
+          (let [[pred-kind target-ref] pred
+                then-ref (:ref then-info)
+                else-ref (:ref else-info)
+                narrowed-then (when (= then-ref target-ref)
+                                (if (= pred-kind :some?)
+                                  (strip-null-from-union (:type then-info))
+                                  :null))
+                narrowed-else (when (= else-ref target-ref)
+                                (if (= pred-kind :some?)
+                                  :null
+                                  (strip-null-from-union (:type else-info))))]
+            (if (or narrowed-then narrowed-else)
+              (types/make-union [(or narrowed-then (:type then-info))
+                                 (or narrowed-else (:type else-info))])
+              default-ret))
+          default-ret)))))
+
+
 (defn case-return-rule
   [bindings-info default-ret]
   (let [clauses-t   (get-in bindings-info [:clauses :type])
@@ -174,23 +320,83 @@
       (and (map? item) (true? (:value item)))))
 
 
+(defn- narrow-clause-result
+  "Per-clause flow-sensitive narrowing. When the clause's predicate
+   is `(:some? :_x)` / `(:nil? :_x)` AND the result-form is the same
+   `:_x` ref directly, narrow the recorded result type accordingly
+   (strip `:null` for `:some?`-truthy / `:nil?`-falsy, replace with
+   `:null` for `:nil?`-truthy / `:some?`-falsy). Otherwise return
+   the recorded type unchanged.
+
+   Same conservatism as `if-return-rule`'s narrowing: secret-tainted
+   nullables (`[:secret [:union :null T]]`) never have `:null` at
+   the top level, so `strip-null-from-union` won't reach inside the
+   marker. Laziness is preserved — `:cond` short-circuits at the
+   IMPL level (`:lazy-seq-args` on `:clauses`); this rule is types-
+   only."
+  [pred-form result-form recorded-t]
+  (if (and (keyword? pred-form) (keyword? result-form))
+    (if-let [[pred-kind target-ref] (predicate-of-ref pred-form)]
+      (if (= target-ref result-form)
+        (case pred-kind
+          :some? (strip-null-from-union recorded-t)
+          :nil?  :null)
+        recorded-t)
+      recorded-t)
+    recorded-t))
+
+
 (defn cond-return-rule
   [bindings-info default-ret]
   (let [info       (get bindings-info :clauses)
         elem-types (:elem-types info)
-        clause-val (:value info)
-        results    (when (sequential? elem-types)
-                     (vec (keep-indexed (fn [i t] (when (odd? i) t))
-                                        elem-types)))
-        exhaustive? (and (sequential? clause-val)
-                         (boolean
-                           (some literal-true?
-                                 (keep-indexed
-                                   (fn [i item] (when (even? i) item))
-                                   clause-val))))]
-    (if (seq results)
-      (types/make-union (cond-> results (not exhaustive?) (conj :null)))
-      default-ret)))
+        clause-val (:value info)]
+    ;; `:cond :clauses` is a flat `[test1 result1 test2 result2 …]`
+    ;; sequence — odd-length silently behaves as "last item is a
+    ;; test with no corresponding result", which `cond-fn` then
+    ;; forces via `(force (second s))` on a nil tail → all
+    ;; runtime returns become nil regardless of the test value.
+    ;; Empty-length silently always returns nil at runtime — also a
+    ;; bug (zero clauses is never what the author meant). Catch
+    ;; both at sync-time when the clause-val is a literal vector we
+    ;; can count statically.
+    (when (and (sequential? clause-val)
+               (or (zero? (count clause-val))
+                   (odd? (count clause-val))))
+      (throw (ex-info
+               (str ":cond :clauses must have an even non-zero number of items"
+                    " — saw " (count clause-val)
+                    " (a flat [test1 result1 test2 result2 …] sequence)."
+                    (cond
+                      (zero? (count clause-val))
+                      " Zero clauses always returns nil at runtime."
+                      :else
+                      " Last item is treated as a test with no result and every match silently returns nil at runtime."))
+               {:type :bindings/cond-bad-clause-count
+                :clause-count (count clause-val)
+                :clauses clause-val})))
+    (let [;; Per-clause narrowing: at odd index i (result position),
+          ;; the predicate is the binding-form at (i-1). When that
+          ;; predicate is a `:some?`/`:nil?` of the same ref the
+          ;; result is, the result's recorded type narrows.
+          results    (when (and (sequential? elem-types) (sequential? clause-val))
+                       (vec (keep-indexed
+                              (fn [i t]
+                                (when (odd? i)
+                                  (narrow-clause-result
+                                    (nth clause-val (dec i) nil)
+                                    (nth clause-val i nil)
+                                    t)))
+                              elem-types)))
+          exhaustive? (and (sequential? clause-val)
+                           (boolean
+                             (some literal-true?
+                                   (keep-indexed
+                                     (fn [i item] (when (even? i) item))
+                                     clause-val))))]
+      (if (seq results)
+        (types/make-union (cond-> results (not exhaustive?) (conj :null)))
+        default-ret))))
 
 
 ;; :coalesce — `(or value default)`, the null-eliminator. `:value` is
@@ -230,11 +436,12 @@
    :not {:impl not-fn :return-type-rule (types/wrap-with-taint nil)}
    :some? {:impl some?-fn :return-type-rule (types/wrap-with-taint nil)}
    :nil? {:impl nil?-fn :return-type-rule (types/wrap-with-taint nil)}
-   :if {:impl if-fn :return-type-rule (types/wrap-with-taint nil)}
+   :if {:impl if-fn :return-type-rule (types/wrap-with-taint if-return-rule)}
    :cond {:impl cond-fn
           :return-type-rule (types/wrap-with-taint cond-return-rule)
           :lazy-seq-args #{:clauses}}
    :case {:impl case-fn :return-type-rule (types/wrap-with-taint case-return-rule)}
    :coalesce {:impl coalesce :return-type-rule (types/wrap-with-taint coalesce-return-rule)}
    :const {:impl const :return-type-rule (types/wrap-with-taint const-return-rule)}
-   :equal? {:impl equal?-fn :return-type-rule (types/wrap-with-taint nil)}})
+   :equal? {:impl equal?-fn :return-type-rule (types/wrap-with-taint nil)}
+   :is-a? {:impl is-a?-fn :return-type-rule (types/wrap-with-taint nil)}})

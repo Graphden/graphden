@@ -76,6 +76,53 @@
     (is (contains? (reg/rich-types-snapshot) :rtc-plain))))
 
 
+(deftest record-rich-types-preserves-computed-effects-test
+  ;; Race fix (commit 7a48234e): `record-rich-types!`'s former
+  ;; unconditional `assoc` would clobber computed effects that the
+  ;; type-checker had previously written through
+  ;; `record-rich-types-raw!`. Re-running the raw seed pass on a
+  ;; composed fn-def whose own `:fns.edn` line declares no `:effects`
+  ;; — typical for composed defs that inherit `:process` from a
+  ;; parent — would erase the inherited set. `cron-schedule-fires-
+  ;; and-halts-end-to-end-test` failed flakily because of this.
+  ;;
+  ;; After the fix: when the incoming fn-def declares empty effects
+  ;; and the existing entry already carries non-empty `:effects`,
+  ;; the existing set is preserved.
+  (testing "first-time write installs whatever the fn-def declares"
+    (reg/record-rich-types! :rtc-pres1 {:args {} :return-type :int})
+    (is (= #{} (:effects (reg/rich-type-of :rtc-pres1)))))
+
+  (testing "computed effects (raw write) are preserved by a follow-up raw fn-def write that declares none"
+    ;; Simulate the parallel-bootstrap shape:
+    ;;   1. raw write seeds with fn-def's own declared effects (empty here).
+    ;;   2. type-checker computes the inherited set + writes via -raw!.
+    ;;   3. ANOTHER bootstrap thread re-runs the raw seed.
+    ;; Without the fix step 3 wipes step 2; with the fix it preserves it.
+    (reg/record-rich-types! :rtc-pres2 {:args {} :return-type :int})
+    (reg/record-rich-types-raw! :rtc-pres2
+                                {:return :int :args {}
+                                 :effects #{:process :network}})
+    (is (= #{:process :network} (:effects (reg/rich-type-of :rtc-pres2))))
+    ;; Re-run the raw seed — the fn-def still declares no effects.
+    (reg/record-rich-types! :rtc-pres2 {:args {} :return-type :int})
+    (is (= #{:process :network} (:effects (reg/rich-type-of :rtc-pres2)))
+        "raw re-write with empty :effects must NOT clobber the type-checker's set"))
+
+  (testing "non-empty effects in a later fn-def write DO replace existing"
+    ;; The preservation rule only kicks in for the empty → non-empty
+    ;; direction. If the fn-def itself declares effects, the new write
+    ;; is authoritative (admins may legitimately add a new effect to a
+    ;; base-fn definition; the registry must reflect it).
+    (reg/record-rich-types-raw! :rtc-pres3
+                                {:return :int :args {}
+                                 :effects #{:process}})
+    (reg/record-rich-types! :rtc-pres3
+                            {:args {} :return-type :int :effects #{:db}})
+    (is (= #{:db} (:effects (reg/rich-type-of :rtc-pres3)))
+        "explicit effects in fn-def win over previously-stored effects")))
+
+
 (deftest record-rich-types-raw-test
   (testing "a precomputed map with effects is stashed verbatim"
     (let [m {:return [:list :int] :args {:xs [:list :int]} :effects #{:db}}]

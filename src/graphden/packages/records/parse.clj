@@ -4,6 +4,7 @@
    Dispatches on entry shape; composed defs walk the inheritance +
    rename chain via `slot-resolution`."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.slot-resolution :as slot-res]
     [graphden.packages.records.types :as types]))
@@ -13,11 +14,50 @@
 ;; Per-form parsers — produce records from one fn-def EDN entry
 ;; =============================================================================
 
-(defn emit-composite-records
+(defn- inline-composite-type?
+  "True iff `t` is an inline composite shape `{:k T …}` — a map with
+   no `:type` discriminator, used to declare an anonymous record type.
+   The loader's expanded `{:type T :required B}` wrapper does NOT
+   qualify (it's a type-spec map, not a composite)."
+  [t]
+  (and (map? t)
+       (not (types/type-spec-map? t))
+       (seq t)))
+
+
+(declare ^:private emit-composite-records)
+
+
+(defn- emit-anon-composite-fn
+  "Build the anon `:fn` row + recursive slot rows for an inline
+   composite shape. Returns `[fn-id records]`. Both the dangling
+   `return-type-fn-id` and dangling slot `type-fn-id` bugs trace back
+   to this emission being skipped — centralising it here keeps every
+   inline-composite site in sync."
+  [shape name->id]
+  (let [inline-id (ids/anonymous-fn-id (ids/shape-hash shape))
+        inline-fn {:kind :fn
+                   :id inline-id
+                   :name nil
+                   :namespace-id nil
+                   :parent-ids []
+                   :impl-hash nil
+                   :base-fn-id nil
+                   :element-fn-id nil
+                   :return-type-fn-id nil
+                   :anonymous-hash (ids/shape-hash shape)
+                   :constraint nil
+                   :description nil}]
+    [inline-id (into [inline-fn]
+                     (emit-composite-records inline-id shape name->id))]))
+
+
+(defn- emit-composite-records
   "For a composite type definition `{slot-name slot-type ...}` belonging
    to fn `owner-fn-id`, emit slot, fn-slot rows. If any slot's type is
-   itself an inline composite, recursively emit that composite's records
-   too. Returns vector of records.
+   itself an inline composite — either directly (`field-type = {:k T}`)
+   or wrapped (`field-type = {:type {:k T} :required ?}`) — recursively
+   emit that composite's records too. Returns vector of records.
 
    `name->id`: existing fn-name → fn-id mapping (for resolving named
    refs within the composite)."
@@ -26,42 +66,26 @@
     (vec
       (mapcat
         (fn [[idx [field-name field-type]]]
-          (let [;; Resolve field's type. If inline composite (a pure
-                ;; {field-name field-type} map with NO `:type` discriminator),
-                ;; recurse to emit its anonymous fn / slot rows. Loader's
-                ;; expanded `{:type T :required B}` shape is NOT an inline
-                ;; composite — `resolve-type-ref` strips it back to T.
-                inline-composite? (and (map? field-type)
-                                       (not (types/type-spec-map? field-type)))
+          (let [;; Inline composite can appear directly OR inside a
+                ;; `{:type T :required B}` wrapper. Pre-fix the wrapped
+                ;; case slipped through — `:_seq-remove-load-item :args
+                ;; {:parsed {:type {:item-id :uuid}}}` resolved to an
+                ;; anon-fn-id but never emitted the corresponding fn-row.
+                inner-type (if (types/type-spec-map? field-type)
+                             (:type field-type)
+                             field-type)
                 [type-fn-id sub-records]
-                (if inline-composite?
-                  (let [inline-id (ids/anonymous-fn-id (ids/shape-hash field-type))
-                        inline-fn {:kind :fn
-                                   :id inline-id
-                                   :name nil
-                                   :namespace-id nil
-                                   :parent-ids []
-                                   :impl-hash nil
-                                   :base-fn-id nil
-                                   :element-fn-id nil
-                                   :return-type-fn-id nil
-                                   :anonymous-hash (ids/shape-hash field-type)
-                                   :constraint nil
-                                   :description nil}]
-                    ;; (no :required for inline composite anon-fn rows)
-                    [inline-id
-                     (into [inline-fn]
-                           (emit-composite-records inline-id field-type name->id))])
+                (if (inline-composite-type? inner-type)
+                  (emit-anon-composite-fn inner-type name->id)
                   [(types/resolve-type-ref field-type name->id) []])
 
                 slot-description (when (types/type-spec-map? field-type)
                                    (:description field-type))
-                slot-required (cond
-                                (types/type-spec-map? field-type)
+                slot-required (if (types/type-spec-map? field-type)
                                 (if (contains? field-type :required)
                                   (:required field-type)
                                   true)
-                                :else true)
+                                true)
                 slot (ids/slot-id owner-fn-id field-name)
                 fn-slot (ids/fn-slot-id owner-fn-id slot)]
             (into sub-records
@@ -79,7 +103,21 @@
         (map-indexed vector entries)))))
 
 
-(defn parse-base-fn
+(defn- inline-record-rows-for-return-type
+  "When a fn-def's `:return-type` is an inline composite map
+   (`{:status :int :body :text …}`, no `:type` discriminator),
+   `resolve-type-ref` returns an anonymous-fn-id keyed by shape-hash
+   but the parser used to NEVER emit the corresponding fn / slot
+   rows — leaving a dangling `return-type-fn-id` FK that the editor
+   couldn't dereference. Returns a vector of records, or empty when
+   `return-type` is anything else (named ref, primitive, structural)."
+  [return-type name->id]
+  (if (inline-composite-type? return-type)
+    (second (emit-anon-composite-fn return-type name->id))
+    []))
+
+
+(defn- parse-base-fn
   "A fn-def with `:args` declaration and an impl is a base-fn. The
    args become slot/fn-slot rows."
   [{:keys [args return-type description]
@@ -98,11 +136,12 @@
                 :anonymous-hash nil
                 :constraint nil
                 :description description}
-        slots-records (emit-composite-records own-id (or args {}) name->id)]
-    (into [own-fn] slots-records)))
+        slots-records (emit-composite-records own-id (or args {}) name->id)
+        return-rows (inline-record-rows-for-return-type return-type name->id)]
+    (into [own-fn] (concat slots-records return-rows))))
 
 
-(defn parse-record-type
+(defn- parse-record-type
   "`{:name :foo :type {:k T …}}` — record-type with the given fields."
   [{:keys [description]
     fn-name :name ns-id :namespace shape :type} name->id]
@@ -123,7 +162,7 @@
     (into [own-fn] slots-records)))
 
 
-(defn parse-refinement
+(defn- parse-refinement
   "`{:name :foo :refine {:base T :constraint C}}` — refinement-type.
 
    Emits a fn-row with `base-fn-id` + `constraint` set, plus a single
@@ -161,7 +200,7 @@
       :position 0}]))
 
 
-(defn parse-list-type
+(defn- parse-list-type
   "`{:name :foo :list T}` — list-type with the given element type.
 
    Emits a fn-row plus a single `:items` slot (list-typed) so children
@@ -197,7 +236,7 @@
       :position 0}]))
 
 
-(defn parse-union
+(defn- parse-union
   "`{:name :foo :union [T1 T2 …]}` — union type. Stored as a fn-row
    with the branch list serialised into `:constraint` (a `[:union …]`
    vector that the type-checker reads). No slots — the row's role is
@@ -219,7 +258,7 @@
       :description description}]))
 
 
-(defn parse-map
+(defn- parse-map
   "`{:name :foo :map {:key K :value V}}` — homogeneous-map type. Like
    `:union`, stored as a fn-row whose `:constraint` carries `[:map K V]`
    for the type-checker; no slots — the row is pure type metadata."
@@ -240,7 +279,7 @@
       :description description}]))
 
 
-(defn parse-tuple
+(defn- parse-tuple
   "`{:name :foo :tuple [T1 T2 …]}` — fixed-length heterogeneous tuple.
    Like `:union`, stored as a fn-row whose `:constraint` carries
    `[:tuple T1 T2 …]`; no slots — pure type metadata."
@@ -261,7 +300,7 @@
       :description description}]))
 
 
-(defn parse-variant
+(defn- parse-variant
   "`{:name :foo :variant [:tag1 T1 :tag2 T2 …]}` — discriminated union.
    Like union, stored as a fn-row whose `:constraint` carries the
    variant payload for the type-checker to inspect.
@@ -298,7 +337,7 @@
         :description description}])))
 
 
-(defn resolve-parent-list
+(defn- resolve-parent-list
   "Pulls the parent fn-ids from a composed fn-def. Accepts either
    `:parent :foo` (single) or `:parents [:a :b]` (multi-inheritance).
    Throws on unknown names."
@@ -319,12 +358,12 @@
             parent-names))))
 
 
-(defn map-arg-value->binding-fields
+(defn- map-arg-value->binding-fields
   "Map-shaped arg-value branch of `arg-value->binding-fields`. Carries
    every recognised key (`:as`, `:ref`, `:value`, `:type`, `:append`,
-   `:closed`, `:terminal?`, `:required`) and emits the corresponding
-   binding columns. Falls back to `:value <whole-map>` when none of
-   the recognised keys are present (literal map binding).
+   `:closed`, `:required`) and emits the corresponding binding columns.
+   Falls back to `:value <whole-map>` when none of the recognised keys
+   are present (literal map binding).
 
    `:required true` narrows an inherited optional slot to required at
    this level — a one-way ratchet (descendants can't widen back).
@@ -332,12 +371,21 @@
    (widening forbidden); we still pass it through here so the diagnostic
    fires on the actual binding row, not as a silent drop."
   [arg-value name->id]
-  (let [{:keys [as value append closed terminal? required]
+  (let [{:keys [as value append closed required]
          ref-name :ref type-ref :type} arg-value
         has-required? (contains? arg-value :required)
         override-fn-id (when type-ref
                          (try (types/resolve-type-ref type-ref name->id)
-                              (catch Exception _ nil)))
+                              (catch Exception e
+                                ;; Surface unresolvable type-overrides instead
+                                ;; of silently dropping the user's annotation —
+                                ;; a typo in `:type :rng-resp-shape` (missing 'e')
+                                ;; would otherwise turn the binding into a plain
+                                ;; ref with no type-override and the user would
+                                ;; never know their override was ignored.
+                                (log/warn e "Binding :type override silently lost"
+                                          {:type-ref type-ref})
+                                nil)))
         ;; Phase 6c — `:as` no longer writes to `binding.rename-to`.
         ;; The renamed-view slot row (emitted by
         ;; `build-rename-slot-records`) carries the FK link and the
@@ -351,18 +399,17 @@
                  (assoc :value value)
 
                  override-fn-id (assoc :type-override-fn-id override-fn-id)
-                 terminal? (assoc :terminal true)
                  (or append closed) (assoc :list-append (boolean append)
                                            :list-closed (boolean closed))
                  has-required? (assoc :required (boolean required))
                  (not (or ref-name (contains? arg-value :value) as type-ref
-                          append closed terminal? has-required?))
+                          append closed has-required?))
                  (assoc :value arg-value))]
     {:fields fields
      :items (vec (when (vector? append) append))}))
 
 
-(defn arg-value->binding-fields
+(defn- arg-value->binding-fields
   "Translate a fn-def `:args` value into `{:value :ref-fn-id …}` fields
    plus the items vector that should be emitted as `binding-list-item`
    rows.
@@ -382,7 +429,6 @@
      `{:value v}`                  → literal `:value` (bypasses
                                      bare-keyword fn-ref resolution)
      `{:ref :name}`                → `:ref-fn-id`
-     `{:terminal? true}`           → `:terminal`
      anything else (incl. literal map) → `:value`"
   [arg-value name->id sequence-slot?]
   (cond
@@ -404,7 +450,7 @@
     {:fields {:value arg-value} :items []}))
 
 
-(defn item->record
+(defn- item->record
   "Translate one element of an `:append [...]` vector into a
    binding-list-item record. Recognised shapes mirror
    `arg-value->binding-fields`:
@@ -445,7 +491,19 @@
       (assoc base :value item))))
 
 
-(defn composed-own-fn
+(defn- resolve-owner-fn-id
+  "Map an owner fn-name to its fn-id. Prefer `name->id` (pre-built
+   from the module's fn-defs + base-fn bootstrap); fall back to
+   reconstructing `(ids/fn-id ns owner-name)` from the def in
+   `defs-by-name`. Returns nil when neither lookup succeeds."
+  [owner-name name->id defs-by-name]
+  (or (get name->id owner-name)
+      (some-> (get defs-by-name owner-name)
+              :namespace
+              (ids/fn-id owner-name))))
+
+
+(defn- composed-own-fn
   "Top-level fn-row record for a composed fn-def — no impl-hash and no
    type-row markers (those are owned by base-fn / type-row branches
    of the parser). `return-type-fn-id` may be set when the composed
@@ -476,21 +534,29 @@
    :override-kind :fixed
    :type-override-fn-id nil
    :description nil
-   :terminal nil
    :list-append nil
    :list-closed nil
    :required nil})
 
 
-(defn build-binding-and-items
+(defn- build-binding-and-items
   "Translate one `[arg-name arg-value]` into the binding row plus its
    list-item rows. Walks inheritance to find the slot owner so the
-   binding targets the canonical slot-id."
+   binding targets the canonical slot-id.
+
+   Pure `{:as :exposed-name}` renames produce a binding row with
+   empty fields (just `:id :fn-id :slot-id`) — counter-intuitively
+   the executor's slot resolution REQUIRES that binding row to
+   recognise the rename's source-slot-id pointer at lookup time. An
+   earlier optimisation suppressed pure-rename binding rows and
+   broke `storage-protocol-poc-test`'s `:func {:as :storage-query}`
+   pattern; reverted. The rename mechanism is bound up with the
+   binding presence — both the slot row (from
+   `build-rename-slot-records`) AND the empty binding row are part
+   of the contract."
   [own-id fn-name [arg-name arg-value] name->id defs-by-name]
   (let [[owner-name owner-arg] (slot-res/resolve-slot-owner fn-name arg-name defs-by-name)
-        owner-fn-def (get defs-by-name owner-name)
-        owner-fn-id (or (get name->id owner-name)
-                        (ids/fn-id (:namespace owner-fn-def) owner-name))
+        owner-fn-id (resolve-owner-fn-id owner-name name->id defs-by-name)
         slot (ids/slot-id owner-fn-id owner-arg)
         bid (ids/binding-id own-id slot)
         slot-type (slot-res/slot-type-of owner-name owner-arg defs-by-name)
@@ -512,36 +578,116 @@
     (into [binding-row] item-rows)))
 
 
-(defn parse-composed
-  "Composed fn-def: `:parent` (single) or `:parents` (multi). Each
-   `:args` entry becomes a binding row on the slot it targets.
+(defn- own-slot-declaration?
+  "True iff this `:args` value is an OWN slot declaration (not a
+   binding on an inherited slot). Shape: a map with `:type` and
+   optionally `:description` / `:required`, but NONE of the binding
+   markers (`:value`, `:ref`, `:as`, `:append`, `:closed`).
 
-   Slot resolution walks the inheritance chain (`resolve-slot-owner`)
-   to find the actual ancestor that DECLARED the slot — directly via
-   a base-fn / type-row, or via a `:as` rename that re-exposes a
-   deeper slot under a new name. The slot-id is computed from the
-   resolved owner's fn-id and the slot's original name, so siblings
-   that bind the same effective slot agree on its id."
+   Composed fn-defs use this to expose a NEW free pin under their own
+   contract — the slot's value flows down to deeper refs by name
+   match, the same way it would if the slot were declared at a
+   base-fn. Without this the parser would treat `{:data {:type :jsonb}}`
+   as a binding on a non-existent inherited `:data` slot."
+  [arg-value]
+  (and (map? arg-value)
+       (contains? arg-value :type)
+       (not-any? #(contains? arg-value %)
+                 [:value :ref :as :append :closed])))
+
+
+(defn- parse-composed
+  "Composed fn-def: `:parent` (single) or `:parents` (multi). Each
+   `:args` entry becomes a binding row on the inherited slot it
+   targets, OR — when the entry shape is `{:type T :description D?
+   :required R?}` with no binding markers — an own slot row that
+   this fn-def adds on top of inheritance.
+
+   Slot resolution for binding entries walks the inheritance chain
+   (`resolve-slot-owner`) to find the actual ancestor that DECLARED
+   the slot. Own slot declarations skip that walk: the slot-id is
+   computed from THIS fn-def's id + the arg-name, mirroring how
+   `parse-base-fn` mints fn-slots for a base-fn's args."
   [fn-def name->id defs-by-name]
   (let [{:keys [args description return-type] fn-name :name ns-id :namespace} fn-def
         own-id (ids/fn-id ns-id fn-name)
         parent-ids (resolve-parent-list fn-def name->id)
         ret-id (when return-type
-                 (try (types/resolve-type-ref return-type name->id) (catch Exception _ nil)))
+                 (try (types/resolve-type-ref return-type name->id)
+                      (catch Exception e
+                        (log/warn e "Composed-fn :return-type silently lost"
+                                  {:fn-name fn-name :return-type return-type})
+                        nil)))
         own-fn (composed-own-fn own-id fn-name ns-id parent-ids description ret-id)
-        exposed-names (slot-res/collect-exposed-names args fn-name defs-by-name)
-        rename-slot-records (slot-res/build-rename-slot-records fn-name exposed-names
-                                                                own-id name->id
-                                                                defs-by-name)
+        ;; Partition args: own-slot declarations (shape `{:type T}`
+        ;; without binding markers) vs. bindings on inherited slots.
+        {own-slot-args true binding-args false} (group-by
+                                                  (fn [[_ v]] (own-slot-declaration? v))
+                                                  args)
+        own-slot-map (into {} own-slot-args)
+        binding-map (into {} binding-args)
+        exposed-names (slot-res/collect-exposed-names binding-map fn-name defs-by-name)
+        ;; PB' own-slot decls — emit the slot/fn-slot rows. Then
+        ;; enrich each top-level slot with a `:source-slot-id` link
+        ;; if the same name exists deeper in the ref-tree. The link
+        ;; makes the PB' own-slot behave as a rename-view of the
+        ;; underlying base-fn / rename slot — `chain-source-slot-ids`
+        ;; reaches the deep slot through this FK, so downstream HOF
+        ;; callbacks with `{:as :item}` renames keep their full
+        ;; rename-chain working after PC's binding-routing change
+        ;; (real-PC commit 66d8f754 routes consumer bindings to PB'
+        ;; own-slots; without this bridge the rename mechanism would
+        ;; shortcircuit). The walk seeds `resolve-slot-owner-strict`
+        ;; from each ref-target so the OWN PB' decl on `fn-def`
+        ;; doesn't Pass-1-hit itself. Inline-composite anon slots
+        ;; (emitted recursively for `{:type {…}}` shapes) skip the
+        ;; enrichment — they aren't reachable through ref-targets and
+        ;; would mis-link.
+        own-slot-records
+        (when (seq own-slot-map)
+          (let [pb-slot-name-set (set (keys own-slot-map))
+                find-deep-source
+                (fn [arg-name]
+                  (some (fn [ref-name]
+                          (when-let [[owner-name owner-arg]
+                                     (slot-res/resolve-slot-owner-strict
+                                       ref-name arg-name defs-by-name #{})]
+                            (when-let [owner-fn-id
+                                       (resolve-owner-fn-id
+                                         owner-name name->id defs-by-name)]
+                              (ids/slot-id owner-fn-id owner-arg))))
+                        (slot-res/ref-targets-of fn-def defs-by-name)))]
+            (mapv (fn [r]
+                    (let [arg-name (some-> (:name r) keyword)]
+                      (if (and (= :slot (:kind r))
+                               (contains? pb-slot-name-set arg-name)
+                               (nil? (:source-slot-id r)))
+                        (if-let [deep-sid (find-deep-source arg-name)]
+                          (cond-> r
+                            (not= deep-sid (:id r)) (assoc :source-slot-id deep-sid))
+                          r)
+                        r)))
+                  (emit-composite-records own-id own-slot-map name->id))))
         binding+items (mapv #(build-binding-and-items own-id fn-name %
                                                       name->id defs-by-name)
-                            args)]
+                            binding-map)
+        return-rows (inline-record-rows-for-return-type return-type name->id)
+        ;; Park rename `:fn-slot` rows after any PB' own-slot rows so
+        ;; their `:position` doesn't collide. Pre-fix EVERY rename
+        ;; hardcoded position 0; mixing PB' + multiple renames produced
+        ;; non-deterministic `fn-slots-by-fn` ordering.
+        pb-slot-count (count (filter #(= :fn-slot (:kind %)) own-slot-records))
+        rename-slot-records (slot-res/build-rename-slot-records
+                              fn-name exposed-names own-id name->id
+                              defs-by-name pb-slot-count)]
     (into [own-fn]
-          (concat (apply concat rename-slot-records)
-                  (apply concat binding+items)))))
+          (concat (or own-slot-records [])
+                  (apply concat rename-slot-records)
+                  (apply concat binding+items)
+                  return-rows))))
 
 
-(defn attach-fn-meta
+(defn- attach-fn-meta
   "Post-process step that copies fn-def-level metadata onto the first
    record of every parser's output (which is always the `:fn` row).
    Today there's only one such field — `:expects-effects` — but the
@@ -608,6 +754,119 @@
        (attach-fn-meta fn-def))))
 
 
+(defn- inline-anon-fn-def?
+  "True iff `v` is an inline anonymous fn-def — a map with
+   `:parent` or `:parents` in arg-value position. The parser's
+   regular `map-arg-value->binding-fields` recognises only the
+   `:as/:ref/:value/:type/:append/:closed/:required`
+   shapes; a `{:parent X :args Y}` map falls through to
+   `(assoc :value <whole-map>)` (literal map binding) unless the
+   pre-pass below lifts it into a synthetic named fn-def first."
+  [v]
+  (and (map? v)
+       (or (contains? v :parent) (contains? v :parents))))
+
+
+(defn- anon-fn-name
+  "Stable synthetic name for an inline anon fn-def. Same shape across
+   the module collapses to the same name (deterministic — useful when
+   the same `(if (keyword? v) … …)` shape recurs)."
+  [anon-def]
+  (keyword (str "_anon-" (subs (ids/shape-hash anon-def) 0 16))))
+
+
+(declare expand-anons-in-fn-def)
+
+
+(defn- expand-anons-in-arg-value
+  "Walk one arg-value. If it's an inline anon, lift it into a synthetic
+   named fn-def (recursively expanding anons inside it). If it's a
+   sequence-arg vector, walk each item. Returns `[new-arg-value
+   extra-fn-defs]`."
+  [v ns-id]
+  (cond
+    (inline-anon-fn-def? v)
+    (let [;; A `:type` on the binding side is an author-pinned
+          ;; type-override for THIS call-site (parser writes
+          ;; `:type-override-fn-id` on the binding). It belongs on
+          ;; the resulting binding-form, not on the lifted anon's
+          ;; fn-def declaration — strip it before hashing so an
+          ;; otherwise-identical anon doesn't get a different
+          ;; synthetic name based on per-call-site overrides.
+          binding-type (:type v)
+          v* (dissoc v :type)
+          synthetic-name (anon-fn-name v*)
+          ;; Anon inherits the outer fn-def's namespace so its fn-id
+          ;; lands in the same module's namespace tree.
+          named (-> v*
+                    (assoc :name synthetic-name
+                           :namespace ns-id
+                           :description (or (:description v*)
+                                            "Synthetic — extracted from an inline anon fn-def.")))
+          [expanded extras] (expand-anons-in-fn-def named)
+          new-arg-value (if binding-type
+                          {:ref synthetic-name :type binding-type}
+                          synthetic-name)]
+      [new-arg-value (cons expanded extras)])
+
+    (vector? v)
+    (reduce
+      (fn [[acc-items acc-extras] item]
+        (let [[new-item extras] (expand-anons-in-arg-value item ns-id)]
+          [(conj acc-items new-item) (into acc-extras extras)]))
+      [[] []]
+      v)
+
+    :else
+    [v []]))
+
+
+(defn- expand-anons-in-fn-def
+  "Walk a fn-def's `:args` tree, extracting every inline anon into a
+   synthetic named fn-def. Returns `[expanded-fn-def extra-fn-defs]`
+   where `expanded-fn-def` has refs in place of inline anons."
+  [fn-def]
+  (let [ns-id (:namespace fn-def)
+        [new-args extras]
+        (reduce-kv
+          (fn [[acc-args acc-extras] k v]
+            (let [[new-v extras] (expand-anons-in-arg-value v ns-id)]
+              [(assoc acc-args k new-v) (into acc-extras extras)]))
+          [{} []]
+          (or (:args fn-def) {}))]
+    [(assoc fn-def :args new-args) extras]))
+
+
+(defn expand-inline-anons-in-module
+  "Pre-pass before regular module parsing. Walks every fn-def's
+   `:args` tree, lifts every inline `{:parent …}` map into a
+   synthetic named fn-def, and returns the FLATTENED list of fn-defs
+   (originals with refs in place + the new synthetics) for the
+   regular parser to consume.
+
+   Dedup: identical inline anon shapes within a module collapse to
+   one synthetic name via `ids/shape-hash`. Multiple identical
+   inline anons (in one fn-def OR across fn-defs in the module)
+   produce the SAME synthetic name → keep only one copy. Without
+   dedup, sync would fail `validate-no-duplicate-ids!` on the
+   resulting storage batch. Cross-module identical shapes still
+   produce separate fn-ids (different `:namespace`)."
+  [module-fn-defs]
+  (let [results (mapv expand-anons-in-fn-def module-fn-defs)
+        expanded-defs (map first results)
+        ;; Dedup synthetic anons by `:name` — identical shapes share a
+        ;; name via `shape-hash`, so the first occurrence wins.
+        unique-extras (->> results
+                           (mapcat second)
+                           (reduce (fn [acc fd]
+                                     (if (contains? acc (:name fd))
+                                       acc
+                                       (assoc acc (:name fd) fd)))
+                                   {})
+                           vals)]
+    (vec (concat expanded-defs unique-extras))))
+
+
 (defn parse-module
   "Parse fn-defs into records. Two passes:
    1. Pre-compute `name->id` (deterministic UUIDs) and `defs-by-name`
@@ -627,7 +886,13 @@
   ([module-fn-defs extra-name->id]
    (parse-module module-fn-defs extra-name->id {}))
   ([module-fn-defs extra-name->id extra-defs-by-name]
-   (let [;; Every named fn-def — including `:fn-type` declarations —
+   (let [;; Pre-pass: lift every inline `{:parent X :args Y}` map in
+         ;; arg-value position into a synthetic `_anon-<hash>` fn-def
+         ;; (deterministic, dedup'd by shape). The regular parser
+         ;; then sees a longer list with all the anons as ordinary
+         ;; named composed fn-defs.
+         module-fn-defs (expand-inline-anons-in-module module-fn-defs)
+         ;; Every named fn-def — including `:fn-type` declarations —
          ;; gets a deterministic fn-id by `(:namespace, :name)`.
          ;; `:fn-type` rows now carry their structural shape in
          ;; `:constraint` (see parse-fn-def), so they take the

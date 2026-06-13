@@ -1,4 +1,4 @@
-(ns graphden.crud.fn-execution.persist-test
+(ns ^:serial graphden.crud.fn-execution.persist-test
   "Unit tests for the pure helpers in `graphden.crud.fn-execution.persist`.
    The DB-touching write paths are covered indirectly by the
    integration tests in `graphden.crud.fn-execution-test` — this
@@ -118,12 +118,16 @@
       "blank :ref short-circuits before UUID parse"))
 
 
-(deftest parse-ref-fn-id-malformed-throws
-  ;; parse-uuid-or-clear does NOT swallow IllegalArgumentException;
-  ;; malformed input bubbles up so upstream validation can catch it
-  ;; with a clean error code.
-  (is (thrown? IllegalArgumentException
-        (persist/parse-ref-fn-id {:ref "not-a-uuid"}))))
+(deftest parse-ref-fn-id-malformed-returns-nil
+  ;; Updated when `parse-uuid-or-clear` started swallowing
+  ;; `IllegalArgumentException` to stop the
+  ;; `/api/execute {:args {:nums {:ref "not-a-uuid"}}}` regression
+  ;; where the bare exception leaked through as the response body.
+  ;; The malformed-ref path is now identical to the
+  ;; missing-`:ref` and blank-`:ref` paths — all collapse to nil so
+  ;; the downstream caller treats the binding as "no ref" and the
+  ;; literal value (or absence) survives.
+  (is (nil? (persist/parse-ref-fn-id {:ref "not-a-uuid"}))))
 
 
 ;; =============================================================================

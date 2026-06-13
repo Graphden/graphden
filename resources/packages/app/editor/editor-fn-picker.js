@@ -65,7 +65,7 @@ function fnRichInfo(f) {
 
 function openFnPicker(opts) {
   closeFnPicker();
-  if (!opts || !opts.anchorEl) return;
+  if (!opts?.anchorEl) return;
   if (!graphData || !Array.isArray(graphData.fns)) return;
 
   const excludeSet = new Set(opts.excludeIds || []);

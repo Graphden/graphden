@@ -10,6 +10,7 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
+    [graphden.layout.builder-helpers :as bh]
     [graphden.layout.core :as lc]
     [graphden.layout.graph :as lg]
     [graphden.storage.protocol.core :as sp]))
@@ -422,4 +423,4 @@
                                         [f2 s] {}}}]
       (is (= [{:type "int"   :fns ["f1"] :source "binding-override"}
               {:type "jsonb" :fns ["f2"] :source "slot-declared"}]
-             (#'lg/compute-edge-type-chain lookups a1 #{f1 f2}))))))
+             (bh/compute-edge-type-chain lookups a1 #{f1 f2}))))))

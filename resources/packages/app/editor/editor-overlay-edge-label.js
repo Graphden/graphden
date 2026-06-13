@@ -87,8 +87,7 @@ function createEdgeLabelOverlay(edge, container) {
   const editArg = (typeof argRowFromNode === 'function')
                   ? argRowFromNode(edge.data())
                   : null;
-  const argEditable = editArg
-                   && implementationFnIds && implementationFnIds.has(editArg['fn-id'])
+  const argEditable = editArg&& implementationFnIds?.has(editArg['fn-id'])
                    && (typeof isAuthenticated === 'function' && isAuthenticated());
   // Sequence-item edges encode an element/container relationship:
   // the leaf chip is the element type (from the slot's `:of`), and the

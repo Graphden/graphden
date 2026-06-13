@@ -174,30 +174,6 @@
   (vec (distinct coll)))
 
 
-(defbase stringify-map-keys-fn
-  "Converts all map keys to strings (keyword keys become their name)."
-  [m]
-  (when m
-    (into {}
-          (map (fn [[k v]]
-                 [(if (keyword? k) (name k) (str k)) v])
-               m))))
-
-
-(defbase keywordize-map-keys-fn
-  "Recursively converts all string map keys to keywords."
-  [m]
-  (clojure.walk/postwalk
-    (fn [x]
-      (if (map? x)
-        (into {}
-              (map (fn [[k v]]
-                     [(if (string? k) (keyword k) k) v])
-                   x))
-        x))
-    m))
-
-
 (defbase select-keys-fn [m ks]
   (select-keys m ks))
 
@@ -210,6 +186,19 @@
   (update-vals m f))
 
 
+(defbase update-keys-fn [m f]
+  (update-keys m f))
+
+
+(defbase postwalk-fn
+  "Walk `coll` bottom-up, applying `f` to every form. Atomic wrapper
+   around `clojure.walk/postwalk`. The HOF callable receives each node
+   under the convention free-arg name `:value` and returns the
+   replacement."
+  [f coll]
+  (clojure.walk/postwalk f coll))
+
+
 ;; === Sequence primitives ===
 ;; The executor resolves a `:seq` binding into an unchunked lazy-seq
 ;; (`compile/resolve-seq-items`). `list-fn` returns it as-is — `vec`
@@ -220,10 +209,43 @@
   items)
 
 
+(defbase vec-fn
+  "Coerce any sequential / collection to a vector. Idempotent on
+   vectors. Used by graph composition to normalise a possibly-lazy
+   `:seq` binding before handing it to operations that depend on
+   vector semantics (e.g. `into`'s append-on-vector vs prepend-on-seq
+   behaviour)."
+  [coll]
+  (vec coll))
+
+
 (defbase pairs->map-fn [entries]
   ;; `into {}` needs each entry to be a vector / map-entry; a pair
   ;; built via `:list` is now a lazy-seq, so coerce each with `vec`.
   (into {} (map vec) entries))
+
+
+(defn vec-return-rule
+  "When the input is a known `[:list T]`, preserve the element type;
+   otherwise fall back to the declared `[:list :any]`. Coercing a
+   typed sequence to a vector is identity at the type level — `vec`
+   just changes the runtime container, not the element story."
+  [bindings-info default-ret]
+  (let [coll-type (get-in bindings-info [:coll :type])]
+    (cond
+      (types/list-type? coll-type) coll-type
+      :else                        default-ret)))
+
+
+(defbase position-in-fn
+  "Index of the first occurrence of `:value` in `:coll`, or nil if
+   absent. Wraps `java.util.List/.indexOf`; the seq is `vec`'d first
+   so a lazy `:seq` binding works too. Companion to `:get` for
+   indexed-lookup style traversal."
+  [coll value]
+  (let [v (if (vector? coll) coll (vec coll))
+        idx (java.util.List/.indexOf ^java.util.List v value)]
+    (when-not (neg? idx) idx)))
 
 
 ;; === Type-rules ===
@@ -300,6 +322,18 @@
 
       base            (assoc base field-kw (or v-type :any))
 
+      ;; Homogeneous `[:map K V]` source — preserve the shape but
+      ;; widen the value-type to include the new field's type. Every
+      ;; value in the result is either an original V or the new
+      ;; `v-type`, so `[:union V v-type]` covers them. Without this
+      ;; arm a record-as-headers builder over a `[:map :text :text]`
+      ;; source would collapse to a fresh one-field record, losing
+      ;; the open-map shape downstream consumers (`:ring-response`,
+      ;; etc.) expect.
+      (types/map-type? m-type)
+      [:map (types/map-key m-type)
+       (types/make-union [(types/map-val m-type) (or v-type :any)])]
+
       ;; Neither `:map` nor the inherited return is a known record —
       ;; start a fresh one-field record.
       :else           {field-kw (or v-type :any)})))
@@ -319,6 +353,12 @@
 
       (types/record-type? m-type)
       (dissoc m-type field-kw)
+
+      ;; Homogeneous `[:map K V]` — removing one entry leaves a map
+      ;; with the same K and V (every remaining entry was already a
+      ;; K → V mapping).
+      (types/map-type? m-type)
+      m-type
 
       :else default-ret)))
 
@@ -416,6 +456,100 @@
       (first elem-types)
 
       :else default-ret)))
+
+
+;; --- :select-keys -----------------------------------------------------------
+;; When `:m` is a known record and `:ks` is a literal vector of
+;; `{:value :kw}` items, the result is the subset record carrying
+;; exactly those fields. For a homogeneous `[:map K V]` source the
+;; result is the same `[:map K V]` (key/val types unchanged).
+;; Anything else degrades to the declared `[:map :keyword :any]`.
+
+(defn select-keys-return-rule
+  [bindings-info default-ret]
+  (let [m-type (get-in bindings-info [:m :type])
+        ks-form (get-in bindings-info [:ks :value])
+        literal-kws (when (vector? ks-form)
+                      (mapv (fn [item]
+                              (when (and (map? item) (contains? item :value))
+                                (field-keyword-from-literal (:value item))))
+                            ks-form))
+        all-literal? (and (vector? ks-form)
+                          (seq ks-form)
+                          (every? some? literal-kws))]
+    (cond
+      (and (types/record-type? m-type) all-literal?)
+      (select-keys m-type literal-kws)
+
+      (types/map-type? m-type) m-type
+
+      :else default-ret)))
+
+
+;; --- :update-vals -----------------------------------------------------------
+;; `(update-vals m f)` keeps `m`'s key shape, replacing each value
+;; with `(f val)`. When the input is a homogeneous `[:map K V]` and
+;; the HOF callback `:f` has a known return type W, the result is
+;; `[:map K W]`. Record inputs would need per-field independent
+;; unification of `:f`'s `value` arg against each field's type —
+;; we don't (yet) widen the HOF's lambda-param across heterogeneous
+;; inputs, so fall back to the declared shape for that case.
+
+(defn update-vals-return-rule
+  [bindings-info default-ret]
+  (let [m-type (get-in bindings-info [:m :type])
+        f-type (get-in bindings-info [:f :type])
+        f-ret  (when (types/fn-type? f-type) (types/fn-ret f-type))]
+    (cond
+      (and (types/map-type? m-type) f-ret)
+      [:map (types/map-key m-type) f-ret]
+
+      :else default-ret)))
+
+
+(defn update-keys-return-rule
+  "`(update-keys m f)` keeps values, transforms keys. For a
+   homogeneous `[:map K V]` input and a HOF callback with a known
+   return type W, the result is `[:map W V]` (the W transform may
+   collide multiple K → same W, but the resulting value type is
+   still V — `update-keys` keeps the latter on collision)."
+  [bindings-info default-ret]
+  (let [m-type (get-in bindings-info [:m :type])
+        f-type (get-in bindings-info [:f :type])
+        f-ret  (when (types/fn-type? f-type) (types/fn-ret f-type))]
+    (cond
+      (and (types/map-type? m-type) f-ret)
+      [:map f-ret (types/map-val m-type)]
+
+      :else default-ret)))
+
+
+;; --- :zipmap ----------------------------------------------------------------
+;; When `:keys` is a literal vector of `{:value <kw-or-string>}` items,
+;; the result is a record-type whose fields are exactly those keys and
+;; whose value-types come from `:vals`'s per-item `:elem-types`. This
+;; is the canonical Ring-response builder pattern
+;; (`:zipmap :keys [{:value :status} {:value :body}] :vals [...]`) —
+;; preserving the record shape lets downstream `:assoc` / `:merge`
+;; chains keep per-field type info instead of collapsing the inherited
+;; `[:map :keyword :any]` declared return.
+
+(defn zipmap-return-rule
+  [bindings-info default-ret]
+  (let [keys-form (get-in bindings-info [:keys :value])
+        val-elems (get-in bindings-info [:vals :elem-types])
+        literal-kws (when (vector? keys-form)
+                      (mapv (fn [item]
+                              (when (and (map? item) (contains? item :value))
+                                (field-keyword-from-literal (:value item))))
+                            keys-form))]
+    (if (and (vector? keys-form)
+             (seq keys-form)
+             (every? some? literal-kws)
+             (sequential? val-elems)
+             (= (count literal-kws) (count val-elems)))
+      (zipmap literal-kws val-elems)
+      default-ret)))
 
 
 ;; --- :update-in / :merge-in -------------------------------------------------
@@ -529,17 +663,44 @@
 ;; nil, so the result is `[:union :null T]`, not bare `T`.
 (defn first-return-rule
   [b d]
-  (let [t (list-elem-of-arg b :coll)]
-    (if t (types/make-union [:null t]) d)))
+  (if-let [t (list-elem-of-arg b :coll)]
+    (types/make-union [:null t])
+    d))
 
 
-(defn rest-return-rule     [b d] (preserve-coll-list b d))
-(defn cons-return-rule     [b d] (preserve-coll-list b d))
-(defn take-return-rule     [b d] (preserve-coll-list b d))
-(defn drop-return-rule     [b d] (preserve-coll-list b d))
-(defn reverse-return-rule  [b d] (preserve-coll-list b d))
-(defn sort-return-rule     [b d] (preserve-coll-list b d))
-(defn distinct-return-rule [b d] (preserve-coll-list b d))
+(defn rest-return-rule
+  [b d]
+  (preserve-coll-list b d))
+
+
+(defn cons-return-rule
+  [b d]
+  (preserve-coll-list b d))
+
+
+(defn take-return-rule
+  [b d]
+  (preserve-coll-list b d))
+
+
+(defn drop-return-rule
+  [b d]
+  (preserve-coll-list b d))
+
+
+(defn reverse-return-rule
+  [b d]
+  (preserve-coll-list b d))
+
+
+(defn sort-return-rule
+  [b d]
+  (preserve-coll-list b d))
+
+
+(defn distinct-return-rule
+  [b d]
+  (preserve-coll-list b d))
 
 
 ;; --- :keys / :vals ----------------------------------------------------------
@@ -580,6 +741,19 @@
              (types/list-type? (types/list-elem colls-type)))
       (types/list-elem colls-type)
       d)))
+
+
+(defn flatten-return-rule
+  "One-level unnesting at the type level: `[:list [:list T]]` →
+   `[:list T]`. `flatten` recurses deeper at runtime but we only
+   model the common (and statically-trackable) one-level case;
+   deeper nesting falls back to the declared `[:list :any]`."
+  [bindings-info default-ret]
+  (let [coll-type (get-in bindings-info [:coll :type])]
+    (if (and (types/list-type? coll-type)
+             (types/list-type? (types/list-elem coll-type)))
+      (types/list-elem coll-type)
+      default-ret)))
 
 
 ;; --- :list ------------------------------------------------------------------
@@ -766,16 +940,18 @@
    :reverse {:impl reverse-fn :return-type-rule (types/wrap-with-taint reverse-return-rule)}
    :sort {:impl sort-fn :return-type-rule (types/wrap-with-taint sort-return-rule)}
    :concat {:impl concat-fn :return-type-rule (types/wrap-with-taint concat-return-rule)}
-   :flatten {:impl flatten-fn :return-type-rule (types/wrap-with-taint nil)}
+   :flatten {:impl flatten-fn :return-type-rule (types/wrap-with-taint flatten-return-rule)}
    :distinct {:impl distinct-fn :return-type-rule (types/wrap-with-taint distinct-return-rule)}
-   :stringify-map-keys {:impl stringify-map-keys-fn :return-type-rule (types/wrap-with-taint nil)}
-   :keywordize-map-keys {:impl keywordize-map-keys-fn :return-type-rule (types/wrap-with-taint nil)}
-   :select-keys {:impl select-keys-fn :return-type-rule (types/wrap-with-taint nil)}
-   :zipmap {:impl zipmap-fn :return-type-rule (types/wrap-with-taint nil)}
-   :update-vals {:impl update-vals-fn :return-type-rule (types/wrap-with-taint nil)}
+   :select-keys {:impl select-keys-fn :return-type-rule (types/wrap-with-taint select-keys-return-rule)}
+   :zipmap {:impl zipmap-fn :return-type-rule (types/wrap-with-taint zipmap-return-rule)}
+   :update-vals {:impl update-vals-fn :return-type-rule (types/wrap-with-taint update-vals-return-rule)}
+   :update-keys {:impl update-keys-fn :return-type-rule (types/wrap-with-taint update-keys-return-rule)}
+   :postwalk {:impl postwalk-fn :return-type-rule (types/wrap-with-taint nil)}
    :update-in {:impl update-in-fn
                :return-type-rule (types/wrap-with-taint update-in-return-rule)
                :slot-types-rule update-in-slot-rule
                :nav-types-rule update-in-nav-rule}
    :list {:impl list-fn :return-type-rule (types/wrap-with-taint list-return-rule)}
-   :pairs->map {:impl pairs->map-fn :return-type-rule (types/wrap-with-taint nil)}})
+   :vec {:impl vec-fn :return-type-rule (types/wrap-with-taint vec-return-rule)}
+   :pairs->map {:impl pairs->map-fn :return-type-rule (types/wrap-with-taint nil)}
+   :position-in {:impl position-in-fn :return-type-rule (types/wrap-with-taint nil)}})

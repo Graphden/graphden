@@ -78,7 +78,7 @@ function showProvenancePopover(arg, anchorEl) {
       || typeof appendResolutionSection !== 'function') return;
   const prov = slotTypeProvenance(arg);
   // No narrowing chain to show — bail rather than open an empty popover.
-  if (!prov || !prov.winner) return;
+  if (!prov?.winner) return;
 
   const el = ensureProvenancePopoverEl();
   el.textContent = '';

@@ -21,16 +21,599 @@
   ;; Base-fns — stage shims
   ;; ---------------------------------------------------------------------
 
+  ;; --- Stage 1 (Variant-2 decomposition) ---
+  ;; Was `(defbase _execute-parsed [request] (parse-execute-request
+  ;; request))` delegating to a Clojure helper that read the JSON
+  ;; body, parse-uuid'd `:fn-id`, str'd `:fn-name`, `or`'d `:args` to
+  ;; `{}`, `or`'d `:timeout-ms` to 10000, and `true?`'d `:persist?`.
+  ;;
+  ;; Now expressed as graph composition over per-field atoms:
+  ;;   parse body → 5 field lookups → 5 per-field transforms → :zipmap
+  ;;
+  ;; Admins extending the request shape (`:branch-ref`, `:cron-spec`,
+  ;; …) edit `:_execute-parsed`'s `:keys`/`:vals` lists instead of a
+  ;; Clojure helper.
+
+  {:name :_execute-body
+   :description "POST /api/execute request body parsed as JSON."
+   :parent :parse-json-body}
+
+  {:name :_execute-body-fn-id
+   :parent :get :args {:coll :_execute-body :key {:value :fn-id} :default nil}}
+
+  {:name :_execute-body-fn-name
+   :parent :get :args {:coll :_execute-body :key {:value :fn-name} :default nil}}
+
+  {:name :_execute-body-args
+   :parent :get :args {:coll :_execute-body :key {:value :args} :default nil}}
+
+  {:name :_execute-body-timeout-ms
+   :parent :get :args {:coll :_execute-body :key {:value :timeout-ms} :default nil}}
+
+  {:name :_execute-body-persist
+   :parent :get :args {:coll :_execute-body :key {:value :persist?} :default nil}}
+
+  ;; Field-level transforms.
+
+  {:name :_execute-fn-id
+   :description "`:fn-id` parsed UUID; nil for blank / non-string / malformed input. Mirrors `parse-uuid-or-clear`'s defensive collapse — every failure path returns nil so downstream guards can produce a clean error response."
+   :parent :parse-uuid
+   :args {:s :_execute-body-fn-id}}
+
+  {:name :_execute-fn-name
+   :description "`:fn-name` coerced to string when present, nil when absent. Nil-safe `(some-> body :fn-name str)` pattern."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_execute-body-fn-name}}
+          :then {:parent :to-str :args {:value :_execute-body-fn-name}}
+          :else nil}}
+
+  {:name :_execute-args
+   :description "`:args` map, defaulting to `{}` when absent."
+   :parent :coalesce
+   :args {:value :_execute-body-args :default {}}}
+
+  {:name :_execute-timeout-ms
+   :description "`:timeout-ms`, defaulting to 10000ms when the request didn't override. Matches `default-timeout-ms` in `graphden.crud.fn-execution`."
+   :parent :coalesce
+   :args {:value :_execute-body-timeout-ms :default 10000}}
+
+  {:name :_execute-persist
+   :description "`:persist?` — `true?` semantics. Any truthy-but-not-true value (string, number) → false. The strict equality guards against client-side libraries sending `\"true\"` or `1`."
+   :parent :equal?
+   :args {:a :_execute-body-persist :b {:value true}}}
+
   {:name :_execute-parsed
-   :description "Stage 1 — JSON body → `{:fn-id :fn-name :args :timeout-ms :persist?}`. No DB."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :_execute-parsed-shape}
+   :description "Stage 1 — JSON body → `{:fn-id :fn-name :args :timeout-ms :persist?}`. Per-field graph composition over `:parse-json-body` + `:get` + (`:parse-uuid` / `:coalesce` / nil-safe `:to-str` / `:equal? true`) — admin-extensible without touching Clojure."
+   :parent :zipmap
+   :args {:keys [{:value :fn-id}
+                 {:value :fn-name}
+                 {:value :args}
+                 {:value :timeout-ms}
+                 {:value :persist?}]
+          :vals [:_execute-fn-id
+                 :_execute-fn-name
+                 :_execute-args
+                 :_execute-timeout-ms
+                 :_execute-persist]}}
+
+  ;; --- C23: stage 2 of execute as a graph `:cond`. Was a single
+  ;; `defbase` delegating to `fn-exec/validate-execute`; now each
+  ;; guard is its own `:_execute-*-err` rejection-builder defbase
+  ;; (the `defn`s in `graphden.crud.fn-execution`), with a thin
+  ;; `:_execute-*-rej?` predicate built as `:parent :some?` over
+  ;; the same err. `:cond` is lazy + shares `parsed`, so each
+  ;; guard's underlying `parsed` lookup runs at most once per call
+  ;; even though predicate + clause-result both read it (call-cache
+  ;; dedupes the per-guard `defn` call). The Clojure-level
+  ;; composition in `validate-execute` mirrors this order. ---
+  ;; --- :_execute-no-fn-err (Variant-2). Was defbase delegating to
+  ;; `execute-no-fn-rej` which returned `(when (and (nil? fn-id) (nil?
+  ;; fn-name)) {...})`. Now an `:if` over `:and :nil? :nil?` returning
+  ;; a `:const` rejection or nil. The rejection body is admin-tunable
+  ;; via the `:const`'s `:value`.
+  {:name :_execute-no-fn?
+   :description "True iff parsed request has neither `:fn-id` nor `:fn-name`."
+   :parent :and
+   :args {:values [{:parent :nil?
+                    :args {:value {:parent :get
+                                   :args {:coll {:as :parsed}
+                                          :key {:value :fn-id}
+                                          :default nil}}}}
+                   {:parent :nil?
+                    :args {:value {:parent :get
+                                   :args {:coll {:as :parsed}
+                                          :key {:value :fn-name}
+                                          :default nil}}}}]}}
+
+  {:name :_execute-no-fn-rej
+   :description "Static rejection envelope for the `:no-fn` guard."
+   :parent :const
+   :args {:value {:ok false
+                  :status :rejected
+                  :error "Request must carry :fn-id or :fn-name"
+                  :error-data {:reason :no-fn}}}}
+
+  {:name :_execute-no-fn-err
+   :description "Static rejection — request carried neither `:fn-id` nor `:fn-name`. Returns the rejection map when the guard fires, else nil. `:if` is lazy, so the rejection literal is only realised when actually needed."
+   :parent :if
+   :args {:test :_execute-no-fn?
+          :then :_execute-no-fn-rej
+          :else nil}}
+
+  ;; --- :resolve-fn — atomic primitive. Resolves `{:fn-id ? :fn-name ?}`
+  ;; to the full `:fn` row in one storage round-trip; nil when neither
+  ;; identifier matches. Wraps `lookup/resolve-fn` (which itself absorbs
+  ;; the storage's text-vs-keyword codec ambiguity for `fn.name`).
+  ;; Reusable across the validation guards: fn-not-found / running-as-
+  ;; svc / unknown-arg all share the same fn-row, so result-cache
+  ;; dedupes the DB hit within a single /api/execute call.
+  {:name :resolve-fn
+   :description "Resolve `parsed.{:fn-id, :fn-name}` to a full `:fn` row; nil when neither identifier resolves."
+   :args {:parsed {:type :_execute-parsed-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  ;; --- :_execute-fn-not-found-err (Variant-2). Was defbase delegating
+  ;; to `execute-fn-not-found-rej`. Now graph-composed: resolve-fn +
+  ;; has-anchor? (request carried fn-id or fn-name) + nil-id? +
+  ;; dynamic `:str` message. Same lazy `:if` envelope.
+  {:name :_execute-fn-row
+   :description "Full :fn row for the parsed request, or nil when neither :fn-id nor :fn-name resolves."
+   :parent :resolve-fn
+   :args {:parsed {:as :parsed}}}
+
+  {:name :_execute-fn-row-id
+   :parent :get
+   :args {:coll :_execute-fn-row :key {:value :id} :default nil}}
+
+  {:name :_execute-parsed-fn-id
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}
+
+  {:name :_execute-parsed-fn-name
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :fn-name} :default nil}}
+
+  {:name :_execute-has-anchor?
+   :description "Request carried `:fn-id` OR `:fn-name`. Distinguishes the no-anchor case (caught by `:_execute-no-fn?`) from the unresolvable-anchor case (caught here)."
+   :parent :or
+   :args {:values [{:parent :some? :args {:value :_execute-parsed-fn-id}}
+                   {:parent :some? :args {:value :_execute-parsed-fn-name}}]}}
+
+  {:name :_execute-fn-not-found?
+   :description "True iff request carried an anchor BUT it didn't resolve."
+   :parent :and
+   :args {:values [:_execute-has-anchor?
+                   {:parent :nil? :args {:value :_execute-fn-row-id}}]}}
+
+  {:name :_execute-fn-not-found-anchor
+   :description "The anchor cited in the error message — fn-name when supplied, else fn-id."
+   :parent :coalesce
+   :args {:value :_execute-parsed-fn-name
+          :default :_execute-parsed-fn-id}}
+
+  {:name :_execute-fn-not-found-msg
+   :parent :str
+   :args {:parts [{:value "Function not found: "}
+                  :_execute-fn-not-found-anchor]}}
+
+  {:name :_execute-fn-not-found-rej
+   :description "Rejection envelope for the fn-not-found guard. Dynamic — `:error` cites the unresolved anchor."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+          :vals [{:value false}
+                 {:value :rejected}
+                 :_execute-fn-not-found-msg
+                 {:value {:reason :fn-not-found}}]}}
+
+  {:name :_execute-fn-not-found-err
+   :description "Dynamic rejection — `:fn-id` / `:fn-name` was supplied but doesn't resolve to a real `:fn` row. Returns the rejection map when the guard fires, else nil. `:resolve-fn` runs once per request thanks to result-cache; downstream guards (`running-as-svc`, `unknown-arg`) share the same `:_execute-fn-row`."
+   :parent :if
+   :args {:test :_execute-fn-not-found?
+          :then :_execute-fn-not-found-rej
+          :else nil}}
+
+  ;; --- :_execute-timeout-bad-err (Variant-2). Was defbase delegating
+  ;; to `execute-timeout-out-of-range-rej` which returned `(when (or
+  ;; (< t 1) (> t 60000)) {...})`. Now graph-composed: parsed-timeout
+  ;; lookup + range predicate (`:or :lt :gt`) + `:if` over a `:zipmap`
+  ;; envelope. The `:error-data` map cites the bad timeout value.
+  {:name :_execute-parsed-timeout
+   :description "`:timeout-ms` field of `:_execute-parsed`."
+   :parent :get
+   :args {:coll {:as :parsed}
+          :key {:value :timeout-ms}
+          :default nil}}
+
+  {:name :_execute-timeout-bad?
+   :description "True iff parsed `:timeout-ms` is < 1 or > 60000 (max-timeout-ms in `graphden.crud.fn-execution`)."
+   :parent :or
+   :args {:values [{:parent :lt :args {:nums [:_execute-parsed-timeout {:value 1}]}}
+                   {:parent :gt :args {:nums [:_execute-parsed-timeout {:value 60000}]}}]}}
+
+  {:name :_execute-timeout-bad-rej-data
+   :description "`:error-data` block for the timeout-out-of-range rejection — `{:reason :timeout-out-of-range :timeout-ms <bad-value>}`."
+   :parent :zipmap
+   :args {:keys [{:value :reason} {:value :timeout-ms}]
+          :vals [{:value :timeout-out-of-range}
+                 :_execute-parsed-timeout]}}
+
+  {:name :_execute-timeout-bad-rej
+   :description "Rejection envelope for the timeout-out-of-range guard. Dynamic — `:error-data` cites the bad value."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+          :vals [{:value false}
+                 {:value :rejected}
+                 {:value ":timeout-ms must be in [1, 60000]"}
+                 :_execute-timeout-bad-rej-data]}}
+
+  {:name :_execute-timeout-bad-err
+   :description "Dynamic rejection — `:timeout-ms` outside `[1, max-timeout-ms]`. Returns the rejection map when out of range, else nil. `:if` is lazy, so the dynamic envelope is built only when the guard fires."
+   :parent :if
+   :args {:test :_execute-timeout-bad?
+          :then :_execute-timeout-bad-rej
+          :else nil}}
+
+  ;; --- :_execute-args-too-large-err (Variant-2). Was defbase wrapping
+  ;; `(when (> (count (json/generate-string args)) 262144) {...})`.
+  ;; Now pure graph composition — no new base-fns needed because
+  ;; `:to-json-string` + `:count` already cover the size calc, and
+  ;; `:gt` + `:if` + `:zipmap` cover the rest. `max-args-bytes` lives
+  ;; in `graphden.crud.fn-execution.persist` (256 KB = 262144); change
+  ;; both sides if you tighten / loosen the limit.
+  {:name :_execute-args-bytes
+   :description "Serialised byte-size of `:args` — `(count (to-json-string args))`. Pure graph composition over existing primitives, no new base-fn."
+   :parent :count
+   :args {:coll {:parent :to-json-string
+                 :args {:data {:parent :get
+                               :args {:coll {:as :parsed}
+                                      :key {:value :args}
+                                      :default nil}}}}}}
+
+  {:name :_execute-args-too-large?
+   :description "True iff serialised `:args` exceeds the 256 KB limit."
+   :parent :gt
+   :args {:nums [:_execute-args-bytes {:value 262144}]}}
+
+  {:name :_execute-args-too-large-rej-data
+   :description "`:error-data` block for the args-too-large rejection — `{:reason :args-too-large :bytes <n>}`."
+   :parent :zipmap
+   :args {:keys [{:value :reason} {:value :bytes}]
+          :vals [{:value :args-too-large}
+                 :_execute-args-bytes]}}
+
+  {:name :_execute-args-too-large-rej
+   :description "Rejection envelope for the args-too-large guard."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+          :vals [{:value false}
+                 {:value :rejected}
+                 {:value ":args size exceeds 262144 bytes"}
+                 :_execute-args-too-large-rej-data]}}
+
+  {:name :_execute-args-too-large-err
+   :description "Dynamic rejection — serialised `:args` payload exceeds 256 KB (`max-args-bytes` in `fn-execution.persist`). Returns the rejection map when the guard fires, else nil."
+   :parent :if
+   :args {:test :_execute-args-too-large?
+          :then :_execute-args-too-large-rej
+          :else nil}}
+
+  ;; --- :_execute-running-as-svc-err (Variant-2). Was defbase wrapping
+  ;; `(when fn-id (when-let [svc (first (query :service {:fn-id fn-id
+  ;; :enabled? true}))] {...}))`. Now graph composition — reuses
+  ;; `:_execute-fn-row-id` from `:_execute-fn-not-found-err`, builds the
+  ;; query :where via `:zipmap`, takes :first, gates the rejection on
+  ;; both fn-id-present AND conflict-present.
+  ;; Block 1 Step 2 migration: enabled-services-for-fn check now reads
+  ;; :service directly via `:pg-query` + per-row `:decode-row`.
+  ;; `:service` is non-versioned, so the version-resolution bypass is
+  ;; correct. The where filter combines `:fn-id` + `:enabled?` in an
+  ;; `[:and …]` HoneySQL clause; the `fn-id` is per-request so the
+  ;; where vector is built via `:vec`.
+  {:name :_execute-svc-conflicts
+   :description "Enabled `:service` rows whose `:fn-id` matches the resolved fn."
+   :parent :map
+   :args {:func :_execute-svc-conflicts-decode-row
+          :coll :_execute-svc-conflicts-raw}}
+
+  {:name :_execute-svc-conflicts-raw
+   :parent :storage-query-call
+   :args {:arg :_execute-svc-conflicts-hsql}}
+
+  {:name :_execute-svc-conflicts-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :service}}
+          :key {:value :where}
+          :value :_execute-svc-conflicts-hsql-where}}
+
+  {:name :_execute-svc-conflicts-hsql-where
+   :parent :vec
+   :args {:coll [{:value :and}
+                 :_execute-svc-conflicts-hsql-fn-id-eq
+                 {:value [:= :enabled? true]}]}}
+
+  {:name :_execute-svc-conflicts-hsql-fn-id-eq
+   :parent :vec
+   :args {:coll [{:value :=} {:value :fn-id} :_execute-fn-row-id]}}
+
+  {:name :_execute-svc-conflicts-decode-row
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "service"}}}
+
+  {:name :_execute-conflict-svc
+   :description "First conflicting service row (nil when none)."
+   :parent :first
+   :args {:coll :_execute-svc-conflicts}}
+
+  {:name :_execute-running-as-svc?
+   :description "Guard — request resolved to a fn-id AND that fn-id has an enabled service. Lazy `:and` short-circuits when fn-id is nil (caught by `:_execute-no-fn?` / `:_execute-fn-not-found?` earlier in the cond)."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_execute-fn-row-id}}
+                   {:parent :some? :args {:value :_execute-conflict-svc}}]}}
+
+  {:name :_execute-running-as-svc-rej-data
+   :description "`:error-data` block — cites the conflicting service's id."
+   :parent :zipmap
+   :args {:keys [{:value :reason} {:value :source} {:value :service-id}]
+          :vals [{:value :already-running-as-service}
+                 {:value :service}
+                 {:parent :get :args {:coll :_execute-conflict-svc :key {:value :id} :default nil}}]}}
+
+  {:name :_execute-running-as-svc-rej
+   :description "Rejection envelope for the already-running-as-service guard."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+          :vals [{:value false}
+                 {:value :rejected}
+                 {:value "Function is already running as a managed service. Disable the service in /api/entities/service or restart it via /api/services/reconcile."}
+                 :_execute-running-as-svc-rej-data]}}
+
+  {:name :_execute-running-as-svc-err
+   :description "Dynamic rejection — fn is already alive as a managed `:service` row (the reconciler owns it). Returns the rejection map when both fn-id resolves AND an enabled service references it, else nil."
+   :parent :if
+   :args {:test :_execute-running-as-svc?
+          :then :_execute-running-as-svc-rej
+          :else nil}}
+
+  ;; `:free-arg-slot-map` is now declared in `web/crud/fns.edn` so
+  ;; both CRUD-write-time guards and this execute-validation guard
+  ;; can reference it. Pulled transitively via the `app → web`
+  ;; package edge.
+
+  ;; --- :_execute-unknown-arg-err (Variant-2). Was defbase wrapping
+  ;; `(let [free-args (lookup/free-arg-slot-map ctx fn-id) unknown
+  ;; (remove (set (keys free-args)) (map keyword (keys (:args
+  ;; parsed))))] (when (seq unknown) {...}))`. Now graph composition:
+  ;; resolve fn-row → look up its free-arg slot map → set-diff against
+  ;; supplied arg names → if any leftover, build rejection citing
+  ;; both unknown + known. The `lookup/free-arg-slot-map` BFS stays
+  ;; inside the new `:free-arg-slot-map` primitive (§3.3 inside the
+  ;; atomic boundary).
+  {:name :_execute-free-args
+   :description "`{arg-name → slot-id}` of the resolved fn's free args. `{}` when fn-row didn't resolve."
+   :parent :free-arg-slot-map
+   :args {:fn-id :_execute-fn-row-id}}
+
+  {:name :_execute-free-arg-keys
+   :description "Vector of free-arg keyword names — the set of acceptable arg keys."
+   :parent :keys
+   :args {:map :_execute-free-args}}
+
+  ;; Per-iteration predicate — `:item` is a key from `:args parsed`;
+  ;; `:_execute-free-arg-keys` is captured from outer scope.
+  {:name :_execute-arg-is-unknown?
+   :description "True iff the per-iteration arg-key is NOT among the fn's free-arg names. Uses `:position-in` + `:nil?` for membership; converting `:_execute-free-arg-keys` to a set would be cheaper for large fn-defs but typical free-arg counts (1–10) make the linear scan a non-issue."
+   :parent :nil?
+   :args {:value {:parent :position-in
+                  :args {:coll :_execute-free-arg-keys
+                         :value {:as :item}}}}}
+
+  {:name :_execute-unknown-args
+   :description "Subset of `:args` keys not in the fn's free-arg names."
+   :parent :filter
+   :args {:pred :_execute-arg-is-unknown?
+          :coll :_execute-args-keys}}
+
+  {:name :_execute-unknown-arg?
+   :description "Guard fires when fn-id resolved AND at least one supplied arg-key is not a known free-arg. Lazy `:and` short-circuits when fn-id is nil."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_execute-fn-row-id}}
+                   {:parent :not :args {:value {:parent :empty? :args {:coll :_execute-unknown-args}}}}]}}
+
+  {:name :_execute-unknown-args-vec
+   :description "Vec-coerced version of the filter result for the wire envelope."
+   :parent :vec
+   :args {:coll :_execute-unknown-args}}
+
+  {:name :_execute-unknown-arg-msg
+   :description "`Unknown arg(s): [:foo :bar]` — concatenates the prefix with the unknown vector's `(str)` form."
+   :parent :str
+   :args {:parts [{:value "Unknown arg(s): "}
+                  :_execute-unknown-args-vec]}}
+
+  {:name :_execute-unknown-arg-rej-data
+   :description "`:error-data` block — cites both `:unknown` (the offending args) and `:known` (the full free-arg list) so the editor can render a 'did you mean' picker."
+   :parent :zipmap
+   :args {:keys [{:value :reason} {:value :unknown} {:value :known}]
+          :vals [{:value :unknown-arg}
+                 :_execute-unknown-args-vec
+                 {:parent :vec :args {:coll :_execute-free-arg-keys}}]}}
+
+  {:name :_execute-unknown-arg-rej
+   :description "Rejection envelope for the unknown-arg guard."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+          :vals [{:value false}
+                 {:value :rejected}
+                 :_execute-unknown-arg-msg
+                 :_execute-unknown-arg-rej-data]}}
+
+  {:name :_execute-unknown-arg-err
+   :description "Dynamic rejection — one or more `:args` keys aren't valid free-arg names on the target fn. Returns the rejection map when the guard fires, else nil."
+   :parent :if
+   :args {:test :_execute-unknown-arg?
+          :then :_execute-unknown-arg-rej
+          :else nil}}
+
+  ;; --- :_execute-malformed-ref-err (Variant-2). Was defbase wrapping
+  ;; `(keep (fn [[k v]] (when (and (ref-arg? v) (nil? (parse-ref-fn-id
+  ;; v))) {:arg (name k) :raw-ref (:ref v)})) (:args parsed))`. Now
+  ;; pure graph composition — no new base-fns. Iterates over `:args`
+  ;; keys, filters keys whose value is a `{:ref str}` shape with a
+  ;; bad UUID, maps each kept key to the wire shape.
+  ;;
+  ;; The `:ref-arg?` and `:parse-ref-fn-id` Clojure helpers in
+  ;; `crud.fn-execution.persist` remain because `apply-execute` calls
+  ;; them through a different code path; eventual decomposition of
+  ;; `:_execute-apply` would eliminate the duplication.
+  {:name :_execute-parsed-args
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :args} :default nil}}
+
+  ;; Per-iteration helpers — `{:as :item}` is the current key into
+  ;; `:_execute-parsed-args`, supplied by the HOF.
+  {:name :_execute-arg-value
+   :description "Value at `args[item]`. `:item` is the HOF iteration variable."
+   :parent :get
+   :args {:coll :_execute-parsed-args :key {:as :item} :default nil}}
+
+  {:name :_execute-arg-ref
+   :description "`(get arg-value :ref)` — the raw ref under the `:ref` key (or nil)."
+   :parent :get
+   :args {:coll :_execute-arg-value :key {:value :ref} :default nil}}
+
+  {:name :_execute-arg-is-ref-shape?
+   :description "True iff `args[item]` is a `{:ref ...}` map."
+   :parent :and
+   :args {:values [{:parent :is-a? :args {:value :_execute-arg-value :type {:value :map}}}
+                   {:parent :contains? :args {:coll :_execute-arg-value :key {:value :ref}}}]}}
+
+  {:name :_execute-arg-ref-bad?
+   :description "True iff the ref under `args[item]` doesn't parse as a UUID."
+   :parent :nil?
+   :args {:value {:parent :parse-uuid :args {:s :_execute-arg-ref}}}}
+
+  {:name :_execute-arg-is-malformed-ref?
+   :description "Pure per-key predicate for `:filter` — ref-shape AND ref doesn't parse."
+   :parent :and
+   :args {:values [:_execute-arg-is-ref-shape? :_execute-arg-ref-bad?]}}
+
+  {:name :_execute-args-keys
+   :description "Keys of the parsed `:args` map. `(keys {})` returns nil; `:filter`/`:map` (now eager) treat nil-coll as empty seq per Clojure semantics, so downstream HOFs handle it cleanly without an explicit clamp."
+   :parent :keys
+   :args {:map :_execute-parsed-args}}
+
+  {:name :_execute-malformed-keys
+   :description "Subset of arg-keys whose value is a malformed ref."
+   :parent :filter
+   :args {:pred :_execute-arg-is-malformed-ref?
+          :coll :_execute-args-keys}}
+
+  ;; Per malformed key → `{:arg (name k) :raw-ref (get-in args [k :ref])}`.
+  {:name :_execute-malformed-shape
+   :description "HOF callback over a malformed key — `{:arg (name k) :raw-ref (get args[k] :ref)}`. `:item` is the key; `:_execute-arg-ref` reads the ref via the same `:item` capture."
+   :parent :zipmap
+   :args {:keys [{:value :arg} {:value :raw-ref}]
+          :vals [{:parent :keyword-to-str :args {:keyword {:as :item}}}
+                 :_execute-arg-ref]}}
+
+  {:name :_execute-malformed
+   :parent :map
+   :args {:func :_execute-malformed-shape
+          :coll :_execute-malformed-keys}}
+
+  {:name :_execute-any-malformed?
+   :description "Guard — at least one arg is a malformed ref."
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_execute-malformed}}}}
+
+  ;; Error builder fragments.
+  {:name :_execute-malformed-arg-names
+   :description "List of just the `:arg` names for the error message — `(mapv :arg malformed)`."
+   :parent :map
+   :args {:func :_execute-malformed-name-of
+          :coll :_execute-malformed}}
+
+  {:name :_execute-malformed-name-of
+   :parent :get
+   :args {:coll {:as :item} :key {:value :arg} :default nil}}
+
+  {:name :_execute-malformed-msg
+   :description "`Malformed ref(s) in args: [\"a\" \"b\"]` — concatenates the prefix with the vector's print form."
+   :parent :str
+   :args {:parts [{:value "Malformed ref(s) in args: "}
+                  {:parent :vec :args {:coll :_execute-malformed-arg-names}}]}}
+
+  {:name :_execute-malformed-ref-rej-data
+   :description "`:error-data` block — cites every malformed `{:arg :raw-ref}` entry."
+   :parent :zipmap
+   :args {:keys [{:value :reason} {:value :malformed}]
+          :vals [{:value :malformed-ref}
+                 {:parent :vec :args {:coll :_execute-malformed}}]}}
+
+  {:name :_execute-malformed-ref-rej
+   :description "Rejection envelope for the malformed-ref guard."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :status} {:value :error} {:value :error-data}]
+          :vals [{:value false}
+                 {:value :rejected}
+                 :_execute-malformed-msg
+                 :_execute-malformed-ref-rej-data]}}
+
+  {:name :_execute-malformed-ref-err
+   :description "Dynamic rejection — one or more `{:ref str}` args carry an unparseable UUID. Returns the rejection map when any malformed ref exists, else nil. Lazy `:if` — the rejection envelope only builds when the guard fires."
+   :parent :if
+   :args {:test :_execute-any-malformed?
+          :then :_execute-malformed-ref-rej
+          :else nil}}
+
+  {:name :_execute-no-fn-rej?
+   :description "Predicate — `:_execute-no-fn-err` produced a rejection."
+   :parent :some?
+   :args {:value :_execute-no-fn-err}}
+
+  {:name :_execute-fn-not-found-rej?
+   :description "Predicate — `:_execute-fn-not-found-err` produced a rejection."
+   :parent :some?
+   :args {:value :_execute-fn-not-found-err}}
+
+  {:name :_execute-timeout-bad-rej?
+   :description "Predicate — `:_execute-timeout-bad-err` produced a rejection."
+   :parent :some?
+   :args {:value :_execute-timeout-bad-err}}
+
+  {:name :_execute-args-too-large-rej?
+   :description "Predicate — `:_execute-args-too-large-err` produced a rejection."
+   :parent :some?
+   :args {:value :_execute-args-too-large-err}}
+
+  {:name :_execute-running-as-svc-rej?
+   :description "Predicate — `:_execute-running-as-svc-err` produced a rejection."
+   :parent :some?
+   :args {:value :_execute-running-as-svc-err}}
+
+  {:name :_execute-unknown-arg-rej?
+   :description "Predicate — `:_execute-unknown-arg-err` produced a rejection."
+   :parent :some?
+   :args {:value :_execute-unknown-arg-err}}
+
+  {:name :_execute-malformed-ref-rej?
+   :description "Predicate — `:_execute-malformed-ref-err` produced a rejection."
+   :parent :some?
+   :args {:value :_execute-malformed-ref-err}}
 
   {:name :_execute-validation
-   :description "Stage 2 — fn-id/name resolves, args within size cap, timeout in [1, 60000], every arg name is a real free-arg. Returns `{:ok false :error}` rejection, or nil when well-formed."
-   :args {:parsed {:type :_execute-parsed-shape}}
-   :return-type :_execute-rejection-shape
-   :effects #{:db}}
+   :description "Stage 2 — guards wired as a flat `:cond` over per-guard rejection-builders. Returns the first matching `{:ok false :status :rejected :error :error-data}` rejection, or `nil` when the request is well-formed (the `{:value true}` clause). `parsed` is bound once at this `:cond` so every guard shares it. Order mirrors the Clojure `validate-execute` composition."
+   :parent :cond
+   :args {:clauses [:_execute-no-fn-rej?            :_execute-no-fn-err
+                    :_execute-fn-not-found-rej?     :_execute-fn-not-found-err
+                    :_execute-timeout-bad-rej?      :_execute-timeout-bad-err
+                    :_execute-args-too-large-rej?   :_execute-args-too-large-err
+                    :_execute-running-as-svc-rej?   :_execute-running-as-svc-err
+                    :_execute-unknown-arg-rej?      :_execute-unknown-arg-err
+                    :_execute-malformed-ref-rej?    :_execute-malformed-ref-err
+                    {:value true}                   {:value nil}]
+          :parsed :_execute-parsed}}
 
   {:name :_execute-apply
    :description "Stage 3 — submit future, deref with timeout. Returns inline `{:status :succeeded :result …}` for fast pure fns, or `{:status :pending :execution-id}` when timeout/effects/persist? forced async."
@@ -40,8 +623,8 @@
 
   {:name :_execute-rejected?
    :description "True when `:_execute-validation` produced a rejection."
-   :args {:validation {:type [:union :_execute-rejection-shape :null]}}
-   :return-type :bool}
+   :parent :some?
+   :args {:value {:as :validation}}}
 
   ;; ---------------------------------------------------------------------
   ;; Composed: parse → (if rejected then rejection else apply)
@@ -68,35 +651,70 @@
   ;; --- C18 atoms: get-execution + cancel-execution variant-2.
   ;; Shared parse (`_exec-id-parsed`) + shared 404 builder
   ;; (`_exec-err-not-found`).
+  {:name :_exec-id-from-path-params
+   :description "Try the reitit-enriched `:path-params {:id …}` field first — the canonical place when the request flows through reitit's enrich-request middleware."
+   :parent :get-in
+   :args {:map {:as :request}
+          :path [{:value :path-params} {:value :id}]
+          :default nil}}
+
+  {:name :_exec-id-from-uri
+   :description "Fallback: parse the id directly from the URL when the handler is invoked with a raw http-kit request (e.g. through `:branch-routing-wrap`) that hasn't gone through reitit's enrich-request — `:path-params` is nil there."
+   :parent :uri-segment-after
+   :args {:marker {:value "execute"}}}
+
+  {:name :_exec-id-raw
+   :description "Raw id string from the URL — `:path-params` when present, else the URI segment after `execute/`."
+   :parent :coalesce
+   :args {:value :_exec-id-from-path-params
+          :default :_exec-id-from-uri}}
+
   {:name :_exec-id-parsed
    :description "Parse the `:id` path segment for both `/api/execute/:id` and `/api/execute/:id/cancel` into `{:id <uuid|nil> :id-raw <raw>}`. Raw form preserved for the dynamic 404 message."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{}}
+   :parent :zipmap
+   :args {:keys [{:value :id} {:value :id-raw}]
+          :vals [{:parent :parse-uuid :args {:s :_exec-id-raw}}
+                 :_exec-id-raw]}}
 
   {:name :_exec-err-not-found
    :description "Dynamic 404 builder — cites the raw id-segment. Shared between get + cancel."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["Execution not found: "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :id-raw}
+                                         :default nil}}]}}]}}
 
-  {:name :_get-exec-loaded
-   :description "Load the persisted execution row by id; nil when not found."
-   :args {:parsed {:type :jsonb}}
+  ;; --- :get-execution / :cancel-execution! — atomic DB primitives.
+  {:name :get-execution
+   :description "Read a :fn-execution row by id (joined with arg + arg-item rows). nil when id is nil or doesn't resolve."
+   :args {:id {:type [:union :null :uuid] :description "Target execution id."}}
    :return-type :jsonb
    :effects #{:db}}
 
+  {:name :cancel-execution!
+   :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
+   :args {:id {:type [:union :null :uuid] :description "Target execution id."}}
+   :return-type :jsonb
+   :effects #{:db :process}}
+
+  {:name :_get-exec-loaded
+   :description "Load the persisted execution row by id; nil when not found. Reuses the `:get-execution` primitive."
+   :parent :get-execution
+   :args {:id {:parent :get :args {:coll {:as :parsed} :key {:value :id} :default nil}}}}
+
   {:name :_get-exec-missing?
    :description "Guard — load returned nil."
-   :args {:loaded {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :parent :nil?
+   :args {:value {:as :loaded}}}
 
   {:name :_get-exec-apply
-   :description "Success branch — return the loaded row verbatim."
-   :args {:loaded {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Success branch — return the loaded row verbatim. `:const` over the captured `:loaded` cond shared-arg."
+   :parent :const
+   :args {:value {:as :loaded}}}
 
   {:name :_get-execution
    :description "GET /api/execute/:id — flat `:cond` of `[exec-missing? → 404-dynamic, true → return-loaded]`. `parsed` + `loaded` are shared sub-results bound once at the `:cond` fn-def."
@@ -116,22 +734,19 @@
   ;; ---------------------------------------------------------------------
 
   {:name :_cancel-exec-applied
-   :description "Call `cancel-execution!` — no-op (returns nil) when id is invalid OR no row matches. Otherwise sets `:cancel-requested?` on the row + `future-cancel`s the in-process handle."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "Call `:cancel-execution!` — no-op (returns nil) when id is invalid OR no row matches. Otherwise sets `:cancel-requested?` on the row + `future-cancel`s the in-process handle."
+   :parent :cancel-execution!
+   :args {:id {:parent :get :args {:coll {:as :parsed} :key {:value :id} :default nil}}}}
 
   {:name :_cancel-exec-missing?
    :description "Guard — cancel returned nil (bad id OR no row)."
-   :args {:applied {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :parent :nil?
+   :args {:value {:as :applied}}}
 
   {:name :_cancel-exec-apply
-   :description "Success branch — return the cancel-result-map verbatim."
-   :args {:applied {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Success branch — return the cancel-result-map verbatim. `:const` over the captured `:applied` cond shared-arg."
+   :parent :const
+   :args {:value {:as :applied}}}
 
   {:name :_cancel-execution
    :description "POST /api/execute/:id/cancel — flat `:cond` of `[cancel-missing? → 404-dynamic, true → return-applied]`. Reuses C18's `_exec-id-parsed` parser + `_exec-err-not-found` builder."
@@ -151,39 +766,197 @@
   ;; ---------------------------------------------------------------------
 
   ;; --- C6 atoms: parse / no-anchor? / by-version? / two apply paths.
+  ;; --- :_list-exec-parsed (Variant-2). Was defbase delegating to
+  ;; `parse-list-executions-request`. Now graph composition:
+  ;;   - `:query-param` (new web/crud primitive) for each of the 3
+  ;;     query params,
+  ;;   - `:parse-uuid` for `:fn-id` and `:version-id` (returns nil on
+  ;;     blank / non-string / malformed — matches the legacy
+  ;;     `parse-uuid-or-clear` semantics),
+  ;;   - `:try`-wrapped `:parse-int` for `:limit` so a non-numeric
+  ;;     `?limit=abc` collapses to nil instead of 500-ing.
+
+  {:name :_list-exec-fn-id-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "fn-id"}}}
+
+  {:name :_list-exec-version-id-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "fn-version-id"}}}
+
+  {:name :_list-exec-limit-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "limit"}}}
+
+  {:name :_list-exec-limit-parsed-body
+   :description "`:try` body — :parse-int throws NumberFormatException on non-numeric input. The wrapping :try collapses that to nil. The `:type :text` override on the ref-binding tells the type-checker that `:_list-exec-limit-raw`'s nullable surface is excluded under the `:_list-exec-limit` `:if`-guard (`(:some? :_list-exec-limit-raw)` clears it)."
+   :parent :parse-int
+   :args {:s {:ref :_list-exec-limit-raw :type :text}}}
+
+  {:name :_list-exec-limit
+   :description "Parsed `?limit` integer; nil when absent / non-numeric."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_list-exec-limit-raw}}
+          :then {:parent :try
+                 :args {:body :_list-exec-limit-parsed-body
+                        ;; `:on-throw` is a `[:fn :any]` callable invoked WITH
+                        ;; the caught exception. A literal `{:value nil}` would
+                        ;; type-fail against the slot's callable shape; wrap in
+                        ;; `:const` so the binding is a (fn [_] nil) shape.
+                        :on-throw {:parent :const :args {:value nil}}}}
+          :else nil}}
+
   {:name :_list-exec-parsed
    :description "Parse `GET /api/executions` query-string into `{:fn-id :version-id :limit}`."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{}}
+   :parent :zipmap
+   :args {:keys [{:value :fn-id} {:value :version-id} {:value :limit}]
+          :vals [{:parent :parse-uuid :args {:s :_list-exec-fn-id-raw}}
+                 {:parent :parse-uuid :args {:s :_list-exec-version-id-raw}}
+                 :_list-exec-limit]}}
 
   {:name :_list-exec-no-anchor?
-   :description "Guard — neither `?fn-id` nor `?fn-version-id` was supplied."
-   :args {:parsed {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard — neither `?fn-id` nor `?fn-version-id` was supplied. `:and [nil? (get parsed :version-id)] [nil? (get parsed :fn-id)]`."
+   :parent :and
+   :args {:values [{:parent :nil? :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :version-id} :default nil}}}}
+                   {:parent :nil? :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}}}]}}
 
   {:name :_list-exec-by-version?
    :description "Dispatch — `?fn-version-id` supplied. Wins over `?fn-id` when both are present."
-   :args {:parsed {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :parent :some?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :version-id} :default nil}}}}
 
+  ;; Phase 4 follow-up — list-executions-by-version decomposition.
+  ;; `:fn-execution` is non-versioned (write-once log), so the SQL
+  ;; goes through `:pg-query` directly with `WHERE fn-version-id = ?`
+  ;; + `ORDER BY started-at DESC` + `LIMIT <clamped>`. Per-row
+  ;; `:decode-row` for snake_case → kebab-case + timestamp parsing.
+  ;; Limit clamp is a `:cond` graph over the same nil/non-number/
+  ;; lt-1/gt-max ladder the Clojure helper used.
   {:name :_list-exec-apply-by-version
    :description "Return executions for the specific `:fn-version-id`."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :executions}]
+          :vals [{:value true} :_list-exec-by-version-rows]}}
+
+  {:name :_list-exec-by-version-rows
+   :description "Latest-first slice of the executions for this version, capped at the clamped limit."
+   :parent :take
+   :args {:count :_list-exec-clamped-limit
+          :coll :_list-exec-by-version-rows-desc}}
+
+  {:name :_list-exec-by-version-rows-desc
+   :parent :reverse
+   :args {:coll :_list-exec-by-version-rows-asc}}
+
+  {:name :_list-exec-by-version-rows-asc
+   :parent :sort-by
+   :args {:key-fn :_list-exec-started-at-key
+          :coll :_list-exec-by-version-decoded}}
+
+  {:name :_list-exec-started-at-key
+   :parent :get :args {:coll {:as :item} :key {:value :started-at} :default nil}}
+
+  {:name :_list-exec-by-version-decoded
+   :parent :map
+   :args {:func :_list-exec-decode-row :coll :_list-exec-by-version-raw}}
+
+  {:name :_list-exec-decode-row
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "fn-execution"}}}
+
+  {:name :_list-exec-by-version-raw
+   :parent :storage-query-call
+   :args {:arg :_list-exec-by-version-hsql}}
+
+  {:name :_list-exec-by-version-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :fn-execution}}
+          :key {:value :where}
+          :value :_list-exec-by-version-hsql-where}}
+
+  {:name :_list-exec-by-version-hsql-where
+   :parent :vec
+   :args {:coll [{:value :=} {:value :fn-version-id} :_list-exec-version-id]}}
+
+  {:name :_list-exec-version-id
+   :parent :get :args {:coll {:as :parsed} :key {:value :version-id} :default nil}}
+
+  ;; Limit clamp. The Clojure version: nil/not-number/<1 → 20,
+  ;; > 100 → 100, else (long limit). Express as flat `:cond` over
+  ;; the parsed `:limit` field.
+  {:name :_list-exec-limit-parsed
+   :parent :get :args {:coll {:as :parsed} :key {:value :limit} :default nil}}
+
+  {:name :_list-exec-clamped-limit
+   :parent :cond
+   :args {:clauses [:_list-exec-limit-invalid?  {:value 20}
+                    :_list-exec-limit-over-max? {:value 100}
+                    {:value true}                :_list-exec-limit-parsed]}}
+
+  {:name :_list-exec-limit-invalid?
+   :parent :or
+   :args {:values [{:parent :nil? :args {:value :_list-exec-limit-parsed}}
+                   :_list-exec-limit-less-than-1?]}}
+
+  {:name :_list-exec-limit-less-than-1?
+   :parent :gt
+   :args {:nums [{:value 1} :_list-exec-limit-parsed]}}
+
+  {:name :_list-exec-limit-over-max?
+   :parent :gt
+   :args {:nums [:_list-exec-limit-parsed {:value 100}]}}
+
+  ;; `:_list-exec-apply-by-fn` — same shape as `-by-version`, but the
+  ;; version-id is RESOLVED from the logical fn-id via
+  ;; `:resolve-fn-version-id` (a thin §3.1 wrap around `fn-execution.
+  ;; lookup/resolve-fn-version-id`). The reuses-the-version-path :if
+  ;; emits `{:ok true :executions []}` when the fn has no version
+  ;; visible on the active branch (e.g. inherited-only, never written).
+  {:name :resolve-fn-version-id
+   :description "Resolve a logical fn-id to its current-branch version-id. nil when the fn has no version visible on the active branch."
+   :args {:fn-id {:type :uuid}}
+   :return-type [:union :null :uuid]
    :effects #{:db}}
 
   {:name :_list-exec-apply-by-fn
    :description "Return executions for the logical `:fn-id` (current branch's resolved version)."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :parent :if
+   :args {:test :_list-exec-by-fn-version-found?
+          :then :_list-exec-apply-by-fn-with-version
+          :else :_list-exec-apply-by-fn-empty
+          :version-id :_list-exec-by-fn-version-id}}
+
+  {:name :_list-exec-by-fn-version-id
+   :parent :resolve-fn-version-id
+   :args {:fn-id {:parent :get :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}}}
+
+  {:name :_list-exec-by-fn-version-found?
+   :parent :some? :args {:value {:as :version-id}}}
+
+  ;; When a version IS resolvable, reuse the by-version path's query
+  ;; via a small parsed-shape adapter — synthesize a `{:version-id <resolved>}`
+  ;; that the version-path's `:_list-exec-version-id` reader picks up.
+  {:name :_list-exec-apply-by-fn-with-version
+   :parent :_list-exec-apply-by-version
+   :args {:parsed :_list-exec-by-fn-synth-parsed}}
+
+  {:name :_list-exec-by-fn-synth-parsed
+   :description "Carry the resolved version-id + the original limit into the by-version graph composition."
+   :parent :assoc
+   :args {:map {:parent :zipmap
+                :args {:keys [{:value :limit}]
+                       :vals [{:parent :get :args {:coll {:as :parsed} :key {:value :limit} :default nil}}]}}
+          :key {:value :version-id}
+          :value {:as :version-id}}}
+
+  {:name :_list-exec-apply-by-fn-empty
+   :description "Fn has no version visible on the current branch → empty execution list."
+   :parent :const
+   :args {:value {:ok true :executions []}}}
 
   {:name :_list-exec-err-no-anchor
    :parent :const
-   :return-type :jsonb
+   :return-type :_error-result-shape
    :args {:value {:ok false :error "missing or invalid ?fn-id / ?fn-version-id query parameter"}}}
 
   {:name :_list-executions-by-fn
@@ -203,11 +976,18 @@
   ;; POST /api/services/reconcile — Phase 1 hot-reload trigger
   ;; ---------------------------------------------------------------------
 
-  {:name :_reconcile-services
-   :description "Read enabled :service rows, diff against the in-process running atom, start missing + stop removed. Returns `{:ok true :reconcile {:started [ids] :stopped [ids]}}`. Admin calls this after creating/modifying :service rows so the change takes effect without a pod restart."
+  {:name :_reconcile-services-apply
+   :description "Stage 1 — single recon-library call producing the reconcile summary (`{:started [ids] :stopped [ids]}`). Wrapped into `{:ok true :reconcile …}` by the fn-def below."
    :args {:request {:type :ring-request-shape}}
    :return-type :jsonb
    :effects #{:db :io}}
+
+  {:name :_reconcile-services
+   :description "Wrap the recon summary into the public response shape. Admins can extend the response by adding keys here without touching impls."
+   :parent :zipmap
+   :args {:keys [:ok :reconcile]
+          :vals [{:value true}
+                 :_reconcile-services-apply]}}
 
   {:name :reconcile-services-handler
    :description "Ring handler for POST /api/services/reconcile."
@@ -222,42 +1002,179 @@
   ;; Five named stages glued by a non-:cond graph (pure variant-1
   ;; data composition). Each stage's purpose is visible at the
   ;; graph level instead of buried in a 20-line `defbase` body.
+  ;;
+  ;; --- Block 1 Step 2 migration: Stage 1 now reads :service directly
+  ;; via `:pg-query` + `:decode-row` instead of the thin
+  ;; `:list-entities` wrap. `:service` is NON-VERSIONED (per
+  ;; `versioning.storage.resolution/entity-config`), so a raw
+  ;; pg-query bypasses the version-resolution layer correctly. The
+  ;; HoneySQL is visible in the graph: admins can add `:where` /
+  ;; `:order-by` / joins without going through `:list-entities`'s
+  ;; generic interface.
   {:name :_list-services-rows
-   :description "Stage 1 — load every `:service` row from storage."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "Stage 1 — every `:service` row decoded to graphden's canonical shape. Direct `:pg-query` + per-row `:decode-row` composition (Block 1 Step 2 migration off `:list-entities`)."
+   :parent :map
+   :args {:func :_list-services-decode-row
+          :coll :_list-services-rows-raw}}
+
+  {:name :_list-services-rows-raw
+   :description "Raw `SELECT * FROM service` — snake_case column keys, undecoded enum/jsonb. Decoded per-row by `:_list-services-decode-row`."
+   :parent :storage-query-call
+   :args {:arg {:value {:select [:*] :from :service}}}}
+
+  {:name :_list-services-decode-row
+   :description "HOF callback — decode one raw `:service` row to graphden's canonical shape."
+   :parent :decode-row
+   :args {:row {:as :item}
+          :entity-type {:value "service"}}}
+
+  ;; Block 1 Step 2 Phase 3: `:fn` is a VERSIONED entity. The
+  ;; per-entity-type wrapper `:resolve-fn-rows` pins everything
+  ;; entity-specific (version-id-field, version-data-fields, the
+  ;; SQL for the version table). Per-site we only wire `:identities`
+  ;; (the SELECT against `:fn` identity table) and `:branch-chain`
+  ;; (the parent chain to scan).
+  {:name :_list-services-fn-rows
+   :description "Stage 2a — all `:fn` rows visible on the current branch."
+   :parent :resolve-fn-rows
+   :args {:identities :_list-services-fn-identities
+          :branch-chain :current-branch-chain}}
+
+  {:name :_list-services-fn-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "fn"}
+          :where {:value {}}}}
+
+  {:name :_list-services-fn-id-name-pair
+   :description "HOF callback per fn-row — emit a `[:id :name]` 2-vec so `:into {}` folds the sequence into a `{id → name}` index."
+   :parent :vec
+   :args {:coll [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}]}}
+
+  {:name :_list-services-fn-id-name-pairs
+   :description "Stage 2b — map the per-fn `[:id :name]` builder over every fn row."
+   :parent :map
+   :args {:func :_list-services-fn-id-name-pair
+          :coll :_list-services-fn-rows}}
 
   {:name :_list-services-fn-names
    :description "Stage 2 — build `{fn-id → name}` index over `:fn` rows (one query, constant-time lookups for the join below)."
-   :args {:request {:type :ring-request-shape}}
+   :parent :into
+   :args {:to {:value {}}
+          :from :_list-services-fn-id-name-pairs}}
+
+  ;; --- :running-entry atomic primitive ----------------------------
+  ;; Single library call — atom-deref + key lookup on `@recon/running`.
+  ;; The downstream reshape lives in `:enrich-running` graph fn-def
+  ;; below; admins can add `:thread-id` / `:port` / rename
+  ;; `:stopper-set?` without touching Clojure.
+  {:name :running-entry
+   :description "Raw per-service running-info entry from `@recon/running` — `{:stopper :started-at :start-attempts :start-failed-at}` or nil. Atomic boundary; the JSON shape reshape lives in `:enrich-running`."
+   :args {:service-id {:type :any :description "Service's row id."}}
    :return-type :jsonb
-   :effects #{:db}}
+   :effects #{}}
+
+  ;; --- :enrich-running graph composition --------------------------
+  ;; Per-service reshape into a JSON-safe map. Was a `defbase` that
+  ;; hardcoded `{:stopper-set? :started-at :start-attempts
+  ;; :start-failed-at}` in Clojure; now pure graph composition over
+  ;; `:running-entry` + `:if (some? entry)` + `:zipmap`. Admins can
+  ;; vary the response shape by reparenting `:_enrich-running-shape`.
+
+  {:name :_enrich-running-entry
+   :description "Closure-capture seed — the raw entry pulled off the reconciler atom. Referenced by the per-field readers below."
+   :parent :running-entry
+   :args {:service-id {:as :service-id}}}
+
+  {:name :_enrich-running-stopper-set?
+   :description "Boolean coercion of `:stopper` (a Clojure callable or nil) for the JSON wire."
+   :parent :is-a?
+   :args {:value {:parent :get :args {:coll :_enrich-running-entry :key {:value :stopper} :default nil}}
+          :type {:value :any}}}
+
+  {:name :_enrich-running-started-at-raw
+   :parent :get :args {:coll :_enrich-running-entry :key {:value :started-at} :default nil}}
+
+  {:name :_enrich-running-started-at
+   :description "Nil-safe stringify (mirrors `(some-> :started-at str)`)."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_enrich-running-started-at-raw}}
+          :then {:parent :to-str :args {:value :_enrich-running-started-at-raw}}
+          :else {:value nil}}}
+
+  {:name :_enrich-running-start-failed-at-raw
+   :parent :get :args {:coll :_enrich-running-entry :key {:value :start-failed-at} :default nil}}
+
+  {:name :_enrich-running-start-failed-at
+   :description "Nil-safe stringify (mirrors `(some-> :start-failed-at str)`)."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_enrich-running-start-failed-at-raw}}
+          :then {:parent :to-str :args {:value :_enrich-running-start-failed-at-raw}}
+          :else {:value nil}}}
+
+  {:name :_enrich-running-shape
+   :description "4-field JSON shape — `{:stopper-set? :started-at :start-attempts :start-failed-at}`. Admins can reparent / reorder to vary the response shape."
+   :parent :zipmap
+   :return-type :jsonb
+   :args {:keys [{:value :stopper-set?} {:value :started-at} {:value :start-attempts} {:value :start-failed-at}]
+          :vals [:_enrich-running-stopper-set?
+                 :_enrich-running-started-at
+                 {:parent :get :args {:coll :_enrich-running-entry :key {:value :start-attempts} :default nil}}
+                 :_enrich-running-start-failed-at]}}
+
+  {:name :enrich-running
+   :description "Reshape the in-process running entry for `service-id` (from `@recon/running`) into a JSON-safe map. nil when nothing is registered. Pure graph composition over `:running-entry` + `:if (some?)` + 4-field `:zipmap` reshape."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_enrich-running-entry}}
+          :then :_enrich-running-shape
+          :else {:value nil}
+          :service-id {:type :uuid
+                       :description "Service entity id — used to look up the running entry off the reconciler's in-process atom."}}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :_list-services-enriched — graph-composed ETL Stage 3
+  ;; ---------------------------------------------------------------------
+  ;; Was `(mapv (fn [s] {:id … :fn-id … :fn-name (get names …)
+  ;; :running (enrich-running …)}) rows)` — a single defbase that
+  ;; hardcoded the per-row reshape. Now an `:map` HOF over `:rows`
+  ;; with a `:_list-services-row-shape` callback that uses `:zipmap`
+  ;; for the field map. `:names` is captured from the outer scope via
+  ;; `{:as :names}` — closure-capture per `docs/CLOSURE_CAPTURE.md`,
+  ;; the same pattern `:_merge-in-fn` uses for `:update-in`.
 
   {:name :_list-services-enriched
-   :description "Stage 3 — `mapv` each service row to the JSON-safe shape (`:fn-name` joined from the index, `:running` snapshot from the in-process atom)."
-   :args {:rows {:type :jsonb} :names {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Stage 3 — `:map` each service row to the JSON-safe shape (`:fn-name` joined from the index, `:running` snapshot from the in-process atom). Composition is open: admins can extend the `:keys`/`:vals` lists in `:_list-services-row-shape` without editing Clojure."
+   :parent :map
+   :args {:func :_list-services-row-shape
+          :coll {:as :rows}}}
 
-  {:name :_list-services-legacy
-   :description "Stage 4 — single-pod legacy `web-server` running outside the `:service` table; nil when displaced by a real `:service` row."
-   :args {:names {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+  {:name :_list-services-row-shape
+   :description "Single-row reshape — `(fn [s] {:id (:id s) :fn-id (:fn-id s) :fn-name (get names (:fn-id s)) :enabled? (:enabled? s) :restart-policy (:restart-policy s) :running (enrich-running (:id s))})`. The HOF callback of `:_list-services-enriched`; `:names` is captured from the outer fn-def's free args."
+   :parent :zipmap
+   :args {:keys [:id :fn-id :fn-name :enabled? :restart-policy :running]
+          :vals [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+                 {:parent :get
+                  :args {:coll {:as :names}
+                         :key {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+                         :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :enabled?} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :restart-policy} :default nil}}
+                 {:parent :enrich-running
+                  :args {:service-id {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}}}]}}
 
   {:name :_list-services
-   :description "Stage 5 — wrap enriched-services + legacy-fallback into the final `{:ok true :services :legacy-fallback}` response."
-   :args {:enriched {:type :jsonb} :legacy {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Stage 4 — wrap enriched-services into the final `{:ok true :services}` response."
+   :parent :zipmap
+   :args {:keys [:ok :services]
+          :vals [{:value true}
+                 {:as :enriched}]}}
 
   {:name :_list-services-data
-   :description "GET /api/services — Stage-5 wrap of the enriched-services + legacy-fallback sub-results. Each stage is named in fns.edn so the editor's graph view surfaces the pipeline."
+   :description "GET /api/services — Stage-4 wrap of the enriched-services sub-result. Each stage is named in fns.edn so the editor's graph view surfaces the pipeline."
    :parent :_list-services
    :args {:enriched :_list-services-enriched
-          :legacy :_list-services-legacy
-          ;; Sub-results fed into the enrichment + join.
+          ;; Sub-results fed into the enrichment.
           :rows :_list-services-rows
           :names :_list-services-fn-names}}
 

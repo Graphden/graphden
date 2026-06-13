@@ -206,6 +206,68 @@
       (is (= original decoded)))))
 
 
+(defn- jsonb-roundtrip
+  "Round-trip `v` through the codec — encode as JSONB, then decode."
+  [v]
+  (sp/decode-value test-codec
+                   (sp/encode-value test-codec v {:type :jsonb})
+                   {:type :jsonb}))
+
+
+(deftest jsonb-keyword-roundtrip-test
+  (testing "keyword VALUES survive jsonb round-trip"
+    (is (= {:reason :no-fn} (jsonb-roundtrip {:reason :no-fn})))
+    (is (= {:status :rejected :code :timeout-out-of-range}
+           (jsonb-roundtrip {:status :rejected :code :timeout-out-of-range}))))
+
+  (testing "nested keyword values in vectors round-trip"
+    (is (= {:parents [:secret-leaf]} (jsonb-roundtrip {:parents [:secret-leaf]})))
+    (is (= [:a :b :c] (jsonb-roundtrip [:a :b :c]))))
+
+  (testing "nested keyword values in maps round-trip"
+    (is (= {:outer {:inner :leaf}}
+           (jsonb-roundtrip {:outer {:inner :leaf}})))))
+
+
+(deftest jsonb-set-roundtrip-test
+  (testing "Clojure sets round-trip via :_set tag"
+    (is (= #{:db :io} (jsonb-roundtrip #{:db :io})))
+    (is (= #{1 2 3} (jsonb-roundtrip #{1 2 3}))))
+
+  (testing "sets nested inside maps round-trip"
+    (is (= {:effects #{:db :io}}
+           (jsonb-roundtrip {:effects #{:db :io}})))))
+
+
+(deftest jsonb-string-with-colon-prefix-roundtrip-test
+  ;; Regression: under the previous codec scheme, a string literal
+  ;; starting with `:` (length ≥ 2) was misread as a keyword and lost
+  ;; its leading colon on the round-trip. The tagged-map scheme makes
+  ;; keyword carriers unambiguous; user strings are preserved as-is.
+  (testing "string starting with `:` stays a string"
+    (is (= ":foo" (jsonb-roundtrip ":foo")))
+    (is (= ":timeout-ms must be in [1, 60000]"
+           (jsonb-roundtrip ":timeout-ms must be in [1, 60000]"))))
+
+  (testing "colon-prefixed strings inside collections stay strings"
+    (is (= [":a" ":b"] (jsonb-roundtrip [":a" ":b"])))
+    (is (= {:msg ":this is a string, not a keyword"}
+           (jsonb-roundtrip {:msg ":this is a string, not a keyword"}))))
+
+  (testing "single `:` character stays a string"
+    (is (= ":" (jsonb-roundtrip ":")))))
+
+
+(deftest jsonb-mixed-keyword-and-string-test
+  ;; The whole point of the scheme: a payload can contain both keyword
+  ;; values and strings-that-look-like-keywords, side by side, without
+  ;; confusion.
+  (testing "keyword value and colon-prefixed string coexist"
+    (let [original {:reason :no-fn
+                    :error ":fn-id or :fn-name required"}]
+      (is (= original (jsonb-roundtrip original))))))
+
+
 ;; === encode-value fallback tests ===
 
 (deftest encode-value-fallback-test

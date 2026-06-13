@@ -256,7 +256,13 @@
     (is (t/fail? (t/unify 'a [:fn {:item 'a} :bool])))
     (is (t/fail? (t/unify 'a [:fn {:item :int} 'a])))
     (is (t/fail? (t/unify 'a [:refine 'a [:> 0]])))
-    (is (t/fail? (t/unify 'a [:union :null 'a])))
+    ;; `[:union :null 'a]` is NOT a cycle — `'a` recursively
+    ;; appearing as a union branch is a vacuous "or itself"
+    ;; tautology, not an infinite shape. `bind-var` now strips
+    ;; the recursive branch and unifies against the remainder
+    ;; (`:null` here). Same shape as let-poly "returns either
+    ;; this fresh value or the input unchanged".
+    (is (= {'a :null} (t/unify 'a [:union :null 'a])))
     (is (t/fail? (t/unify 'a {:f 'a})))
     (is (t/fail? (t/unify 'a {:f [:list 'a]}))
         "nested compounds — 'a inside list inside record"))
@@ -555,8 +561,15 @@
   (let [s (t/unify {:name 'a :age :int} {:name :text :age :int})]
     (is (t/unified? s))
     (is (= :text (t/resolve s 'a))))
-  (testing "record key sets must match"
-    (is (t/fail? (t/unify {:a :int} {:a :int :b :text})))))
+  (testing "open-record unification — extras on either side allowed"
+    (is (t/unified? (t/unify {:a :int} {:a :int :b :text})))
+    (is (t/unified? (t/unify {:a :int :b :text} {:a :int}))))
+  (testing "shared keys still unify properly"
+    (let [s (t/unify {:a 'a :b :text} {:a :int :c :bool})]
+      (is (t/unified? s))
+      (is (= :int (t/resolve s 'a)))))
+  (testing "fully-disjoint records still fail (no shared keys to unify)"
+    (is (t/fail? (t/unify {:a :int} {:b :text})))))
 
 
 (deftest resolve-nested-test
@@ -590,7 +603,19 @@
     (is (= [:union :int :null :text]
            (t/make-union [[:union :int :null] :text]))))
   (testing ":any absorbs"
-    (is (= :any (t/make-union [:int :any :text])))))
+    (is (= :any (t/make-union [:int :any :text]))))
+  (testing "subtype absorption — refinement absorbed by its base"
+    (is (= :int (t/make-union [:int [:refine :int [:> 0]]])))
+    (is (= :int (t/make-union [[:refine :int [:> 0]] :int]))))
+  (testing "subtype absorption — narrower refinement absorbed by wider"
+    (is (= [:refine :int [:>= 0]]
+           (t/make-union [[:refine :int [:>= 0]] [:refine :int [:> 0]]]))))
+  (testing "type-vars are kept even when a sibling would otherwise absorb"
+    (is (= [:union :null 'a] (t/make-union [:null 'a])))
+    (is (= [:union :int 'a] (t/make-union [:int 'a]))))
+  (testing "primitive subtype absorbs through the numeric hierarchy"
+    (is (= :numeric (t/make-union [:int :numeric])))
+    (is (= :numeric (t/make-union [:int :float :numeric])))))
 
 
 (deftest union-subtype-rules

@@ -124,10 +124,25 @@
                 :child {:parent :base}}]
       (is (= [:base :x] (sr/resolve-slot-owner :child :x defs)))))
 
-  (testing "an unresolvable arg falls back to [primary-parent arg-name]"
+  (testing "an unresolvable arg throws orphan-slot-binding when parent is in defs"
+    ;; Pre-2026-06-12 this silently fell back to [:base :unknown] and
+    ;; emitted a binding row targeting a non-existent slot — exactly
+    ;; the `:n` vs `:take`'s `:count` class of footgun. The throw makes
+    ;; sync fail loudly instead.
     (let [defs {:base {:args {:x :int}}
                 :child {:parent :base}}]
-      (is (= [:base :unknown] (sr/resolve-slot-owner :child :unknown defs)))))
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"non-existent slot"
+            (sr/resolve-slot-owner :child :unknown defs)))))
+
+  (testing "an unresolvable arg falls back when parent is NOT in defs (external base-fn)"
+    ;; Legacy compat: bindings on slots whose owner is a base-fn that
+    ;; wasn't piped into `defs-by-name` (rare; modern sync includes
+    ;; every base-fn via `extra-defs`).
+    (let [defs {:child {:parent :external-base-fn}}]
+      (is (= [:external-base-fn :anything]
+             (sr/resolve-slot-owner :child :anything defs)))))
 
   (testing "a {:as} rename slot is owned by the renaming ancestor"
     (let [defs {:base  {:args {:x :int}}

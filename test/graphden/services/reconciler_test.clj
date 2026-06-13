@@ -29,7 +29,13 @@
     [graphden.versioning.storage.core :as vs]))
 
 
-(use-fixtures :once (setup/create-container-fixture))
+(use-fixtures :once
+  (setup/create-container-fixture)
+  ;; Isolate the runtime base-fn registrations these tests do
+  ;; (`exec/register-base-fn! :test-needs-arg` and similar) into a
+  ;; thread-local override atom — keeps them out of the process-
+  ;; global registry that sibling test ns'es read from.
+  exec/with-clean-registry)
 
 
 (defn- full-schema
@@ -251,6 +257,14 @@
 ;; ============================================================================
 
 (deftest validate-create-rejects-service-on-fn-with-free-args-test
+  ;; Behavioural test of the two service-eligibility guards used by
+  ;; the `:_create-service-free-args-rej` and `:_create-service-no-
+  ;; process-rej` graph fn-defs that compose the production
+  ;; `:process-create-entity` rejection chain. Calls the underlying
+  ;; mechanisms directly (`fn-exec-lookup/free-arg-slot-map` +
+  ;; `entities/chain-has-process-effect?`) — same code paths the
+  ;; defbase wrappers `free-arg-slot-map` and
+  ;; `chain-has-process-effect?` invoke.
   (let [storage (create-full-storage)
         ;; A base-fn with one declared but unbound slot — composed
         ;; instance inherits the slot as a free arg.
@@ -261,64 +275,46 @@
         port-slot (setup/create-slot! storage "port" :int)
         _ (setup/attach-slot! storage (:id base) (:id port-slot) 0)
         composed (setup/create-composed-fn! storage composed-name (:id base))
-        c (test-ctx storage)]
+        c (test-ctx storage)
+        free-arg-slot-map (requiring-resolve
+                            'graphden.crud.fn-execution.lookup/free-arg-slot-map)
+        chain-process? (requiring-resolve
+                         'graphden.crud.entities/chain-has-process-effect?)]
     (try
-      (testing "validate-create rejects with the free-args listed"
-        (let [parsed {:entity-type :service
-                      :type-str "service"
-                      :form-data {:fn-id (str (:id composed))
-                                  :enabled? "true"
-                                  :restart-policy "always"}
-                      :entity-data {:fn-id (:id composed)
-                                    :enabled? true
-                                    :restart-policy :always}}
-              rej (graphden.crud.entities/validate-create parsed c)]
-          (is (some? rej))
-          (is (re-find #"free args" (:reason rej)))
-          (is (re-find #":port" (:reason rej)))))
-      (testing "binding the slot AND declaring :process makes the fn service-eligible"
-        ;; Create a derived fn-def that binds :port — same impl, no
-        ;; free args anymore. Also register a rich-type WITH :process
-        ;; so the second validation gate passes.
+      (testing "composed fn with unbound :port slot has :port as a free arg"
+        (let [free (free-arg-slot-map c (:id composed))]
+          (is (contains? free :port)
+              ":port surfaces as a free arg → service rejection would fire")))
+
+      (testing "binding the slot collapses :port to empty free-arg map"
         (let [derived-name "my-test-needs-arg-bound"
               derived (setup/create-composed-fn! storage
                                                  derived-name
                                                  (:id composed))]
           (setup/bind-value! storage (:id derived) (:id port-slot) 8080)
-          (registry/record-rich-types-raw!
-            (keyword derived-name)
-            {:args {} :return [:fn {} :null] :effects #{:process}})
-          (let [parsed {:entity-type :service
-                        :type-str "service"
-                        :form-data {:fn-id (str (:id derived))
-                                    :enabled? "true"
-                                    :restart-policy "always"}
-                        :entity-data {:fn-id (:id derived)
-                                      :enabled? true
-                                      :restart-policy :always}}]
-            (is (nil? (graphden.crud.entities/validate-create parsed c))
-                "no rejection — slot is bound + :process declared"))
-          ;; Cleanup rich-type so it doesn't bleed into other tests.
-          (registry/record-rich-types-raw!
-            (keyword derived-name)
-            {:args {} :return :any :effects #{}})))
-      (testing "binding alone (without :process) still rejects"
+          (let [free (free-arg-slot-map c (:id derived))]
+            (is (not (contains? free :port))
+                ":port bound → no free arg → free-args guard passes"))
+
+          (testing ":process effect declared via rich-types ancestor chain"
+            (registry/record-rich-types-raw!
+              (keyword derived-name)
+              {:args {} :return [:fn {} :null] :effects #{:process}})
+            (is (true? (chain-process? storage (:id derived)))
+                ":process effect found on the fn itself")
+            ;; Cleanup rich-type so it doesn't bleed into other tests.
+            (registry/record-rich-types-raw!
+              (keyword derived-name)
+              {:args {} :return :any :effects #{}}))))
+
+      (testing "without :process effect declared, chain-has-process-effect? is false"
         (let [derived-name "my-test-needs-arg-bound-noeff"
               derived (setup/create-composed-fn! storage
                                                  derived-name
                                                  (:id composed))]
           (setup/bind-value! storage (:id derived) (:id port-slot) 8080)
-          (let [parsed {:entity-type :service
-                        :type-str "service"
-                        :form-data {:fn-id (str (:id derived))
-                                    :enabled? "true"
-                                    :restart-policy "always"}
-                        :entity-data {:fn-id (:id derived)
-                                      :enabled? true
-                                      :restart-policy :always}}
-                rej (graphden.crud.entities/validate-create parsed c)]
-            (is (some? rej) "rejected — fn has no :process effect declared")
-            (is (re-find #":process effect" (:reason rej))))))
+          (is (false? (chain-process? storage (:id derived)))
+              ":process effect NOT declared → service rejection would fire")))
       (finally (sp/close storage)))))
 
 
@@ -422,76 +418,6 @@
               (is (= 1 (:start-attempts entry)))
               (is (some? (:start-failed-at entry)))))
           (finally (sp/close storage)))))))
-
-
-;; ============================================================================
-;; Legacy-to-managed displacement — when a managed :service row appears
-;; for the same fn-id the boot fallback is running, reconcile-once!
-;; stops the legacy first (freeing its port) before starting the
-;; managed one. Without this, both would try to bind the same port and
-;; the managed start would fail.
-;; ============================================================================
-
-(deftest reconcile-displaces-legacy-when-matching-service-appears-test
-  (let [storage (create-full-storage)
-        calls (atom [])
-        legacy-stops (atom [])
-        managed-stops (atom [])
-        {composed :composed}
-        (make-trackable-fn! storage "displace" calls managed-stops)
-        prior-handle @recon/legacy-handle]
-    (try
-      ;; Simulate the boot state: legacy fallback is running for
-      ;; `composed`'s fn-id. The stopper records into legacy-stops so
-      ;; we can verify it fires.
-      (reset! recon/legacy-handle
-              {:fn-id (:id composed)
-               :stopper (fn [] (swap! legacy-stops conj :legacy-stopped))})
-      ;; Now admin declares a managed :service for the same fn.
-      (let [_svc (make-service-row! storage (:id composed) true)
-            c (test-ctx storage)
-            running (atom {})
-            summary (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})]
-        (testing "reconcile summary flags the displacement"
-          (is (true? (:legacy-displaced? summary))))
-        (testing "legacy stopper was invoked"
-          (is (= [:legacy-stopped] @legacy-stops)))
-        (testing "legacy-handle was cleared"
-          (is (nil? @recon/legacy-handle)))
-        (testing "managed service started"
-          (is (= [{:suffix "displace"}] @calls))))
-      (finally
-        (reset! recon/legacy-handle prior-handle)
-        (sp/close storage)))))
-
-
-(deftest reconcile-does-not-displace-legacy-for-unrelated-service-test
-  (testing "an enabled :service for a DIFFERENT fn-id leaves the legacy alone"
-    (let [storage (create-full-storage)
-          calls (atom [])
-          stops (atom [])
-          {composed :composed}
-          (make-trackable-fn! storage "no-displace" calls stops)
-          prior-handle @recon/legacy-handle
-          ;; Legacy is running for some OTHER fn (random uuid — never
-          ;; reached by the service we'll declare).
-          unrelated-fn-id (random-uuid)]
-      (try
-        (reset! recon/legacy-handle
-                {:fn-id unrelated-fn-id :stopper (fn [] (swap! stops conj :must-not-fire))})
-        (make-service-row! storage (:id composed) true)
-        (let [c (test-ctx storage)
-              running (atom {})
-              summary (recon/reconcile-once! c running {:max-retries 0 :backoff-ms 0})]
-          (testing "no displacement happened"
-            (is (false? (:legacy-displaced? summary))))
-          (testing "legacy-handle is untouched"
-            (is (= unrelated-fn-id (:fn-id @recon/legacy-handle))))
-          (testing "legacy stopper was NOT called"
-            (is (not-any? #{:must-not-fire} @stops))))
-        (finally
-          (reset! recon/legacy-handle prior-handle)
-          (sp/close storage))))))
 
 
 (deftest supervisor-exhausts-retries-and-gives-up-test

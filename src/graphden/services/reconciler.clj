@@ -3,10 +3,12 @@
    against `running` (actual state in-process), start missing /
    stop removed.
 
-   Phase 1 single-pod model. Reconciliation is poll-driven (a
-   `ScheduledExecutorService` ticks every `:period-ms`); the
-   integrant component owns the scheduler + `running` atom and
-   delegates the per-tick work to `reconcile-once!`.
+   Multi-pod-safe: every executor pod runs its own reconciler, but
+   per-service Postgres advisory locks ensure only one pod actually
+   runs each enabled service. Sibling pods receive
+   `service:write:<id>` NOTIFY events on `graphden_events` and react
+   within ~1s. Single-pod behaviour is identical (lock always
+   succeeds; emitter is a no-op when ctx has no pg-pool).
 
    The `running` atom shape is
      `{service-id → {:fn-id … :stopper (fn []) :started-at Instant}}`.
@@ -22,7 +24,11 @@
     [clojure.set]
     [clojure.tools.logging :as log]
     [graphden.executor.compile-runtime :as cr]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.postgres.advisory-lock :as pg-lock]
+    [graphden.storage.protocol.core :as sp])
+  (:import
+    (java.sql
+      Connection)))
 
 
 ;; =============================================================================
@@ -35,21 +41,6 @@
 
 (defonce running
   (atom {}))
-
-
-;; Phase 1 legacy-fallback handle — when no :service rows exist on
-;; boot, the integrant init-key starts the package-declared
-;; `:startup-fn` and stashes its `{:fn-id :stopper}` pair here. Two
-;; consumers read it:
-;;   - `validate-execute`'s `already-running-as-service?` rejects
-;;     ad-hoc Run on the same fn (UX protection against the "click ▶
-;;     on :web-server while it's bound" foot-gun)
-;;   - `reconcile-once!`'s displacement step stops the fallback when
-;;     a matching managed service appears, freeing the port
-;; nil when no fallback is active. Drops away when Phase 2 retires the
-;; fallback path entirely.
-(defonce legacy-handle
-  (atom nil))
 
 
 ;; =============================================================================
@@ -101,9 +92,9 @@
 
 
 ;; Supervisor retry tuning. Bounded to keep reconcile-once! responsive
-;; — even max retries finishes inside ~7s (1+2+4). For Phase 1 this
-;; only catches STARTUP failures (e.g. port-in-use); runtime crashes
-;; aren't detected (no healthcheck) so `:always` ≡ `:on-failure` in
+;; — even max retries finishes inside ~7s (1+2+4). Currently catches
+;; STARTUP failures only (e.g. port-in-use); runtime crashes aren't
+;; detected (no healthcheck) so `:always` ≡ `:on-failure` in
 ;; behaviour. Tunable per-call so tests can pin to zero-backoff.
 (def ^:private default-max-retries 3)
 (def ^:private default-backoff-ms 1000)
@@ -203,21 +194,14 @@
 ;; One reconciliation pass — read desired, compute diff, apply.
 ;; =============================================================================
 
-(defn- maybe-displace-legacy!
-  "Phase 1: if any enabled service's :fn-id matches the legacy
-   fallback's :fn-id, stop the fallback so its port frees up before
-   the managed service tries to start. Idempotent — the legacy-handle
-   is cleared after the first matching reconcile pass.
-
-   Returns true when displacement happened (for the caller's summary)."
-  [enabled-services]
-  (when-let [handle @legacy-handle]
-    (when (some #(= (:fn-id %) (:fn-id handle)) enabled-services)
-      (log/info "managed service for legacy-fallback fn-id detected — stopping legacy"
-                {:fn-id (:fn-id handle)})
-      (stop-service! ::legacy-fallback {:stopper (:stopper handle)})
-      (reset! legacy-handle nil)
-      true)))
+(defn- lock-conn-from-ctx
+  "Pull the service-locks Connection off the executor context.
+   When the ctx wasn't built with a `:service-locks-connection` (test
+   contexts using an in-memory storage), returns nil — callers
+   degrade gracefully (single-pod path: every lock attempt
+   `succeeds` because there's no contention)."
+  ^Connection [ctx]
+  (:service-locks-connection ctx))
 
 
 (defn reconcile-once!
@@ -225,42 +209,70 @@
    `running-atom`'s contents, start missing + stop removed. Mutates
    `running-atom` in place.
 
-   If a managed service is declared for the same fn-id as the Phase 1
-   legacy fallback, the fallback is stopped FIRST (before start-service!
-   runs) so its port is free. Reflected in the return as
-   `:legacy-displaced? true`.
+   Each new service start is gated on
+   `pg_try_advisory_lock(service-id-hash)` on the pod's dedicated
+   lock connection (`:service-locks-connection` on ctx). When the
+   lock is unavailable — another pod owns this service — we record a
+   `:not-our-lock` entry in `running-atom` so the next reconcile pass
+   doesn't re-try until a NOTIFY tells us the situation changed.
 
    `start-opts` (optional) is passed straight to `start-service!`,
    e.g. `{:max-retries 0 :backoff-ms 0}` keeps tests responsive when
    they intentionally cause start failures.
 
    Returns `{:started [service-id …] :stopped [service-id …]
-              :legacy-displaced? bool}` for logging / tests."
+              :not-our-lock [service-id …]}` for logging / tests."
   ([ctx running-atom]
    (reconcile-once! ctx running-atom {}))
   ([ctx running-atom start-opts]
    (let [storage (:storage ctx)
+         lock-conn (lock-conn-from-ctx ctx)
          enabled-services (vec (sp/query-entities storage :service {:enabled? true}))
          enabled-by-id    (into {} (map (juxt :id identity)) enabled-services)
-         legacy-displaced? (boolean (maybe-displace-legacy! enabled-services))
          {:keys [to-start to-stop]} (diff-desired (keys enabled-by-id)
-                                                  (keys @running-atom))]
+                                                  (keys @running-atom))
+         not-our-lock (atom [])]
      (doseq [sid to-stop]
        (let [entry (get @running-atom sid)]
-         (when entry (stop-service! sid entry))
+         (when (and entry (not= ::not-our-lock entry)) (stop-service! sid entry))
+         (when (and lock-conn entry (not= ::not-our-lock entry))
+           (try (pg-lock/release-lock! lock-conn sid)
+                (catch Exception e
+                  (log/warn e "advisory lock release failed — continuing"
+                            {:service-id sid}))))
          (swap! running-atom dissoc sid)))
      (doseq [sid to-start]
        (let [svc (get enabled-by-id sid)
-             entry (start-service! ctx svc start-opts)]
-         (swap! running-atom assoc sid entry)))
-     {:started to-start :stopped to-stop
-      :legacy-displaced? legacy-displaced?})))
+             acquired? (if lock-conn
+                         (try (pg-lock/try-lock! lock-conn sid)
+                              (catch Exception e
+                                (log/warn e "advisory try-lock failed — treating as not-owned"
+                                          {:service-id sid})
+                                false))
+                         true)]
+         (cond
+           acquired?
+           (let [entry (start-service! ctx svc start-opts)]
+             (swap! running-atom assoc sid entry))
+
+           :else
+           (do (swap! not-our-lock conj sid)
+               (swap! running-atom assoc sid ::not-our-lock)))))
+     {:started (vec (remove (set @not-our-lock) to-start))
+      :stopped to-stop
+      :not-our-lock @not-our-lock})))
 
 
 (defn stop-all!
   "Shutdown helper — drains `running-atom` by calling every stopper,
-   clears the atom. Called from the integrant `halt-key!`."
+   clears the atom. Called from the integrant `halt-key!`.
+
+   `not-our-lock` placeholder entries are skipped (no stopper to
+   call). Advisory locks held by THIS pod are released by closing
+   the lock connection at the `:db/service-locks` halt-key, so we
+   don't need to release per-service here."
   [running-atom]
   (doseq [[sid entry] @running-atom]
-    (stop-service! sid entry))
+    (when (not= ::not-our-lock entry)
+      (stop-service! sid entry)))
   (reset! running-atom {}))

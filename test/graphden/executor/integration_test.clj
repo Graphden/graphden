@@ -89,9 +89,10 @@
         (let [double-fn (first (sp/query-entities storage :fn {:name "double-fn"}))
               ctx (exec/create-context {:storage storage})
               result (exec/execute ctx (:id double-fn) nil)]
-          ;; Result should be 10 + 10 = 20
           (is (= 20 result))
-          ;; counted-const should be called only ONCE due to caching
+          ;; Per-execute DRY memo: both `:a` and `:b` reference
+          ;; `:value-fn`, so the impl fires exactly once for the
+          ;; whole `execute` call (the second ref hits the cache).
           (is (= 1 @call-count)))
         (finally
           (sp/close storage))))))

@@ -105,7 +105,7 @@ function createArgOverlay(node, container) {
   const arg = (typeof argRowFromNode === 'function')
               ? argRowFromNode(node.data())
               : null;
-  const inImpl = arg && implementationFnIds && implementationFnIds.has(arg['fn-id']);
+  const inImpl = arg && implementationFnIds?.has(arg['fn-id']);
   const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
   const editable = inImpl && signedIn;
   if (editable) {
@@ -207,7 +207,7 @@ function createArgSourceLink(node) {
   // Navigate to the immediate parent the slot came from, when it
   // resolves to a globally addressable name (anonymous → tooltip only).
   const immediate = chain[0];
-  const fn = (immediate?.fnId && lookups && lookups.fnMap)
+  const fn = (immediate?.fnId && lookups?.fnMap)
              ? lookups.fnMap.get(immediate.fnId) : null;
   const qualified = (fn && typeof getQualifiedFnName === 'function')
                     ? getQualifiedFnName(fn) : null;
@@ -270,7 +270,7 @@ function findAnonymousTypeFnId(arg) {
 // carries the slot's resolved type-kw (binding's type-override-fn-id
 // or slot's type-fn-id), so a single field read is enough.
 function resolveArgType(arg) {
-  if (!arg || !arg.type) return null;
+  if (!arg?.type) return null;
   return String(arg.type).replace(/^:/, '');
 }
 
@@ -356,7 +356,7 @@ function getTypeNarrowingInfo(arg) {
 // (every ancestor that contributed an override + the 4-tier resolution
 // + clickable navigation to each source fn).
 function createProvenanceBadge(narrowingInfo, arg) {
-  if (!narrowingInfo || !narrowingInfo.narrowed) return null;
+  if (!narrowingInfo?.narrowed) return null;
   const badge = document.createElement('button');
   badge.type = 'button';
   badge.className = 'arg-type-provenance';

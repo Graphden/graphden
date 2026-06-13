@@ -1,5 +1,5 @@
 ;; HTML templating base functions using Hiccup —
-;; render-hiccup, html-page, with-cdn-script, cytoscape-container,
+;; render-hiccup, html-page, with-cdn-script,
 ;; wrap-element / wrap-style / wrap-script, hiccup.
 
 
@@ -34,36 +34,321 @@
    :args {:hiccup {:type :hiccup-node :description "Hiccup expression — vector of `[tag attrs? & children]`."}}
    :return-type :text}
 
+  ;; --- :h-raw — wrap a string in a hiccup `RawString` so the HTML
+  ;; renderer emits it verbatim (no entity escaping). Used inside
+  ;; `<script>` / `<style>` bodies via the postwalk-based
+  ;; `:hiccup-normalize` chain below.
+  {:name :h-raw
+   :description "Wrap `:string` in a hiccup `RawString` so `:render-hiccup` emits it verbatim without HTML entity escaping. Single library call (`hiccup.util/raw`)."
+   :args {:string {:type :text :description "Raw HTML content (script body, style body, …)."}}
+   :return-type :any}
+
+  ;; --- :hiccup-normalize — graph-level recursive hiccup tree walker.
+  ;;
+  ;; Walks a hiccup tree bottom-up via `:postwalk`. For each node:
+  ;;   * non-element node (scalar, non-hiccup vector): unchanged
+  ;;   * element (vector starting with keyword or string):
+  ;;       - string tag → keyword
+  ;;       - attr-map present → string keys → keyword keys
+  ;;       - children: already normalized by postwalk's bottom-up
+  ;;         traversal. EXCEPT for script/style elements, where string
+  ;;         children get wrapped in `:h-raw` so the HTML renderer
+  ;;         emits the body verbatim without escaping.
+  ;;
+  ;; Admin extension surface — every piece below is a named fn-def
+  ;; that can be `:parent`'d or replaced individually:
+  ;;   * `:_hiccup-element-raw-tag?` — extend the raw-content set
+  ;;     (e.g. add `<template>` for shadow-dom embedding) by parent-ing
+  ;;     and adding `:equal? :template` to the `:or`.
+  ;;   * `:_hiccup-normalize-attr-key` — swap the kebab/snake/camel
+  ;;     casing rule for attribute keys.
+  ;;   * `:_hiccup-normalize-node` — wrap the whole transform with
+  ;;     custom pre/post-processing.
+
+  {:name :hiccup-normalize
+   :description "Walk a hiccup tree bottom-up; keywordize string tags + string attr-keys; wrap string children of `<script>`/`<style>` in `:h-raw` so render emits them verbatim. Pure graph composition over `:postwalk` + element-aware per-node transform."
+   :parent :postwalk
+   :args {:f :_hiccup-normalize-node
+          :coll {:as :tree}}}
+
+  ;; Per-node postwalk callback. The HOF binds `:value` to each node.
+  {:name :_hiccup-normalize-node
+   :description "If the node is a hiccup element, normalize it; otherwise pass through."
+   :parent :if
+   :args {:test :_is-hiccup-element?
+          :then :_normalize-hiccup-element
+          :else {:as :value}}}
+
+  {:name :_first-of-value
+   :parent :first
+   :args {:coll {:as :value}}}
+
+  {:name :_first-is-keyword?
+   :parent :is-a?
+   :args {:value :_first-of-value :type {:value :keyword}}}
+
+  {:name :_first-is-text?
+   :parent :is-a?
+   :args {:value :_first-of-value :type {:value :text}}}
+
+  {:name :_first-is-element-name?
+   :description "True iff the first element of the node is a tag-name candidate (keyword or non-empty string)."
+   :parent :or
+   :args {:values [:_first-is-keyword? :_first-is-text?]}}
+
+  {:name :_value-is-sequence?
+   :parent :is-a?
+   :args {:value {:as :value} :type {:value :sequence}}}
+
+  {:name :_value-is-non-empty?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll {:as :value}}}}}
+
+  {:name :_is-hiccup-element?
+   :description "True iff `:value` is a non-empty vector/list whose first element is a keyword or string tag-name."
+   :parent :and
+   :args {:values [:_value-is-sequence?
+                   :_value-is-non-empty?
+                   :_first-is-element-name?]}}
+
+  ;; Element transform: extract tag, attrs (if present), children;
+  ;; normalize each; assemble.
+  {:name :_element-tag
+   :parent :first
+   :args {:coll {:as :value}}}
+
+  {:name :_normalized-tag
+   :description "String tag → keyword; keyword tag stays."
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value :_element-tag :type {:value :text}}}
+          :then {:parent :str-to-keyword :args {:string :_element-tag}}
+          :else :_element-tag}}
+
+  {:name :_second-of-value
+   :parent :get
+   :args {:coll {:as :value} :key {:value 1} :default nil}}
+
+  {:name :_has-attrs?
+   :description "True iff position-1 of the element is an attr map."
+   :parent :is-a?
+   :args {:value :_second-of-value :type {:value :map}}}
+
+  ;; Normalize attr-keys: keywordize string keys via :update-keys.
+  {:name :_hiccup-normalize-attr-key
+   :description "Per-key callback for `:update-keys` on the attr-map. String keys → keywords; everything else unchanged."
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value {:as :value} :type {:value :text}}}
+          :then {:parent :str-to-keyword :args {:string {:as :value}}}
+          :else {:as :value}}}
+
+  {:name :_normalized-attrs
+   :parent :update-keys
+   :args {:m :_second-of-value
+          :f :_hiccup-normalize-attr-key}}
+
+  ;; Children: drop tag (+ attrs if present), then maybe wrap strings.
+  {:name :_drop-count
+   :description "How many leading elements to skip before children start — 1 (tag only) or 2 (tag + attrs)."
+   :parent :if
+   :args {:test :_has-attrs?
+          :then {:value 2}
+          :else {:value 1}}}
+
+  {:name :_raw-children
+   :description "All elements after the tag/attrs prefix."
+   :parent :drop
+   :args {:count :_drop-count
+          :coll {:as :value}}}
+
+  {:name :_hiccup-element-raw-tag?
+   :description "True iff the (normalized) tag is one of `<script>` / `<style>` — i.e. an element whose string children should NOT be HTML-escaped. Admins can extend by parent-ing this fn-def and adding more `:equal?` clauses."
+   :parent :or
+   :args {:values [{:parent :equal? :args {:a :_normalized-tag :b {:value :script}}}
+                   {:parent :equal? :args {:a :_normalized-tag :b {:value :style}}}]}}
+
+  {:name :_raw-wrap-child
+   :description "Per-child callback for `:script`/`:style` children — wrap strings in `:h-raw` to bypass HTML escaping; pass through non-strings (already postwalk-normalized)."
+   :parent :if
+   :args {:test {:parent :is-a? :args {:value {:as :item} :type {:value :text}}}
+          :then {:parent :h-raw :args {:string {:as :item}}}
+          :else {:as :item}}}
+
+  {:name :_raw-tag-children
+   :parent :map
+   :args {:func :_raw-wrap-child
+          :coll :_raw-children}}
+
+  {:name :_normalized-children
+   :description "Children of the element. For `<script>`/`<style>` parents, string children are wrapped in `:h-raw`; otherwise children are passed through (postwalk has already visited and normalized them)."
+   :parent :if
+   :args {:test :_hiccup-element-raw-tag?
+          :then :_raw-tag-children
+          :else :_raw-children}}
+
+  ;; Assemble the normalized element: [tag attrs? & children].
+  {:name :_element-prefix-with-attrs
+   :parent :vec
+   :args {:coll [:_normalized-tag :_normalized-attrs]}}
+
+  {:name :_element-prefix-without-attrs
+   :parent :vec
+   :args {:coll [:_normalized-tag]}}
+
+  {:name :_element-prefix
+   :parent :if
+   :args {:test :_has-attrs?
+          :then :_element-prefix-with-attrs
+          :else :_element-prefix-without-attrs}}
+
+  {:name :_normalize-hiccup-element
+   :description "Build the normalized element by pouring children into the (tag, [attrs]) prefix."
+   :parent :into
+   :args {:to :_element-prefix
+          :from :_normalized-children}}
+
+  ;; --- html-page is now pure graph composition over :hiccup +
+  ;; :assoc + :concat + :list + :hiccup-normalize. Every piece is a
+  ;; named fn-def the user can override or replace without admin
+  ;; intervention: different `:lang`, additional meta tags, a
+  ;; different title-element wrapper, JSON instead of hiccup, etc.
+  ;; ---
+
+  {:name :_html-meta-charset
+   :description "`<meta charset=\"utf-8\">` — the UTF-8 declaration in `<head>`."
+   :parent :hiccup
+   :args {:tag {:value "meta"}
+          :attrs {:value {:charset "utf-8"}}
+          :children {:value []}}}
+
+  {:name :_html-meta-viewport
+   :description "`<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">` — the mobile-friendly viewport hint."
+   :parent :hiccup
+   :args {:tag {:value "meta"}
+          :attrs {:value {:name "viewport"
+                          :content "width=device-width, initial-scale=1"}}
+          :children {:value []}}}
+
+  {:name :_html-title-children
+   :description "Single-element children list for the `<title>` tag — wraps the user's `:title` text so the free arg propagates."
+   :parent :list
+   :args {:items [{:as :title :type :text
+                   :description "Document title (rendered in `<title>`)."}]}}
+
+  {:name :_html-title-element
+   :description "`<title>TITLE</title>` — `<title>` element with the user's title text."
+   :parent :hiccup
+   :args {:tag {:value "title"}
+          :attrs {:value {}}
+          :children :_html-title-children}}
+
+  {:name :_html-head-base
+   :description "Initial head-elements list: [charset, viewport, title]. User's `:head` is concatenated after this."
+   :parent :list
+   :args {:items [:_html-meta-charset
+                  :_html-meta-viewport
+                  :_html-title-element]}}
+
+  {:name :_html-head-children
+   :description "Full head children — base elements (charset/viewport/title) followed by the user-supplied head-elements list."
+   :parent :concat
+   :args {:colls [:_html-head-base
+                  {:as :head :type [:list :hiccup-node] :required false
+                   :description "Additional `<head>` hiccup elements."}]}}
+
+  {:name :_html-head
+   :description "`<head>...</head>` element wrapping the assembled head children."
+   :parent :hiccup
+   :args {:tag {:value "head"}
+          :attrs {:value {}}
+          :children :_html-head-children}}
+
+  {:name :_html-body-children-head
+   :description "Single-element list wrapping the user's `:body` — head of the `<body>` children sequence so scripts concat after it. The whole assembled page is normalised at the top via `:html-page` so we don't need a per-body normalize step here."
+   :parent :list
+   :args {:items [{:as :body :type :hiccup-node
+                   :description "Hiccup tree placed inside `<body>`."}]}}
+
+  {:name :_html-body-children
+   :description "Full `<body>` children — the normalized body element followed by the user-supplied scripts list."
+   :parent :concat
+   :args {:colls [:_html-body-children-head
+                  {:as :scripts :type [:list :hiccup-node] :required false
+                   :description "`<script>` hiccup elements appended at end of body."}]}}
+
+  {:name :_html-body
+   :description "`<body>...</body>` element wrapping the body + scripts."
+   :parent :hiccup
+   :args {:tag {:value "body"}
+          :attrs {:value {}}
+          :children :_html-body-children}}
+
+  {:name :_html-doc-attrs
+   :description "{:lang \"en\"} attrs map for the `<html>` root."
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :lang}
+          :value {:value "en"}}}
+
+  {:name :_html-doc-children
+   :description "Top-level `<html>` children — head + body."
+   :parent :list
+   :args {:items [:_html-head :_html-body]}}
+
+  {:name :_html-page-raw
+   :description "Raw `<html lang=\"en\"><head>…</head><body>…</body></html>` tree before string-tag keywordization. `:html-page` wraps this in `:hiccup-normalize` so JSONB-stored hiccup (`:const` bindings) gets its string tags keywordized AND `<style>` / `<script>` text content survives via `h/raw` (without it, the editor's CSS and JS get HTML-escaped — `'` → `&apos;` etc. — and the page is broken)."
+   :parent :hiccup
+   :args {:tag {:value "html"}
+          :attrs :_html-doc-attrs
+          :children :_html-doc-children}}
+
   {:name :html-page
-   :description "Build a full HTML page hiccup tree — `<!DOCTYPE html>` + `<head>` (title + head elements) + `<body>` (body + script tags)."
-   :args {:title {:type :text :description "Document title (rendered in `<title>`)."}
-          :head {:type [:list :hiccup-node] :required false
-                 :description "Additional `<head>` hiccup elements."}
-          :body {:type :hiccup-node :description "Hiccup tree placed inside `<body>`."}
-          :scripts {:type [:list :hiccup-node] :required false
-                    :description "`<script>` hiccup elements appended at end of body."}}
+   :description "Build a full HTML page hiccup tree — `<!DOCTYPE html>` + `<head>` (title + head elements) + `<body>` (body + script tags). Pure graph composition over `:hiccup` / `:assoc` / `:concat` / `:list` / `:hiccup-normalize`. Users can override `:_html-doc-attrs` (different lang), `:_html-head-base` (different meta tags), `:_html-title-element` (different title wrapper), `:_html-page-raw` (skip top-level normalize for trees built entirely via `:hiccup`), etc. Owns `:title`, `:head` and `:scripts` as explicit free pins — the page's user-facing knobs."
+   :parent :hiccup-normalize
+   :args {:tree :_html-page-raw
+          :title {:type :text
+                  :description "Document `<title>` text."}
+          :head {:type :jsonb
+                 :description "Extra `<head>` hiccup elements appended after the base meta tags."}
+          :scripts {:type :jsonb
+                    :description "Sequence of `<script>` hiccup elements appended at the end of `<body>`."}}
    :return-type :hiccup-node}
 
-  ;; Append a CDN script tag to head elements
+  ;; Append a CDN script tag to head elements — pure graph composition
+  ;; over :assoc + :hiccup + :conj. Users wanting a different attr set
+  ;; (`integrity`, `crossorigin`, `defer`, …) can override the per-attr
+  ;; assoc chain or replace the script-element fn-def entirely.
+  {:name :_cdn-script-attrs
+   :description "`{:src url}` attrs map for the CDN script tag."
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :src}
+          :value {:as :url :type :url
+                  :description "CDN URL of the script to load."}}}
+
+  {:name :_cdn-script-element
+   :description "Hiccup `[:script {:src url}]` for a CDN-loaded script."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs :_cdn-script-attrs
+          :children {:value []}}}
+
   {:name :with-cdn-script
-   :description "Append a `<script src=\"url\">` element to a head-elements vector."
-   :args {:head {:type [:list :hiccup-node] :required false
-                 :description "Existing head-elements list (nil treated as empty)."}
-          :url {:type :url :description "CDN URL of the script to load."}}
+   :description "Append a `<script src=\"url\">` element to a head-elements vector. Own pins: `:head` (existing head list) and `:url` (CDN script src)."
+   :parent :conj
+   :args {:coll {:as :head :type [:list :hiccup-node]
+                 :description "Existing head-elements list."}
+          :item :_cdn-script-element
+          :url {:type :text
+                :description "Script `src` URL — used by `:_cdn-script-attrs` to build the `<script src=…>` attrs map."}}
    :return-type [:list :hiccup-node]}
-
-  {:name :cytoscape-container
-   :description "Hiccup snippet for a Cytoscape.js mount point — `<div id=… style=…>` ready for the JS to attach to."
-   :args {:id {:type :text :description "DOM id used by the JS to find this container."}
-          :style {:type :jsonb :description "Inline-style map (e.g. `{\"width\" \"100%\"}`)."}}
-   :return-type :hiccup-node}
 
   ;; Wrap text content in an HTML element. Pure composition over
   ;; :hiccup with a single-item children sequence.
   {:name :wrap-element
-   :description "Build a single-child hiccup element `[tag content]` — pure composition over `:hiccup`. Used as the parent of `:wrap-style` / `:wrap-script`."
+   :description "Build a single-child hiccup element `[tag content]` — pure composition over `:hiccup`. Used as the parent of `:wrap-style` / `:wrap-script`. `:attrs` is pinned to `{}` — content-wrappers don't add attributes, and leaving the slot free would surface it as a phantom pin on every descendant."
    :parent :hiccup
-   :args {:children [{:as :content}]}}
+   :args {:children [{:as :content}]
+          :attrs {:value {}}}}
 
   {:name :wrap-style
    :description "Wrap a CSS string into `<style>content</style>` hiccup."

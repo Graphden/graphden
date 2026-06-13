@@ -184,11 +184,16 @@ context. The plan supersedes the per-item entries in § Future Work
 below; those entries remain for historical context and as
 deeper-design references.
 
-**Path to MVP launch with external users**: Blocks 1 → 2 → 4 on the
-critical path, with Blocks 3 / 5 / 6 parallelizable. Estimated total
-**~14-15 weeks**, calibrated against velocity in Jan-May 2026
+**Path to MVP launch with external users**: Blocks 1 → 2 → 4 → 9-Launch
+on the critical path, with Blocks 3 / 5 / 6 parallelizable. Estimated
+total **~18-19 weeks**, calibrated against velocity in Jan-May 2026
 (~150 commits/month sustained, e.g. full type-system overhaul in
 ~3 weeks, versioning + branches in ~3-4 weeks).
+
+The AI-launch piece (Block 9.1–9.3) is on the critical path because
+"co-edit your graph with the AI of your choice, review proposals as
+graph-diffs not text-diffs" is part of the launch story; growth-piece
+(Block 9.4–9.6) is deliberately deferred to post-MVP.
 
 ### Block 0 — Tutorial framework (continuous)
 
@@ -235,6 +240,27 @@ Block total: **~6-7 weeks**
    size/TTL limits) — ~1.5 weeks
 5. **Free-arg aliases** — see § Future Work entry; status check,
    finish if not already shipped
+6. **Routes API for frontend + static-lint against drift** — close
+   the gap between declarative HTTP routes (`app/routes/fns.edn`
+   `:get-route` / `:post-route` / `:delete` / `:put` fn-defs) and
+   the editor JS which today hardcodes URL strings (`fetch('/api/
+   secrets/' + id, …)`). When admin renames a path in `fns.edn`,
+   JS continues hitting the old URL — bug surfaces only when a user
+   clicks the button. ~3-4 days. Has 3 pieces:
+   - **`GET /api/routes` endpoint** — graph fn-def chain over a new
+     atomic `:list-routes` base-fn; returns `{action-name →
+     {:path :method}}`. Single source of truth = the same fns.edn
+     declarations that wire the actual handlers.
+   - **`routeFor(action, params)` helper in `editor-state.js`** —
+     reads `window.ROUTES` (loaded on bootstrap), substitutes `:param`
+     placeholders. Replaces ~30 hardcoded `'/api/…'` literals
+     across the editor JS modules.
+   - **`bb check` lint** — sweeps editor JS for `routeFor('…')`
+     calls, asserts every action-name appears in the routes-map
+     computed from `fns.edn` at lint time. Catches typos and
+     forgotten renames at CI instead of runtime. Closes the same
+     drift gap that the `:tags` refactor closed for the
+     admin-only-vault gate (declarative co-location of contract).
 
 Block total: **~4-5 weeks**
 
@@ -261,6 +287,132 @@ Block total: **~4-5 weeks**
   rebuild trigger — ~1.5 weeks. See
   [PHILOSOPHY § UI as Graph](PHILOSOPHY.md#ui-as-graph--two-step-roadmap).
 
+### Block 7 — Horizontal scaling foundation
+
+**Critical path for Cloud-Shared launch; deferrable if shipping
+only Self-Hosted + Cloud-Dedicated.** Without this block running
+more than one executor process is best-effort — fn-def writes on
+one node don't invalidate compiled registries on others.
+
+Sub-block A — **Multi-process executors over shared Postgres**:
+each JVM instance serves requests independently; load balancer in
+front (nginx / ALB / etc.); each executor builds its own
+`:compiled-registry` from the shared storage at startup. The
+self-hosted single-pod path is unchanged. Tested by spinning two
+containers against one PG and round-tripping CRUD across them.
+
+Sub-block B — **Cross-process fn-def invalidation via Postgres
+LISTEN / NOTIFY**: every storage write that today calls
+`invalidate-graph-cache!` also emits a `NOTIFY graphden_invalidate
+<payload>` carrying the affected fn-ids. Each executor LISTENs on
+the same channel and re-fires its local invalidate when it
+receives a NOTIFY from a sibling. Per-branch routing already
+in-process; the new layer is the cross-process pub/sub.
+
+Estimated total: **~3-4 weeks** (A: ~1, B: ~2-3 incl. concurrency
+testing across multiple containers).
+
+Dependencies: Block 1 (storage-as-graph) + Block 2 (orgs/users for
+tenant routing).
+
+### Block 8 — Hot-reload of impls (optional)
+
+**Dev-velocity feature, NOT required for Cloud-Shared launch.**
+Today changing a `defbase` body requires `bb rebuild` (docker
+image rebuild + restart). Hot-reload would let the author push a
+new impl into a running executor without restart.
+
+Approach sketch: nREPL channel into each executor; the package
+loader re-syncs an individual `impls.clj` and the registry rebuild
+picks up the new impl-fn map. Risk class: ClassLoader hygiene,
+in-flight requests during swap, security (treats any nREPL caller
+as trusted code-pusher — needs auth gating).
+
+Estimated: **~2 weeks**.
+
+Scheduled any time after Block 7 lands (sharing the cross-process
+invalidation channel). Will not block any other block.
+
+### Block 9 — AI Integration
+
+**Launch piece (9.1–9.3) is on the MVP critical path; growth piece
+(9.4–9.6) is post-MVP.** Implements the AI co-author surface so users
+can drive graphden with the AI model of their choice (their own API
+key) and so the editor presents AI proposals as graph-diffs rather
+than text-diffs.
+
+#### Motivation
+
+1. **Author pain.** Reviewing AI-proposed changes in text-based
+   codebases costs attention to whitespace, line-breaks, formatting
+   noise rather than to behaviour. Graphden's entity model lets a
+   proposal surface as "added 3 fn-defs, changed 2 bindings, deleted
+   1 ref" against the current graph — the existing branch-diff UI
+   already renders this shape.
+2. **Launch-time differentiation.** "Co-edit your graph with the AI
+   of your choice, review without text-diff noise" is part of the
+   first-launch story for both users and investors.
+3. **Hypothesis under test.** The small vocabulary (5 entity types,
+   ~150 base-fns) should give an AI a tighter problem surface than
+   an arbitrary 50 kLOC text codebase. Unproven — the MCP server +
+   AI-context resource is the experiment that tests it.
+
+#### Launch piece (~4 weeks, critical path)
+
+1. **MCP server.** Graphden exposes its primitives (list / read /
+   create / update / delete fn-def, execute, run tests, query
+   branches, read history, get AI context) over the Model Context
+   Protocol. Any MCP-capable client (Claude Code, Cursor, Claude
+   Desktop, future clients) can drive graphden against the user's
+   own model + API key. Open-source, ships as a base-fn-graph
+   (`:mcp-server`) wired into the editor process. Per-user auth on
+   every tool call. **~1.5 weeks.**
+2. **Editor "Ask AI" flow.** Button in the editor that prompts for
+   instructions + a target branch (defaults to a fresh `ai/<slug>`
+   branch), spins up an AI session against the user-configured
+   model, lets the AI execute graph mutations against that branch
+   via the same MCP tools, and on completion routes the user to the
+   existing branch-diff UI (`editor-branch-diff.js`) for accept /
+   reject. **BYOM (bring-your-own-model)**: per-user model + API
+   key config UI, encrypted at rest via the existing `:vault-*`
+   surface (cloud-shared) or kept client-side (self-hosted).
+   **~2 weeks.**
+3. **AI-context resource.** Curated description of graphden's entity
+   model, design principles, common patterns, naming conventions,
+   and how to mutate the graph via MCP tools, served by the MCP
+   server as a `get-ai-context` resource and as a downloadable
+   `docs/AI_CONTEXT.md` for clients that don't auto-fetch resources.
+   Distinct from `CLAUDE.md` (which is developer-side guidance for
+   working on graphden) — this teaches an external AI how to write
+   *user* fn-defs. **~3–4 days.**
+
+#### Growth piece (~4–5 weeks, post-MVP)
+
+4. **Managed-model gateway.** Control-plane proxy for users who
+   don't want to manage their own API keys; per-token markup on top
+   of upstream cost. Closed source, lives with the cloud control
+   plane. Self-hosted users keep BYOM. **~1.5 weeks.**
+5. **Dedicated proposal panel.** Richer per-fn-def diff cards with
+   inline reject-with-feedback and conversational follow-up;
+   successor to the branch-diff-modal reuse from 9.2. **~2 weeks.**
+6. **Persistent AI sessions.** Store conversation transcripts +
+   tool-call traces per branch, resume / share. **~1 week.**
+
+#### Dependencies
+
+- 9.1 needs Block 2 (auth — every tool call is per-user). Storage
+  base-fns from Block 1 are not required but simplify implementing
+  the tools as graph fn-defs rather than Clojure shims.
+- 9.2 needs Block 2 (per-user secret storage for BYOM API keys).
+  Block 6 (inline `:const` editor polish) is helpful but not
+  required — the launch UX uses the existing branch-diff modal.
+- 9.3 is standalone.
+- 9.4 needs the cloud control plane (closed-source track, parallel
+  to open-core blocks).
+- 9.5–9.6 follow 9.2.
+
+**Block total launch: ~4 weeks. Growth: ~4–5 weeks.**
+
 ### Deprioritized (do when there's a slot, no critical path)
 
 - **Graph → Clojure export** — credibility / REPL escape hatch.
@@ -279,6 +431,13 @@ Block total: **~4-5 weeks**
 - **UI Step 2** (full graph-described UI structure) — far future.
 - **Distributed execution** — kept on the existing § Future Work
   list as a separate research thread, not part of this block plan.
+- **Popularity-based fn-set distribution** — the "smart" horizontal
+  scaling where each executor holds only the hot subset of fn-defs
+  and a routing layer dispatches by fn-id popularity. Requires
+  millions-of-fns scale + heavy per-impl resource cost to pay back
+  the orchestration complexity. We are not there for the next ~24
+  months minimum. Block 7's "every executor holds everything"
+  shape scales fine for thousands of fn-defs in modest-RAM JVMs.
 
 ---
 

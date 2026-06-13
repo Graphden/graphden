@@ -1,10 +1,14 @@
 (ns ^:integration graphden.crud.secret-shape-test
   "Tests for the shared secret-shape predicates. `secret-fn?` is pure
-   data; `find-vault-get-fn-id` needs storage so we run against the
-   shared PG container fixture."
+   data; `find-secret-leaf-fn-id` needs storage AND the in-memory
+   rich-types-registry (which carries the `:secret-shape` tag set
+   from `web/vault/fns.edn`), so we run against the shared PG
+   container fixture and stub the registry entry directly."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.secret-shape :as shape]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
@@ -13,54 +17,84 @@
 
 
 (deftest secret-fn?-pure-test
-  (testing "exactly [vault-get-id] in parent-ids → true (legacy shape)"
-    (let [vg (random-uuid)
-          sl (random-uuid)]
-      (is (true? (shape/secret-fn? {:parent-ids [vg]} vg sl)))))
-
-  (testing "exactly [secret-leaf-id] in parent-ids → true (F-4 shape)"
-    (let [vg (random-uuid)
-          sl (random-uuid)]
-      (is (true? (shape/secret-fn? {:parent-ids [sl]} vg sl)))))
+  (testing "exactly [secret-leaf-id] in parent-ids → true"
+    (let [sl (random-uuid)]
+      (is (true? (shape/secret-fn? {:parent-ids [sl]} sl)))))
 
   (testing "empty parent-ids → false"
-    (let [vg (random-uuid)
-          sl (random-uuid)]
-      (is (not (shape/secret-fn? {:parent-ids []} vg sl)))
-      (is (not (shape/secret-fn? {:parent-ids nil} vg sl)))))
+    (let [sl (random-uuid)]
+      (is (not (shape/secret-fn? {:parent-ids []} sl)))
+      (is (not (shape/secret-fn? {:parent-ids nil} sl)))))
 
-  (testing "MI child (vault-get or secret-leaf + another parent) → false"
-    (let [vg (random-uuid)
-          sl (random-uuid)
+  (testing "MI child (secret-leaf + another parent) → false"
+    (let [sl (random-uuid)
           other (random-uuid)]
-      (is (not (shape/secret-fn? {:parent-ids [vg other]} vg sl)))
-      (is (not (shape/secret-fn? {:parent-ids [sl other]} vg sl)))
-      (is (not (shape/secret-fn? {:parent-ids [other vg]} vg sl)))))
+      (is (not (shape/secret-fn? {:parent-ids [sl other]} sl)))
+      (is (not (shape/secret-fn? {:parent-ids [other sl]} sl)))))
 
   (testing "different sole parent → false"
-    (let [vg (random-uuid)
-          sl (random-uuid)
+    (let [sl (random-uuid)
           other (random-uuid)]
-      (is (not (shape/secret-fn? {:parent-ids [other]} vg sl)))))
+      (is (not (shape/secret-fn? {:parent-ids [other]} sl)))))
 
-  (testing "both ids nil → false (vault package not loaded)"
-    (is (not (shape/secret-fn? {:parent-ids [(random-uuid)]} nil nil)))))
+  (testing "id nil → false (vault package not loaded)"
+    (is (not (shape/secret-fn? {:parent-ids [(random-uuid)]} nil)))))
 
 
-(deftest find-vault-get-fn-id-test
-  (let [storage (setup/create-test-storage)]
-    (try
-      (testing "no vault-get row → nil (package not loaded)"
-        (is (nil? (shape/find-vault-get-fn-id storage))))
+(defn- with-secret-leaf-tag
+  "Register the `:secret-leaf` rich-type with the `:secret-shape`
+   tag in the thread-local registry — production gets the same
+   entry from `record-rich-types!` over the EDN declaration."
+  [body-fn]
+  (exec/with-clean-registry
+    #(do (registry/record-rich-types!
+           :secret-leaf
+           {:return :text
+            :args {}
+            :tags #{:secret-shape :admin-only-vault}})
+         (body-fn))))
 
-      (testing "after seeding vault-get → returns its id"
-        (let [vg (setup/create-base-fn! storage "vault-get" :text)]
-          (is (= (:id vg) (shape/find-vault-get-fn-id storage)))))
 
-      (testing "name match is exact — `vault-getter` doesn't shadow"
-        (let [storage2 (setup/create-test-storage)
-              _ (setup/create-base-fn! storage2 "vault-getter" :text)]
-          (try
-            (is (nil? (shape/find-vault-get-fn-id storage2)))
-            (finally (sp/close storage2)))))
-      (finally (sp/close storage)))))
+(deftest find-secret-leaf-fn-id-test
+  (with-secret-leaf-tag
+    (fn []
+      (let [storage (setup/create-test-storage)]
+        (try
+          (testing "no secret-leaf row → nil (storage hasn't seen it)"
+            (is (nil? (shape/find-secret-leaf-fn-id storage))))
+
+          (testing "after seeding secret-leaf → returns its id"
+            (let [sl (setup/create-base-fn! storage "secret-leaf" :text)]
+              (is (= (:id sl) (shape/find-secret-leaf-fn-id storage)))))
+
+          (testing "name match is exact — `secret-leafy` doesn't shadow"
+            (let [storage2 (setup/create-test-storage)
+                  _ (setup/create-base-fn! storage2 "secret-leafy" :text)]
+              (try
+                (is (nil? (shape/find-secret-leaf-fn-id storage2)))
+                (finally (sp/close storage2)))))
+          (finally (sp/close storage)))))))
+
+
+(deftest find-admin-only-vault-base-fn-ids-test
+  (testing "no tagged entries → empty set"
+    (exec/with-clean-registry
+      #(let [storage (setup/create-test-storage)]
+         (try
+           (is (= #{} (shape/find-admin-only-vault-base-fn-ids storage)))
+           (finally (sp/close storage))))))
+
+  (testing "tag → set of fn-ids; non-tagged entries excluded"
+    (exec/with-clean-registry
+      #(let [storage (setup/create-test-storage)]
+         (try
+           (registry/record-rich-types! :vault-put
+                                        {:return :null :args {}
+                                         :tags #{:admin-only-vault}})
+           (registry/record-rich-types! :vault-metadata-get
+                                        {:return :jsonb :args {}})
+           (let [vp (setup/create-base-fn! storage "vault-put" :null)
+                 _vmg (setup/create-base-fn! storage "vault-metadata-get" :jsonb)
+                 result (shape/find-admin-only-vault-base-fn-ids storage)]
+             (is (= #{(:id vp)} result)))
+           (finally (sp/close storage)))))))

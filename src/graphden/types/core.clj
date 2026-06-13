@@ -46,7 +46,9 @@
          (param names are alpha-equivalent), a ≥2-arg slot
          by name (map-callable). See `fn-args-subtype?`.
      :jsonb ⊄ any concrete type                            requires explicit conversion"
-  (:refer-clojure :exclude [resolve]))
+  (:refer-clojure :exclude [resolve])
+  (:require
+    [clojure.set]))
 
 
 ;; -----------------------------------------------------------------------------
@@ -86,6 +88,56 @@
 (defn primitive?
   [t]
   (boolean (and (keyword? t) (primitives t))))
+
+
+;; Runtime test for "is this value an instance of `tag`?", keyed on
+;; the canonical type-tag. Used by the `:is-a?` base-fn (and any
+;; future runtime-classification consumer).
+;;
+;; Covers every member of `primitives` plus a few `structural-class`
+;; tags (`:map`, `:vector`) that don't appear in `primitives` because
+;; the type-system's general container is `:jsonb` — but at runtime
+;; the user often does want to distinguish "this is a map" from
+;; "this is a vector".
+;;
+;; KEEP THIS IN SYNC WITH `primitives`: every primitive whose values
+;; have a Clojure runtime check belongs here. A startup `assert`
+;; verifies the covering — adding to `primitives` without updating
+;; this map fails the assert at namespace load.
+;;
+;; Special cases:
+;; - `:never` is BOTTOM; no value matches → always false.
+;; - `:any` is TOP; every value matches → always true.
+;; - `:fn` matches Clojure callables (subset of values; in
+;;   structural fn-types the type-system is richer).
+;; - `:jsonb` is "JSON-encodable shape" — map / vector / scalar.
+;; - `:input-stream` is the transient `java.io.InputStream` carrier.
+(def runtime-predicates
+  (let [m {:null         nil?
+           :bool         boolean?
+           :int          integer?
+           :float        float?
+           :numeric      number?
+           :text         string?
+           :keyword      keyword?
+           :uuid         uuid?
+           :decimal      decimal?
+           :jsonb        (some-fn map? vector? string? number? boolean? nil?)
+           :sequence     sequential?
+           :bytes        bytes?
+           :timestamptz  inst?
+           :fn           fn?
+           :any          (constantly true)
+           :never        (constantly false)
+           :input-stream (fn [v] (instance? java.io.InputStream v))
+           ;; Structural-class additions beyond `primitives`:
+           :map          map?
+           :vector       vector?}]
+    (assert (every? m primitives)
+            (str "types/core/runtime-predicates is missing primitives — "
+                 "every member of `primitives` must have an entry here. "
+                 "Missing: " (pr-str (remove m primitives))))
+    m))
 
 
 (defn type-var?
@@ -401,6 +453,14 @@
     taint-with-secret-if-tainted))
 
 
+;; Forward declaration — `make-union` consults `subtype?` for
+;; absorption (drop members strictly subsumed by another sibling).
+;; `subtype?` itself only calls `make-union` indirectly through
+;; `normalise → resolve-alias`, and only on STRICTLY SMALLER subtypes
+;; in the type tree, so the mutual recursion bottoms out.
+(declare subtype?)
+
+
 (defn make-union
   "Smart constructor for `[:union …]`. Flattens nested unions, drops
    duplicates, and collapses singletons (a 1-member union IS that
@@ -417,10 +477,59 @@
         ;; but `:never` members collapses back to `:never`.
         non-never (remove #{:never} flat)
         flat (if (seq non-never) non-never flat)
+        ;; `:empty-map` gets absorbed by any sibling map-shape
+        ;; (`:jsonb` / `[:map K V]` / record-type) the same way
+        ;; `:never` gets absorbed by everything. Without this the
+        ;; union of an `:if`'s branches surfaces
+        ;; `[:union :empty-map record]` upstream — each downstream
+        ;; check then has to special-case the sentinel. Members
+        ;; ` ⊆ :empty-map`-test is performed via `subtype?` (already
+        ;; loaded above), so `:empty-map` itself is preserved when
+        ;; it's the ONLY sibling and the union collapses to it.
+        has-map-shape? (some (fn [m]
+                               (or (= m :jsonb)
+                                   (map-type? m)
+                                   (record-type? m)))
+                             flat)
+        flat (if has-map-shape? (remove #{:empty-map} flat) flat)
         ;; Stable order to keep the canonical form deterministic for
         ;; equality. `pr-str` sorts heterogeneous keywords/vectors
         ;; without confusing comparators.
-        unique (vec (sort-by pr-str (distinct flat)))]
+        unique (vec (sort-by pr-str (distinct flat)))
+        ;; Subtype absorption: `T ⊆ S` ⟹ T is redundant in
+        ;; `[:union T S]` because every value of T is already a
+        ;; value of S. Drop any non-typevar member that's a STRICT
+        ;; subtype of some other non-typevar sibling. Type-vars
+        ;; are KEPT (they're polymorphic — `'a` may bind to
+        ;; anything, so we can't reason about subtype here) but
+        ;; can't absorb others either. Without this the checker
+        ;; surfaces redundant unions like
+        ;; `[:union :int :positive-int]` (where `:positive-int ⊆
+        ;; :int` makes the wider `:int` cover everything) — UI
+        ;; chips and `:if`/`:cond` rule outputs end up noisier than
+        ;; the semantics warrants.
+        absorbed (vec
+                   (keep-indexed
+                     (fn [i m]
+                       (if (type-var? m)
+                         m
+                         (when-not (some (fn [[j other]]
+                                           (and (not= i j)
+                                                (not (type-var? other))
+                                                (not= m other)
+                                                (subtype? m other)
+                                                ;; If two members are
+                                                ;; mutually-subtype
+                                                ;; (alias equality
+                                                ;; through normalise),
+                                                ;; keep the lower-
+                                                ;; indexed one.
+                                                (or (not (subtype? other m))
+                                                    (< j i))))
+                                         (map-indexed vector unique))
+                           m)))
+                     unique))
+        unique (if (seq absorbed) absorbed unique)]
     (cond
       (= 1 (count unique)) (first unique)
       (some #{:any} unique) :any        ; :any absorbs everything
@@ -473,6 +582,23 @@
 (defonce ^:private type-aliases (atom {}))
 
 
+;; Thread-local override of the process-global `type-aliases` atom.
+;; When non-nil, every `register-type-alias!` / `clear-aliases!` /
+;; `resolve-alias` operation reads and writes THIS atom instead of
+;; the process-global one. Tests bind it via a `:each` fixture to
+;; get an isolated alias map per NS, so parallel test runs don't
+;; race on the shared atom.
+;;
+;; Mirrors `graphden.executor.registry.core/*registry-override*`.
+;; Production paths leave it nil and hit the global atom.
+(def ^:dynamic *type-aliases-override* nil)
+
+
+(defn- aliases-atom
+  []
+  (or *type-aliases-override* type-aliases))
+
+
 (declare register-type-aliases-batch)
 
 
@@ -492,12 +618,12 @@
     (throw (ex-info (str "type-alias name shadows a primitive: " (pr-str alias-name))
                     {:type :types/invalid-alias
                      :name alias-name})))
-  (binding [*alias-view* (assoc @type-aliases alias-name :any)]
+  (binding [*alias-view* (assoc @(aliases-atom) alias-name :any)]
     (when-not (well-formed? t)
       (throw (ex-info (str "type-alias body is not well-formed: " (pr-str t))
                       {:type :types/invalid-alias
                        :name alias-name :body t}))))
-  (swap! type-aliases assoc alias-name t)
+  (swap! (aliases-atom) assoc alias-name t)
   alias-name)
 
 
@@ -521,7 +647,7 @@
      (or (primitive? t) (type-var? t)) t
      (keyword? t)     (if (contains? seen t)
                         t
-                        (if-let [target (@type-aliases t)]
+                        (if-let [target (@(aliases-atom) t)]
                           (resolve-alias target (conj seen t))
                           t))
      (fn-type? t)     (let [base [:fn
@@ -550,7 +676,7 @@
    During batch registration the dynamic `*alias-view*` shadows
    the atom — see `register-type-aliases-batch`."
   []
-  (or *alias-view* @type-aliases))
+  (or *alias-view* @(aliases-atom)))
 
 
 (defn register-type-aliases-batch
@@ -569,7 +695,7 @@
    `{:registered #{names} :failed [{:name n :body b :reason r} ...]}`."
   [pairs]
   (let [proposed-names (into #{} (keep first) pairs)
-        scratch (merge @type-aliases
+        scratch (merge @(aliases-atom)
                        (zipmap proposed-names (repeat :any)))
         classify
         (fn [[nm body]]
@@ -587,7 +713,7 @@
         failed   (->> results (remove :ok)
                       (mapv (fn [r] (select-keys r [:nm :body :reason]))))]
     (when (seq ok-pairs)
-      (swap! type-aliases
+      (swap! (aliases-atom)
              (fn [m]
                (reduce (fn [acc [nm body]] (assoc acc nm body))
                        m ok-pairs))))
@@ -638,7 +764,7 @@
    `:type` / `:refine` / `:list` / `:union` / `:variant` fn-defs in
    the package loader."
   []
-  (reset! type-aliases {}))
+  (reset! (aliases-atom) {}))
 
 
 ;; -----------------------------------------------------------------------------
@@ -704,8 +830,7 @@
 
 ;; -----------------------------------------------------------------------------
 ;; Subtyping
-
-(declare subtype?)
+;; (Forward-declared near `make-union` so absorption can consult it.)
 
 
 (defn- record-subtype?
@@ -1060,11 +1185,27 @@
       (or (= sub sup) (= sup :any))            true
       (= sub :any)                             false
 
-      ;; `:never` is the bottom type — a subtype of every type, and
-      ;; nothing but itself is a subtype of it. (`:never ⊆ :never`
-      ;; is already covered by the `= sub sup` reflexive case above.)
-      (= sub :never)                           true
+      ;; Universal yes-arms:
+      ;; - `typevar SUB ⊆ :jsonb` — at any binding site the var
+      ;;   resolves to SOME type, and most concrete types subtype
+      ;;   `:jsonb`. Without it, every fn-ref whose computed return
+      ;;   is polymorphic (`[:union 'a <record>]` etc.) rejects
+      ;;   against a `:jsonb`-typed slot.
+      ;; - `:never ⊆ T` — `:never` is the bottom type, a subtype of
+      ;;   every type; nothing but itself is a subtype of it.
+      (or (and (type-var? sub) (= sup :jsonb))
+          (= sub :never))                      true
       (= sup :never)                           false
+
+      ;; `:empty-map` — sentinel from `classify-literal` for `{}`.
+      ;; Vacuous-truth subtype of every map-shaped target: it carries
+      ;; no entries to violate any structural constraint. Without it
+      ;; an `:_storage-where-map`-typed slot bound to `{:value {}}`
+      ;; fails the `:jsonb ⊄ [:map :keyword :any]` rule below.
+      (= sub :empty-map)
+      (boolean (or (= sup :empty-map) (= sup :jsonb)
+                   (map-type? sup) (record-type? sup)))
+      (= sup :empty-map)                       false
 
       ;; Union LHS: every member must subtype.
       (union-type? sub)
@@ -1160,9 +1301,28 @@
 (defn- bind-var
   [v t subst]
   (cond
-    (= v t)              subst
-    (occurs? v t subst)  ::fail
-    :else                (assoc subst v t)))
+    (= v t) subst
+
+    ;; Occurs in a UNION — `v` ↔ `[:union T … v …]` is the common
+    ;; let-poly "I might return `v` or something derived from `v`"
+    ;; pattern. The strict occurs check would reject it as an
+    ;; infinite type; the looser-and-correct interpretation is to
+    ;; drop `v` from the union (the recursive branch is just `v`
+    ;; itself, a tautological subtype of any binding we pick) and
+    ;; unify against the remainder. Common shape:
+    ;; `:keywordize-map-keys`'s `:f` callable returns `[:union 'a
+    ;; 'b]` against `:postwalk`'s `:f [:fn {:value v} v]` slot —
+    ;; without the strip, the arg-side `v := b` binding makes the
+    ;; return-side `b ↔ [:union 'a 'b]` trip occurs.
+    (and (union-type? t) (contains? (set (union-members t)) v))
+    (let [rest-members (remove #{v} (union-members t))]
+      (cond
+        (empty? rest-members)    subst
+        (= 1 (count rest-members)) (unify v (first rest-members) subst)
+        :else                    (unify v (make-union rest-members) subst)))
+
+    (occurs? v t subst) ::fail
+    :else (assoc subst v t)))
 
 
 (defn- unify-fn
@@ -1212,15 +1372,30 @@
 
 
 (defn- unify-record
+  "Open-record unification — unify the SHARED keys, with extra keys
+   on EITHER side allowed (mirrors `record-subtype?`'s open
+   semantics: `{a A b B c C}` is a valid subtype of `{a A b B}`, and
+   vice-versa under the sub-direction). If the shared-keys subset
+   is empty, fail (no information to unify against).
+
+   Without the open form, a `{:status :int :body :text}`-typed slot
+   couldn't unify against a `{:status :int :body :text :headers …}`
+   binding — even though `subtype?` accepts it. The asymmetry
+   (`subtype?` open, `unify-record` closed) silently rejected
+   legitimate bindings where the record fields needed any actual
+   typevar binding to happen via unify."
   [a b subst]
-  (if (not= (set (keys a)) (set (keys b)))
-    ::fail
-    (reduce (fn [s k]
-              (if (= s ::fail)
-                (reduced ::fail)
-                (unify (get a k) (get b k) s)))
-            subst
-            (keys a))))
+  (let [a-keys (set (keys a))
+        b-keys (set (keys b))
+        shared (clojure.set/intersection a-keys b-keys)]
+    (if (empty? shared)
+      ::fail
+      (reduce (fn [s k]
+                (if (= s ::fail)
+                  (reduced ::fail)
+                  (unify (get a k) (get b k) s)))
+              subst
+              shared))))
 
 
 (defn- unify-map-record
@@ -1285,7 +1460,28 @@
        ;; reality that unions appear as DECLARED slot types, not as
        ;; type-var bindings.
        (or (union-type? a) (union-type? b))
-       (if (or (subtype? a b) (subtype? b a)) subst ::fail)
+       (or
+         ;; Subtype-direction success — `:null ⊆ [:union :null T]`
+         ;; etc.; matches the lenient `:any` handling above.
+         (when (or (subtype? a b) (subtype? b a)) subst)
+         ;; Strip mutually-present members. `[:union :null 'a]` vs
+         ;; `[:union :null :text]` after the strip becomes `'a` vs
+         ;; `:text` — unify binds `'a := :text` and we're done.
+         ;; Without this step a free typevar nested inside a
+         ;; nullable union (very common: every fn-ref whose return
+         ;; could be nil and carries a polymorphic non-null
+         ;; branch) was stuck against the slot's same-shaped
+         ;; nullable type because both unions failed subtype
+         ;; each-way (the typevar member subtypes nothing concrete).
+         (let [a-members (if (union-type? a) (set (union-members a)) #{a})
+               b-members (if (union-type? b) (set (union-members b)) #{b})
+               common    (clojure.set/intersection a-members b-members)
+               a-rest    (vec (clojure.set/difference a-members common))
+               b-rest    (vec (clojure.set/difference b-members common))]
+           (when (and (seq common) (= 1 (count a-rest)) (= 1 (count b-rest)))
+             (let [s (unify (first a-rest) (first b-rest) subst)]
+               (when-not (= s ::fail) s))))
+         ::fail)
        ;; Subtype-aware unification — succeeds without further binding
        ;; when one of the relations holds:
        ;;
@@ -1307,7 +1503,26 @@
                     (tuple-type? b) (refine-type? b)))
            (and (= b :jsonb)
                 (or (record-type? a) (list-type? a) (map-type? a)
-                    (tuple-type? a) (refine-type? a))))
+                    (tuple-type? a) (refine-type? a)))
+           ;; Refinement ↔ (primitive OR refinement) — defer to
+           ;; `subtype?`, which already understands
+           ;; `[:refine B c] ⊆ B` and constraint-implies between
+           ;; refinement constraints. Without this, unifying a
+           ;; record field declared `:int` against a record field
+           ;; computed as `:non-negative-int` (or vice-versa) falls
+           ;; into the `::fail` arm, even though the relation holds.
+           (and (or (refine-type? a) (refine-type? b))
+                (or (subtype? a b) (subtype? b a)))
+           ;; `:empty-map` is the bottom of map shapes — vacuous-truth
+           ;; subtype of every map-shaped target (the same rule
+           ;; `subtype?` already grants). Without this branch a
+           ;; `{:value {}}` binding to `:coalesce :default a` after
+           ;; `:value` resolved `a := :jsonb` falls into the `:else
+           ;; ::fail` arm — the subtype-aware leniency for `:jsonb`
+           ;; above only fires for record/list/map/tuple/refine
+           ;; literal classifications, not the `:empty-map` sentinel.
+           (and (= a :empty-map) (or (= b :jsonb) (map-type? b) (record-type? b)))
+           (and (= b :empty-map) (or (= a :jsonb) (map-type? a) (record-type? a))))
        subst
        (and (fn-type? a) (fn-type? b))         (unify-fn a b subst)
        (and (list-type? a) (list-type? b))     (unify (list-elem a) (list-elem b) subst)
@@ -1401,3 +1616,12 @@
   [args-map]
   (let [subst (atom {})]
     (into {} (map (fn [[k v]] [k (freshen* v subst)])) args-map)))
+
+
+(defn freshen
+  "Freshen the type-vars of a SINGLE type. Standard let-polymorphism
+   move for a value-bound ref's return-type: each use site gets its
+   own scope of `'a`/`'b` so the caller's free typevars can't
+   accidentally collide with the callee's."
+  [t]
+  (freshen* t (atom {})))

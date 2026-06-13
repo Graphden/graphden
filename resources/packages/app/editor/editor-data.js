@@ -332,7 +332,7 @@ function buildLookups(data) {
 // Get the binding row for (fn-id, slot-id) — the one that overrides
 // the slot's value/ref/rename at this fn level. nil if no override.
 function getBindingForFnSlot(fnId, slotId) {
-  if (!lookups || !lookups.bindingByFnSlot) return null;
+  if (!lookups?.bindingByFnSlot) return null;
   return lookups.bindingByFnSlot.get(fnId + '|' + slotId) || null;
 }
 
@@ -345,7 +345,7 @@ function getBindingForFnSlot(fnId, slotId) {
 // `slot.source-slot-id` (FK). Both sources currently agree —
 // parser + Phase 6b's ensure-rename-slot! emit them in lock-step.
 function getEffectiveSlotName(fnId, slotId) {
-  if (!lookups || !lookups.fnMap) return null;
+  if (!lookups?.fnMap) return null;
   const visited = new Set();
   const queue = [fnId];
   while (queue.length) {
@@ -384,8 +384,8 @@ function argRowFromNode(nodeData) {
   const itemId = data.itemId;
   const fnId = data.fnId;
   if (!argId && !slotId && !bindingId) return null;
-  const slot = slotId && lookups && lookups.slotMap && lookups.slotMap.get(slotId);
-  const binding = bindingId && lookups && lookups.bindingMap && lookups.bindingMap.get(bindingId);
+  const slot = slotId && lookups?.slotMap?.get(slotId);
+  const binding = bindingId && lookups?.bindingMap?.get(bindingId);
   const item = itemId && lookups?.itemByItemId?.get(itemId);
   const effName = fnId && slotId && (typeof getEffectiveSlotName === 'function')
                   ? getEffectiveSlotName(fnId, slotId) : null;
@@ -449,7 +449,7 @@ function getFnEditBlockReason(fnId) {
 // Look up a fn's namespace as a dotted path (e.g. "core.collections")
 // or null if the fn has no namespace assigned.
 function getFnNamespace(fn) {
-  if (!fn || !fn['namespace-id'] || !lookups || !lookups.nsPathMap) return null;
+  if (!fn?.['namespace-id'] || !lookups?.nsPathMap) return null;
   return lookups.nsPathMap.get(fn['namespace-id']) || null;
 }
 
@@ -458,7 +458,7 @@ function getQualifiedFnName(fn) {
   if (!fn) return '(anonymous)';
   const name = fn.name || '(anonymous)';
   const nsId = fn['namespace-id'];
-  if (nsId && lookups && lookups.nsPathMap) {
+  if (nsId && lookups?.nsPathMap) {
     const nsPath = lookups.nsPathMap.get(nsId);
     if (nsPath) return nsPath + '.' + name;
   }

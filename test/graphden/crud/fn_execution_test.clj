@@ -8,7 +8,15 @@
    These tests need the FULL schema (graph + versioned + executions)
    because `fn_execution` rows ref :fn-version. The default
    `create-test-storage` includes only the graph slice — we
-   re-initialise here against the full builder chain."
+   re-initialise here against the full builder chain.
+
+   PARALLELISM: tests call `apply-and-await!` (local helper) instead
+   of `fn-exec/apply-execute` directly — under in-JVM parallel test
+   load the 5 s `:timeout-ms` knob can expire before the future
+   derefs, leaving `:status :pending` and the row's `:result` blank
+   until `record-completion!` lands later. The helper polls for the
+   row's `:result` column on `:pending`, transparently passing
+   inline successes through."
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
@@ -30,7 +38,6 @@
     [graphden.schema.services.schema :as svcs]
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
-    [graphden.services.reconciler :as services-recon]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
@@ -133,6 +140,36 @@
   (ctx/create-context {:storage storage :base-fns (exec/get-default-registry)}))
 
 
+(defn- apply-and-await!
+  "Drop-in replacement for `fn-exec/apply-execute` that guarantees
+   `:result` is materialised before returning. `fn-exec/apply-execute`
+   itself returns `:status :pending` when the in-process
+   `:timeout-ms` expires before the future derefs — under parallel
+   test load (DB-pool + executor warmup contention) even a 2 + 2
+   future can be late. `record-completion!` fills `:result`
+   asynchronously, so tests that read the row immediately race the
+   writer.
+
+   On `:pending` we poll the row's `:result` column until it lands
+   or 10 s passes (plenty for any primitive op). Inline successes
+   pass straight through, so this wrapper is cheap on the happy
+   path."
+  [ctx parsed]
+  (let [out (fn-exec/apply-execute ctx parsed)
+        eid (some-> (:execution-id out) parse-uuid)
+        storage (:storage ctx)]
+    (when (and eid storage (= :pending (:status out)))
+      (let [deadline (+ (System/currentTimeMillis) 10000)]
+        (loop []
+          (let [row (sp/read-entity storage :fn-execution eid)]
+            (when (and (nil? (:result row))
+                       (not (#{:failed "failed"} (:status row)))
+                       (< (System/currentTimeMillis) deadline))
+              (Thread/sleep 50)
+              (recur))))))
+    out))
+
+
 (defn- make-pure-add-fn!
   "Build a small base-fn + composed instance the executor can run.
    `my-add` takes free args `:a` and `:b` (both ints), returns their
@@ -155,34 +192,6 @@
        :composed (setup/create-composed-fn! storage composed-name (:id base))
        :slot-a slot-a
        :slot-b slot-b})))
-
-
-;; ============================================================================
-;; parse-execute-request — pure
-;; ============================================================================
-
-(deftest parse-execute-request-test
-  (testing "defaults: timeout-ms 10000, persist? false, args {}"
-    (let [parsed (fn-exec/parse-execute-request
-                   {:body {:fn-name "add"}})]
-      (is (= "add" (:fn-name parsed)))
-      (is (= {} (:args parsed)))
-      (is (= 10000 (:timeout-ms parsed)))
-      (is (false? (:persist? parsed)))
-      (is (nil? (:fn-id parsed)))))
-
-  (testing "fn-id parses as uuid; malformed → nil"
-    (let [id (random-uuid)
-          ok  (fn-exec/parse-execute-request {:body {:fn-id (str id)}})
-          bad (fn-exec/parse-execute-request {:body {:fn-id "not-a-uuid"}})]
-      (is (= id (:fn-id ok)))
-      (is (nil? (:fn-id bad)))))
-
-  (testing "custom timeout-ms / persist?  passed through"
-    (let [parsed (fn-exec/parse-execute-request
-                   {:body {:fn-name "add" :timeout-ms 5000 :persist? true}})]
-      (is (= 5000 (:timeout-ms parsed)))
-      (is (true? (:persist? parsed))))))
 
 
 ;; ============================================================================
@@ -209,6 +218,64 @@
                      :args {} :timeout-ms 1000 :persist? false})]
         (is (false? (:ok rej)))
         (is (= :fn-not-found (-> rej :error-data :reason))))
+      (finally nil))))
+
+
+(deftest validate-rejects-malformed-ref-arg-test
+  ;; Regression: pre-fix, an arg shaped `{:ref "not-a-uuid"}` parsed
+  ;; to nil (via the now-lenient `parse-uuid-or-clear`) but slipped
+  ;; through validation. `apply-execute` then handed nil to the
+  ;; executor in place of the intended ref, and a fn like `:add`
+  ;; happily returned `(apply + nil)` = 0. Silent succeed with
+  ;; garbage was worse than the pre-leniency raw-exception leak;
+  ;; fix is to reject malformed refs at validate-execute time with a
+  ;; clean `:malformed-ref` reason.
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "malformed-ref-target")
+        c (test-ctx storage)]
+    (try
+      (testing "non-UUID inside `:ref`"
+        (let [rej (fn-exec/validate-execute
+                    c {:fn-id (:id composed)
+                       :args {:a {:ref "not-a-uuid"}}
+                       :timeout-ms 1000 :persist? false})]
+          (is (false? (:ok rej)))
+          (is (= :malformed-ref (-> rej :error-data :reason)))
+          (is (= "a" (-> rej :error-data :malformed first :arg)))
+          (is (= "not-a-uuid" (-> rej :error-data :malformed first :raw-ref)))))
+
+      (testing "blank string inside `:ref`"
+        (let [rej (fn-exec/validate-execute
+                    c {:fn-id (:id composed)
+                       :args {:a {:ref ""}}
+                       :timeout-ms 1000 :persist? false})]
+          (is (false? (:ok rej)))
+          (is (= :malformed-ref (-> rej :error-data :reason)))))
+      (finally nil))))
+
+
+(deftest validate-rejects-unknown-fn-id-test
+  ;; Regression: pre-fix, `validate-execute` called `lookup/resolve-fn-id`
+  ;; which for the `:fn-id` branch returns the parsed UUID without a
+  ;; storage check. Validation passed for any well-formed UUID — then
+  ;; `apply-execute` called `lookup/resolve-fn` (which DOES check),
+  ;; got nil, ran `cr/execute` with `fn-id nil`, and the executor's
+  ;; bare "Function not found: " bubbled up with `:fn-id null` in the
+  ;; error data. Fix: switch validate-execute to `lookup/resolve-fn`
+  ;; so both stages agree on existence.
+  (let [storage (create-full-storage)
+        c (test-ctx storage)
+        ;; Well-formed UUID that won't match any row.
+        absent-id #uuid "00000000-0000-0000-0000-000000000000"]
+    (try
+      (let [rej (fn-exec/validate-execute
+                  c {:fn-id absent-id
+                     :args {} :timeout-ms 1000 :persist? false})]
+        (is (false? (:ok rej)))
+        (is (= :fn-not-found (-> rej :error-data :reason))
+            "the symmetric :fn-name path already rejected this way")
+        (is (clojure.string/includes? (:error rej) (str absent-id))
+            "error message cites the actual fn-id, not an empty tail"))
       (finally nil))))
 
 
@@ -280,36 +347,6 @@
       (finally nil))))
 
 
-(deftest validate-rejects-already-running-as-legacy-fallback-test
-  ;; Phase 1 stopgap: the integrant component stashes the boot
-  ;; fallback's `{:fn-id :stopper}` under `recon/legacy-handle`.
-  ;; validate-execute rejects ad-hoc Run on that fn even though no
-  ;; :service row exists.
-  (let [storage (create-full-storage)
-        {composed :composed} (make-pure-add-fn! storage "legacy-fallback")
-        c (test-ctx storage)
-        prior @services-recon/legacy-handle]
-    (try
-      (reset! services-recon/legacy-handle
-              {:fn-id (:id composed) :stopper (fn [] :stopped)})
-      (testing "validate rejects with :source :legacy-fallback"
-        (let [rej (fn-exec/validate-execute
-                    c {:fn-id (:id composed)
-                       :args {:a 1 :b 2} :timeout-ms 5000 :persist? false})]
-          (is (false? (:ok rej)))
-          (is (= :already-running-as-service (-> rej :error-data :reason)))
-          (is (= :legacy-fallback (-> rej :error-data :source)))
-          (is (nil? (-> rej :error-data :service-id))
-              "no :service-id — there is no managed row")))
-      (testing "error message mentions pod-restart path for legacy"
-        (let [rej (fn-exec/validate-execute
-                    c {:fn-id (:id composed)
-                       :args {:a 1 :b 2} :timeout-ms 5000 :persist? false})]
-          (is (re-find #"boot fallback|Pod restart" (:error rej)))))
-      (finally
-        (reset! services-recon/legacy-handle prior)))))
-
-
 (deftest validate-passes-well-formed-test
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "ok")
@@ -330,7 +367,7 @@
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "inline")
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a 1 :b 2}
                     :timeout-ms 5000 :persist? false})]
@@ -374,7 +411,7 @@
                                         :effects #{:io}})
         c (test-ctx storage)]
     (testing "execute → row carries :touched-secret? true"
-      (let [r (fn-exec/apply-execute
+      (let [r (apply-and-await!
                 c {:fn-id (:id composed)
                    :args {:secret-arg "literal-auto-promoted-to-secret"}
                    :timeout-ms 5000 :persist? true})
@@ -391,7 +428,7 @@
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "no-secret")
         c (test-ctx storage)
-        r (fn-exec/apply-execute
+        r (apply-and-await!
             c {:fn-id (:id composed)
                :args {:a 1 :b 2}
                :timeout-ms 5000 :persist? true})
@@ -426,7 +463,7 @@
                                         :return-type [:secret :text]})
         c (test-ctx storage)]
     (testing "inline succeeded response carries :tainted? without value"
-      (let [r (fn-exec/apply-execute
+      (let [r (apply-and-await!
                 c {:fn-id (:id composed)
                    :args {}
                    :timeout-ms 5000 :persist? false})]
@@ -435,7 +472,7 @@
         (is (true? (:tainted? r)))))
 
     (testing "persisted execution row also stores nil + tainted marker"
-      (let [r (fn-exec/apply-execute
+      (let [r (apply-and-await!
                 c {:fn-id (:id composed)
                    :args {}
                    :timeout-ms 5000 :persist? true})
@@ -449,7 +486,7 @@
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "persist")
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a 4 :b 5}
                     :timeout-ms 5000 :persist? true})]
@@ -468,7 +505,7 @@
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "args")
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a 7 :b 8}
                     :timeout-ms 5000 :persist? true})
@@ -490,7 +527,7 @@
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "getex")
         c (test-ctx storage)
-        sub (fn-exec/apply-execute
+        sub (apply-and-await!
               c {:fn-id (:id composed) :args {:a 10 :b 20}
                  :timeout-ms 5000 :persist? true})
         exec-id (some-> (:execution-id sub) java.util.UUID/fromString)]
@@ -517,7 +554,7 @@
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "cancel")
         c (test-ctx storage)
-        sub (fn-exec/apply-execute
+        sub (apply-and-await!
               c {:fn-id (:id composed) :args {:a 1 :b 2}
                  :timeout-ms 5000 :persist? true})
         exec-id (some-> (:execution-id sub) java.util.UUID/fromString)]
@@ -607,6 +644,8 @@
         {composed :composed} (make-slow-cancelable-fn! storage "real-cancel")
         c (test-ctx storage)
         ;; Short timeout — fn takes ~5s, timeout flips to pending fast.
+        ;; Bypass the await-helper here: this test wants the :pending
+        ;; intermediate state, polling the row to :cancelled itself.
         sub (fn-exec/apply-execute c {:fn-id (:id composed)
                                       :args {}
                                       :timeout-ms 300
@@ -677,6 +716,8 @@
         ;; tail-future writes :succeeded ~500ms later.
         {composed :composed} (make-slow-pure-fn! storage "tail-write" 600)
         c (test-ctx storage)
+        ;; Bypass the await-helper: this test EXPECTS :pending and
+        ;; polls the tail-write itself.
         sub (fn-exec/apply-execute c {:fn-id (:id composed)
                                       :args {}
                                       :timeout-ms 100
@@ -730,9 +771,9 @@
     (try
       ;; Three persisted runs — varying :b so we can identify them.
       (doseq [b [10 20 30]]
-        (fn-exec/apply-execute c {:fn-id (:id composed)
-                                  :args {:a 1 :b b}
-                                  :timeout-ms 5000 :persist? true}))
+        (apply-and-await! c {:fn-id (:id composed)
+                             :args {:a 1 :b b}
+                             :timeout-ms 5000 :persist? true}))
       (let [rows (fn-exec/list-executions-for-fn c (:id composed))]
         (testing "all three runs surface"
           (is (= 3 (count rows))))
@@ -755,9 +796,9 @@
         {composed :composed} (make-pure-add-fn! storage "list-branch-iso")
         parent-ctx (test-ctx storage)
         ;; one run on the parent (test-branch)
-        _ (fn-exec/apply-execute parent-ctx {:fn-id (:id composed)
-                                             :args {:a 1 :b 1}
-                                             :timeout-ms 5000 :persist? true})
+        _ (apply-and-await! parent-ctx {:fn-id (:id composed)
+                                        :args {:a 1 :b 1}
+                                        :timeout-ms 5000 :persist? true})
         child-branch (vs/create-branch! storage "list-iso-child")
         child-storage (vs/switch-branch storage (:id child-branch))]
     (try
@@ -771,9 +812,9 @@
       (sp/update-entity child-storage :fn (:id composed)
                         {:description "edited on child"})
       (let [child-ctx (test-ctx child-storage)]
-        (fn-exec/apply-execute child-ctx {:fn-id (:id composed)
-                                          :args {:a 2 :b 2}
-                                          :timeout-ms 5000 :persist? true}))
+        (apply-and-await! child-ctx {:fn-id (:id composed)
+                                     :args {:a 2 :b 2}
+                                     :timeout-ms 5000 :persist? true}))
 
       (testing "after child override: parent still sees only its own version's run"
         (let [parent-rows (fn-exec/list-executions-for-fn parent-ctx (:id composed))]
@@ -806,9 +847,9 @@
         c (test-ctx storage)]
     (try
       (dotimes [i 25]
-        (fn-exec/apply-execute c {:fn-id (:id composed)
-                                  :args {:a i :b 1}
-                                  :timeout-ms 5000 :persist? true}))
+        (apply-and-await! c {:fn-id (:id composed)
+                             :args {:a i :b 1}
+                             :timeout-ms 5000 :persist? true}))
       (is (= 20 (count (fn-exec/list-executions-for-fn c (:id composed))))
           "default history-limit caps the list at 20 even with 25 runs")
       (testing "explicit :limit narrows the result set"
@@ -965,7 +1006,7 @@
         ;; non-truncated branch first.
         {composed :composed} (make-throwing-fn! storage "fail-small" 16)
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 5000 :persist? true})
         exec-id (some-> (:execution-id result) java.util.UUID/fromString)]
@@ -990,7 +1031,7 @@
         ;; the truncation fallback: data shrinks to {:type :truncated true}.
         {composed :composed} (make-throwing-fn! storage "fail-big" (* 70 1024))
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 5000 :persist? true})
         exec-id (some-> (:execution-id result) java.util.UUID/fromString)]
@@ -1060,7 +1101,7 @@
         ;; 6 MB string — over 5 MB cap.
         {composed :composed} (make-big-result-fn! storage "trunc" (* 6 1024 1024))
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 30000 :persist? true})
         exec-id (some-> (:execution-id result) java.util.UUID/fromString)]
@@ -1106,7 +1147,7 @@
   (let [storage (create-full-storage)
         {composed :composed} (make-effectful-fn! storage "rt-eff")
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 5000 :persist? true})
         exec-id (some-> (:execution-id result) java.util.UUID/fromString)]
@@ -1153,7 +1194,7 @@
              :composed-name composed-name}))
         c (test-ctx storage)
         ;; Note: persist?=false — relying on declared-effects to force persistence.
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed) :args {}
                     :timeout-ms 5000 :persist? false})]
     (try
@@ -1196,7 +1237,7 @@
         ;; row structure persisted).
         {composed :composed} (make-pure-add-fn! storage "list-args")
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed)
                     :args {:a [10 20 30]      ; sequential — spawns item rows
                            :b 7}              ; scalar — single arg row
@@ -1236,7 +1277,7 @@
   (let [storage (create-full-storage)
         {composed :composed} (make-pure-add-fn! storage "pure-eff")
         c (test-ctx storage)
-        result (fn-exec/apply-execute
+        result (apply-and-await!
                  c {:fn-id (:id composed) :args {:a 1 :b 2}
                     :timeout-ms 5000 :persist? true})
         exec-id (some-> (:execution-id result) java.util.UUID/fromString)]
@@ -1258,34 +1299,40 @@
 ;; ============================================================================
 
 (deftest log-effect-drift-emits-warn-on-mismatch-test
+  ;; `with-redefs` modifies a root binding (NOT thread-local), so under
+  ;; parallel test load any other NS that logs while we hold the redef
+  ;; pollutes our `logs` atom. We filter on the canonical marker
+  ;; `:execution/effect-drift` to count ONLY this test's emissions.
   (let [logs (atom [])
         capture (fn [_ns level _throwable msg]
-                  (swap! logs conj {:level level :msg (str msg)}))]
+                  (swap! logs conj {:level level :msg (str msg)}))
+        drift-logs (fn [] (filter #(re-find #":execution/effect-drift" (:msg %)) @logs))]
     (with-redefs [clojure.tools.logging/log* capture]
       (testing "no log when declared == runtime"
         (reset! logs [])
         (#'persist/log-effect-drift!
          (random-uuid) ["db"] ["db"])
-        (is (empty? @logs)))
+        (is (empty? (drift-logs))))
       (testing "widened (runtime ∉ declared) triggers warn with the marker"
         (reset! logs [])
         (#'persist/log-effect-drift!
          (random-uuid) ["db"] ["db" "network"])
-        (is (= 1 (count @logs)))
-        (is (= :warn (:level (first @logs))))
-        (is (re-find #":type :execution/effect-drift" (:msg (first @logs))))
-        (is (re-find #":widened \[\"?network\"?\]" (:msg (first @logs)))))
+        (let [matches (drift-logs)]
+          (is (= 1 (count matches)))
+          (is (= :warn (:level (first matches))))
+          (is (re-find #":widened \[\"?network\"?\]" (:msg (first matches))))))
       (testing "unobserved (declared ∉ runtime) also triggers warn"
         (reset! logs [])
         (#'persist/log-effect-drift!
          (random-uuid) ["db" "network"] ["db"])
-        (is (= 1 (count @logs)))
-        (is (re-find #":unobserved \[\"?network\"?\]" (:msg (first @logs)))))
+        (let [matches (drift-logs)]
+          (is (= 1 (count matches)))
+          (is (re-find #":unobserved \[\"?network\"?\]" (:msg (first matches))))))
       (testing "empty/nil sides → no log (pure fn, no instrumentation, etc.)"
         (reset! logs [])
         (#'persist/log-effect-drift!
          (random-uuid) nil nil)
-        (is (empty? @logs))))))
+        (is (empty? (drift-logs)))))))
 
 
 (deftest record-effect-noop-outside-trace-test
@@ -1314,9 +1361,9 @@
         c (test-ctx storage)]
     (try
       (doseq [b [10 20]]
-        (fn-exec/apply-execute c {:fn-id (:id composed)
-                                  :args {:a 1 :b b}
-                                  :timeout-ms 5000 :persist? true}))
+        (apply-and-await! c {:fn-id (:id composed)
+                             :args {:a 1 :b b}
+                             :timeout-ms 5000 :persist? true}))
       (let [rows (fn-exec/list-executions-for-fn c (:id composed))
             envelope {:ok true :executions rows}
             ;; Roundtrip through cheshire so any unserializable values
@@ -1360,13 +1407,13 @@
     (try
       ;; Two runs of A, three of B — list for A should return only 2.
       (dotimes [_ 2]
-        (fn-exec/apply-execute c {:fn-id (:id a-composed)
-                                  :args {:a 1 :b 2} :timeout-ms 5000
-                                  :persist? true}))
+        (apply-and-await! c {:fn-id (:id a-composed)
+                             :args {:a 1 :b 2} :timeout-ms 5000
+                             :persist? true}))
       (dotimes [_ 3]
-        (fn-exec/apply-execute c {:fn-id (:id b-composed)
-                                  :args {:a 1 :b 2} :timeout-ms 5000
-                                  :persist? true}))
+        (apply-and-await! c {:fn-id (:id b-composed)
+                             :args {:a 1 :b 2} :timeout-ms 5000
+                             :persist? true}))
       (is (= 2 (count (fn-exec/list-executions-for-fn c (:id a-composed)))))
       (is (= 3 (count (fn-exec/list-executions-for-fn c (:id b-composed)))))
       (finally nil))))

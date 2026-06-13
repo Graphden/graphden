@@ -50,28 +50,149 @@
 
   ;; =============================================================================
   ;; BASE-FNS: layout pipeline primitives
+  ;;
+  ;; Each is exactly ONE library call into `graphden.layout.*`.
+  ;; Composition, error handling, and upstream-error pass-through live
+  ;; in the graph fn-defs below.
   ;; =============================================================================
-
-  {:name :_parse-layout-request
-   :description "Parse the internal Ring request body into `{:root-id :expansions}` for the layout pipeline."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request — body carries `{:root-id :expansions}`."}}
-   :return-type :_parse-layout-request-shape}
 
   {:name :_load-graph-cached
    :description "Load every fn/slot/binding entity for layout, served from the per-context graph cache when warm. Context-aware (reads storage from `ctx`)."
    :args {}
    :return-type :_graph-snapshot-shape}
 
-  {:name :_layout-build-elements
-   :description "Stage A — build cytoscape `{:nodes :edges}` for the requested subgraph from the graph snapshot + parsed request."
-   :args {:graph {:type :_graph-snapshot-shape :description "Entity snapshot from `:_load-graph-cached`."}
-          :parsed {:type :_parse-layout-request-shape :description "`{:root-id :expansions}` from `:_parse-layout-request`."}}
+  {:name :_parse-layout-body
+   :description "Single library call — parse the Ring body into `{:root-id :expansions}`. Throws JsonParseException / ExceptionInfo / IllegalArgumentException on bad input; the graph's `:try` catches all three."
+   :args {:request {:type :ring-request-shape}}
+   :return-type :_parse-layout-request-shape}
+
+  {:name :_layout-build-apply
+   :description "Single library call — build cytoscape `{:nodes :edges}` from the graph snapshot + parsed request. Throws ExceptionInfo on `:execution-error/not-found`."
+   :args {:graph {:type :_graph-snapshot-shape}
+          :parsed {:type :_parse-layout-request-shape}}
    :return-type :_layout-elements-shape}
 
-  {:name :_layout-place
-   :description "Stage B — grid-place the `{:nodes :edges}` from `:_layout-build-elements` into the full `{:nodes :edges :grid-pos :validation}` response."
-   :args {:elements {:type :_layout-elements-shape :description "`{:nodes :edges}` from `:_layout-build-elements`."}}
+  {:name :_layout-place-apply
+   :description "Single library call — grid-place `{:nodes :edges}` into the full layout response."
+   :args {:elements {:type :_layout-elements-shape}}
    :return-type :_layout-response-shape}
+
+  ;; =============================================================================
+  ;; FN-DEFS: error-shape templates + pass-through guards
+  ;; =============================================================================
+
+  {:name :_layout-err-message
+   :description "`{:ok false :error <exception.message>}` — the shape `:_layout-build-elements` and `:_parse-layout-request` use to surface ExceptionInfo / IllegalArgumentException messages."
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :throwable-message
+                  :args {:ex {:as :exception}}}]}}
+
+  ;; =============================================================================
+  ;; FN-DEFS: :_parse-layout-request — :try with multi-class dispatch
+  ;; =============================================================================
+
+  {:name :_parse-layout-err-bad-json
+   :description "Static err — JsonParseException leaks `Source: REDACTED` info if we surface .getMessage; replace with a generic message."
+   :parent :const
+   :return-type :_error-result-shape
+   :args {:value {:ok false :error "Request body is not valid JSON"}}}
+
+  {:name :_parse-layout-err-invalid-request
+   :description "`{:ok false :error \"Invalid request: <msg>\"}` — IllegalArgumentException (typically from `UUID/fromString`) gets a prefix to disambiguate from server-side errors."
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["Invalid request: "
+                                 {:parent :throwable-message
+                                  :args {:ex {:as :exception}}}]}}]}}
+
+  {:name :_parse-layout-err-rethrow
+   :description "Fallback — any exception class outside the three expected user-input classes is rethrown so it surfaces as a 500 / proper server error."
+   :parent :throw
+   :args {:exception {:as :exception}}}
+
+  {:name :_parse-layout-exception-class
+   :description "Look up the exception's class-name once so the `:cond` clauses can compare against literal class-name strings."
+   :parent :throwable-class-name
+   :args {:ex {:as :exception}}}
+
+  {:name :_parse-layout-on-throw
+   :description "1-arg handler — dispatch on the caught exception's class name to JsonParseException / ExceptionInfo / IllegalArgumentException err-shapes, else rethrow."
+   :parent :cond
+   :args {:clauses [{:parent :equal?
+                     :args {:a :_parse-layout-exception-class
+                            :b {:value "com.fasterxml.jackson.core.JsonParseException"}}}
+                    :_parse-layout-err-bad-json
+                    {:parent :equal?
+                     :args {:a :_parse-layout-exception-class
+                            :b {:value "clojure.lang.ExceptionInfo"}}}
+                    :_layout-err-message
+                    {:parent :equal?
+                     :args {:a :_parse-layout-exception-class
+                            :b {:value "java.lang.IllegalArgumentException"}}}
+                    :_parse-layout-err-invalid-request
+                    {:value true}
+                    :_parse-layout-err-rethrow]}}
+
+  {:name :_parse-layout-request
+   :description "Parse the internal Ring request body into `{:root-id :expansions}` via a graph `:try` wrapping the single library call. On JsonParseException / ExceptionInfo / IllegalArgumentException the on-throw handler returns `{:ok false :error}`; other exceptions propagate."
+   :parent :try
+   :args {:body :_parse-layout-body
+          :on-throw :_parse-layout-on-throw}}
+
+  ;; =============================================================================
+  ;; FN-DEFS: :_layout-build-elements — :if pass-through + :try
+  ;; =============================================================================
+
+  {:name :_layout-build-try
+   :description "Run `:_layout-build-apply` and convert any ExceptionInfo into `:_layout-err-message`. Pure graph `:try`."
+   :parent :try
+   :args {:body :_layout-build-apply
+          :on-throw :_layout-err-message
+          :graph {:as :graph}
+          :parsed {:as :parsed}}}
+
+  {:name :_layout-build-elements
+   :description "Stage A — pass an upstream `{:ok false}` parse result through, otherwise build cytoscape `{:nodes :edges}`."
+   :parent :if
+   :args {:test :_layout-build-parsed-failed?
+          :then {:as :parsed}
+          :else :_layout-build-try
+          :graph {:as :graph}
+          :parsed {:as :parsed}}}
+
+  {:name :_layout-build-parsed-failed?
+   :description "True iff `:parsed` is an upstream `{:ok false}` payload."
+   :parent :equal?
+   :args {:a {:parent :get
+              :args {:coll {:as :parsed}
+                     :key {:value :ok}
+                     :default nil}}
+          :b {:value false}}}
+
+  ;; =============================================================================
+  ;; FN-DEFS: :_layout-place — :if pass-through
+  ;; =============================================================================
+
+  {:name :_layout-place
+   :description "Stage B — pass an upstream `{:ok false}` from `:_layout-build-elements` through, otherwise grid-place the elements."
+   :parent :if
+   :args {:test :_layout-place-failed?
+          :then {:as :elements}
+          :else :_layout-place-apply
+          :elements {:as :elements}}}
+
+  {:name :_layout-place-failed?
+   :description "True iff `:elements` is an upstream `{:ok false}` payload."
+   :parent :equal?
+   :args {:a {:parent :get
+              :args {:coll {:as :elements}
+                     :key {:value :ok}
+                     :default nil}}
+          :b {:value false}}}
 
   ;; =============================================================================
   ;; FN-DEFS: layout pipeline composition
@@ -80,9 +201,11 @@
   ;; build → place. Free args `graph` + `parsed` propagate up from
   ;; `_layout-build-elements`.
   {:name :_compute-layout
-   :description "Run the build → place layout pipeline for one parsed request. Composition of `:_layout-build-elements` → `:_layout-place`."
+   :description "Run the build → place layout pipeline for one parsed request. Composition of `:_layout-build-elements` → `:_layout-place`. Owns `:graph` as an explicit free pin — value flows down to `:_layout-build-elements :graph` by name match."
    :parent :_layout-place
-   :args {:elements :_layout-build-elements}}
+   :args {:elements :_layout-build-elements
+          :graph {:type :jsonb
+                  :description "Full entity graph snapshot — typically supplied by `:_load-graph-cached`."}}}
 
   ;; parse → load → compute. Context-aware: free arg `request`
   ;; propagates up from `_parse-layout-request`.

@@ -161,15 +161,17 @@
 
 
 ;; =============================================================================
-;; get-startup-fn-name tests
+;; get-seeded-services tests
 ;; =============================================================================
 
-(deftest get-startup-fn-name-test
-  (testing "returns startup-fn from loaded packages"
-    (is (= :web-server (loader/get-startup-fn-name {:startup-fn :web-server}))))
+(deftest get-seeded-services-test
+  (testing "returns empty vec when nothing seeded"
+    (is (= [] (loader/get-seeded-services {:seeded-services []}))))
 
-  (testing "returns nil when no startup-fn"
-    (is (nil? (loader/get-startup-fn-name {:base-fn-defs {} :fn-defs []})))))
+  (testing "returns the aggregated list"
+    (let [seeds [{:package-name "app" :name :default :fn-name :web-server
+                  :enabled? true :restart-policy :always}]]
+      (is (= seeds (loader/get-seeded-services {:seeded-services seeds}))))))
 
 
 ;; =============================================================================
@@ -238,11 +240,14 @@
 ;; load-packages — full integration touching real packages
 ;; =============================================================================
 
-(deftest load-packages-collects-startup-fn
-  (testing "the :app package declares :web-server as startup-fn"
+(deftest load-packages-collects-seeded-services
+  (testing "the :app package declares its default web-server service"
     (try
-      (let [result (loader/load-packages ["core" "web" "app"])]
-        (is (= :web-server (:startup-fn result))))
+      (let [result (loader/load-packages ["core" "web" "app"])
+            svcs (:seeded-services result)
+            default (first (filter #(= "app" (:package-name %)) svcs))]
+        (is (some? default) "the app package contributes a seed entry")
+        (is (= :web-server (:fn-name default))))
       (catch clojure.lang.ExceptionInfo _ nil))))
 
 

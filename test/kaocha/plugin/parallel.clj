@@ -1,0 +1,150 @@
+(ns kaocha.plugin.parallel
+  "Per-suite parallel namespace runner.
+
+   Overrides `:kaocha.type/clojure.test` -run multimethod at load time
+   so a suite with `:kaocha/parallelism N > 1` runs its child
+   namespaces on a bounded N-thread pool. Other suites fall through to
+   the original single-threaded behaviour. Registered as
+   `:kaocha.plugin/parallel` in tests.edn.
+
+   Two opt-out mechanisms keep parallel runs honest:
+
+   - `^:serial` NS meta — an NS-level opt-out for tests that mutate
+     non-`^:dynamic` symbols via `with-redefs` (jdbc/execute!,
+     ig/halt!, …); their writes are process-global and parallel runs
+     race fatally. They run sequentially BEFORE the parallel set so
+     the parallel slot count bounds wall-clock.
+
+   - `isolation-vars` — a list of `^:dynamic` Vars naming
+     process-global atoms (`types.core/*type-aliases-override*`,
+     …). For each NS-thread we bind these to fresh atoms via
+     `with-bindings`, so test code that mutates the named registry
+     stays thread-local. Mirrors the executor's
+     `registry/*registry-override*` pattern; extend the list when a
+     new global-mutable surface gets used by tests in parallel.
+
+   IMPLEMENTATION GOTCHA: kaocha lazy-loads
+   `kaocha.type.clojure.test` / `kaocha.type.ns` from `testable/run`
+   via `try-load-third-party-lib`. Without an EAGER require at the
+   top of THIS NS, kaocha's own
+   `(defmethod testable/-run :kaocha.type/clojure.test ...)` loads
+   LATER and silently clobbers our defmethod. The `:require` below
+   forces them loaded BEFORE we register."
+  {:clj-kondo/config '{:linters {:unresolved-symbol {:level :off}}}}
+  (:require
+    [clojure.test :as t]
+    [kaocha.plugin :refer [defplugin]]
+    [kaocha.testable :as testable]
+    [kaocha.type.clojure.test]
+    [kaocha.type.ns])
+  (:import
+    (java.util.concurrent
+      Callable
+      ExecutorService
+      Executors
+      TimeUnit)))
+
+
+(defn- ns-serial?
+  [t]
+  (boolean
+    (when-let [id (:kaocha.testable/id t)]
+      ;; kaocha's :kaocha.testable/id is a KEYWORD (e.g. :graphden.foo-test);
+      ;; find-ns wants a symbol. Convert.
+      (let [ns-sym (symbol (name id))]
+        (when-let [n (try (find-ns ns-sym) (catch Exception _ nil))]
+          (:serial (meta n)))))))
+
+
+;; Process-global mutables that test code mutates as if it owned them
+;; (clear, register, replace, …). Under parallel execution each NS
+;; needs its own isolated copy so tests don't trample one another.
+;;
+;; Each entry is the fully-qualified symbol of a `^:dynamic` var
+;; declared in production code; we bind it to a fresh atom per
+;; NS-thread for the duration of that NS's run. We `requiring-resolve`
+;; lazily so the plugin doesn't trigger production-NS load at
+;; plugin-load time (the parallel-suite -run dispatch needs to
+;; complete `try-load-third-party-lib` first).
+(def ^:private isolation-vars
+  '[graphden.types.core/*type-aliases-override*])
+
+
+(defn- resolve-isolation-vars
+  []
+  (into {}
+        (keep (fn [sym]
+                (when-let [v (try (requiring-resolve sym)
+                                  (catch Exception _ nil))]
+                  [v (atom {})])))
+        isolation-vars))
+
+
+(defn- run-one
+  [test test-plan load-error?]
+  (let [test (cond-> test
+               (and load-error? (not (::testable/load-error test)))
+               (assoc ::testable/skip true))]
+    (with-bindings (resolve-isolation-vars)
+      (testable/run-testable test test-plan))))
+
+
+(defn- run-testables-parallel
+  [parallel-tests test-plan n load-error?]
+  (let [pool (Executors/newFixedThreadPool ^int n)]
+    (try
+      (let [futures (mapv (fn [test]
+                            (let [work (bound-fn []
+                                         (run-one test test-plan load-error?))]
+                              (ExecutorService/.submit pool ^Callable work)))
+                          parallel-tests)]
+        (mapv deref futures))
+      (finally
+        (ExecutorService/.shutdown pool)
+        (ExecutorService/.awaitTermination pool 5 TimeUnit/MINUTES)))))
+
+
+(defn- run-children-mixed
+  "Same shape as `testable/run-testables` (vector of result-testables in
+   the input order), but splits children into serial + parallel sets and
+   runs the parallel set on an N-thread pool."
+  [testables test-plan n]
+  (let [load-error? (some ::testable/load-error testables)
+        indexed (map-indexed vector testables)
+        {serial-set true parallel-set false}
+        (group-by (comp ns-serial? second) indexed)
+        serial-results (mapv (fn [[i t]]
+                               [i (run-one t test-plan load-error?)])
+                             serial-set)
+        parallel-tests (mapv second parallel-set)
+        parallel-raw (run-testables-parallel parallel-tests test-plan n load-error?)
+        parallel-results (mapv vector (map first parallel-set) parallel-raw)]
+    (->> (concat serial-results parallel-results)
+         (sort-by first)
+         (mapv second))))
+
+
+(defn- run-suite-maybe-parallel
+  [testable test-plan]
+  (t/do-report {:type :begin-test-suite})
+  (let [;; KAOCHA_PARALLELISM env overrides per-suite config; lets
+        ;; `bb test-sequential` force n=1 without editing tests.edn.
+        env-n (some-> (System/getenv "KAOCHA_PARALLELISM") parse-long)
+        n (or env-n (:kaocha/parallelism testable) 1)
+        children (:kaocha.test-plan/tests testable)
+        results (if (> n 1)
+                  (run-children-mixed children test-plan n)
+                  (testable/run-testables children test-plan))
+        testable (-> testable
+                     (dissoc :kaocha.test-plan/tests)
+                     (assoc :kaocha.result/tests results))]
+    (t/do-report {:type :end-test-suite
+                  :kaocha/testable testable})
+    testable))
+
+
+(clojure.lang.MultiFn/.addMethod
+  testable/-run :kaocha.type/clojure.test run-suite-maybe-parallel)
+
+
+(defplugin kaocha.plugin/parallel)

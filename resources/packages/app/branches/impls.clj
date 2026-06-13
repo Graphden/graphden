@@ -1,67 +1,55 @@
 (ns graphden.packages.app.branches.impls
-  "Impls for app/branches read endpoints. Each `defbase` is a thin
-   shim that parses the URL / query string and delegates to
-   `graphden.crud.branches`."
+  "Impls for `app.branches` endpoints. Only thin §3.1 boundary defbases
+   live here — URL parsing, query-string parsing, predicate guards, and
+   response-envelope wrapping are all graph fn-defs in `fns.edn`."
   (:require
-    [clojure.string :as str]
     [graphden.crud.branches :as branches]
     [graphden.crud.request :as request]
-    [graphden.executor.defbase :refer [defbase]]))
+    [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.merge :as mrg]))
 
 
-(defn- uri-segments
-  "Split `:uri` into non-empty path segments. `/api/branches/foo` →
-   `[\"api\" \"branches\" \"foo\"]`. Used because reitit's path-params
-   aren't always available — handlers compiled inside a fn-graph
-   sometimes receive the raw http-kit request that hasn't been
-   through `enrich-request`. Mirrors `fn_execution.impls`'s
-   `path-id` trick."
-  [request]
-  (->> (-> (:uri request "") (str/split #"/"))
-       (remove str/blank?)
-       vec))
+(defbase resolve-branch-ref
+  "Look up a branch by ref (UUID string or name). Returns the row, or
+   nil when not found / blank ref / non-string ref. Operates on the
+   unwrapped base storage — branch context flows through the URL /
+   query, not the wrapper. Single library boundary (single delegation
+   to `crud.branches/resolve-branch-ref` over `base-storage`); the
+   semantics are graph-visible at every call site via this base-fn."
+  [ref]
+  (cr/record-effect! :db)
+  (branches/resolve-branch-ref (branches/base-storage ctx) ref))
 
 
-(defn- after-segment
-  "Return the segment immediately following `marker` in the URI path,
-   or nil if `marker` is the final / absent segment."
-  [request marker]
-  (let [segs (uri-segments request)
-        idx (.indexOf ^java.util.List segs marker)]
-    (when (and (not (neg? idx)) (< (inc idx) (count segs)))
-      (get segs (inc idx)))))
+;; `:current-branch-id` migrated to `storage/branches/impls.clj` so
+;; packages below `app` (e.g. `web/crud`) can reference the active
+;; branch without taking an `app/branches` dep.
 
 
 ;; =============================================================================
 ;; GET /api/branches
 ;; =============================================================================
 
-(defbase _list-branches-data
-  [_request]
-  ;; `_request` is the single-arg callable's leftover — unused: listing
-  ;; branches needs no request fields. Underscore matches the
-  ;; `_list-services` convention.
-  (branches/list-branches ctx))
+;; `:_list-branches-data` is now a graph fn-def — see fns.edn.
 
 
 ;; =============================================================================
 ;; GET /api/branches/:ref
 ;; =============================================================================
 
-(defbase _get-branch-data
-  [request]
-  (branches/get-branch ctx (after-segment request "branches")))
+;; `:_get-branch-data` is now a graph fn-def — see fns.edn.
 
 
 ;; =============================================================================
 ;; GET /api/fns/:fn-id/versions
 ;; =============================================================================
 
-(defbase _list-fn-versions-data
-  [request]
-  (let [raw (after-segment request "fns")
-        fn-id (request/parse-uuid-or-clear raw)]
-    (branches/list-fn-versions ctx fn-id)))
+;; `:list-fn-versions` is now a graph fn-def — see fns.edn. The
+;; previous defbase shim is fully replaced by a multi-query +
+;; per-row HOF chain composing `:list-entities` / `:group-by` /
+;; `:update-vals` / `:sort-by` / `:select-keys` / `:zipmap`.
 
 
 ;; =============================================================================
@@ -70,51 +58,30 @@
 
 ;; --- C12 atoms: diff-branches variant-2.
 
-(defbase _diff-parsed
-  [request]
-  (let [target (after-segment request "branches")
-        params (request/parse-query-string (:query-string request))]
-    (branches/parse-diff-branches-request target (get params "against"))))
+;; `:_diff-parsed` is now a graph fn-def — see fns.edn.
 
 
-(defbase _diff-target-branch
-  [parsed]
-  (branches/diff-target-branch parsed ctx))
+;; `:_diff-target-branch` / `:_diff-source-branch` are now graph
+;; fn-defs over `:resolve-branch-ref` — see fns.edn.
 
 
-(defbase _diff-source-branch
-  [parsed]
-  (branches/diff-source-branch parsed ctx))
+;; `:_diff-target-missing?` / `:_diff-against-missing?` /
+;; `:_diff-source-missing?` are now graph fn-defs — see fns.edn.
 
 
-(defbase _diff-target-missing?
-  [target-branch]
-  (nil? target-branch))
+(defbase diff-branches
+  "Single library call over `mrg/diff-branches` — symmetric resolved-
+   view diff between two branches' ancestor chains. Returns the raw
+   `{:source-branch-id :target-branch-id :diffs [...]}` shape. The
+   per-row reshape + envelope live in graph (`:_diff-apply-…`)."
+  [source-branch-id target-branch-id]
+  (cr/record-effect! :db)
+  (mrg/diff-branches (branches/base-storage ctx)
+                     source-branch-id
+                     target-branch-id))
 
 
-(defbase _diff-against-missing?
-  [parsed]
-  (nil? (:against-ref parsed)))
-
-
-(defbase _diff-source-missing?
-  [source-branch]
-  (nil? source-branch))
-
-
-(defbase _diff-err-target-missing
-  [parsed]
-  {:ok false :error (str "Target branch not found: " (:target-ref parsed))})
-
-
-(defbase _diff-err-source-missing
-  [parsed]
-  {:ok false :error (str "Source branch not found: " (:against-ref parsed))})
-
-
-(defbase _diff-apply
-  [parsed target-branch source-branch]
-  (branches/apply-diff-branches parsed target-branch source-branch ctx))
+;; `:_diff-apply` is now a graph fn-def — see fns.edn.
 
 
 ;; =============================================================================
@@ -123,49 +90,35 @@
 
 ;; --- C13 atoms: create-branch variant-2.
 
-(defbase _create-branch-parsed
-  [request]
-  (branches/parse-create-branch-request (request/read-json-body request)))
+;; `:_create-branch-parsed` is now a graph fn-def — see fns.edn.
 
 
-(defbase _create-branch-name-blank?
-  [parsed]
-  (or (nil? (:branch-name parsed)) (str/blank? (:branch-name parsed))))
+;; `:_create-branch-name-blank?` is now a graph fn-def — see fns.edn.
 
 
-(defbase _create-branch-name-taken?
-  [parsed]
-  (boolean (branches/create-branch-name-taken? parsed ctx)))
+;; `:_create-branch-name-taken?` is now a graph fn-def — see fns.edn.
 
 
-(defbase _create-branch-resolved-parent
-  [parsed]
-  (branches/create-branch-resolved-parent parsed ctx))
+;; `:_create-branch-resolved-parent` is now a graph fn-def — see fns.edn.
 
 
-(defbase _create-branch-base-missing?
-  [parsed resolved-parent]
-  (and (some? (:base-ref parsed)) (nil? resolved-parent)))
+;; `:_create-branch-base-missing?` is now a graph fn-def — see fns.edn.
 
 
-(defbase _create-branch-err-name-blank
-  [_request]
-  {:ok false :error "Required field ':name' is missing"})
+(defbase create-branch!
+  "Single library call over `vs/create-branch!` — write a new branch
+   row off `:branch-name` + `:base-branch-id` and return the row.
+   Atomic §3.1 boundary; the response-shape building lives in
+   graph (`:_create-branch-apply` → `:as-json-branch` + `:zipmap`
+   envelope), not here."
+  [branch-name base-branch-id]
+  (cr/record-effect! :db)
+  (vs/create-branch! (request/require-storage ctx)
+                     branch-name
+                     {:base-branch-id base-branch-id}))
 
 
-(defbase _create-branch-err-name-taken
-  [parsed]
-  {:ok false :error (str "Branch already exists: " (:branch-name parsed))})
-
-
-(defbase _create-branch-err-base-missing
-  [parsed]
-  {:ok false :error (str "Base branch not found: " (:base-ref parsed))})
-
-
-(defbase _create-branch-apply
-  [parsed resolved-parent]
-  (branches/apply-create-branch parsed resolved-parent ctx))
+;; `:_create-branch-apply` is now a graph fn-def — see fns.edn.
 
 
 ;; =============================================================================
@@ -177,29 +130,28 @@
 ;; surface as exceptions from `vs/delete-branch!` — pre-checking them
 ;; would duplicate underlying constraint logic.
 
-(defbase _delete-branch-parsed
-  [request]
-  (branches/parse-delete-branch-request (after-segment request "branches")))
+;; `:_delete-branch-parsed` is now a graph fn-def — see fns.edn.
 
 
-(defbase _delete-branch-resolved
-  [parsed]
-  (branches/delete-branch-resolved parsed ctx))
+;; `:_delete-branch-resolved` is now a graph fn-def — see fns.edn.
 
 
-(defbase _delete-branch-missing?
-  [resolved]
-  (nil? resolved))
+;; `:_delete-branch-missing?` is now a graph fn-def — see fns.edn.
 
 
-(defbase _delete-branch-err-missing
-  [parsed]
-  {:ok false :error (str "Branch not found: " (:branch-ref parsed))})
+(defbase delete-branch!
+  "Atomic library boundary over `vs/delete-branch!` — removes the
+   branch by id. Throws `ex-info` with
+   `:type :constraint-violation/main-branch-undeletable` or
+   `:type :constraint-violation/branch-has-children` (latter carries
+   a `:child-branch-ids` vec); the graph `:on-throw` handler
+   dispatches on `:type` via `:case`. Returns nil on success."
+  [branch-id]
+  (cr/record-effect! :db)
+  (vs/delete-branch! (request/require-storage ctx) branch-id))
 
 
-(defbase _delete-branch-apply
-  [parsed resolved]
-  (branches/apply-delete-branch parsed resolved ctx))
+;; `:_delete-branch-apply` is now a graph fn-def — see fns.edn.
 
 
 ;; =============================================================================
@@ -208,51 +160,30 @@
 
 ;; --- C15 atoms: preview-conflicts variant-2.
 
-(defbase _conflicts-parsed
-  [request]
-  (let [target (after-segment request "branches")
-        params (request/parse-query-string (:query-string request))]
-    (branches/parse-preview-conflicts-request target (get params "source"))))
+;; `:_conflicts-parsed` is now a graph fn-def — see fns.edn.
 
 
-(defbase _conflicts-target
-  [parsed]
-  (branches/preview-conflicts-target parsed ctx))
+;; `:_conflicts-target` / `:_conflicts-source` are now graph fn-defs
+;; over `:resolve-branch-ref` — see fns.edn.
 
 
-(defbase _conflicts-source
-  [parsed]
-  (branches/preview-conflicts-source parsed ctx))
+;; `:_conflicts-target-missing?` / `:_conflicts-source-not-supplied?` /
+;; `:_conflicts-source-missing?` are now graph fn-defs — see fns.edn.
 
 
-(defbase _conflicts-target-missing?
-  [target]
-  (nil? target))
+(defbase detect-conflicts
+  "Single library call over `mrg/detect-conflicts` — returns
+   `{:conflicts [...] :fork-point <uuid-or-nil>}` for the merge-
+   oriented framing (source → target). The per-row reshape +
+   envelope live in graph (`:_conflicts-apply-…`)."
+  [source-branch-id target-branch-id]
+  (cr/record-effect! :db)
+  (mrg/detect-conflicts (branches/base-storage ctx)
+                        source-branch-id
+                        target-branch-id))
 
 
-(defbase _conflicts-source-not-supplied?
-  [parsed]
-  (nil? (:source-ref parsed)))
-
-
-(defbase _conflicts-source-missing?
-  [source]
-  (nil? source))
-
-
-(defbase _conflicts-err-target-missing
-  [parsed]
-  {:ok false :error (str "Target branch not found: " (:target-ref parsed))})
-
-
-(defbase _conflicts-err-source-missing
-  [parsed]
-  {:ok false :error (str "Source branch not found: " (:source-ref parsed))})
-
-
-(defbase _conflicts-apply
-  [target source]
-  (branches/apply-preview-conflicts target source ctx))
+;; `:_conflicts-apply` is now a graph fn-def — see fns.edn.
 
 
 ;; =============================================================================
@@ -261,101 +192,44 @@
 
 ;; --- C16 atoms: merge-branch variant-2.
 
-(defbase _merge-parsed
-  [request]
-  (branches/parse-merge-branch-request
-    (after-segment request "branches")
-    (request/read-json-body request)))
+;; `:_merge-parsed` is now a graph fn-def — see fns.edn.
 
 
-(defbase _merge-target
-  [parsed]
-  (branches/merge-target-branch parsed ctx))
+;; `:_merge-target` / `:_merge-source` are now graph fn-defs over
+;; `:resolve-branch-ref` — see fns.edn.
 
 
-(defbase _merge-source
-  [parsed]
-  (branches/merge-source-branch parsed ctx))
+;; `:_merge-target-missing?` / `:_merge-source-not-supplied?` /
+;; `:_merge-source-missing?` / `:_merge-same?` are now graph fn-defs —
+;; see fns.edn.
 
 
-(defbase _merge-target-missing?
-  [target]
-  (nil? target))
+(defbase merge-branch!
+  "Atomic library boundary over `vs/switch-branch` + `vs/merge-branch!` —
+   switches to the target branch, then folds source's history in.
+   Returns the merge record on success. Throws `ex-info` on
+   `:merge-conflict` (which the graph `:on-throw` handler dispatches
+   on via `:ex-data → :type`). The switch + merge are intrinsically
+   coupled — splitting them would break the atomic semantics, so the
+   single base-fn is the natural §3.1 unit."
+  [source-branch-id target-branch-id resolutions]
+  (cr/record-effect! :db)
+  (let [storage (vs/switch-branch (request/require-storage ctx) target-branch-id)]
+    (vs/merge-branch! storage source-branch-id
+                      {:conflict-resolutions resolutions})))
 
 
-(defbase _merge-source-not-supplied?
-  [parsed]
-  (nil? (:source-ref parsed)))
-
-
-(defbase _merge-source-missing?
-  [source]
-  (nil? source))
-
-
-(defbase _merge-same?
-  [target source]
-  (and (some? target) (some? source) (= (:id source) (:id target))))
-
-
-(defbase _merge-err-target-missing
-  [parsed]
-  {:ok false :error (str "Target branch not found: " (:target-ref parsed))})
-
-
-(defbase _merge-err-source-missing
-  [parsed]
-  {:ok false :error (str "Source branch not found: " (:source-ref parsed))})
-
-
-(defbase _merge-apply
-  [parsed target source]
-  (branches/apply-merge-branch target source (:resolutions parsed) ctx))
+;; `:_merge-apply` is now a graph fn-def — see fns.edn. The `:try` body
+;; calls `:merge-branch!`; the `:on-throw` handler dispatches on
+;; `(:type (ex-data e))` via `:case` to produce either a
+;; `:merge-conflict` envelope (with reshaped `:conflicts` rows) or a
+;; generic `{:ok false :error}`.
 
 
 (def impls
-  {:_list-branches-data     _list-branches-data
-   :_get-branch-data        _get-branch-data
-   :_list-fn-versions-data  _list-fn-versions-data
-   :_diff-parsed            _diff-parsed
-   :_diff-target-branch     _diff-target-branch
-   :_diff-source-branch     _diff-source-branch
-   :_diff-target-missing?   _diff-target-missing?
-   :_diff-against-missing?  _diff-against-missing?
-   :_diff-source-missing?   _diff-source-missing?
-   :_diff-err-target-missing _diff-err-target-missing
-   :_diff-err-source-missing _diff-err-source-missing
-   :_diff-apply             _diff-apply
-   :_create-branch-parsed   _create-branch-parsed
-   :_create-branch-name-blank? _create-branch-name-blank?
-   :_create-branch-name-taken? _create-branch-name-taken?
-   :_create-branch-resolved-parent _create-branch-resolved-parent
-   :_create-branch-base-missing? _create-branch-base-missing?
-   :_create-branch-err-name-blank _create-branch-err-name-blank
-   :_create-branch-err-name-taken _create-branch-err-name-taken
-   :_create-branch-err-base-missing _create-branch-err-base-missing
-   :_create-branch-apply    _create-branch-apply
-   :_delete-branch-parsed   _delete-branch-parsed
-   :_delete-branch-resolved _delete-branch-resolved
-   :_delete-branch-missing? _delete-branch-missing?
-   :_delete-branch-err-missing _delete-branch-err-missing
-   :_delete-branch-apply    _delete-branch-apply
-   :_conflicts-parsed       _conflicts-parsed
-   :_conflicts-target       _conflicts-target
-   :_conflicts-source       _conflicts-source
-   :_conflicts-target-missing? _conflicts-target-missing?
-   :_conflicts-source-not-supplied? _conflicts-source-not-supplied?
-   :_conflicts-source-missing? _conflicts-source-missing?
-   :_conflicts-err-target-missing _conflicts-err-target-missing
-   :_conflicts-err-source-missing _conflicts-err-source-missing
-   :_conflicts-apply        _conflicts-apply
-   :_merge-parsed           _merge-parsed
-   :_merge-target           _merge-target
-   :_merge-source           _merge-source
-   :_merge-target-missing?  _merge-target-missing?
-   :_merge-source-not-supplied? _merge-source-not-supplied?
-   :_merge-source-missing?  _merge-source-missing?
-   :_merge-same?            _merge-same?
-   :_merge-err-target-missing _merge-err-target-missing
-   :_merge-err-source-missing _merge-err-source-missing
-   :_merge-apply            _merge-apply})
+  {:resolve-branch-ref      resolve-branch-ref
+   :diff-branches           diff-branches
+   :create-branch!          create-branch!
+   :delete-branch!          delete-branch!
+   :detect-conflicts        detect-conflicts
+   :merge-branch!           merge-branch!})

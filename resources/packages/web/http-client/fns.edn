@@ -31,32 +31,33 @@
    :effects #{:network}}
 
   ;; ---------------------------------------------------------------------
-  ;; :http-get-with-bearer — secret-aware variant of :http-get.
+  ;; :http-get-with-authorization — generalised auth-aware HTTP GET.
   ;;
-  ;; Why a dedicated base-fn instead of letting the user wire the
-  ;; Authorization header themselves? Because the user-side flow
-  ;; would be:
-  ;;   _auth-header parent :str-concat args [["Bearer " <secret>]]
-  ;;     → return [:secret :text]    (propagator taints the result)
-  ;;   _my-call parent :http-get args {:headers {"Authorization" <ref>}}
-  ;;     → REJECTED at type-check    (headers slot refuses :secret value)
+  ;; The secret-flow problem: plain `:http-get`'s `:headers` slot is
+  ;; `[:map :text :text]`, which deliberately refuses secret-typed
+  ;; values. That closes the leak path (a literal map can't sneak a
+  ;; secret through a generic shape) but also blocks the legitimate
+  ;; "wire a vault token into the Authorization header" use case.
   ;;
-  ;; Plain :http-get's `:headers` slot deliberately refuses secrets
-  ;; (so a literal map with a secret value can't compose-leak), which
-  ;; closes the leak path AND blocks the legitimate auth use case.
-  ;; This fn provides the legitimate path: token is `[:secret :text]`,
-  ;; the impl embeds it in the Authorization header internally so the
-  ;; secret never crosses a generic :map slot. Extra headers can still
-  ;; be supplied as plain text.
+  ;; The fix is one base-fn whose `:auth-value` slot is `[:secret
+  ;; :text]` — accepts a secret structurally, injects it into the
+  ;; request headers internally so the secret never crosses a generic
+  ;; `:map` slot. The user can build the auth-value with full graph
+  ;; composability (different schemes, custom prefixes, multi-secret
+  ;; compositions), because `:str` propagates `[:secret :text]` taint.
+  ;;
+  ;; Scheme-specific variants (`:http-get-with-bearer` below,
+  ;; `:http-get-with-token`, `:http-get-with-basic`, …) are pure graph
+  ;; fn-defs parent-ing this primitive. No JAR rebuild for a new
+  ;; scheme — just a new fn-def.
   ;; ---------------------------------------------------------------------
-  {:name :http-get-with-bearer
-   :description "Variant of `:http-get` that takes a secret-typed `:token` and embeds it as `Authorization: Bearer <token>` internally. Use this whenever the bearer token comes from `:vault-get` (or any secret-propagating composition). Extra headers are merged on top. Same return shape, same 10s timeout, same `:network` effect as `:http-get`."
-   :args {:url {:type :text
-                :description "Absolute URL."}
-          :token {:type [:secret :text]
-                  :description "Bearer token. Slot is `[:secret :text]` — accepts a `:vault-get` ref, a plain literal (auto-promoted), or any propagated text. The token never crosses a non-secret-aware slot; the impl injects it directly into the request headers."}
+  {:name :http-get-with-authorization
+   :description "Variant of `:http-get` that takes a secret-typed `:auth-value` (the full `Authorization` header value, e.g. `\"Bearer xxx\"`) and injects it directly into the request headers. The slot's `[:secret :text]` shape IS the secret-flow boundary — secret values never cross a generic `[:map :text :text]` slot."
+   :args {:url {:type :text :description "Absolute URL."}
+          :auth-value {:type [:secret :text]
+                       :description "Full Authorization header value — scheme keyword (`Bearer`/`Token`/`Basic`/…) included. Slot is `[:secret :text]`, so a secret-typed value (`:vault-get` ref, any `:str`-composed secret) is accepted structurally."}
           :extra-headers {:type [:map :text :text]
                           :value {}
-                          :description "Additional headers merged on top of the auth header. Must be plain text only — secrets here would leak through the generic `:map` shape."}}
+                          :description "Additional headers merged BEFORE the Authorization header (auth always wins on key collision). Plain text only — secrets here would leak through the generic `:map` shape."}}
    :return-type :http-response-shape
    :effects #{:network}}]}

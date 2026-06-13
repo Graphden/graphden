@@ -11,7 +11,6 @@
    namespace only carries library call-sites and the middleware
    factory."
   (:require
-    [clojure.walk :as walk]
     [graphden.executor.defbase :refer [defbase]]
     [reitit.ring :as ring]))
 
@@ -19,30 +18,14 @@
 ;; === Reitit library wrappers ====================================================
 
 (defbase ring-router-fn
-  "Compile routes into a reitit router. Consumes reitit-shaped route
-   data — a vector whose entries are either leaves `[path method-data]`
-   or prefix groups `[prefix child …]` (which reitit expands into full
-   paths by walking the tree). Multi-method paths are merged at the
-   graph level so reitit's natural conflict detection handles the rest.
-
-   Adapter-boundary coercion (one deep-walk, here): graph `:list` /
-   `:seq` bindings are unchunked lazy-seqs, but reitit needs vector
-   route data — so every sequence is `vec`'d. And routes can carry
-   string keys (literal `:assoc` bindings produce strings; JSONB
-   literals come back keywords) while reitit needs keyword keys
-   (`:get`, `:handler`, `:middleware`) — so string map-keys are
-   keywordized. The fn-graph stays representation-agnostic; the
-   external library's exact shape requirement is met at this one
-   adapter."
+  "Bare `(reitit.ring/router routes)`. The caller is expected to hand
+   in reitit-shaped data (vectors + keyword keys). Graph-side coercion
+   (vec'ing lazy `:seq` bindings, keywordizing string map-keys) is now
+   a separate fn-def `:_router-coerced-routes` in fns.edn — sites that
+   compose routes via graph primitives route their data through that
+   coercer before binding it here."
   [routes]
-  (ring/router
-    (walk/postwalk
-      (fn [x]
-        (cond
-          (map? x) (update-keys x #(cond-> % (string? %) keyword))
-          (seq? x) (vec x)
-          :else    x))
-      routes)))
+  (ring/router routes))
 
 
 (defbase ring-create-default-handler-fn

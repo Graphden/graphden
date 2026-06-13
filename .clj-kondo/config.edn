@@ -11,6 +11,13 @@
                  graphden.executor.defbase/defbase hooks.defbase/defbase
                  graphden.executor.test-setup/fn-impl hooks.fn-impl/fn-impl}}
 
+ ;; resources/packages/<pkg>/<module>/impls.clj files are loaded via
+ ;; `load-file`, not via classpath. Their `(ns …)` deliberately
+ ;; mismatches the on-disk path — namespace-name-mismatch is turned
+ ;; off globally below (it can't be ns-scoped because it's reported
+ ;; before ns-config applies). shadowed-var is also off globally —
+ ;; see its entry in :linters for the rationale.
+
  :linters
  {;; Critical - these indicate real bugs or dead code
   :unused-binding {:level :error}
@@ -18,7 +25,14 @@
   :unused-namespace {:level :error}
   :unused-private-var {:level :error}
   :unused-referred-var {:level :error}
-  :shadowed-var {:level :error}
+  ;; shadowed-var: off globally. defbase declares args like `map`,
+  ;; `count`, `key`, `name`, `keyword`, `test` etc. — public names of
+  ;; the user-visible base-fns. The kondo hook expands them into
+  ;; `:keys [...]` destructures so they shadow clojure.core. ns-scoped
+  ;; suppression (config-in-ns / ns-groups) doesn't reach the hook
+  ;; expansion. src/test currently lint clean for shadowed-var, so
+  ;; the linter provides no current value vs. ongoing false-positives.
+  :shadowed-var {:level :off}
   :inline-def {:level :error}
 
   ;; Code quality
@@ -45,7 +59,12 @@
   :missing-docstring {:level :off}
 
   ;; Consistent naming
-  :non-arg-vec-return-type-hint {:level :warning}}
+  :non-arg-vec-return-type-hint {:level :warning}
+
+  ;; See top-of-file comment — turned off for package impls.clj
+  ;; deliberately. Re-enable if/when those move to a real classpath
+  ;; root.
+  :namespace-name-mismatch {:level :off}}
 
  :output
  {:progress true

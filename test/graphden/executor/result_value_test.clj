@@ -144,18 +144,26 @@
 ;; === with-clean-registry Tests ===
 
 (deftest with-clean-registry-test
-  (testing "clears registry before and after"
-    (exec/register-base-fn! :before-clean (fn [_ _] 1))
-    (is (some? (exec/get-base-fn :before-clean)))
+  ;; This NS already wires `with-clean-registry` as a `:each` fixture
+  ;; (line 39), so each test body runs INSIDE a thread-local override.
+  ;; The assertions below verify the new dynamic-binding semantics:
+  ;; a nested `with-clean-registry` opens a fresh inner scope that
+  ;; doesn't leak writes to the surrounding scope.
+  (testing "nested with-clean-registry opens a fresh inner override"
+    ;; Register in the OUTER (:each-fixture) scope.
+    (exec/register-base-fn! :outer-stub (fn [_ _] :outer))
+    (is (some? (exec/get-base-fn :outer-stub)))
 
+    ;; Inner scope — outer-stub is invisible (different atom), and
+    ;; inner stubs don't leak back out.
     (exec/with-clean-registry
       (fn []
-        ;; Should be cleared
-        (is (nil? (exec/get-base-fn :before-clean)))
-        ;; Register during test
-        (exec/register-base-fn! :during-clean (fn [_ _] 2))
-        (is (some? (exec/get-base-fn :during-clean)))))
+        (is (nil? (exec/get-base-fn :outer-stub))
+            "inner override doesn't inherit the outer override's writes")
+        (exec/register-base-fn! :inner-stub (fn [_ _] :inner))
+        (is (some? (exec/get-base-fn :inner-stub)))))
 
-    ;; After cleanup, both should be gone
-    (is (nil? (exec/get-base-fn :before-clean)))
-    (is (nil? (exec/get-base-fn :during-clean)))))
+    ;; Back in the outer scope: outer-stub still there, inner-stub
+    ;; cleaned up automatically.
+    (is (some? (exec/get-base-fn :outer-stub)))
+    (is (nil? (exec/get-base-fn :inner-stub)))))

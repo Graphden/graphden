@@ -22,6 +22,16 @@
 ;; index. Built alongside `:compiled-registry` by `compile-runtime/rebuild!`,
 ;; consumed by the delta-invalidation path so a single-fn mutation doesn't
 ;; force re-compilation of the whole registry. Nil when registry is cold.
+;;
+;; Extra (off-record) atom assoc'd by `create-context`:
+;;
+;; - `:invalidation-lock` — plain `Object` instance. Held by
+;;   `invalidate-graph-cache!` and `compile-runtime/rebuild!` to
+;;   serialize the read-graph → compute → prime-multi-atom sequence,
+;;   so two concurrent writers can't interleave a stale storage
+;;   snapshot's prime over a newer one. The `swap!` on
+;;   `:compiled-registry` is still defensive for direct delta-
+;;   recompile callers that bypass invalidate-graph-cache!.
 
 
 (defn invalidate-graph-cache!
@@ -51,34 +61,42 @@
    context ← compile-runtime ← context."
   ([ctx] (invalidate-graph-cache! ctx nil))
   ([ctx changed-fn-ids]
-   (when-let [c (:graph-cache ctx)]
-     (reset! c nil))
-   (cond
-     ;; Storage isn't wired (stripped test ctx) — nothing to refresh.
-     (or (nil? (:storage ctx))
-         (nil? (:compiled-registry ctx)))
-     (when-let [c (:compiled-registry ctx)]
-       (reset! c nil))
+   ;; Serialize the whole invalidation body on the per-context lock —
+   ;; both branches (full clear / delta recompile) write to a cluster
+   ;; of related atoms in sequence, and two concurrent callers that
+   ;; interleaved their writes could leave the caches reflecting an
+   ;; older storage snapshot than what's already committed. Test ctx
+   ;; without the lock falls through with no synchronization (no
+   ;; concurrency to worry about anyway).
+   (let [body (fn []
+                (when-let [c (:graph-cache ctx)]
+                  (reset! c nil))
+                (cond
+                  ;; Storage isn't wired (stripped test ctx) — nothing
+                  ;; to refresh.
+                  (or (nil? (:storage ctx))
+                      (nil? (:compiled-registry ctx)))
+                  (when-let [c (:compiled-registry ctx)]
+                    (reset! c nil))
 
-     ;; Delta path — caller named the changed fns AND we have a
-     ;; reverse-deps index from a prior compile.
-     (and (seq changed-fn-ids)
-          (some-> (:compile-deps ctx) deref some?)
-          (some-> (:compiled-registry ctx) deref some?))
-     (when-let [recompile (requiring-resolve
-                            'graphden.executor.compile-runtime/delta-recompile!)]
-       (recompile ctx changed-fn-ids))
+                  ;; Delta path — caller named the changed fns AND we
+                  ;; have a reverse-deps index from a prior compile.
+                  (and (seq changed-fn-ids)
+                       (some-> (:compile-deps ctx) deref some?)
+                       (some-> (:compiled-registry ctx) deref some?))
+                  (when-let [recompile (requiring-resolve
+                                         'graphden.executor.compile-runtime/delta-recompile!)]
+                    (recompile ctx changed-fn-ids))
 
-     :else
-     (do
-       (reset! (:compiled-registry ctx) nil)
-       ;; Templates are also derived from storage; drop them so the
-       ;; next rebuild doesn't reuse stale ctx-takers built off the
-       ;; pre-invalidation graph.
-       (when-let [t (:compiled-templates ctx)] (reset! t nil))
-       (when-let [refresh (requiring-resolve
-                            'graphden.executor.compile-runtime/refresh-type-registries-from-storage!)]
-         (refresh ctx))))))
+                  :else
+                  (do
+                    (reset! (:compiled-registry ctx) nil)
+                    (when-let [refresh (requiring-resolve
+                                         'graphden.executor.compile-runtime/refresh-type-registries-from-storage!)]
+                      (refresh ctx)))))]
+     (if-let [lock (:invalidation-lock ctx)]
+       (locking lock (body))
+       (body)))))
 
 
 (defn cached-graph
@@ -134,14 +152,13 @@
                           (atom nil)
                           (atom nil)
                           (atom nil))
-      ;; `:compiled-templates` is an extra-key atom (not a positional
-      ;; field) so we don't bump every `->ExecutionContext` callsite.
-      ;; Holds the ctx-INDEPENDENT `{fn-id → ctx-taker}` templates
-      ;; alongside the ctx-specific `:compiled-registry`. Sibling
-      ;; branches with identical graph views skip the heavy compile
-      ;; by reusing this atom via
-      ;; `compile-runtime/instantiate-from-templates!`.
-      (assoc :compiled-templates (atom nil))))
+      ;; Per-context lock for serializing the read-graph → compute →
+      ;; prime-multi-atom sequence in `invalidate-graph-cache!` /
+      ;; `compile-runtime/rebuild!`. Without it, concurrent CRUD
+      ;; requests can prime `:graph-cache` / `:compile-deps` from
+      ;; out-of-order storage snapshots and leave the caches
+      ;; reflecting an older view than what storage already holds.
+      (assoc :invalidation-lock (Object.))))
 
 
 (defn current-time-ms

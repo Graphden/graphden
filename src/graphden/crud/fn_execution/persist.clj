@@ -16,6 +16,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.set]
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.request :as request]
@@ -76,11 +77,16 @@
 
 (defn jsonize-result
   "Serialize result to test size cap. Returns `[ok? value-or-nil]` —
-   `[true result]` when within cap, `[false nil]` when oversize."
+   `[true result]` when within cap, `[false nil]` when oversize OR
+   when the value can't be JSON-encoded at all (treating unsersializable
+   results the same as oversize: storage layer would fail downstream
+   anyway, better to refuse here with a clean signal)."
   [result]
   (let [json-str (try (json/generate-string result)
-                      (catch Exception _ ""))]
-    (if (<= (count json-str) max-result-bytes)
+                      (catch Exception e
+                        (log/warn e "Result JSON-encode failed — treating as oversize")
+                        nil))]
+    (if (and json-str (<= (count json-str) max-result-bytes))
       [true result]
       [false nil])))
 
@@ -88,7 +94,11 @@
 (defn jsonize-error-data
   [data]
   (let [json-str (try (json/generate-string data)
-                      (catch Exception _ "null"))]
+                      (catch Exception e
+                        (log/warn e "Error-data JSON-encode failed — truncating to :type")
+                        ;; Fall through to the truncated path below by
+                        ;; returning a string longer than the cap.
+                        (str/join (repeat (inc max-error-data-bytes) \X))))]
     (if (<= (count json-str) max-error-data-bytes)
       data
       ;; Best-effort: try to keep just the :type key (canonical
@@ -257,7 +267,7 @@
 
 
 (defn stamp-touched-secret
-  "Followup-3 audit trail: set `:touched-secret? true` on `outcome`
+  "Audit trail: set `:touched-secret? true` on `outcome`
    when (a) the fn-def's rich-type touches a `:secret` AND (b) the
    runtime observed at least one side-effect. Both halves matter:
    a pure tainted-aware run isn't an audit event; a runtime-side-

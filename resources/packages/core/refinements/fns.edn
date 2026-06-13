@@ -85,40 +85,69 @@
   {:name :validation    :variant [:valid :any :invalid :text]}
 
   ;; ---------------------------------------------------------------------
-  ;; Runtime narrowing impls — paired with a refinement above.
+  ;; Runtime narrowing — generic template + per-refinement specialisations.
+  ;;
+  ;; Each `:ensure-*` is now a fn-def composing the shared
+  ;; `:_refinement-narrow` template with its own `:test`, `:refine-name`,
+  ;; and `:constraint`. Admins can declare a new `:ensure-X` for any
+  ;; user-defined refinement by `:parent`-ing `:_refinement-narrow` and
+  ;; supplying the three binding args. The `:refinement/violated`
+  ;; ex-info shape stays identical to what the previous defbase impls
+  ;; threw, so callers and tests see no behavioural change.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_refinement-violation-message
+   :description "Human-readable violation message — `\"Refinement :foo violated: 42 doesn't satisfy [:> 100]\"`. Free args: `:refine-name`, `:value`, `:constraint`."
+   :parent :str
+   :args {:parts ["Refinement "
+                  {:parent :pr-str :args {:value {:as :refine-name}}}
+                  " violated: "
+                  {:parent :pr-str :args {:value {:as :value}}}
+                  " doesn't satisfy "
+                  {:parent :pr-str :args {:value {:as :constraint}}}]}}
+
+  {:name :_refinement-violation-data
+   :description "`:ex-data` payload — `{:type :refinement/violated :refine-name … :constraint … :value …}`. Same shape the previous `violated!` helper built."
+   :parent :zipmap
+   :args {:keys [{:value :type} {:value :refine-name} {:value :constraint} {:value :value}]
+          :vals [{:value :refinement/violated}
+                 {:as :refine-name}
+                 {:as :constraint}
+                 {:as :value}]}}
+
+  {:name :_refinement-violation-ex
+   :description "Construct the `ExceptionInfo` from message + data so `:throw` can raise it."
+   :parent :ex-info
+   :args {:message :_refinement-violation-message
+          :data :_refinement-violation-data}}
+
+  {:name :_refinement-narrow
+   :description "Generic refinement narrower — if `:test` is truthy, return `:value`; otherwise throw the standard `:refinement/violated` ex-info naming `:refine-name` and the original `:constraint` shape. Lazy via `:if` (test passes → no `:ex-info` build, no `:throw`). Admins create a new narrower by `:parent`-ing this fn-def and binding `:test` + `:refine-name` + `:constraint`."
+   :parent :if
+   :args {:test {:as :test}
+          :then {:as :value}
+          :else {:parent :throw :args {:exception :_refinement-violation-ex}}}}
+
+  ;; ---------------------------------------------------------------------
+  ;; The seven shipped narrowers, written via the template.
   ;; ---------------------------------------------------------------------
 
   {:name :ensure-positive-int
-   :description "Validate that `:value` is `> 0`; return it as `:positive-int`. Throws `refinement/violated` otherwise."
-   :args {:value {:type :int :description "Integer to validate."}}
-   :return-type :positive-int}
-
-  {:name :ensure-non-negative-int
-   :description "Validate that `:value` is `>= 0`; return it as `:non-negative-int`. Throws `refinement/violated` otherwise."
-   :args {:value {:type :int :description "Integer to validate."}}
-   :return-type :non-negative-int}
-
-  {:name :ensure-negative-int
-   :description "Validate that `:value` is `< 0`; return it as `:negative-int`. Throws `refinement/violated` otherwise."
-   :args {:value {:type :int :description "Integer to validate."}}
-   :return-type :negative-int}
+   :description "Validate that `:value` is an `:int` and `> 0`; return as `:positive-int`. Throws `refinement/violated` otherwise."
+   :parent :_refinement-narrow
+   :return-type :positive-int
+   :args {:test {:parent :and
+                 :args {:values [{:parent :is-a? :args {:type {:value :int} :value {:as :value}}}
+                                 {:parent :gt :args {:nums [{:as :value} 0]}}]}}
+          :refine-name {:value :positive-int}
+          :constraint [:> 0]}}
 
   {:name :ensure-non-empty-text
-   :description "Validate that `:value` is a non-empty string; return it as `:non-empty-text`. Throws `refinement/violated` otherwise."
-   :args {:value {:type :text :description "Text to validate."}}
-   :return-type :non-empty-text}
-
-  {:name :ensure-non-blank-text
-   :description "Validate that `:value` contains at least one non-whitespace character; return it as `:non-blank-text`. Throws `refinement/violated` otherwise."
-   :args {:value {:type :text :description "Text to validate."}}
-   :return-type :non-blank-text}
-
-  {:name :ensure-url
-   :description "Validate that `:value` starts with `http://` or `https://`; return it as `:url`. Throws `refinement/violated` otherwise."
-   :args {:value {:type :text :description "URL to validate."}}
-   :return-type :url}
-
-  {:name :ensure-positive-numeric
-   :description "Validate that `:value` is `> 0`; return it as `:positive-numeric`. Throws `refinement/violated` otherwise."
-   :args {:value {:type :numeric :description "Number to validate."}}
-   :return-type :positive-numeric}]}
+   :description "Validate that `:value` is a non-empty `:text`; return as `:non-empty-text`. Throws `refinement/violated` otherwise."
+   :parent :_refinement-narrow
+   :return-type :non-empty-text
+   :args {:test {:parent :and
+                 :args {:values [{:parent :is-a? :args {:type {:value :text} :value {:as :value}}}
+                                 {:parent :neq :args {:values [{:as :value} {:value ""}]}}]}}
+          :refine-name {:value :non-empty-text}
+          :constraint [:not= ""]}}]}

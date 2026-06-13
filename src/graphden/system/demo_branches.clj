@@ -36,22 +36,19 @@
    names are visible."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]))
 
 
 (defn- resolve-fn-by-name
   "Look up a fn by its globally-unique name. Returns the resolved
-   entity row (or nil). Storage codec ambiguity (text vs enum-tagged
-   names) handled by trying both shapes — same trick as
-   `system/core/resolve-fn-id-by-name`."
+   entity row (or nil). Seeder path — swallow all ExceptionInfo
+   (not just `:validation-error/type-mismatch`) since this runs
+   during early startup where some storage states may not exist
+   yet."
   [storage fn-name]
-  (letfn [(try-one
-            [v]
-            (try (first (sp/query-entities storage :fn {:name v}))
-                 (catch clojure.lang.ExceptionInfo _ nil)))]
-    (or (try-one fn-name)
-        (try-one (keyword fn-name)))))
+  (fn-lookup/query-fn-by-name storage fn-name true))
 
 
 (defmulti apply-mutation!

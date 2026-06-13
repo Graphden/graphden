@@ -1,4 +1,4 @@
-(ns graphden.system.interface-test
+(ns ^:serial graphden.system.interface-test
   "Tests for system/interface.clj public API.
 
    Tests configuration loading and lifecycle functions.

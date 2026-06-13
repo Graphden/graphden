@@ -29,7 +29,7 @@
    :description "GET /metrics — JVM info (heap, threads, uptime) as JSON."
    :parent :get-route
    :args {:path "/metrics" :handler :_metrics-handler}
-   :expects-effects #{:io}}                   ; reads JVM state (heap / threads / os)
+   :expects-effects #{:io :env}}              ; reads JVM state (heap / threads / os) + env (hostname / user)
 
   {:name :version
    :description "GET /version — `{\"build-hash\": \"<hex>\"}`. Hash is SHA-256 of every source file at build time; compare with `bb verify` to confirm a deploy actually shipped your changes."
@@ -394,11 +394,6 @@
    :parent :put
    :args {:path "/secrets/:fn-id/value" :handler :rotate-secret-handler}}
 
-  {:name :api-secret-migrate
-   :description "POST /api/secrets/:fn-id/migrate — convert legacy :vault-get-shaped secret to :secret-leaf shape. Vault path/value preserved. Auth-required."
-   :parent :post
-   :args {:path "/secrets/:fn-id/migrate" :handler :migrate-secret-handler}}
-
   ;; --- /api top group (combines all /api/* sub-groups + the standalone leaves) ---
 
   {:name :api-routes
@@ -428,5 +423,4 @@
                   :api-secret-inline-binding
                   :api-secret-delete
                   :api-secret-rotate-value
-                  :api-secret-migrate
                   :auth-check]}}]}

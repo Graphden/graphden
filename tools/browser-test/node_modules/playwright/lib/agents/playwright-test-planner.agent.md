@@ -15,9 +15,10 @@ tools:
   - playwright-test/browser_hover
   - playwright-test/browser_navigate
   - playwright-test/browser_navigate_back
+  - playwright-test/browser_network_request
   - playwright-test/browser_network_requests
   - playwright-test/browser_press_key
-  - playwright-test/browser_run_code
+  - playwright-test/browser_run_code_unsafe
   - playwright-test/browser_select_option
   - playwright-test/browser_snapshot
   - playwright-test/browser_take_screenshot

@@ -37,12 +37,18 @@
 
    Arguments:
    - profile: (optional) :dev, :test, or :prod (default: :prod)
+   - overrides: (optional) integrant config overrides — merged per
+     top-level key into the loaded profile. Use this in tests to
+     inject DB credentials etc. without `with-redefs` on the
+     `sys/read-config` var.
 
    Returns the running system map."
   ([]
    (core/start!))
   ([profile]
-   (core/start! profile)))
+   (core/start! profile))
+  ([profile overrides]
+   (core/start! profile overrides)))
 
 
 (defn stop!
@@ -55,8 +61,11 @@
   "Restarts the executor runtime system.
 
    Arguments:
-   - profile: (optional) :dev, :test, or :prod (default: :prod)"
+   - profile: (optional) :dev, :test, or :prod (default: :prod)
+   - overrides: (optional) see `start!`."
   ([]
    (core/restart!))
   ([profile]
-   (core/restart! profile)))
+   (core/restart! profile))
+  ([profile overrides]
+   (core/restart! profile overrides)))

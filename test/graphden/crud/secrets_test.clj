@@ -81,28 +81,26 @@
       (assoc :vault {:address "http://fake-vault" :token "fake"})))
 
 
-(defn- seed-vault-get!
-  "Seed BOTH secret base-fns (`vault-get` legacy + `secret-leaf`
-   Followup-4) so `crud.secrets/create-secret` finds an owner for
-   `parent-ids` AND `validation/secret-path-rej` finds a slot whose
-   rich-type carries the `:secret` marker (without the marker the
-   F-4 binding fails validation). Returns
-   `{:vault-get :path-slot :secret-leaf :secret-leaf-slot}` so test
-   bodies can refer to either shape."
+(defn- seed-secret-leaf!
+  "Seed the `:secret-leaf` base-fn (the only admin secret shape) so
+   `crud.secrets/create-secret` finds an owner for `parent-ids` AND
+   `validation/secret-path-rej` finds a slot whose rich-type carries
+   the `:secret` marker. Returns `{:secret-leaf :secret-leaf-slot}`."
   [storage]
-  (let [vg (setup/create-base-fn! storage "vault-get" :text)
-        ps (setup/create-slot! storage "path" :text)
-        sl (setup/create-base-fn! storage "secret-leaf" :text)
+  (let [sl (setup/create-base-fn! storage "secret-leaf" :text)
         sl-slot (setup/create-slot! storage "in" :text)]
-    (setup/attach-slot! storage (:id vg) (:id ps) 0)
     (setup/attach-slot! storage (:id sl) (:id sl-slot) 0)
-    ;; Register the marker so the validation gate sees `[:secret :text]`.
+    ;; Register the marker so the validation gate sees `[:secret :text]`
+    ;; AND the `:secret-shape` / `:admin-only-vault` tags so
+    ;; `shape/find-secret-leaf-fn-id` + `find-admin-only-vault-base-fn-ids`
+    ;; resolve to this seeded row (production gets the same tags from
+    ;; `web/vault/fns.edn`).
     (registry/record-rich-types! :secret-leaf
                                  {:args {:in {:type [:secret :text]}}
                                   :return-type [:secret :text]
-                                  :effects #{:io}})
-    {:vault-get vg :path-slot ps
-     :secret-leaf sl :secret-leaf-slot sl-slot}))
+                                  :effects #{:io}
+                                  :tags #{:secret-shape :admin-only-vault}})
+    {:secret-leaf sl :secret-leaf-slot sl-slot}))
 
 
 ;; ============================================================================
@@ -113,7 +111,7 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault (fresh-vault)
         (testing "no secret-shaped fn-defs → empty list"
           (let [{:keys [ok secrets]} (secrets/list-secrets c)]
@@ -127,7 +125,7 @@
         c (test-ctx storage)
         vault-state (fresh-vault)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault vault-state
         (let [{:keys [ok secret]} (secrets/create-secret
                                     c {:name "_db-password"
@@ -157,16 +155,16 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
-      (let [{:keys [vault-get]} (seed-vault-get! storage)
+      (let [{:keys [secret-leaf]} (seed-secret-leaf! storage)
             other (setup/create-base-fn! storage "other-base" :text)]
-        ;; Hand-craft a fn-row with TWO parents (vault-get + something
+        ;; Hand-craft a fn-row with TWO parents (secret-leaf + something
         ;; else) — it's not an admin-managed secret, must not appear
         ;; in the list.
         (sp/create-entity storage :fn
                           {:name "mi-child"
-                           :parent-ids [(:id vault-get) (:id other)]})
+                           :parent-ids [(:id secret-leaf) (:id other)]})
         (with-fake-vault (fresh-vault)
-          (testing "MI child of vault-get does NOT appear as a secret"
+          (testing "MI child of secret-leaf does NOT appear as a secret"
             (let [{:keys [secrets]} (secrets/list-secrets c)]
               (is (= [] secrets))))))
       (finally (sp/close storage)))))
@@ -181,12 +179,9 @@
         c (test-ctx storage)
         vault-state (fresh-vault)]
     (try
-      ;; After Followup-4's editor-UX switch, create-secret writes
-      ;; `parent :secret-leaf` + `:override-kind :secret-path`
-      ;; binding on the leaf's `:in` slot. The legacy
-      ;; `parent :vault-get` shape remains readable by `list-secrets`
-      ;; but isn't produced by the admin path anymore.
-      (let [{:keys [secret-leaf secret-leaf-slot]} (seed-vault-get! storage)]
+      ;; create-secret writes `parent :secret-leaf` +
+      ;; `:override-kind :secret-path` binding on the leaf's `:in` slot.
+      (let [{:keys [secret-leaf secret-leaf-slot]} (seed-secret-leaf! storage)]
         (with-fake-vault vault-state
           (let [{:keys [ok secret]} (secrets/create-secret
                                       c {:name "_test"
@@ -219,7 +214,7 @@
         vault-state (fresh-vault)
         orig-create-entity crud-entities/create-entity]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault vault-state
         (with-redefs [crud-entities/create-entity
                       (fn [entity-type data ctx]
@@ -247,7 +242,7 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault (fresh-vault)
         (testing "blank name → :error"
           (let [{:keys [ok error]} (secrets/create-secret
@@ -285,7 +280,7 @@
         c (test-ctx storage)
         vault-state (fresh-vault)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault vault-state
         (let [{:keys [secret]} (secrets/create-secret
                                  c {:name "_to-delete"
@@ -304,7 +299,7 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault (fresh-vault)
         (testing "missing id → :reason :not-found"
           (let [{:keys [ok reason]} (secrets/delete-secret c (str (random-uuid)))]
@@ -317,7 +312,7 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (let [non-secret (setup/create-base-fn! storage "not-a-secret" :text)]
         (with-fake-vault (fresh-vault)
           (testing "deleting a non-secret fn through /api/secrets is refused"
@@ -332,7 +327,7 @@
         c (test-ctx storage)
         vault-state (fresh-vault)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault vault-state
         ;; Create the secret first.
         (let [{:keys [secret]} (secrets/create-secret
@@ -365,7 +360,7 @@
         c (test-ctx storage)
         vault-state (fresh-vault)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault vault-state
         (let [{:keys [secret]} (secrets/create-secret
                                  c {:name "_rot"
@@ -387,7 +382,7 @@
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault (fresh-vault)
         (let [{:keys [ok reason]} (secrets/rotate-secret
                                     c (str (random-uuid)) {:value "x"})]
@@ -401,7 +396,7 @@
         c (test-ctx storage)
         vault-state (fresh-vault)]
     (try
-      (seed-vault-get! storage)
+      (seed-secret-leaf! storage)
       (with-fake-vault vault-state
         (let [{:keys [secret]} (secrets/create-secret
                                  c {:name "_r" :path "r/k" :value "v1"})
@@ -409,91 +404,4 @@
                                    c (:id secret) {})]
           (is (not ok))
           (is (re-find #"value" error))))
-      (finally (sp/close storage)))))
-
-
-;; ============================================================================
-;; migrate-to-secret-leaf (Followup-A7)
-;; ============================================================================
-
-(defn- seed-legacy-vault-get-secret!
-  "Hand-craft a legacy `:vault-get`-shaped secret: parent=[:vault-get]
-   + plain value-binding on the `:path` slot (no `:override-kind`).
-   Bypasses `crud-entities/create-entity`'s capability gate via
-   `sp/create-entity` direct."
-  [storage vault-get vault-get-slot nm path]
-  (let [fn-id (java.util.UUID/randomUUID)]
-    (sp/create-entity storage :fn
-                      {:id fn-id
-                       :name nm
-                       :parent-ids [(:id vault-get)]})
-    (sp/create-entity storage :binding
-                      {:id (java.util.UUID/randomUUID)
-                       :fn-id fn-id
-                       :slot-id (:id vault-get-slot)
-                       :value path})
-    fn-id))
-
-
-(deftest migrate-to-secret-leaf-happy-path-test
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      (let [{:keys [vault-get path-slot secret-leaf secret-leaf-slot]} (seed-vault-get! storage)
-            legacy-id (seed-legacy-vault-get-secret! storage vault-get path-slot
-                                                     "_legacy-db-password"
-                                                     "legacy/db/password")]
-        (with-fake-vault (fresh-vault)
-          (testing "list-secrets surfaces it with :shape \"vault-get\" before migration"
-            (let [{:keys [secrets]} (secrets/list-secrets c)
-                  s (first (filter #(= "_legacy-db-password" (:name %)) secrets))]
-              (is (some? s))
-              (is (= "vault-get" (:shape s)))))
-          (testing "migration succeeds and returns the preserved path"
-            (let [{:keys [ok path]} (secrets/migrate-to-secret-leaf c (str legacy-id))]
-              (is ok)
-              (is (= "legacy/db/password" path))))
-          (testing "fn-row now has parent=[:secret-leaf]"
-            (let [fn-row (sp/read-entity storage :fn legacy-id)]
-              (is (= [(:id secret-leaf)] (vec (:parent-ids fn-row))))))
-          (testing "binding now lives on :in slot with :override-kind :secret-path"
-            (let [bs (sp/query-entities storage :binding {:fn-id legacy-id})]
-              (is (= 1 (count bs)))
-              (let [b (first bs)]
-                (is (= (:id secret-leaf-slot) (:slot-id b)))
-                (is (= :secret-path (:override-kind b)))
-                (is (= "legacy/db/password" (:value b))))))
-          (testing "post-migration list-secrets surfaces :shape \"secret-leaf\""
-            (let [{:keys [secrets]} (secrets/list-secrets c)
-                  s (first (filter #(= "_legacy-db-password" (:name %)) secrets))]
-              (is (some? s))
-              (is (= "secret-leaf" (:shape s)))))))
-      (finally (sp/close storage)))))
-
-
-(deftest migrate-to-secret-leaf-rejects-non-legacy-test
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)
-        vault-state (fresh-vault)]
-    (try
-      (seed-vault-get! storage)
-      (with-fake-vault vault-state
-        (let [{:keys [secret]} (secrets/create-secret
-                                 c {:name "_already-leaf" :path "a/p" :value "v"})
-              {:keys [ok reason]} (secrets/migrate-to-secret-leaf c (:id secret))]
-          (testing "migrating an already-:secret-leaf-shaped secret is rejected"
-            (is (not ok))
-            (is (= :not-legacy-shape reason)))))
-      (finally (sp/close storage)))))
-
-
-(deftest migrate-to-secret-leaf-not-found-test
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      (seed-vault-get! storage)
-      (with-fake-vault (fresh-vault)
-        (let [{:keys [ok reason]} (secrets/migrate-to-secret-leaf c (str (random-uuid)))]
-          (is (not ok))
-          (is (= :not-found reason))))
       (finally (sp/close storage)))))

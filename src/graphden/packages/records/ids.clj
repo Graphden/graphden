@@ -61,6 +61,17 @@
   (uuid-v5 records-namespace-uuid (str "anon-fn:" shape-hash)))
 
 
+(defn seeded-service-id
+  "Deterministic UUID for a `:service` row seeded from a
+   `package.edn :services` entry. Keyed by `(package-name,
+   service-name)` so re-running the seeder lands on the same row
+   (idempotent), letting admins toggle `:enabled?` without the
+   next boot recreating their preference."
+  ^UUID [package-name service-name]
+  (uuid-v5 records-namespace-uuid
+           (str "seeded-service:" package-name ":" (name service-name))))
+
+
 (defn slot-id
   "Deterministic UUID for a slot owned by a specific fn. Slots are
    immutable once created; sharing across fns happens via composition

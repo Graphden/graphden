@@ -53,9 +53,19 @@ function hideServicePopover() {
 async function fetchServices() {
   try {
     const r = await authFetch('/api/services', { method: 'GET' });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      if (r.status !== 401) {
+        // eslint-disable-next-line no-console
+        console.error('/api/services HTTP', r.status, r.statusText);
+      }
+      return null;
+    }
     return await r.json();
-  } catch (_) { return null; }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('/api/services fetch threw', err);
+    return null;
+  }
 }
 
 
@@ -247,26 +257,34 @@ async function showServicePopover(fnEntity, anchorEl) {
     saveBtn.textContent = 'Saving…';
     const policy = el.querySelector('input[name="service-restart-policy"]:checked')?.value
                    || 'always';
-    const r = await saveService(existing, fnEntity.id, {
-      enabled: enabledCb.checked,
-      restartPolicy: policy,
-    });
-    if (!r || !r.ok) {
-      const text = r ? await r.text().catch(() => '') : 'network error';
-      alert('Save failed (' + (r?.status) + '): '
-            + text.replace(/<[^>]+>/g, '').trim().slice(0, 300));
+    // authFetch THROWS on network rejection (browser fetch contract); without
+    // a try-catch, the button would stay disabled with no user feedback.
+    try {
+      const r = await saveService(existing, fnEntity.id, {
+        enabled: enabledCb.checked,
+        restartPolicy: policy,
+      });
+      if (!r?.ok) {
+        const text = r ? await r.text().catch(() => '') : 'network error';
+        alert('Save failed (' + (r?.status) + '): '
+              + text.replace(/<[^>]+>/g, '').trim().slice(0, 300));
+        saveBtn.disabled = false;
+        saveBtn.textContent = existing ? 'Save & reconcile' : 'Create & reconcile';
+        return;
+      }
+      const rec = await reconcileServices();
+      if (!rec?.ok) {
+        alert('Saved but reconcile failed — restart the pod or call '
+              + 'POST /api/services/reconcile manually.');
+      }
+      // Invalidate cache so the next open shows fresh state.
+      servicesCache = null;
+      hideServicePopover();
+    } catch (err) {
+      alert('Save failed (network error): ' + (err?.message || err));
       saveBtn.disabled = false;
       saveBtn.textContent = existing ? 'Save & reconcile' : 'Create & reconcile';
-      return;
     }
-    const rec = await reconcileServices();
-    if (!rec || !rec.ok) {
-      alert('Saved but reconcile failed — restart the pod or call '
-            + 'POST /api/services/reconcile manually.');
-    }
-    // Invalidate cache so the next open shows fresh state.
-    servicesCache = null;
-    hideServicePopover();
   });
   actions.appendChild(saveBtn);
 
@@ -281,15 +299,22 @@ async function showServicePopover(fnEntity, anchorEl) {
       if (!confirm('Delete the :service for :' + fnEntity.name
                    + '? The running fn will stop on reconcile.')) return;
       delBtn.disabled = true;
-      const r = await deleteService(existing.id);
-      if (!r || !r.ok) {
-        alert('Delete failed (' + (r?.status) + ')');
+      // authFetch THROWS on network rejection — without try-catch the button
+      // would stay disabled with no user feedback.
+      try {
+        const r = await deleteService(existing.id);
+        if (!r?.ok) {
+          alert('Delete failed (' + (r?.status) + ')');
+          delBtn.disabled = false;
+          return;
+        }
+        await reconcileServices();
+        servicesCache = null;
+        hideServicePopover();
+      } catch (err) {
+        alert('Delete failed (network error): ' + (err?.message || err));
         delBtn.disabled = false;
-        return;
       }
-      await reconcileServices();
-      servicesCache = null;
-      hideServicePopover();
     });
     actions.appendChild(delBtn);
   }

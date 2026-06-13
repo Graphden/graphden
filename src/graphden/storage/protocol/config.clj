@@ -16,6 +16,7 @@
    | `*query-timeout-ms*`            | 30000    | Query timeout (min 1000ms for JDBC)   |
    | `*max-batch-size*`              | 1000     | Max entities per batch operation      |
    | `*max-graph-iterations*`        | 10000    | Max BFS iterations for graph resolve  |
+   | `*max-recursion-depth*`         | 1000     | Max depth for graph-level `:fix`      |
 
    ### DoS Prevention Limits
    | Variable                        | Default  | Description                           |
@@ -242,16 +243,17 @@
   "Returns the current query timeout in seconds for JDBC calls.
    Reads the dynamic var *query-timeout-ms* and converts to seconds.
 
-   Safety: Throws if timeout is below minimum to prevent silent timeout disabling.
-   This catches improper direct binding of *query-timeout-ms*
-   (use with-query-timeout instead)."
+   Safety: Throws if timeout is invalid (non-positive OR below minimum)
+   to prevent silent timeout disabling. This catches improper direct
+   binding of `*query-timeout-ms*` — use `with-query-timeout` instead.
+
+   Delegates the validation to `validate-query-timeout!` so the
+   pos-int? check + minimum check stay in one place. The pre-fix
+   inline check only verified the minimum, silently letting `0` /
+   negative / non-integer bindings through (they'd surface as obscure
+   JDBC errors downstream)."
   []
-  (when (< *query-timeout-ms* min-query-timeout-ms)
-    (throw (ex-info (str "Query timeout must be at least " min-query-timeout-ms "ms")
-                    {:type :config-error/invalid-timeout
-                     :min-timeout-ms min-query-timeout-ms
-                     :current-timeout-ms *query-timeout-ms*
-                     :hint "Use with-query-timeout for safe rebinding"})))
+  (validate-query-timeout! *query-timeout-ms*)
   (quot *query-timeout-ms* 1000))
 
 
@@ -387,6 +389,24 @@
    Prevents stack overflow from deeply nested structures.
    Default: 100 levels."
   100)
+
+
+;; ============================================================================
+;; Graph Recursion Configuration
+;; ============================================================================
+;;
+;; Limit for the `:fix`-based graph recursion primitive (`core/recursion`).
+;; The step fn invokes `:self` to recurse; the depth counter trips when
+;; runaway recursion would blow the JVM stack — closes the door on a
+;; naive non-terminating step (`f n → f (n-1)` forgetting the base case)
+;; without surrendering useful recursion budget for tree-walks, AST
+;; visitors, expansion passes, etc.
+
+(def ^:dynamic *max-recursion-depth*
+  "Maximum depth a graph-level `:fix` recursion may reach before
+   throwing `:recursion-error/max-depth-exceeded`.
+   Default: 1000 levels."
+  1000)
 
 
 ;; ============================================================================

@@ -170,6 +170,10 @@
     (let [u (random-uuid)]
       (is (= u (req/parse-uuid-or-clear (str u))))))
 
-  (testing "malformed UUID string → throws"
-    (is (thrown? IllegalArgumentException
-          (req/parse-uuid-or-clear "not-a-uuid")))))
+  (testing "malformed UUID string → nil (was: throws — caused 500s on HTTP path)"
+    (is (nil? (req/parse-uuid-or-clear "not-a-uuid"))))
+
+  (testing "non-string input → nil"
+    (is (nil? (req/parse-uuid-or-clear 12345)))
+    (is (nil? (req/parse-uuid-or-clear :keyword)))
+    (is (nil? (req/parse-uuid-or-clear {:nested true})))))

@@ -92,11 +92,28 @@
                        :description "When true, convert string keys to keywords."}}
    :return-type :jsonb}
 
-  {:name :jvm-version
-   :description "Java runtime version string (`java.version` system property)."
+  {:name :system-property
+   :description "`(System/getProperty name)` — read a JVM system property (`java.vm.name`, `java.version`, `user.dir`, etc.). Returns nil when unset. Counterpart to `:env` for environment variables."
+   :args {:name {:type :text :description "Property name (`java.version`, …)."}}
+   :return-type [:union :null :text]
+   :effects #{:env}}
+
+  {:name :jvm-uptime-ms
+   :description "Milliseconds since the JVM started. Single library call (`ManagementFactory.getRuntimeMXBean().getUptime()`) so admins can build their own JVM-info shape without an opaque all-in-one impl."
    :args {}
-   :return-type :jvm-version-shape
-   :effects #{:io}}                 ; system-property read
+   :return-type :int
+   :effects #{:io}}
+
+  ;; :jvm-version is now a graph composition of the three primitives —
+  ;; admins can swap fields, add `:user-dir`, drop `:uptime-ms`, etc.
+  ;; without writing Clojure.
+  {:name :jvm-version
+   :description "Java runtime info — `{:name :version :uptime-ms}`. Composed from `:system-property` (twice, for `java.vm.name` + `java.version`) and `:jvm-uptime-ms`. Same observable shape as before; just admin-extensible. `:version` is wrapped in `{:value …}` because the editor's `/version` route fn-def shadows the bare keyword; the others are safe but match the explicit-literal style of the wrapped one."
+   :parent :zipmap
+   :args {:keys [{:value :name} {:value :version} {:value :uptime-ms}]
+          :vals [{:parent :system-property :args {:name {:value "java.vm.name"}}}
+                 {:parent :system-property :args {:name {:value "java.version"}}}
+                 :jvm-uptime-ms]}}
 
   {:name :heap-memory
    :description "JVM heap usage snapshot — `{:heap-used :heap-max :heap-committed :free :total :max}` in bytes."
@@ -176,7 +193,7 @@
   ;; if the path doesn't resolve. fn-def composition on top of
   ;; `:read-resource-or-nil` + `:if` + `:throw` + `:ex-info`.
   {:name :read-resource
-   :description "Read a classpath resource as a string, throwing `execution-error/resource-not-found` when the path doesn't resolve. Pure composition over `:read-resource-or-nil`/`:if`/`:throw`/`:ex-info`."
+   :description "Read a classpath resource as a string, throwing `execution-error/resource-not-found` when the path doesn't resolve. Pure composition over `:read-resource-or-nil`/`:if`/`:throw`/`:ex-info`. `:path` propagates from the inner `:read-resource-or-nil :path` rename annotation."
    :parent :if
    :args {:test :_resource-nil?
           :then :_resource-not-found-throw
@@ -210,7 +227,9 @@
    :description "Read each path in `:paths` via `:read-resource` and join the contents with a separator (default `\\n\\n`). Used to bundle CSS/JS asset modules."
    :parent :str-join
    :args {:coll :_concat-resources-list
-          :separator {:type :text :value "\n\n"}}}
+          :separator {:type :text :value "\n\n"}
+          :paths {:type [:list :text]
+                  :description "Classpath resource paths — each is slurp'd via `:read-resource`, contents joined by `:separator`."}}}
 
   {:name :_concat-resources-list
    :parent :map
@@ -321,8 +340,45 @@
    :args {:func {:type [:fn {} a] :description "Fn-graph wrapped as a 0-arg callable. Captured args resolve from the calling fn's binding-chain at wrap time."}}
    :return-type a}
 
+  ;; Graph-level try/catch. Pair with `:atom` + `:swap-conj` (from
+  ;; `core.concurrency`) to express journalled-write transactions: the
+  ;; body's phases conj rollback-entries into a shared atom, and
+  ;; `on-throw` derefs the atom + replays in reverse. `:_update-record-
+  ;; type-apply` (web/crud/fns.edn) is the canonical use.
+  {:name :try
+   :description "Run `:body` (a 0-arg HOF callable) and return its result. If body throws an `Exception`, invoke `:on-throw` with the exception and return its result. `Throwable`-level errors (OOM / InterruptedException / LinkageError) DELIBERATELY propagate — graph-level try is for recoverable exceptions only."
+   :args {:body {:type [:fn {} a]
+                 :description "0-arg callable; its result is returned on success."}
+          :on-throw {:type [:fn {:exception :any} b]
+                     :description "1-arg callable invoked with the caught `Exception` when body throws; its result is returned instead. The exception's `ex-data` is available for case-style dispatch. May return a different shape than body — `:try`'s return-type is `[:union a b]`."}}
+   :return-type [:union a b]}
+
   ;; Read an InputStream/Reader to string
   {:name :slurp
    :description "Read an InputStream/Reader to a string (Clojure's `slurp`). Used to materialise Ring request bodies."
    :args {:input {:type :any :description "InputStream, Reader, or any source `clojure.core/slurp` accepts."}}
-   :return-type :text}]}
+   :return-type :text
+   :effects #{:io}}
+
+  ;; Exception accessors — let `:on-throw` handlers dispatch on class
+  ;; name (`:case` lookup) and surface the human-readable message in
+  ;; graph-built error responses without a bespoke base-fn per call site.
+  {:name :throwable-message
+   :description "`(.getMessage ex)` — the human-readable message of any `Throwable`. Returns nil when `:ex` is nil. Use inside a `:try`'s `:on-throw` handler to surface the message in a `{:ok false :error}` response."
+   :args {:ex {:type :any :description "Throwable. nil-safe."}}
+   :return-type [:union :null :text]}
+
+  {:name :throwable-class-name
+   :description "`(.getName (.getClass ex))` — the fully-qualified class name of any `Throwable`. Returns nil when `:ex` is nil. Use as the `:value` of a `:case` to dispatch on exception type inside an `:on-throw` handler."
+   :args {:ex {:type :any :description "Throwable. nil-safe."}}
+   :return-type [:union :null :text]}
+
+  {:name :ex-data
+   :description "`(ex-data ex)` — the structured `:type`/payload map from an `ex-info`-style exception, or nil for non-ex-info exceptions. Use inside an `:on-throw` handler to access the `:type` key (e.g. `:constraint-violation/branch-has-children`) for `:case`-style dispatch."
+   :args {:ex {:type :any :description "Throwable. nil-safe; non-ex-info exceptions also return nil."}}
+   :return-type [:union :null :jsonb]}
+
+  {:name :parse-uuid
+   :description "Parse `:s` as a `:uuid`. Returns nil for non-string / blank / malformed input — every failure mode collapses to nil so graph callers don't need a try/catch wrap. Defensive boundary mirroring `crud.request/parse-uuid-or-clear`."
+   :args {:s {:type :any :required false :description "Candidate string. Non-string / blank → nil."}}
+   :return-type [:union :null :uuid]}]}

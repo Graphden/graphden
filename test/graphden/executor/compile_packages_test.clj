@@ -28,6 +28,13 @@
 
 (use-fixtures :once
   (pth/create-container-fixture #'*container*)
+  ;; `:exec/base-fns` init-key registers ~190 package base-fn impls
+  ;; into the process-global registry via `exec/register-base-fn!`.
+  ;; Wrap the integrant init in `with-clean-registry` so those
+  ;; writes land in a thread-local override atom — sibling test
+  ;; ns'es running in parallel kaocha threads keep their own
+  ;; override and don't race on the global atom.
+  exec/with-clean-registry
   (fn [f]
     (pth/clean-database-fast! *container*)
     (let [cfg    (pth/get-container-config *container*)
@@ -173,6 +180,40 @@
 ;; ============================================================================
 ;; :cond / :case execution + executor laziness (short-circuit)
 ;; ============================================================================
+
+(deftest pw-coercer-bisection-test
+  ;; Step-by-step bisection of `:postwalk + :cond + inline-anon` —
+  ;; the pattern used by the `:_router-coerced-routes` graph-level
+  ;; route-data coercer (was inline in `ring-router-fn`). Each level
+  ;; adds one piece; if the chain regresses in the future this test
+  ;; pinpoints which combination broke.
+  (testing "step 1 — :postwalk + :const identity returns input as-is"
+    (is (= {:a 1 :b "two"} (run "ex-pw-identity-call"))))
+  (testing "step 2 — :postwalk + :cond with `[true {:as :value}]` passthrough"
+    (is (= {:a 1 :b "two"} (run "ex-pw-cond-identity-call"))))
+  (testing "step 3 — keyword nodes get :keyword-to-str, others pass through"
+    (is (= ["foo" "bar" "baz"] (run "ex-pw-kw-to-str-call"))))
+  (testing "step 4 — full reitit-shape coercer on a literal vector"
+    (is (= [["/health" {:get {:handler "noop"}}]
+            ["/version" {:get {:handler "version-handler"}}]]
+           (run "ex-pw-router-call"))))
+  (testing "step 5 — same coercer on a `:filter`-produced lazy-seq (production shape)"
+    (is (= [["/health" {:get {:handler "noop"}}]
+            ["/version" {:get {:handler "version-handler"}}]]
+           (run "ex-pw-router-via-filter"))))
+  (testing "step 6 — direct call to `:ring-router` itself"
+    ;; If this passes but production /version still 404s, the issue
+    ;; isn't in the decomp's routes-coercer but in how the routes
+    ;; flow from `:_router-non-nil-routes` to `:_router-compiled` —
+    ;; specifically the slot-name-collision bug fixed by putting
+    ;; `:_router-coerced-routes` as a SIBLING of `:_router-compiled`
+    ;; rather than as an inline transform on `:ring-router`'s slot.
+    (let [router (run "ex-via-ring-router-direct")
+          match ((requiring-resolve 'reitit.core/match-by-path) router "/health")]
+      (is (some? router))
+      (is (some? match)
+          "router built by `:ring-router` must actually route /health"))))
+
 
 (deftest cond-case-execution-test
   (testing ":cond multi-branch dispatch over a free arg"

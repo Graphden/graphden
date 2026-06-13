@@ -17,6 +17,7 @@
   (:require
     [clojure.string :as str]
     [graphden.crud.fn-execution.lookup :as lookup]
+    [graphden.crud.request :as request]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
@@ -32,7 +33,7 @@
    catches and surfaces a clean message."
   [storage v]
   (when-not (str/blank? v)
-    (or (try (java.util.UUID/fromString v) (catch Exception _ nil))
+    (or (request/parse-uuid-or-clear v)
         (let [match (lookup/query-fn-by-name storage v)]
           (or (:id match)
               (throw (ex-info (str "Unknown type reference: " (pr-str v)
@@ -204,9 +205,14 @@
               ;; `binding-shape-for-edn` can reconstruct
               ;; `{:as :renamed :type T}` shapes from the slot side.
               own-fn-slots (sp/query-entities storage :fn-slot {:fn-id fn-id})
-              fn-slots (mapcat (fn [pid]
-                                 (sp/query-entities storage :fn-slot {:fn-id pid}))
-                               parent-ids)
+              ;; Batch the parent fn-slot fetch — pre-fix this was
+              ;; `(mapcat (fn [pid] (query-entities … {:fn-id pid})) parent-ids)`
+              ;; which fired one round-trip per parent (3 for a typical
+              ;; MI chain). The vector-valued `:fn-id` filter folds into
+              ;; a single IN-clause.
+              fn-slots (if (seq parent-ids)
+                         (sp/query-entities storage :fn-slot {:fn-id (vec parent-ids)})
+                         [])
               slot-ids (into [] (comp (mapcat (fn [b] [(:slot-id b)]))
                                       (filter some?))
                              (concat own-bindings own-fn-slots fn-slots))

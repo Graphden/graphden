@@ -42,6 +42,25 @@ When evaluating a proposed change, the question is not "does someone
 want this?" but "does this remove a pain the author has, or does it
 unlock a deployment shape the author needs?". If neither — defer.
 
+**AI-assisted editing is a first-class consumer of the model.** The
+author uses AI in their daily work and hits the text-diff review
+pain (whitespace / line-break / formatting noise drowning out the
+behaviour change) every time the AI proposes a multi-file edit.
+Graphden's entity model makes graph-diff review possible — an AI
+proposal lands as "added N fn-defs, changed M bindings, deleted K
+refs" against the current graph, reusing the branch-diff UI that
+already exists. Two consequences for design:
+
+- The MCP server and editor "Ask AI" flow are open core, not a paid
+  feature. Self-hosted users get the full integration without any
+  cloud dependency.
+- BYOM (bring-your-own-model) is the default. The author's chosen
+  AI — not ours — is the one in the loop. The managed-model gateway
+  is an optional billed add-on, never a gate.
+
+See [DISTRIBUTION § Paid Add-ons](DISTRIBUTION.md#paid-add-ons) and
+[ROADMAP Block 9](ROADMAP.md#block-9--ai-integration).
+
 ### Trade-off Sovereignty
 
 In any popular system the trade-offs are chosen by someone else —
@@ -820,38 +839,76 @@ passing that implementation as the free-arg's value. This mirrors
 how `graphden.storage.protocol.contract-tests` works at the Clojure
 level, lifted into the graph.
 
-Worked example — the storage swap path:
+**Two shapes — the realisable one today, the aspirational one for later.**
+
+#### Shape 1 — free-arg per operation (works in current runtime)
+
+The runtime POC validated end-to-end in
+`test/graphden/integration/storage_protocol_poc_test.clj`. Each
+abstract operation is its own `:fn`-typed free-arg on the consumer;
+the caller binds each to a concrete base-fn at the top of the
+chain.
 
 ```edn
-;; (a) Contract — type-row, declares the operations
-{:name :Storage
- :slots [{:name :read  :type :fn}     ; (k -> v)
-         {:name :write :type :fn}     ; (k v -> nil)
-         {:name :query :type :fn}]}   ; (where -> [v])
-
-;; (b) Implementation — concrete impl over Postgres base-fns
-{:name :postgres-storage-impl
- :parent :Storage
- :args {:read  :pg-read-row
-        :write :pg-write-row
-        :query :pg-query-rows}}
-
-;; (c) Consumer — a route handler takes :storage as a free-arg
+;; Consumer — declares one :fn-typed free-arg per abstract op.
 {:name :user-profile-handler
- :parent :route-handler
- :args {:fetch (-> :storage :read :user-by-id …)}}
+ :parent :call
+ :args {:func {:as :storage-query}    ; :fn-typed by inheritance from :call
+        :arg  {:select [:id :name] :from :users :where [:= :id 42]}}}
 
-;; (d) Wire-up at the top — bind storage once for the whole app
+;; Top-level wire-up — bind each abstract op to a concrete base-fn.
+;; Swap to a future backend = sibling top-level binding to its
+;; equivalents (`:storage-query`, `:storage-execute`, `:storage-tx`).
 {:name :web-server
  :parent :http-server
- :args {:handler :api-router
-        :storage :postgres-storage-impl}}
+ :args {:handler        :api-router
+        :storage-query  :pg-query
+        :storage-execute :pg-execute
+        :storage-tx     :pg-tx}}
 ```
 
-Swapping to a different backend = supplying a different fn-def to
-the top-level `:storage` arg. Nothing in `:user-profile-handler` or
-below needs to change. The consumer never names "postgres" — it
-only knows it has something of type `:Storage`.
+Swappability works as designed: nothing in `:user-profile-handler`
+or below names "postgres". Only the top-level binding does. A
+second backend ships its own equivalent `:pg-*` peers; the top-
+level switch is the only edit point.
+
+#### Shape 2 — record-of-fn-ids type-row (aspirational; needs a new primitive)
+
+```edn
+{:name :Storage
+ :type {:query   [:fn {:hsql :jsonb} [:list :jsonb]]
+        :execute [:fn {:hsql :jsonb} :int]
+        :tx      [:fn {:body [:fn {} :any]} :any]}}
+
+{:name :postgres-storage-impl
+ :parent :Storage
+ :args {:query :pg-query :execute :pg-execute :tx :pg-tx}}
+
+;; Consumer would receive ONE free-arg `:storage` of type :Storage
+;; and navigate via :get on the record.
+```
+
+This shape is **not runnable today**. Two gaps surfaced during the
+POC attempt:
+
+1. Inheriting from a type-row (`:postgres-storage-impl :parent
+   :Storage`) does NOT auto-construct a record-of-fn-ids value at
+   run time. Records are type-level constructs; instance
+   construction is the body fn's job.
+2. The natural alternative (`:assoc` chain to build the map) won't
+   keep `:fn`-typed values as raw fn-ids — `:assoc :value` evaluates
+   the ref and stores the result.
+
+Bridging the gap needs a new primitive — something like an
+`:as-callable` base-fn that promotes a stored fn-id into a Clojure
+callable, plus a record-of-callables construction path that
+captures fn-ids without executing them. We did not ship this in
+Block 1; it's documented here so a future implementation has a
+clear target.
+
+For now, **use Shape 1 for any new code**. Both shapes deliver the
+same swappability guarantee — Shape 2 only adds compact "one
+free-arg" ergonomics, which Shape 1 trades for working-today.
 
 ---
 

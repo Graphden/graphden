@@ -17,7 +17,7 @@
    package loader + type-checker + executor. No mocks.
 
    The two scenarios:
-     1. Compose `vault-get` (return `[:secret :text]`) into a
+     1. Compose `secret-leaf` (return `[:secret :text]`) into a
         propagating string op (`str-upper`). The composed fn-def's
         recorded return is `[:secret :text]`, an inline `/api/execute`
         succeeds with `:result nil` and `:tainted? true`.
@@ -61,13 +61,14 @@
 
 
 (deftest secret-propagates-through-str-upper-then-hides-at-execute-test
-  ;; Mirror the runtime registry: register `vault-get` returning
+  ;; Mirror the runtime registry: register `secret-leaf` returning
   ;; `[:secret :text]` and `str-upper` with a taint-propagating rule.
   ;; The compose `upper(get(...))` MUST type-check AND end up with a
   ;; secret-marked recorded return.
-  (registry/record-rich-types! :vault-get
+  (registry/record-rich-types! :secret-leaf
                                {:args {:path :text}
-                                :return-type [:secret :text]})
+                                :return-type [:secret :text]
+                                :tags #{:secret-shape :admin-only-vault}})
   (registry/record-rich-types! :str-upper
                                {:args {:string {:type [:secret :text]}}
                                 :return-type :text
@@ -75,14 +76,14 @@
                                                     (types-core/taint-with-secret-if-tainted
                                                       bi default-ret))})
 
-  (testing "leaf vault-get binding accepts a literal path → composes"
+  (testing "leaf secret-leaf binding accepts a literal path → composes"
     (check/check-fn-def! {:name :_my-db-pwd
-                          :parent :vault-get
+                          :parent :secret-leaf
                           :args {:path {:value "user-db/password"}}})
     (is (= [:secret :text]
            (:return (registry/rich-type-of :_my-db-pwd)))))
 
-  (testing "compose vault-get into str-upper — propagation taints the result"
+  (testing "compose secret-leaf into str-upper — propagation taints the result"
     (check/check-fn-def! {:name :_my-shouty-pwd
                           :parent :str-upper
                           :args {:string :_my-db-pwd}})
@@ -136,9 +137,10 @@
   ;; {"Authorization" (str-concat "Bearer " <secret>)})` gets a
   ;; type-check rejection at sync-time, BEFORE the request is ever
   ;; built.
-  (registry/record-rich-types! :vault-get
+  (registry/record-rich-types! :secret-leaf
                                {:args {:path :text}
-                                :return-type [:secret :text]})
+                                :return-type [:secret :text]
+                                :tags #{:secret-shape :admin-only-vault}})
   (registry/record-rich-types! :http-get
                                {:args {:url {:type :text}
                                        :headers {:type [:map :text :text]}}
@@ -146,7 +148,7 @@
                                 :effects #{:network}})
 
   (check/check-fn-def! {:name :_secret-token
-                        :parent :vault-get
+                        :parent :secret-leaf
                         :args {:path {:value "api/token"}}})
 
   (testing "literal map with a secret-typed value REJECTS at sync-time"
@@ -160,12 +162,13 @@
 
 (deftest http-get-with-bearer-accepts-secret-token-test
   ;; B: the secret-aware sibling `:http-get-with-bearer` declares its
-  ;; `:token` slot `[:secret :text]`. A `:vault-get` ref flows in
+  ;; `:token` slot `[:secret :text]`. A `:secret-leaf` ref flows in
   ;; cleanly; the impl embeds the secret in the Authorization header
   ;; internally so the secret never touches the generic `:map` slot.
-  (registry/record-rich-types! :vault-get
+  (registry/record-rich-types! :secret-leaf
                                {:args {:path :text}
-                                :return-type [:secret :text]})
+                                :return-type [:secret :text]
+                                :tags #{:secret-shape :admin-only-vault}})
   (registry/record-rich-types! :http-get-with-bearer
                                {:args {:url {:type :text}
                                        :token {:type [:secret :text]}
@@ -174,7 +177,7 @@
                                 :effects #{:network}})
 
   (check/check-fn-def! {:name :_my-api-token
-                        :parent :vault-get
+                        :parent :secret-leaf
                         :args {:path {:value "api/token"}}})
 
   (testing "secret-ref into :token slot composes — call type-checks"
@@ -201,9 +204,10 @@
   ;; the user can't sneak a SECOND secret into the headers map under
   ;; the cover of the legitimate token. Defence-in-depth against the
   ;; "I have one legit auth and one exfil header" mix.
-  (registry/record-rich-types! :vault-get
+  (registry/record-rich-types! :secret-leaf
                                {:args {:path :text}
-                                :return-type [:secret :text]})
+                                :return-type [:secret :text]
+                                :tags #{:secret-shape :admin-only-vault}})
   (registry/record-rich-types! :http-get-with-bearer
                                {:args {:url {:type :text}
                                        :token {:type [:secret :text]}
@@ -212,10 +216,10 @@
                                 :effects #{:network}})
 
   (check/check-fn-def! {:name :_db-pwd
-                        :parent :vault-get
+                        :parent :secret-leaf
                         :args {:path {:value "db/password"}}})
   (check/check-fn-def! {:name :_token
-                        :parent :vault-get
+                        :parent :secret-leaf
                         :args {:path {:value "api/token"}}})
 
   (testing ":extra-headers literal with a secret value REJECTS"
@@ -243,9 +247,10 @@
   ;; `taint-with-secret-if-tainted` to every such fn, so the RESULT
   ;; type is lifted back into `[:secret …]`. The secret marker
   ;; round-trips through the `:any` slot without leaking.
-  (registry/record-rich-types! :vault-get
+  (registry/record-rich-types! :secret-leaf
                                {:args {:path :text}
-                                :return-type [:secret :text]})
+                                :return-type [:secret :text]
+                                :tags #{:secret-shape :admin-only-vault}})
   ;; Simulate `:assoc` — slot types are :any, return is :any, but
   ;; the registered rule propagates.
   (registry/record-rich-types! :assoc-any-stub
@@ -258,7 +263,7 @@
                                                       bi default-ret))})
 
   (check/check-fn-def! {:name :_my-pwd
-                        :parent :vault-get
+                        :parent :secret-leaf
                         :args {:path {:value "user-db/password"}}})
 
   (testing "secret flows through :any slot AND result type is lifted"
@@ -369,14 +374,15 @@
 
 
 (deftest secret-ref-into-secret-sink-also-passes-test
-  ;; The intended pattern in T7 docs — wire `vault-get` into the
+  ;; The intended pattern in T7 docs — wire `secret-leaf` into the
   ;; `password` slot of `sql-query` via ref-binding. Type-check
   ;; should pass; sql-query's return-type isn't tainted (it doesn't
   ;; expose the password in the response), but if it WERE tainted
   ;; via a propagator, that would surface at /api/execute time.
-  (registry/record-rich-types! :vault-get
+  (registry/record-rich-types! :secret-leaf
                                {:args {:path :text}
-                                :return-type [:secret :text]})
+                                :return-type [:secret :text]
+                                :tags #{:secret-shape :admin-only-vault}})
   (registry/record-rich-types! :sql-query
                                {:args {:url {:type :text}
                                        :user {:type :text}
@@ -386,7 +392,7 @@
                                 :return-type [:list :jsonb]})
 
   (check/check-fn-def! {:name :_db-pwd
-                        :parent :vault-get
+                        :parent :secret-leaf
                         :args {:path {:value "user-db/password"}}})
 
   (testing "secret-ref into secret-slot composes — no taint visible in result type"

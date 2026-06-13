@@ -104,7 +104,7 @@
              :version-data-fields #{:fn-id :slot-id :value :ref-fn-id
                                     :override-kind
                                     :type-override-fn-id :description
-                                    :terminal :list-append :list-closed}}
+                                    :list-append :list-closed}}
 
    :binding-list-item {:version-entity :binding-list-item-version
                        :version-id-field :item-id
@@ -376,7 +376,7 @@
           branch-chain (collect-branch-chain base-storage branch-id)
           versions-by-id (load-all-versions-for-ids base-storage entity-name
                                                     entity-ids branch-chain)
-          identity-by-id (into {} (map (fn [r] [(:id r) r])) identity-records)]
+          identity-by-id (into {} (map (juxt :id identity)) identity-records)]
       (into {}
             (map (fn [eid]
                    (let [identity-rec (get identity-by-id eid)]

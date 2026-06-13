@@ -61,6 +61,7 @@
    - `with-query-timeout` - Macro for temporary timeout change
    - `get-query-timeout-seconds` - Get timeout in seconds for JDBC"
   (:require
+    [graphden.schema.fields.types :as ft]
     [graphden.storage.protocol.codec :as codec]
     [graphden.storage.protocol.config :as config]
     [graphden.storage.protocol.constraints :as constraints]
@@ -387,24 +388,16 @@
   redaction/critical-sensitive-patterns)
 
 
-(def validate-sensitive-field-coverage!
-  "Validates that all critical sensitive patterns are properly matched.
-   Throws if any critical pattern would not be detected as sensitive.
-   Use this at application startup to verify security configuration."
-  redaction/validate-sensitive-field-coverage!)
-
-
-(def warn-on-suspicious-field
-  "Logs warning if field looks sensitive but isn't registered.
-   Returns true if field looks suspicious but not registered."
-  redaction/warn-on-suspicious-field)
-
-
 ;; === Metadata re-exports ===
+;;
+;; Public protocol surface for schema-type compatibility checks.
+;; Implementations live in `storage.protocol.metadata`; the storage
+;; protocol re-exports them here so callers (`postgres/migration`,
+;; protocol tests) don't reach into the metadata helper namespace.
 
 (defn types-equivalent?
   [t1 t2]
-  (metadata/types-equivalent? t1 t2))
+  (ft/types-equivalent? t1 t2))
 
 
 (defn safe-type-change?
@@ -486,25 +479,6 @@
 (def check-graph-iteration-limit! graph/check-graph-iteration-limit!)
 (def traverse-bfs graph/traverse-bfs)
 (def try-parse-uuid graph/try-parse-uuid)
-(def ->execution-graph graph/->execution-graph)
-
-
-(defn execution-graph?
-  [x]
-  (graph/execution-graph? x))
-
-
-;; === ExecutionGraph accessor functions ===
-;; Stable API for accessing graph data.
-
-(def get-graph-fns        graph/get-graph-fns)
-(def get-graph-slots      graph/get-graph-slots)
-(def get-graph-fn-slots   graph/get-graph-fn-slots)
-(def get-graph-bindings   graph/get-graph-bindings)
-(def get-graph-list-items graph/get-graph-list-items)
-(def get-bindings-for-fn  graph/get-bindings-for-fn)
-(def get-fn-slots-for-fn  graph/get-fn-slots-for-fn)
-(def get-items-for-binding graph/get-items-for-binding)
 
 
 ;; === Constraint limits re-exports ===
@@ -512,15 +486,8 @@
 
 
 ;; === Lock re-exports ===
-(def with-read-lock locks/with-read-lock)
 (def with-write-lock locks/with-write-lock)
 (def create-rw-lock locks/create-rw-lock)
-
-
-(def with-double-check-locking
-  "Double-check locking for lazy cached initialization.
-   See locks/with-double-check-locking for details."
-  locks/with-double-check-locking)
 
 
 ;; === Naming re-exports ===
@@ -529,8 +496,7 @@
 (def check-snake-case-collisions! naming/check-snake-case-collisions!)
 
 
-;; === Query timeout re-exports ===
-;; === Dynamic Configuration Vars ===
+;; === Query timeout re-exports + dynamic vars ===
 
 (def ^:dynamic *query-timeout-ms*
   "Timeout for storage queries in milliseconds. Can be rebound per-thread.
@@ -538,8 +504,10 @@
   config/*query-timeout-ms*)
 
 
-(def min-query-timeout-ms config/min-query-timeout-ms)
 (def validate-query-timeout! config/validate-query-timeout!)
+
+
+(def get-query-timeout-seconds config/get-query-timeout-seconds)
 
 
 (defn with-query-timeout
@@ -551,10 +519,6 @@
   (binding [config/*query-timeout-ms* timeout-ms
             *query-timeout-ms* timeout-ms]
     (f)))
-
-
-(def get-query-timeout-seconds config/get-query-timeout-seconds)
-(def execute-with-timeout! config/execute-with-timeout!)
 
 
 ;; === Collection generation limits re-exports ===

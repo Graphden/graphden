@@ -1,7 +1,7 @@
 (ns graphden.crud.validation-test
   "DB-backed tests for the server-side write-time guards in
    `graphden.crud.validation` — cycle detection, MI-collision,
-   `:terminal` / `:list-closed` enforcement, constraint-shape
+   value-override + `:list-closed` enforcement, constraint-shape
    validation, and the `write-rej` aggregator.
 
    Follows the container pattern of `crud-tighten-test`: a shared
@@ -21,9 +21,9 @@
 ;; ============================================================================
 
 (defn- make-binding!
-  "Create a raw binding row with arbitrary extra fields (`:terminal`,
-   `:list-append`, `:list-closed`, …) — `bind-value!` only covers the
-   plain value case."
+  "Create a raw binding row with arbitrary extra fields
+   (`:list-append`, `:list-closed`, …) — `bind-value!` only covers
+   the plain value case."
   [storage fields]
   (sp/create-entity storage :binding (merge {:override-kind :fixed} fields)))
 
@@ -163,21 +163,20 @@
 
 
 ;; ============================================================================
-;; ancestor-binding-flag? / terminal-rej / list-closed-rej
+;; ancestor-binding-flag? / list-closed-rej
 ;; ============================================================================
 
 (deftest ancestor-binding-flag-test
-  (testing "a flag set on a parent's binding is visible from the child"
+  (testing ":list-closed set on a parent's binding is visible from the child"
     (let [storage (setup/create-test-storage)]
       (try
         (let [parent (setup/create-base-fn! storage "abf-parent")
-              slot   (setup/create-slot! storage "s" :int)
+              slot   (setup/create-slot! storage "items" :any)
               _      (setup/attach-slot! storage (:id parent) (:id slot) 0)
               _      (make-binding! storage {:fn-id (:id parent) :slot-id (:id slot)
-                                             :value 1 :terminal true})
+                                             :list-closed true})
               child  (setup/create-composed-fn! storage "abf-child" (:id parent))]
-          (is (true? (v/ancestor-binding-flag? storage (:id child) (:id slot) :terminal)))
-          (is (false? (v/ancestor-binding-flag? storage (:id child) (:id slot) :list-closed))))
+          (is (true? (v/ancestor-binding-flag? storage (:id child) (:id slot) :list-closed))))
         (finally (sp/close storage)))))
 
   (testing "no ancestor → false"
@@ -185,36 +184,77 @@
       (try
         (let [f    (setup/create-base-fn! storage "abf-orphan")
               slot (setup/create-slot! storage "s" :int)]
-          (is (false? (v/ancestor-binding-flag? storage (:id f) (:id slot) :terminal))))
+          (is (false? (v/ancestor-binding-flag? storage (:id f) (:id slot) :list-closed))))
         (finally (sp/close storage))))))
 
 
-(deftest terminal-rej-test
-  (testing "binding write on a slot sealed `:terminal` by an ancestor is rejected"
+(deftest value-override-rej-test
+  (testing "binding write rejected when an ancestor already supplied a value"
     (let [storage (setup/create-test-storage)]
       (try
-        (let [parent (setup/create-base-fn! storage "tr-parent")
+        (let [parent (setup/create-base-fn! storage "vor-value-parent")
               slot   (setup/create-slot! storage "s" :int)
               _      (setup/attach-slot! storage (:id parent) (:id slot) 0)
               _      (make-binding! storage {:fn-id (:id parent) :slot-id (:id slot)
-                                             :value 1 :terminal true})
-              child  (setup/create-composed-fn! storage "tr-child" (:id parent))
-              rej    (v/terminal-rej storage :binding
-                                     {:fn-id (:id child) :slot-id (:id slot)})]
+                                             :value 42})
+              child  (setup/create-composed-fn! storage "vor-value-child" (:id parent))
+              rej    (v/value-override-rej storage :binding
+                                           {:fn-id (:id child) :slot-id (:id slot)})]
           (is (some? rej))
-          (is (re-find #"terminal" (:reason rej))))
+          (is (re-find #"already supplied a value" (:reason rej))))
         (finally (sp/close storage)))))
 
-  (testing "no terminal ancestor, and non-:binding writes → nil"
+  (testing "binding write rejected when an ancestor already supplied a ref-fn-id"
     (let [storage (setup/create-test-storage)]
       (try
-        (let [parent (setup/create-base-fn! storage "tr2-parent")
+        (let [parent (setup/create-base-fn! storage "vor-ref-parent")
+              target (setup/create-base-fn! storage "vor-ref-target")
+              slot   (setup/create-slot! storage "s" :any)
+              _      (setup/attach-slot! storage (:id parent) (:id slot) 0)
+              _      (make-binding! storage {:fn-id (:id parent) :slot-id (:id slot)
+                                             :ref-fn-id (:id target)})
+              child  (setup/create-composed-fn! storage "vor-ref-child" (:id parent))
+              rej    (v/value-override-rej storage :binding
+                                           {:fn-id (:id child) :slot-id (:id slot)})]
+          (is (some? rej)))
+        (finally (sp/close storage)))))
+
+  (testing "ancestor with rename / type-narrowing only (no value, no ref) → child write allowed"
+    ;; Mirrors `:ex-keyword-key-assoc :args {:key {:type :keyword}}` →
+    ;; `:ex-keyword-key-status :args {:key :status}` — parent narrows
+    ;; type, child fills value, no override happens.
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [parent (setup/create-base-fn! storage "vor-narrow-parent")
+              type-fn (setup/create-base-fn! storage "vor-narrow-type")
+              slot   (setup/create-slot! storage "s" :any)
+              _      (setup/attach-slot! storage (:id parent) (:id slot) 0)
+              ;; Parent binding has only :type-override-fn-id — no value.
+              _      (make-binding! storage {:fn-id (:id parent) :slot-id (:id slot)
+                                             :type-override-fn-id (:id type-fn)})
+              child  (setup/create-composed-fn! storage "vor-narrow-child" (:id parent))]
+          (is (nil? (v/value-override-rej storage :binding
+                                          {:fn-id (:id child) :slot-id (:id slot)}))))
+        (finally (sp/close storage)))))
+
+  (testing "no ancestor binding at all → child write allowed"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [parent (setup/create-base-fn! storage "vor-empty-parent")
               slot   (setup/create-slot! storage "s" :int)
-              child  (setup/create-composed-fn! storage "tr2-child" (:id parent))]
-          (is (nil? (v/terminal-rej storage :binding
-                                    {:fn-id (:id child) :slot-id (:id slot)})))
-          (is (nil? (v/terminal-rej storage :slot
-                                    {:fn-id (:id child) :slot-id (:id slot)}))))
+              _      (setup/attach-slot! storage (:id parent) (:id slot) 0)
+              child  (setup/create-composed-fn! storage "vor-empty-child" (:id parent))]
+          (is (nil? (v/value-override-rej storage :binding
+                                          {:fn-id (:id child) :slot-id (:id slot)}))))
+        (finally (sp/close storage)))))
+
+  (testing "non-:binding writes → nil (validator only fires for :binding entity-type)"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (is (nil? (v/value-override-rej storage :slot
+                                        {:fn-id (random-uuid) :slot-id (random-uuid)})))
+        (is (nil? (v/value-override-rej storage :fn
+                                        {:fn-id (random-uuid) :slot-id (random-uuid)})))
         (finally (sp/close storage))))))
 
 

@@ -9,6 +9,7 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor-runtime.core :as rt]
+    [graphden.executor.interface :as exec]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
@@ -22,7 +23,17 @@
 
 (def ^:dynamic *container* nil)
 
-(use-fixtures :once (pth/create-container-fixture #'*container*))
+
+(use-fixtures :once
+  (pth/create-container-fixture #'*container*)
+  ;; Multiple deftests in this ns boot integrant systems that
+  ;; register ~190 package base-fn impls into the global registry.
+  ;; Wrap in `with-clean-registry` so those writes land in a
+  ;; thread-local override atom — sibling test ns'es running in
+  ;; parallel kaocha threads keep their own override and don't race.
+  exec/with-clean-registry)
+
+
 (use-fixtures :each (pth/create-clean-db-fixture #'*container*))
 
 
@@ -88,9 +99,9 @@
 
 (deftest partial-system-start-test
   (testing "Can start only schema component"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+    (let [pg-cfg (pth/get-container-config *container*)
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+                     (update :db/postgres merge pg-cfg))
           system (ig/init config [:db/schema])]
       (try
         (is (some? (:db/schema system)))
@@ -100,9 +111,9 @@
           (ig/halt! system)))))
 
   (testing "Can start schema + age + versioned components"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+    (let [pg-cfg (pth/get-container-config *container*)
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+                     (update :db/postgres merge pg-cfg))
           system (ig/init config [:db/schema :db/postgres :db/versioned])]
       (try
         (is (some? (:db/schema system)))
@@ -115,9 +126,9 @@
 
 (deftest full-system-lifecycle-test
   (testing "Full system starts and stops correctly"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+    (let [pg-cfg (pth/get-container-config *container*)
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+                     (update :db/postgres merge pg-cfg))
           system (ig/init config)]
       (try
         ;; Verify all components are initialized
@@ -133,9 +144,8 @@
 
 (deftest start-with-overrides-test
   (testing "start-with-overrides! merges config correctly"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
-          system (sys/start-with-overrides! :test
-                                            {:db/postgres {:jdbc-url jdbc-url}})]
+    (let [system (sys/start-with-overrides! :test
+                                            {:db/postgres (pth/get-container-config *container*)})]
       (try
         (is (some? (:db/schema system)))
         (is (some? (:db/postgres system)))
@@ -146,9 +156,9 @@
 
 (deftest system-component-values-test
   (testing "Initialized components have correct types"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+    (let [pg-cfg (pth/get-container-config *container*)
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+                     (update :db/postgres merge pg-cfg))
           system (ig/init config)]
       (try
         ;; Schema is a DataSchema
@@ -192,42 +202,33 @@
 ;; =============================================================================
 
 (deftest executor-runtime-start-stop-test
-  (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
-        original-read-config sys/read-config]
-    ;; Override config to use test container
-    (with-redefs [sys/read-config (fn [profile]
-                                    (-> (original-read-config profile)
-                                        (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
-      (testing "start! returns running system"
-        (let [system (rt/start! :test)]
-          (try
-            (is (map? system))
-            (is (some? (:db/schema system)))
-            (is (some? (:db/postgres system)))
-            (is (some? (:db/versioned system)))
-            (finally
-              (rt/stop!)))))
+  (let [overrides {:db/postgres (pth/get-container-config *container*)}]
+    (testing "start! returns running system"
+      (let [system (rt/start! :test overrides)]
+        (try
+          (is (map? system))
+          (is (some? (:db/schema system)))
+          (is (some? (:db/postgres system)))
+          (is (some? (:db/versioned system)))
+          (finally
+            (rt/stop!)))))
 
-      (testing "stop! with no running system does nothing"
-        ;; stop! should not throw when nothing is running
-        (is (nil? (rt/stop!)))))))
+    (testing "stop! with no running system does nothing"
+      ;; stop! should not throw when nothing is running
+      (is (nil? (rt/stop!))))))
 
 
 (deftest executor-runtime-restart-test
-  (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
-        original-read-config sys/read-config]
-    (with-redefs [sys/read-config (fn [profile]
-                                    (-> (original-read-config profile)
-                                        (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
-      (testing "restart! stops and starts system"
-        (let [system1 (rt/start! :test)]
-          (try
-            (is (some? system1))
-            (let [system2 (rt/restart! :test)]
-              (is (some? system2))
-              (is (not= system1 system2)))
-            (finally
-              (rt/stop!))))))))
+  (let [overrides {:db/postgres (pth/get-container-config *container*)}]
+    (testing "restart! stops and starts system"
+      (let [system1 (rt/start! :test overrides)]
+        (try
+          (is (some? system1))
+          (let [system2 (rt/restart! :test overrides)]
+            (is (some? system2))
+            (is (not= system1 system2)))
+          (finally
+            (rt/stop!)))))))
 
 
 ;; =============================================================================
@@ -245,9 +246,9 @@
           (ig/halt! system)))))
 
   (testing "suspend! with multiple components"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+    (let [pg-cfg (pth/get-container-config *container*)
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+                     (update :db/postgres merge pg-cfg))
           system (ig/init config [:db/schema :db/postgres :db/versioned])]
       (try
         (is (some? (:db/versioned system)))
@@ -276,9 +277,9 @@
 
 (deftest exec-base-fns-init-test
   (testing ":exec/base-fns returns :registered"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+    (let [pg-cfg (pth/get-container-config *container*)
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+                     (update :db/postgres merge pg-cfg))
           system (ig/init config [:db/schema :db/postgres :db/versioned :exec/base-fns])]
       (try
         (is (= :registered (:status (:exec/base-fns system))))
@@ -288,9 +289,9 @@
 
 (deftest exec-context-init-test
   (testing ":exec/context creates context with the slim field set"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+    (let [pg-cfg (pth/get-container-config *container*)
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+                     (update :db/postgres merge pg-cfg))
           system (ig/init config [:db/schema :db/postgres :db/versioned :exec/context])]
       (try
         (let [ctx (:exec/context system)]
@@ -309,23 +310,26 @@
 
 (deftest resume-system-test
   (testing "resume! restarts system after suspend"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
-          original-read-config sys/read-config]
-      (with-redefs [sys/read-config (fn [profile]
-                                      (-> (original-read-config profile)
-                                          (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
-        (let [system (sys/start! :test [:db/schema :db/postgres :db/versioned])]
+    (let [overrides {:db/postgres (pth/get-container-config *container*)}
+          system (sys/start-with-overrides!
+                   :test
+                   [:db/schema :db/postgres :db/versioned]
+                   overrides)]
+      (try
+        (is (some? (:db/schema system)))
+        (sys/suspend! system)
+        ;; `resume!` re-reads the profile config from disk so it needs
+        ;; the same DB override. Pass an inline merged-config form.
+        (let [config (reduce-kv (fn [c k v] (update c k merge v))
+                                (sys/read-config :test)
+                                overrides)
+              resumed (ig/resume config system)]
           (try
-            (is (some? (:db/schema system)))
-            (sys/suspend! system)
-            (let [resumed (sys/resume! system :test)]
-              (try
-                (is (some? (:db/schema resumed)))
-                (finally
-                  (sys/stop! resumed))))
+            (is (some? (:db/schema resumed)))
             (finally
-              ;; Ensure cleanup happens
-              (try (sys/stop! system) (catch Exception _)))))))))
+              (sys/stop! resumed))))
+        (finally
+          (try (sys/stop! system) (catch Exception _)))))))
 
 
 ;; =============================================================================
@@ -351,14 +355,16 @@
 ;; =============================================================================
 
 (deftest start-default-profile-test
-  (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+  (let [pg-cfg (pth/get-container-config *container*)
         original-read-config sys/read-config
         profile-used (atom nil)]
-    ;; Override to track which profile is used and inject test container URL
-    (with-redefs [sys/read-config (fn [profile]
-                                    (reset! profile-used profile)
-                                    (-> (original-read-config :test)
-                                        (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
+    ;; `binding` instead of `with-redefs` so the parallel kaocha
+    ;; runner doesn't race on `sys/read-config`'s root binding —
+    ;; this Var carries `^:dynamic`, the rebind is thread-local.
+    (binding [sys/read-config (fn [profile]
+                                (reset! profile-used profile)
+                                (-> (original-read-config :test)
+                                    (update :db/postgres merge pg-cfg)))]
       (testing "start! with no args uses :prod profile"
         (let [system (rt/start!)]
           (try
@@ -369,14 +375,15 @@
 
 
 (deftest restart-default-profile-test
-  (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
+  (let [pg-cfg (pth/get-container-config *container*)
         original-read-config sys/read-config
         profiles-used (atom [])]
-    ;; Override to track which profiles are used
-    (with-redefs [sys/read-config (fn [profile]
-                                    (swap! profiles-used conj profile)
-                                    (-> (original-read-config :test)
-                                        (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
+    ;; Same `binding`-not-`with-redefs` reasoning as
+    ;; start-default-profile-test above.
+    (binding [sys/read-config (fn [profile]
+                                (swap! profiles-used conj profile)
+                                (-> (original-read-config :test)
+                                    (update :db/postgres merge pg-cfg)))]
       (testing "restart! with no args uses :prod profile"
         ;; First start with :test
         (rt/start! :test)
@@ -406,14 +413,9 @@
 
 (deftest stop-returns-nil-test
   (testing "stop! returns nil when system is stopped"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
-          original-read-config sys/read-config]
-      (with-redefs [sys/read-config (fn [profile]
-                                      (-> (original-read-config profile)
-                                          (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
-        (rt/start! :test)
-        (let [result (rt/stop!)]
-          (is (nil? result)))))))
+    (rt/start! :test {:db/postgres (pth/get-container-config *container*)})
+    (let [result (rt/stop!)]
+      (is (nil? result)))))
 
 
 ;; =============================================================================
@@ -429,11 +431,15 @@
     (let [profile-used (atom nil)
           hook-installed? (atom false)
           blocked? (atom false)]
-      (with-redefs [rt/start! (fn
-                                ([] (reset! profile-used :no-arg))
-                                ([p] (reset! profile-used p)))
-                    rt/install-shutdown-hook! (fn [] (reset! hook-installed? true))
-                    rt/block-forever! (fn [] (reset! blocked? true))]
+      ;; `binding` instead of `with-redefs` — these lifecycle Vars are
+      ;; ^:dynamic so the parallel kaocha runner doesn't race on the
+      ;; root binding (sibling NS executor_runtime.interface-test
+      ;; rebinds the same names).
+      (binding [rt/start! (fn
+                            ([] (reset! profile-used :no-arg))
+                            ([p] (reset! profile-used p)))
+                rt/install-shutdown-hook! (fn [] (reset! hook-installed? true))
+                rt/block-forever! (fn [] (reset! blocked? true))]
         (rt/-main "ignored")
         (is (= :prod @profile-used) "-main starts with :prod profile")
         (is @hook-installed? "shutdown hook installed")

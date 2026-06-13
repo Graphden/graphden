@@ -1,9 +1,10 @@
 // Editor Secrets — admin Secrets-panel CRUD.
 //
 // A secret in graphden is a normal fn-def with
-// `parent-ids = [:vault-get]` and one binding for `:path`. The
-// secret VALUE never touches graphden's DB — it lives in OpenBao and
-// is read by `:vault-get` at execution-time.
+// `parent-ids = [:secret-leaf]` and one binding for `:in` carrying
+// `:override-kind :secret-path`. The secret VALUE never touches
+// graphden's DB — it lives in OpenBao and the executor auto-derefs
+// the path at arg-resolution time.
 //
 // This module:
 //   • fetches GET /api/secrets and renders a sidebar section,
@@ -21,38 +22,39 @@
 // SHAPE DETECTION
 // ============================================================================
 
-// Cache both base-fn ids once per graph load — UUIDs are
+// Cache the secret-leaf base-fn id once per graph load — UUIDs are
 // content-addressed and stable across branches.
-let _cachedSecretBaseIds = null;
-let _cachedSecretBaseIdsGraph = null;
+let _cachedSecretLeafId = null;
+let _cachedSecretLeafIdGraph = null;
 
-function getSecretBaseFnIds() {
-  if (_cachedSecretBaseIdsGraph === graphData && _cachedSecretBaseIds !== null) {
-    return _cachedSecretBaseIds;
+function getSecretLeafFnId() {
+  if (_cachedSecretLeafIdGraph === graphData && _cachedSecretLeafId !== null) {
+    return _cachedSecretLeafId;
   }
-  _cachedSecretBaseIdsGraph = graphData;
-  _cachedSecretBaseIds = { vaultGetId: null, secretLeafId: null };
-  if (!graphData?.fns) return _cachedSecretBaseIds;
+  _cachedSecretLeafIdGraph = graphData;
+  _cachedSecretLeafId = null;
+  if (!graphData?.fns) return null;
   for (const fn of graphData.fns) {
     const parents = fn['parent-ids'] || [];
     if (parents.length !== 0) continue;
-    if (fn.name === 'vault-get')   _cachedSecretBaseIds.vaultGetId   = fn.id;
-    if (fn.name === 'secret-leaf') _cachedSecretBaseIds.secretLeafId = fn.id;
+    if (fn.name === 'secret-leaf') {
+      _cachedSecretLeafId = fn.id;
+      break;
+    }
   }
-  return _cachedSecretBaseIds;
+  return _cachedSecretLeafId;
 }
 
 // `fn` is a secret-shaped fn-def iff its parents are exactly
-// `[:vault-get]` (legacy) OR `[:secret-leaf]` (Followup-4).
-// Used by the sidebar (🔒 badge), row-actions (override Delete to
-// call /api/secrets), and the fn-overlay (Rotate affordance).
+// `[:secret-leaf]`. Used by the sidebar (🔒 badge), row-actions
+// (override Delete to call /api/secrets), and the fn-overlay
+// (Rotate affordance).
 function isSecretFn(fn) {
   if (!fn) return false;
-  const { vaultGetId, secretLeafId } = getSecretBaseFnIds();
-  if (!vaultGetId && !secretLeafId) return false;
+  const secretLeafId = getSecretLeafFnId();
+  if (!secretLeafId) return false;
   const parents = fn['parent-ids'] || [];
-  if (parents.length !== 1) return false;
-  return parents[0] === vaultGetId || parents[0] === secretLeafId;
+  return parents.length === 1 && parents[0] === secretLeafId;
 }
 
 
@@ -73,13 +75,22 @@ async function loadSecrets() {
   try {
     const r = await authFetch('/api/secrets');
     if (!r.ok) {
+      // 401 is the common case (anonymous visitor); keep that quiet.
+      // Other statuses indicate a real backend problem we should
+      // surface in DevTools for triage.
+      if (r.status !== 401) {
+        // eslint-disable-next-line no-console
+        console.error('list-secrets HTTP', r.status, r.statusText);
+      }
       _secretsList = [];
       _secretsLoaded = true;
       return _secretsList;
     }
     const data = await r.json();
     _secretsList = data.ok ? (data.secrets || []) : [];
-  } catch (_) {
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('list-secrets fetch threw', err);
     _secretsList = [];
   }
   _secretsLoaded = true;

@@ -620,7 +620,7 @@ function renderInlineExpansionInto(host, rich, path, ctx) {
 
 async function promptRenameFnTypeArg(fnId, currentFnType, oldArgName) {
   const newName = prompt('Rename `' + oldArgName + '` to:', oldArgName);
-  if (!newName || !newName.trim() || newName.trim() === oldArgName) return;
+  if (!newName?.trim() || newName.trim() === oldArgName) return;
   const trimmed = newName.trim();
   // Rebuild the constraint vector with the arg map's key renamed.
   // currentFnType is the rich shape `["fn", {arg: type, …}, ret, eff?]`;
@@ -664,7 +664,7 @@ function appendPromoteAnonymousButton(host, fnId) {
   btn.addEventListener('click', async (ev) => {
     ev.stopPropagation();
     const name = prompt('Name for this type (lowercase-with-hyphens):');
-    if (!name || !name.trim()) return;
+    if (!name?.trim()) return;
     const trimmed = name.trim();
     try {
       const r = await authMutate('PUT',
@@ -731,7 +731,7 @@ function appendTypeUsagesSection(host, typeName) {
     };
     for (const k of KIND_ORDER) {
       const group = byKind[k];
-      if (!group || !group.length) continue;
+      if (!group?.length) continue;
       for (const u of group) {
         const row = document.createElement('div');
         row.className = 'type-inline-usage-row';
@@ -780,14 +780,18 @@ function appendTypeUsagesSection(host, typeName) {
   })
     .then(r => r.ok ? r.json() : null)
     .then(d => {
-      if (!d || !d.ok) return;
+      if (!d?.ok) return;
       typeUsagesCache.set(typeName, d.usages || []);
       renderList(d.usages || []);
       if (typeof repositionAllInlineHosts === 'function') {
         repositionAllInlineHosts();
       }
     })
-    .catch(() => { /* leave the placeholder header */ });
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('/api/types/usages fetch failed', err);
+      // UI: leave the placeholder header (no usage data shown).
+    });
 }
 
 

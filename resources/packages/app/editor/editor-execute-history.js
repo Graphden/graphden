@@ -115,7 +115,7 @@ function buildHistoryRow(fnEntity, row, resultHostEl, onExpand) {
     head.appendChild(lock);
   }
 
-  // Followup-A4: audit-trail badge. Distinct from the tainted-result
+  // audit-trail badge. Distinct from the tainted-result
   // badge above: `:touched-secret?` fires whenever the fn's
   // rich-type touches `:secret` ANYWHERE (input OR return) AND the
   // run observed side-effects. `:sql-exec` with a secret password
@@ -184,7 +184,7 @@ function buildHistoryRow(fnEntity, row, resultHostEl, onExpand) {
 }
 
 
-// Followup-A4: when at least one row in the panel has the audit
+// when at least one row in the panel has the audit
 // flag, surface a filter chip at the top so an admin can quickly
 // page just the audit-relevant rows.
 function buildAuditFilterChip(panel, rows) {

@@ -14,7 +14,7 @@
 // would create a cycle.
 function wouldCycle(fnId, candidateParentId, _lookups) {
   const lk = _lookups || (typeof lookups !== 'undefined' ? lookups : null);
-  if (!lk || !lk.fnMap) return { ok: false, reason: 'lookups unavailable' };
+  if (!lk?.fnMap) return { ok: false, reason: 'lookups unavailable' };
   if (fnId === candidateParentId) {
     return { ok: false, reason: 'a fn cannot be its own parent' };
   }
@@ -45,7 +45,7 @@ function wouldCycle(fnId, candidateParentId, _lookups) {
 // wouldn't know which value to forward).
 function miCollisionCheck(parentIds, _lookups) {
   const lk = _lookups || (typeof lookups !== 'undefined' ? lookups : null);
-  if (!lk || !lk.fnMap || !lk.fnSlotsByFn || !lk.slotMap) {
+  if (!lk?.fnMap || !lk.fnSlotsByFn || !lk.slotMap) {
     return { ok: false, reason: 'lookups unavailable' };
   }
   if (!parentIds || parentIds.length < 2) return { ok: true };

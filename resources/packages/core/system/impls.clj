@@ -8,6 +8,8 @@
    `{:impl … :return-type-rule …}`."
   (:require
     [cheshire.core :as json]
+    [clojure.java.io :as io]
+    [clojure.string :as str]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.types.core :as types])
@@ -38,12 +40,23 @@
 
 ;; === System Information ===
 
-(defbase jvm-version []
+(defbase system-property-fn
+  "`(System/getProperty name)` — JVM system property, nil if unset.
+   Counterpart to `:env` (environment variables): both read a single
+   process-scoped key/value, both are pure-ish reads under the `:env`
+   effect tag. Use for `java.vm.name`, `java.version`, `user.dir`, etc."
+  [name]
+  (cr/record-effect! :env)
+  (System/getProperty name))
+
+
+(defbase jvm-uptime-ms-fn
+  "`(.getUptime (ManagementFactory/getRuntimeMXBean))` — ms since JVM
+   startup. Single library call so admins can build their own JVM-info
+   shape via `:zipmap` without an opaque all-in-one `:jvm-version` impl."
+  []
   (cr/record-effect! :io)
-  (let [runtime-bean (ManagementFactory/getRuntimeMXBean)]
-    {:name (System/getProperty "java.vm.name")
-     :version (System/getProperty "java.version")
-     :uptime-ms (RuntimeMXBean/.getUptime runtime-bean)}))
+  (RuntimeMXBean/.getUptime (ManagementFactory/getRuntimeMXBean)))
 
 
 (defbase heap-memory []
@@ -59,10 +72,12 @@
 
 
 (defbase thread-count []
+  (cr/record-effect! :io)
   (Thread/activeCount))
 
 
 (defbase os-info []
+  (cr/record-effect! :io)
   (let [os-bean (ManagementFactory/getOperatingSystemMXBean)]
     {:name (OperatingSystemMXBean/.getName os-bean)
      :arch (OperatingSystemMXBean/.getArch os-bean)
@@ -101,8 +116,8 @@
    the path is missing."
   [path]
   (cr/record-effect! :io)
-  (when-let [r (clojure.java.io/resource path)]
-    (clojure.core/slurp r)))
+  (when-let [r (io/resource path)]
+    (slurp r)))
 
 
 (defbase invoke-fn
@@ -123,6 +138,24 @@
   (func))
 
 
+(defbase try-fn
+  "Run `body` (a 0-arg HOF callable) and return its result. If body
+   throws, invoke `on-throw` with the caught Exception and return its
+   result instead. Pairs with `:atom` + `:swap-conj` to express
+   journalled-write transactions at the graph level (see
+   `:_update-record-type-apply` for the canonical use).
+
+   `Throwable` deliberately NOT caught — OOM / `InterruptedException` /
+   `LinkageError` etc. must propagate; graph-level try-catch is for
+   recoverable exceptions only, same convention as Clojure `try`'s
+   typical `catch Exception` shape."
+  [body on-throw]
+  (try
+    (body)
+    (catch Exception e
+      (on-throw e))))
+
+
 (defbase slurp-fn [input]
   (when (instance? java.io.InputStream input)
     (cr/record-effect! :io)
@@ -136,8 +169,35 @@
 (defbase sha256-hex-fn [s]
   (when s
     (let [md (java.security.MessageDigest/getInstance "SHA-256")
-          bs (.digest md (.getBytes ^String s "UTF-8"))]
-      (apply str (map #(format "%02x" (bit-and ^byte % 0xff)) bs)))))
+          bs (java.security.MessageDigest/.digest
+               md (String/.getBytes ^String s "UTF-8"))]
+      (str/join (map #(format "%02x" (bit-and ^byte % 0xff)) bs)))))
+
+
+(defbase throwable-message-fn [ex]
+  (when ex (Throwable/.getMessage ex)))
+
+
+(defbase throwable-class-name-fn [ex]
+  (when ex (Class/.getName (Object/.getClass ex))))
+
+
+(defbase ex-data-fn
+  "`(ex-data ex)` — structured payload of an ex-info exception
+   (`{:type … …}`), or nil for plain exceptions / nil input."
+  [ex]
+  (when ex (ex-data ex)))
+
+
+(defbase parse-uuid-fn
+  "Parse `:s` as a UUID. Returns nil for non-string / blank / malformed
+   input — every failure mode collapses to nil so graph callers don't
+   need a try/catch wrapper. Defensive boundary mirroring
+   `crud.request/parse-uuid-or-clear`."
+  [s]
+  (when (and (string? s) (not (str/blank? s)))
+    (try (java.util.UUID/fromString s)
+         (catch IllegalArgumentException _ nil))))
 
 
 ;; === Type-rules ===
@@ -166,16 +226,17 @@
 ;; (`:to-json-string`, `:parse-json`, `:parse-int`, `:sha256-hex`,
 ;; `:slurp`, `:ex-info`, `:throw`, `:invoke`, `:call`, `:call-noargs`)
 ;; potentially expose a secret in their result and must propagate;
-;; pure environment readers (`:jvm-version`, `:heap-memory`,
-;; `:thread-count`, `:os-info`, `:current-time-ms`, `:env`,
-;; `:read-resource-or-nil`) take no user input so taint can't enter
-;; through them — left bare. `:sha256-hex` deserves special note:
+;; pure environment readers (`:system-property`, `:jvm-uptime-ms`,
+;; `:heap-memory`, `:thread-count`, `:os-info`, `:current-time-ms`,
+;; `:env`, `:read-resource-or-nil`) take no user input so taint can't
+;; enter through them — left bare. `:sha256-hex` deserves special note:
 ;; even a HASH of a secret leaks the value (rainbow tables, length
 ;; oracles), so the propagator is mandatory here.
 (def impls
   {:to-json-string {:impl to-json-string :return-type-rule (types/wrap-with-taint nil)}
    :parse-json {:impl parse-json :return-type-rule (types/wrap-with-taint nil)}
-   :jvm-version jvm-version
+   :system-property system-property-fn
+   :jvm-uptime-ms jvm-uptime-ms-fn
    :heap-memory heap-memory
    :thread-count thread-count
    :os-info os-info
@@ -187,6 +248,11 @@
    :invoke {:impl invoke-fn :return-type-rule (types/wrap-with-taint invoke-return-rule)}
    :call {:impl invoke-fn :return-type-rule (types/wrap-with-taint nil)}
    :call-noargs {:impl call-noargs-fn :return-type-rule (types/wrap-with-taint nil)}
+   :try {:impl try-fn :return-type-rule (types/wrap-with-taint nil)}
    :slurp {:impl slurp-fn :return-type-rule (types/wrap-with-taint nil)}
    :parse-int {:impl parse-int :return-type-rule (types/wrap-with-taint nil)}
-   :sha256-hex {:impl sha256-hex-fn :return-type-rule (types/wrap-with-taint nil)}})
+   :sha256-hex {:impl sha256-hex-fn :return-type-rule (types/wrap-with-taint nil)}
+   :throwable-message {:impl throwable-message-fn :return-type-rule (types/wrap-with-taint nil)}
+   :throwable-class-name {:impl throwable-class-name-fn :return-type-rule (types/wrap-with-taint nil)}
+   :ex-data {:impl ex-data-fn :return-type-rule (types/wrap-with-taint nil)}
+   :parse-uuid {:impl parse-uuid-fn :return-type-rule (types/wrap-with-taint nil)}})

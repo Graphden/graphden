@@ -13,31 +13,6 @@
 
 ;; === Type compatibility ===
 
-(def type-mappings
-  "Complete type mapping reference for all storage backends.
-   See graphden.schema.fields.types/type-mappings for details."
-  ft/type-mappings)
-
-
-(def type-widening
-  "Map of type→set of types it can safely widen to.
-   See graphden.schema.fields.types/type-widening for details."
-  ft/type-widening)
-
-
-(def type-equivalents
-  "Types that are equivalent (stored the same way in storage).
-   See graphden.schema.fields.types/type-equivalents for details."
-  ft/type-equivalents)
-
-
-(defn types-equivalent?
-  "Returns true if two types are equivalent (stored the same way).
-   Delegates to graphden.schema.fields.types/types-equivalent?."
-  [t1 t2]
-  (ft/types-equivalent? t1 t2))
-
-
 (defn safe-type-change?
   "Returns true if changing from old-type to new-type is safe.
    Safe changes are: same type, equivalent types, or widening to a more general type.
@@ -57,8 +32,8 @@
    requiring DBA review for production migrations."
   [old-type new-type]
   (or (= old-type new-type)
-      (types-equivalent? old-type new-type)
-      (contains? (get type-widening old-type #{}) new-type)))
+      (ft/types-equivalent? old-type new-type)
+      (contains? (get ft/type-widening old-type #{}) new-type)))
 
 
 (defn safe-nullable-change?

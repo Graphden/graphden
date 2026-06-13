@@ -105,4 +105,4 @@ peeling layers.
 
 ## Next
 
-[Lesson 02 — Parents and inheritance](02-parents.md) (planned)
+Lesson 02 — Parents and inheritance (planned — see [tutorial/README.md](README.md))

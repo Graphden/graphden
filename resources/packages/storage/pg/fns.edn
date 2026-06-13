@@ -1,0 +1,201 @@
+;; Application-level Postgres base-fns.
+;;
+;; These reuse graphden's own pooled datasource — for connecting to
+;; ARBITRARY databases with per-call creds use `web/sql` instead.
+;;
+;; SQL is built from HoneySQL maps (see https://github.com/seancorfield/honeysql)
+;; to keep the surface declarative and parameterised by default —
+;; users do not concatenate SQL strings.
+
+{:namespace "storage.pg"
+ :description "Application-level Postgres access against the pooled datasource backing graphden itself, using HoneySQL maps."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; :pg-query — SELECT-shape HoneySQL → list of row-maps.
+  ;;
+  ;; Each row arrives as `{:column value}` (next.jdbc's
+  ;; `as-unqualified-maps`: lower-snake-case keys, no table-qualifier
+  ;; prefix). For consumers that want JSON shapes, `:jsonb` per item
+  ;; is the right downstream type.
+  ;; ---------------------------------------------------------------------
+  {:name :pg-query
+   :description "Run a SELECT-shape HoneySQL map against graphden's own datasource and return rows. Each row is `{:column value}` with unqualified, lower-snake-case column keys."
+   :args {:hsql {:type :jsonb
+                 :description "HoneySQL map, e.g. `{:select [:id :name] :from :users :where [:= :id ?]}`. See honeysql docs for the full vocabulary."}}
+   :return-type [:list :jsonb]
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :pg-execute — mutation HoneySQL → affected row count (long).
+  ;;
+  ;; INSERT / UPDATE / DELETE / DDL all funnel through here. DDL
+  ;; reports 0; DML reports `next.jdbc/update-count` flattened to a
+  ;; plain int so downstream `:if` / `:>` can branch on it without
+  ;; record-shape acrobatics.
+  ;; ---------------------------------------------------------------------
+  {:name :pg-execute
+   :description "Run a mutation-shape HoneySQL map (INSERT / UPDATE / DELETE / DDL) against graphden's own datasource and return the affected row count (0 for DDL)."
+   :args {:hsql {:type :jsonb
+                 :description "HoneySQL map describing the mutation."}}
+   :return-type :int
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :pg-tx — run a body callable inside a JDBC transaction.
+  ;;
+  ;; `body` is a 0-arg fn-graph that does any number of :pg-query /
+  ;; :pg-execute calls. They all run on the same connection inside a
+  ;; BEGIN / COMMIT, with rollback on throw. The return value of the
+  ;; transaction is the return value of `body`'s last computation.
+  ;;
+  ;; Nested :pg-tx reuses the outer transaction (JDBC has no true
+  ;; nesting); the inner block commits / rolls back with the outer.
+  ;; ---------------------------------------------------------------------
+  {:name :pg-tx
+   :description "Run a body inside a JDBC transaction against graphden's own datasource. All nested :pg-query / :pg-execute calls atomically share one connection; rollback on throw."
+   :args {:body {:type [:fn {} :any]
+                 :description "0-arg fn-graph executed inside the transaction. Its return value is returned by :pg-tx."}}
+   :return-type :any
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :decode-row — raw JDBC row → graphden's canonical entity shape.
+  ;;
+  ;; `:pg-query` returns rows in their RAW shape — snake_case column
+  ;; keys (`fn_id`, `restart_policy`), enum strings (`"always"`), jsonb
+  ;; PGobjects, and timestamps as JDBC strings. graphden's downstream
+  ;; consumers expect the decoded shape: kebab-case kw keys (`:fn-id`,
+  ;; `:restart-policy`), enum kw values (`:always`), Clojure data for
+  ;; jsonb, `Instant` for timestamps.
+  ;;
+  ;; `:decode-row` does this transformation in graph form — single
+  ;; row only; consumers compose `:map :func :decode-row :coll
+  ;; <pg-query result>` for batches. Looks up the entity's field-specs
+  ;; via storage-protocol introspection (`current-fields`) so no
+  ;; storage-backend internals leak into the graph layer.
+  ;; ---------------------------------------------------------------------
+  {:name :decode-row
+   :description "Decode one raw next.jdbc row into graphden's canonical entity shape (snake_case → kebab-case kw, enum strings → keywords, jsonb PGobjects → Clojure data, etc.). Field metadata is fetched per `entity-type`."
+   :args {:row {:type :jsonb
+                :description "Raw row map from `:pg-query` — snake_case column keys with undecoded values."}
+          :entity-type {:type :text
+                        :description "Entity table name (e.g. `\"service\"`, `\"fn\"`). Used to look up field-specs for decoding."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :pg-notify — emit `pg_notify` event for cross-pod sync.
+  ;;
+  ;; Sibling pods LISTEN on `graphden_events`; mutations on one pod
+  ;; (e.g. an admin toggles a `:service` row on pod A) propagate to
+  ;; the others within ~1s. The reconciler / compiled-registry
+  ;; consume kind-specific payloads (`{:kind :service :op :write
+  ;; :id "uuid-..."}` for services; `{:kind :fn :op :invalidate
+  ;; :id "uuid-..."}` for fn-graph changes) — graph composition picks
+  ;; the right shape per write site.
+  ;;
+  ;; Best-effort: a NOTIFY failure is logged but doesn't throw —
+  ;; sibling pods catch up at the next mutation cycle.
+  ;; ---------------------------------------------------------------------
+  {:name :pg-notify
+   :description "Emit a `pg_notify` event on `graphden_events` so sibling pods react to a local write. `:event` shape varies by kind — see system/core.clj LISTEN callbacks for the consumer contract. Best-effort: failures are logged but don't throw."
+   :args {:event {:type :jsonb
+                  :description "Event payload. Standard shapes: `{:kind :fn :op :invalidate :id <uuid-str>}` (fn-graph mutation), `{:kind :service :op :write|:delete :id <uuid-str>}` (service row)."}}
+   :return-type :null
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :storage-query-identities — base-storage `query-entities` (versioning bypass).
+  ;;
+  ;; For VERSIONED entities (`:fn` / `:fn-slot` / `:binding` /
+  ;; `:binding-list-item`) the wrapping VersionedStorage intercepts
+  ;; `query-entities` and routes it through `resolve-all-entities`,
+  ;; merging identity + version rows on the current branch. That's
+  ;; what `:list-entities` does today. To express versioned reads as
+  ;; pure graph composition (Block 1 Step 2 Phase 3) we need to load
+  ;; identity rows DIRECTLY — without version resolution — and run
+  ;; the merge in graph form via `:resolve-versioned-rows`.
+  ;;
+  ;; This primitive unwraps the VersionedStorage wrapper and calls
+  ;; `sp/query-entities` against the base storage. The result is
+  ;; codec-decoded and has `:ref-many` fields (e.g. `:fn`'s
+  ;; `:parent-ids`) populated from junction tables — which a raw
+  ;; `:pg-query` would NOT include. For non-versioned entities,
+  ;; prefer `:pg-query` + `:decode-row` since the SQL stays explicit
+  ;; at the graph level.
+  ;; ---------------------------------------------------------------------
+  {:name :storage-query-identities
+   :description "Query identity rows of an entity DIRECTLY against base storage (bypassing VersionedStorage). Returns codec-decoded rows with `:ref-many` fields populated from junction tables. Use as the identity-load input to `:resolve-versioned-rows`."
+   :args {:entity-type {:type :text
+                        :description "Entity table name, e.g. `\"fn\"`, `\"binding\"`."}
+          :where {:type :jsonb
+                  :description "Equality-map (`{:column value}` or `{:column [v1 v2 …]}` for IN). Empty / nil → full scan."}}
+   :return-type [:list :jsonb]
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :invalidate-graph-cache — drop executor caches after a write.
+  ;;
+  ;; Every fn-graph write site (`_create-apply`, `_update-apply`,
+  ;; `_delete-apply`, plus the secret + branch + type-row variants)
+  ;; calls `invalidate-graph-cache!` after a successful mutation so
+  ;; subsequent reads see the new state. Exposing this as a primitive
+  ;; lets writes that decompose into graph composition (Block 1 Step 2
+  ;; Phase 4) bind the invalidate as a regular composition step.
+  ;; ---------------------------------------------------------------------
+  {:name :invalidate-graph-cache
+   :description "Drop derived caches on the executor context. `seeds` empty / nil → full clear; non-empty → delta invalidate just those fn-ids + transitive dependents. Standard final step of any fn-graph write."
+   :args {:seeds {:type [:list :uuid]
+                  :description "fn-ids whose closure should be invalidated. Empty / nil performs a full clear."
+                  :required false}}
+   :return-type :null
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :invalidate-after-write — entity-type-aware cache invalidation.
+  ;;
+  ;; Derives the affected-fn-id seeds from `entity-type` + `entity-data`
+  ;; (`:fn` writes seed themselves, `:fn-slot` / `:binding` seed their
+  ;; owner fn-id, `:binding-list-item` reads the parent binding,
+  ;; other types fall through to a full clear) and invalidates.
+  ;; Use in write-site graph composition to keep the seed-shape case-
+  ;; dispatch in one place.
+  ;; ---------------------------------------------------------------------
+  {:name :invalidate-after-write
+   :description "Cache-invalidate after a write: derive affected-fn-ids from entity-type + entity-data, then invalidate. Use in write-site graph composition as the post-write effect step."
+   :args {:entity-type {:type :text :description "Entity table name, e.g. `\"fn\"`, `\"binding\"`."}
+          :entity-data {:type :jsonb
+                        :description "The just-written / about-to-be-deleted entity payload (incl. `:id` and any FKs needed for seed derivation)."}}
+   :return-type :null
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :notify-after-write — fire pg_notify event(s) describing the
+  ;; just-completed write so sibling pods react. Service writes get
+  ;; `{:kind :service :op <op> :id}`, fn-graph writes get one
+  ;; `{:kind :fn :op :invalidate :id <seed>}` per affected seed.
+  ;; ---------------------------------------------------------------------
+  {:name :notify-after-write
+   :description "Emit pg_notify events describing the write. Service: `{:kind :service :op <op> :id}`. Fn-graph entities: one `{:kind :fn :op :invalidate :id <seed>}` per affected seed."
+   :args {:entity-type {:type :text :description "Entity table name."}
+          :op {:type :text :description "CRUD op kind — `\"write\"` or `\"delete\"`."}
+          :entity-data {:type :jsonb
+                        :description "Entity payload — incl. `:id` and FKs for seed derivation."}}
+   :return-type :null
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; :postgres-storage-impl — first concrete realisation of :Storage.
+  ;;
+  ;; Parents to the type-row `:Storage` from storage.protocol; each
+  ;; :fn-typed slot is bound to the matching pg-* base-fn. Consumers
+  ;; bind this fn-def (or any other :Storage implementation) at the
+  ;; top of their chain to satisfy the storage protocol — see
+  ;; PHILOSOPHY § Self-Describing System → Protocols via type-row.
+  ;; ---------------------------------------------------------------------
+  {:name :postgres-storage-impl
+   :description "Storage protocol implementation backed by graphden's own pooled Postgres datasource. Inject at the top of a consumer chain to bind storage to the platform's own DB."
+   :parent :Storage
+   :args {:query   :pg-query
+          :execute :pg-execute
+          :tx      :pg-tx}}]}

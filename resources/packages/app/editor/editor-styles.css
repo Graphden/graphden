@@ -65,9 +65,9 @@
   --icon-pin-r-1: 6px;
   --icon-pin-r-2: 24px;
   --icon-pin-r-3: 42px;
-  /* r-4 carries the Delete (🗑) icon when the root fn-name row
-     surfaces all four actions inline (i / ✎ / + / 🗑). */
-  --icon-pin-r-4: 60px;
+  /* Monospace font stack — shared between the layout-affecting JS
+     pinning helpers (none yet) and editor's :code-shaped surfaces. */
+  --mono: ui-monospace, monospace;
   /* Status semantic colours — used by edit-form validation, picker
      compatibility hints, error tooltips. Same hue across themes so
      "green = ok / red = problem" is unambiguous. */
@@ -429,7 +429,6 @@ body.sidebar-collapsed .sidebar-expand-floating {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   min-width: 0;
 }
-.branch-row-meta-spacer { width: 16px; }
 .branch-row-actions {
   display: inline-flex; gap: 2px; align-items: center;
 }
@@ -513,7 +512,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
   font-size: 11px;
 }
 .fn-versions-ts {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
   font-size: 10px; color: var(--muted-fg);
   margin-left: auto;
 }
@@ -527,7 +526,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .fn-versions-restore:hover { background: var(--hover-bg); }
 .fn-versions-row-meta {
   font-size: 10px; color: var(--muted-fg);
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
   overflow-wrap: anywhere;
 }
 .fn-versions-row { cursor: pointer; }
@@ -560,7 +559,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .fn-versions-execs-row {
   display: flex; align-items: baseline; gap: 6px;
   font-size: 10px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
   padding: 2px 0;
 }
 .fn-versions-execs-status {
@@ -625,7 +624,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
   background: var(--hover-bg); padding: 1px 5px; border-radius: 2px;
 }
 .merge-conflict-id {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
   font-size: 10px; color: var(--muted-fg);
 }
 .merge-conflict-choice {
@@ -636,7 +635,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
   cursor: pointer; display: flex; gap: 6px; align-items: baseline;
 }
 .merge-conflict-choice code {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
   background: var(--hover-bg); padding: 0 3px; border-radius: 2px;
   color: var(--muted-fg); font-size: 10px;
 }
@@ -753,12 +752,12 @@ body.sidebar-collapsed .sidebar-expand-floating {
   background: var(--bg); padding: 1px 5px; border-radius: 2px;
 }
 .branch-diff-id {
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
   font-size: 10px; color: var(--muted-fg);
 }
 .branch-diff-row-summary {
   font-size: 11px;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
   overflow-wrap: anywhere;
 }
 .branch-diff-row-summary em {
@@ -1288,7 +1287,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
    message; mirrors what the backend would say on save. */
 .arg-value-edit-status {
   font-size: 11px; padding: 2px 0; min-height: 14px;
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--mono);
 }
 .arg-value-edit-status.ok  { color: var(--success-fg); }
 .arg-value-edit-status.err { color: var(--error-fg); }
@@ -1313,7 +1312,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
 /* Textarea control (long text / JSON) — user-resizable, monospace. */
 textarea.arg-value-edit-input {
   resize: vertical; min-height: 64px;
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--mono);
   line-height: 1.4;
 }
 /* Record / composite field grouping inside a value-form — a bordered
@@ -1344,7 +1343,7 @@ textarea.arg-value-edit-input {
 .value-form-widget-range { flex: 1; }
 .value-form-widget-readout {
   font-size: 11px; color: var(--muted-fg);
-  font-family: var(--mono, ui-monospace, monospace);
+  font-family: var(--mono);
   white-space: nowrap;
 }
 
@@ -2939,7 +2938,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
     --icon-pin-r-1: 4px;
     --icon-pin-r-2: 38px;
     --icon-pin-r-3: 72px;
-    --icon-pin-r-4: 106px;
   }
 
   /* Reveal hover-gated sidebar affordances unconditionally on touch.
@@ -3762,7 +3760,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   font-size: 11px;
 }
 
-/* Audit trail badge + filter (Followup-A4). Distinct from the
+/* Audit trail badge + filter. Distinct from the
    tainted-result badge above — fires when the fn touched a secret
    AND observed a side-effect, even if its return-type is plain. */
 

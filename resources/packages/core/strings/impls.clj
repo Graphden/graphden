@@ -123,7 +123,7 @@
   (str/trim string))
 
 
-(defbase str-split-fn [string separator]
+(defbase str-split-fn [string separator limit]
   (when (empty? separator)
     (throw (ex-info "separator cannot be empty"
                     {:type :execution-error/invalid-separator
@@ -136,7 +136,9 @@
                        :max-length max-input-len
                        :hint "Use streaming or chunked processing for large inputs"})))
     (let [pattern (safe-compile-regex separator)]
-      (vec (str/split string pattern)))))
+      (vec (if (and limit (pos? (long limit)))
+             (str/split string pattern (long limit))
+             (str/split string pattern))))))
 
 
 (defbase str-join-fn [coll separator]
@@ -145,6 +147,23 @@
 
 (defbase str-to-keyword-fn [string]
   (keyword string))
+
+
+(defn str-to-keyword-return-rule
+  "When the input is statically known to be non-null `:text`, the
+   result is non-null `:keyword`. The declared `[:union :null
+   :keyword]` only kicks in when the input genuinely admits nil
+   (the nullable `[:union :null :text]` slot type covers callers
+   like `:_qs-pair-k`). Narrowing here means a chain like
+   `:str-to-keyword :string {:as :request-method :type :text}`
+   surfaces as `:keyword` on the editor's type chip instead of the
+   broader nullable union."
+  [bindings-info default-ret]
+  (let [s-type (get-in bindings-info [:string :type])]
+    (cond
+      (= s-type :text)    :keyword
+      (= s-type :null)    :null
+      :else               default-ret)))
 
 
 (defbase keyword-to-str-fn [keyword]
@@ -165,20 +184,29 @@
   (str value))
 
 
-(defbase parse-query-string-fn
-  "Parses a URL query string or form-urlencoded body into a map.
-   Splits by & then = and URL-decodes values."
-  [string]
-  (when (and string (not (str/blank? string)))
-    (into {}
-          (for [pair (str/split string #"&")
-                :let [[k v] (str/split pair #"=" 2)]
-                :when k]
-            [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
+(defbase name-fn
+  "Clojure's `(name x)` — strip the leading `:` from a keyword or
+   return a string as-is. Used at boundaries that expect a bare
+   identifier text (entity-type slot names, SQL identifiers, etc.)
+   rather than `(str :kw)`'s `\":kw\"` form."
+  [value]
+  (cond
+    (string? value) value
+    (keyword? value) (name value)
+    (nil? value) nil
+    :else (str value)))
 
 
 (defbase blank?-fn [string]
   (str/blank? string))
+
+
+(defbase non-blank?-fn
+  "True iff `:string` is non-blank. Required-slot 1-arg companion to
+   `:blank?` so it can serve as a `:filter` / `:some` HOF predicate
+   (optional slots aren't bound as HOF lambda-params)."
+  [string]
+  (not (str/blank? string)))
 
 
 (defbase url-decode-fn [string]
@@ -197,6 +225,16 @@
   (when s (str/replace s match replacement)))
 
 
+(defbase re-find?-fn
+  "True iff the regex `pattern` matches somewhere inside `string`.
+   Returns false for nil / non-string `string`. Compiled regex is
+   cached behind the safe-compile boundary (size + complexity caps
+   shared with `:str-split`)."
+  [string pattern]
+  (boolean (and (string? string)
+                (re-find (safe-compile-regex pattern) string))))
+
+
 ;; === Registry ===
 
 (def impls
@@ -208,11 +246,10 @@
   ;; downstream type-check refuses to drop the marker.
   ;;
   ;; The handful of fns that genuinely DON'T pass content
-  ;; (`:keyword-to-str`'s input is a `:keyword`, never a text-secret;
-  ;; `:parse-query-string`'s output is a record-of-strings that COULD
-  ;; carry secrets if the URL did — we taint conservatively) are
-  ;; still annotated, since the propagator is a no-op for plain
-  ;; inputs.
+  ;; (`:keyword-to-str`'s input is a `:keyword`, never a text-secret)
+  ;; are still annotated, since the propagator is a no-op for plain
+  ;; inputs. `:parse-query-string` is now a pure graph composition
+  ;; — its taint flows through `:str-split` + `:url-decode`.
   {:str                {:impl str-fn                :return-type-rule taint}
    :subs               {:impl subs-fn               :return-type-rule taint}
    :str-len            {:impl str-len-fn            :return-type-rule taint}
@@ -221,13 +258,15 @@
    :str-trim           {:impl str-trim-fn           :return-type-rule taint}
    :str-split          {:impl str-split-fn          :return-type-rule taint}
    :str-join           {:impl str-join-fn           :return-type-rule taint}
-   :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule taint}
+   :str-to-keyword     {:impl str-to-keyword-fn     :return-type-rule (types/wrap-with-taint str-to-keyword-return-rule)}
    :keyword-to-str     {:impl keyword-to-str-fn     :return-type-rule taint}
    :pr-str             {:impl pr-str-fn             :return-type-rule taint}
    :to-str             {:impl to-str-fn             :return-type-rule taint}
-   :parse-query-string {:impl parse-query-string-fn :return-type-rule taint}
+   :name               {:impl name-fn               :return-type-rule taint}
    :blank?             {:impl blank?-fn             :return-type-rule taint}
+   :non-blank?         {:impl non-blank?-fn         :return-type-rule taint}
    :url-decode         {:impl url-decode-fn         :return-type-rule taint}
    :str-contains?      {:impl str-contains?-fn      :return-type-rule taint}
    :str-starts-with?   {:impl str-starts-with?-fn   :return-type-rule taint}
-   :str-replace        {:impl str-replace-fn        :return-type-rule taint}})
+   :str-replace        {:impl str-replace-fn        :return-type-rule taint}
+   :re-find?           {:impl re-find?-fn           :return-type-rule taint}})

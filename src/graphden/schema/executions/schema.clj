@@ -123,7 +123,7 @@
 
 
 (def ^:private fn-execution-touched-secret-field-uuid
-  ;; Followup-3 audit trail: true when the executed fn-def either
+  ;; Audit trail: true when the executed fn-def either
   ;; declared a `:secret`-typed slot OR computed a `:secret`-returning
   ;; signature. Set on rows whose `runtime-effects` is also non-empty
   ;; — that's the combination that means a secret was both consumed
@@ -263,7 +263,7 @@
                       :cancel-requested? {:uuid fn-execution-cancel-requested-field-uuid
                                           :type :bool
                                           :nullable? true}
-                      ;; Audit trail (Followup-3). True iff the
+                      ;; Audit trail. True iff the
                       ;; executed fn-def's rich-type carries the
                       ;; `:secret` marker on its return OR on any
                       ;; arg slot — combined with a non-empty

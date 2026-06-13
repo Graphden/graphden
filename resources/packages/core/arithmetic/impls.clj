@@ -125,9 +125,19 @@
   (if (= :int (nums-elem-type bindings-info)) :int default-ret))
 
 
-(defn add-return-rule [b d] (narrow-numeric-to-int b d))
-(defn sub-return-rule [b d] (narrow-numeric-to-int b d))
-(defn mul-return-rule [b d] (narrow-numeric-to-int b d))
+(defn add-return-rule
+  [b d]
+  (narrow-numeric-to-int b d))
+
+
+(defn sub-return-rule
+  [b d]
+  (narrow-numeric-to-int b d))
+
+
+(defn mul-return-rule
+  [b d]
+  (narrow-numeric-to-int b d))
 
 
 (defn mod-return-rule

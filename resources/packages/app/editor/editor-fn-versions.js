@@ -43,7 +43,7 @@ function closeFnVersionsPopover() {
 }
 
 async function showFnVersionsPopover(fnEntity, anchorEl) {
-  if (!fnEntity || !fnEntity.id) return;
+  if (!fnEntity?.id) return;
   const popover = ensureFnVersionsPopover();
   _fnVersionsAnchor = anchorEl;
   _fnVersionsFnId = fnEntity.id;

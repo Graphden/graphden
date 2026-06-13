@@ -39,9 +39,12 @@
    :return-type :text}
 
   {:name :str-split
-   :description "Split a string by separator (Clojure's `(str/split s (re-pattern separator))`). Separator is a regex."
+   :description "Split a string by separator (Clojure's `(str/split s (re-pattern separator) limit)`). Separator is a regex. Optional `:limit` caps the number of parts — handy for `key=value=more` style parsing where you want exactly 2 parts even if the value contains the separator."
    :args {:string {:type :text :description "String to split."}
-          :separator {:type :text :description "Regex pattern that delimits parts."}}
+          :separator {:type :text :description "Regex pattern that delimits parts."}
+          :limit {:type [:union :null :int]
+                  :required false
+                  :description "Maximum number of parts. Non-positive / nil → no limit (default)."}}
    :return-type [:list :text]}
 
   {:name :str-join
@@ -51,9 +54,9 @@
    :return-type :text}
 
   {:name :str-to-keyword
-   :description "Coerce a string into a keyword (Clojure's `keyword`)."
-   :args {:string {:type :text :description "String to convert."}}
-   :return-type :keyword}
+   :description "Coerce a string into a keyword (Clojure's `keyword`). Nil-safe — returns nil for nil input."
+   :args {:string {:type [:union :null :text] :description "String to convert (nil-safe)."}}
+   :return-type [:union :null :keyword]}
 
   {:name :keyword-to-str
    :description "Coerce a keyword into a string without the leading colon (Clojure's `name`)."
@@ -70,14 +73,82 @@
    :args {:value {:type a :description "Value to stringify."}}
    :return-type :text}
 
+  {:name :name
+   :description "Clojure's `(name x)` — strip the leading `:` from a keyword, return a string as-is. Differs from `:to-str` on keywords: `(name :foo)` returns `\"foo\"`, `(to-str :foo)` returns `\":foo\"`. Use at boundaries that expect bare identifier text (entity-type slot names, SQL identifiers, …)."
+   :args {:value {:type a :description "Keyword, string, or nil."}}
+   :return-type [:union :null :text]}
+
+  ;; ----------------------------------------------------------------
+  ;; :parse-query-string is now a pure graph composition over
+  ;; `:blank?` / `:str-split` (with the new `:limit` overload) /
+  ;; `:url-decode` / `:map` / `:into` / `:get` / `:vec`. The shape
+  ;; matches the previous impl's: blank input → nil, otherwise split
+  ;; on `&`, then on `=` with limit 2 so a value containing `=` keeps
+  ;; its trailing parts, URL-decode each value, fold into a map.
+  ;; ----------------------------------------------------------------
+  {:name :_qs-pairs-split
+   :description "Stage 1 — split the raw query string on `&`. Each element of the result is a `k=v` pair string."
+   :parent :str-split
+   :args {:string {:as :string}
+          :separator {:value "&"}}}
+
+  {:name :_qs-pair-split
+   :description "HOF helper — split a single `k=v` pair on `=` with limit 2 so a value that itself contains `=` keeps its trailing parts intact. Bound to the HOF `:item` from `:_qs-pairs-decoded`."
+   :parent :str-split
+   :args {:string {:as :item}
+          :separator {:value "="}
+          :limit {:value 2}}}
+
+  {:name :_qs-pair-k
+   :parent :get
+   :args {:coll :_qs-pair-split
+          :key {:value 0}
+          :default nil}}
+
+  {:name :_qs-pair-v
+   :parent :get
+   :args {:coll :_qs-pair-split
+          :key {:value 1}
+          :default {:value ""}}}
+
+  {:name :_qs-pair-v-decoded
+   :parent :url-decode
+   :args {:string :_qs-pair-v}}
+
+  {:name :_qs-decode-pair
+   :description "HOF callback per pair — return `[k url-decode(v|\"\")]` as a 2-vec so `:into {}` can fold it into the map."
+   :parent :vec
+   :args {:coll [:_qs-pair-k :_qs-pair-v-decoded]}}
+
+  {:name :_qs-pairs-decoded
+   :description "Map the per-pair decoder over every `k=v` split out of the raw string."
+   :parent :map
+   :args {:func :_qs-decode-pair
+          :coll :_qs-pairs-split}}
+
+  {:name :_qs-pairs-as-map
+   :description "Fold the decoded `[k v]` pairs into `{k v}`. Repeated keys collapse to last (Clojure `:into` over `{}`)."
+   :parent :into
+   :args {:to {:value {}}
+          :from :_qs-pairs-decoded}}
+
   {:name :parse-query-string
-   :description "Parse an HTTP query string into a `{key value}` map. Repeated keys collapse to last."
-   :args {:string {:type :text :description "Raw query string (without leading `?`)."}}
-   :return-type [:map :text :text]}
+   :description "Parse an HTTP query string into a `{key value}` map. Splits on `&` then on `=` (limit 2 so values containing `=` are preserved), URL-decodes each value. Blank / empty input → nil. Repeated keys collapse to last. Pure graph composition; admins can swap the separator / decoding rule without writing Clojure. Owns its `:string` free pin explicitly — value flows down to the inner blank? / split chain by name match."
+   :parent :if
+   :args {:test {:parent :blank? :args {:string {:as :string}}}
+          :then {:value nil}
+          :else :_qs-pairs-as-map
+          :string {:type :text
+                   :description "Raw HTTP query string (e.g. `\"a=1&b=2\"`)."}}}
 
   {:name :blank?
    :description "True iff the string is nil, empty, or contains only whitespace (Clojure's `clojure.string/blank?`)."
-   :args {:string {:type :text :required false :description "String to test (nil-safe)."}}
+   :args {:string {:type [:union :null :text] :required false :description "String to test (nil-safe)."}}
+   :return-type :bool}
+
+  {:name :non-blank?
+   :description "True iff the string is non-blank. Required-slot 1-arg companion to `:blank?` — graphden's HOF wrap treats `:required false` slots as 0-lambda-param (variadic-ignore), which would make `(filter :blank? coll)` keep every element instead of filtering. Use this when you need a blank-check as a `:filter` / `:some` predicate."
+   :args {:string {:type :text :description "String to test."}}
    :return-type :bool}
 
   {:name :url-decode
@@ -102,4 +173,10 @@
    :args {:s {:type :text :description "Source string."}
           :match {:type :text :description "Literal substring to find."}
           :replacement {:type :text :description "Replacement string."}}
-   :return-type :text}]}
+   :return-type :text}
+
+  {:name :re-find?
+   :description "True iff `:pattern` (a regex) matches somewhere inside `:string`. Returns false for nil / non-string input. Building block for refinement narrowers like `:ensure-url` and `:ensure-non-blank-text`."
+   :args {:string {:type :any :required false :description "String to search. Non-string / nil → false."}
+          :pattern {:type :text :description "Regex pattern (Java syntax)."}}
+   :return-type :bool}]}

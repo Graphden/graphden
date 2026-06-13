@@ -1,0 +1,34 @@
+;; Graph-level recursion primitive.
+;;
+;; The cycle constraints (per-binding + sync-time topological-sort)
+;; reject every self/mutual ref in the fn-graph. Without escape, a
+;; recursive fn-def is structurally impossible to write — admins
+;; either fall back to `exec/execute-by-name` from inside a base-fn
+;; impl (violates Code = Graph) or open-code the recursion in
+;; Clojure (defeats the editor / type-checker / layout).
+;;
+;; `:fix` provides the escape WITHOUT relaxing the cycle invariant
+;; — it synthesises a self-referential callable at runtime from a
+;; step fn that receives `:self` as a call-site arg. Recursion is
+;; expressed as: "step receives self + input; the body decides
+;; whether to recurse (`:invoke :func :self :arg <next>`) or
+;; terminate." No graph-level cycle is required; the recursive
+;; structure is created when `:fix`'s impl wires `:self` to the
+;; step's own invocation.
+;;
+;; Recursion depth is bounded by `*max-recursion-depth*` (default
+;; 1000; configurable per call via `binding`). A runaway step that
+;; never hits its base case throws `:recursion-error/max-depth-
+;; exceeded` instead of blowing the JVM stack.
+
+{:namespace "core.recursion"
+ :description "Graph-level recursion via Y-combinator-style :fix primitive — step fn receives :self as a call-site arg, depth-bounded by `*max-recursion-depth*`."
+ :fns
+ [{:name :fix
+   :description "Y-combinator-style recursion primitive. Invokes `:step` with `{:input <initial> :self <recursive-callable>}`; `:step` returns either a terminal value OR recurses by invoking `:self` with the next input (`:invoke :func :self :arg <next>`). Bounded by `*max-recursion-depth*` (default 1000)."
+   :args {:step {:type [:fn {:input :any :self [:fn {:arg :any} :any]} :any]
+                 :description "Step fn. Receives `:input` (the current iteration's value) and `:self` (a 1-arg callable that re-enters the step with a new input). MUST have a base case that does NOT invoke `:self`."}
+          :input {:type :any
+                  :description "Initial value passed to the first invocation of `:step`."}}
+   :return-type :any
+   :effects #{}}]}

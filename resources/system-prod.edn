@@ -13,9 +13,36 @@
  :db/versioned
  {:base-storage #ig/ref :db/postgres}
 
+ ;; Cross-process events: every executor pod LISTENs on
+ ;; `graphden_events` so that a mutation on one pod (e.g. an admin
+ ;; toggles a :service via /api/entities/service on pod A) is
+ ;; observed by all sibling pods within ~1s. The listener owns a
+ ;; dedicated PG connection — pool-bound connections aren't usable
+ ;; for LISTEN because the session must stay alive forever.
+ :db/notify-listener
+ {:pg-opts
+  {:jdbc-url #or [#env JDBC_URL "jdbc:postgresql://localhost:5432/graphden"]
+   :username #or [#env DB_USERNAME "graphden"]
+   :password #or [#env DB_PASSWORD "graphden"]}}
+
+ ;; Per-service ownership via Postgres session-scoped advisory locks.
+ ;; Owns a dedicated PG connection (pool connections aren't usable —
+ ;; advisory locks are session-scoped and a pool would lend the
+ ;; session to other callers). Reconciler tries to acquire the lock
+ ;; before starting each service; only the pod that wins runs it.
+ :db/service-locks
+ {:pg-opts
+  {:jdbc-url #or [#env JDBC_URL "jdbc:postgresql://localhost:5432/graphden"]
+   :username #or [#env DB_USERNAME "graphden"]
+   :password #or [#env DB_PASSWORD "graphden"]}}
+
  ;; Load packages from resources/packages/
+ ;; `examples` is dev/test-only per its package.edn description
+ ;; ("pedagogical fn-def examples — Load only in dev/test, never in
+ ;; prod"); it ships 174 pedagogical fn-defs that bloat the prod
+ ;; DB + namespace tree without serving any runtime feature.
  :app/packages
- {:package-names ["core" "web" "app" "examples"]}
+ {:package-names ["core" "storage" "web" "app"]}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned
@@ -36,7 +63,13 @@
 
  :exec/context
  {:storage #ig/ref :db/versioned
-  :vault-client #ig/ref :vault/client}
+  :vault-client #ig/ref :vault/client
+  ;; Raw PG storage for NOTIFY emission (the pool is on PostgresStorage).
+  ;; Emission is fire-and-forget — done on the main pool, not on the
+  ;; listener's dedicated connection.
+  :pg-storage #ig/ref :db/postgres
+  ;; ctx-scoped base-fns map (sidesteps the process-global registry).
+  :base-fns #ig/ref :exec/base-fns}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on
  ;; fn-entities so every composed fn is already in storage before we
@@ -54,13 +87,15 @@
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
 
- ;; Phase 1 service registry: reads :service rows on startup, starts
- ;; enabled ones. Falls back to packages' :startup-fn when no rows
- ;; exist (preserves the old single-web-server behaviour for fresh
- ;; deploys). See system/core.clj for the full lifecycle.
+ ;; Service registry: seeds packages' `:services` declarations into the
+ ;; `:service` table (idempotent — deterministic ids), then reads
+ ;; enabled rows and starts them under the supervisor. See
+ ;; system/core.clj for the full lifecycle.
  :exec/service-reconciler
  {:context #ig/ref :exec/context
   :packages #ig/ref :app/packages
+  :notify-listener #ig/ref :db/notify-listener
+  :service-locks #ig/ref :db/service-locks
   :_compiled-registry #ig/ref :exec/compiled-registry
   :_branch-router #ig/ref :exec/branch-router}
 

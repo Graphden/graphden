@@ -106,8 +106,7 @@ function renderDescriptionTooltip() {
   // Edit affordance only when (a) the tooltip is pinned (sticky) and
   // (b) we know which entity this is. Hover-mode tooltips skip the
   // button entirely so the read-only floating tip stays compact.
-  if (descriptionTooltipSticky
-      && content && content.entityType && content.entityId) {
+  if (descriptionTooltipSticky&& content?.entityType && content.entityId) {
     const editRow = document.createElement('div');
     editRow.style.marginTop = '6px';
     editRow.style.textAlign = 'right';
@@ -161,7 +160,7 @@ function positionDescriptionTooltipAt(el, clientX, clientY) {
 function enterDescriptionEditMode() {
   const el = descriptionTooltipEl;
   const content = descriptionTooltipContent;
-  if (!el || !content || !content.entityType || !content.entityId) return;
+  if (!el || !content?.entityType || !content.entityId) return;
   descriptionTooltipEditing = true;
   el.textContent = '';
   el.style.pointerEvents = 'auto';

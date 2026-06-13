@@ -1,4 +1,4 @@
-(ns graphden.storage.postgres.sql-errors-test
+(ns ^:serial graphden.storage.postgres.sql-errors-test
   "Tests for PostgreSQL storage SQL error handling.
 
    ## 2-Entity Schema

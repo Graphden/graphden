@@ -22,6 +22,7 @@
    Sits alongside `graphden.crud.type-check` in the crud.* layer."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
     [graphden.executor.interface :as executor]
@@ -202,7 +203,19 @@
                    [(types/resolve-alias (keyword (first pair)))
                     (str (second pair))])))
          vec)
-    (catch Exception _ [])))
+    (catch clojure.lang.ExceptionInfo e
+      ;; `fn-not-found` is expected during early sync (registry fn-def
+      ;; not loaded yet). Other ExceptionInfo types (malformed registry
+      ;; result, type-check failure, executor-internal bug) are real
+      ;; problems — log so the editor's empty form-picker isn't
+      ;; silently masking a regression.
+      (let [reason (-> e ex-data :error-data :reason)]
+        (when-not (= :fn-not-found reason)
+          (log/warn e "value-form-registry read failed — form-picker will be empty")))
+      [])
+    (catch Exception e
+      (log/warn e "value-form-registry read failed — form-picker will be empty")
+      [])))
 
 
 (defn pick-form-fn
@@ -227,21 +240,15 @@
 ;; Endpoint stages — parse / validate / apply
 ;; =============================================================================
 
-(defn- ->uuid
-  [v]
-  (when (and (string? v) (not (str/blank? v)))
-    (try (java.util.UUID/fromString v) (catch Exception _ nil))))
-
-
 (defn parse-value-form-request
   "Stage 1 — JSON body -> `{:binding-id :fn-id :slot-id :item-id}`,
    each coerced to a UUID (nil when absent / malformed)."
   [request]
   (let [body (request/read-json-body request)]
-    {:binding-id (->uuid (:binding-id body))
-     :fn-id      (->uuid (:fn-id body))
-     :slot-id    (->uuid (:slot-id body))
-     :item-id    (->uuid (:item-id body))}))
+    {:binding-id (request/parse-uuid-or-clear (:binding-id body))
+     :fn-id      (request/parse-uuid-or-clear (:fn-id body))
+     :slot-id    (request/parse-uuid-or-clear (:slot-id body))
+     :item-id    (request/parse-uuid-or-clear (:item-id body))}))
 
 
 (defn validate-value-form
@@ -255,7 +262,7 @@
      :error "Request must include 'binding-id', or both 'fn-id' and 'slot-id'"}))
 
 
-(defn- current-value
+(defn current-value
   "The literal currently bound at this site — from the list-item row
    when editing a sequence element, else from the binding row. nil
    for an unbound free-arg."
@@ -397,7 +404,7 @@
     :else                  (pr-str t)))
 
 
-(defn- build-form
+(defn build-form
   "Recursively assemble the form hiccup for a `resolve-form` descriptor.
    `path` is the dotted `data-field-path` prefix; `id` (when non-nil)
    is the control id a record-field `<label for>` points at; `value`

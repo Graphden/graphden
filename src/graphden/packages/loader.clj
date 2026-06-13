@@ -276,11 +276,13 @@
       return-type-rule      (assoc :return-type-rule return-type-rule)
       slot-types-rule       (assoc :slot-types-rule slot-types-rule)
       nav-types-rule        (assoc :nav-types-rule nav-types-rule)
-      ;; `:lazy-seq-args` — set of slot names whose `:seq` binding the
-      ;; executor resolves to delay-wrapped items (see
-      ;; `compile/resolve-seq-thunks`). Declared by the base-fn so a
-      ;; consumer like `:cond` can skip un-taken clauses lazily.
-      lazy-seq-args         (assoc :lazy-seq-args lazy-seq-args))))
+      ;; `:lazy-seq-args` — seq slots whose ITEMS arrive as delays
+      ;; (consumer steps past unforced items, see :cond).
+      lazy-seq-args         (assoc :lazy-seq-args lazy-seq-args)
+      ;; `:tags` — declarative capability / shape markers; consumed by
+      ;; policy callers (e.g. admin-only-vault gate) via
+      ;; `registry/fn-names-with-tag`. See `record-rich-types!`.
+      (seq (:tags fn-def))  (assoc :tags (set (:tags fn-def))))))
 
 
 ;; Type-rows are first-class fn-rows declared in `fns.edn` alongside
@@ -383,31 +385,34 @@
 
 (defn- resolve-dependencies
   "Returns packages in dependency order (topological sort).
-   Simple implementation assuming no cycles."
+
+   Pulls TRANSITIVE deps — if `app` declares `:dependencies [\"core\"
+   \"web\" \"storage\"]` and the caller passes just `[\"app\"]`, all
+   three are loaded ahead of `app`. Silently dropping a transitive dep
+   was a real bug: the missing primitive surfaced as `Unknown parent`
+   at sync time, far from the misconfiguration.
+
+   Simple DFS topological sort, no cycle detection (a cycle in the
+   dep graph would loop here; package.edn dep graphs are tiny and
+   reviewed)."
   [package-names]
-  (let [metas (into {} (for [pkg package-names]
-                         [pkg (load-package-meta pkg)]))
-
-        ;; Build dependency graph
-        get-deps (fn [pkg]
-                   (filter (set package-names)
-                           (get-in metas [pkg :dependencies] [])))
-
-        ;; Simple DFS-based topological sort
+  (let [metas (atom {})
+        load-meta! (fn [pkg]
+                     (or (@metas pkg)
+                         (let [m (load-package-meta pkg)]
+                           (swap! metas assoc pkg m)
+                           m)))
         sorted (atom [])
         visited (atom #{})
-
         visit (fn visit
                 [pkg]
                 (when-not (@visited pkg)
                   (swap! visited conj pkg)
-                  (doseq [dep (get-deps pkg)]
+                  (doseq [dep (get (load-meta! pkg) :dependencies [])]
                     (visit dep))
                   (swap! sorted conj pkg)))]
-
     (doseq [pkg package-names]
       (visit pkg))
-
     @sorted))
 
 
@@ -421,22 +426,32 @@
    {:base-fn-defs {fn-name -> {:args ... :return-type ... :impl fn}}
     :fn-defs [{:name :foo :parent :bar :args {...}} ...]
     :packages [{:name \"core\" :version \"1.0.0\" ...} ...]
-    :startup-fn :web-server}  ; from last package with :startup-fn"
+    :seeded-services [{:package-name \"app\"
+                       :service-name :default
+                       :fn-name :web-server
+                       :enabled? true
+                       :restart-policy :always
+                       :description \"…\"} …]}"
   [package-names]
   (let [ordered (resolve-dependencies package-names)
         _ (log/info "Loading packages in order:" ordered)
         results (mapv load-single-package ordered)
         ;; Single pass over results to build all aggregations
         combined (reduce (fn [acc result]
-                           (-> acc
-                               (update :base-fn-defs merge (:base-fn-defs result))
-                               (update :fn-defs into (:fn-defs result))
-                               (update :ns-descriptions merge (:ns-descriptions result))
-                               (update :packages conj (:meta result))
-                               (cond-> (get-in result [:meta :startup-fn])
-                                 (assoc :startup-fn (get-in result [:meta :startup-fn])))))
+                           (let [pkg-name (get-in result [:meta :name])
+                                 pkg-services (get-in result [:meta :services])]
+                             (cond-> (-> acc
+                                         (update :base-fn-defs merge (:base-fn-defs result))
+                                         (update :fn-defs into (:fn-defs result))
+                                         (update :ns-descriptions merge (:ns-descriptions result))
+                                         (update :packages conj (:meta result)))
+                               (seq pkg-services)
+                               (update :seeded-services into
+                                       (mapv (fn [svc]
+                                               (assoc svc :package-name pkg-name))
+                                             pkg-services)))))
                          {:base-fn-defs {} :fn-defs [] :ns-descriptions {}
-                          :packages [] :startup-fn nil}
+                          :packages [] :seeded-services []}
                          results)
         ;; Collect all namespace paths declared in modules.
         ;; A path like "core.arithmetic" also implies "core" as a parent ns.
@@ -524,10 +539,12 @@
   (load-packages ["core" "web" "app"]))
 
 
-(defn get-startup-fn-name
-  "Returns the startup function name from loaded packages."
+(defn get-seeded-services
+  "Returns the vector of `:services` entries aggregated across all
+   loaded packages — each entry is the original package map plus
+   `:package-name` so the seeder can compute deterministic ids."
   [loaded-packages]
-  (:startup-fn loaded-packages))
+  (vec (:seeded-services loaded-packages)))
 
 
 (defn list-available-packages

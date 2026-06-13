@@ -106,14 +106,13 @@
               f-fn   (setup/build-fn! storage
                                       {:name "hlp-f" :parent base-f})]
           ;; Nothing in F's world supplies x → x is a per-call lambda-param.
-          ;; Pass nil slot-id/b-row — neither r-fn nor f-fn carries a
-          ;; bound slot at this test boundary (we're directly probing
-          ;; the helper, not exercising a real bind site). nil slot-id
-          ;; falls back to the legacy heuristic (no structural shape).
-          (is (= [:x] (r/hof-lambda-params (-> r-fn :fn :id)
-                                           nil nil
-                                           (-> f-fn :fn :id)
-                                           (lookups-for storage)))))
+          ;; Probe the alpha-equivalence resolver directly — this is the
+          ;; helper `hof-lambda-params` delegates to for 1-arg structural
+          ;; slots whose conventional name doesn't match R's free arg
+          ;; (`:filter :pred :some?` case).
+          (is (= [:x] (r/alpha-equiv-lambda-params (-> r-fn :fn :id)
+                                                   (-> f-fn :fn :id)
+                                                   (lookups-for storage)))))
         (finally (sp/close storage)))))
 
   (testing "a name a caller-relative supplies is captured, not a lambda-param"
@@ -129,10 +128,9 @@
                                      :parent base
                                      :bindings {"x" {:value 99}}})]
           ;; f binds x → x flows in from the closure → no lambda-params.
-          (is (= [] (r/hof-lambda-params (-> r-fn :fn :id)
-                                         nil nil
-                                         (-> f-fn :fn :id)
-                                         (lookups-for storage)))))
+          (is (= [] (r/alpha-equiv-lambda-params (-> r-fn :fn :id)
+                                                 (-> f-fn :fn :id)
+                                                 (lookups-for storage)))))
         (finally (sp/close storage))))))
 
 
@@ -166,14 +164,14 @@
           (testing "T's free args do NOT bubble up through the HOF boundary"
             (is (= [] (r/deep-free-ext-names (:id f-fn) (lookups-for storage)))
                 "the :is-fn=true ref guard suppresses recursion into T"))
-          (testing "find-slot-id-in-tree (via hof-lambda-params) honors the same guard"
-            ;; hof-lambda-params runs find-slot-id-in-tree against every
-            ;; deep-free name of an outer HOF-target. Nothing in F's tree
-            ;; supplies `inner-free`, so it becomes a lambda-param of T
-            ;; when called from F.
+          (testing "find-slot-id-in-tree (via alpha-equiv resolver) honors the same guard"
+            ;; alpha-equiv-lambda-params runs find-slot-id-in-tree
+            ;; against every deep-free name of an outer HOF-target.
+            ;; Nothing in F's tree supplies `inner-free`, so it
+            ;; becomes a lambda-param of T when called from F.
             (is (= [:inner-free]
-                   (r/hof-lambda-params (:id t-fn) nil nil (:id f-fn)
-                                        (lookups-for storage))))))
+                   (r/alpha-equiv-lambda-params
+                     (:id t-fn) (:id f-fn) (lookups-for storage))))))
         (finally (sp/close storage))))))
 
 
@@ -343,4 +341,167 @@
                                      (lookups-for storage))]
         (is (= {:inner :outer} out)
             ":inner (R's free) maps to :outer (F's rename ext-name)"))
+      (finally (sp/close storage)))))
+
+
+(deftest build-ref-renames-cross-tree-via-slot-id
+  ;; Cross-tree rename: R's free arg `:inner` slot is OWNED BY R
+  ;; itself (not a same-named slot on F's side). F owns a rename-slot
+  ;; named `outer` whose `:source-slot-id` FK points DIRECTLY at R's
+  ;; `inner` slot. Earlier build-ref-renames implementations missed
+  ;; this because they walked F's bindings looking for `:free` rows
+  ;; with renamed `:ext-name` matching R's free names — but F has no
+  ;; such binding row when the source slot lives in R's tree (reached
+  ;; via ref-target from R's perspective, not via inheritance from
+  ;; F's). The two-pass build-ref-renames now resolves R's free
+  ;; slot-id via `find-slot-id-in-tree` and asks
+  ;; `l/rename-for-slot(F, that-slot-id)` for F's external name.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base-r (setup/build-fn! storage
+                                    {:name "brr-xtree-base-r"
+                                     :slots [{:name "inner" :type :int}]})
+            r-fn   (setup/build-fn! storage
+                                    {:name "brr-xtree-r" :parent base-r})
+            base-f (setup/create-base-fn! storage "brr-xtree-base-f")
+            f-fn   (setup/create-composed-fn! storage "brr-xtree-f" (:id base-f))
+            ;; F owns a rename-slot named "outer" with source pointing
+            ;; at R-base's "inner" slot — the cross-tree case.
+            rename-slot (sp/create-entity storage :slot
+                                          {:name "outer"
+                                           :type-fn-id (-> base-r :slots (get "inner") :type-fn-id)
+                                           :source-slot-id (-> base-r :slots (get "inner") :id)})
+            _ (setup/attach-slot! storage (:id f-fn) (:id rename-slot) 0)
+            out (r/build-ref-renames (-> r-fn :fn :id) (:id f-fn)
+                                     (lookups-for storage))]
+        (is (= {:inner :outer} out)
+            "cross-tree pass: F's `outer` slot with source-slot-id → R's `inner` produces {:inner :outer}"))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
+;; chain-source-slot-ids — pure (slot-id walker over a plain slot-map).
+;; No storage needed; covers the head case, multi-hop chains, missing
+;; intermediates, the cycle guard, and the depth cap at 16.
+;; ============================================================================
+
+(deftest chain-source-slot-ids-test
+  (testing "slot with no source — returns [slot-id]"
+    (let [s1 (random-uuid)
+          slot-map {s1 {:id s1 :source-slot-id nil}}]
+      (is (= [s1] (r/chain-source-slot-ids s1 slot-map)))))
+
+  (testing "two-link chain — head then source"
+    (let [src (random-uuid)
+          mid (random-uuid)
+          slot-map {mid {:id mid :source-slot-id src}
+                    src {:id src :source-slot-id nil}}]
+      (is (= [mid src] (r/chain-source-slot-ids mid slot-map)))))
+
+  (testing "missing intermediate slot — chain still includes the start"
+    ;; `slot-map` doesn't carry the next hop's row → `(get slot-map sid)`
+    ;; returns nil → `:source-slot-id` of nil is nil → loop terminates.
+    (let [a (random-uuid)
+          dangling (random-uuid)
+          slot-map {a {:id a :source-slot-id dangling}}]
+      (is (= [a dangling] (r/chain-source-slot-ids a slot-map))
+          "the unknown hop is included; the walker stops at its nil source")))
+
+  (testing "cycle guard — a ↔ b loop terminates after one full pass"
+    (let [a (random-uuid)
+          b (random-uuid)
+          slot-map {a {:id a :source-slot-id b}
+                    b {:id b :source-slot-id a}}]
+      (is (= [a b] (r/chain-source-slot-ids a slot-map))
+          "seen-set rejects the second hit on :a")))
+
+  (testing "depth cap at 16 — an unbounded chain truncates"
+    (let [ids (vec (repeatedly 30 random-uuid))
+          slot-map (into {} (map-indexed (fn [i id]
+                                           [id {:id id
+                                                :source-slot-id (get ids (inc i))}])
+                                         ids))
+          result (r/chain-source-slot-ids (first ids) slot-map)]
+      (is (= 16 (count result)) "result bounded to 16 hops")
+      (is (= (first ids) (first result)) "still starts at the head")))
+
+  (testing "nil start — empty chain"
+    (is (= [] (r/chain-source-slot-ids nil {})))))
+
+
+;; ============================================================================
+;; apply-rename-aliases — pure runtime; map + alias-vector in, map out.
+;; ============================================================================
+
+(deftest apply-rename-aliases-test
+  (testing "empty aliases — input passes through untouched (the common case)"
+    (is (= {:a 1 :b 2} (r/apply-rename-aliases {:a 1 :b 2} []))))
+
+  (testing "rename-name present, chain-name absent — copies value into chain-name"
+    (is (= {:item 10 :branch-row 10}
+           (r/apply-rename-aliases {:item 10}
+                                   [{:chain-name :branch-row :rename-name :item}]))))
+
+  (testing "chain-name already supplied by caller — caller value wins, no overwrite"
+    (is (= {:item 10 :branch-row 99}
+           (r/apply-rename-aliases {:item 10 :branch-row 99}
+                                   [{:chain-name :branch-row :rename-name :item}]))
+        "explicit caller-supplied binding outranks the alias copy"))
+
+  (testing "rename-name absent — alias is a no-op"
+    (is (= {:other 5}
+           (r/apply-rename-aliases {:other 5}
+                                   [{:chain-name :chain :rename-name :rename}]))))
+
+  (testing "multiple aliases each applied independently"
+    (is (= {:item 1 :other 2 :branch-row 1 :coll 2}
+           (r/apply-rename-aliases {:item 1 :other 2}
+                                   [{:chain-name :branch-row :rename-name :item}
+                                    {:chain-name :coll :rename-name :other}])))))
+
+
+;; ============================================================================
+;; compute-rename-aliases — picks up own rename-slots whose source-
+;; slot-id points OUTSIDE the root slot set. Two coverage shapes:
+;; (1) fn with NO own rename-slots → empty vec (early-exit branch);
+;; (2) own rename-slot whose source IS a root slot → filtered out by
+;;     the `:when (not (contains? root-ids src))` guard.
+;; The "outside the root set" alias path is exercised through the
+;; integration `:_list-branches-as-json-item` chain on the production
+;; graph — synthesising it here would require building a multi-hop
+;; source chain by hand, which the existing integration paths cover.
+;; ============================================================================
+
+(deftest compute-rename-aliases-empty-when-no-own-rename-slots
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base (setup/create-base-fn! storage "cra0-base")
+            f-fn (setup/create-composed-fn! storage "cra0-f" (:id base))]
+        (is (= [] (r/compute-rename-aliases (:id f-fn) (lookups-for storage)))
+            "no own rename-slots → vec'd empty seq"))
+      (finally (sp/close storage)))))
+
+
+(deftest compute-rename-aliases-filters-source-pointing-at-own-root-slot
+  ;; Guard `:when (not (contains? root-ids src))`: a rename whose
+  ;; source is already a root slot of the SAME fn is not aliased —
+  ;; the caller already supplies the value under the renamed name
+  ;; and no chain-link copy is needed.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base-f (setup/build-fn! storage
+                                    {:name "cra1-base-f"
+                                     :slots [{:name "root-slot" :type :int}]})
+            f-fn (:fn base-f)
+            root-slot-id (-> base-f :slots (get "root-slot") :id)
+            ;; F owns a rename-slot pointing AT its own root-slot.
+            rename-slot (sp/create-entity storage :slot
+                                          {:name "renamed"
+                                           :type-fn-id (-> base-f :slots
+                                                           (get "root-slot")
+                                                           :type-fn-id)
+                                           :source-slot-id root-slot-id})
+            _ (setup/attach-slot! storage (:id f-fn) (:id rename-slot) 1)]
+        (is (= [] (r/compute-rename-aliases (:id f-fn) (lookups-for storage)))
+            "rename whose source is F's own root-slot — no chain alias"))
       (finally (sp/close storage)))))

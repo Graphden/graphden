@@ -1,9 +1,9 @@
 (ns graphden.crud.validation
   "Server-side write-time guards for the web/crud base functions.
 
-   Cycle checks, multi-inheritance collision checks, `:terminal` /
-   `:list-closed` enforcement and constraint-shape validation — every
-   guard the generic `create-entity` / `update-entity` and the
+   Cycle checks, multi-inheritance collision checks, value-override
+   + `:list-closed` enforcement and constraint-shape validation —
+   every guard the generic `create-entity` / `update-entity` and the
    form-driven `process-*` paths run before touching storage.
 
    Depends only on `graphden.crud.request` from the crud.* tree."
@@ -170,35 +170,26 @@
     (mi-collision-check storage (:parent-ids entity-data))))
 
 
-;; === :terminal / :list-closed enforcement ===================================
+;; === Inheritance-chain binding inspections ==================================
 ;;
-;; Two declared-but-unenforced binding flags. Each gates a specific
-;; downstream operation when it appears anywhere in the inheritance
-;; chain above the writer:
+;; The validators below walk the inheritance chain to check whether
+;; some ancestor's binding on a slot blocks the current write:
 ;;
-;;   :terminal true   — ancestors that mark a binding terminal say
-;;                      "this is the final word; descendants don't
-;;                      get to re-bind this slot." A descendant
-;;                      `POST /api/entities/binding` for the same
-;;                      `(slot-id)` is rejected.
+;;   - `value-override-rej` rejects any binding write on a slot whose
+;;     inheritance chain already supplies a `:value` or `:ref-fn-id`.
+;;     That encodes the LEGO rule "arguments aren't overridden — to
+;;     change behaviour, create a new fn-def" as an auto-rule (no
+;;     per-binding flag needed).
 ;;
-;;   :list-closed true — sequence slot. Ancestors can extend (with
-;;                      `:list-append true` items); a `:list-closed`
-;;                      flag downstream of any ancestor seals the
-;;                      list — further `:list-append true` bindings
-;;                      from descendants get rejected.
-;;
-;; `:override-kind :fixed` is the schema default but the codebase
-;; uses inheritance with overrides everywhere; enforcing it strictly
-;; would break the world. Treated as advisory only until the default
-;; is revisited (separate concern — would require data migration to
-;; flip existing rows from `:fixed` to `:default`).
+;;   - `list-closed-rej` enforces the only declared-and-still-used
+;;     binding flag: `:list-closed true` on an ancestor seals a
+;;     sequence slot, descendants can't append more items.
 
 (defn ancestor-binding-flag?
   "Walk the PARENT chain of `fn-id` (skipping fn-id's own bindings)
    and return true iff any ancestor's binding on `slot-id` has
-   `(flag-key ancestor-binding) = true`. Used to gate `:terminal`
-   and `:list-closed` enforcement.
+   `(flag-key ancestor-binding) = true`. Used to gate `:list-closed`
+   enforcement.
 
    BFS by frontier level: two batched storage queries per level
    (`:fn {:id frontier}` for the next layer's parent-ids; `:binding
@@ -231,20 +222,63 @@
               (recur next-frontier seen'))))))))
 
 
-(defn terminal-rej
-  "Reject a `:binding` write whose `(fn-id, slot-id)` is sealed by
-   an ancestor's `:terminal true` flag. Returns nil on success or
-   `{:reason …}`."
+(defn- ancestor-binding-has-value?
+  "True iff some ancestor of `fn-id` has a binding on `slot-id` whose
+   `:value` or `:ref-fn-id` is set (i.e. carries an actual value, not
+   just a type-narrowing or rename annotation). Walks parent-ids BFS,
+   one batched query per level, same shape as `ancestor-binding-flag?`."
+  [storage fn-id slot-id]
+  (let [seed (when fn-id (sp/read-entity storage :fn fn-id))]
+    (loop [frontier (->> (:parent-ids seed) (remove nil?) distinct vec)
+           seen #{}]
+      (if (empty? frontier)
+        false
+        (let [bindings (sp/query-entities storage :binding
+                                          {:fn-id frontier :slot-id slot-id})
+              valued? (some (fn [b]
+                              (or (some? (:value b))
+                                  (some? (:ref-fn-id b))))
+                            bindings)]
+          (if valued?
+            true
+            (let [next-seen (into seen frontier)
+                  next-frontier
+                  (->> frontier
+                       (mapcat (fn [fid]
+                                 (when-let [row (sp/read-entity storage :fn fid)]
+                                   (:parent-ids row))))
+                       (remove nil?)
+                       (remove next-seen)
+                       distinct
+                       vec)]
+              (recur next-frontier next-seen))))))))
+
+
+(defn value-override-rej
+  "Reject a `:binding` write whose `(fn-id, slot-id)` already has a
+   value-carrying binding somewhere in the inheritance chain. The
+   rule encodes the LEGO principle 'arguments aren't overridden — if
+   you need different behaviour, create a different fn-def'. Only
+   value-carrying ancestor bindings count: a rename / type-narrowing
+   binding (`:value` nil, `:ref-fn-id` nil) is treated as an
+   intentional template slot waiting to be filled, not an override.
+
+   Triggered on the binding being WRITTEN — the writer's own value
+   matters only if the ancestor is sealed; this validator doesn't
+   second-guess what the writer is doing, it just checks whether an
+   ancestor already committed a value here."
   [storage entity-type entity-data]
   (when (and (= entity-type :binding)
              (:fn-id entity-data)
              (:slot-id entity-data))
-    (when (ancestor-binding-flag? storage (:fn-id entity-data)
-                                  (:slot-id entity-data) :terminal)
+    (when (ancestor-binding-has-value? storage (:fn-id entity-data)
+                                       (:slot-id entity-data))
       {:reason
        (str "Binding rejected: an ancestor in the inheritance chain "
-            "marked this slot's binding `:terminal true`, sealing it "
-            "against descendant overrides.")})))
+            "already supplied a value (or fn-ref) for this slot. "
+            "Arguments with a value are implicitly final — if you "
+            "need different behaviour, create a new fn-def instead "
+            "of overriding the inherited value.")})))
 
 
 (defn list-closed-rej
@@ -385,14 +419,18 @@
         (let [nm (some-> (:name f) keyword)]
           (cond
             ;; Reached a primitive (no parents, no impl, no constraint).
+            ;; Uses the canonical `types/primitives` set so adding a
+            ;; new primitive (e.g. `:decimal`) doesn't silently fall
+            ;; through the cond and return nil — the prior hardcoded
+            ;; subset here was missing `:decimal`, `:never`, and
+            ;; `:input-stream`.
             (and nm
                  (empty? (:parent-ids f))
                  (nil? (:impl-hash f))
                  (nil? (:base-fn-id f))
                  (nil? (:element-fn-id f))
                  (nil? (:constraint f))
-                 (#{:null :uuid :text :int :bool :numeric :timestamptz
-                    :jsonb :bytes :any :fn :sequence :keyword :float} nm))
+                 (types/primitive? nm))
             nm
             ;; Refinement-of-refinement: descend.
             (:base-fn-id f)
@@ -459,7 +497,7 @@
 
 
 (defn- secret-path-rej
-  "Followup-4: refuse `:override-kind :secret-path` on bindings whose
+  "refuse `:override-kind :secret-path` on bindings whose
    slot's effective rich-type doesn't carry a `:secret` marker.
    Without this gate, a user could mark any plain `:text`-typed
    binding as secret-path, the executor would dereference via vault,
@@ -506,8 +544,8 @@
               (assoc :type :constraint-violation/constraint-shape))
       (some-> (mi-collision-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/mi-collision))
-      (some-> (terminal-rej storage entity-type entity-data)
-              (assoc :type :constraint-violation/terminal-binding))
+      (some-> (value-override-rej storage entity-type entity-data)
+              (assoc :type :constraint-violation/value-override))
       (some-> (list-closed-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/list-closed))
       (some-> (secret-path-rej storage entity-type entity-data)

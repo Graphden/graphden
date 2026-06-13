@@ -20,9 +20,17 @@
     [integrant.core :as ig]))
 
 
-(defn read-config
+(defn ^:dynamic read-config
   "Reads system config for given profile (:dev, :test, :prod).
-   Returns a prepared Integrant configuration map."
+   Returns a prepared Integrant configuration map.
+
+   `^:dynamic` so the runtime-lifecycle tests can rebind this via
+   `binding [read-config …]` without using `with-redefs` (which
+   mutates a root binding and races with sibling tests under the
+   parallel kaocha runner). The plugin's `isolation-vars` list
+   already covers per-thread atom isolation; this Var goes through
+   the standard `^:dynamic` thread-local path because the rebind is
+   needed only inside the test body."
   [profile]
   (config/read-config profile))
 
@@ -41,17 +49,38 @@
 (defn start-with-overrides!
   "Starts system with config overrides. Useful for tests.
 
+   - 2-arity: `(start-with-overrides! :test overrides)` — start ALL
+     components.
+   - 3-arity: `(start-with-overrides! :test component-keys overrides)`
+     — start only `component-keys` (and their dependencies).
+
+   Overrides merge into the integrant config per top-level key:
+   `(update cfg k merge override-for-k)`. This is the supported
+   replacement for the test pattern `(with-redefs [sys/read-config …]
+   (sys/start! :dev component-keys))` — `with-redefs` mutates a global
+   root binding which races with concurrent test invocations on the
+   same JVM; explicit overrides scope the change to one start! call.
+
    Example:
-   (start-with-overrides! :test
-     {:db/age {:jdbc-url \"jdbc:postgresql://localhost:5433/test\"}})"
-  [profile overrides]
-  (let [base-config (read-config profile)
-        merged-config (reduce-kv
-                        (fn [cfg k v]
-                          (update cfg k merge v))
-                        base-config
-                        overrides)]
-    (ig/init merged-config)))
+     (start-with-overrides!
+       :dev
+       [:db/schema :db/postgres :db/versioned :exec/context]
+       {:db/postgres {:jdbc-url \"jdbc:postgresql://…/test\"
+                      :username \"…\" :password \"…\"}})"
+  ([profile overrides]
+   (let [base-config (read-config profile)
+         merged-config (reduce-kv
+                         (fn [cfg k v] (update cfg k merge v))
+                         base-config
+                         overrides)]
+     (ig/init merged-config)))
+  ([profile component-keys overrides]
+   (let [base-config (read-config profile)
+         merged-config (reduce-kv
+                         (fn [cfg k v] (update cfg k merge v))
+                         base-config
+                         overrides)]
+     (ig/init merged-config component-keys))))
 
 
 (defn stop!

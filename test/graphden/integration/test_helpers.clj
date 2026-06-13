@@ -12,7 +12,9 @@
   "Find the slot owned by `owner-fn-name` whose name matches
    `slot-name`. Used by cron service tests to resolve the captured-
    arg slots before creating an admin-side binding row:
-     - `:cron` lives on `:cron-next-after`
+     - `:cron` lives on `:cron-parse` (`:cron-next-after` is now
+       `:parent :cron-fire-after` and inherits `:cron` through the
+       `:expr {:parent :cron-parse :args {:cron {:as :cron}}}` binding)
      - `:fn` is the rename slot owned by `:_fire-target` (its
        `:source-slot-id` points at `:call-noargs :func`)
    Both slots are OUTSIDE the derived fn's inheritance chain — they

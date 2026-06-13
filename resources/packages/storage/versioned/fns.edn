@@ -1,0 +1,375 @@
+;; Block 1 Step 2 Phase 3 — versioned-entity reads as pure graph
+;; composition.
+;;
+;; VersionedStorage's `resolve-all-entities` answers "what rows of
+;; `<entity-type>` does this branch see?" by:
+;;   1. walking the parent-chain of the current branch (current → root);
+;;   2. loading all version rows whose `:branch-id` lives anywhere
+;;      on that chain;
+;;   3. per-identity, picking the latest version on the highest-
+;;      priority branch in the chain;
+;;   4. merging identity ∪ version-data; dropping entities with
+;;      no version anywhere on the chain.
+;;
+;; Today that lives as Clojure code inside `versioning.storage.
+;; resolution`. This module re-expresses the merge as a graph
+;; composition over standard HOFs (`:group-by`, `:some`, `:filter`,
+;; `:select-keys`, `:merge`). The only IO is via:
+;;   - `:storage-query-identities`   — pull identity rows
+;;     (caller-controlled SQL via the WHERE arg)
+;;   - `:pg-query`                   — pull version rows on chain
+;;   - `:branch-chain`               — already a `:fix`-composition
+;; All of which are visible at the graph level. Admins who want to
+;; vary the algorithm (e.g. add merge-record awareness, or sort by
+;; a different timestamp field) reparent the relevant step.
+
+{:namespace "storage.versioned"
+ :description "Versioned-entity row resolution as graph composition: merges identity + latest-on-chain version into the live row set. Used by versioned read sites to express `:list-entities`-equivalent queries without going through the generic CRUD wrap."
+ :fns
+ [;; =====================================================================
+  ;; Entry point.
+  ;;
+  ;; Inputs (free args):
+  ;;   :identities          — vec of identity rows (from
+  ;;                          `:storage-query-identities`).
+  ;;   :version-rows        — vec of version rows on the branch chain
+  ;;                          (from `:pg-query` + `:decode-row` against
+  ;;                          the version table, WHERE branch_id IN
+  ;;                          <chain>).
+  ;;   :branch-chain        — vec of branch ids, current → root.
+  ;;   :version-id-field    — kw, the column linking versions back to
+  ;;                          identities (`:fn-id`, `:fn-slot-id`, …).
+  ;;   :version-data-fields — vec/set of kw fields to overlay from
+  ;;                          the chosen version row onto each
+  ;;                          identity (see `entity-config` in
+  ;;                          `versioning.storage.resolution`).
+  ;;
+  ;; Output: vec of merged rows. Entities without a version visible
+  ;; on the chain are dropped (mirrors `resolve-all-entities`).
+  ;;
+  ;; The `:where` filter is NOT applied here — call sites that need
+  ;; post-resolution filtering wrap with their own `:filter` (most
+  ;; sites have 1-2 equality predicates which are simpler inline
+  ;; than as a generic where evaluator).
+  ;; =====================================================================
+  ;; Type-row exposing the five free args as DECLARED typed slots. Why:
+  ;; propagated free args inside a composed fn-def do NOT materialise
+  ;; as `fn_slot` rows, so callers binding a fn-ref to a propagated
+  ;; free arg slip into the fallback slot-id path (dangling slot) and
+  ;; the ref ends up passed through as a callable instead of evaluated.
+  ;; Anchoring the slots on a separate type-row makes the slot ownership
+  ;; concrete, so `:resolve-versioned-rows :args {:identities :_x …}`
+  ;; gets a real value-typed binding.
+  {:name :ResolveVersionedRowsInput
+   :description "Type-row declaring the five free-arg slots of `:resolve-versioned-rows` so callers can bind fn-refs that auto-resolve."
+   :type {:identities          [:list :jsonb]
+          :version-rows        [:list :jsonb]
+          :branch-chain        [:list :uuid]
+          :version-id-field    :keyword
+          :version-data-fields [:list :keyword]}}
+
+  {:name :resolve-versioned-rows
+   :description "Resolve a versioned entity's live row set on the current branch by merging identity rows with the latest version on the branch chain. Pure graph composition over `:group-by` / `:some` / `:filter`. Inputs: `:identities`, `:version-rows`, `:branch-chain`, `:version-id-field`, `:version-data-fields`. Returns rows for entities with a version somewhere on the chain."
+   :parents [:filter :ResolveVersionedRowsInput]
+   :args {:pred :some?
+          :coll :_rv-mapped-rows}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Per-identity → resolved-row-or-nil.
+  ;;
+  ;; The HOF wrap passes:
+  ;;   :item                = the identity row (per :map iteration)
+  ;;   :versions-by-eid     = closure-captured index
+  ;;   :branch-chain        = closure-captured outer free arg
+  ;;   :version-data-fields = closure-captured outer free arg
+  ;; ---------------------------------------------------------------------
+  {:name :_rv-mapped-rows
+   :parent :map
+   :args {:func :_rv-resolve-one
+          :coll {:as :identities}
+          :versions-by-eid :_rv-versions-by-eid
+          :branch-chain {:as :branch-chain}
+          :version-data-fields {:as :version-data-fields}}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Pre-compute `{eid → [version-row …]}` (one-shot for the whole
+  ;; identity loop). `:version-id-field` is a free arg of
+  ;; `:_rv-version-id-extractor`; closure-capture bubbles it up to
+  ;; `:resolve-versioned-rows`' signature.
+  ;; ---------------------------------------------------------------------
+  {:name :_rv-versions-by-eid
+   :parent :group-by
+   :args {:key-fn :_rv-version-id-extractor
+          :coll {:as :version-rows}}}
+
+  {:name :_rv-version-id-extractor
+   :description "HOF key-fn for `:group-by` over version rows — return the column named by `:version-id-field` (e.g. `:fn-id`)."
+   :parent :get
+   :args {:coll {:as :item}
+          :key {:as :version-id-field}
+          :default nil}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Resolve ONE identity to a merged row, or nil if no version on chain.
+  ;;
+  ;; `:_rv-resolved-version-for-eid` is the latest version on the
+  ;; highest-priority branch in chain, or nil. We reference it from
+  ;; two slots (`:test` via `:_rv-version-found?` + `:then` via
+  ;; `:_rv-merged-row`) but both sit on the SAME execution path —
+  ;; the executor's per-execution result cache evaluates it once.
+  ;; ---------------------------------------------------------------------
+  {:name :_rv-resolve-one
+   :parent :if
+   :args {:test :_rv-version-found?
+          :then :_rv-merged-row
+          :else {:value nil}}}
+
+  {:name :_rv-version-found?
+   :parent :some?
+   :args {:value :_rv-resolved-version-for-eid}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Walk the branch chain, picking the first non-nil per-branch
+  ;; latest. `:some` returns the first truthy result of its pred over
+  ;; the chain — exactly what `resolve-version-from-cache` does in
+  ;; Clojure.
+  ;;
+  ;; The HOF wrap passes:
+  ;;   :item            = a branch-id (per :some iteration over chain)
+  ;;   :versions-by-bid = closure-captured per-eid index
+  ;; ---------------------------------------------------------------------
+  {:name :_rv-resolved-version-for-eid
+   :parent :some
+   :args {:pred :_rv-latest-version-on-branch
+          :coll {:as :branch-chain}
+          :versions-by-bid :_rv-versions-grouped-by-bid}}
+
+  ;; Per-eid index `{bid → [version-row …]}`. Closure-captures `:item`
+  ;; (the identity row) from `:_rv-resolve-one`'s scope.
+  {:name :_rv-versions-grouped-by-bid
+   :parent :group-by
+   :args {:key-fn :_rv-extract-branch-id
+          :coll :_rv-versions-for-this-eid}}
+
+  {:name :_rv-versions-for-this-eid
+   :description "Look up the (already-grouped) versions for the current identity's id."
+   :parent :get
+   :args {:coll {:as :versions-by-eid}
+          :key :_rv-this-eid
+          :default {:value []}}}
+
+  {:name :_rv-this-eid
+   :parent :get
+   :args {:coll {:as :item}
+          :key {:value :id}
+          :default nil}}
+
+  {:name :_rv-extract-branch-id
+   :description "HOF key-fn for `:group-by` over per-eid versions — the rows are version records, so the branch is at `:branch-id`."
+   :parent :get
+   :args {:coll {:as :item}
+          :key {:value :branch-id}
+          :default nil}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Latest version on ONE branch: take versions-by-bid[bid], sort by
+  ;; :created-at ascending, reverse, take first. Returns nil when no
+  ;; versions exist on that branch — `:some` treats that as a miss
+  ;; and continues to the next branch in chain.
+  ;; ---------------------------------------------------------------------
+  {:name :_rv-latest-version-on-branch
+   :description "HOF pred for `:some` walking the branch chain — return the latest version row on this branch, or nil."
+   :parent :first
+   :args {:coll :_rv-versions-on-bid-sorted}}
+
+  {:name :_rv-versions-on-bid
+   :parent :get
+   :args {:coll {:as :versions-by-bid}
+          :key {:as :item}
+          :default {:value []}}}
+
+  {:name :_rv-versions-on-bid-sorted
+   :description "Descending-by-created-at view of one branch's versions, so `:first` picks the newest."
+   :parent :reverse
+   :args {:coll :_rv-versions-on-bid-sorted-asc}}
+
+  {:name :_rv-versions-on-bid-sorted-asc
+   :parent :sort-by
+   :args {:key-fn :_rv-extract-created-at
+          :coll :_rv-versions-on-bid}}
+
+  {:name :_rv-extract-created-at
+   :parent :get
+   :args {:coll {:as :item}
+          :key {:value :created-at}
+          :default nil}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Merge identity ∪ select-keys(version, version-data-fields).
+  ;;
+  ;; `:select-keys` keeps only the version-data fields, dropping the
+  ;; version-row metadata (`:id`, `:branch-id`, `:created-at`,
+  ;; `:<version-id-field>`). Then `:merge` overlays them onto the
+  ;; identity row.
+  ;; ---------------------------------------------------------------------
+  {:name :_rv-merged-row
+   :parent :merge
+   :args {:maps [{:as :item}
+                 :_rv-version-data-selected]}}
+
+  {:name :_rv-version-data-selected
+   :parent :select-keys
+   :args {:m :_rv-resolved-version-for-eid
+          :ks {:as :version-data-fields}}}
+
+  ;; =====================================================================
+  ;; Per-entity-type wrappers — pin the `:version-id-field`, the
+  ;; `:version-data-fields` set, and the per-call SQL for version-row
+  ;; loading. Each wrapper exposes just `:identities` + `:branch-chain`
+  ;; as the per-site inputs.
+  ;;
+  ;; The version-data-fields lists mirror `versioning.storage.
+  ;; resolution/entity-config`. Drift would mean overlaid fields
+  ;; misalign — at sync time the type-checker would already complain
+  ;; (the wrapper's effective return type is just the identity-row
+  ;; type), but the per-row contents would silently miss fields.
+  ;; Keeping these explicit makes the contract auditable from the
+  ;; graph.
+  ;;
+  ;; ── Pattern for each wrapper ──
+  ;;   `:_<type>-versions-…` chain is local to the wrapper — they
+  ;;   compose the `SELECT * FROM <type-version> WHERE branch_id IN
+  ;;   <chain>` query, then `:map` per-row `:decode-row` against the
+  ;;   version table.
+  ;; =====================================================================
+
+  ;; ---- :fn ------------------------------------------------------------
+  {:name :resolve-fn-rows
+   :description "Resolve the live `:fn` row set on the current branch. Pins entity-type-specific args; exposes `:identities` + `:branch-chain` for the call site to wire."
+   :parent :resolve-versioned-rows
+   :args {:version-id-field {:value :fn-id}
+          :version-data-fields {:value [:name :impl-hash :description :constraint
+                                        :base-fn-id :element-fn-id
+                                        :return-type-fn-id :anonymous-hash
+                                        :expects-effects]}
+          :version-rows :_resolve-fn-versions}}
+
+  {:name :_resolve-fn-versions
+   :parent :map
+   :args {:func :_resolve-fn-versions-decode
+          :coll :_resolve-fn-versions-raw}}
+
+  {:name :_resolve-fn-versions-raw
+   :parent :pg-query
+   :args {:hsql :_resolve-fn-versions-hsql}}
+
+  {:name :_resolve-fn-versions-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :fn-version}}
+          :key {:value :where}
+          :value :_resolve-fn-versions-hsql-where}}
+
+  {:name :_resolve-fn-versions-hsql-where
+   :parent :vec
+   :args {:coll [{:value :in} {:value :branch-id} {:as :branch-chain}]}}
+
+  {:name :_resolve-fn-versions-decode
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "fn-version"}}}
+
+  ;; ---- :fn-slot -------------------------------------------------------
+  {:name :resolve-fn-slot-rows
+   :description "Resolve the live `:fn-slot` row set on the current branch."
+   :parent :resolve-versioned-rows
+   :args {:version-id-field {:value :fn-slot-id}
+          :version-data-fields {:value [:fn-id :slot-id :position]}
+          :version-rows :_resolve-fn-slot-versions}}
+
+  {:name :_resolve-fn-slot-versions
+   :parent :map
+   :args {:func :_resolve-fn-slot-versions-decode
+          :coll :_resolve-fn-slot-versions-raw}}
+
+  {:name :_resolve-fn-slot-versions-raw
+   :parent :pg-query
+   :args {:hsql :_resolve-fn-slot-versions-hsql}}
+
+  {:name :_resolve-fn-slot-versions-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :fn-slot-version}}
+          :key {:value :where}
+          :value :_resolve-fn-slot-versions-hsql-where}}
+
+  {:name :_resolve-fn-slot-versions-hsql-where
+   :parent :vec
+   :args {:coll [{:value :in} {:value :branch-id} {:as :branch-chain}]}}
+
+  {:name :_resolve-fn-slot-versions-decode
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "fn-slot-version"}}}
+
+  ;; ---- :binding -------------------------------------------------------
+  {:name :resolve-binding-rows
+   :description "Resolve the live `:binding` row set on the current branch."
+   :parent :resolve-versioned-rows
+   :args {:version-id-field {:value :binding-id}
+          :version-data-fields {:value [:fn-id :slot-id :value :ref-fn-id
+                                        :override-kind :type-override-fn-id
+                                        :description :list-append
+                                        :list-closed]}
+          :version-rows :_resolve-binding-versions}}
+
+  {:name :_resolve-binding-versions
+   :parent :map
+   :args {:func :_resolve-binding-versions-decode
+          :coll :_resolve-binding-versions-raw}}
+
+  {:name :_resolve-binding-versions-raw
+   :parent :pg-query
+   :args {:hsql :_resolve-binding-versions-hsql}}
+
+  {:name :_resolve-binding-versions-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :binding-version}}
+          :key {:value :where}
+          :value :_resolve-binding-versions-hsql-where}}
+
+  {:name :_resolve-binding-versions-hsql-where
+   :parent :vec
+   :args {:coll [{:value :in} {:value :branch-id} {:as :branch-chain}]}}
+
+  {:name :_resolve-binding-versions-decode
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "binding-version"}}}
+
+  ;; ---- :binding-list-item ---------------------------------------------
+  {:name :resolve-binding-list-item-rows
+   :description "Resolve the live `:binding-list-item` row set on the current branch."
+   :parent :resolve-versioned-rows
+   :args {:version-id-field {:value :item-id}
+          :version-data-fields {:value [:binding-id :position :value
+                                        :ref-fn-id :literal]}
+          :version-rows :_resolve-binding-list-item-versions}}
+
+  {:name :_resolve-binding-list-item-versions
+   :parent :map
+   :args {:func :_resolve-binding-list-item-versions-decode
+          :coll :_resolve-binding-list-item-versions-raw}}
+
+  {:name :_resolve-binding-list-item-versions-raw
+   :parent :pg-query
+   :args {:hsql :_resolve-binding-list-item-versions-hsql}}
+
+  {:name :_resolve-binding-list-item-versions-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :binding-list-item-version}}
+          :key {:value :where}
+          :value :_resolve-binding-list-item-versions-hsql-where}}
+
+  {:name :_resolve-binding-list-item-versions-hsql-where
+   :parent :vec
+   :args {:coll [{:value :in} {:value :branch-id} {:as :branch-chain}]}}
+
+  {:name :_resolve-binding-list-item-versions-decode
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "binding-list-item-version"}}}]}

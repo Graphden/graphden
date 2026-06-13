@@ -3,7 +3,6 @@
    Handles JSONB, enum, and other type conversions."
   (:require
     [cheshire.core :as json]
-    [clojure.string :as str]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp])
   (:import
@@ -45,16 +44,27 @@
 
 
 (defn- preserve-keywords
-  "Converts keyword VALUES to \":name\" strings so they survive JSON round-trip.
-   Map keys are left as-is (Cheshire handles key serialization separately).
+  "Tags keyword VALUES as `{:_kw \"name\"}` so they survive JSON round-trip
+   without colliding with user-provided strings.
 
-   Sets get tagged as `{:_set [...]}` — cheshire would otherwise lose
-   the set-vs-vector distinction (both serialise to JSON arrays).
-   Type-system constraints like `[:fn args ret #{:io}]` (Phase 8
-   effect carve-out) need the set preserved through storage."
+   The previous scheme serialised `:foo` as the string `\":foo\"` and
+   restored it on read by recognising the leading colon. That collided
+   with any user string literal starting with `:` (length ≥ 2): such
+   strings were misread as keywords and lost their leading colon on the
+   way back. The tagged-map scheme is unambiguous — a 1-key map under
+   `:_kw` is reserved for the keyword carrier; user data may legitimately
+   contain `:foo`-prefixed strings.
+
+   Sets get tagged as `{:_set [...]}` via the same convention — JSON
+   loses the set-vs-vector distinction otherwise. Type-system
+   constraints like `[:fn args ret #{:io}]` (effect carve-out) need
+   the set preserved through storage.
+
+   Map keys are left as-is (cheshire handles key serialisation
+   separately)."
   [v]
   (cond
-    (keyword? v) (str v)
+    (keyword? v) {:_kw (subs (str v) 1)}
     (set? v) {:_set (mapv preserve-keywords (vec v))}
     (map? v) (persistent! (reduce-kv (fn [m k v2] (assoc! m k (preserve-keywords v2))) (transient {}) v))
     (sequential? v) (mapv preserve-keywords v)
@@ -63,26 +73,27 @@
 
 (defn- value->jsonb
   "Wraps a value as JSONB PGobject for PostgreSQL.
-   Keywords in values are preserved as \":name\" strings."
+   Keywords in values are preserved via `preserve-keywords`."
   [v]
   (->pgobject "jsonb" (json/generate-string (preserve-keywords v))))
 
 
 (defn- normalize-parsed-json
-  "Post-processes parsed JSON: converts lazy seqs to vectors, restores
-   keyword values (strings starting with ':' → keywords), and unwraps
-   `{:_set [...]}` markers back into Clojure sets (mirror of
-   `preserve-keywords`'s set-tagging)."
+  "Post-processes parsed JSON: converts lazy seqs to vectors and unwraps
+   the codec's tagged carriers — `{:_kw \"name\"}` → keyword, `{:_set
+   [...]}` → Clojure set. Mirror of `preserve-keywords`."
   [x]
   (cond
-    (and (string? x)
-         (> (count x) 1)
-         (str/starts-with? x ":"))
-    (keyword (subs x 1))
+    ;; Tagged-keyword unwrap. The single-key `:_kw`/`\"_kw\"` shape is
+    ;; the only place this convention applies for keyword values; any
+    ;; other map flows through the normal recursion.
+    (and (map? x)
+         (= 1 (count x))
+         (let [k (first (keys x))]
+           (or (= k :_kw) (= k "_kw"))))
+    (keyword (val (first x)))
 
-    ;; Tagged-set unwrap. The single-key `:_set`/`"_set"` shape is the
-    ;; only place this convention applies; any other map flows through
-    ;; the normal recursion.
+    ;; Tagged-set unwrap. Same convention as `:_kw` but for sets.
     (and (map? x)
          (= 1 (count x))
          (let [k (first (keys x))]
@@ -100,8 +111,8 @@
 
 (defn- parse-jsonb
   "Parses JSONB PGobject value to Clojure data.
-   Returns nil for null values.
-   Restores keywords from \":name\" strings and converts arrays to vectors."
+   Returns nil for null values. Restores keywords from `{:_kw \"name\"}`
+   tags, sets from `{:_set [...]}` tags, and converts arrays to vectors."
   [pg-value]
   (when pg-value
     (try

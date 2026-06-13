@@ -82,25 +82,90 @@
       v)))
 
 
+(defn- list-type-impl
+  "Synthesised impl for a list-type fn-row — pass the items through,
+   forcing any thunks the executor placed in `:items`. Hoisted to
+   a top-level def so every call site shares one identity (otherwise
+   each `compute-base-fns-map` invocation creates a fresh closure,
+   wobbling the base-fns map's hash across boots and blocking
+   `compile-all-templates`' cross-boot template cache)."
+  [args _ctx]
+  (force (:items args)))
+
+
+;; Per-constraint cache so `refinement-type-impl` doesn't fabricate a
+;; fresh closure on every `compute-base-fns-map` call — same constraint
+;; would otherwise hash differently per boot and pollute the
+;; templates-cache key.
+(def ^:private refinement-impl-cache (atom {}))
+
+
+(defn- cached-refinement-impl
+  [constraint]
+  ;; Identity-stable: under concurrent first-touch on the same
+  ;; `constraint`, two threads racing through the cache miss would each
+  ;; compute their OWN `refinement-type-impl` value (new fn per call),
+  ;; and `swap! assoc` would let the SECOND writer overwrite the first.
+  ;; Both threads then return DIFFERENT fn references for the same
+  ;; constraint — breaking the identity-stable contract the
+  ;; `compute-base-fns-map` template cache relies on. Wrap the assoc
+  ;; in a `swap!` that no-ops when the key landed during the race so
+  ;; whichever thread wins becomes the canonical impl; both readers
+  ;; return that same canonical value.
+  (or (get @refinement-impl-cache constraint)
+      (let [impl (refinement-type-impl constraint)
+            after (swap! refinement-impl-cache
+                         (fn [m]
+                           (if (contains? m constraint)
+                             m
+                             (assoc m constraint impl))))]
+        (get after constraint))))
+
+
 (defn- synthesised-impl-for
   "Type-row markers `:type {…}` (record), `:refine {…}` (refinement),
    `:list T` (list) get an auto-generated impl. Other fn-defs return
-   the user-provided `:impl`."
+   the user-provided `:impl`.
+
+   Refinement + list impls flow through identity-stable cached
+   constructors so the resulting `compute-base-fns-map` output hashes
+   the same on repeated invocations — required for
+   `compile.compile-all-templates`' template cache to hit."
   [fn-def]
   (cond
     (:type fn-def)   record-type-impl
-    (:refine fn-def) (refinement-type-impl (:constraint (:refine fn-def)))
-    (:list fn-def)   (fn [args _ctx] (force (:items args)))
+    (:refine fn-def) (cached-refinement-impl (:constraint (:refine fn-def)))
+    (:list fn-def)   list-type-impl
     :else            (:impl fn-def)))
+
+
+(defn compute-base-fns-map
+  "Build `{fn-name → impl}` from a `defs` map of fn-name → fn-def
+   without mutating any registry. Type-row markers get a synthesised
+   impl (record / refinement / list); fn-defs with no impl AND no
+   marker are skipped (anonymous types etc.). Pure data — the
+   integrant `:exec/base-fns` init-key uses this to surface the map
+   to `:exec/context` as a ref-dep, so ctx's `:base-fns` snapshot
+   comes from the pipeline instead of the global atom."
+  [defs]
+  (into {}
+        (keep (fn [[fn-name fn-def]]
+                (when-let [impl (synthesised-impl-for fn-def)]
+                  [fn-name impl])))
+        defs))
 
 
 (defn register-base-fns!
   "Registers Clojure impls in the executor's global registry. Type-rows
-   (no `:impl` key) get a synthesised impl matching their role."
+   (no `:impl` key) get a synthesised impl matching their role.
+
+   Kept for direct callers that don't go through the integrant
+   pipeline — production / `bb run` flows snapshot the map via
+   `compute-base-fns-map` and pass it through ctx instead. The global
+   atom still holds the merged result so legacy callers
+   (`exec/get-base-fn` by name from REPL etc.) keep working."
   [defs]
-  (doseq [[fn-name fn-def] defs
-          :let [impl (synthesised-impl-for fn-def)]
-          :when impl]
+  (doseq [[fn-name impl] (compute-base-fns-map defs)]
     (exec/register-base-fn! fn-name impl)))
 
 
@@ -178,9 +243,9 @@
    `:effects` is recorded straight from the fn-def as a set of keyword
    tags (`:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
    `:process`). `:process` is the service-eligibility marker —
-   declares 'spawns supervised background work'; required by
-   `crud.entities/validate-create` when admins make a fn into a
-   `:service`.
+   declares 'spawns supervised background work'; required by the
+   `:_create-service-no-process-rej` graph guard when admins make a
+   fn into a `:service`.
    The legacy generic `:effectful? true` boolean / `:effect` tag have
    been retired — every base-fn that produces side effects names a
    specific category. `:description` is propagated so the editor's
@@ -199,40 +264,70 @@
                       (map (fn [[arg-name arg-spec]]
                              [arg-name (or (arg-spec->rich-type arg-name arg-spec) :any)]))
                       args)
-        effects (set (:effects fn-def))
-        desc (:description fn-def)]
-    (swap! rich-types-registry assoc fn-name
-           (cond-> {:return (or ret :any)
-                    :args   per-arg
-                    ;; Always store the computed set, even when empty.
-                    ;; compute-effects is total — every fn has a known
-                    ;; set, possibly #{} (pure). Gating on (seq effects)
-                    ;; collapsed "computed pure" and "no info recorded"
-                    ;; into one absent-key state, which forced every
-                    ;; consumer downstream to write (or (:effects info)
-                    ;; #{}) to recover the pure case. Storing #{}
-                    ;; explicitly drops the asymmetry.
-                    :effects effects}
-             (and desc (seq desc))      (assoc :description desc)
-             (:return-type-rule fn-def) (assoc :return-type-rule
-                                               (:return-type-rule fn-def))
-             (:slot-types-rule fn-def)  (assoc :slot-types-rule
-                                               (:slot-types-rule fn-def))
-             (:nav-types-rule fn-def)   (assoc :nav-types-rule
-                                               (:nav-types-rule fn-def))
-             ;; `:lazy-seq-args` — slot names the executor resolves to
-             ;; delay-wrapped seq items; read by `compile/bindings` to
-             ;; tag the binding so a consumer like `:cond` short-circuits.
-             (:lazy-seq-args fn-def)    (assoc :lazy-seq-args
-                                               (:lazy-seq-args fn-def))
-             ;; `:source-file` / `:source-line` — origin of the EDN entry
-             ;; (tools.reader meta). Stored alongside the rich-type so
-             ;; type-error messages can point at the fn that introduced
-             ;; the offending constraint.
-             (:source-file fn-def)      (assoc :source-file
-                                               (:source-file fn-def))
-             (:source-line fn-def)      (assoc :source-line
-                                               (:source-line fn-def))))))
+        raw-effects (set (:effects fn-def))
+        desc (:description fn-def)
+        build (fn [final-effects]
+                (cond-> {:return (or ret :any)
+                         :args   per-arg
+                         ;; Always store the computed set, even when empty.
+                         ;; compute-effects is total — every fn has a known
+                         ;; set, possibly #{} (pure). Gating on (seq effects)
+                         ;; collapsed "computed pure" and "no info recorded"
+                         ;; into one absent-key state, which forced every
+                         ;; consumer downstream to write (or (:effects info)
+                         ;; #{}) to recover the pure case. Storing #{}
+                         ;; explicitly drops the asymmetry.
+                         :effects final-effects}
+                  (and desc (seq desc))      (assoc :description desc)
+                  (:return-type-rule fn-def) (assoc :return-type-rule
+                                                    (:return-type-rule fn-def))
+                  (:slot-types-rule fn-def)  (assoc :slot-types-rule
+                                                    (:slot-types-rule fn-def))
+                  (:nav-types-rule fn-def)   (assoc :nav-types-rule
+                                                    (:nav-types-rule fn-def))
+                  ;; `:lazy-seq-args` — slot names where each ITEM in the
+                  ;; seq slot's list arrives as a `delay`, so a consumer
+                  ;; like `:cond` can step past an unforced item.
+                  ;;
+                  ;; Scalar lazy slots DON'T need a marker — every `:ref`
+                  ;; binding compiles to a delay by default; Clojure's
+                  ;; native `if`/`and`/`or` short-circuit on un-read args.
+                  (:lazy-seq-args fn-def)    (assoc :lazy-seq-args
+                                                    (:lazy-seq-args fn-def))
+                  ;; `:source-file` / `:source-line` — origin of the EDN entry
+                  ;; (tools.reader meta). Stored alongside the rich-type so
+                  ;; type-error messages can point at the fn that introduced
+                  ;; the offending constraint.
+                  (:source-file fn-def)      (assoc :source-file
+                                                    (:source-file fn-def))
+                  (:source-line fn-def)      (assoc :source-line
+                                                    (:source-line fn-def))
+                  ;; `:tags` — set of declarative capability / shape markers
+                  ;; on the fn-def. Policy callers (e.g. the admin-only-vault
+                  ;; capability gate in `crud.secret-shape`) query by tag
+                  ;; rather than hardcoding fn-name sets, so adding a new
+                  ;; tagged base-fn is a one-line `fns.edn` annotation.
+                  (seq (:tags fn-def))       (assoc :tags
+                                                    (set (:tags fn-def)))))]
+    ;; `:effects` race resolution: the type-checker computes a fn's
+    ;; full effect set (parent inheritance + own-declared) and writes
+    ;; it via `record-rich-types-raw!`. Earlier in the same sync we
+    ;; wrote a raw `record-rich-types!` entry with only the fn-def's
+    ;; OWN-declared effects (often empty for composed fns that inherit
+    ;; `:process` from `:future`). If a parallel bootstrap re-runs
+    ;; `record-rich-types!` AFTER the type-check has populated
+    ;; computed effects, this second raw write would erase them — any
+    ;; service-eligibility assertion downstream then sees an empty
+    ;; set. Preserve existing non-empty effects when the fn-def
+    ;; declares none.
+    (swap! rich-types-registry
+           (fn [reg]
+             (let [existing (get reg fn-name)
+                   final-effects (if (and (empty? raw-effects)
+                                          (seq (:effects existing)))
+                                   (:effects existing)
+                                   raw-effects)]
+               (assoc reg fn-name (build final-effects)))))))
 
 
 (defn effectful-rich-type?
@@ -266,6 +361,17 @@
 (defn rich-types-snapshot
   []
   @rich-types-registry)
+
+
+(defn fn-names-with-tag
+  "Return the set of fn-NAMES (keywords) declared with `tag` in their
+   `:tags`. Used by policy callers (admin-only-vault gate) to discover
+   tagged base-fns declaratively instead of hardcoding names."
+  [tag]
+  (->> @rich-types-registry
+       (keep (fn [[fn-name info]]
+               (when (contains? (:tags info) tag) fn-name)))
+       set))
 
 
 ;; =============================================================================

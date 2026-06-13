@@ -1,0 +1,173 @@
+;; Branch-chain walk as pure graph composition — Block 1 Phase 1.
+;;
+;; Versioned reads (`:fn` / `:fn-slot` / `:binding` /
+;; `:binding-list-item`) need to know the parent-chain of the current
+;; branch in order to resolve "what's the latest version of this row
+;; that lives anywhere along the chain from current up to root."
+;;
+;; The walk is RECURSIVE — given a branch, look up its parent, recurse.
+;; Before `:fix` shipped (`core/recursion`), this had to live as a
+;; Clojure §3.3 carve-out (`versioning.storage.resolution/
+;; collect-branch-chain-impl`). Now it expresses cleanly as a `:fix`
+;; graph composition over `:pg-query` + `:decode-row` — code = graph
+;; in the literal sense, and admins can reparent any step to vary
+;; the walk (e.g. cap depth at N, terminate on a tagged-branch
+;; sentinel) without a Clojure rebuild.
+;;
+;; Performance: each iteration is ONE `:pg-query` + decode. For typical
+;; chain depths (< 10 levels) this is fine. The existing in-memory
+;; `global-chain-cache` (per Clojure impl) is NOT reproduced here —
+;; if cache becomes load-bearing in practice it'll graft onto this
+;; chain via `:atom` + a cache-keyed `:if`-gated wrap.
+
+{:namespace "storage.branches"
+ :description "Branch-chain walk as graph composition over `:fix` + `:pg-query` + `:decode-row`. Foundation for versioned-read resolution."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; :branch-chain — walk the parent chain from `:branch-id` to root.
+  ;;
+  ;; Returns `[current-id parent-id grandparent-id ... root-id]`.
+  ;; A branch with no `:base-branch-id` (root) returns a 1-element
+  ;; chain `[branch-id]`. A branch that doesn't exist returns the
+  ;; same `[branch-id]` (the caller passed an invalid id).
+  ;; ---------------------------------------------------------------------
+
+  ;; Type-row exposing `:branch-id :uuid` as a declared slot.
+  ;; `:branch-chain` parents to this so callers binding `:branch-id`
+  ;; (with `:current-branch-id` or any other ref-fn returning a uuid)
+  ;; get the value-binding path. Without the type-row the `:branch-id`
+  ;; arg would only exist as a propagated free-arg inside
+  ;; `:_branch-chain-initial-state` and the parser couldn't find it
+  ;; on the inheritance walk → dangling slot-id at the binding row.
+  {:name :BranchChainInput
+   :description "Type-row exposing the `:branch-id :uuid` input slot of `:branch-chain`. Separate so the slot is declared at a stable owner, NOT a propagated free arg through a composed fn-def (which can't be resolved across incremental syncs)."
+   :type {:branch-id :uuid}}
+
+  {:name :branch-chain
+   :description "Walk the parent chain from `:branch-id` to the root branch. Returns a vector `[branch-id parent-id ... root-id]`. Pure graph composition over `:fix` + `:pg-query` + `:decode-row`."
+   :parents [:fix :BranchChainInput]
+   :args {:step :_branch-chain-step
+          :input :_branch-chain-initial-state}}
+
+  ;; ---------------------------------------------------------------------
+  ;; `:current-branch-id` + `:current-branch-chain` — primitives every
+  ;; versioned-read site needs. Living at the storage layer so packages
+  ;; downstream of `storage` (`web`, `app`) can compose against the
+  ;; active branch without taking an `app/branches` dep.
+  ;; ---------------------------------------------------------------------
+  {:name :current-branch-id
+   :description "Active branch id from the request's VersionedStorage wrapper. Use as a default base-branch-id when no `:base-ref` was supplied, or as input to `:branch-chain`."
+   :args {}
+   :return-type :uuid
+   :effects #{:db}}
+
+  {:name :current-branch-chain
+   :description "Branch chain (current → root) for the active request's branch. Composition over `:branch-chain` + `:current-branch-id`; bind in `:resolve-*-rows :args :branch-chain` at any versioned-read site."
+   :parent :branch-chain
+   :args {:branch-id :current-branch-id}}
+
+  ;; Initial state: `{:chain [branch-id] :cur branch-id}`.
+  {:name :_branch-chain-initial-state
+   :parent :zipmap
+   :args {:keys [{:value :chain} {:value :cur}]
+          :vals [:_branch-chain-initial-chain
+                 {:as :branch-id}]}}
+
+  {:name :_branch-chain-initial-chain
+   :parent :list
+   :args {:items [{:as :branch-id}]}}
+
+  ;; Each step: look up the cur row, check its parent, recurse or
+  ;; terminate.
+  {:name :_branch-chain-step
+   :parent :if
+   :args {:test :_branch-chain-has-parent?
+          :then :_branch-chain-recurse
+          :else :_branch-chain-result}}
+
+  {:name :_branch-chain-has-parent?
+   :description "True iff the cur branch row has a non-nil `:base-branch-id`."
+   :parent :some?
+   :args {:value :_branch-chain-parent-id}}
+
+  {:name :_branch-chain-parent-id
+   :description "Parent branch id of the cur branch (nil for root or missing row)."
+   :parent :get
+   :args {:coll :_branch-chain-cur-row
+          :key {:value :base-branch-id}
+          :default nil}}
+
+  ;; Decode the raw row → graphden's canonical kebab-case shape so
+  ;; `:get :key :base-branch-id` finds the field under its decoded name.
+  {:name :_branch-chain-cur-row
+   :parent :decode-row
+   :args {:row :_branch-chain-cur-row-raw
+          :entity-type {:value "branch"}}}
+
+  {:name :_branch-chain-cur-row-raw
+   :parent :first
+   :args {:coll :_branch-chain-fetch}}
+
+  ;; Single-row SELECT: `SELECT * FROM branch WHERE id = <cur>`.
+  ;; Direct `:pg-query` parent (NOT `:storage-query-call`) — this fn-def
+  ;; lives in the `storage/branches` package, which is the primitive
+  ;; layer alongside `:pg-query` itself. The Storage protocol's
+  ;; abstract `:query` slot is plumbed in by consumers in the
+  ;; `app/*` layer (via `:storage-query-call`), not by primitives
+  ;; that ARE the implementation. Going through the protocol here
+  ;; would also force closure-capture of `:storage-query` across the
+  ;; `:fix :step` HOF boundary on every recursive iteration — a per-
+  ;; iteration `:call`-indirection on a hot path that fires for every
+  ;; versioned read.
+  {:name :_branch-chain-fetch
+   :parent :pg-query
+   :args {:hsql :_branch-chain-hsql}}
+
+  {:name :_branch-chain-hsql
+   :parent :zipmap
+   :args {:keys [{:value :select} {:value :from} {:value :where}]
+          :vals [:_branch-chain-hsql-select
+                 {:value :branch}
+                 :_branch-chain-hsql-where]}}
+
+  {:name :_branch-chain-hsql-select
+   :parent :vec
+   :args {:coll [{:value :*}]}}
+
+  ;; `[:= :id <cur-id>]` — read cur from the state map at `:input`.
+  {:name :_branch-chain-hsql-where
+   :parent :vec
+   :args {:coll [{:value :=} {:value :id} :_branch-chain-cur-id]}}
+
+  {:name :_branch-chain-cur-id
+   :parent :get
+   :args {:coll {:as :input}
+          :key {:value :cur}}}
+
+  ;; Recurse: call `:self` with `{:chain (conj chain parent) :cur parent}`.
+  {:name :_branch-chain-recurse
+   :parent :invoke
+   :args {:func {:as :self}
+          :arg :_branch-chain-next-state}}
+
+  {:name :_branch-chain-next-state
+   :parent :zipmap
+   :args {:keys [{:value :chain} {:value :cur}]
+          :vals [:_branch-chain-extended-chain
+                 :_branch-chain-parent-id]}}
+
+  {:name :_branch-chain-extended-chain
+   :parent :conj
+   :args {:coll :_branch-chain-cur-chain
+          :item :_branch-chain-parent-id}}
+
+  {:name :_branch-chain-cur-chain
+   :parent :get
+   :args {:coll {:as :input}
+          :key {:value :chain}}}
+
+  ;; Terminal: return the accumulated chain.
+  {:name :_branch-chain-result
+   :parent :get
+   :args {:coll {:as :input}
+          :key {:value :chain}}}]}

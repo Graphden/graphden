@@ -83,6 +83,11 @@ async function deleteAnyExistingServiceFor(page, fnName) {
     await page.waitForTimeout(500);
 
     // === Phase A: ⚙ visible in row-actions popover ===
+    // :current-time-ms has no :process effect declared, so the server
+    // refuses to create a service row. The save button click triggers
+    // an alert dialog whose message names the missing effect — we
+    // assert that copy so the test still catches a regression where
+    // some earlier guard swallows the rejection silently.
     let rejectionAlertSeen = false;
     page.on('dialog', (d) => {
       if (d.type() === 'alert' && d.message().includes(':process effect')) {

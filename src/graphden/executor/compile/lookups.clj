@@ -86,7 +86,14 @@
      :bindings-by-fn     bindings-by-fn
      :binding-by-fn-slot binding-by-fn-slot
      :items-by-binding   items-by-binding
-     :chain-cache        (atom {})}))
+     :chain-cache        (atom {})
+     ;; Hot per-(fn-id) caches used by the compile pipeline. Same
+     ;; lifetime as `:chain-cache` — populated lazily by the
+     ;; compile fns and shared across the compile-all pass so a
+     ;; deep walk runs once per fn-id instead of once per ref-
+     ;; binding pointing at it.
+     :deep-frees-cache   (atom {})
+     :bindings-cache     (atom {})}))
 
 
 (def ^:private cached-build-lookups-max-size
@@ -215,11 +222,35 @@
         (inheritance-chain* fn-id lookups)))
 
 
+(defn- rename-chain-reaches?
+  "True iff `candidate-slot`'s `:source-slot-id` chain transitively
+   reaches `target-slot-id`. `candidate-slot` may rename a renamed
+   slot — e.g. renamed-leaf's `:item` renames leaf-id's `:row` which
+   itself renames `:get`'s `:coll`; asking 'does :item reach :coll?'
+   needs to follow both hops. Bounded to 16 hops to be safe."
+  [candidate-slot target-slot-id slot-map]
+  (loop [src (:source-slot-id candidate-slot)
+         depth 0]
+    (cond
+      (nil? src) false
+      (= src target-slot-id) true
+      (>= depth 16) false
+      :else (recur (:source-slot-id (get slot-map src)) (inc depth)))))
+
+
 (defn rename-for-slot
   "Effective external name for `slot-id` as seen by F's caller. Walks
    the inheritance chain (closest-first); the first own-slot found
-   in the chain whose `:source-slot-id` points to `slot-id` wins —
-   its `:name` is the rename. Falls back to the slot's own name.
+   in the chain whose `:source-slot-id` chain transitively reaches
+   `slot-id` wins — its `:name` is the rename. Falls back to the
+   slot's own name.
+
+   Transitive resolution matters when a fn-def renames a parent's
+   already-renamed slot (e.g. `_list-branches-as-json-item :parent
+   :as-json-branch :args {:branch-row {:as :item}}` — the slot
+   chain is item → branch-row → coll; asking for the rename of
+   `coll` at `_list-branches-as-json-item` must return `:item`,
+   not the intermediate `:branch-row`).
 
    Phase 6c: the FK link `slot.source-slot-id` is now the canonical
    carrier for renames. The legacy `binding.rename-to` text is no
@@ -228,11 +259,15 @@
    populates the FK for every EDN-declared rename. Positional
    list-item renames don't reach this resolver — they live in
    binding-list-item rows and resolve through that path."
-  [fn-id slot-id {:keys [slot-map slot-by-fn-source-slot] :as lookups}]
+  [fn-id slot-id {:keys [slot-map fn-slots-by-fn] :as lookups}]
   (let [renamed (some (fn [fid]
-                        (some-> (get slot-by-fn-source-slot [fid slot-id])
-                                :name
-                                keyword))
+                        (let [own-slots (->> (get fn-slots-by-fn fid [])
+                                             (keep #(get slot-map (:slot-id %))))]
+                          (some-> (first (filter #(rename-chain-reaches?
+                                                    % slot-id slot-map)
+                                                 own-slots))
+                                  :name
+                                  keyword)))
                       (inheritance-chain* fn-id lookups))]
     (or renamed
         (some-> (get-in slot-map [slot-id :name]) keyword))))

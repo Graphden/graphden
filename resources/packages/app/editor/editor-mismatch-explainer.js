@@ -92,7 +92,7 @@ function formatActualLiteral(v) {
 
 function isEditableArg(arg) {
   if (!arg) return false;
-  if (!implementationFnIds || !implementationFnIds.has(arg['fn-id'])) return false;
+  if (!implementationFnIds?.has(arg['fn-id'])) return false;
   return typeof isAuthenticated === 'function' && isAuthenticated();
 }
 

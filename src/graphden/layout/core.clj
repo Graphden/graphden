@@ -308,18 +308,26 @@
 
 (defn parse-layout-request
   "Parse request body into {:root-id UUID, :expansions parsed-map}.
-   Throws on missing root-id. The JSON body→map coercion (InputStream
-   / string / already-parsed map → keywordized map) is delegated to
+   Throws on missing root-id or a non-map / non-nil :expansions value
+   (caught by the `_parse-layout-request` defbase and surfaced as
+   `{:ok false :error}` rather than a bare 500 with a Clojure internal
+   exception). The JSON body→map coercion (InputStream / string /
+   already-parsed map → keywordized map) is delegated to
    `graphden.crud.request/read-json-body` — the layout endpoint and
    the types API share that logic."
   [request]
   (let [body (request/read-json-body request)
-        root-id-str (:root-id body)]
+        root-id-str (:root-id body)
+        expansions-raw (:expansions body)]
     (when-not root-id-str
       (throw (ex-info "Request body must contain 'root-id'"
                       {:type :execution-error/invalid-args})))
+    (when (and (some? expansions-raw) (not (map? expansions-raw)))
+      (throw (ex-info "Request body 'expansions' must be a map of node-id → spec"
+                      {:type :execution-error/invalid-args
+                       :got (Class/.getSimpleName (class expansions-raw))})))
     {:root-id (java.util.UUID/fromString root-id-str)
-     :expansions (parse-expansions (:expansions body {}))}))
+     :expansions (parse-expansions (or expansions-raw {}))}))
 
 
 (defn build-elements

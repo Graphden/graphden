@@ -82,7 +82,8 @@
                  "graphden-future")]
     (Thread/.setDaemon thread true)
     (Thread/.start thread)
-    (fn stopper []
+    (fn stopper
+      []
       (Thread/.interrupt thread))))
 
 
@@ -122,17 +123,74 @@
 ;; current-time-ms via :sub to compute the sleep duration.
 ;; =============================================================================
 
-(defbase cron-next-after-fn
-  [cron now-ms]
-  (let [expr (try (org.quartz.CronExpression. ^String cron)
-                  (catch java.text.ParseException e
-                    (throw (ex-info (str "Invalid cron expression: "
-                                         (.getMessage e))
-                                    {:type :cron/parse-error
-                                     :cron cron}))))
-        now-date (java.util.Date. (long now-ms))
+(defbase cron-parse-fn
+  "Parse a Quartz cron expression into a `CronExpression` handle. Throws
+   `:cron/parse-error` ex-info on malformed input — the boundary
+   converts Quartz's `ParseException` (whose message includes the bad
+   substring + offset) into a stable `:type` tag for graph callers."
+  [cron]
+  (try (org.quartz.CronExpression. ^String cron)
+       (catch java.text.ParseException e
+         (throw (ex-info (str "Invalid cron expression: "
+                              (Throwable/.getMessage e))
+                         {:type :cron/parse-error
+                          :cron cron})))))
+
+
+(defbase cron-fire-after-fn
+  "Given a parsed `CronExpression` handle and a wall-clock instant
+   (epoch-ms), return the next epoch-ms at which the cron would fire.
+   Single Quartz call wrapped in `Date` ↔ epoch-ms interop — both sides
+   speak epoch-ms so this composes cleanly with `:current-time-ms`.
+
+   Quartz returns null when the expression has no valid time after
+   the given instant (e.g. a year-locked cron whose year is already
+   past). The pre-fix code did `(.getTime null)` → NPE with no `:type`
+   tag, surfacing as a generic ClassCastException down the schedule
+   loop. Convert to a clean `:cron/no-future-fire` ex-info so callers
+   can pattern-match the cause."
+  [expr now-ms]
+  (let [now-date (java.util.Date. (long now-ms))
         next-date (org.quartz.CronExpression/.getNextValidTimeAfter expr now-date)]
-    (java.util.Date/.getTime next-date)))
+    (if next-date
+      (java.util.Date/.getTime next-date)
+      (throw (ex-info "Cron expression has no valid future fire time"
+                      {:type :cron/no-future-fire
+                       :now-ms now-ms})))))
+
+
+;; =============================================================================
+;; :atom / :swap-conj / :deref — shared-mutable accumulator for
+;; journalled-write patterns. The atom is meant to be CREATED inside the
+;; same fn-def that consumes it (via `:try`), so a single result-cache
+;; entry per top-level invocation backs every reference to the atom
+;; fn-def → all phases see the same instance.
+;; =============================================================================
+
+(defbase atom-fn
+  "Create a fresh `clojure.core/atom` holding `initial-value`. Returns
+   the atom instance for use with `:swap-conj` / `:deref`. The result
+   is cached per top-level invocation, so every fn-def referencing this
+   atom fn-def derefs to the SAME instance — that's what makes the
+   journal-shared-across-phases idiom work."
+  [initial-value]
+  (atom initial-value))
+
+
+(defbase swap-conj-fn
+  "`(swap! a conj value)` — append `value` to a vector-holding atom.
+   Returns the new vector. The conj is atomic at the JVM level; concurrent
+   appends from a single-threaded executor (the common case) are linearised
+   trivially by the underlying `swap!`."
+  [a value]
+  (swap! a conj value))
+
+
+(defbase deref-fn
+  "`@a` — read the current value of an atom (`clojure.core/deref`).
+   Returns whatever the atom currently holds."
+  [a]
+  (deref a))
 
 
 (def impls
@@ -141,4 +199,8 @@
    :sleep-until-ms sleep-until-ms-fn
    :future future-fn
    :loop-until-interrupted loop-until-interrupted-fn
-   :cron-next-after cron-next-after-fn})
+   :cron-parse cron-parse-fn
+   :cron-fire-after cron-fire-after-fn
+   :atom atom-fn
+   :swap-conj swap-conj-fn
+   :deref deref-fn})

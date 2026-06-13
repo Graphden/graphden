@@ -56,13 +56,7 @@
 
 
 ;; -----------------------------------------------------------------------------
-;; :list-entities / :value-kinds — narrower return-types in the EDN
-
-(deftest list-entities-declares-list-of-jsonb-return
-  (testing ":list-entities EDN declares :return-type [:list :jsonb]"
-    (is (= [:list :jsonb]
-           (:return-type (get (:base-fn-defs loaded) :list-entities))))))
-
+;; :value-kinds — narrower return-type in the EDN
 
 (deftest value-kinds-declares-list-of-text-return
   (testing ":value-kinds EDN declares :return-type [:list :text]"

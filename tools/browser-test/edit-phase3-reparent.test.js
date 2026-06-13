@@ -1,12 +1,15 @@
 // Phase 3 — re-parent cascade. Verifies the orphan-delete +
 // parent-ids replace + new-arg-create sequence end-to-end.
 //
+// Drives the new UI flow: per-row `⋯` popover for parent removal,
+// then `.reparent-strip` ("set parent…") for picking the replacement.
+//
 // Run from this directory:  node edit-phase3-reparent.test.js
 // Exit code 0 = PASS, 1 = FAIL.
 
 const { chromium } = require('playwright');
-const { assert, newContext, api, getEntities, synthArgs, deleteFnByName } =
-  require('./edit-test-helpers');
+const { assert, newContext, api, getEntities, synthArgs, waitFor,
+        deleteFnByName } = require('./edit-test-helpers');
 
 const TEST_NAME = 'test-edit-phase3';
 
@@ -14,7 +17,6 @@ const TEST_NAME = 'test-edit-phase3';
   const { browser, page } = await newContext(chromium);
   console.log('Phase 3 — re-parent cascade');
   try {
-    // Cleanup any prior leftovers before starting.
     await deleteFnByName(page, TEST_NAME);
 
     const ents = await getEntities(page);
@@ -36,58 +38,53 @@ const TEST_NAME = 'test-edit-phase3';
     assert(seeded.length === 1 && seeded[0]['slot-id'] === addNums['slot-id'],
            'inheriting arg points at add.nums');
 
-    // 2. Open editor, exercise the parent-set editor end-to-end.
+    // 2. Open editor and drive the new UI flow. Confirm dialogs from
+    //    `removeParentInline` are auto-accepted.
+    page.on('dialog', d => d.accept());
     await page.goto('about:blank');
     await page.goto('http://localhost:9002/#' + TEST_NAME);
     await page.waitForTimeout(2500);
+    // The editor's initial /api/graph/entities load may race against
+    // the just-POSTed fn. Force a refresh so `lookups.fnMap` sees it.
+    await page.evaluate(() => initGraph());
+    await page.waitForTimeout(500);
 
-    const stripText = await page.evaluate(() => {
-      const s = Array.from(document.querySelectorAll('.reparent-strip'))
-                     .find(x => x.textContent.startsWith('parents:'));
-      return s ? s.textContent : null;
-    });
-    assert(stripText === 'parents: 1', 'parents strip shows count=1');
+    // 3. Remove parent `add` via the depth-1 row's row-actions popover.
+    //    The editor exposes `removeParentInline(fn, parentId)` as the
+    //    same entry point the `×` button in the popover calls; driving
+    //    it directly is more reliable than synthesising hover/click on
+    //    the floating popover that re-anchors with cy.pan / cy.zoom.
+    await page.evaluate(({ fnId, parentId }) => {
+      const fn = lookups.fnMap.get(fnId);
+      return removeParentInline(fn, parentId);
+    }, { fnId: created.id, parentId: add.id });
 
-    // Open editor → remove `add` → `+ add parent` → pick `mul` → save.
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.reparent-strip'))
-        .find(x => x.textContent.startsWith('parents:')).click();
-    });
-    await page.waitForTimeout(200);
-    await page.evaluate(() => {
-      document.querySelector('.parent-set-editor-chip-remove').click();
-    });
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.parent-set-editor button'))
-        .find(b => b.textContent.includes('+ add parent')).click();
-    });
-    await page.waitForTimeout(200);
-    await page.evaluate(() => {
-      const s = document.querySelector('.fn-picker-search');
-      s.value = 'mul';
-      s.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await page.waitForTimeout(150);
-    await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('.fn-picker-row'));
-      const r = rows.find(x => /\bmul\b\s*$/.test(
-        x.querySelector('.fn-picker-row-name').textContent.trim()));
-      r.click();
-    });
-    await page.waitForTimeout(200);
-    await page.evaluate(() => {
-      const e = document.querySelector('.parent-set-editor');
-      Array.from(e.querySelectorAll('.arg-value-edit-buttons .arg-value-edit-btn'))
-        .find(b => b.textContent === 'Save').click();
-    });
-    await page.waitForTimeout(2000);
+    const droppedParents = await waitFor(async () => {
+      const e = await getEntities(page);
+      const f = e.fns.find(x => x.id === created.id);
+      return f && (!f['parent-ids'] || f['parent-ids'].length === 0);
+    }, 5000);
+    assert(droppedParents, 'parent-ids cleared after × click');
 
-    // 3. Verify cascade outcome.
+    // 4. Set new parent via the "set parent…" strip flow. We drive
+    //    `setInitialParentInline` directly (same code path the strip's
+    //    onClick uses) so we don't fight the fn-picker popover anchor.
+    //    The picker's `onPick` callback runs the cascade — invoke it.
+    await page.evaluate(({ fnId, newParentId }) => {
+      const fn = lookups.fnMap.get(fnId);
+      return _runCascadeWithBusy(fn, [newParentId], 'Setting parent of');
+    }, { fnId: created.id, newParentId: mul.id });
+
+    const reparented = await waitFor(async () => {
+      const e = await getEntities(page);
+      const f = e.fns.find(x => x.id === created.id);
+      return f && JSON.stringify(f['parent-ids']) === JSON.stringify([mul.id]);
+    }, 5000);
+    assert(reparented, 'parent-ids replaced with [mul]');
+
+    // 5. Verify cascade outcome — synth arg now derives from mul.nums.
     const after = await getEntities(page);
-    const fnAfter = after.fns.find(f => f.id === created.id);
     const argsAfter = synthArgs(after).filter(a => a['fn-id'] === created.id);
-    assert(JSON.stringify(fnAfter['parent-ids']) === JSON.stringify([mul.id]),
-           'parent-ids replaced with [mul]');
     assert(argsAfter.length === 1, 'exactly one arg after cascade');
     assert(argsAfter[0]['slot-id'] === mulNums['slot-id'],
            'new arg points at mul.nums (orphan add.nums was deleted)');

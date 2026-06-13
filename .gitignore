@@ -70,3 +70,8 @@ tools/browser-test/scratch/
 # everything else (per-run diffs, html report, traces) is throwaway.
 tools/visual-tests/test-results/
 tools/visual-tests/playwright-report/
+
+# Playwright screenshot artifacts (browser-test verification, not for repo)
+/editor-*.png
+/.playwright-mcp/
+tools/browser-test/node_modules/

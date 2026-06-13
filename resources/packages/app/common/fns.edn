@@ -50,9 +50,11 @@
   ;; Level 3: route = [path, method-map] using :list
   ;; First item is the renamed free :path; second is the method-map.
   {:name :route
-   :description "Generic reitit route — `[path method-data]`. Free args: `:path`, `:method`, `:handler`. Method-specific shortcuts below bind `:method`."
+   :description "Generic reitit route — `[path method-data]`. Own pins: `:path`, `:method`, `:handler`. Method-specific shortcuts below bind `:method`."
    :parent :list
-   :args {:items [{:as :path} :method-map]}}
+   :args {:items [{:as :path} :method-map]
+          :method {:type [:union :text :keyword]
+                   :description "HTTP method literal — e.g. `\"GET\"` / `\"POST\"`. Bound to a concrete value by method shortcuts (`:get-route`, `:post-route`, …)."}}}
 
   ;; Level 4: HTTP method shortcuts (`get-route`, `post-route`, …) live in
   ;; `app.routes.method`. They keep the `-route` suffix because bare
@@ -75,9 +77,13 @@
 
   ;; Route carrying its own middleware list (free: path, handler, middleware).
   {:name :route-with-middleware
-   :description "Reitit route that carries its own `:middleware` list — `[path {<method> {\"handler\" h \"middleware\" mw}}]`. Free args: `:path`, `:method`, `:handler`, `:middleware`."
+   :description "Reitit route that carries its own `:middleware` list — `[path {<method> {\"handler\" h \"middleware\" mw}}]`. Own pins: `:path`, `:method`, `:handler`, `:middleware`."
    :parent :list
-   :args {:items [{:as :path} :_method-map-with-middleware]}}
+   :args {:items [{:as :path} :_method-map-with-middleware]
+          :method {:type [:union :text :keyword]
+                   :description "HTTP method literal — bound to a concrete value by `:*-route-with-middleware` shortcuts."}
+          :middleware {:type [:list :any]
+                       :description "Reitit middleware spec list — composed around the route handler."}}}
 
   ;; Method shortcuts (`get-route-with-middleware`, …) live in
   ;; `app.routes.method` next to their plain-method twins.

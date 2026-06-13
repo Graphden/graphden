@@ -1,82 +1,9 @@
 (ns graphden.packages.core.refinements.impls
-  "Runtime narrowing for built-in refinements (Phase 4 step 3).
-
-   Each `:ensure-*` impl validates a single constraint and either
-   returns its input (now narrowed to the refined type from the type
-   system's view) or throws `:refinement/violated`. The throw shape
-   mirrors the type-checker's sync-time rejection so callers can
-   catch one error mode regardless of when the violation surfaces."
-  (:require
-    [graphden.executor.defbase :refer [defbase]]
-    [graphden.types.core :as types]))
+  "All runtime narrowers (`:ensure-positive-int`, `:ensure-url`, …) are
+   now graph fn-defs composing the generic `:_refinement-narrow`
+   template — see `fns.edn`. No defbase impls live here anymore; the
+   `impls` map stays so the package loader's `load-module-impls` finds
+   the expected sentinel (a map keyed by base-fn name).")
 
 
-(defn- violated!
-  [refine-name constraint v]
-  (throw (ex-info (str "Refinement " refine-name
-                       " violated: " (pr-str v)
-                       " doesn't satisfy " (pr-str constraint))
-                  {:type :refinement/violated
-                   :refine-name refine-name
-                   :constraint constraint
-                   :value v})))
-
-
-(defbase ensure-positive-int [value]
-  (if (and (integer? value) (pos? value))
-    value
-    (violated! :positive-int [:> 0] value)))
-
-
-(defbase ensure-non-negative-int [value]
-  (if (and (integer? value) (>= value 0))
-    value
-    (violated! :non-negative-int [:>= 0] value)))
-
-
-(defbase ensure-negative-int [value]
-  (if (and (integer? value) (neg? value))
-    value
-    (violated! :negative-int [:< 0] value)))
-
-
-(defbase ensure-non-empty-text [value]
-  (if (and (string? value) (not= value ""))
-    value
-    (violated! :non-empty-text [:not= ""] value)))
-
-
-(def ^:private non-blank-re #"\S")
-
-
-(defbase ensure-non-blank-text [value]
-  (if (and (string? value) (re-find non-blank-re value))
-    value
-    (violated! :non-blank-text [:matches "\\S"] value)))
-
-
-(def ^:private url-re #"^https?://")
-
-
-(defbase ensure-url [value]
-  (if (and (string? value) (re-find url-re value))
-    value
-    (violated! :url [:matches "^https?://"] value)))
-
-
-(defbase ensure-positive-numeric [value]
-  (if (and (number? value) (pos? value))
-    value
-    (violated! :positive-numeric [:> 0] value)))
-
-
-;; Runtime narrowing fns: input flows through to result (just typed
-;; narrower). If a secret arrives, its taint must follow.
-(def impls
-  {:ensure-positive-int      {:impl ensure-positive-int     :return-type-rule (types/wrap-with-taint nil)}
-   :ensure-non-negative-int  {:impl ensure-non-negative-int :return-type-rule (types/wrap-with-taint nil)}
-   :ensure-negative-int      {:impl ensure-negative-int     :return-type-rule (types/wrap-with-taint nil)}
-   :ensure-non-empty-text    {:impl ensure-non-empty-text   :return-type-rule (types/wrap-with-taint nil)}
-   :ensure-non-blank-text    {:impl ensure-non-blank-text   :return-type-rule (types/wrap-with-taint nil)}
-   :ensure-url               {:impl ensure-url              :return-type-rule (types/wrap-with-taint nil)}
-   :ensure-positive-numeric  {:impl ensure-positive-numeric :return-type-rule (types/wrap-with-taint nil)}})
+(def impls {})

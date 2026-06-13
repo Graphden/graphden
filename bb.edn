@@ -6,7 +6,11 @@
              [clojure.string :as str])
 
   :init (do
-          (def all-paths "src test")
+          ;; Lint paths cover: src + test (classpath sources) AND
+          ;; resources/packages (impls.clj files loaded via load-file —
+          ;; previously un-linted, see .clj-kondo/config.edn for the
+          ;; namespace-name-mismatch carve-out).
+          (def all-paths "src test resources/packages")
           (def green "\u001b[32m")
           (def red "\u001b[31m")
           (def cyan "\u001b[36m")
@@ -119,19 +123,60 @@
 
   ;; === TESTS ===
 
+  ;; `bb test` runs the in-JVM parallel path (one runner, child NSs on a
+  ;; bounded thread pool — wired by `:kaocha.plugin/parallel` in
+  ;; `test/kaocha/plugin/parallel.clj`). Faster than the multi-process
+  ;; path on most boxes because we pay container-startup once instead
+  ;; of per-worker. NSs that redef process-wide vars carry `^:serial`
+  ;; in their ns meta and run sequentially BEFORE the parallel pool.
+  ;;
+  ;; For targeted debugging or `--focus` flows, call kaocha directly:
+  ;; `clojure -M:dev:test -m kaocha.runner --focus my.ns`.
+  ;;
+  ;; The multi-process path lives at `bb test-parallel` if a flake
+  ;; reproduces only across separate JVMs.
   test
-  {:doc "Run all tests"
+  {:doc "Run all tests (single JVM, NSs parallel via :kaocha.plugin/parallel)."
    :task (clojure "-M:dev:test -m kaocha.runner")}
+
+  test-sequential
+  {:doc "Run all tests sequentially in a single JVM (KAOCHA_PARALLELISM=1); use if a flake reproduces only sequentially."
+   :task (p/shell {:extra-env {"KAOCHA_PARALLELISM" "1"}}
+                  "clojure" "-M:dev:test" "-m" "kaocha.runner")}
+
+  ;; Same as `bb test` but points all workers at the local docker-compose
+  ;; `graphden-postgres` (port 5435) via `GRAPHDEN_TEST_PG_JDBC_URL` so
+  ;; the workers skip spinning up their own testcontainer (saves
+  ;; ~3-4 s per worker beyond the first). Requires `bb deploy` /
+  ;; docker-compose up postgres first. The shared cluster is safe — each
+  ;; worker still gets per-NS logical DBs (see
+  ;; `graphden.test-infra.shared-container/ensure-ns-database!`); only
+  ;; the bootstrap admin DB (`graphden`) is shared, and tests never
+  ;; touch it directly.
+  test-shared-pg
+  {:doc "Run tests using the local docker-compose `graphden-postgres` (port 5435) for all workers."
+   :task (let [n (or (first *command-line-args*) "4")]
+           (p/shell {:extra-env {"GRAPHDEN_TEST_PG_JDBC_URL"
+                                 "jdbc:postgresql://localhost:5435/graphden"
+                                 "GRAPHDEN_TEST_PG_USERNAME" "graphden"
+                                 "GRAPHDEN_TEST_PG_PASSWORD" "graphden"}}
+                    "bb" "test-parallel" n))}
 
   ;; Parallel test runner — splits test namespaces across N worker JVMs
   ;; (default 4). Each worker spins up its OWN testcontainer (via the
   ;; shared-container plugin in tests.edn — shared inside a worker, not
-  ;; across workers), so tests run isolated from each other. Worth ~3x
+  ;; across workers), so tests run isolated from each other. Worth ~2x
   ;; speedup on a quad-core dev box; the per-worker JVM + container
   ;; startup overhead (~6-8s) eats into the savings for very small test
-  ;; subsets, so `bb test` stays the canonical single-process runner.
-  ;; Default N picked to match the ~4 cores typical of dev boxes; CI
-  ;; may override via the first argument: `bb test-parallel 8`.
+  ;; subsets, so `bb test-sequential` exists as the single-process
+  ;; escape hatch. CI may override the worker count via the first
+  ;; argument: `bb test-parallel 8`.
+  ;;
+  ;; To skip per-worker testcontainer startup, set
+  ;; `GRAPHDEN_TEST_PG_JDBC_URL` (and optionally `_USERNAME` /
+  ;; `_PASSWORD`) — workers inherit env and connect to that cluster
+  ;; instead. Useful when a docker-compose Postgres is already running;
+  ;; see `bb test-shared-pg`.
   test-parallel
   {:doc "Run tests in parallel (N=4 by default; arg overrides)."
    :task (let [n (or (some-> (first *command-line-args*) Long/parseLong)
@@ -184,8 +229,12 @@
              (System/exit 1)))}
 
   coverage
-  {:doc "Run tests with coverage report"
-   :task (clojure "-M:dev:test:cloverage --src-ns-path src --test-ns-path test --ns-regex \"graphden\\..*\" --ns-exclude-regex \".*-test\" --ns-exclude-regex \".*contract-tests\" --ns-exclude-regex \".*test-helpers\" --ns-exclude-regex \".*test-mocks\"")}
+  {:doc "Unit-only coverage (~1:26 wall, ~72.8% form / 82.3% line). Cloverage's per-form instrumentation × testcontainer round-trips brings full-coverage wall time to ~35 min (see `bb coverage-full`), so the day-to-day CI signal stays unit-only. Integration-only paths (cron / services / secrets / storage e2e / executor-runtime / branch-router) run every CI via `bb test` but their cloverage %-numbers only appear in `bb coverage-full`."
+   :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
+
+  coverage-full
+  {:doc "Full coverage (unit + integration). ~35 min wall (cloverage instrumentation × testcontainer round-trips). Use as a periodic audit (manual / nightly), NOT on every CI — the budget would blow up ~6×. Baseline at last run: 84.65% form / 93.72% line; only RED NS is `system.demo-branches` (2.78%)."
+   :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn")}
 
   ;; === FULL CHECK ===
 

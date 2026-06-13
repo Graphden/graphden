@@ -20,9 +20,17 @@
       (is (pos? result))
       (is (= 30 result))))
 
-  (testing "respects custom timeout via binding"
-    (binding [sp/*query-timeout-ms* 60000]
-      (is (= 60 (util/get-query-timeout-seconds))))))
+  (testing "respects custom timeout via with-query-timeout"
+    ;; `sp/*query-timeout-ms*` and `config/*query-timeout-ms*` are
+    ;; SEPARATE dynamic vars (both protocol re-export and config
+    ;; declare their own); production code threads both via
+    ;; `sp/with-query-timeout` which is the only safe path.
+    ;; Direct `(binding [sp/*query-timeout-ms* …])` leaves
+    ;; `config/*query-timeout-ms*` at its default — pre-fix this
+    ;; test relied on the (pre-consolidation) duplicate `util`
+    ;; impl reading sp's var directly.
+    (sp/with-query-timeout 60000
+                           #(is (= 60 (util/get-query-timeout-seconds))))))
 
 
 ;; === Helper to create SQLException with specific state ===

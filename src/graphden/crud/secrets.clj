@@ -1,14 +1,17 @@
 (ns graphden.crud.secrets
-  "Admin-side CRUD for secrets — backed by OpenBao + the user's
-   `:vault-get` fn-def shape.
+  "Admin-side CRUD for secrets — backed by OpenBao + the
+   `:secret-leaf` fn-def shape.
 
    A secret is represented in graphden as a normal `fn` row with
-   `parent-ids=[:vault-get]` plus a single `binding` row carrying
-   the KV path in `binding.value`. The actual secret VALUE never
-   touches the graphden DB — it goes straight to OpenBao via the
-   `graphden.clients.vault` client. This module orchestrates both
-   sides: graphden-row + OpenBao-write happen together with
-   compensation rollback if either side fails.
+   `parent-ids=[:secret-leaf]` plus a single `binding` row whose
+   `:override-kind :secret-path` carries the KV path in
+   `binding.value`. The actual secret VALUE never touches the
+   graphden DB — it goes straight to OpenBao via the
+   `graphden.clients.vault` client, and the executor auto-derefs
+   the path at arg-resolution time (see `compile/bindings.clj`
+   `:secret-value` case). This module orchestrates both sides:
+   graphden-row + OpenBao-write happen together with compensation
+   rollback if either side fails.
 
    Endpoints (see `app/secrets/fns.edn`):
    - `GET /api/secrets`          → `list-secrets`
@@ -17,6 +20,7 @@
    - `PUT /api/secrets/:id/value` → `rotate-secret`"
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.clients.vault :as vault]
     [graphden.crud.entities :as crud-entities]
     [graphden.crud.request :as request]
@@ -28,10 +32,24 @@
       UUID)))
 
 
+(defn- log-rollback-failure
+  "Log (don't silence) a failed compensation step. Rollback steps must
+   not throw — a re-throw inside the outer `catch` block would mask the
+   original failure that triggered the rollback. But silently nil'ing
+   the failure hides operational data the operator needs (vault left
+   with an orphan secret? graphden left with an orphan binding?). Log
+   at WARN so the original error stays primary while the compensation
+   gap is visible in dashboards."
+  [step e]
+  (log/warn e (str "Secret-rollback step failed: " (name step)
+                   " — manual cleanup may be required")))
+
+
 (defn- require-vault!
   "The admin path treats a missing vault as a hard error — without
-   OpenBao there's nowhere to store the value. (User `:vault-get`
-   calls also fail with `:vault/not-configured` in this state.)"
+   OpenBao there's nowhere to store the value. (The executor's
+   `:secret-value` auto-deref also fails with `:vault/not-configured`
+   in this state.)"
   [ctx]
   (or (:vault ctx)
       (throw (ex-info "Vault client not configured — set VAULT_ADDR / VAULT_TOKEN"
@@ -39,39 +57,49 @@
 
 
 (defn- find-path-slot-id
-  "The single arg slot is owned by the secret base-fn (`:vault-get`
-   in the legacy shape with slot `:path`; `:secret-leaf` in the
-   Followup-4 shape with slot `:in`). Each base-fn has exactly one
-   slot — pick the first fn-slot junction off the owner."
+  "The single arg slot is owned by `:secret-leaf` (its `:in` slot).
+   Pick the first fn-slot junction off the owner."
   [storage owner-fn-id]
   (when-let [fs (first (sp/query-entities storage :fn-slot {:fn-id owner-fn-id}))]
     (:slot-id fs)))
 
 
 (defn- secret-binding-path
-  "Read the path string out of a secret-fn-def's binding on the
-   `:path` slot. Returns nil when no binding exists (corrupted state)."
+  "Read the path string out of a secret-fn-def's binding. Returns
+   nil when no binding exists (corrupted state)."
   [storage fn-id path-slot-id]
   (some-> (first (sp/query-entities storage :binding {:fn-id fn-id
                                                       :slot-id path-slot-id}))
           :value))
 
 
-(defn- find-usages
+(defn find-usages
   "Find every fn that references `fn-id`:
    - as a parent (`parent-ids` :ref-many — reverse junction-index
      via `sp/query-ref-many-owners`, O(log n))
    - via a binding (`binding.ref-fn-id` :ref — equality filter)
    - via a sequence item (`binding-list-item.ref-fn-id` :ref)
-   Returns a vec of `{:fn-id :name :reason}` maps, deduplicated."
+   Returns a vec of `{:fn-id :name :reason}` maps, deduplicated.
+
+   Parallels the graph fn-def `:find-fn-usages` in
+   `app/secrets/fns.edn` — the production HTTP path goes through
+   that graph composition (`:query-ref-many-owners` + 2
+   `:list-entities` reverse-ref scans + `:merge`-precedence + name
+   lookup). This Clojure helper exists for the test orchestrator
+   `delete-secret` (mirror of the graph path for unit testing)."
   [storage fn-id]
   (let [parent-owner-ids (sp/query-ref-many-owners storage :fn :parent-ids fn-id)
         as-binding (sp/query-entities storage :binding {:ref-fn-id fn-id})
         as-list-item (sp/query-entities storage :binding-list-item {:ref-fn-id fn-id})
-        list-item-binding-fn-ids (keep (fn [li]
-                                         (some-> (sp/read-entity storage :binding (:binding-id li))
-                                                 :fn-id))
-                                       as-list-item)
+        ;; One IN-query to resolve every list-item's owning binding, then
+        ;; pluck the :fn-id off each. Pre-fix this did
+        ;; `(read-entity :binding bid)` inside `keep` — N round-trips for
+        ;; N list-items.
+        list-item-binding-ids (into [] (keep :binding-id) as-list-item)
+        list-item-bindings (when (seq list-item-binding-ids)
+                             (sp/query-entities storage :binding
+                                                {:id list-item-binding-ids}))
+        list-item-binding-fn-ids (into [] (keep :fn-id) list-item-bindings)
         ;; Collect every referencing fn-id with the most-specific reason
         ;; (parent > binding > list-item). One row per fn-id.
         reasons (merge
@@ -93,8 +121,7 @@
    round-trip per secret. Failures to read metadata downgrade
    gracefully — the row still appears, just without provenance.
 
-   `shape` is `\"secret-leaf\"` (new model) or `\"vault-get\"` (legacy
-   — needs migration via POST /api/secrets/:fn-id/migrate)."
+   `shape` is `\"secret-leaf\"` — the only admin secret shape."
   [storage vault-client fn-row path-slot-id shape]
   (let [fn-id (:id fn-row)
         path (secret-binding-path storage fn-id path-slot-id)
@@ -114,54 +141,32 @@
 
 
 (defn list-secrets
-  "GET /api/secrets — every fn-def with parent=`[:vault-get]` OR
-   parent=`[:secret-leaf]`, enriched with OpenBao metadata. Secret
-   VALUES are never returned."
+  "GET /api/secrets — every fn-def with parent=`[:secret-leaf]`,
+   enriched with OpenBao metadata. Secret VALUES are never returned."
   [ctx]
   (let [storage (request/require-storage ctx)
         vault-client (require-vault! ctx)
-        vault-get-id (shape/find-vault-get-fn-id storage)
         secret-leaf-id (shape/find-secret-leaf-fn-id storage)]
-    (if-not (or vault-get-id secret-leaf-id)
-      {:ok false :error ":vault-get / :secret-leaf base-fn not found — package web.vault not loaded?"}
-      (let [;; Each base-fn owns its single arg slot (`:path` for
-            ;; vault-get, `:in` for secret-leaf). We need both to
-            ;; read the path out of each candidate's binding row.
-            vault-get-path-slot-id (when vault-get-id
-                                     (find-path-slot-id storage vault-get-id))
-            secret-leaf-path-slot-id (when secret-leaf-id
-                                       (find-path-slot-id storage secret-leaf-id))
-            ;; Reverse junction-index: owners of EITHER vault-get
-            ;; OR secret-leaf as a parent. Cheap because the index
-            ;; is per-target.
-            owner-ids (distinct
-                        (concat
-                          (when vault-get-id
-                            (sp/query-ref-many-owners storage :fn :parent-ids vault-get-id))
-                          (when secret-leaf-id
-                            (sp/query-ref-many-owners storage :fn :parent-ids secret-leaf-id))))
+    (if-not secret-leaf-id
+      {:ok false :error ":secret-leaf base-fn not found — package web.vault not loaded?"}
+      (let [path-slot-id (find-path-slot-id storage secret-leaf-id)
+            owner-ids (sp/query-ref-many-owners storage :fn :parent-ids secret-leaf-id)
             candidates (when (seq owner-ids)
                          (sp/query-entities storage :fn {:id (vec owner-ids)}))
             secrets (->> candidates
-                         (filter #(shape/secret-fn? % vault-get-id secret-leaf-id))
+                         (filter #(shape/secret-fn? % secret-leaf-id))
                          (mapv (fn [fn-row]
-                                 (let [ps (vec (:parent-ids fn-row))
-                                       [slot-id shape] (condp = ps
-                                                         [secret-leaf-id] [secret-leaf-path-slot-id "secret-leaf"]
-                                                         [vault-get-id]   [vault-get-path-slot-id "vault-get"]
-                                                         [nil nil])]
-                                   (shape-secret storage vault-client fn-row slot-id shape)))))]
+                                 (shape-secret storage vault-client fn-row
+                                               path-slot-id "secret-leaf"))))]
         {:ok true :secrets secrets}))))
 
 
-(defn- parse-uuid-loose
-  "Accept either a UUID or its string form. Returns nil when the
-   input is blank / malformed."
-  [v]
-  (cond
-    (uuid? v) v
-    (string? v) (request/parse-uuid-or-clear v)
-    :else nil))
+;; Private `parse-uuid-loose` removed — the `(uuid? v)` passthrough
+;; case was dead in practice. Every callsite read `body`-extracted
+;; JSON fields or URL segments, both of which arrive as strings (or
+;; nil). For those `request/parse-uuid-or-clear` already returns the
+;; right value (UUID on parse success, nil on blank / malformed /
+;; non-string). Callers below thread directly through that helper.
 
 
 (defn parse-create-secret-request
@@ -170,7 +175,7 @@
   [body]
   (let [description (some-> (:description body) str)]
     {:nm (some-> (:name body) str str/trim)
-     :ns-id (parse-uuid-loose (:namespace-id body))
+     :ns-id (request/parse-uuid-or-clear (:namespace-id body))
      :path (some-> (:path body) str str/trim)
      :value (:value body)
      :description description
@@ -197,289 +202,146 @@
                           {:name (:nm parsed) :namespace-id (:ns-id parsed)})))
 
 
-(defn apply-create-secret
-  "C7 success branch — vault-put + graphden fn-row + path-binding.
-   On graphden failure, compensates by vault-deleting the path.
-   Reached only after every guard passes."
-  [parsed leaf-id ctx]
+(defn replay-secret-rollback!
+  "Shared rollback callable for the §3.3 secret-write `:try` carve-outs
+   (create-secret + create-inline-binding). Walks the journal in
+   reverse and undoes each entry by tag: `[:vault-delete <path>]`
+   tries `vault/delete-secret`, `[:storage-delete <et> <id>]` tries
+   `sp/delete-entity`. Each step is best-effort + logged — replay
+   failures don't re-throw, matching the legacy behaviour (the
+   important contract is that the response says `{:ok false}` and
+   no orphan rows linger on the happy path)."
+  [journal exception ctx]
+  (let [storage (request/require-storage ctx)
+        vault-client (try (require-vault! ctx)
+                          (catch Exception _ nil))]
+    (doseq [entry (reverse @journal)]
+      (case (first entry)
+        :vault-delete
+        (when vault-client
+          (try (vault/delete-secret vault-client (second entry))
+               (catch Exception e (log-rollback-failure :vault-delete e))))
+
+        :storage-delete
+        (let [[_ et id] entry]
+          (try (sp/delete-entity storage et id)
+               (catch Exception e (log-rollback-failure et e))))))
+    (if (instance? clojure.lang.ExceptionInfo exception)
+      {:ok false
+       :error (or (ex-message exception) (str exception))
+       :data (ex-data exception)}
+      {:ok false
+       :error (or (ex-message exception) (str exception))})))
+
+
+(defn apply-create-secret-body
+  "Body of the create-secret `:try`: vault-put + vault-put-metadata
+   (optional) + storage create-fn + storage create-binding +
+   post-create whole-fn type-check. Records rollback entries on the
+   shared `journal` atom (`[:vault-delete path]`, `[:storage-delete
+   :fn fn-id]`, `[:storage-delete :binding binding-id]`). Throws on
+   any failure (caught by `:try`)."
+  [parsed leaf-id journal ctx]
   (let [storage (request/require-storage ctx)
         vault-client (require-vault! ctx)
         {:keys [nm ns-id path value description custom-metadata]} parsed
         path-slot-id (find-path-slot-id storage leaf-id)
         ;; OpenBao first — easy to roll back via vault-delete.
         _ (vault/put-secret vault-client path value)
+        _ (swap! journal conj [:vault-delete path])
         metadata-ok? (try (vault/put-metadata vault-client path custom-metadata)
                           true
-                          (catch Exception _ false))
+                          (catch Exception e
+                            (log/warn e "Vault metadata stamp failed"
+                                      {:path path})
+                            false))
         fn-id (UUID/randomUUID)
         binding-id (UUID/randomUUID)]
-    (try
-      (crud-entities/create-entity
-        :fn
-        (cond-> {:id fn-id
-                 :name nm
-                 :parent-ids [leaf-id]
-                 :_admin-secret-create true}
-          ns-id (assoc :namespace-id ns-id)
-          (and description (seq description)) (assoc :description description))
-        ctx)
-      (crud-entities/create-entity
-        :binding
-        {:id binding-id
-         :fn-id fn-id
-         :slot-id path-slot-id
-         :value path
-         :override-kind :secret-path}
-        ctx)
-      (tc/type-check-fn-after-mutation! storage fn-id)
-      {:ok true
-       :secret {:id (str fn-id)
-                :name nm
-                :namespace-id (some-> ns-id str)
-                :path path
-                :description description
-                :metadata-stamped? metadata-ok?}}
-      (catch Exception t
-        (try (vault/delete-secret vault-client path) (catch Exception _ nil))
-        (try (sp/delete-entity storage :binding binding-id) (catch Exception _ nil))
-        (try (sp/delete-entity storage :fn fn-id) (catch Exception _ nil))
-        {:ok false
-         :error (or (ex-message t) (str t))
-         :data (ex-data t)}))))
+    (crud-entities/create-entity
+      :fn
+      (cond-> {:id fn-id
+               :name nm
+               :parent-ids [leaf-id]
+               :_admin-secret-create true}
+        ns-id (assoc :namespace-id ns-id)
+        (and description (seq description)) (assoc :description description))
+      ctx)
+    (swap! journal conj [:storage-delete :fn fn-id])
+    (crud-entities/create-entity
+      :binding
+      {:id binding-id
+       :fn-id fn-id
+       :slot-id path-slot-id
+       :value path
+       :override-kind :secret-path}
+      ctx)
+    (swap! journal conj [:storage-delete :binding binding-id])
+    (tc/type-check-fn-after-mutation! storage fn-id)
+    {:ok true
+     :secret {:id (str fn-id)
+              :name nm
+              :namespace-id (some-> ns-id str)
+              :path path
+              :description description
+              :metadata-stamped? metadata-ok?}}))
+
+
+(defn apply-create-secret
+  "C7 success branch — wraps `apply-create-secret-body` with journal
+   allocation + try/catch + replay. Survives for non-graph callers."
+  [parsed leaf-id ctx]
+  (let [journal (atom [])]
+    (try (apply-create-secret-body parsed leaf-id journal ctx)
+         (catch Exception e
+           (replay-secret-rollback! journal e ctx)))))
 
 
 (defn create-secret
   "POST /api/secrets — atomically create the OpenBao value, the
    OpenBao custom-metadata, and the graphden fn-row + path-binding.
    On any failure, rolls back partial writes (vault-delete if the
-   graphden side fails)."
+   graphden side fails).
+
+   Thin orchestration over the per-stage helpers
+   (`parse-create-secret-request` / `create-secret-leaf-id` /
+   `create-secret-name-taken?` / `apply-create-secret`) — the same
+   helpers the C7 graph `:cond` in `app/secrets/fns.edn` consumes.
+   Keeping this public defn lets direct Clojure callers (notably
+   the secrets test suite) keep their `(create-secret ctx body)`
+   call shape, while ensuring the validation and apply logic stay
+   single-sourced between the test path and the graph path."
   [ctx body]
-  (let [storage (request/require-storage ctx)
-        vault-client (require-vault! ctx)
-        nm (some-> (:name body) str str/trim)
-        ns-id (parse-uuid-loose (:namespace-id body))
-        path (some-> (:path body) str str/trim)
-        value (:value body)
-        description (some-> (:description body) str)
-        custom-metadata (cond-> {}
-                          (and description (seq description)) (assoc :description description))]
+  (let [parsed (parse-create-secret-request body)
+        leaf-id (create-secret-leaf-id ctx)]
     (cond
-      (str/blank? nm)
+      (str/blank? (:nm parsed))
       {:ok false :error "Required field ':name' is missing"}
 
-      (str/blank? path)
+      (str/blank? (:path parsed))
       {:ok false :error "Required field ':path' is missing"}
 
-      (not (string? value))
+      (not (string? (:value parsed)))
       {:ok false :error "Required field ':value' (string) is missing"}
 
-      :else
-      (let [secret-leaf-id (shape/find-secret-leaf-fn-id storage)
-            path-slot-id (when secret-leaf-id (find-path-slot-id storage secret-leaf-id))]
-        (cond
-          (or (nil? secret-leaf-id) (nil? path-slot-id))
-          {:ok false :error ":secret-leaf base-fn missing — package web.vault not loaded"}
+      (nil? leaf-id)
+      {:ok false
+       :error ":secret-leaf base-fn missing — package web.vault not loaded"}
 
-          (seq (sp/query-entities storage :fn {:name nm :namespace-id ns-id}))
-          {:ok false :error (str "fn already exists with name: " nm)
-           :reason :name-taken}
-
-          :else
-          (let [;; OpenBao first — easy to roll back via vault-delete.
-                _ (vault/put-secret vault-client path value)
-                metadata-ok? (try (vault/put-metadata vault-client path custom-metadata)
-                                  true
-                                  (catch Exception _
-                                    ;; Metadata is best-effort; the value
-                                    ;; is in. Don't fail the create.
-                                    false))
-                fn-id (UUID/randomUUID)
-                binding-id (UUID/randomUUID)]
-            ;; Go through `crud.entities/create-entity` so write-rej
-            ;; validation runs AND the compiled-registry / graph cache
-            ;; gets invalidated — without that, /api/graph/layout for
-            ;; this new fn 500s with "Root function not found".
-            (try
-              (crud-entities/create-entity
-                :fn
-                (cond-> {:id fn-id
-                         :name nm
-                         :parent-ids [secret-leaf-id]
-                         ;; In-memory marker so the capability gate
-                         ;; in `crud.entities/create-entity` lets the
-                         ;; admin path through. Stripped before the
-                         ;; row reaches storage — never persisted.
-                         :_admin-secret-create true}
-                  ns-id (assoc :namespace-id ns-id)
-                  (and description (seq description)) (assoc :description description))
-                ctx)
-              ;; Binding-IS-secret model (F-4): :override-kind
-              ;; :secret-path tells the executor to dereference via
-              ;; vault at arg-resolution time. The binding's :value
-              ;; is the path (visible in graphden); the actual secret
-              ;; value never persists here.
-              (crud-entities/create-entity
-                :binding
-                {:id binding-id
-                 :fn-id fn-id
-                 :slot-id path-slot-id
-                 :value path
-                 :override-kind :secret-path}
-                ctx)
-              ;; Type-check the new fn-def so its rich-type (in
-              ;; particular `[:secret :text]` inherited from
-              ;; `:secret-leaf`'s return) lands in the registry.
-              ;; Without this, `/api/execute`'s `tainted-fn?` check
-              ;; doesn't see the marker and the result-hide layer
-              ;; (T4) doesn't fire — secret leaks into the response.
-              ;; `apply-create` (the form-driven path) already does
-              ;; an equivalent post-mutation check; this is the
-              ;; admin-CRUD parallel.
-              (tc/type-check-fn-after-mutation! storage fn-id)
-              {:ok true
-               :secret {:id (str fn-id)
-                        :name nm
-                        :namespace-id (some-> ns-id str)
-                        :path path
-                        :description description
-                        :metadata-stamped? metadata-ok?}}
-              (catch Exception t
-                ;; Graphden write failed — vault-delete to keep stores in sync.
-                (try (vault/delete-secret vault-client path)
-                     (catch Exception _ nil))
-                (try (sp/delete-entity storage :binding binding-id)
-                     (catch Exception _ nil))
-                (try (sp/delete-entity storage :fn fn-id)
-                     (catch Exception _ nil))
-                {:ok false
-                 :error (or (ex-message t) (str t))
-                 :data (ex-data t)}))))))))
-
-
-(defn parse-migrate-secret-request
-  "Parse `POST /api/secrets/:fn-id/migrate` URL into `{:fn-id :fn-id-ref}`."
-  [fn-id-ref]
-  {:fn-id (parse-uuid-loose fn-id-ref)
-   :fn-id-ref fn-id-ref})
-
-
-(defn migrate-secret-legacy-binding
-  "C10 sub-result — find the legacy binding row on the vault-get's
-   `:path` slot. nil when the binding row is missing OR vault-get-id
-   isn't loaded. Shared between the missing-binding guard + apply."
-  [parsed vault-get-id ctx]
-  (let [storage (request/require-storage ctx)
-        fn-id (:fn-id parsed)]
-    (when (and fn-id vault-get-id)
-      (when-let [legacy-path-slot-id (find-path-slot-id storage vault-get-id)]
-        (first (sp/query-entities storage :binding
-                                  {:fn-id fn-id :slot-id legacy-path-slot-id}))))))
-
-
-(defn migrate-secret-new-slot-id
-  "C10 sub-result — `:secret-leaf`'s `:in` slot id (target of the new
-   binding). Nil when secret-leaf-id isn't loaded."
-  [secret-leaf-id ctx]
-  (when secret-leaf-id
-    (find-path-slot-id (request/require-storage ctx) secret-leaf-id)))
-
-
-(defn apply-migrate-secret
-  "C10 success branch — three storage ops: delete legacy binding,
-   flip parent-ids to [:secret-leaf], create new `:secret-path`-kinded
-   binding on `:in` slot. Done order-sensitively — see the source
-   docstring above for the parent-flip rationale."
-  [parsed legacy-binding new-in-slot-id secret-leaf-id ctx]
-  (let [storage (request/require-storage ctx)
-        fn-id (:fn-id parsed)
-        path (:value legacy-binding)
-        fn-row (sp/read-entity storage :fn fn-id)]
-    (crud-entities/delete-entity :binding (:id legacy-binding) ctx)
-    (crud-entities/update-entity :fn fn-id {:parent-ids [secret-leaf-id]} ctx)
-    (crud-entities/create-entity
-      :binding
-      {:id (UUID/randomUUID)
-       :fn-id fn-id
-       :slot-id new-in-slot-id
-       :value path
-       :override-kind :secret-path}
-      ctx)
-    (tc/type-check-fn-after-mutation! storage fn-id)
-    {:ok true :id (str fn-id) :name (:name fn-row) :path path}))
-
-
-(defn migrate-to-secret-leaf
-  "POST /api/secrets/:fn-id/migrate — convert a legacy `:vault-get`-
-   shaped secret fn-def to the new `:secret-leaf` shape:
-
-   1. Legacy:   parent-ids=[:vault-get], binding on `:path` slot, no override.
-   2. Migrated: parent-ids=[:secret-leaf], binding on `:in` slot, `:override-kind :secret-path`.
-
-   Vault contents are NOT touched — the path stays the same.
-
-   Order matters: delete old binding → switch parent-ids → create new
-   binding. Doing it in a different order leaves the binding's
-   `:slot-id` referencing a slot the new parent doesn't inherit
-   (`write-rej` would reject the parent-ids update). Failures
-   mid-sequence leave the row in an inconsistent state — caller must
-   re-attempt or restore from backup. We do NOT attempt to roll back
-   automatically because either (a) the storage operation succeeded
-   (rollback would itself fail symmetrically) or (b) the failure is
-   the validation gate, in which case the previous state is still
-   intact and no rollback is needed."
-  [ctx fn-id-ref]
-  (let [storage (request/require-storage ctx)
-        fn-id (parse-uuid-loose fn-id-ref)
-        fn-row (when fn-id (sp/read-entity storage :fn fn-id))
-        vault-get-id (shape/find-vault-get-fn-id storage)
-        secret-leaf-id (shape/find-secret-leaf-fn-id storage)]
-    (cond
-      (nil? fn-row)
-      {:ok false :error (str "Secret not found: " fn-id-ref) :reason :not-found}
-
-      (or (nil? vault-get-id) (nil? secret-leaf-id))
-      {:ok false :error ":vault-get / :secret-leaf base-fn not found — package web.vault not loaded"}
-
-      (not= [vault-get-id] (vec (:parent-ids fn-row)))
-      {:ok false :error (str "fn is not legacy :vault-get-shaped (parent-ids != [:vault-get]): " fn-id-ref)
-       :reason :not-legacy-shape}
+      (create-secret-name-taken? parsed ctx)
+      {:ok false
+       :error (str "fn already exists with name: " (:nm parsed))
+       :reason :name-taken}
 
       :else
-      (let [legacy-path-slot-id (find-path-slot-id storage vault-get-id)
-            new-in-slot-id (find-path-slot-id storage secret-leaf-id)
-            legacy-binding (first (sp/query-entities storage :binding {:fn-id fn-id
-                                                                       :slot-id legacy-path-slot-id}))]
-        (cond
-          (nil? legacy-binding)
-          {:ok false :error "Legacy secret has no :path binding (corrupted state?)"
-           :reason :missing-binding}
-
-          (nil? new-in-slot-id)
-          {:ok false :error ":secret-leaf has no inherited slot — package web.vault corrupt?"
-           :reason :missing-slot}
-
-          :else
-          (let [path (:value legacy-binding)]
-            (crud-entities/delete-entity :binding (:id legacy-binding) ctx)
-            (crud-entities/update-entity :fn fn-id {:parent-ids [secret-leaf-id]} ctx)
-            (crud-entities/create-entity
-              :binding
-              {:id (UUID/randomUUID)
-               :fn-id fn-id
-               :slot-id new-in-slot-id
-               :value path
-               :override-kind :secret-path}
-              ctx)
-            (tc/type-check-fn-after-mutation! storage fn-id)
-            {:ok true :id (str fn-id) :name (:name fn-row) :path path}))))))
+      (apply-create-secret parsed leaf-id ctx))))
 
 
 (defn parse-create-inline-binding-request
   "Parse the JSON body of `POST /api/secret-bindings` into `{:fn-id
    :slot-id :path :value}`."
   [body]
-  {:fn-id (parse-uuid-loose (:fn-id body))
-   :slot-id (parse-uuid-loose (:slot-id body))
+  {:fn-id (request/parse-uuid-or-clear (:fn-id body))
+   :slot-id (request/parse-uuid-or-clear (:slot-id body))
    :path (some-> (:path body) str str/trim)
    :value (:value body)})
 
@@ -503,34 +365,41 @@
                                 {:fn-id fn-id :slot-id slot-id})))))
 
 
-(defn apply-create-inline-binding
-  "C11 success branch — vault-put, then create the binding row through
-   crud.entities. Compensates with vault-delete on graphden write
-   failure so the stores stay in sync."
-  [parsed ctx]
+(defn apply-create-inline-binding-body
+  "Body of the inline-bind `:try`: vault-put then storage create.
+   Records rollback entries on the shared `journal` atom. Throws on
+   storage / vault failure (caught by `:try`)."
+  [parsed journal ctx]
   (let [vault-client (require-vault! ctx)
-        {:keys [fn-id slot-id path value]} parsed]
+        {:keys [fn-id slot-id path value]} parsed
+        binding-id (UUID/randomUUID)]
     (vault/put-secret vault-client path value)
-    (let [binding-id (UUID/randomUUID)]
-      (try
-        (crud-entities/create-entity
-          :binding
-          {:id binding-id
-           :fn-id fn-id
-           :slot-id slot-id
-           :value path
-           :override-kind :secret-path}
-          ctx)
-        {:ok true
-         :binding {:id (str binding-id)
-                   :fn-id (str fn-id)
-                   :slot-id (str slot-id)
-                   :path path}}
-        (catch Exception t
-          (try (vault/delete-secret vault-client path) (catch Exception _ nil))
-          {:ok false
-           :error (or (ex-message t) (str t))
-           :data (ex-data t)})))))
+    (swap! journal conj [:vault-delete path])
+    (crud-entities/create-entity
+      :binding
+      {:id binding-id
+       :fn-id fn-id
+       :slot-id slot-id
+       :value path
+       :override-kind :secret-path}
+      ctx)
+    (swap! journal conj [:storage-delete :binding binding-id])
+    {:ok true
+     :binding {:id (str binding-id)
+               :fn-id (str fn-id)
+               :slot-id (str slot-id)
+               :path path}}))
+
+
+(defn apply-create-inline-binding
+  "C11 success branch — wraps `apply-create-inline-binding-body` with
+   journal allocation + try/catch + replay. Survives for non-graph
+   callers; new paths go through `:_inline-bind-apply`'s `:try` node."
+  [parsed ctx]
+  (let [journal (atom [])]
+    (try (apply-create-inline-binding-body parsed journal ctx)
+         (catch Exception e
+           (replay-secret-rollback! journal e ctx)))))
 
 
 (defn create-inline-binding
@@ -542,64 +411,38 @@
    `crud-entities/create-entity` runs `secret-path-rej`, which rejects
    when the slot's declared type doesn't contain `:secret`. On graphden
    failure (gate reject OR uniqueness collision) we vault-delete the
-   path so the stores stay in sync."
+   path so the stores stay in sync.
+
+   Thin orchestration over the C11 helpers (the same ones
+   `:_create-inline-binding-data`'s graph cond consumes) so the test
+   path and the graph path share one source of truth."
   [ctx body]
-  (let [storage (request/require-storage ctx)
-        vault-client (require-vault! ctx)
-        fn-id (parse-uuid-loose (:fn-id body))
-        slot-id (parse-uuid-loose (:slot-id body))
-        path (some-> (:path body) str str/trim)
-        value (:value body)]
+  (let [parsed (parse-create-inline-binding-request body)
+        target-fn-row (inline-binding-target-fn-row parsed ctx)
+        existing (inline-binding-existing parsed ctx)]
     (cond
-      (nil? fn-id) {:ok false :error "Required field ':fn-id' is missing or malformed"}
-      (nil? slot-id) {:ok false :error "Required field ':slot-id' is missing or malformed"}
-      (str/blank? path) {:ok false :error "Required field ':path' is missing"}
-      (not (string? value)) {:ok false :error "Required field ':value' (string) is missing"}
+      (nil? (:fn-id parsed))
+      {:ok false :error "Required field ':fn-id' is missing or malformed"}
 
-      (nil? (sp/read-entity storage :fn fn-id))
-      {:ok false :error (str "fn not found: " fn-id)}
+      (nil? (:slot-id parsed))
+      {:ok false :error "Required field ':slot-id' is missing or malformed"}
 
-      (seq (sp/query-entities storage :binding {:fn-id fn-id :slot-id slot-id}))
-      {:ok false :error "A binding already exists for this fn+slot — delete it first"
+      (str/blank? (:path parsed))
+      {:ok false :error "Required field ':path' is missing"}
+
+      (not (string? (:value parsed)))
+      {:ok false :error "Required field ':value' (string) is missing"}
+
+      (nil? target-fn-row)
+      {:ok false :error (str "fn not found: " (:fn-id parsed))}
+
+      (some? existing)
+      {:ok false
+       :error "A binding already exists for this fn+slot — delete it first"
        :reason :binding-exists}
 
       :else
-      (let [_ (vault/put-secret vault-client path value)
-            binding-id (UUID/randomUUID)]
-        (try
-          (crud-entities/create-entity
-            :binding
-            {:id binding-id
-             :fn-id fn-id
-             :slot-id slot-id
-             :value path
-             :override-kind :secret-path}
-            ctx)
-          {:ok true
-           :binding {:id (str binding-id)
-                     :fn-id (str fn-id)
-                     :slot-id (str slot-id)
-                     :path path}}
-          (catch Exception t
-            (try (vault/delete-secret vault-client path) (catch Exception _ nil))
-            {:ok false
-             :error (or (ex-message t) (str t))
-             :data (ex-data t)}))))))
-
-
-(defn- path-slot-for-fn-row
-  "Pick the correct path-slot id for `fn-row` based on which secret
-   base-fn it inherits from (legacy `:vault-get` or Followup-4
-   `:secret-leaf`). Both base-fns own a single arg slot — the
-   `find-path-slot-id` helper handles that uniformly; we just need
-   to feed it the right owner id."
-  [storage fn-row vault-get-id secret-leaf-id]
-  (let [ps (vec (:parent-ids fn-row))
-        owner-id (condp = ps
-                   [secret-leaf-id] secret-leaf-id
-                   [vault-get-id]   vault-get-id
-                   nil)]
-    (when owner-id (find-path-slot-id storage owner-id))))
+      (apply-create-inline-binding parsed ctx))))
 
 
 (defn parse-delete-secret-request
@@ -607,7 +450,7 @@
    :fn-id-ref <raw>}`. Raw form is preserved for the dynamic error
    messages — they cite back whatever the caller passed."
   [fn-id-ref]
-  {:fn-id (parse-uuid-loose fn-id-ref)
+  {:fn-id (request/parse-uuid-or-clear fn-id-ref)
    :fn-id-ref fn-id-ref})
 
 
@@ -629,23 +472,51 @@
     (find-usages (request/require-storage ctx) fn-id)))
 
 
-(defn apply-delete-secret
-  "C8 success branch — vault-delete first (idempotent), then graphden
-   binding + fn-row deletes through crud.entities so the graph cache
-   invalidates. Reached only after every guard passes."
-  [parsed fn-row ctx]
+(defn delete-secret-vault-cleanup!
+  "Best-effort vault delete during secret removal. Vault may not have
+   the path (already manually purged) or be unreachable — neither is
+   a fatal condition for the graphden-side cleanup. Logged so
+   operators see vault drift."
+  [path ctx]
+  (let [vault-client (require-vault! ctx)]
+    (try (vault/delete-secret vault-client path)
+         (catch Exception e
+           (log/warn e "Vault delete failed during secret removal"
+                     {:path path}))))
+  nil)
+
+
+(defn delete-secret-storage-cleanup!
+  "Storage-side cleanup of a secret removal: delete the path-binding
+   (if present) and the fn-row through `crud-entities/delete-entity`
+   so the graph cache invalidates on each. Returns `nil`. Reads the
+   binding row off `parsed` + `fn-row` so the graph caller doesn't
+   have to thread it."
+  [parsed ctx]
   (let [storage (request/require-storage ctx)
-        vault-client (require-vault! ctx)
         fn-id (:fn-id parsed)
-        vault-get-id (shape/find-vault-get-fn-id storage)
         secret-leaf-id (shape/find-secret-leaf-fn-id storage)
-        path-slot-id (path-slot-for-fn-row storage fn-row vault-get-id secret-leaf-id)
-        path (secret-binding-path storage fn-id path-slot-id)
+        path-slot-id (find-path-slot-id storage secret-leaf-id)
         binding-row (first (sp/query-entities storage :binding
                                               {:fn-id fn-id :slot-id path-slot-id}))]
-    (try (vault/delete-secret vault-client path) (catch Exception _ nil))
     (when binding-row (crud-entities/delete-entity :binding (:id binding-row) ctx))
     (crud-entities/delete-entity :fn fn-id ctx)
+    nil))
+
+
+(defn apply-delete-secret
+  "C8 success branch — wrapper kept for non-graph callers. New paths go
+   through `:_delete-secret-apply`'s `:do` over `:_delete-secret-do-
+   vault-cleanup` + `:_delete-secret-do-storage-cleanup` + the
+   response builder."
+  [parsed fn-row ctx]
+  (let [storage (request/require-storage ctx)
+        fn-id (:fn-id parsed)
+        secret-leaf-id (shape/find-secret-leaf-fn-id storage)
+        path-slot-id (find-path-slot-id storage secret-leaf-id)
+        path (secret-binding-path storage fn-id path-slot-id)]
+    (delete-secret-vault-cleanup! path ctx)
+    (delete-secret-storage-cleanup! parsed ctx)
     {:ok true :id (str fn-id) :name (:name fn-row) :path path}))
 
 
@@ -653,59 +524,47 @@
   "DELETE /api/secrets/:fn-id — hard delete (graphden row + every
    OpenBao version + metadata). Rejected if ANY fn references this
    secret (`:reason :secret-in-use`). Caller must re-target or
-   remove dependents first."
+   remove dependents first.
+
+   Thin orchestration over the C8 helpers (parse / fn-row lookup /
+   usages / apply) so the test path and the `:_delete-secret-data`
+   graph cond stay observationally equivalent."
   [ctx fn-id-ref]
-  (let [storage (request/require-storage ctx)
-        vault-client (require-vault! ctx)
-        fn-id (parse-uuid-loose fn-id-ref)
-        fn-row (when fn-id (sp/read-entity storage :fn fn-id))
-        vault-get-id (shape/find-vault-get-fn-id storage)
+  (let [parsed (parse-delete-secret-request fn-id-ref)
+        fn-row (delete-secret-fn-row parsed ctx)
+        storage (request/require-storage ctx)
         secret-leaf-id (shape/find-secret-leaf-fn-id storage)
-        path-slot-id (when fn-row
-                       (path-slot-for-fn-row storage fn-row vault-get-id secret-leaf-id))]
+        usages (delete-secret-find-usages parsed ctx)]
     (cond
       (nil? fn-row)
       {:ok false :error (str "Secret not found: " fn-id-ref)
        :reason :not-found}
 
-      (not (shape/secret-fn? fn-row vault-get-id secret-leaf-id))
-      {:ok false :error (str "fn is not a secret (parent != [:vault-get|:secret-leaf]): " fn-id-ref)
+      (not (shape/secret-fn? fn-row secret-leaf-id))
+      {:ok false
+       :error (str "fn is not a secret (parent != [:secret-leaf]): " fn-id-ref)
        :reason :not-a-secret}
 
-      :else
-      (let [usages (find-usages storage fn-id)]
-        (cond
-          (seq usages)
-          {:ok false :error (str "Secret is referenced by " (count usages) " fn(s) — remove or re-target dependents first")
-           :reason :secret-in-use
-           :usages (mapv (fn [u]
-                           {:fn-id (str (:fn-id u))
-                            :name (:name u)
-                            :reason (:reason u)})
-                         usages)}
+      (seq usages)
+      {:ok false
+       :error (str "Secret is referenced by " (count usages)
+                   " fn(s) — remove or re-target dependents first")
+       :reason :secret-in-use
+       :usages (mapv (fn [u]
+                       {:fn-id (str (:fn-id u))
+                        :name (:name u)
+                        :reason (:reason u)})
+                     usages)}
 
-          :else
-          (let [path (secret-binding-path storage fn-id path-slot-id)
-                binding-row (first (sp/query-entities storage :binding {:fn-id fn-id
-                                                                        :slot-id path-slot-id}))]
-            ;; Vault first; if graphden delete fails after, the row
-            ;; is harmless (path-binding still resolves at runtime
-            ;; will 404), and re-issuing DELETE will clean up.
-            (try (vault/delete-secret vault-client path)
-                 (catch Exception _ nil))
-            ;; Both deletes go through crud.entities/delete-entity so
-            ;; the graph cache + compiled-registry invalidate alongside
-            ;; the row removal.
-            (when binding-row (crud-entities/delete-entity :binding (:id binding-row) ctx))
-            (crud-entities/delete-entity :fn fn-id ctx)
-            {:ok true :id (str fn-id) :name (:name fn-row) :path path}))))))
+      :else
+      (apply-delete-secret parsed fn-row ctx))))
 
 
 (defn parse-rotate-secret-request
   "Parse the URL + body for `PUT /api/secrets/:fn-id/value` into
    `{:fn-id :fn-id-ref :value}`."
   [fn-id-ref body]
-  {:fn-id (parse-uuid-loose fn-id-ref)
+  {:fn-id (request/parse-uuid-or-clear fn-id-ref)
    :fn-id-ref fn-id-ref
    :value (:value body)})
 
@@ -716,11 +575,9 @@
    by the missing-binding guard + apply."
   [parsed fn-row ctx]
   (let [storage (request/require-storage ctx)
-        vault-get-id (shape/find-vault-get-fn-id storage)
         secret-leaf-id (shape/find-secret-leaf-fn-id storage)]
-    (when fn-row
-      (let [path-slot-id (path-slot-for-fn-row storage fn-row
-                                               vault-get-id secret-leaf-id)]
+    (when (and fn-row secret-leaf-id)
+      (let [path-slot-id (find-path-slot-id storage secret-leaf-id)]
         (secret-binding-path storage (:fn-id parsed) path-slot-id)))))
 
 
@@ -740,33 +597,34 @@
 (defn rotate-secret
   "PUT /api/secrets/:fn-id/value — writes a new value to OpenBao at
    the same path (KV v2 retains the previous version under
-   `?version=N`). graphden state is unchanged."
+   `?version=N`). graphden state is unchanged.
+
+   Thin orchestration over the C9 helpers (parse / fn-row lookup /
+   path lookup / apply). The fn-row + not-a-secret guards reuse the
+   C8 delete helpers — same `parsed` shape (both carry `:fn-id`),
+   same `:_delete-secret-fn-row` / `:_delete-secret-not-found?` /
+   `:_delete-secret-not-a-secret?` graph defbases."
   [ctx fn-id-ref body]
-  (let [storage (request/require-storage ctx)
-        vault-client (require-vault! ctx)
-        fn-id (parse-uuid-loose fn-id-ref)
-        fn-row (when fn-id (sp/read-entity storage :fn fn-id))
-        vault-get-id (shape/find-vault-get-fn-id storage)
+  (let [parsed (parse-rotate-secret-request fn-id-ref body)
+        fn-row (delete-secret-fn-row parsed ctx)
+        storage (request/require-storage ctx)
         secret-leaf-id (shape/find-secret-leaf-fn-id storage)
-        path-slot-id (when fn-row
-                       (path-slot-for-fn-row storage fn-row vault-get-id secret-leaf-id))
-        value (:value body)]
+        path (rotate-secret-path parsed fn-row ctx)]
     (cond
       (nil? fn-row)
       {:ok false :error (str "Secret not found: " fn-id-ref)
        :reason :not-found}
 
-      (not (shape/secret-fn? fn-row vault-get-id secret-leaf-id))
+      (not (shape/secret-fn? fn-row secret-leaf-id))
       {:ok false :error (str "fn is not a secret: " fn-id-ref)
        :reason :not-a-secret}
 
-      (not (string? value))
+      (not (string? (:value parsed)))
       {:ok false :error "Required field ':value' (string) is missing"}
 
+      (nil? path)
+      {:ok false :error "Secret has no :path binding (corrupted state?)"
+       :reason :missing-binding}
+
       :else
-      (let [path (secret-binding-path storage fn-id path-slot-id)]
-        (if-not path
-          {:ok false :error "Secret has no :path binding (corrupted state?)"
-           :reason :missing-binding}
-          (let [version (vault/put-secret vault-client path value)]
-            {:ok true :id (str fn-id) :name (:name fn-row) :path path :version version}))))))
+      (apply-rotate-secret parsed fn-row path ctx))))

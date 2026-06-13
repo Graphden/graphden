@@ -1,17 +1,20 @@
 # Service Registry
 
-Declarative long-running services backed by the `:service` entity. An
-admin declares "keep this fn running" in the DB; the reconciler turns
-the rows into actual futures, supervises startup failures, and stops
-them on shutdown.
+Declarative long-running services backed by the `:service` entity.
+Packages declare baseline services in `package.edn`; an admin can
+also write `:service` rows directly through `/api/entities/service`.
+The reconciler turns enabled rows into running futures, supervises
+startup failures, and stops them on shutdown.
 
-This is **Phase 1 single-pod**. Cron schedules and multi-pod
-coordination come in later phases (see § Roadmap at the bottom).
+This is **single-pod with no periodic poll yet** — reconcile fires
+on integrant init and on every CRUD mutation. Cron schedules,
+periodic poll, and multi-pod coordination come in later phases (see
+§ Roadmap at the bottom).
 
 ## Why services?
 
-Before this feature, exactly one long-running fn was supported via the
-package `:startup-fn` field — typically `:web-server` baked into
+Before this feature, exactly one long-running fn was supported via a
+package's `:startup-fn` field — typically `:web-server` baked into
 `app/package.edn`. You couldn't:
 
 - Run a second long-running fn alongside (e.g. metrics server on a
@@ -21,7 +24,10 @@ package `:startup-fn` field — typically `:web-server` baked into
   via the executor (Run ▶ on `:web-server` from the editor used to
   crash with `Address already in use`)
 
-The `:service` registry fixes all three.
+The `:service` registry fixes all three. Packages now contribute
+baseline services through a `:services [...]` declaration in their
+`package.edn` — the reconciler seeds them idempotently at boot, the
+admin retains the option to disable them.
 
 ## The model: a service IS a no-arg fn
 
@@ -100,27 +106,20 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
 ### Lifecycle
 
 1. **Init** (`:exec/service-reconciler` integrant key):
-   - Reset the production singletons (`recon/running`,
-     `recon/legacy-handle`).
+   - Reset the production singleton `recon/running`.
+   - Seed package-declared `:services` into the `:service` table
+     (idempotent — see § Packages-based seeding below).
    - Read enabled `:service` rows from DB.
-   - If any exist → `reconcile-once!` starts each.
-   - If none → fall back to `package.edn`'s `:startup-fn`
-     (single-shot, no supervisor) and stash the
-     `{:fn-id :stopper}` pair in `legacy-handle`.
+   - If any are enabled → `reconcile-once!` starts each.
 
 2. **Reconcile** (`POST /api/services/reconcile` or programmatic
    `reconcile-once!`):
    - Read enabled rows.
-   - **Displacement step**: if any enabled service's `:fn-id` matches
-     the legacy fallback's `:fn-id`, stop the fallback first (frees
-     its port) and clear `legacy-handle`. Reflected in the summary as
-     `:legacy-displaced? true`.
    - Diff desired set (DB) vs running set (in-process atom). Stop
      extra entries, start missing ones with empty args (the fn is
      fully bound by definition).
 
-3. **Halt** (`halt-key!`): drain `recon/running` via `stop-all!`,
-   stop the legacy fallback if any, clear `legacy-handle`.
+3. **Halt** (`halt-key!`): drain `recon/running` via `stop-all!`.
 
 ### Running-atom shape
 
@@ -144,8 +143,8 @@ exponential-backoff retry loop per `:restart-policy`:
 
 | Policy        | Behaviour                                                  |
 |---------------|------------------------------------------------------------|
-| `:always`     | Retry on start exception up to `max-retries` (default 3) with backoff 1s → 2s → 4s. Phase 1 has no runtime watcher, so this is currently equivalent to `:on-failure`. |
-| `:on-failure` | Same as `:always` in Phase 1. Future phase distinguishes when "clean exit" vs "crash" can be detected. |
+| `:always`     | Retry on start exception up to `max-retries` (default 3) with backoff 1s → 2s → 4s. No runtime watcher yet, so this is currently equivalent to `:on-failure`. |
+| `:on-failure` | Same as `:always` today. A future phase distinguishes "clean exit" vs "crash" once we have a runtime watcher. |
 | `:never`      | Single attempt. On failure, record `:start-failed-at`, leave `:stopper` nil. |
 
 After give-up, the entry stays in `running` so the next reconcile
@@ -186,26 +185,25 @@ that still has free arguments, the create is rejected with:
 
 ### `POST /api/services/reconcile`
 
-Trigger reconciliation. Without periodic poll (Phase 1), this is the
-admin's "apply changes" button.
+Trigger reconciliation. Without periodic poll, this is the admin's
+"apply changes" button.
 
 ```jsonc
 {"ok": true,
  "reconcile": {"started": ["uuid", …],
-               "stopped": ["uuid", …],
-               "legacy-displaced?": false}}
+               "stopped": ["uuid", …]}}
 ```
 
-**Phase 1 caveat: never call this endpoint to displace the very
-web-server that serves it.** http-kit's stop interrupts in-flight
-request threads, including the one running the reconcile call — the
-managed service start fails mid-query and the port ends up unbound.
+**Caveat: never call this endpoint to displace the very web-server
+that serves it.** http-kit's stop interrupts in-flight request
+threads, including the one running the reconcile call — the managed
+service start fails mid-query and the port ends up unbound.
 Workarounds:
 
 - Restart the container so init-key picks up the new rows directly
-- Trigger reconcile from a non-HTTP path (REPL, CLI, future supervisor
-  daemon)
-- Wait for Phase 2's periodic poll
+- Trigger reconcile from a non-HTTP path (REPL, CLI, future
+  supervisor daemon)
+- Wait for the planned periodic-poll feature
 
 For services that DON'T displace the API-serving web-server (a
 metrics server on a different port, say), the endpoint works fine
@@ -218,45 +216,57 @@ service registry already considers alive, the request is rejected
 upfront with `:status :rejected`:
 
 ```jsonc
-// from :service row
 {"ok": false, "status": "rejected",
  "error": "Function is already running as a managed service. …",
  "error-data": {"reason": "already-running-as-service",
                 "source": "service",
                 "service-id": "uuid"}}
-
-// from legacy fallback (no row, only the init-key fallback)
-{"ok": false, "status": "rejected",
- "error": "Function is already running as the boot fallback service. …",
- "error-data": {"reason": "already-running-as-service",
-                "source": "legacy-fallback"}}
 ```
 
 Prevents the foot-gun where clicking ▶ on `:web-server` in the editor
 tries to re-bind its port.
 
-## Legacy fallback (Phase 1 stopgap)
+## Packages-based seeding
 
-When no `:service` rows exist, the reconciler honors the package's
-`:startup-fn` (typically `:web-server`) as a single-shot fallback so a
-freshly-deployed pod still serves HTTP without admin setup.
+Packages contribute baseline `:service` rows through a
+`:services [...]` field in their `package.edn`. Each entry is a map:
 
-The fallback is invisible to subsequent reconcile passes (lives in
-`recon/legacy-handle`, NOT in the diff'd `running` atom). It IS
-displaced when an enabled `:service` with a matching `:fn-id`
-appears — see § Reconciler above.
+```edn
+{:name :default                  ; required — seed name, used for id
+ :fn-name :web-server             ; required — fn-name to resolve
+ :enabled? true                   ; optional, default true
+ :restart-policy :always          ; optional, default :always
+ :description "..."}              ; optional, comment-only
+```
 
-The whole code path retires when Phase 2 introduces a packages-based
-service-seeding mechanism. Until then, keep `:startup-fn` in
-`package.edn`.
+The reconciler invokes `seed-package-services!` at integrant init.
+For each entry:
+
+1. Computes a deterministic service-id via
+   `ids/seeded-service-id package-name name` so re-runs land on the
+   same row.
+2. Resolves `:fn-name` against the `:fn` table; if not found, logs
+   and skips (admin can re-create the fn and the next boot picks it
+   up).
+3. If the row already exists, leaves it alone — an admin's
+   `:enabled?` toggle survives restarts.
+4. Otherwise creates the row with the seed defaults.
+
+The seeded rows go through the regular reconcile path — no separate
+fallback code, no separate stopper handle. Each seed becomes a
+fully-supervised service.
+
+`app/package.edn` ships one seed by default — `:default → :web-server`.
+Other packages can add their own; the loader aggregates seeds across
+all loaded packages.
 
 ## Roadmap
 
-| Phase | What |
-|-------|------|
-| 1 (this doc) | `:service` schema, reconciler, integrant, generic CRUD via /api/entities/service, supervisor for startup failures, legacy displacement, already-running rejection, validation that target fn has zero free args |
-| 2 | `:service-schedule` 1-to-many for cron/interval triggers; periodic reconcile poll (picks up out-of-band DB edits); UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
-| 3 | Multi-pod: `:owner-pod-id`, PG advisory-lock leader election for cron, cross-pod cancel routing |
+| Step | What |
+|------|------|
+| Done | `:service` schema, reconciler, integrant, generic CRUD via /api/entities/service, supervisor for startup failures, packages-based seeding, already-running rejection, validation that target fn has zero free args |
+| Next | Periodic reconcile poll (picks up out-of-band DB edits); `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
+| Then | Multi-pod: `:owner-pod-id`, PG advisory-lock leader election for cron, cross-pod cancel routing |
 | Future | Healthcheck-based runtime crash detection (lets `:always` honor "restart on clean exit"); pluggable supervisor strategies |
 
 ## Code locations

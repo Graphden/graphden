@@ -31,6 +31,23 @@
    :args {:value {:type a :description "Value to test for nilness."}}
    :return-type :bool}
 
+  ;; === Type predicate ===
+  ;;
+  ;; ONE primitive replacing the per-type `keyword?` / `string?` /
+  ;; `map?` / `vector?` / `sequential?` / `number?` / `integer?` /
+  ;; `boolean?` family. The runtime check map lives in
+  ;; `graphden.types.core/runtime-predicates`, colocated with the
+  ;; canonical `primitives` set — adding a new primitive type updates
+  ;; ONE place.
+
+  {:name :is-a?
+   :description "True iff `value` is an instance of the primitive type tagged by `type` (`:keyword` / `:int` / `:numeric` / `:text` / `:map` / `:vector` / `:sequence` / `:bool` / `:null` / `:any` / …). See `runtime-predicates` in `graphden.types.core` for the full list. Throws on unknown tags."
+   :args {:value {:type :any
+                  :description "Value to test."}
+          :type {:type :keyword
+                 :description "Canonical type-tag — a keyword like `:int` / `:keyword` / `:map`. Wrap with `{:value :foo}` in fn-def args to bypass fn-ref resolution if the tag happens to name a known fn-def."}}
+   :return-type :bool}
+
   ;; === Conditionals ===
   ;; `:then` and `:else` share type-var `'a` so the return narrows to
   ;; whichever concrete type both branches carry. `:else` is optional —

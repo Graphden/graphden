@@ -137,7 +137,7 @@ function compatibleMIParentInfo(targetFnId, currentParentIds) {
 // =============================================================================
 
 async function performReparentCascade(fnId, newParentIds) {
-  if (!lookups || !lookups.bindingsByFn) return false;
+  if (!lookups?.bindingsByFn) return false;
   // 1. Walk current bindings on this fn. A binding is orphaned when
   //    its slot lives on a fn no longer reachable through the new
   //    parent set — keeping such a binding would leave a dangling
@@ -165,18 +165,24 @@ async function performReparentCascade(fnId, newParentIds) {
     try {
       const r = await authMutate('DELETE',
                                  '/api/entities/binding/' + encodeURIComponent(b.id));
-      if (!r || !r.ok) return false;
+      if (!r?.ok) return false;
     } catch (_) { return false; }
   }
 
   // 3. PUT new parent-ids on the fn itself. Empty list is encoded as
-  //    `parent-ids=` so the backend resets the FK column to NULL,
-  //    surfacing the fn back to the "set parent…" state.
+  //    the literal string `parent-ids=` so the backend resets the FK
+  //    column to NULL, surfacing the fn back to the "set parent…"
+  //    state. `authMutate`'s field-map form strips empty-string values,
+  //    which would silently drop a clear-parents request — pass the
+  //    pre-encoded body when the new list is empty.
   try {
+    const body = newParentIds.length === 0
+      ? 'parent-ids='
+      : { 'parent-ids': newParentIds.join(',') };
     const r = await authMutate('PUT',
                                '/api/entities/fn/' + encodeURIComponent(fnId),
-                               { 'parent-ids': newParentIds.join(',') });
-    if (!r || !r.ok) return false;
+                               body);
+    if (!r?.ok) return false;
   } catch (_) { return false; }
 
   return true;
@@ -254,7 +260,7 @@ function addMIParentInline(fn, anchorEl) {
     excludeIds: exclude,
     fnNamespaceId: fn['namespace-id'],
     onPick: async (picked) => {
-      if (!picked || !picked.id) return;
+      if (!picked?.id) return;
       const next = [...current, picked.id];
       const v = (typeof validateParentSet === 'function')
                 ? validateParentSet(fn.id, next) : { ok: true };
@@ -287,7 +293,7 @@ function setInitialParentInline(fn, anchorEl) {
     excludeIds: Array.from(exclude),
     fnNamespaceId: fn['namespace-id'],
     onPick: async (picked) => {
-      if (!picked || !picked.id) return;
+      if (!picked?.id) return;
       await _runCascadeWithBusy(fn, [picked.id], 'Setting parent of');
     }
   });

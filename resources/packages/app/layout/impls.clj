@@ -1,23 +1,29 @@
 (ns graphden.packages.app.layout.impls
-  "Graph layout calculation — thin defbase shims.
+  "Graph layout calculation — atomic library-boundary defbases.
 
    API: POST /api/graph/layout
    Input: {root-id: uuid, expansions: {fn-id: level, ...}}
    Output: {nodes: [...], edges: [...], grid-pos: {...}, validation: {...}}
 
-   The whole layout algorithm lives in `graphden.layout.graph`
-   (Stages 1-2 — slot-view synthesis, data loading, graph building)
-   and `graphden.layout.core` (Stages 3-7 — placement, validation,
-   request parsing, the `compute-layout` orchestrator).
+   The whole layout algorithm lives in `graphden.layout.*`:
+   `data` (Stage 1 — slot-view synthesis, data loading, lookup maps),
+   `bindings` (classifier-item constructors + sequence-anchor helpers),
+   `builder-helpers` (pure helpers used by `build-graph-elements`),
+   `graph` (Stage 2 — `process-*` walkers, post-processing,
+   `build-graph-elements` orchestrator), `core` (Stages 3-7 —
+   placement, validation, request parsing, `compute-layout`).
 
    The `parse → load → build → place` pipeline that produces a layout
-   is itself a composition, so it is expressed as graph fn-defs
-   (`:_compute-layout` and `:get-layout-data` in `fns.edn`) gluing the
-   base-fns below. Each base-fn stays a minimal primitive: read `ctx`
-   and/or delegate to one `graphden.layout.*` call."
+   is expressed as graph fn-defs in `fns.edn`. Even the error-handling
+   shape — multi-catch dispatch on exception class for parse, single
+   `ExceptionInfo` catch for build, pass-through guards on upstream
+   `{:ok false}` payloads — is graph composition via `:try` / `:case` /
+   `:if`. Each base-fn here is ONE library call: load entities from
+   storage, parse a request, build the cytoscape element lists, or
+   grid-place them."
   (:require
     [graphden.executor.context :as exec-ctx]
-    [graphden.executor.defbase :as defbase]
+    [graphden.executor.defbase :refer [defbase]]
     [graphden.layout.core :as layout]
     [graphden.layout.graph :as lgraph]))
 
@@ -35,14 +41,7 @@
         data)))
 
 
-(defbase/defbase _parse-layout-request
-  "Parse the internal Ring request body into `{:root-id :expansions}`.
-   Thin wrapper around `layout/parse-layout-request`."
-  [request]
-  (layout/parse-layout-request request))
-
-
-(defbase/defbase _load-graph-cached
+(defbase _load-graph-cached
   "Load every graph entity for layout, served from the per-context
    cache when warm. Context-aware: no args, pulls storage + cache
    from `ctx`."
@@ -50,17 +49,29 @@
   (load-graph-entities ctx))
 
 
-(defbase/defbase _layout-build-elements
-  "Stage A — build cytoscape `{:nodes :edges}` for the requested
-   subgraph. `graph` is the entity snapshot from `_load-graph-cached`;
-   `parsed` is `{:root-id :expansions}` from `_parse-layout-request`."
+(defbase _parse-layout-body
+  "Single library call — parse the Ring request body into
+   `{:root-id :expansions}`. Thrown by `layout/parse-layout-request`:
+   `JsonParseException` (malformed JSON), `ExceptionInfo` (missing
+   `:root-id`), `IllegalArgumentException` (bad UUID). The graph's
+   `:try` + class-name dispatch in `fns.edn` turns each into the
+   appropriate `{:ok false :error}` shape."
+  [request]
+  (layout/parse-layout-request request))
+
+
+(defbase _layout-build-apply
+  "Single library call — build cytoscape `{:nodes :edges}` for the
+   requested subgraph. Throws `ExceptionInfo` (`:execution-error/not-
+   found`) when `:root-id` doesn't resolve; the graph's `:try` turns
+   that into `{:ok false :error}`."
   [graph parsed]
   (layout/build-elements graph (:root-id parsed) (:expansions parsed)))
 
 
-(defbase/defbase _layout-place
-  "Stage B — grid-place the `{:nodes :edges}` from
-   `_layout-build-elements` into the full layout response
+(defbase _layout-place-apply
+  "Single library call — grid-place the `{:nodes :edges}` from
+   `:_layout-build-elements` into the full layout response
    `{:nodes :edges :grid-pos :validation}`."
   [elements]
   (layout/place-elements elements))
@@ -69,7 +80,7 @@
 ;; === Registry ===
 
 (def impls
-  {:_parse-layout-request _parse-layout-request
-   :_load-graph-cached _load-graph-cached
-   :_layout-build-elements _layout-build-elements
-   :_layout-place _layout-place})
+  {:_load-graph-cached _load-graph-cached
+   :_parse-layout-body _parse-layout-body
+   :_layout-build-apply _layout-build-apply
+   :_layout-place-apply _layout-place-apply})

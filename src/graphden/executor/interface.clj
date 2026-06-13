@@ -153,12 +153,14 @@
 ;; === Test Fixtures ===
 
 (defn with-clean-registry
-  "Test fixture that clears the global base-fn registry before and after
-   each test. Prevents leftover registrations from polluting other tests.
+  "Test fixture that establishes a thread-local base-fn registry for the
+   duration of `f`. Every `register-base-fn!` inside `f` writes to
+   this scoped atom instead of the process-global one; reads fall
+   through to the global for primitives this test doesn't override.
+   Sibling tests on other threads each get their own override — no
+   cross-test leak, no global mutation, in-JVM-parallel-safe.
+
    Wire in via `(use-fixtures :each exec/with-clean-registry)`."
   [f]
-  (clear-base-fns!)
-  (try
-    (f)
-    (finally
-      (clear-base-fns!))))
+  (binding [registry/*registry-override* (atom {})]
+    (f)))

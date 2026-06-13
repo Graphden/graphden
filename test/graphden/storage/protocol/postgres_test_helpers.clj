@@ -41,21 +41,18 @@
 
 
 (defn get-container-config
-  "Returns connection configuration map from a running container.
+  "Returns connection configuration map. Delegates to `sc/get-config`,
+   which surfaces the per-NS logical-DB config when the
+   `shared-container-fixture` is active (the parallel-safe path) and
+   the cluster's bootstrap config otherwise. The `container` argument
+   is retained for back-compat with callers that still bind
+   `*container*` to a testcontainer instance, but is no longer read —
+   external-PG mode (env `GRAPHDEN_TEST_PG_JDBC_URL`) leaves
+   `*container*` nil and `sc/get-config` reads the env vars.
 
-   Arguments:
-   - container: A running PostgreSQLContainer instance
-
-   Returns map with:
-   - :jdbc-url - JDBC connection URL
-   - :username - Database username
-   - :password - Database password
-   - :pool-size - Default pool size for tests (2)"
-  [container]
-  {:jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
-   :username (PostgreSQLContainer/.getUsername container)
-   :password (PostgreSQLContainer/.getPassword container)
-   :pool-size 2})
+   Returns map with `:jdbc-url :username :password :pool-size`."
+  [_container]
+  (sc/get-config))
 
 
 ;; ============================================================================

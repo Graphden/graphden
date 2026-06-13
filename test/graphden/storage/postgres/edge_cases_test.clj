@@ -1,4 +1,4 @@
-(ns graphden.storage.postgres.edge-cases-test
+(ns ^:serial graphden.storage.postgres.edge-cases-test
   "Tests for PostgreSQL storage edge cases.
 
    Covers:

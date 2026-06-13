@@ -4,7 +4,13 @@
    now lives in `graphden.crud.entities` (extracted from the
    `web/crud` package impls), so the test calls it directly and
    asserts on its `{:status :reason :result}` map without bringing
-   up the full HTTP stack."
+   up the full HTTP stack.
+
+   PARALLELISM: each test calls `clear-aliases!` +
+   `register-type-alias!`. `:kaocha.plugin/parallel` binds a fresh
+   `graphden.types.core/*type-aliases-override*` atom per NS thread,
+   so the alias mutations stay thread-local and don't race with
+   other parallel NSs."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]

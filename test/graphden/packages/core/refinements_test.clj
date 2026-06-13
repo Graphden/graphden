@@ -1,149 +1,93 @@
-(ns graphden.packages.core.refinements-test
-  "Direct unit tests for the runtime `:ensure-*` narrowers shipped by
-   `core.refinements/impls.clj`. Each impl validates a single
-   constraint at execute time and either returns its input (narrowed
-   to the refined type from the type system's view) or throws
-   `:refinement/violated` with the constraint that failed.
+(ns ^:integration graphden.packages.core.refinements-test
+  "Behavioural tests for the runtime `:ensure-*` narrowers shipped by
+   `core.refinements`. Each one validates a single constraint at
+   execute time and either returns its input (narrowed to the refined
+   type from the type system's view) or throws `:refinement/violated`
+   with the constraint that failed.
 
-   `impls.clj` lives under `resources/packages/...` and is loaded by
-   the package loader's `load-module-impls` (slurp + eval, not a
-   conventional require). The fixture below invokes the loader once
-   so the symbols are reachable for the rest of the suite, then each
-   test resolves the impl by name from the returned map.
-
-   The defbase macro generates a fn of shape `[__args ctx]` that
-   forces delays on access — tests mirror that wire format, wrapping
-   values in `(delay ...)` and passing nil for ctx."
+   The `:ensure-*` narrowers are now graph fn-defs composing the
+   shared `:_refinement-narrow` template + per-refinement `:test`,
+   `:refine-name`, and `:constraint` bindings — no defbase impls
+   live in `impls.clj` anymore. So these tests drive the fn-defs
+   through the executor against a real package-synced graph (same
+   fixture as `compile-packages-test`)."
   (:require
-    [clojure.test :refer [deftest is testing use-fixtures]]))
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.test-setup :as setup]
+    [graphden.storage.protocol.core :as sp]))
 
 
-(def ^:dynamic *impls* nil)
+(def ^:dynamic *context* nil)
+(def ^:dynamic *storage* nil)
 
 
-(defn- load-refinement-impls-fixture
-  "Slurp + eval the package's impls.clj (mirrors the runtime loader's
-   load-module-impls — which is private, hence requiring-resolve) so
-   the defbase'd symbols become reachable and bind their impls map to
-   `*impls*` for the suite. Doing it via the loader instead of a
-   top-level `require` keeps the test honest about how impls.clj is
-   actually consumed in production."
-  [f]
-  (binding [*impls* ((requiring-resolve 'graphden.packages.loader/load-module-impls)
-                     "core" "refinements")]
-    (f)))
+(use-fixtures :once
+  (setup/create-container-fixture)
+  (fn [t]
+    (exec/with-clean-registry
+      #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
+         (try
+           (binding [*context* (:ctx graph)
+                     *storage* (:storage graph)]
+             (t))
+           (finally (sp/close (:storage graph))))))))
 
 
-(use-fixtures :once load-refinement-impls-fixture)
-
-
-(defn- impl-of
-  [kw]
-  (let [entry (or (get *impls* kw)
-                  (throw (ex-info (str "No impl for " kw) {:available (keys *impls*)})))]
-    ;; impls.clj values are either a bare impl-fn or a
-    ;; `{:impl … :return-type-rule …}` map (every fn that participates
-    ;; in `:secret`-taint propagation moved to the map form in T3).
-    (if (map? entry) (:impl entry) entry)))
+(defn- fn-id
+  [nm]
+  (:id (first (sp/query-entities *storage* :fn {:name nm}))))
 
 
 (defn- call
-  "Invoke a defbase impl with a single :value binding."
-  [impl v]
-  (impl {:value (delay v)} nil))
+  "Invoke `:ensure-X` with `:value` = v through the executor; returns
+   the value on pass or rethrows the original ExceptionInfo on fail."
+  [ensure-name v]
+  (exec/execute *context* (fn-id ensure-name) {:value v}))
 
 
 (defn- ex-of
-  "Return the ex-data :type tag thrown by calling `impl` with `v`, or
-   :no-throw if the impl returned cleanly."
-  [impl v]
-  (try (call impl v) :no-throw
+  "Return the ex-data :type tag thrown by calling `ensure-name` with
+   `v`, or `:no-throw` if it returned cleanly."
+  [ensure-name v]
+  (try (call ensure-name v) :no-throw
        (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))
 
 
 ;; -----------------------------------------------------------------------------
-;; :ensure-url
+;; :ensure-positive-int — the surviving narrower (the others were
+;; dropped as unreachable production code, see commit message of the
+;; cleanup).
 
-(deftest ensure-url-accepts-http-and-https
-  (let [impl (impl-of :ensure-url)]
-    (testing "http:// and https:// pass through unchanged"
-      (is (= "http://example.com"  (call impl "http://example.com")))
-      (is (= "https://example.com" (call impl "https://example.com")))
-      (is (= "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"
-             (call impl "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"))))))
-
-
-(deftest ensure-url-rejects-non-http-schemes
-  (let [impl (impl-of :ensure-url)]
-    (testing "ftp / file / mailto / bare hostname → :refinement/violated"
-      (is (= :refinement/violated (ex-of impl "ftp://example.com")))
-      (is (= :refinement/violated (ex-of impl "file:///tmp/x")))
-      (is (= :refinement/violated (ex-of impl "mailto:a@b.c")))
-      (is (= :refinement/violated (ex-of impl "example.com")))
-      (is (= :refinement/violated (ex-of impl ""))))))
+(deftest ensure-positive-int-passes-and-rejects
+  (testing "positive ints pass through"
+    (is (= 1   (call "ensure-positive-int" 1)))
+    (is (= 42  (call "ensure-positive-int" 42))))
+  (testing "0, negative, and non-int reject"
+    (is (= :refinement/violated (ex-of "ensure-positive-int" 0)))
+    (is (= :refinement/violated (ex-of "ensure-positive-int" -1)))
+    (is (= :refinement/violated (ex-of "ensure-positive-int" 1.5)))))
 
 
-(deftest ensure-url-rejects-non-strings
-  (let [impl (impl-of :ensure-url)]
-    (testing "non-string inputs throw"
-      (is (= :refinement/violated (ex-of impl 42)))
-      (is (= :refinement/violated (ex-of impl nil)))
-      (is (= :refinement/violated (ex-of impl :keyword))))))
-
-
-(deftest ensure-url-ex-data-shape
-  (let [impl (impl-of :ensure-url)]
-    (testing "violation carries the constraint that was checked"
-      (let [ex (try (call impl "nope")
-                    (catch clojure.lang.ExceptionInfo e e))]
-        (is (= :refinement/violated  (:type (ex-data ex))))
-        (is (= :url                  (:refine-name (ex-data ex))))
-        (is (= [:matches "^https?://"] (:constraint (ex-data ex))))
-        (is (= "nope"                (:value (ex-data ex))))))))
+(deftest ensure-positive-int-ex-data-shape
+  (testing "violation names :positive-int and the [:> 0] constraint"
+    (let [ex (try (call "ensure-positive-int" -5)
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :refinement/violated (:type (ex-data ex))))
+      (is (= :positive-int        (:refine-name (ex-data ex))))
+      (is (= [:> 0]               (:constraint (ex-data ex))))
+      (is (= -5                   (:value (ex-data ex)))))))
 
 
 ;; -----------------------------------------------------------------------------
-;; :ensure-non-blank-text
+;; :ensure-non-empty-text — also still reachable in production (per
+;; reachability audit).
 
-(deftest ensure-non-blank-text-accepts-strings-with-non-ws
-  (let [impl (impl-of :ensure-non-blank-text)]
-    (testing "any non-whitespace character anywhere in the string passes"
-      (is (= "hello"       (call impl "hello")))
-      (is (= "  hello  "   (call impl "  hello  ")))
-      (is (= "x"           (call impl "x")))
-      (is (= "\t a \n"     (call impl "\t a \n"))))))
-
-
-(deftest ensure-non-blank-text-rejects-blank-and-empty
-  (let [impl (impl-of :ensure-non-blank-text)]
-    (testing "empty string and whitespace-only strings throw"
-      (is (= :refinement/violated (ex-of impl "")))
-      (is (= :refinement/violated (ex-of impl " ")))
-      (is (= :refinement/violated (ex-of impl "\t\n  "))))))
-
-
-(deftest ensure-non-blank-text-rejects-non-strings
-  (let [impl (impl-of :ensure-non-blank-text)]
-    (testing "non-string inputs throw"
-      (is (= :refinement/violated (ex-of impl 0)))
-      (is (= :refinement/violated (ex-of impl nil)))
-      (is (= :refinement/violated (ex-of impl [\a \b]))))))
-
-
-(deftest ensure-non-blank-text-ex-data-shape
-  (let [impl (impl-of :ensure-non-blank-text)]
-    (testing "violation names :non-blank-text and the :matches constraint"
-      (let [ex (try (call impl "   ")
-                    (catch clojure.lang.ExceptionInfo e e))]
-        (is (= :refinement/violated   (:type (ex-data ex))))
-        (is (= :non-blank-text        (:refine-name (ex-data ex))))
-        (is (= [:matches "\\S"]       (:constraint (ex-data ex))))
-        (is (= "   "                  (:value (ex-data ex))))))))
-
-
-(deftest impls-map-exposes-new-narrowers
-  (testing ":ensure-url and :ensure-non-blank-text are in the impls map"
-    (is (contains? *impls* :ensure-url))
-    (is (contains? *impls* :ensure-non-blank-text))
-    (is (fn? (impl-of :ensure-url)))
-    (is (fn? (impl-of :ensure-non-blank-text)))))
+(deftest ensure-non-empty-text-passes-and-rejects
+  (testing "any non-empty string passes (including whitespace-only)"
+    (is (= "hi"     (call "ensure-non-empty-text" "hi")))
+    (is (= "   "    (call "ensure-non-empty-text" "   "))))
+  (testing "empty string and non-strings reject"
+    (is (= :refinement/violated (ex-of "ensure-non-empty-text" "")))
+    (is (= :refinement/violated (ex-of "ensure-non-empty-text" nil)))
+    (is (= :refinement/violated (ex-of "ensure-non-empty-text" 42)))))

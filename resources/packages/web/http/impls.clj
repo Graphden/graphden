@@ -30,6 +30,29 @@
     resp))
 
 
+(defn- realize-body
+  "Eagerly slurp the request `:body` InputStream into a UTF-8 String
+   so downstream graph fn-defs that read the body more than once (the
+   per-call `*call-cache*` keys by the caller's full env — and a
+   parse-stage referenced from both a `:cond` validation chain AND a
+   sibling `:apply` ref can land in two cache slots) don't hit an
+   exhausted stream on the second consumer.
+
+   Without this, anything that read the body more than once produced
+   a silently-wrong second result: nil keys, empty vectors, and
+   downstream apply stages writing rows with `:name nil` and zero
+   slots. See C19 regression hunt 2026-06-03.
+
+   `crud.request/read-json-body` already accepts strings, maps, and
+   InputStreams — once we hand it a String the rest of the chain
+   works without changes."
+  [req]
+  (let [b (:body req)]
+    (if (instance? java.io.InputStream b)
+      (assoc req :body (slurp (java.io.InputStreamReader. b "UTF-8")))
+      req)))
+
+
 (defbase http-server
   [handler port]
   (cr/record-effect! :network)
@@ -38,7 +61,7 @@
   ;; validate-create requires :process for service-eligibility.
   (cr/record-effect! :process)
   (http-kit/run-server
-    (fn [req] (stringify-response-headers (handler req)))
+    (fn [req] (stringify-response-headers (handler (realize-body req))))
     {:port port}))
 
 

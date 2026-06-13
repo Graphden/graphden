@@ -42,8 +42,8 @@ let VALUE_KINDS = [];             // value_kind schema enum, from /api/value-kin
 // (initGraph) and whenever lookups change.
 let implementationFnIds = new Set();
 function rebuildImplementationFnIds() {
-  if (!selectedFnId || !lookups
-      || !lookups.bindingsByFn || !lookups.itemsByBinding) {
+  if (!selectedFnId 
+      || !lookups?.bindingsByFn || !lookups.itemsByBinding) {
     implementationFnIds = new Set();
     return;
   }

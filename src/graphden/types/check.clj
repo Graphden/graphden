@@ -83,7 +83,7 @@
     (keyword? v)     :keyword
     (uuid? v)        :uuid
     (map? v)         (cond
-                       (empty? v) :jsonb
+                       (empty? v) :empty-map
                        (every? keyword? (keys v))
                        (into {}
                              (map (fn [[k fv]]
@@ -184,11 +184,11 @@
    for type-rows we don't model yet)."
   [base]
   (case base
-    (:int :numeric :float)  (into numeric-ops text-only-ops)
-    :text                   (into equality-ops text-only-ops)
+    (:int :numeric :float :decimal)  (into numeric-ops text-only-ops)
+    :text                            (into equality-ops text-only-ops)
     (:bool :keyword :null
-           :uuid :timestamptz)    equality-ops
-    nil                     #{} ; nil base — reject everything
+           :uuid :timestamptz)       equality-ops
+    nil                              #{} ; nil base — reject everything
     :any))
 
 
@@ -217,41 +217,57 @@
       (contains? allowed (first constraint)))))
 
 
+(defn- binding-shape
+  "Classify an AST binding form (the value in a fn-def's `:args` map)
+   into one of six coarse shapes. Drives the predicates below and the
+   inline classifiers in `describe-binding` / `hint-for-actual` /
+   `vector-binding-elem-types` — one source of truth for 'what shape
+   is this AST binding'.
+
+   - `:fn-ref`     bare keyword (`:my-fn`) — fn-reference by name
+   - `:seq-vec`    bare vector — sequence-chain literal
+   - `:value-map`  `{:value v …}` — explicit literal
+   - `:ref-map`    `{:ref :name …}` — explicit fn-reference
+   - `:meta-map`   map with `:as`/`:type`/`:required` but no `:value`/`:ref`
+   - `:scalar`    anything else — bare literal (numbers, strings, …)"
+  [b]
+  (cond
+    (keyword? b) :fn-ref
+    (vector? b) :seq-vec
+    (not (map? b)) :scalar
+    (contains? b :value) :value-map
+    (contains? b :ref) :ref-map
+    (or (contains? b :as)
+        (contains? b :type)
+        (contains? b :required)) :meta-map
+    :else :scalar))
+
+
 (defn- ref-binding?
   "A bare keyword in fn-def args means a fn-ref to that name."
   [v]
-  (keyword? v))
+  (= :fn-ref (binding-shape v)))
 
 
 (defn- metadata-only-binding?
   "True iff `v` is a map binding that carries ONLY metadata
-   (`:as`, `:required`, `:terminal?`, `:type`) without an explicit
-   value or ref. Such bindings leave the slot logically free —
-   nothing to value-type-check against the slot's expected type
-   (the `:type` override itself is monotonicity-checked separately
-   by `check-binding-monotonicity!`)."
+   (`:as`, `:required`, `:type`) without an explicit value or ref.
+   Such bindings leave the slot logically free — nothing to
+   value-type-check against the slot's expected type (the `:type`
+   override itself is monotonicity-checked separately by
+   `check-binding-monotonicity!`)."
   [v]
-  (and (map? v)
-       (not (contains? v :value))
-       (not (contains? v :ref))
-       (or (contains? v :as)
-           (contains? v :required)
-           (contains? v :terminal?)
-           (contains? v :type))))
+  (= :meta-map (binding-shape v)))
 
 
 (defn- value-binding?
   "Either a bare literal or a `{:value …}` map. We accept BOTH the
    shorthand and the explicit form here so the type-check is
    syntax-tolerant — composition.records will reject any genuinely
-   malformed binding later."
+   malformed binding later. Sequence chains (bare vectors) count as
+   value-shaped here so the elem-walker handles them downstream."
   [v]
-  (or (and (map? v) (contains? v :value))
-      (and (not (keyword? v))
-           (not (and (map? v) (or (contains? v :as)
-                                  (contains? v :ref)
-                                  (contains? v :required))))
-           (not (metadata-only-binding? v)))))
+  (contains? #{:value-map :scalar :seq-vec} (binding-shape v)))
 
 
 (defn- assemble-fn-type
@@ -286,7 +302,15 @@
           ;; `:effects` is unconditionally stored — by record-rich-types!
           ;; AND record-rich-types-raw! (both default `#{}` for pure
           ;; fns post-P8). Direct lookup is safe.
-          eff (:effects info)]
+          ;;
+          ;; `:call-time-effects` (when present) is the per-invocation
+          ;; subset — bound-arg ref-effects subtracted. HOF slots
+          ;; (`:filter :pred #{}`, `:map :func #{}`) measure against
+          ;; per-invocation purity, NOT against the fn's full
+          ;; construction-time effect set; prefer the call-time
+          ;; subset when recorded. Falls back to `:effects` for
+          ;; base-fns / older raw entries without the split.
+          eff (or (:call-time-effects info) (:effects info))]
       (if (types/fn-type? ret)
         ;; Producer-of-callable: the inner fn-type already carries
         ;; whatever effects-constraint the slot declared. We can't
@@ -358,25 +382,16 @@
    `:fn-ref → some-fn` or `(literal 42)` or `(sequence-chain N items)`.
    Drives the `hint` line of the error message."
   [b-form]
-  (cond
-    (and (map? b-form) (contains? b-form :value))
-    (str "(literal " (pr-str (:value b-form)) ")")
-
-    (and (map? b-form) (contains? b-form :ref))
-    (str "ref → " (pr-str (:ref b-form)))
-
-    (and (map? b-form) (contains? b-form :as))
-    (str "rename via {:as " (pr-str (:as b-form)) "}")
-
-    (keyword? b-form)
-    (str "fn-ref → " (pr-str b-form))
-
-    (vector? b-form)
-    (str "(sequence-chain, " (count b-form) " item"
-         (if (= 1 (count b-form)) "" "s") ")")
-
-    :else
-    (str "(literal " (pr-str b-form) ")")))
+  (case (binding-shape b-form)
+    :value-map (str "(literal " (pr-str (:value b-form)) ")")
+    :ref-map   (str "ref → " (pr-str (:ref b-form)))
+    :meta-map  (if (contains? b-form :as)
+                 (str "rename via {:as " (pr-str (:as b-form)) "}")
+                 (str "(literal " (pr-str b-form) ")"))
+    :fn-ref    (str "fn-ref → " (pr-str b-form))
+    :seq-vec   (str "(sequence-chain, " (count b-form) " item"
+                    (if (= 1 (count b-form)) "" "s") ")")
+    :scalar    (str "(literal " (pr-str b-form) ")")))
 
 
 (defn- hint-for-actual
@@ -385,17 +400,10 @@
    user trace back to the source of the mismatch instead of staring
    at two lines of structural types."
   [b-form actual]
-  (cond
-    (keyword? b-form)
-    (str (pr-str b-form) "'s computed signature is " (pr-str actual))
-
-    (and (map? b-form) (contains? b-form :ref))
-    (str (pr-str (:ref b-form)) "'s computed signature is " (pr-str actual))
-
-    (vector? b-form)
-    (str "sequence's element type resolves to " (pr-str actual))
-
-    :else
+  (case (binding-shape b-form)
+    :fn-ref  (str (pr-str b-form) "'s computed signature is " (pr-str actual))
+    :ref-map (str (pr-str (:ref b-form)) "'s computed signature is " (pr-str actual))
+    :seq-vec (str "sequence's element type resolves to " (pr-str actual))
     (str "the literal value classifies as " (pr-str actual))))
 
 
@@ -490,8 +498,7 @@
    or a bare scalar (anything that isn't a keyword fn-ref, a vector
    sequence chain, or another map shape like `{:as :name}`)."
   [b-form]
-  (or (and (map? b-form) (contains? b-form :value))
-      (not (or (map? b-form) (keyword? b-form) (vector? b-form)))))
+  (contains? #{:value-map :scalar} (binding-shape b-form)))
 
 
 (defn- literal-binding-value
@@ -644,18 +651,112 @@
       (every? nil? infos) nil
       (= 1 (count infos)) (first infos)
       :else
-      ;; Merge with `or` defaults so a missing parent (registered
-      ;; later, or never) doesn't poison the union.
-      (let [bound (into #{}
-                        (mapcat #(keys (:resolved-bindings % {})))
-                        infos)]
-        {:return   (or (:return (first infos)) :any)
-         :args     (reduce dissoc
-                           (apply merge (mapv #(:args % {}) infos))
-                           bound)
-         :effects  (into #{} (mapcat #(:effects % #{})) infos)
-         :resolved-bindings (apply merge
-                                   (mapv #(:resolved-bindings % {}) infos))}))))
+      ;; Slot type-incompatibility check: when N parents share a slot
+      ;; name but declare INCOMPATIBLE types (neither is a subtype of
+      ;; the other), the silent `apply merge` would keep the last
+      ;; parent's type. A subsequent binding check would then verify
+      ;; against an arbitrary contract, not the union of intended
+      ;; contracts. Throw on conflict.
+      ;;
+      ;; Compatible cases (silent-pass): identical types, primitive
+      ;; subtype chains (`:positive-int ⊆ :int`), record extras
+      ;; (`{:a A :b B} ⊆ {:a A}` via `record-subtype?`), typevars on
+      ;; either side. The check uses `subtype?` bidirectionally, so a
+      ;; parent A typed `:positive-int` and parent B typed `:int` for
+      ;; the same slot stays compatible — the merged contract is the
+      ;; wider one (`:int`).
+      (let [parent-args-list (mapv #(:args % {}) (filter some? infos))
+            slot-types-by-name (reduce (fn [m args]
+                                         (reduce-kv (fn [acc k v]
+                                                      (update acc k (fnil conj []) v))
+                                                    m args))
+                                       {}
+                                       parent-args-list)
+            incompatible (keep (fn [[slot ts]]
+                                 (let [distinct-ts (distinct ts)]
+                                   (when (> (count distinct-ts) 1)
+                                     (let [related? (some (fn [a]
+                                                            (every? (fn [b]
+                                                                      (or (= a b)
+                                                                          (types/subtype? a b)
+                                                                          (types/subtype? b a)))
+                                                                    distinct-ts))
+                                                          distinct-ts)]
+                                       (when-not related?
+                                         [slot distinct-ts])))))
+                               slot-types-by-name)]
+        (when (seq incompatible)
+          (let [[slot ts] (first incompatible)]
+            (throw (ex-info
+                     (str "MI parent slot type conflict on " (pr-str slot)
+                          ": parents declare incompatible types "
+                          (pr-str (vec ts))
+                          " — neither is a subtype of the other. The merged"
+                          " contract would silently keep just the last"
+                          " parent's type. Pick parents with compatible"
+                          " slot types or override the slot at the MI"
+                          " child to pin one contract.")
+                     {:type :bindings/mi-slot-type-conflict
+                      :slot-name slot
+                      :conflicting-types (vec ts)
+                      :parents parent-list}))))
+        ;; Slot-VALUE conflict: same slot has DIFFERENT bound values
+        ;; (literal `:value` or fn-`:ref`) across parents. The merged
+        ;; `:resolved-bindings` would silently keep just the
+        ;; last-listed parent's binding. Distinguish from inherited-
+        ;; same-source: only compare the discriminating fields
+        ;; (`:value` and `:ref`), not `:type` (which slot-type
+        ;; conflict above handles).
+        ;;
+        ;; PB' own-slot declarations (`{:type T}` with no `:value` or
+        ;; `:ref`) surface in `:resolved-bindings` as `{:type T :value
+        ;; nil}` — `select-keys [:value :ref]` then yields `{:value
+        ;; nil}`, which would falsely register as a "binding to nil"
+        ;; and conflict with a real ref-binding on a sibling parent.
+        ;; Filter those out: only true bindings (real `:value` or
+        ;; `:ref`) participate in the value-conflict check.
+        (let [actual-binding? (fn [pin]
+                                (or (contains? pin :ref)
+                                    (some? (:value pin))))
+              rbs-by-slot
+              (reduce (fn [acc info]
+                        (reduce-kv (fn [a slot binding]
+                                     (let [pin (select-keys binding [:value :ref])]
+                                       (if (and (actual-binding? pin)
+                                                (not (contains? (a slot) pin)))
+                                         (update a slot (fnil conj #{}) pin)
+                                         a)))
+                                   acc
+                                   (:resolved-bindings info {})))
+                      {}
+                      (filter some? infos))
+              conflicting-vals (filter (fn [[_ s]] (> (count s) 1)) rbs-by-slot)]
+          (when (seq conflicting-vals)
+            (let [[slot pins] (first conflicting-vals)]
+              (throw (ex-info
+                       (str "MI parent slot value conflict on " (pr-str slot)
+                            ": parents bind the slot to "
+                            (count pins) " different values "
+                            (pr-str (vec pins))
+                            " — the merged `:resolved-bindings` would"
+                            " silently keep only the last-listed parent's"
+                            " binding. Either override the slot at the MI"
+                            " child to pin the intended value, or choose"
+                            " parents that don't both bind the same slot.")
+                       {:type :bindings/mi-slot-value-conflict
+                        :slot-name slot
+                        :conflicting-bindings (vec pins)
+                        :parents parent-list})))))
+        (let [bound (into #{}
+                          (mapcat #(keys (:resolved-bindings % {})))
+                          infos)]
+          {:return   (or (:return (first infos)) :any)
+           :args     (reduce dissoc
+                             (apply merge (mapv #(:args % {}) infos))
+                             bound)
+           :effects  (into #{} (mapcat #(:effects % #{})) infos)
+           :resolved-bindings (apply merge
+                                     (mapv #(:resolved-bindings % {}) infos))})))))
 
 
 (defn- resolve-parent-info
@@ -683,10 +784,8 @@
 (defn- rename-binding?
   "True iff `b` is `{:as :x}` style — slot stays free under a new name."
   [b]
-  (and (map? b)
-       (contains? b :as)
-       (not (contains? b :value))
-       (not (contains? b :ref))))
+  (and (= :meta-map (binding-shape b))
+       (contains? b :as)))
 
 
 (defn- type-only-binding?
@@ -696,10 +795,8 @@
    (e.g. `:invoke`'s `[:fn {:arg a} b]`) without supplying a value at
    this fn-def level."
   [b]
-  (and (map? b)
+  (and (= :meta-map (binding-shape b))
        (contains? b :type)
-       (not (contains? b :value))
-       (not (contains? b :ref))
        (not (contains? b :as))))
 
 
@@ -729,6 +826,220 @@
                    :binding b-form
                    :type (keyword "bindings" (str "widening-" (name direction)))}
                   *source-info*))))
+
+
+(defn- nearest-slot-suggestion
+  "When the user binds an unknown slot name, suggest the closest match
+   from the available slot set by simple Levenshtein-ish similarity:
+   prefer same-length names, then names sharing the longest common
+   substring prefix. Returns the best candidate keyword (or nil if no
+   slots available)."
+  [unknown-kw available-kws]
+  (when (seq available-kws)
+    (let [u (name unknown-kw)
+          score (fn [k]
+                  (let [n (name k)
+                        ;; Shared prefix length.
+                        prefix-len (count (take-while true?
+                                                      (map = u n)))
+                        ;; Length-difference penalty.
+                        len-diff (Math/abs (- (count u) (count n)))]
+                    [(- prefix-len) len-diff]))]
+      (->> available-kws
+           (sort-by score)
+           first))))
+
+
+(defn- ref-free-arg-names
+  "Collect free-arg names of every fn-ref reachable from a binding-
+   form, transitively walking sequence bindings and inline-anon refs.
+
+   Closure-capture pattern: a sibling binding like `:parsed
+   :_parsed-result` doesn't necessarily bind a slot of the parent —
+   it SEEDS a closure-captured free arg consumed by ANOTHER sibling
+   ref (e.g. a `:cond :clauses` ref typed `{:as :parsed}`). The
+   seeded name must appear as a free arg in some sibling ref's
+   rich-type to be a valid seed; otherwise it's a typo (the seed
+   binding does nothing and silently disappears at runtime)."
+  [b-form]
+  (cond
+    (keyword? b-form)
+    (set (keys (:args (registry/rich-type-of b-form) {})))
+
+    (and (map? b-form) (contains? b-form :ref))
+    (set (keys (:args (registry/rich-type-of (:ref b-form)) {})))
+
+    (vector? b-form)
+    (apply clojure.set/union #{} (map ref-free-arg-names b-form))
+
+    :else #{}))
+
+
+(def ^:private known-effect-categories
+  "Effect tags graphden's runtime knows how to record. Each base-fn's
+   side effects map to one of these via `cr/record-effect!`. A
+   `:expects-effects` / `:effects` declaration carrying a tag outside
+   this set is almost always a typo (`:do` for `:db`, `:netowrk` for
+   `:network`); reject at sync time so the contract isn't a silent
+   no-op.
+
+   Mirrors the docstring of `compile-runtime/record-effect!` plus
+   `:process` from the service registry (services declare
+   `:expects-effects #{:process}` to opt into supervisor reconciliation)."
+  #{:db :env :io :network :time :random :process})
+
+
+(defn- check-effect-categories!
+  "Reject any `:effects` or `:expects-effects` set that names an
+   unknown category. Without this, a typo like
+   `:expects-effects #{:do}` is silently treated as an extra
+   contracted category — drift-checking never fires (computed
+   effects can't drift INTO `:do`) and the editor's effect-chip
+   strip displays a bogus tag."
+  [{fn-name :name :as fn-def}]
+  (doseq [[field tag-set] [[:effects (:effects fn-def)]
+                           [:expects-effects (:expects-effects fn-def)]]]
+    (when tag-set
+      (let [bad (remove known-effect-categories tag-set)]
+        (when (seq bad)
+          (throw (ex-info
+                   (str "Type-check failed in fn-def " (pr-str fn-name)
+                        "\n  unknown effect category in " field
+                        ": " (pr-str (set bad))
+                        "\n  known categories: "
+                        (pr-str (vec (sort known-effect-categories))))
+                   (merge {:fn-name fn-name
+                           :field field
+                           :unknown-categories (set bad)
+                           :known-categories known-effect-categories
+                           :type :bindings/unknown-effect-category}
+                          *source-info*))))))))
+
+
+(defn- check-unknown-slots!
+  "Reject any `:args` key that doesn't correspond to a slot reachable
+   through the parent's inheritance chain OR a closure-capture seed
+   consumed by some sibling ref. Catches the `:assoc :m :_x` (typo
+   for `:map`) class of bugs: previously the binding was silently
+   dropped because `:m` isn't a slot of `:assoc`, and the
+   per-binding type-check treats unknown slots as 'no expected
+   type → defer'.
+
+   Valid keys are:
+   - `parent-args` keys — slots still unbound on the parent (so the
+     child can bind them, OR descendants can pre-bind a free arg
+     propagated up).
+   - `:resolved-bindings` keys — slots ALREADY bound somewhere in the
+     parent chain. The child can shadow these (closer-fn-wins).
+   - Any sibling ref's free arg name — the binding seeds a value for
+     a closure-captured arg the sibling consumes. Common pattern in
+     `:cond :clauses` chains where `:parsed` / `:fn-in-use-reason` /
+     etc. seed the per-clause refs.
+
+   Anything outside that union is a typo or a stale name."
+  [{fn-name :name :as fn-def} parent-name parent-args parent-info]
+  (let [own-args (:args fn-def)
+        ;; Closure-capture seeds: a sibling binding's free args
+        ;; whitelist this fn-def's bindings of the same name.
+        sibling-free-args (apply clojure.set/union #{}
+                                 (map ref-free-arg-names (vals own-args)))
+        ;; `parent-args` already includes type-row record-fields when
+        ;; the parent is a type-row (merged by `check-fn-def!` ahead
+        ;; of this call). The `:resolved-bindings` keys cover slots
+        ;; shadowed earlier in the parent chain.
+        valid (-> (set (keys parent-args))
+                  (into (keys (:resolved-bindings parent-info {})))
+                  (into sibling-free-args))
+        unknown (remove valid (keys own-args))]
+    (when (seq unknown)
+      (let [arg-name (first unknown)
+            b-form (get own-args arg-name)
+            suggestion (nearest-slot-suggestion arg-name valid)]
+        (throw (ex-info
+                 (str "Type-check failed in fn-def " (pr-str fn-name)
+                      "\n  arg " (pr-str arg-name) " ← " (pr-str b-form)
+                      "\n  parent " (pr-str parent-name) (source-suffix parent-name)
+                      "\n  reason: " (pr-str arg-name)
+                      " is neither a slot of " (pr-str parent-name)
+                      " nor a closure-capture seed consumed by a sibling ref."
+                      (when suggestion (str " Did you mean " (pr-str suggestion) "?"))
+                      "\n  available names: "
+                      (pr-str (vec (sort valid))))
+                 (merge {:fn-name fn-name
+                         :parent-name parent-name
+                         :parent parent-name
+                         :arg-name arg-name
+                         :arg arg-name
+                         :binding b-form
+                         :suggestion suggestion
+                         :available-slots (vec (sort valid))
+                         :type :bindings/unknown-slot}
+                        *source-info*)))))))
+
+
+(defn- check-ref-type-overrides!
+  "Reject `{:ref :_x :type T}` bindings where T is NOT a subtype of
+   `:_x`'s declared return. The override is the author's
+   `narrowed-contract claim` (`I know :_x's nullable return is
+   actually non-nil in this guarded path; treat it as :text here`).
+   Widening claims (`treat :_x's :text return as :int here`) silently
+   pass the call-site check while leaving the runtime to drift —
+   downstream consumers reading this binding see the LIE.
+
+   Same lie-detection for `{:value V :type T}` — the literal V's
+   classified type must be a subtype of the override T. `{:value
+   \"hello\" :type :int}` previously slipped through because
+   monotonicity only checks T vs the inherited slot type.
+
+   Typevar on either side defers — typevars are unification
+   placeholders and can bind to anything; the override pins one
+   specific instantiation, which is monotonic by construction."
+  [{fn-name :name :as fn-def} parent-name]
+  (doseq [[arg-name b-form] (:args fn-def)]
+    (when (and (map? b-form) (contains? b-form :type))
+      (let [override (some-> (:type b-form) types/resolve-alias)
+            ;; ref-binding → check against ref's return.
+            ;; value-binding → check against classified value type.
+            [actual-source actual]
+            (cond
+              (contains? b-form :ref)
+              [:ref-return
+               (some-> (registry/rich-type-of (:ref b-form))
+                       :return
+                       types/resolve-alias)]
+              (contains? b-form :value)
+              [:literal-value
+               (classify-literal (:value b-form))]
+              :else nil)]
+        (when (and actual override actual-source
+                   (not (has-type-var? actual))
+                   (not (has-type-var? override))
+                   ;; Narrowing direction: override must be a SUBTYPE
+                   ;; of the actual (more-specific claim about a
+                   ;; less-specific value). Equality is allowed.
+                   ;; Failure here means the author is widening or
+                   ;; making an incompatible claim — error.
+                   (not (types/subtype? override actual)))
+          (throw (ex-info
+                   (str "Type-check failed in fn-def " (pr-str fn-name)
+                        "\n  arg " (pr-str arg-name) " ← " (pr-str b-form)
+                        "\n  parent " (pr-str parent-name) (source-suffix parent-name)
+                        "\n  reason: the binding's `:type` override "
+                        (pr-str override) " contradicts the "
+                        (name actual-source) " "
+                        (pr-str actual) ". The override is the author's"
+                        " narrowed-contract claim (e.g. asserting non-nil"
+                        " in a guarded path) — widening claims silently"
+                        " propagate a wrong type to downstream consumers.")
+                   (merge {:fn-name fn-name
+                           :parent-name parent-name
+                           :arg-name arg-name
+                           :binding b-form
+                           :actual-source actual-source
+                           :actual actual
+                           :override override
+                           :type :bindings/type-override-widens}
+                          *source-info*))))))))
 
 
 (defn- check-binding-monotonicity!
@@ -793,21 +1104,32 @@
   "Classify ONE item from a literal-vector binding into its actual
    type. Mirrors classify-literal but also unwraps `{:value …}` /
    `{:ref :fn}` / bare keyword-refs / `{:as :name}`. Items whose
-   shape leaves the type unknown surface as `:any`."
+   shape leaves the type unknown surface as `:any`.
+
+   Refs are FRESHENED per item — every keyword fn-ref brings its own
+   scope of `'a`/`'b`/`'v`. Without that, two siblings whose computed
+   return both name `v` (e.g. `[:_list-branches-count :_list-
+   branches-json]` against `:zipmap :vals [:list v]`) collapse into
+   a single shared `v` that the outer slot's typevar then refuses to
+   bind to via the occurs check."
   [item]
   (cond
     (and (map? item) (contains? item :value))
     (or (classify-literal (:value item)) :any)
 
     (and (map? item) (contains? item :ref))
-    (or (:return (registry/rich-type-of (:ref item))) :any)
+    (or (some-> (:type item) types/resolve-alias)
+        (some-> (registry/rich-type-of (:ref item)) :return types/freshen)
+        :any)
 
-    ;; Item-level rename — type unknown without seeing the caller.
+    ;; Item-level rename — type unknown without seeing the caller,
+    ;; unless the author pinned `:type` to assert the expected shape.
     (and (map? item) (contains? item :as))
-    :any
+    (or (some-> (:type item) types/resolve-alias) :any)
 
     (keyword? item)
-    (or (:return (registry/rich-type-of item)) :any)
+    (or (some-> (registry/rich-type-of item) :return types/freshen)
+        :any)
 
     :else
     (or (classify-literal item) :any)))
@@ -853,11 +1175,21 @@
 
 (defn- deferred-binding?
   "Shapes that fall through to defer rather than being type-checked
-   here. See check-one-binding for the full breakdown."
-  [expected b-form]
-  (or (and (sequence-slot? expected)
-           (not (vector? b-form)))
-      (and (map? b-form)
+   here. See check-one-binding for the full breakdown.
+
+   Sequence-slot + ref-binding used to be deferred under the loose
+   notion 'sequence slot expects a vector'. But a ref-binding to a
+   sequence slot IS statically checkable: assemble the ref's
+   `:return` and verify subtype against the slot's `[:list T]`
+   shape. Skipping that check was a silent footgun — a typevar
+   conflict like `:filter :pred :int-pred :coll :text-list-fn`
+   (`'a` binds to `:int` via pred, then `[:list :int]` ⊄ `[:list
+   :text]` for the coll ref) used to slip through. Same for literal
+   value bindings: `{:value [1 2 3]}` classifies as `[:list :int]`
+   and IS comparable against `[:list :text]` — we should check, not
+   defer. Only rename / metadata / vector chains still defer."
+  [_expected b-form]
+  (or (and (map? b-form)
            (or (contains? b-form :as)
                (and (contains? b-form :ref)
                     (not (contains? b-form :value)))))
@@ -884,10 +1216,138 @@
       ;; own structural shape and unify positionally — catches HOF
       ;; mismatches like `:filter :pred :add-10` (add-10 returns
       ;; :int, filter expects :bool).
+      ;;
+      ;; Closure-capture awareness: the ref's free args partition into
+      ;; (a) CALL-SITE args (those whose names match the slot's
+      ;; structural `[:fn {ARGS} …]`) — executor's hof-wrap supplies
+      ;; them per invocation; and (b) CAPTURED args (everything else)
+      ;; — closed over at wrap time from the OUTER fn-def's
+      ;; binding-chain (docs/CLOSURE_CAPTURE.md). The capture-side
+      ;; doesn't participate in the slot's callable contract, so
+      ;; strip those keys from the actual fn-type before unifying.
+      ;; Without this, `:_apply-update-record-type-body`'s computed
+      ;; `[:fn {:parsed _, :journal _} _]` rejects against `:try
+      ;; :body [:fn {} a :any]` — the two captured args are
+      ;; legitimately closure-captured per the runtime contract.
       (and (types/fn-type? expected) (ref-binding? b-form))
       (if-let [actual (assemble-fn-type b-form)]
-        (check-binding! primary-parent arg-name expected actual subst fn-name b-form)
+        (let [call-site-keys (set (keys (types/fn-args expected)))
+              raw-args       (types/fn-args actual)
+              ;; Variadic-ignore: a 0-arg callable accepts any
+              ;; call-site arity (the executor's hof-wrap drops the
+              ;; supplied args at invocation). Adopt the slot's arg
+              ;; map so unify-fn's cardinality check passes; the
+              ;; rest of the contract (return + effects) still gets
+              ;; verified. Example: `:_list-exec-limit-on-throw`
+              ;; declared `[:fn {} :null #{}]` binds to `:try
+              ;; :on-throw [:fn {:exception :any} a :any]` via the
+              ;; variadic-ignore wrap.
+              args-after-var (if (and (empty? raw-args)
+                                      (seq call-site-keys))
+                               (types/fn-args expected)
+                               raw-args)
+              extras         (when (> (count args-after-var)
+                                      (count call-site-keys))
+                               ;; Closure-capture stripping: the
+                               ;; actual signature carries MORE args
+                               ;; than the slot's callable contract
+                               ;; declares. The runtime's hof-wrap
+                               ;; closes the surplus over from the
+                               ;; OUTER binding-chain, so they don't
+                               ;; participate in the slot's
+                               ;; per-invocation contract. Drop the
+                               ;; args whose names aren't in the
+                               ;; slot's call-site set — that's the
+                               ;; documented capture rule
+                               ;; (docs/CLOSURE_CAPTURE.md).
+                               ;; If cardinalities match, every
+                               ;; actual arg is alpha-equivalent to
+                               ;; the slot's positional arg via
+                               ;; `unify-fn`'s sort-by-key path;
+                               ;; stripping would wrongly empty a
+                               ;; 1-arg `:str-upper :func` binding
+                               ;; to `:map`'s `{:item a}` slot.
+                               (remove call-site-keys
+                                       (keys args-after-var)))
+              stripped       (cond
+                               (seq extras) (apply dissoc args-after-var extras)
+                               :else        args-after-var)
+              ;; If the strip wiped every arg but the slot expects
+              ;; some (every actual arg was a closure-capture),
+              ;; the resulting `[:fn {}` looks like a 0-arg
+              ;; callable to `unify-fn` — same shape as the
+              ;; variadic-ignore case. Adopt the slot's args so
+              ;; `unify-fn`'s cardinality check passes; the
+              ;; return + effect contract still gets verified.
+              final-args     (if (and (empty? stripped)
+                                      (seq call-site-keys))
+                               (types/fn-args expected)
+                               stripped)
+              ;; Effect-strip: captured args' effects are wrap-time —
+              ;; they belong to the OUTER scope's effect computation,
+              ;; not the callable's per-invocation contract. Subtract
+              ;; per-arg contributions for stripped keys; if no
+              ;; per-arg map is recorded (base-fn or pre-arg-effects
+              ;; entries) keep the original effects.
+              stripped-keys  (set extras)
+              actual-effects (types/fn-effects actual)
+              per-arg        (or (some-> (registry/rich-type-of b-form)
+                                         :arg-effects)
+                                 {})
+              capture-eff    (reduce into #{}
+                                     (vals (select-keys per-arg
+                                                        stripped-keys)))
+              final-effects  (if (seq stripped-keys)
+                               (set/difference actual-effects capture-eff)
+                               actual-effects)
+              actual'        (if (and (= final-args raw-args)
+                                      (= final-effects actual-effects))
+                               actual
+                               (types/make-fn-type
+                                 final-args
+                                 (types/fn-ret actual)
+                                 final-effects))]
+          (check-binding! primary-parent arg-name expected actual' subst fn-name b-form))
         subst)
+
+      ;; Structural fn-type slot, LITERAL value binding — a fn-typed
+      ;; slot expects a callable but the binding is a primitive (text,
+      ;; int, bool, …) that can't be invoked. The runtime would either
+      ;; throw on the call OR silently wrap the literal into a
+      ;; constant-returning thunk depending on the call site —
+      ;; either way the author meant SOMETHING else (a fn-ref or an
+      ;; inline anon). Catch at sync time.
+      ;;
+      ;; `{:as :name}` renames (with or without `:type`) still defer
+      ;; — the slot becomes a free arg, the caller supplies the
+      ;; callable. Vector bindings to fn slots aren't a thing
+      ;; (sequence-slot branch below handles them), but the explicit
+      ;; defer keeps the cases independent.
+      (and (types/fn-type? expected)
+           (map? b-form)
+           (contains? b-form :value)
+           (let [classified (classify-literal (:value b-form))]
+             (and (some? classified) (not= classified :any))))
+      (throw (ex-info
+               (str "Type-check failed in fn-def " (pr-str fn-name)
+                    "\n  arg "        (pr-str arg-name) " ← " (describe-binding b-form)
+                    "\n  parent "     (pr-str primary-parent)
+                    (source-suffix primary-parent)
+                    " expects a callable shape: " (pr-str expected)
+                    "\n  actual:                "
+                    (pr-str (classify-literal (:value b-form)))
+                    " (literal value, not a callable)"
+                    "\n  hint: bind a fn-ref (`:_my-fn`) or an inline"
+                    " `{:parent :some-fn :args {…}}`; a literal of"
+                    " primitive type cannot be invoked as a HOF arg.")
+               (merge {:fn-name fn-name
+                       :parent-name primary-parent
+                       :arg-name arg-name
+                       :binding b-form
+                       :expected expected
+                       :actual (classify-literal (:value b-form))
+                       :type :types/literal-bound-to-fn-slot}
+                      *source-info*)))
 
       ;; Structural fn-type slot, non-ref binding — runtime will
       ;; hof-wrap whatever's there. No structural info; defer.
@@ -903,7 +1363,18 @@
       subst
 
       (ref-binding? b-form)
-      (let [actual (or (:return (registry/rich-type-of b-form)) :any)]
+      ;; Freshen the ref's return-type so its `'a`/`'b` don't collide
+      ;; with the caller's free typevars. Without this an actual like
+      ;; `[:union :null a]` (from a fn-def whose computed return is
+      ;; nullable-and-polymorphic) gets stuck against the slot's bare
+      ;; `'a` via the occurs check — `bind-var 'a [:union :null 'a]`
+      ;; fails because the typevar appears in its own value. After
+      ;; freshening the actual carries `'a-N` (fresh per use site) so
+      ;; unify cleanly binds `'a := [:union :null 'a-N]`.
+      (let [actual (or (some-> (registry/rich-type-of b-form)
+                               :return
+                               types/freshen)
+                       :any)]
         (check-binding! primary-parent arg-name expected actual subst fn-name b-form))
 
       (value-binding? b-form)
@@ -1091,16 +1562,13 @@
    merged shape from these meta-fields."
   [items]
   (mapv (fn [item]
-          (cond
-            (keyword? item)
-            (or (:return (registry/rich-type-of item)) :any)
-            (and (map? item) (contains? item :value))
-            (or (classify-literal (:value item)) :any)
-            (and (map? item) (contains? item :ref))
-            (or (:return (registry/rich-type-of (:ref item))) :any)
-            (and (map? item) (contains? item :as))
-            :any
-            :else
+          (case (binding-shape item)
+            :fn-ref    (or (:return (registry/rich-type-of item)) :any)
+            :value-map (or (classify-literal (:value item)) :any)
+            :ref-map   (or (some-> (:type item) types/resolve-alias)
+                           (:return (registry/rich-type-of (:ref item)))
+                           :any)
+            :meta-map  (or (:type item) :any)
             (or (classify-literal item) :any)))
         items))
 
@@ -1276,21 +1744,60 @@
 ;; -----------------------------------------------------------------------------
 ;; Phase 4: effects — parent's ∪ each ref-binding's.
 
+(defn- compute-per-arg-effects
+  "Per-arg effect contribution: `{arg-name #{effects}}`. For each arg,
+   the union of effects from refs bound to that arg. Closure-capture
+   strip at fn-type binding sites subtracts these when an arg is
+   wrap-time-only — its effects belong to the OUTER scope's effect
+   computation, not to the per-invocation callable contract."
+  [args]
+  (into {}
+        (map (fn [[arg-name b-form]]
+               [arg-name
+                (reduce (fn [a r]
+                          (into a (or (:effects (registry/rich-type-of r)) #{})))
+                        #{}
+                        (ref-targets b-form))]))
+        args))
+
+
 (defn- compute-effects
   "Effects are tainted: parent ∪ every ref-binding's effects. Once
    any link in the composition reads/writes I/O the tag flows into
    the fn-def — caching / parallelism / docs all read this single
    source of truth."
   [args parent-info]
-  (let [ref-effects
-        (reduce-kv (fn [acc _ b-form]
-                     (reduce (fn [a r]
-                               (into a (or (:effects (registry/rich-type-of r)) #{})))
-                             acc
-                             (ref-targets b-form)))
-                   #{}
-                   args)]
+  (let [ref-effects (reduce into #{} (vals (compute-per-arg-effects args)))]
     (into ref-effects (or (:effects parent-info) #{}))))
+
+
+(defn- compute-call-time-effects
+  "Effects that run on EVERY invocation of this fn-def when it's used
+   as a callable (HOF arg). Splits:
+
+   - PARENT's call-time effects (its body — pure for `:equal?` etc.)
+   - effects of refs bound to args that REMAIN free (call-site args)
+
+   EXCLUDES: effects of refs bound to args that are FULLY BOUND in
+   this fn-def — those are wrap-time / construction-time, computed
+   ONCE when the lambda is assembled, and their effects belong to
+   the OUTER scope, not the per-invocation callable contract.
+
+   This is what HOF slots check against (`:filter :pred [:fn … #{}]`
+   demands pure per-invocation): a fn-def that pre-computes a DB
+   value at construction time is still a pure predicate at call time.
+
+   Free args are the arg-NAMES that survive the lift — bound args
+   are everything else under `(:args fn-def)`."
+  [args parent-info free-arg-names]
+  (let [free-keys (set free-arg-names)
+        per-arg (compute-per-arg-effects args)
+        call-site-arg-effects (reduce into #{}
+                                      (vals (select-keys per-arg free-keys)))
+        parent-call-time (or (:call-time-effects parent-info)
+                             (:effects parent-info)
+                             #{})]
+    (into call-site-arg-effects parent-call-time)))
 
 
 (defn- check-effects-policy!
@@ -1362,7 +1869,11 @@
   [fn-name fn-def primary-parent parent-info free-args
    computed-return effects own-resolved slot-types nav-types drift]
   (let [expected (some-> fn-def :expects-effects set)
-        resolved (merge (:resolved-bindings parent-info {}) own-resolved)]
+        resolved (merge (:resolved-bindings parent-info {}) own-resolved)
+        arg-effects (compute-per-arg-effects (:args fn-def))
+        call-time-effects (compute-call-time-effects (:args fn-def)
+                                                     parent-info
+                                                     (keys free-args))]
     (registry/record-rich-types-raw!
       fn-name
       (cond-> (merge {:return computed-return :args free-args}
@@ -1372,6 +1883,19 @@
         (seq nav-types)   (assoc :nav-types nav-types)
         primary-parent    (assoc :primary-parent primary-parent)
         (seq effects)     (assoc :effects effects)
+        ;; `:arg-effects` — per-binding effect contribution. Used by
+        ;; the closure-capture strip in check-binding! to subtract
+        ;; wrap-time-only effects from the per-invocation callable
+        ;; contract when the strip removes captured-arg keys.
+        (some seq (vals arg-effects)) (assoc :arg-effects arg-effects)
+        ;; `:call-time-effects` — effects per-invocation when used as
+        ;; a HOF callable. Parent's body + free-arg ref-effects;
+        ;; EXCLUDES bound-arg ref-effects (those are wrap-time, run
+        ;; once during outer assembly). When equal to `:effects` the
+        ;; assoc is redundant — only stash on divergence.
+        (and (some seq (vals arg-effects))
+             (not= call-time-effects effects))
+        (assoc :call-time-effects call-time-effects)
         expected          (assoc :expects-effects expected)
         drift             (assoc :return-type-drift drift)
         ;; Surface description so the inline-expand panel can show
@@ -1433,16 +1957,27 @@
     static-ret))
 
 
+(defn- apply-args-only-rule
+  "Shared shape for the rules whose signature is `(rule
+   bindings-info) → narrowed-map`: pull the rule off the ROOT
+   base-fn's rich-type entry by `rule-key`, run it against the
+   call-site's args-info, default to `{}` when no rule is declared.
+   Wrapped by `compute-rule-slot-types` + `compute-rule-nav-types` —
+   the two rules whose docs differ but bodies were byte-identical."
+  [rule-key fn-def primary-parent parent-args]
+  (if-let [rule (base-fn-type-rule rule-key
+                                   (root-base-fn-name primary-parent))]
+    (rule (bindings-info-for-rule (:args fn-def) parent-args))
+    {}))
+
+
 (defn- compute-rule-slot-types
   "Run the ROOT base-fn's `compute-slot-types` rule — narrowed INPUT
    slot types the editor surfaces on type-chips (e.g. `:update-in`
    narrowing `:path` to `[:list :keyword]` when `:m` is a record).
    Empty for base-fns without a slot-types rule."
   [fn-def primary-parent parent-args]
-  (if-let [rule (base-fn-type-rule :slot-types-rule
-                                   (root-base-fn-name primary-parent))]
-    (rule (bindings-info-for-rule (:args fn-def) parent-args))
-    {}))
+  (apply-args-only-rule :slot-types-rule fn-def primary-parent parent-args))
 
 
 (defn- compute-rule-nav-types
@@ -1452,10 +1987,7 @@
    The editor walks this against the live path. Empty for base-fns
    without a nav-types rule."
   [fn-def primary-parent parent-args]
-  (if-let [rule (base-fn-type-rule :nav-types-rule
-                                   (root-base-fn-name primary-parent))]
-    (rule (bindings-info-for-rule (:args fn-def) parent-args))
-    {}))
+  (apply-args-only-rule :nav-types-rule fn-def primary-parent parent-args))
 
 
 (defn- enforce-declared-return!
@@ -1564,6 +2096,38 @@
                where)))
 
 
+(defn- log-effects-drift!
+  "Emit a sync-time WARN when a composed fn-def's declared `:effects`
+   set differs from the computed set. For composed fn-defs the
+   type-checker / runtime read the COMPUTED `:effects` from the
+   rich-type registry — the author's declaration is then a no-op,
+   not a contract. Same author-misled-by-declaration class as
+   return-type drift; treat it as a soft signal so existing
+   fn-defs that just redundantly redeclare what's already computed
+   don't break (their declared == computed, no warning fires).
+
+   The contract-style equivalent is `:expects-effects`, which IS
+   enforced by `check-effects-policy!`. Authors who want a binding
+   contract should use that field instead.
+
+   `:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
+   `:process` — same set the runtime accepts.
+
+   `:expects-effects` is skipped here (that path has its own drift
+   check)."
+  [fn-name fn-def declared computed]
+  (let [{:keys [source-file source-line]} (source-info-for fn-def)
+        where (cond
+                (and source-file source-line) (str source-file ":" source-line)
+                source-file                   source-file
+                :else                         "<unknown>")]
+    (log/warnf "type-drift: fn-def %s declares :effects %s but the computed set is %s — the declared value is silently dropped (rich-type uses the computed set). Use :expects-effects for a binding contract, or remove the redundant :effects field. at %s"
+               (pr-str fn-name)
+               (pr-str declared)
+               (pr-str computed)
+               where)))
+
+
 (defn check-fn-def!
   "Type-check a single fn-def against its parent's signature
    (whether that parent is a base-fn or a previously-checked
@@ -1584,16 +2148,41 @@
   [{fn-name :name :as fn-def}]
   (when-let [{:keys [primary-parent parent-info]} (resolve-parent-info fn-def)]
     (binding [*source-info* (source-info-for fn-def)]
-      (let [parent-args (:args parent-info)]
+      ;; Type-row parents (e.g. `:Storage`) declare their abstract
+      ;; operations as record FIELDS, not as the rich-type `:args`
+      ;; slot map (which is empty for type-rows). Concrete impls
+      ;; (`:postgres-storage-impl :parent :Storage :args {:query
+      ;; :pg-query …}`) bind those fields. Inject the resolved fields
+      ;; into `parent-args` so the per-binding type-check verifies
+      ;; that `:pg-query` actually satisfies `:Storage`'s `:query`
+      ;; field type (a `[:fn …]` shape). `(:args parent-info)` wins
+      ;; on a key collision — that's the normal slot map.
+      (let [type-row-fields (let [resolved (and (keyword? primary-parent)
+                                                (types/resolve-alias primary-parent))
+                                  ret (:return parent-info)]
+                              (cond
+                                (types/record-type? resolved) resolved
+                                (types/record-type? ret) ret
+                                :else {}))
+            parent-args (merge type-row-fields (:args parent-info))]
+        (check-effect-categories! fn-def)
+        (check-unknown-slots! fn-def primary-parent parent-args parent-info)
+        (check-ref-type-overrides! fn-def primary-parent)
         (check-binding-monotonicity! fn-def primary-parent parent-args))
-      (let [parent-args (:args parent-info)
+      (let [type-row-fields (let [resolved (and (keyword? primary-parent)
+                                                (types/resolve-alias primary-parent))
+                                  ret (:return parent-info)]
+                              (cond
+                                (types/record-type? resolved) resolved
+                                (types/record-type? ret) ret
+                                :else {}))
+            parent-args (merge type-row-fields (:args parent-info))
             ;; Effective parent-args includes resolved bindings from
             ;; further up the chain — gives rules a transitive view of
             ;; slot types AND the ref-name (when bound to a fn-ref) so
             ;; ref re-firing can pick up call-site narrowing.
             effective-parent
-            (merge (into {} (map (fn [[k v]] [k v]))
-                         (:resolved-bindings parent-info {}))
+            (merge (:resolved-bindings parent-info {})
                    (into {}
                          (map (fn [[k t]] [k {:type t :value nil}]))
                          parent-args))
@@ -1636,6 +2225,9 @@
             drift (return-type-drift fn-def computed-return)
             effects (compute-effects (:args fn-def) parent-info)]
         (when drift (log-return-type-drift! fn-name fn-def drift))
+        (when-let [declared (some-> fn-def :effects set)]
+          (when (not= declared effects)
+            (log-effects-drift! fn-name fn-def declared effects)))
         (check-effects-policy! fn-name fn-def effects)
         (record-result! fn-name fn-def primary-parent parent-info
                         free-args recorded-return effects own-bindings

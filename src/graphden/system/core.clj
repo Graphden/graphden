@@ -15,14 +15,18 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.interface :as fn-composition]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
     [graphden.packages.loader :as pkg]
     [graphden.packages.records :as records]
+    [graphden.packages.records.ids :as ids]
+    [graphden.packages.records.parse :as records-parse]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
@@ -31,7 +35,9 @@
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
     [graphden.services.reconciler :as recon]
+    [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.postgres.core :as postgres]
+    [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
@@ -97,6 +103,55 @@
 
 
 ;; =============================================================================
+;; Cross-process LISTEN/NOTIFY transport
+;; =============================================================================
+;;
+;; Background thread + dedicated Postgres connection. Receives events
+;; (`:service` writes today; fn-def invalidations in Block 7 sub-block
+;; B) and dispatches to registered callbacks. The reconciler registers
+;; its callback during its own init-key; the connection's session
+;; lasts the lifetime of the pod.
+
+(defmethod ig/init-key :db/notify-listener [_ {:keys [pg-opts]}]
+  (log/info "Starting LISTEN listener for graphden_events...")
+  (pg-notify/create-listener pg-opts))
+
+
+(defmethod ig/halt-key! :db/notify-listener [_ listener]
+  (log/info "Stopping LISTEN listener...")
+  (pg-notify/close-listener! listener))
+
+
+;; =============================================================================
+;; Per-service advisory-lock connection
+;; =============================================================================
+;;
+;; A dedicated Postgres connection that holds this pod's service
+;; ownership locks. `pg_try_advisory_lock(<service-key>)` succeeds
+;; for whichever pod gets to it first; siblings see false and skip
+;; starting the service. On pod halt the connection closes →
+;; Postgres releases every lock → sibling pods can take over on
+;; their next reconcile pass.
+
+(defmethod ig/init-key :db/service-locks [_ {:keys [pg-opts]}]
+  (log/info "Opening service-locks connection...")
+  {:connection (pg-lock/create-lock-conn pg-opts)})
+
+
+(defmethod ig/halt-key! :db/service-locks [_ {:keys [connection]}]
+  (log/info "Releasing service-locks + closing connection...")
+  ;; Release-all is best-effort during shutdown — we still need to
+  ;; close the connection even if a release fails. But silencing
+  ;; the failure entirely would hide DB-side state-leak (advisory
+  ;; locks persisting on the connection until the session truly
+  ;; dies). Log so dashboards see shutdown-time PG drift.
+  (try (pg-lock/release-all! connection)
+       (catch Exception e
+         (log/warn e "service-locks release-all failed during halt — continuing close")))
+  (pg-lock/close-lock-conn! connection))
+
+
+;; =============================================================================
 ;; Versioned Storage Decorator
 ;; =============================================================================
 
@@ -127,7 +182,7 @@
 ;; Base Functions Registry
 ;; =============================================================================
 
-(defn- compute-all-fn-name-ids
+(defn compute-all-fn-name-ids
   "Pre-compute deterministic fn-ids for every named def across the
    loaded packages — base-fns + composed fn-defs (incl. `:fn-type`
    declarations) combined. Threaded into both syncs so cross-module
@@ -153,7 +208,7 @@
     (into {} (concat base-pairs fn-def-pairs))))
 
 
-(defn- register-type-aliases!
+(defn register-type-aliases!
   "Walk every fn-def that declares a structural type (refinement,
    record, list, union, fn-type) and register it as a type-alias so
    the type-checker's `resolve-alias` can expand the keyword when it
@@ -186,6 +241,18 @@
 
             (:union fd)
             (into [:union] (:union fd))
+
+            ;; Homogeneous map alias — `:map {:key K :value V}` is sugar
+            ;; for the structural `[:map K V]`. Without this branch the
+            ;; alias-body fn ignored the declaration and downstream slot
+            ;; references (`:list-entities :where :_storage-where-map`)
+            ;; saw a bare keyword the alias registry didn't know about,
+            ;; so the type-checker treated it as opaque and a literal
+            ;; `{:value {}}` failed against it. See
+            ;; `docs/TYPE_CHECK_BACKLOG.md` § "Re-audit (2026-06-07)".
+            (and (:map fd) (map? (:map fd)))
+            (let [{:keys [key value]} (:map fd)]
+              (when (and key value) [:map key value]))
 
             ;; `:variant [:tag1 T1 :tag2 T2 …]` desugars to a union of
             ;; tag-pinned records (see types/desugar-variant). Without
@@ -233,26 +300,175 @@
           :else (recur next-pending (inc iter)))))))
 
 
-(defmethod ig/init-key :exec/base-fns [_ {:keys [storage packages]}]
+(defn register-base-fns-from-packages!
+  "Pure side-effects: sync namespaces, register type-aliases, register
+   base-fn impls in the global registry, sync base-fn rows to storage.
+   `extra-base-fns` is an optional map of `{fn-name → impl}` merged on
+   top of the package impls (test overrides). Returns
+   `{:ns-id-map :all-name->id :base-fns}` so callers can thread the
+   resolved name→id map into a subsequent
+   `sync-fn-entities-from-packages!` call.
+
+   Shared by the production `:exec/base-fns` integrant init-key and the
+   out-of-band `bootstrap-from-packages!` test helper."
+  ([storage packages]
+   (register-base-fns-from-packages! storage packages nil))
+  ([storage packages extra-base-fns]
+   (let [base-fn-defs (:base-fn-defs packages)
+         ;; Sync namespace entities first (creates ns hierarchy in DB)
+         ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
+                                         (:ns-descriptions packages))
+         ;; Full name→id map covering base-fns + composed fn-defs so
+         ;; either sync can resolve a reference into the other set.
+         all-name->id (compute-all-fn-name-ids packages)
+         ;; Map of {fn-name → impl} threaded through to `:exec/context`
+         ;; via integrant — sidesteps the process-global registry so
+         ;; concurrent test-scope start! calls can't race on the atom.
+         ;; `extra-base-fns` is merged on top of package impls. Same
+         ;; map is also pushed into the global registry for back-compat
+         ;; with direct `exec/get-base-fn` / REPL callers.
+         base-fns-map (merge (registry/compute-base-fns-map base-fn-defs)
+                             extra-base-fns)]
+     (registry/sync-primitives! storage)
+     ;; Register refinement type-aliases BEFORE base-fn rich-type
+     ;; recording so `:http-server :args {:port :port}` stores the
+     ;; structural `[:refine :int …]` form, not the bare keyword.
+     (register-type-aliases! (:fn-defs packages))
+     (doseq [[fn-name impl] base-fns-map]
+       (exec/register-base-fn! fn-name impl))
+     (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)
+     {:ns-id-map ns-id-map
+      :all-name->id all-name->id
+      :base-fns base-fns-map})))
+
+
+(defn sync-fn-entities-from-packages!
+  "Pure side-effects: sync composed fn-defs to storage, snapshot their
+   rich-types, run a topological-order type-check sweep. Returns the
+   created fn-rows. `base-fns-info` is the result of
+   `register-base-fns-from-packages!` — its `:ns-id-map` and
+   `:all-name->id` are forwarded to the compose layer so cross-set
+   references (base-fn `:return-type` naming a fn-def-declared type-row)
+   resolve.
+
+   Shared by the production `:exec/fn-entities` integrant init-key and
+   the out-of-band `bootstrap-from-packages!` test helper.
+
+   `:skip-type-check?` — when truthy, runs only the storage-sync +
+   seed-rich-types passes; skips the heavy topological type-check
+   sweep at the end. Tests that don't exercise the type-API
+   endpoints can opt in to save ~15 s of bootstrap per ns. The
+   editor type strips / `/api/types/*` endpoints depend on the
+   sweep, so production NEVER skips."
+  ([storage packages base-fns-info]
+   (sync-fn-entities-from-packages! storage packages base-fns-info nil))
+  ([storage packages base-fns-info {:keys [skip-type-check?]}]
+   (let [fn-defs (:fn-defs packages)
+         ns-id-map (or (:ns-id-map base-fns-info) {})
+         extra-name->id (or (:all-name->id base-fns-info) {})
+         ;; Hand the base-fn defs into the composed-fn sync so the slot
+         ;; resolver sees their `:args` declarations — without these,
+         ;; bindings on slots owned by base-fns wouldn't resolve.
+         extra-defs (into {}
+                          (keep (fn [[fn-name fn-def]]
+                                  (when fn-name
+                                    [fn-name (assoc fn-def :name fn-name)])))
+                          (:base-fn-defs packages))
+         fns (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map
+                                                  extra-name->id extra-defs)]
+     ;; Snapshot composed fn-defs into the in-memory rich-type registry
+     ;; so the editor's `:effects` strip and arg-type hints can resolve
+     ;; their declared shape. Two passes:
+     ;;
+     ;; 1. Seed each fn-def's declared shape (return + args + declared
+     ;;    `:effects`). Without this, `check-all-defs!` would fail to
+     ;;    resolve refs to peer fn-defs whose entries don't exist yet.
+     ;; 2. Run the full type-checker so `:effects` propagate transitively
+     ;;    through every parent + ref edge — that's what powers the
+     ;;    editor's effects-strip showing the union of every category
+     ;;    a fn-def TRANSITIVELY pulls in. Wrap in try/catch: a single
+     ;;    fn-def's type-mismatch shouldn't block server startup.
+     ;; Refinement aliases are registered earlier in `:exec/base-fns` so
+     ;; base-fn arg types (`:port`, `:user-port`, …) resolve to their
+     ;; structural form during the base-fn rich-type pass.
+     ;; record-rich-types! validates arg `:type` declarations — those
+     ;; only exist on base-fn-style fn-defs (rare here; composed fn-defs
+     ;; use `:args` for parent BINDINGS, not declarations). Try-each so a
+     ;; few mis-shaped entries don't kill the seed pass; check-all-defs!
+     ;; below recovers the proper computed types via type-inference anyway.
+     (doseq [fd fn-defs]
+       (when-let [fn-name (:name fd)]
+         (try (registry-core/record-rich-types! fn-name fd)
+              (catch Exception e
+                ;; Mis-shaped entries are recoverable by the type-check
+                ;; sweep below — don't block startup, but DEBUG-log so
+                ;; the per-fn cause is available when chasing a
+                ;; downstream sweep failure.
+                (log/debug e "Seed-pass record-rich-types! failed for"
+                           fn-name)))))
+     ;; Type-check in dependency (topological) order: every fn-def is
+     ;; checked AFTER the parents and refs it reads, so a SINGLE sweep
+     ;; reaches the fixpoint — `check-fn-def!` always sees its
+     ;; dependencies' final rich-types, never a stale seed. This is
+     ;; what eliminates the order-dependent under-convergence a fixed
+     ;; pass count over arbitrary order suffered (a deep chain it
+     ;; couldn't propagate, leaving composed fn-defs absent or
+     ;; mis-typed). A fn-def that throws here is genuinely absent from
+     ;; the rich-type registry — the editor would miss its effect strip
+     ;; / computed return — so the per-failure detail is logged at
+     ;; DEBUG and a single summary WARN runs at the end. Per-fn-def
+     ;; WARNs were too noisy in prod startup logs (~22 baseline
+     ;; entries from `:router-result` / `:merge-in` / friends whose
+     ;; producer-of-callable shape the typchecker can't unify yet —
+     ;; runtime behaviour is correct, the editor just doesn't get a
+     ;; computed return-type for those slots). DEBUG keeps the signal
+     ;; available; the summary count makes regressions visible.
+     ;; Inline `{:parent :X :args …}` anon fn-defs appear in arg-binding
+     ;; position throughout `branches/`, `secrets/`, and `execution/`
+     ;; packages. The parser's storage-sync pass lifts each into a
+     ;; synthetic named `_anon-<hash>` fn-def — so storage / runtime
+     ;; see the expanded form — but the type-check sweep reads the
+     ;; ORIGINAL EDN, which still carries the literal map. Without
+     ;; pre-expansion the sweep classifies each inline anon as a
+     ;; record-type literal and fails 20+ bindings against slots that
+     ;; expect the parent's structural return type (eg. `:ref` against
+     ;; `[:union :null :text]`, `:string` against predicates).
+     ;;
+     ;; Run the same `expand-inline-anons-in-module` pass on the
+     ;; type-check input so the sweep sees the synthetic refs.
+     (let [expanded-fn-defs (records-parse/expand-inline-anons-in-module fn-defs)]
+       ;; Re-seed rich-types so synthetic anons get a registry entry too.
+       (doseq [fd expanded-fn-defs]
+         (when-let [fn-name (:name fd)]
+           (try (registry-core/record-rich-types! fn-name fd)
+                (catch Exception e
+                  (log/debug e "Re-seed record-rich-types! failed for" fn-name)))))
+       (when-not skip-type-check?
+         (let [failures (atom 0)]
+           (doseq [fd (deps/topological-sort expanded-fn-defs)]
+             (try (types-check/check-fn-def! fd)
+                  (catch Exception e
+                    (swap! failures inc)
+                    (log/debug "Type-check failed for fn-def" (:name fd) "—"
+                               (ex-message e)))))
+           (when (pos? @failures)
+             (log/warn "Type-check sweep: " @failures
+                       "fn-defs failed (DEBUG-logged) — runtime unaffected,"
+                       " editor effect/return strips may be missing for those names —"
+                       " docs/TYPE_CHECK_BACKLOG.md")))))
+     fns)))
+
+
+(defmethod ig/init-key :exec/base-fns
+  [_ {:keys [storage packages extra-base-fns]}]
   (log/info "Registering base functions...")
-  (let [base-fn-defs (:base-fn-defs packages)
-        ;; Sync namespace entities first (creates ns hierarchy in DB)
-        ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
-                                        (:ns-descriptions packages))
-        ;; Full name→id map covering base-fns + composed fn-defs so
-        ;; either sync can resolve a reference into the other set.
-        all-name->id (compute-all-fn-name-ids packages)]
-    (registry/sync-primitives! storage)
-    ;; Register refinement type-aliases BEFORE base-fn rich-type
-    ;; recording so `:http-server :args {:port :port}` stores the
-    ;; structural `[:refine :int …]` form, not the bare keyword.
-    (register-type-aliases! (:fn-defs packages))
-    (registry/register-base-fns! base-fn-defs)
-    (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map all-name->id)
-    (log/info "Base functions registered:" (count base-fn-defs))
-    {:status :registered
-     :ns-id-map ns-id-map
-     :all-name->id all-name->id}))
+  (let [result (register-base-fns-from-packages! storage packages extra-base-fns)
+        base-fn-defs (:base-fn-defs packages)]
+    (log/info "Base functions registered:"
+              (count base-fn-defs)
+              (when (seq extra-base-fns)
+                (str "(+ " (count extra-base-fns) " extras)")))
+    (assoc result :status :registered)))
 
 
 ;; No halt needed - registry is global state
@@ -264,95 +480,63 @@
 
 (defmethod ig/init-key :exec/fn-entities [_ {:keys [storage packages base-fns]}]
   (log/info "Creating fn entities...")
-  (let [fn-defs (:fn-defs packages)
-        ns-id-map (or (:ns-id-map base-fns) {})
-        extra-name->id (or (:all-name->id base-fns) {})
-        ;; Hand the base-fn defs into the composed-fn sync so the slot
-        ;; resolver sees their `:args` declarations — without these,
-        ;; bindings on slots owned by base-fns wouldn't resolve.
-        extra-defs (into {}
-                         (keep (fn [[fn-name fn-def]]
-                                 (when fn-name
-                                   [fn-name (assoc fn-def :name fn-name)])))
-                         (:base-fn-defs packages))
-        fns (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map
-                                                 extra-name->id extra-defs)]
-    ;; Snapshot composed fn-defs into the in-memory rich-type registry
-    ;; so the editor's `:effects` strip and arg-type hints can resolve
-    ;; their declared shape. Two passes:
-    ;;
-    ;; 1. Seed each fn-def's declared shape (return + args + declared
-    ;;    `:effects`). Without this, `check-all-defs!` would fail to
-    ;;    resolve refs to peer fn-defs whose entries don't exist yet.
-    ;; 2. Run the full type-checker so `:effects` propagate transitively
-    ;;    through every parent + ref edge — that's what powers the
-    ;;    editor's effects-strip showing the union of every category
-    ;;    a fn-def TRANSITIVELY pulls in. Wrap in try/catch: a single
-    ;;    fn-def's type-mismatch shouldn't block server startup.
-    ;; Refinement aliases are registered earlier in `:exec/base-fns` so
-    ;; base-fn arg types (`:port`, `:user-port`, …) resolve to their
-    ;; structural form during the base-fn rich-type pass.
-    ;; record-rich-types! validates arg `:type` declarations — those
-    ;; only exist on base-fn-style fn-defs (rare here; composed fn-defs
-    ;; use `:args` for parent BINDINGS, not declarations). Try-each so a
-    ;; few mis-shaped entries don't kill the seed pass; check-all-defs!
-    ;; below recovers the proper computed types via type-inference anyway.
-    (doseq [fd fn-defs]
-      (when-let [fn-name (:name fd)]
-        (try (registry-core/record-rich-types! fn-name fd)
-             (catch Exception _))))
-    ;; Type-check in dependency (topological) order: every fn-def is
-    ;; checked AFTER the parents and refs it reads, so a SINGLE sweep
-    ;; reaches the fixpoint — `check-fn-def!` always sees its
-    ;; dependencies' final rich-types, never a stale seed. This is
-    ;; what eliminates the order-dependent under-convergence a fixed
-    ;; pass count over arbitrary order suffered (a deep chain it
-    ;; couldn't propagate, leaving composed fn-defs absent or
-    ;; mis-typed). A fn-def that throws here is genuinely absent from
-    ;; the rich-type registry — the editor would miss its effect strip
-    ;; / computed return — so the per-failure detail is logged at
-    ;; DEBUG and a single summary WARN runs at the end. Per-fn-def
-    ;; WARNs were too noisy in prod startup logs (~22 baseline
-    ;; entries from `:router-result` / `:merge-in` / friends whose
-    ;; producer-of-callable shape the typchecker can't unify yet —
-    ;; runtime behaviour is correct, the editor just doesn't get a
-    ;; computed return-type for those slots). DEBUG keeps the signal
-    ;; available; the summary count makes regressions visible.
-    (let [failures (atom 0)]
-      (doseq [fd (deps/topological-sort fn-defs)]
-        (try (types-check/check-fn-def! fd)
-             (catch Exception e
-               (swap! failures inc)
-               (log/debug "Type-check failed for fn-def" (:name fd) "—"
-                          (ex-message e)))))
-      (when (pos? @failures)
-        (log/warn "Type-check sweep: " @failures
-                  "fn-defs failed (DEBUG-logged) — runtime unaffected,"
-                  " editor effect/return strips may be missing for those names —"
-                  " docs/TYPE_CHECK_BACKLOG.md")))
+  (let [fns (sync-fn-entities-from-packages! storage packages base-fns)]
     (log/info "Fn entities created:" (count fns))
     fns))
+
+
+;; =============================================================================
+;; Test-friendly bootstrap (out-of-band)
+;; =============================================================================
+;;
+;; Replicates the `:exec/base-fns` + `:exec/fn-entities` init-key chain
+;; without integrant. Tests that exercise graph-level handlers
+;; (`/api/entities/*` via `:process-create-entity` &c.) call this once
+;; from a `:once` fixture to populate storage + registry + type-aliases.
+;;
+;; Returns `{:ns-id-map :all-name->id :base-fns :fn-rows}` so callers
+;; can resolve fn-ids by name without re-querying storage.
+
+(defn bootstrap-from-packages!
+  "Bootstrap `storage` from the named `package-names` (default
+   [\"core\" \"web\"]). Calls the same `register-base-fns-from-packages!`
+   + `sync-fn-entities-from-packages!` helpers the production
+   `:exec/base-fns` + `:exec/fn-entities` init-keys use, so any drift
+   between bootstrap and production stays localized to those two
+   helpers. Safe to call once per test JVM lifetime against a clean
+   storage. Idempotent against the global type-alias / base-fn-impl
+   registries (re-registers them)."
+  ([storage]
+   (bootstrap-from-packages! storage ["core" "web"] nil))
+  ([storage package-names]
+   (bootstrap-from-packages! storage package-names nil))
+  ([storage package-names opts]
+   (let [packages (pkg/load-packages package-names)
+         base-fns-info (register-base-fns-from-packages! storage packages)
+         fns (sync-fn-entities-from-packages! storage packages base-fns-info opts)]
+     (assoc base-fns-info :fn-rows fns))))
 
 
 ;; =============================================================================
 ;; Vault client (OpenBao / Vault KV v2)
 ;; =============================================================================
 ;;
-;; Infrastructure-level secrets handle. The :vault-get base-fn pulls
-;; this off the executor context to talk to KV v2. Address + token
-;; live in `system-*.edn` (and ultimately env), NEVER exposed to the
-;; user fn-graph — that's the whole point of routing user secrets
-;; through `:vault-get` instead of `:env`.
+;; Infrastructure-level secrets handle. The executor pulls this off
+;; the context to auto-deref `:override-kind :secret-path` bindings
+;; on `:secret-leaf`-parented fn-defs. Address + token live in
+;; `system-*.edn` (and ultimately env), NEVER exposed to the user
+;; fn-graph — that's the whole point of routing user secrets through
+;; `:secret-leaf` instead of `:env`.
 ;;
-;; Optional: when address is blank, the key returns nil and
-;; `:vault-get` raises a clear "vault not configured" error on first
-;; use. Lets tests skip the openbao container.
+;; Optional: when address is blank, the key returns nil and the
+;; secret-leaf auto-deref raises a clear "vault not configured"
+;; error on first use. Lets tests skip the openbao container.
 
 (defmethod ig/init-key :vault/client [_ {:keys [address token]}]
   (if (and (string? address) (not (str/blank? address)))
     (do (log/info "Vault client configured for" address)
         {:address address :token token})
-    (do (log/info "Vault client disabled (no :address) — :vault-get will throw on use")
+    (do (log/info "Vault client disabled (no :address) — secret-leaf auto-deref will throw on use")
         nil)))
 
 
@@ -360,13 +544,33 @@
 ;; Executor Context
 ;; =============================================================================
 
-(defmethod ig/init-key :exec/context [_ {:keys [storage vault-client]}]
+(defmethod ig/init-key :exec/context
+  [_ {:keys [storage vault-client pg-storage base-fns]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
   ;; alongside `:compiled-templates`. Impls grab it via `(:vault ctx)`.
-  (cond-> (exec/create-context {:storage storage})
-    vault-client (assoc :vault vault-client)))
+  ;;
+  ;; `:notify-emitter` is built from the raw PG pool — short-lived
+  ;; `SELECT pg_notify(...)` runs through the main pool just like
+  ;; any other one-shot query. CRUD writers call
+  ;; `((:notify-emitter ctx) event)` after a successful `:service`
+  ;; row mutation. Falls back to a no-op when pg-storage is absent
+  ;; (tests that don't wire PG).
+  ;;
+  ;; `:base-fns` comes via integrant ref from `:exec/base-fns` —
+  ;; ctx-scoped (no global registry read). When the ref isn't wired
+  ;; (older config files or tests that skip `:exec/base-fns`),
+  ;; `create-context` falls back to the global registry snapshot.
+  (let [emitter (if pg-storage
+                  (pg-notify/make-emitter (:pool pg-storage))
+                  pg-notify/noop-emitter)
+        ctx-opts (cond-> {:storage storage}
+                   (and base-fns (:base-fns base-fns))
+                   (assoc :base-fns (:base-fns base-fns)))]
+    (cond-> (-> (exec/create-context ctx-opts)
+                (assoc :notify-emitter emitter))
+      vault-client (assoc :vault vault-client))))
 
 
 ;; =============================================================================
@@ -398,7 +602,7 @@
 ;; The router lives in a process-wide atom
 ;; (`branch-router/active-router`) because the wrap base-fn impl
 ;; runs inside compiled closures that already closed over a fixed
-;; ctx — same pattern as `services.reconciler/legacy-handle`.
+;; ctx.
 
 (defmethod ig/init-key :exec/branch-router [_ {:keys [context]}]
   (log/info "Initialising branch router...")
@@ -458,116 +662,148 @@
 ;; =============================================================================
 ;; Service reconciler (replaces :http/server)
 ;;
-;; On start: read enabled :service rows; if none, fall back to the
-;; package-declared :startup-fn (single-shot, no supervision). When
-;; service rows exist they take priority — the legacy :startup-fn is
-;; ignored so an admin who switched to declarative services doesn't
-;; get a duplicate web-server bound to the same port.
+;; On start: seed package-declared services into the :service table
+;; (idempotent — deterministic ids), then read enabled rows and
+;; reconcile.
 ;;
-;; On halt: stop every running service (including the legacy fallback).
+;; On halt: stop every running service.
 ;;
-;; Phase 1 is NOT periodic-poll: the in-process atom is only modified
-;; from CRUD endpoints (which call `recon/reconcile-once!` after
-;; writing) and from this init-key. Out-of-band DB edits (psql, other
-;; tools) won't be picked up until restart — acceptable for the admin
-;; workflow on Phase 1. Periodic poll arrives with multi-pod (Phase 3).
+;; The in-process atom is modified from CRUD endpoints (which call
+;; `recon/reconcile-once!` after writing) and from this init-key.
+;; Out-of-band DB edits (psql, other tools) won't be picked up until
+;; restart — acceptable for the admin workflow today. Periodic poll
+;; is on the Phase-2 roadmap (next sub-feature).
 ;; =============================================================================
 
 (defn- resolve-fn-id-by-name
-  "Best-effort fn-name → fn-id lookup. Storage codec ambiguity (text
-   vs enum-tagged) is handled by trying both forms — same pattern as
-   `fn-execution.lookup/query-fn-by-name` but inlined here to avoid
-   coupling the legacy-fallback path to crud machinery."
+  "Best-effort fn-name → fn-id lookup. Seeder path swallows any
+   ExceptionInfo since this runs during early startup where
+   storage state may be incomplete."
   [storage fn-name]
-  (letfn [(try-one
-            [v]
-            (try (some-> (first (sp/query-entities storage :fn {:name v})) :id)
-                 (catch clojure.lang.ExceptionInfo _ nil)))]
-    (or (try-one fn-name)
-        (try-one (keyword fn-name)))))
+  (fn-lookup/query-fn-id-by-name storage fn-name true))
 
 
-(defn- start-legacy-fallback!
-  "When no :service rows exist, honour the package-declared
-   `:startup-fn` (single-shot, no supervisor). Returns the fn's
-   return value (a stopper for web-server-shape fns).
+(defn- seed-package-services!
+  "Idempotently materialise each entry from `(:seeded-services
+   packages)` as a `:service` row.
 
-   Also stashes `{:fn-id :stopper}` under `recon/legacy-handle` so:
-   - `validate-execute`'s `already-running-as-service?` can reject
-     ad-hoc Run on the same fn (clicking ▶ on the legacy web-server
-     would try to re-bind its port)
-   - `reconcile-once!`'s displacement step can stop the fallback
-     before starting a matching managed service"
-  [context packages]
-  (when-let [startup-fn-name (:startup-fn packages)]
-    (log/warn "no :service rows in DB — falling back to package :startup-fn"
-              startup-fn-name
-              "(declare a :service row to enable supervision; this code path goes away in Phase 2)")
-    (let [fn-id (resolve-fn-id-by-name (:storage context) (name startup-fn-name))
-          stopper (cr/execute-by-name context (name startup-fn-name) nil)]
-      (reset! recon/legacy-handle {:fn-id fn-id :stopper stopper})
-      stopper)))
+   Service id is deterministic on `(package-name, service-name)` via
+   `ids/seeded-service-id` so re-running the seeder lands on the same
+   row — letting an admin's `:enabled?` toggle survive restart.
+
+   If the `:fn-name` doesn't resolve at boot (e.g. package didn't load
+   the fn for some reason), the entry is logged and skipped — the
+   admin can re-create the fn and the next boot will pick it up.
+
+   Returns a vector of `{:id :seeded? :fn-name :package-name}` maps
+   for logging."
+  [storage packages]
+  (vec
+    (keep
+      (fn [{:keys [package-name name fn-name enabled? restart-policy]}]
+        (let [svc-id (ids/seeded-service-id package-name name)
+              fn-id (resolve-fn-id-by-name storage (clojure.core/name fn-name))]
+          (cond
+            (nil? fn-id)
+            (do (log/warn "seeded service skipped — fn-name didn't resolve"
+                          {:package package-name :service name :fn-name fn-name})
+                nil)
+
+            (seq (sp/query-entities storage :service {:id svc-id}))
+            ;; Idempotent: existing row may have a different
+            ;; :enabled? (admin toggled it) — don't overwrite.
+            {:id svc-id :seeded? false :fn-name fn-name :package-name package-name}
+
+            :else
+            (try
+              (sp/create-entity storage :service
+                                {:id svc-id
+                                 :fn-id fn-id
+                                 :enabled? (if (false? enabled?) false true)
+                                 :restart-policy (or restart-policy :always)})
+              {:id svc-id :seeded? true :fn-name fn-name :package-name package-name}
+              (catch Exception e
+                ;; Race window: two pods may seed concurrently with
+                ;; the same deterministic id. One wins the unique-
+                ;; constraint, the other gets PG's `duplicate key`
+                ;; — treat as success (the row exists, that's what
+                ;; we wanted).
+                (if (re-find #"duplicate key|unique constraint" (or (ex-message e) ""))
+                  {:id svc-id :seeded? false :fn-name fn-name :package-name package-name}
+                  (throw e)))))))
+      (pkg/get-seeded-services packages))))
 
 
-(defmethod ig/init-key :exec/service-reconciler [_ {:keys [context packages]}]
+(defn- on-notify
+  "Multi-purpose listener callback:
+
+   - `:service` events → trigger a reconcile pass (managed-service
+     ownership re-evaluation).
+   - `:fn :invalidate` events → drop the affected fn-id from the
+     compiled cache; empty id ≡ full clear (mirrors the local
+     `(invalidate-graph-cache! ctx)` no-seed path). A populated id
+     is one delta seed; pod A writes 5 binding rows under one
+     request → emits 5 events → sibling pod B fires 5 invalidates.
+     Each is cheap (delta path on the reverse-deps index)."
+  [ctx]
+  (fn [{:keys [kind op id] :as event}]
+    (try
+      (case kind
+        :service (recon/reconcile-once! ctx recon/running)
+        :fn      (when (= op :invalidate)
+                   (if (or (nil? id) (= "" id))
+                     (exec-ctx/invalidate-graph-cache! ctx)
+                     (exec-ctx/invalidate-graph-cache!
+                       ctx [(java.util.UUID/fromString id)])))
+        nil)
+      (catch Exception e
+        (log/error e "NOTIFY dispatch threw" {:event event})))))
+
+
+(defmethod ig/init-key :exec/service-reconciler
+  [_ {:keys [context packages notify-listener service-locks]}]
   (log/info "Starting service reconciler...")
-  ;; Production singletons — clear any stale state from a previous run
+  ;; Production singleton — clear any stale state from a previous run
   ;; (e.g. test fixture or REPL reset) before reconciling.
   (reset! recon/running {})
-  (reset! recon/legacy-handle nil)
   (let [storage (:storage context)
-        enabled-services (sp/query-entities storage :service {:enabled? true})
-        ;; Legacy fallback lives OUTSIDE the reconciler's atom — if it
-        ;; was in there, every `/api/services/reconcile` would diff
-        ;; against the empty DB and stop the web-server. Stored in the
-        ;; component map; halt-key! drains it alongside `stop-all!`.
-        ;; Once an admin declares a real :service for :web-server, the
-        ;; bind will conflict (legacy still on the port). Phase 2's
-        ;; packages-based registration will retire this path entirely.
-        legacy-stopper (when (empty? enabled-services)
-                         (start-legacy-fallback! context packages))]
+        ;; Thread the lock connection through ctx so reconcile-once!
+        ;; can use it without changing its arglist contract.
+        ctx (cond-> context
+              service-locks (assoc :service-locks-connection (:connection service-locks)))
+        seeded (seed-package-services! storage packages)
+        new-seeds (filterv :seeded? seeded)
+        enabled-services (sp/query-entities storage :service {:enabled? true})]
+    (when (seq new-seeds)
+      (log/info "Seeded" (count new-seeds) "package-declared :service rows"
+                {:rows (mapv (fn [s] (select-keys s [:fn-name :package-name])) new-seeds)}))
     (when (seq enabled-services)
-      (log/info "reconciling" (count enabled-services) "enabled :service rows")
-      (recon/reconcile-once! context recon/running))
-    {:running recon/running
-     :context context
-     :legacy-stopper legacy-stopper}))
+      (log/info "Reconciling" (count enabled-services) "enabled :service rows")
+      (recon/reconcile-once! ctx recon/running))
+    ;; Hook into the NOTIFY transport — reconcile when a sibling pod
+    ;; mutates `:service`. Callback closes over the lock-augmented
+    ;; ctx so per-NOTIFY reconciles use the same advisory-lock path
+    ;; as boot.
+    (let [callback (when notify-listener
+                     (pg-notify/register! notify-listener (on-notify ctx)))]
+      {:running recon/running
+       :context ctx
+       :notify-listener notify-listener
+       :notify-callback callback})))
 
 
-(defn- stop-legacy!
-  "Defensive: legacy-stopper is whatever the startup-fn returned —
-   usually a thunk, but we don't enforce it. Log unfamiliar shapes
-   instead of throwing, mirroring `reconciler/stop-service!`."
-  [legacy-stopper]
-  (try
-    (cond
-      (fn? legacy-stopper)  (do (log/info "stopping legacy fallback")
-                                (legacy-stopper))
-      (nil? legacy-stopper) nil
-      :else                 (log/warn "legacy fallback stopper is non-callable"
-                                      (type legacy-stopper)))
-    (catch Exception e
-      (log/error e "legacy fallback stopper threw"))))
-
-
-(defmethod ig/halt-key! :exec/service-reconciler [_ {:keys [running legacy-stopper]}]
+(defmethod ig/halt-key! :exec/service-reconciler
+  [_ {:keys [running notify-listener notify-callback]}]
   (log/info "Stopping service reconciler...")
+  (when (and notify-listener notify-callback)
+    (pg-notify/unregister! notify-listener notify-callback))
   (when running (recon/stop-all! running))
-  ;; Two possible stoppers — `:legacy-stopper` in the component map
-  ;; (set by init-key) and the `:stopper` in `recon/legacy-handle`
-  ;; (set by start-legacy-fallback!). They're the same function but
-  ;; the handle may have been cleared by `maybe-displace-legacy!`
-  ;; already — calling the component-map one is the authoritative path.
-  (stop-legacy! legacy-stopper)
-  (reset! recon/legacy-handle nil)
   (log/info "Service reconciler stopped"))
 
 
-(defmethod ig/suspend-key! :exec/service-reconciler [_ component]
-  ;; Same as halt — services don't have a suspend state distinct from
-  ;; stop in Phase 1.
-  (when-let [running (:running component)] (recon/stop-all! running))
-  (stop-legacy! (:legacy-stopper component)))
+(defmethod ig/suspend-key! :exec/service-reconciler [_ {:keys [running]}]
+  ;; Same as halt — services don't have a suspend state distinct from stop.
+  (when running (recon/stop-all! running)))
 
 
 ;; =============================================================================

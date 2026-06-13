@@ -59,9 +59,21 @@
 ;; Lifecycle Functions
 ;; =============================================================================
 
-(defn start!
+;; The runtime-lifecycle entry points carry `^:dynamic` so the parallel
+;; kaocha runner can rebind them via `binding` from inside an
+;; integration test without mutating a root binding (which would race
+;; across NSes — `executor_runtime.core_test` and
+;; `executor_runtime.interface_test` both stub these). Production
+;; callers (`-main`, REPL `(go)`/`(halt)`) read the Var the same way.
+(defn ^:dynamic start!
   "Starts the system with given profile (:dev, :test, :prod).
-   Returns the running system map."
+   Returns the running system map.
+
+   - 1-arity: `(start! :test)` — start ALL components.
+   - 2-arity: `(start! :test overrides)` — merge per-key `overrides`
+     into the integrant config before init. Cleaner replacement for
+     the test pattern `(with-redefs [sys/read-config …] (start! :test))`
+     (which mutates a global var and races on concurrent invocations)."
   ([]
    (start! :prod))
   ([profile]
@@ -69,10 +81,17 @@
    (let [sys (sys/start! profile)]
      (reset! system sys)
      (log/info "Graphden started successfully")
+     sys))
+  ([profile overrides]
+   (log/info "Starting Graphden Executor Runtime with profile:"
+             profile "(with overrides)")
+   (let [sys (sys/start-with-overrides! profile overrides)]
+     (reset! system sys)
+     (log/info "Graphden started successfully")
      sys)))
 
 
-(defn stop!
+(defn ^:dynamic stop!
   "Stops the running system."
   []
   (when-let [sys @system]
@@ -82,20 +101,24 @@
     (log/info "Graphden stopped")))
 
 
-(defn restart!
-  "Restarts the system with given profile."
+(defn ^:dynamic restart!
+  "Restarts the system with given profile.
+   3-arity accepts integrant config overrides — see `start!`."
   ([]
    (restart! :prod))
   ([profile]
    (stop!)
-   (start! profile)))
+   (start! profile))
+  ([profile overrides]
+   (stop!)
+   (start! profile overrides)))
 
 
 ;; =============================================================================
 ;; Main Entry Point
 ;; =============================================================================
 
-(defn install-shutdown-hook!
+(defn ^:dynamic install-shutdown-hook!
   "Register a JVM shutdown hook that stops the running system. Pulled
    out of -main so tests can stub it without leaking real hooks."
   []
@@ -103,11 +126,24 @@
                             (Thread. #(stop!))))
 
 
-(defn block-forever!
+(defn ^:dynamic block-forever!
   "Block the calling thread indefinitely. Pulled out of -main so tests
    can stub it instead of waiting on a real promise."
   []
   @(promise))
+
+
+(defn- maybe-start-nrepl!
+  "Start a plain-nREPL server on `GRAPHDEN_NREPL_PORT` when set —
+   debugging access into the live executor. No cider/refactor
+   middleware (those live only in dev aliases); plain `nrepl.server`
+   is enough for `clojure_eval`-driven inspection."
+  []
+  (when-let [p (some-> (System/getenv "GRAPHDEN_NREPL_PORT")
+                       Integer/parseInt)]
+    (let [start-server (requiring-resolve 'nrepl.server/start-server)]
+      (start-server :bind "0.0.0.0" :port p)
+      (log/info (str "nREPL listening on 0.0.0.0:" p)))))
 
 
 (defn -main
@@ -115,5 +151,6 @@
   [& _args]
   (start! :prod)
   (install-shutdown-hook!)
+  (maybe-start-nrepl!)
   (log/info "Server running. Press Ctrl+C to stop.")
   (block-forever!))

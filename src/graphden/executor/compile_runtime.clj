@@ -2,8 +2,8 @@
   "Public entry points for the compiled executor.
 
    Bridges between the compile-time registry (produced by
-   `graphden.executor.compile/compile-all`) and the executor's public API
-   (`execute`, `make-*-arg-callable`).
+   `graphden.executor.compile-eager/compile-all`) and the executor's
+   public API (`execute`, `make-*-arg-callable`).
 
    Since the legacy queue was retired, this namespace IS the executor —
    `exec/` public API delegates here. The registry is rebuilt on demand
@@ -11,10 +11,11 @@
    through the system-level `:exec/compiled-registry` init-key)."
   (:require
     [clojure.tools.logging :as log]
-    [graphden.executor.compile :as compile]
-    [graphden.executor.compile.bindings :as b]
+    [graphden.crud.fn-execution.lookup :as lookup]
+    [graphden.executor.compile-eager :as ce]
+    [graphden.executor.compile.deps :as deps]
     [graphden.executor.compile.lookups :as l]
-    [graphden.executor.runtime :as rt]
+    [graphden.executor.compile.renames :as r]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.core :as types]))
 
@@ -175,25 +176,6 @@
     graph))
 
 
-(defn- prime-always-fresh!
-  "Refresh the global always-fresh fn-id set from `:effects` in the
-   rich-types registry. Pulled out of `rebuild!` so `delta-recompile!`
-   can call it too — the set is consulted on every per-call cache
-   read, so it must reflect the current graph after partial recompiles."
-  [fns]
-  (let [rich ((requiring-resolve 'graphden.executor.registry.core/rich-types-snapshot))
-        always-fresh-categories #{:time :random}
-        always-fresh-fn-ids
-        (into #{}
-              (keep (fn [f]
-                      (when-let [nm (:name f)]
-                        (let [eff (:effects (get rich (keyword nm)))]
-                          (when (and eff (some always-fresh-categories eff))
-                            (:id f))))))
-              fns)]
-    (compile/set-always-fresh-fn-ids! always-fresh-fn-ids)))
-
-
 (defn- prime-graph-cache!
   "Mirror the just-loaded raw entities into `:graph-cache` so reads
    from layout / `/api/graph/entities` / `/api/types` go through the
@@ -210,60 +192,79 @@
    mutations."
   [ctx graph]
   (when-let [holder (:compile-deps ctx)]
-    (reset! holder (compile/build-reverse-deps graph))))
+    (reset! holder (deps/build-reverse-deps graph))))
+
+
+(defn- prime-always-fresh!
+  "Refresh the global always-fresh fn-id set from `:effects` in the
+   rich-types registry. Pulled out so `delta-recompile!` can call it
+   too — the set drives every `:ref` invocation's cache lookup, so it
+   must reflect the current graph after a partial recompile."
+  [fns]
+  (let [rich ((requiring-resolve 'graphden.executor.registry.core/rich-types-snapshot))
+        fresh-cats #{:time :random}
+        fresh-ids
+        (into #{}
+              (keep (fn [f]
+                      (when-let [nm (:name f)]
+                        (let [eff (:effects (get rich (keyword nm)))]
+                          (when (and eff (some fresh-cats eff))
+                            (:id f))))))
+              fns)]
+    (ce/set-always-fresh-fn-ids! fresh-ids)))
 
 
 (defn rebuild!
-  "Rebuild the compiled registry in `ctx` from whatever the slot/binding
-   tables currently hold. Also primes `:graph-cache`, `:compile-deps`
-   AND `:compiled-templates` (when present) so read-heavy consumers
-   stay in sync. The `:compiled-templates` atom holds the
-   ctx-independent `{fn-id → ctx-taker}` map — sister branches with
-   the same graph view can re-use it via `instantiate-from-templates!`
-   instead of repeating the full compile pass. Call at startup and on
-   full invalidation."
+  "Rebuild the compiled registry in `ctx` from whatever the slot/
+   binding tables currently hold. Also primes `:graph-cache` and
+   `:compile-deps` so read-heavy consumers stay in sync. Call at
+   startup and on full invalidation.
+
+   Runs under the context's `:invalidation-lock` so the
+   read-graph → compute → prime-multi-atom sequence stays atomic
+   relative to concurrent `invalidate-graph-cache!` callers."
   [ctx]
-  (let [storage (:storage ctx)
-        graph (read-graph storage)
-        _ (register-type-aliases-from-db! graph)
-        base-fns (:base-fns ctx)]
-    (prime-always-fresh! (:fns graph))
-    (let [templates (compile/compile-all-templates (assoc graph :base-fns base-fns))
-          compiled (compile/instantiate-templates templates ctx)]
-      (when-let [t-holder (:compiled-templates ctx)]
-        (reset! t-holder templates))
-      (reset! (:compiled-registry ctx) compiled)
-      (prime-graph-cache! ctx graph)
-      (prime-compile-deps! ctx graph)
-      compiled)))
+  (let [body (fn []
+               (let [storage (:storage ctx)
+                     graph (read-graph storage)
+                     _ (register-type-aliases-from-db! graph)
+                     base-fns (:base-fns ctx)
+                     lookups (assoc (l/cached-build-lookups graph)
+                                    :base-fns base-fns)
+                     _ (prime-always-fresh! (:fns graph))
+                     compiled (ce/compile-all lookups)]
+                 (reset! (:compiled-registry ctx) compiled)
+                 (prime-graph-cache! ctx graph)
+                 (prime-compile-deps! ctx graph)
+                 compiled))]
+    (if-let [lock (:invalidation-lock ctx)]
+      (locking lock (body))
+      (body))))
 
 
 (defn instantiate-from-templates!
-  "Hydrate `dst-ctx`'s `:compiled-registry` by instantiating templates
-   from `src-ctx`. Used by the branch-router's lazy-compile fast path:
-   when a non-default branch is graph-identical to its base (no own
-   version rows + no merge edges landing on it), the base's templates
-   are the same templates the branch would compile from scratch — so
-   we skip the ~700-fn compile pass and just allocate ~700 small
-   closures. Cost goes from ~100ms to ~ms.
+  "Hydrate `dst-ctx`'s `:compiled-registry` from `src-ctx`'s. Used by
+   the branch-router's lazy-compile fast path: when a non-default
+   branch is graph-identical to its base (no own version rows + no
+   merge edges landing on it), the base's compiled closures are the
+   same closures the branch would compile from scratch.
 
-   Returns the new instantiated registry. Returns nil when `src-ctx`
-   has no usable templates (e.g. fresh context never went through
-   `rebuild!`)."
+   compile-eager closures are ctx-INDEPENDENT — `ctx` arrives at
+   `execute` time, not compile time — so sister branches share the
+   same `{fn-id → closure}` map directly. `:graph-cache` and
+   `:compile-deps` are copied across for warm reads.
+
+   Returns the registry copied across, or nil when `src-ctx` has
+   nothing to share."
   [src-ctx dst-ctx]
-  (when-let [templates (some-> (:compiled-templates src-ctx) deref)]
-    (let [compiled (compile/instantiate-templates templates dst-ctx)]
-      (reset! (:compiled-registry dst-ctx) compiled)
-      ;; The graph-cache / compile-deps are derived from the SAME graph
-      ;; (since templates were built from src's graph and we're reusing
-      ;; them, the dst sees the same shape). Copy them over so reads
-      ;; that go through cached-graph hit warm.
-      (when-let [src-graph (some-> (:graph-cache src-ctx) deref)]
-        (prime-graph-cache! dst-ctx src-graph))
-      (when-let [src-deps (some-> (:compile-deps src-ctx) deref)]
-        (when-let [holder (:compile-deps dst-ctx)]
-          (reset! holder src-deps)))
-      compiled)))
+  (when-let [src-registry (some-> (:compiled-registry src-ctx) deref)]
+    (reset! (:compiled-registry dst-ctx) src-registry)
+    (when-let [src-graph (some-> (:graph-cache src-ctx) deref)]
+      (prime-graph-cache! dst-ctx src-graph))
+    (when-let [src-deps (some-> (:compile-deps src-ctx) deref)]
+      (when-let [holder (:compile-deps dst-ctx)]
+        (reset! holder src-deps)))
+    src-registry))
 
 
 (defn delta-recompile!
@@ -283,50 +284,34 @@
    stale closure can't outlive its row."
   [ctx changed-fn-ids]
   (let [holder (:compiled-registry ctx)
-        deps   (some-> (:compile-deps ctx) deref)]
+        reverse-deps (some-> (:compile-deps ctx) deref)]
     (cond
-      (or (nil? holder) (nil? @holder) (nil? deps) (empty? changed-fn-ids))
+      (or (nil? holder) (nil? @holder) (nil? reverse-deps) (empty? changed-fn-ids))
       (rebuild! ctx)
 
       :else
       (let [storage (:storage ctx)
             graph (read-graph storage)
-            base-fns (:base-fns ctx)
             _ (register-type-aliases-from-db! graph)
+            base-fns (:base-fns ctx)
             fns-map (if (map? (:fns graph))
                       (:fns graph)
                       (into {} (map (juxt :id identity)) (:fns graph)))
             _ (prime-always-fresh! (vals fns-map))
-            blast (compile/transitive-blast deps changed-fn-ids)
-            lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)
-            compilable? (fn [f]
-                          (let [root (l/root-fn (:id f) (:fn-map lookups) lookups)
-                                root-name (some-> (:name root) keyword)]
-                            (and root-name (contains? base-fns root-name))))
-            new-templates (into {}
-                                (keep (fn [fn-id]
-                                        (when-let [f (get fns-map fn-id)]
-                                          (when (compilable? f)
-                                            [fn-id (compile/compile-fn-template
-                                                     fn-id lookups)]))))
-                                blast)
-            new-entries (compile/instantiate-templates new-templates ctx)
-            cleaned (into {}
-                          (filter (fn [[k _]] (contains? fns-map k)))
-                          @holder)]
-        (reset! holder (merge cleaned new-entries))
-        ;; Merge fresh templates into the shared template atom so
-        ;; sister branches that resync see the post-mutation shape.
-        ;; A delta-recompile can shrink the registry (deleted fns)
-        ;; — strip those from templates too.
-        (when-let [t-holder (:compiled-templates ctx)]
-          (swap! t-holder (fn [old-templates]
-                            (let [base (or old-templates {})
-                                  pruned (into {}
-                                               (filter (fn [[k _]]
-                                                         (contains? fns-map k)))
-                                               base)]
-                              (merge pruned new-templates)))))
+            blast (deps/transitive-blast reverse-deps changed-fn-ids)
+            lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)]
+        ;; CRUD impls invoke `invalidate-graph-cache!` directly on
+        ;; the http-kit worker thread (see `crud/entities.clj`), so
+        ;; two concurrent client requests can land here against the
+        ;; same `holder` atom. Read-modify-write through `swap!`
+        ;; CAS-retries so a sibling's recompile isn't silently
+        ;; dropped.
+        (swap! holder
+               (fn [current]
+                 (let [pruned (into {}
+                                    (filter (fn [[k _]] (contains? fns-map k)))
+                                    current)]
+                   (ce/compile-subset lookups pruned blast))))
         (prime-graph-cache! ctx graph)
         (prime-compile-deps! ctx graph)
         @holder))))
@@ -348,16 +333,20 @@
 
 (defn free-arg-ext-names
   "Ordered vector of external names for fn-id's free args reachable
-   through its ref-chain. Used to shape HOF callables when the caller
-   didn't pick a specific arg name."
+   through its ref-chain — propagates names through non-HOF refs and
+   env-bindings so deep frees (`:request` of `:_request-body` →
+   `:_create-parsed` → `:process-create-entity`) surface at the outer
+   fn-def's interface.
+
+   Includes optional frees (e.g. `:default` of `:get`) — callers can
+   override them; HOF dispatch is shielded by the structural-name
+   fast-path in `hof-lambda-params`."
   [ctx fn-id]
   (let [storage (:storage ctx)
         graph (read-graph storage)
         lookups (assoc (l/cached-build-lookups graph)
                        :base-fns (:base-fns ctx))]
-    (mapv :ext-name
-          (filter #(= :free (:kind %))
-                  (b/collect-bindings fn-id lookups)))))
+    (vec (r/deep-free-ext-names fn-id lookups))))
 
 
 ;; =============================================================================
@@ -443,30 +432,15 @@
         (throw (ex-info (str "Function not found: " fn-id)
                         {:type :execution-error/fn-not-found
                          :fn-id fn-id})))
-      (closure reg (or named-args {})))))
-
-
-(defn- query-fn-by-name
-  "Storage schemas vary on whether `fn.name` is stored as text or enum
-   (package-loader goes through a keyword codec). Try both shapes and
-   swallow validation errors so either works."
-  [storage fn-name]
-  (letfn [(try-one
-            [value]
-            (try
-              (first (sp/query-entities storage :fn {:name value}))
-              (catch clojure.lang.ExceptionInfo e
-                (when-not (= :validation-error/type-mismatch
-                             (:type (ex-data e)))
-                  (throw e))
-                nil)))]
-    (or (try-one fn-name)
-        (try-one (keyword fn-name)))))
+      ;; compile-eager closure signature: `(fn [free-args ctx])`.
+      ;; Child callables are captured at compile time — `reg`
+      ;; is no longer needed by the runtime.
+      (closure (or named-args {}) ctx))))
 
 
 (defn execute-by-name
   [ctx fn-name named-args]
-  (let [match (query-fn-by-name (:storage ctx) fn-name)]
+  (let [match (lookup/query-fn-by-name (:storage ctx) fn-name)]
     (when-not match
       (throw (ex-info (str "Function '" fn-name "' not found")
                       {:type :execution-error/fn-not-found
@@ -479,18 +453,15 @@
 ;; =============================================================================
 
 (defn make-single-arg-callable
-  "Build a callable over `fn-id`. Mirrors `compile/hof-wrap`'s
-   leftover-logic: 0 free args → variadic ignore; 1 free arg →
-   single-arg callable (item bound to that name); 2+ → map-callable
-   (caller passes `{name value}` map matching the target's free-arg
-   names). The compiler picks no names — author and caller agree.
+  "Build a top-level Clojure callable over `fn-id`. Dispatches on
+   the free-arg count of the target:
+   - 0 free args → variadic-ignore callable
+   - 1 free arg → single-arg callable (item bound to that name)
+   - 2+         → map-callable, caller passes `{name → value}`
 
-   If `fn-id` is already a callable (e.g. a compile-produced wrap
-   result handed to a helper that calls this), returns it as-is.
-
-   This entry point has no `outer-free-args` to subtract — it builds
-   a top-level callable. So `leftover` here is the full set of
-   free-arg names of the target."
+   If `fn-id` is already a callable, returns it as-is — convenience
+   for HOF impls that may receive either a fn-id or an already-built
+   callable."
   [ctx fn-id]
   (if (fn? fn-id)
     fn-id
@@ -501,13 +472,5 @@
         (throw (ex-info (str "Function not found: " fn-id)
                         {:type :execution-error/fn-not-found
                          :fn-id fn-id})))
-      (case (count free-names)
-        0 (fn [& _] (closure reg {}))
-        1 (let [n (first free-names)]
-            (fn [item] (closure reg {n item})))
-        (fn [m] (closure reg m))))))
-
-
-;; Re-export — so this namespace is the canonical entry surface.
-(def thunk rt/thunk)
-(def resolve-arg rt/resolve-arg)
+      (ce/make-shape-callable free-names
+                              (fn [args] (closure (or args {}) ctx))))))

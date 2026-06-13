@@ -145,21 +145,176 @@
    :description "Output of `:_value-form-apply` — the resolved editor form: `:form` is the control hiccup, `:value` the binding's current value."
    :type {:ok :bool :form :jsonb :value :jsonb}}
 
+  ;; --- :_value-form-parsed (Variant-2). Was defbase wrapping
+  ;; `parse-value-form-request` (4 UUID fields off JSON body). Pure
+  ;; graph composition over :parse-json-body + 4 :parse-uuid + :zipmap.
+
+  {:name :_value-form-body
+   :parent :parse-json-body
+   :args {:request {:as :request}}}
+
   {:name :_value-form-parsed
    :description "Stage 1 of value-form — JSON body -> {:binding-id :fn-id :slot-id :item-id}, each coerced to a UUID."
-   :args {:request {:type :ring-request-shape :description "Internal Ring request map."}}
-   :return-type :_value-form-parsed-shape}
+   :parent :zipmap
+   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
+          :vals [{:parent :parse-uuid :args {:s {:parent :get :args {:coll :_value-form-body :key {:value :binding-id} :default nil}}}}
+                 {:parent :parse-uuid :args {:s {:parent :get :args {:coll :_value-form-body :key {:value :fn-id} :default nil}}}}
+                 {:parent :parse-uuid :args {:s {:parent :get :args {:coll :_value-form-body :key {:value :slot-id} :default nil}}}}
+                 {:parent :parse-uuid :args {:s {:parent :get :args {:coll :_value-form-body :key {:value :item-id} :default nil}}}}]}}
+
+  ;; --- :_value-form-validation (Variant-2). Was defbase wrapping
+  ;; `validate-value-form` — `(when-not (or binding-id (and fn-id
+  ;; slot-id)) {:ok false :error "…"})`. Pure graph: :if over :not
+  ;; :or :some? + :and :some? + :const envelope.
+
+  {:name :_value-form-binding-id
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :binding-id} :default nil}}
+
+  {:name :_value-form-fn-id
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}
+
+  {:name :_value-form-slot-id
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :slot-id} :default nil}}
+
+  {:name :_value-form-well-formed?
+   :description "True iff the request identifies a slot — `binding-id`, OR both `fn-id` and `slot-id`."
+   :parent :or
+   :args {:values [{:parent :some? :args {:value :_value-form-binding-id}}
+                   {:parent :and
+                    :args {:values [{:parent :some? :args {:value :_value-form-fn-id}}
+                                    {:parent :some? :args {:value :_value-form-slot-id}}]}}]}}
+
+  {:name :_value-form-err-no-slot
+   :parent :const
+   :args {:value {:ok false
+                  :error "Request must include 'binding-id', or both 'fn-id' and 'slot-id'"}}}
 
   {:name :_value-form-validation
    :description "Stage 2 of value-form — the request must identify a slot (binding-id, or fn-id+slot-id). Returns the {:ok false :error} rejection, or nil when well-formed."
-   :args {:parsed {:type :_value-form-parsed-shape :description "Output of `:_value-form-parsed`."}}
-   :return-type :_error-result-shape}
+   :parent :if
+   :args {:test :_value-form-well-formed?
+          :then nil
+          :else :_value-form-err-no-slot}}
+
+  ;; Phase 4 follow-up — value-form apply decomposition. The §3.3
+  ;; type-aware form-renderer (`:build-value-form`) stays atomic;
+  ;; the slot-type lookup, value pre-read, and response shape become
+  ;; graph composition. Admin who wants a different per-row attr set
+  ;; or response envelope reparents `:_value-form-root` or
+  ;; `:_value-form-apply` itself.
+  {:name :resolve-slot-effective-type
+   :description "Resolve the slot's effective type from the parsed shape."
+   :args {:parsed {:type :_value-form-parsed-shape}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :current-slot-value
+   :description "Pre-read the slot's currently-bound value (used to seed the form)."
+   :args {:parsed {:type :_value-form-parsed-shape}}
+   :return-type :any
+   :effects #{:db}}
+
+  {:name :build-value-form
+   :description "§3.3 type-aware form-renderer — returns a hiccup vector describing the form control(s)."
+   :args {:eff-type {:type :jsonb}
+          :current-value {:type :any}}
+   :return-type :jsonb
+   :effects #{:db}}
 
   {:name :_value-form-apply
-   :description "Stage 3 of value-form — resolve the slot's effective type, pick the matching form-fn, execute it, and wrap the control in a data-form-root div. Returns {:ok true :form <hiccup> :value <current>}. Reached only after validation passes."
-   :args {:parsed {:type :_value-form-parsed-shape :description "Output of `:_value-form-parsed`."}}
-   :return-type :_value-form-result-shape
-   :effects #{:db}}
+   :description "Stage 3 of value-form — resolve the slot's effective type, pick the matching form-fn, execute it, and wrap the control in a data-form-root div. Returns {:ok true :form <hiccup> :value <current>}."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :form} {:value :value}]
+          :vals [{:value true}
+                 :_value-form-hiccup
+                 :_value-form-current]}}
+
+  {:name :_value-form-eff-type
+   :parent :resolve-slot-effective-type
+   :args {:parsed {:as :parsed}}}
+
+  {:name :_value-form-current
+   :parent :current-slot-value
+   :args {:parsed {:as :parsed}}}
+
+  {:name :_value-form-control
+   :parent :build-value-form
+   :args {:eff-type :_value-form-eff-type
+          :current-value :_value-form-current}}
+
+  {:name :_value-form-hiccup
+   :description "`[\"div\" <root-attrs> <control>]` hiccup shell."
+   :parent :vec
+   :args {:coll [{:value "div"}
+                 :_value-form-root-attrs
+                 :_value-form-control]}}
+
+  ;; Root attributes: always carries `data-form-root`, conditionally
+  ;; adds `data-binding-id` / `data-fn-id` / `data-slot-id` /
+  ;; `data-item-id` when the parsed shape has the corresponding id.
+  ;; Stringified via `:to-str` to match the legacy `(str (:binding-id parsed))`.
+  {:name :_value-form-root-attrs
+   :parent :merge
+   :args {:maps [{:value {"data-form-root" ""}}
+                 :_value-form-binding-id-attr
+                 :_value-form-fn-id-attr
+                 :_value-form-slot-id-attr
+                 :_value-form-item-id-attr]}}
+
+  {:name :_value-form-binding-id-attr
+   :parent :if
+   :args {:test :_value-form-binding-id-present?
+          :then {:parent :zipmap
+                 :args {:keys [{:value "data-binding-id"}]
+                        :vals [{:parent :to-str
+                                :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :binding-id} :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_value-form-binding-id-present?
+   :parent :some?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :binding-id} :default nil}}}}
+
+  {:name :_value-form-fn-id-attr
+   :parent :if
+   :args {:test :_value-form-fn-id-present?
+          :then {:parent :zipmap
+                 :args {:keys [{:value "data-fn-id"}]
+                        :vals [{:parent :to-str
+                                :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_value-form-fn-id-present?
+   :parent :some?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}}}
+
+  {:name :_value-form-slot-id-attr
+   :parent :if
+   :args {:test :_value-form-slot-id-present?
+          :then {:parent :zipmap
+                 :args {:keys [{:value "data-slot-id"}]
+                        :vals [{:parent :to-str
+                                :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :slot-id} :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_value-form-slot-id-present?
+   :parent :some?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :slot-id} :default nil}}}}
+
+  {:name :_value-form-item-id-attr
+   :parent :if
+   :args {:test :_value-form-item-id-present?
+          :then {:parent :zipmap
+                 :args {:keys [{:value "data-item-id"}]
+                        :vals [{:parent :to-str
+                                :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_value-form-item-id-present?
+   :parent :some?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
 
   {:name :value-form
    :description "POST /api/value-form — parse the JSON body identifying a binding/slot, validate, and on success resolve the type-aware editor form. Returns {:ok true :form :value} or {:ok false :error}."

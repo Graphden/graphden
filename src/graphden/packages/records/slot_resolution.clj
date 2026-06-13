@@ -4,6 +4,7 @@
    parse time to find the ancestor that DECLARED the slot, and emits
    the rename-view slot rows for `{:as X}` renames."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.types :as types]))
 
@@ -33,9 +34,29 @@
 ;; The walk uses the input fn-defs (not storage), so the algorithm is
 ;; pure and runs at parse time.
 
+(defn- own-slot-arg-names
+  "Arg-names declared as PB' own-slots on a composed fn-def —
+   entries whose shape is `{:type T :description D? :required R?}`
+   with no binding markers (`:value` / `:ref` / `:as` / `:append` /
+   `:closed`). These mirror base-fn arg declarations: they add new
+   free pins this fn-def exposes on top of inheritance."
+  [fn-def]
+  (into #{}
+        (keep (fn [[arg-name v]]
+                (when (and (map? v)
+                           (contains? v :type)
+                           (not-any? #(contains? v %)
+                                     [:value :ref :as :append :closed]))
+                  arg-name)))
+        (:args fn-def)))
+
+
 (defn type-row-arg-names
-  "Set of arg-names a fn-def directly declares slots for (base-fn,
-   record-type, refinement, list-type)."
+  "Set of arg-names a fn-def directly declares slots for. Covers:
+   - type-row primitives (`:type` / `:refine` / `:list`)
+   - base-fns (`:args` without `:parent` / `:parents`)
+   - composed fn-defs with PB' own-slot decls (`{:type T}` entries
+     inside `:args` alongside ordinary bindings)"
   [fn-def]
   (cond
     (:type fn-def)   (set (keys (:type fn-def)))
@@ -43,6 +64,7 @@
     (:list fn-def)   #{:items}
     (and (:args fn-def) (not (:parent fn-def)) (not (:parents fn-def)))
     (set (keys (:args fn-def)))
+    (:args fn-def)   (own-slot-arg-names fn-def)
     :else            #{}))
 
 
@@ -238,15 +260,40 @@
      finds nothing; refs propagate the ref-target's renamed free
      args outward, so the slot may live deep in the ref tree.
 
-   Falls back to `[primary-parent arg-name]` when both passes are
-   exhausted — matches the legacy slot-id formula for slots whose
-   owner lives in a base-fn outside `defs-by-name`."
+   Throws `:packages/orphan-slot-binding` when both passes are
+   exhausted AND the primary parent is in `defs-by-name` but doesn't
+   declare `arg-name` — that combination produces a binding row
+   targeting a non-existent slot-id (silent no-op at runtime). The
+   `:n` vs `:take`'s `:count` mismatch was the canonical case caught
+   2026-06-12 before this guard landed.
+
+   Falls back to `[primary-parent arg-name]` only when the primary
+   parent is OUTSIDE `defs-by-name` — covers legacy bindings on slots
+   whose owner is an external base-fn not registered through
+   `extra-defs`. Modern sync passes all base-fn declarations into
+   `defs-by-name`, so this fallback should be unreachable in
+   practice."
   [composed-fn-name arg-name defs-by-name]
-  (let [fd (get defs-by-name composed-fn-name)]
+  (let [fd (get defs-by-name composed-fn-name)
+        primary-parent (or (when fd (or (:parent fd) (first (:parents fd))))
+                           composed-fn-name)]
     (or (resolve-slot-owner-strict composed-fn-name arg-name defs-by-name #{})
-        [(or (when fd (or (:parent fd) (first (:parents fd))))
-             composed-fn-name)
-         arg-name])))
+        (let [parent-def (get defs-by-name primary-parent)]
+          (when (and parent-def
+                     (not (contains? (type-row-arg-names parent-def) arg-name)))
+            (throw (ex-info
+                     (str "Binding `" arg-name "` on fn-def `"
+                          composed-fn-name "` targets a non-existent slot — "
+                          "the resolved owner `" primary-parent "` doesn't "
+                          "declare `" arg-name "`. Check for a typo against "
+                          "the parent's `:args` keys (canonical example: "
+                          "`:n` on `:take` should be `:count`).")
+                     {:type :packages/orphan-slot-binding
+                      :fn-name composed-fn-name
+                      :arg-name arg-name
+                      :primary-parent primary-parent
+                      :parent-args (some-> parent-def :args keys vec)})))
+          [primary-parent arg-name]))))
 
 
 (defn build-defs-by-name
@@ -307,7 +354,7 @@
     args))
 
 
-(defn resolve-source-slot-id
+(defn- resolve-source-slot-id
   "For a scalar rename `{source-arg {:as exposed}}` on `composed-fn-name`,
    find the slot id that the rename is shadowing. Walks the inheritance
    chain (and `:as` renames upstream) via `resolve-slot-owner`, then
@@ -351,27 +398,49 @@
      stored directly on the slot row); descendants binding `:X`
      find the slot identity through that index, not through the
      source chain."
-  [composed-fn-name exposed-names own-id name->id defs-by-name]
-  (vec
-    (for [[exposed type-spec source-arg] exposed-names
-          :let [slot-name (clojure.core/name exposed)
-                sid (ids/slot-id own-id slot-name)
-                fsid (ids/fn-slot-id own-id sid)
-                type-fn-id (or (when type-spec
-                                 (try (types/resolve-type-ref type-spec name->id)
-                                      (catch Exception _ nil)))
-                               (ids/primitive-fn-id :any))
-                source-sid (resolve-source-slot-id composed-fn-name source-arg
-                                                   defs-by-name name->id)]]
-      [{:kind :slot
-        :id sid
-        :name slot-name
-        :type-fn-id type-fn-id
-        :required false
-        :description nil
-        :source-slot-id source-sid}
-       {:kind :fn-slot
-        :id fsid
-        :fn-id own-id
-        :slot-id sid
-        :position 0}])))
+  ([composed-fn-name exposed-names own-id name->id defs-by-name]
+   (build-rename-slot-records composed-fn-name exposed-names own-id
+                              name->id defs-by-name 0))
+  ([composed-fn-name exposed-names own-id name->id defs-by-name pos-offset]
+   ;; `pos-offset` lets the caller park rename `fn-slot` rows AFTER
+   ;; any PB' own-slot rows emitted ahead of them — without it, every
+   ;; rename hardcoded `:position 0` and any fn with multiple renames
+   ;; (or a mix of PB' + renames) ended up with colliding positions,
+   ;; making `fn-slots-by-fn` order non-deterministic.
+   (vec
+     (map-indexed
+       (fn [idx [exposed type-spec source-arg]]
+         (let [slot-name (clojure.core/name exposed)
+               sid (ids/slot-id own-id slot-name)
+               fsid (ids/fn-slot-id own-id sid)
+               type-fn-id (or (when type-spec
+                                (try (types/resolve-type-ref type-spec name->id)
+                                     (catch Exception e
+                                       ;; A typo in `:type` on a renamed slot
+                                       ;; would otherwise silently downgrade
+                                       ;; the slot to `:any` — the most
+                                       ;; permissive type — and the user gets
+                                       ;; no signal that their constraint was
+                                       ;; lost.
+                                       (log/warn e
+                                                 "Renamed-slot :type silently downgraded to :any"
+                                                 {:fn-name composed-fn-name
+                                                  :slot-name (clojure.core/name exposed)
+                                                  :type-spec type-spec})
+                                       nil)))
+                              (ids/primitive-fn-id :any))
+               source-sid (resolve-source-slot-id composed-fn-name source-arg
+                                                  defs-by-name name->id)]
+           [{:kind :slot
+             :id sid
+             :name slot-name
+             :type-fn-id type-fn-id
+             :required false
+             :description nil
+             :source-slot-id source-sid}
+            {:kind :fn-slot
+             :id fsid
+             :fn-id own-id
+             :slot-id sid
+             :position (+ pos-offset idx)}]))
+       exposed-names))))

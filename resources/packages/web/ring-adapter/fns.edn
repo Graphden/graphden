@@ -114,8 +114,61 @@
    :args {:key {:value :body}}}
 
   ;; =============================================================================
-  ;; INTERNAL REQUEST SHAPE — one :pairs->map with 5 pair entries.
+  ;; URI SEGMENT EXTRACTION — pure graph composition over :str-split /
+  ;; :filter / :position-in / :get. Used by request parsers that read
+  ;; an id from the URL when reitit's :path-params isn't populated
+  ;; (handlers compiled inside a fn-graph sometimes receive the raw
+  ;; http-kit request that hasn't been through enrich-request).
   ;; =============================================================================
+
+  {:name :_uri-split
+   :description "Raw `:str-split` of the request URI on `/`. Result includes leading-slash empties; `:_uri-segments` filters them out."
+   :parent :str-split
+   :args {:string :ring-uri
+          :separator {:value "/"}}}
+
+  {:name :_uri-filtered-segments
+   :description "Lazy-seq of non-blank URI segments — `:filter :non-blank?` over `:_uri-split`. Uses the required-slot `:non-blank?` primitive (NOT `:blank?`, whose `:required false` slot would make the HOF wrap as variadic-ignore, keeping every element)."
+   :parent :filter
+   :args {:pred :non-blank?
+          :coll :_uri-split}}
+
+  {:name :_uri-segments
+   :description "Non-blank path segments of the Ring request URI as a vector — `vec(filter non-blank? (str/split (:uri request) #\"/\"))`."
+   :parent :vec
+   :args {:coll :_uri-filtered-segments}}
+
+  {:name :_uri-marker-pos
+   :description "Index of `:marker` in the URI segments, or nil when absent."
+   :parent :position-in
+   :args {:coll :_uri-segments
+          :value {:as :marker}}}
+
+  {:name :_uri-marker-found?
+   :description "True iff the marker was found in the URI segments."
+   :parent :some?
+   :args {:value :_uri-marker-pos}}
+
+  {:name :_uri-marker-next-pos
+   :description "Index of the segment AFTER the marker (`marker-pos + 1`). Only computed when `:_uri-marker-found?` is true — `:add` doesn't tolerate a nil position. The `:type :int` override on the ref strips `:_uri-marker-pos`'s nullable surface (the caller `:uri-segment-after`'s `:if` already gates on `:_uri-marker-found?` = `(:some? :_uri-marker-pos)`)."
+   :parent :add
+   :args {:nums [{:ref :_uri-marker-pos :type :int} {:value 1}]}}
+
+  {:name :_uri-marker-next-segment
+   :description "The URI segment at `marker-pos + 1`. Returns nil when the index is out of bounds (marker is the final segment)."
+   :parent :get
+   :args {:coll :_uri-segments
+          :key :_uri-marker-next-pos
+          :default nil}}
+
+  {:name :uri-segment-after
+   :description "Return the URI segment immediately following `:marker`, or nil if the marker is absent / final. Pure graph composition: split the URI on `/`, filter blanks, look up the marker index, return the next segment. Used by request parsers to read e.g. `:fn-id` from `/api/secrets/:fn-id` when reitit's `:path-params` aren't populated."
+   :parent :if
+   :args {:test :_uri-marker-found?
+          :then :_uri-marker-next-segment
+          :else nil
+          :marker {:type :text
+                   :description "Path segment to search for — caller supplies the literal (e.g. `\"fns\"`, `\"branches\"`, `\"secrets\"`)."}}}
 
   {:name :ring-method-entry
    :description "`[:request-method <method>]` entry for the internal-request map."
@@ -190,28 +243,41 @@
    :return-type :ring-response-shape
    :args {:m        :router-result
           :path     [{:value :headers}]
-          :defaults :default-security-headers}}
+          :defaults :default-security-headers
+          :func     {:type [:fn {:arg :ring-request-shape} :ring-response-shape]
+                     :description "Concrete router callable invoked per request. Bound by the consumer (typically a `:router` descendant)."}}}
 
   ;; =============================================================================
   ;; AUTH — Bearer token primitives (opinionated defaults)
   ;; =============================================================================
 
   ;; nil when AUTH_TOKEN is unset. `token-valid?` below explicitly
-  ;; rejects nil env-tokens (`(and (some? env) (= bearer env))`), so
-  ;; an unconfigured server cleanly returns 401 for every auth-required
-  ;; request instead of 500-ing through `env-required`'s throw. The
-  ;; `(= nil nil)` bypass is closed by the `some?` gate, not by env's
-  ;; throw.
+  ;; rejects unset / blank env-tokens, so an unconfigured server
+  ;; cleanly returns 401 for every auth-required request instead of
+  ;; 500-ing through `env-required`'s throw. The `(= nil nil)` and
+  ;; `(= "" "")` bypasses are closed by the non-blank gate, not by
+  ;; env's throw.
   {:name :auth-token-from-env
-   :description "`AUTH_TOKEN` env var, or nil when unset. `token-valid?` rejects nil-vs-nil to prevent the bypass — so missing AUTH_TOKEN means \"every authed request returns 401\", not \"server crashes with 500\"."
+   :description "`AUTH_TOKEN` env var, or nil when unset. `token-valid?` rejects unset / blank env-tokens to prevent the bypass — so a missing or empty AUTH_TOKEN means \"every authed request returns 401\", not \"the empty Bearer token validates\"."
    :parent :env
    :return-type :nullable-text
    :args {:name "AUTH_TOKEN"}}
 
-  {:name :_auth-token-configured?
-   :parent :some?
+  {:name :_auth-token-blank?
+   :description "True iff `AUTH_TOKEN` is nil OR contains only whitespace. Nil-safe — `:blank?` returns true for nil."
+   :parent :blank?
    :return-type :bool
-   :args {:value :auth-token-from-env}}
+   :args {:string :auth-token-from-env}}
+
+  ;; Stricter than `some?`: rejects `AUTH_TOKEN=\"\"` and
+  ;; `AUTH_TOKEN=\"   \"` too. Defense in depth — without this the
+  ;; `(= \"\" \"\")` shape in `_bearer-equals-env?` would auth anyone
+  ;; sending `Authorization: Bearer ` (with no token after) when the
+  ;; operator misconfigured AUTH_TOKEN to an empty string.
+  {:name :_auth-token-configured?
+   :parent :not
+   :return-type :bool
+   :args {:value :_auth-token-blank?}}
 
   {:name :_bearer-equals-env?
    :parent :equal?

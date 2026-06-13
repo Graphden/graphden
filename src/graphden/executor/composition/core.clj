@@ -8,10 +8,7 @@
 
      fn → slot → fn-slot → binding → binding-list-item
 
-   Returns `{fn-name → fn-id}` for named fn rows. The old composition
-   layer (records.clj, source-chain.clj — both stubbed) translated
-   `:args` into `arg`-rows; this is replaced by the new parser
-   producing records directly.
+   Returns `{fn-name → fn-id}` for named fn rows.
 
    This module also has `sync-defs-to-storage!` for primitives and
    `:base-fn` entries — same pipeline, just driven by a different
@@ -214,36 +211,82 @@
 (defn- defs-by-name-from-rows
   "Pure: given pre-fetched fn / slot / fn-slot rows, reconstruct the
    minimal fn-def shapes the records-parser's slot resolver needs.
-   We only carry `:args`-map (set of slot names) so the
-   `type-row-arg-names` check fires on inheritance walks."
+
+   Two row classes go in:
+
+   - **Type-row-like** entries (no parents, has slots / impl-hash /
+     `:base-fn-id` / `:element-fn-id` / `:constraint`) carry an
+     `:args` map of `{slot-name :any}` so `type-row-arg-names` fires
+     on inheritance walks and recognises THIS fn as the slot owner.
+
+   - **Composed-fn-def** entries (one or more parents) carry just
+     enough — `:parent` / `:parents` — for `chain-of` to walk through
+     them up to whichever type-row actually declares the slot. Before
+     this addition, incremental syncs (single fn-def synced at a
+     time) emitted dangling slot ids whenever an inherited slot
+     lived two or more inheritance hops away, because the composed
+     intermediate didn't appear in `defs-by-name` and the walk
+     dead-ended at it. `:args` is intentionally NOT reconstructed
+     for composed fn-defs — `type-row-arg-names` returns `{}` for
+     anything with a `:parent`, so the args wouldn't matter for slot
+     ownership; and reconstructing them from binding/list-item rows
+     would mean another two queries per sync."
   [fns slots fn-slots]
   (let [slot-by-id (into {} (map (juxt :id identity)) slots)
+        id->name (into {}
+                       (keep (fn [f]
+                               (when-let [n (some-> (:name f) keyword)]
+                                 [(:id f) n])))
+                       fns)
+        ;; Map each `(fn-id, slot-name)` to the slot's declared type
+        ;; keyword (resolved through `id->name`). Sequence-typed slots
+        ;; (`:sequence`, `[:list T]` aliases) are what the parser
+        ;; needs to recognise — emitting `:any` here would make the
+        ;; sequence-slot? check miss and the bare-vector binding
+        ;; would be stored as a literal jsonb instead of being
+        ;; expanded into list-item rows. Primitives resolve directly;
+        ;; opaque/complex types fall back to `:any` (good enough —
+        ;; `sequence-slot?` only fires on the primitive `:sequence`
+        ;; alias or a `[:list T]` literal).
+        slot-type-of (fn [slot-row]
+                       (or (get id->name (:type-fn-id slot-row))
+                           :any))
         slots-by-fn (reduce (fn [acc fs]
                               (if-let [s (get slot-by-id (:slot-id fs))]
-                                (update acc (:fn-id fs) (fnil conj #{}) (keyword (:name s)))
+                                (update acc (:fn-id fs) (fnil assoc {})
+                                        (keyword (:name s))
+                                        (slot-type-of s))
                                 acc))
                             {}
-                            fn-slots)]
+                            fn-slots)
+        parents-of (fn [f]
+                     (->> (:parent-ids f)
+                          (keep id->name)
+                          vec))]
     (into {}
           (keep (fn [f]
                   (let [n (some-> (:name f) keyword)
-                        args (when (seq (get slots-by-fn (:id f)))
-                               (into {}
-                                     (map (fn [a] [a :any]))
-                                     (get slots-by-fn (:id f))))
-                        ;; Treat fn-rows with no parent and no impl as
-                        ;; type-rows whose `:args` keys are their slot
-                        ;; names; that's enough for the slot resolver
-                        ;; to recognise the fn as declaring those slots.
+                        own-args (not-empty (get slots-by-fn (:id f) {}))
                         is-type-row? (and (empty? (:parent-ids f))
-                                          (or args (:base-fn-id f)
-                                              (:element-fn-id f) (:constraint f)))]
-                    (when (and n is-type-row? args)
-                      [n {:name n :args args
-                          ;; Best-effort: we don't have the ns-path
-                          ;; here. Leave nil; UUIDs for fn-id were
-                          ;; threaded via extra-name->id already.
-                          :namespace nil}]))))
+                                          (or own-args (:base-fn-id f)
+                                              (:element-fn-id f) (:constraint f)))
+                        parent-names (parents-of f)]
+                    (cond
+                      ;; Type-row / base-fn / refinement / list-type:
+                      ;; carry :args so type-row-arg-names recognises it.
+                      (and n is-type-row? own-args)
+                      [n {:name n :args own-args :namespace nil}]
+
+                      ;; Composed fn-def: carry just the parent chain
+                      ;; so `chain-of` walks THROUGH this node to whichever
+                      ;; ancestor actually declares the slot.
+                      (and n (seq parent-names))
+                      [n (cond-> {:name n :namespace nil}
+                           (= 1 (count parent-names))
+                           (assoc :parent (first parent-names))
+
+                           (> (count parent-names) 1)
+                           (assoc :parents parent-names))]))))
           fns)))
 
 

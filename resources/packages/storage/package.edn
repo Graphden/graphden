@@ -1,0 +1,9 @@
+{:name "storage"
+ :version "1.0.0"
+ :description "Application-level storage primitives over graphden's own datasource. Distinct from `web/sql` (per-call JDBC + creds for external DBs): these base-fns reuse the pooled connection backing the platform itself."
+ :dependencies ["core"]
+ ;; `protocol` must load BEFORE `pg` so the `:Storage` type-row is
+ ;; registered before `:postgres-storage-impl` declares it as parent.
+ ;; `branches` loads after `pg` — its graph composition uses
+ ;; `:pg-query` + `:decode-row` for the branch-chain walk.
+ :modules ["protocol" "pg" "branches" "versioned"]}

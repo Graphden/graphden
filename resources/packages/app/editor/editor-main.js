@@ -28,10 +28,18 @@ async function initGraph() {
   graphData = await entResp.json();
   lookups = buildLookups(graphData);
   if (typeResp?.ok) {
-    try { richTypes = await typeResp.json(); } catch (_) { richTypes = {}; }
+    try { richTypes = await typeResp.json(); } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('/api/types JSON parse failed — type tooltips will be empty', err);
+      richTypes = {};
+    }
   }
   if (vkResp?.ok) {
-    try { VALUE_KINDS = await vkResp.json(); } catch (_) { VALUE_KINDS = []; }
+    try { VALUE_KINDS = await vkResp.json(); } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('/api/value-kinds JSON parse failed — type-picker may be incomplete', err);
+      VALUE_KINDS = [];
+    }
   }
   updateEntityList(graphData);
   // First-load hash navigation: `#fn-name` in the URL (bookmark,
@@ -55,8 +63,21 @@ async function initGraph() {
 // fn from `init()` so it doesn't also re-fire the auth / hash
 // navigation work.
 async function loadGraphData() {
-  const r = await fetch('/api/graph/entities');
-  if (!r.ok) return;
+  let r;
+  try {
+    r = await fetch('/api/graph/entities');
+  } catch (err) {
+    // Surface network drops in DevTools — caller (post-mutation
+    // refresh) silently leaves stale state on the screen otherwise.
+    // eslint-disable-next-line no-console
+    console.error('loadGraphData fetch threw', err);
+    return;
+  }
+  if (!r.ok) {
+    // eslint-disable-next-line no-console
+    console.error('loadGraphData HTTP', r.status, r.statusText);
+    return;
+  }
   graphData = await r.json();
   lookups = buildLookups(graphData);
   updateEntityList(graphData);
@@ -99,5 +120,19 @@ document.addEventListener('DOMContentLoaded', () => {
   initPrefsLate();
   initAuthLock();
   if (typeof initBranchSelector === 'function') initBranchSelector();
-  initGraph();
+  // Top-level catch so a failed initial /api/graph/entities load (network
+  // outage, 5xx, branch-router error) shows a user-visible error in the
+  // header instead of leaving the editor silently broken with just an
+  // uncaught-promise message in DevTools.
+  initGraph().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('initGraph failed', err);
+    const banner = document.createElement('div');
+    banner.style.cssText =
+      'position:fixed;top:0;left:0;right:0;z-index:99999;' +
+      'padding:8px 16px;background:#c0392b;color:#fff;font:14px sans-serif;';
+    banner.textContent =
+      'Editor failed to load graph data. Check network / server logs, then reload.';
+    document.body.appendChild(banner);
+  });
 });

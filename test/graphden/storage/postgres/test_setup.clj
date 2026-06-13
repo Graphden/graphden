@@ -150,7 +150,7 @@
 (defn create-binding!
   "Creates a binding row at `(fn-id, slot-id)`. Pass any combination of
    `:value`, `:ref-fn-id`, `:rename-to`, `:type-override-fn-id`,
-   `:terminal`, `:list-append`, `:list-closed`, `:description`."
+   `:list-append`, `:list-closed`, `:description`."
   [storage fn-id slot-id & {:as fields}]
   (sp/create-entity storage :binding
                     (merge {:fn-id fn-id :slot-id slot-id} fields)))

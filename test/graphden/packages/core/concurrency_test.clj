@@ -228,28 +228,39 @@
 
 
 ;; ============================================================================
-;; :cron-next-after — Quartz cron parsing + next-fire computation
+;; :cron-parse + :cron-fire-after — Quartz cron parsing + next-fire computation
+;; (`:cron-next-after` is the graph-level composition `:cron-fire-after`
+;; of `:cron-parse`; the integration tests in
+;; `cron_schedule_runtime_test` / `cron_schedule_service_test` exercise
+;; the composed form end-to-end. The unit tests below verify each atom
+;; on its own.)
 ;; ============================================================================
 
-(deftest cron-next-after-every-minute-test
+(defn- cron-next-after
+  "Test helper — invoke the two-step composition directly against the
+   atomic impls so the assertion can name `next-ms` plainly."
+  [cron-str now-ms]
+  (let [parse (impl-of :cron-parse)
+        fire-after (impl-of :cron-fire-after)
+        expr (parse {:cron (delay cron-str)} nil)]
+    (fire-after {:expr (delay expr) :now-ms (delay now-ms)} nil)))
+
+
+(deftest cron-fire-after-every-second-test
   (testing "`* * * * * ?` fires every second — next-after of any ms is ≤1s later"
-    (let [impl (impl-of :cron-next-after)
-          ;; A specific epoch ms: 2026-05-23 00:00:00.500 UTC.
+    (let [;; A specific epoch ms: 2026-05-23 00:00:00.500 UTC.
           now-ms 1779840000500
-          next-ms (impl {:cron (delay "* * * * * ?")
-                         :now-ms (delay now-ms)} nil)]
+          next-ms (cron-next-after "* * * * * ?" now-ms)]
       (is (> next-ms now-ms))
       (is (<= (- next-ms now-ms) 1000)
           (str "next-fire within 1s, got delta=" (- next-ms now-ms) "ms")))))
 
 
-(deftest cron-next-after-specific-time-test
+(deftest cron-fire-after-specific-time-test
   (testing "`0 0 9 * * ?` fires at 09:00:00 daily — next-after midnight is 9h later"
-    (let [impl (impl-of :cron-next-after)
-          ;; 2026-05-23 00:00:00 UTC
+    (let [;; 2026-05-23 00:00:00 UTC
           midnight-utc-ms 1779840000000
-          next-ms (impl {:cron (delay "0 0 9 * * ?")
-                         :now-ms (delay midnight-utc-ms)} nil)
+          next-ms (cron-next-after "0 0 9 * * ?" midnight-utc-ms)
           ;; 09:00:00 same day
           expected-ms (+ midnight-utc-ms (* 9 60 60 1000))]
       ;; Quartz uses default timezone; we allow ±12h slack (one tz width)
@@ -258,11 +269,10 @@
           (str "next-fire near 9am, got " (java.util.Date. next-ms))))))
 
 
-(deftest cron-next-after-rejects-bad-expression-test
-  (testing "malformed cron throws :cron/parse-error with the original text"
-    (let [impl (impl-of :cron-next-after)
-          thrown (try (impl {:cron (delay "garbage")
-                             :now-ms (delay 0)} nil)
+(deftest cron-parse-rejects-bad-expression-test
+  (testing "malformed cron throws :cron/parse-error with the original text — at parse, not at fire-after"
+    (let [parse (impl-of :cron-parse)
+          thrown (try (parse {:cron (delay "garbage")} nil)
                       :no-throw
                       (catch clojure.lang.ExceptionInfo e
                         (ex-data e)))]

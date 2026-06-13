@@ -8,6 +8,7 @@
            "free-args"
            "collections"
            "hof"
+           "postwalk-coercer"
            "shared-vs-isolated"
            "invoke-vs-call"
            "literal-keyword-in-sequence"
@@ -20,10 +21,10 @@
            "runtime-refinement"
            "types-variants"
            "types-nullable"
-           "types-terminal-arg"
            "types-append-list"
            "schedule-cron"
            "recipe-mini-app"
            "local-fns-pattern"
            "regression/sequence-fn-ref"
-           "regression/migrate-on-fn-ref"]}
+           "regression/migrate-on-fn-ref"
+           "recursion"]}

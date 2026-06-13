@@ -183,8 +183,8 @@
                                           :return-type :int
                                           :impl (setup/fn-impl [a b] (+ a b))}}
                                    ;; Compose two unary int->int functions
-                                   {:compose-unary {:args {:f {:type :fn :required true}
-                                                           :g {:type :fn :required true}
+                                   {:compose-unary {:args {:f {:type [:fn {:n :int} :int] :required true}
+                                                           :g {:type [:fn {:n :int} :int] :required true}
                                                            :x {:type :int :required true}}
                                                     :return-type :int
                                                     :impl (setup/fn-impl [f g x]

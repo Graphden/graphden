@@ -459,7 +459,7 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
 function appendFnActionToolbar(overlay, originalFnId, isNavRoot) {
   if (!isNavRoot) return;
   if (typeof isAuthenticated === 'function' && isAuthenticated()) return;
-  if (!lookups || !lookups.fnMap || !lookups.fnMap.get(originalFnId)) return;
+  if (!lookups?.fnMap?.get(originalFnId)) return;
 
   const bar = document.createElement('div');
   bar.className = 'fn-action-toolbar';

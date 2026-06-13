@@ -19,18 +19,14 @@
    ;; WHICH elements survive, which is genuinely unsafe under lazy
    ;; realisation; an effectful `:map` only tags the elements it
    ;; produces, leaving the collection's shape deterministic.
-   ;; When :coll is omitted (:required false) :map returns a
-   ;; transducer instead — that overload is not yet expressible in
-   ;; the type system; the structured types here cover the with-coll
-   ;; path which is the common case.
    :args {:func {:type [:fn {:item a} b]
                  :description "Callable applied to each item; may be effectful (effects propagate)."}
-          :coll {:type [:list a] :required false
-                 :description "Collection to map over. When omitted, returns a transducer."}}
+          :coll {:type [:list a]
+                 :description "Collection to map over. nil → empty seq (Clojure semantics)."}}
    :return-type [:list b]}
 
   {:name :filter
-   :description "Keep items where `(pred item)` is truthy (Clojure's `filter`). When `:coll` is omitted, returns a transducer."
+   :description "Keep items where `(pred item)` is truthy (Clojure's `filter`)."
    ;; :pred must return :bool, element type `a` flows in and out
    ;; unchanged. The `#{}` effect constraint demands a PURE
    ;; predicate — `:filter` is element-wise and is meant to be
@@ -42,9 +38,27 @@
    ;; (effect-constraint violation) at save time.
    :args {:pred {:type [:fn {:item a} :bool #{}]
                  :description "Pure predicate callable; items where `(pred item)` is truthy are kept."}
-          :coll {:type [:list a] :required false
-                 :description "Collection to filter. When omitted, returns a transducer."}}
+          :coll {:type [:list a]
+                 :description "Collection to filter. nil → empty seq (Clojure semantics)."}}
    :return-type [:list a]}
+
+  ;; Transducer-form HOFs — :map-xf / :filter-xf produce a transducer
+  ;; that's stateless until composed with a coll via :transduce.
+  ;; Separated from :map / :filter so the eager-with-coll path
+  ;; can't silently produce a transducer when an upstream `:get` /
+  ;; `:keys` returned nil.
+
+  {:name :map-xf
+   :description "Transducer form of `:map` — returns a stateless transducer that applies `func` to each item when consumed via `:transduce` or composed via `:comp`."
+   :args {:func {:type [:fn {:item a} b]
+                 :description "Callable applied to each item under the transducer."}}
+   :return-type :any}
+
+  {:name :filter-xf
+   :description "Transducer form of `:filter` — returns a stateless transducer that keeps items satisfying `pred` when consumed."
+   :args {:pred {:type [:fn {:item a} :bool #{}]
+                 :description "Pure predicate callable used by the transducer."}}
+   :return-type :any}
 
   {:name :reduce
    :description "Left fold over a collection (Clojure's `reduce`). `(func [acc item])` — graphden's `:reduce` impl packs `acc` and `item` into a single vector before calling the user fn, so the reducer is a 1-arg callable receiving `[acc item]`."

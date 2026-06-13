@@ -92,22 +92,9 @@
         (str ":db recorded on " impl-sym " call"))))
 
 
-(deftest list-entities-records-db-effect-test
-  (assert-records-db 'list-entities {:entity-type :branch :where {}}))
-
-
 (deftest get-entity-records-db-effect-test
   (assert-records-db 'get-entity
                      {:entity-type :branch :id (java.util.UUID/randomUUID)}))
-
-
-(deftest create-entity-records-db-effect-test
-  (assert-records-db 'create-entity {:entity-type :branch :data {}}))
-
-
-(deftest update-entity-records-db-effect-test
-  (assert-records-db 'update-entity
-                     {:entity-type :branch :id (java.util.UUID/randomUUID) :data {}}))
 
 
 (deftest delete-entity-records-db-effect-test
@@ -117,13 +104,16 @@
 
 (deftest pure-impls-do-not-record-effects-test
   (testing "control: a known-pure impl from this same registry does NOT touch *effect-trace*"
-    ;; `all-rich-types` is a pure registry read (no record-effect!
-    ;; call in its body); confirms our assertion mechanism doesn't
-    ;; spuriously trigger.
-    (let [impl (unwrap crud-ns 'all-rich-types)
+    ;; `to-set-fn` is the pure-coercion control case — `(set coll)`
+    ;; with no record-effect! call in the body. (Pre-fix this used
+    ;; `all-rich-types`, but that one ACTUALLY does read storage via
+    ;; `cached-or-load-graph` and now correctly records :db; using
+    ;; it here was hiding the missing-record-effect bug across the
+    ;; whole `_*-apply` family. `to-set-fn` is genuinely pure.)
+    (let [impl (unwrap crud-ns 'to-set-fn)
           trace (atom #{})]
       (is (some? impl))
       (binding [cr/*effect-trace* trace]
-        (try (impl {} nil) (catch Exception _)))
+        (try (impl {:coll [1 2 3]} nil) (catch Exception _)))
       (is (empty? @trace)
           "pure impl did NOT record any effect"))))

@@ -76,9 +76,15 @@
   (testing "string-keyed heterogeneous-value maps fall back to :jsonb"
     (is (= :jsonb (check/classify-literal {"a" 1 "b" "x"}))
         "values disagree → :jsonb, the conservative catch-all"))
-  (testing "mixed-keyed maps and empty maps stay :jsonb"
-    (is (= :jsonb (check/classify-literal {:a 1 "b" 2})))
-    (is (= :jsonb (check/classify-literal {})))))
+  (testing "mixed-keyed map stays :jsonb"
+    (is (= :jsonb (check/classify-literal {:a 1 "b" 2}))))
+  (testing "empty map classifies as :empty-map — vacuous-truth sentinel"
+    ;; `(empty? v) → :empty-map` instead of `:jsonb` so a `{}` literal
+    ;; subtypes any structural map shape (`[:map K V]`, record-type,
+    ;; `:jsonb`) without bouncing off the `:jsonb ⊄ [:map …]` rule.
+    ;; Drove `(74 → 63)` failures on the topo-sorted sweep. See
+    ;; `docs/TYPE_CHECK_BACKLOG.md` § "In-session pass (2026-06-07)".
+    (is (= :empty-map (check/classify-literal {})))))
 
 
 (deftest accepts-matching-literals
@@ -95,6 +101,164 @@
           (check/check-fn-def! {:name :bad
                                 :parent :int-add
                                 :args {:a "hello" :b 5}})))))
+
+
+(deftest effects-declared-on-composed-fn-is-noop
+  (testing "composed fn-def's declared :effects is silently dropped — the rich-type records the COMPUTED set. Sync-time WARN is logged but not asserted here (the log channel runs through SLF4J and is hard to intercept). Authors who want a binding contract should use :expects-effects."
+    (registry/record-rich-types! :pure-base
+                                 {:args {:x :int} :return-type :int})
+    (check/check-fn-def! {:name :under-claimed
+                          :parent :pure-base
+                          :args {:x 1}
+                          :effects #{:db}})  ; lies — pure-base is pure
+    (is (= #{} (:effects (registry/rich-type-of :under-claimed)))
+        "rich-type records the COMPUTED #{} pure, not the declared #{:db}")))
+
+
+(deftest rejects-type-override-widening
+  (testing "`{:ref :_x :type T}` where T is NOT a subtype of `:_x`'s declared return — the override is supposed to be a narrowing claim (e.g. asserting non-nil in a guarded path), not a widening / incompatible lie"
+    (registry/record-rich-types! :text-ref
+                                 {:args {} :return-type :text})
+    (try
+      (check/check-fn-def! {:name :lie
+                            :parent :int-add
+                            :args {:a {:ref :text-ref :type :int}
+                                   :b 5}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :bindings/type-override-widens (:type d)))
+          (is (= :a (:arg-name d)))))))
+  (testing "subtype narrowing (nullable-text → :text override) passes"
+    (registry/record-rich-types! :nullable-text-ref
+                                 {:args {} :return-type [:union :null :text]})
+    (registry/record-rich-types! :takes-text
+                                 {:args {:s :text} :return-type :text})
+    (is (some? (check/check-fn-def!
+                 {:name :ok-narrowing
+                  :parent :takes-text
+                  :args {:s {:ref :nullable-text-ref :type :text}}}))))
+  (testing "value-binding `{:value V :type T}` where (classify V) is NOT a subtype of T — also rejected (text literal claimed as :int)"
+    (try
+      (check/check-fn-def! {:name :literal-lie
+                            :parent :int-add
+                            :args {:a {:value "hello" :type :int}
+                                   :b 5}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :bindings/type-override-widens (:type d)))
+          (is (= :literal-value (:actual-source d))))))))
+
+
+(deftest rejects-ref-on-sequence-slot-with-elem-type-mismatch
+  (testing "sequence-slot bound to a ref whose return is [:list T'] with T'≠T is rejected (previously deferred under `deferred-binding?`'s loose 'sequence slot expects vector' arm, a silent footgun for typevar conflicts like :filter :pred :int-pred :coll :text-list-fn)"
+    (registry/record-rich-types! :_text-list-source
+                                 {:args {} :return-type [:list :text]})
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)type-check failed"
+          (check/check-fn-def! {:name :mismatched-coll
+                                :parent :filter
+                                :args {:pred :int-add
+                                       :coll :_text-list-source}})))))
+
+
+(deftest rejects-mi-slot-value-conflict
+  (testing "two parents binding the SAME slot to different values — error names the conflict so last-wins silent shadow doesn't bite"
+    (registry/record-rich-types-raw! :a-pins-x-to-foo
+                                     {:return :text
+                                      :args {}
+                                      :resolved-bindings {:x {:type :text :value "foo"}}})
+    (registry/record-rich-types-raw! :b-pins-x-to-bar
+                                     {:return :text
+                                      :args {}
+                                      :resolved-bindings {:x {:type :text :value "bar"}}})
+    (try
+      (check/check-fn-def! {:name :mi-value-conflict
+                            :parents [:a-pins-x-to-foo :b-pins-x-to-bar]
+                            :args {}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :bindings/mi-slot-value-conflict (:type d)))
+          (is (= :x (:slot-name d))))))))
+
+
+(deftest rejects-mi-slot-type-conflict
+  (testing "two parents with same slot name but incompatible types — error names the conflict at sync time"
+    (registry/record-rich-types! :parent-int-slot
+                                 {:args {:x :int} :return-type :int})
+    (registry/record-rich-types! :parent-text-slot
+                                 {:args {:x :text} :return-type :int})
+    (try
+      (check/check-fn-def! {:name :mi-bad
+                            :parents [:parent-int-slot :parent-text-slot]
+                            :args {}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :bindings/mi-slot-type-conflict (:type d)))
+          (is (= :x (:slot-name d))))))))
+
+
+(deftest rejects-literal-bound-to-fn-slot
+  (testing "binding a literal text to a fn-typed slot — the value can't be invoked, error catches the bug at sync time"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #":types/literal-bound-to-fn-slot|literal value, not a callable"
+          (check/check-fn-def! {:name :bad
+                                :parent :filter
+                                :args {:pred {:value "hello"}
+                                       :coll {:value [1 2 3]}}})))
+    (try
+      (check/check-fn-def! {:name :bad
+                            :parent :map
+                            :args {:func {:value 42}
+                                   :coll {:value [1 2 3]}}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :types/literal-bound-to-fn-slot (:type d)))
+          (is (= :int (:actual d))))))))
+
+
+(deftest rejects-unknown-effect-category
+  (testing "expects-effects with typo (`:do` for `:db`) is rejected at sync time"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #":bindings/unknown-effect-category|unknown effect category"
+          (check/check-fn-def! {:name :bad-effects
+                                :parent :int-add
+                                :args {:a 5 :b 10}
+                                :expects-effects #{:do}})))
+    (try
+      (check/check-fn-def! {:name :bad-effects
+                            :parent :int-add
+                            :args {:a 5 :b 10}
+                            :effects #{:netowrk}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :bindings/unknown-effect-category (:type d)))
+          (is (= #{:netowrk} (:unknown-categories d))))))))
+
+
+(deftest rejects-typo-slot-name
+  (testing "binding key not in parent's slot set is a typo — error suggests nearest match"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"(?i)did you mean"
+          (check/check-fn-def! {:name :typo
+                                :parent :int-add
+                                :args {:c 5 :b 10}})))
+    (try
+      (check/check-fn-def! {:name :typo
+                            :parent :int-add
+                            :args {:c 5 :b 10}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :bindings/unknown-slot (:type d)))
+          (is (= :c (:arg-name d)))
+          (is (#{:a :b} (:suggestion d))
+              (str "suggestion should be :a or :b, got " (pr-str (:suggestion d)))))))))
 
 
 (deftest error-message-contains-fn-def-context
@@ -266,11 +430,13 @@
                                     :args {:x 5}})))))
 
 
-(deftest unknown-arg-name-skips-check
-  (testing "binding to a non-existent arg of parent — type check skips it (composition layer rejects later)"
-    (is (some? (check/check-fn-def! {:name :ok
-                                     :parent :int-add
-                                     :args {:not-a-real-arg 99}})))))
+(deftest unknown-arg-name-rejected
+  (testing "binding to a non-existent slot of parent throws — previously this was silently dropped (the binding had no runtime effect), which made typos like `:assoc :m :_x` (correct slot is `:map`) misbehave invisibly. The new check enforces every `:args` key is either a parent slot, a closure-capture seed, or a type-row field."
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #":bindings/unknown-slot|neither a slot"
+          (check/check-fn-def! {:name :bad
+                                :parent :int-add
+                                :args {:not-a-real-arg 99}})))))
 
 
 (deftest rename-binding-skipped

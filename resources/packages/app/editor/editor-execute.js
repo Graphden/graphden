@@ -121,7 +121,7 @@ function freeArgsOf(fnEntity) {
 // === Declared-effects lookup ===============================================
 
 function declaredEffectsOf(fnEntity) {
-  if (!fnEntity || !fnEntity.name) return [];
+  if (!fnEntity?.name) return [];
   if (typeof richTypes !== 'object' || !richTypes) return [];
   const entry = richTypes[fnEntity.name];
   const eff = entry?.effects || [];

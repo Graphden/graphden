@@ -114,5 +114,23 @@
 
 
 (defn parse-uuid-or-clear
+  "Parse `v` as a UUID. Returns nil for:
+   - non-string input (`123`, `:foo`, nested map …) — protects HTTP
+     bodies where the JSON decoder turned the field into something
+     other than a string;
+   - blank string (the `or-clear` path — caller treats it as 'field
+     cleared');
+   - any string that isn't a well-formed UUID.
+
+   Every failure mode collapses to nil so HTTP callers don't get
+   bare `java.lang.IllegalArgumentException: Invalid UUID string …`
+   leaks bubbling up as 500-style response bodies (see the
+   `/api/execute {:args {:nums {:ref \"not-a-uuid\"}}}` regression
+   that surfaced this — strict parsing here was the only call site
+   missing a defensive wrap). The strict legacy behaviour lives on
+   in plain `java.util.UUID/fromString` for callers that genuinely
+   need it (none in this codebase)."
   [v]
-  (when-not (str/blank? v) (java.util.UUID/fromString v)))
+  (when (and (string? v) (not (str/blank? v)))
+    (try (java.util.UUID/fromString v)
+         (catch IllegalArgumentException _ nil))))

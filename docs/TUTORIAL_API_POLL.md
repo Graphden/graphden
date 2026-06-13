@@ -15,7 +15,7 @@ fn-def created through the editor — no API calls by hand, no shell.
 | Piece | Role | Why this and not something else |
 |---|---|---|
 | `https://httpbin.org/bearer` | Mock external API | Accepts any `Authorization: Bearer <anything>`, echoes the token + `{"authenticated": true}`. Demonstrates the credentials flow without you needing to sign up for anything real. |
-| **OpenBao** (KV v2 at `secret/`) | Secrets store | OSS fork of Vault, Linux Foundation. Lets the fn-graph fetch creds via `:vault-get` so you never have to use `:env` in user code. |
+| **OpenBao** (KV v2 at `secret/`) | Secrets store | OSS fork of Vault, Linux Foundation. Lets the fn-graph fetch creds via `:secret-leaf` so you never have to use `:env` in user code. |
 | **user-postgres** (port `5436`) | Tenant DB | Separate container so the tutorial graph can never touch graphden's own schema. |
 | Tutorial port `8081` (exposed as host `9081`) | Where your history endpoint listens | Different port from graphden's `8080` so it's plainly a second service. |
 
@@ -68,33 +68,23 @@ There are two ways to make a secret available to a fn-graph; both
 result in a fn-def the rest of the tutorial can `:ref` to. Pick
 one — they're interchangeable for everything below.
 
-> **Recommended: the Secrets panel.** If you're signed in, the
-> top-of-sidebar **Secrets** section is the one-form admin entry.
-> The `+` button asks for `{name, path, value}`, writes the value
-> to OpenBao, and creates a fn-def in graphden whose `parent` is
-> the `:secret-leaf` base-fn (a pure passthrough — the executor
-> dereferences the vault path at arg-resolution time so the impl
-> just returns the value). The created fn-def's return-type is
-> `[:secret :text]` and the row shows up with a 🔒 in the sidebar.
+If you're signed in, the top-of-sidebar **Secrets** section is the
+admin entry. The `+` button asks for `{name, path, value}`, writes
+the value to OpenBao, and creates a fn-def in graphden whose
+`parent` is the `:secret-leaf` base-fn (a pure passthrough — the
+executor dereferences the vault path at arg-resolution time so the
+impl just returns the value). The created fn-def's return-type is
+`[:secret :text]` and the row shows up with a 🔒 in the sidebar.
 
-> **Manual / legacy: `parent :vault-get`.** Before Followup-4 the
-> only way to wire a secret was a manual fn-def with parent
-> `:vault-get` + a literal `:path` binding. That still works (and
-> the Secrets-panel surfaces both shapes with 🔒) — the
-> `:vault-get` impl makes the HTTP call itself instead of
-> delegating to the executor. New work should prefer the panel
-> shape; existing `:vault-get` fn-defs remain valid.
-
-Each manual derivation is a one-line fn-def: `parent :vault-get`,
-`:path` set to one of the seeded paths.
+Create one secret-leaf-shaped fn-def per path:
 
 | Name | parent | Bind |
 |---|---|---|
-| `_db-url` | `:vault-get` | `:path` = `"user-db/url"` |
-| `_db-user` | `:vault-get` | `:path` = `"user-db/user"` |
-| `_db-password` | `:vault-get` | `:path` = `"user-db/password"` |
-| `_api-token` | `:vault-get` | `:path` = `"api/token"` |
-| `_history-port-text` | `:vault-get` | `:path` = `"history-port"` |
+| `_db-url` | `:secret-leaf` | `:path` = `"user-db/url"` |
+| `_db-user` | `:secret-leaf` | `:path` = `"user-db/user"` |
+| `_db-password` | `:secret-leaf` | `:path` = `"user-db/password"` |
+| `_api-token` | `:secret-leaf` | `:path` = `"api/token"` |
+| `_history-port-text` | `:secret-leaf` | `:path` = `"history-port"` |
 
 `_history-port-text` returns a string. Wrap it once to get an int:
 

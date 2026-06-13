@@ -27,7 +27,7 @@ function closeNamespacePicker() {
 
 function openNamespacePicker(opts) {
   closeNamespacePicker();
-  if (!opts || !opts.anchorEl) return;
+  if (!opts?.anchorEl) return;
   if (!graphData || !Array.isArray(graphData.namespaces)) return;
 
   // Build path strings for every namespace (walk parent-id chain).

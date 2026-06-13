@@ -33,6 +33,11 @@
    :args {:items {:type [:list :any] :description "Items in order. Each can be a literal or a fn-ref."}}
    :return-type [:list :any]}
 
+  {:name :vec
+   :description "Coerce any collection / sequence to a vector. Idempotent on vectors. Compose with `:if (sequential? coll) (vec coll) coll` to apply only when needed. The per-call `vec-return-rule` narrows the element type when the input has a known `[:list T]` shape — falls back to `[:list :any]` for opaque sources."
+   :args {:coll {:type [:list :any] :description "Sequence / collection to coerce."}}
+   :return-type [:list :any]}
+
   ;; Converts a list of 2-element pairs into a map. :entries is a sequence-arg
   ;; where each item is either a :pair fn-def result or a literal [k v] vector.
   {:name :pairs->map
@@ -212,15 +217,40 @@
    :args {:coll {:type [:list a] :description "List that may contain duplicates."}}
    :return-type [:list a]}
 
-  {:name :stringify-map-keys
-   :description "Walk a map and convert each keyword key into a string key. Useful at JSON/string boundaries."
-   :args {:m {:type :jsonb :description "Map whose keys to stringify."}}
-   :return-type [:map :text :any]}
+  ;; ---------------------------------------------------------------------
+  ;; :stringify-map-keys — graph composition over :update-keys
+  ;; ---------------------------------------------------------------------
+  ;; The key coercer is INLINED via anonymous fn-defs (see the parser's
+  ;; `expand-inline-anons-in-module` pre-pass): each `{:parent …}` map
+  ;; becomes a synthetic `_anon-<hash>` fn-def under the hood, so the
+  ;; user reads one self-contained composition instead of jumping
+  ;; through 5 named `_`-private helpers.
+  ;;
+  ;; Free-arg propagation rules:
+  ;;   - Omit a slot from `:args` to leave it free under its inherited
+  ;;     name.
+  ;;   - Use `{:as :name}` to ALSO rename while keeping it free.
+  ;;   - A bare keyword in arg-value position is a fn-ref ONLY if it
+  ;;     names a fn-def; otherwise it's a LITERAL keyword. Free-arg
+  ;;     refs don't have explicit syntax — they propagate from inner
+  ;;     fn-defs' free args through `ref-free-args`.
+  ;;
+  ;; `:_str-coerce-key` propagates `:value` (the HOF-callable convention
+  ;; name) as a free arg — `:update-keys` binds the per-call key to it.
 
-  {:name :keywordize-map-keys
-   :description "Walk a map and convert each string key into a keyword. Inverse of `:stringify-map-keys`."
-   :args {:m {:type :any :description "Map whose keys to keywordize."}}
-   :return-type [:map :keyword :any]}
+  {:name :_str-coerce-key
+   :description "Coerce ONE key value to a string. Keyword → `(name k)` (strips the leading colon); anything else → `(str k)`. Used as `:f` of `:update-keys` inside `:stringify-map-keys`."
+   :parent :if
+   :args {:test {:parent :is-a? :args {:type {:value :keyword}}}
+          :then {:parent :keyword-to-str :args {:keyword {:as :value}}}
+          :else {:parent :str
+                 :args {:parts {:parent :list
+                                :args {:items [{:as :value}]}}}}}}
+
+  {:name :stringify-map-keys
+   :description "Convert every key of `:m` to a string. Keyword keys lose their leading colon (`name`); others run through `str`."
+   :parent :update-keys
+   :args {:f :_str-coerce-key}}
 
   {:name :select-keys
    :description "Submap containing only the specified keys (Clojure's `select-keys`). Records in graphden are keyword-keyed, so the result is a `[:map :keyword :any]`."
@@ -239,6 +269,24 @@
    :args {:m {:type :any :description "Map whose values to transform."}
           :f {:type [:fn {:value v} w] :description "Callable receiving each value under the convention name `:value` (alpha-equivalent for 1-arg callees), returning the new one."}}
    :return-type :any}
+
+  {:name :update-keys
+   :description "Apply a function to every key of a map (Clojure's `update-keys`). Values are preserved."
+   :args {:m {:type :any :description "Map whose keys to transform."}
+          :f {:type [:fn {:value v} w] :description "Callable receiving each key under the convention name `:value`, returning the new key. If two old keys map to the same new key, the latter overrides."}}
+   :return-type :any}
+
+  {:name :postwalk
+   :description "Walk `:coll` bottom-up (`clojure.walk/postwalk`); apply `:f` to every form. Each child is replaced before its parent is visited, so the same fn-def can transform deeply-nested structure in one pass."
+   :args {:f {:type [:fn {:value v} v] :description "Callable receiving each form under the convention name `:value`, returning the replacement. Same input/output type because postwalk preserves shape; specialise via `:if` on `:map?` / `:vector?` / etc. inside."}
+          :coll {:type :any :description "Root form to walk — map, vector, sequence, scalar."}}
+   :return-type :any}
+
+  {:name :position-in
+   :description "Index of the first occurrence of `:value` in `:coll`, or nil if absent (Java `List/.indexOf`, but nil instead of -1). Lazy `:seq` bindings work — they're `vec`'d at the boundary. Companion to `:get` for indexed-lookup-style traversal (e.g. `position-in segs marker` then `get segs (inc idx)`)."
+   :args {:coll {:type [:list :any] :description "Collection to search. Lazy seqs are realised."}
+          :value {:type :any :description "Element to look for (Clojure `=` equality)."}}
+   :return-type [:union :null :int]}
 
   ;; (update-in m path #(merge defaults %)) — Clojure-style closure.
   ;; `:defaults` is captured from caller's outer scope (callers source-id

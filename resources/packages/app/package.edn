@@ -1,6 +1,14 @@
 {:name "app"
  :version "1.0.0"
  :description "Application server: common building blocks, editor UI, and server fn-defs"
- :dependencies ["core" "web"]
+ ;; `storage` is required because Block 1 Step 2 migrated consumer
+ ;; fn-defs (`:_list-services-rows`, …) off `:list-entities` and onto
+ ;; direct `:pg-query` + `:decode-row` chains — both primitives live
+ ;; in the `storage/pg` module.
+ :dependencies ["core" "web" "storage"]
  :modules ["common" "routes-method" "editor" "layout" "forms" "execution" "branches" "secrets" "routes" "routes-auth" "route-groups" "server"]
- :startup-fn :web-server}
+ :services [{:name :default
+             :fn-name :web-server
+             :enabled? true
+             :restart-policy :always
+             :description "Default HTTP listener — package-seeded service for the editor/API."}]}

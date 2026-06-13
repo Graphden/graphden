@@ -283,9 +283,19 @@ async function fetchValueForm(arg) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    if (!r.ok) return null;
+    if (!r.ok) {
+      // eslint-disable-next-line no-console
+      console.error('value-form fetch HTTP', r.status, r.statusText);
+      return null;
+    }
     return await r.json();
-  } catch (_) {
+  } catch (err) {
+    // Silent on the wire was hiding real failures (network drops,
+    // CORS mishaps, JSON parse errors) — caller renders a generic
+    // "Could not load the form" but DevTools had nothing. Surface
+    // so a triage session can see the real cause without re-running.
+    // eslint-disable-next-line no-console
+    console.error('value-form fetch threw', err);
     return null;
   }
 }
@@ -443,7 +453,7 @@ async function openValueViewer(arg, anchorEl) {
 
   const payload = await fetchValueForm(arg);
   // The user may have dismissed the viewer mid-fetch.
-  if (!valueViewerEl || !valueViewerEl.classList.contains('visible')) return;
+  if (!valueViewerEl?.classList.contains('visible')) return;
   renderValueForm(host, payload, { readOnly: true });
   // The form changed the popover's height — re-clamp to the viewport.
   if (typeof anchorBelowClamped === 'function') anchorBelowClamped(el, anchorEl);

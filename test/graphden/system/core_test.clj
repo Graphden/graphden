@@ -1,4 +1,4 @@
-(ns graphden.system.core-test
+(ns ^:serial graphden.system.core-test
   "Tests for Integrant init-key implementations in system.core.
 
    Covers:
@@ -10,21 +10,20 @@
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.core :as sys-core]
     [integrant.core :as ig]))
 
 
 ;; =============================================================================
 ;; :exec/service-reconciler lifecycle Tests
 ;;
-;; Phase 1 service registry: at startup the reconciler queries enabled
-;; :service rows. None present → falls back to the package-declared
-;; `:startup-fn` (legacy single-shot). On halt-key! both the supervised
-;; services and the legacy stopper drain.
+;; At startup the reconciler seeds package-declared `:services` into the
+;; `:service` table (idempotent — deterministic ids), then queries
+;; enabled rows and reconciles. On halt-key! the supervised services
+;; drain.
 ;;
-;; The init-key path reads from `:storage` and the registry; the mocks
-;; below let the test drive both branches (with/without enabled service
-;; rows) without spinning up a real container.
+;; The init-key path reads from `:storage`; the mocks below let the test
+;; drive both branches (empty / non-empty enabled rows) without spinning
+;; up a real container.
 ;; =============================================================================
 
 (defn- mock-storage
@@ -51,73 +50,42 @@
     (delete-entity [_ _ _] nil)))
 
 
-(deftest service-reconciler-init-halt-no-rows-uses-legacy-fallback-test
-  (testing "no :service rows → init-key invokes the package's :startup-fn"
-    (let [stopped? (atom false)
-          startup-called? (atom false)
-          ;; Mock the legacy-fallback path: the reconciler resolves
-          ;; the fn-id by name then executes it; redef the resolver
-          ;; chain to skip real storage lookups.
-          fake-stopper (fn [] (reset! stopped? true))]
-      (with-redefs [;; Bypass the legacy fallback's fn-id lookup and
-                    ;; execution — for this lifecycle test we only
-                    ;; care that init→halt drains the stopper.
-                    sys-core/start-legacy-fallback!
-                    (fn [_ctx _packages]
-                      (reset! startup-called? true)
-                      fake-stopper)]
+(deftest service-reconciler-init-empty-storage-test
+  (testing "no :service rows + no seeded-services → init-key returns a quiet component"
+    (let [reconcile-called? (atom false)]
+      (with-redefs [recon/reconcile-once! (fn [_ _] (reset! reconcile-called? true))]
         (let [storage (mock-storage [])
               context {:storage storage}
-              packages {:startup-fn :test-server}
-              opts {:context context :packages packages}
-              ;; init: empty :service set + non-nil :startup-fn →
-              ;; calls start-legacy-fallback!
+              opts {:context context :packages {:seeded-services []}}
               component (ig/init-key :exec/service-reconciler opts)]
-          (is @startup-called? "no :service rows → legacy fallback invoked")
-          (is (some? (:legacy-stopper component))
-              "init returns component map with the stopper handle")
-          ;; halt: drains the legacy stopper.
-          (ig/halt-key! :exec/service-reconciler component)
-          (is @stopped? "halt-key! called the legacy stopper"))))))
-
-
-(deftest service-reconciler-init-halt-with-rows-skips-legacy-test
-  (testing "enabled :service rows present → init-key skips legacy fallback"
-    (let [legacy-called? (atom false)
-          reconcile-called? (atom false)]
-      (with-redefs [sys-core/start-legacy-fallback!
-                    (fn [_ _] (reset! legacy-called? true) nil)
-                    recon/reconcile-once!
-                    (fn [_ _] (reset! reconcile-called? true))]
-        (let [;; Single enabled :service row — non-empty triggers
-              ;; reconcile, suppresses legacy.
-              storage (mock-storage [{:id (random-uuid)
-                                      :fn-id (random-uuid)
-                                      :enabled? true}])
-              context {:storage storage}
-              opts {:context context :packages {:startup-fn :ignored}}
-              component (ig/init-key :exec/service-reconciler opts)]
-          (is (not @legacy-called?)
-              ":service rows present → legacy fallback suppressed")
-          (is @reconcile-called?
-              "reconcile-once! invoked to start the desired services")
-          (is (nil? (:legacy-stopper component))
-              "no legacy stopper handed back when fallback skipped")
-          ;; halt: idempotent on a nil legacy-stopper.
+          (is (not @reconcile-called?)
+              "nothing enabled → reconcile-once! not invoked")
+          (is (some? (:running component)))
           (ig/halt-key! :exec/service-reconciler component))))))
 
 
-(deftest service-reconciler-suspend-mirrors-halt-test
-  (testing "suspend-key! drains both supervised services + legacy stopper"
-    (let [legacy-stopped? (atom false)
-          fake-stopper (fn [] (reset! legacy-stopped? true))
-          stop-all-called? (atom false)]
+(deftest service-reconciler-init-with-rows-reconciles-test
+  (testing "enabled :service rows present → init-key calls reconcile"
+    (let [reconcile-called? (atom false)]
+      (with-redefs [recon/reconcile-once!
+                    (fn [_ _] (reset! reconcile-called? true))]
+        (let [storage (mock-storage [{:id (random-uuid)
+                                      :fn-id (random-uuid)
+                                      :enabled? true}])
+              context {:storage storage}
+              opts {:context context :packages {:seeded-services []}}
+              component (ig/init-key :exec/service-reconciler opts)]
+          (is @reconcile-called?
+              "reconcile-once! invoked to start the desired services")
+          (ig/halt-key! :exec/service-reconciler component))))))
+
+
+(deftest service-reconciler-suspend-drains-running-test
+  (testing "suspend-key! invokes stop-all! on running"
+    (let [stop-all-called? (atom false)]
       (with-redefs [recon/stop-all! (fn [_] (reset! stop-all-called? true))]
-        (let [component {:running (atom {})
-                         :context {}
-                         :legacy-stopper fake-stopper}]
+        (let [component {:running (atom {}) :context {}}]
           (ig/suspend-key! :exec/service-reconciler component)
-          (is @legacy-stopped? "suspend invokes legacy stopper")
           (is @stop-all-called? "suspend invokes stop-all! on running"))))))
 
 

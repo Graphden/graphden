@@ -33,20 +33,23 @@ const TEST_NAME = 'test-edit-phase5';
     await page.goto('about:blank');
     await page.goto('http://localhost:9002/#' + TEST_NAME);
     await page.waitForTimeout(2500);
+    // Force a refresh so the just-POSTed fn is in lookups.fnMap.
+    await page.evaluate(() => initGraph());
+    await page.waitForTimeout(500);
 
-    // 2. Verify the empty-sequence "+ first item" placeholder.
-    const emptyLabel = await page.evaluate(() => {
-      const overlays = Array.from(document.querySelectorAll('.node-overlay'));
-      const ph = overlays.find(o => o.style.border && o.style.border.includes('dashed'));
-      return ph ? ph.firstElementChild.textContent : null;
+    // 2. Verify the empty-sequence placeholder — the button now shows
+    //    a bare `+` glyph with the descriptive copy in `title=`.
+    const emptyAnchor = await page.evaluate(() => {
+      const btn = document.querySelector('.placeholder-binder.is-seq-anchor');
+      return btn ? { text: btn.textContent, title: btn.title } : null;
     });
-    assert(emptyLabel === '+ first item', 'empty anchor renders "+ first item"');
+    assert(emptyAnchor && emptyAnchor.text === '+'
+           && emptyAnchor.title === 'Add the first item',
+           'empty anchor renders + with "Add the first item" title');
 
     // 3. Click → "Append literal" → "1" → save.
     await page.evaluate(() => {
-      const overlays = Array.from(document.querySelectorAll('.node-overlay'));
-      const ph = overlays.find(o => o.style.border && o.style.border.includes('dashed'));
-      ph.firstElementChild.click();
+      document.querySelector('.placeholder-binder.is-seq-anchor').click();
     });
     await page.waitForTimeout(300);
     await page.evaluate(() => {
@@ -107,41 +110,43 @@ const TEST_NAME = 'test-edit-phase5';
     chain = chainOf(await getEntities(page));
     assert(chain.length === 1, '× button removed exactly one item');
 
-    // 6. namespace-move smoke — pick first non-root namespace and back.
-    const nsStripText = await page.evaluate(() => {
-      const s = Array.from(document.querySelectorAll('.reparent-strip'))
-                     .find(x => x.textContent.startsWith('ns:'));
-      return s ? s.textContent : null;
+    // 6. namespace-move smoke. The bottom "ns:" strip moved into the
+    //    row-actions popover as a clickable `ns` badge — drive the
+    //    same code path via `enterNamespaceMoveEditMode` so we don't
+    //    depend on hover/popover timing. Verify both the set and the
+    //    clear-back-to-root directions.
+    const firstNsId = await page.evaluate(() => {
+      const ns = (graphData.namespaces || []).find(n => true);
+      return ns ? ns.id : null;
     });
-    assert(nsStripText === 'ns: (root)', 'ns strip starts at (root)');
+    assert(firstNsId, 'at least one namespace exists in graphData');
 
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.reparent-strip'))
-        .find(x => x.textContent.startsWith('ns:')).click();
-    });
-    await page.waitForTimeout(200);
-    await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('.fn-picker-row'));
-      // First non-(root) row.
-      const target = rows.find(r => !r.textContent.includes('(root)'));
-      target.click();
-    });
-    await page.waitForTimeout(2000);
+    await page.evaluate(({ fnId, nsId }) => new Promise(resolve => {
+      const fn = lookups.fnMap.get(fnId);
+      const origOpen = openNamespacePicker;
+      // Stub the picker so we don't depend on popover anchoring.
+      openNamespacePicker = (opts) => {
+        opts.onPick({ id: nsId }).then(resolve);
+      };
+      enterNamespaceMoveEditMode(fn, document.body);
+      // Restore eventually.
+      setTimeout(() => { openNamespacePicker = origOpen; }, 100);
+    }), { fnId: created.id, nsId: firstNsId });
+    await page.waitForTimeout(1500);
 
     const movedNs = (await getEntities(page)).fns.find(f => f.id === created.id)['namespace-id'];
-    assert(movedNs, 'fn now has a namespace-id');
+    assert(movedNs === firstNsId, 'fn now has the picked namespace-id');
 
-    // Move back to (root).
-    await page.evaluate(() => {
-      Array.from(document.querySelectorAll('.reparent-strip'))
-        .find(x => x.textContent.startsWith('ns:')).click();
-    });
-    await page.waitForTimeout(200);
-    await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('.fn-picker-row'));
-      rows.find(r => r.textContent.includes('(root)')).click();
-    });
-    await page.waitForTimeout(2000);
+    await page.evaluate((fnId) => new Promise(resolve => {
+      const fn = lookups.fnMap.get(fnId);
+      const origOpen = openNamespacePicker;
+      openNamespacePicker = (opts) => {
+        opts.onPick({ id: null }).then(resolve);
+      };
+      enterNamespaceMoveEditMode(fn, document.body);
+      setTimeout(() => { openNamespacePicker = origOpen; }, 100);
+    }), created.id);
+    await page.waitForTimeout(1500);
 
     const backToRoot = (await getEntities(page)).fns.find(f => f.id === created.id)['namespace-id'];
     assert(backToRoot === null || backToRoot === undefined, 'ns cleared back to root');

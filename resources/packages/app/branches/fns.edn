@@ -15,14 +15,86 @@
  :description "Read-side endpoints for the versioning UI — list branches, look up one branch, list a fn's version history, diff two branches. Backed by `graphden.crud.branches` + `graphden.versioning.storage.{core,merge}`. Concrete routes are wired in `app.routes`."
  :fns
  [;; ---------------------------------------------------------------------
+  ;; BASE-FN — shared branch lookup. Accepts a UUID string or a name,
+  ;; returns the branch row or nil. Composed by every parser-driven
+  ;; lookup (diff / conflicts / merge / delete) instead of going through
+  ;; per-handler defbase shims.
+  ;; ---------------------------------------------------------------------
+
+  {:name :resolve-branch-ref
+   :description "Look up a branch by `:ref` — accepts either a stringified UUID or a branch name. Returns the row, or nil when not found / ref is blank / ref isn't a string. Operates on the unwrapped base storage so reads see across versions."
+   :args {:ref {:type [:union :null :text] :required false :description "UUID string or branch name. Non-string / blank → nil."}}
+   :return-type [:union :null :jsonb]
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
   ;; GET /api/branches — list every branch row, ordered by created-at.
   ;; ---------------------------------------------------------------------
 
+  ;; GET /api/branches — graph composition: list-entities → sort-by
+  ;; created-at → :map :as-json-branch → :zipmap envelope.
+  ;; Reuses the same `:as-json-branch` row converter as
+  ;; `:_get-branch-data`. Admin extension surface:
+  ;;   * `:_list-branches-sort-key` — sort dimension (created-at /
+  ;;     name / base-branch chain).
+  ;;   * `:as-json-branch` — per-row JSON shape (single point of
+  ;;     variation; touching this changes EVERY branch-returning
+  ;;     handler too).
+  ;;   * `:_list-branches-data` envelope — `{:ok :count :branches}`
+  ;;     shape; replace for JSON:API, pagination, etc.
+  ;; --- Block 1 Step 2 migration: row load goes through `:pg-query`
+  ;; + per-row `:decode-row` instead of the generic `:list-entities`
+  ;; wrap. `:branch` is non-versioned (per `versioning.storage.
+  ;; resolution/entity-config`), so a raw pg-query bypasses the
+  ;; version-resolution layer correctly. The HoneySQL is now
+  ;; visible at the graph level — admins can add `:where` / extra
+  ;; columns without touching the generic loader.
+  {:name :_list-branches-rows
+   :parent :map
+   :args {:func :_list-branches-decode-row
+          :coll :_list-branches-rows-raw}}
+
+  {:name :_list-branches-rows-raw
+   :description "Raw `SELECT * FROM branch` — snake_case column keys, undecoded enum/jsonb. Decoded per-row by `:_list-branches-decode-row`."
+   :parent :storage-query-call
+   :args {:arg {:value {:select [:*] :from :branch}}}}
+
+  {:name :_list-branches-decode-row
+   :description "HOF callback — decode one raw `:branch` row to graphden's canonical shape."
+   :parent :decode-row
+   :args {:row {:as :item}
+          :entity-type {:value "branch"}}}
+
+  {:name :_list-branches-sort-key
+   :description "Per-row sort key — `:created-at` ascending (so the editor renders the forked-from chain in order)."
+   :parent :get
+   :args {:coll {:as :item} :key {:value :created-at} :default nil}}
+
+  {:name :_list-branches-sorted
+   :parent :sort-by
+   :args {:key-fn :_list-branches-sort-key :coll :_list-branches-rows}}
+
+  ;; HOF callback wrapping `:as-json-branch` — the free arg surface
+  ;; differs (`:as-json-branch` expects `:branch-row`, HOF binds
+  ;; `:item`). Bridge via an intermediate fn-def.
+  {:name :_list-branches-as-json-item
+   :parent :as-json-branch
+   :args {:branch-row {:as :item}}}
+
+  {:name :_list-branches-json
+   :parent :map
+   :args {:func :_list-branches-as-json-item
+          :coll :_list-branches-sorted}}
+
+  {:name :_list-branches-count
+   :parent :count
+   :args {:coll :_list-branches-sorted}}
+
   {:name :_list-branches-data
-   :description "Reads every :branch row off base storage, shapes them for JSON (UUIDs as strings, timestamps as ISO-8601). Used by the editor's branch picker."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "GET /api/branches — every :branch row off base storage, sorted by `:created-at` ascending, shaped via `:as-json-branch`."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :count} {:value :branches}]
+          :vals [{:value true} :_list-branches-count :_list-branches-json]}}
 
   {:name :list-branches-handler
    :description "Ring handler for GET /api/branches."
@@ -30,14 +102,132 @@
    :args {:data :_list-branches-data}}
 
   ;; ---------------------------------------------------------------------
+  ;; Shared JSON-coercion helpers — reused by branch / fn-version /
+  ;; diff-entry / conflict-entry response shapes. Stringify any UUID
+  ;; or timestamp value so jsonista doesn't choke.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_is-uuid-or-inst?
+   :description "True for values that need stringification before JSON encode — UUIDs and timestamps. Other scalars (bool / string / int) pass through. HOF-shaped: reads `:value` from the per-call binding."
+   :parent :or
+   :args {:values [{:parent :is-a? :args {:value {:as :value} :type {:value :uuid}}}
+                   {:parent :is-a? :args {:value {:as :value} :type {:value :timestamptz}}}]}}
+
+  {:name :_stringify-uuid-or-inst
+   :description "HOF callable for `:update-vals` — stringify a UUID / timestamp, pass everything else through."
+   :parent :if
+   :args {:test :_is-uuid-or-inst?
+          :then {:parent :to-str :args {:value {:as :value}}}
+          :else {:as :value}}}
+
+  {:name :stringify-uuids
+   :description "Shallow stringify of UUIDs and timestamps in a map's values (mirrors `branches/stringify-uuids` Clojure helper). Nil-safe — `nil` in → `nil` out. Reused by diff-entry and conflict-entry per-row reshapes."
+   :parent :if
+   :args {:test {:parent :some? :args {:value {:as :m}}}
+          :then {:parent :update-vals
+                 :args {:m {:as :m} :f :_stringify-uuid-or-inst}}
+          :else {:value nil}}}
+
+  ;; ---------------------------------------------------------------------
   ;; GET /api/branches/:ref — one branch (by UUID or name).
   ;; ---------------------------------------------------------------------
 
+  ;; GET /api/branches/:ref — graph composition over the already-
+  ;; decomposed `:resolve-branch-ref` plus a reusable
+  ;; `:as-json-branch` row-to-JSON converter. Admins can:
+  ;;   * Replace `:as-json-branch` to expose extra columns or different
+  ;;     field names (`{:ok :data}` instead of `{:ok :branch}`, add a
+  ;;     `:metadata` field, etc.).
+  ;;   * Replace `:_get-branch-success` / `:_get-branch-err` to change
+  ;;     the response envelope shape entirely.
+  ;;   * The same `:as-json-branch` is reused by `:_list-branches-data`
+  ;;     when it's eventually decomposed — single point of variation.
+  {:name :_branch-row-id
+   :parent :get
+   :args {:coll {:as :branch-row} :key {:value :id} :default nil}}
+
+  {:name :_branch-row-name
+   :parent :get
+   :args {:coll {:as :branch-row} :key {:value :name} :default nil}}
+
+  {:name :_branch-row-base-branch-id
+   :parent :get
+   :args {:coll {:as :branch-row} :key {:value :base-branch-id} :default nil}}
+
+  {:name :_branch-row-created-at
+   :parent :get
+   :args {:coll {:as :branch-row} :key {:value :created-at} :default nil}}
+
+  {:name :_branch-id-str
+   :description "Nil-safe `(str :id)`."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_branch-row-id}}
+          :then {:parent :to-str :args {:value :_branch-row-id}}
+          :else nil}}
+
+  {:name :_branch-base-id-str
+   :description "Nil-safe `(some-> :base-branch-id str)`."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_branch-row-base-branch-id}}
+          :then {:parent :to-str :args {:value :_branch-row-base-branch-id}}
+          :else nil}}
+
+  {:name :_branch-created-at-str
+   :description "Nil-safe `(some-> :created-at str)`."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_branch-row-created-at}}
+          :then {:parent :to-str :args {:value :_branch-row-created-at}}
+          :else nil}}
+
+  {:name :as-json-branch
+   :description "Convert a `:branch` storage row into a JSON-safe map — `{:id (str id) :name name :base-branch-id (some-> base-branch-id str) :created-at (some-> created-at str)}`. Own pin `:branch-row`. Used by `:_get-branch-data` and reusable by any other handler that surfaces a branch row."
+   :parent :zipmap
+   :args {:keys [{:value :id} {:value :name} {:value :base-branch-id} {:value :created-at}]
+          :vals [:_branch-id-str
+                 :_branch-row-name
+                 :_branch-base-id-str
+                 :_branch-created-at-str]
+          :branch-row {:type :jsonb
+                       :description "Storage row of a `:branch` entity — fields stringified for the JSON wire."}}}
+
+  {:name :_get-branch-ref
+   :description "URL segment after `branches/` — the UUID or name to resolve."
+   :parent :uri-segment-after
+   :args {:marker {:value "branches"}}}
+
+  {:name :_get-branch-row
+   :description "Resolve the URL ref to a `:branch` row, or nil when not found."
+   :parent :resolve-branch-ref
+   :args {:ref :_get-branch-ref}}
+
+  {:name :_get-branch-found?
+   :parent :some?
+   :args {:value :_get-branch-row}}
+
+  {:name :_get-branch-as-json
+   :description "Apply `:as-json-branch` to the resolved row."
+   :parent :as-json-branch
+   :args {:branch-row :_get-branch-row}}
+
+  {:name :_get-branch-success
+   :description "Success shape — `{:ok true :branch <json>}`."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :branch}]
+          :vals [{:value true} :_get-branch-as-json]}}
+
+  {:name :_get-branch-err
+   :description "404 shape — `{:ok false :error \"Branch not found: <ref>\"}`."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :error}]
+          :vals [{:value false}
+                 {:parent :str :args {:parts ["Branch not found: " :_get-branch-ref]}}]}}
+
   {:name :_get-branch-data
-   :description "Pulls the trailing path segment (`:ref`) from the URI and reads the matching :branch row. `:ref` may be either a stringified UUID or a branch name. Returns `{:ok false :error}` when not found."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "GET /api/branches/:ref — `:_get-branch-success` when the row resolves, `:_get-branch-err` otherwise. Pure graph composition over `:resolve-branch-ref` + `:as-json-branch` + `:zipmap`."
+   :parent :if
+   :args {:test :_get-branch-found?
+          :then :_get-branch-success
+          :else :_get-branch-err}}
 
   {:name :get-branch-handler
    :description "Ring handler for GET /api/branches/:ref."
@@ -48,11 +238,308 @@
   ;; GET /api/fns/:fn-id/versions — history of one fn across branches.
   ;; ---------------------------------------------------------------------
 
+  ;; `:list-fn-versions` is now a full graph decomposition — multi-
+  ;; query join over `:list-entities` + `:group-by` + `:update-vals`
+  ;; + `:sort-by` + per-row HOF chain producing the JSON shape, plus
+  ;; the envelope `{:ok :fn-id :count :versions}`.
+  ;;
+  ;; Admin extension surface — every field can be varied independently:
+  ;;   * `:_lfv-version-fields` — bare-row field set. Add / remove
+  ;;     columns by swapping this list.
+  ;;   * `:_lfv-stringify-uuid-or-inst` — value transform. Swap for a
+  ;;     custom timestamp formatter (ISO-8601, epoch-ms, etc.).
+  ;;   * `:_lfv-version-row` — the assoc'd shape per version. Add
+  ;;     custom computed fields (last-executor, latency stats, …).
+  ;;   * `:_lfv-version-sort-key` — change the sort dimension
+  ;;     (latest first → oldest first, or sort by execution-count).
+
+  ;; --- URL / fn-id extraction
+  {:name :_list-fn-versions-fn-id-raw
+   :description "Raw `:fn-id` segment from `/api/fns/:fn-id/versions`."
+   :parent :uri-segment-after
+   :args {:marker {:value "fns"}}}
+
+  {:name :_list-fn-versions-fn-id
+   :description "Parsed UUID (nil when missing / malformed)."
+   :parent :parse-uuid
+   :args {:s :_list-fn-versions-fn-id-raw}}
+
+  ;; --- Query #1: versions for the fn-id.
+  ;; Block 1 Step 2 migration: direct `:pg-query` + per-row
+  ;; `:decode-row` over `:fn-version`. `:fn-version` is itself a
+  ;; non-versioned write-once log (the version-history of `:fn`),
+  ;; so bypassing the version-resolution layer is correct.
+  {:name :_lfv-versions-from-storage
+   :parent :map
+   :args {:func :_lfv-versions-decode-row
+          :coll :_lfv-versions-raw}}
+
+  {:name :_lfv-versions-raw
+   :parent :storage-query-call
+   :args {:arg :_lfv-versions-hsql}}
+
+  {:name :_lfv-versions-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :fn-version}}
+          :key {:value :where}
+          :value :_lfv-versions-hsql-where}}
+
+  {:name :_lfv-versions-hsql-where
+   :parent :vec
+   :args {:coll [{:value :=} {:value :fn-id} {:as :fn-id}]}}
+
+  {:name :_lfv-versions-decode-row
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "fn-version"}}}
+
+  {:name :_lfv-versions
+   :description "Empty when fn-id is nil; otherwise the live version rows."
+   :parent :if
+   :args {:test {:parent :some? :args {:value {:as :fn-id}}}
+          :then :_lfv-versions-from-storage
+          :else {:value []}}}
+
+  ;; --- Sort: descending by :created-at.
+  {:name :_lfv-version-sort-key
+   :description "Per-row sort key — `:created-at`. Swap to sort by something else (e.g. `:_lfv-version-execution-count`)."
+   :parent :get
+   :args {:coll {:as :item} :key {:value :created-at} :default nil}}
+
+  {:name :_lfv-versions-sorted-asc
+   :parent :sort-by
+   :args {:key-fn :_lfv-version-sort-key :coll :_lfv-versions}}
+
+  {:name :_lfv-versions-sorted
+   :description "Latest first."
+   :parent :reverse
+   :args {:coll :_lfv-versions-sorted-asc}}
+
+  ;; --- Compute distinct, non-nil referenced branch-ids.
+  {:name :_lfv-extract-branch-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :branch-id} :default nil}}
+
+  {:name :_lfv-version-branch-ids
+   :parent :map
+   :args {:func :_lfv-extract-branch-id :coll :_lfv-versions}}
+
+  {:name :_lfv-version-branch-ids-non-nil
+   :parent :filter
+   :args {:pred :some? :coll :_lfv-version-branch-ids}}
+
+  {:name :_lfv-branch-ids-vec
+   :parent :vec
+   :args {:coll {:parent :distinct :args {:coll :_lfv-version-branch-ids-non-nil}}}}
+
+  ;; --- Query #2: branches by IN(branch-ids).
+  ;; Block 1 Step 2 migration: HoneySQL emits `id IN (?, ?, ...)`
+  ;; via `[:in :id <ids-vec>]` — the same shape `:list-entities`'s
+  ;; collection-value heuristic produced internally.
+  {:name :_lfv-branches-from-storage
+   :parent :map
+   :args {:func :_lfv-branches-decode-row
+          :coll :_lfv-branches-raw}}
+
+  {:name :_lfv-branches-raw
+   :parent :storage-query-call
+   :args {:arg :_lfv-branches-hsql}}
+
+  {:name :_lfv-branches-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :branch}}
+          :key {:value :where}
+          :value :_lfv-branches-hsql-where}}
+
+  {:name :_lfv-branches-hsql-where
+   :parent :vec
+   :args {:coll [{:value :in} {:value :id} :_lfv-branch-ids-vec]}}
+
+  {:name :_lfv-branches-decode-row
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "branch"}}}
+
+  {:name :_lfv-branches
+   :description "Skip the read when no branches are referenced."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_lfv-branch-ids-vec}}
+          :then {:value []}
+          :else :_lfv-branches-from-storage}}
+
+  ;; --- Build {branch-id → branch} index for the join.
+  {:name :_lfv-branch-id-of
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default nil}}
+
+  {:name :_lfv-branch-id-pair
+   :parent :vec
+   :args {:coll [:_lfv-branch-id-of {:as :item}]}}
+
+  {:name :_lfv-branch-id-pairs
+   :parent :map
+   :args {:func :_lfv-branch-id-pair :coll :_lfv-branches}}
+
+  {:name :_lfv-branches-by-id
+   :parent :pairs->map
+   :args {:entries :_lfv-branch-id-pairs}}
+
+  ;; --- Query #3: executions by IN(version-ids), grouped + counted.
+  {:name :_lfv-version-id-of
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default nil}}
+
+  {:name :_lfv-version-id-list
+   :parent :map
+   :args {:func :_lfv-version-id-of :coll :_lfv-versions}}
+
+  {:name :_lfv-version-ids-vec
+   :parent :vec
+   :args {:coll :_lfv-version-id-list}}
+
+  ;; --- Query #3: executions by IN(version-ids).
+  ;; Block 1 Step 2 migration: same IN-clause pattern as branches.
+  {:name :_lfv-execs-from-storage
+   :parent :map
+   :args {:func :_lfv-execs-decode-row
+          :coll :_lfv-execs-raw}}
+
+  {:name :_lfv-execs-raw
+   :parent :storage-query-call
+   :args {:arg :_lfv-execs-hsql}}
+
+  {:name :_lfv-execs-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :fn-execution}}
+          :key {:value :where}
+          :value :_lfv-execs-hsql-where}}
+
+  {:name :_lfv-execs-hsql-where
+   :parent :vec
+   :args {:coll [{:value :in} {:value :fn-version-id} :_lfv-version-ids-vec]}}
+
+  {:name :_lfv-execs-decode-row
+   :parent :decode-row
+   :args {:row {:as :item} :entity-type {:value "fn-execution"}}}
+
+  {:name :_lfv-execs
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_lfv-version-ids-vec}}
+          :then {:value []}
+          :else :_lfv-execs-from-storage}}
+
+  {:name :_lfv-exec-version-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-version-id} :default nil}}
+
+  {:name :_lfv-execs-by-version-id
+   :parent :group-by
+   :args {:key-fn :_lfv-exec-version-id :coll :_lfv-execs}}
+
+  {:name :_lfv-count-callable
+   :description "HOF callable for `:update-vals` — replace each grouped execution-list with its count."
+   :parent :count
+   :args {:coll {:as :value}}}
+
+  {:name :_lfv-exec-counts
+   :description "`{version-id → execution-count}` index."
+   :parent :update-vals
+   :args {:m :_lfv-execs-by-version-id :f :_lfv-count-callable}}
+
+  ;; --- Per-row JSON shape (HOF callback over sorted versions).
+  {:name :_lfv-version-selected
+   :description "Pick the bare fn-version columns. Admin extension point: add / remove keys to change the bare-row field set."
+   :parent :select-keys
+   :args {:m {:as :item}
+          :ks [{:value :id} {:value :name} {:value :description}
+               {:value :impl-hash} {:value :constraint}
+               {:value :base-fn-id} {:value :element-fn-id}
+               {:value :return-type-fn-id} {:value :anonymous-hash}
+               {:value :expects-effects} {:value :created-at}
+               {:value :deleted-at}]}}
+
+  {:name :_lfv-version-base
+   :description "Bare fn-version JSON shape — selected columns with UUIDs and timestamps stringified via the shared `:_stringify-uuid-or-inst` helper."
+   :parent :update-vals
+   :args {:m :_lfv-version-selected :f :_stringify-uuid-or-inst}}
+
+  ;; The three computed fields (assoc'd onto :_lfv-version-base).
+  {:name :_lfv-version-branch-id-raw
+   :parent :get
+   :args {:coll {:as :item} :key {:value :branch-id} :default nil}}
+
+  {:name :_lfv-version-branch-id-str
+   :description "Nil-safe stringified branch-id."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_lfv-version-branch-id-raw}}
+          :then {:parent :to-str :args {:value :_lfv-version-branch-id-raw}}
+          :else nil}}
+
+  {:name :_lfv-version-branch
+   :parent :get
+   :args {:coll :_lfv-branches-by-id
+          :key :_lfv-version-branch-id-raw
+          :default nil}}
+
+  {:name :_lfv-version-branch-name
+   :parent :get
+   :args {:coll :_lfv-version-branch
+          :key {:value :name}
+          :default nil}}
+
+  {:name :_lfv-version-execution-count
+   :parent :get
+   :args {:coll :_lfv-exec-counts
+          :key :_lfv-version-id-of
+          :default {:value 0}}}
+
+  ;; Assoc the three computed fields onto the bare row, one at a time.
+  {:name :_lfv-row-with-branch-id
+   :parent :assoc
+   :args {:map :_lfv-version-base
+          :key {:value :branch-id}
+          :value :_lfv-version-branch-id-str}}
+
+  {:name :_lfv-row-with-branch-name
+   :parent :assoc
+   :args {:map :_lfv-row-with-branch-id
+          :key {:value :branch-name}
+          :value :_lfv-version-branch-name}}
+
+  {:name :_lfv-version-row
+   :description "Per-row HOF callback — bare row + branch-id + branch-name + execution-count."
+   :parent :assoc
+   :args {:map :_lfv-row-with-branch-name
+          :key {:value :execution-count}
+          :value :_lfv-version-execution-count}}
+
+  ;; Map the per-row builder over sorted versions.
+  {:name :_lfv-versions-json
+   :parent :map
+   :args {:func :_lfv-version-row :coll :_lfv-versions-sorted}}
+
+  ;; --- Final envelope.
+  {:name :_lfv-fn-id-str
+   :parent :if
+   :args {:test {:parent :some? :args {:value {:as :fn-id}}}
+          :then {:parent :to-str :args {:value {:as :fn-id}}}
+          :else nil}}
+
+  {:name :_lfv-version-count
+   :parent :count
+   :args {:coll :_lfv-versions-sorted}}
+
+  {:name :list-fn-versions
+   :description "Full version-list response for one logical fn — `{:ok true :fn-id (str fn-id) :count N :versions [...]}`. Empty `:versions` when `:fn-id` is nil. `:fn-id` is the own public pin — reusable by any handler that needs this shape."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :fn-id} {:value :count} {:value :versions}]
+          :vals [{:value true} :_lfv-fn-id-str :_lfv-version-count :_lfv-versions-json]
+          :fn-id {:type [:union :null :text]
+                  :description "UUID string of the logical fn whose version history is being listed; nil → empty `:versions`."}}}
+
+  ;; Handler entry point.
   {:name :_list-fn-versions-data
-   :description "Pulls `:fn-id` from the URI (path segment between `/api/fns/` and `/versions`) and returns every :fn-version row for that logical fn, joined with the branch name. Latest first. Used by the fn-card History panel."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "GET /api/fns/:fn-id/versions — URL extraction → `:list-fn-versions`."
+   :parent :list-fn-versions
+   :args {:fn-id :_list-fn-versions-fn-id}}
 
   {:name :list-fn-versions-handler
    :description "Ring handler for GET /api/fns/:fn-id/versions."
@@ -65,64 +552,161 @@
   ;; ---------------------------------------------------------------------
 
   ;; --- C12 atoms: diff-branches variant-2.
+  {:name :_branches-target-ref
+   :description "Target branch ref extracted from `/api/branches/:target/…` — shared by diff / conflicts / merge / delete parsers."
+   :parent :uri-segment-after
+   :args {:marker {:value "branches"}}}
+
+  {:name :_query-params
+   :description "Parsed query-string of the Ring request (`{key value}` map, repeated keys collapse to last). Shared by diff + conflicts."
+   :parent :parse-query-string
+   :args {:string :ring-query-string}}
+
+  {:name :_diff-against-ref
+   :description "Raw `against=` query-param value, or nil."
+   :parent :get
+   :args {:coll :_query-params
+          :key {:value "against"}
+          :default nil}}
+
   {:name :_diff-parsed
-   :description "Parse `GET /api/branches/:target/diff?against=<source>` into `{:target-ref :against-ref}`."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Parse `GET /api/branches/:target/diff?against=<source>` into `{:target-ref :against-ref}`. Pure graph composition over `:uri-segment-after` + `:parse-query-string` + `:zipmap`."
+   :parent :zipmap
+   :args {:keys [{:value :target-ref} {:value :against-ref}]
+          :vals [:_branches-target-ref :_diff-against-ref]}}
 
   {:name :_diff-target-branch
-   :description "Resolve the target branch by ref; nil when missing."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "Resolve the target branch by ref; nil when missing. `:resolve-branch-ref` over `(get parsed :target-ref)`."
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :target-ref} :default nil}}}}
 
   {:name :_diff-source-branch
    :description "Resolve the source branch when `?against=` was supplied; nil otherwise."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :against-ref} :default nil}}}}
 
   {:name :_diff-target-missing?
-   :description "Guard #1 — target branch not found."
-   :args {:target-branch {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #1 — target branch not found. `:nil? :target-branch`."
+   :parent :nil?
+   :args {:value {:as :target-branch}}}
 
   {:name :_diff-against-missing?
-   :description "Guard #2 — `?against=` query param not supplied."
-   :args {:parsed {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #2 — `?against=` query param not supplied. `:nil? (get parsed :against-ref)`."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :against-ref} :default nil}}}}
 
   {:name :_diff-source-missing?
-   :description "Guard #3 — source branch ref supplied but resolves to nil."
-   :args {:source-branch {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #3 — source branch ref supplied but resolves to nil. `:nil? :source-branch`."
+   :parent :nil?
+   :args {:value {:as :source-branch}}}
 
   {:name :_diff-err-target-missing
-   :description "Dynamic error — cites the raw target-ref."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Dynamic error — cites the raw target-ref. Shared by diff / conflicts / merge via `:parent`."
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["Target branch not found: "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :target-ref}
+                                         :default nil}}]}}]}}
 
   {:name :_diff-err-against-missing
    :parent :const
-   :return-type :jsonb
+   :return-type :_error-result-shape
    :args {:value {:ok false :error "Query parameter 'against' is required"}}}
 
   {:name :_diff-err-source-missing
-   :description "Dynamic error — cites the raw against-ref."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Dynamic error — cites the raw against-ref. Only diff uses `:against-ref` as the source key (conflicts/merge use `:source-ref`)."
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["Source branch not found: "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :against-ref}
+                                         :default nil}}]}}]}}
 
-  {:name :_diff-apply
-   :description "Success branch — compute the per-entity diff."
-   :args {:parsed {:type :jsonb} :target-branch {:type :jsonb} :source-branch {:type :jsonb}}
+  ;; --- :diff-branches atomic primitive ------------------------------
+  ;; Single library call over `mrg/diff-branches`. The per-entry
+  ;; reshape + envelope are graph composition below — admins can vary
+  ;; the diff-entry shape or the envelope without Clojure edits.
+  {:name :diff-branches
+   :description "Atomic library boundary over `mrg/diff-branches` — returns the resolved-view diff between the two branches' ancestor chains: `{:source-branch-id :target-branch-id :diffs [...]}`."
+   :args {:source-branch-id {:type :uuid :description "Source branch id."}
+          :target-branch-id {:type :uuid :description "Target branch id."}}
    :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_diff-apply-raw
+   :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_diff-target-branch`."
+   :parent :diff-branches
+   :args {:source-branch-id {:parent :get
+                             :args {:coll {:as :source-branch}
+                                    :key {:value :id}
+                                    :default nil}}
+          :target-branch-id {:parent :get
+                             :args {:coll {:as :target-branch}
+                                    :key {:value :id}
+                                    :default nil}}}}
+
+  {:name :_diff-apply-diffs-raw
+   :description "Stage 2 — pull the `:diffs` vec out of the diff result."
+   :parent :get
+   :args {:coll :_diff-apply-raw :key {:value :diffs} :default []}}
+
+  ;; --- Per-entry reshape: stringify UUIDs in version maps.
+  {:name :_diff-entry-entity-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :entity-id} :default nil}}
+
+  {:name :_diff-entry-source-version
+   :parent :get
+   :args {:coll {:as :item} :key {:value :source-version} :default nil}}
+
+  {:name :_diff-entry-target-version
+   :parent :get
+   :args {:coll {:as :item} :key {:value :target-version} :default nil}}
+
+  {:name :_diff-apply-entry
+   :description "HOF callback per diff row — `{:entity-name :entity-id (str) :change :source-version (stringify-uuids) :target-version (stringify-uuids)}`. Mirrors the Clojure `prepare-diff-entry`."
+   :parent :zipmap
+   :args {:keys [{:value :entity-name} {:value :entity-id} {:value :change}
+                 {:value :source-version} {:value :target-version}]
+          :vals [{:parent :get :args {:coll {:as :item} :key {:value :entity-name} :default nil}}
+                 {:parent :to-str :args {:value :_diff-entry-entity-id}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :change} :default nil}}
+                 {:parent :stringify-uuids :args {:m :_diff-entry-source-version}}
+                 {:parent :stringify-uuids :args {:m :_diff-entry-target-version}}]}}
+
+  {:name :_diff-apply-diffs
+   :parent :map
+   :args {:func :_diff-apply-entry :coll :_diff-apply-diffs-raw}}
+
+  {:name :_diff-apply-target-shaped
+   :parent :as-json-branch
+   :args {:branch-row {:as :target-branch}}}
+
+  {:name :_diff-apply-source-shaped
+   :parent :as-json-branch
+   :args {:branch-row {:as :source-branch}}}
+
+  {:name :_diff-apply-count
+   :parent :count
+   :args {:coll :_diff-apply-diffs}}
+
+  {:name :_diff-apply
+   :description "Success branch — `{:ok true :target (as-json-branch) :source (as-json-branch) :count :diffs [...]}`. Pure graph composition over `:diff-branches` + per-row reshape + envelope."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :target} {:value :source}
+                 {:value :count} {:value :diffs}]
+          :vals [{:value true}
+                 :_diff-apply-target-shaped
+                 :_diff-apply-source-shaped
+                 :_diff-apply-count
+                 :_diff-apply-diffs]}}
 
   {:name :_diff-branches-data
    :description "GET /api/branches/:ref/diff?against=<source> — flat `:cond` of 3 guards + apply."
@@ -145,64 +729,201 @@
   ;; ---------------------------------------------------------------------
 
   ;; --- C13 atoms: create-branch variant-2.
+  ;; Body parser — `:branch-name` is `:str-trim`'d (nil-safe via `:if
+  ;; :some?`), `:base-ref` is `(str v)` if non-blank else nil.
+  {:name :_create-branch-body
+   :description "Parsed JSON body of POST /api/branches — `{:name :base-branch-id}`."
+   :parent :parse-json-body}
+
+  {:name :_create-branch-name-raw
+   :description "Raw `:name` field from the body (nil when missing)."
+   :parent :get
+   :args {:coll :_create-branch-body
+          :key {:value :name}
+          :default nil}}
+
+  {:name :_create-branch-name-trimmed
+   :description "`(str/trim :_create-branch-name-raw)` — only computed when the raw value is non-nil; `:str-trim`'s `:string` slot is required so we gate via `:if :some?`."
+   :parent :str-trim
+   :args {:string :_create-branch-name-raw}}
+
+  {:name :_create-branch-name
+   :description "Nil-safe trim: `(some-> body :name str/trim)`."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_create-branch-name-raw}}
+          :then :_create-branch-name-trimmed
+          :else nil}}
+
+  {:name :_create-branch-base-raw
+   :description "Raw `:base-branch-id` field from the body (nil when missing)."
+   :parent :get
+   :args {:coll :_create-branch-body
+          :key {:value :base-branch-id}
+          :default nil}}
+
+  {:name :_create-branch-base-str
+   :description "`(str :base-branch-id)` — coerces UUID / string / other-jsonb to a string. Nil becomes the empty string, which the `:blank?` guard below collapses back to nil."
+   :parent :to-str
+   :args {:value :_create-branch-base-raw}}
+
+  {:name :_create-branch-base-blank?
+   :description "True iff the coerced base-ref string is blank (which means: missing OR empty OR whitespace-only)."
+   :parent :blank?
+   :args {:string :_create-branch-base-str}}
+
+  {:name :_create-branch-base-ref
+   :description "Final `:base-ref` value — nil if blank, the coerced string otherwise. Matches `(when-let [v (:base-branch-id body)] (when-not (blank? (str v)) (str v)))`."
+   :parent :if
+   :args {:test :_create-branch-base-blank?
+          :then nil
+          :else :_create-branch-base-str}}
+
   {:name :_create-branch-parsed
-   :description "Parse POST /api/branches body into `{:branch-name :base-ref}`."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Parse POST /api/branches body into `{:branch-name :base-ref}`. Pure graph composition over `:parse-json-body` + `:get` + `:to-str` + `:str-trim` + `:if` + `:zipmap`."
+   :parent :zipmap
+   :args {:keys [{:value :branch-name} {:value :base-ref}]
+          :vals [:_create-branch-name :_create-branch-base-ref]}}
 
   {:name :_create-branch-name-blank?
-   :description "Guard #1 — `:name` missing or blank."
-   :args {:parsed {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #1 — `:name` missing or blank. `:blank?` is nil-safe, so it covers both cases in one call."
+   :parent :blank?
+   :args {:string {:parent :get :args {:coll {:as :parsed} :key {:value :branch-name} :default nil}}}}
+
+  ;; --- Block 1 Step 2 migration: name-collision check goes through
+  ;; `:pg-query` + parameterised HoneySQL `:where [:= :name ...]`
+  ;; instead of the generic `:list-entities` wrap. `:branch` is
+  ;; non-versioned (see `versioning.storage.resolution/entity-config`),
+  ;; so a raw pg-query bypasses the version-resolution layer
+  ;; correctly.
+  ;;
+  ;; We don't decode the rows — the only consumer (`:_create-branch-
+  ;; name-taken?`) just checks `:empty?`, never reads columns.
+  {:name :_create-branch-name-taken-rows
+   :description "Raw `SELECT * FROM branch WHERE name = <branch-name>`. Empty when no collision. Rows are NOT decoded — the only consumer checks emptiness."
+   :parent :storage-query-call
+   :args {:arg :_create-branch-name-taken-hsql}}
+
+  {:name :_create-branch-name-taken-hsql
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :branch}}
+          :key {:value :where}
+          :value :_create-branch-name-taken-hsql-where}}
+
+  {:name :_create-branch-name-taken-hsql-where
+   :parent :vec
+   :args {:coll [{:value :=} {:value :name} :_create-branch-name-taken-name]}}
+
+  {:name :_create-branch-name-taken-name
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :branch-name} :default nil}}
 
   {:name :_create-branch-name-taken?
-   :description "Guard #2 — a branch with this name already exists."
-   :args {:parsed {:type :jsonb}}
-   :return-type :bool
-   :effects #{:db}}
+   :description "Guard #2 — a branch with this name already exists. `:not :empty? (pg-query :branch where name = :branch-name)`."
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_create-branch-name-taken-rows}}}}
+
+  ;; `:current-branch-id` + `:current-branch-chain` now live in
+  ;; `storage/branches` so packages below `app` (`web/crud` etc.) can
+  ;; reference them.
+
+  ;; `:_create-branch-resolved-parent` graph form:
+  ;;   if base-ref supplied: resolve it via `:resolve-branch-ref`
+  ;;   else: look up the current branch row via `:resolve-branch-ref`
+  ;;         on (str current-branch-id).
+  {:name :_create-branch-base-ref-raw
+   :parent :get
+   :args {:coll {:as :parsed} :key {:value :base-ref} :default nil}}
+
+  {:name :_create-branch-resolved-supplied
+   :parent :resolve-branch-ref
+   :args {:ref :_create-branch-base-ref-raw}}
+
+  {:name :_current-branch-id-str
+   :description "Stringify the UUID so `:resolve-branch-ref` (which accepts the same string form as URL refs) can look it up."
+   :parent :to-str
+   :args {:value :current-branch-id}}
+
+  {:name :_create-branch-default-parent
+   :parent :resolve-branch-ref
+   :args {:ref :_current-branch-id-str}}
 
   {:name :_create-branch-resolved-parent
-   :description "Resolve `:base-ref` to a branch row, defaulting to the wrapper's current branch (= main) when absent."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "Resolve `:base-ref` to a branch row, defaulting to the wrapper's current branch (= main) when absent. `:if :some? :base-ref :then resolve else default-parent`."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_create-branch-base-ref-raw}}
+          :then :_create-branch-resolved-supplied
+          :else :_create-branch-default-parent}}
 
   {:name :_create-branch-base-missing?
-   :description "Guard #3 — base-ref supplied but resolves to nil."
-   :args {:parsed {:type :jsonb} :resolved-parent {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
-
-  {:name :_create-branch-err-name-blank
-   :description "Builds the name-blank error."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Guard #3 — base-ref supplied but resolves to nil. `:and [some? (get parsed :base-ref)] [nil? :resolved-parent]`."
+   :parent :and
+   :args {:values [{:parent :some?
+                    :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :base-ref} :default nil}}}}
+                   {:parent :nil? :args {:value {:as :resolved-parent}}}]}}
 
   {:name :_create-branch-err-name-taken
    :description "Dynamic error — cites the rejected name."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["Branch already exists: "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :branch-name}
+                                         :default nil}}]}}]}}
 
   {:name :_create-branch-err-base-missing
    :description "Dynamic error — cites the base-ref that didn't resolve."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["Base branch not found: "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :base-ref}
+                                         :default nil}}]}}]}}
 
-  {:name :_create-branch-apply
-   :description "Success branch — `vs/create-branch!` with the resolved parent's id."
-   :args {:parsed {:type :jsonb} :resolved-parent {:type :jsonb}}
+  ;; --- :create-branch! atomic primitive ----------------------------
+  ;; Single library call over `vs/create-branch!`. The success-shape
+  ;; building (envelope + `:as-json-branch` row reshape) is graph
+  ;; composition below — admins can swap the envelope or per-row
+  ;; shape without touching Clojure.
+  {:name :create-branch!
+   :description "Atomic library boundary over `vs/create-branch!` — writes a new branch row with `:branch-name` + `:base-branch-id` and returns the row."
+   :args {:branch-name {:type :text :description "New branch's display name."}
+          :base-branch-id {:type :uuid :description "Parent branch's id; the new branch forks from this point."}}
    :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_create-branch-apply-row
+   :description "Stage 1 of the apply — write the branch row off the parsed name + resolved parent."
+   :parent :create-branch!
+   :args {:branch-name {:parent :get
+                        :args {:coll {:as :parsed}
+                               :key {:value :branch-name}
+                               :default nil}}
+          :base-branch-id {:parent :get
+                           :args {:coll {:as :resolved-parent}
+                                  :key {:value :id}
+                                  :default nil}}}}
+
+  {:name :_create-branch-apply-shaped
+   :description "Stage 2 — reshape the new row via the shared `:as-json-branch` converter (stringified ids + created-at)."
+   :parent :as-json-branch
+   :args {:branch-row :_create-branch-apply-row}}
+
+  {:name :_create-branch-apply
+   :description "Success branch — `{:ok true :branch (as-json-branch row)}`. Pure graph composition over `:create-branch!` + `:as-json-branch` + `:zipmap`."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :branch}]
+          :vals [{:value true} :_create-branch-apply-shaped]}}
 
   {:name :_create-branch-data
    :description "POST /api/branches — flat `:cond` of `[name-blank? → 400, name-taken? → 400-dynamic, base-missing? → 400-dynamic, true → apply]`."
    :parent :cond
-   :args {:clauses [:_create-branch-name-blank?  :_create-branch-err-name-blank
+   :args {:clauses [:_create-branch-name-blank?  :_err-name-blank
                     :_create-branch-name-taken?  :_create-branch-err-name-taken
                     :_create-branch-base-missing? :_create-branch-err-base-missing
                     {:value true}                 :_create-branch-apply]
@@ -220,34 +941,149 @@
 
   ;; --- C14 atoms: delete-branch variant-2.
   {:name :_delete-branch-parsed
-   :description "Parse DELETE /api/branches/:ref URL into `{:branch-ref}`."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Parse DELETE /api/branches/:ref URL into `{:branch-ref}`. Shares `:_branches-target-ref` with diff / conflicts / merge."
+   :parent :zipmap
+   :args {:keys [{:value :branch-ref}]
+          :vals [:_branches-target-ref]}}
 
   {:name :_delete-branch-resolved
-   :description "Resolve the branch ref to a row; nil when missing."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "Resolve the branch ref to a row; nil when missing. `:resolve-branch-ref` over `(get parsed :branch-ref)`."
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :branch-ref} :default nil}}}}
 
   {:name :_delete-branch-missing?
-   :description "Guard — branch not found."
-   :args {:resolved {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard — branch not found. `:nil? :resolved`."
+   :parent :nil?
+   :args {:value {:as :resolved}}}
 
   {:name :_delete-branch-err-missing
    :description "Dynamic error — cites the raw branch-ref."
-   :args {:parsed {:type :jsonb}}
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["Branch not found: "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :branch-ref}
+                                         :default nil}}]}}]}}
+
+  ;; --- :delete-branch! atomic primitive + graph try/catch ----------
+  ;; The success path AND the 3 constraint-violation rejection shapes
+  ;; live in graph (`_delete-branch-apply-*`). The dispatch on
+  ;; `(:type (ex-data e))` uses the `:ex-data` primitive in
+  ;; `core.system`.
+  {:name :delete-branch!
+   :description "Atomic library boundary over `vs/delete-branch!` — removes branch by id. Throws ex-info with `:type :constraint-violation/{main-branch-undeletable, branch-has-children}` (latter carries `:child-branch-ids`) or `:not-found`."
+   :args {:branch-id {:type :uuid :description "Branch id to remove."}}
+   :return-type :any
+   :effects #{:db}}
+
+  {:name :_delete-branch-id
+   :parent :get :args {:coll {:as :resolved} :key {:value :id} :default nil}}
+
+  ;; --- Success path: delete returns nil; success envelope cites the
+  ;; resolved branch's id + name. `:do` forces the side-effect before
+  ;; building the response shape (its return value — the last step's
+  ;; result — IS the response).
+  {:name :_delete-branch-apply-deleted
+   :parent :delete-branch! :args {:branch-id :_delete-branch-id}}
+
+  {:name :_delete-branch-apply-response
+   :parent :zipmap
    :return-type :jsonb
-   :effects #{}}
+   :args {:keys [{:value :ok} {:value :id} {:value :name}]
+          :vals [{:value true}
+                 {:parent :to-str :args {:value :_delete-branch-id}}
+                 {:parent :get :args {:coll {:as :resolved} :key {:value :name} :default nil}}]}}
+
+  {:name :_delete-branch-apply-success
+   :description "Force the delete first (`:do`'s steps evaluate in order), then return the response envelope. Without this the executor could observe the branch row's `:name` BEFORE the delete row-removal landed, surfacing stale state."
+   :parent :do
+   :args {:steps [:_delete-branch-apply-deleted
+                  :_delete-branch-apply-response]}}
+
+  ;; --- Error path: ex-data dispatch.
+  {:name :_delete-branch-apply-ex-data
+   :parent :ex-data :args {:ex {:as :exception}}}
+
+  {:name :_delete-branch-apply-ex-type
+   :parent :get :args {:coll :_delete-branch-apply-ex-data :key {:value :type} :default nil}}
+
+  ;; child-branch-ids stringification (vec of UUIDs → vec of strings).
+  {:name :_delete-branch-apply-ex-child-ids
+   :parent :get :args {:coll :_delete-branch-apply-ex-data :key {:value :child-branch-ids} :default []}}
+
+  {:name :_delete-branch-apply-ex-child-ids-str-item
+   :parent :to-str :args {:value {:as :item}}}
+
+  {:name :_delete-branch-apply-ex-child-ids-str
+   :parent :map
+   :args {:func :_delete-branch-apply-ex-child-ids-str-item
+          :coll :_delete-branch-apply-ex-child-ids}}
+
+  {:name :_delete-branch-err-main
+   :parent :const
+   :return-type :jsonb
+   :args {:value {:ok false :reason :main-branch-undeletable
+                  :error "Cannot delete the main branch"}}}
+
+  {:name :_delete-branch-err-children
+   :parent :zipmap
+   :return-type :jsonb
+   :args {:keys [{:value :ok} {:value :reason} {:value :error} {:value :child-branch-ids}]
+          :vals [{:value false}
+                 {:value :branch-has-children}
+                 {:value "Branch has children — delete or re-parent them first"}
+                 :_delete-branch-apply-ex-child-ids-str]}}
+
+  {:name :_delete-branch-err-not-found
+   :description "Cites the raw branch-ref. Mirrors the `_delete-branch-err-missing` shape from the parse-time guard but is the exception-surfaced flavour."
+   :parent :zipmap
+   :return-type :jsonb
+   :args {:keys [{:value :ok} {:value :reason} {:value :error}]
+          :vals [{:value false}
+                 {:value :not-found}
+                 {:parent :str
+                  :args {:parts ["Branch not found: "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :branch-ref}
+                                         :default nil}}]}}]}}
+
+  {:name :_delete-branch-err-generic-msg
+   :parent :coalesce
+   :args {:value {:parent :throwable-message :args {:ex {:as :exception}}}
+          :default "Unknown error"}}
+
+  {:name :_delete-branch-err-generic
+   :parent :zipmap
+   :return-type :jsonb
+   :args {:keys [{:value :ok} {:value :error}]
+          :vals [{:value false} :_delete-branch-err-generic-msg]}}
+
+  {:name :_delete-branch-apply-clauses
+   :description "Dynamic `:case` clauses — built via `:zipmap` so the vals stay as refs (resolving to the per-type envelope), not literal keywords."
+   :parent :zipmap
+   :args {:keys [{:value :constraint-violation/main-branch-undeletable}
+                 {:value :constraint-violation/branch-has-children}
+                 {:value :not-found}]
+          :vals [:_delete-branch-err-main
+                 :_delete-branch-err-children
+                 :_delete-branch-err-not-found]}}
+
+  {:name :_delete-branch-apply-on-throw
+   :description "`:try`'s `:on-throw` handler — dispatches on `(:type (ex-data e))`. The 3 ex-info-shaped cases produce structured envelopes; default falls through to a generic `{:ok false :error <message>}`."
+   :parent :case
+   :args {:value :_delete-branch-apply-ex-type
+          :clauses :_delete-branch-apply-clauses
+          :default :_delete-branch-err-generic}}
 
   {:name :_delete-branch-apply
-   :description "Success branch — `vs/delete-branch!`. The :main / :has-children / :not-found rejection cases stay inside apply because they're exception-surfaced from the underlying delete."
-   :args {:parsed {:type :jsonb} :resolved {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :description "Delete a branch with structured 4-shape rejection: main-undeletable / has-children / not-found / generic. Pure graph composition over `:delete-branch!` + `:try` + `:case` dispatch on `(ex-data e :type)`."
+   :parent :try
+   :args {:body :_delete-branch-apply-success
+          :on-throw :_delete-branch-apply-on-throw}}
 
   {:name :_delete-branch-data
    :description "DELETE /api/branches/:ref — flat `:cond` of `[branch-missing? → 404-shape, true → apply]`. The constraint-rejection cases (main / has-children) come from apply."
@@ -267,64 +1103,150 @@
   ;; ---------------------------------------------------------------------
 
   ;; --- C15 atoms: preview-conflicts variant-2.
+  {:name :_conflicts-source-ref
+   :description "Raw `source=` query-param value, or nil."
+   :parent :get
+   :args {:coll :_query-params
+          :key {:value "source"}
+          :default nil}}
+
   {:name :_conflicts-parsed
-   :description "Parse GET /api/branches/:target/conflicts?source=<source> into `{:target-ref :source-ref}`."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Parse GET /api/branches/:target/conflicts?source=<source> into `{:target-ref :source-ref}`. Shares `:_branches-target-ref` + `:_query-params` with `:_diff-parsed`."
+   :parent :zipmap
+   :args {:keys [{:value :target-ref} {:value :source-ref}]
+          :vals [:_branches-target-ref :_conflicts-source-ref]}}
 
   {:name :_conflicts-target
    :description "Resolve the target branch by ref; nil when missing."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :target-ref} :default nil}}}}
 
   {:name :_conflicts-source
    :description "Resolve the source branch when supplied; nil otherwise."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :source-ref} :default nil}}}}
 
   {:name :_conflicts-target-missing?
-   :description "Guard #1 — target branch not found."
-   :args {:target {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #1 — target branch not found. `:nil? :target`."
+   :parent :nil?
+   :args {:value {:as :target}}}
 
   {:name :_conflicts-source-not-supplied?
-   :description "Guard #2 — `?source=` query param missing."
-   :args {:parsed {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #2 — `?source=` query param missing. `:nil? (get parsed :source-ref)`."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :source-ref} :default nil}}}}
 
   {:name :_conflicts-source-missing?
-   :description "Guard #3 — source supplied but doesn't resolve."
-   :args {:source {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #3 — source supplied but doesn't resolve. `:nil? :source`."
+   :parent :nil?
+   :args {:value {:as :source}}}
 
   {:name :_conflicts-err-target-missing
-   :description "Dynamic error — cites the raw target-ref."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Identical shape to `:_diff-err-target-missing` — inherit it verbatim."
+   :parent :_diff-err-target-missing}
 
   {:name :_conflicts-err-source-supplied-missing
    :parent :const
-   :return-type :jsonb
+   :return-type :_error-result-shape
    :args {:value {:ok false :error "Query parameter 'source' is required"}}}
 
   {:name :_conflicts-err-source-missing
-   :description "Dynamic error — cites the raw source-ref."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Dynamic error — cites the raw source-ref. Shared with `:_merge-err-source-missing` via `:parent`."
+   :parent :zipmap
+   :args {:keys [:ok :error]
+          :vals [false
+                 {:parent :str
+                  :args {:parts ["Source branch not found: "
+                                 {:parent :get
+                                  :args {:coll {:as :parsed}
+                                         :key {:value :source-ref}
+                                         :default nil}}]}}]}}
 
-  {:name :_conflicts-apply
-   :description "Success branch — `detect-conflicts` between target + source."
-   :args {:target {:type :jsonb} :source {:type :jsonb}}
+  ;; --- :detect-conflicts atomic primitive ---------------------------
+  ;; Single library call over `mrg/detect-conflicts`. Response shape is
+  ;; graph composition below.
+  {:name :detect-conflicts
+   :description "Atomic library boundary over `mrg/detect-conflicts` — returns `{:conflicts [...] :fork-point <uuid-or-nil>}` for the merge-oriented framing (source → target)."
+   :args {:source-branch-id {:type :uuid :description "Source branch id."}
+          :target-branch-id {:type :uuid :description "Target branch id."}}
    :return-type :jsonb
    :effects #{:db}}
+
+  {:name :_conflicts-apply-raw
+   :description "Stage 1 — run conflict detection."
+   :parent :detect-conflicts
+   :args {:source-branch-id {:parent :get
+                             :args {:coll {:as :source} :key {:value :id} :default nil}}
+          :target-branch-id {:parent :get
+                             :args {:coll {:as :target} :key {:value :id} :default nil}}}}
+
+  {:name :_conflicts-apply-list-raw
+   :parent :get
+   :args {:coll :_conflicts-apply-raw :key {:value :conflicts} :default []}}
+
+  {:name :_conflicts-apply-fork-point-raw
+   :parent :get
+   :args {:coll :_conflicts-apply-raw :key {:value :fork-point} :default nil}}
+
+  {:name :_conflicts-apply-fork-point
+   :description "Nil-safe stringify of the fork-point UUID (mirrors `(some-> fork-point str)`)."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_conflicts-apply-fork-point-raw}}
+          :then {:parent :to-str :args {:value :_conflicts-apply-fork-point-raw}}
+          :else {:value nil}}}
+
+  ;; --- Per-conflict-row reshape: stringify the entity-id + the two
+  ;; version maps. Same shape as `prepare-conflict-entry` in
+  ;; `crud/branches.clj` (now removed).
+  {:name :_conflict-entry-entity-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :entity-id} :default nil}}
+
+  {:name :_conflict-entry-source-version
+   :parent :get
+   :args {:coll {:as :item} :key {:value :source-version} :default nil}}
+
+  {:name :_conflict-entry-target-version
+   :parent :get
+   :args {:coll {:as :item} :key {:value :target-version} :default nil}}
+
+  {:name :_conflicts-apply-entry
+   :description "HOF callback per conflict — `{:entity-name :entity-id (str) :source-version (stringify-uuids) :target-version (stringify-uuids)}`."
+   :parent :zipmap
+   :args {:keys [{:value :entity-name} {:value :entity-id}
+                 {:value :source-version} {:value :target-version}]
+          :vals [{:parent :get :args {:coll {:as :item} :key {:value :entity-name} :default nil}}
+                 {:parent :to-str :args {:value :_conflict-entry-entity-id}}
+                 {:parent :stringify-uuids :args {:m :_conflict-entry-source-version}}
+                 {:parent :stringify-uuids :args {:m :_conflict-entry-target-version}}]}}
+
+  {:name :_conflicts-apply-list
+   :parent :map
+   :args {:func :_conflicts-apply-entry :coll :_conflicts-apply-list-raw}}
+
+  {:name :_conflicts-apply-target-shaped
+   :parent :as-json-branch
+   :args {:branch-row {:as :target}}}
+
+  {:name :_conflicts-apply-source-shaped
+   :parent :as-json-branch
+   :args {:branch-row {:as :source}}}
+
+  {:name :_conflicts-apply-count
+   :parent :count
+   :args {:coll :_conflicts-apply-list}}
+
+  {:name :_conflicts-apply
+   :description "Success branch — `{:ok :target :source :fork-point :count :conflicts}`. Pure graph composition over `:detect-conflicts` + per-row reshape + envelope."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :target} {:value :source}
+                 {:value :fork-point} {:value :count} {:value :conflicts}]
+          :vals [{:value true}
+                 :_conflicts-apply-target-shaped
+                 :_conflicts-apply-source-shaped
+                 :_conflicts-apply-fork-point
+                 :_conflicts-apply-count
+                 :_conflicts-apply-list]}}
 
   {:name :_preview-conflicts-data
    :description "GET /api/branches/:target/conflicts?source=<source> — flat `:cond` of 3 guards + apply."
@@ -349,75 +1271,280 @@
   ;; --- C16 atoms: merge-branch variant-2. The :merge-conflict
   ;; rejection case stays inside apply (exception-surfaced from
   ;; `vs/merge-branch!`).
+  ;;
+  ;; Body parse + `coerce-resolutions` is fully decomposed: per-item
+  ;; HOF callback over the body's `:conflict-resolutions` list extracts
+  ;; the three fields (`:entity-name`, `:entity-id`, `:choice`),
+  ;; validates each (string-to-keyword for entity-name + choice;
+  ;; UUID-parse for entity-id; choice must be `:source` or `:target`),
+  ;; emits a `[[entity-name entity-id] choice]` pair when valid or nil
+  ;; otherwise. Outer filters nils, folds the pairs into a map.
+  ;;
+  ;; Admin extension surface — admins who want to add a `:manual`
+  ;; choice or accept a different resolution shape can either parent
+  ;; `:_merge-resolution-choice-valid?` to extend the choice set, or
+  ;; replace `:_merge-resolution-tuple` with their own per-item HOF.
+  {:name :_merge-body
+   :parent :parse-json-body}
+
+  {:name :_merge-resolutions-raw
+   :description "Raw `:conflict-resolutions` array from the body (default `[]`)."
+   :parent :get
+   :args {:coll :_merge-body
+          :key {:value :conflict-resolutions}
+          :default {:value []}}}
+
+  ;; Per-resolution HOF callback. The HOF binds `:item` to each
+  ;; resolution map; the chain below extracts and validates fields.
+  {:name :_merge-resolution-name-kw
+   :description "`(some-> (:entity-name item) keyword)`."
+   :parent :str-to-keyword
+   :args {:string {:parent :get :args {:coll {:as :item} :key {:value :entity-name} :default nil}}}}
+
+  {:name :_merge-resolution-eid
+   :description "`(parse-uuid (:entity-id item))` — nil when missing/malformed."
+   :parent :parse-uuid
+   :args {:s {:parent :get :args {:coll {:as :item} :key {:value :entity-id} :default nil}}}}
+
+  {:name :_merge-resolution-choice-kw
+   :description "`(some-> (:choice item) keyword)`."
+   :parent :str-to-keyword
+   :args {:string {:parent :get :args {:coll {:as :item} :key {:value :choice} :default nil}}}}
+
+  {:name :_merge-resolution-choice-valid?
+   :description "True iff the choice is one of the recognised picks (`:source` or `:target`). Admins can extend by parent-ing or replacing this fn-def."
+   :parent :or
+   :args {:values [{:parent :equal? :args {:a :_merge-resolution-choice-kw :b {:value :source}}}
+                   {:parent :equal? :args {:a :_merge-resolution-choice-kw :b {:value :target}}}]}}
+
+  {:name :_merge-resolution-valid?
+   :description "Three-way validation: entity-name keyword non-nil, entity-id UUID parsed, choice in recognised set."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value :_merge-resolution-name-kw}}
+                   {:parent :some? :args {:value :_merge-resolution-eid}}
+                   :_merge-resolution-choice-valid?]}}
+
+  {:name :_merge-resolution-key
+   :description "`[entity-name entity-id]` — the map key the merge engine expects."
+   :parent :vec
+   :args {:coll [:_merge-resolution-name-kw :_merge-resolution-eid]}}
+
+  {:name :_merge-resolution-pair
+   :description "Two-element pair `[[entity-name entity-id] choice]` for `:pairs->map`."
+   :parent :vec
+   :args {:coll [:_merge-resolution-key :_merge-resolution-choice-kw]}}
+
+  {:name :_merge-resolution-tuple
+   :description "Per-item HOF callback: emit the pair when valid, nil otherwise. The outer filter drops nils."
+   :parent :if
+   :args {:test :_merge-resolution-valid?
+          :then :_merge-resolution-pair
+          :else nil}}
+
+  ;; Outer: :map → :filter (drop nils) → :pairs->map.
+  {:name :_merge-resolutions-mapped
+   :parent :map
+   :args {:func :_merge-resolution-tuple
+          :coll :_merge-resolutions-raw}}
+
+  {:name :_merge-resolutions-non-nil
+   :parent :filter
+   :args {:pred :some?
+          :coll :_merge-resolutions-mapped}}
+
+  {:name :_merge-resolutions
+   :description "Folded `{[entity-name entity-id] :source|:target}` map ready for `vs/merge-branch!`."
+   :parent :pairs->map
+   :args {:entries :_merge-resolutions-non-nil}}
+
+  ;; Source ref: `(some-> (:source body) str)` — nil-safe string coerce.
+  {:name :_merge-source-raw
+   :parent :get
+   :args {:coll :_merge-body
+          :key {:value :source}
+          :default nil}}
+
+  {:name :_merge-source-ref
+   :description "Nil-safe `(str (:source body))`."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_merge-source-raw}}
+          :then {:parent :to-str :args {:value :_merge-source-raw}}
+          :else nil}}
+
   {:name :_merge-parsed
-   :description "Parse POST /api/branches/:target/merge URL + body into `{:target-ref :source-ref :resolutions}`."
-   :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Parse POST /api/branches/:target/merge URL + body into `{:target-ref :source-ref :resolutions}`. Pure graph composition over `:uri-segment-after` + `:parse-json-body` + per-resolution HOF chain + `:pairs->map`."
+   :parent :zipmap
+   :args {:keys [{:value :target-ref} {:value :source-ref} {:value :resolutions}]
+          :vals [:_branches-target-ref :_merge-source-ref :_merge-resolutions]}}
 
   {:name :_merge-target
    :description "Resolve target branch by ref; nil when missing."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :target-ref} :default nil}}}}
 
   {:name :_merge-source
    :description "Resolve source branch when supplied; nil otherwise."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{:db}}
+   :parent :resolve-branch-ref
+   :args {:ref {:parent :get :args {:coll {:as :parsed} :key {:value :source-ref} :default nil}}}}
 
   {:name :_merge-target-missing?
-   :description "Guard #1 — target branch not found."
-   :args {:target {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #1 — target branch not found. `:nil? :target`."
+   :parent :nil?
+   :args {:value {:as :target}}}
 
   {:name :_merge-source-not-supplied?
-   :description "Guard #2 — `:source` missing in body."
-   :args {:parsed {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #2 — `:source` missing in body. `:nil? (get parsed :source-ref)`."
+   :parent :nil?
+   :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :source-ref} :default nil}}}}
 
   {:name :_merge-source-missing?
-   :description "Guard #3 — source supplied but doesn't resolve."
-   :args {:source {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #3 — source supplied but doesn't resolve. `:nil? :source`."
+   :parent :nil?
+   :args {:value {:as :source}}}
 
   {:name :_merge-same?
-   :description "Guard #4 — source and target are the same branch."
-   :args {:target {:type :jsonb} :source {:type :jsonb}}
-   :return-type :bool
-   :effects #{}}
+   :description "Guard #4 — source and target are the same branch. `:and [some? target] [some? source] [(:id target) = (:id source)]`."
+   :parent :and
+   :args {:values [{:parent :some? :args {:value {:as :target}}}
+                   {:parent :some? :args {:value {:as :source}}}
+                   {:parent :equal?
+                    :args {:a {:parent :get :args {:coll {:as :target} :key {:value :id} :default nil}}
+                           :b {:parent :get :args {:coll {:as :source} :key {:value :id} :default nil}}}}]}}
 
   {:name :_merge-err-target-missing
-   :description "Dynamic error — cites the raw target-ref."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Identical shape to `:_diff-err-target-missing` — inherit it verbatim."
+   :parent :_diff-err-target-missing}
 
   {:name :_merge-err-source-not-supplied
    :parent :const
-   :return-type :jsonb
+   :return-type :_error-result-shape
    :args {:value {:ok false :error "Required field ':source' is missing"}}}
 
   {:name :_merge-err-source-missing
-   :description "Dynamic error — cites the raw source-ref."
-   :args {:parsed {:type :jsonb}}
-   :return-type :jsonb
-   :effects #{}}
+   :description "Identical shape to `:_conflicts-err-source-missing` (same `:source-ref` key) — inherit it verbatim."
+   :parent :_conflicts-err-source-missing}
 
   {:name :_merge-err-same
    :parent :const
-   :return-type :jsonb
+   :return-type :_error-result-shape
    :args {:value {:ok false :error "Source and target branches must differ"}}}
 
-  {:name :_merge-apply
-   :description "Success branch — `vs/merge-branch!`. Catches :merge-conflict exception and reshapes it into a JSON-friendly 409-style payload; other failures surface as generic `{:ok false :error}`."
-   :args {:parsed {:type :jsonb} :target {:type :jsonb} :source {:type :jsonb}}
+  ;; --- :merge-branch! atomic primitive + graph-level try/catch ----
+  ;; The atomic switch+merge stays in Clojure (`:merge-branch!`).
+  ;; The success-shape AND the merge-conflict-rejection-shape live in
+  ;; graph — admins can vary either without touching Clojure. The
+  ;; dispatch on `:type` from `(ex-data e)` uses the new `:ex-data`
+  ;; primitive in `core.system`.
+  {:name :merge-branch!
+   :description "Atomic library boundary over `vs/switch-branch` + `vs/merge-branch!` — switches to target then folds source in. Throws ex-info `{:type :merge-conflict :conflicts [...]}` when resolutions don't cover every conflict; other failures surface as plain Exception."
+   :args {:source-branch-id {:type :uuid :description "Source branch id."}
+          :target-branch-id {:type :uuid :description "Target branch id."}
+          :resolutions {:type :jsonb :required false :description "Per-conflict resolution map; absent for first-attempt merges."}}
    :return-type :jsonb
    :effects #{:db}}
+
+  ;; --- Success path: build the response body off the merge record.
+  {:name :_merge-apply-record
+   :description "Stage 1 — actually run the merge. Throws on :merge-conflict; the `:try` outside catches."
+   :parent :merge-branch!
+   :args {:source-branch-id {:parent :get
+                             :args {:coll {:as :source} :key {:value :id} :default nil}}
+          :target-branch-id {:parent :get
+                             :args {:coll {:as :target} :key {:value :id} :default nil}}
+          :resolutions {:parent :get
+                        :args {:coll {:as :parsed} :key {:value :resolutions} :default nil}}}}
+
+  {:name :_merge-apply-record-id
+   :parent :get :args {:coll :_merge-apply-record :key {:value :id} :default nil}}
+
+  {:name :_merge-apply-record-source-id
+   :parent :get :args {:coll :_merge-apply-record :key {:value :source-branch-id} :default nil}}
+
+  {:name :_merge-apply-record-target-id
+   :parent :get :args {:coll :_merge-apply-record :key {:value :target-branch-id} :default nil}}
+
+  {:name :_merge-apply-record-created-at
+   :parent :get :args {:coll :_merge-apply-record :key {:value :created-at} :default nil}}
+
+  {:name :_merge-apply-created-at-str
+   :description "Nil-safe stringify of `:created-at` (mirrors `(some-> created-at str)`)."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_merge-apply-record-created-at}}
+          :then {:parent :to-str :args {:value :_merge-apply-record-created-at}}
+          :else {:value nil}}}
+
+  {:name :_merge-apply-record-shaped
+   :description "Stringified-id merge-record shape: `{:id :source-branch-id :target-branch-id :created-at}`."
+   :parent :zipmap
+   :args {:keys [{:value :id} {:value :source-branch-id}
+                 {:value :target-branch-id} {:value :created-at}]
+          :vals [{:parent :to-str :args {:value :_merge-apply-record-id}}
+                 {:parent :to-str :args {:value :_merge-apply-record-source-id}}
+                 {:parent :to-str :args {:value :_merge-apply-record-target-id}}
+                 :_merge-apply-created-at-str]}}
+
+  {:name :_merge-apply-success
+   :description "Success envelope — `{:ok true :merge <record>}`. Used as the `:body` callable of `:try`."
+   :parent :zipmap
+   :args {:keys [{:value :ok} {:value :merge}]
+          :vals [{:value true} :_merge-apply-record-shaped]}}
+
+  ;; --- Error path: on-throw handler dispatching by ex-data :type.
+  {:name :_merge-apply-ex-data
+   :parent :ex-data :args {:ex {:as :exception}}}
+
+  {:name :_merge-apply-ex-type
+   :parent :get :args {:coll :_merge-apply-ex-data :key {:value :type} :default nil}}
+
+  {:name :_merge-apply-ex-conflicts
+   :description "The `:conflicts` vec from the ex-data — only meaningful on `:merge-conflict`. The same per-row shape `:_conflicts-apply-entry` reuses for the success-path of `/conflicts`."
+   :parent :map
+   :args {:func :_conflicts-apply-entry
+          :coll {:parent :get :args {:coll :_merge-apply-ex-data :key {:value :conflicts} :default []}}}}
+
+  {:name :_merge-apply-err-conflict
+   :description "Merge-conflict envelope — `{:ok false :reason :merge-conflict :error \"…\" :target :source :conflicts [...]}`. Returns opaque `:jsonb` so `:case` unifies cleanly with the generic-error sibling."
+   :parent :zipmap
+   :return-type :jsonb
+   :args {:keys [{:value :ok} {:value :reason} {:value :error}
+                 {:value :target} {:value :source} {:value :conflicts}]
+          :vals [{:value false}
+                 {:value :merge-conflict}
+                 {:value "Merge has unresolved conflicts"}
+                 {:parent :as-json-branch :args {:branch-row {:as :target}}}
+                 {:parent :as-json-branch :args {:branch-row {:as :source}}}
+                 :_merge-apply-ex-conflicts]}}
+
+  {:name :_merge-apply-err-generic-msg
+   :description "Fallback message — `(or (.getMessage e) \"Unknown error\")`."
+   :parent :coalesce
+   :args {:value {:parent :throwable-message :args {:ex {:as :exception}}}
+          :default "Unknown error"}}
+
+  {:name :_merge-apply-err-generic
+   :parent :zipmap
+   :return-type :jsonb
+   :args {:keys [{:value :ok} {:value :error}]
+          :vals [{:value false} :_merge-apply-err-generic-msg]}}
+
+  {:name :_merge-apply-clauses
+   :description "Dynamic `:case` clauses map — `{:merge-conflict <ref>}`. Built via `:zipmap` so the result-vec entry is a ref (resolving to the conflict envelope), not a literal keyword."
+   :parent :zipmap
+   :args {:keys [{:value :merge-conflict}]
+          :vals [:_merge-apply-err-conflict]}}
+
+  {:name :_merge-apply-on-throw
+   :description "`:try`'s `:on-throw` handler — dispatches on `(:type (ex-data e))` via `:case`. The `:merge-conflict` clause builds the structured 409-style payload; default falls through to a generic `{:ok false :error <message>}`."
+   :parent :case
+   :args {:value :_merge-apply-ex-type
+          :clauses :_merge-apply-clauses
+          :default :_merge-apply-err-generic}}
+
+  {:name :_merge-apply
+   :description "Success branch — `vs/merge-branch!` via the `:merge-branch!` atomic primitive, wrapped in `:try` so a `:merge-conflict` rejection becomes a structured JSON envelope instead of a 500. Pure graph composition end-to-end."
+   :parent :try
+   :args {:body :_merge-apply-success
+          :on-throw :_merge-apply-on-throw}}
 
   {:name :_merge-branch-data
    :description "POST /api/branches/:target/merge — flat `:cond` of 4 guards + apply. The :merge-conflict rejection comes from apply."

@@ -48,7 +48,7 @@
 
 
 (deftest rebuild-replaces-current-registry
-  (testing "manual `rebuild!` re-reads storage and replaces atom contents"
+  (testing "manual `rebuild!` re-reads storage and installs into ctx"
     (let [storage (setup/create-test-storage)]
       (try
         (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
@@ -58,8 +58,12 @@
               reg-2 (cr/rebuild! ctx)]
           (is (= (set (keys reg-1)) (set (keys reg-2)))
               "same fns in both builds")
-          (is (not (identical? reg-1 reg-2))
-              "rebuild produces fresh closures"))
+          ;; compile-eager closures are ctx-INDEPENDENT and cached
+          ;; by graph-shape (compile-all LRU), so an unchanged graph
+          ;; produces the SAME closure map across rebuilds —
+          ;; identity-equality is the cache hit signal, not a bug.
+          (is (= reg-2 @(:compiled-registry ctx))
+              "rebuild's return value matches what landed in the atom"))
         (finally
           (sp/close storage))))))
 
@@ -221,5 +225,107 @@
               "no narrowing → free-arg keeps slot's :required false")
           (is (true? (:required (first narrowed-bindings)))
               "binding's :required true overrides slot's :required false"))
+        (finally
+          (sp/close storage))))))
+
+
+;; ============================================================================
+;; concurrent delta-recompile — write-discipline regression
+;; ============================================================================
+;;
+;; CRUD impls call `invalidate-graph-cache!` synchronously on the http-kit
+;; worker thread (see `crud/entities.clj`'s `notify-after-write!`), so two
+;; concurrent client requests CAN land in `delta-recompile!` against the
+;; same `:compiled-registry` atom. Previously the holder write was
+;; `reset!` over a read-modify-write computed outside the swap — two
+;; threads could both read `@holder`, both compute their merged map, and
+;; the last `reset!` would silently drop the other's `new-entries`,
+;; causing `/api/execute` against a just-modified fn to return the
+;; pre-mutation closure until something else invalidated it again. The
+;; fix moves the read-modify-write inside `swap!` (CAS-retry) — same
+;; pattern the `:compiled-templates` swap below already uses.
+;;
+;; The race window in the real code is microseconds (one `into` + one
+;; `merge` between deref and write), so even N=64 threads on the latch
+;; rarely overlap reliably enough to lose updates — that means this test
+;; functions as a CONCURRENT-EXERCISE smoke (no exceptions, result
+;; complete) rather than a strict race detector. The actual write-
+;; discipline guarantee lives in the `swap!` call in
+;; `compile-runtime/delta-recompile!`; reverting it to `reset!` is the
+;; failure mode this test is here to remind future reviewers about
+;; (the comment in the source explains why).
+
+(deftest concurrent-delta-recompile-preserves-all-entries
+  (testing "N parallel delta-recompiles each with a distinct seed all land in the registry"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
+        (let [;; One :add base-fn + N composed children — each child has
+              ;; the same dependency shape so the delta-recompile blast
+              ;; for any one of them is small (just itself).
+              base-fn (setup/create-base-fn! storage "add" :int)
+              slot-a (setup/create-slot! storage "a" :int)
+              slot-b (setup/create-slot! storage "b" :int)
+              _ (setup/attach-slot! storage (:id base-fn) (:id slot-a) 0)
+              _ (setup/attach-slot! storage (:id base-fn) (:id slot-b) 1)
+              n 64
+              composed-ids (mapv (fn [i]
+                                   (:id (setup/create-composed-fn!
+                                          storage
+                                          (str "race-child-" i)
+                                          (:id base-fn))))
+                                 (range n))
+              ctx (exec/create-context {:storage storage})
+              _ (cr/rebuild! ctx)
+              delta! (fn [fid]
+                       (#'graphden.executor.compile-runtime/delta-recompile!
+                        ctx #{fid}))
+              run-round
+              (fn []
+                ;; One round: N workers race through the latch, each
+                ;; calling delta-recompile with a distinct seed. Returns
+                ;; the set of fn-ids missing from the registry after
+                ;; everyone finishes — empty means no lost update.
+                (let [start (java.util.concurrent.CountDownLatch. 1)
+                      done (java.util.concurrent.CountDownLatch. n)
+                      errors (atom [])
+                      workers (mapv (fn [fid]
+                                      (Thread.
+                                        ^Runnable
+                                        (fn []
+                                          (try
+                                            (java.util.concurrent.CountDownLatch/.await start)
+                                            (delta! fid)
+                                            (catch Exception t
+                                              (swap! errors conj t))
+                                            (finally
+                                              (java.util.concurrent.CountDownLatch/.countDown done))))))
+                                    composed-ids)]
+                  (doseq [t workers] (Thread/.start t))
+                  (java.util.concurrent.CountDownLatch/.countDown start)
+                  (when-not (java.util.concurrent.CountDownLatch/.await
+                              done 30 java.util.concurrent.TimeUnit/SECONDS)
+                    (throw (ex-info "delta-recompile workers timed out" {})))
+                  {:errors @errors
+                   :missing (set (remove (set (keys @(:compiled-registry ctx)))
+                                         composed-ids))}))
+              ;; Multiple rounds: with `reset!`-based read-modify-write
+              ;; the race surfaces probabilistically (depends on thread
+              ;; scheduling — a couple of overlaps per round is typical,
+              ;; but can be zero). Running 5 rounds accumulates the
+              ;; chance under the bug while the fixed code passes every
+              ;; round trivially.
+              rounds 5
+              results (vec (repeatedly rounds run-round))
+              total-errors (mapcat :errors results)
+              total-missing (reduce into #{} (map :missing results))]
+          (is (empty? total-errors)
+              (str "no worker threw across " rounds " rounds; got "
+                   (count total-errors) " exceptions"))
+          (is (empty? total-missing)
+              (str "every concurrently-recompiled fn-id is present in "
+                   "the registry across " rounds " rounds; lost "
+                   (count total-missing) " of " n
+                   " distinct fn-ids under the race")))
         (finally
           (sp/close storage))))))

@@ -1,4 +1,4 @@
-(ns graphden.storage.postgres.crud-test
+(ns ^:serial graphden.storage.postgres.crud-test
   "Tests for PostgreSQL storage CRUD operations.
 
    Covers:

@@ -104,7 +104,7 @@ function createPlaceholderOverlay(node, container) {
   const arg = (typeof argRowFromNode === 'function')
               ? argRowFromNode(node.data())
               : null;
-  const inImpl = arg && implementationFnIds && implementationFnIds.has(arg['fn-id']);
+  const inImpl = arg && implementationFnIds?.has(arg['fn-id']);
   const editable = inImpl
                 && (typeof isAuthenticated === 'function' && isAuthenticated());
   if (!editable) return;

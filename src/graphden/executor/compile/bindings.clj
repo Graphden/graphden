@@ -23,17 +23,29 @@
 (def ^:private rich-type-of-fn (delay (requiring-resolve 'graphden.executor.registry.core/rich-type-of)))
 
 
-(defn- value-binding?
+;; Binding-row shape predicates. Single source of truth for "what kind
+;; of binding does this DB row carry" — siblings (`renames.clj` etc.)
+;; and out-of-module callers (`layout/builder_helpers`,
+;; `versioning/storage/resolution`) duplicated the underlying
+;; `(some? (:value b))`/`(some? (:ref-fn-id b))` checks before these
+;; were lifted into shared predicates. Mirrors the AST-level
+;; `binding-shape` taxonomy in `types/check`, but classifies STORED
+;; rows (parsed + persisted) rather than the user's AST.
+;;
+;;   value → row sets `:value` (no `:ref-fn-id`)
+;;   ref   → row sets `:ref-fn-id`
+;;   list  → row sets `:list-append true` (chain-append semantics)
+(defn value-binding?
   [b]
   (and b (some? (:value b)) (nil? (:ref-fn-id b))))
 
 
-(defn- ref-binding?
+(defn ref-binding?
   [b]
   (and b (some? (:ref-fn-id b))))
 
 
-(defn- list-binding?
+(defn list-binding?
   [b]
   (and b (true? (:list-append b))))
 
@@ -145,10 +157,13 @@
 (defn- ref-produces-callable?
   "True iff the bound ref-fn's `:return-type` is itself a fn-type —
    i.e. evaluating the fn-graph produces a callable VALUE rather than
-   the fn-graph BEING the callable. `:_router` (returns reitit ring-
-   handler) is the canonical case. When the slot is fn-typed AND the
+   the fn-graph BEING the callable. When the slot is fn-typed AND the
    ref produces a callable, the runtime thunks (evaluate to get the
-   callable) instead of `hof-wrap`'ping (which would double-wrap)."
+   callable) instead of `hof-wrap`'ping (which would double-wrap).
+
+   Decision is keyed on the registered return-type via the rich-types
+   registry — purely type-driven, never on fn name. Any fn-def whose
+   computed `:return` is a `[:fn …]` type takes this branch."
   [ref-fn-id {:keys [fn-map]}]
   (when-let [fn-name (some-> (get fn-map ref-fn-id) :name)]
     (when-let [info (@rich-type-of-fn (keyword fn-name))]
@@ -158,10 +173,9 @@
 (defn- lazy-seq-arg-names
   "Set of slot base-names the root base-fn of `fn-id` declared in its
    `:lazy-seq-args` — those `:seq` slots resolve to delay-wrapped
-   elements (`compile/resolve-seq-thunks`) so a consumer like `cond-fn`
-   can step past an un-taken element without executing it. Declared
-   once at the base-fn's `impls.clj` registration site and read here
-   by base-fn identity — never by name-dispatch."
+   ITEMS so a consumer like `cond-fn` can step past an un-taken
+   element. Declared once at the base-fn's `impls.clj` registration
+   site and read here by base-fn identity — never by name-dispatch."
   [fn-id {:keys [fn-map] :as lookups}]
   (when-let [root-name (some-> (l/root-fn fn-id fn-map lookups) :name keyword)]
     (some-> (@rich-type-of-fn root-name) :lazy-seq-args set)))
@@ -174,22 +188,13 @@
                    :is-fn BOOL :produces-callable? BOOL}
      {:kind :seq   :base-name K :ext-name K :slot-id UUID :items […]
                    :lazy-seq? BOOL}
-     {:kind :free  :base-name K :ext-name K :slot-id UUID :required true}
-
-   `:slot-id` is the owning-slot's id; consumers that need to read
-   the slot's structural type (e.g. `hof-lambda-params` for closure-
-   capture; docs/CLOSURE_CAPTURE.md) use it to resolve the slot's
-   `:type-fn-id` to its anonymous fn-row + `:constraint`."
+     {:kind :free  :base-name K :ext-name K :slot-id UUID :required true}"
   [slot fn-id lookups fn-typed-fn-ids lazy-seq-args]
   (let [base-name (keyword (:name slot))
         slot-id (:id slot)
         ext-name (l/rename-for-slot fn-id slot-id lookups)
         b (effective-binding fn-id slot-id lookups)]
     (cond
-      ;; Followup-4: a value-binding marked `:override-kind :secret-path`
-      ;; carries a vault PATH in `:value`. The executor auto-derefs
-      ;; via `clients.vault/get-secret` at arg-resolution time; the
-      ;; actual secret value never appears in graphden storage.
       (and (value-binding? b) (= :secret-path (:override-kind b)))
       {:kind :secret-value :base-name base-name :ext-name ext-name
        :slot-id slot-id :path (:value b)}
@@ -211,11 +216,6 @@
 
       :else
       {:kind :free :base-name base-name :ext-name ext-name :slot-id slot-id
-       ;; Effective required = slot's own :required (default true)
-       ;; OR'd with any binding `:required true` along the inheritance
-       ;; chain. Lets a descendant fn-def narrow an inherited optional
-       ;; slot to required for itself and its descendants — a one-way
-       ;; ratchet enforced by the sync-time check on `:required false`.
        :required (effective-required? slot fn-id lookups)
        :is-fn (fn-typed-slot? slot b fn-typed-fn-ids fn-id lookups)})))
 
@@ -247,15 +247,28 @@
         fn-map))
 
 
-(defn collect-bindings
-  "For F, classify every root slot. Returns a vector of binding entries
-   in fn-slot position order."
+(defn- collect-bindings*
   [fn-id lookups]
   (let [slots (l/root-slots fn-id lookups)
         fn-typed-fn-ids (compute-fn-typed-fn-ids lookups)
         lazy-seq-args (lazy-seq-arg-names fn-id lookups)]
     (mapv #(classify-slot % fn-id lookups fn-typed-fn-ids lazy-seq-args)
           slots)))
+
+
+(defn collect-bindings
+  "For F, classify every root slot. Returns a vector of binding entries
+   in fn-slot position order. Memoised on `lookups`'s
+   `:bindings-cache` — compile-eager + `build-ref-renames` between
+   them hit this once per (fn-id, ref-binding) which can be hundreds
+   of calls on the same fn-id during a single compile-all pass."
+  [fn-id {:keys [bindings-cache] :as lookups}]
+  (if-let [cache bindings-cache]
+    (or (get @cache fn-id)
+        (let [r (collect-bindings* fn-id lookups)]
+          (swap! cache assoc fn-id r)
+          r))
+    (collect-bindings* fn-id lookups)))
 
 
 (defn- own-fn-of-slot
@@ -312,12 +325,22 @@
                 env-name (some-> (:name slot) keyword)]
             (when (and env-name
                        (not (contains? root-slot-ids slot-id))
-                       (or (some? (:value b)) (some? (:ref-fn-id b))))
+                       (or (value-binding? b) (ref-binding? b)))
               (cond
-                (some? (:value b))
-                [env-name {:kind :value :env-name env-name :value (:value b)}]
-                (some? (:ref-fn-id b))
+                (value-binding? b)
+                [env-name {:kind :value :env-name env-name
+                           :slot-id slot-id :value (:value b)}]
+                (ref-binding? b)
                 [env-name {:kind :ref :env-name env-name
+                           ;; `:slot-id` + `:type-override-fn-id` carry
+                           ;; enough for downstream `hof-lambda-params`
+                           ;; (via `enrich-is-fn-ref`) to resolve the
+                           ;; slot's structural `[:fn {ARGS} RET]` type
+                           ;; — without these the helper would see a
+                           ;; nil slot-id and reject the binding as a
+                           ;; bare-`:fn` slot.
+                           :slot-id slot-id
+                           :type-override-fn-id (:type-override-fn-id b)
                            :ref-id (:ref-fn-id b)
                            :is-fn (is-fn-for-slot slot-id slot b)
                            :produces-callable? (ref-produces-callable?

@@ -32,7 +32,6 @@
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
-    [graphden.services.reconciler :as services-recon]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -40,8 +39,10 @@
 ;; Configuration
 ;; =============================================================================
 
-(def ^:private default-timeout-ms 10000)
-(def ^:private max-timeout-ms      60000)     ; HTTP proxies bite past ~120s
+(def ^:private max-timeout-ms 60000)     ; HTTP proxies bite past ~120s
+
+(def ^:private default-timeout-ms 10000) ; matches `:_execute-timeout-ms` default
+;; in `app/execution/fns.edn`
 
 
 ;; Re-export: tests + the cancel endpoint look up futures by id.
@@ -52,33 +53,9 @@
 ;; Parse — JSON body → in-memory parsed map
 ;; =============================================================================
 
-(defn- safe-uuid
-  "`parse-uuid-or-clear` throws on malformed input; we want nil here
-   so the validation stage can reject with a clean error instead of
-   500-ing on a typo'd UUID."
-  [v]
-  (when (and v (string? v))
-    (try (request/parse-uuid-or-clear v)
-         (catch IllegalArgumentException _ nil))))
-
-
-(defn parse-execute-request
-  "Stage 1 — JSON body to `{:fn-id-or-name :args :timeout-ms :persist?}`.
-   No DB access; pure transform of incoming bytes.
-
-   Body shape:
-     {\"fn-id\":     \"uuid\"            ; XOR with fn-name
-      \"fn-name\":   \"add\"
-      \"args\":      {\"a\": 1, \"b\": {\"ref\": \"uuid\"}, \"c\": [1, 2]}
-      \"timeout-ms\":10000
-      \"persist?\":  false}"
-  [request]
-  (let [body (request/read-json-body request)]
-    {:fn-id      (safe-uuid (:fn-id body))
-     :fn-name    (when-let [n (:fn-name body)] (str n))
-     :args       (or (:args body) {})
-     :timeout-ms (or (:timeout-ms body) default-timeout-ms)
-     :persist?   (true? (:persist? body))}))
+;; `safe-uuid` removed — `request/parse-uuid-or-clear` is now
+;; lenient itself (returns nil for non-string / blank / malformed
+;; input), so wrapping it in another try/catch was redundant.
 
 
 ;; =============================================================================
@@ -86,85 +63,155 @@
 ;; =============================================================================
 
 (defn- already-running-as-service?
-  "Returns a `{:reason :service-id?}` map when this fn is already
-   alive in a way that would conflict with a fresh Run:
-
-   - an enabled `:service` row exists for `fn-id` (managed path) —
-     returns `{:source :service :service-id …}`
-   - the Phase 1 legacy fallback is active for this fn-id (no DB
-     row but the integrant component holds its stopper) — returns
-     `{:source :legacy-fallback}`
-
-   Used by `validate-execute` to refuse ad-hoc Run; prevents the
-   foot-gun where clicking ▶ on :web-server tries to re-bind its
+  "Returns `{:source :service :service-id <uuid>}` when an enabled
+   `:service` row exists for `fn-id`. Used by `validate-execute` to
+   refuse ad-hoc Run on a fn the reconciler already owns — prevents
+   the foot-gun where clicking ▶ on :web-server tries to re-bind its
    already-occupied port."
   [storage fn-id]
-  (or (when-let [svc (first (sp/query-entities storage :service
-                                               {:fn-id fn-id :enabled? true}))]
-        {:source :service :service-id (:id svc)})
-      (when-let [handle @services-recon/legacy-handle]
-        (when (= fn-id (:fn-id handle))
-          {:source :legacy-fallback}))))
+  (when-let [svc (first (sp/query-entities storage :service
+                                           {:fn-id fn-id :enabled? true}))]
+    {:source :service :service-id (:id svc)}))
+
+
+;; === Stage-2 execute-validation guards (C23) ===
+;; Decomposed from the old 88-line cond into one defn per guard so
+;; the same chain wires as a graph `:cond` fn-def
+;; (`:_execute-validation` in app/execution/fns.edn) AND as the
+;; back-compat composition below — single source of truth either
+;; way. Each guard returns `{:ok false :status :rejected …}` on
+;; rejection or nil on pass.
+
+(defn- execute-no-fn-rej
+  "Guard 1 — request carried neither `:fn-id` nor `:fn-name`."
+  [parsed]
+  (when (and (nil? (:fn-id parsed)) (nil? (:fn-name parsed)))
+    {:ok false :status :rejected
+     :error "Request must carry :fn-id or :fn-name"
+     :error-data {:reason :no-fn}}))
+
+
+(defn- execute-fn-not-found-rej
+  "Guard 2 — `:fn-id` or `:fn-name` was supplied but didn't resolve
+   to a real `:fn` row. Without this guard, the parsed `:fn-id`
+   would slip through to apply-execute and surface as the
+   executor's bare \"Function not found: <nil>\" with an empty
+   error string."
+  [parsed ctx]
+  (let [storage (request/require-storage ctx)
+        fn-row (lookup/resolve-fn storage parsed)]
+    ;; Skip if the no-fn guard already matched.
+    (when (and (or (:fn-id parsed) (:fn-name parsed))
+               (nil? (:id fn-row)))
+      {:ok false :status :rejected
+       :error (str "Function not found: "
+                   (or (:fn-name parsed) (:fn-id parsed)))
+       :error-data {:reason :fn-not-found}})))
+
+
+(defn- execute-timeout-out-of-range-rej
+  "Guard 3 — `:timeout-ms` must land in `[1, max-timeout-ms]`. nil
+   timeouts are treated as missing → use the default (mirrors the
+   graph path's `:_execute-timeout-ms :coalesce :default 10000`).
+   The prior version called `(< nil 1)` which NPE'd on direct
+   Clojure callers that omitted `:timeout-ms` — the test suite + the
+   HTTP graph path both supplied it, masking the contract gap."
+  [parsed]
+  (let [t (or (:timeout-ms parsed) default-timeout-ms)]
+    (when (or (< t 1) (> t max-timeout-ms))
+      {:ok false :status :rejected
+       :error (str ":timeout-ms must be in [1, " max-timeout-ms "]")
+       :error-data {:reason :timeout-out-of-range :timeout-ms t}})))
+
+
+(defn- execute-args-too-large-rej
+  "Guard 4 — serialised `:args` payload exceeds `max-args-bytes`."
+  [parsed]
+  (let [n (persist/args-bytes (:args parsed))]
+    (when (> n persist/max-args-bytes)
+      {:ok false :status :rejected
+       :error (str ":args size exceeds " persist/max-args-bytes " bytes")
+       :error-data {:reason :args-too-large :bytes n}})))
+
+
+(defn- execute-already-running-rej
+  "Guard 5 — the target fn is already alive as a managed `:service`
+   row, so a fresh Run would conflict (the reconciler owns it).
+   Returns nil when no enabled service references the fn."
+  [parsed ctx]
+  (let [storage (request/require-storage ctx)
+        fn-row (lookup/resolve-fn storage parsed)
+        fn-id (:id fn-row)]
+    (when fn-id
+      (when-let [conflict (already-running-as-service? storage fn-id)]
+        {:ok false :status :rejected
+         :error "Function is already running as a managed service. Disable the service in /api/entities/service or restart it via /api/services/reconcile."
+         :error-data {:reason :already-running-as-service
+                      :source (:source conflict)
+                      :service-id (:service-id conflict)}}))))
+
+
+(defn- execute-unknown-arg-rej
+  "Guard 6 — every arg name in `:args` must match one of the fn's
+   free-arg slots; an unknown name is a typo that would silently
+   ride through apply-execute (the executor ignores unknown keys
+   in the args map). Reach requires fn-id to be resolved."
+  [parsed ctx]
+  (let [storage (request/require-storage ctx)
+        fn-row (lookup/resolve-fn storage parsed)
+        fn-id (:id fn-row)]
+    (when fn-id
+      (let [free-args (lookup/free-arg-slot-map ctx fn-id)
+            unknown (remove (set (keys free-args))
+                            (map keyword (keys (:args parsed))))]
+        (when (seq unknown)
+          {:ok false :status :rejected
+           :error (str "Unknown arg(s): " (vec unknown))
+           :error-data {:reason :unknown-arg
+                        :unknown unknown
+                        :known (vec (keys free-args))}})))))
+
+
+(defn- execute-malformed-ref-rej
+  "Guard 7 — a `{:ref <str>}` arg-shape whose `:ref` isn't a
+   well-formed UUID used to slip through validation, land in
+   apply-execute as nil, and silently produce nonsense results
+   (`{:args {:nums {:ref \"not-a-uuid\"}}}` against `:add`
+   returned 0 — sum of an empty list — because `:nums` resolved
+   to nil). Reject early with a clean reason."
+  [parsed]
+  (let [malformed (keep (fn [[k v]]
+                          (when (and (persist/ref-arg? v)
+                                     (nil? (persist/parse-ref-fn-id v)))
+                            {:arg (name k) :raw-ref (:ref v)}))
+                        (:args parsed))]
+    (when (seq malformed)
+      {:ok false :status :rejected
+       :error (str "Malformed ref(s) in args: "
+                   (vec (map :arg malformed)))
+       :error-data {:reason :malformed-ref
+                    :malformed (vec malformed)}})))
 
 
 (defn validate-execute
-  "Stage 2 — pre-flight checks. Returns nil when valid, or a
-   `{:ok false :error :error-data}` rejection map.
+  "Stage 2 — pre-flight checks. Returns nil when valid, or the first
+   matching `{:ok false :status :rejected :error :error-data}`
+   rejection. Composes the per-guard helpers above in the same
+   order as the `:_execute-validation` graph `:cond` so the Clojure
+   path (used by direct callers + tests) stays observationally
+   equivalent to the graph path.
 
-   Reasons we reject:
-     :no-fn               — neither fn-id nor fn-name resolves
-     :fn-not-found        — id/name didn't match a fn entity
-     :no-version          — fn has no version row (corrupt state)
-     :timeout-out-of-range — timeout-ms < 1 or > 60000
-     :args-too-large      — serialised args > 256 KB
-     :already-running-as-service — fn-id matches an enabled :service
-                                   row; the reconciler owns it
-     :unknown-arg         — arg name isn't in the fn's free-args
-     :missing-required    — *not enforced here* (the executor itself
-                            throws on missing required slot at run-
-                            time; would duplicate logic to check twice)."
+   Reasons we reject (see per-guard defns for details):
+     :no-fn / :fn-not-found / :timeout-out-of-range / :args-too-large
+     / :already-running-as-service / :unknown-arg / :malformed-ref."
   [ctx parsed]
-  (let [storage (request/require-storage ctx)
-        fn-id (lookup/resolve-fn-id storage parsed)]
-    (cond
-      (and (nil? (:fn-id parsed)) (nil? (:fn-name parsed)))
-      {:ok false :status :rejected :error "Request must carry :fn-id or :fn-name"
-       :error-data {:reason :no-fn}}
-
-      (nil? fn-id)
-      {:ok false :status :rejected :error (str "Function not found: "
-                                               (or (:fn-name parsed) (:fn-id parsed)))
-       :error-data {:reason :fn-not-found}}
-
-      (or (< (:timeout-ms parsed) 1)
-          (> (:timeout-ms parsed) max-timeout-ms))
-      {:ok false :status :rejected :error (str ":timeout-ms must be in [1, " max-timeout-ms "]")
-       :error-data {:reason :timeout-out-of-range :timeout-ms (:timeout-ms parsed)}}
-
-      (> (persist/args-bytes (:args parsed)) persist/max-args-bytes)
-      {:ok false :status :rejected :error (str ":args size exceeds " persist/max-args-bytes " bytes")
-       :error-data {:reason :args-too-large
-                    :bytes (persist/args-bytes (:args parsed))}}
-
-      :else
-      (or (when-let [conflict (already-running-as-service? storage fn-id)]
-            (let [legacy? (= :legacy-fallback (:source conflict))]
-              {:ok false :status :rejected
-               :error (if legacy?
-                        "Function is already running as the boot fallback service. Pod restart required to free its port, or declare a managed :service row + reconcile to take ownership."
-                        "Function is already running as a managed service. Disable the service in /api/entities/service or restart it via /api/services/reconcile.")
-               :error-data (cond-> {:reason :already-running-as-service
-                                    :source (:source conflict)}
-                             (:service-id conflict)
-                             (assoc :service-id (:service-id conflict)))}))
-          (let [free-args (lookup/free-arg-slot-map ctx fn-id)
-                unknown (remove (set (keys free-args))
-                                (map keyword (keys (:args parsed))))]
-            (when (seq unknown)
-              {:ok false :status :rejected :error (str "Unknown arg(s): " (vec unknown))
-               :error-data {:reason :unknown-arg
-                            :unknown unknown
-                            :known (vec (keys free-args))}}))))))
+  (or (execute-no-fn-rej parsed)
+      (execute-fn-not-found-rej parsed ctx)
+      (execute-timeout-out-of-range-rej parsed)
+      (execute-args-too-large-rej parsed)
+      (execute-already-running-rej parsed ctx)
+      (execute-unknown-arg-rej parsed ctx)
+      (execute-malformed-ref-rej parsed)))
 
 
 ;; =============================================================================
@@ -375,29 +422,19 @@
 ;; GET /api/executions parsing (C6 atoms)
 ;; =============================================================================
 
-(defn- query-param
+(defn query-param
   "Pull a named query-string parameter from `request`, tolerating both
    reitit's enriched shapes AND raw http-kit requests that haven't
-   gone through the enrich middleware."
+   gone through the enrich middleware.
+
+   Also surfaced as the `:query-param` base-fn in
+   `web/crud/impls.clj`."
   [request param-name]
   (or (get-in request [:query-params param-name])
       (get-in request [:query-params (keyword param-name)])
       (some->> (:query-string request)
                (re-find (re-pattern (str "(?:^|&)" param-name "=([^&]+)")))
                second)))
-
-
-(defn parse-list-executions-request
-  "Parse the `GET /api/executions` query-string into the bundle the C6
-   `:cond` graph fn-def consumes — `{:fn-id :version-id :limit}`. No
-   validation here; the `_list-exec-no-anchor?` guard rejects when
-   both id-shaped params are nil."
-  [request]
-  {:fn-id (request/parse-uuid-or-clear (query-param request "fn-id"))
-   :version-id (request/parse-uuid-or-clear (query-param request "fn-version-id"))
-   :limit (when-let [raw (query-param request "limit")]
-            (try (Long/parseLong (str raw))
-                 (catch NumberFormatException _ nil)))})
 
 
 (defn apply-list-executions-by-version

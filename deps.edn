@@ -4,13 +4,13 @@
  {org.clojure/clojure {:mvn/version "1.12.5"}
   ;; Logging
   org.clojure/tools.logging {:mvn/version "1.3.1"}
-  ch.qos.logback/logback-classic {:mvn/version "1.5.33"}
+  ch.qos.logback/logback-classic {:mvn/version "1.5.34"}
   ;; Schema validation
   metosin/malli {:mvn/version "0.20.1"}
   ;; PostgreSQL
   org.postgresql/postgresql {:mvn/version "42.7.11"}
   com.github.seancorfield/next.jdbc {:mvn/version "1.3.1108"}
-  com.github.seancorfield/honeysql {:mvn/version "2.7.1368"}
+  com.github.seancorfield/honeysql {:mvn/version "2.7.1388"}
   com.zaxxer/HikariCP {:mvn/version "7.0.2"}
   cheshire/cheshire {:mvn/version "6.2.0"}
   ;; Web
@@ -25,13 +25,21 @@
   ;; (org.quartz.CronExpression). We only depend on the cron-parser
   ;; class, not the Quartz scheduler runtime — graphden's own
   ;; :future + :loop-until-interrupted primitives drive the firing.
-  org.quartz-scheduler/quartz {:mvn/version "2.5.2"}}
+  org.quartz-scheduler/quartz {:mvn/version "2.5.2"}
+  ;; Opt-in nREPL server — booted by `-main` when
+  ;; `GRAPHDEN_NREPL_PORT` is set. Production deployments leave it
+  ;; unset; dev / debugging sessions expose it through compose.
+  nrepl/nrepl {:mvn/version "1.7.0"}}
 
  :aliases
  {:test
   {:extra-paths ["test"]
    :extra-deps
    {lambdaisland/kaocha {:mvn/version "1.91.1392"}
+    ;; Cloverage-via-kaocha — activated only by `bb coverage` (see
+    ;; `tests-coverage.edn`). Plugin stays off in normal `bb test`
+    ;; runs so we don't pay bytecode-instrumentation cost.
+    lambdaisland/kaocha-cloverage {:mvn/version "1.1.89"}
     org.testcontainers/testcontainers {:mvn/version "1.21.4"}
     org.testcontainers/postgresql {:mvn/version "1.21.4"}}}
 

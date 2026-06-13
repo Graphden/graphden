@@ -10,15 +10,26 @@
 
 
 (defbase map-fn [func coll]
-  (if coll
-    (map func coll)
-    (map func)))
+  ;; Eager. nil coll → Clojure's `(map f nil) → ()`. The
+  ;; transducer-form lives in `:map-xf` — separating the two removes
+  ;; the silent "nil coll → transducer" footgun that bit several
+  ;; decomposition call sites.
+  (map func coll))
 
 
 (defbase filter-fn [pred coll]
-  (if coll
-    (filter pred coll)
-    (filter pred)))
+  ;; Eager. See `map-fn`; transducer-form is `:filter-xf`.
+  (filter pred coll))
+
+
+(defbase map-xf-fn [func]
+  ;; Transducer-only form — use via `:transduce` or `:comp`.
+  (map func))
+
+
+(defbase filter-xf-fn [pred]
+  ;; Transducer-only form — see `map-xf-fn`.
+  (filter pred))
 
 
 (defbase reduce-fn [func init coll]
@@ -67,6 +78,8 @@
 (def impls
   {:map map-fn
    :filter filter-fn
+   :map-xf map-xf-fn
+   :filter-xf filter-xf-fn
    :reduce reduce-fn
    :some some-fn
    :every? every?-fn

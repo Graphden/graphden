@@ -1,0 +1,44 @@
+;; Coverage-mode kaocha config. Mirrors `tests.edn` but activates
+;; `:kaocha.plugin/cloverage` (from `lambdaisland/kaocha-cloverage`)
+;; so the coverage instrumentation runs through the kaocha runner —
+;; that way `:kaocha.plugin/parallel` (in-JVM NS parallelism) is also
+;; in effect during coverage runs.
+;;
+;; Activated by `bb coverage` only — `bb test` keeps using `tests.edn`
+;; so day-to-day local runs don't pay the cloverage instrumentation
+;; cost.
+#kaocha/v1
+{:tests
+ [{:id :unit
+   :test-paths ["test"]
+   :skip-meta [:integration]
+   :kaocha/parallelism 8}
+
+  {:id :integration
+   :test-paths ["test"]
+   :focus-meta [:integration]
+   ;; Per-NS logical DBs (shared-container plugin) keep integration
+   ;; tests isolated even when their NSs run on parallel threads.
+   ;; Capped at 4 (see comment in `tests.edn`) — concurrent
+   ;; `GenericContainer.start` calls race on Docker daemon throughput.
+   :kaocha/parallelism 4}]
+
+ :plugins [:kaocha.plugin/profiling
+           :kaocha.plugin/parallel
+           :kaocha.plugin/shared-container
+           :kaocha.plugin/cloverage]
+
+ :cloverage/opts
+ {:ns-regex ["graphden\\..*"]
+  :ns-exclude-regex [".*-test"
+                     ".*contract-tests"
+                     ".*test-helpers"
+                     ".*test-mocks"]
+  ;; ANSI-colour the summary table — red below low-watermark (50%),
+  ;; yellow in between, green at or above high-watermark (80%). The
+  ;; cloverage CLI defaults this to true, but kaocha-cloverage builds
+  ;; its opts map from scratch (no `:cov-colorize` CLI option), so
+  ;; without this explicit key the report comes back uncoloured.
+  :colorize? true
+  :low-watermark 50
+  :high-watermark 80}}

@@ -77,7 +77,7 @@ refuses to drop it.
 | `core/arithmetic` | All 13 fns propagate. `(eq secret 42)` leaks; `:lt` / `:gt` / `:eq` / `:neq` included. |
 | `core/system` | 12 fns propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
 | `core/refinements` | All 7 `:ensure-*` narrowers propagate. |
-| `web/vault` | `:vault-get` declares `[:secret :text]` return directly. |
+| `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |
 
 `web/http-*` and `web/sql` SQL impls are sinks — they don't return
 the input content, they send it as a side-effect. Mark a sink's
@@ -122,7 +122,7 @@ the preview text "hidden — secret-typed".
 ## Admin UX — Secrets panel (B2 / C1 / C2)
 
 The Secrets sidebar section (`editor-secrets.js`) lists every
-fn-def whose `parent-ids` is exactly `[:vault-get]`. Each entry:
+fn-def whose `parent-ids` is exactly `[:secret-leaf]`. Each entry:
 
 - **Name + path** in the row.
 - **Rotate** — opens a popover with a single value field; on submit
@@ -144,7 +144,8 @@ The current pattern (works through every protection layer above):
 
 ```clojure
 ;; admin: create secret via the Secrets panel (path + value)
-;; → graphden auto-creates `_db-password parent :vault-get path:"user-db/password"`
+;; → graphden auto-creates `_db-password parent :secret-leaf path:"user-db/password"`
+;;   (with a `:override-kind :secret-path` binding on `:in`)
 
 ;; user fn-def:
 _my-sql-call
@@ -186,7 +187,7 @@ embed the value internally where impl-side trust is the only path:
 
 | Sink | Secret-aware variant | Slot taking `:secret` |
 |---|---|---|
-| `:http-get` | `:http-get-with-bearer` | `:token` |
+| `:http-get` | `:http-get-with-authorization` | `:auth-value` |
 | `:sql-exec` | `:sql-exec` itself (T6) | `:password` |
 | `:sql-query` | `:sql-query` itself (T6) | `:password` |
 | `:vault-put` | `:vault-put` itself (B) | `:value` |
@@ -194,10 +195,13 @@ embed the value internally where impl-side trust is the only path:
 The split is intentional: plain `:http-get` stays generic-payload
 (`[:map :text :text]` headers, `:text` url) and refuses any secret
 to compose-leak through it. Users who need auth flow MUST go
-through `:http-get-with-bearer`, which makes the auth-bearing
-slot's type EXPLICIT. New auth modes (`:http-get-with-basic-auth`,
-`:http-post-with-bearer`, …) add as needed; each is its own audited
-entry point.
+through `:http-get-with-authorization`, which makes the auth-bearing
+slot's type EXPLICIT. The slot accepts the FULL `Authorization`
+header value (scheme included — `"Bearer xxx"`, `"Basic xxx"`,
+`"Token xxx"`, …) so a single sink covers every scheme, with the
+caller composing the scheme prefix at the graph layer
+(`:str` of `"Bearer "` + the secret-typed token preserves the
+`[:secret :text]` taint through the `:auth-value` boundary).
 
 This is the "B: sink-side capability narrowing" pattern. It doesn't
 prevent the impl from then sending the secret over the wire (that's
@@ -205,7 +209,7 @@ the whole point — auth works), but it FORCES every secret-bearing
 sink to declare itself, so adding a new exfil channel is a visible
 code change, not an accidental composition.
 
-`:extra-headers` on `:http-get-with-bearer` stays plain
+`:extra-headers` on `:http-get-with-authorization` stays plain
 `[:map :text :text]` — a user can't sneak a SECOND secret into the
 headers map under the cover of the legitimate token. Defence-in-
 depth against "one legit auth + one exfil header".
@@ -221,7 +225,7 @@ with `:any` slots (`:assoc`, `:get`, `:conj`, `:select-keys`,
 RESULT type is lifted back into `[:secret …]` and the marker
 round-trips.
 
-Audit of `:any`-slot uses across the standard library (Followup-1):
+Audit of `:any`-slot uses across the standard library:
 
 | Category | Example | Mitigation |
 |---|---|---|
@@ -239,7 +243,7 @@ The only remaining concern is `:throw` — see Known limits.
 1. **Side-effect exfiltration via secret-aware sinks themselves** —
    once a sink declares a `[:secret :text]` slot, it's TRUSTED to
    handle the value responsibly. A malicious impl of
-   `:http-get-with-bearer` could log the token before sending it.
+   `:http-get-with-authorization` could log the token before sending it.
    That's why the secret-aware sink list above is audited — adding
    a new one is a visible code change, not an accidental composition.
    Same trust model as today's `:io` impls: at some point the
@@ -248,49 +252,37 @@ The only remaining concern is `:throw` — see Known limits.
 
 2. **Exception messages can leak through `:throw`** — `:throw`'s
    `:exception :any` slot accepts any value including a string
-   built via `(:str "secret is " <vault-get-ref>)`. The propagator
-   on `:str` lifts the result to `[:secret :text]`; the
+   built via `(:str "secret is " <secret-leaf-ref>)`. The
+   propagator on `:str` lifts the result to `[:secret :text]`; the
    `:exception :any` slot accepts it (escape hatch). At runtime
    the exception fires; the exception MESSAGE embeds the secret.
    `/api/execute` redacts the error string ONLY when the fn-def's
    recorded return-type carries `:secret` (T4) — a fn whose return
    is plain `:int` but which throws-with-secret internally would
-   leak the message. Followup-3 (`secret-flow audit trail`) detects
-   this case at runtime by inspecting whether the execution touched
-   a secret-typed binding transitively; tighter mitigation
-   (rewrite the error message conditionally) is reserved for that
-   pass.
+   leak the message. The audit trail (below) detects this case at
+   runtime by inspecting whether the execution touched a secret-
+   typed binding transitively; tighter mitigation (rewrite the
+   error message conditionally) is reserved for a later pass.
 
 2. **`:any`-typed slots** are the documented escape hatch. A
    `[:secret :text]` value flows into an `:any` slot and the marker
-   is lost. A future T+1 audit could narrow specific `:any` slots
+   is lost. A future audit pass could narrow specific `:any` slots
    to refuse secrets.
 
-3. **Editor still creates `parent :vault-get` fn-defs** for each
-   secret — they appear in the namespace tree with a 🔒 badge.
-   The user's design vision was "secret = binding kind, not fn-def
-   shape"; that refactor (new `:override-kind :secret-path` enum
-   value, executor auto-deref on the binding kind, dedicated value-
-   form pipeline) is its own focused effort. The current model gets
-   the same security properties through the type system, just with
-   a more visible representation.
+3. **`:secret-leaf` is gated at the create path.** A user can't
+   `parent :secret-leaf` directly through `/api/entities/fn` or any
+   other generic create path — the gate in `crud.entities/create-
+   entity` + `apply-create` refuses any `:fn` create whose
+   `:parent-ids` contains the `:secret-leaf` row UNLESS the data
+   carries the `:_admin-secret-create` marker, which only
+   `crud.secrets/create-secret` sets (and strips before the row
+   reaches storage). The Secrets-panel admin path continues to
+   work; everything else gets a 409 / 400 with a pointer to
+   `/api/secrets`. The orthogonal "write any secret from user-graph
+   via `:vault-put`" hole is closed by the same gate covering
+   `:vault-put`, `:vault-delete`, `:vault-metadata-put`.
 
-4. **`:vault-get` is gated at the create path** (Followup-2). A
-   user can't `parent :vault-get` directly through
-   `/api/entities/fn` or any other generic create path — the gate
-   in `crud.entities/create-entity` + `apply-create` refuses any
-   `:fn` create whose `:parent-ids` contains the `:vault-get` row
-   UNLESS the data carries the `:_admin-secret-create` marker,
-   which only `crud.secrets/create-secret` sets (and strips before
-   the row reaches storage). The Secrets-panel admin path
-   continues to work; everything else gets a 409 / 400 with a
-   pointer to `/api/secrets`. The orthogonal "write any secret
-   from user-graph via `:vault-put`" hole would need a parallel
-   capability gate on `parent :vault-put` if `:vault-put` is ever
-   exposed in user-facing flows — currently it's only used
-   internally by `crud.secrets`.
-
-## Audit trail (Followup-3)
+## Audit trail
 
 `:fn-execution.touched-secret?` is set to `true` on rows where
 BOTH halves are satisfied:
@@ -315,24 +307,22 @@ Read access: `GET /api/executions?fn-id=X` returns the flag on
 each row. The future "Secret flows" history tab can filter on
 `touched-secret? = true` to surface just the audit-relevant rows.
 
-## Binding-IS-secret model (Followup-4)
+## Binding-IS-secret model
 
-The architectural target the user articulated early on: the secret
-lives as a TYPED BINDING, not a separate fn-def shape. Implemented
-in three pieces:
+The secret lives as a TYPED BINDING, not a separate fn-def shape.
+Three pieces:
 
-  - **Schema**: new `:secret-path` value in the `:override-kind`
-    enum (`schema/graph/schema.clj`). Persisted alongside the
-    existing `:fixed` / `:default` values.
+  - **Schema**: `:secret-path` value in the `:override-kind` enum
+    (`schema/graph/schema.clj`). Persisted alongside the existing
+    `:fixed` / `:default` values.
 
   - **Executor**: `compile/bindings.clj/classify-slot` recognises
-    `:override-kind :secret-path` and emits a new
-    `:kind :secret-value` shape. `compile.clj/build-args-and-aug`
-    handles `:secret-value` by calling
-    `clients.vault/get-secret` on `(:vault ctx)` with the
-    binding's `:value` field as the path. The dereferenced secret
-    flows into BOTH `:args` (what the impl receives) and `:aug`
-    (so inner ref-chains that reference the slot by ext-name
+    `:override-kind :secret-path` and emits a `:kind :secret-value`
+    shape. `compile.clj/build-args-and-aug` handles `:secret-value`
+    by calling `clients.vault/get-secret` on `(:vault ctx)` with
+    the binding's `:value` field as the path. The dereferenced
+    secret flows into BOTH `:args` (what the impl receives) and
+    `:aug` (so inner ref-chains that reference the slot by ext-name
     receive the same value).
 
   - **Validation gate**: `crud/validation.clj/secret-path-rej`
@@ -343,90 +333,40 @@ in three pieces:
     value would silently flow into a non-secret slot — bypassing
     T1's structural enforcement at runtime.
 
-**Editor UX switch (done)**: the Secrets-panel admin flow now
-writes new secrets with the binding-IS-secret shape:
+The Secrets-panel admin flow writes new secrets with this shape:
 
   - `:secret-leaf` base-fn (in `web/vault/fns.edn`) — a pure
     passthrough whose `:in` slot is `[:secret :text]`. The impl
     just returns its arg; the executor's `:secret-value` case
-    has already dereferenced via vault by the time the impl
-    runs.
+    has already dereferenced via vault by the time the impl runs.
   - `crud/secrets/create-secret` writes
     `parent-ids=[<secret-leaf-id>]` + a binding with
     `:override-kind :secret-path` + `:value=<path>`.
   - `crud.secrets/find-usages`, `delete-secret`, `rotate-secret`
-    accept both legacy `parent :vault-get` AND new
-    `parent :secret-leaf` shapes — `shape/secret-fn?` takes both
-    base-fn ids as args. Existing fn-defs from before the switch
-    keep working through the legacy `:vault-get` impl path; new
-    creates follow the binding-IS-secret model.
-  - `crud.entities/vault-get-capability-rej` gates BOTH base-fns,
-    so user-graph can't `parent :vault-get` OR `parent :secret-leaf`
-    via generic endpoints.
-  - Editor `isSecretFn` (in `editor-secrets.js`) recognises
-    either shape — the 🔒 badge surfaces on legacy fn-defs and
-    new secret-leaf fn-defs alike.
+    accept only the secret-leaf shape — `shape/secret-fn?` takes
+    the secret-leaf id and checks `[secret-leaf-id]` parent-ids.
+  - `crud.entities/secret-leaf-capability-rej` gates
+    `:secret-leaf`, `:vault-put`, `:vault-delete`,
+    `:vault-metadata-put`, so user-graph can't `parent` any of
+    those via generic endpoints.
+  - Editor `isSecretFn` (in `editor-secrets.js`) renders the 🔒
+    badge on every fn-def whose `parent-ids` is exactly
+    `[:secret-leaf]`.
   - `crud.secrets/create-secret` explicitly calls
     `tc/type-check-fn-after-mutation!` on the new fn-def so its
     inherited `[:secret :text]` return-type lands in the rich-
     types registry; otherwise `tainted-fn?` wouldn't see the
     marker and T4's redaction wouldn't fire.
-  - `validation/secret-path-rej` was extended to walk
-    `binding.slot-id → fn-slot.fn-id → fn.name → rich-types[name]
-    → :args → slot-name keyword → :type` and ask
-    `contains-secret?`. The storage layer drops `[:secret T]`
-    down to its inner type's `fn-id` for the `:type-fn-id`
-    foreign key (see `packages/records/types.clj`), so the
-    marker lives only in the rich-types registry on the slot-
-    owning fn-row's args; the validation gate has to read it
-    from there.
+  - `validation/secret-path-rej` walks `binding.slot-id →
+    fn-slot.fn-id → fn.name → rich-types[name] → :args →
+    slot-name keyword → :type` and asks `contains-secret?`. The
+    storage layer drops `[:secret T]` down to its inner type's
+    `fn-id` for the `:type-fn-id` foreign key (see
+    `packages/records/types.clj`), so the marker lives only in
+    the rich-types registry on the slot-owning fn-row's args; the
+    validation gate has to read it from there.
 
-## `:vault-get` deprecation + migration (Followup-A7)
-
-Two secret shapes exist in the codebase:
-
-| Shape | parent-ids | Binding | Status |
-|---|---|---|---|
-| `:vault-get` (legacy) | `[:vault-get]` | plain value-binding on `:path` slot, no `:override-kind` | DEPRECATED — kept readable for back-compat |
-| `:secret-leaf` (current) | `[:secret-leaf]` | `:override-kind :secret-path` on `:in` slot | The shape `create-secret` and the inline-binding form produce |
-
-`GET /api/secrets` surfaces a `:shape` field on every entry
-(`"vault-get"` or `"secret-leaf"`) so an operator can spot legacy
-entries at a glance.
-
-`POST /api/secrets/:fn-id/migrate` (handler:
-`graphden.crud.secrets/migrate-to-secret-leaf`) converts a single
-legacy entry in place. Steps inside the handler:
-
-1. Validate the fn-row's `parent-ids` is exactly `[vault-get-id]` —
-   reject with `:reason :not-legacy-shape` otherwise.
-2. Read the path from the existing binding (`fn-id`, legacy-`:path`-slot).
-3. Delete the legacy binding.
-4. `update-entity :fn` flipping `parent-ids` to `[secret-leaf-id]`.
-5. `create-entity :binding` on the new `:in` slot with
-   `:override-kind :secret-path` and the same path string.
-6. `type-check-fn-after-mutation!` so the new shape's rich-type
-   (with `[:secret :text]` marker) lands in the registry.
-
-Vault contents are not touched — the path stays where it is. The
-order is deliberate: doing the parent-flip before deleting the old
-binding would leave the binding's `slot-id` pointing at a slot the
-new parent doesn't inherit, which the `write-rej` gate rejects.
-
-The handler does NOT roll back mid-sequence. If step 4 or 5 fails,
-the fn-row is in an inconsistent state — caller must re-attempt or
-restore from backup. Justification: failures here are either storage-
-level (a rollback would itself fail symmetrically) or capability-gate
-(the previous state is still intact and no rollback is needed). The
-test suite covers happy-path + two rejection paths
-(`migrate-to-secret-leaf-{happy-path,rejects-non-legacy,not-found}-test`).
-
-The `:vault-get` base-fn is NOT removed from the codebase. Removing
-it requires confirming no legacy entries exist in any deployed
-graphden — which can be checked by querying `/api/secrets` and
-counting `:shape "vault-get"` entries.
-
-## Inline secret-path binding (Followup-A3)
+## Inline secret-path binding
 
 When a slot's declared type is `[:secret T]`, the editor's value-form
 no longer routes through the generic `/api/value-form` path. Instead
@@ -470,4 +410,4 @@ Verified end-to-end in 2026-05-29 smoke:
 | `test/graphden/types/core_test.clj` | `[:secret T]` predicates, well-formed, subtype asymmetry (5 cases), `:any` escape hatch, `:jsonb` non-launder, alias resolution, freshen recursion, `contains-secret?` recursion, `taint-with-secret-if-tainted` propagation rules. |
 | `test/graphden/types/check_test.clj` | `enforce-declared-return!` relaxation for tainted computed against plain declared; tainted ref bubbles into recorded return; clean inputs leave plain; structural leak rejection; auto-promote into secret slot. |
 | `test/graphden/crud/fn_execution_test.clj` | `apply-execute` hides result for `[:secret …]`-return fn-defs; persisted row stores `:result nil + :error-data {:reason :tainted}`. |
-| `test/graphden/integration/secret_flow_test.clj` | End-to-end: vault-get → str-upper composes (recorded return `[:secret :text]`), downstream plain-text sink rejects, plain text into secret slot auto-promotes, secret-ref into secret slot composes. |
+| `test/graphden/integration/secret_flow_test.clj` | End-to-end: secret-leaf → str-upper composes (recorded return `[:secret :text]`), downstream plain-text sink rejects, plain text into secret slot auto-promotes, secret-ref into secret slot composes. |

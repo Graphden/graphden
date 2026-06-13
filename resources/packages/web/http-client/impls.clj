@@ -39,10 +39,10 @@
         resp-body (:body resp)
         resp-error (:error resp)]
     (when resp-error
-      (throw (ex-info (str "HTTP GET " url " failed: " (.getMessage ^Throwable resp-error))
+      (throw (ex-info (str "HTTP GET " url " failed: " (Throwable/.getMessage resp-error))
                       {:type :http-client/request-failed
                        :url url
-                       :cause (.getMessage ^Throwable resp-error)})))
+                       :cause (Throwable/.getMessage resp-error)})))
     {:status (or resp-status 0)
      :headers (or (stringify-header-keys resp-headers) {})
      :body (or resp-body "")}))
@@ -60,19 +60,28 @@
   (do-http-get* url (stringify-header-keys headers)))
 
 
-(defbase http-get-with-bearer
-  [url token extra-headers]
+(defbase http-get-with-authorization
+  "Generalised auth-aware HTTP GET — `:auth-value` is the FULL
+   `Authorization` header value (e.g. `\"Bearer xxx\"`, `\"Token xxx\"`,
+   `\"Basic <b64>\"`) and gets injected directly into the request
+   headers. The slot is `[:secret :text]`, so a secret-typed value
+   accumulated via graph-level `:str` propagation (e.g. from
+   `:vault-get`) is accepted structurally — it never crosses a
+   generic `[:map :text :text]` slot. The slot-typing IS the
+   secret-flow invariant that keeps decomposition safe.
+
+   `:http-get-with-bearer` and any other scheme-specific variant
+   (`:http-get-with-token`, `:http-get-with-basic`, …) are thin
+   graph fn-defs that prepend the scheme keyword to a secret value
+   via `:str` (which propagates `[:secret :text]`) and bind the
+   resulting full auth-value here."
+  [url auth-value extra-headers]
   (cr/record-effect! :network)
-  ;; The secret-aware path: token never crosses a generic `:map`
-  ;; slot — it lands as the Authorization header internally, where
-  ;; impl-side trust is the only path it can take. Extra headers
-  ;; are plain-text and get merged BEFORE the auth header (so the
-  ;; auth header always wins on a key collision).
   (let [extra (or (stringify-header-keys extra-headers) {})
-        headers (assoc extra "Authorization" (str "Bearer " token))]
+        headers (assoc extra "Authorization" auth-value)]
     (do-http-get* url headers)))
 
 
 (def impls
   {:http-get http-get
-   :http-get-with-bearer http-get-with-bearer})
+   :http-get-with-authorization http-get-with-authorization})

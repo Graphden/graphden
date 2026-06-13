@@ -1,0 +1,63 @@
+;; Graph-level recursion via `:fix` — factorial as the canonical
+;; example. `:fix` synthesises a self-referential callable at
+;; runtime; the step fn receives `:self` + `:input` as call-site
+;; args and decides whether to terminate (`:input` zero → return 1)
+;; or recurse (`:invoke :func :self :arg <input - 1>`).
+;;
+;; Cycle invariant is NOT relaxed — no `:fact` → `:fact` ref. The
+;; recursion lives entirely in `:fix-fn`'s impl wiring `:self` to
+;; the step's invocation.
+
+{:namespace "examples.recursion"
+ :description "Graph-level recursion examples. The `:fix` primitive shape: step fn receives `:self` (a 1-arg callable) + `:input` (current value); recurses by `:invoke`-ing `:self` with the next input."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; :ex-factorial — n! via :fix.
+  ;;
+  ;; User invokes `:ex-factorial :n 5` → 120.
+  ;;
+  ;; Wiring: `:ex-factorial :parent :fix` inherits `:fix`'s `:step`
+  ;; (bound to `:_ex-fact-step`) and `:input` (renamed to `:n` so the
+  ;; caller writes `:n 5` not `:input 5`).
+  ;; ---------------------------------------------------------------------
+  {:name :ex-factorial
+   :description "n! computed via `:fix`. Caller binds `:n` (rename of `:fix`'s `:input` slot); recursion runs through `:_ex-fact-step`. Demonstrates the minimum `:fix` shape: rename input + bind step."
+   :parent :fix
+   :args {:step :_ex-fact-step
+          :input {:as :n}}}
+
+  ;; Step fn — receives `:input` (current n) and `:self` (the
+  ;; recursive callable) as call-site args. Body: if n == 0 return
+  ;; 1, else return n * (self (n - 1)).
+  {:name :_ex-fact-step
+   :description "Step fn of `:ex-factorial`. `:if` over base case (`:input` zero) returning 1, else recursive multiply: `n * (self (n-1))`."
+   :parent :if
+   :args {:test :_ex-fact-base-case?
+          :then {:value 1}
+          :else :_ex-fact-recurse}}
+
+  ;; Base-case predicate: input == 0.
+  {:name :_ex-fact-base-case?
+   :description "`(= :input 0)` — terminate recursion."
+   :parent :equal?
+   :args {:a {:as :input} :b {:value 0}}}
+
+  ;; Recursive arm: multiply current input by self(input - 1).
+  {:name :_ex-fact-recurse
+   :description "`n * (self (n - 1))` — the recursive step's multiply."
+   :parent :mul
+   :args {:nums [{:as :input} :_ex-fact-self-call]}}
+
+  ;; Re-enter the recursion: invoke `:self` (a Clojure runtime
+  ;; callable synthesised by `:fix`-fn — `:any`-typed, not a
+  ;; fn-graph) with the next value (input - 1).
+  {:name :_ex-fact-self-call
+   :description "`(:self (- :input 1))` — re-enter the recursion at one step down."
+   :parent :invoke
+   :args {:func {:as :self}
+          :arg :_ex-fact-n-minus-1}}
+
+  {:name :_ex-fact-n-minus-1
+   :description "`:input - 1` — next iteration's input."
+   :parent :sub
+   :args {:nums [{:as :input} {:value 1}]}}]}

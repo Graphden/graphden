@@ -50,10 +50,18 @@
   ;; :sleep — composes cleanly with :cron-next-after (which returns an
   ;; epoch-ms target) without needing intermediate arithmetic.
   ;; ---------------------------------------------------------------------
+  ;; ---------------------------------------------------------------------
+  ;; :sleep-until-ms — kept as a defbase (not decomposed) because the
+  ;; closure-capture / service-eligibility static analysis treats
+  ;; `{:as :target-ms}` inside a `:list` binding as a free arg that
+  ;; persists past the calling chain's `:target-ms`-slot binding,
+  ;; which breaks `:my-cron`'s "no remaining free args" check (see
+  ;; `closure_capture_test.clj`). The defbase keeps `:target-ms` as
+  ;; a regular own slot so the binding chain collapses cleanly.
+  ;; ---------------------------------------------------------------------
   {:name :sleep-until-ms
-   :description "Block until the given epoch-ms target — or return immediately if already past. Honors Thread.interrupt. Composes with `:cron-next-after` for cron-driven loops: target = next-fire-ms, no subtraction required."
-   :args {:target-ms {:type :int
-                      :description "Wall-clock target in epoch milliseconds."}}
+   :description "Block until the given epoch-ms target — or return immediately if already past. Honors Thread.interrupt. Composes with `:cron-next-after` for cron-driven loops."
+   :args {:target-ms {:type :int :description "Wall-clock target in epoch milliseconds."}}
    :return-type :null
    :effects #{:time}}
 
@@ -99,13 +107,36 @@
   ;; daily. The `?` in day-of-week / day-of-month is "no specific value"
   ;; — Quartz requires it when one of the two is `*`.
   ;; ---------------------------------------------------------------------
-  {:name :cron-next-after
-   :description "Pure cron arithmetic — given a cron-6 expression and a current epoch-ms, return the NEXT epoch-ms that satisfies the cron. Use with `:current-time-ms` + `:sub` + `:sleep` to drive a cron loop. Throws `:cron/parse-error` on a malformed expression."
+  {:name :cron-parse
+   :description "Parse a Quartz cron-6 expression (`sec min hr day-of-month mon day-of-week`) into an opaque `CronExpression` handle. Throws `:cron/parse-error` on malformed input. Compose with `:cron-fire-after` for cron-loop driving."
    :args {:cron {:type :text
-                 :description "Quartz cron-6 expression: `sec min hr day-of-month mon day-of-week`."}
+                 :description "Quartz cron-6 expression: `sec min hr day-of-month mon day-of-week`."}}
+   :return-type :any}
+
+  {:name :cron-fire-after
+   :description "Given a parsed `CronExpression` and current epoch-ms, return the NEXT epoch-ms that satisfies the cron. Pure arithmetic over a parsed handle — no string parsing per call."
+   :args {:expr {:type :any
+                 :description "Parsed handle from `:cron-parse`."}
           :now-ms {:type :int
                    :description "Current epoch milliseconds (from `:current-time-ms`)."}}
    :return-type :int}
+
+  ;; Intermediate fn-def needed so `:cron` propagates as a free arg
+  ;; of `:cron-next-after` (and onward to `:schedule`'s closure
+  ;; capture). An inline anon `{:parent :cron-parse :args {:cron {:as
+  ;; :cron}}}` binding wouldn't lift its rename through to the outer
+  ;; fn-def — see `feedback_fn_def_arg_keyword_literal` memory.
+  {:name :_cron-parsed
+   :description "Parse the supplied `:cron` (free arg) into a `CronExpression` handle. Result-cached per top-level invocation."
+   :parent :cron-parse
+   :args {:cron {:as :cron}}}
+
+  {:name :cron-next-after
+   :description "Pure cron arithmetic — given a cron-6 expression and current epoch-ms, return the NEXT epoch-ms that satisfies the cron. Composition: `(cron-fire-after :_cron-parsed now-ms)`. The parse + fire are separated so admins can hoist parsing out of a tight loop by binding `:expr` to `:cron-parse` directly."
+   :parent :cron-fire-after
+   :args {:expr :_cron-parsed
+          :cron {:type :text
+                 :description "Cron-6 expression (sec min hour day mon dow) — parsed via `:_cron-parsed`'s result-cached `:cron-parse`."}}}
 
   ;; ---------------------------------------------------------------------
   ;; :schedule — pure fn-def composition over the concurrency primitives.
@@ -162,4 +193,29 @@
   {:name :_fire-target
    :description "Invoke the captured `:fn` with no arguments. The slot's bare `[:fn {} a]` shape makes the binding-site hof-wrap, capturing the calling scope's `:fn` value."
    :parent :call-noargs
-   :args {:func {:as :fn}}}]}
+   :args {:func {:as :fn}}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Atom primitives — shared mutable accumulator for journalled-write
+  ;; transactions. Companion to `:try` (core.system): a fn-def that
+  ;; creates an atom is referenced by every phase that mutates it AND by
+  ;; the on-throw cleanup; result-caching ensures all references resolve
+  ;; to the SAME atom instance per top-level invocation.
+  ;; ---------------------------------------------------------------------
+
+  {:name :atom
+   :description "Create a fresh `clojure.core/atom` holding `:initial-value`. The same fn-def (referenced multiple times in one composition) hands back the SAME atom instance per top-level call — that's the mechanism that lets every `:try`-body phase share a journal."
+   :args {:initial-value {:type :any
+                          :description "Value the atom starts holding."}}
+   :return-type :any}
+
+  {:name :swap-conj
+   :description "`(swap! :a conj :value)` — append to a vector-holding atom. Returns the new vector. Atomic at the JVM level."
+   :args {:a {:type :any :description "Atom holding a vector."}
+          :value {:type :any :description "Value to conj."}}
+   :return-type :any}
+
+  {:name :deref
+   :description "`@:a` — read the current value of an atom (`clojure.core/deref`)."
+   :args {:a {:type :any :description "Atom to read."}}
+   :return-type :any}]}

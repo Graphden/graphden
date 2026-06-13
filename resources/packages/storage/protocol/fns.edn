@@ -1,0 +1,35 @@
+;; Storage protocol — the abstract contract that concrete storage
+;; implementations (currently `:postgres-storage-impl`, future
+;; backends to come) satisfy.
+;;
+;; This module declares a single record-type-row whose fields are
+;; `:fn`-typed slots — one per abstract operation. Consumers depend
+;; on `:Storage` as a free-arg type; concrete impl is supplied at
+;; the top of the consumer chain (free-arg injection). See
+;; PHILOSOPHY § Self-Describing System → Protocols via type-row.
+
+{:namespace "storage.protocol"
+ :description "Abstract storage contract: type-row :Storage whose :fn-typed slots are the abstract operations a backend must satisfy."
+ :fns
+ [{:name :Storage
+   :description "Storage protocol — contract for application-level storage backends. Bind via free-arg injection at the top of a consumer chain. Concrete implementations parent to this type-row and supply each slot with a concrete callable (e.g. :pg-query for :query)."
+   :type {:query   [:fn {:hsql :jsonb} [:list :jsonb]]
+          :execute [:fn {:hsql :jsonb} :int]
+          :tx      [:fn {:body [:fn {} :any]} :any]}}
+
+  ;; DRY shortcut for the `:query` slot. Replacing `:parent :pg-query`
+  ;; with `:parent :storage-query-call` routes the call through the
+  ;; abstract `:query` slot — the backend is supplied once at the top
+  ;; of the consumer chain (currently `:web-server` → `:pg-query`),
+  ;; not hard-wired per call-site. The free arg `:storage-query`
+  ;; propagates up unbound by virtue of the `:as` rename.
+  ;;
+  ;; The `:execute` / `:tx` slots have no in-graph callers yet, so per
+  ;; YAGNI their `*-call` wrappers stay unwritten until the first
+  ;; caller lands.
+  {:name :storage-query-call
+   :description "Invoke the :query slot of the active :Storage impl with the given HoneySQL bundle. Replaces direct `:parent :pg-query` refs — routes through the abstract slot."
+   :parent :call
+   :args {:func {:as :storage-query
+                 :type [:fn {:hsql :jsonb} [:list :jsonb]]
+                 :description "Storage protocol :query slot. Bound to a concrete impl (e.g. :pg-query) at the top of the consumer chain."}}}]}

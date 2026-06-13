@@ -20,6 +20,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.executor.context :as ctx]
     [graphden.versioning.storage.core :as vs]))
 
@@ -115,7 +116,8 @@
                            :fn-id handler-fn-id
                            :branch-id (vs/current-branch-id
                                         (:storage branch-ctx))})))
-        (closure reg {:request request})))))
+        ;; compile-eager closure signature: `(fn [free-args ctx])`.
+        (closure {:request request} branch-ctx)))))
 
 
 (defn- now-ms
@@ -195,9 +197,10 @@
 (defn- build-actual-entry!
   "Lazy-compile per-branch ctx + Ring callable. Fast path: when the
    branch is graph-identical to its base (no own version rows, no
-   merge edges) we INSTANTIATE the base ctx's templates against the
-   branch's ctx — ~700 closure allocations vs a ~700-fn compile
-   pass. Slow path: full `rebuild!` for the branch.
+   merge edges) we copy the base ctx's compiled registry directly
+   into the branch's ctx — compile-eager closures are ctx-
+   independent, so the same `{fn-id → closure}` map serves both.
+   Slow path: full `rebuild!` for the branch.
 
    No atom writes; caller installs the result."
   [{:keys [base-ctx handler-fn-id]} branch-id]
@@ -207,9 +210,9 @@
         branch-ctx (build-branch-ctx base-ctx branch-id)
         base-storage (vs/unwrap (:storage base-ctx))
         own-content? (branch-has-own-content? base-storage branch-id)
-        base-templates (some-> (:compiled-templates base-ctx) deref)]
-    (if (and (not own-content?) base-templates)
-      ;; Fast path: graph identical → reuse base templates.
+        base-registry (some-> (:compiled-registry base-ctx) deref)]
+    (if (and (not own-content?) base-registry)
+      ;; Fast path: graph identical → reuse base registry.
       (instantiate base-ctx branch-ctx)
       ;; Slow path: branch differs from base → full compile.
       (rebuild! branch-ctx))
@@ -315,17 +318,11 @@
 ;; =============================================================================
 
 (defn- resolve-handler-fn-id
-  "Look up the top-level Ring handler fn by name in base storage.
-   Codec ambiguity (text vs enum-tagged) is handled by trying both
-   forms — same pattern as `system/core/resolve-fn-id-by-name`."
+  "Look up the top-level Ring handler fn by name in base storage."
   [base-storage handler-fn-name]
-  (let [storage (vs/unwrap base-storage)
-        sp-query (requiring-resolve 'graphden.storage.protocol.core/query-entities)
-        try-one (fn [v]
-                  (try (some-> (first (sp-query storage :fn {:name v})) :id)
-                       (catch clojure.lang.ExceptionInfo _ nil)))]
-    (or (try-one handler-fn-name)
-        (try-one (keyword handler-fn-name)))))
+  (fn-lookup/query-fn-id-by-name (vs/unwrap base-storage)
+                                 handler-fn-name
+                                 true))
 
 
 (defn create-router
@@ -430,9 +427,9 @@
 ;; Process-wide singleton — the only knob `web.ring-adapter/branch-routing-wrap`
 ;; base-fn impl needs to reach the router from inside a compiled fn-graph.
 ;; Mirrors the pattern used by `graphden.services.reconciler` for its
-;; `running` / `legacy-handle` atoms — system-level state that doesn't fit
-;; cleanly inside ctx (because the ctx is closed in at compile time, before
-;; the router exists).
+;; `running` atom — system-level state that doesn't fit cleanly inside
+;; ctx (because the ctx is closed in at compile time, before the
+;; router exists).
 ;; =============================================================================
 
 (defonce ^{:doc "Active BranchRouter for this JVM. Set by the

@@ -66,8 +66,8 @@ function metadataStripsHeight(nodeData) {
   // there's an explicit `:return-type` on the entity, OR when
   // `richTypes` carries a computed entry for this name.
   const hasRtEntry = !!fn.name
-    && typeof richTypes === 'object' && richTypes
-    && richTypes[fn.name] && richTypes[fn.name].return != null;
+    && typeof richTypes === 'object' 
+    && richTypes?.[fn.name] && richTypes[fn.name].return != null;
   const isNavRoot = !nodeData.isPlaceholder && nodeData.isRoot;
   const rtEditable = isNavRoot
     && (typeof isFnEditable === 'function' && isFnEditable(fnId))

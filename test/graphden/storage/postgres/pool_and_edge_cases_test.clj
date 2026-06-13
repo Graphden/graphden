@@ -1,4 +1,4 @@
-(ns graphden.storage.postgres.pool-and-edge-cases-test
+(ns ^:serial graphden.storage.postgres.pool-and-edge-cases-test
   "Tests for PostgreSQL storage pool management, timeouts, and edge cases."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]

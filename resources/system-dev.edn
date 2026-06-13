@@ -16,9 +16,22 @@
  :db/versioned
  {:base-storage #ig/ref :db/postgres}
 
+ ;; Cross-process events (mirrors system-prod.edn block).
+ :db/notify-listener
+ {:pg-opts
+  {:jdbc-url #or [#env GRAPHDEN_JDBC_URL "jdbc:postgresql://localhost:5434/graphden"]
+   :username #or [#env GRAPHDEN_DB_USER "graphden"]
+   :password #or [#env GRAPHDEN_DB_PASSWORD "graphden"]}}
+
+ :db/service-locks
+ {:pg-opts
+  {:jdbc-url #or [#env GRAPHDEN_JDBC_URL "jdbc:postgresql://localhost:5434/graphden"]
+   :username #or [#env GRAPHDEN_DB_USER "graphden"]
+   :password #or [#env GRAPHDEN_DB_PASSWORD "graphden"]}}
+
  ;; Load packages from resources/packages/
  :app/packages
- {:package-names ["core" "web" "app" "examples"]}
+ {:package-names ["core" "storage" "web" "app" "examples"]}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned
@@ -37,7 +50,9 @@
 
  :exec/context
  {:storage #ig/ref :db/versioned
-  :vault-client #ig/ref :vault/client}
+  :vault-client #ig/ref :vault/client
+  :pg-storage #ig/ref :db/postgres
+  :base-fns #ig/ref :exec/base-fns}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on
  ;; fn-entities so every composed fn is already in storage before we
@@ -52,11 +67,12 @@
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
 
- ;; Phase 1 service registry — see system-prod.edn for the full
- ;; rationale. Fallback to packages' :startup-fn when no rows exist.
+ ;; Service registry — see system-prod.edn for the full rationale.
  :exec/service-reconciler
  {:context #ig/ref :exec/context
   :packages #ig/ref :app/packages
+  :notify-listener #ig/ref :db/notify-listener
+  :service-locks #ig/ref :db/service-locks
   :_compiled-registry #ig/ref :exec/compiled-registry
   :_branch-router #ig/ref :exec/branch-router}
 

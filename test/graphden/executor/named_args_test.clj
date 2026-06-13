@@ -239,7 +239,8 @@
           ;; Create my-map base fn
           map-base (setup/create-base-fn! storage "my-map" :jsonb)
           map-arg-f (setup/create-arg! storage (:id map-base)
-                                       {:name "f" :type :fn :required true})
+                                       {:name "f" :type [:fn {:item :int} :int]
+                                        :required true})
           map-arg-coll (setup/create-arg! storage (:id map-base)
                                           {:name "coll" :type :jsonb :required true})
           ;; Create recorder base fn with exactly 1 required arg
@@ -252,7 +253,8 @@
           map-fn (setup/create-composed-fn! storage "map-fn" (:id map-base))
           ;; map-fn's f -> rec-fn via ref-id (is-fn=true passes fn-id)
           _ (setup/create-arg! storage (:id map-fn)
-                               {:name "f" :type :fn :required true
+                               {:name "f" :type [:fn {:item :int} :int]
+                                :required true
                                 :source-id (:id map-arg-f) :ref-id (:id rec-fn)})
           ;; map-fn's coll -> [1 2 3]
           _ (setup/create-arg! storage (:id map-fn)

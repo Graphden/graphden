@@ -381,7 +381,7 @@
    field is legitimately covered by another branch, so the lookup is
    structurally valid; the result for THIS branch is the default's
    type (or `:null` when no default is bound)."
-  [coll-type bindings-info default-ret default-bound? dflt field-kw in-union?]
+  [coll-type default-ret default-bound? dflt field-kw in-union?]
   (cond
     ;; `:null` coll → returns the default's type (or `:null`). This
     ;; mirrors Clojure's `(get nil k d)` → `d`. Most useful inside
@@ -453,11 +453,11 @@
       ;; record-type? checks never fired on the union itself.
       (->> (types/union-members coll-type)
            (mapv (fn [member]
-                   (get-return-for-coll-type member bindings-info default-ret
+                   (get-return-for-coll-type member default-ret
                                              default-bound? dflt field-kw
                                              true)))
            types/make-union)
-      (get-return-for-coll-type coll-type bindings-info default-ret
+      (get-return-for-coll-type coll-type default-ret
                                 default-bound? dflt field-kw false))))
 
 

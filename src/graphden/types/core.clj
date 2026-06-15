@@ -1285,9 +1285,22 @@
       ;; value when the map's key type admits keywords and every field
       ;; value fits the map's value type — lets a literal map (which
       ;; classifies as a record) bind into a `[:map …]`-typed slot.
+      ;;
+      ;; Typevar slots in `(map-key sup)` / `(map-val sup)` accept
+      ;; unconditionally: a fresh typevar at a parametric slot like
+      ;; `:merge`'s `:maps [:list [:map a :any]]` represents
+      ;; "anything the call-site picks for `a`"; the record's
+      ;; concrete `:keyword` key (or each concrete field type) is a
+      ;; satisfying assignment. Without this, every record-bound-to-
+      ;; HOF-typed-map-slot site rejected during the sweep — e.g.
+      ;; `_value-form-root-attrs`'s `{:data-binding-id :text}`
+      ;; against `:merge :maps` declared `[:list [:map a :any]]`.
       (and (record-type? sub) (map-type? sup))
-      (and (subtype? :keyword (map-key sup))
-           (every? #(subtype? % (map-val sup)) (vals sub)))
+      (let [k-ok? (or (type-var? (map-key sup))
+                      (subtype? :keyword (map-key sup)))
+            v-ok? (or (type-var? (map-val sup))
+                      (every? #(subtype? % (map-val sup)) (vals sub)))]
+        (and k-ok? v-ok?))
       (and (fn-type? sub) (fn-type? sup))      (fn-subtype? sub sup)
       :else                                    false)))
 

@@ -1124,7 +1124,10 @@
   {:name :_enrich-running-shape
    :description "4-field JSON shape — `{:stopper-set? :started-at :start-attempts :start-failed-at}`. Admins can reparent / reorder to vary the response shape."
    :parent :zipmap
-   :return-type :jsonb
+   :return-type {:stopper-set? :bool
+                 :started-at [:union :null :text]
+                 :start-attempts :any
+                 :start-failed-at [:union :null :text]}
    :args {:keys [{:value :stopper-set?} {:value :started-at} {:value :start-attempts} {:value :start-failed-at}]
           :vals [:_enrich-running-stopper-set?
                  :_enrich-running-started-at

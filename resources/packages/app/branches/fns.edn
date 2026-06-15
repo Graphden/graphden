@@ -991,7 +991,7 @@
 
   {:name :_delete-branch-apply-response
    :parent :zipmap
-   :return-type :jsonb
+   :return-type {:ok :bool :id :text :name :any}
    :args {:keys [{:value :ok} {:value :id} {:value :name}]
           :vals [{:value true}
                  {:parent :to-str :args {:value :_delete-branch-id}}
@@ -1024,13 +1024,13 @@
 
   {:name :_delete-branch-err-main
    :parent :const
-   :return-type :jsonb
+   :return-type :_error-result-with-reason-shape
    :args {:value {:ok false :reason :main-branch-undeletable
                   :error "Cannot delete the main branch"}}}
 
   {:name :_delete-branch-err-children
    :parent :zipmap
-   :return-type :jsonb
+   :return-type {:ok :bool :reason :keyword :error :text :child-branch-ids [:list :text]}
    :args {:keys [{:value :ok} {:value :reason} {:value :error} {:value :child-branch-ids}]
           :vals [{:value false}
                  {:value :branch-has-children}
@@ -1040,7 +1040,7 @@
   {:name :_delete-branch-err-not-found
    :description "Cites the raw branch-ref. Mirrors the `_delete-branch-err-missing` shape from the parse-time guard but is the exception-surfaced flavour."
    :parent :zipmap
-   :return-type :jsonb
+   :return-type :_error-result-with-reason-shape
    :args {:keys [{:value :ok} {:value :reason} {:value :error}]
           :vals [{:value false}
                  {:value :not-found}
@@ -1058,7 +1058,7 @@
 
   {:name :_delete-branch-err-generic
    :parent :zipmap
-   :return-type :jsonb
+   :return-type :_error-result-shape
    :args {:keys [{:value :ok} {:value :error}]
           :vals [{:value false} :_delete-branch-err-generic-msg]}}
 
@@ -1508,9 +1508,23 @@
           :coll {:parent :get :args {:coll :_merge-apply-ex-data :key {:value :conflicts} :default []}}}}
 
   {:name :_merge-apply-err-conflict
-   :description "Merge-conflict envelope — `{:ok false :reason :merge-conflict :error \"…\" :target :source :conflicts [...]}`. Returns opaque `:jsonb` so `:case` unifies cleanly with the generic-error sibling."
+   :description "Merge-conflict envelope — `{:ok false :reason :merge-conflict :error \"…\" :target :source :conflicts [...]}`."
    :parent :zipmap
-   :return-type :jsonb
+   :return-type {:ok :bool
+                 :reason :keyword
+                 :error :text
+                 :target {:id [:union :null :text]
+                          :name :any
+                          :base-branch-id [:union :null :text]
+                          :created-at [:union :null :text]}
+                 :source {:id [:union :null :text]
+                          :name :any
+                          :base-branch-id [:union :null :text]
+                          :created-at [:union :null :text]}
+                 :conflicts [:list {:entity-name :any
+                                    :entity-id :text
+                                    :source-version :jsonb
+                                    :target-version :jsonb}]}
    :args {:keys [{:value :ok} {:value :reason} {:value :error}
                  {:value :target} {:value :source} {:value :conflicts}]
           :vals [{:value false}
@@ -1528,7 +1542,7 @@
 
   {:name :_merge-apply-err-generic
    :parent :zipmap
-   :return-type :jsonb
+   :return-type :_error-result-shape
    :args {:keys [{:value :ok} {:value :error}]
           :vals [{:value false} :_merge-apply-err-generic-msg]}}
 

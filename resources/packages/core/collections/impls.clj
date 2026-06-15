@@ -914,6 +914,52 @@
 ;; value (rare here, since sequence args travel through arg-chain) or
 ;; fall through to default.
 
+(defn- get-in-walk
+  "Walk one non-union `t` through `segs` (a sequence of literal
+   keyword/string keys). Returns the deeply-nested type, or
+   `default-ret` on the first non-record / non-map / missing-key
+   step. `nullable?` accumulates: any `[:map K V]` intermediate
+   makes the final result nullable (key may be absent there).
+
+   Encountering a union mid-walk fans out: each member is walked
+   with the remaining segs and the results are unioned. `:null`
+   members of the union narrow to a `:null` leaf — `(get-in nil
+   anything)` is nil regardless of the path."
+  [t segs nullable? default-ret]
+  (cond
+    (empty? segs)
+    (if nullable? (types/make-union [:null t]) t)
+
+    (= :null t) :null
+
+    (types/union-type? t)
+    (->> (types/union-members t)
+         (mapv #(get-in-walk % segs nullable? default-ret))
+         types/make-union)
+
+    (types/record-type? t)
+    (let [k (field-keyword-from-literal (first segs))]
+      (if (and k (contains? t k))
+        (get-in-walk (get t k) (rest segs) nullable? default-ret)
+        default-ret))
+
+    (types/map-type? t)
+    (get-in-walk (types/map-val t) (rest segs) true default-ret)
+
+    :else default-ret))
+
+
+;; --- :get-in ----------------------------------------------------------------
+;; Walk a record by literal-key path. When the path is a sequence of
+;; literal keys AND every intermediate is a record, return the
+;; deeply-nested field type. Any non-record intermediate or non-literal
+;; key falls back to default.
+;;
+;; The `:path` arg is a `:sequence`-typed slot — bindings-info has its
+;; literal items collected by check-fn-def!. We accept either a vector
+;; value (rare here, since sequence args travel through arg-chain) or
+;; fall through to default.
+
 (defn get-in-return-rule
   [bindings-info default-ret]
   (let [m-type    (get-in bindings-info [:map :type])
@@ -926,21 +972,7 @@
       ;; total) keep nullability false; navigating off a known record
       ;; (missing field) falls through to default — the typo path
       ;; the per-record rule already exercises.
-      (loop [t m-type, segs path-val, nullable? false]
-        (cond
-          (empty? segs)
-          (if nullable? (types/make-union [:null t]) t)
-
-          (types/record-type? t)
-          (let [k (field-keyword-from-literal (first segs))]
-            (if (and k (contains? t k))
-              (recur (get t k) (rest segs) nullable?)
-              default-ret))
-
-          (types/map-type? t)
-          (recur (types/map-val t) (rest segs) true)
-
-          :else default-ret))
+      (get-in-walk m-type path-val false default-ret)
       default-ret)))
 
 

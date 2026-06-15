@@ -482,6 +482,31 @@
                                 :any)))))
 
 
+(deftest get-in-through-union-of-null-and-record-narrows
+  (testing "[:union :null record] entry → [:union :null field-type]"
+    ;; Mirrors :get's union narrowing — same production-shape case
+    ;; for the deep-walk variant. Without this, the entire union
+    ;; opaqued out to default-ret (:any) because neither
+    ;; record-type? nor map-type? fired on the union itself.
+    (is (= (t/make-union [:null :text])
+           (compute-return-type :get-in
+                                {:map  {:type [:union :null {:user {:name :text}}]}
+                                 :path {:type :sequence :value [:user :name]}}
+                                :any)))))
+
+
+(deftest get-in-through-mid-walk-union-fans-out
+  (testing "a union encountered mid-walk recurses each branch with the remaining path"
+    ;; Outer record's :v is a union of two records; both have a :k
+    ;; field, but with different types. The walk continues through
+    ;; the union and unions the leaf types.
+    (is (= (t/make-union [:text :int])
+           (compute-return-type :get-in
+                                {:map  {:type {:v [:union {:k :text} {:k :int}]}}
+                                 :path {:type :sequence :value [:v :k]}}
+                                :any)))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; :take / :drop / :reverse / :sort / :distinct — preserve list elem-type
 

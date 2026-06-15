@@ -297,3 +297,38 @@
       (Thread/.join t 500)
       (is (not (Thread/.isAlive t))
           "non-blocking loop body also exits cleanly on interrupt"))))
+
+
+;; ============================================================================
+;; :schedule / :future — service-eligibility marker chain (`:process` effect)
+;;
+;; Production reconciler classifies any composed fn-def whose effective
+;; rich-type carries `:process` as service-eligible. `:schedule` (composed)
+;; gets it by inheriting from `:future` (declared). Lift used to be
+;; covered by the old `cron-schedule-runtime-test` integration NS, which
+;; paid ~85s of full :dev-system bootstrap just to read one declarative
+;; field; pulled here as a fast structural assertion on the fn-def
+;; data. The `fn? stopper-thunk` check that ran beside it lives — and
+;; always lived — in `cron-schedule-service-test` (it's verified on
+;; line 125: `(is (fn? (-> @running vals first :stopper)))`).
+;; ============================================================================
+
+(deftest schedule-inherits-process-effect-from-future-test
+  (testing ":future declares :process; :schedule parents from :future — the
+            inheritance is what makes `{:parent :schedule}` fn-defs
+            service-eligible without per-fn-def re-declaration."
+    (let [pkg ((requiring-resolve 'graphden.packages.loader/load-packages)
+               ["core"])
+          ;; `:future` is a BASE-fn (declared with a Clojure impl), so it
+          ;; lives in `:base-fn-defs`. `:schedule` is a COMPOSED fn-def
+          ;; (no impl, all graph), so it's in `:fn-defs`.
+          future-def (get (:base-fn-defs pkg) :future)
+          composed (:fn-defs pkg)
+          schedule-def (first (filter #(= :schedule (:name %)) composed))]
+      (is (some? future-def) ":future base-fn present in core.concurrency")
+      (is (some? schedule-def) ":schedule composed fn-def present in core.concurrency")
+      (is (contains? (set (:effects future-def)) :process)
+          ":future declares :process — the service-eligibility marker")
+      (is (= :future (:parent schedule-def))
+          ":schedule's single parent IS :future — the effect propagates by
+           inheritance, no per-derivative re-declaration needed"))))

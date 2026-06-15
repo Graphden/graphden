@@ -40,7 +40,9 @@
 ;; structural type `[:fn {} a]` makes the binding-site hof-wrap with
 ;; variadic-ignore semantics (closure-capture; docs/CLOSURE_CAPTURE.md).
 ;; This unit test exercises the impl in isolation — the wrap mechanism
-;; is covered by cron-schedule-runtime-test.
+;; is covered end-to-end by `cron-schedule-service-test` (the full
+;; closure-capture chain through `:schedule` → `:future` → `:_fire-target`
+;; → `:call-noargs`).
 ;; ============================================================================
 
 (deftest call-noargs-invokes-the-callable-test

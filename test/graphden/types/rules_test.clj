@@ -277,6 +277,30 @@
                                 :any)))))
 
 
+(deftest get-on-union-of-null-and-record-narrows-through-branches
+  (testing "[:union :null record] with a key in record + :default nil →
+           [:union :null field-type] (was :any before union handling)"
+    ;; This is the production-shape case: `:resolve-branch-ref` etc.
+    ;; return `[:union :null record]`; consumers `:get :default nil` a
+    ;; field on the row. Pre-extension the union opaqued to :any.
+    (is (= (t/make-union [:null :text])
+           (compute-return-type :get
+                                {:coll    {:type [:union :null {:name :text :age :int}]}
+                                 :key     {:type :text :value "name"}
+                                 :default {:type :null :value nil}}
+                                :any)))))
+
+
+(deftest get-on-union-of-two-records-unions-field-types
+  (testing "[:union record-A record-B] with key present in BOTH branches →
+           [:union A[key] B[key]]"
+    (is (= (t/make-union [:text :int])
+           (compute-return-type :get
+                                {:coll {:type [:union {:k :text} {:k :int}]}
+                                 :key  {:type :text :value "k"}}
+                                :any)))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; :update-in — return preserves m's shape; literal :path validated
 ;; against m's record structure (typo-catching, mirrors :get).

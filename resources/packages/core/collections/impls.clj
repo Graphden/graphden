@@ -367,6 +367,68 @@
 ;; Look up a field by literal key. Returns the field's type when `:m`
 ;; is a known record AND the field exists.
 
+(declare get-return-rule)
+
+
+(defn- get-return-for-coll-type
+  "Per-branch `:get` typing — given ONE non-union `coll-type`, compute
+   the result-type for `(get coll key default)`. Pulled out so the
+   top-level rule can iterate union members and union their results
+   without losing record-narrowing on each branch.
+
+   Union-branch context (`:in-union? true`) suppresses the
+   missing-field-on-known-record throw — inside a union, the absent
+   field is legitimately covered by another branch, so the lookup is
+   structurally valid; the result for THIS branch is the default's
+   type (or `:null` when no default is bound)."
+  [coll-type bindings-info default-ret default-bound? dflt field-kw in-union?]
+  (cond
+    ;; `:null` coll → returns the default's type (or `:null`). This
+    ;; mirrors Clojure's `(get nil k d)` → `d`. Most useful inside
+    ;; unions like `[:union :null record]`.
+    (= :null coll-type)
+    (if default-bound? (or (:type dflt) default-ret) :null)
+
+    ;; Homogeneous map — no fixed fields, so key presence is
+    ;; unknowable at sync time: a lookup is value-or-default, or
+    ;; value-or-nil when no default is bound.
+    (types/map-type? coll-type)
+    (let [v (types/map-val coll-type)]
+      (if default-bound?
+        (types/make-union [v (or (:type dflt) :any)])
+        (types/make-union [:null v])))
+
+    (nil? field-kw) default-ret
+
+    (and (types/record-type? coll-type) (contains? coll-type field-kw))
+    (get coll-type field-kw)
+
+    ;; Field missing from a KNOWN record BUT `:default` is bound —
+    ;; absence is explicitly handled, so the lookup is intentional,
+    ;; not a typo. The result is unconditionally the default's type.
+    (and (types/record-type? coll-type) default-bound?)
+    (or (:type dflt) default-ret)
+
+    ;; Field missing from a KNOWN record, no `:default`. Top-level:
+    ;; that's a typo, throw with the field list. Union-branch:
+    ;; another union member presumably covers this, so fall back to
+    ;; `:null` (the implicit no-default semantics).
+    (types/record-type? coll-type)
+    (if in-union?
+      :null
+      (throw (ex-info (str ":get — field "
+                           (pr-str field-kw)
+                           " not found in record. Available: "
+                           (pr-str (sort (keys coll-type))))
+                      {:type :types/check-failed
+                       :rule :get
+                       :reason :missing-field
+                       :field field-kw
+                       :record coll-type})))
+
+    :else default-ret))
+
+
 (defn get-return-rule
   [bindings-info default-ret]
   (let [coll-type (get-in bindings-info [:coll :type])
@@ -382,44 +444,21 @@
         default-bound? (boolean (and dflt
                                      (or (some? (:value dflt))
                                          (some? (:ref dflt)))))]
-    (cond
-      ;; Homogeneous map — no fixed fields, so key presence is
-      ;; unknowable at sync time: a lookup is value-or-default, or
-      ;; value-or-nil when no default is bound.
-      (types/map-type? coll-type)
-      (let [v (types/map-val coll-type)]
-        (if default-bound?
-          (types/make-union [v (or (:type dflt) :any)])
-          (types/make-union [:null v])))
-
-      (nil? field-kw) default-ret
-
-      (and (types/record-type? coll-type) (contains? coll-type field-kw))
-      (get coll-type field-kw)
-
-      ;; Field missing from a KNOWN record BUT `:default` is bound —
-      ;; absence is explicitly handled, so the lookup is intentional,
-      ;; not a typo. The result is unconditionally the default's type.
-      (and (types/record-type? coll-type) default-bound?)
-      (or (:type dflt) default-ret)
-
-      ;; Field literally missing from a KNOWN record, no `:default`.
-      ;; The user wrote a literal key that doesn't exist in the
-      ;; record's known fields and gave no fallback — that's a typo,
-      ;; not a runtime case. Throw with the available field list so
-      ;; the user can spot the misspelling.
-      (types/record-type? coll-type)
-      (throw (ex-info (str ":get — field "
-                           (pr-str field-kw)
-                           " not found in record. Available: "
-                           (pr-str (sort (keys coll-type))))
-                      {:type :types/check-failed
-                       :rule :get
-                       :reason :missing-field
-                       :field field-kw
-                       :record coll-type}))
-
-      :else default-ret)))
+    (if (types/union-type? coll-type)
+      ;; Union — narrow each member individually and union the
+      ;; results. E.g. `:coll [:union :null record]` with a literal
+      ;; key looking up a record field, `:default nil` →
+      ;; `[:union :null <field-type>]`. Without this, the entire
+      ;; union opaqued out to `default-ret` (`:any`) because the
+      ;; record-type? checks never fired on the union itself.
+      (->> (types/union-members coll-type)
+           (mapv (fn [member]
+                   (get-return-for-coll-type member bindings-info default-ret
+                                             default-bound? dflt field-kw
+                                             true)))
+           types/make-union)
+      (get-return-for-coll-type coll-type bindings-info default-ret
+                                default-bound? dflt field-kw false))))
 
 
 ;; --- :merge -----------------------------------------------------------------

@@ -53,10 +53,41 @@
 ;; Sync — single entry point for any record bundle
 ;; =============================================================================
 
+(defn- distinct-by-id
+  "Stateful transducer — emit only the first row per `:id` seen."
+  []
+  (fn [rf]
+    (let [seen (volatile! #{})]
+      (fn
+        ([] (rf))
+        ([result] (rf result))
+        ([result input]
+         (let [id (:id input)]
+           (if (contains? @seen id)
+             result
+             (do (vswap! seen conj id)
+                 (rf result input)))))))))
+
+
 (defn- group-records-by-kind
+  "Bucket records by `:kind`, then DEDUPE each bucket by `:id`.
+
+   The parser emits a deterministic anon-fn row for every inline
+   composite type — `(ids/anonymous-fn-id (ids/shape-hash shape))` —
+   so two fn-defs that declare structurally identical
+   `:return-type {…}` (or use the same inline `[:fn …]` slot type)
+   produce identical rows with the same id. The downstream
+   `sp/upsert-entities` calls `validate-no-duplicate-ids!` which
+   throws on duplicate keys; deduping here keeps the parser's
+   per-fn emission tidy while the storage write sees one row per
+   identity. Identical-by-id rows are semantically the same node,
+   so first-wins is safe."
   [records]
-  (reduce (fn [acc r] (update acc (:kind r) (fnil conj []) r))
-          {} records))
+  (let [grouped (reduce (fn [acc r] (update acc (:kind r) (fnil conj []) r))
+                        {} records)]
+    (update-vals grouped
+                 (fn [rows]
+                   (into [] (distinct-by-id) rows)))))
 
 
 (defn- prep-fn-rows

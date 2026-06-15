@@ -18,6 +18,61 @@ future type-system pass can pick them up.
 
 Sweep count: **13 → 0** (2026-05-29 baseline).
 
+## 2026-06-16 — sweep regressed to 12 (control-flow narrowing gap)
+
+After the CRUD apply-stage decomposition (Phase 4.2 — splitting
+`_create-apply` / `_update-apply` / `_delete-apply` into separate
+`-result` / `-existing` / `-do-invalidate` / `-do-notify` /
+`-do-delete` nodes), the type-check sweep started reporting **12
+fn-defs failed** at startup. Captured 2026-06-16 by temporarily
+promoting the per-fn `log/debug` to `log/warn` in
+`system.core/sync-fn-entities-from-packages!`.
+
+### Failure pattern (11 of 12)
+
+`expected :text, actual [:union :null :text]` on `:entity-type`
+slot. The 11 affected fn-defs:
+
+* `:_create-apply-result` / `-do-invalidate` / `-do-notify`
+* `:_update-apply-result` / `-do-invalidate` / `-do-notify`
+* `:_delete-apply-existing` / `-do-delete` / `-do-invalidate` /
+  `-do-notify`
+
+Root cause: each binds `:entity-type :_X-apply-entity-type-str`
+where `:_X-apply-entity-type-str = (:name (:get :parsed
+:entity-type :default nil))`. `:name`'s declared return is
+`[:union :null :text]` (because `(name nil)` is `nil`); the chain
+through `:any`-typed `(:get …)` doesn't narrow. The downstream
+slot expects strict `:text`.
+
+The `:_create-apply` outer `:if` already guards the success path
+(`:else`) by checking `:_create-apply-error?` — when control
+reaches `-do-invalidate`, `:entity-type` IS non-nil. But the
+type-checker doesn't propagate `:if`-guard knowledge through
+branches.
+
+### Failure 12 — `:_value-form-root-attrs`
+
+`expected [:map a :any], actual {:data-binding-id :text}`. `:merge`'s
+:maps slot expects a homogeneous map; the binding's computed type is
+a single-field record. The two are structurally compatible at
+runtime but the type-checker doesn't accept `record-type ⊆ [:map K
+V]`. Adjacent to the record/map subtype work in B8.
+
+### Fix paths (deferred)
+
+* **Control-flow narrowing via `:if`/`:case` guard propagation** —
+  the principled fix. Substantial type-system change.
+* **Mechanical `:coalesce`-with-sentinel** — wrap each
+  entity-type-str chain with `:coalesce :default :_unknown` to
+  strip null. Runtime never hits the default (guarded upstream), but
+  pollutes the type-spec and semantically lies.
+* **`record-type ⊆ [:map K V]` subtype rule** — fixes the
+  `:_value-form-root-attrs` case. Pure type-system addition.
+
+All 12 surface only as missing editor effect/return strips — runtime
+is unaffected. Holding for a focused type-system iteration.
+
 ## In-session pass (2026-06-07): sweep count 74 → 0 (-100 %)
 
 13 fixes landed across `types/check.clj`, `types/core.clj`,

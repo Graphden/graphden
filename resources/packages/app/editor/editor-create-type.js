@@ -971,6 +971,15 @@ async function putTypeEdit(kind, fnId, name, payload) {
     return r;
   }
   const form = Object.assign({ name, description: desc }, payload.body);
+  // PUT /api/entities/fn/:id reads `element-fn-id` from the form (the
+  // resolver under the hood accepts UUID-or-name). The create-side
+  // payload uses `element-type` because POST /api/types/list takes a
+  // distinct JSON-body key; rename so the same builder works for the
+  // edit path.
+  if (payload.kind === 'list' && form['element-type'] != null) {
+    form['element-fn-id'] = form['element-type'];
+    delete form['element-type'];
+  }
   const r = await authMutate('PUT',
     '/api/entities/fn/' + encodeURIComponent(fnId), form);
   if (!(r.status >= 200 && r.status < 300)) {

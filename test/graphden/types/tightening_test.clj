@@ -110,6 +110,12 @@
 ;; Behavioural tests — feed values through check-fn-def! to prove the
 ;; declarations are enforced.
 
+;; `with-isolated-rich-types` keeps the synthetic `:get-in` / `:dissoc`
+;; / `:stub-bool-fn` shapes this ns writes from leaking into
+;; sibling integration tests (see check-test for the same rationale).
+(use-fixtures :once exec/with-isolated-rich-types)
+
+
 (use-fixtures :each
   exec/with-clean-registry
   (fn [t]

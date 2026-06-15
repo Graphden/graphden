@@ -201,7 +201,18 @@
    too — the set drives every `:ref` invocation's cache lookup, so it
    must reflect the current graph after a partial recompile."
   [fns]
-  (let [rich ((requiring-resolve 'graphden.executor.registry.core/rich-types-snapshot))
+  ;; `registry.core` requires `executor.interface`, which requires
+  ;; `executor.context`, which requires this ns — so eagerly
+  ;; requiring it here would cycle. Deferred-resolved + asserted
+  ;; non-nil so a future rename fails loudly instead of silently
+  ;; degrading.
+  (let [snap (or (requiring-resolve
+                   'graphden.executor.registry.core/rich-types-snapshot)
+                 (throw (ex-info
+                          "rich-types-snapshot missing — namespace rename?"
+                          {:type :compile/missing-symbol
+                           :symbol 'graphden.executor.registry.core/rich-types-snapshot})))
+        rich (snap)
         fresh-cats #{:time :random}
         fresh-ids
         (into #{}

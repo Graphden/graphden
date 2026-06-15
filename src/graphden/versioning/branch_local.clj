@@ -1,0 +1,124 @@
+(ns graphden.versioning.branch-local
+  "Effective `:branch-local?` for fn entities — monotonic OR over the
+   `:parent-ids` transitive closure on the identity-side `:fn` row.
+
+   Mirrors the `effective-required?` shape in
+   `graphden.executor.compile.bindings`: nil ≡ false ≡ inherit; any
+   ancestor true on the chain ⇒ effective true forever. The widening
+   guard lives in `graphden.types.check`.
+
+   Used by `graphden.versioning.storage.resolution` to filter
+   `merge-candidates` — foreign-branch `:fn-version` rows whose
+   identity has effective-`:branch-local?` true are SKIPPED, so
+   runtime-config functions (web-server with a dev port, vault path,
+   etc.) never propagate to sibling branches on merge.
+
+   Cache: per-storage atom, keyed by `System/identityHashCode`. Lazy
+   compute on first access; cleared via `invalidate!` on any write
+   to the `:fn` table (CRUD layer). The cache is intentionally a
+   `defonce` process-wide map rather than an extra field on
+   `VersionedStorage` because the resolution algorithm doesn't carry
+   the versioned wrapper — it operates over `base-storage`."
+  (:require
+    [clojure.set :as set]
+    [graphden.storage.protocol.core :as sp]))
+
+
+(defonce ^:private storage-caches
+  ;; {storage-identity-hash → atom of {fn-id → bool}}
+  (atom {}))
+
+
+(defn- cache-for-storage
+  "Returns the per-storage cache atom, creating one on first use."
+  [base-storage]
+  (let [k (System/identityHashCode base-storage)]
+    (or (get @storage-caches k)
+        (let [fresh (atom {})]
+          (swap! storage-caches assoc k fresh)
+          fresh))))
+
+
+(defn invalidate!
+  "Drop the cached `effective-branch-local?` map for `base-storage`.
+   Call after any write to the `:fn` table — both `:branch-local?`
+   itself and `:parent-ids` writes can shift the effective set."
+  [base-storage]
+  (let [k (System/identityHashCode base-storage)]
+    (when-let [cache (get @storage-caches k)]
+      (reset! cache {}))))
+
+
+(defn invalidate-all!
+  "Drop all per-storage caches. Used by test harness on DB wipe so
+   stale identity-hashes from killed storages don't linger."
+  []
+  (reset! storage-caches {}))
+
+
+(defn- compute-effective
+  "Walks the `:parent-ids` closure of `fn-id` until one ancestor (or
+   `fn-id` itself) carries `:branch-local? true`, then short-circuits.
+   When the whole closure is false / nil, returns false."
+  [base-storage fn-id]
+  (loop [to-visit #{fn-id}
+         visited #{}]
+    (if (empty? to-visit)
+      false
+      (let [current (first to-visit)
+            rest-set (disj to-visit current)
+            row (sp/read-entity base-storage :fn current)]
+        (cond
+          (true? (:branch-local? row))
+          true
+
+          :else
+          (let [parents (or (:parent-ids row) [])
+                new-visited (conj visited current)
+                new-to-visit (set/difference (set parents) new-visited)]
+            (recur (set/union rest-set new-to-visit) new-visited)))))))
+
+
+(defn effective-branch-local?
+  "True iff `fn-id` (an identity-side `:fn` row id) or any ancestor
+   in its `:parent-ids` closure has `:branch-local? true`.
+
+   Memoized per storage. Callers in resolution.clj batch this against
+   the same storage handle repeatedly, so the cache keeps the walk
+   O(1) after the first hit. `nil` fn-id returns false (defensive —
+   resolve-entity may pass nil for missing rows)."
+  [base-storage fn-id]
+  (if (nil? fn-id)
+    false
+    (let [cache (cache-for-storage base-storage)]
+      (if (contains? @cache fn-id)
+        (get @cache fn-id)
+        (let [result (compute-effective base-storage fn-id)]
+          (swap! cache assoc fn-id result)
+          result)))))
+
+
+(defn build-branch-local-set
+  "Pre-compute the set of effective-branch-local fn-ids from a map
+   `{fn-id → fn-row}` (loaded in batch). Used by the batch-resolution
+   path so it doesn't need per-id walks; the in-memory map provides
+   the entire parent-id graph already.
+
+   Algorithm: any node `:branch-local? true` is local; then any node
+   whose `:parent-ids` includes a local node is local. Iterate until
+   the set stops growing."
+  [fns-by-id]
+  (let [seed (into #{}
+                   (keep (fn [[fid row]] (when (true? (:branch-local? row)) fid)))
+                   fns-by-id)]
+    (loop [local seed]
+      (let [grown (reduce (fn [acc [fid row]]
+                            (if (and (not (contains? acc fid))
+                                     (some local (or (:parent-ids row) [])))
+                              (conj acc fid)
+                              acc))
+                          local
+                          fns-by-id)]
+        (if (= grown local)
+          local
+          (recur grown))))))

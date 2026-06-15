@@ -164,3 +164,44 @@
   [f]
   (binding [registry/*registry-override* (atom {})]
     (f)))
+
+
+(defn with-isolated-rich-types
+  "Test fixture that scopes ALL rich-types reads and writes inside
+   `f` to a thread-local atom, leaving the process-global
+   `rich-types-registry` untouched. Use on ns'es that BOOTSTRAP
+   their own packages (e.g. integration tests calling
+   `sys/bootstrap-from-packages!`), so a contaminator entry from
+   a sibling NS-thread can't crash compile-eager mid-test.
+
+   Earlier symptom (without this fixture, or with the prior
+   snapshot/restore implementation under parallel kaocha): a
+   foreign `:effects` / `:return` shape on a fn-name landed by a
+   sibling test left a builder that returned a closure where an
+   Associative was expected, surfacing as
+   `AFunction$1 cannot be cast to Associative` deep inside
+   compile-eager's arg-builder chain in `execute-http-test`.
+
+   The previous snapshot/restore version (pre-2026-06) was correct
+   in serial mode but racy under parallel kaocha: thread A's
+   `(restore-fn snap)` could be interleaved with thread B's writes
+   on the shared process atom. The thread-local override removes
+   the race entirely — each NS-thread reads and writes its own
+   isolated registry, so the order of test starts/finishes can't
+   leak state across threads.
+
+   The override is PRE-SEEDED with a snapshot of the current
+   global registry (via `snapshot-for-isolation`) so reads stay
+   O(1) — see the design note above `*rich-types-override*` in
+   `registry.core` for why merge-on-read was unworkable.
+
+   `requiring-resolve` defers the registry.core import so this ns
+   stays out of the `interface ← registry.core ← interface` cycle
+   — registry.core requires interface for `:base-fns` plumbing.
+
+   Wire in via `(use-fixtures :once exec/with-isolated-rich-types)`."
+  [f]
+  (let [override-var (requiring-resolve 'graphden.executor.registry.core/*rich-types-override*)
+        snapshot-fn (requiring-resolve 'graphden.executor.registry.core/snapshot-for-isolation)]
+    (with-bindings {override-var (atom (snapshot-fn))}
+      (f))))

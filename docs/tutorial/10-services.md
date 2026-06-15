@@ -1,0 +1,225 @@
+# Lesson 10 — Services: long-running fns supervised by graphden
+
+**Goal**: by the end of this lesson you can mark a fn as a
+service, see graphden start it automatically, run two versions
+side-by-side on different branches, and reason about the
+restart-policy + branch scoping.
+
+**Concepts introduced**: `service`, `reconciler`, `restart-
+policy`, `:enabled?`, `:process` effect, `:service.branch-id`,
+service vs `execute`.
+
+## Service vs execute
+
+Two ways to call a fn in graphden:
+
+| Action | Lifetime | Where it happens |
+|---|---|---|
+| **execute** (`▶` button, `/api/execute`) | One-shot. Returns a result and stops. | The HTTP request thread, with cancellation + TTL. |
+| **service** (`⚙` button, `/api/entities/service`) | Forever. Restarted by graphden if it crashes. | A daemon thread managed by the reconciler. |
+
+A service is a desired-state row that says "keep THIS fn
+running". The fn must have zero free arguments (every slot
+bound) — services don't pass per-call inputs. Anything you'd
+normally pass as an argument has to be hard-coded as a binding
+on a derived fn-def first.
+
+## What makes a fn service-eligible
+
+The fn must declare the `:process` effect somewhere in its
+ancestor chain. `:process` means "spawns supervised background
+work". The seeded base-fns that declare it:
+
+| Base-fn | What `:process` work |
+|---|---|
+| `:http-server` | Owns a network listener until stopped |
+| `:schedule` | Runs a cron loop until interrupted |
+| `:future` | Spawns a daemon thread (used by both above) |
+
+If you try to create a service for a fn whose ancestor chain
+doesn't have `:process`, the editor's create-guard rejects:
+"`:current-time-ms` is not service-eligible — neither it nor any
+ancestor declares the `:process` effect."
+
+## Try it: one service
+
+1. Find the editor's own server `:web-server` (parented from
+   `:http-server`, port 8080). The `⚙` button on its row-actions
+   popover is enabled.
+2. Click `⚙`. The popover shows:
+   - **Branch** picker (default = your current branch)
+   - **Enabled** checkbox (default = on)
+   - **Restart policy**: `:always` / `:on-failure` / `:never`
+3. Click `Create & reconcile`. The badge on the fn-card turns
+   `running` once the reconciler starts it.
+
+The reconciler runs on a NOTIFY callback — every `:service`
+write fires `service:write:<id>` on the `graphden_events`
+channel, the in-process callback diffs enabled-rows vs the
+running-atom, starts the missing ones, stops the deleted ones.
+
+## Building your own service-eligible fn-def
+
+`:web-server` is a pre-built example; let's walk a from-scratch
+recipe. We'll write the smallest possible service-eligible
+fn-def — a future-parented thunk that just spawns a no-op
+daemon thread. Useful as a sanity probe; the structure
+generalises to real services (an HTTP server, a cron loop, a
+pg-listen consumer) by swapping the bound body.
+
+Two fn-defs, one parent each:
+
+```edn
+;; Step 1 — a thunk. :const returns its bound :value as-is;
+;; with :value bound, the thunk has zero free args and
+;; statically returns :text.
+{:name :my-tick
+ :parent :const
+ :args  {:value "tick"}}
+
+;; Step 2 — a service-eligible probe. :future's :body slot is
+;; [:fn {} :any] — a 0-arg callable returning anything. Binding
+;; it to :my-tick is accepted by the type-checker because the
+;; ref's static signature [:fn {} :text] is a subtype of the
+;; slot (covariant return: :text ⊆ :any). The runtime hof-wraps
+;; :my-tick as the daemon's body.
+{:name :my-probe
+ :parent :future
+ :args  {:body :my-tick}}
+```
+
+`:my-probe` now has zero free args (every slot in the chain is
+bound) AND the `:process` effect (inherited from `:future`).
+The `⚙` button on its card is enabled. Click it → popover
+says "Make service: :my-probe" + "Create & reconcile". The
+reconciler starts a daemon thread that calls `:my-tick` once
+and exits; with `:restart-policy :always`, it respawns. With
+`:never`, it runs once and the badge flips to `disabled`.
+
+This is the minimum reproducible service. Real services swap
+the body for a long-lived loop — `:loop-until-interrupted`
+binds `:body` to its own step fn that runs forever until the
+parent `:future`'s stopper interrupts.
+
+### Common bind-failures
+
+The type-checker enforces the `[:fn {} :any]` slot shape on
+`:body`. Two binds that look reasonable but get rejected:
+
+- **Bind to a base-fn directly**:
+  `{:args {:body :current-time-ms}}` — also accepted (`:int`
+  ⊆ `:any` via covariant return), but `:current-time-ms` has
+  the `:time` effect and bare `:future` doesn't expect to
+  capture it. The probe becomes a one-shot clock read in a
+  daemon — fine for a smoke test, surprising for a service.
+
+- **Bind to a literal**:
+  `{:args {:body "tick"}}` — rejected at sync time. A literal
+  text isn't a callable; you can't invoke `"tick"` as a thunk.
+  The hint suggests "bind a fn-ref or an inline `{:parent
+  …}`". Use the `:my-tick` indirection or write an inline
+  `{:parent :const :args {:value "tick"}}` directly inside
+  `:body`.
+
+### Restart policy
+
+| Policy | When graphden restarts the fn |
+|---|---|
+| `:always` | Any exit — crash OR clean return |
+| `:on-failure` | Only uncaught exceptions |
+| `:never` | Single-shot. Log on exit, move on. |
+
+In Phase 1 there's no runtime liveness check, so `:always`
+≡ `:on-failure` in practice — both kick in only on startup
+exception (e.g. port-in-use). A future phase will add a watchdog.
+
+## Per-branch services
+
+`:service.branch-id` is a ref to a branch row. The reconciler
+groups services by branch, asks `branch-router/ctx-for` for each
+branch's `ExecutionContext`, and starts the service against
+THAT ctx. So **the same fn can run with branch-specific bindings
+on dev and prod at the same time**.
+
+Worked example:
+
+```edn
+;; on `main`:
+{:name :prod-server :parent :http-server
+ :args {:handler :app-handler :port 8080}}
+
+;; on `dev` (after forking from main):
+{:name :dev-server  :parent :http-server
+ :args {:handler :app-handler :port 9001}}
+```
+
+Both `:http-server`, both branch-local (so they don't
+cross-merge — see lesson 08). Two `:service` rows:
+
+```
+{:fn-id :prod-server  :branch-id main :enabled? true}
+{:fn-id :dev-server   :branch-id dev  :enabled? true}
+```
+
+The reconciler starts both. Port 8080 is the production server
+on `main`'s graph, port 9001 is the development server on
+`dev`'s graph. Iterating on `:app-handler` on `dev` immediately
+affects port 9001 without touching port 8080.
+
+### Try it (per-branch edition)
+
+1. Pre-req: complete the per-branch web-server walk-through in
+   lesson 08. You should have `:dev-server` on `feat-dev-server`
+   parented from `:http-server` with `:port 9001`.
+2. Stay on `feat-dev-server`. Click `⚙` on `:dev-server`. The
+   branch picker defaults to `feat-dev-server`. Hit
+   `Create & reconcile`.
+3. `curl http://localhost:9001/version` — runs against your dev
+   graph.
+4. `curl http://localhost:8080/version` — still runs against
+   main (you didn't touch it).
+5. On a service for the same fn but `branch-id = main`, the
+   same fn-id with a different per-branch binding produces a
+   different service instance. They co-exist.
+
+Port conflicts (two branches binding 8080) surface as OS-level
+`Address already in use` — the loser records `:start-failed-at`
+and the editor shows the `failed` badge. Pick a different port
+in your dev derivative.
+
+## What happens when you merge or delete
+
+- **Merge** into a target branch: graphden calls
+  `recon/restart-services-on-branch!` so cron loops (which sit
+  in closed-over fn-graphs) pick up the new versions. HTTP
+  servers re-read the registry lazily on the next request.
+- **Delete branch**: services scoped to that branch are
+  soft-disabled (`:enabled? false`) BEFORE the branch row
+  disappears, so the reconciler stops them on the next pass and
+  releases their advisory locks cleanly.
+
+## Inspecting state
+
+```
+GET /api/services
+→ {:ok true :services [{:id ... :fn-id ... :fn-name "web-server"
+                         :enabled? true :restart-policy "always"
+                         :branch-id ... :running {...}}]}
+```
+
+The `:running` block carries the in-process atom snapshot:
+`:stopper-set?` (true ⇒ running), `:started-at`,
+`:start-failed-at`, `:start-attempts`, `:branch-id`.
+
+## What we glossed over
+
+- The advisory-lock dance that keeps two pods from running the
+  same service twice — see [docs/SERVICES.md § Supervisor](../SERVICES.md).
+- Closure-capture and why cron loops need an explicit restart
+  after merge — see [docs/CLOSURE_CAPTURE.md](../CLOSURE_CAPTURE.md).
+- The package-declared seed services (web-server is one) — see
+  [docs/SERVICES.md § Packages-based seeding](../SERVICES.md).
+
+## Next
+
+Lesson 11 — Packages (planned — see [tutorial/README.md](README.md))

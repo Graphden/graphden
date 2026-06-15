@@ -20,6 +20,13 @@
   (:base-fn-defs (loader/load-packages ["core"])))
 
 
+;; Drift tests register synthetic rich-types via check-fn-def!
+;; (which calls record-rich-types-raw!). `with-isolated-rich-types`
+;; keeps those entries from leaking into sibling integration
+;; tests — see check-test for the same rationale.
+(use-fixtures :once exec/with-isolated-rich-types)
+
+
 (use-fixtures :each
   exec/with-clean-registry
   (fn [test-fn]

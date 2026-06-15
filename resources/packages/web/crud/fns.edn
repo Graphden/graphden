@@ -3858,13 +3858,28 @@
                                                        :default nil}}}}]}}
           :else {:value {}}}}
 
+  {:name :_parse-svc-form-branch-id-fragment
+   :description "Optional `:branch-id` form-field. When the admin picks a branch in the editor's service popover, the value lands here as a UUID string; `:parse-uuid` collapses empty / malformed input to nil so the row falls back to the legacy no-branch-id behavior in the reconciler."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :branch-id}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :branch-id}]
+                        :vals [{:parent :parse-uuid
+                                :args {:s {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :branch-id}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
   {:name :parse-service-from-form
-   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy. Empty form values clear the corresponding column."
+   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
    :parent :merge
    :args {:maps [{:value {}}
                  :_parse-svc-form-fn-id-fragment
                  :_parse-svc-form-enabled-fragment
-                 :_parse-svc-form-restart-policy-fragment]
+                 :_parse-svc-form-restart-policy-fragment
+                 :_parse-svc-form-branch-id-fragment]
           :form-data {:type :jsonb
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 

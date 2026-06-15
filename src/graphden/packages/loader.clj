@@ -282,7 +282,16 @@
       ;; `:tags` — declarative capability / shape markers; consumed by
       ;; policy callers (e.g. admin-only-vault gate) via
       ;; `registry/fn-names-with-tag`. See `record-rich-types!`.
-      (seq (:tags fn-def))  (assoc :tags (set (:tags fn-def))))))
+      (seq (:tags fn-def))  (assoc :tags (set (:tags fn-def)))
+      ;; `:branch-local?` — identity-level monotonic flag. Pass
+      ;; through so `records-parser/attach-fn-meta` can stamp it onto
+      ;; the fn-row; the merge-resolution filter in
+      ;; `versioning.storage.resolution` reads it directly.
+      ;; Without this, the seed `:branch-local? true` on base-fns
+      ;; (`:http-server`, `:secret-leaf`, `:schedule`, `:env`) is
+      ;; silently stripped here and downstream sync writes nil.
+      (contains? fn-def :branch-local?)
+      (assoc :branch-local? (boolean (:branch-local? fn-def))))))
 
 
 ;; Type-rows are first-class fn-rows declared in `fns.edn` alongside

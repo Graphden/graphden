@@ -93,6 +93,17 @@
   #uuid "e078766c-9f02-40f5-bdc0-fa8ed95ef944")
 
 
+;; Per-branch service binding (Phase 2 — branch-local services).
+;; Same fn-id can have a different `:enabled?` / `:restart-policy`
+;; row on each branch, so `:my-server` keeps running on `dev` while
+;; staying disabled on `main`. Reconciler groups services by this
+;; field and runs each branch in its own ExecutionContext (per the
+;; existing `branch-router/get-or-create-context!`). Backfilled to
+;; the main branch's id on first sync for legacy rows.
+(def ^:private service-branch-id-field-uuid
+  #uuid "c3a8d572-1e4f-4b06-9a25-6f8c4e9d5a31")
+
+
 ;; =============================================================================
 ;; Schema
 ;; =============================================================================
@@ -117,4 +128,8 @@
                                  :type :bool}
                       :restart-policy {:uuid service-restart-policy-field-uuid
                                        :type :enum
-                                       :enum-name :restart-policy}})))
+                                       :enum-name :restart-policy}
+                      :branch-id {:uuid service-branch-id-field-uuid
+                                  :type :ref
+                                  :ref-entity :branch
+                                  :nullable? true}})))

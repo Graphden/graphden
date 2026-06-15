@@ -924,7 +924,16 @@
    :args {:test :_list-exec-by-fn-version-found?
           :then :_list-exec-apply-by-fn-with-version
           :else :_list-exec-apply-by-fn-empty
-          :version-id :_list-exec-by-fn-version-id}}
+          :version-id :_list-exec-by-fn-version-id
+          ;; Carry the OUTER :parsed's :limit out under a fresh
+          ;; name so the synth below doesn't have to re-read the
+          ;; OUTER :parsed (which the by-version chain rewrites to
+          ;; `:_list-exec-by-fn-synth-parsed` — a self-reference
+          ;; that loops the executor at runtime).
+          :outer-limit {:parent :get
+                        :args {:coll {:as :parsed}
+                               :key {:value :limit}
+                               :default nil}}}}
 
   {:name :_list-exec-by-fn-version-id
    :parent :resolve-fn-version-id
@@ -941,11 +950,11 @@
    :args {:parsed :_list-exec-by-fn-synth-parsed}}
 
   {:name :_list-exec-by-fn-synth-parsed
-   :description "Carry the resolved version-id + the original limit into the by-version graph composition."
+   :description "Carry the resolved version-id + the OUTER limit into the by-version graph composition. The limit comes via `:outer-limit` from `:_list-exec-apply-by-fn` (NOT a re-read of `:as :parsed`) — at this level `:parsed` is BEING REDEFINED to point at this same fn, so re-reading it would loop."
    :parent :assoc
    :args {:map {:parent :zipmap
                 :args {:keys [{:value :limit}]
-                       :vals [{:parent :get :args {:coll {:as :parsed} :key {:value :limit} :default nil}}]}}
+                       :vals [{:as :outer-limit}]}}
           :key {:value :version-id}
           :value {:as :version-id}}}
 
@@ -1149,9 +1158,9 @@
           :coll {:as :rows}}}
 
   {:name :_list-services-row-shape
-   :description "Single-row reshape — `(fn [s] {:id (:id s) :fn-id (:fn-id s) :fn-name (get names (:fn-id s)) :enabled? (:enabled? s) :restart-policy (:restart-policy s) :running (enrich-running (:id s))})`. The HOF callback of `:_list-services-enriched`; `:names` is captured from the outer fn-def's free args."
+   :description "Single-row reshape — `(fn [s] {:id (:id s) :fn-id (:fn-id s) :fn-name (get names (:fn-id s)) :enabled? (:enabled? s) :restart-policy (:restart-policy s) :branch-id (:branch-id s) :running (enrich-running (:id s))})`. The HOF callback of `:_list-services-enriched`; `:names` is captured from the outer fn-def's free args. `:branch-id` is nullable (legacy rows pre-date the field); the editor service popover uses it to pre-fill the branch picker."
    :parent :zipmap
-   :args {:keys [:id :fn-id :fn-name :enabled? :restart-policy :running]
+   :args {:keys [:id :fn-id :fn-name :enabled? :restart-policy :branch-id :running]
           :vals [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
                  {:parent :get
@@ -1160,6 +1169,7 @@
                          :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :enabled?} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :restart-policy} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :branch-id} :default nil}}
                  {:parent :enrich-running
                   :args {:service-id {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}}}]}}
 

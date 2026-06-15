@@ -35,12 +35,18 @@ const TEST_NAME = 'test-free-arg-literal';
     await page.goto('http://localhost:9002/#' + TEST_NAME);
     await page.waitForTimeout(2500);
 
-    // Click the unset-placeholder overlay's inner div → chooser.
+    // Click the unset-placeholder's `.placeholder-binder` button →
+    // chooser. The overlay wrapper has pointer-events:none (so drag
+    // events pass through to cytoscape), so clicking the wrapper or
+    // its inner div is a no-op — only the binder button is wired.
     const placeholderClicked = await page.evaluate(() => {
       const placeholder = Array.from(document.querySelectorAll('.node-overlay'))
         .find(el => /^unset-/.test(el.getAttribute('data-node-id') || ''));
       if (!placeholder) return {error: 'no placeholder overlay'};
-      (placeholder.querySelector('div') || placeholder).click();
+      const btn = placeholder.querySelector('.placeholder-binder')
+                 || placeholder.querySelector('button');
+      if (!btn) return {error: 'no .placeholder-binder button'};
+      btn.click();
       return {clicked: true};
     });
     assert(!placeholderClicked.error, placeholderClicked.error || 'placeholder clicked');
@@ -70,11 +76,15 @@ const TEST_NAME = 'test-free-arg-literal';
            'hint reads "Expected: text" (the slot type from str-len): '
            + JSON.stringify(hintProbe.hint));
 
-    // Type a literal string and click Save. JSON-encoded so the input
-    // round-trips through saveArgValue's `JSON.parse` cleanly.
+    // Type a literal string and click Save. The value-form mounts a
+    // plain text <input> for the :text slot, so we type the bare
+    // string `hello` (no JSON-encoding). Earlier the input was
+    // smart-parsed and the test had to wrap in quotes; the current
+    // form-rendering path is text-as-text and the round-trip
+    // becomes user-typing-clean.
     await page.evaluate(() => {
       const i = document.querySelector('.arg-value-edit-input');
-      i.value = '"hello"';
+      i.value = 'hello';
       i.dispatchEvent(new Event('input', {bubbles: true}));
     });
     await page.waitForTimeout(150);

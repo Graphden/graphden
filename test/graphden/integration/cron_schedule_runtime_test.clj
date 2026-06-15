@@ -76,7 +76,15 @@
                  {:db/postgres (select-keys container-cfg
                                             [:jdbc-url :username :password])
                   :exec/base-fns {:extra-base-fns
-                                  {:_cron-runtime-tick tick-impl}}})]
+                                  {:_cron-runtime-tick tick-impl}}
+                  ;; Cron runtime test only needs `:schedule` (core),
+                  ;; `:future` (core), `:cron-parse` + `:cron-next-after`
+                  ;; (core), and `:fire-target` (core). Drop the
+                  ;; `examples` package — it contributes 171 fn-defs
+                  ;; (mostly tutorial demos) that the test doesn't
+                  ;; touch but the sync + compile passes still pay for.
+                  :app/packages {:package-names
+                                 ["core" "storage" "web" "app"]}})]
     (try
       (let [storage (:db/versioned system)
             context (:exec/context system)]

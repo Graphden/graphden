@@ -9,6 +9,7 @@
    non-HOF refs collects R's leftover free slots so the outer F can
    thread them through."
   (:require
+    [clojure.set :as set]
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]))
 
@@ -66,6 +67,7 @@
 
 
 (declare ^:private deep-free-ext-names*)
+(declare ^:private hof-lambda-params)
 
 
 (defn deep-free-ext-names
@@ -73,7 +75,19 @@
    lookups always produce the same answer, and the underlying walk
    is O(reachable-graph). compile-all calls this MANY times per
    compile-fn (once per ref-binding via `build-ref-renames`); without
-   memoisation the worst case is quadratic in graph size."
+   memoisation the worst case is quadratic in graph size.
+
+   SURFACE walker — stops at `:is-fn` HOF boundaries because HOF
+   callables expose their OWN argument surface (HOFs are invoked
+   via `hof-wrap`'s `make-shape-callable`, not threaded with the
+   outer caller's fa). Consumers that need the HOF boundary opaque
+   (`hof-lambda-params`, `alpha-equiv-lambda-params`,
+   `build-ref-renames`, the editor's free-arg-ext-names) use THIS
+   function.
+
+   For CACHE-KEY projection, where closure-captured names DO affect
+   the result, use `cache-projection-frees` (below). See the
+   docstring there for the invariant relating the two."
   [fn-id {:keys [deep-frees-cache] :as lookups}]
   (if-let [cache deep-frees-cache]
     (or (get @cache fn-id)
@@ -81,6 +95,122 @@
           (swap! cache assoc fn-id r)
           r))
     (deep-free-ext-names* fn-id lookups)))
+
+
+(declare cache-projection-frees)
+
+
+(defn- hof-closure-captures
+  "Helper for `cache-projection-frees`. Walks F's non-HOF tree (same
+   shape as `deep-free-ext-names*`'s walk over `:ref :is-fn false`
+   bindings + seq item refs) and at every `:is-fn :ref` binding
+   encountered, computes the HOF's closure-captured contribution:
+   `cache-projection-frees(target) \\ hof-lambda-params(...)`.
+
+   Returns a set of ext-names. Used internally only — public callers
+   should query `cache-projection-frees` which unions this with
+   `deep-free-ext-names`'s surface output."
+  [fn-id lookups]
+  (let [captures (atom #{})
+        visited (atom #{})]
+    (letfn [(walk
+              [fid]
+              (when-not (contains? @visited fid)
+                (swap! visited conj fid)
+                (doseq [bnd (b/collect-bindings fid lookups)]
+                  (case (:kind bnd)
+                    :ref (if (:is-fn bnd)
+                           (let [target (:ref-id bnd)
+                                 inner (cache-projection-frees target lookups)
+                                 lambda-params (set (hof-lambda-params
+                                                      target (:slot-id bnd)
+                                                      bnd fid lookups))]
+                             (doseq [n inner]
+                               (when-not (contains? lambda-params n)
+                                 (swap! captures conj n))))
+                           (walk (:ref-id bnd)))
+                    :seq (doseq [item (:items bnd)]
+                           (when-let [r (:ref-fn-id item)] (walk r)))
+                    nil))))]
+      (walk fn-id))
+    @captures))
+
+
+(defn cache-projection-frees
+  "Names whose value affects fn-id's evaluation result, used by
+   `compile-eager`'s `call-with-cache` to project the caller's `fa`
+   into the cache key. Strict SUPERSET of `deep-free-ext-names`.
+
+   `cache-projection-frees(F)` = `deep-free-ext-names(F)` ∪
+   {names HOF callbacks in F's tree read from F's caller's fa}.
+
+   The HOF closure-capture component comes from `hof-wrap`'s
+   `(merge fa lambda-args)` (`compile_eager.clj:234`): when F invokes
+   a HOF target H, H's body sees F's fa snapshot plus the per-call
+   lambda-args. Anything H reads beyond its lambda-params is read
+   from F's fa — and thus part of F's effective evaluation
+   dependencies even though it's NOT part of F's caller-facing
+   interface.
+
+   Production bug closed by this (commit `[...]`):
+   `_shape-secret-bindings`'s `:filter :pred` reads `:fn-row` via
+   closure capture; `deep-free-ext-names` returned `#{}` for
+   `_shape-secret-bindings`, so the cache key omitted `:fn-row` and
+   every secret invocation hashed to one cache slot — `GET
+   /api/secrets` returned every row with the FIRST secret's `:path`.
+
+   Invariant (verified by
+   `verify-cache-projection-frees-superset-of-deep-free!`):
+   `(set/superset? (cache-projection-frees F) (set (deep-free-ext-names F)))`
+   for every fn-id F. A strict superset can only ever produce MORE
+   cache misses (slower), never a wrong cache hit. If this invariant
+   ever breaks, the bug-class (stale-cache returning a
+   `make-shape-callable` closure that flows as data into a sibling
+   evaluation) returns.
+
+   Memoised per fn-id via `:cache-projection-frees-cache`. The cache
+   is seeded with `#{}` before the recursive descent so any
+   structural cycle terminates (graphden has none today, cheap
+   insurance)."
+  [fn-id {:keys [cache-projection-frees-cache] :as lookups}]
+  (if-let [cache cache-projection-frees-cache]
+    (or (get @cache fn-id)
+        (let [_ (swap! cache assoc fn-id #{})
+              direct (set (deep-free-ext-names fn-id lookups))
+              captured (hof-closure-captures fn-id lookups)
+              result (into direct captured)]
+          (swap! cache assoc fn-id result)
+          result))
+    (into (set (deep-free-ext-names fn-id lookups))
+          (hof-closure-captures fn-id lookups))))
+
+
+(defn verify-cache-projection-frees-superset-of-deep-free!
+  "Exhaustive invariant check: for every fn-id in `lookups`, asserts
+   `(set/superset? (cache-projection-frees F) (set (deep-free-ext-names F)))`.
+
+   Returns a vector of counter-examples
+   `[{:fn-id F :missing #{names…}} …]`, EMPTY when the invariant
+   holds. Used by tests and by ad-hoc nREPL probes to verify the
+   walker before deploying the cache-projection switch.
+
+   Wired BEFORE `compile-eager` swaps to `cache-projection-frees` —
+   if any counter-example surfaces, the walker is broken and would
+   re-introduce the bug class my prior attempts hit (stale cache hit
+   returning a closure as data)."
+  [lookups]
+  (vec
+    (keep (fn [[fid _]]
+            (let [surface (set (deep-free-ext-names fid lookups))
+                  cache (cache-projection-frees fid lookups)
+                  missing (set/difference surface cache)]
+              (when (seq missing)
+                {:fn-id fid
+                 :fn-name (get-in lookups [:fn-map fid :name])
+                 :missing missing
+                 :surface surface
+                 :cache cache})))
+          (:fn-map lookups))))
 
 
 (defn- deep-free-ext-names*
@@ -111,6 +241,28 @@
    would see 3 unrelated frees instead of `[:item :default :else]`,
    pick the wrong wrap shape, and silently return all-nil rows.
 
+   The propagation uses the inner fn's OWN rename slot-id as the key
+   into outer-renames — NOT the binding's raw (root-inherited)
+   slot-id. This distinguishes two structurally identical-looking
+   shapes:
+
+   - Bridged: outer's chain expansion (own-rename-chain-map)
+     includes a NON-ROOT intermediate slot that inner's rename
+     ALSO owns (slot dedup via `(name, source-slot-id)`-keyed
+     resolution, e.g. `_branch-row-id.branch-row` slot
+     `6a8b587c` is also in `_list-branches-as-json-item`'s chain).
+     Translate ext-name to outer's name; runtime
+     `build-ref-renames` correspondingly emits the bridge.
+
+   - Sibling: outer and inner both rename the same root slot but
+     own DIFFERENT rename slots (e.g.
+     `_rv-versions-for-this-eid.coll {:as :versions-by-eid}` and
+     `_rv-this-eid.coll {:as :item}` both source from `:get.coll`
+     but their rename slots aren't deduped — no shared
+     intermediate). Don't translate; keep inner's ext-name; runtime
+     `build-ref-renames` correspondingly returns `{}` and inner
+     reads its own free arg.
+
    Returns the names in their first-encountered order, deduped."
   [fn-id lookups]
   (let [result (atom [])
@@ -121,21 +273,81 @@
                   (swap! seen conj n)
                   (swap! result conj n)))]
     (letfn [(translate
-              [entry name-key outer-renames]
-              (if-let [r (get outer-renames (:slot-id entry))]
-                (assoc entry name-key r)
-                entry))
+              [entry name-key outer-renames fid]
+              ;; Prefer fid's own rename slot-id over the binding's raw
+              ;; (root-inherited) slot-id. This is the structural test
+              ;; that distinguishes outer-rename-bridges-into-inner
+              ;; (shared chain link via rename slot) from outer-and-inner-
+              ;; are-siblings-on-root (no shared chain link).
+              ;;
+              ;; - Bridged case (e.g. `_list-branches-as-json-item :item`
+              ;;   → `_branch-row-id :branch-row`): R's rename slot id is
+              ;;   the SHARED intermediate (e.g. `6a8b587c`); F's chain
+              ;;   includes it; translate applies, R emits :item.
+              ;; - Sibling case (e.g. `_rv-versions-for-this-eid
+              ;;   :versions-by-eid` → `_rv-this-eid :item`): R's rename
+              ;;   slot id is R's own (e.g. `0de3ffed`), NOT in F's chain
+              ;;   (whose only non-root link is F's own slot); translate
+              ;;   skips, R emits :item.
+              ;;
+              ;; Without a rename slot (inner has no own rename for the
+              ;; binding's slot), fall back to the raw slot-id —
+              ;; preserving the original "outer wins for inherited slot
+              ;; with no inner rename" semantics.
+              (let [own-rename-slot (get (:slot-by-fn-source-slot lookups)
+                                         [fid (:slot-id entry)])
+                    lookup-id (or (:id own-rename-slot) (:slot-id entry))]
+                (if-let [r (get outer-renames lookup-id)]
+                  (assoc entry name-key r)
+                  entry)))
             (walk
               [fid covered outer-renames]
               (when-not (contains? @visited-fns fid)
                 (swap! visited-fns conj fid)
-                (let [bindings (mapv #(translate % :ext-name outer-renames)
+                (let [bindings (mapv #(translate % :ext-name outer-renames fid)
                                      (b/collect-bindings fid lookups))
-                      env-bindings (mapv #(translate % :env-name outer-renames)
+                      env-bindings (mapv #(translate % :env-name outer-renames fid)
                                          (b/collect-env-bindings fid lookups))
+                      ;; NON-HOF `:ref` bindings DON'T cover the slot
+                      ;; name at the caller's surface, regardless of
+                      ;; rename:
+                      ;;
+                      ;; - The slot's VALUE is computed by the ref-target,
+                      ;;   so the caller doesn't need to provide it.
+                      ;; - But the ref-target itself reads names from
+                      ;;   the SAME `fa` the caller passes (`compile-eager`
+                      ;;   threads outer's `fa` into the ref's
+                      ;;   `call-with-cache`). Those names ARE the
+                      ;;   caller's surface.
+                      ;;
+                      ;; If the ref-target's deep-free happens to overlap
+                      ;; with F's own slot name (e.g. `_normalized-tag`'s
+                      ;; `:if :then {:parent :str-to-keyword :args {:string
+                      ;; :_element-tag}}` where `:then`'s anon-fn's
+                      ;; `:value` slot is bound by a ref to `_element-tag`
+                      ;; which itself reads `:value` from fa), adding the
+                      ;; ext-name to own-primaries would mask the inner
+                      ;; emit and the walker would silently drop the
+                      ;; caller-side free arg. Production symptom:
+                      ;; `:hiccup-normalize`'s `:_hiccup-normalize-node`
+                      ;; emitted nothing for `:value`, so the editor
+                      ;; page rendered every tag as `<lang>` (string
+                      ;; tags never coerced to keywords because the
+                      ;; postwalk callback's free wasn't piped through).
+                      ;;
+                      ;; HOF refs (`:is-fn true`) DO cover — they're
+                      ;; called via `make-shape-callable` with their
+                      ;; OWN argument surface, not threaded with outer's
+                      ;; fa, so their free args don't leak to outer's
+                      ;; caller. `:value` / `:seq` bindings cover for
+                      ;; the obvious reason (literal value or sequence
+                      ;; constructor — caller doesn't supply).
                       own-primaries (into #{}
-                                          (comp (remove #(= :free (:kind %)))
-                                                (map :ext-name))
+                                          (comp
+                                            (remove #(or (= :free (:kind %))
+                                                         (and (= :ref (:kind %))
+                                                              (not (:is-fn %)))))
+                                            (map :ext-name))
                                           bindings)
                       ;; Env-bindings cover names exposed by ref-targets'
                       ;; free args — without including them, the walker
@@ -304,6 +516,30 @@
       (set (keys (or (second constraint) {}))))))
 
 
+(defn- global-env-binding-names
+  "Set of every env-binding `:env-name` across the WHOLE graph,
+   memoised on `lookups`. Used by `alpha-equiv-lambda-params` to spot
+   names a wrap-time-captured `fa` is LIKELY to already carry — any
+   env-binding name a fn somewhere declares can flow into `fa` via
+   the closure-capture propagation from an upstream caller.
+
+   Names found in this set are at risk of collision when chosen as a
+   lambda-param: the wrap's `(merge fa lambda-args)` would overwrite
+   the captured value (request, env-binding callable, etc.) with the
+   per-call lambda value. The full hof-lambda-params policy decides
+   what to do with the risk based on the slot's iteration semantics
+   (`:item`-style iteration wants the override; `:arg`-style generic
+   one-shot does NOT)."
+  [{:keys [fn-map global-env-cache] :as lookups}]
+  (let [compute (fn []
+                  (set (mapcat #(keep :env-name
+                                      (b/collect-env-bindings % lookups))
+                               (keys fn-map))))]
+    (if-let [cache global-env-cache]
+      (or @cache (let [r (compute)] (reset! cache r) r))
+      (compute))))
+
+
 (defn alpha-equiv-lambda-params
   "Resolves the single lambda-param of a 1-arg HOF slot by picking
    R's surviving free-arg name AFTER subtracting everything F
@@ -404,12 +640,36 @@
 
       ;; 1-arg structural slot — structural name when R declares it,
       ;; alpha-equivalent positional unification otherwise.
+      ;;
+      ;; Iteration vs one-shot policy (#52-followup): the structural
+      ;; name `:arg` is the generic-positional convention for one-shot
+      ;; HOF slots (`:call`, `:invoke`, `:assoc-fn`, route handlers).
+      ;; All OTHER structural names (`:item`, `:value`, `:pair`,
+      ;; `:existing`, `:acc`, `:request`, …) declare per-element or
+      ;; domain-specific iteration semantics where the lambda-arg IS
+      ;; meant to override fa.
+      ;;
+      ;; For one-shot slots whose callee doesn't use `:arg`, if the
+      ;; alpha-equiv fallback finds ONLY names that would collide
+      ;; with `fa` keys (every candidate is somewhere an env-binding
+      ;; name), return `[]` — variadic-ignore wrap — so reitit's
+      ;; `(handler request)` call doesn't overwrite a captured
+      ;; `:storage-query → :pg-query` callable with the request map.
+      ;; Real-world repro: `/api/branches` and `/api/services` whose
+      ;; handler chains have only `[:storage-query]` as r-frees.
       (= 1 (count structural-args))
       (let [structural-name (first structural-args)
             r-frees (deep-free-ext-names r-fn-id lookups)]
         (if (some #{structural-name} r-frees)
           [structural-name]
-          (alpha-equiv-lambda-params r-fn-id f-fn-id lookups)))
+          (let [a (alpha-equiv-lambda-params r-fn-id f-fn-id lookups)
+                one-shot? (= :arg structural-name)
+                global-env (when one-shot? (global-env-binding-names lookups))]
+            (if (and one-shot?
+                     (seq a)
+                     (every? global-env a))
+              []
+              a))))
 
       ;; Map-callable structural slot — names must match. Sub free
       ;; args outside structural-args are captured.

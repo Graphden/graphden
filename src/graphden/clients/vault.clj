@@ -19,6 +19,18 @@
     [org.httpkit.client :as http]))
 
 
+;; Process-wide vault client — set by the `:vault/client` integrant
+;; init-key at startup, cleared on halt. Read as a fallback when a
+;; consumer doesn't have a ctx-attached client. Mirrors the
+;; `system.branch-router/active-router` pattern: shared infrastructure
+;; that doesn't fit per-branch ctx (where propagating it triggers an
+;; unrelated compile-eager closure-leak on the secrets graph) but
+;; logically belongs to the JVM lifecycle anyway — one Vault per JVM.
+(defonce ^{:doc "JVM-wide active vault client `{:address … :token …}` or nil."}
+  active-client
+  (atom nil))
+
+
 (defn- require-path!
   "Reject nil / non-string / blank paths upfront with a clean
    `:vault/lookup-failed :reason :missing-path` ex-info. The string-

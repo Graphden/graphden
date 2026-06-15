@@ -1,6 +1,7 @@
 (ns graphden.executor.context
   "Execution context for the function executor."
   (:require
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry :as registry]
     [graphden.storage.protocol.core :as sp]))
 
@@ -57,8 +58,7 @@
 
    Both paths re-register type-aliases from storage so newly-created
    types are resolvable to the type-checker without a server
-   restart. The lazy `requiring-resolve` avoids the cycle
-   context ← compile-runtime ← context."
+   restart."
   ([ctx] (invalidate-graph-cache! ctx nil))
   ([ctx changed-fn-ids]
    ;; Serialize the whole invalidation body on the per-context lock —
@@ -84,16 +84,12 @@
                   (and (seq changed-fn-ids)
                        (some-> (:compile-deps ctx) deref some?)
                        (some-> (:compiled-registry ctx) deref some?))
-                  (when-let [recompile (requiring-resolve
-                                         'graphden.executor.compile-runtime/delta-recompile!)]
-                    (recompile ctx changed-fn-ids))
+                  (cr/delta-recompile! ctx changed-fn-ids)
 
                   :else
                   (do
                     (reset! (:compiled-registry ctx) nil)
-                    (when-let [refresh (requiring-resolve
-                                         'graphden.executor.compile-runtime/refresh-type-registries-from-storage!)]
-                      (refresh ctx)))))]
+                    (cr/refresh-type-registries-from-storage! ctx))))]
      (if-let [lock (:invalidation-lock ctx)]
        (locking lock (body))
        (body)))))

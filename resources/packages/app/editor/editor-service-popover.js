@@ -77,10 +77,43 @@ async function refreshServicesCache() {
 }
 
 
+// Branch-aware lookup. The same fn-id can have several `:service`
+// rows — one per branch (`:branch-id` scopes each entry to its own
+// `ExecutionContext`). When the user opens the popover from main,
+// they expect to see the main-branch service; from feat → the feat
+// service. Picking blindly via `services.find` returned whichever
+// row the backend ordered first and silently mis-routed save/delete
+// across branches. Preference order:
+//   1. row whose `:branch-id` matches the editor's current branch
+//   2. row with no `:branch-id` (legacy "(any)" entry — reconciler
+//      falls back to the base ExecutionContext)
+//   3. first match (defensive — shouldn't trigger in practice once
+//      every row has either an explicit branch-id or null)
 async function loadServiceForFn(fnId) {
   const cache = servicesCache || await refreshServicesCache();
   if (!cache?.services) return null;
-  return cache.services.find((s) => s['fn-id'] === fnId) || null;
+  const matches = cache.services.filter((s) => s['fn-id'] === fnId);
+  if (matches.length === 0) return null;
+  // Resolve the current branch's id via the cached /api/branches
+  // result that the popover already needs anyway. Falls through to
+  // `null` when the branches list isn't primed yet, leaving the
+  // null-branch + first-match fallback to do the right thing for
+  // the legacy single-branch path.
+  let currentBranchId = null;
+  try {
+    const branches = await fetchBranchesForPicker();
+    const currentName = (typeof getCurrentBranchName === 'function')
+      ? getCurrentBranchName() : 'main';
+    currentBranchId = branches.find(
+      (b) => b.name === currentName)?.id || null;
+  } catch (_) {}
+  if (currentBranchId) {
+    const onCurrent = matches.find((s) => s['branch-id'] === currentBranchId);
+    if (onCurrent) return onCurrent;
+  }
+  const legacy = matches.find((s) => !s['branch-id']);
+  if (legacy) return legacy;
+  return matches[0];
 }
 
 
@@ -137,6 +170,11 @@ async function saveService(existing, fnId, data) {
   body.set('fn-id', fnId);
   body.set('enabled?', data.enabled ? 'true' : 'false');
   body.set('restart-policy', data.restartPolicy);
+  // `:branch-id` is optional on the wire: an empty string clears the
+  // field (legacy no-branch-id behavior), a UUID scopes the run to
+  // that branch's ExecutionContext. We always emit the key so a PUT
+  // can switch a service from "any branch" to "this branch" and back.
+  if (data.branchId) body.set('branch-id', data.branchId);
   const url = existing
     ? '/api/entities/service/' + encodeURIComponent(existing.id)
     : '/api/entities/service';
@@ -145,6 +183,22 @@ async function saveService(existing, fnId, data) {
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
     body: body.toString(),
   });
+}
+
+
+// Cached branch list — refreshed once per popover open. The list is
+// stable for the popover's lifetime (the user can't create a branch
+// from inside the service popover) so a single fetch per open is
+// enough.
+async function fetchBranchesForPicker() {
+  try {
+    const r = await authFetch('/api/branches', { method: 'GET' });
+    if (!r.ok) return [];
+    const body = await r.json();
+    return body?.branches || [];
+  } catch (_) {
+    return [];
+  }
 }
 
 
@@ -177,9 +231,28 @@ function renderStatusLine(running) {
 }
 
 
+// Returns the OTHER services for this fn-id — same fn, different
+// branch-id. Helpful as a guard against accidentally creating a
+// duplicate service when forking + experimenting; an admin who
+// already wired `:web-server` on main may not realise they're
+// queueing up a sibling row on dev. Returns [] when the
+// services-list isn't loaded yet (rare race during editor init).
+function siblingServicesForFn(fnId, currentServiceId) {
+  if (!servicesCache?.services) return [];
+  return servicesCache.services.filter((s) =>
+    s['fn-id'] === fnId
+    && s.id !== currentServiceId);
+}
+
+
 async function showServicePopover(fnEntity, anchorEl) {
   if (!fnEntity || !anchorEl) return;
-  const existing = await loadServiceForFn(fnEntity.id);
+  const [existing, branches] = await Promise.all([
+    loadServiceForFn(fnEntity.id),
+    fetchBranchesForPicker(),
+  ]);
+  const siblings = siblingServicesForFn(fnEntity.id, existing?.id);
+  const branchById = Object.fromEntries(branches.map((b) => [b.id, b]));
   const el = ensureServicePopoverEl();
   el.textContent = '';
 
@@ -209,6 +282,32 @@ async function showServicePopover(fnEntity, anchorEl) {
     el.appendChild(status);
   }
 
+  // Cross-branch duplicate warning. When another `:service` row
+  // already targets THIS fn-id on a different branch, surface the
+  // list so the admin doesn't accidentally configure a second
+  // sibling. Editing an existing row excludes itself (the row IS
+  // already on its branch); creating a new row sees every existing
+  // row.
+  if (siblings.length > 0) {
+    const warn = document.createElement('div');
+    warn.className = 'service-popover-sibling-warn';
+    const labels = siblings.map((s) => {
+      const branchName = branchById[s['branch-id']]?.name
+                         || (s['branch-id'] ? '<unknown branch>' : '(any)');
+      const runState = s.running?.['stopper-set?'] ? 'running'
+                     : s.running?.['start-failed-at'] ? 'failed'
+                     : s['enabled?'] ? 'pending' : 'disabled';
+      return branchName + ' (' + runState + ')';
+    }).join(', ');
+    warn.textContent = (siblings.length === 1
+                       ? '⚠ Also a service on: '
+                       : '⚠ Also services on: ') + labels;
+    warn.title = 'Same fn-id, different branch. Reconciler keeps each branch\'s '
+               + 'instance separate — verify this is intentional before adding '
+               + 'another.';
+    el.appendChild(warn);
+  }
+
   // Enabled toggle
   const enabledLabel = document.createElement('label');
   enabledLabel.className = 'service-popover-option';
@@ -219,6 +318,42 @@ async function showServicePopover(fnEntity, anchorEl) {
   enabledLabel.appendChild(enabledCb);
   enabledLabel.appendChild(document.createTextNode(' Enabled'));
   el.appendChild(enabledLabel);
+
+  // Branch picker — :service.branch-id (nullable). Pre-fills with
+  // the existing row's branch-id; for a brand-new service, default
+  // to the editor's CURRENT branch (most natural for "make this fn
+  // run on the branch I'm looking at"). Empty option = legacy no-
+  // branch-id row → reconciler falls back to the base ExecutionContext.
+  const branchWrap = document.createElement('div');
+  branchWrap.className = 'service-popover-branch';
+  const branchLbl = document.createElement('div');
+  branchLbl.className = 'service-popover-branch-label';
+  branchLbl.textContent = 'Branch:';
+  branchWrap.appendChild(branchLbl);
+  const branchSel = document.createElement('select');
+  branchSel.className = 'service-popover-branch-select';
+  const currentBranchName = (typeof getCurrentBranchName === 'function')
+    ? getCurrentBranchName() : null;
+  const currentBranchRow = branches.find((b) => b.name === currentBranchName);
+  const defaultBranchId = existing
+    ? (existing['branch-id'] || '')
+    : (currentBranchRow?.id || '');
+  // "Any" — legacy nullable row; reconciler picks base ctx. Keep it
+  // available so admins can opt out of per-branch scoping for a
+  // service that ought to run regardless of the active branch.
+  const optAny = document.createElement('option');
+  optAny.value = '';
+  optAny.textContent = '(any — legacy)';
+  branchSel.appendChild(optAny);
+  for (const b of branches) {
+    const opt = document.createElement('option');
+    opt.value = b.id;
+    opt.textContent = b.name;
+    branchSel.appendChild(opt);
+  }
+  branchSel.value = defaultBranchId;
+  branchWrap.appendChild(branchSel);
+  el.appendChild(branchWrap);
 
   // Restart policy radios
   const policyWrap = document.createElement('div');
@@ -257,34 +392,54 @@ async function showServicePopover(fnEntity, anchorEl) {
     saveBtn.textContent = 'Saving…';
     const policy = el.querySelector('input[name="service-restart-policy"]:checked')?.value
                    || 'always';
-    // authFetch THROWS on network rejection (browser fetch contract); without
-    // a try-catch, the button would stay disabled with no user feedback.
+    // The save and the follow-up reconcile are TWO independent calls
+    // with different failure consequences. Saving failed → row didn't
+    // persist, the user needs to retry. Reconcile failed → row IS
+    // persisted, the post-edit hook + the next scheduled reconcile
+    // pass will catch it up; the user doesn't need to retry. Earlier
+    // a single try/catch wrapped both, so a transient reconcile abort
+    // (e.g. caused by the page navigating to a fresh view right after
+    // save) misleadingly showed "Save failed (network error): Failed
+    // to fetch" even though the row was correctly stored.
+    let saveResp;
     try {
-      const r = await saveService(existing, fnEntity.id, {
+      saveResp = await saveService(existing, fnEntity.id, {
         enabled: enabledCb.checked,
         restartPolicy: policy,
+        branchId: branchSel.value || null,
       });
-      if (!r?.ok) {
-        const text = r ? await r.text().catch(() => '') : 'network error';
-        alert('Save failed (' + (r?.status) + '): '
-              + text.replace(/<[^>]+>/g, '').trim().slice(0, 300));
-        saveBtn.disabled = false;
-        saveBtn.textContent = existing ? 'Save & reconcile' : 'Create & reconcile';
-        return;
-      }
-      const rec = await reconcileServices();
-      if (!rec?.ok) {
-        alert('Saved but reconcile failed — restart the pod or call '
-              + 'POST /api/services/reconcile manually.');
-      }
-      // Invalidate cache so the next open shows fresh state.
-      servicesCache = null;
-      hideServicePopover();
     } catch (err) {
       alert('Save failed (network error): ' + (err?.message || err));
       saveBtn.disabled = false;
       saveBtn.textContent = existing ? 'Save & reconcile' : 'Create & reconcile';
+      return;
     }
+    if (!saveResp?.ok) {
+      const text = saveResp ? await saveResp.text().catch(() => '') : 'network error';
+      alert('Save failed (' + (saveResp?.status) + '): '
+            + text.replace(/<[^>]+>/g, '').trim().slice(0, 300));
+      saveBtn.disabled = false;
+      saveBtn.textContent = existing ? 'Save & reconcile' : 'Create & reconcile';
+      return;
+    }
+    // Save succeeded. Reconcile failures are observability-grade, NOT
+    // user-action-required — the post-edit hook in
+    // `crud/entities.invalidate!` already restarts dependent services,
+    // and the next periodic reconcile pass catches anything else.
+    try {
+      const rec = await reconcileServices();
+      if (rec && !rec.ok) {
+        alert('Saved but reconcile failed — restart the pod or call '
+              + 'POST /api/services/reconcile manually.');
+      }
+    } catch (_) {
+      // Most often an AbortError caused by navigating away (e.g.
+      // a branch switch immediately after save). Row is safe; the
+      // reconciler will pick it up. Silently swallow.
+    }
+    // Invalidate cache so the next open shows fresh state.
+    servicesCache = null;
+    hideServicePopover();
   });
   actions.appendChild(saveBtn);
 

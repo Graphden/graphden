@@ -10,17 +10,25 @@
    `register-type-alias!`. `:kaocha.plugin/parallel` binds a fresh
    `graphden.types.core/*type-aliases-override*` atom per NS thread,
    so the alias mutations stay thread-local and don't race with
-   other parallel NSs."
+   other parallel NSs. `with-isolated-rich-types` plus per-NS PG
+   database (via `shared-container-fixture`) cover the remaining
+   shared-state surfaces, so this ns runs safely under
+   `:kaocha/parallelism > 1`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]))
 
 
-(use-fixtures :once (setup/create-container-fixture))
+(use-fixtures :once
+  (setup/create-container-fixture)
+  ;; `record-rich-types(-raw)!` writes by this ns leak into sibling
+  ;; integration tests otherwise — see check-test for the same fix.
+  exec/with-isolated-rich-types)
 
 
 ;; ============================================================================

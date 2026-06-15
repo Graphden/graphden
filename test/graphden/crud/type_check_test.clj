@@ -7,12 +7,17 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.type-check :as tc]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
 
-(use-fixtures :once (setup/create-container-fixture))
+(use-fixtures :once
+  (setup/create-container-fixture)
+  ;; `record-rich-types(-raw)!` writes by this ns leak into sibling
+  ;; integration tests otherwise — see check-test for the same fix.
+  exec/with-isolated-rich-types)
 
 
 ;; ============================================================================
@@ -395,4 +400,58 @@
                        :tcbd-ret-int {:return :int :args {} :effects #{}})]
           (is (nil? (tc/type-check-binding-direct!
                       storage {:slot-id (:id slot) :ref-fn-id (:id target)} nil))))
+        (finally (sp/close storage)))))
+
+  (testing "HOF-forwarding — scalar-returning ref into [:fn {} :any] slot"
+    ;; `:future`-shaped slot expects a 0-arg callable returning :any.
+    ;; A ref to a fn that returns `:int` should be ACCEPTED — the
+    ;; runtime hof-wrap forwards the ref as the callable, and
+    ;; `[:fn {} :int] ⊆ [:fn {} :any]` by covariant return.
+    ;; Prior to the HOF-forwarding clause, the spot-check naively
+    ;; compared `:int` vs `[:fn {} :any]` and rejected.
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [slot   (setup/create-slot! storage "body" [:fn {} :any])
+              target (setup/create-base-fn! storage "tcbd-hof-int-leaf")
+              _      (registry/record-rich-types-raw!
+                       :tcbd-hof-int-leaf
+                       {:return :int :args {} :effects #{}})]
+          (is (nil? (tc/type-check-binding-direct!
+                      storage {:slot-id (:id slot) :ref-fn-id (:id target)} nil))))
+        (finally (sp/close storage)))))
+
+  (testing "HOF-forwarding — text-returning ref into [:fn {} :any] slot"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [slot   (setup/create-slot! storage "body" [:fn {} :any])
+              target (setup/create-base-fn! storage "tcbd-hof-text-leaf")
+              _      (registry/record-rich-types-raw!
+                       :tcbd-hof-text-leaf
+                       {:return :text :args {} :effects #{}})]
+          (is (nil? (tc/type-check-binding-direct!
+                      storage {:slot-id (:id slot) :ref-fn-id (:id target)} nil))))
+        (finally (sp/close storage)))))
+
+  (testing "HOF-forwarding — return covariance into [:fn {} :int] slot"
+    ;; Tighter slot — return type `:int`. `:int` return passes,
+    ;; `:text` return rejects.
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [slot      (setup/create-slot! storage "tick" [:fn {} :int])
+              ok-target (setup/create-base-fn! storage "tcbd-hof-int-tight")
+              _         (registry/record-rich-types-raw!
+                          :tcbd-hof-int-tight
+                          {:return :int :args {} :effects #{}})
+              bad-target (setup/create-base-fn! storage "tcbd-hof-text-tight")
+              _          (registry/record-rich-types-raw!
+                           :tcbd-hof-text-tight
+                           {:return :text :args {} :effects #{}})]
+          (is (nil? (tc/type-check-binding-direct!
+                      storage {:slot-id (:id slot)
+                               :ref-fn-id (:id ok-target)} nil)))
+          (let [rej (tc/type-check-binding-direct!
+                      storage {:slot-id (:id slot)
+                               :ref-fn-id (:id bad-target)} nil)]
+            (is (some? rej))
+            (is (re-find #"Type mismatch on ref binding" (:reason rej)))))
         (finally (sp/close storage))))))

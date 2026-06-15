@@ -143,20 +143,74 @@ function renderDiffBody(modal, body, targetName, sourceName) {
   modal.querySelectorAll('[data-diff-fn-id]').forEach((row) => {
     row.addEventListener('click', () => {
       const id = row.getAttribute('data-diff-fn-id');
-      if (id && typeof selectFn === 'function') {
+      if (!id) return;
+      const change = row.getAttribute('data-diff-change');
+      const fnName = row.getAttribute('data-diff-fn-name');
+      // `added-in-source` — the fn lives ONLY on the source branch.
+      // The current branch's `lookups.fnMap` won't know it; `selectFn`
+      // would set `selectedFnId` and then no-op visibly (no hash push,
+      // no card, no namespace expand). Offer to switch first; the
+      // post-reload hash-handler picks up the fn name on the target
+      // branch where it actually exists.
+      if (change === 'added-in-source' && fnName
+          && typeof switchToBranch === 'function') {
+        const proceed = confirm(
+          'This fn lives only on "' + sourceName + '". '
+          + 'Switch to that branch to view :' + fnName + '?');
+        if (!proceed) return;
         closeBranchDiffModal();
-        // Switching off the popover/modal and selecting a fn is the
-        // most natural action; the user will see the fn-card on the
-        // CURRENT branch (the one they clicked from).
+        try {
+          window.history.pushState(null, '', '#' + fnName);
+        } catch (_) {}
+        switchToBranch(sourceName);
+        return;
+      }
+      if (typeof selectFn === 'function') {
+        closeBranchDiffModal();
+        // `added-in-target` / `modified` — the fn exists on the
+        // current branch. selectFn works normally.
         selectFn(id);
       }
     });
   });
 }
 
+// Walk parent-ids transitively through `lookups.fnMap` to see if
+// any ancestor carries `branch-local? === true`. Mirrors the server-
+// side `effective-branch-local?` (graphden.versioning.branch-local).
+// Used to annotate diff rows so the user can see at a glance which
+// entries WOULDN'T merge across branches even though the diff lists
+// them.
+//
+// `seed` (optional) — the row from the diff payload itself, used when
+// `lookups.fnMap` doesn't know about the fn yet (fn lives ONLY on the
+// source branch, hasn't propagated to the editor's current view). The
+// seed carries `:branch-local?` + `:parent-ids` straight from the
+// version row, so we can start the walk from the seed and only need
+// the fnMap for ancestor lookups (which usually DO exist on main).
+function isFnBranchLocal(fnId, seed) {
+  const fnMap = typeof lookups === 'object' ? lookups?.fnMap : null;
+  const startRow = fnMap?.get(fnId) || seed;
+  if (!startRow) return false;
+  const visited = new Set();
+  const queue = [startRow];
+  while (queue.length) {
+    const f = queue.shift();
+    if (!f || visited.has(f.id)) continue;
+    visited.add(f.id);
+    if (f['branch-local?'] === true) return true;
+    for (const pid of (f['parent-ids'] || [])) {
+      const pf = fnMap?.get(pid);
+      if (pf) queue.push(pf);
+    }
+  }
+  return false;
+}
+
 function diffRowHtml(d) {
   const entityName = d['entity-name'];
   const entityId = d['entity-id'];
+  const change = d.change;
   const sv = d['source-version'];
   const tv = d['target-version'];
   const summary = previewSummary(entityName, sv, tv);
@@ -164,15 +218,40 @@ function diffRowHtml(d) {
   // knows how to render. :binding / :binding-list-item navigate via
   // their owning fn-id, but we don't always have that on the wire;
   // skip the data attr in that case to disable navigation.
-  const fnNav = entityName === 'fn' ? (' data-diff-fn-id="' + escapeAttr(entityId) + '"')
-                                    : '';
+  // `data-diff-change` flags `added-in-source` so the click handler
+  // knows the target fn lives ONLY on the OTHER branch — selectFn on
+  // the current branch would no-op silently; switch first.
+  // `data-diff-fn-name` carries the source-version's `:name` (preferred,
+  // since fnMap on current branch may not know this fn-id) so the
+  // post-switch reload's hash-resolution can find it.
+  const fnName = sv?.name || tv?.name || '';
+  const fnNav = entityName === 'fn'
+    ? (' data-diff-fn-id="' + escapeAttr(entityId) + '"'
+       + ' data-diff-change="' + escapeAttr(change || '') + '"'
+       + (fnName ? ' data-diff-fn-name="' + escapeAttr(fnName) + '"' : ''))
+    : '';
+  // Pass the source-version (or target-version) as the seed so the
+  // walker can resolve `:branch-local?` for fns that ONLY exist on
+  // one of the two branches — the editor's `lookups.fnMap` is built
+  // from the active branch's view, so an `added-in-source` fn won't
+  // be there. The seed carries the row's `:parent-ids` straight from
+  // the diff payload, which is enough to start the walk.
+  const seed = entityName === 'fn'
+    ? Object.assign({ id: entityId }, sv || tv || {})
+    : null;
+  const branchLocal = entityName === 'fn' && isFnBranchLocal(entityId, seed);
   const klass = 'branch-diff-row'
-                + (entityName === 'fn' ? ' branch-diff-row-clickable' : '');
+                + (entityName === 'fn' ? ' branch-diff-row-clickable' : '')
+                + (branchLocal ? ' branch-diff-row-local' : '');
+  const localBadge = branchLocal
+    ? '<span class="branch-diff-row-local-badge" title="Won\'t propagate on merge — branch-local fn">📍 branch-local</span>'
+    : '';
   return ''
     + '<div class="' + klass + '"' + fnNav + '>'
     +   '<div class="branch-diff-row-head">'
     +     '<span class="branch-diff-entity">' + escapeText(entityName) + '</span>'
     +     '<span class="branch-diff-id">' + escapeText(entityId) + '</span>'
+    +     localBadge
     +   '</div>'
     +   '<div class="branch-diff-row-summary">' + summary + '</div>'
     + '</div>';

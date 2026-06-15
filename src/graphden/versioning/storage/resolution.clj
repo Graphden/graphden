@@ -11,10 +11,18 @@
    `slot` is intentionally NOT versioned (immutable post-create).
 
    Algorithm: find own latest version on the branch, fall back through
-   branch-merge records, then recurse to the parent branch."
+   branch-merge records, then recurse to the parent branch.
+
+   Branch-local filter: fn rows whose effective `:branch-local?` is
+   true (per `graphden.versioning.branch-local`) get foreign-branch
+   merge candidates dropped. Identity remains visible on every
+   branch (it's non-versioned), but the version data stays scoped
+   to the originating branch — so runtime-config fn-defs (web-server
+   with a dev port, vault path) don't leak across merges."
   (:require
     [clojure.set :as set]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.branch-local :as bl]))
 
 
 ;; === Branch Chain Cache ===
@@ -72,6 +80,7 @@
 (declare resolve-entities-batch)
 (declare collect-branch-chain)
 (declare resolve-version-from-cache)
+(declare load-merge-aware-cache)
 
 
 ;; === Entity Configuration ===
@@ -101,7 +110,8 @@
 
    :binding {:version-entity :binding-version
              :version-id-field :binding-id
-             :version-data-fields #{:fn-id :slot-id :value :ref-fn-id
+             :version-data-fields #{:fn-id :slot-id :value :value-present
+                                    :ref-fn-id
                                     :override-kind
                                     :type-override-fn-id :description
                                     :list-append :list-closed}}
@@ -146,12 +156,46 @@
                        {version-id-field entity-id :branch-id branch-id})))
 
 
+(defn- owning-fn-id
+  "Find the fn-id whose `:branch-local?` flag governs filtering for
+   a given version row. The fn itself is its own owner; `:fn-slot`
+   + `:binding` version rows carry `:fn-id` in their data fields;
+   `:binding-list-item` would need a chained lookup through binding
+   identity (skipped — items of a filtered binding never reach a
+   reader anyway, because the binding identity has no resolvable
+   version on the target branch). Returns nil when the entity
+   doesn't expose an owning fn."
+  [entity-name entity-id version-row]
+  (case entity-name
+    :fn entity-id
+    :fn-slot (:fn-id version-row)
+    :binding (:fn-id version-row)
+    nil))
+
+
+(defn- branch-local-version?
+  "True iff `version-row` belongs to an effective-branch-local
+   owning fn. Wraps `bl/effective-branch-local?` with the
+   entity-aware owner-lookup so child-row version rows
+   (`:binding`, `:fn-slot`) are filtered alongside `:fn` itself."
+  [base-storage entity-name entity-id version-row]
+  (when-let [fid (owning-fn-id entity-name entity-id version-row)]
+    (bl/effective-branch-local? base-storage fid)))
+
+
 (defn- merge-candidates
   "For each branch-merge that lands on `branch-id`, return a
    `{:version :effective-ts}` candidate carrying the source branch's
    latest version that's still ≤ source-timestamp AND landed AFTER
-   our own latest. Empty when no merges match."
-  [base-storage version-entity version-id-field entity-id own-latest merges]
+   our own latest. Empty when no merges match.
+
+   Branch-local filter: when the owning fn (via
+   `branch-local-version?`) is effective-branch-local on a per-
+   candidate basis, that candidate is dropped. For `:fn` entities
+   the owner IS the entity itself; for `:fn-slot` and `:binding`
+   the version-row carries `:fn-id`, so the same flag suppresses
+   child rows owned by a sticky-local fn from leaking on merge."
+  [base-storage entity-name version-entity version-id-field entity-id own-latest merges]
   (when (seq merges)
     (let [source-branch-ids (mapv :source-branch-id merges)
           ;; Single batch query for all source branches.
@@ -168,6 +212,8 @@
                                    branch-versions)
                   best (latest-by-created-at eligible)]
             :when best
+            :when (not (branch-local-version? base-storage entity-name
+                                              entity-id best))
             ;; Only consider merge if it happened after our own latest.
             :when (or (nil? own-latest)
                       (pos? (compare (:target-timestamp m)
@@ -220,7 +266,7 @@
                                        version-id-field entity-id branch-id)
         merges (sp/query-entities base-storage :branch-merge
                                   {:target-branch-id branch-id})
-        merge-cands (merge-candidates base-storage version-entity
+        merge-cands (merge-candidates base-storage entity-name version-entity
                                       version-id-field entity-id
                                       own-latest merges)
         all-candidates (cond-> []
@@ -254,25 +300,26 @@
    Only returns entities that have at least one version visible on the branch chain.
    This is different from resolve-entities-batch which returns all entities.
 
-   Optimized: uses batch version loading instead of N+1 queries."
+   Optimized: uses batch version loading instead of N+1 queries.
+   Merge-aware as of #52 — versions on merged-in source branches
+   surface here too."
   [base-storage entity-name branch-id where]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-        branch-chain (collect-branch-chain base-storage branch-id)
-        ;; Load versions on branch chain first - this tells us which entities are visible
-        all-versions (sp/query-entities base-storage version-entity
-                                        {:branch-id (vec branch-chain)})
-        ;; Get unique entity IDs that have versions on this branch chain
-        entity-ids-with-versions (into #{} (map version-id-field) all-versions)
-        ;; Load only the identity records for entities that have versions
+        {:keys [versions-by-id merges-by-target branch-chain]}
+        (load-merge-aware-cache base-storage version-entity version-id-field
+                                nil branch-id)
+        ;; Entities visible: those with at least one loaded version
+        ;; (loaded set already covers chain + merge sources).
+        entity-ids-with-versions (set (keys versions-by-id))
         identities-map (if (empty? entity-ids-with-versions)
                          {}
                          (sp/read-entities base-storage entity-name
                                            (vec entity-ids-with-versions)))
-        ;; Group versions by entity-id for resolution
-        versions-by-id (group-by version-id-field all-versions)
-        ;; Resolve each entity
         resolved (for [[eid identity-rec] identities-map
-                       :let [version (resolve-version-from-cache versions-by-id eid branch-chain)]
+                       :let [version (resolve-version-from-cache
+                                       base-storage entity-name
+                                       versions-by-id merges-by-target
+                                       eid branch-chain)]
                        :when version]
                    (merge identity-rec (extract-version-data version version-id-field)))]
     (if (empty? where)
@@ -325,34 +372,101 @@
         chain))))
 
 
-(defn- load-all-versions-for-ids
-  "Loads all version records for given entity-ids on the branch chain.
-   Returns map: {entity-id -> [version-record, ...]}"
-  [base-storage entity-name entity-ids branch-chain]
-  (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)]
-    (if (empty? entity-ids)
-      {}
-      ;; Load versions using WHERE IN for entity-ids and branch-ids
-      (let [versions (sp/query-entities base-storage version-entity
-                                        {version-id-field (vec entity-ids)
-                                         :branch-id (vec branch-chain)})]
-        (group-by version-id-field versions)))))
+(defn- load-merge-aware-cache
+  "Pre-load every row needed to resolve `entity-ids` (or every entity
+   of the type if `entity-ids` is nil) on `branch-id` with full
+   `branch-merge` support.
+
+   Returns `{:versions-by-id :merges-by-target :branch-chain}`:
+
+   - `:branch-chain` — `[branch-id parent-id … root-id]`.
+   - `:merges-by-target` — every `branch-merge` row landing on any
+     branch in chain, grouped by `:target-branch-id`. Tells
+     `resolve-version-from-cache` what to walk per chain level.
+   - `:versions-by-id` — versions grouped by entity-id. The
+     `:branch-id` filter union'd in the source-branch-ids of those
+     merges so source-branch overlays are available for merge-
+     candidate evaluation. WITHOUT this expansion the batch path
+     never sees the merged-in versions (#52) and merges were silently
+     no-ops at read time."
+  [base-storage version-entity version-id-field entity-ids branch-id]
+  (let [branch-chain (collect-branch-chain base-storage branch-id)
+        all-merges (sp/query-entities base-storage :branch-merge
+                                      {:target-branch-id (vec branch-chain)})
+        source-branch-ids (into #{} (map :source-branch-id) all-merges)
+        all-branch-ids (vec (into (set branch-chain) source-branch-ids))
+        version-where (cond-> {:branch-id all-branch-ids}
+                        (seq entity-ids)
+                        (assoc version-id-field (vec entity-ids)))
+        all-versions (sp/query-entities base-storage version-entity
+                                        version-where)]
+    {:versions-by-id (group-by version-id-field all-versions)
+     :merges-by-target (group-by :target-branch-id all-merges)
+     :branch-chain branch-chain}))
+
+
+(defn- merge-candidates-from-cache
+  "In-memory mirror of `merge-candidates`. `versions-by-branch` is
+   the entity's versions grouped by `:branch-id` (just for this
+   entity-id — caller does the per-id slice). Pure-ish: only hits
+   storage through `bl/effective-branch-local?`, which is process-
+   cached per `(storage, fn-id)`.
+
+   Branch-local filter: per-candidate. For `:fn` the entity-id is
+   the fn-id; for `:fn-slot` / `:binding` the version row carries
+   `:fn-id` in its data fields, so the same flag suppresses child
+   rows whose owning fn is sticky-local."
+  [base-storage entity-name entity-id versions-by-branch own-latest merges]
+  (when (seq merges)
+    (for [m merges
+          :let [src-versions (get versions-by-branch (:source-branch-id m) [])
+                eligible (filter #(not (pos? (compare (:created-at %)
+                                                      (:source-timestamp m))))
+                                 src-versions)
+                best (latest-by-created-at eligible)]
+          :when best
+          :when (not (branch-local-version? base-storage entity-name
+                                            entity-id best))
+          :when (or (nil? own-latest)
+                    (pos? (compare (:target-timestamp m)
+                                   (:created-at own-latest))))]
+      {:version best :effective-ts (:target-timestamp m)})))
 
 
 (defn- resolve-version-from-cache
-  "Resolves version for an entity from pre-loaded versions map.
-   Uses simplified algorithm (no merge support - just branch chain priority).
+  "Resolves version for an entity using pre-loaded `versions-by-id`
+   + `merges-by-target` (built by `load-merge-aware-cache`). Mirrors
+   `resolve-version`'s recursion: at each chain level, combine
+   own-latest with merge-candidates and pick the latest by
+   effective-ts; recurse to parent if nothing matched.
 
-   Optimization: Index versions by branch-id for O(1) lookup per branch instead of O(n) filter."
-  [versions-by-id entity-id branch-chain]
-  (let [versions (get versions-by-id entity-id)]
-    (when (seq versions)
-      ;; Index by branch-id once, then O(1) lookup per branch in chain
-      (let [by-branch (group-by :branch-id versions)]
-        (some (fn [bid]
-                (when-let [on-branch (get by-branch bid)]
-                  (latest-by-created-at on-branch)))
-              branch-chain)))))
+   The old simplified algorithm (chain priority only, no merge
+   support) silently dropped merge-record visibility on the batch
+   path — `/api/graph/entities` and the executor's compiled graph
+   load both went through here, so a `POST /api/branches/X/merge`
+   created the branch-merge row but never affected reads (#52).
+
+   `entity-name` + `base-storage` are threaded down to
+   `merge-candidates-from-cache` so the `:fn` branch-local filter can
+   call `bl/effective-branch-local?`. Non-fn entities skip the check."
+  [base-storage entity-name versions-by-id merges-by-target entity-id branch-chain]
+  (when-let [versions (get versions-by-id entity-id)]
+    (let [by-branch (group-by :branch-id versions)]
+      (loop [chain branch-chain]
+        (when-let [bid (first chain)]
+          (let [own-latest (latest-by-created-at (get by-branch bid))
+                merges (get merges-by-target bid)
+                merge-cands (merge-candidates-from-cache base-storage entity-name
+                                                         entity-id by-branch
+                                                         own-latest merges)
+                all-candidates (cond-> []
+                                 own-latest
+                                 (conj {:version own-latest
+                                        :effective-ts (:created-at own-latest)})
+                                 (seq merge-cands)
+                                 (into merge-cands))]
+            (or (pick-latest-candidate all-candidates)
+                (recur (rest chain)))))))))
 
 
 (defn resolve-entities-batch
@@ -371,16 +485,19 @@
   [base-storage entity-name identity-records branch-id]
   (if (empty? identity-records)
     {}
-    (let [{:keys [version-id-field]} (get entity-config entity-name)
+    (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
           entity-ids (mapv :id identity-records)
-          branch-chain (collect-branch-chain base-storage branch-id)
-          versions-by-id (load-all-versions-for-ids base-storage entity-name
-                                                    entity-ids branch-chain)
+          {:keys [versions-by-id merges-by-target branch-chain]}
+          (load-merge-aware-cache base-storage version-entity version-id-field
+                                  entity-ids branch-id)
           identity-by-id (into {} (map (juxt :id identity)) identity-records)]
       (into {}
             (map (fn [eid]
                    (let [identity-rec (get identity-by-id eid)]
-                     (if-let [version (resolve-version-from-cache versions-by-id eid branch-chain)]
+                     (if-let [version (resolve-version-from-cache
+                                        base-storage entity-name
+                                        versions-by-id merges-by-target
+                                        eid branch-chain)]
                        ;; Has version - merge identity + version data
                        [eid (merge identity-rec
                                    (extract-version-data version version-id-field))]
@@ -396,18 +513,23 @@
 
 (defn- load-all-resolved
   "Loads all identity rows of `entity-name` and overlays the latest
-   version on each. Returns a map `{id → resolved-row}`."
+   version on each. Returns a map `{id → resolved-row}`. Merge-aware
+   via `load-merge-aware-cache` — the executor's compiled-graph load
+   goes through here, so merging branch A into B must affect B's
+   compiled view (#52)."
   [base-storage entity-name branch-id]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
         all-identities (sp/query-entities base-storage entity-name {})
-        branch-chain (collect-branch-chain base-storage branch-id)
-        relevant-versions (sp/query-entities base-storage version-entity
-                                             {:branch-id (vec branch-chain)})
-        versions-by-id (group-by version-id-field relevant-versions)]
+        {:keys [versions-by-id merges-by-target branch-chain]}
+        (load-merge-aware-cache base-storage version-entity version-id-field
+                                nil branch-id)]
     (into {}
           (map (fn [identity-rec]
                  (let [eid (:id identity-rec)]
-                   (if-let [version (resolve-version-from-cache versions-by-id eid branch-chain)]
+                   (if-let [version (resolve-version-from-cache
+                                      base-storage entity-name
+                                      versions-by-id merges-by-target
+                                      eid branch-chain)]
                      [eid (merge identity-rec
                                  (extract-version-data version version-id-field))]
                      [eid identity-rec]))))

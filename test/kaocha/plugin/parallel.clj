@@ -66,8 +66,91 @@
 ;; lazily so the plugin doesn't trigger production-NS load at
 ;; plugin-load time (the parallel-suite -run dispatch needs to
 ;; complete `try-load-third-party-lib` first).
+;;
+;; 2026-06-15 audit of `src/`-side process-global atoms — the four
+;; entries below cover every test-contaminator surface. The other
+;; defonce atoms are safe under parallel by construction:
+;;
+;;   - `executor.registry/default-registry` — covered via the
+;;     `*registry-override*` thread-local pattern (different mechanism,
+;;     wired through `exec/with-clean-registry` instead of this list).
+;;   - `executor.compile.lookups/cached-build-lookups-state`
+;;     and `layout.data/cached-build-lookups-state` — identity-keyed by
+;;     graph reference. Two ctxes never collide on the same key (the
+;;     bounded LRU might evict a sibling's entry, but that's a perf
+;;     hiccup, not a correctness bug).
+;;   - `crud.fn-execution.persist/futures-registry` — UUID-keyed by
+;;     execution-id. No key collisions across tests.
+;;   - `executor.registry.core/refinement-impl-cache` — content-keyed
+;;     by constraint shape. Cache values are deterministic (the
+;;     compiled validator fn); concurrent writes for the same
+;;     constraint produce equivalent values.
+;;   - `types.core/fresh-counter` — monotonic int counter. Tests may
+;;     see different values across runs but the values are just
+;;     unique identifiers, not test inputs.
+;;   - `schema.fields.types/custom-types-registry` — used by exactly
+;;     one test ns (`schema.fields.types-test`) which both registers
+;;     and unregisters in symmetric pairs.
+;;   - `clients.vault/active-client` and
+;;     `system.branch-router/active-router` — production JVM-wide
+;;     singletons. Tests don't touch them.
+;;   - `executor_runtime.core/system` — production singleton.
+;;
+;; When a NEW global-mutable surface is added, default it to this list
+;; unless one of the above by-construction reasons applies. Symptom
+;; of a missed isolation: an integration test flakes intermittently
+;; under `bb test` but passes under `bb test-sequential`.
 (def ^:private isolation-vars
-  '[graphden.types.core/*type-aliases-override*])
+  '[graphden.types.core/*type-aliases-override*
+    ;; compile-eager's always-fresh set lives behind a dynamic var so
+    ;; two NS-threads racing on `compile-runtime/rebuild!` —
+    ;; `prime-always-fresh!` resets via `set-always-fresh-fn-ids!` —
+    ;; don't overwrite each other's `:time`/`:random` fn-id set. Without
+    ;; this isolation the loser's always-fresh entries drop out and
+    ;; timing-sensitive tests (clock read twice → see same value via
+    ;; memo) flake under parallel runs.
+    graphden.executor.compile-eager/*always-fresh-fn-ids*
+    ;; rich-types-registry's thread-local override. Integration tests
+    ;; that bootstrap their own package set (`compile-packages-test`,
+    ;; `execute-http-test`, `smoke-pass-test`) write per-fn `:return` /
+    ;; `:effects` / `:args` shapes that the executor's compile pass
+    ;; reads via `ref-produces-callable?`. Without this isolation, a
+    ;; sibling NS-thread's partial registry can leak in mid-compile and
+    ;; the consumer reads a stale `:return` — surfacing as
+    ;; `AFunction$1 cannot be cast to Associative` deep inside
+    ;; compile-eager's arg-builder chain. Symptom historically caught
+    ;; by `execute-http-test`'s parallel-mode flakes.
+    ;;
+    ;; This var has an isolation-var-seeder entry: the bound atom is
+    ;; PRE-SEEDED with the global snapshot via
+    ;; `snapshot-for-isolation`. Reads of `rich-type-of` happen deep
+    ;; in the type-checker's `effective-ref-return` recursion (O(depth
+    ;; × fn-defs)) — pre-seeding keeps each read at O(1) hash lookup
+    ;; instead of the O(N) merge view that an empty-seed override
+    ;; would have forced (smoke_pass_test demonstrated the cost: a
+    ;; merge-on-read view tipped bootstrap from seconds into a 20-min
+    ;; GC-thrashing hang).
+    graphden.executor.registry.core/*rich-types-override*])
+
+
+;; Per-var seeders. Some isolation atoms must start non-empty — the
+;; rich-types one needs to inherit the global snapshot at bind time
+;; or the test ns's first read returns nil and downstream type-check
+;; consumers crash. Default seed is `{}`; add entries here when an
+;; isolation var needs a richer initial state.
+(def ^:private isolation-var-seeders
+  '{graphden.executor.registry.core/*rich-types-override*
+    graphden.executor.registry.core/snapshot-for-isolation})
+
+
+(defn- seed-for
+  [sym]
+  (if-let [seeder-sym (get isolation-var-seeders sym)]
+    (if-let [seeder-fn (try (requiring-resolve seeder-sym)
+                            (catch Exception _ nil))]
+      (seeder-fn)
+      {})
+    {}))
 
 
 (defn- resolve-isolation-vars
@@ -76,7 +159,7 @@
         (keep (fn [sym]
                 (when-let [v (try (requiring-resolve sym)
                                   (catch Exception _ nil))]
-                  [v (atom {})])))
+                  [v (atom (seed-for sym))])))
         isolation-vars))
 
 

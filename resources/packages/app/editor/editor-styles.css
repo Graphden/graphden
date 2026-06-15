@@ -608,6 +608,14 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .merge-conflicts-help {
   font-size: 11px; color: var(--muted-fg);
 }
+.merge-conflicts-batch {
+  display: flex; gap: 6px; align-items: center;
+  font-size: 11px; color: var(--muted-fg);
+}
+.merge-conflicts-batch-label { margin-right: 2px; }
+.merge-conflicts-batch-btn {
+  font-size: 10px; padding: 2px 8px;
+}
 .merge-conflicts-rows {
   display: flex; flex-direction: column; gap: 8px;
 }
@@ -763,6 +771,22 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .branch-diff-row-summary em {
   font-style: normal;
   background: var(--bg); padding: 0 3px; border-radius: 2px;
+}
+/* Branch-local annotation — appears on diff rows for fns whose
+   effective branch-local is true. The diff lists them (the version
+   DOES differ), but the resolver filters them out at merge time, so
+   the badge tells the user "this won't actually propagate". */
+.branch-diff-row-local-badge {
+  margin-left: auto;
+  font-size: 10px;
+  font-style: italic;
+  color: var(--muted-fg);
+  padding: 1px 5px;
+  border: 1px dashed var(--muted-fg);
+  border-radius: 2px;
+}
+.branch-diff-row-local {
+  opacity: 0.7;
 }
 .auth-error.hidden { display: none; }
 
@@ -2338,6 +2362,30 @@ textarea.arg-value-edit-input {
   background: color-mix(in srgb, var(--fg) 6%, var(--card-bg));
 }
 
+/* Branch-local strip — informational marker that this fn (or an
+   ancestor) is sticky-local: version rows do not propagate across
+   branches on merge. No edit affordance — once an ancestor sets the
+   flag, descendants inherit it monotonically and cannot widen back. */
+.branch-local-strip {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--muted-fg);
+  border-top: 1px solid var(--card-border);
+  background: var(--card-bg);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+}
+.branch-local-strip-glyph {
+  font-size: 11px;
+  line-height: 1;
+}
+.branch-local-strip-label {
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+
 /* In-tooltip dismiss — the × button is the obvious affordance for
    touch users; the document-level pointerdown handler is a fallback
    for desktop "tap-outside". Sized 20×20 to be a comfortable touch
@@ -3271,6 +3319,43 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   margin-right: 10px;
   cursor: pointer;
   font-size: 11px;
+}
+
+/* Cross-branch sibling-services warning — appears when another
+   :service row targets the same fn-id on a different branch.
+   Dashed border + warn-tone background so it visually separates
+   from regular status text without screaming. */
+.service-popover-sibling-warn {
+  margin: 6px 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--warning-fg, #c47b00) 12%, var(--card-bg));
+  border: 1px dashed var(--warning-fg, #c47b00);
+  border-radius: 3px;
+  cursor: help;
+}
+
+/* Branch picker — per-branch service scoping. The select is full-
+   width so longer branch names don't truncate; size matches the
+   restart-policy block visually. */
+.service-popover-branch {
+  margin: 8px 0;
+}
+.service-popover-branch-label {
+  font-weight: 600;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.service-popover-branch-select {
+  width: 100%;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 4px;
+  background: var(--card-bg);
+  color: var(--fg);
+  border: 1px solid var(--card-border);
+  border-radius: 3px;
 }
 
 .service-popover-actions {

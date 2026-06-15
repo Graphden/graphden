@@ -21,7 +21,11 @@
     [graphden.types.core :as types]))
 
 
-(use-fixtures :once (setup/create-container-fixture))
+(use-fixtures :once
+  (setup/create-container-fixture)
+  ;; `record-rich-types(-raw)!` writes by this ns leak into sibling
+  ;; integration tests otherwise — see check-test for the same fix.
+  exec/with-isolated-rich-types)
 
 
 (use-fixtures :each exec/with-clean-registry)

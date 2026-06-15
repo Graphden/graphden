@@ -16,7 +16,10 @@
    derefs, leaving `:status :pending` and the row's `:result` blank
    until `record-completion!` lands later. The helper polls for the
    row's `:result` column on `:pending`, transparently passing
-   inline successes through."
+   inline successes through. Plus `with-isolated-rich-types` and
+   per-NS PG database (via `shared-container-fixture`) cover the
+   shared-mutable surfaces, so this ns runs safely under
+   `:kaocha/parallelism > 1`."
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
@@ -87,6 +90,11 @@
 
 (use-fixtures :once
   (setup/create-container-fixture)
+  ;; `record-rich-types-raw!` writes by this ns ("audit-composed",
+  ;; "tainted-composed", suffix-driven names) restore to a stub
+  ;; rather than dissoc — sticky stubs leak into sibling tests.
+  ;; `with-isolated-rich-types` enforces clean teardown.
+  exec/with-isolated-rich-types
   (fn [f]
     (init-shared-storage!)
     (try (f)

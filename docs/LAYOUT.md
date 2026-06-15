@@ -170,6 +170,32 @@ Example: editor-routes expanded to list-11 level.
  :edges [{:data {:id "e-xxx" :source "fn-a" :target "fn-b" :argName "handler"}} ...]}
 ```
 
+#### 2.6 Inherited bindings are surfaced through ANCESTOR cards, not child arg nodes
+
+A composed fn-def with no own bindings on a slot inherits its
+parent's `value` / `:list-append` items. The layout intentionally
+does NOT emit those values as arg-nodes under the CHILD's fn —
+the child's `args-by-fn` slice is empty for inherited-only slots.
+
+Instead, the editor's fn-overlay walks `parent-ids` at render
+time and exposes the parent rows on the SAME card (the ancestor
+expansion strip). Clicking an ancestor row navigates to that fn,
+whose own layout DOES emit the bound values + sequence items.
+
+What this means for layout-API consumers (UI tests, alternate
+front-ends):
+
+- A child's `/api/graph/layout?root=child` returns just the fn
+  node + any own-binding placeholders. Inherited values are NOT
+  in the response.
+- To inspect the inherited values, request the parent's layout
+  separately, or expand the child's ancestor row via the
+  `:expansions` argument in the layout request.
+
+This split is the load-bearing assumption pinned by the
+`graphden.tools.browser-test/edit-inheritance-regression.test.js`
+e2e test — parent layout exposes items, child layout doesn't.
+
 ### Stage 3: Compute Paths to Shared Nodes
 
 **Shared node:** A node with multiple parents (multiple incoming edges)

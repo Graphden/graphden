@@ -1,4 +1,4 @@
-(ns ^:serial graphden.executor.runtime-test
+(ns graphden.executor.runtime-test
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.interface]

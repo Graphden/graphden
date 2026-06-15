@@ -257,6 +257,229 @@
       (finally (sp/close base)))))
 
 
+(deftest merge-applies-source-overlay-on-batch-read-path-test
+  ;; Regression for #52. The batch read path (`resolve-all-entities`,
+  ;; `resolve-entities-batch`, the executor's compiled-graph load via
+  ;; `load-all-resolved`) used to call a "simplified" cache resolver
+  ;; that walked the branch chain only — no `branch-merge` support.
+  ;; A `POST /api/branches/:target/merge` would create the merge row
+  ;; but reads on the target STILL saw the target's own version. The
+  ;; user-visible symptom we hit in the browser smoke pass: smoke-branch
+  ;; sets a list-item value to 100, main holds 42, merge endpoint
+  ;; returns ok:true, executor on main still answers 42. The
+  ;; per-entity `resolve-version` did walk merges; only the batch
+  ;; path lagged.
+  ;;
+  ;; Acceptance: a `:fn` row whose only version overlay lives on the
+  ;; merged-in source branch must show that overlay on the target
+  ;; after `merge-branch!`. Same shape as the failing scenario, just
+  ;; using `:description` instead of a list-item value because the
+  ;; versioning machinery is the same for any version-data field.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [;; Seed an entity on main with the original value.
+            seeded  (sp/create-entity v :fn {:name "merge-overlay-fn"
+                                             :parent-ids [] :impl-hash "h"
+                                             :description "from-main"})
+            id      (:id seeded)
+            ;; Fork a feature branch and rewrite the description there.
+            feature (vs/create-branch! v "merge-overlay-feature")
+            vf      (vs/switch-branch v (:id feature))
+            _       (sp/update-entity vf :fn id {:description "from-feature"})]
+        (testing "before merge: each branch sees its own version"
+          (is (= "from-main" (:description (sp/read-entity v :fn id))))
+          (is (= "from-feature" (:description (sp/read-entity vf :fn id)))))
+
+        (testing "after merge: main's batch read picks up feature's overlay"
+          (vs/merge-branch! v (:id feature))
+          (is (= "from-feature"
+                 (:description (sp/read-entity v :fn id)))
+              "per-entity read (already merge-aware) sees the overlay")
+          ;; `query-entities` exercises the batch path — the one
+          ;; that #52 documented as silently dropping merges.
+          (let [batch (sp/query-entities v :fn {:id id})]
+            (is (= 1 (count batch)))
+            (is (= "from-feature" (:description (first batch)))
+                "batch read path must honor the branch-merge row")))
+
+        (testing "an unrelated branch still sees main's version"
+          (let [other  (vs/create-branch! v "merge-overlay-other")
+                vother (vs/switch-branch v (:id other))]
+            ;; "other" forked from main AFTER the merge already
+            ;; promoted feature's version to main — so other inherits
+            ;; the merged value too. Mirrors what the user expects
+            ;; when starting work after a merge has landed.
+            (is (= "from-feature"
+                   (:description (sp/read-entity vother :fn id)))))))
+      (finally (sp/close base)))))
+
+
+(deftest branch-local-fn-does-not-propagate-on-merge-test
+  ;; A `:fn` row whose effective `:branch-local?` is true (via own
+  ;; flag OR via parent-ids closure) must NOT have its version row
+  ;; surface on a sibling branch after merge. The branch-merge
+  ;; pointer still lands (and OTHER non-branch-local entities DO
+  ;; merge normally — see #52), but resolution filters foreign-branch
+  ;; candidates for sticky fn-ids.
+  ;;
+  ;; This is the unit-level counterpart of the smoke-pass [7] test
+  ;; in graphden.integration.smoke-pass-test, exercising the same
+  ;; behaviour without the HTTP / packages stack on top.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [;; Local-marker base-fn (mirrors `:http-server` etc.).
+            sticky-parent (sp/create-entity v :fn
+                                            {:name "sticky-parent"
+                                             :parent-ids []
+                                             :impl-hash "h"
+                                             :branch-local? true})
+            ;; Non-local plain base-fn — control case.
+            plain-parent  (sp/create-entity v :fn
+                                            {:name "plain-parent"
+                                             :parent-ids []
+                                             :impl-hash "h"})
+            feature (vs/create-branch! v "branch-local-feat")
+            vf      (vs/switch-branch v (:id feature))
+            ;; CHILD fn created on the feature branch, parented from
+            ;; the sticky base-fn → effective branch-local via the
+            ;; walker. Production analog: `{:parent :http-server …}`.
+            sticky-child  (sp/create-entity vf :fn
+                                            {:name "sticky-child"
+                                             :parent-ids [(:id sticky-parent)]
+                                             :impl-hash "h"})
+            ;; CHILD fn parented from plain-parent — should merge.
+            plain-child   (sp/create-entity vf :fn
+                                            {:name "plain-child"
+                                             :parent-ids [(:id plain-parent)]
+                                             :impl-hash "h"})]
+        ;; Sanity: feat sees both children.
+        (is (= "sticky-child" (:name (sp/read-entity vf :fn (:id sticky-child)))))
+        (is (= "plain-child"  (:name (sp/read-entity vf :fn (:id plain-child)))))
+
+        (testing "before merge: main sees NEITHER child (no version on main)"
+          (is (nil? (sp/read-entity v :fn (:id sticky-child))))
+          (is (nil? (sp/read-entity v :fn (:id plain-child)))))
+
+        (vs/merge-branch! v (:id feature))
+
+        (testing "after merge: plain-child propagates, sticky-child does NOT"
+          (is (= "plain-child"
+                 (:name (sp/read-entity v :fn (:id plain-child))))
+              "non-branch-local children merge normally")
+          (is (nil? (sp/read-entity v :fn (:id sticky-child)))
+              "branch-local fn is filtered out — identity exists but no version resolves"))
+
+        (testing "feature branch still sees the sticky child after merge"
+          ;; Feat's own-latest is still authoritative on its own
+          ;; branch — the filter only drops FOREIGN-branch candidates.
+          (is (= "sticky-child"
+                 (:name (sp/read-entity vf :fn (:id sticky-child))))))
+
+        (testing "batch path agrees: sticky-child absent from main's :fn list"
+          (let [main-fns (sp/query-entities v :fn {})
+                names (set (map :name main-fns))]
+            (is (contains? names "plain-child"))
+            (is (not (contains? names "sticky-child"))
+                "resolve-all-entities on main filters the branch-local fn"))))
+      (finally (sp/close base)))))
+
+
+(deftest branch-local-binding-does-not-propagate-on-merge-test
+  ;; Child-rows extension of the previous test. A `:binding` row's
+  ;; visibility on a sibling branch after merge ALSO depends on the
+  ;; owning fn's effective `:branch-local?`. Without this, main
+  ;; would see orphan bindings whose `:fn-id` doesn't resolve there
+  ;; — cosmetic noise + the `/api/graph/entities` payload bloated
+  ;; with sticky-local subtree leaves.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [sticky-parent (sp/create-entity v :fn
+                                            {:name "bind-sticky-parent"
+                                             :parent-ids []
+                                             :impl-hash "h"
+                                             :branch-local? true})
+            plain-parent  (sp/create-entity v :fn
+                                            {:name "bind-plain-parent"
+                                             :parent-ids []
+                                             :impl-hash "h"})
+            slot          (sp/create-entity v :slot
+                                            {:name "x"
+                                             :type-fn-id (:id sticky-parent)})
+            feature (vs/create-branch! v "binding-feat")
+            vf      (vs/switch-branch v (:id feature))
+            sticky-child  (sp/create-entity vf :fn
+                                            {:name "bind-sticky-child"
+                                             :parent-ids [(:id sticky-parent)]
+                                             :impl-hash "h"})
+            plain-child   (sp/create-entity vf :fn
+                                            {:name "bind-plain-child"
+                                             :parent-ids [(:id plain-parent)]
+                                             :impl-hash "h"})
+            sticky-binding (sp/create-entity vf :binding
+                                             {:fn-id (:id sticky-child)
+                                              :slot-id (:id slot)
+                                              :value "sticky-val"})
+            plain-binding  (sp/create-entity vf :binding
+                                             {:fn-id (:id plain-child)
+                                              :slot-id (:id slot)
+                                              :value "plain-val"})]
+        (testing "before merge: main sees neither binding"
+          (is (nil? (sp/read-entity v :binding (:id sticky-binding))))
+          (is (nil? (sp/read-entity v :binding (:id plain-binding)))))
+
+        (vs/merge-branch! v (:id feature))
+
+        (testing "after merge: plain-binding propagates, sticky-binding does NOT"
+          (is (= "plain-val"
+                 (:value (sp/read-entity v :binding (:id plain-binding))))
+              "binding under a non-branch-local fn surfaces normally")
+          (is (nil? (sp/read-entity v :binding (:id sticky-binding)))
+              "binding under a sticky-local fn is filtered alongside the fn")))
+      (finally (sp/close base)))))
+
+
+(deftest branch-local-fn-inherits-via-parent-branch-recursion-test
+  ;; Intentional asymmetry between merge (filtered) and inheritance
+  ;; (NOT filtered). A branch B forked from A picks up A's sticky-
+  ;; local fn version through `resolve-version`'s parent-branch
+  ;; recursion — that's normal inheritance. Only MERGE (sibling →
+  ;; sibling, child → parent fold-in) is what `:branch-local?`
+  ;; blocks.
+  ;;
+  ;; This test pins the asymmetry so a future refactor that
+  ;; "uniformly" applies the filter doesn't silently break the
+  ;; inheritance direction.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [sticky-parent (sp/create-entity v :fn
+                                            {:name "inh-sticky-parent"
+                                             :parent-ids []
+                                             :impl-hash "h"
+                                             :branch-local? true})
+            ;; Sticky-local child created on MAIN (the root branch).
+            sticky-child (sp/create-entity v :fn
+                                           {:name "inh-sticky-child"
+                                            :parent-ids [(:id sticky-parent)]
+                                            :impl-hash "h"})
+            ;; Fork a child branch FROM main. No edits on the child
+            ;; branch — it inherits main's state.
+            feature (vs/create-branch! v "inh-feat")
+            vf      (vs/switch-branch v (:id feature))]
+        (testing "feat inherits sticky-child via parent-branch recursion"
+          ;; Resolve on feat: own-latest nil, no merges, recurse to
+          ;; main → finds sticky-child's version. Asymmetric with
+          ;; merge: a fn-version moving FROM dev TO main via merge
+          ;; would be filtered.
+          (is (= "inh-sticky-child"
+                 (:name (sp/read-entity vf :fn (:id sticky-child))))
+              "branch-local fn IS inherited downward via parent-branch")))
+      (finally (sp/close base)))))
+
+
 ;; ============================================================================
 ;; VersionedStorage — the StorageCRUD protocol over a versioned entity (:fn)
 ;; ============================================================================

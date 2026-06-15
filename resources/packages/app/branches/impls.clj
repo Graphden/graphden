@@ -3,10 +3,13 @@
    live here — URL parsing, query-string parsing, predicate guards, and
    response-envelope wrapping are all graph fn-defs in `fns.edn`."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.crud.branches :as branches]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.services.reconciler :as recon]
+    [graphden.system.branch-router :as br]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as mrg]))
 
@@ -145,10 +148,34 @@
    `:type :constraint-violation/main-branch-undeletable` or
    `:type :constraint-violation/branch-has-children` (latter carries
    a `:child-branch-ids` vec); the graph `:on-throw` handler
-   dispatches on `:type` via `:case`. Returns nil on success."
+   dispatches on `:type` via `:case`. Returns nil on success.
+
+   After a successful delete, drops the branch's entry from the
+   branch-router's per-branch ctx cache AND clears any cached
+   `name → id` ref so a same-name recreate doesn't hand back the
+   stale id (see `branch-router/forget-ref-cache-for-branch!`).
+   Without this, deleting `foo` then creating a new `foo` routes
+   subsequent /api/* requests to the dead branch's compiled
+   registry — the closures point at nothing and every dispatch
+   throws `Branch handler closure missing`.
+
+   Also stops any service whose `:branch-id` matched the deleted
+   branch — `vs/delete-branch!` soft-disables them, but the
+   reconciler won't pick that up until its next pass, so trigger
+   it eagerly via `recon/restart-services-on-branch!` (which then
+   reconcile-once!'s the deleted branch and removes its now-
+   disabled entries from `running-atom`)."
   [branch-id]
   (cr/record-effect! :db)
-  (vs/delete-branch! (request/require-storage ctx) branch-id))
+  (let [result (vs/delete-branch! (request/require-storage ctx) branch-id)]
+    (when-let [router (br/current-router)]
+      (br/invalidate! router branch-id))
+    (try
+      (recon/restart-services-on-branch! ctx recon/running branch-id)
+      (catch Exception e
+        (log/warn e "post-delete service reconcile failed"
+                  {:branch-id branch-id})))
+    result))
 
 
 ;; `:_delete-branch-apply` is now a graph fn-def — see fns.edn.
@@ -211,12 +238,51 @@
    `:merge-conflict` (which the graph `:on-throw` handler dispatches
    on via `:ex-data → :type`). The switch + merge are intrinsically
    coupled — splitting them would break the atomic semantics, so the
-   single base-fn is the natural §3.1 unit."
+   single base-fn is the natural §3.1 unit.
+
+   After a successful merge, invalidates the TARGET branch's
+   cached per-branch handler / compiled-registry in the branch
+   router — the merge changes which versions resolve on target but
+   writes no row that the standard CRUD-notify path would touch.
+   Without this invalidate the target branch keeps serving its
+   pre-merge compiled closures and the merged-in versions are
+   invisible to readers until something else triggers a recompile
+   (verified by manual `bb deploy`).
+
+   Also restarts every running service whose `:branch-id` matches
+   the target branch via `recon/restart-services-on-branch!`.
+   HTTP-server services pick up new closures lazily on the next
+   request (the per-branch Ring-callable re-reads its registry),
+   but cron-loop services hold their fn-graph in a closed-over
+   reference and would otherwise keep firing the pre-merge graph
+   forever. The restart is best-effort — when no reconciler
+   singleton is wired (test contexts without `:exec/service-
+   reconciler`) the call is a no-op."
   [source-branch-id target-branch-id resolutions]
   (cr/record-effect! :db)
-  (let [storage (vs/switch-branch (request/require-storage ctx) target-branch-id)]
-    (vs/merge-branch! storage source-branch-id
-                      {:conflict-resolutions resolutions})))
+  (let [storage (vs/switch-branch (request/require-storage ctx) target-branch-id)
+        result (vs/merge-branch! storage source-branch-id
+                                 {:conflict-resolutions resolutions})]
+    (when-let [router (br/current-router)]
+      (br/invalidate! router target-branch-id))
+    (try
+      (recon/restart-services-on-branch! ctx recon/running target-branch-id)
+      (catch Exception e
+        ;; Restart is observability-grade — the merge already
+        ;; succeeded; surface the failure but don't fail the API.
+        (log/warn e "post-merge service restart failed"
+                  {:target-branch-id target-branch-id})))
+    ;; Attach the audit log — fns that have a version on the source
+    ;; branch but won't surface on the target after merge because
+    ;; their effective `:branch-local?` filtered them out at the
+    ;; resolver. API consumers (and the editor's post-merge alert)
+    ;; consume this directly. nil-safe shape: empty :branch-local
+    ;; key always present so downstream :zipmap envelopes don't
+    ;; have to special-case the no-skips case.
+    (assoc result
+           :skipped {:branch-local
+                     (mrg/skipped-as-branch-local
+                       (branches/base-storage ctx) source-branch-id)})))
 
 
 ;; `:_merge-apply` is now a graph fn-def — see fns.edn. The `:try` body

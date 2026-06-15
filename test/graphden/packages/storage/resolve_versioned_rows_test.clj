@@ -46,13 +46,14 @@
   (:id (first (sp/query-entities *storage* :branch {:name "main"}))))
 
 
-(defn- sync-resolve-call-shape!
-  "Wire up the standard per-site shape: load identities + version
-   rows + chain, then call `:resolve-versioned-rows`. `cfg` keys:
-     :public-name        — name of the public fn-def (synced)
-     :entity-type        — string, e.g. \"fn\"
-     :version-table      — keyword, e.g. :fn-version
-     :version-id-field   — keyword, e.g. :fn-id
+(defn- resolve-call-shape-fns
+  "Build the 8 fn-def records that materialise one per-site
+   call shape: load identities + version rows + chain, then call
+   `:resolve-versioned-rows`. `cfg` keys:
+     :public-name         — name of the public fn-def (synced)
+     :entity-type         — string, e.g. \"fn\"
+     :version-table       — keyword, e.g. :fn-version
+     :version-id-field    — keyword, e.g. :fn-id
      :version-data-fields — vec of kw"
   [{:keys [public-name entity-type version-table version-id-field version-data-fields]}]
   (let [chain-name      (keyword (str "_" (name public-name) "-chain"))
@@ -62,115 +63,99 @@
         vers-where-name (keyword (str "_" (name public-name) "-versions-where"))
         vers-decode     (keyword (str "_" (name public-name) "-versions-decode"))
         vers-name       (keyword (str "_" (name public-name) "-versions"))]
-    (fn-composition/sync-fns-to-storage!
-      *storage*
-      [{:name public-name
-        :parent :resolve-versioned-rows
-        :args {:identities ids-name
-               :version-rows vers-name
-               :branch-chain chain-name
-               :version-id-field {:value version-id-field}
-               :version-data-fields {:value version-data-fields}}}
+    [{:name public-name
+      :parent :resolve-versioned-rows
+      :args {:identities ids-name
+             :version-rows vers-name
+             :branch-chain chain-name
+             :version-id-field {:value version-id-field}
+             :version-data-fields {:value version-data-fields}}}
 
-       {:name chain-name
-        :parent :branch-chain
-        :args {:branch-id :current-branch-id}}
+     {:name chain-name
+      :parent :branch-chain
+      :args {:branch-id :current-branch-id}}
 
-       {:name ids-name
-        :parent :storage-query-identities
-        :args {:entity-type {:value entity-type}
-               :where {:value {}}}}
+     {:name ids-name
+      :parent :storage-query-identities
+      :args {:entity-type {:value entity-type}
+             :where {:value {}}}}
 
-       {:name vers-name
-        :parent :map
-        :args {:func vers-decode
-               :coll vers-raw-name}}
+     {:name vers-name
+      :parent :map
+      :args {:func vers-decode
+             :coll vers-raw-name}}
 
-       {:name vers-raw-name
-        :parent :pg-query
-        :args {:hsql vers-hsql-name}}
+     {:name vers-raw-name
+      :parent :pg-query
+      :args {:hsql vers-hsql-name}}
 
-       {:name vers-hsql-name
-        :parent :assoc
-        :args {:map {:value {:select [:*] :from version-table}}
-               :key {:value :where}
-               :value vers-where-name}}
+     {:name vers-hsql-name
+      :parent :assoc
+      :args {:map {:value {:select [:*] :from version-table}}
+             :key {:value :where}
+             :value vers-where-name}}
 
-       {:name vers-where-name
-        :parent :vec
-        :args {:coll [{:value :in} {:value :branch-id} chain-name]}}
+     {:name vers-where-name
+      :parent :vec
+      :args {:coll [{:value :in} {:value :branch-id} chain-name]}}
 
-       {:name vers-decode
-        :parent :decode-row
-        :args {:row {:as :item}
-               :entity-type {:value (name version-table)}}}])))
+     {:name vers-decode
+      :parent :decode-row
+      :args {:row {:as :item}
+             :entity-type {:value (name version-table)}}}]))
 
 
-(deftest resolve-versioned-rows-matches-fn
-  (testing ":fn — graph output matches Clojure resolve-all-entities"
-    (sync-resolve-call-shape!
-      {:public-name :test-resolve-fn-rows
-       :entity-type "fn"
-       :version-table :fn-version
-       :version-id-field :fn-id
-       :version-data-fields [:name :impl-hash :description :constraint
-                             :base-fn-id :element-fn-id :return-type-fn-id
-                             :anonymous-hash :expects-effects]})
+(def ^:private call-shapes
+  "Per-entity-type call-shape configs for the four versioned entities.
+   Each entry produces 8 fn-def records via `resolve-call-shape-fns`."
+  [{:public-name :test-resolve-fn-rows
+    :entity-name :fn
+    :entity-type "fn"
+    :version-table :fn-version
+    :version-id-field :fn-id
+    :version-data-fields [:name :impl-hash :description :constraint
+                          :base-fn-id :element-fn-id :return-type-fn-id
+                          :anonymous-hash :expects-effects]}
+   {:public-name :test-resolve-fn-slot-rows
+    :entity-name :fn-slot
+    :entity-type "fn-slot"
+    :version-table :fn-slot-version
+    :version-id-field :fn-slot-id
+    :version-data-fields [:fn-id :slot-id :position]}
+   {:public-name :test-resolve-binding-rows
+    :entity-name :binding
+    :entity-type "binding"
+    :version-table :binding-version
+    :version-id-field :binding-id
+    :version-data-fields [:fn-id :slot-id :value :value-present :ref-fn-id
+                          :override-kind :type-override-fn-id
+                          :description :list-append :list-closed]}
+   {:public-name :test-resolve-bli-rows
+    :entity-name :binding-list-item
+    :entity-type "binding-list-item"
+    :version-table :binding-list-item-version
+    :version-id-field :item-id
+    :version-data-fields [:binding-id :position :value :ref-fn-id :literal]}])
+
+
+(deftest resolve-versioned-rows-matches-clojure-end-to-end
+  ;; All four entity types share the SAME assertion shape ("graph
+  ;; output equals `resolve-all-entities`"). Consolidated into one
+  ;; deftest so the per-site fn-def syncs (32 rows across the 4
+  ;; shapes) land in ONE batch + ONE graph-cache invalidate, and
+  ;; the first `exec/execute` pays the registry rebuild once for
+  ;; the entire batch instead of once per entity type.
+  (let [all-fns (vec (mapcat resolve-call-shape-fns call-shapes))]
+    (fn-composition/sync-fns-to-storage! *storage* all-fns)
     (exec-ctx/invalidate-graph-cache! *context*)
-    (let [via-graph   (exec/execute *context* (fn-id "test-resolve-fn-rows") {})
-          via-clojure (res/resolve-all-entities (vs/unwrap *storage*) :fn
-                                                (main-branch-id) {})]
-      (is (= (count via-clojure) (count via-graph))
-          "row count matches between graph and Clojure")
-      (is (= (set (map :id via-clojure)) (set (map :id via-graph)))
-          ":id sets match"))))
-
-
-(deftest resolve-versioned-rows-matches-fn-slot
-  (testing ":fn-slot — graph output matches Clojure resolve-all-entities"
-    (sync-resolve-call-shape!
-      {:public-name :test-resolve-fn-slot-rows
-       :entity-type "fn-slot"
-       :version-table :fn-slot-version
-       :version-id-field :fn-slot-id
-       :version-data-fields [:fn-id :slot-id :position]})
-    (exec-ctx/invalidate-graph-cache! *context*)
-    (let [via-graph   (exec/execute *context* (fn-id "test-resolve-fn-slot-rows") {})
-          via-clojure (res/resolve-all-entities (vs/unwrap *storage*) :fn-slot
-                                                (main-branch-id) {})]
-      (is (= (count via-clojure) (count via-graph)))
-      (is (= (set (map :id via-clojure)) (set (map :id via-graph)))))))
-
-
-(deftest resolve-versioned-rows-matches-binding
-  (testing ":binding — graph output matches Clojure resolve-all-entities"
-    (sync-resolve-call-shape!
-      {:public-name :test-resolve-binding-rows
-       :entity-type "binding"
-       :version-table :binding-version
-       :version-id-field :binding-id
-       :version-data-fields [:fn-id :slot-id :value :ref-fn-id
-                             :override-kind :type-override-fn-id
-                             :description :list-append :list-closed]})
-    (exec-ctx/invalidate-graph-cache! *context*)
-    (let [via-graph   (exec/execute *context* (fn-id "test-resolve-binding-rows") {})
-          via-clojure (res/resolve-all-entities (vs/unwrap *storage*) :binding
-                                                (main-branch-id) {})]
-      (is (= (count via-clojure) (count via-graph)))
-      (is (= (set (map :id via-clojure)) (set (map :id via-graph)))))))
-
-
-(deftest resolve-versioned-rows-matches-binding-list-item
-  (testing ":binding-list-item — graph output matches Clojure resolve-all-entities"
-    (sync-resolve-call-shape!
-      {:public-name :test-resolve-bli-rows
-       :entity-type "binding-list-item"
-       :version-table :binding-list-item-version
-       :version-id-field :item-id
-       :version-data-fields [:binding-id :position :value :ref-fn-id :literal]})
-    (exec-ctx/invalidate-graph-cache! *context*)
-    (let [via-graph   (exec/execute *context* (fn-id "test-resolve-bli-rows") {})
-          via-clojure (res/resolve-all-entities (vs/unwrap *storage*) :binding-list-item
-                                                (main-branch-id) {})]
-      (is (= (count via-clojure) (count via-graph)))
-      (is (= (set (map :id via-clojure)) (set (map :id via-graph)))))))
+    (doseq [{:keys [public-name entity-name]} call-shapes]
+      (testing (str (name entity-name)
+                    " — graph output matches Clojure resolve-all-entities")
+        (let [via-graph   (exec/execute *context* (fn-id (name public-name)) {})
+              via-clojure (res/resolve-all-entities
+                            (vs/unwrap *storage*) entity-name
+                            (main-branch-id) {})]
+          (is (= (count via-clojure) (count via-graph))
+              "row count matches between graph and Clojure")
+          (is (= (set (map :id via-clojure)) (set (map :id via-graph)))
+              ":id sets match"))))))

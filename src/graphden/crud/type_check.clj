@@ -168,7 +168,11 @@
             items)
 
       ref-name ref-name
-      (some? (:value b)) {:value (:value b)}
+      ;; `:value-present` flag (intent), not `(some? :value)` —
+      ;; `{:value nil}` is a legitimate pinned-nil binding that must
+      ;; round-trip through reconstruct → type-check, otherwise it
+      ;; vanishes and the type-checker sees the slot as free.
+      (true? (:value-present b)) {:value (:value b)}
       renamed-view {:as (keyword (:name renamed-view))
                     :type (some-> (:type-fn-id renamed-view)
                                   (->> (get fn-by-id))
@@ -334,7 +338,29 @@
                     ;; lenient check passes when base subtype holds.
                     (and (types/refine-type? expected)
                          (types/subtype? target-ret
-                                         (types/refine-base expected))))]
+                                         (types/refine-base expected)))
+                    ;; HOF-forwarding semantics: when the slot expects a
+                    ;; fn-VALUE ([:fn ...]), the ref-binding forwards the
+                    ;; target as the callable — `compile-eager`'s hof-wrap
+                    ;; turns it into a 0-arg (or single-arg) thunk that
+                    ;; closes over the caller's env. The CALLABLE's
+                    ;; signature is `[:fn (target's args) (target's
+                    ;; return) (target's effects)]` (`make-fn-type`),
+                    ;; which is what the slot must accept. Without this
+                    ;; clause a scalar-returning fn-ref like
+                    ;; `:current-time-ms` (return `:int`) into a `[:fn {}
+                    ;; :any]` slot gets rejected even though the runtime
+                    ;; would correctly hof-wrap it. The sync-time check
+                    ;; in `types/check.clj` is already HOF-aware via
+                    ;; variadic-ignore + closure-capture strip; this
+                    ;; clause brings the API spot-check in line.
+                    (and (types/fn-type? expected)
+                         (types/subtype?
+                           (types/make-fn-type
+                             (or (:args target-info) {})
+                             target-ret
+                             (or (:effects target-info) :any))
+                           expected)))]
         (when-not ok?
           {:reason (str "Type mismatch on ref binding: slot expects "
                         (pr-str expected) ", but " (pr-str target-name)

@@ -277,31 +277,101 @@ running when this row was produced" becomes critical, expand the
 anchor scope; for now, the resolved-view on the run's branch at
 the run's timestamp is the closest the system gets.
 
-### Services live on `main`, not per-branch
+### Services CAN now run per-branch (`:service.branch-id`)
 
-`:service` is intentionally NOT in `versioning.storage.resolution/
-entity-config` — service rows are a GLOBAL table shared by every
-branch (the VersionedStorage decorator forwards CRUD on
-non-versioned entities straight through to the base storage). The
-service reconciler runs against the boot-time `:exec/context`
-which is bound to `main`, so:
+`:service` is still NOT in `versioning.storage.resolution/
+entity-config` — the row is global — but each row carries a
+`:branch-id` ref that the reconciler routes against. The
+production reconciler (`graphden.services.reconciler/reconcile-
+once!`) groups enabled services by `:branch-id`, asks
+`branch-router/ctx-for` for each branch's `ExecutionContext`, and
+starts the service against THAT ctx. Same fn-id can run with
+branch-specific bindings (dev port + prod port live side-by-side).
 
-- Creating a `:service` row via the editor's ⚙ popover on branch
-  X lands the row globally and the reconciler starts it as
-  main's-version-of-the-fn. Other branches see the same row.
-- A bug fix on branch X doesn't affect the running service until
-  the fix is merged into main. There's no per-branch service
-  drift; merge is the lever.
-- "Run the feature-branch version of this service for an hour"
-  has no one-click UI. The honest workflow is merge-into-main +
-  watch the reconciler roll the service over, then revert if
-  needed.
+- Creating a `:service` via the editor's ⚙ popover offers a
+  branch picker (default = the editor's current branch). The
+  reconciler picks up the row immediately and starts it inside
+  the chosen branch's ctx.
+- A bug fix on branch X immediately re-rolls the X-scoped service
+  via `recon/restart-services-on-branch!` (wired into
+  `merge-branch!` as well, so post-merge cron loops pick up the
+  fresh closures).
+- Legacy rows without `:branch-id` fall back to the reconciler's
+  base ctx (= main behavior), so the migration is transparent.
 
-This is an intentional MVP simplification — multi-tenant services
-("user X gets feature-X-version, user Y gets main-version") would
-need per-branch service rows, per-branch reconcilers, AND careful
-port / resource isolation. None of that is implemented; the doc is
-here so the constraint isn't a surprise.
+Open gaps: port allocation is OS-level (two branches binding
+`8080` fight; the loser records `:start-failed-at`); cron
+collision detection across branches isn't implemented; the
+running-atom is a single in-process map (no multi-pod
+coordination beyond the existing advisory locks).
+
+### `:branch-local?` — runtime-config that doesn't propagate on merge
+
+Some fn-defs encode environment-specific runtime config (web-
+server port, vault path, cron cadence, env-var indirection). For
+those, an `:branch-local?` identity-level flag on `:fn`
+short-circuits the cross-branch overlay: foreign-branch version
+rows are dropped from `merge-candidates` (online + batch paths)
+so a sticky-local fn version stays scoped to the branch that
+produced it.
+
+The filter applies to MERGE propagation, NOT to parent-branch
+INHERITANCE. A branch B that was forked from A (`:base-branch-
+id = A`) inherits A's branch-local fn versions as part of normal
+inheritance — that's the user's choice when they forked B from A.
+The asymmetry is intentional: merge says "fold sibling's history
+in", inheritance says "I'm a child of this branch, give me its
+state". Branch-local blocks the first but not the second.
+
+The flag is **monotonic-OR over `:parent-ids`**: any ancestor
+true ⇒ effective true forever. Sync-time type-check rejects
+descendant `:branch-local? false` when an ancestor is true (mirror
+of the `:required` widening guard).
+
+Seeded defaults: `:http-server`, `:secret-leaf`, `:schedule`,
+`:env`. NOT seeded: `:pg-query` (admins may want portable
+queries), `:future` (transitively reaches `:schedule`).
+
+Implementation:
+- Walker + per-storage cache: `graphden.versioning.branch-local`
+  (`effective-branch-local?` + `build-branch-local-set`).
+- Resolution filter: `versioning.storage.resolution/merge-
+  candidates(-from-cache)` drops foreign-branch candidates when
+  `effective-branch-local?` is true for the fn-id; `resolve-
+  version`'s parent-branch recursion is also gated.
+- Type-check guard: `types.check/check-branch-local-monotonicity!`
+  throws `:types/branch-local-widening-forbidden` on widening.
+- Editor: 📍 strip on the fn-card (walks parent-ids via
+  `lookups.fnMap` + the diff payload's `source-version` as a
+  seed for cross-branch fns); 📍 badge + dimmed row in the
+  branch-diff modal.
+- Merge response surfaces a `:skipped-as-branch-local` list with
+  entity-ids (see "Merge audit log" below) so API consumers can
+  see what didn't propagate.
+
+### Merge audit log
+
+`POST /api/branches/:ref/merge` returns the merge record plus a
+`:skipped` block enumerating entities the resolver kept scoped to
+their origin branch:
+
+```json
+{
+  "ok": true,
+  "merge": { /* :branch-merge row */ },
+  "skipped": {
+    "branch-local": [
+      {"entity-name": "fn", "entity-id": "uuid…", "fn-name": "my-server"}
+    ]
+  }
+}
+```
+
+The shape is forward-compatible: new categories
+(`:conflict-deferred`, `:protected-by-trait`) can land alongside
+`:branch-local` without breaking existing consumers. The editor's
+post-merge alert summarises the skipped count; the diff modal
+keeps its inline 📍 badge on the same rows.
 
 ## Known gaps
 

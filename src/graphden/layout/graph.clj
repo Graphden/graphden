@@ -326,7 +326,7 @@
                                   (or (:arg-name m) (:arg-name arg))
                                   false parent-bindings (:arg-id arg)
                                   parent-expansion-root expand-set (bh/child-hof arg-map (:arg-id arg) is-hof))
-                  (and m (some? (:value m)))
+                  (and m (true? (:value-present m)))
                   (bh/add-arg-value-node state lookups
                                          (assoc m
                                                 :arg-id (:arg-id arg)
@@ -409,7 +409,7 @@
               (fn [k]
                 (if (contains? @seen k) false (do (swap! seen conj k) true)))]
           (doseq [arg own-args]
-            (let [has-value (some? (:value arg))
+            (let [has-value (true? (:value-present arg))
                   has-ref (some? (:ref-id arg))
                   migrated (when-not (or has-value has-ref)
                              (find-migrated (:id arg)))
@@ -440,7 +440,7 @@
                                   false parent-bindings (:id arg)
                                   nil #{fn-id} (bh/child-hof arg-map (:id arg) is-hof)))
 
-                (and migrated (some? (:value migrated)))
+                (and migrated (true? (:value-present migrated)))
                 (when (mark-once! [terminal :value (:value migrated)])
                   (bh/add-arg-value-node state lookups
                                          (assoc migrated

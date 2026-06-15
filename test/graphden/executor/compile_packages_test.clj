@@ -13,7 +13,9 @@
    Fixture boots `:dev` config up to `:exec/compiled-registry` — the
    whole executor minus the HTTP server."
   (:require
+    [cheshire.core]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.compile-runtime]
     [graphden.executor.interface :as exec]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
@@ -132,6 +134,179 @@
   (testing ":map without :coll yields a transducer object"
     (is (fn? (run "ex-upper-xf")))
     (is (fn? (run "ex-pipeline-xf")))))
+
+
+;; ============================================================================
+;; Regression — /api/secrets list-secrets-handler must terminate
+;; ============================================================================
+;;
+;; Production `:list-secrets-handler` is a `:json-handler` over the
+;; `:_list-secrets-data` fn-graph (filter+map over storage-resolved
+;; rows). The graph compiles fine, individual sub-fns (vault HTTP,
+;; shape-secret, _list-secrets-data) terminate on their own, but the
+;; FULL handler hangs at runtime when invoked through the proper
+;; `:request`-bearing fa. This pins the failing case so the future
+;; surgical fix has a green signal.
+;;
+;; Repro shape: invoke the compiled closure for `:list-secrets-handler`
+;; with `{:request <stub>}`. With the bug present, the future never
+;; completes within 2 s. Once fixed, the test asserts the response is
+;; a Ring map with `:status 200` and a `:body` that parses to
+;; `{ok true, secrets [...]}` (empty list when there are no secret
+;; fn-defs).
+;;
+;; ROOT CAUSE (diagnosed via instrumented `call-with-cache` probe):
+;; `:_list-secrets-leaf-fn-slots-identities` queries `:fn-slot` with
+;; `{:where {}}` (empty), loading EVERY fn-slot identity in storage —
+;; ~8.6k rows on the boot-sync test graph. `:resolve-fn-slot-rows`
+;; then iterates each identity through `:_rv-resolve-one`, which
+;; calls `:_rv-resolved-version-for-eid` twice per identity (the
+;; `:if some? then merged else nil` test+then) plus inner refs.
+;; Empirically: ~130k `call-with-cache` invocations in 5 s, 568k in
+;; 60 s, with the top frame being `:_rv-resolved-version-for-eid`
+;; (17k) → `:current-branch-chain` (8.6k) → `:_rv-version-data-
+;; selected` / `:_rv-this-eid` / `:_rv-versions-on-bid` (8.6k each).
+;;
+;; The `[ref-id × fa]` cache key in `call-with-cache` rejects every
+;; iteration because `fa` differs per `:item`, even for refs whose
+;; deep-free args don't include `:item`. So `:current-branch-chain`
+;; (no `:item` dependency) recomputes 8.6k times instead of once.
+;;
+;; Fix paths (in order of architectural cleanness):
+;;
+;; 1. Project `fa` to the ref-target's `deep-free-ext-names` before
+;;    cache lookup. Memoises by *relevant* fa subset — refs invariant
+;;    to iteration cache after first call. Touches `call-with-cache`
+;;    only. Most general fix; benefits every HOF callback that calls
+;;    an iteration-invariant ref.
+;;
+;; 2. Push the fn-id filter down to the version-table SQL: extend
+;;    `:_resolve-fn-slot-versions-hsql-where` to accept extra
+;;    predicates, then have `_list-secrets-leaf-fn-slots-resolved`
+;;    pass `[:= :fn-id leaf-id]`. Avoids the iteration entirely for
+;;    this query. Less general but more targeted.
+;;
+;; 3. Replace the secrets-graph path with a tailored `:pg-query` over
+;;    `:fn-slot-version` filtered by `:fn-id` + `:branch-id IN chain`.
+;;    Bypasses `:resolve-fn-slot-rows` for this consumer. Smallest
+;;    blast radius, biggest divergence from the unified versioned-
+;;    read pattern Phase 3 established.
+;;
+;; Test stays the same regardless of which path; once the hang is
+;; gone it turns green.
+
+(deftest ^:integration list-secrets-handler-terminates-regression-test
+  ;; Termination guard for the empty-storage path. The non-empty +
+  ;; multi-secret correctness path is covered downstream by
+  ;; `list-secrets-handler-returns-distinct-paths-per-secret` (which
+  ;; seeds two secrets and asserts distinct `:path` per row, also
+  ;; within a hard timeout — so it implicitly verifies termination
+  ;; for N≥2 too). Don't duplicate the 1-secret seeding case here.
+  (testing "list-secrets-handler returns a Ring response within 2s"
+    (let [registry (graphden.executor.compile-runtime/registry *context*)
+          pg-query-closure (get registry (fn-id "pg-query"))
+          ;; Sibling tests in the ns may have already populated
+          ;; `secret-leaf` descendants in shared storage; the handler
+          ;; then actually hits the DB through `:storage-query`. Wire
+          ;; the real callable so the deref doesn't NPE if so.
+          storage-query-callable (fn [hsql]
+                                   (pg-query-closure {:hsql hsql} *context*))
+          fid (fn-id "list-secrets-handler")
+          closure (get registry fid)
+          done (future (closure {:request {:uri "/api/secrets"
+                                           :request-method :get
+                                           :headers {}}
+                                 :storage-query storage-query-callable}
+                                *context*))
+          result (try (deref done 2000 ::timeout)
+                      (finally (when-not (java.util.concurrent.Future/.isDone done)
+                                 (java.util.concurrent.Future/.cancel done true))))]
+      (is (not= ::timeout result)
+          "list-secrets-handler must terminate within 2 s — the hang here is the regression this test pins")
+      (when (map? result)
+        (is (= 200 (:status result)))
+        (is (string? (:body result)))))))
+
+
+;; -----------------------------------------------------------------
+;; Regression — /api/secrets must return each secret's OWN :path.
+;; -----------------------------------------------------------------
+;; Production bug (2026-06-15): with N≥2 secret-leaf fn-rows in
+;; storage, `GET /api/secrets` returned every row with the FIRST
+;; secret's `:path`. Root cause: `compile-eager`'s per-execute
+;; call-cache projects `fa` to `r/deep-free-ext-names`'s output, and
+;; `_shape-secret-bindings` reads `:fn-row` via the closure-captured
+;; `:filter :pred` HOF body — but `deep-free-ext-names` STOPS at HOF
+;; boundaries (correct for hof-dispatch / alpha-equiv / build-ref-
+;; renames callers), so `:fn-row` was absent from the projection and
+;; every secret's binding-row lookup hashed to one cache slot.
+;;
+;; Fix: a separate `r/cache-projection-frees` walker that walks INTO
+;; `:is-fn :ref` bindings (subtracting hof-lambda-params at each
+;; HOF boundary) so closure-captured names land in the cache key.
+;; See `src/graphden/executor/compile/renames.clj`.
+
+(deftest ^:integration
+  list-secrets-handler-returns-distinct-paths-per-secret
+  (testing "two secrets in storage → API returns each one's own :path"
+    (let [leaf-id (fn-id "secret-leaf")
+          path-slot (-> (sp/query-entities *storage* :fn-slot {:fn-id leaf-id})
+                        first :slot-id)
+          probe-a-id (random-uuid)
+          probe-b-id (random-uuid)
+          _ (sp/create-entity *storage* :fn
+                              {:id probe-a-id
+                               :name "regression-secret-a"
+                               :parent-ids [leaf-id]})
+          _ (sp/create-entity *storage* :binding
+                              {:fn-id probe-a-id
+                               :slot-id path-slot
+                               :value "kv/data/secret-a"
+                               :override-kind :secret-path})
+          _ (sp/create-entity *storage* :fn
+                              {:id probe-b-id
+                               :name "regression-secret-b"
+                               :parent-ids [leaf-id]})
+          _ (sp/create-entity *storage* :binding
+                              {:fn-id probe-b-id
+                               :slot-id path-slot
+                               :value "kv/data/secret-b"
+                               :override-kind :secret-path})
+          registry (graphden.executor.compile-runtime/registry *context*)
+          pg-query-closure (get registry (fn-id "pg-query"))
+          storage-query-callable (fn [hsql]
+                                   (pg-query-closure {:hsql hsql} *context*))
+          closure (get registry (fn-id "list-secrets-handler"))
+          done (future (closure {:request {:uri "/api/secrets"
+                                           :request-method :get
+                                           :headers {}}
+                                 :storage-query storage-query-callable}
+                                *context*))
+          result (try (deref done 5000 ::timeout)
+                      (finally (when-not (java.util.concurrent.Future/.isDone done)
+                                 (java.util.concurrent.Future/.cancel done true))))]
+      (is (not= ::timeout result)
+          "handler must terminate within 5 s")
+      (when (map? result)
+        (is (= 200 (:status result)))
+        (let [body (when (string? (:body result))
+                     (cheshire.core/parse-string (:body result) true))
+              secrets-by-name (when body
+                                (into {} (map (juxt :name :path)) (:secrets body)))]
+          (is (= "kv/data/secret-a"
+                 (get secrets-by-name "regression-secret-a"))
+              ":path of regression-secret-a must be its own, NOT the first secret's")
+          (is (= "kv/data/secret-b"
+                 (get secrets-by-name "regression-secret-b"))
+              ":path of regression-secret-b must be its own, NOT the first secret's")
+          ;; Cross-row check: my two seeded secrets must hash to two
+          ;; distinct cache slots (sibling tests in this ns may leave
+          ;; additional secrets in shared storage, so check the pair
+          ;; not the total count).
+          (is (not= (get secrets-by-name "regression-secret-a")
+                    (get secrets-by-name "regression-secret-b"))
+              (str ":path values collapsed onto one cache slot — "
+                   "regression-secret-a and regression-secret-b returned the same path")))))))
 
 
 ;; ============================================================================

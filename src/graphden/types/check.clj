@@ -1042,6 +1042,50 @@
                           *source-info*))))))))
 
 
+(defn- check-branch-local-monotonicity!
+  "Reject any fn-def that widens an effective-true `:branch-local?`
+   inherited from a parent. `:branch-local?` is the identity-level
+   flag stamped on `:fn` rows; widening it would let a descendant
+   propagate runtime config across branches even though its ancestor
+   marked it sticky-local.
+
+   `record-rich-types!` stashes the effective (own ∨ ancestors) on
+   every parent before this fn-def is checked, so the lookup is just
+   `(:branch-local? (registry/rich-type-of parent))` per declared
+   parent. Multi-inheritance: any single true parent is enough.
+
+   Mirror of the `:required` widening guard in
+   `check-binding-monotonicity!` — sync-time signal, never silent."
+  [fn-def]
+  (when (and (contains? fn-def :branch-local?)
+             (false? (:branch-local? fn-def)))
+    (let [parents (or (seq (:parents fn-def))
+                      (when (:parent fn-def) [(:parent fn-def)])
+                      [])
+          true-parent (some (fn [p]
+                              (when (true? (:branch-local?
+                                             (registry/rich-type-of p)))
+                                p))
+                            parents)]
+      (when true-parent
+        (throw (ex-info
+                 (str "Type-check failed in fn-def "
+                      (pr-str (:name fn-def))
+                      "\n  reason: cannot set `:branch-local? false` —"
+                      " inherited effective-true from "
+                      (pr-str true-parent)
+                      (source-suffix true-parent)
+                      "\n  `:branch-local?` is monotonic: once an"
+                      " ancestor marks itself sticky-local, descendants"
+                      " can only stay local. Either drop the flag from"
+                      " this fn-def (it'll inherit true), or re-parent"
+                      " off the local ancestor.")
+                 (merge {:fn-name (:name fn-def)
+                         :parent-name true-parent
+                         :type :types/branch-local-widening-forbidden}
+                        *source-info*)))))))
+
+
 (defn- check-binding-monotonicity!
   "Reject any binding that widens an inherited narrowing. Two cases
    share one pre-pass:
@@ -2168,7 +2212,8 @@
         (check-effect-categories! fn-def)
         (check-unknown-slots! fn-def primary-parent parent-args parent-info)
         (check-ref-type-overrides! fn-def primary-parent)
-        (check-binding-monotonicity! fn-def primary-parent parent-args))
+        (check-binding-monotonicity! fn-def primary-parent parent-args)
+        (check-branch-local-monotonicity! fn-def))
       (let [type-row-fields (let [resolved (and (keyword? primary-parent)
                                                 (types/resolve-alias primary-parent))
                                   ret (:return parent-info)]

@@ -224,9 +224,13 @@
 
 (defn- ancestor-binding-has-value?
   "True iff some ancestor of `fn-id` has a binding on `slot-id` whose
-   `:value` or `:ref-fn-id` is set (i.e. carries an actual value, not
-   just a type-narrowing or rename annotation). Walks parent-ids BFS,
-   one batched query per level, same shape as `ancestor-binding-flag?`."
+   `:value-present` (intent) or `:ref-fn-id` is set — i.e. carries an
+   actual value, not just a type-narrowing or rename annotation.
+   `:value-present`, NOT `(some? :value)`, because `{:default nil}`
+   in fns.edn is a legitimate value-binding (pinned to literal nil)
+   that should block descendants from re-binding, same as any other.
+   Walks parent-ids BFS, one batched query per level, same shape as
+   `ancestor-binding-flag?`."
   [storage fn-id slot-id]
   (let [seed (when fn-id (sp/read-entity storage :fn fn-id))]
     (loop [frontier (->> (:parent-ids seed) (remove nil?) distinct vec)
@@ -236,7 +240,7 @@
         (let [bindings (sp/query-entities storage :binding
                                           {:fn-id frontier :slot-id slot-id})
               valued? (some (fn [b]
-                              (or (some? (:value b))
+                              (or (true? (:value-present b))
                                   (some? (:ref-fn-id b))))
                             bindings)]
           (if valued?

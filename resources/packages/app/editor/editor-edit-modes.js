@@ -812,20 +812,25 @@ function enterArgTypeEditMode(arg, anchorEl) {
       const curType = arg.type ? String(arg.type).replace(/^:/, '') : null;
       if (newType === curType) return true;  // no-op
       // Type override = binding's `:type-override-fn-id` pointing at
-      // the primitive type-row. Find that row by name in the loaded
-      // graph snapshot. Empty string clears the override.
-      const primitiveFnId = (() => {
+      // the type-row whose name matches the picker selection. The
+      // picker offers PRIMITIVES (`:text`, `:int`, …) AND
+      // REFINEMENTS (`:non-blank-text`, `:port`, …) — both are
+      // valid override targets, the only constraint is
+      // "parent-less + no impl" (rules out composed fn-defs that
+      // happen to share a name). The earlier "primitive only"
+      // filter (`!base-fn-id && !element-fn-id`) rejected
+      // refinements which the picker happily listed, leaving the
+      // user staring at a silent 400 from `writeBindingFields`.
+      const overrideFnId = (() => {
         if (!newType || !graphData) return '';
         const fn = (graphData.fns || []).find(f =>
           f.name === newType
           && (!f['parent-ids'] || f['parent-ids'].length === 0)
-          && !f['impl-hash']
-          && !f['base-fn-id']
-          && !f['element-fn-id']);
+          && !f['impl-hash']);
         return fn ? fn.id : '';
       })();
       if (!(await writeBindingFields(arg, {
-        'type-override-fn-id': primitiveFnId,
+        'type-override-fn-id': overrideFnId,
         value: '',
         'ref-fn-id': ''
       })).ok) return false;

@@ -42,13 +42,18 @@ const TEST_NAME = 'test-fn-picker-filter';
     await page.waitForTimeout(2500);
 
     // Find the unset-placeholder overlay (data-node-id starts with
-    // "unset-"). Its inner div is the click target.
+    // "unset-"). The click handler now sits on a `.placeholder-binder`
+    // BUTTON child (the overlay wrapper has pointer-events:none so
+    // clicks pass through cytoscape's drag handler), so target the
+    // button directly — clicking the wrapper does nothing.
     const opened = await page.evaluate(() => {
       const placeholder = Array.from(document.querySelectorAll('.node-overlay'))
         .find(el => /^unset-/.test(el.getAttribute('data-node-id') || ''));
       if (!placeholder) return {error: 'no placeholder overlay'};
-      const inner = placeholder.querySelector('div') || placeholder;
-      inner.click();
+      const btn = placeholder.querySelector('.placeholder-binder')
+                 || placeholder.querySelector('button');
+      if (!btn) return {error: 'no .placeholder-binder button'};
+      btn.click();
       return {clicked: true};
     });
     assert(!opened.error, opened.error || 'placeholder clicked');
@@ -96,33 +101,42 @@ const TEST_NAME = 'test-fn-picker-filter';
     assert(probe.firstCompatHasOk,
            'first compat row carries the ✓ glyph');
 
-    // Probe 2: filter to "add"-named fns (arithmetic — return :numeric,
-    // incompatible with the :text slot). Pins the dimmed-incompat
-    // styling regardless of how many text-returning fns exist in the
-    // overall population.
+    // Probe 2: text-search filtering narrows the candidate list.
+    // The picker now HIDES type-incompatible fns by default (a UX
+    // improvement over the old "dim them with a strikethrough"
+    // behavior — incompat candidates would never be a valid choice
+    // anyway, surfacing them is noise). Test the load-bearing
+    // behavior: filtering by name narrows the list and the surviving
+    // rows are all type-compat.
+    //
+    // `lower` / `upper` are :text → :text transformers that show up
+    // in the str-len.string slot's compat set; filtering on `lower`
+    // surfaces at least one row, and every row is compat.
     await page.evaluate(() => {
       const inp = document.querySelector('.fn-picker-search');
       if (inp) {
-        inp.value = 'add';
+        inp.value = 'lower';
         inp.dispatchEvent(new Event('input', {bubbles: true}));
       }
     });
     await page.waitForTimeout(150);
-    const incompatProbe = await page.evaluate(() => {
+    const filterProbe = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(
         '.fn-picker-popover .fn-picker-row'));
       return {
         total: rows.length,
+        compat: rows.filter(r =>
+          r.classList.contains('fn-picker-row-compat')).length,
         incompat: rows.filter(r =>
           r.classList.contains('fn-picker-row-incompat')).length,
       };
     });
-    assert(incompatProbe.total > 0,
-           'filter "add" surfaces at least one row: '
-           + JSON.stringify(incompatProbe));
-    assert(incompatProbe.incompat > 0,
-           '`:add` (returns :numeric) shows as dimmed incompat against the :text '
-           + 'slot: ' + JSON.stringify(incompatProbe));
+    assert(filterProbe.total > 0,
+           'filter "lower" surfaces at least one row (text → text candidates exist): '
+           + JSON.stringify(filterProbe));
+    assert(filterProbe.compat === filterProbe.total,
+           'every surviving row is type-compat (incompat hidden in the new UX): '
+           + JSON.stringify(filterProbe));
 
     // Close the picker to keep the page clean.
     await page.keyboard.press('Escape');

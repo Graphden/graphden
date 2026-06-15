@@ -181,6 +181,59 @@
 (defonce ^:private rich-types-registry (atom {}))
 
 
+;; Thread-local override for parallel-test isolation. When `nil`
+;; (production + any non-test code path), reads and writes go to the
+;; process-global `rich-types-registry`. When bound (by
+;; `interface/with-isolated-rich-types` or the kaocha parallel plugin's
+;; isolation-vars list), ALL reads and writes go to the override
+;; atom — so a test ns gets a private rich-types-registry that's
+;; pre-seeded with the global snapshot at bind time.
+;;
+;; Pre-seed (rather than merge-on-read): the type-checker calls
+;; `rich-type-of` deep in the `effective-ref-return` recursion — for
+;; a single fn-def check, the read count is O(depth × fn-defs). The
+;; earlier "merge global ∪ override on every read" view turned every
+;; one of those reads into an O(N) full-registry merge (~1500
+;; entries), tipping the smoke_pass_test bootstrap from seconds into
+;; a 20-minute GC-thrashing hang. The snapshot-at-bind strategy
+;; keeps reads O(1) while still giving each test thread a private
+;; view: `with-isolated-rich-types` and the kaocha plugin both call
+;; `snapshot-for-isolation` to clone the current global state into a
+;; fresh atom, bind that atom under `*rich-types-override*`, and let
+;; the test write into it freely.
+;;
+;; Mirrors the `*registry-override*` pattern that
+;; `executor/registry.clj` uses for the base-fn registry — see that
+;; file for the design rationale.
+(def ^:dynamic *rich-types-override*
+  nil)
+
+
+(defn snapshot-for-isolation
+  "Snapshot the current global rich-types-registry. Used by test
+   fixtures and the kaocha parallel plugin to pre-populate a fresh
+   thread-local override so reads stay O(1) hash lookups instead of
+   degrading into per-read O(N) merges of global ∪ override."
+  []
+  @rich-types-registry)
+
+
+(defn- target-rich-types-atom
+  "Atom that reads and writes land on — override when bound, else the
+   global. With the snapshot-at-bind strategy a bound override is
+   already pre-populated with the global snapshot, so no fall-through
+   is needed."
+  []
+  (or *rich-types-override* rich-types-registry))
+
+
+(defn- rich-types-view
+  "Snapshot of the active rich-types map — override when bound,
+   global otherwise. O(1) deref, no merge."
+  []
+  @(target-rich-types-atom))
+
+
 (defn- validate-arg-type!
   [arg-name arg-type]
   ;; Accept primitives, type-vars, structural types — and any other
@@ -308,7 +361,25 @@
                   ;; rather than hardcoding fn-name sets, so adding a new
                   ;; tagged base-fn is a one-line `fns.edn` annotation.
                   (seq (:tags fn-def))       (assoc :tags
-                                                    (set (:tags fn-def)))))]
+                                                    (set (:tags fn-def)))
+                  ;; `:branch-local?` — effective (monotonic OR) over
+                  ;; own + every parent's stored effective. Topo-sort
+                  ;; in sync means parents have been recorded before
+                  ;; us, so we can read from the registry directly.
+                  ;; ONLY stashed when true — false is the default
+                  ;; everywhere else (resolve-version-from-cache,
+                  ;; type-checker), so keeping the absent-key
+                  ;; convention matches existing patterns and
+                  ;; preserves identity assertions in tests.
+                  (or (:branch-local? fn-def)
+                      (some (fn [p]
+                              (get-in (rich-types-view)
+                                      [p :branch-local?]))
+                            (or (seq (:parents fn-def))
+                                (when (:parent fn-def)
+                                  [(:parent fn-def)])
+                                [])))
+                  (assoc :branch-local? true)))]
     ;; `:effects` race resolution: the type-checker computes a fn's
     ;; full effect set (parent inheritance + own-declared) and writes
     ;; it via `record-rich-types-raw!`. Earlier in the same sync we
@@ -320,7 +391,7 @@
     ;; service-eligibility assertion downstream then sees an empty
     ;; set. Preserve existing non-empty effects when the fn-def
     ;; declares none.
-    (swap! rich-types-registry
+    (swap! (target-rich-types-atom)
            (fn [reg]
              (let [existing (get reg fn-name)
                    final-effects (if (and (empty? raw-effects)
@@ -347,20 +418,55 @@
    Mirrors `record-rich-types!`'s P8 invariant — `:effects` is always
    present, defaulting to `#{}` (computed-pure) when the caller omits
    it. Keeps downstream consumers (`assemble-fn-type`, `effects-
-   compatible?`) free of `(or … #{})` fallbacks for raw entries too."
+   compatible?`) free of `(or … #{})` fallbacks for raw entries too.
+
+   `:branch-local?` carry-over: when an earlier `record-rich-types!`
+   pass stamped the flag, preserve it here so the unification-driven
+   raw write doesn't drop the inheritance. Only stashed when true —
+   matches the absent-key default everywhere else."
   [fn-name rich-type-map]
-  (swap! rich-types-registry assoc fn-name
-         (update rich-type-map :effects #(or % #{}))))
+  (swap! (target-rich-types-atom)
+         (fn [reg]
+           (let [existing (get reg fn-name)
+                 carry-bl? (or (true? (:branch-local? rich-type-map))
+                               (true? (:branch-local? existing)))]
+             (assoc reg fn-name
+                    (cond-> (update rich-type-map :effects #(or % #{}))
+                      carry-bl? (assoc :branch-local? true)))))))
 
 
 (defn rich-type-of
-  ([fn-name]            (get @rich-types-registry fn-name))
-  ([fn-name arg-name]   (get-in @rich-types-registry [fn-name :args arg-name])))
+  ([fn-name]            (get (rich-types-view) fn-name))
+  ([fn-name arg-name]   (get-in (rich-types-view) [fn-name :args arg-name])))
 
 
 (defn rich-types-snapshot
   []
-  @rich-types-registry)
+  (rich-types-view))
+
+
+(defn restore-rich-types!
+  "Test-only: replace the `rich-types-registry` with `snapshot`. Pair
+   with `rich-types-snapshot` to scope ad-hoc `record-rich-types(-raw)!`
+   writes to one test:
+
+     (let [snap (rich-types-snapshot)]
+       (try
+         (record-rich-types-raw! :fake {:args {} :return :int})
+         …
+         (finally (restore-rich-types! snap))))
+
+   The `defonce` registry is process-global (its private state
+   leaks across test ns'es by design — production sync paths
+   accumulate fn-defs as they load), so any test that pollutes it
+   with synthetic stubs must restore. The
+   `execute-http-test` ClassCastException flake was a
+   contaminator-leaks-into-compile-eager symptom — a foreign
+   `:effects` / `:return` shape on one of the
+   service/handler-internal fn names landed a builder that
+   returned a closure where an Associative was expected."
+  [snapshot]
+  (reset! (target-rich-types-atom) (or snapshot {})))
 
 
 (defn fn-names-with-tag
@@ -368,7 +474,7 @@
    `:tags`. Used by policy callers (admin-only-vault gate) to discover
    tagged base-fns declaratively instead of hardcoding names."
   [tag]
-  (->> @rich-types-registry
+  (->> (rich-types-view)
        (keep (fn [[fn-name info]]
                (when (contains? (:tags info) tag) fn-name)))
        set))
@@ -405,8 +511,13 @@
   (when-let [refine (:refine fn-def)]
     (let [base (:base refine)
           constraint (:constraint refine)
-          check-fn (requiring-resolve 'graphden.types.check/constraint-compatible-with-base?)]
-      (when (and constraint check-fn
+          check-fn (or (requiring-resolve
+                         'graphden.types.check/constraint-compatible-with-base?)
+                       (throw (ex-info
+                                "constraint-compatible-with-base? unresolved — namespace rename?"
+                                {:type :sync/missing-symbol
+                                 :symbol 'graphden.types.check/constraint-compatible-with-base?})))]
+      (when (and constraint
                  (not (check-fn base constraint)))
         (throw (ex-info (str "Refinement constraint " (pr-str constraint)
                              " uses operators not valid on base " (pr-str base))

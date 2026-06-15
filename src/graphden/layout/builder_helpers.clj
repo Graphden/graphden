@@ -303,7 +303,11 @@
   [arg arg-map bindings is-structural
    binding-applies? bound-by-chain? binding-goes-to-child?]
   (let [arg-name (bnd/resolve-arg-name arg arg-map)
-        has-value (some? (:value arg))
+        ;; `:value-present` (flag), NOT `(some? :value)` — a slot
+        ;; pinned to literal `nil` is a value-binding the editor must
+        ;; render, and is what distinguishes `{:default nil}` from an
+        ;; unbound free arg post-parser.
+        has-value (true? (:value-present arg))
         has-ref (some? (:ref-id arg))
         source-has-ref (when-let [sid (:source-id arg)]
                          (let [source-arg (get arg-map sid)]
@@ -332,7 +336,7 @@
       (bnd/ref-item-from-bnd arg bnd)
 
       ;; Ancestor binding's literal value covers the slot.
-      (and bnd (some? (:value bnd)))
+      (and bnd (true? (:value-present bnd)))
       (bnd/value-item-from-bnd arg bnd)
 
       ;; Has-ref on a non-structural call — emit as own ref.
@@ -501,7 +505,7 @@
           (fn [acc fn-id]
             (reduce
               (fn [acc2 arg]
-                (if (or (some? (:value arg)) (some? (:ref-id arg))
+                (if (or (true? (:value-present arg)) (some? (:ref-id arg))
                         ;; Sequence binding — the anchor arg row carries
                         ;; no :value (items live in chained arg rows),
                         ;; so without this branch a slot bound to e.g.
@@ -538,7 +542,7 @@
         (doseq [arg args]
           (let [cslot (canon-slot (:slot-id arg))
                 already-covered (contains? @covered-slots cslot)
-                has-value (some? (:value arg))
+                has-value (true? (:value-present arg))
                 has-ref (some? (:ref-id arg))
                 shadow-of-bound
                 (and (not has-value) (not has-ref)
@@ -999,7 +1003,7 @@
             (recur rest-q visited)
             (let [children (get inverse-source-map cur [])
                   bound (some (fn [a]
-                                (when (or (some? (:value a))
+                                (when (or (true? (:value-present a))
                                           (some? (:ref-id a)))
                                   a))
                               children)]

@@ -212,6 +212,19 @@
   #uuid "d52a7c10-3b94-4f0d-9c1e-7a4d8b6f2e15")
 
 
+;; Identity-level "do not propagate version-rows across branches" flag.
+;; Mirrors the monotonic-ratchet of slot `:required`: nil ≡ false ≡
+;; "inherit"; true on this fn OR any ancestor in `:parent-ids` closure
+;; makes the effective set true; widening (descendant `:branch-local?
+;; false` when ancestor is true) is rejected at sync-time. Checked at
+;; resolve-time in `versioning/storage/resolution.clj`: merge-
+;; candidates of foreign branches are filtered out for fn-ids whose
+;; effective-branch-local? is true, so dev-only runtime config
+;; (web-server port, vault path, etc.) never leaks to main on merge.
+(def ^:private fn-branch-local-field-uuid
+  #uuid "e8b3f7c2-9d4a-4f1e-b2c5-1a3b8d6e9f02")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :slot
 ;; =============================================================================
@@ -276,6 +289,10 @@
 
 (def ^:private binding-value-field-uuid
   #uuid "6459f00a-76ef-4fc3-a331-d222dc130982")
+
+
+(def ^:private binding-value-present-field-uuid
+  #uuid "644dd3d8-96f9-4813-b9e9-6809603bf477")
 
 
 (def ^:private binding-ref-fn-id-field-uuid
@@ -428,7 +445,11 @@
                       ;; warns when computed effects diverge from this).
                       :expects-effects {:uuid fn-expects-effects-field-uuid
                                         :type :jsonb
-                                        :nullable? true}})
+                                        :nullable? true}
+                      ;; Identity-level monotonic flag (see ns-doc above).
+                      :branch-local? {:uuid fn-branch-local-field-uuid
+                                      :type :bool
+                                      :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:namespace-id :name]})
       (ds/add-constraint :fn {:type :unique :fields [:anonymous-hash]})
 
@@ -496,6 +517,19 @@
                       :value {:uuid binding-value-field-uuid
                               :type :jsonb
                               :nullable? true}
+                      ;; `:value-present` distinguishes "author wrote
+                      ;; `{:value nil}`" from "author wrote nothing for
+                      ;; this slot". Both serialise `:value` to SQL NULL
+                      ;; via `encode-value`'s `(when (some? value) ...)`
+                      ;; skip, so without this flag they're
+                      ;; indistinguishable at read time — and the
+                      ;; classifier falls through to `:free`, leaking
+                      ;; the caller's `fa[<slot-name>]` (e.g. Ring
+                      ;; request) into the slot. See
+                      ;; `compile/bindings.clj/value-binding?`.
+                      :value-present {:uuid binding-value-present-field-uuid
+                                      :type :bool
+                                      :nullable? true}
                       :ref-fn-id {:uuid binding-ref-fn-id-field-uuid
                                   :type :ref
                                   :ref-entity :fn

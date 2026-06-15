@@ -1,4 +1,4 @@
-(ns ^:serial graphden.crud.fn-execution.persist-test
+(ns graphden.crud.fn-execution.persist-test
   "Unit tests for the pure helpers in `graphden.crud.fn-execution.persist`.
    The DB-touching write paths are covered indirectly by the
    integration tests in `graphden.crud.fn-execution-test` — this

@@ -67,37 +67,47 @@
    :parent :text-error-router
    :args {:routes :all}}
 
-  {:name :_app-ring-response
-   :description "Final Ring handler — invokes the router on the parsed request and merges default security headers. Wrapped by `:_branch-routed-handler` before reaching http-kit."
-   :parent :router-ring-response
-   :args {:func :_router}}
-
-  ;; Branch dispatch wraps the compiled main handler. At runtime, the
-  ;; wrap reads `X-Graphden-Branch` / `?branch=` from the request,
-  ;; resolves the branch, and routes to a per-branch
-  ;; ExecutionContext (lazy-built + cached by
-  ;; `graphden.system.branch-router`). Missing branch ref → main.
   ;; Storage-protocol injection (Block 1 Step 3): consumer-layer
   ;; fn-defs in `app/*` and `web/crud` use `:parent :storage-query-call`
   ;; instead of `:parent :pg-query`, which propagates `:storage-query`
-  ;; as a free arg up the chain. We satisfy that free arg HERE — at
-  ;; the handler-chain root — by binding it to `:pg-query`. The
-  ;; binding lives on `:_branch-routed-handler` (and NOT on the
-  ;; outer `:web-server`) because storage backend choice is a
-  ;; handler-concern, not a transport-concern: the same handler tree
-  ;; could be mounted on a non-HTTP host (CLI, desktop, message
-  ;; queue) and the storage binding would travel with it.
+  ;; as a free arg up the chain. We satisfy that free arg HERE — on
+  ;; the handler-tree root — by binding it to `:pg-query`.
+  ;;
+  ;; Lives on `:_app-ring-response` (and NOT on `:_branch-routed-handler`
+  ;; above) because the per-branch dispatcher
+  ;; (`graphden.system.branch-router`) compiles `_app-ring-response`
+  ;; directly for each per-branch ExecutionContext, BYPASSING the
+  ;; `branch-routing-wrap` layer entirely. A binding on
+  ;; `:_branch-routed-handler` would only fire on the (rare)
+  ;; no-router fallback path; on every real request the per-branch
+  ;; compiled closure for `_app-ring-response` is what runs, and the
+  ;; `:storage-query` free arg must already be bound at that point.
+  ;;
+  ;; Storage backend choice is a handler-concern, not a transport-
+  ;; concern: the same handler tree could be mounted on a non-HTTP
+  ;; host (CLI, desktop, message queue) and the storage binding would
+  ;; travel with it.
   ;;
   ;; Primitive-layer fn-defs (`storage/branches`, `storage/versioned`)
   ;; stay on `:parent :pg-query` directly — they live alongside
   ;; `:pg-query` and going through the protocol from inside the
   ;; storage layer is both circular and (for `:branch-chain`) would
   ;; force per-iteration closure-capture across a `:fix` HOF boundary.
-  {:name :_branch-routed-handler
-   :description "`:_app-ring-response` wrapped with per-branch dispatch. Bound to `:http-server.handler` so EVERY request flows through the branch router. Owns the storage-protocol injection point — `:storage-query :pg-query` satisfies the free arg propagated up from every consumer fn-def parented from `:storage-query-call`."
-   :parent :branch-routing-wrap
-   :args {:base-handler :_app-ring-response
+  {:name :_app-ring-response
+   :description "Final Ring handler — invokes the router on the parsed request and merges default security headers. Owns the storage-protocol injection point: `:storage-query :pg-query` satisfies the free arg propagated up from every consumer fn-def parented from `:storage-query-call`. Wrapped by `:_branch-routed-handler` before reaching http-kit."
+   :parent :router-ring-response
+   :args {:func :_router
           :storage-query :pg-query}}
+
+  ;; Branch dispatch wraps the compiled main handler. At runtime, the
+  ;; wrap reads `X-Graphden-Branch` / `?branch=` from the request,
+  ;; resolves the branch, and routes to a per-branch
+  ;; ExecutionContext (lazy-built + cached by
+  ;; `graphden.system.branch-router`). Missing branch ref → main.
+  {:name :_branch-routed-handler
+   :description "`:_app-ring-response` wrapped with per-branch dispatch. Bound to `:http-server.handler` so EVERY request flows through the branch router."
+   :parent :branch-routing-wrap
+   :args {:base-handler :_app-ring-response}}
 
   {:name :web-server
    :description "Application root — starts the http-kit server on port 8080 with the branch-aware Ring handler chain. Pure transport: the handler tree (including its storage binding) is supplied through `:handler`; this node only knows about the network surface."

@@ -53,6 +53,76 @@
       req)))
 
 
+(def ^:private gzip-min-size
+  "Skip the gzip overhead for bodies under this many bytes — the
+   Content-Encoding header plus GZIP framing eats the savings on
+   tiny responses. 1 KB is the conventional crossover (CloudFront /
+   nginx defaults sit at 256-1024); pick the conservative end."
+  1024)
+
+
+(defn- accepts-gzip?
+  [req]
+  (when-let [h (or (get-in req [:headers "accept-encoding"])
+                   (get-in req [:headers "Accept-Encoding"]))]
+    (re-find #"\bgzip\b" h)))
+
+
+(defn- gzip-bytes
+  ^bytes [^bytes raw]
+  (let [out (java.io.ByteArrayOutputStream. (count raw))]
+    (with-open [gz (java.util.zip.GZIPOutputStream. out)]
+      (java.util.zip.GZIPOutputStream/.write gz raw 0 (count raw)))
+    (java.io.ByteArrayOutputStream/.toByteArray out)))
+
+
+(defn- maybe-gzip-response
+  "Compress `:body` with gzip when:
+   - the request advertises `Accept-Encoding: gzip`, AND
+   - the response is a String or byte[] body ≥ `gzip-min-size` bytes,
+     AND
+   - the response doesn't already carry `Content-Encoding`.
+
+   `:content-type` text/json/javascript/svg/html are the typical
+   JSON-on-wire payloads the editor downloads (`/api/graph/entities`
+   sits at ~3 MB raw, ~150 KB gzipped). Binary content-types (images,
+   pre-compressed archives) are passed through untouched.
+
+   The response shape stays Ring-compatible — `:body` becomes a
+   `byte[]`, `Content-Encoding: gzip` is set, `Content-Length` is
+   updated, and `Vary: Accept-Encoding` is appended so caches don't
+   serve a compressed payload to a client that didn't ask for it."
+  [req resp]
+  (let [headers (:headers resp)
+        ce (or (get headers "content-encoding") (get headers "Content-Encoding"))
+        ct (or (get headers "content-type") (get headers "Content-Type") "")
+        compressible? (and (string? ct)
+                           (some #(re-find % ct)
+                                 [#"(?i)\bjson\b"
+                                  #"(?i)\btext\b"
+                                  #"(?i)\bjavascript\b"
+                                  #"(?i)\bxml\b"
+                                  #"(?i)\bsvg\b"
+                                  #"(?i)\bhtml\b"]))
+        body (:body resp)
+        ^bytes raw (cond
+                     (and (string? body) compressible?)
+                     (String/.getBytes ^String body "UTF-8")
+
+                     (and (bytes? body) compressible?)
+                     body)
+        big-enough? (and raw (>= (alength raw) gzip-min-size))]
+    (if (and (accepts-gzip? req) (not ce) big-enough?)
+      (let [compressed (gzip-bytes raw)
+            new-headers (-> headers
+                            (assoc "Content-Encoding" "gzip"
+                                   "Content-Length" (str (alength compressed)))
+                            (update "Vary" #(if % (str % ", Accept-Encoding")
+                                                "Accept-Encoding")))]
+        (assoc resp :body compressed :headers new-headers))
+      resp)))
+
+
 (defbase http-server
   [handler port]
   (cr/record-effect! :network)
@@ -61,7 +131,12 @@
   ;; validate-create requires :process for service-eligibility.
   (cr/record-effect! :process)
   (http-kit/run-server
-    (fn [req] (stringify-response-headers (handler (realize-body req))))
+    (fn [req]
+      (let [realized (realize-body req)
+            resp (handler realized)]
+        (->> resp
+             stringify-response-headers
+             (maybe-gzip-response realized))))
     {:port port}))
 
 

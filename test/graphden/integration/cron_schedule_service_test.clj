@@ -72,7 +72,12 @@
                  {:db/postgres (select-keys container-cfg
                                             [:jdbc-url :username :password])
                   :exec/base-fns {:extra-base-fns
-                                  {:_cron-service-tick tick-impl}}})]
+                                  {:_cron-service-tick tick-impl}}
+                  ;; See cron-runtime-test: drop the `examples` package
+                  ;; — none of its 171 fn-defs are exercised here, but
+                  ;; sync + compile + type-check sweep still walk them.
+                  :app/packages {:package-names
+                                 ["core" "storage" "web" "app"]}})]
     (try
       (let [storage (:db/versioned system)
             context (:exec/context system)

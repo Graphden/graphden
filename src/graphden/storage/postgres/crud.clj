@@ -76,28 +76,29 @@
 
    For :ref-many fields: writes to junction tables after entity row is created."
   [ds entity-name data fields]
-  (sp/standard-crud-validations! entity-name data fields)
-  (let [table-name (keyword (util/kw->snake-case entity-name))
-        id (or (:id data) (random-uuid))
-        record (assoc data :id id)
-        ;; Split off ref-many fields - they go into junction tables
-        [columnar-data ref-many-data] (junction/extract-ref-many-data record fields)
-        row (entity->row columnar-data fields)
-        columns (keys row)
-        values (vals row)
-        query (sql/format {:insert-into table-name
-                           :columns columns
-                           :values [values]
-                           :returning [:*]}
-                          {:quoted true})]
-    (util/with-sql-error-handling "Database error" :create-entity {:entity-name entity-name :id id}
-                                  (let [created (-> (jdbc/execute-one! ds query (util/query-opts))
-                                                    (codec/row->entity fields))]
-                                    (when (seq ref-many-data)
-                                      (junction/write-ref-many-fields! ds entity-name (:id created) ref-many-data))
-                                    ;; Merge back the ref-many fields so the returned record
-                                    ;; reflects what was written.
-                                    (merge created ref-many-data)))))
+  (let [data (sp/standard-crud-normalize-data entity-name data)]
+    (sp/standard-crud-validations! entity-name data fields)
+    (let [table-name (keyword (util/kw->snake-case entity-name))
+          id (or (:id data) (random-uuid))
+          record (assoc data :id id)
+          ;; Split off ref-many fields - they go into junction tables
+          [columnar-data ref-many-data] (junction/extract-ref-many-data record fields)
+          row (entity->row columnar-data fields)
+          columns (keys row)
+          values (vals row)
+          query (sql/format {:insert-into table-name
+                             :columns columns
+                             :values [values]
+                             :returning [:*]}
+                            {:quoted true})]
+      (util/with-sql-error-handling "Database error" :create-entity {:entity-name entity-name :id id}
+                                    (let [created (-> (jdbc/execute-one! ds query (util/query-opts))
+                                                      (codec/row->entity fields))]
+                                      (when (seq ref-many-data)
+                                        (junction/write-ref-many-fields! ds entity-name (:id created) ref-many-data))
+                                      ;; Merge back the ref-many fields so the returned record
+                                      ;; reflects what was written.
+                                      (merge created ref-many-data))))))
 
 
 (defn read-entity
@@ -131,7 +132,8 @@
 
    For :ref-many fields: replaces junction rows (delete + insert)."
   [ds entity-name id data fields]
-  (let [table-name (keyword (util/kw->snake-case entity-name))
+  (let [data (sp/standard-crud-normalize-data entity-name data)
+        table-name (keyword (util/kw->snake-case entity-name))
         existing (read-entity ds entity-name id fields)]
     (when-not existing
       (throw (ex-info "Entity not found"
@@ -253,7 +255,7 @@
   [ds entity-name data-seq fields]
   (if (empty? data-seq)
     []
-    (do
+    (let [data-seq (mapv #(sp/standard-crud-normalize-data entity-name %) data-seq)]
       (sp/validate-batch-size! (count data-seq) :create-entities {:entity-name entity-name})
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name (keyword (util/kw->snake-case entity-name))
@@ -333,7 +335,7 @@
   [ds entity-name data-seq fields]
   (if (empty? data-seq)
     []
-    (do
+    (let [data-seq (mapv #(sp/standard-crud-normalize-data entity-name %) data-seq)]
       (sp/validate-batch-size! (count data-seq) :update-entities {:entity-name entity-name})
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name-str (util/kw->snake-case entity-name)
@@ -442,7 +444,7 @@
   [ds entity-name data-seq fields]
   (if (empty? data-seq)
     []
-    (do
+    (let [data-seq (mapv #(sp/standard-crud-normalize-data entity-name %) data-seq)]
       (sp/validate-batch-size! (count data-seq) :upsert-entities {:entity-name entity-name})
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name (keyword (util/kw->snake-case entity-name))

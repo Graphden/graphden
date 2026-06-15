@@ -157,7 +157,8 @@
           (let [extra (setup/create-slot! storage "extra" :int)]
             (sp/create-entity storage :binding
                               {:fn-id (:id cfn) :slot-id (:id extra)
-                               :value 99 :override-kind :fixed})
+                               :value 99 :value-present true
+                               :override-kind :fixed})
             (let [env (b/collect-env-bindings (:id cfn) (lookups-for storage))]
               (is (= 1 (count env)))
               (is (= :extra (:env-name (first env))))

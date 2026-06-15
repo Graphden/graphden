@@ -105,6 +105,11 @@
           :key {:value 0}
           :default nil}}
 
+  {:name :_qs-pair-k-decoded
+   :description "URL-decode the key. RFC 3986 form-urlencoded bodies allow `%`-escapes in keys too — most browsers' `URLSearchParams` percent-encodes any keyword-unsafe char (e.g. `?` → `%3F`), so a server-side parser that leaves keys raw misroutes `enabled?` to a bucket nothing reads. Without this decode, the `:service` create form's `enabled?=true` field never reaches the form-data parser."
+   :parent :url-decode
+   :args {:string :_qs-pair-k}}
+
   {:name :_qs-pair-v
    :parent :get
    :args {:coll :_qs-pair-split
@@ -116,9 +121,9 @@
    :args {:string :_qs-pair-v}}
 
   {:name :_qs-decode-pair
-   :description "HOF callback per pair — return `[k url-decode(v|\"\")]` as a 2-vec so `:into {}` can fold it into the map."
+   :description "HOF callback per pair — return `[url-decode(k) url-decode(v|\"\")]` as a 2-vec so `:into {}` can fold it into the map."
    :parent :vec
-   :args {:coll [:_qs-pair-k :_qs-pair-v-decoded]}}
+   :args {:coll [:_qs-pair-k-decoded :_qs-pair-v-decoded]}}
 
   {:name :_qs-pairs-decoded
    :description "Map the per-pair decoder over every `k=v` split out of the raw string."

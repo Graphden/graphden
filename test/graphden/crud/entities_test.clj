@@ -1,4 +1,4 @@
-(ns ^:serial graphden.crud.entities-test
+(ns graphden.crud.entities-test
   "DB-backed tests for `graphden.crud.entities` — the heavy CRUD logic
    behind the web/crud base functions: form parsers, generic
    create/read/update/delete, the compound type-row endpoints, the

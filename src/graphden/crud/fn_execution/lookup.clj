@@ -165,6 +165,29 @@
         (recur (into acc next-frontier) next-frontier)))))
 
 
+(defn- root-source-slot-id
+  "Walk the `:source-slot-id` chain to the ROOT slot — the deepest
+   slot in the chain (the original one being renamed). Returns
+   `slot-id` itself when it has no `:source-slot-id`.
+
+   Rename equivalence: two slots are equivalent free-arg surfaces iff
+   they share a root. Captured-arg discovery walks refs and surfaces
+   slots at WHICHEVER point in the chain the ref-walk hits — that may
+   be the original (`:call-noargs.:func`) or an upstream rename
+   (`:_fire-target.:fn`, `:cron-next-after.:cron`). A binding on any
+   of them must close all of them. Comparing by root makes the check
+   commutative (#51)."
+  [slot-id slots-by-id]
+  (loop [sid slot-id seen #{}]
+    (cond
+      (nil? sid) nil
+      (seen sid) sid
+      :else
+      (if-let [src (:source-slot-id (get slots-by-id sid))]
+        (recur src (conj seen sid))
+        sid))))
+
+
 (defn- free-args-via
   "Internal: `{arg-name → slot-id}` for `fn-id`'s free args, walking
    ref-fn-id bindings transitively. `visited` guards against cycles
@@ -185,15 +208,23 @@
           chain-binding-ids (set (map :id chain-bindings))
           chain-list-items (filter #(chain-binding-ids (:binding-id %))
                                    all-list-items)
-          bound-slot-ids (->> chain-bindings
-                              (filter #(or (some? (:value %))
-                                           (some? (:ref-fn-id %))
-                                           (true? (:list-append %))))
-                              (map :slot-id)
-                              set)
+          ;; Bound bindings are tracked by ROOT slot-id (see
+          ;; `root-source-slot-id`). All rename siblings collapse to
+          ;; the same root, so the bound check is rename-insensitive.
+          root-of (fn [sid] (root-source-slot-id sid slots-by-id))
+          bound-roots (->> chain-bindings
+                           ;; `:value-present` flag — `{:default nil}`
+                           ;; in fns.edn is a real binding (slot is
+                           ;; pinned to nil), so the slot is NOT free
+                           ;; at execute-by-name time.
+                           (filter #(or (true? (:value-present %))
+                                        (some? (:ref-fn-id %))
+                                        (true? (:list-append %))))
+                           (map (comp root-of :slot-id))
+                           set)
           direct (into {}
                        (keep (fn [{:keys [slot-id]}]
-                               (when-not (bound-slot-ids slot-id)
+                               (when-not (bound-roots (root-of slot-id))
                                  (when-let [s (get slots-by-id slot-id)]
                                    [(keyword (:name s)) slot-id]))))
                        chain-fn-slots)
@@ -211,10 +242,12 @@
           ;; A slot bound at THIS level removes that slot from the
           ;; combined free-arg map — both direct and transitive. Lets
           ;; a derived fn-def bind a captured arg (e.g.
-          ;; `:my-cron :args {:cron …}`) and have it disappear.
+          ;; `:my-cron :args {:cron …}`) and have it disappear. Compare
+          ;; by ROOT slot-id so a binding on a rename slot closes its
+          ;; siblings everywhere in the chain (#51).
           combined (merge transitive direct)]
       (into {}
-            (remove (fn [[_ sid]] (bound-slot-ids sid)))
+            (remove (fn [[_ sid]] (bound-roots (root-of sid))))
             combined))))
 
 

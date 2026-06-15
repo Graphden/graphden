@@ -653,7 +653,14 @@
 (defn delete-branch!
   "Deletes a branch and all its version records.
    Throws if branch has child branches or if trying to delete main branch.
-   Returns true on success."
+   Returns true on success.
+
+   Cascade: any `:service` row scoped to this branch is soft-disabled
+   (`:enabled? false`) BEFORE the branch row goes away. The next
+   reconcile pass picks the row up via the standard diff-desired path,
+   stops the running closure, and releases its advisory lock. We don't
+   hard-delete the rows because they form part of the audit trail and
+   may be wanted for `branch-restore` (planned)."
   [versioned-storage branch-id]
   (let [base (:base-storage versioned-storage)
         branch (sp/read-entity base :branch branch-id)]
@@ -670,6 +677,17 @@
                         {:type :constraint-violation/branch-has-children
                          :branch-id branch-id
                          :child-branch-ids (mapv :id children)}))))
+    ;; Soft-disable services scoped to this branch so the reconciler
+    ;; stops them on its next pass — see the docstring's cascade note.
+    ;; The `:service` entity is only registered when the services
+    ;; schema is loaded (production system + integration tests);
+    ;; storage-only tests use a smaller schema that omits it. Skip
+    ;; the cascade quietly in that case rather than throwing
+    ;; `:table-not-found` on every branch delete.
+    (when (contains? (sp/current-entities base) :service)
+      (doseq [svc (sp/query-entities base :service {:branch-id branch-id
+                                                    :enabled? true})]
+        (sp/update-entity base :service (:id svc) {:enabled? false})))
     ;; Delete all version records on this branch (batch)
     (doseq [[_ {:keys [version-entity]}] res/entity-config]
       (let [version-ids (mapv :id (sp/query-entities base version-entity {:branch-id branch-id}))]

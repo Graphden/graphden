@@ -21,7 +21,9 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
+    [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -103,21 +105,20 @@
 (defn- ring-callable-for-ctx
   "Returns a `(fn [request])` callable that delegates to the compiled
    closure for `handler-fn-id` in `branch-ctx`. The registry is
-   re-read on every invocation via `requiring-resolve` to avoid a
-   circular require (compile-runtime → context → branch-router)."
+   re-read on every invocation so the latest delta-recompile result
+   is visible without rebuilding the callable."
   [branch-ctx handler-fn-id]
-  (let [registry (requiring-resolve 'graphden.executor.compile-runtime/registry)]
-    (fn [request]
-      (let [reg (registry branch-ctx)
-            closure (get reg handler-fn-id)]
-        (when-not closure
-          (throw (ex-info "Branch handler closure missing"
-                          {:type :execution-error/fn-not-found
-                           :fn-id handler-fn-id
-                           :branch-id (vs/current-branch-id
-                                        (:storage branch-ctx))})))
-        ;; compile-eager closure signature: `(fn [free-args ctx])`.
-        (closure {:request request} branch-ctx)))))
+  (fn [request]
+    (let [reg (cr/registry branch-ctx)
+          closure (get reg handler-fn-id)]
+      (when-not closure
+        (throw (ex-info "Branch handler closure missing"
+                        {:type :execution-error/fn-not-found
+                         :fn-id handler-fn-id
+                         :branch-id (vs/current-branch-id
+                                      (:storage branch-ctx))})))
+      ;; compile-eager closure signature: `(fn [free-args ctx])`.
+      (closure {:request request} branch-ctx))))
 
 
 (defn- now-ms
@@ -184,9 +185,8 @@
    without the limit a single hit on `:fn-version` for a branch
    with 10k own version rows would return all 10k."
   [base-storage branch-id]
-  (let [sp-query (requiring-resolve 'graphden.storage.protocol.core/query-entities)
-        any-row? (fn [entity where]
-                   (boolean (seq (sp-query base-storage entity where {:limit 1}))))]
+  (let [any-row? (fn [entity where]
+                   (boolean (seq (sp/query-entities base-storage entity where {:limit 1}))))]
     (or (any-row? :fn-version {:branch-id branch-id})
         (any-row? :fn-slot-version {:branch-id branch-id})
         (any-row? :binding-version {:branch-id branch-id})
@@ -204,18 +204,15 @@
 
    No atom writes; caller installs the result."
   [{:keys [base-ctx handler-fn-id]} branch-id]
-  (let [rebuild! (requiring-resolve 'graphden.executor.compile-runtime/rebuild!)
-        instantiate (requiring-resolve
-                      'graphden.executor.compile-runtime/instantiate-from-templates!)
-        branch-ctx (build-branch-ctx base-ctx branch-id)
+  (let [branch-ctx (build-branch-ctx base-ctx branch-id)
         base-storage (vs/unwrap (:storage base-ctx))
         own-content? (branch-has-own-content? base-storage branch-id)
         base-registry (some-> (:compiled-registry base-ctx) deref)]
     (if (and (not own-content?) base-registry)
       ;; Fast path: graph identical → reuse base registry.
-      (instantiate base-ctx branch-ctx)
+      (cr/instantiate-from-templates! base-ctx branch-ctx)
       ;; Slow path: branch differs from base → full compile.
-      (rebuild! branch-ctx))
+      (cr/rebuild! branch-ctx))
     {:ctx branch-ctx
      :handler (ring-callable-for-ctx branch-ctx handler-fn-id)
      :built-at (java.time.Instant/now)
@@ -368,14 +365,12 @@
 
 (defn- resolve-branch-id-uncached
   [{:keys [base-ctx]} branch-ref]
-  (let [base (vs/unwrap (:storage base-ctx))
-        sp-read (requiring-resolve 'graphden.storage.protocol.core/read-entity)
-        sp-query (requiring-resolve 'graphden.storage.protocol.core/query-entities)]
+  (let [base (vs/unwrap (:storage base-ctx))]
     (or (try (some->> branch-ref java.util.UUID/fromString
-                      (sp-read base :branch)
+                      (sp/read-entity base :branch)
                       :id)
              (catch IllegalArgumentException _ nil))
-        (:id (first (sp-query base :branch {:name branch-ref}))))))
+        (:id (first (sp/query-entities base :branch {:name branch-ref}))))))
 
 
 (defn resolve-branch-id

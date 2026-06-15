@@ -593,6 +593,29 @@
   (contains? #{:jsonb :union :enum} field-type))
 
 
+(defn standard-crud-normalize-data
+  "Apply entity-specific normalization rules to a CRUD write payload
+   before validation + storage. Returns the (possibly-augmented) data
+   map.
+
+   Currently one rule:
+     `:binding` rows with `:value` written but no `:value-present`
+     flag get `:value-present true`. Mirrors the parser's contract
+     (`packages/records/parse.clj`) — the writer who passes `:value`,
+     even nil, intends a value-binding. Without this, callers (tests,
+     CRUD handlers, any direct sp/create-entity user) would silently
+     produce rows the executor's classifier treats as `:free`,
+     leaking the caller's `fa[<slot-name>]` (Ring request, etc.) into
+     the slot. Centralised here so every storage backend picks it up
+     without each call-site having to remember."
+  [entity-name data]
+  (cond-> data
+    (and (= entity-name :binding)
+         (contains? data :value)
+         (not (contains? data :value-present)))
+    (assoc :value-present true)))
+
+
 (defn standard-crud-validations!
   "Performs standard validations for CRUD operations."
   [entity-name data fields]

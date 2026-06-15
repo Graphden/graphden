@@ -37,7 +37,14 @@
    ;; rejected with a "must declare :process" message. :http-stop
    ;; stays :network-only — it kills the server but doesn't spawn
    ;; anything itself.
-   :effects #{:network :process}}
+   :effects #{:network :process}
+   ;; Runtime-config marker — see graphden.versioning.branch-local.
+   ;; A web-server's port + handler are environment-specific; merging
+   ;; a dev http-server config into prod would clobber the production
+   ;; listener. The monotonic-OR walker makes every descendant
+   ;; ({:parent :http-server …}) sticky-local too, so user-defined
+   ;; servers inherit the policy without per-fn-def opt-in.
+   :branch-local? true}
 
   {:name :http-stop
    :description "Stop a running http-kit server returned by `:http-server`."

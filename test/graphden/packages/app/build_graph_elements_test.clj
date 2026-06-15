@@ -27,12 +27,19 @@
    denser real DB shape and avoid surprising `(:value arg)` truthy checks.
    Adds a synthetic `:slot-id` so the slot-id-keyed walkers (added in
    the slot/binding refactor) line up — defaults to the row's
-   `:source-id` (the inheritance lineage) or its own `:id`."
+   `:source-id` (the inheritance lineage) or its own `:id`.
+   Mirrors the parser's value-presence contract: when `:value` is
+   supplied (even `nil`), set `:value-present true` so the layout
+   classifies the arg as a value-binding."
   [opts]
   (let [base (into {} (remove (comp nil? val)) opts)]
     (cond-> base
       (not (contains? base :slot-id))
-      (assoc :slot-id (or (:source-id base) (:id base))))))
+      (assoc :slot-id (or (:source-id base) (:id base)))
+
+      (and (contains? opts :value)
+           (not (contains? base :value-present)))
+      (assoc :value-present true))))
 
 
 (defn- resolve-slot-ids

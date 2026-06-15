@@ -45,9 +45,13 @@
    "biome"      60000
    "stylelint" 120000
    ;; tests (no cloverage) under :kaocha.plugin/parallel typically
-   ;; finishes in ~3-5 min. Ceiling sized so a real hang (test
-   ;; deadlock, testcontainer stuck on Docker daemon) still surfaces.
-   "tests"     600000
+   ;; finishes in ~3-5 min standalone but creeps to 7-8 min under
+   ;; bb ci parallel load (cloverage in :coverage runs concurrently
+   ;; and instruments the same NSes; CPU contention). Ceiling sized
+   ;; so a real hang (test deadlock, testcontainer stuck on Docker
+   ;; daemon) still surfaces — 15 min is well outside any realistic
+   ;; legitimate runtime, well inside any genuine hang.
+   "tests"     900000
    ;; Unit-only coverage measured at ~1:13. Ceiling sized 4× to
    ;; absorb cold-cache variance + cloverage's first-time JIT
    ;; warmup pass through instrumented namespaces.

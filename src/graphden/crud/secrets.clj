@@ -49,9 +49,18 @@
   "The admin path treats a missing vault as a hard error — without
    OpenBao there's nowhere to store the value. (The executor's
    `:secret-value` auto-deref also fails with `:vault/not-configured`
-   in this state.)"
+   in this state.)
+
+   Reads `(:vault ctx)` first, then falls back to the JVM-wide
+   `vault/active-client` atom. The fallback covers per-branch ctx
+   builds that don't carry vault forward (branch-router's
+   build-branch-ctx) — propagating it through ctx mutates the
+   secrets fn-graph evaluation in a way that triggers a separate
+   compile-eager closure-leak, so the JVM-wide read is the safer
+   path."
   [ctx]
   (or (:vault ctx)
+      @vault/active-client
       (throw (ex-info "Vault client not configured — set VAULT_ADDR / VAULT_TOKEN"
                       {:type :vault/not-configured}))))
 

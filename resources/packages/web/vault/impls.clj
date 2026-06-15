@@ -12,8 +12,14 @@
 
 
 (defn- require-client!
+  "Read `(:vault ctx)`, falling back to the JVM-wide
+   `vault/active-client` atom. Mirrors `crud.secrets/require-vault!` —
+   per-branch ctx builds don't carry vault forward (propagating it
+   exposes a separate compile-eager closure-leak), so the JVM-wide
+   atom is the load-bearing path here."
   [ctx]
   (or (:vault ctx)
+      @vault/active-client
       (throw (ex-info "Vault client not configured — set VAULT_ADDR / VAULT_TOKEN"
                       {:type :vault/not-configured}))))
 

@@ -38,7 +38,14 @@
    :args {:in {:type [:secret :text]
                :description "Auto-resolved by the executor from a `:override-kind :secret-path` binding whose `:value` is the OpenBao path. Sync-time validation refuses any other binding shape on this slot — see `crud.validation/secret-path-rej`."}}
    :return-type [:secret :text]
-   :effects #{:network}}
+   :effects #{:network}
+   ;; Runtime-config marker — see graphden.versioning.branch-local.
+   ;; A secret's vault path is per-environment (dev → dev-creds path,
+   ;; prod → prod-creds path); merging a dev-secret-leaf row into main
+   ;; would silently rewire the prod consumer to dev's path. The
+   ;; monotonic-OR walker makes admin-created `:parent :secret-leaf`
+   ;; fn-defs sticky-local automatically.
+   :branch-local? true}
 
   ;; ---------------------------------------------------------------------
   ;; :vault-put — write/overwrite a single-value KV v2 secret.

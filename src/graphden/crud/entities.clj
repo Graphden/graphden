@@ -22,8 +22,10 @@
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.registry.core :as registry]
     [graphden.packages.records :as records]
+    [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
-    [graphden.types.core :as types]))
+    [graphden.types.core :as types]
+    [graphden.versioning.branch-local :as branch-local]))
 
 
 ;; === Affected-fn-id derivation for delta invalidation =======================
@@ -70,11 +72,42 @@
   "Convenience wrapper: derive the affected fn-id seeds and call
    `invalidate-graph-cache!` with the right arity. Pass `entity-data`
    that already includes `:id` (so :fn deletes pre-read the row,
-   binding-list-item deletes pre-read the item)."
+   binding-list-item deletes pre-read the item).
+
+   `:fn` writes also drop the per-storage branch-local cache (in
+   `graphden.versioning.branch-local`) — `:parent-ids` and
+   `:branch-local?` changes can both shift the effective set, and
+   the cache key is the storage handle so it lives below the
+   graph-cache layer.
+
+   Also kicks `recon/restart-services-depending-on!` against the
+   affected fn-id seeds so cron-loop services whose closure was
+   captured before the edit get restarted. HTTP services re-read
+   their compiled-registry lazily on the next request and don't
+   need the hint; cron loops sit in closed-over fn-graphs and
+   would otherwise fire the pre-edit code forever. Best-effort —
+   the restart is observability-grade; a failure during it
+   doesn't fail the user's CRUD call. No-op when the reconciler
+   singleton isn't wired (tests, REPL eval)."
   [ctx storage entity-type entity-data]
-  (if-let [seeds (affected-fn-ids storage entity-type entity-data)]
-    (exec-ctx/invalidate-graph-cache! ctx seeds)
-    (exec-ctx/invalidate-graph-cache! ctx)))
+  (when (= entity-type :fn)
+    ;; Cache lives below the VersionedStorage wrapper and is keyed by
+    ;; the BASE storage handle; unwrap before invalidating.
+    (let [base (or (:base-storage storage) storage)]
+      (branch-local/invalidate! base)))
+  (let [seeds (affected-fn-ids storage entity-type entity-data)]
+    (if seeds
+      (exec-ctx/invalidate-graph-cache! ctx seeds)
+      (exec-ctx/invalidate-graph-cache! ctx))
+    (when (seq seeds)
+      (try
+        ;; `recon/running` is a process-wide defonce atom — the same
+        ;; one the integrant init wired up.
+        (recon/restart-services-depending-on! ctx recon/running seeds)
+        (catch Exception e
+          (log/warn e
+                    "post-edit service restart hook failed"
+                    {:entity-type entity-type :seeds seeds}))))))
 
 
 (def ^:private fn-graph-entity-types
@@ -181,6 +214,10 @@
         ;; know who's "owner"). Synthesize one so the check sees a
         ;; stable owner — `sp/create-entity` honours a pre-supplied
         ;; `:id` so the synthesized value is what lands in storage.
+        ;; `:binding` :value-present normalisation lives in
+        ;; `storage/protocol/core/standard-crud-normalize-data`
+        ;; (called from every postgres CRUD entry) so direct
+        ;; `sp/create-entity` users (tests, sync) pick it up too.
         data' (cond-> data
                 (and (= et :fn) (nil? (:id data))) (assoc :id (random-uuid)))]
     ;; Capability gate: secret-shaped fn-defs are admin-only — see
@@ -826,11 +863,25 @@
                   (secret-leaf-capability-rej storage entity-data))
         create-result (cond
                         cap-rej {:error (:reason cap-rej)}
-                        :else (try {:created (sp/create-entity storage entity-type entity-data)}
-                                   (catch Exception e
-                                     (log/error e "create-entity failed for"
-                                                entity-type entity-data)
-                                     {:error (humanise e)})))]
+                        :else (try
+                                ;; `sp/create-entity` returns the full
+                                ;; created record; downstream
+                                ;; (invalidate / notify / response)
+                                ;; only need the id, so we project to
+                                ;; `:id` here. Leaving the whole record
+                                ;; in `:created` makes the NOTIFY-
+                                ;; emitter `(str seed)` stringify the
+                                ;; map, and the listener's
+                                ;; `UUID/fromString` then throws
+                                ;; "UUID string too large" — observed
+                                ;; on every type-row create.
+                                {:created (:id (sp/create-entity
+                                                 storage entity-type
+                                                 entity-data))}
+                                (catch Exception e
+                                  (log/error e "create-entity failed for"
+                                             entity-type entity-data)
+                                  {:error (humanise e)})))]
     ;; Phase 6c — forward a form `:rename-to` to the dedicated
     ;; renamed-view slot. A failure here is logged, not fatal — the
     ;; binding is still useful without the rename slot.

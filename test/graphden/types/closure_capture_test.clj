@@ -25,6 +25,8 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.fn-execution.lookup :as lookup]
+    [graphden.executor.compile.lookups :as compile-lookups]
+    [graphden.executor.compile.renames :as renames]
     [graphden.executor.composition.deps :as comp-deps]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
@@ -46,7 +48,11 @@
     [graphden.versioning.storage.core :as vs]))
 
 
-(use-fixtures :once (setup/create-container-fixture))
+(use-fixtures :once
+  (setup/create-container-fixture)
+  ;; `record-rich-types(-raw)!` writes by this ns leak into sibling
+  ;; integration tests otherwise — see check-test for the same fix.
+  exec/with-isolated-rich-types)
 
 
 (defn- full-schema
@@ -126,6 +132,186 @@
         (setup/bind-value! storage (:id outer) (:id slot-captured) 42)
         (let [free (lookup/free-arg-slot-map c (:id outer))]
           (is (= {} free))))
+      (finally (sp/close storage)))))
+
+
+(deftest binding-on-rename-slot-marks-source-slot-bound-test
+  ;; Regression for #51. The real-world reproduction: derive a fn from
+  ;; `:schedule` and bind `:fn` (which is the `{:as :fn}` rename of
+  ;; `:_fire-target.:func`). Before the fix, the captured-arg walk
+  ;; surfaced the underlying `:func` slot and `bound-slot-ids` only
+  ;; held the rename-slot's id, so `:func` ghost-survived as a free
+  ;; arg and validate-service-row rejected the user's binding.
+  ;;
+  ;; Synthetic graph:
+  ;;   :inner-base — base-fn with one unbound slot :original (free)
+  ;;   :outer-base — base-fn with one slot :body (HOF target)
+  ;;   :inner-fn   — fn-def parent=:inner-base, leaves :original free
+  ;;   :renamed-slot — slot on :outer-base whose :source-slot-id
+  ;;                   points at :inner-base.:original. Models a
+  ;;                   `{:as :renamed}` rename on the call site.
+  ;;   :outer-fn   — fn-def parent=:outer-base, binds :body to :inner-fn,
+  ;;                 and binds :renamed-slot to value 7.
+  ;;
+  ;; After the fix, `free-arg-slot-map` on :outer-fn must be empty —
+  ;; the binding on the rename slot has to cancel the underlying
+  ;; :original free arg surfaced by the ref walk.
+  (let [storage (create-full-storage)
+        _ (exec/register-base-fn! :test-rename-inner-base (fn [_ _] :ok))
+        _ (exec/register-base-fn! :test-rename-outer-base (fn [_ _] :ok))
+        inner-base (setup/create-base-fn! storage "test-rename-inner-base" :any)
+        outer-base (setup/create-base-fn! storage "test-rename-outer-base" :any)
+        orig-slot (setup/create-slot! storage "original" :int)
+        body-slot (setup/create-slot! storage "body" :any)
+        _ (setup/attach-slot! storage (:id inner-base) (:id orig-slot) 0)
+        _ (setup/attach-slot! storage (:id outer-base) (:id body-slot) 0)
+        ;; Rename slot: lives on :outer-base, exposes :original as
+        ;; :renamed via :source-slot-id. Direct sp create — the
+        ;; `setup/create-slot!` helper doesn't take source-slot-id.
+        rename-slot (sp/create-entity storage :slot
+                                      {:name "renamed"
+                                       :type-fn-id (get setup/primitive-fn-ids :int)
+                                       :source-slot-id (:id orig-slot)})
+        _ (setup/attach-slot! storage (:id outer-base) (:id rename-slot) 1)
+        inner-fn (setup/create-composed-fn! storage "test-rename-inner" (:id inner-base))
+        outer-fn (setup/create-composed-fn! storage "test-rename-outer" (:id outer-base))
+        _ (setup/bind-ref! storage (:id outer-fn) (:id body-slot) (:id inner-fn))
+        c (test-ctx storage)]
+    (try
+      (testing "without the rename-binding :original surfaces as a free arg"
+        (let [free (lookup/free-arg-slot-map c (:id outer-fn))]
+          (is (contains? free :original)
+              "the ref walk surfaces :original via :body → :inner-fn → :inner-base")
+          (is (contains? free :renamed)
+              "and the rename slot is also free at this point")))
+      (testing "binding the RENAME slot closes both names"
+        (setup/bind-value! storage (:id outer-fn) (:id rename-slot) 7)
+        (let [free (lookup/free-arg-slot-map c (:id outer-fn))]
+          (is (= {} free)
+              "binding on the rename slot must mark :source-slot-id as bound too — without the fix, :original ghosts back as free")))
+      (finally (sp/close storage)))))
+
+
+(deftest one-shot-hof-discards-env-collision-test
+  ;; Regression for the route-handler env-binding collision the
+  ;; smoke pass surfaced on `/api/branches` and `/api/services`.
+  ;;
+  ;; Production reproduction: `:_app-ring-response` env-binds
+  ;; `:storage-query :pg-query`. `:assoc-handler` is deep in the
+  ;; route tree doing the HOF wrap of e.g. `:list-branches-handler`
+  ;; (whose only r-free is `:storage-query`). The two fns aren't
+  ;; related by inheritance — `:assoc-handler` reaches
+  ;; `:_app-ring-response`'s env-binding via runtime `fa`
+  ;; propagation through refs. So at compile time, `alpha-equiv-
+  ;; lambda-params(R=:list-branches-handler, F=:assoc-handler)`
+  ;; sees `:storage-query` as uncaptured (no local binding, no
+  ;; inheritance-relative supplies it) and picks it as the lambda-
+  ;; param. The wrap's `(merge fa lambda-args)` then overwrites
+  ;; the captured `:storage-query → :pg-query` callable with the
+  ;; request map reitit passes in, and `:storage-query-call`
+  ;; downstream silently sees a map instead of a callable.
+  ;;
+  ;; Synthetic mirror (no inheritance between the env-binder and
+  ;; the wrap site, so `env-captured` doesn't already cover the
+  ;; name):
+  ;;   - `:test-injected` — base-fn whose impl returns its
+  ;;     `:injected` arg, mirroring a handler that READS the
+  ;;     env-bound value.
+  ;;   - `:test-handler` (R) — composed fn parent=:test-injected,
+  ;;     leaves `:injected` free.
+  ;;   - `:test-wrap-base` — base-fn whose `:value` slot is HOF-
+  ;;     typed `[:fn {:arg :any} :any]` (one-shot generic-
+  ;;     positional, matches `:assoc-fn`).
+  ;;   - `:test-wrap` (F) — composed fn parent=:test-wrap-base,
+  ;;     binds `:value :test-handler` (HOF). This is the wrap
+  ;;     site `hof-lambda-params` analyses.
+  ;;   - `:test-env-binder` — UNRELATED fn (parent= some no-op
+  ;;     base) carrying an env-binding for `:injected`. It's the
+  ;;     graph-wide `global-env-binding-names` entry that the
+  ;;     iteration-vs-one-shot policy reads.
+  ;;
+  ;; Without the policy, `hof-lambda-params` at the wrap site
+  ;; returns `[:injected]` — bug. With the policy, it returns `[]`.
+  (let [storage (create-full-storage)
+        _ (exec/register-base-fn! :test-wrap-base (fn [_ _] :ok))
+        _ (exec/register-base-fn! :test-injected (fn [_ _] :ok))
+        _ (exec/register-base-fn! :test-env-binder-base (fn [_ _] :ok))
+        wrap-base (setup/create-base-fn! storage "test-wrap-base" :any)
+        injected-base (setup/create-base-fn! storage "test-injected" :any)
+        env-binder-base (setup/create-base-fn! storage "test-env-binder-base" :any)
+        injected-slot (setup/create-slot! storage "injected" :any)
+        value-slot (setup/create-slot! storage "value"
+                                       [:fn {:arg :any} :any])
+        _ (setup/attach-slot! storage (:id wrap-base) (:id value-slot) 0)
+        _ (setup/attach-slot! storage (:id injected-base)
+                              (:id injected-slot) 0)
+        handler-fn (setup/create-composed-fn! storage "test-handler"
+                                              (:id injected-base))
+        wrap-fn (setup/create-composed-fn! storage "test-wrap"
+                                           (:id wrap-base))
+        ;; Wrap site: bind :value to the handler-fn (HOF).
+        _ (setup/bind-ref! storage (:id wrap-fn) (:id value-slot)
+                           (:id handler-fn))
+        ;; UNRELATED fn carrying the env-binding for :injected.
+        ;; No inheritance link to :test-wrap.
+        env-binder-fn (setup/create-composed-fn! storage "test-env-binder"
+                                                 (:id env-binder-base))
+        _ (setup/bind-value! storage (:id env-binder-fn) (:id injected-slot)
+                             :env-bound-value)
+        ;; Build a fresh lookups for the synthesised graph.
+        lookups (compile-lookups/build-lookups
+                  {:fns (sp/query-entities storage :fn {})
+                   :slots (sp/query-entities storage :slot {})
+                   :fn-slots (sp/query-entities storage :fn-slot {})
+                   :bindings (sp/query-entities storage :binding {})
+                   :list-items (sp/query-entities storage :binding-list-item {})})
+        ;; Re-fetch the wrap-site's :value binding row for the
+        ;; hof-lambda-params call.
+        bnd (first (filter #(= (:slot-id %) (:id value-slot))
+                           (get (:bindings-by-fn lookups) (:id wrap-fn))))
+        params (renames/hof-lambda-params (:id handler-fn) (:id value-slot)
+                                          bnd (:id wrap-fn) lookups)]
+    (try
+      (testing "one-shot HOF returns [] when alpha-equiv has only globally env-bound candidates"
+        (is (= [] params)
+            "before the iteration-vs-one-shot fix, hof-lambda-params returned [:injected] for the wrap site even though :injected is bound as an env-binding elsewhere in the graph (mirrors :_app-ring-response's :storage-query :pg-query). At runtime the wrap's lambda-arg merge would overwrite the captured env-bound value."))
+      (finally (sp/close storage)))))
+
+
+(deftest binding-on-source-slot-closes-rename-too-test
+  ;; Symmetric to the previous test: the user binds the SOURCE
+  ;; (original) slot and the ref walk surfaces the RENAME. Mirrors
+  ;; the cron case the smoke pass hit — the rename slot
+  ;; `:cron-next-after.:cron` (source = `:cron-parse.:cron`) is what
+  ;; the ref-walk hits via `:_next-fire-ms`'s inheritance, so
+  ;; `bound-roots` must collapse both ends of the chain.
+  (let [storage (create-full-storage)
+        _ (exec/register-base-fn! :test-rename-up-inner-base (fn [_ _] :ok))
+        _ (exec/register-base-fn! :test-rename-up-outer-base (fn [_ _] :ok))
+        inner-base (setup/create-base-fn! storage "test-rename-up-inner-base" :any)
+        outer-base (setup/create-base-fn! storage "test-rename-up-outer-base" :any)
+        orig-slot (setup/create-slot! storage "original-up" :int)
+        body-slot (setup/create-slot! storage "body-up" :any)
+        _ (setup/attach-slot! storage (:id inner-base) (:id orig-slot) 0)
+        _ (setup/attach-slot! storage (:id outer-base) (:id body-slot) 0)
+        ;; Rename slot whose source is the ORIGINAL. The ref-walk
+        ;; surfaces the rename (not the source) because the outer
+        ;; chain owns it.
+        rename-slot (sp/create-entity storage :slot
+                                      {:name "renamed-up"
+                                       :type-fn-id (get setup/primitive-fn-ids :int)
+                                       :source-slot-id (:id orig-slot)})
+        _ (setup/attach-slot! storage (:id outer-base) (:id rename-slot) 1)
+        inner-fn (setup/create-composed-fn! storage "test-rename-up-inner" (:id inner-base))
+        outer-fn (setup/create-composed-fn! storage "test-rename-up-outer" (:id outer-base))
+        _ (setup/bind-ref! storage (:id outer-fn) (:id body-slot) (:id inner-fn))
+        c (test-ctx storage)]
+    (try
+      (testing "binding the SOURCE slot closes the rename slot too"
+        (setup/bind-value! storage (:id outer-fn) (:id orig-slot) 99)
+        (let [free (lookup/free-arg-slot-map c (:id outer-fn))]
+          (is (= {} free)
+              "either end of the rename chain must close both; without root-comparison the rename surfaces as a phantom free arg")))
       (finally (sp/close storage)))))
 
 

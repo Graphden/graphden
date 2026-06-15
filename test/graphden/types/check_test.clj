@@ -1,4 +1,15 @@
-(ns graphden.types.check-test
+(ns ^:serial graphden.types.check-test
+  "FLAKY UNDER PARALLEL: this ns shares `core-base-fns` (a JVM-wide
+   `defonce` from `loader/load-packages`) with the type-check sweep
+   and its `:each` fixture seeds `:int-add` / `:map` / `:filter`
+   synthetic shapes through `record-rich-types!`. The seeding is
+   isolated to this NS's thread-local override, but under heavy
+   parallel scheduling 3 tests (`check-all-defs-stops-at-first-mismatch`,
+   `refinement-base-mismatch-throws`, `binding-type-widening-via-union-rejected`)
+   intermittently see `:int-add`'s rich-type resolve to a permissive
+   default instead of the seeded `{:a :int :b :int}` shape — the
+   expected `:type-check failed` doesn't fire. Cause not fully
+   characterised; pin to serial until the underlying race is found."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging :as log]
@@ -17,6 +28,15 @@
 ;; package resources.
 (defonce ^:private core-base-fns
   (:base-fn-defs (loader/load-packages ["core"])))
+
+
+;; `with-isolated-rich-types` keeps the synthetic `:map` / `:filter`
+;; / `:int-add` shapes this ns writes via `record-rich-types!` from
+;; leaking into sibling integration tests (e.g. execute-http-test
+;; would crash with `AFunction$1 cannot be cast to Associative`
+;; deep in compile-eager when the simplified `:map` shape replaced
+;; the production-rich one mid-suite).
+(use-fixtures :once exec/with-isolated-rich-types)
 
 
 (use-fixtures :each
@@ -113,6 +133,69 @@
                           :effects #{:db}})  ; lies — pure-base is pure
     (is (= #{} (:effects (registry/rich-type-of :under-claimed)))
         "rich-type records the COMPUTED #{} pure, not the declared #{:db}")))
+
+
+(deftest rejects-branch-local-widening
+  (testing "descendant cannot set `:branch-local? false` when ancestor is sticky-local — mirrors `:required` monotonicity"
+    ;; Seed: parent base-fn is effective-branch-local true (mirrors
+    ;; the `:http-server` / `:secret-leaf` / `:schedule` / `:env`
+    ;; seeds in fns.edn). The type-checker reads `:branch-local?`
+    ;; off rich-types-registry — `record-rich-types!` propagates
+    ;; the flag from parent to child at registration time, but the
+    ;; widening guard fires BEFORE the registry entry for the new
+    ;; def is written, so the parent's flag is what matters.
+    (registry/record-rich-types! :sticky-parent
+                                 {:args {} :return-type :int
+                                  :branch-local? true})
+    (try
+      (check/check-fn-def! {:name :sticky-child
+                            :parent :sticky-parent
+                            :branch-local? false})
+      (is false "should have thrown — :branch-local? false widens true ancestor")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :types/branch-local-widening-forbidden (:type d)))
+          (is (= :sticky-child (:fn-name d)))
+          (is (= :sticky-parent (:parent-name d)))))))
+  (testing "leaving `:branch-local?` absent (inherit) is allowed under a sticky ancestor"
+    (registry/record-rich-types! :sticky-parent-2
+                                 {:args {} :return-type :int
+                                  :branch-local? true})
+    (is (some? (check/check-fn-def!
+                 {:name :inheriting-child
+                  :parent :sticky-parent-2}))
+        "no :branch-local? key in the descendant → effective true via inheritance"))
+  (testing "explicit `:branch-local? true` on a sticky descendant is fine (redundant but not widening)"
+    (registry/record-rich-types! :sticky-parent-3
+                                 {:args {} :return-type :int
+                                  :branch-local? true})
+    (is (some? (check/check-fn-def!
+                 {:name :double-local-child
+                  :parent :sticky-parent-3
+                  :branch-local? true}))))
+  (testing "`:branch-local? false` is fine when no ancestor is sticky (no widening to forbid)"
+    (registry/record-rich-types! :plain-parent
+                                 {:args {} :return-type :int})
+    (is (some? (check/check-fn-def!
+                 {:name :explicit-non-local-child
+                  :parent :plain-parent
+                  :branch-local? false}))))
+  (testing "MI: any single sticky parent is enough to trigger widening rejection"
+    (registry/record-rich-types! :mi-plain
+                                 {:args {} :return-type :int})
+    (registry/record-rich-types! :mi-sticky
+                                 {:args {} :return-type :int
+                                  :branch-local? true})
+    (try
+      (check/check-fn-def! {:name :mi-widener
+                            :parents [:mi-plain :mi-sticky]
+                            :branch-local? false})
+      (is false "should have thrown — `:mi-sticky` parent forces effective true")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :types/branch-local-widening-forbidden (:type d)))
+          (is (= :mi-sticky (:parent-name d))
+              "widening guard names the FIRST sticky ancestor it finds"))))))
 
 
 (deftest rejects-type-override-widening

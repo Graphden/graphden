@@ -184,12 +184,16 @@
 
 
 (defn bind-value!
-  "Creates a value-binding for `slot-id` on `fn-id`."
+  "Creates a value-binding for `slot-id` on `fn-id`. Mirrors the
+   parser's value-presence contract: `:value-present true` so
+   `compile/bindings/value-binding?` classifies the row as `:value`,
+   even when `value` is `nil`."
   [storage fn-id slot-id value]
   (sp/create-entity storage :binding
                     {:fn-id fn-id
                      :slot-id slot-id
                      :value value
+                     :value-present true
                      :override-kind :fixed}))
 
 

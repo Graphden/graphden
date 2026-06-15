@@ -396,7 +396,7 @@
                  (assoc :ref-fn-id (get name->id ref-name))
 
                  (and (contains? arg-value :value) (not (contains? arg-value :ref)))
-                 (assoc :value value)
+                 (assoc :value value :value-present true)
 
                  override-fn-id (assoc :type-override-fn-id override-fn-id)
                  (or append closed) (assoc :list-append (boolean append)
@@ -404,7 +404,7 @@
                  has-required? (assoc :required (boolean required))
                  (not (or ref-name (contains? arg-value :value) as type-ref
                           append closed has-required?))
-                 (assoc :value arg-value))]
+                 (assoc :value arg-value :value-present true))]
     {:fields fields
      :items (vec (when (vector? append) append))}))
 
@@ -441,13 +441,13 @@
     {:fields {:list-append true} :items (vec arg-value)}
 
     (vector? arg-value)
-    {:fields {:value arg-value} :items []}
+    {:fields {:value arg-value :value-present true} :items []}
 
     (map? arg-value)
     (map-arg-value->binding-fields arg-value name->id)
 
     :else
-    {:fields {:value arg-value} :items []}))
+    {:fields {:value arg-value :value-present true} :items []}))
 
 
 (defn- item->record
@@ -527,9 +527,16 @@
 (def ^:private blank-binding-row
   "Default values for every nullable column on the binding entity.
    Merged under `arg-value->binding-fields`'s overrides so the row
-   shape matches the schema even when only one column is set."
+   shape matches the schema even when only one column is set.
+
+   `:value-present` defaults to `false`; the field-emitting branches
+   in `arg-value->binding-fields` / `map-arg-value->binding-fields`
+   overlay `true` whenever they actually write `:value`. This is what
+   lets the executor distinguish `{:default nil}` (pinned to literal
+   nil) from `{:as :x}` or a pure-ref binding (slot remains free)."
   {:kind :binding
    :value nil
+   :value-present false
    :ref-fn-id nil
    :override-kind :fixed
    :type-override-fn-id nil
@@ -690,14 +697,19 @@
 (defn- attach-fn-meta
   "Post-process step that copies fn-def-level metadata onto the first
    record of every parser's output (which is always the `:fn` row).
-   Today there's only one such field — `:expects-effects` — but the
-   pattern is here so any future authored-only column slips into the
-   first row without a per-parser tweak."
+   Handles authored-only columns: `:expects-effects` and
+   `:branch-local?`. Both pass through verbatim — they're identity-
+   level on `:fn` (not versioned), so a single write at parse-time
+   suffices."
   [records fn-def]
-  (if-let [ee (:expects-effects fn-def)]
-    (let [normalised (vec (map #(if (keyword? %) (name %) (str %)) ee))]
-      (update records 0 assoc :expects-effects normalised))
-    records))
+  (cond-> records
+    (:expects-effects fn-def)
+    (update 0 assoc :expects-effects
+            (vec (map #(if (keyword? %) (name %) (str %))
+                      (:expects-effects fn-def))))
+
+    (contains? fn-def :branch-local?)
+    (update 0 assoc :branch-local? (boolean (:branch-local? fn-def)))))
 
 
 (defn parse-fn-def

@@ -382,3 +382,38 @@
       (is (some? child-binding))
       (is (false? (:required child-binding))
           "loader passes :required=false through; types/check.clj rejects on sync"))))
+
+
+(deftest binding-value-present-distinguishes-literal-nil-from-no-binding
+  (testing "{:args {:x nil}} → binding with :value-present? true (pinned to literal nil)"
+    (let [defs [{:name :base-with-x :namespace "test"
+                 :args {:x {:type :jsonb :required false}}
+                 :return-type :bool}
+                {:name :child-pins-nil :namespace "test"
+                 :parent :base-with-x
+                 :args {:x nil}}]
+          recs (r/parse-module defs)
+          child-binding (first (filter #(and (= :binding (:kind %))
+                                             (= (r/fn-id "test" :child-pins-nil)
+                                                (:fn-id %)))
+                                       recs))]
+      (is (some? child-binding) "child emits a binding row")
+      (is (nil? (:value child-binding)))
+      (is (true? (:value-present child-binding))
+          ":x nil binds value to literal nil — flag must distinguish from absent")
+      (is (nil? (:ref-fn-id child-binding)))))
+  (testing "{:args {:x {:as :renamed}}} → no :value-present? (slot stays free)"
+    (let [defs [{:name :base-with-y :namespace "test"
+                 :args {:y {:type :jsonb}}
+                 :return-type :bool}
+                {:name :child-just-renames :namespace "test"
+                 :parent :base-with-y
+                 :args {:y {:as :renamed}}}]
+          recs (r/parse-module defs)
+          child-binding (first (filter #(and (= :binding (:kind %))
+                                             (= (r/fn-id "test" :child-just-renames)
+                                                (:fn-id %)))
+                                       recs))]
+      (when (some? child-binding)
+        (is (not (true? (:value-present child-binding)))
+            "pure rename must not flip the value-present flag")))))

@@ -45,7 +45,14 @@
 ;; top-level call (env values don't change mid-request, the txn sees a
 ;; consistent DB snapshot, etc.).
 
-(def ^:private always-fresh-fn-ids (atom #{}))
+;; ^:dynamic so the parallel kaocha plugin can shadow per-NS-thread.
+;; Production hands prod a single shared atom via the root binding; tests
+;; running on isolated NS-threads see fresh atoms via
+;; `kaocha.plugin.parallel/isolation-vars`. Without this, two sibling
+;; NSes both calling `compile-runtime/rebuild!` race on the set —
+;; whoever lands last wins, and the loser's `:time`/`:random` fn-ids
+;; drop out of always-fresh, masking timing-sensitive tests.
+(def ^:dynamic *always-fresh-fn-ids* (atom #{}))
 
 
 (defn set-always-fresh-fn-ids!
@@ -54,18 +61,43 @@
    by `compile_runtime`'s `rebuild!` / `delta-recompile!` after a
    compile pass, since the set drives every `:ref` invocation."
   [ids]
-  (reset! always-fresh-fn-ids (set ids)))
+  (reset! *always-fresh-fn-ids* (set ids)))
+
+
+(defn- fa-key-for-cache
+  "Project `fa` to the subset the ref-target actually reads —
+   `ref-frees` from `r/cache-projection-frees`. The walker is a
+   strict superset of `deep-free-ext-names`: it walks INTO HOF
+   bodies (`:is-fn :ref` bindings) and subtracts each boundary's
+   `hof-lambda-params`, so closure-captured names a HOF body reads
+   from caller's `fa` at wrap time DO land in the cache key.
+   Without this, two invocations of the same outer fn-graph with
+   different closure-captured values (e.g. each secret's `:fn-row`
+   in `_shape-secret-bindings`) collapse to one cache slot and
+   every caller sees the FIRST result — `GET /api/secrets` returned
+   every row with the first secret's `:path` until this wiring
+   landed.
+
+   `nil` → unknown set, full `fa` as the key (defensive fallback)."
+  [ref-frees fa]
+  (if (nil? ref-frees)
+    fa
+    (if (empty? ref-frees)
+      {}
+      (select-keys fa ref-frees))))
 
 
 (defn- call-with-cache
-  "Invoke `(child fa ctx)` through the per-execute memo. Cache miss /
-   absent cache / always-fresh fn-id all fall through to a fresh
-   call. `::nil` sentinel distinguishes a cached `nil` from miss."
-  [ref-id child fa ctx]
+  "Invoke `(child fa ctx)` through the per-execute memo. Cache key is
+   `[ref-id projected-fa]` where projected-fa is `fa` restricted to
+   the ref-target's declared free args. Cache miss / absent cache /
+   always-fresh fn-id all fall through to a fresh call. `::nil`
+   sentinel distinguishes a cached `nil` from miss."
+  [ref-id ref-frees child fa ctx]
   (let [^java.util.HashMap cache (::call-cache ctx)]
-    (if (or (nil? cache) (contains? @always-fresh-fn-ids ref-id))
+    (if (or (nil? cache) (contains? @*always-fresh-fn-ids* ref-id))
       (child fa ctx)
-      (let [k [ref-id fa]
+      (let [k [ref-id (fa-key-for-cache ref-frees fa)]
             cached (java.util.HashMap/.get cache k)]
         (if (some? cached)
           (when-not (identical? cached ::nil) cached)
@@ -151,7 +183,7 @@
      - `:value` present — literal value.
      - `:ref-fn-id` — invoke pre-compiled child callable.
      - everything nil — literal `nil`."
-  [item child-callables]
+  [item child-callables lookups]
   (cond
     (and (map? (:value item))
          (:as (:value item))
@@ -166,8 +198,9 @@
     (let [ref-id (:ref-fn-id item)
           child (or (get child-callables ref-id)
                     (throw (ex-info "compile-eager: seq-item ref-target not compiled"
-                                    {:type :compile/missing-child :item item})))]
-      (fn [fa ctx] (call-with-cache ref-id child fa ctx)))
+                                    {:type :compile/missing-child :item item})))
+          ref-frees (set (r/cache-projection-frees ref-id lookups))]
+      (fn [fa ctx] (call-with-cache ref-id ref-frees child fa ctx)))
 
     :else (constantly nil)))
 
@@ -210,6 +243,16 @@
 
 (def ^:private vault-get-secret
   (delay (requiring-resolve 'graphden.clients.vault/get-secret)))
+
+
+(def ^:private vault-active-client
+  ;; JVM-wide fallback for fn-graphs running on a ctx that doesn't
+  ;; carry `:vault` (per-branch ctx builds — see
+  ;; `system.branch-router/build-branch-ctx`). Lazy resolve preserves
+  ;; the "don't load clients.vault until first use" perf optimisation.
+  ;; `@vault-active-client` is the Var, `(deref @vault-active-client)`
+  ;; is the atom, `@(deref @vault-active-client)` is the client value.
+  (delay (requiring-resolve 'graphden.clients.vault/active-client)))
 
 
 (defn- lazy-seq-of-values
@@ -262,6 +305,7 @@
         (rt/thunk
           (fn []
             (let [vault-client (or (:vault ctx)
+                                   (some-> @vault-active-client deref deref)
                                    (throw (ex-info "Vault client not configured — set VAULT_ADDR / VAULT_TOKEN"
                                                    {:type :vault/not-configured})))]
               (@vault-get-secret vault-client p))))))
@@ -270,7 +314,8 @@
                     (throw (ex-info "compile-eager: ref-target not yet compiled"
                                     {:type :compile/missing-child
                                      :binding bnd :ref-id ref-id
-                                     :fn-id fn-id})))]
+                                     :fn-id fn-id})))
+          ref-frees (set (r/cache-projection-frees ref-id lookups))]
       (cond
         ;; HOF binding where the slot's structural shape is
         ;; `[:fn {…} …]` and the target is NOT itself a callable-
@@ -296,19 +341,19 @@
         ;; can still invoke the value as a 0-arg fn.
         (or produces-callable? (empty? ref-renames))
         (fn [fa ctx]
-          (rt/thunk (fn [] (call-with-cache ref-id child fa ctx))))
+          (rt/thunk (fn [] (call-with-cache ref-id ref-frees child fa ctx))))
 
         :else
         (fn [fa ctx]
           (rt/thunk (fn []
                       (call-with-cache
-                        ref-id child
+                        ref-id ref-frees child
                         (reduce-kv (fn [acc callee-name caller-name]
                                      (assoc acc callee-name (get fa caller-name)))
                                    fa ref-renames)
                         ctx))))))
     :seq
-    (let [item-builders (mapv #(seq-item-builder % child-callables) items)]
+    (let [item-builders (mapv #(seq-item-builder % child-callables lookups) items)]
       (if lazy-seq?
         (fn [fa ctx]
           (map (fn [b] (delay (b fa ctx))) item-builders))
@@ -338,7 +383,8 @@
           child (or (get child-callables ref-id)
                     (throw (ex-info "compile-eager: env-binding ref not yet compiled"
                                     {:type :compile/missing-child
-                                     :env-binding env-bnd :fn-id fn-id})))]
+                                     :env-binding env-bnd :fn-id fn-id})))
+          ref-frees (set (r/cache-projection-frees ref-id lookups))]
       (cond
         ;; HOF env-binding whose target ISN'T itself a callable-
         ;; producer: build the closure-captured Clojure callable.
@@ -358,17 +404,17 @@
         ;; path: don't hof-wrap a positional callable.
         produces-callable?
         (fn [fa-ref ctx]
-          (rt/thunk (fn [] (call-with-cache ref-id child @fa-ref ctx))))
+          (rt/thunk (fn [] (call-with-cache ref-id ref-frees child @fa-ref ctx))))
 
         :else
         (let [renames (r/build-ref-renames ref-id fn-id lookups)]
           (if (empty? renames)
             (fn [fa-ref ctx]
-              (rt/thunk (fn [] (call-with-cache ref-id child @fa-ref ctx))))
+              (rt/thunk (fn [] (call-with-cache ref-id ref-frees child @fa-ref ctx))))
             (fn [fa-ref ctx]
               (rt/thunk (fn []
                           (call-with-cache
-                            ref-id child
+                            ref-id ref-frees child
                             (reduce-kv
                               (fn [acc cn cln] (assoc acc cn (get @fa-ref cln)))
                               @fa-ref

@@ -446,6 +446,22 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions) {
       setError(body?.error || ('HTTP ' + resp.status));
       return;
     }
+    // Surface the audit-log when the resolver kept entries scoped
+    // to their origin branch (sticky-local fns — see
+    // graphden.versioning.branch-local). The alert is intentionally
+    // synchronous + simple: the user just clicked "Merge", we want
+    // them to KNOW these entries didn't propagate before the page
+    // reloads. The diff modal's 📍 badge already showed them ahead
+    // of time; this is the post-merge confirmation.
+    const skipped = body?.skipped?.['branch-local'] || [];
+    if (skipped.length > 0) {
+      const names = skipped.map((s) => ':' + (s['fn-name'] || s['entity-id']))
+                           .join(', ');
+      alert(skipped.length + ' branch-local fn'
+            + (skipped.length === 1 ? '' : 's')
+            + ' did NOT propagate to ' + targetName + ': ' + names
+            + '. (Marked with 📍 in the branch-diff modal.)');
+    }
     // Success — drop everything and reload so caches refresh and the
     // editor picks up the new resolved view on the current branch.
     closeBranchPopover();
@@ -479,6 +495,22 @@ function showMergeConflictsModal(body, sourceName, targetName) {
   modal.classList.remove('hidden');
   const conflicts = body.conflicts || [];
   const rows = conflicts.map((c, i) => conflictRowHtml(c, i)).join('');
+  // Batch-pick toolbar — for diffs with > 1 conflict, two buttons that
+  // flip every row's radio in one click. For a 1-conflict modal it'd
+  // just be noise; hide it.
+  const batchToolbar = conflicts.length > 1
+    ? '<div class="merge-conflicts-batch">'
+      +   '<span class="merge-conflicts-batch-label">Pick all:</span>'
+      +   '<button id="merge-conflicts-pick-all-source" '
+      +          'class="branch-popover-btn merge-conflicts-batch-btn"'
+      +          ' title="Set every row to source — ' + escapeAttr(sourceName) + '">'
+      +     'source</button>'
+      +   '<button id="merge-conflicts-pick-all-target" '
+      +          'class="branch-popover-btn merge-conflicts-batch-btn"'
+      +          ' title="Set every row to target — ' + escapeAttr(targetName) + '">'
+      +     'target</button>'
+      + '</div>'
+    : '';
   modal.innerHTML =
     '<div class="merge-conflicts-overlay"></div>'
     + '<div class="merge-conflicts-card">'
@@ -492,6 +524,7 @@ function showMergeConflictsModal(body, sourceName, targetName) {
     +     '<em>source</em> = ' + escapeText(sourceName)
     +     ', <em>target</em> = ' + escapeText(targetName) + '.'
     +   '</div>'
+    +   batchToolbar
     +   '<div class="merge-conflicts-rows">' + rows + '</div>'
     +   '<div class="merge-conflicts-error hidden" id="merge-conflicts-error"></div>'
     +   '<div class="merge-conflicts-actions">'
@@ -506,6 +539,21 @@ function showMergeConflictsModal(body, sourceName, targetName) {
     .addEventListener('click', closeConflictsModal);
   modal.querySelector('#merge-conflicts-submit')
     .addEventListener('click', () => submitConflictResolutions(conflicts, sourceName, targetName));
+  if (conflicts.length > 1) {
+    const pickAll = (choice) => {
+      modal.querySelectorAll('.merge-conflict-row input[type="radio"]')
+        .forEach((r) => {
+          if (r.value === choice) {
+            r.checked = true;
+            r.dispatchEvent(new Event('change', {bubbles: true}));
+          }
+        });
+    };
+    modal.querySelector('#merge-conflicts-pick-all-source')
+      .addEventListener('click', () => pickAll('source'));
+    modal.querySelector('#merge-conflicts-pick-all-target')
+      .addEventListener('click', () => pickAll('target'));
+  }
 }
 
 function conflictRowHtml(c, i) {

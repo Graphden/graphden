@@ -129,12 +129,16 @@
               ;; declared a rename.
               renamed-view (when slot-by-fn-source-slot
                              (get slot-by-fn-source-slot [(:fn-id bnd) sid]))
-              has-value (some? (:value bnd))
+              ;; `:value-present`, NOT `(some? :value)` — a binding
+              ;; pinned to literal `nil` (`:default nil` in fns.edn)
+              ;; must still render in the editor as a value binding.
+              has-value (true? (:value-present bnd))
               has-ref (some? (:ref-fn-id bnd))
               has-items (seq (get items-by-binding (:id bnd) []))]
           (if (and slot (or has-value has-ref has-items))
             (assoc b sid {:arg-name (or (:name renamed-view) (:name slot))
                           :value (:value bnd)
+                          :value-present (true? (:value-present bnd))
                           :ref-id (:ref-fn-id bnd)
                           :arg-id (data/synth-arg-id fn-id sid)
                           :slot-id sid

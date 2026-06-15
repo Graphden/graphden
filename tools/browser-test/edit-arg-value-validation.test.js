@@ -80,20 +80,24 @@ const TEST_NAME = 'test-arg-value-validation';
     await page.waitForTimeout(2500);
 
     // Click the port arg-overlay to open the value-edit popover.
-    // Overlay text reads `22int⋮⋮⋮` — value + type chip + drag handle.
-    // The first child div carries the value text and the click-to-edit
-    // handler (per createArgOverlay).
+    // The chip-row UI consolidation now packs value + chip + provenance
+    // into the first overlay div, so an exact-text lookup against the
+    // first child no longer matches; identify arg overlays by their
+    // `.arg-type-chip` (only arg overlays carry one) and then find the
+    // inner span/div whose trimmed text reads `22`.
     const opened = await page.evaluate(() => {
-      // Arg-overlay text is "<value><type-chip><drag-handle>", e.g.
-      // "22int⋮⋮⋮". The clickable inner div carries just the value
-      // and the click-to-edit handler.
       const overlay = Array.from(document.querySelectorAll('.node-overlay'))
         .find(el => {
-          const inner = el.querySelector('div');
-          return inner && (inner.textContent || '').trim() === '22';
+          const chip = el.querySelector('.arg-type-chip');
+          if (!chip) return false;
+          const valueDiv = Array.from(el.querySelectorAll('div, span'))
+            .find(d => (d.textContent || '').trim() === '22');
+          return !!valueDiv;
         });
       if (!overlay) return false;
-      overlay.querySelector('div').click();
+      const valueDiv = Array.from(overlay.querySelectorAll('div, span'))
+        .find(d => (d.textContent || '').trim() === '22');
+      valueDiv.click();
       return true;
     });
     assert(opened, 'port arg-overlay clickable');
@@ -126,10 +130,18 @@ const TEST_NAME = 'test-arg-value-validation';
     assert(okStatus.ok && !okStatus.err,
            'valid value shows ✓: ' + JSON.stringify(okStatus));
 
-    // Type an invalid value → ✗ status.
+    // Type a refinement-violating value → ✗ status.
+    // The :port slot's value-form mounts an <input type="number">,
+    // which silently rejects non-numeric text (browsers strip the
+    // value on the way in). So a `"hello"` test would never reach
+    // the live validator — `i.value = '"hello"'` ends up as the
+    // empty string and the popover treats it as "no value yet".
+    // Use `-1` instead — a valid Number that violates the port
+    // refinement (`[:and [:>= 1] [:<= 65535]]`), which IS what the
+    // live validator catches.
     await page.evaluate(() => {
       const i = document.querySelector('.arg-value-edit-input');
-      i.value = '"hello"';
+      i.value = '-1';
       i.dispatchEvent(new Event('input', {bubbles: true}));
     });
     await page.waitForTimeout(150);
@@ -139,9 +151,10 @@ const TEST_NAME = 'test-arg-value-validation';
               err: s && s.classList.contains('err')};
     });
     assert(errStatus.err && !errStatus.ok,
-           'invalid value shows ✗: ' + JSON.stringify(errStatus));
-    assert(/text|int|number/.test(errStatus.text || ''),
-           'error message mentions the type mismatch');
+           'invalid value (-1 below port range) shows ✗: '
+           + JSON.stringify(errStatus));
+    assert(/refine|>=|<=|range|satisfies|fails/i.test(errStatus.text || ''),
+           'error message mentions the refinement / range');
 
     // Close the popover (Escape).
     await page.keyboard.press('Escape');

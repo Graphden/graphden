@@ -24,8 +24,10 @@
     [clojure.set]
     [clojure.tools.logging :as log]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.compile.deps :as compile-deps]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
-    [graphden.storage.protocol.core :as sp])
+    [graphden.storage.protocol.core :as sp]
+    [graphden.system.branch-router :as br])
   (:import
     (java.sql
       Connection)))
@@ -204,6 +206,30 @@
   (:service-locks-connection ctx))
 
 
+(defn- ctx-for-service
+  "Pick the ExecutionContext to start `svc` in. When a branch-router
+   is registered (`branch-router/set-active-router!` was called by
+   `:exec/branch-router` at init), look up the per-branch ctx for
+   the service's `:branch-id`. Falls back to the reconciler's base
+   `ctx` when no router or no `:branch-id` is set — both apply to
+   tests that bypass the router, and to legacy rows that pre-date
+   the field.
+
+   Lazy: `br/ctx-for` builds the per-branch ctx on first request
+   (compile + cache), so a freshly-created branch with services
+   pays the compile cost on first reconcile."
+  [base-ctx svc]
+  (or (when-let [router (br/current-router)]
+        (when-let [branch-id (:branch-id svc)]
+          (try
+            (br/ctx-for router branch-id)
+            (catch Exception e
+              (log/warn e "per-branch ctx build failed — falling back to base"
+                        {:service-id (:id svc) :branch-id branch-id})
+              nil))))
+      base-ctx))
+
+
 (defn reconcile-once!
   "One pass: read enabled `:service` rows, compute diff vs
    `running-atom`'s contents, start missing + stop removed. Mutates
@@ -219,6 +245,12 @@
    `start-opts` (optional) is passed straight to `start-service!`,
    e.g. `{:max-retries 0 :backoff-ms 0}` keeps tests responsive when
    they intentionally cause start failures.
+
+   Per-branch services: each row carries `:branch-id`. The service
+   is started against THAT branch's ExecutionContext (looked up via
+   `branch-router/ctx-for`), so the same fn-id can run with branch-
+   specific bindings (dev port, prod port). Nil `:branch-id` falls
+   back to the reconciler's base ctx — matches pre-Phase-2 rows.
 
    Returns `{:started [service-id …] :stopped [service-id …]
               :not-our-lock [service-id …]}` for logging / tests."
@@ -243,6 +275,7 @@
          (swap! running-atom dissoc sid)))
      (doseq [sid to-start]
        (let [svc (get enabled-by-id sid)
+             svc-ctx (ctx-for-service ctx svc)
              acquired? (if lock-conn
                          (try (pg-lock/try-lock! lock-conn sid)
                               (catch Exception e
@@ -252,8 +285,13 @@
                          true)]
          (cond
            acquired?
-           (let [entry (start-service! ctx svc start-opts)]
-             (swap! running-atom assoc sid entry))
+           (let [entry (start-service! svc-ctx svc start-opts)
+                 ;; Record :branch-id on the entry so stop time can
+                 ;; tell which branch this run belonged to (for
+                 ;; observability + future per-branch reconcile).
+                 entry' (cond-> entry
+                          (:branch-id svc) (assoc :branch-id (:branch-id svc)))]
+             (swap! running-atom assoc sid entry'))
 
            :else
            (do (swap! not-our-lock conj sid)
@@ -261,6 +299,95 @@
      {:started (vec (remove (set @not-our-lock) to-start))
       :stopped to-stop
       :not-our-lock @not-our-lock})))
+
+
+(defn restart-services-on-branch!
+  "Stop every running service whose entry was started against
+   `target-branch-id`, then call `reconcile-once!` so the still-
+   enabled rows pick up fresh per-branch ExecutionContexts. Wired
+   into the merge endpoint so cron loops (which hold their fn-graph
+   closures by reference) actually pick up post-merge fn-versions —
+   `branch-router/invalidate!` clears the per-branch ctx, but the
+   running closures don't observe that on their own.
+
+   `running-atom` carries `:branch-id` on each entry (set by
+   `reconcile-once!` from the row's `:branch-id`). Entries without
+   a recorded branch are LEFT ALONE — they were started under the
+   legacy no-branch-id path and the per-branch invalidate isn't
+   relevant to them.
+
+   Returns the `reconcile-once!` result map (`:started :stopped
+   :not-our-lock`) so the caller can log / observe."
+  [ctx running-atom target-branch-id]
+  (let [lock-conn (lock-conn-from-ctx ctx)
+        to-restart (->> @running-atom
+                        (filter (fn [[_ entry]]
+                                  (and (map? entry)
+                                       (= target-branch-id (:branch-id entry)))))
+                        (mapv first))]
+    (doseq [sid to-restart]
+      (let [entry (get @running-atom sid)]
+        (when entry (stop-service! sid entry))
+        (when lock-conn
+          (try (pg-lock/release-lock! lock-conn sid)
+               (catch Exception e
+                 (log/warn e "advisory lock release failed during branch restart"
+                           {:service-id sid :branch-id target-branch-id}))))
+        (swap! running-atom dissoc sid)))
+    (when (seq to-restart)
+      (log/info "Stopping" (count to-restart) "services on branch for restart"
+                {:branch-id target-branch-id :service-ids to-restart}))
+    ;; reconcile-once! sees the just-stopped rows as to-start (still
+    ;; enabled in DB) and restarts them with `ctx-for-service` →
+    ;; fresh per-branch ctx from `branch-router/ctx-for`.
+    (reconcile-once! ctx running-atom)))
+
+
+(defn restart-services-depending-on!
+  "Stop every running service whose fn-id appears in the
+   compile-deps reverse-dep closure of `changed-fn-ids`, then call
+   `reconcile-once!` so the still-enabled rows pick up fresh
+   per-branch ExecutionContexts. Covers the gap where an admin
+   edits a fn-graph node used INSIDE a service's closure — HTTP
+   handlers re-read the registry lazily on the next request, but
+   cron loops hold the closure by reference and would keep firing
+   the pre-edit graph forever.
+
+   `changed-fn-ids` — the set of fn-ids the CRUD invalidate just
+   touched. Looks them up against `:compile-deps` on `ctx` to
+   compute the blast radius; services whose fn-id is in that
+   radius get stopped + restarted.
+
+   Returns the `reconcile-once!` result (`:started :stopped
+   :not-our-lock`) so the caller can log / observe. No-op when
+   compile-deps isn't populated yet (cold start) or when no running
+   service is affected."
+  [ctx running-atom changed-fn-ids]
+  (let [reverse-deps (some-> (:compile-deps ctx) deref)]
+    (if (or (nil? reverse-deps) (empty? changed-fn-ids))
+      {:started [] :stopped [] :not-our-lock []}
+      (let [blast (compile-deps/transitive-blast reverse-deps changed-fn-ids)
+            lock-conn (lock-conn-from-ctx ctx)
+            to-restart (->> @running-atom
+                            (filter (fn [[_ entry]]
+                                      (and (map? entry)
+                                           (contains? blast (:fn-id entry)))))
+                            (mapv first))]
+        (doseq [sid to-restart]
+          (let [entry (get @running-atom sid)]
+            (when entry (stop-service! sid entry))
+            (when lock-conn
+              (try (pg-lock/release-lock! lock-conn sid)
+                   (catch Exception e
+                     (log/warn e "advisory lock release failed during fn-edit restart"
+                               {:service-id sid}))))
+            (swap! running-atom dissoc sid)))
+        (when (seq to-restart)
+          (log/info "Stopping" (count to-restart)
+                    "services whose closure depends on edited fn"
+                    {:changed-fn-ids changed-fn-ids
+                     :service-ids to-restart}))
+        (reconcile-once! ctx running-atom)))))
 
 
 (defn stop-all!

@@ -448,6 +448,58 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
   // fn-name row — see `createNamespaceBadge` in editor-icons.js.
   // Removed the dedicated bottom strip: same payload duplicated in
   // two places turned the card into a noisy stack of labels.)
+
+  // --- branch-local strip ---
+  // Walk parent-ids transitively (mirror of
+  // `graphden.versioning.branch-local/effective-branch-local?`); any
+  // ancestor with the flag makes this fn sticky-local. The strip is a
+  // visual cue + an explainer tooltip — "this fn does not propagate
+  // across branches on merge". No edit affordance: descendants
+  // CAN'T widen back to non-local (sync-time guard rejects the write),
+  // so showing a toggle here would be a footgun. Admin opt-in lives
+  // in the fns.edn declaration of the root local ancestor.
+  if (lookups?.fnMap) {
+    const visited = new Set();
+    const queue = [cardFnEntity];
+    let local = false;
+    let localAncestor = null;
+    while (queue.length && !local) {
+      const f = queue.shift();
+      if (!f || visited.has(f.id)) continue;
+      visited.add(f.id);
+      if (f['branch-local?'] === true) {
+        local = true;
+        localAncestor = f;
+        break;
+      }
+      for (const pid of (f['parent-ids'] || [])) {
+        const pf = lookups.fnMap.get(pid);
+        if (pf) queue.push(pf);
+      }
+    }
+    if (local) {
+      const strip = document.createElement('div');
+      strip.className = 'branch-local-strip';
+      const glyph = document.createElement('span');
+      glyph.className = 'branch-local-strip-glyph';
+      glyph.textContent = '📍';
+      glyph.setAttribute('aria-hidden', 'true');
+      const label = document.createElement('span');
+      label.className = 'branch-local-strip-label';
+      label.textContent = 'branch-local';
+      strip.appendChild(glyph);
+      strip.appendChild(label);
+      // Tooltip explains the policy + names the ancestor that carries
+      // the seed so the user can trace where it came from. When
+      // self-marked, ancestor === cardFnEntity.
+      const ownTrue = cardFnEntity['branch-local?'] === true;
+      strip.title = ownTrue
+        ? 'This fn is sticky-local: version rows do not propagate across branches on merge.'
+        : ('This fn inherits branch-local from `:' + (localAncestor.name || '<anon>')
+           + '`. Version rows do not propagate across branches on merge.');
+      overlay.appendChild(strip);
+    }
+  }
 }
 
 // When the nav-root fn's viewer isn't signed in, surface a single

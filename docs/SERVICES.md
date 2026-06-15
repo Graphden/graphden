@@ -94,10 +94,41 @@ services spawn).
 | `:fn-id`          | `:ref :fn`        | **Logical** fn id — service tracks the current graph; editing the fn picks up at next restart. (Compare `:fn-execution.fn-version-id` which is a frozen snapshot.) Must point at a fn with zero free args. |
 | `:enabled?`       | `:bool`           | Reconciler only starts enabled rows. Toggle this + reconcile to stop a service without deleting it. |
 | `:restart-policy` | `:restart-policy` | `:always` / `:on-failure` / `:never` — see § Supervisor below.    |
+| `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil falls back to the reconciler's base ctx (= main behavior). The editor's ⚙ popover picker defaults to the editor's current branch on create. |
 
 ### `:restart-policy` enum
 
 `:always`, `:on-failure`, `:never`.
+
+### Per-branch services
+
+`reconcile-once!` groups enabled rows by `:branch-id`, asks the
+branch-router for each branch's `ExecutionContext` (built lazily
+via `build-actual-entry!`), and starts the service against that
+ctx. A typical workflow:
+
+```
+;; dev:  port 9001 (sticky-local, doesn't merge to main)
+{:name :dev-server  :parent :http-server
+ :args {:handler :app-handler  :port 9001}}
+
+;; main: port 8080 (also sticky-local)
+{:name :prod-server :parent :http-server
+ :args {:handler :app-handler  :port 8080}}
+```
+
+Two `:service` rows — `{:fn-id :dev-server  :branch-id dev}` and
+`{:fn-id :prod-server :branch-id main}` — both run.
+
+`merge-branch!` calls `recon/restart-services-on-branch!` on the
+target so cron loops pick up new fn-versions (HTTP servers re-
+read their registry lazily, cron closes over the fn-graph at
+spawn time). `delete-branch!` cascade-soft-disables services
+scoped to the deleted branch before the row goes away.
+
+Port / resource conflicts surface as OS-level failures —
+`Address already in use` records `:start-failed-at` and shows up
+in the running-atom for the UI badge.
 
 ## Reconciler
 

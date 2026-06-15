@@ -161,7 +161,13 @@
    :description "Read an OS environment variable. Returns nil if the variable is unset, hence the `:nullable-text` (`[:union :null :text]`) return — callers narrow to non-null via `:coalesce` (or an `:if`/`:nil?` guard)."
    :args {:name {:type :text :description "Environment variable name."}}
    :return-type :nullable-text
-   :effects #{:env}}
+   :effects #{:env}
+   ;; Runtime-config marker — see graphden.versioning.branch-local.
+   ;; Env-var indirection is per-deployment by definition (the OS env
+   ;; differs between dev / staging / prod). Descendants composed via
+   ;; `:parent :env` (or wrappers like `:env-or-default`) inherit
+   ;; sticky-local so user-defined env adapters never cross-merge.
+   :branch-local? true}
 
   ;; Construct an ExceptionInfo. Paired with :throw to raise from
   ;; graph code; also usable as a plain value if something wants a

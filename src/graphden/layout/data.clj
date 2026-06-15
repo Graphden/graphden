@@ -190,6 +190,7 @@
      :required (get slot :required true)
      :source-id inherits-from
      :value (:value b)
+     :value-present (true? (:value-present b))
      :ref-id (:ref-fn-id b)
      :next-arg-id first-item-id
      :append? (true? (:list-append b))}))

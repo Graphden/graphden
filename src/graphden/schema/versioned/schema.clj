@@ -205,6 +205,10 @@
   #uuid "51afa4af-fb8f-400b-8d26-6781fed40721")
 
 
+(def ^:private binding-version-value-present-field-uuid
+  #uuid "9f8c6e8d-56ee-4b82-a11b-15bc1bb491be")
+
+
 (def ^:private binding-version-ref-fn-id-field-uuid
   #uuid "276ddd7a-4caa-4280-98b0-8fca584c3367")
 
@@ -408,6 +412,10 @@
                                 :type :uuid}
                       :value {:uuid binding-version-value-field-uuid
                               :type :jsonb :nullable? true}
+                      ;; Mirrors :binding's :value-present — see
+                      ;; schema/graph/schema.clj for the rationale.
+                      :value-present {:uuid binding-version-value-present-field-uuid
+                                      :type :bool :nullable? true}
                       :ref-fn-id {:uuid binding-version-ref-fn-id-field-uuid
                                   :type :uuid :nullable? true}
                       :override-kind {:uuid binding-version-override-kind-field-uuid

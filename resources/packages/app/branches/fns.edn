@@ -1483,11 +1483,16 @@
                  {:parent :to-str :args {:value :_merge-apply-record-target-id}}
                  :_merge-apply-created-at-str]}}
 
+  {:name :_merge-apply-skipped
+   :description "Audit log: `{:branch-local [<entity-row> …]}`. Pulled straight from `merge-branch!`'s `:skipped` field which the defbase populates via `mrg/skipped-as-branch-local`. Empty `:branch-local` vec means every visible-on-source fn propagated."
+   :parent :get
+   :args {:coll :_merge-apply-record :key {:value :skipped} :default nil}}
+
   {:name :_merge-apply-success
-   :description "Success envelope — `{:ok true :merge <record>}`. Used as the `:body` callable of `:try`."
+   :description "Success envelope — `{:ok true :merge <record> :skipped {:branch-local […]}}`. Used as the `:body` callable of `:try`."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :merge}]
-          :vals [{:value true} :_merge-apply-record-shaped]}}
+   :args {:keys [{:value :ok} {:value :merge} {:value :skipped}]
+          :vals [{:value true} :_merge-apply-record-shaped :_merge-apply-skipped]}}
 
   ;; --- Error path: on-throw handler dispatching by ex-data :type.
   {:name :_merge-apply-ex-data

@@ -168,7 +168,12 @@
   {:name :schedule
    :description "Run `:fn` on every fire of a cron schedule. Spawns a daemon thread (inherits `:process` effect from `:future`), loops with cooperative shutdown via Thread.interrupt. Derivatives that bind `:cron` and `:fn` are service-eligible."
    :parent :future
-   :args {:body :_cron-loop}}
+   :args {:body :_cron-loop}
+   ;; Runtime-config marker — see graphden.versioning.branch-local.
+   ;; A cron schedule (string) is per-environment (dev → every 5s for
+   ;; fast iteration, prod → hourly). Sticky-local so `{:parent :schedule}`
+   ;; user fn-defs never carry a dev cadence to prod via merge.
+   :branch-local? true}
 
   {:name :_cron-loop
    :description "Cron-driven cooperative loop body — sleeps to the next fire then invokes the captured `:fn`, repeating until interrupted."

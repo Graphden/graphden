@@ -34,19 +34,19 @@ const NEW = 'test-fn-rename-new';
     await page.goto('http://localhost:9002/#' + ORIG);
     await page.waitForTimeout(2500);
 
-    // The root card carries a ✎ pencil next to the name. createFnOverlay
-    // emits one specifically for fn-rename when the fn is editable.
+    // Per-row action icons live in the `.row-actions-popover` triggered
+    // by hover/click on the `.more-actions-trigger` (⋯) on the root
+    // row — moved out of the card itself so the right-edge actions
+    // aren't clipped by the card's overflow:hidden. Open the popover
+    // FIRST, then look for the ✎ pencil inside it. (Same pattern the
+    // edit-service.test.js uses for the ⚙ button.)
+    await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
+    await page.waitForTimeout(500);
     const opened = await page.evaluate(() => {
-      const overlay = Array.from(document.querySelectorAll('.node-overlay'))
-        .find(el => (el.textContent || '').trim().startsWith('test-fn-rename-orig'));
-      if (!overlay) return {error: 'root overlay not found'};
-      // Multiple `.edit-pencil` buttons exist on a card (name +
-      // description). The fn-name pencil sits on the FIRST line — the
-      // one whose text matches the fn's own name.
-      const firstLine = Array.from(overlay.querySelectorAll('div'))
-        .find(d => /^test-fn-rename-orig/.test((d.textContent || '').trim()));
-      const pencil = firstLine && firstLine.querySelector('.edit-pencil');
-      if (!pencil) return {error: 'no .edit-pencil on root name line'};
+      const popover = document.querySelector('.row-actions-popover');
+      if (!popover) return {error: 'row-actions popover not found'};
+      const pencil = popover.querySelector('.edit-pencil');
+      if (!pencil) return {error: 'no .edit-pencil in row-actions popover'};
       pencil.click();
       return {clicked: true};
     });

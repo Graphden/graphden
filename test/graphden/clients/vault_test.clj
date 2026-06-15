@@ -65,22 +65,36 @@
 (use-fixtures :once container-fixture)
 
 
+;; Each test scopes its paths under a fresh `(random-uuid)` prefix so
+;; reruns of the same NS (cloverage instrumentation, repeated kaocha
+;; invocations, `bb ci` running tests + coverage in adjacent JVMs that
+;; somehow shared a vault image layer) can't bump KV v2 version
+;; counters from a prior pass into this one. The deftest-local prefix
+;; also keeps deftests inside the SAME ns from colliding on each other's
+;; keys when the parallel plugin schedules them concurrently in the
+;; future.
+(defn- scoped-path
+  [tag]
+  (str tag "/" (random-uuid)))
+
+
 ;; ============================================================================
 ;; KV v2 round-trip — happy path
 ;; ============================================================================
 
 (deftest put-get-roundtrip-test
-  (testing "put-secret returns version 1 for a fresh path"
-    (is (= 1 (vault/put-secret *client* "rt/path-a" "first-value"))))
+  (let [p (scoped-path "rt")]
+    (testing "put-secret returns version 1 for a fresh path"
+      (is (= 1 (vault/put-secret *client* p "first-value"))))
 
-  (testing "get-secret returns the value verbatim"
-    (is (= "first-value" (vault/get-secret *client* "rt/path-a"))))
+    (testing "get-secret returns the value verbatim"
+      (is (= "first-value" (vault/get-secret *client* p))))
 
-  (testing "put again at the same path returns version 2"
-    (is (= 2 (vault/put-secret *client* "rt/path-a" "second-value"))))
+    (testing "put again at the same path returns version 2"
+      (is (= 2 (vault/put-secret *client* p "second-value"))))
 
-  (testing "get-secret returns the latest version"
-    (is (= "second-value" (vault/get-secret *client* "rt/path-a")))))
+    (testing "get-secret returns the latest version"
+      (is (= "second-value" (vault/get-secret *client* p))))))
 
 
 ;; ============================================================================
@@ -88,23 +102,24 @@
 ;; ============================================================================
 
 (deftest delete-secret-test
-  (vault/put-secret *client* "del/path" "doomed")
-  (is (= "doomed" (vault/get-secret *client* "del/path")))
+  (let [p (scoped-path "del")]
+    (vault/put-secret *client* p "doomed")
+    (is (= "doomed" (vault/get-secret *client* p)))
 
-  (testing "delete-secret returns nil (204 No Content)"
-    (is (nil? (vault/delete-secret *client* "del/path"))))
+    (testing "delete-secret returns nil (204 No Content)"
+      (is (nil? (vault/delete-secret *client* p))))
 
-  (testing "subsequent get-secret raises :vault/lookup-failed with 404"
-    (try
-      (vault/get-secret *client* "del/path")
-      (is false "expected vault/lookup-failed")
-      (catch clojure.lang.ExceptionInfo e
-        (let [d (ex-data e)]
-          (is (= :vault/lookup-failed (:type d)))
-          (is (= 404 (:status d)))))))
+    (testing "subsequent get-secret raises :vault/lookup-failed with 404"
+      (try
+        (vault/get-secret *client* p)
+        (is false "expected vault/lookup-failed")
+        (catch clojure.lang.ExceptionInfo e
+          (let [d (ex-data e)]
+            (is (= :vault/lookup-failed (:type d)))
+            (is (= 404 (:status d)))))))
 
-  (testing "deleting an already-deleted path is idempotent"
-    (is (nil? (vault/delete-secret *client* "del/path")))))
+    (testing "deleting an already-deleted path is idempotent"
+      (is (nil? (vault/delete-secret *client* p))))))
 
 
 ;; ============================================================================
@@ -112,15 +127,16 @@
 ;; ============================================================================
 
 (deftest metadata-roundtrip-test
-  (vault/put-secret *client* "md/key" "v")
-  (vault/put-metadata *client* "md/key" {:description "hello"
-                                         :owner "alice"})
+  (let [p (scoped-path "md")]
+    (vault/put-secret *client* p "v")
+    (vault/put-metadata *client* p {:description "hello"
+                                    :owner "alice"})
 
-  (testing "get-metadata returns custom_metadata plus version info"
-    (let [m (vault/get-metadata *client* "md/key")]
-      (is (= 1 (:current_version m)))
-      (is (string? (:created_time m)))
-      (is (= {:description "hello" :owner "alice"} (:custom_metadata m))))))
+    (testing "get-metadata returns custom_metadata plus version info"
+      (let [m (vault/get-metadata *client* p)]
+        (is (= 1 (:current_version m)))
+        (is (string? (:created_time m)))
+        (is (= {:description "hello" :owner "alice"} (:custom_metadata m)))))))
 
 
 ;; ============================================================================
@@ -130,7 +146,7 @@
 (deftest missing-path-test
   (testing "get-secret on a missing path raises :vault/lookup-failed with 404"
     (try
-      (vault/get-secret *client* "does/not/exist")
+      (vault/get-secret *client* (scoped-path "missing"))
       (is false "expected vault/lookup-failed")
       (catch clojure.lang.ExceptionInfo e
         (let [d (ex-data e)]
@@ -142,7 +158,7 @@
   (testing "bad token raises :vault/lookup-failed with 403"
     (let [bad-client (assoc *client* :token "wrong-token")]
       (try
-        (vault/get-secret bad-client "anything")
+        (vault/get-secret bad-client (scoped-path "bad-tok"))
         (is false "expected vault/lookup-failed")
         (catch clojure.lang.ExceptionInfo e
           (let [d (ex-data e)]

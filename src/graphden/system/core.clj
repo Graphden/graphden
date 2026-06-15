@@ -15,6 +15,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.clients.vault :as vault]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.deps :as deps]
@@ -34,6 +35,7 @@
     [graphden.schema.services.schema :as svcs]
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
+    [graphden.services.port-check :as port-check]
     [graphden.services.reconciler :as recon]
     [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.postgres.core :as postgres]
@@ -455,7 +457,15 @@
              (log/warn "Type-check sweep: " @failures
                        "fn-defs failed (DEBUG-logged) — runtime unaffected,"
                        " editor effect/return strips may be missing for those names —"
-                       " docs/TYPE_CHECK_BACKLOG.md")))))
+                       " docs/TYPE_CHECK_BACKLOG.md")))
+         ;; Port-collision scan — runs against the expanded fn-def
+         ;; set so synthetic anons that bind `:port` get inspected
+         ;; too. Logs a WARN per colliding port; doesn't fail
+         ;; bootstrap because the OS still tells the truth at
+         ;; reconcile time. Catches admin-misconfig (two web-server
+         ;; fn-defs both bound to :port 8080) BEFORE any service is
+         ;; even created — earlier than `:start-failed-at`.
+         (port-check/warn-on-collisions! expanded-fn-defs)))
      fns)))
 
 
@@ -533,11 +543,22 @@
 ;; error on first use. Lets tests skip the openbao container.
 
 (defmethod ig/init-key :vault/client [_ {:keys [address token]}]
-  (if (and (string? address) (not (str/blank? address)))
-    (do (log/info "Vault client configured for" address)
-        {:address address :token token})
-    (do (log/info "Vault client disabled (no :address) — secret-leaf auto-deref will throw on use")
-        nil)))
+  (let [client (when (and (string? address) (not (str/blank? address)))
+                 {:address address :token token})]
+    (if client
+      (log/info "Vault client configured for" address)
+      (log/info "Vault client disabled (no :address) — secret-leaf auto-deref will throw on use"))
+    ;; Also stash in the JVM-wide atom so consumers that don't get the
+    ;; client through their request ctx (admin handlers running in a
+    ;; per-branch ctx whose build doesn't carry :vault forward) can
+    ;; still find it. See `graphden.clients.vault/active-client` for
+    ;; the rationale.
+    (reset! vault/active-client client)
+    client))
+
+
+(defmethod ig/halt-key! :vault/client [_ _]
+  (reset! vault/active-client nil))
 
 
 ;; =============================================================================

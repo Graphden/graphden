@@ -446,18 +446,29 @@
                 (catch Exception e
                   (log/debug e "Re-seed record-rich-types! failed for" fn-name)))))
        (when-not skip-type-check?
-         (let [failures (atom 0)]
+         (let [failed-names (atom #{})]
            (doseq [fd (deps/topological-sort expanded-fn-defs)]
              (try (types-check/check-fn-def! fd)
                   (catch Exception e
-                    (swap! failures inc)
+                    (swap! failed-names conj (:name fd))
                     (log/debug "Type-check failed for fn-def" (:name fd) "—"
                                (ex-message e)))))
-           (when (pos? @failures)
-             (log/warn "Type-check sweep: " @failures
+           (when (pos? (count @failed-names))
+             (log/warn "Type-check sweep: " (count @failed-names)
                        "fn-defs failed (DEBUG-logged) — runtime unaffected,"
                        " editor effect/return strips may be missing for those names —"
-                       " docs/TYPE_CHECK_BACKLOG.md")))
+                       " docs/TYPE_CHECK_BACKLOG.md"))
+           ;; Phase E: hard gate. The allowlist
+           ;; (`types-check/allowed-type-check-failures`) enumerates
+           ;; the known-failing fn-defs (closed over time as the
+           ;; type-system gains expressiveness). Any failure NOT in
+           ;; the allowlist is a regression — throw at sync time so
+           ;; CI catches it loud. Conversely, any allowlisted name
+           ;; that's NO LONGER failing must be removed from the
+           ;; allowlist (the registry is shrinking, hence the
+           ;; assertion).
+           (types-check/assert-sweep-failures-match-allowlist!
+             @failed-names))
          ;; Port-collision scan — runs against the expanded fn-def
          ;; set so synthetic anons that bind `:port` get inspected
          ;; too. Logs a WARN per colliding port; doesn't fail

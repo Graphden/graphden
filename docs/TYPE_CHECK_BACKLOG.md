@@ -18,6 +18,25 @@ future type-system pass can pick them up.
 
 Sweep count: **13 → 0** (2026-05-29 baseline).
 
+## 2026-06-16 — Phase E hard-gate on sweep failures (allowlisted)
+
+The 10 remaining failures listed below (all `:_X-apply-*` family)
+are now allowlisted in `graphden.types.check/allowed-type-check-
+failures`. `system.core/sync-fn-entities-from-packages!` calls
+`assert-sweep-failures-match-allowlist!` after every sync:
+
+* Any failure NOT in the allowlist throws `:types/sweep-regression`
+  at sync time — the system refuses to start. CI catches it loud.
+* Any allowlisted name that's NO LONGER failing throws
+  `:types/sweep-stale-allowlist` — the ledger must shrink as the
+  type-system gains expressiveness.
+
+The 10 entries map 1:1 to the `:get :parsed :entity-type → :name`
+chain through shared `:parsed` slot identity. Closing them requires
+Phase α' (slot-id-aware caller-context propagation) or Phase γ
+(row polymorphism) — see `docs/TYPE_SYSTEM_ROADMAP.md` for the
+architectural tradeoffs and recommended path.
+
 ## 2026-06-16 — sweep regressed to 12 (control-flow narrowing gap)
 
 After the CRUD apply-stage decomposition (Phase 4.2 — splitting

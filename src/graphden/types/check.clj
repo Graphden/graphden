@@ -2327,3 +2327,79 @@
         (map (fn [fn-def]
                [(:name fn-def) (check-fn-def! fn-def)]))
         fn-defs))
+
+
+;; -----------------------------------------------------------------------------
+;; Phase E — sweep failure allowlist.
+;;
+;; The set of fn-def names that are KNOWN to fail the type-check
+;; sweep due to architectural gaps documented in
+;; `docs/TYPE_SYSTEM_ROADMAP.md` and `docs/TYPE_CHECK_BACKLOG.md`.
+;; Each name here is a piece of known debt — runtime is unaffected,
+;; the editor's effect/return strips for these names may be missing.
+;;
+;; The sync-time check in `system.core/sync-fn-entities-from-packages!`
+;; gates on this set:
+;;   - Any failure NOT in this set is a REGRESSION — throws hard.
+;;   - Any name in this set that's NO LONGER failing is STALE — also
+;;     throws hard, to keep the ledger honest.
+;;
+;; Removing a name = the architectural gap that caused it has closed
+;; (e.g. Phase β/γ row polymorphism, Phase α' slot-id awareness).
+;; Adding a name = a known new debt the type-system can't yet
+;; express; MUST be co-justified with a roadmap update.
+;;
+;; The 10 entries below correspond to the `:_X-apply-*` family that
+;; reads `(:name (:get :parsed :entity-type :default nil))` against
+;; a shared `:parsed` slot. See `docs/TYPE_CHECK_BACKLOG.md § 11
+;; failures by `:_X-apply-entity-type-str` route`.
+(def allowed-type-check-failures
+  #{:_create-apply-result
+    :_create-apply-do-invalidate
+    :_create-apply-do-notify
+    :_update-apply-result
+    :_update-apply-do-invalidate
+    :_update-apply-do-notify
+    :_delete-apply-existing
+    :_delete-apply-do-delete
+    :_delete-apply-do-invalidate
+    :_delete-apply-do-notify})
+
+
+(defn assert-sweep-failures-match-allowlist!
+  "Verify the sync-time type-check sweep's failure set matches
+   `allowed-type-check-failures` exactly. Throws on:
+   - Any actual failure NOT in the allowlist — a REGRESSION.
+   - Any allowlisted name that's NO LONGER failing — STALE allowlist
+     (architectural gap closed, ledger needs trimming).
+
+   Called by `system.core/sync-fn-entities-from-packages!` after the
+   sweep; exposed as a separate fn so unit tests can exercise the
+   logic without bootstrapping integrant."
+  [failed-names]
+  (let [actual              (set failed-names)
+        unexpected-failures (set/difference actual allowed-type-check-failures)
+        stale-allowlist     (set/difference allowed-type-check-failures actual)]
+    (when (seq unexpected-failures)
+      (throw (ex-info
+               (str "Type-check sweep: " (count unexpected-failures)
+                    " NEW failure(s) not in allowlist. Add to"
+                    " `graphden.types.check/allowed-type-check-failures`"
+                    " ONLY after confirming the failure is architectural known-debt"
+                    " (not a runtime bug). Failing names: "
+                    (pr-str (sort unexpected-failures)))
+               {:type :types/sweep-regression
+                :unexpected unexpected-failures
+                :allowlist allowed-type-check-failures})))
+    (when (seq stale-allowlist)
+      (throw (ex-info
+               (str "Type-check sweep: allowlist contains "
+                    (count stale-allowlist)
+                    " name(s) that NO LONGER fail. Remove from"
+                    " `graphden.types.check/allowed-type-check-failures`"
+                    " to keep the ledger honest. Stale names: "
+                    (pr-str (sort stale-allowlist)))
+               {:type :types/sweep-stale-allowlist
+                :stale stale-allowlist
+                :allowlist allowed-type-check-failures})))
+    :ok))

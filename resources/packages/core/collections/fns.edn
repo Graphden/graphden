@@ -47,7 +47,7 @@
 
   {:name :conj
    :description "Append/prepend an item depending on collection type (Clojure's `conj`). Vectors append; lists/seqs prepend; maps add a `[k v]` entry."
-   :args {:coll {:type :any :description "Collection to add to."}
+   :args {:coll {:type [:union :null [:map a :any] [:list :any]] :description "Collection to add to. Nil treated as empty (becomes a list)."}
           :item {:type :any :description "Item to add."}}
    :return-type :any}
 
@@ -255,7 +255,7 @@
 
   {:name :select-keys
    :description "Submap containing only the specified keys (Clojure's `select-keys`). Records in graphden are keyword-keyed, so the result is a `[:map :keyword :any]`."
-   :args {:m {:type :any :description "Source map."}
+   :args {:m {:type [:union :null [:map a :any]] :description "Source map. Nil treated as empty."}
           :ks {:type [:list :keyword] :description "Keys to keep — keyword each (records in graphden are keyword-keyed). Each item may be a literal or a fn-ref."}}
    :return-type [:map :keyword :any]}
 
@@ -267,13 +267,13 @@
 
   {:name :update-vals
    :description "Apply a function to every value in a map (Clojure's `update-vals`). Keys are preserved."
-   :args {:m {:type :any :description "Map whose values to transform."}
+   :args {:m {:type [:union :null [:map a :any]] :description "Map whose values to transform. Nil treated as empty."}
           :f {:type [:fn {:value v} w] :description "Callable receiving each value under the convention name `:value` (alpha-equivalent for 1-arg callees), returning the new one."}}
    :return-type :any}
 
   {:name :update-keys
    :description "Apply a function to every key of a map (Clojure's `update-keys`). Values are preserved."
-   :args {:m {:type :any :description "Map whose keys to transform."}
+   :args {:m {:type [:union :null [:map a :any]] :description "Map whose keys to transform. Nil treated as empty."}
           :f {:type [:fn {:value v} w] :description "Callable receiving each key under the convention name `:value`, returning the new key. If two old keys map to the same new key, the latter overrides."}}
    :return-type :any}
 

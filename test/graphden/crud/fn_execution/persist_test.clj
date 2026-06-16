@@ -1,5 +1,13 @@
-(ns graphden.crud.fn-execution.persist-test
+(ns ^:serial graphden.crud.fn-execution.persist-test
   "Unit tests for the pure helpers in `graphden.crud.fn-execution.persist`.
+
+   `^:serial` because `log-effect-drift-widened-warns` and its
+   sibling redef the global `clojure.tools.logging/log*` via
+   `with-redefs`. Under in-JVM parallel runs that redef leaks into
+   any other test that emits a log message during the window,
+   inflating the `(count @calls)` assertion. Forcing this NS into
+   the sequential bucket (kaocha.plugin/parallel) keeps the redef
+   scoped to this NS's tests only.
    The DB-touching write paths are covered indirectly by the
    integration tests in `graphden.crud.fn-execution-test` — this
    file focuses on truncation, futures-registry lifecycle,

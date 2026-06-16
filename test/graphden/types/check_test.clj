@@ -1254,7 +1254,7 @@
       ;; The recorded return must NOT contain a raw typevar — both
       ;; branches' types should be present in the resolved union (after
       ;; absorption it may collapse, but no bare typevar leaks).
-      (is (not (some types-core/type-var? (tree-seq coll? seq ret)))
+      (is (not-any? types-core/type-var? (tree-seq coll? seq ret))
           (str "no typevar leaks; got " (pr-str ret))))))
 
 

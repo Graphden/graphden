@@ -70,7 +70,119 @@ slot-identity semantics, generalises beyond the 11 failures.
 **Recommendation: β as the next milestone. γ as a long-horizon
 option if β's expressiveness ceiling shows up empirically.**
 
-## β — Caller-context type propagation
+## β attempt (2026-06-16) — reverted
+
+A first prototype of β was implemented and reverted in the same
+session. The core insight: **per-NAME propagation through the
+ref-graph is unsound because graphden's slot identities are
+distinct from slot NAMES.** Multiple flows independently use the
+name `:parsed` (create / update / delete / seq-append / record-
+type / list-type / types-compatible — 9 distinct binders, 7
+distinct shapes), and the create-flow's chain re-uses utility fn-
+defs (`:_rejection-response`, `:html-error-response`, `:_request-
+body`, …) shared with update-flow / handler scaffolding. A BFS over
+the ref-graph keyed on `:parsed` correctly narrowed the create-flow
+LEAVES (`:_create-apply-entity-type-str` → `:text`, `:_anon-XXX`'s
+`:coll` → `:_create-parsed-shape`) but also leaked the narrowing
+to unrelated fn-defs sharing `:parsed` semantics elsewhere — sweep
+went 10 → 28-31 with new false-positive `:get :body` /
+`:get :id` failures on update-flow / seq-flow descendants.
+
+The prototype tried three increasing restrictions to scope
+propagation:
+
+1. **Parent-slots filter** — skip propagation when the binder's
+   arg-name is one of the parent base-fn's slot names (it's
+   binding the parent's contract, not a free-arg).
+2. **Free-arg-of-child filter** — propagation requires `arg-name`
+   to be in the union of F's ref-children's lifted free args.
+3. **Walk-through-rebind filter** — terminate BFS at fn-defs that
+   re-bind `arg-name` with a real value/ref (a bare `{:as :name}`
+   rename does NOT terminate, it just re-exposes the slot under
+   the same name).
+
+Each step cut false propagations but none captured the root
+constraint: **two flows can share a free-arg name without sharing
+its slot identity**. The shared-utility ref-tree (`:html-error-
+response` → `:_html-error-body`'s `{:as :reason}` rename → its
+`:status` rename → …) creates ad-hoc identity-by-name overlaps
+the per-name view can't disambiguate.
+
+The reverted code is in the git history; the dormant primitives
+(`*caller-narrowings*` dynvar, the rename branch in `bindings-info-
+for-rule`, `collect-free-args`'s rename-narrowing, the parent-args
+overlay) were removed too — each adds complexity that returns no
+value until the propagation problem is solved.
+
+### Why per-name propagation is fundamentally wrong
+
+The runtime semantics of a free-arg are tied to its **slot
+identity** (the slot-id introduced by the original rename in the
+parser pre-pass). Two `{:as :parsed}` renames at the inline-anon
+level of `:_create-apply-entity-type-str` and `:_seq-append-body-
+invalid?` create two DIFFERENT slot-ids (each rename is a fresh
+slot record). They share the AS-NAME `:parsed` but ARE NOT the
+same slot.
+
+The type-checker today operates one-level above this: it sees the
+AS-NAME and treats it as the free arg's identity. For Pass-1's
+local check this is fine — the slot type doesn't escape the
+fn-def's local computation. For Pass-2 propagation across the
+ref-graph it ISN'T fine — the AS-NAME's TYPE flows through
+distinct slot-ids that may need different types.
+
+## Architectural direction forward
+
+Two clean answers, each substantial:
+
+### Option γ — Row polymorphism (architecturally correct)
+
+Slot types parameterised over **row variables** — a record type
+`[:record {fields} 'rho]` where `'rho` is unbound row content
+that can be unified per call-site. `:get :coll :parsed :key :K`
+fires with `:coll = [:record {:K T} 'rho]` (open record, requires
+field K, accepts any other fields). At each call-site that binds
+`:parsed`, row-variable unification fills `'rho` with the
+caller's actual record minus the required fields.
+
+Tradeoffs: clean semantics, full HM treatment of polymorphism.
+Touches `types/core`'s `subtype?` + `unify` significantly;
+record-type representation gains a row-variable field; the
+existing record-subtype rule needs to handle open / closed
+distinction; downstream code that introspects records (rules,
+editor) needs to know about row variables. Multi-week.
+
+### Option α + slot-id awareness
+
+A pragmatic middle: keep records closed but track **slot-id**
+through the rename chain. Every free arg in the registry carries
+its source slot-id (from the rename that introduced it). Pass 2
+propagation matches on slot-id, not name — so `:parsed` from
+create-flow's `_anon-XXX` has slot-id X, and only fn-defs whose
+free-arg `:parsed` originates from slot-id X get narrowed.
+
+Tradeoff: avoids the type-system rewrite of γ, but requires
+threading slot-id through the parser's pre-pass output, the
+registry's `:args` map (currently `{name → type}` → becomes
+`{name → {:type T :slot-id S}}`), and the BFS walker. Mid-week.
+
+## Recommendation
+
+α + slot-id awareness is the smaller commitment with a clear
+endpoint and gives us a sound β. γ is the textbook answer but
+intersects with several other open type-system items (subtype
+asymmetries, `:any`-as-typevar, secret-flow's wrap/unwrap
+contract) and would be best done as a dedicated initiative when
+the broader type-system has fewer open fronts.
+
+Holding β at the "reverted prototype" mark; resuming via the α
+route in a focused follow-up.
+
+## β archive — original design notes
+
+The remainder of this section documents the original β design
+(retained for reference; the implementation is no longer in the
+codebase).
 
 ### Concept
 

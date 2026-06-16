@@ -466,6 +466,20 @@
 (def ^:dynamic *source-info* {})
 
 
+;; Caller-context narrowings (Phase α'). Built by `build-caller-
+;; narrowings` after Pass 1; Pass 3 binds it per-fn-def. The rename
+;; branch in `bindings-info-for-rule` and `collect-free-args`
+;; reads the entry for the current `:as`-name when no author
+;; `:type` is pinned.
+;;
+;; Soundness rests on a parser-level fix landed alongside (see
+;; `packages/records/parse.clj :: anon-fn-name`): inline anons are
+;; now named per use-site, so two unrelated flows whose anons have
+;; identical shape no longer share a registry entry. Narrowing an
+;; anon for one flow cannot leak into another.
+(def ^:dynamic *caller-narrowings* nil)
+
+
 (defn- mismatch-context
   "Build the structured `ctx` map every type-error throw shares —
    merges in `*source-info*` so file:line gets stamped automatically."
@@ -1582,6 +1596,7 @@
             (cond
               (rename-binding? b)
               (let [t (or (some-> (:type b) types/resolve-alias)
+                          (some-> *caller-narrowings* (get (:as b)))
                           (types/resolve subst (or (get parent-args a) :any)))]
                 (-> acc
                     (update :renamed-original-names conj a)
@@ -1671,8 +1686,16 @@
     (when-let [info (registry/rich-type-of ref-name)]
       (let [seen' (conj seen ref-name)
             ref-bindings (:resolved-bindings info {})
-            ;; Caller's bindings shadow the ref's own — closer-fn-wins.
-            combined (merge ref-bindings caller-bindings)
+            ;; Ref's OWN bindings shadow caller's on key collision —
+            ;; caller-bindings may carry slot-named entries from a
+            ;; deeper rename chain (e.g. `:coll` typed via Pass-3
+            ;; narrowing of `:_create-apply-entity-data`) that
+            ;; shouldn't override an unrelated ref's own `:coll`
+            ;; binding when recursed into. Caller still contributes
+            ;; free-arg context for keys the ref doesn't bind
+            ;; locally — that's how narrowings flow into rename
+            ;; AS-name slots.
+            combined (merge caller-bindings ref-bindings)
             inner-info (into {}
                              (map (fn [[k v]]
                                     [k {:type (effective-binding-type v combined seen' (inc depth))
@@ -1718,8 +1741,15 @@
                              ;; the renamed name. If `:type T` is also given, the
                              ;; rule should see T (matches the rename's type-
                              ;; override semantics in `collect-free-args`).
+                             ;;
+                             ;; Phase α' caller-narrowing: when the outer caller
+                             ;; has propagated a narrowed type for this AS-name,
+                             ;; use it. Resolution: author-pinned > caller-
+                             ;; narrowing > `:any`.
                              (rename-binding? b-form)
-                             {:type (or (some-> (:type b-form) types/resolve-alias) :any)
+                             {:type (or (some-> (:type b-form) types/resolve-alias)
+                                        (some-> *caller-narrowings* (get (:as b-form)))
+                                        :any)
                               :value nil}
 
                              (and (map? b-form) (contains? b-form :value))
@@ -2345,25 +2375,35 @@
 ;;     throws hard, to keep the ledger honest.
 ;;
 ;; Removing a name = the architectural gap that caused it has closed
-;; (e.g. Phase β/γ row polymorphism, Phase α' slot-id awareness).
+;; (e.g. Phase α' caller-context propagation, or future row poly).
 ;; Adding a name = a known new debt the type-system can't yet
 ;; express; MUST be co-justified with a roadmap update.
 ;;
-;; The 10 entries below correspond to the `:_X-apply-*` family that
-;; reads `(:name (:get :parsed :entity-type :default nil))` against
-;; a shared `:parsed` slot. See `docs/TYPE_CHECK_BACKLOG.md § 11
-;; failures by `:_X-apply-entity-type-str` route`.
+;; Post-Phase-α' (2026-06-16). The original 10 entries (the
+;; `:_X-apply-result/-do-invalidate/-do-notify` family that read
+;; `(:name (:get :parsed :entity-type :default nil))`) CLOSED when
+;; α' Pass-2/3 caller-context propagation landed alongside the
+;; per-use-site anon naming fix in `packages/records/parse.clj`.
+;;
+;; The 11 entries below are nullability gaps that α'-driven
+;; tighter return types now surface — each binding passes
+;; `[:union :null T]` into a slot expecting `T`, where the runtime
+;; is guarded by an upstream nil-check the type-checker doesn't
+;; yet see through. Closing them needs Phase #170 control-flow
+;; narrowing through `:if`/`:cond` guards OR per-fn-def
+;; `:assert-some` annotations.
 (def allowed-type-check-failures
-  #{:_create-apply-result
-    :_create-apply-do-invalidate
-    :_create-apply-do-notify
-    :_update-apply-result
-    :_update-apply-do-invalidate
-    :_update-apply-do-notify
-    :_delete-apply-existing
-    :_delete-apply-do-delete
-    :_delete-apply-do-invalidate
-    :_delete-apply-do-notify})
+  #{:bearer-token-raw
+    :has-bearer-prefix?
+    :_create-branch-apply-row
+    :_delete-secret-fn-row
+    :_execute-fn-not-found-anchor
+    :_inline-bind-target-fn-row
+    :_list-exec-by-fn-version-id
+    :_list-exec-by-version-rows
+    :_list-exec-limit-less-than-1?
+    :_list-exec-limit-over-max?
+    :_seq-remove-apply-do-delete})
 
 
 (defn assert-sweep-failures-match-allowlist!
@@ -2403,3 +2443,151 @@
                 :stale stale-allowlist
                 :allowlist allowed-type-check-failures})))
     :ok))
+
+
+;; -----------------------------------------------------------------------------
+;; Phase α' — caller-context propagation.
+;;
+;; Pass 2 walks every fn-def F. For each ref-binding `:arg :ref-name`
+;; where `:arg` is NOT a parent-contract slot, propagates the ref's
+;; return type to every fn-def in F's transitive ref-tree
+;; (EXCLUDING the ref-name itself) that has a rename `{:as :arg}` in
+;; its own args. Pass 3 re-runs `check-fn-def!` with
+;; `*caller-narrowings*` bound to the per-callee entry.
+;;
+;; Per-use-site anon names (parse.clj's `anon-fn-name`) ensure each
+;; anon's narrowing is scoped to one consumer chain — no cross-flow
+;; leak. The narrowing on a leaf rename-host flows UP via
+;; `effective-ref-return`'s normal rule re-firing during outer
+;; consumers' Pass 3 checks.
+
+(defn- ref-binding-name
+  [b]
+  (cond
+    (keyword? b) b
+    (and (map? b) (contains? b :ref) (keyword? (:ref b))) (:ref b)
+    :else nil))
+
+
+(defn- ref-children-of
+  [fd known-names]
+  (let [from-binding (fn [b]
+                       (cond
+                         (ref-binding-name b) [(ref-binding-name b)]
+                         (vector? b) (keep (fn [item]
+                                             (cond
+                                               (keyword? item) item
+                                               (and (map? item) (contains? item :ref))
+                                               (:ref item)
+                                               :else nil))
+                                           b)
+                         :else nil))]
+    (into #{}
+          (comp (mapcat (fn [[_ b]] (from-binding b)))
+                (filter known-names))
+          (:args fd))))
+
+
+(defn- rename-as-names-in
+  "Set of AS-names `fd` introduces as rename-bindings in its own
+   args (NOT inherited)."
+  [fd]
+  (into #{}
+        (keep (fn [[_ b]]
+                (when (and (map? b)
+                           (contains? b :as)
+                           (not (contains? b :value))
+                           (not (contains? b :ref)))
+                  (:as b))))
+        (or (:args fd) {})))
+
+
+(defn- propagate-narrowing-to-rename-hosts
+  "DFS from `from-name`'s children EXCLUDING `exclude-ref` (the
+   binder's own ref-target — produces the narrowed value, doesn't
+   consume the free arg). At each visited callee whose own args
+   have a rename `{:as arg-name}`, record the narrowing. Continue
+   walking into ref-children regardless (deeper rename-hosts may
+   need narrowing too). Callees that rebind `arg-name` via real
+   value/ref stop THIS branch."
+  [ref-children-by-name fn-defs-by-name from-name exclude-ref
+   arg-name narrowed acc]
+  (let [seed (vec (disj (set (get ref-children-by-name from-name #{}))
+                        exclude-ref))]
+    (loop [queue seed
+           visited (conj #{from-name} exclude-ref)
+           acc acc]
+      (if (empty? queue)
+        acc
+        (let [callee (peek queue)
+              queue (pop queue)]
+          (if (contains? visited callee)
+            (recur queue visited acc)
+            (let [visited' (conj visited callee)
+                  callee-fd (get fn-defs-by-name callee)
+                  callee-args (or (:args callee-fd) {})
+                  under-key (get callee-args arg-name)
+                  rebinds? (not (or (nil? under-key)
+                                    (and (map? under-key)
+                                         (contains? under-key :as)
+                                         (not (contains? under-key :value))
+                                         (not (contains? under-key :ref)))))]
+              (if rebinds?
+                (recur queue visited' acc)
+                (let [as-names (rename-as-names-in callee-fd)
+                      acc' (if (contains? as-names arg-name)
+                             (update-in acc [callee arg-name]
+                                        (fn [existing]
+                                          (if (some? existing)
+                                            (types/make-union [existing narrowed])
+                                            narrowed)))
+                             acc)
+                      queue' (into queue (get ref-children-by-name callee []))]
+                  (recur queue' visited' acc'))))))))))
+
+
+(defn build-caller-narrowings
+  "Pass 2 — narrowings for rename-host fn-defs. Returns
+   `{rename-host-name → {as-name → narrowed-type}}`."
+  [fn-defs]
+  (let [fn-defs-by-name (into {} (map (fn [fd] [(:name fd) fd])) fn-defs)
+        known-names     (set (keys fn-defs-by-name))
+        ref-children    (into {}
+                              (map (fn [[n fd]]
+                                     [n (ref-children-of fd known-names)]))
+                              fn-defs-by-name)]
+    (reduce
+      (fn [acc fd]
+        (let [F-name (:name fd)
+              parent-info  (or (when-let [p (first (or (some-> fd :parents seq)
+                                                       (some-> fd :parent vector)))]
+                                 (registry/rich-type-of p))
+                               {})
+              parent-slots (set (keys (or (:args parent-info) {})))]
+          (reduce
+            (fn [acc [arg-name b]]
+              (let [ref-name (ref-binding-name b)]
+                (cond
+                  (contains? parent-slots arg-name) acc
+
+                  (and ref-name (contains? known-names ref-name))
+                  (let [ref-info (registry/rich-type-of ref-name)
+                        narrowed (some-> ref-info :return)]
+                    (if (or (nil? narrowed) (= :any narrowed))
+                      acc
+                      (propagate-narrowing-to-rename-hosts
+                        ref-children fn-defs-by-name
+                        F-name ref-name arg-name narrowed acc)))
+
+                  :else acc)))
+            acc
+            (:args fd))))
+      {}
+      fn-defs)))
+
+
+(defn check-fn-def-with-narrowings!
+  "Phase α' Pass 3."
+  [fd narrowings-map]
+  (binding [*caller-narrowings* (get narrowings-map (:name fd))]
+    (check-fn-def! fd)))

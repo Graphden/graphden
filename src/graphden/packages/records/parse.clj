@@ -780,11 +780,29 @@
 
 
 (defn- anon-fn-name
-  "Stable synthetic name for an inline anon fn-def. Same shape across
-   the module collapses to the same name (deterministic — useful when
-   the same `(if (keyword? v) … …)` shape recurs)."
-  [anon-def]
-  (keyword (str "_anon-" (subs (ids/shape-hash anon-def) 0 16))))
+  "Stable synthetic name for an inline anon fn-def. The hash mixes the
+   anon's shape with the `host` tuple `[parent-fn-def-name parent-arg-
+   name]` of the use-site — so two identical-shape anons referenced
+   from DIFFERENT use-sites get DIFFERENT synthetic names (and
+   therefore distinct registry entries).
+
+   Why per-use-site: type-narrowing via Pass 2 caller-context
+   propagation (Phase α') requires each anon's `:resolved-bindings`
+   to be specific to its caller's chain. Dedup-by-shape (the previous
+   behaviour) caused two unrelated flows that happened to have
+   identical inline-anon structure (e.g. create-flow's
+   `:_create-apply-entity-type-str.value` and update-flow's
+   `:_update-apply-entity-type-str.value` both `(:get :coll {:as
+   :parsed} :key :entity-type :default nil)`) to collapse onto the
+   SAME synthetic anon — narrowing it for one flow then poisoned the
+   other.
+
+   For nested anons (anon inside anon's arg), `host` carries the
+   OUTER anon's already-uniquified name + the nested arg-name; the
+   uniqueness propagates down."
+  [anon-def host]
+  (let [shape-with-host (assoc anon-def ::_use-site host)]
+    (keyword (str "_anon-" (subs (ids/shape-hash shape-with-host) 0 16)))))
 
 
 (declare expand-anons-in-fn-def)
@@ -794,8 +812,13 @@
   "Walk one arg-value. If it's an inline anon, lift it into a synthetic
    named fn-def (recursively expanding anons inside it). If it's a
    sequence-arg vector, walk each item. Returns `[new-arg-value
-   extra-fn-defs]`."
-  [v ns-id]
+   extra-fn-defs]`.
+
+   `host` is the `[parent-fn-def-name parent-arg-name]` tuple of the
+   use-site; passed into `anon-fn-name` so identical-shape anons at
+   different use-sites get distinct synthetic names. For sequence
+   items, `host` includes the position index."
+  [v ns-id host]
   (cond
     (inline-anon-fn-def? v)
     (let [;; A `:type` on the binding side is an author-pinned
@@ -807,7 +830,7 @@
           ;; synthetic name based on per-call-site overrides.
           binding-type (:type v)
           v* (dissoc v :type)
-          synthetic-name (anon-fn-name v*)
+          synthetic-name (anon-fn-name v* host)
           ;; Anon inherits the outer fn-def's namespace so its fn-id
           ;; lands in the same module's namespace tree.
           named (-> v*
@@ -822,12 +845,15 @@
       [new-arg-value (cons expanded extras)])
 
     (vector? v)
-    (reduce
-      (fn [[acc-items acc-extras] item]
-        (let [[new-item extras] (expand-anons-in-arg-value item ns-id)]
-          [(conj acc-items new-item) (into acc-extras extras)]))
-      [[] []]
-      v)
+    (let [[acc-items acc-extras _]
+          (reduce
+            (fn [[acc-items acc-extras idx] item]
+              (let [item-host (conj host idx)
+                    [new-item extras] (expand-anons-in-arg-value item ns-id item-host)]
+                [(conj acc-items new-item) (into acc-extras extras) (inc idx)]))
+            [[] [] 0]
+            v)]
+      [acc-items acc-extras])
 
     :else
     [v []]))
@@ -839,10 +865,12 @@
    where `expanded-fn-def` has refs in place of inline anons."
   [fn-def]
   (let [ns-id (:namespace fn-def)
+        parent-name (:name fn-def)
         [new-args extras]
         (reduce-kv
           (fn [[acc-args acc-extras] k v]
-            (let [[new-v extras] (expand-anons-in-arg-value v ns-id)]
+            (let [host [parent-name k]
+                  [new-v extras] (expand-anons-in-arg-value v ns-id host)]
               [(assoc acc-args k new-v) (into acc-extras extras)]))
           [{} []]
           (or (:args fn-def) {}))]

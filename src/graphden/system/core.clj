@@ -447,13 +447,29 @@
                 (catch Exception e
                   (log/debug e "Re-seed record-rich-types! failed for" fn-name)))))
        (when-not skip-type-check?
-         (let [failed-names (atom #{})]
-           (doseq [fd (deps/topological-sort expanded-fn-defs)]
+         (let [sorted (deps/topological-sort expanded-fn-defs)
+               failed-names (atom #{})]
+           ;; Pass 1 — isolated per-fn-def check populates registry.
+           (doseq [fd sorted]
              (try (types-check/check-fn-def! fd)
                   (catch Exception e
                     (swap! failed-names conj (:name fd))
                     (log/debug "Type-check failed for fn-def" (:name fd) "—"
                                (ex-message e)))))
+           ;; Pass 2/3 — Phase α' caller-context propagation.
+           ;; Build narrowings for rename-host fn-defs; re-check each
+           ;; fn-def with the per-callee entry bound into
+           ;; `*caller-narrowings*`. Pass 3's record replaces Pass 1's
+           ;; isolation view; the FINAL failure set is what the
+           ;; allowlist gates against.
+           (let [narrowings (types-check/build-caller-narrowings sorted)]
+             (reset! failed-names #{})
+             (doseq [fd sorted]
+               (try (types-check/check-fn-def-with-narrowings! fd narrowings)
+                    (catch Exception e
+                      (swap! failed-names conj (:name fd))
+                      (log/debug "Type-check failed for fn-def" (:name fd) "—"
+                                 (ex-message e))))))
            (when (pos? (count @failed-names))
              (log/warn "Type-check sweep: " (count @failed-names)
                        "fn-defs failed (DEBUG-logged) — runtime unaffected,"

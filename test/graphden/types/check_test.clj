@@ -1235,14 +1235,19 @@
 
 (deftest sweep-allowlist-rejects-stale-entries
   (testing "allowlist contains a name that no longer fails → :types/sweep-stale-allowlist"
-    (let [missing-failures (disj check/allowed-type-check-failures :_create-apply-result)
+    (let [;; Pick any concrete entry from the current allowlist — the
+          ;; specific name doesn't matter, just need a name we KNOW
+          ;; is allowlisted so disj leaves the residue with that
+          ;; member as the "no-longer-failing" stale entry.
+          arbitrary-allowed (first check/allowed-type-check-failures)
+          missing-failures (disj check/allowed-type-check-failures arbitrary-allowed)
           thrown (try
                    (check/assert-sweep-failures-match-allowlist! missing-failures)
                    nil
                    (catch clojure.lang.ExceptionInfo e e))]
       (is (some? thrown))
       (is (= :types/sweep-stale-allowlist (:type (ex-data thrown))))
-      (is (contains? (:stale (ex-data thrown)) :_create-apply-result)))))
+      (is (contains? (:stale (ex-data thrown)) arbitrary-allowed)))))
 
 
 (deftest sweep-allowlist-empty-failure-set-when-allowlist-non-empty

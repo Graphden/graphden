@@ -18,6 +18,62 @@ future type-system pass can pick them up.
 
 Sweep count: **13 → 0** (2026-05-29 baseline).
 
+## 2026-06-16 — Phase α' lands: original 10 closed, 11 nullability gaps surface
+
+Phase α' (caller-context propagation to rename-host fn-defs)
+combined with per-use-site anon naming
+(`packages/records/parse.clj :: anon-fn-name` now mixes the host
+fn-def + arg-name into the synthetic-name hash) closes the original
+10 `:_X-apply-*` family failures — `:_create-apply-entity-type-str`,
+its update/delete siblings, and the `-result/-do-invalidate/-do-
+notify` consumers all narrow correctly to `:text` via
+`name-return-rule` reading a typed `:parsed`.
+
+The Pass-2/3 sweep extension lives in
+`graphden.types.check :: build-caller-narrowings` +
+`check-fn-def-with-narrowings!`. Pass 2 walks every binder
+`F :arg :ref-name` where `:arg` is NOT a parent-contract slot, and
+propagates the ref's return type to every fn-def in F's
+ref-tree (EXCLUDING `:ref-name` itself) that has a rename
+`{:as :arg}` in its OWN args. Pass 3 re-runs `check-fn-def!` with
+`*caller-narrowings*` bound to the per-callee entry; the rename
+branches in `bindings-info-for-rule` + `collect-free-args` honour
+the narrowed type.
+
+Side fix in `effective-ref-return` (PRE-EXISTING bug): the merge
+order was `(merge ref-bindings caller-bindings)` — caller-wins —
+which let a deeper rename chain's `:coll` narrowing leak across
+unrelated refs whose own `:coll` should have dominated. Flipped
+to `(merge caller-bindings ref-bindings)` so ref's own bindings
+shadow caller's on key collision. Without this, α' v2/v3 produced
+28-30 cross-flow false-positives.
+
+### Post-α' residual: 11 nullability gaps
+
+α'-driven tighter return types now SURFACE 11 pre-existing
+`[:union :null T] vs T` mismatches that were previously masked by
+looser Pass-1 returns:
+
+| fn-def | offending binding | expected | actual |
+|---|---|---|---|
+| `:bearer-token-raw` | `:string ← :authorization-header` | `:text` | `[:union :null :text]` |
+| `:has-bearer-prefix?` | `:string ← :authorization-header` | `:text` | `[:union :null :text]` |
+| `:_create-branch-apply-row` | `:branch-name ← anon` | `:text` | `[:union :null :text]` |
+| `:_delete-secret-fn-row` | `:id ← anon` | `:uuid` | `[:union :null :uuid]` |
+| `:_execute-fn-not-found-anchor` | (TBD) | | |
+| `:_inline-bind-target-fn-row` | `:id ← anon` | `:uuid` | `[:union :null :uuid]` |
+| `:_list-exec-by-fn-version-id` | `:fn-id ← anon` | `:uuid` | `[:union :null :uuid]` |
+| `:_list-exec-by-version-rows` | `:count ← :_list-exec-clamped-limit` | `[:refine :int [:>= 0]]` | `[:union :int :null]` |
+| `:_list-exec-limit-less-than-1?` | `:nums ← :_list-exec-limit-parsed` | `:numeric` | `[:union :int :null]` |
+| `:_list-exec-limit-over-max?` | (same) | `:numeric` | `[:union :int :null]` |
+| `:_seq-remove-apply-do-delete` | `:id ← anon` | `:uuid` | `[:union :null :uuid]` |
+
+These need either Phase #170 (control-flow narrowing through
+`:if`/`:cond` guards) or per-fn-def `:assert-some` annotations.
+The runtime is guarded — an upstream nil-check rejects the null
+case before the apply branch runs — but the type-checker can't see
+through the guard. Architectural debt, allowlisted.
+
 ## 2026-06-16 — Phase E hard-gate on sweep failures (allowlisted)
 
 The 10 remaining failures listed below (all `:_X-apply-*` family)

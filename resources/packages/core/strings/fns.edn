@@ -168,8 +168,8 @@
    :return-type :bool}
 
   {:name :str-starts-with?
-   :description "True iff `string` starts with `prefix` (Java `String.startsWith`). Nil-safe — returns false for nil input."
-   :args {:string {:type :text :description "String to test."}
+   :description "True iff `string` starts with `prefix` (Java `String.startsWith`). Nil-safe — returns false for nil input. `:string` accepts the nullable form so callers needn't pre-guard."
+   :args {:string {:type [:union :null :text] :description "String to test (nil → returns false)."}
           :prefix {:type :text :description "Required leading substring."}}
    :return-type :bool}
 

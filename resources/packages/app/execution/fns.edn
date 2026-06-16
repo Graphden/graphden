@@ -187,10 +187,10 @@
                    {:parent :nil? :args {:value :_execute-fn-row-id}}]}}
 
   {:name :_execute-fn-not-found-anchor
-   :description "The anchor cited in the error message — fn-name when supplied, else fn-id."
+   :description "The anchor cited in the error message — fn-name when supplied, else stringified fn-id. `:coalesce` requires `:value` and `:default` to share a type-var binding, so the UUID fn-id is `:to-str`'d before being passed — the consumer (`:str :parts`) just concatenates regardless."
    :parent :coalesce
    :args {:value :_execute-parsed-fn-name
-          :default :_execute-parsed-fn-id}}
+          :default {:parent :to-str :args {:value :_execute-parsed-fn-id}}}}
 
   {:name :_execute-fn-not-found-msg
    :parent :str
@@ -841,7 +841,7 @@
   {:name :_list-exec-by-version-rows
    :description "Latest-first slice of the executions for this version, capped at the clamped limit."
    :parent :take
-   :args {:count :_list-exec-clamped-limit
+   :args {:count {:ref :_list-exec-clamped-limit :type :non-negative-int}
           :coll :_list-exec-by-version-rows-desc}}
 
   {:name :_list-exec-by-version-rows-desc
@@ -898,13 +898,18 @@
    :args {:values [{:parent :nil? :args {:value :_list-exec-limit-parsed}}
                    :_list-exec-limit-less-than-1?]}}
 
+  ;; `:_list-exec-limit-parsed` declares `[:union :int :null]` —
+  ;; non-null asserted here because the sole consumer
+  ;; `:_list-exec-limit-invalid?` short-circuits on `:or` after the
+  ;; preceding `(:nil? :_list-exec-limit-parsed)` clause, so this
+  ;; branch only evaluates when the parsed limit IS an int.
   {:name :_list-exec-limit-less-than-1?
    :parent :gt
-   :args {:nums [{:value 1} :_list-exec-limit-parsed]}}
+   :args {:nums [{:value 1} {:ref :_list-exec-limit-parsed :type :int}]}}
 
   {:name :_list-exec-limit-over-max?
    :parent :gt
-   :args {:nums [:_list-exec-limit-parsed {:value 100}]}}
+   :args {:nums [{:ref :_list-exec-limit-parsed :type :int} {:value 100}]}}
 
   ;; `:_list-exec-apply-by-fn` — same shape as `-by-version`, but the
   ;; version-id is RESOLVED from the logical fn-id via
@@ -937,7 +942,8 @@
 
   {:name :_list-exec-by-fn-version-id
    :parent :resolve-fn-version-id
-   :args {:fn-id {:parent :get :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}}}
+   :args {:fn-id {:parent :get :type :uuid
+                  :args {:coll {:as :parsed} :key {:value :fn-id} :default nil}}}}
 
   {:name :_list-exec-by-fn-version-found?
    :parent :some? :args {:value {:as :version-id}}}
@@ -950,11 +956,12 @@
    :args {:parsed :_list-exec-by-fn-synth-parsed}}
 
   {:name :_list-exec-by-fn-synth-parsed
-   :description "Carry the resolved version-id + the OUTER limit into the by-version graph composition. The limit comes via `:outer-limit` from `:_list-exec-apply-by-fn` (NOT a re-read of `:as :parsed`) — at this level `:parsed` is BEING REDEFINED to point at this same fn, so re-reading it would loop."
+   :description "Carry the resolved version-id + the OUTER limit into the by-version graph composition. The limit comes via `:outer-limit` from `:_list-exec-apply-by-fn` (NOT a re-read of `:as :parsed`) — at this level `:parsed` is BEING REDEFINED to point at this same fn, so re-reading it would loop. The structural shape mirrors `:_list-exec-by-version`'s declared `:parsed` (fn-id + version-id + limit) so the by-version's typed downstream chain doesn't fail open-record subtype against the missing `:fn-id`."
    :parent :assoc
    :args {:map {:parent :zipmap
-                :args {:keys [{:value :limit}]
-                       :vals [{:as :outer-limit}]}}
+                :args {:keys [{:value :limit} {:value :fn-id}]
+                       :vals [{:as :outer-limit :type [:union :int :null]}
+                              {:as :fn-id :type [:union :null :uuid]}]}}
           :key {:value :version-id}
           :value {:as :version-id}}}
 

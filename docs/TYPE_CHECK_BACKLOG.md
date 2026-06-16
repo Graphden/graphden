@@ -18,6 +18,33 @@ future type-system pass can pick them up.
 
 Sweep count: **13 → 0** (2026-05-29 baseline).
 
+## 2026-06-16 — Sweep at ZERO; allowlist emptied
+
+Post-α' the 11 nullability gaps fell to author-typed assertions in a
+follow-up pass (same session). Each binding that passed a nullable
+value into a non-null slot got a `{:type T}` override on the
+inline-get / ref binding, documenting the runtime-guaranteed
+narrowing the type-checker can't (yet) see through:
+
+| fn-def | binding-form | override |
+|---|---|---|
+| `:str-starts-with?` (decl tightened) | `:string {:type :text}` → `:string {:type [:union :null :text]}` | impl is `(boolean (and string …))` — nil-safe by construction; the decl was lying. |
+| `:bearer-token-raw` | `:string :authorization-header` → `:string {:ref :authorization-header :type :text}` | sole consumer `:bearer-token :if :test :has-bearer-prefix?` gates evaluation behind the non-null check. |
+| `:_list-exec-limit-less-than-1?` / `:_list-exec-limit-over-max?` | `:nums [… :_list-exec-limit-parsed]` → `… {:ref :_list-exec-limit-parsed :type :int}` | wrapping `:_list-exec-limit-invalid? :or [(:nil? …) :_list-exec-limit-less-than-1?]` short-circuits before the non-null check fires. |
+| `:_seq-remove-apply-do-delete` | `:id {:parent :get :args …}` → `:id {:parent :get :type :uuid :args …}` | upstream validation guard rejects the request when `:item-id` is missing. |
+| `:_list-exec-by-fn-version-id` | `:fn-id {:parent :get …}` → `:fn-id {:parent :get :type :uuid …}` | same pattern. |
+| `:_create-branch-apply-row` | `:branch-name {:parent :get …}` → `:branch-name {:parent :get :type :text …}` | `:_create-branch-name-blank?` guard rejects empty / nil names. |
+| `:_inline-bind-target-fn-row` / `:_delete-secret-fn-row` | `:id {:parent :get …}` → `:id {:parent :get :type :uuid …}` | upstream `fn-id-missing?` guards reject the request. |
+| `:_list-exec-by-version-rows` | `:count :_list-exec-clamped-limit` → `:count {:ref :_list-exec-clamped-limit :type :non-negative-int}` | `:cond`-clamped result is always non-negative int by construction. |
+| `:_execute-fn-not-found-anchor` | `:default :_execute-parsed-fn-id` → `:default {:parent :to-str :args {:value :_execute-parsed-fn-id}}` | `:coalesce`'s typevar requires `:value` and `:default` to share a type; stringifying the UUID closes the join — sound because the sole consumer is `:str :parts`. |
+| `:_list-exec-by-fn-synth-parsed` | structural rewrite | shape extended to include `:fn-id` + `:type` overrides on the rename items so the synth matches `:_list-exec-by-version`'s declared `:parsed` shape. |
+
+The allowlist (`graphden.types.check/allowed-type-check-failures`)
+is now `#{}`. The Phase E hard-gate stays armed: any NEW failure
+trips `:types/sweep-regression`; any STALE entry would trip
+`:types/sweep-stale-allowlist`. From here the type-system is
+fully sound across the production package set.
+
 ## 2026-06-16 — Phase α' lands: original 10 closed, 11 nullability gaps surface
 
 Phase α' (caller-context propagation to rename-host fn-defs)

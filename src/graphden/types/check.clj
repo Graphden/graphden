@@ -2393,17 +2393,11 @@
 ;; narrowing through `:if`/`:cond` guards OR per-fn-def
 ;; `:assert-some` annotations.
 (def allowed-type-check-failures
-  #{:bearer-token-raw
-    :has-bearer-prefix?
-    :_create-branch-apply-row
-    :_delete-secret-fn-row
-    :_execute-fn-not-found-anchor
-    :_inline-bind-target-fn-row
-    :_list-exec-by-fn-version-id
-    :_list-exec-by-version-rows
-    :_list-exec-limit-less-than-1?
-    :_list-exec-limit-over-max?
-    :_seq-remove-apply-do-delete})
+  ;; Closed 2026-06-16 — sweep down to 0 after applying author
+  ;; type-assertions for runtime-guaranteed nullability narrowings
+  ;; that the type-checker can't (yet) see through control-flow
+  ;; guards. See `docs/TYPE_CHECK_BACKLOG.md` for the running ledger.
+  #{})
 
 
 (defn assert-sweep-failures-match-allowlist!

@@ -2713,7 +2713,12 @@
   {:name :_seq-remove-apply-do-delete
    :parent :delete-entity
    :args {:entity-type {:value "binding-list-item"}
-          :id {:parent :get :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
+          ;; `:type :uuid` author-assertion — the validation guard
+          ;; upstream rejects the request when `:item-id` is missing
+          ;; or malformed, so by the time this fn runs the parsed
+          ;; UUID is non-null.
+          :id {:parent :get :type :uuid
+               :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
 
   {:name :_seq-remove-apply-do-invalidate
    :parent :invalidate-after-write

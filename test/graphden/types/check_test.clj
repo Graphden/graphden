@@ -1235,30 +1235,28 @@
 
 (deftest sweep-allowlist-rejects-stale-entries
   (testing "allowlist contains a name that no longer fails → :types/sweep-stale-allowlist"
-    (let [;; Pick any concrete entry from the current allowlist — the
-          ;; specific name doesn't matter, just need a name we KNOW
-          ;; is allowlisted so disj leaves the residue with that
-          ;; member as the "no-longer-failing" stale entry.
-          arbitrary-allowed (first check/allowed-type-check-failures)
-          missing-failures (disj check/allowed-type-check-failures arbitrary-allowed)
-          thrown (try
-                   (check/assert-sweep-failures-match-allowlist! missing-failures)
-                   nil
-                   (catch clojure.lang.ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (= :types/sweep-stale-allowlist (:type (ex-data thrown))))
-      (is (contains? (:stale (ex-data thrown)) arbitrary-allowed)))))
+    ;; Independent of the live allowlist's contents (which may legitimately
+    ;; be empty after a closure pass) — construct an ad-hoc allowlist with
+    ;; a known entry and verify the stale check fires.
+    (with-redefs [check/allowed-type-check-failures #{:_ex-stale-name}]
+      (let [thrown (try
+                     (check/assert-sweep-failures-match-allowlist! #{})
+                     nil
+                     (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? thrown))
+        (is (= :types/sweep-stale-allowlist (:type (ex-data thrown))))
+        (is (contains? (:stale (ex-data thrown)) :_ex-stale-name))))))
 
 
-(deftest sweep-allowlist-empty-failure-set-when-allowlist-non-empty
-  (testing "all allowlisted names cleared → stale-allowlist throw (the registry is shrinking)"
-    (let [thrown (try
-                   (check/assert-sweep-failures-match-allowlist! #{})
-                   nil
-                   (catch clojure.lang.ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (= :types/sweep-stale-allowlist (:type (ex-data thrown))))
-      (is (= check/allowed-type-check-failures (:stale (ex-data thrown)))))))
+(deftest sweep-allowlist-mixed-stale-and-regression-reports-both-arms
+  (testing "actual ≠ allowlist with disjoint members on both sides — regression arm trips first"
+    (with-redefs [check/allowed-type-check-failures #{:_known-debt}]
+      (let [thrown (try
+                     (check/assert-sweep-failures-match-allowlist! #{:_some-new-failure})
+                     nil
+                     (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? thrown))
+        (is (= :types/sweep-regression (:type (ex-data thrown))))))))
 
 
 (deftest declared-return-type-narrowing-assertion-stays-sound

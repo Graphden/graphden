@@ -898,9 +898,9 @@
    :effects #{:db}}
 
   {:name :_create-branch-apply-row
-   :description "Stage 1 of the apply — write the branch row off the parsed name + resolved parent."
+   :description "Stage 1 of the apply — write the branch row off the parsed name + resolved parent. Branch-name is non-null here because the `:_create-branch-name-blank?` guard rejects the request upstream."
    :parent :create-branch!
-   :args {:branch-name {:parent :get
+   :args {:branch-name {:parent :get :type :text
                         :args {:coll {:as :parsed}
                                :key {:value :branch-name}
                                :default nil}}

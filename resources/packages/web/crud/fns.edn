@@ -45,6 +45,10 @@
    :description "Output of `:_update-parsed` — like `:_create-parsed-shape` plus the `:id` URI segment (`:id-str` / `:id-uuid`) and `:pre-existing`, the pre-read of the row being updated."
    :type {:entity-type :keyword :type-str :text :id-str :text :id-uuid :uuid :form-data :jsonb :pre-existing :jsonb :entity-data :jsonb :parse-error :text}}
 
+  {:name :_delete-parsed-shape
+   :description "Output of `:_delete-parsed` — the URI entity-type and the parsed UUID. Validation downstream rejects unknown entity-type / malformed id, so the apply-flow sees them as non-null at runtime; the type asserts that post-validation invariant."
+   :type {:entity-type :keyword :id :uuid}}
+
   {:name :_tighten-parsed-shape
    :description "Output of `:_tighten-parsed` — the target binding-id and the raw `effects` / `args` / `ret` body components plus the assembled `:delta` map."
    :type {:binding-id :uuid :effects-val :jsonb :args-val :jsonb :ret-val :jsonb :delta :jsonb}}
@@ -1076,7 +1080,8 @@
    :parent :if
    :args {:test :_create-can-dispatch?
           :then :_create-dispatched-merge
-          :else :_create-base}}
+          :else :_create-base}
+   :return-type :_create-parsed-shape}
 
   ;; --- C22: stage 2 of create as a graph `:cond`.
   ;; Same shape as C19/C20/C21 but with eight guards covering every
@@ -1611,7 +1616,8 @@
    :parent :if
    :args {:test :_update-can-dispatch?
           :then :_update-dispatched-merge
-          :else :_update-base}}
+          :else :_update-base}
+   :return-type :_update-parsed-shape}
 
   ;; --- :write-rej / :type-check-binding-rej — atomic §3.1 boundaries
   ;; over the §3.3 validators. Used by both create + update chains so
@@ -1934,7 +1940,8 @@
                   :args {:s {:parent :get
                              :args {:coll :_delete-parsed-extracted
                                     :key {:value :id-str}
-                                    :default nil}}}}]}}
+                                    :default nil}}}}]}
+   :return-type :_delete-parsed-shape}
 
   {:name :_delete-request-invalid?
    :description "Guard #1 — entity-type or id is missing / malformed in the URL. `:or [nil? :entity-type] [nil? :id]`."

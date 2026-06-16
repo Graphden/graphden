@@ -532,8 +532,8 @@
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :fn-id} {:value :count} {:value :versions}]
           :vals [{:value true} :_lfv-fn-id-str :_lfv-version-count :_lfv-versions-json]
-          :fn-id {:type [:union :null :text]
-                  :description "UUID string of the logical fn whose version history is being listed; nil → empty `:versions`."}}}
+          :fn-id {:type [:union :null :uuid]
+                  :description "Logical fn-id whose version history is being listed; nil → empty `:versions`. The JSON envelope stringifies via `:_lfv-fn-id-str`."}}}
 
   ;; Handler entry point.
   {:name :_list-fn-versions-data

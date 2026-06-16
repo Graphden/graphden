@@ -547,6 +547,19 @@
    needed."
   [parent-name arg-name expected actual subst fn-name b-form]
   (cond
+    ;; Type-var on EITHER side + `:any`-shaped actual — bind the var
+    ;; via unify FIRST. Without this, `:if`'s `:then a` slot bound to
+    ;; an actual `[:map :any :any]` would fall into the silent-pass
+    ;; below, leaving `a` unbound; `:if`'s declared `[:union a b]`
+    ;; return then surfaces a literal `"a"` typevar string in the
+    ;; registry, polluting downstream consumers (the structural-any
+    ;; from the binding IS information — that's the bind path, not
+    ;; a no-op).
+    (and (or (has-type-var? expected) (has-type-var? actual))
+         (any-shape? actual))
+    (let [next-subst (types/unify expected actual subst)]
+      (if (types/fail? next-subst) subst next-subst))
+
     ;; `:any` (or structural-`:any` like `[:map :any :any]` /
     ;; `[:list :any]`) — the doc's static escape hatch. Carries no
     ;; static information either way, so silent-pass. (`:null` used
@@ -2073,7 +2086,26 @@
                          ;; case the author owns at runtime.
                          (and (any-shape? computed-return)
                               declared
-                              (not (types/primitive? declared))))
+                              (not (types/primitive? declared)))
+                         ;; Author NARROWING-assertion mode: declared
+                         ;; is strictly MORE specific than computed
+                         ;; (declared ⊆ computed). The author commits
+                         ;; to a runtime-guaranteed contract that the
+                         ;; rule chain couldn't prove without help —
+                         ;; the classic case is `:_create-parsed`
+                         ;; whose `:entity-type` is non-null at apply
+                         ;; time because validation upstream rejects
+                         ;; null first. Same guardrail as any-shape
+                         ;; mode: only structural declared types
+                         ;; qualify; primitives stay strict to catch
+                         ;; typos. `subtype? declared computed`
+                         ;; verifies the relation is sound — declared
+                         ;; values are a subset of what computed
+                         ;; admits, so the author's narrower view is
+                         ;; never wider than the rule could prove.
+                         (and declared
+                              (not (types/primitive? declared))
+                              (types/subtype? declared computed-return)))
         ;; When declared is plain `T` but computed is `[:secret T]`,
         ;; record the tainted form — that's what downstream consumers
         ;; need to see to refuse to drop the marker. Otherwise the

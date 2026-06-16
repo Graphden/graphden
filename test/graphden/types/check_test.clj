@@ -1195,6 +1195,69 @@
                                 :return-type :int})))))
 
 
+(deftest declared-return-type-narrowing-assertion-mode
+  (testing "structural declared type narrower than computed is accepted as an author runtime assertion"
+    ;; Mimic the :_create-parsed pattern: parent's rule yields a wider/looser
+    ;; record (some fields :any, some nullable). Author asserts a tighter
+    ;; record. The rule's view (each declared field ⊆ matching computed
+    ;; field) makes the narrowing sound; runtime guarantees come from
+    ;; upstream validation, declared is the post-validation contract.
+    (registry/record-rich-types!
+      :parsed-base
+      {:args {} :return-type {:entity-type :any :id [:union :null :uuid]}})
+    (check/check-fn-def! {:name :tightened-parsed
+                          :parent :parsed-base
+                          :args {}
+                          :return-type {:entity-type :keyword :id :uuid}})
+    (is (= {:entity-type :keyword :id :uuid}
+           (:return (registry/rich-type-of :tightened-parsed)))
+        "registry records the declared (tightened) shape")))
+
+
+(deftest declared-return-type-narrowing-assertion-stays-sound
+  (testing "narrowing-assertion only accepts when declared ⊆ computed; unrelated narrowing still rejects"
+    (registry/record-rich-types!
+      :returns-int-or-null
+      {:args {} :return-type [:union :null :int]})
+    ;; :keyword is NOT a subtype of [:union :null :int]. Author lying.
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"declares :return-type"
+          (check/check-fn-def! {:name :wrong-narrowing
+                                :parent :returns-int-or-null
+                                :args {}
+                                :return-type :keyword})))))
+
+
+(deftest typevar-binds-to-any-shape-actual
+  (testing ":if's `:then a` slot bound to an actual `[:map :any :any]` BINDS the typevar instead of silent-passing"
+    ;; Without the fix, structural-any actual silent-passed against a
+    ;; typevar slot, leaving `a` unbound in the substitution. `:if`'s
+    ;; declared `[:union a b]` return then surfaced a literal "a"
+    ;; typevar string in the registry, polluting downstream consumers.
+    (registry/record-rich-types!
+      :returns-loose-map
+      {:args {} :return-type [:map :any :any]})
+    (registry/record-rich-types!
+      :returns-record
+      {:args {} :return-type {:k :int}})
+    ;; Use :if as the parent; its :then/:else are independent typevars
+    ;; and the return is their union.
+    (let [recorded (check/check-fn-def! {:name :branched
+                                         :parent :if
+                                         :args {:test true
+                                                :then :returns-loose-map
+                                                :else :returns-record}})
+          info (registry/rich-type-of :branched)
+          ret (:return info)]
+      (is (some? recorded))
+      ;; The recorded return must NOT contain a raw typevar — both
+      ;; branches' types should be present in the resolved union (after
+      ;; absorption it may collapse, but no bare typevar leaks).
+      (is (not (some types-core/type-var? (tree-seq coll? seq ret)))
+          (str "no typevar leaks; got " (pr-str ret))))))
+
+
 ;; -----------------------------------------------------------------------------
 ;; :required widening rejection — bindings cannot widen required → optional
 

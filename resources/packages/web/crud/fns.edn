@@ -20,7 +20,9 @@
 
   {:name :_types-candidates-parsed-shape
    :description "Output of `:_types-candidates-parsed` — the target type plus optional effect-set / name-prefix filters. `:allowed-effects` and `:name-prefix` are nullable (caller may omit either) — `:_types-candidates-apply` treats nil as 'no filter'."
-   :type {:expected :jsonb :allowed-effects :jsonb :name-prefix [:union :null :text]}}
+   :type {:expected [:union :keyword :text [:list :any] [:map :keyword :any]]
+          :allowed-effects [:union :null [:list [:union :keyword :null]]]
+          :name-prefix [:union :null :text]}}
 
   {:name :_types-usages-parsed-shape
    :description "Output of `:_types-usages-parsed` — the type-row id to search references for. `:target-id` is nullable to match the parse stage's `(when raw (try uuid-parse ...))` semantics; the downstream validation guard catches the nil case."
@@ -366,7 +368,9 @@
   {:name :_types-compatible-ok-shape
    :description "Stage 3c-ok — `{:ok true :expected :candidate}` envelope."
    :parent :zipmap
-   :return-type {:ok :bool :expected :jsonb :candidate :jsonb}
+   :return-type {:ok :bool
+                 :expected [:union :keyword :text [:list :any] [:map :keyword :any]]
+                 :candidate [:union :keyword :text [:list :any] [:map :keyword :any]]}
    :args {:keys [{:value :ok} {:value :expected} {:value :candidate}]
           :vals [{:value true}
                  :_types-compatible-parsed-expected
@@ -375,7 +379,10 @@
   {:name :_types-compatible-not-ok-shape
    :description "Stage 3c-not-ok — `{:ok false :expected :candidate :reason}` envelope."
    :parent :zipmap
-   :return-type {:ok :bool :expected :jsonb :candidate :jsonb :reason :text}
+   :return-type {:ok :bool
+                 :expected [:union :keyword :text [:list :any] [:map :keyword :any]]
+                 :candidate [:union :keyword :text [:list :any] [:map :keyword :any]]
+                 :reason :text}
    :args {:keys [{:value :ok} {:value :expected} {:value :candidate} {:value :reason}]
           :vals [{:value false}
                  :_types-compatible-parsed-expected

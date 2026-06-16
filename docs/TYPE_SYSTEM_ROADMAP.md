@@ -153,14 +153,42 @@ Risk: precision degradations elsewhere. Tighter narrowings can
 expose new gaps downstream — the same way α' surfaced the 11
 nullability cases.
 
-### Recommendation
+### Decision — 2026-06-16: REJECTED (v2 not pursued)
 
-v1 is committed. v2 (composed-guard decomposition, field-level
-narrowing) is the next investment — multi-week — and only worth
-it when there's a fresh wave of nullability gaps to close. The
-current `:type T` annotations at the remaining sites are sound
-and self-documenting; the Phase E gate ensures we won't lose
-visibility into similar new gaps.
+v1 stays. v2 is **not on the roadmap**.
+
+The driving question was: does v2 make the system architecturally
+better OR the user's life easier?
+
+- **Architecture (principle #3 — explicit over implicit)**: AGAINST
+  v2. Each remaining `:type T` site is paired with a one-line
+  comment (`;; validation guard upstream rejects nil`) pointing
+  at the invariant. That's the runtime contract written down at
+  the use-site, where someone reading the code needs it. v2
+  would dissolve that into type-checker inference rules — to
+  understand "why is `:branch-name` non-null here?", a reader
+  would have to track which composed-guard shapes the inferer
+  recognises and find the upstream `:cond` clauses.
+- **Author UX**: NEUTRAL. Adding a `:type T` assertion after a
+  sweep failure is a 30-second one-time edit per new flow. The
+  Phase E gate makes the failure loud and unmissable.
+- **Reader UX**: AGAINST v2. Explicit assertion + comment beats
+  implicit inference.
+- **Cost**: ~2 weeks, plus risk of new under-convergence cases
+  surfacing downstream.
+
+v1 was worth doing because `:if :test (:some? :_x) :then :_y`
+is trivially readable — the guard, target, and branch are right
+there in the parent shape. Composed guards (`:str-blank?`-shims,
+`:and`/`:or` decompositions, `:get`-through-record narrowing)
+don't have that property.
+
+Net: no architectural win, no UX win, mid-size implementation
+cost, real risk of regressions. Don't do it.
+
+The remaining `:type T` sites below ARE the canonical pattern for
+"non-null guaranteed by upstream guard" — keep them; document the
+guard in the binding's comment.
 
 ### Remaining `:type T` author-assertions (uncovered by v1)
 
@@ -235,11 +263,34 @@ But α' delivers identical CORRECTNESS today with a fraction of
 the implementation cost. The remaining gap is mostly aesthetic
 (registry size + the per-use-site naming convention).
 
-### Recommendation
+### Decision — 2026-06-16: REJECTED
 
-Defer indefinitely unless: (a) registry size becomes a real
-problem, OR (b) a feature genuinely requires open-record
-polymorphism that α' can't express (none identified today).
+Not on the roadmap. Reasons:
+
+- **Correctness**: α' already delivers it. Phase γ does not
+  fix any unsoundness or false positive in the type-checker.
+- **Author UX**: zero visible change. Users don't write row
+  variables; the type-checker would derive them. Same per-flow
+  experience as today.
+- **Reader UX**: WORSE. `rich-type-of`'s output today shows
+  concrete record shapes. Row-polymorphic form
+  (`(record-with :coll T + 'ρ)`) is strictly more abstract — one
+  more concept to hold in your head when inspecting a fn's type.
+- **Registry size**: α' added ~30% anon-fn-def rows (532 → 695).
+  Full type-check sweep finishes in seconds; this is not on any
+  hot path. No measured pain.
+- **Feature unlock**: none. Open-record polymorphism would
+  enable "extend a record at the call-site" patterns — but no
+  current or queued feature requires it.
+- **Cost**: ~3 weeks + an unknown settle-in period. Every record-
+  consuming rule (`:get`, `:assoc`, `:select-keys`, `:merge`,
+  `:zipmap`, …) needs updating; `subtype?` / `unify` would need
+  an "open vs closed" distinction throughout.
+
+If at some future point either (a) registry size becomes a real
+performance problem, OR (b) a queued feature genuinely needs
+open-record polymorphism, this section gets revisited. Until
+then, do not pursue.
 
 ## Sequencing & checkpoints — historical (kept for context)
 
@@ -555,10 +606,12 @@ held as long-horizon. Actual landings:
 | E (hard-gate sweep + allowlist + tests) | LANDED — both directions, bidirectional gate |
 | C (`:type` rename localisation) | not needed — α' supersedes the use case |
 | D (editor surface) | LANDED implicitly — α' writes narrowed types into the canonical `:return` field; editor reads them via `/api/types` without any UI change |
-| #170 (control-flow narrowing) | v1 LANDED — direct-predicate `:if`/`:cond` subset closes the `:_list-exec-limit-parsed-body` assertion; ~7 sites with composed guards remain `:type T`-asserted, fully documented |
-| γ (row polymorphism) | DEFERRED — see § above; α' delivers identical correctness today |
+| #170 v1 (direct-predicate `:if`/`:cond` narrowing) | LANDED — closes `:_list-exec-limit-parsed-body`; framework in `build-ref-return-overrides` for future shapes |
+| #170 v2 (composed-guard narrowing) | REJECTED — see § above; explicit `:type T` + comment beats implicit inference per principle #3 |
+| γ (row polymorphism) | REJECTED — see § above; no correctness win, no UX win, no feature unlock |
 
 Final state: sweep at zero, allowlist empty, Phase E gate armed.
-No known type-system bugs in production. The deferred work is
-listed above with implementation sketches for when next-stage
-investment makes sense.
+No known type-system bugs in production. The remaining `:type T`
+author-assertions at ~7 sites are the canonical pattern for
+"non-null guaranteed by upstream composed guard" — they're sound,
+documented, and architecturally correct.

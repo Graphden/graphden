@@ -1,5 +1,13 @@
-(ns graphden.storage.protocol.redact-test
-  "Tests for redaction and sensitive field handling."
+(ns ^:serial graphden.storage.protocol.redact-test
+  "Tests for redaction and sensitive field handling.
+
+   `^:serial` — `register-sensitive-field-pattern!` /
+   `register-sensitive-field-predicate!` write to a JVM-wide registry
+   atom; the per-test `(finally (reset-sensitive-field-registry!))`
+   restores AFTER the assertions complete, but under parallel
+   scheduling a sibling NS can reset BETWEEN this NS's register-and-
+   check pair, knocking the registration out. Serial scope confines
+   the registry mutation to one test thread."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as storage]))

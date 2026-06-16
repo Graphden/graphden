@@ -1,17 +1,37 @@
 # Performance debt — executor hot path
 
-## TL;DR
+## TL;DR — 2026-06-16: numbers superseded by eager-compile + DRY memo
 
-`exec/execute` of a composed fn-def over a 2400-row dataset takes
-~63 s, vs ~70 ms for the equivalent direct-Clojure call —
-**~900× slowdown** on `resolve-versioned-rows`-shape graphs.
+The original measurement (2026-05) reported `exec/execute` of a
+composed fn-def over a 2400-row dataset at ~63 s vs ~70 ms for the
+direct-Clojure equivalent — a 900× slowdown on `resolve-versioned-
+rows`-shape graphs. That number predates several executor wins:
 
-This isn't a regression from any one change; it's the cost of the
-current executor pipeline showing up as soon as a single graph
-execution iterates over thousands of items inside nested HOFs.
-Production endpoints haven't hit it yet because each request
-typically processes <10 entities — but the headroom is much smaller
-than expected.
+- executor-eager-compile refactor (Clojure-native delays, lazy
+  semantics): ~2000× faster worst-case;
+- per-execute DRY memo (handlers don't fire siblings twice);
+- shared golden DB via `CREATE DATABASE … TEMPLATE` (NS clones
+  in ~100 ms);
+- rich-types snapshot-at-bind isolation.
+
+Fresh measurement (2026-06-16, full `core+web+app` package set,
+2236 fn-defs):
+
+| path | wall | size | notes |
+|---|---|---|---|
+| `/api/graph/entities` (base-fn impl) | ~95 ms | 4.0 MB | direct Clojure call, no executor — baseline |
+| `/api/branches` (graph composition via `:resolve-fn-rows`) | ~20 ms | 498 B | small dataset |
+| `resolve-versioned-rows-matches-clojure-end-to-end` (test) | ~16 s | n/a | bootstrap-included; 4× executes + 4× Clojure SOT compares; per-execute slice estimated ~0.5–1 s |
+
+The graph-executor path is now within an order of magnitude of
+direct-Clojure (vs the original 900×). The architectural design
+sketch below is preserved for the next time we need to push further,
+but the **priority drops sharply** — production endpoints comfortably
+fit their request budgets today.
+
+Re-benchmark with `clj-async-profiler` before allocating multi-commit
+work — the flame-graph below also predates the eager-compile
+refactor and may show a different hot-frame profile now.
 
 ## Observed
 

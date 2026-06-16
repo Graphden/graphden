@@ -1,11 +1,22 @@
-(ns graphden.crud.entities-test
+(ns ^:serial graphden.crud.entities-test
   "DB-backed tests for `graphden.crud.entities` — the heavy CRUD logic
    behind the web/crud base functions: form parsers, generic
    create/read/update/delete, the compound type-row endpoints, the
    delete-guard reasons, and the HTTP `process-*` dispatchers.
 
    Uses the shared container plus a real `ExecutionContext` so the
-   `invalidate!` path exercises against live storage."
+   `invalidate!` path exercises against live storage.
+
+   `^:serial` because two deftests (`tighten-rejects-when-bound-
+   callable-effects-exceed-new-constraint-test` /
+   `tighten-rejects-on-post-write-type-check-failure-test`)
+   `with-redefs` process-global vars (`registry/rich-type-of` /
+   `tc/type-check-fn-after-mutation!`) for the duration of one
+   call. Under N=8 parallel UNIT runs the redef scope can leak
+   into sibling NS-threads — the redef intentionally returns nil
+   for any name OUTSIDE the test's target, which then breaks the
+   sibling test's `rich-type-of` lookups arbitrarily. Forcing
+   this NS into the sequential bucket scopes the redef cleanly."
   (:require
     [cheshire.core :as cheshire]
     [clojure.test :refer [deftest is testing use-fixtures]]

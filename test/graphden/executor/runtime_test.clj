@@ -1,4 +1,8 @@
-(ns graphden.executor.runtime-test
+(ns ^:serial graphden.executor.runtime-test
+  ;; `with-redefs` of `graphden.executor.interface/make-single-arg-
+  ;; callable` (line ~89) is process-global; sibling NS-threads
+  ;; calling that function during the redef window would see the
+  ;; stub instead of the real impl. `^:serial` scopes the redef.
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.interface]

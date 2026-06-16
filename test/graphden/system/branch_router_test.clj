@@ -1,5 +1,11 @@
-(ns ^:integration graphden.system.branch-router-test
+(ns ^:integration ^:serial graphden.system.branch-router-test
   "Tests for `graphden.system.branch-router`.
+
+   `^:serial` because the `dispatch-test-router` helper redefs
+   `br/resolve-branch-id` process-globally for the duration of each
+   test. Sibling NS-threads resolving real branch refs during the
+   redef window would see the stub's per-test resolutions map
+   (default-id for nil/main, nil for everything else).
 
    - Pure-function: extract-branch-ref + dispatch (with stubbed
      resolve-branch-id), invalidate, LRU eviction (testing the

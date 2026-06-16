@@ -1,5 +1,10 @@
-(ns ^:integration graphden.crud.secrets-test
+(ns ^:integration ^:serial graphden.crud.secrets-test
   "Tests for `graphden.crud.secrets` — admin Secrets CRUD orchestrators
+
+   `^:serial` because `with-fake-vault*` (line ~37) redefs
+   `vault/get-secret` / `vault/put-secret` process-globally for the
+   duration of each test. Sibling NS-threads exercising real vault
+   calls during that window would see the fake stubs instead.
    over OpenBao + graphden storage.
 
    Vault is mocked via `with-redefs` over `graphden.clients.vault` so

@@ -129,6 +129,13 @@
   (or value default))
 
 
+(defbase assert-some-fn [value]
+  (when (nil? value)
+    (throw (ex-info "assert-some: value is nil — control-flow invariant violated"
+                    {:type :execution-error/nil-assertion})))
+  value)
+
+
 ;; === Constants ===
 
 (defbase const [value]
@@ -421,6 +428,32 @@
       :else             (types/make-union [vt dt]))))
 
 
+;; --- :assert-some — narrow [:union :null T] → T at the type level
+;;
+;; Runtime: throws if nil; otherwise passes the value through. The
+;; rule strips `:null` from the input's type so the downstream slot
+;; sees the narrowed shape — the type-system bridge for control-flow
+;; invariants the type-checker can't propagate from `:if`-guards.
+;; Falls back to declared `a` when the input type is unavailable;
+;; `:never` when the input is statically always `:null` (the throw
+;; would always fire — a sync-time signal to the author that the
+;; assertion is unreachable).
+
+(defn assert-some-return-rule
+  [bindings-info default-ret]
+  (let [vt (get-in bindings-info [:value :type])]
+    (cond
+      (nil? vt)            default-ret
+      (= vt :null)         :never
+      (types/union-type? vt)
+      (let [non-null (vec (remove #{:null} (types/union-members vt)))]
+        (cond
+          (empty? non-null)        :never
+          (= 1 (count non-null))   (first non-null)
+          :else                    (types/make-union non-null)))
+      :else                vt)))
+
+
 ;; === Registry ===
 ;; A value is either a bare impl fn or a `{:impl … :*-rule …}` map.
 
@@ -436,6 +469,8 @@
    :not {:impl not-fn :return-type-rule (types/wrap-with-taint nil)}
    :some? {:impl some?-fn :return-type-rule (types/wrap-with-taint nil)}
    :nil? {:impl nil?-fn :return-type-rule (types/wrap-with-taint nil)}
+   :assert-some {:impl assert-some-fn
+                 :return-type-rule (types/wrap-with-taint assert-some-return-rule)}
    :if {:impl if-fn :return-type-rule (types/wrap-with-taint if-return-rule)}
    :cond {:impl cond-fn
           :return-type-rule (types/wrap-with-taint cond-return-rule)

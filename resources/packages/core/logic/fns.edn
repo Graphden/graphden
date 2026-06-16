@@ -114,6 +114,28 @@
           :default {:type a :description "Fallback used when value is nil."}}
    :return-type a}
 
+  ;; --- :assert-some — narrow [:union :null T] → T at type-system level
+  ;;
+  ;; Runtime: passes the value through if non-nil, throws
+  ;; `:execution-error/nil-assertion` if nil. The type-system
+  ;; counterpart to `(when (nil? x) (throw ...)) x` — explicit
+  ;; non-null assertion at sites where a control-flow guard
+  ;; (`:if`-test elsewhere in the graph) makes the assertion
+  ;; vacuous at runtime but the type-checker can't propagate the
+  ;; guard knowledge. The rule strips `:null` from the input's
+  ;; type so downstream sees the narrowed shape.
+  ;;
+  ;; Companion to `:coalesce`: both eliminate the null-or-T case,
+  ;; but `:coalesce` substitutes a fallback value and pollutes the
+  ;; type with the default's. `:assert-some` keeps the type clean
+  ;; at the cost of a runtime throw the author has audited as
+  ;; unreachable.
+  {:name :assert-some
+   :description "Throws `:execution-error/nil-assertion` if `value` is nil; returns it unchanged otherwise. The type-system bridge for control-flow invariants — strips `:null` from the input's type without polluting it with a fallback's type the way `:coalesce` does."
+   :args {:value {:type [:union :null a]
+                  :description "Maybe-nil value the caller has audited as unreachable-nil."}}
+   :return-type a}
+
   ;; === Constants ===
   {:name :const
    :description "Identity-style passthrough — returns `:value` unchanged. Building block for capture renames `{:as :name}`."

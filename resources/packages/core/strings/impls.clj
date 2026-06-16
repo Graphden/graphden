@@ -197,6 +197,32 @@
     :else (str value)))
 
 
+;; `:name`'s declared :return-type is the safe `[:union :null :text]`
+;; (because `(name nil) = nil`). When the input type is known to be
+;; non-null (`:keyword` / `:text`), narrow the return to plain `:text`
+;; — propagates record-field knowledge through `(name (get coll :key))`
+;; chains. Mirrors the philosophy of `:get`'s rule: typed input narrows
+;; typed output without polluting the contract elsewhere.
+(defn name-return-rule
+  [bindings-info default-ret]
+  (let [vt (get-in bindings-info [:value :type])]
+    (cond
+      (nil? vt) default-ret
+      (or (= vt :keyword) (= vt :text)) :text
+      (= vt :null) :null
+      (types/union-type? vt)
+      (let [mapped (mapv (fn [m]
+                           (cond
+                             (or (= m :keyword) (= m :text)) :text
+                             (= m :null) :null
+                             :else default-ret))
+                         (types/union-members vt))]
+        (if (some #{default-ret} mapped)
+          default-ret
+          (types/make-union mapped)))
+      :else default-ret)))
+
+
 (defbase blank?-fn [string]
   (str/blank? string))
 
@@ -262,7 +288,7 @@
    :keyword-to-str     {:impl keyword-to-str-fn     :return-type-rule taint}
    :pr-str             {:impl pr-str-fn             :return-type-rule taint}
    :to-str             {:impl to-str-fn             :return-type-rule taint}
-   :name               {:impl name-fn               :return-type-rule taint}
+   :name               {:impl name-fn               :return-type-rule (types/wrap-with-taint name-return-rule)}
    :blank?             {:impl blank?-fn             :return-type-rule taint}
    :non-blank?         {:impl non-blank?-fn         :return-type-rule taint}
    :url-decode         {:impl url-decode-fn         :return-type-rule taint}

@@ -1279,3 +1279,84 @@ always carries `:effects` — possibly `#{}` for pure fns — so
 unconditionally. The "absent key vs. empty set" ambiguity was
 retired; `compute-effects`-computed pure and explicit `#{}` are
 the same wire representation.
+
+
+### Phase 9: Caller-context propagation (Phase α') ✅
+
+Pass 1 of the type-check sweep checks each fn-def in ISOLATION —
+its rule fires reading only the fn-def's own bindings, with free
+args defaulting to their parent's slot type (which is often the
+widest `:any`-like form). The "real" type of a free arg, at any
+SPECIFIC call site, is determined by what the caller binds. Pass 1
+can't see this.
+
+For most patterns this is fine — `:_some-fn` whose free arg `:x` is
+typed `:any` simply means "I work on any `:x`". But a chain like
+`:_X-apply-entity-type-str = (:name (:get :parsed :entity-type
+:default nil))` is BROKEN by isolation: its computed return is
+`[:union :null :text]` (because `:parsed` is `:any` so
+`:entity-type` lookup returns `:any`), but every actual caller
+binds `:parsed` to a typed record where `:entity-type` is
+`:keyword`. The narrowed answer (`:text`) is what the binding-check
+needs but isolation never sees.
+
+Pass 2 / Pass 3 close this gap:
+
+**Pass 2** (`build-caller-narrowings`) walks every binder F. For
+each ref-binding `:arg :ref-name` where `:arg` is a TRUE lifted
+free arg (NOT a parent-contract slot), it propagates the ref's
+recorded return type DOWN through F's transitive ref-tree
+EXCLUDING `:ref-name` itself (the ref PRODUCES the value; the
+consumers are the siblings). The propagation lands on every
+fn-def that has a rename `{:as :arg}` in its OWN args — those are
+the lexical leaves where the free-arg name was originally
+introduced. Result: a `{rename-host-fn-name → {as-name →
+narrowed-type}}` map.
+
+**Pass 3** (`check-fn-def-with-narrowings!`) re-runs
+`check-fn-def!` on every fn-def with `*caller-narrowings*` bound
+to the per-callee entry. The rename branches in
+`bindings-info-for-rule` + `collect-free-args` honour the
+narrowed type. Outer consumers that don't introduce the rename
+locally see the narrowing via `effective-ref-return`'s normal
+rule re-firing reading the narrowed leaf's registry.
+
+#### Per-use-site anon naming
+
+The original `anon-fn-name` (parser pre-pass) dedup'd
+identical-shape inline anons across the whole module — two
+fn-defs with the same `(:get :coll {:as :parsed} :key :entity-type
+:default nil)` shape collapsed to ONE synthetic `_anon-<hex>`
+registry entry. Pass-3 narrowing would then conflict: caller A
+narrows `:parsed := :_create-parsed-shape`, caller B narrows
+`:parsed := :_seq-append-parsed-shape`, and the single anon's
+registry entry can't reflect both.
+
+The fix mixes the use-site host (`[parent-fn-def-name
+parent-arg-name]`) into the hash. Two identical-shape anons at
+different use-sites now get DISTINCT synthetic names — their
+narrowings stay scoped per-consumer. Registry size grew modestly
+(532 → 695 anons in the production package set); the dedup
+optimisation traded for correctness under propagation.
+
+#### Side fix: `effective-ref-return` merge order
+
+`effective-ref-return` built `combined = merge ref-bindings
+caller-bindings` — caller-wins. A deeper rename chain whose `:coll`
+(or any other slot-named entry) carried a Pass-3 narrowed type
+would override unrelated refs' own `:coll` binding when re-fired
+via this path. Flipped to `(merge caller-bindings ref-bindings)`
+— ref's own bindings shadow caller's; caller still contributes
+free-arg context for keys the ref doesn't bind locally.
+
+#### Outcome
+
+The original 10 `:_X-apply-*` family failures closed. The
+post-α'-precision-surfaced 11 nullability gaps closed via author
+`:type T` annotations on binding forms (each guarded by an
+upstream nil-check at runtime). Sweep at zero;
+`allowed-type-check-failures` is `#{}` and the Phase E hard-gate
+stays armed both directions. See `docs/TYPE_CHECK_BACKLOG.md`
+§ 2026-06-16 entries for the closure ledger, and
+`docs/TYPE_SYSTEM_ROADMAP.md` for the deferred Phase #170 /
+Phase γ design notes.

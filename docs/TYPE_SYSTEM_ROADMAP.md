@@ -18,7 +18,174 @@ A type system that delivers, simultaneously:
    secret-flow + the sweep all run automatically, all fail loud at
    sync, none are advisory-only for prod-affecting issues.
 
-## Current state — 2026-06-16
+## Current state — 2026-06-16 (post-α' close)
+
+- **Sweep at ZERO** across all 2236 fn-defs. Allowlist
+  (`allowed-type-check-failures`) is `#{}`.
+- Phase E hard-gate stays armed both directions
+  (`:types/sweep-regression` on new failures,
+  `:types/sweep-stale-allowlist` on dead entries).
+- The original 10 `:_X-apply-*` family failures closed via Phase α'
+  (caller-context propagation to rename-host leaves + per-use-site
+  anon naming).
+- The 11 follow-up nullability gaps that α' surfaced closed via
+  author `:type T` assertions on the binding form (see ledger in
+  `docs/TYPE_CHECK_BACKLOG.md § 2026-06-16 — Sweep at ZERO`).
+
+Remaining architectural items below are NOT bugs in the current
+state — the type-system is sound. They're forward-looking design
+notes for the next time the type-checker's reach needs to grow.
+
+## Phase #170 — Control-flow narrowing through `:if`/`:cond` guards
+
+### Motivation
+
+The 11 nullability gaps that α' surfaced (and that we closed with
+ad-hoc `:type T` assertions) all share a shape:
+
+```clojure
+{:name :_X-data
+ :parent :cond
+ :args {:clauses [:_X-nil?     :err-rsp-nil
+                  :_X-blank?   :err-rsp-blank
+                  …
+                  :true        :_X-apply]
+        :parsed  :_X-parsed}}
+```
+
+`:_X-apply` is only reached when every preceding guard returned
+false. So inside `:_X-apply`'s tree, the slot(s) those guards
+protected are non-null / non-blank / etc. The author KNOWS this;
+the type-checker doesn't.
+
+Today's workaround: per-binding `{:ref :_X-parsed :type :uuid}`
+(or similar) annotations document the runtime invariant. Sound
+but ad-hoc — each new flow needs new annotations.
+
+### Implementation sketch (multi-week)
+
+A proper #170 implementation would:
+
+1. **Recognise `:cond` / `:if` shapes in `build-caller-
+   narrowings`**: when F's `:parent` is `:cond` (or `:if`),
+   enumerate its clauses / branches in evaluation order.
+
+2. **Per-clause guard inference**: for each clause's result-target,
+   compute the conjunction of negated tests from prior clauses.
+   For an `:if`, the `:then` branch sees `:test = true`, `:else`
+   sees `:test = false`.
+
+3. **Guard-to-slot-narrowing rules**: a small dispatch table that
+   maps a recognised predicate shape to the narrowing it implies:
+   - `:nil? :_x` true → `:_x := :null`; false → strip `:null`.
+   - `:some? :_x` mirror.
+   - `:str-blank? :_x` false → `:_x` is non-null non-blank text.
+   - `:and [pred1 pred2 …]` false → each pred is recursively
+     decomposed (any false-arm in the AND being true contributes
+     a narrowing).
+   - `:or [pred1 pred2 …]` true → narrowing from ANY arm.
+   - Composed guards (`:_X-blank?` wrapping `:str-blank? :_X`)
+     resolved one level deep — beyond that the inference gives
+     up (still sound, just less precise).
+
+4. **Propagate narrowings into `*caller-narrowings*` for the
+   result-target**: each clause's `:result` ref gets the union of
+   negated-guard narrowings overlaid on the existing α'
+   narrowings.
+
+5. **Soundness**: the inferred narrowing is a runtime invariant the
+   `:cond` / `:if` semantics ENFORCE. The type-checker is
+   reflecting (not asserting) what the runtime already guarantees.
+
+### Tradeoffs
+
+Cost: ~2 weeks to land cleanly. The guard-decomposition needs
+careful design (which predicates to recognise, how deep to walk,
+how to combine via `:and` / `:or`).
+
+Value: replaces the ~11 author assertions with automatic
+narrowings. Future flows that follow the pattern get correct
+types without per-site annotations.
+
+Risk: precision degradations elsewhere. Tighter narrowings can
+expose new gaps downstream — the same way α' surfaced the 11
+nullability cases.
+
+### Recommendation
+
+Defer until the next time the type-checker's precision needs
+investment. The current `:type T` annotations are sound and
+self-documenting; the Phase E gate ensures we won't lose
+visibility into similar new gaps.
+
+## Phase γ — Row polymorphism
+
+### Motivation
+
+Phase α' closed cross-flow contamination by uniquifying inline
+anons per use-site. That works because the SAME structural anon
+appearing in two flows now has two registry entries with
+independent narrowings. The cost is a modest registry growth
+(532 → 695 anons) and the loss of the "same shape collapses"
+optimisation.
+
+A row-polymorphic type system would solve the same problem from
+the opposite direction: keep the ONE registry entry, but type
+its slots POLYMORPHICALLY so each caller's narrowing applies
+without poisoning siblings. A slot would carry a row variable
+`'ρ` denoting "the rest of the record's fields", unified per
+call-site.
+
+### Worked example
+
+A naive open-record subtype check `record-subtype? sub sup`
+accepts sub iff every field in sup has a sub field with
+sub.k ⊆ sup.k. The implementation today is structural.
+
+Row-polymorphic equivalent:
+
+```
+:_X-apply-entity-type-str's anon : (record-with :coll T_ρ_1 + ρ_1)
+                                   where T_ρ_1 = the create-flow caller's :parsed
+:_Y-some-other-anon              : (record-with :coll T_ρ_2 + ρ_2)
+                                   where T_ρ_2 = the seq-flow caller's :parsed
+```
+
+The two anons COULD be unified onto one registry entry with type
+`(record-with :coll 'τ + 'ρ)`, where `'τ` and `'ρ` get bound at
+each call-site. The narrowing per-call-site is encoded in the
+substitution, not in the registry entry's resolved-bindings.
+
+### Implementation cost
+
+The type-rep change reaches every consumer of
+`types.core/record-type?` / `subtype?` / `unify`. Records would
+gain an optional row-variable; the unifier would need to
+distinguish "closed" (all fields known) from "open" (row-variable
+present) records. Existing rules that introspect records
+(`:get`, `:assoc`, `:select-keys`, …) would need to handle the
+open case.
+
+Estimate: ~3 weeks of focused work, plus a long settle-in period
+as edge cases surface.
+
+### Value over α'
+
+Concrete benefit: smaller registry, no need for per-use-site
+anon naming. Conceptual cleanliness: types describe what the
+function CAN handle, not what one specific caller does.
+
+But α' delivers identical CORRECTNESS today with a fraction of
+the implementation cost. The remaining gap is mostly aesthetic
+(registry size + the per-use-site naming convention).
+
+### Recommendation
+
+Defer indefinitely unless: (a) registry size becomes a real
+problem, OR (b) a feature genuinely requires open-record
+polymorphism that α' can't express (none identified today).
+
+## Sequencing & checkpoints — historical (kept for context)
 
 - Sweep baseline: 11 fn-defs fail. All in `web/crud`'s `_X-apply-*`
   family (CREATE / UPDATE / DELETE flows).
@@ -319,33 +486,23 @@ when available. Backlog of UI work; documented in
 
 This is the "автоматическая всесторонняя проверка" deliverable.
 
-## Sequencing & checkpoints
+## Outcome — 2026-06-16 closure
 
-| Order | Phase | Checkpoint signal |
-|-------|-------|-------------------|
-| 1 | C (`:type` rename localisation) | `bb ci` green + new test covers multi-rename case |
-| 2 | A (`:if`-rule structural narrowing) | `:_create-parsed` declares `:return-type :_create-parsed-shape`, sweep stays at 11 (no new failures) |
-| 3 | β Pass 2 scaffolding (no propagation yet) | unit test confirms second pass visits expected fn-defs |
-| 4 | β Pass 2 single-level narrowing | 3-5 of the 11 close |
-| 5 | β Pass 2 transitive narrowing | all 11 close, sweep = 0 |
-| 6 | E (CI gating) | sweep failure → CI red |
-| 7 | D (editor surface) | editor shows narrowed types on the 11 chains |
+The original plan called for sequencing C → A → β → E → D with γ
+held as long-horizon. Actual landings:
 
-Each step is its own commit (or small commit group) with
-green CI. β scaffolding can land before any narrowing wires up;
-γ stays reserved as future direction if β plateaus.
+| Phase | Status |
+|-------|--------|
+| A (typed `_X-parsed` returns + typevar binding + narrowing-assertion) | LANDED |
+| β (caller-context propagation) | ATTEMPTED + REVERTED — per-name BFS conflated flows; superseded by α' v3 |
+| α' (per-use-site anon naming + rename-leaf narrowing + `effective-ref-return` merge-flip) | LANDED — closed the original 10 |
+| E (hard-gate sweep + allowlist + tests) | LANDED — both directions, bidirectional gate |
+| C (`:type` rename localisation) | not needed — α' supersedes the use case |
+| D (editor surface) | LANDED implicitly — α' writes narrowed types into the canonical `:return` field; editor reads them via `/api/types` without any UI change |
+| #170 (control-flow narrowing) | DEFERRED — see § above; 11 nullability gaps closed via author-typed assertions instead |
+| γ (row polymorphism) | DEFERRED — see § above; α' delivers identical correctness today |
 
-## Open questions for sign-off
-
-1. Order — start with C (small, independent, low-risk) or jump
-   straight to A → β (tackles the root cause faster but each
-   step is bigger)?
-2. Phase E — fail-CI-on-sweep is a hard cut-over. Land
-   simultaneously with β-completion, or earlier as a soft gate
-   (warning becomes error after a grace period)?
-3. Phase D — UI changes likely need their own design pass.
-   Backlog now, or co-design with β?
-4. γ — keep as documented future direction, or scope it out
-   entirely now? (If kept, β's `:call-context-types` field is
-   structured so a future γ migration can replace it without
-   API breakage.)
+Final state: sweep at zero, allowlist empty, Phase E gate armed.
+No known type-system bugs in production. The deferred work is
+listed above with implementation sketches for when next-stage
+investment makes sense.

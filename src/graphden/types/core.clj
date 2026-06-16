@@ -1202,9 +1202,16 @@
       ;; no entries to violate any structural constraint. Without it
       ;; an `:_storage-where-map`-typed slot bound to `{:value {}}`
       ;; fails the `:jsonb ⊄ [:map :keyword :any]` rule below.
+      ;;
+      ;; Unions: an `:empty-map` is a subtype of `[:union :null [:map K V]]`
+      ;; because it's a subtype of the map-shape member. Descend so the
+      ;; nullable-map shapes (common boundary type for read-or-nil sites
+      ;; like `:resolve-branch-ref`) accept empty-map literals too.
       (= sub :empty-map)
       (boolean (or (= sup :empty-map) (= sup :jsonb)
-                   (map-type? sup) (record-type? sup)))
+                   (map-type? sup) (record-type? sup)
+                   (and (union-type? sup)
+                        (some #(subtype? :empty-map %) (union-members sup)))))
       (= sup :empty-map)                       false
 
       ;; Union LHS: every member must subtype.

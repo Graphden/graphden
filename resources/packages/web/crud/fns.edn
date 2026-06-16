@@ -243,7 +243,7 @@
    :description "§3.3 core of sequence-append. Returns `{:created <item-id> :position <int> :fn-id <fn-id>}` or `{:error <reason>}`."
    :args {:parsed {:type {:fn-id [:union :null :uuid] :body [:union :null :jsonb]}
                    :description "Parsed POST /api/sequence/append/:fn-id payload (`{:fn-id :body}`)."}
-          :seq-binding {:type :jsonb :description "Resolved sequence-binding row (real or synthetic)."}}
+          :seq-binding {:type [:union :null :_entity-field-map] :description "Resolved sequence-binding row (real or synthetic)."}}
    :return-type :jsonb
    :effects #{:db}}
 
@@ -251,7 +251,7 @@
    :description "§3.3 core of sequence-update. Returns `{:updated <item-id>}` or `{:error <reason>}`."
    :args {:parsed {:type {:item-id [:union :null :uuid] :body [:union :null :jsonb]}
                    :description "Parsed PUT /api/sequence/item/:item-id payload."}
-          :item {:type :jsonb :description "Pre-read binding-list-item row."}}
+          :item {:type [:union :null :_entity-field-map] :description "Pre-read binding-list-item row."}}
    :return-type :jsonb
    :effects #{:db}}
 

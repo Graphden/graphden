@@ -150,7 +150,7 @@
   {:name :resolve-fn
    :description "Resolve `parsed.{:fn-id, :fn-name}` to a full `:fn` row; nil when neither identifier resolves."
    :args {:parsed {:type :_execute-parsed-shape}}
-   :return-type :jsonb
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{:db}}
 
   ;; --- :_execute-fn-not-found-err (Variant-2). Was defbase delegating
@@ -692,13 +692,13 @@
   {:name :get-execution
    :description "Read a :fn-execution row by id (joined with arg + arg-item rows). nil when id is nil or doesn't resolve."
    :args {:id {:type [:union :null :uuid] :description "Target execution id."}}
-   :return-type :jsonb
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{:db}}
 
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
    :args {:id {:type [:union :null :uuid] :description "Target execution id."}}
-   :return-type :jsonb
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{:db :process}}
 
   {:name :_get-exec-loaded

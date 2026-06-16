@@ -204,7 +204,7 @@
    :description "Run the build → place layout pipeline for one parsed request. Composition of `:_layout-build-elements` → `:_layout-place`. Owns `:graph` as an explicit free pin — value flows down to `:_layout-build-elements :graph` by name match."
    :parent :_layout-place
    :args {:elements :_layout-build-elements
-          :graph {:type :jsonb
+          :graph {:type :_graph-snapshot-shape
                   :description "Full entity graph snapshot — typically supplied by `:_load-graph-cached`."}}}
 
   ;; parse → load → compute. Context-aware: free arg `request`

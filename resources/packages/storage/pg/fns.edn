@@ -128,9 +128,9 @@
    :description "Query identity rows of an entity DIRECTLY against base storage (bypassing VersionedStorage). Returns codec-decoded rows with `:ref-many` fields populated from junction tables. Use as the identity-load input to `:resolve-versioned-rows`."
    :args {:entity-type {:type :text
                         :description "Entity table name, e.g. `\"fn\"`, `\"binding\"`."}
-          :where {:type :jsonb
+          :where {:type [:union :null [:map :keyword :any]]
                   :description "Equality-map (`{:column value}` or `{:column [v1 v2 …]}` for IN). Empty / nil → full scan."}}
-   :return-type [:list :jsonb]
+   :return-type [:list [:map :keyword :any]]
    :effects #{:db}}
 
   ;; ---------------------------------------------------------------------
@@ -164,7 +164,7 @@
   {:name :invalidate-after-write
    :description "Cache-invalidate after a write: derive affected-fn-ids from entity-type + entity-data, then invalidate. Use in write-site graph composition as the post-write effect step."
    :args {:entity-type {:type :text :description "Entity table name, e.g. `\"fn\"`, `\"binding\"`."}
-          :entity-data {:type :jsonb
+          :entity-data {:type [:union :null [:map :keyword :any]]
                         :description "The just-written / about-to-be-deleted entity payload (incl. `:id` and any FKs needed for seed derivation)."}}
    :return-type :null
    :effects #{:db}}
@@ -179,7 +179,7 @@
    :description "Emit pg_notify events describing the write. Service: `{:kind :service :op <op> :id}`. Fn-graph entities: one `{:kind :fn :op :invalidate :id <seed>}` per affected seed."
    :args {:entity-type {:type :text :description "Entity table name."}
           :op {:type :text :description "CRUD op kind — `\"write\"` or `\"delete\"`."}
-          :entity-data {:type :jsonb
+          :entity-data {:type [:union :null [:map :keyword :any]]
                         :description "Entity payload — incl. `:id` and FKs for seed derivation."}}
    :return-type :null
    :effects #{:db}}

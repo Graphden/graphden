@@ -1439,8 +1439,8 @@
    :description "Atomic library boundary over `vs/switch-branch` + `vs/merge-branch!` — switches to target then folds source in. Throws ex-info `{:type :merge-conflict :conflicts [...]}` when resolutions don't cover every conflict; other failures surface as plain Exception."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}
-          :resolutions {:type :jsonb :required false :description "Per-conflict resolution map; absent for first-attempt merges."}}
-   :return-type :jsonb
+          :resolutions {:type [:union :null [:map :keyword :any]] :required false :description "Per-conflict resolution map; absent for first-attempt merges."}}
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   ;; --- Success path: build the response body off the merge record.

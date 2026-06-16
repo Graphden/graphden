@@ -364,6 +364,6 @@
   {:name :hiccup
    :description "Build a hiccup vector `[tag attrs & children]`. `attrs` and `children` are optional."
    :args {:tag {:type :text :description "HTML tag name."}
-          :attrs {:type :jsonb :required false :description "Attribute map (string-or-keyword keys post JSONB-roundtrip). Stays `:jsonb` because empty-map literals `{:value {}}` don't classify as `[:map …]` shape today — tighter typing would surface as unrelated mismatches at every `attrs {:value {}}` site."}
+          :attrs {:type [:union :null [:map [:union :keyword :text] :any]] :required false :description "Attribute map. Keys may be strings (post JSONB-roundtrip) or keywords. Omit/nil for no attributes."}
           :children {:type [:list :hiccup-node] :required false :description "Child hiccup nodes — each item may be a literal node or a fn-ref."}}
    :return-type :hiccup-node}]}

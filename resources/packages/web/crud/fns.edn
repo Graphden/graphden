@@ -359,7 +359,7 @@
   {:name :_types-compatible-ok-shape
    :description "Stage 3c-ok — `{:ok true :expected :candidate}` envelope."
    :parent :zipmap
-   :return-type {:ok :bool :expected :any :candidate :any}
+   :return-type {:ok :bool :expected :jsonb :candidate :jsonb}
    :args {:keys [{:value :ok} {:value :expected} {:value :candidate}]
           :vals [{:value true}
                  :_types-compatible-parsed-expected
@@ -368,7 +368,7 @@
   {:name :_types-compatible-not-ok-shape
    :description "Stage 3c-not-ok — `{:ok false :expected :candidate :reason}` envelope."
    :parent :zipmap
-   :return-type {:ok :bool :expected :any :candidate :any :reason :text}
+   :return-type {:ok :bool :expected :jsonb :candidate :jsonb :reason :text}
    :args {:keys [{:value :ok} {:value :expected} {:value :candidate} {:value :reason}]
           :vals [{:value false}
                  :_types-compatible-parsed-expected

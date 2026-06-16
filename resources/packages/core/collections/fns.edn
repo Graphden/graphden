@@ -53,7 +53,7 @@
 
   {:name :get
    :description "Look up a key in a map/vector (Clojure's `get`). Falls back to `:default` when the key is missing."
-   :args {:coll {:type :jsonb :description "Map or vector to read from."}
+   :args {:coll {:type :jsonb :description "Map or vector to read from. Nil treated as empty."}
           :key {:type :any :description "Lookup key (or vector index)."}
           :default {:type :any :required false :description "Returned when the key is absent."}}
    :return-type :any}

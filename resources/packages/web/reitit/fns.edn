@@ -40,7 +40,7 @@
 
   {:name :ring-router
    :description "Compile a vector of `[path method-data]` route entries into a reitit router. Wraps `reitit.ring/router`. Reitit expects vectors + keyword keys throughout; use `:_router-coerced-routes` (a graph-level `:postwalk`-based coercer below) before binding here if your route data has string keys or lazy `:seq` bindings."
-   :args {:routes {:type :jsonb :description "Already-shaped reitit route data — vectors + keyword keys throughout."}}
+   :args {:routes {:type [:list :any] :description "Already-shaped reitit route data — list of `[path method-data]` entries; nested values follow reitit's vector + keyword-key convention."}}
    :return-type :any}
 
   ;; Build a Ring handler reitit falls back to when no route matches.

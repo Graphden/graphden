@@ -15,7 +15,8 @@
 
   {:name :_types-compatible-parsed-shape
    :description "Output of `:_types-compatible-parsed` — the two type expressions to subtype-check."
-   :type {:expected :jsonb :candidate :jsonb}}
+   :type {:expected [:union :keyword :text [:list :any] [:map :keyword :any]]
+          :candidate [:union :keyword :text [:list :any] [:map :keyword :any]]}}
 
   {:name :_types-candidates-parsed-shape
    :description "Output of `:_types-candidates-parsed` — the target type plus optional effect-set / name-prefix filters. `:allowed-effects` and `:name-prefix` are nullable (caller may omit either) — `:_types-candidates-apply` treats nil as 'no filter'."
@@ -329,14 +330,14 @@
   ;; by reparenting the per-row composition below.
   {:name :subtype?
    :description "True iff `candidate` is a subtype of `expected` under graphden's type hierarchy (refinement / list / union / record / fn-shape recursion in `types/core`)."
-   :args {:expected {:type :jsonb :description "The expected (slot-side) type."}
-          :candidate {:type :jsonb :description "The candidate (binding-side) type."}}
+   :args {:expected {:type [:union :keyword :text [:list :any] [:map :keyword :any]] :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
+          :candidate {:type [:union :keyword :text [:list :any] [:map :keyword :any]] :description "The candidate (binding-side) type expression."}}
    :return-type :bool}
 
   {:name :describe-type-mismatch
    :description "One-line human-readable explanation of why `candidate` ⊄ `expected`. Used by the editor's type-picker tooltip."
-   :args {:expected {:type :jsonb :description "The expected (slot-side) type."}
-          :candidate {:type :jsonb :description "The candidate (binding-side) type."}}
+   :args {:expected {:type [:union :keyword :text [:list :any] [:map :keyword :any]] :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
+          :candidate {:type [:union :keyword :text [:list :any] [:map :keyword :any]] :description "The candidate (binding-side) type expression."}}
    :return-type :text}
 
   ;; --- :_types-compatible-apply — pure graph composition over

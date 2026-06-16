@@ -20,7 +20,7 @@
   ;; ---------------------------------------------------------------------
   {:name :pg-query
    :description "Run a SELECT-shape HoneySQL map against graphden's own datasource and return rows. Each row is `{:column value}` with unqualified, lower-snake-case column keys."
-   :args {:hsql {:type :jsonb
+   :args {:hsql {:type [:map :keyword :any]
                  :description "HoneySQL map, e.g. `{:select [:id :name] :from :users :where [:= :id ?]}`. See honeysql docs for the full vocabulary."}}
    :return-type [:list [:map :text :any]]
    :effects #{:db}}
@@ -35,7 +35,7 @@
   ;; ---------------------------------------------------------------------
   {:name :pg-execute
    :description "Run a mutation-shape HoneySQL map (INSERT / UPDATE / DELETE / DDL) against graphden's own datasource and return the affected row count (0 for DDL)."
-   :args {:hsql {:type :jsonb
+   :args {:hsql {:type [:map :keyword :any]
                  :description "HoneySQL map describing the mutation."}}
    :return-type :int
    :effects #{:db}}
@@ -99,7 +99,7 @@
   ;; ---------------------------------------------------------------------
   {:name :pg-notify
    :description "Emit a `pg_notify` event on `graphden_events` so sibling pods react to a local write. `:event` shape varies by kind — see system/core.clj LISTEN callbacks for the consumer contract. Best-effort: failures are logged but don't throw."
-   :args {:event {:type :jsonb
+   :args {:event {:type [:map :keyword :any]
                   :description "Event payload. Standard shapes: `{:kind :fn :op :invalidate :id <uuid-str>}` (fn-graph mutation), `{:kind :service :op :write|:delete :id <uuid-str>}` (service row)."}}
    :return-type :null
    :effects #{:db}}

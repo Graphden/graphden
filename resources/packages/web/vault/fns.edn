@@ -97,7 +97,7 @@
    :tags #{:admin-only-vault}
    :args {:path {:type :text
                  :description "KV v2 path whose metadata to update."}
-          :metadata {:type :jsonb
+          :metadata {:type [:map :text :text]
                      :description "Map of string→string. Becomes `custom_metadata` on the path."}}
    :return-type :null
    :effects #{:network}}]}

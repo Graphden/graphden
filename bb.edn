@@ -332,6 +332,11 @@
            (p/shell "docker-compose up -d executor")
 
            (println "4. Waiting for server...")
+           ;; Bootstrap is dominated by compiled-registry build (~21s)
+           ;; + fn-entities create (~40s) + integrant init (~10s) —
+           ;; ~70-80s wall in practice. The 90 × 2s = 180s ceiling
+           ;; gives enough margin for cold-cache JVM warmup without
+           ;; flaking on a slow host.
            (loop [attempts 0]
              (Thread/sleep 2000)
              (let [result (p/shell {:continue true :out :string :err :string}
@@ -344,9 +349,9 @@
                      (let [smoke (p/shell {:continue true} "bb" "smoke")]
                        (when-not (zero? (:exit smoke))
                          (System/exit (:exit smoke)))))
-                 (if (< attempts 30)
+                 (if (< attempts 90)
                    (do (print ".") (flush) (recur (inc attempts)))
-                   (do (println (str red "✗ Server failed to start" reset))
+                   (do (println (str red "✗ Server failed to start (180s timeout — check `docker logs graphden-executor`)" reset))
                        (System/exit 1)))))))}
 
   deploy
@@ -369,6 +374,10 @@
            (p/shell "docker-compose up -d executor")
 
            (println "6. Waiting for server...")
+           ;; Same bootstrap budget as `bb rebuild`: ~70-80s wall;
+           ;; 90 × 2s = 180s ceiling. `bb deploy`'s --no-cache rebuild
+           ;; can stretch slightly longer on the docker side, but the
+           ;; in-container bootstrap is the same path.
            (loop [attempts 0]
              (Thread/sleep 2000)
              (let [result (p/shell {:continue true :out :string :err :string}
@@ -381,9 +390,9 @@
                      (let [smoke (p/shell {:continue true} "bb" "smoke")]
                        (when-not (zero? (:exit smoke))
                          (System/exit (:exit smoke)))))
-                 (if (< attempts 30)
+                 (if (< attempts 90)
                    (do (print ".") (flush) (recur (inc attempts)))
-                   (do (println (str red "✗ Server failed to start" reset))
+                   (do (println (str red "✗ Server failed to start (180s timeout — check `docker logs graphden-executor`)" reset))
                        (System/exit 1)))))))}
 
   smoke

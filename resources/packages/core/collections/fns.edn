@@ -52,8 +52,9 @@
    :return-type :any}
 
   {:name :get
-   :description "Look up a key in a map/vector (Clojure's `get`). Falls back to `:default` when the key is missing. Slot stays `:jsonb` because tightening to `[:union :null [:map a :any] [:list :any]]` surfaces real but pre-existing closure-capture seed validation gaps in HOF callbacks (`:_rv-mapped-rows`, `:_lfv-*`, `:_find-fn-usages-li-*` families) — those need `ref-free-arg-names` to descend into transitively-propagated free args, which is a separate type-system task. The structural soundness fixes shipped alongside (map/list typevar-sup, MI+type-row injection from secondary parents, unify union branch-try) all remain in place."
-   :args {:coll {:type :jsonb :description "Map or vector to read from. Nil treated as empty."}
+   :description "Look up a key in a map/vector (Clojure's `get`). Falls back to `:default` when the key is missing."
+   :args {:coll {:type [:union :null [:map a :any] [:list :any]]
+                 :description "Map or vector to read from. Nil treated as empty. Values typed `:any` because real-world callers (records, mixed-element lists) are heterogeneous; only the map key type `a` is parametric."}
           :key {:type :any :description "Lookup key (or vector index)."}
           :default {:type :any :required false :description "Returned when the key is absent."}}
    :return-type :any}

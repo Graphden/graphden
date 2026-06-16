@@ -631,8 +631,21 @@
     ;; type?` arm of the :jsonb sink rule doesn't recurse into the
     ;; element type. Trying unify first would reject these
     ;; (`unify [:list 'b] :jsonb = ::fail`).
+    ;;
+    ;; When typevars ARE present, also run unify after a successful
+    ;; subtype to extract bindings. subtype? is lenient on typevar-sup
+    ;; (`map-subtype?` / `list-subtype?` / `fn-subtype?`'s sup-side
+    ;; typevar arms) so the structural check passes WITHOUT carrying
+    ;; the binding forward. Without this follow-up, e.g. `:try`'s
+    ;; `:body [:fn {} a]` slot bound to a fn returning `[:map :keyword
+    ;; :any]` passes subtype but leaves `a` free; downstream consumers
+    ;; of `:try`'s declared `[:union a b]` see typevars instead of the
+    ;; resolved `[:map :keyword :any]`.
     (types/subtype? actual expected)
-    subst
+    (if (or (has-type-var? expected) (has-type-var? actual))
+      (let [s (types/unify expected actual subst)]
+        (if (types/fail? s) subst s))
+      subst)
 
     ;; Subtype rejected — but if EITHER side carries a type-var,
     ;; the rejection may be because `subtype?` doesn't reason about

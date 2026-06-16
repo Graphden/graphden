@@ -939,28 +939,43 @@
     (>= (count b) 2)
     (every? (fn [[k bt]]
               (when-let [at (get a k)]
-                ;; `:any` on the slot side is "no constraint" — the
-                ;; callee may narrow it freely (assertion-style:
-                ;; "I expect this loose slot to actually carry T").
-                ;; Without this, a slot declaring `:next-handler :any`
-                ;; rejects a callee whose body expects `[:fn ...]`,
-                ;; even though the slot promises nothing.
-                (or (= bt :any) (subtype? bt at))))
+                ;; `:any` or a free type-var on the slot side is "no
+                ;; concrete constraint" — the callee may narrow it
+                ;; freely (assertion-style: "I expect this loose slot
+                ;; to actually carry T"). Typevar specifically: the
+                ;; slot's `a` gets bound at the call site, so any
+                ;; concrete callee arg-type is a valid satisfying
+                ;; assignment. Without the typevar arm, a callee
+                ;; tightened by upstream propagation (e.g. `:item
+                ;; [:union :null …]` after `:get :coll` narrowed the
+                ;; inferred shape) rejects a `[:fn {:item a} …]`
+                ;; slot even though the contravariant relation
+                ;; trivially holds under unification.
+                (or (= bt :any) (type-var? bt) (subtype? bt at))))
             b)
 
     ;; Single-arg / nullary slot, callee of the same arity — positional.
+    ;; Strict contravariance on `:any` (per `subtype-fn-test` line 414:
+    ;; positional `:any` slot ARG is NOT "no constraint" — slot
+    ;; promises `:any` at call time and a callee restricting to `:int`
+    ;; would crash). Typevars on the slot side DO accept any callee
+    ;; arg-type — same logic as `map-subtype?`'s sup-typevar arm,
+    ;; because the slot's typevar is bound at the call site.
     (= (count a) (count b))
     (let [av (mapv val (sort-by key a))
           bv (mapv val (sort-by key b))]
-      (every? (fn [i] (subtype? (get bv i) (get av i)))
+      (every? (fn [i]
+                (let [bt (get bv i) at (get av i)]
+                  (or (type-var? bt) (subtype? bt at))))
               (range (count bv))))
 
     ;; 1-arg slot, callee carries extra (optional / captured) args —
     ;; match the slot's lone param to the callee arg of that name.
+    ;; Typevar on slot side accepts (same rationale as above).
     (and (= 1 (count b)) (> (count a) 1))
     (let [[k bt] (first b)]
       (boolean (when-let [at (get a k)]
-                 (subtype? bt at))))
+                 (or (type-var? bt) (subtype? bt at)))))
 
     ;; 1-arg slot, nullary callee — the callable ignores its input.
     (and (= 1 (count b)) (zero? (count a)))
@@ -980,11 +995,19 @@
    - `sub-ret ⊆ sup-ret` (covariant return).
    - `sub-effects ⊆ sup-effects` (callable-side covariant effect
      constraint — bound fn must NOT exceed the slot's allowed
-     effect set; `nil`/`:any` on the slot means \"unconstrained\")."
+     effect set; `nil`/`:any` on the slot means \"unconstrained\").
+
+   Typevar on the slot's return is lenient (same as map/list/fn-args
+   sup-typevars): subtype? returns true. `check-binding!` separately
+   runs `unify` after a successful subtype check whenever typevars
+   are present, so the variable still BINDS to the callee's actual
+   return — the lenient subtype is for the structural check, the
+   binding flows through unify."
   [sub sup]
-  (and (subtype? (fn-ret sub) (fn-ret sup))
-       (effects-compatible? (fn-effects sub) (fn-effects sup))
-       (fn-args-subtype? (fn-args sub) (fn-args sup))))
+  (let [sub-ret (fn-ret sub) sup-ret (fn-ret sup)]
+    (and (or (type-var? sup-ret) (subtype? sub-ret sup-ret))
+         (effects-compatible? (fn-effects sub) (fn-effects sup))
+         (fn-args-subtype? (fn-args sub) (fn-args sup)))))
 
 
 (defn- normalise
@@ -1469,7 +1492,18 @@
    (let [a (normalise (resolve subst t1))
          b (normalise (resolve subst t2))]
      (cond
-       (or (= a b) (= a :any) (= b :any)) subst
+       ;; Equality OR universal `:any` accept on the OTHER side when
+       ;; neither is a type-var. With a type-var on the other side we
+       ;; deliberately fall through to the typevar arms below so the
+       ;; var BINDS to `:any` rather than silently passing without a
+       ;; binding. Without the binding the var leaks downstream
+       ;; (e.g. `:try`'s declared `[:union a b]` retains free `a`/`b`
+       ;; when the body returns the type-checker's `:any` fallback,
+       ;; which then fails every consumer expecting a concrete
+       ;; member shape).
+       (or (= a b)
+           (and (or (= a :any) (= b :any))
+                (not (or (type-var? a) (type-var? b))))) subst
        ;; A type variable binds to whatever the other side is — a
        ;; primitive, a union, a fn-type, anything (subject to the
        ;; occurs-check in `bind-var`). This MUST precede the union
@@ -1525,6 +1559,43 @@
            (when (and (not (union-type? concrete))
                       (= 1 (count tv-members)))
              (let [s (unify concrete (first tv-members) subst)]
+               (when-not (= s ::fail) s))))
+         ;; Both sides are unions, but after stripping common members
+         ;; LHS-rest has exactly one typevar and RHS-rest has at least
+         ;; one non-typevar member that's compatible. Bind the typevar
+         ;; to ONE of the RHS-rest members — practical compromise for
+         ;; polymorphic-return chains like `:first` over `[:list a]`
+         ;; producing `[:union :null a-N]` consumed by a slot typed
+         ;; `[:union :null [:list :any] [:map a :any]]`. Bind to the
+         ;; full leftover union so the typevar carries the slot's
+         ;; constraint forward instead of an arbitrarily-picked branch.
+         (let [a-mems (if (union-type? a) (set (union-members a)) #{a})
+               b-mems (if (union-type? b) (set (union-members b)) #{b})
+               common (clojure.set/intersection a-mems b-mems)
+               a-rest (vec (clojure.set/difference a-mems common))
+               b-rest (vec (clojure.set/difference b-mems common))
+               a-rest-tvs (filter type-var? a-rest)
+               b-rest-tvs (filter type-var? b-rest)]
+           (when (and (seq common)
+                      (= 1 (count a-rest)) (= 1 (count a-rest-tvs))
+                      (seq b-rest) (empty? b-rest-tvs))
+             (let [s (unify (first a-rest-tvs) (make-union b-rest) subst)]
+               (when-not (= s ::fail) s))))
+         (let [a-mems (if (union-type? a) (set (union-members a)) #{a})
+               b-mems (if (union-type? b) (set (union-members b)) #{b})
+               common (clojure.set/intersection a-mems b-mems)
+               a-rest (vec (clojure.set/difference a-mems common))
+               b-rest (vec (clojure.set/difference b-mems common))
+               a-rest-tvs (filter type-var? a-rest)
+               b-rest-tvs (filter type-var? b-rest)]
+           ;; Symmetric case: RHS has a single typevar leftover that
+           ;; should absorb LHS's concrete remainder. Mirror the arm
+           ;; above with the roles swapped so the direction of the
+           ;; consumer's binding doesn't matter.
+           (when (and (seq common)
+                      (= 1 (count b-rest)) (= 1 (count b-rest-tvs))
+                      (seq a-rest) (empty? a-rest-tvs))
+             (let [s (unify (first b-rest-tvs) (make-union a-rest) subst)]
                (when-not (= s ::fail) s))))
          ::fail)
        ;; Subtype-aware unification — succeeds without further binding

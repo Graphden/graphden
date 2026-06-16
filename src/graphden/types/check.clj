@@ -480,6 +480,28 @@
 (def ^:dynamic *caller-narrowings* nil)
 
 
+;; Phase #170 — control-flow ref-return overrides. Keyed by
+;; FN-NAME (not slot AS-name): `{narrowed-fn-name → narrowed-type}`.
+;; Bound during Pass 3 per fn-def, populated by
+;; `build-ref-return-overrides` for fn-defs reachable from a
+;; provably-non-null `:if`/`:cond` branch. Consulted by
+;; `effective-ref-return` AND by every direct
+;; `(:return (registry/rich-type-of ref-name))` site that feeds the
+;; type-check (sequence items, ref-bindings, `bindings-info-for-rule`'s
+;; ref entries) — see `ref-return-narrowed`.
+(def ^:dynamic *ref-return-overrides* nil)
+
+
+(defn- ref-return-narrowed
+  "Static return of `ref-name`, possibly narrowed by the active
+   `*ref-return-overrides*`. Single entry point for every Pass 3 site
+   that needs the ref's return-as-seen-by-this-check."
+  [ref-name]
+  (or (and *ref-return-overrides*
+           (get *ref-return-overrides* ref-name))
+      (some-> (registry/rich-type-of ref-name) :return)))
+
+
 (defn- mismatch-context
   "Build the structured `ctx` map every type-error throw shares —
    merges in `*source-info*` so file:line gets stamped automatically."
@@ -1193,7 +1215,7 @@
 
     (and (map? item) (contains? item :ref))
     (or (some-> (:type item) types/resolve-alias)
-        (some-> (registry/rich-type-of (:ref item)) :return types/freshen)
+        (some-> (ref-return-narrowed (:ref item)) types/freshen)
         :any)
 
     ;; Item-level rename — type unknown without seeing the caller,
@@ -1445,9 +1467,7 @@
       ;; fails because the typevar appears in its own value. After
       ;; freshening the actual carries `'a-N` (fresh per use site) so
       ;; unify cleanly binds `'a := [:union :null 'a-N]`.
-      (let [actual (or (some-> (registry/rich-type-of b-form)
-                               :return
-                               types/freshen)
+      (let [actual (or (some-> (ref-return-narrowed b-form) types/freshen)
                        :any)]
         (check-binding! primary-parent arg-name expected actual subst fn-name b-form))
 
@@ -1638,17 +1658,20 @@
   [items]
   (mapv (fn [item]
           (case (binding-shape item)
-            :fn-ref    (or (:return (registry/rich-type-of item)) :any)
+            :fn-ref    (or (ref-return-narrowed item) :any)
             :value-map (or (classify-literal (:value item)) :any)
             :ref-map   (or (some-> (:type item) types/resolve-alias)
-                           (:return (registry/rich-type-of (:ref item)))
+                           (ref-return-narrowed (:ref item))
                            :any)
             :meta-map  (or (:type item) :any)
             (or (classify-literal item) :any)))
         items))
 
 
-(declare base-fn-type-rule effective-ref-return root-base-fn-name)
+(declare base-fn-type-rule
+         effective-ref-return
+         effective-ref-return-uncached
+         root-base-fn-name)
 
 
 (defn- effective-binding-type
@@ -1683,33 +1706,32 @@
   (when (and ref-name
              (not (contains? seen ref-name))
              (< depth 6))
-    (when-let [info (registry/rich-type-of ref-name)]
-      (let [seen' (conj seen ref-name)
-            ref-bindings (:resolved-bindings info {})
-            ;; Ref's OWN bindings shadow caller's on key collision —
-            ;; caller-bindings may carry slot-named entries from a
-            ;; deeper rename chain (e.g. `:coll` typed via Pass-3
-            ;; narrowing of `:_create-apply-entity-data`) that
-            ;; shouldn't override an unrelated ref's own `:coll`
-            ;; binding when recursed into. Caller still contributes
-            ;; free-arg context for keys the ref doesn't bind
-            ;; locally — that's how narrowings flow into rename
-            ;; AS-name slots.
-            combined (merge caller-bindings ref-bindings)
-            inner-info (into {}
-                             (map (fn [[k v]]
-                                    [k {:type (effective-binding-type v combined seen' (inc depth))
-                                        :value (:value v)}]))
-                             combined)
-            root-base (root-base-fn-name ref-name)
-            static (or (:return info) :any)
-            recomputed (if-let [rule (base-fn-type-rule :return-type-rule root-base)]
-                         (rule inner-info static)
-                         static)]
-        ;; Prefer the recomputed answer when it's strictly more
-        ;; informative than the static one (`:any` is the
-        ;; "uninformative" sentinel).
-        (if (= recomputed :any) static recomputed)))))
+    (if-let [override (and *ref-return-overrides*
+                           (get *ref-return-overrides* ref-name))]
+      ;; Phase #170: caller's control-flow guard proves a narrower
+      ;; return for `ref-name` than the static registry view. Skip
+      ;; re-firing the rule and use the override directly.
+      override
+      (effective-ref-return-uncached ref-name caller-bindings seen depth))))
+
+
+(defn- effective-ref-return-uncached
+  [ref-name caller-bindings seen depth]
+  (when-let [info (registry/rich-type-of ref-name)]
+    (let [seen' (conj seen ref-name)
+          ref-bindings (:resolved-bindings info {})
+          combined (merge caller-bindings ref-bindings)
+          inner-info (into {}
+                           (map (fn [[k v]]
+                                  [k {:type (effective-binding-type v combined seen' (inc depth))
+                                      :value (:value v)}]))
+                           combined)
+          root-base (root-base-fn-name ref-name)
+          static (or (:return info) :any)
+          recomputed (if-let [rule (base-fn-type-rule :return-type-rule root-base)]
+                       (rule inner-info static)
+                       static)]
+      (if (= recomputed :any) static recomputed))))
 
 
 (defn- bindings-info-for-rule
@@ -1787,7 +1809,7 @@
                              ;; the override.
                              (and (map? b-form) (contains? b-form :ref))
                              (cond-> {:type (or (some-> (:type b-form) types/resolve-alias)
-                                                (:return (registry/rich-type-of (:ref b-form)))
+                                                (ref-return-narrowed (:ref b-form))
                                                 :any)
                                       :value nil}
                                (not (contains? b-form :type))
@@ -2582,6 +2604,225 @@
 
 (defn check-fn-def-with-narrowings!
   "Phase α' Pass 3."
-  [fd narrowings-map]
-  (binding [*caller-narrowings* (get narrowings-map (:name fd))]
-    (check-fn-def! fd)))
+  ([fd narrowings-map]
+   (check-fn-def-with-narrowings! fd narrowings-map nil))
+  ([fd narrowings-map overrides-map]
+   (binding [*caller-narrowings*    (get narrowings-map (:name fd))
+             *ref-return-overrides* (get overrides-map (:name fd))]
+     (check-fn-def! fd))))
+
+
+;; -----------------------------------------------------------------------------
+;; Phase #170 — control-flow narrowing through `:if` / `:cond` guards.
+;;
+;; When F's parent is `:if` AND :test's impl-chain root is `:some?` /
+;; `:nil?` on a target fn-name T, the taken branch knows T is non-null
+;; (or null, for the other branch). Same idea for `:cond`: a result
+;; clause runs only when its own test is truthy AND all prior tests
+;; were falsy — each test contributes a per-target narrowing.
+;;
+;; Scope of this iteration: ONLY direct `:some?` / `:nil?` predicates.
+;; Predicates that wrap multi-step guards (`:str-blank?`, `:and`/`:or`
+;; over multiple `:nil?`s, custom `_X-blank?` shims with `:get` +
+;; `:str-blank?` chains) still need `:type T` author-assertions. The
+;; broader path-sensitive analysis is deferred — see
+;; `docs/TYPE_SYSTEM_ROADMAP.md`.
+
+(defn- root-of-ref
+  "Walk `:primary-parent` chain to the root base-fn. Returns the root
+   name, or `nil` when the ref is unknown."
+  [ref-name]
+  (loop [n ref-name seen #{}]
+    (cond
+      (or (nil? n) (contains? seen n)) n
+      :else (let [info (registry/rich-type-of n)
+                  parent (:primary-parent info)]
+              (if (or (nil? parent) (= parent n))
+                n
+                (recur parent (conj seen n)))))))
+
+
+(defn- direct-predicate-of-ref
+  "If `ref-name`'s impl-chain root is `:some?` / `:nil?` and its
+   `:value` slot is a ref to fn-name T, return `[:some?|:nil? T]`.
+   Otherwise nil. Mirrors `predicate-of-ref` in
+   `core/logic/impls.clj`; duplicated here because that one is
+   `defn-` and importing would create a cycle (impls.clj loads
+   AFTER types/check.clj)."
+  [ref-name]
+  (when ref-name
+    (when-let [info (registry/rich-type-of ref-name)]
+      (let [root (root-of-ref ref-name)
+            rb (:resolved-bindings info {})
+            value-binding (get rb :value)
+            target (:ref value-binding)]
+        (when (and target (#{:some? :nil?} root))
+          [root target])))))
+
+
+(defn- ref-of-binding-form
+  "Extract a fn-ref from an `:args` value: bare keyword, `{:ref X}`,
+   or `{:parent _ :args _}` inline anon — but inline anons are
+   expanded to synthetic names before this pass runs, so we only see
+   keywords or `{:ref X}`."
+  [b]
+  (cond
+    (keyword? b) b
+    (and (map? b) (keyword? (:ref b))) (:ref b)))
+
+
+(defn- strip-null-from-type
+  "Strip `:null` from a union; for the bare `:null` type return
+   `:never`. Mirrors the local helper in `core/logic/impls.clj`
+   but unparameterised — we only need the structural shape."
+  [t]
+  (cond
+    (types/union-type? t)
+    (let [members (vec (remove #{:null} (types/union-members t)))]
+      (cond
+        (empty? members) :never
+        (= 1 (count members)) (first members)
+        :else (types/make-union members)))
+    (= t :null) :never
+    :else t))
+
+
+(defn- narrowed-type-for-predicate
+  "Apply predicate-kind to target's static return: `:some?` taken
+   branch → strip-null; `:nil?` taken branch → `:null`. The
+   `polarity` argument is `:taken` (test was truthy) or `:not-taken`
+   (test was falsy) and inverts the operation."
+  [pred-kind polarity target-static]
+  (let [strip? (or (and (= pred-kind :some?) (= polarity :taken))
+                   (and (= pred-kind :nil?)  (= polarity :not-taken)))]
+    (if strip?
+      (strip-null-from-type target-static)
+      :null)))
+
+
+(defn- if-branch-overrides
+  "Return `{branch-ref-name → {target → narrowed}}` for an `:if`-
+   shaped fn-def F. `:then` is the taken branch; `:else` is
+   not-taken. Empty map when no direct-predicate test is found."
+  [fd]
+  (let [args      (or (:args fd) {})
+        test-b    (get args :test)
+        test-ref  (ref-of-binding-form test-b)
+        pred      (direct-predicate-of-ref test-ref)
+        then-ref  (ref-of-binding-form (get args :then))
+        else-ref  (ref-of-binding-form (get args :else))]
+    (if-not pred
+      {}
+      (let [[pred-kind target] pred
+            target-static (:return (registry/rich-type-of target) :any)
+            taken-narrow     (narrowed-type-for-predicate pred-kind :taken     target-static)
+            not-taken-narrow (narrowed-type-for-predicate pred-kind :not-taken target-static)]
+        (cond-> {}
+          (and then-ref (some? taken-narrow))
+          (assoc then-ref {target taken-narrow})
+
+          (and else-ref (some? not-taken-narrow))
+          (assoc else-ref {target not-taken-narrow}))))))
+
+
+(defn- cond-branch-overrides
+  "Return `{result-ref-name → {target → narrowed}}` for a `:cond`-
+   shaped fn-def F. Clauses sit in `:clauses` as a vector of
+   alternating test/result items. Result at clause k receives:
+   prior tests' `:not-taken` narrowings + this test's `:taken`
+   narrowing. The literal-true sentinel at an even index acts as
+   an exhaustiveness marker — no narrowing it can contribute to
+   its own result, but prior clauses' `:not-taken`s still apply."
+  [fd]
+  (let [args     (or (:args fd) {})
+        clauses  (get args :clauses)]
+    (if-not (sequential? clauses)
+      {}
+      (let [pairs (partition 2 clauses)]
+        (loop [remaining pairs
+               prior-not-taken {}
+               acc {}]
+          (if (empty? remaining)
+            acc
+            (let [[test-item result-item] (first remaining)
+                  test-ref     (ref-of-binding-form test-item)
+                  pred         (direct-predicate-of-ref test-ref)
+                  result-ref   (ref-of-binding-form result-item)
+                  this-taken   (when pred
+                                 (let [[k t] pred
+                                       static (:return (registry/rich-type-of t) :any)]
+                                   {t (narrowed-type-for-predicate k :taken static)}))
+                  for-this     (merge prior-not-taken this-taken)
+                  this-not-taken (when pred
+                                   (let [[k t] pred
+                                         static (:return (registry/rich-type-of t) :any)]
+                                     {t (narrowed-type-for-predicate k :not-taken static)}))
+                  acc'         (if (and result-ref (seq for-this))
+                                 (assoc acc result-ref for-this)
+                                 acc)
+                  prior'       (merge prior-not-taken this-not-taken)]
+              (recur (rest remaining) prior' acc'))))))))
+
+
+(defn- propagate-override-to-ref-tree
+  "Starting from a ref `start-name`, walk transitive fn-refs and
+   attach `override-map` (`{target → narrowed-type}`) at every
+   visited fn-def. Stops at refs not known in `fn-defs-by-name`."
+  [ref-children-by-name fn-defs-by-name start-name override-map acc]
+  (loop [queue (vector start-name)
+         visited #{}
+         acc acc]
+    (if (empty? queue)
+      acc
+      (let [callee (peek queue)
+            queue  (pop queue)]
+        (if (or (contains? visited callee)
+                (not (contains? fn-defs-by-name callee)))
+          (recur queue visited acc)
+          (let [visited' (conj visited callee)
+                acc' (update acc callee
+                             (fn [existing]
+                               (reduce-kv (fn [m target narrowed]
+                                            (update m target
+                                                    (fn [prev]
+                                                      (if prev
+                                                        (types/make-union [prev narrowed])
+                                                        narrowed))))
+                                          (or existing {})
+                                          override-map)))
+                children (get ref-children-by-name callee [])]
+            (recur (into queue children) visited' acc')))))))
+
+
+(defn build-ref-return-overrides
+  "Phase #170 — build `{fn-name → {target-fn-name → narrowed-type}}`.
+   For each F whose parent root is `:if` / `:cond`, compute per-
+   branch overrides and propagate into the branch's transitive ref-
+   tree. Pass 3 binds `*ref-return-overrides*` to the per-callee
+   entry, so the type-checker sees narrowed returns when re-checking
+   a fn-def reachable only from a provably-non-null guarded branch."
+  [fn-defs]
+  (let [fn-defs-by-name (into {} (map (fn [fd] [(:name fd) fd])) fn-defs)
+        known-names     (set (keys fn-defs-by-name))
+        ref-children    (into {}
+                              (map (fn [[n fd]]
+                                     [n (ref-children-of fd known-names)]))
+                              fn-defs-by-name)]
+    (reduce
+      (fn [acc fd]
+        (let [parent (or (:parent fd) (first (:parents fd)))
+              root   (when parent (root-of-ref parent))
+              branch-overrides (case root
+                                 :if    (if-branch-overrides fd)
+                                 :cond  (cond-branch-overrides fd)
+                                 nil)]
+          (if (empty? branch-overrides)
+            acc
+            (reduce-kv
+              (fn [a branch-ref override-map]
+                (propagate-override-to-ref-tree
+                  ref-children fn-defs-by-name branch-ref override-map a))
+              acc
+              branch-overrides))))
+      {}
+      fn-defs)))

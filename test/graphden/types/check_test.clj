@@ -1665,3 +1665,72 @@
                         :parent :propagate-stub
                         :args {:s {:value "literal-text"}}})
   (is (= :text (:return (registry/rich-type-of :plain-into-secret-slot)))))
+
+
+;; -----------------------------------------------------------------------------
+;; Phase #170 — control-flow narrowing through `:if` / `:cond` direct
+;; `:some?`/`:nil?` guards.
+
+(defn- seed-phase-170-fixture!
+  "Register direct registry entries (raw write — `record-rich-types!`
+   would reject the `{:ref X}` shape on `:resolved-bindings`)."
+  [pred-name pred-parent]
+  (registry/record-rich-types-raw! :_nullable-text
+                                   {:args {} :return [:union :null :text]})
+  (registry/record-rich-types-raw! pred-name
+                                   {:args {:value {:type [:union :null :text]}}
+                                    :resolved-bindings {:value {:ref :_nullable-text}}
+                                    :primary-parent pred-parent
+                                    :return :bool})
+  (registry/record-rich-types-raw! :_then-consumer
+                                   {:args {} :return :text})
+  (registry/record-rich-types-raw! :_else-consumer
+                                   {:args {} :return :text}))
+
+
+(deftest phase-170-if-some-builds-then-override
+  (testing ":if :test (:some? :nullable) → :then sees :nullable narrowed to non-null"
+    (seed-phase-170-fixture! :_is-some? :some?)
+    (let [fds [{:name :_guarded
+                :parent :if
+                :args {:test :_is-some?
+                       :then :_then-consumer
+                       :else nil}}
+               {:name :_then-consumer :args {} :return-type :text}]
+          overrides (check/build-ref-return-overrides fds)]
+      (is (= {:_nullable-text :text}
+             (get overrides :_then-consumer))
+          ":then ref-target inherits non-null narrowing"))))
+
+
+(deftest phase-170-if-nil-narrows-else
+  (testing ":if :test (:nil? :nullable) → :else sees non-null narrowing"
+    (seed-phase-170-fixture! :_is-nil? :nil?)
+    (let [fds [{:name :_guarded-nil
+                :parent :if
+                :args {:test :_is-nil?
+                       :then nil
+                       :else :_else-consumer}}
+               {:name :_else-consumer :args {} :return-type :text}]
+          overrides (check/build-ref-return-overrides fds)]
+      (is (= {:_nullable-text :text}
+             (get overrides :_else-consumer))
+          ":else under `:nil?` test gets non-null narrowing"))))
+
+
+(deftest phase-170-cond-result-sees-prior-not-taken-narrowings
+  (testing ":cond clauses — result inherits narrowings from prior negated tests"
+    (seed-phase-170-fixture! :_is-nil? :nil?)
+    (registry/record-rich-types-raw! :_clause-result-1 {:args {} :return :text})
+    (registry/record-rich-types-raw! :_else-result {:args {} :return :text})
+    (let [fds [{:name :_cond-guarded
+                :parent :cond
+                :args {:clauses [:_is-nil? :_clause-result-1
+                                 true :_else-result]}}
+               {:name :_clause-result-1 :args {} :return-type :text}
+               {:name :_else-result :args {} :return-type :text}]
+          overrides (check/build-ref-return-overrides fds)]
+      (is (= :null (get-in overrides [:_clause-result-1 :_nullable-text]))
+          "clause-1 result sees :_nullable-text as :null (test was truthy)")
+      (is (= :text (get-in overrides [:_else-result :_nullable-text]))
+          "else-result sees :_nullable-text non-null (prior :nil? was false)"))))

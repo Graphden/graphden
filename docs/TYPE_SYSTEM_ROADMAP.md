@@ -38,6 +38,48 @@ notes for the next time the type-checker's reach needs to grow.
 
 ## Phase #170 — Control-flow narrowing through `:if`/`:cond` guards
 
+### Status — 2026-06-16: v1 LANDED (direct-predicate subset)
+
+A focused subset shipped: `:if` / `:cond` whose `:test` ref (or
+clause-test ref) walks to a root `:some?` / `:nil?` whose `:value`
+slot is bound to a fn-name `:_T` get treated as control-flow
+guards. The non-null narrowing flows into the taken branch's
+transitive ref-tree via a new `*ref-return-overrides*` dynvar
+(`src/graphden/types/check.clj` — `build-ref-return-overrides`,
+`if-branch-overrides`, `cond-branch-overrides`,
+`ref-return-narrowed`).
+
+Pass 3 binds the per-fn-def overrides alongside `*caller-
+narrowings*` (`check-fn-def-with-narrowings!`). Every site that
+historically read `:return` straight off the registry while
+type-checking a binding now funnels through
+`ref-return-narrowed` — `bindings-info-for-rule`'s `{:ref ...}`
+branch, `ref-binding?` actual computation, sequence-item lookup,
+and the vector-binding `:fn-ref` / `:ref-map` shape readers.
+
+Verified by removing the `:type :text` assertion on
+`:_list-exec-limit-parsed-body` — sweep stays at 0, full test
+suite (1439 tests, 5948 assertions) green.
+
+### What v1 does NOT cover
+
+- Composed guards (e.g. `:_X-blank?` wrapping `:str-blank? + :get`
+  + `:and`/`:or` decomposition). The branch root must be `:some?`
+  or `:nil?` literally — chained shims with `:str-blank?` etc.
+  bail out.
+- Field-level narrowings through `:get :coll {:as :parsed}
+  :key :item-id`. The `:get` call is a per-use-site anon and its
+  return is whatever the rule yields; we narrow the ANON's
+  return, but we can't propagate the narrowing back to a fresh
+  `:get` of the same field at the consumer site (it's a distinct
+  anon after `expand-inline-anons-in-module`'s per-use-site
+  hashing — see `packages/records/parse.clj :: anon-fn-name`).
+- Path-sensitive analysis through record-field projections.
+
+These shapes still need author `:type T` assertions and remain
+documented at the binding site. The remaining annotations are
+listed at the bottom of this section.
+
 ### Motivation
 
 The 11 nullability gaps that α' surfaced (and that we closed with
@@ -113,10 +155,24 @@ nullability cases.
 
 ### Recommendation
 
-Defer until the next time the type-checker's precision needs
-investment. The current `:type T` annotations are sound and
-self-documenting; the Phase E gate ensures we won't lose
+v1 is committed. v2 (composed-guard decomposition, field-level
+narrowing) is the next investment — multi-week — and only worth
+it when there's a fresh wave of nullability gaps to close. The
+current `:type T` annotations at the remaining sites are sound
+and self-documenting; the Phase E gate ensures we won't lose
 visibility into similar new gaps.
+
+### Remaining `:type T` author-assertions (uncovered by v1)
+
+| site | guard shape | reason v1 can't cover |
+|---|---|---|
+| `:_bearer-token-raw` (`:ref :authorization-header :type :text`) | `:_has-bearer-prefix?` `:str-starts-with?` shim | non-`:some?`/`:nil?` predicate |
+| `:_list-exec-limit-less-than-1?` (`:ref :_list-exec-limit-parsed :type :int`) | `:or` short-circuit `:_list-exec-limit-parsed :nil?` | `:or`-shaped guard not yet recognised |
+| `:_list-exec-by-fn-version-id` (`:fn-id :type :uuid` via `:get :parsed`) | `:_list-exec-no-anchor? :and [...]` | `:and` of `:nil?` guards through field projection |
+| `:_seq-remove-apply-do-delete` (`:id :type :uuid` via `:get :parsed`) | `:nil? (get parsed :item-id)` | per-use-site anon split |
+| `:_create-branch-apply-row` (`:branch-name :type :text` via `:get :parsed`) | `:_blank?` (`:str-blank?` shim) | non-`:some?`/`:nil?` predicate |
+| `:_inline-bind-target-fn-row` / `:_delete-secret-fn-row` (`:id :type :uuid`) | validation upstream | per-use-site anon split |
+| `:_update-id-uuid` (`:ref :type :uuid` in `web/crud`) | parse-uuid + `:nil?` guard at caller | per-use-site anon split |
 
 ## Phase γ — Row polymorphism
 
@@ -499,7 +555,7 @@ held as long-horizon. Actual landings:
 | E (hard-gate sweep + allowlist + tests) | LANDED — both directions, bidirectional gate |
 | C (`:type` rename localisation) | not needed — α' supersedes the use case |
 | D (editor surface) | LANDED implicitly — α' writes narrowed types into the canonical `:return` field; editor reads them via `/api/types` without any UI change |
-| #170 (control-flow narrowing) | DEFERRED — see § above; 11 nullability gaps closed via author-typed assertions instead |
+| #170 (control-flow narrowing) | v1 LANDED — direct-predicate `:if`/`:cond` subset closes the `:_list-exec-limit-parsed-body` assertion; ~7 sites with composed guards remain `:type T`-asserted, fully documented |
 | γ (row polymorphism) | DEFERRED — see § above; α' delivers identical correctness today |
 
 Final state: sweep at zero, allowlist empty, Phase E gate armed.

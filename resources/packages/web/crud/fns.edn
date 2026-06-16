@@ -2716,7 +2716,10 @@
           ;; `:type :uuid` author-assertion — the validation guard
           ;; upstream rejects the request when `:item-id` is missing
           ;; or malformed, so by the time this fn runs the parsed
-          ;; UUID is non-null.
+          ;; UUID is non-null. (Phase #170 control-flow narrowing
+          ;; cannot eliminate this assertion because the inline
+          ;; `:get` here is a per-use-site anon, distinct from the
+          ;; one in the upstream `:nil?` guard.)
           :id {:parent :get :type :uuid
                :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
 

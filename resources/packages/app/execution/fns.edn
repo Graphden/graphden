@@ -789,9 +789,9 @@
    :args {:request {:as :request} :param-name {:value "limit"}}}
 
   {:name :_list-exec-limit-parsed-body
-   :description "`:try` body — :parse-int throws NumberFormatException on non-numeric input. The wrapping :try collapses that to nil. The `:type :text` override on the ref-binding tells the type-checker that `:_list-exec-limit-raw`'s nullable surface is excluded under the `:_list-exec-limit` `:if`-guard (`(:some? :_list-exec-limit-raw)` clears it)."
+   :description "`:try` body — :parse-int throws NumberFormatException on non-numeric input. The wrapping `:try` collapses that to nil. Phase #170 control-flow narrowing recognises the parent `:_list-exec-limit`'s `:if :test (:some? :_list-exec-limit-raw)` guard and narrows `:_list-exec-limit-raw` to non-null inside the `:then` ref-tree."
    :parent :parse-int
-   :args {:s {:ref :_list-exec-limit-raw :type :text}}}
+   :args {:s :_list-exec-limit-raw}}
 
   {:name :_list-exec-limit
    :description "Parsed `?limit` integer; nil when absent / non-numeric."

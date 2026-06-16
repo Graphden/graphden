@@ -456,16 +456,19 @@
                     (swap! failed-names conj (:name fd))
                     (log/debug "Type-check failed for fn-def" (:name fd) "—"
                                (ex-message e)))))
-           ;; Pass 2/3 — Phase α' caller-context propagation.
-           ;; Build narrowings for rename-host fn-defs; re-check each
-           ;; fn-def with the per-callee entry bound into
-           ;; `*caller-narrowings*`. Pass 3's record replaces Pass 1's
-           ;; isolation view; the FINAL failure set is what the
-           ;; allowlist gates against.
-           (let [narrowings (types-check/build-caller-narrowings sorted)]
+           ;; Pass 2/3 — Phase α' caller-context propagation +
+           ;; Phase #170 control-flow ref-return overrides.
+           ;; Build narrowings for rename-host fn-defs AND per-fn-def
+           ;; ref-return overrides driven by `:if`/`:cond` direct
+           ;; `:some?`/`:nil?` guards. Re-check each fn-def with both
+           ;; bound. Pass 3's record replaces Pass 1's isolation
+           ;; view; the FINAL failure set is what the allowlist
+           ;; gates against.
+           (let [narrowings (types-check/build-caller-narrowings sorted)
+                 overrides  (types-check/build-ref-return-overrides sorted)]
              (reset! failed-names #{})
              (doseq [fd sorted]
-               (try (types-check/check-fn-def-with-narrowings! fd narrowings)
+               (try (types-check/check-fn-def-with-narrowings! fd narrowings overrides)
                     (catch Exception e
                       (swap! failed-names conj (:name fd))
                       (log/debug "Type-check failed for fn-def" (:name fd) "—"

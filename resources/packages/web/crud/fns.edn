@@ -167,7 +167,7 @@
    :description "Look up a single entity by id."
    :args {:entity-type {:type :text :description "Entity-name keyword as string."}
           :id {:type :uuid :description "Entity UUID."}}
-   :return-type :jsonb
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{:db}}
 
   {:name :delete-entity
@@ -195,19 +195,19 @@
   {:name :free-arg-slot-map
    :description "Map of `arg-name → slot-id` for `fn-id`'s free args. `{}` when fn-id is nil."
    :args {:fn-id {:type [:union :null :uuid] :description "Target fn-id; nil short-circuits to empty map."}}
-   :return-type :jsonb
+   :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
   {:name :list-all-graph-entities
    :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`."
    :args {}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   {:name :all-rich-types
    :description "Snapshot of the in-memory rich-type registry. Returns `{fn-name {:return type :args {arg-name type}}}` for every base-fn AND composed fn-def the type-checker has processed. Powers `/api/types` — editor and external tools use this to know what each slot accepts."
    :args {}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   ;; §3.3 atomic core of POST /api/entities/:type — the unit that
@@ -222,7 +222,7 @@
           :entity-data {:type [:union :null :_entity-field-map] :description "Pre-validated row payload. Type accepts `:null` because the apply branch is reached only when validation passed; the runtime contract is non-null."}
           :type-str {:type :text :description "Original string form of entity-type (`\"fn\"`, `\"binding\"`, …) used to gate rename-slot + post-check dispatch."}
           :form-data {:type [:union :null :_entity-field-map] :description "Original form payload (preserves `:rename-to` / `:list-append` / etc.). Nullable at type level; non-null at runtime."}}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   ;; Atomic update unit. Simpler than try-apply-create — no post-write
@@ -235,7 +235,7 @@
           :entity-data {:type [:union :null :_entity-field-map] :description "Pre-validated row patch. Nullable at type level; non-null at runtime."}
           :type-str {:type :text :description "Original string form of entity-type."}
           :form-data {:type [:union :null :_entity-field-map] :description "Original form payload. Nullable at type level; non-null at runtime."}}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   ;; §3.3 sequence-write atomic units. Same `{:created/:updated}` /
@@ -245,7 +245,7 @@
    :args {:parsed {:type {:fn-id [:union :null :uuid] :body [:union :null :jsonb]}
                    :description "Parsed POST /api/sequence/append/:fn-id payload (`{:fn-id :body}`)."}
           :seq-binding {:type [:union :null :_entity-field-map] :description "Resolved sequence-binding row (real or synthetic)."}}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   {:name :try-apply-seq-update
@@ -253,7 +253,7 @@
    :args {:parsed {:type {:item-id [:union :null :uuid] :body [:union :null :jsonb]}
                    :description "Parsed PUT /api/sequence/item/:item-id payload."}
           :item {:type [:union :null :_entity-field-map] :description "Pre-read binding-list-item row."}}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   {:name :fn-names-with-tag
@@ -289,7 +289,7 @@
   {:name :json-to-type
    :description "Decode the JSON wire-shape of a type expression back to its Clojure AST. Strings become keywords (except inside refinement constraints, where literal-string predicates like `[:not= \"\"]` stay strings — `:non-empty-text` depends on this)."
    :args {:json {:type :jsonb :description "JSON-decoded value (post-cheshire) — string / vector / map / scalar."}}
-   :return-type :jsonb}
+   :return-type [:union :keyword :text [:list :any] [:map :keyword :any]]}
 
   {:name :_types-compatible-parsed
    :description "Stage 1 of types-compatible — JSON body → `{:expected :candidate}`, each decoded from the wire shape produced by `/api/types`."
@@ -394,7 +394,7 @@
   {:name :to-set
    :description "Coerce a sequence into a Clojure set. Useful when the result is consumed as a containment predicate (`every? the-set xs`) — vector/list would silently mis-behave there."
    :args {:coll {:type [:list a] :description "Source sequence."}}
-   :return-type :jsonb}
+   :return-type [:list a]}
 
   {:name :_types-candidates-effects-raw
    :description "Stage 1b — the raw `:effects` list off the JSON body (vector of strings), or nil when omitted."
@@ -1914,7 +1914,7 @@
   {:name :extract-entity-params
    :description "Pull `{:type-str :id-str :entity-type}` from a Ring request — reitit `:path-params` preferred, URI fallback for the http-kit passthrough path."
    :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb}
+   :return-type {:type-str [:union :null :text] :id-str [:union :null :text] :entity-type [:union :null :keyword]}}
 
   ;; --- :query-param — atomic boundary. Pulls a named query-string
   ;; parameter from a Ring request; tolerates both reitit-enriched
@@ -2574,7 +2574,7 @@
   {:name :_seq-append-load-binding
    :description "Read-only sequence-binding lookup. Returns the existing binding row, a synthetic placeholder (materialized by apply), or nil when the fn has no sequence slot."
    :args {:parsed {:type {:fn-id [:union :null :uuid] :body [:union :null :jsonb]}}}
-   :return-type :jsonb
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{:db}}
 
   {:name :_seq-append-no-seq-slot?
@@ -2698,7 +2698,7 @@
   {:name :_seq-remove-load-item
    :description "Read the binding-list-item row for the parsed item-id. Returns nil when the id is invalid (caught by guard #1) OR when no row matches."
    :args {:parsed {:type {:item-id :uuid}}}
-   :return-type :jsonb
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{:db}}
 
   {:name :_seq-remove-item-not-found?
@@ -2774,7 +2774,7 @@
   {:name :_seq-update-load-item
    :description "Read the binding-list-item row for the parsed id."
    :args {:parsed {:type {:item-id [:union :null :uuid] :body [:union :null :jsonb]}}}
-   :return-type :jsonb
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{:db}}
 
   {:name :_seq-update-item-not-found?
@@ -3007,7 +3007,7 @@
   {:name :try-apply-tighten
    :description "§3.3 core of tighten-fn-effects: narrows the fn-typed binding's effective type. Returns `{:status :reason :result}` — graph dispatches on `:status`."
    :args {:parsed {:type :_tighten-parsed-shape}}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   ;; --- :parse-form-body / :parse-json-body (Variant-2). Both were

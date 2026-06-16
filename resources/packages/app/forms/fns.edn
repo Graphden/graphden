@@ -223,7 +223,7 @@
                      :description "Effective type of the slot — atomic kw (`:int`, `:text`), legacy text alias, vector compound (`[:list T]`), or record (`{...}`)."}
           :current-value {:type :any
                           :description "Slot's currently-bound value, used to seed the form. Polymorphic by design."}}
-   :return-type :jsonb
+   :return-type :hiccup-node
    :effects #{:db}}
 
   {:name :_value-form-apply

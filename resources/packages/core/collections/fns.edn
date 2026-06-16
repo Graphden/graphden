@@ -144,7 +144,7 @@
    :description "Pour items from one collection into another (Clojure's `into`). The destination's type is preserved."
    :args {:to {:type [:union :null [:map a :any] [:list :any]] :description "Destination collection. Nil treated as empty."}
           :from {:type [:union :null [:map a :any] [:list :any]] :description "Source items. Nil treated as empty."}}
-   :return-type :jsonb}
+   :return-type [:union [:map a :any] [:list :any]]}
 
   {:name :assoc-in
    :description "Set the value at a nested path in a map (Clojure's `assoc-in`). Creates intermediate maps as needed."

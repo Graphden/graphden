@@ -88,7 +88,7 @@
    :description "Build a reitit middleware spec. `:body` is a Ring-shaped fn-graph with two leftover free args (`:request` and `:next-handler`) — the executor map-callable-wraps it. Inside the body, use `:proceed` to delegate to the next link."
    :args {:name {:type [:union :keyword :text] :description "Identifier (keyword or string) shown in reitit's middleware chain log."}
           :body {:type [:fn {:request :ring-request-shape :next-handler :any} :ring-response-shape] :description "Ring-shaped fn-graph; receives `:request` and `:next-handler` as free args (2-arg map-callable). Names are load-bearing — they're how `hof-wrap` routes the inputs. `:next-handler` stays `:any` because the value flows through opaquely (reitit-supplied callable)."}}
-   :return-type :jsonb}
+   :return-type [:map :keyword :any]}
 
   ;; Delegate to the next handler in the middleware chain. Replaces
   ;; the ex-`:proceed` base-fn (which sat on a `*next-handler*` dynvar).

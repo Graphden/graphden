@@ -846,15 +846,27 @@
 
 
 ;; --- :into ------------------------------------------------------------------
-;; Preserve the destination collection's type. If `:to` is `[:list T]`,
-;; the result is `[:list T]` regardless of `:from`. If `:to` is a known
-;; record, `:into` won't typically be used (it would conj key-value
-;; pairs), so we degrade.
+;; Preserve the destination collection's type. `:into` returns the
+;; same SHAPE as `:to`:
+;; - `[:list T]` → `[:list T]` regardless of `:from`.
+;; - `[:map K V]` / record → same map shape.
+;; - `:empty-map` (literal `{}`) → `[:map :any :any]` (a fresh map
+;;   that downstream may narrow when keys/values become known; the
+;;   common case is `:into {} <pairs>`).
+;; Without these arms `:into`'s declared `[:union [:map a :any]
+;; [:list :any]]` leaks the polymorphic union into every downstream
+;; consumer that bound `:to` to a literal map (e.g. `:parse-form-body`
+;; via `:_qs-pairs-as-map`'s `:to {:value {}}`).
 
 (defn into-return-rule
   [bindings-info default-ret]
   (let [to-type (get-in bindings-info [:to :type])]
-    (if (types/list-type? to-type) to-type default-ret)))
+    (cond
+      (or (types/list-type? to-type)
+          (types/map-type? to-type)
+          (types/record-type? to-type)) to-type
+      (= to-type :empty-map)            [:map :any :any]
+      :else                             default-ret)))
 
 
 ;; --- :assoc-in --------------------------------------------------------------

@@ -618,7 +618,7 @@
   {:name :_execute-apply
    :description "Stage 3 — submit future, deref with timeout. Returns inline `{:status :succeeded :result …}` for fast pure fns, or `{:status :pending :execution-id}` when timeout/effects/persist? forced async."
    :args {:parsed {:type :_execute-parsed-shape}}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   {:name :_execute-rejected?
@@ -995,7 +995,7 @@
   {:name :_reconcile-services-apply
    :description "Stage 1 — single recon-library call producing the reconcile summary (`{:started [ids] :stopped [ids]}`). Wrapped into `{:ok true :reconcile …}` by the fn-def below."
    :args {:request {:type :ring-request-shape}}
-   :return-type :jsonb
+   :return-type {:started [:list :uuid] :stopped [:list :uuid]}
    :effects #{:db :io}}
 
   {:name :_reconcile-services

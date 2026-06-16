@@ -637,7 +637,7 @@
    :description "Atomic library boundary over `mrg/diff-branches` — returns the resolved-view diff between the two branches' ancestor chains: `{:source-branch-id :target-branch-id :diffs [...]}`."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   {:name :_diff-apply-raw
@@ -1169,7 +1169,7 @@
    :description "Atomic library boundary over `mrg/detect-conflicts` — returns `{:conflicts [...] :fork-point <uuid-or-nil>}` for the merge-oriented framing (source → target)."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}}
-   :return-type :jsonb
+   :return-type [:map :keyword :any]
    :effects #{:db}}
 
   {:name :_conflicts-apply-raw

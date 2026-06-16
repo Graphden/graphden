@@ -111,7 +111,7 @@
                    :description "Pure callable producing the grouping key per item."}
           :coll {:type [:list a]
                  :description "Collection to group."}}
-   :return-type :jsonb}
+   :return-type [:map b [:list a]]}
 
   {:name :sort-by
    :description "Sort by the result of `(key-fn item)` in natural order (Clojure's `sort-by`)."

@@ -710,19 +710,22 @@
         ;;
         ;; PB' own-slot declarations (`{:type T}` with no `:value` or
         ;; `:ref`) surface in `:resolved-bindings` as `{:type T :value
-        ;; nil}` — `select-keys [:value :ref]` then yields `{:value
-        ;; nil}`, which would falsely register as a "binding to nil"
-        ;; and conflict with a real ref-binding on a sibling parent.
-        ;; Filter those out: only true bindings (real `:value` or
-        ;; `:ref`) participate in the value-conflict check.
-        (let [actual-binding? (fn [pin]
-                                (or (contains? pin :ref)
-                                    (some? (:value pin))))
+        ;; nil}` — same shape as a legitimate `{:value nil}` binding.
+        ;; Distinguish via the `:value-present` flag set by
+        ;; `bindings-info-for-rule`: true iff the author wrote a
+        ;; literal value (incl. nil), false/absent for PB' decl or
+        ;; ref-binding. A real `{:value nil}` binding then DOES
+        ;; participate in conflict detection (a sibling binding to
+        ;; `{:value :foo}` will trip), while PB' decls correctly
+        ;; defer to the sibling's real binding.
+        (let [actual-binding? (fn [binding]
+                                (or (contains? binding :ref)
+                                    (true? (:value-present binding))))
               rbs-by-slot
               (reduce (fn [acc info]
                         (reduce-kv (fn [a slot binding]
                                      (let [pin (select-keys binding [:value :ref])]
-                                       (if (and (actual-binding? pin)
+                                       (if (and (actual-binding? binding)
                                                 (not (contains? (a slot) pin)))
                                          (update a slot (fnil conj #{}) pin)
                                          a)))
@@ -1710,7 +1713,8 @@
                              {:type (or (some-> (:type b-form) types/resolve-alias)
                                         (classify-literal (:value b-form))
                                         :any)
-                              :value (:value b-form)}
+                              :value (:value b-form)
+                              :value-present true}
 
                              ;; `{:type T}` alone — author pins the static
                              ;; type without supplying a value. The slot
@@ -1756,14 +1760,16 @@
                              (let [et (vector-binding-elem-types b-form)]
                                {:type [:list (types/coarse-lub et)]
                                 :elem-types et
-                                :value b-form})
+                                :value b-form
+                                :value-present true})
 
                              (keyword? b-form)
-                             {:type :any :value b-form}
+                             {:type :any :value b-form :value-present true}
 
                              :else
                              {:type (or (classify-literal b-form) :any)
-                              :value b-form})]))
+                              :value b-form
+                              :value-present true})]))
                    args)
          from-parent (into {}
                            (keep (fn [[arg-name arg-info]]

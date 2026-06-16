@@ -251,14 +251,56 @@
     (registry/record-rich-types-raw! :a-pins-x-to-foo
                                      {:return :text
                                       :args {}
-                                      :resolved-bindings {:x {:type :text :value "foo"}}})
+                                      :resolved-bindings {:x {:type :text :value "foo" :value-present true}}})
     (registry/record-rich-types-raw! :b-pins-x-to-bar
                                      {:return :text
                                       :args {}
-                                      :resolved-bindings {:x {:type :text :value "bar"}}})
+                                      :resolved-bindings {:x {:type :text :value "bar" :value-present true}}})
     (try
       (check/check-fn-def! {:name :mi-value-conflict
                             :parents [:a-pins-x-to-foo :b-pins-x-to-bar]
+                            :args {}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [d (ex-data e)]
+          (is (= :bindings/mi-slot-value-conflict (:type d)))
+          (is (= :x (:slot-name d))))))))
+
+
+(deftest pb-decl-not-mi-value-conflict
+  (testing "PB' own-slot decl (`{:type T}` no value) does NOT trigger MI value-conflict against a sibling's real binding — distinguished from `{:value nil}` via `:value-present` flag"
+    ;; Parent A: PB' own-slot decl — surfaces as `{:type :text :value nil}` (no `:value-present`).
+    (registry/record-rich-types-raw! :a-pb-decl-x
+                                     {:return :text
+                                      :args {}
+                                      :resolved-bindings {:x {:type :text :value nil}}})
+    ;; Parent B: real ref-binding on the same slot.
+    (registry/record-rich-types-raw! :b-binds-x-by-ref
+                                     {:return :text
+                                      :args {}
+                                      :resolved-bindings {:x {:type :text :value nil :ref :some-fn}}})
+    ;; Child inherits both — PB' decl should DEFER to the real binding,
+    ;; no conflict. Without the asymmetry fix, the PB' `{:value nil}`
+    ;; entry would falsely conflict with B's ref pin.
+    (is (some? (check/check-fn-def! {:name :child-mixes-pb-and-ref
+                                     :parents [:a-pb-decl-x :b-binds-x-by-ref]
+                                     :args {}}))
+        "PB' decl should not conflict with sibling's real ref-binding")))
+
+
+(deftest rejects-mi-explicit-nil-vs-real-binding
+  (testing "Author writes `{:value nil}` (literal nil binding, `:value-present true`) on one parent and `{:value :foo}` on another — that IS a real conflict, must trip"
+    (registry/record-rich-types-raw! :a-binds-x-to-nil
+                                     {:return :text
+                                      :args {}
+                                      :resolved-bindings {:x {:type :text :value nil :value-present true}}})
+    (registry/record-rich-types-raw! :b-binds-x-to-foo
+                                     {:return :text
+                                      :args {}
+                                      :resolved-bindings {:x {:type :text :value "foo" :value-present true}}})
+    (try
+      (check/check-fn-def! {:name :mi-nil-vs-foo
+                            :parents [:a-binds-x-to-nil :b-binds-x-to-foo]
                             :args {}})
       (is false "should have thrown")
       (catch clojure.lang.ExceptionInfo e

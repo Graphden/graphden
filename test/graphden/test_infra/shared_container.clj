@@ -252,11 +252,42 @@
      (update cluster :jdbc-url jdbc-url-with-database db))))
 
 
+(defn- drop-one-ns-database!
+  "Two-phase per-DB drop:
+     1. Plain `DROP DATABASE` — succeeds when nothing's connected.
+        If something IS connected, PG returns SQLSTATE 55006
+        (`object_in_use`); catch + log.
+     2. Fall back to `DROP DATABASE … WITH (FORCE)` (PG 13+), which
+        sends SIGTERM to leftover backends.
+
+   The two-phase pattern matters because phase-2's FORCE raises
+   `SQLSTATE 57P01` (`admin_shutdown`) inside any backend that's
+   still actively executing a query — under the previous one-shot
+   FORCE call, in-flight test reads would die mid-query if the
+   post-run hook fired before a parallel NS finished closing its
+   pool (the `process-delete-entity-fn-binding-test` flake). Phase
+   1 gives the cleanup-of-the-cleanup a window; phase 2 is the
+   guarantee."
+  [conn db]
+  (try
+    (jdbc/execute! conn [(str "DROP DATABASE IF EXISTS \"" db "\"")])
+    (catch SQLException e
+      (if (= "55006" (SQLException/.getSQLState e))
+        (do
+          (log/warn "DB" db "still in use at drop time — falling back to WITH (FORCE)")
+          (try
+            (jdbc/execute! conn
+                           [(str "DROP DATABASE IF EXISTS \"" db "\" WITH (FORCE)")])
+            (catch Exception e2
+              (log/warn e2 "WITH (FORCE) drop also failed for" db))))
+        (log/warn e "Failed to drop test DB" db)))))
+
+
 (defn drop-all-ns-databases!
-  "Best-effort teardown: drop every per-NS DB created during this run.
-   Uses `DROP DATABASE … WITH (FORCE)` (PG 13+) so any leftover
-   connection on the doomed DB doesn't block the drop. Called from
-   the kaocha post-run hook BEFORE container shutdown."
+  "Best-effort teardown: drop every per-NS DB created during this
+   run. See `drop-one-ns-database!` for the two-phase semantics that
+   avoid killing in-flight test queries. Called from the kaocha
+   post-run hook BEFORE container shutdown."
   []
   (let [dbs @ns-databases-atom]
     (when (seq dbs)
@@ -265,12 +296,7 @@
                                                :user username
                                                :password password})]
           (doseq [db dbs]
-            (try
-              (jdbc/execute! conn
-                             [(str "DROP DATABASE IF EXISTS \"" db
-                                   "\" WITH (FORCE)")])
-              (catch Exception e
-                (log/warn e "Failed to drop test DB" db))))))
+            (drop-one-ns-database! conn db))))
       (reset! ns-databases-atom #{}))))
 
 

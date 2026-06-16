@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.crud.entities-graph-test
+(ns ^:integration graphden.crud.entities-graph-test
   "Graph-path tests for the entity CRUD HTTP handlers
    (`:process-create-entity` / `:process-update-entity` /
    `:process-delete-entity`). Replaces the test-side reproductions in

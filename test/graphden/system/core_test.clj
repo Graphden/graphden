@@ -112,7 +112,12 @@
       (let [storage :mock-storage
             packages {:fn-defs [{:name :test-fn :parent :const}
                                 {:name :another-fn :parent :add}]}
-            opts {:storage storage :packages packages}
+            opts {:storage storage :packages packages
+                  ;; Mock fn-defs don't include the
+                  ;; `allowed-type-check-failures` allowlist entries
+                  ;; (those live in `web/crud`); skip the gate so the
+                  ;; stale-allowlist arm doesn't trip on test mocks.
+                  :skip-allowlist-gate? true}
             result (ig/init-key :exec/fn-entities opts)]
         (is (map? result) "Should return a map of fn entities")
         (is (contains? result :test-fn) "Should contain test-fn")
@@ -120,7 +125,8 @@
 
   (testing "init-key handles empty fn-defs"
     (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns]
-      (let [opts {:storage :mock :packages {:fn-defs []}}
+      (let [opts {:storage :mock :packages {:fn-defs []}
+                  :skip-allowlist-gate? true}
             result (ig/init-key :exec/fn-entities opts)]
         (is (map? result))
         (is (empty? result))))))

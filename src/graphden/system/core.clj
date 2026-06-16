@@ -364,7 +364,8 @@
    sweep, so production NEVER skips."
   ([storage packages base-fns-info]
    (sync-fn-entities-from-packages! storage packages base-fns-info nil))
-  ([storage packages base-fns-info {:keys [skip-type-check?]}]
+  ([storage packages base-fns-info
+    {:keys [skip-type-check? skip-allowlist-gate?]}]
    (let [fn-defs (:fn-defs packages)
          ns-id-map (or (:ns-id-map base-fns-info) {})
          extra-name->id (or (:all-name->id base-fns-info) {})
@@ -467,8 +468,15 @@
            ;; that's NO LONGER failing must be removed from the
            ;; allowlist (the registry is shrinking, hence the
            ;; assertion).
-           (types-check/assert-sweep-failures-match-allowlist!
-             @failed-names))
+           ;;
+           ;; `skip-allowlist-gate?` — opt-out for test mocks that
+           ;; load a SUBSET of the production packages (the allowlist
+           ;; names live in `web/crud`'s create/update/delete-apply
+           ;; chains — a unit test passing two mock fn-defs would
+           ;; trip the stale-allowlist arm spuriously).
+           (when-not skip-allowlist-gate?
+             (types-check/assert-sweep-failures-match-allowlist!
+               @failed-names)))
          ;; Port-collision scan — runs against the expanded fn-def
          ;; set so synthetic anons that bind `:port` get inspected
          ;; too. Logs a WARN per colliding port; doesn't fail
@@ -499,9 +507,12 @@
 ;; Fn Entities
 ;; =============================================================================
 
-(defmethod ig/init-key :exec/fn-entities [_ {:keys [storage packages base-fns]}]
+(defmethod ig/init-key :exec/fn-entities
+  [_ {:keys [storage packages base-fns skip-allowlist-gate?]}]
   (log/info "Creating fn entities...")
-  (let [fns (sync-fn-entities-from-packages! storage packages base-fns)]
+  (let [fns (sync-fn-entities-from-packages!
+              storage packages base-fns
+              {:skip-allowlist-gate? skip-allowlist-gate?})]
     (log/info "Fn entities created:" (count fns))
     fns))
 

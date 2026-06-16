@@ -2282,35 +2282,53 @@
   [{fn-name :name :as fn-def}]
   (when-let [{:keys [primary-parent parent-info]} (resolve-parent-info fn-def)]
     (binding [*source-info* (source-info-for fn-def)]
-      ;; Type-row parents (e.g. `:Storage`) declare their abstract
-      ;; operations as record FIELDS, not as the rich-type `:args`
-      ;; slot map (which is empty for type-rows). Concrete impls
-      ;; (`:postgres-storage-impl :parent :Storage :args {:query
-      ;; :pg-query …}`) bind those fields. Inject the resolved fields
-      ;; into `parent-args` so the per-binding type-check verifies
-      ;; that `:pg-query` actually satisfies `:Storage`'s `:query`
-      ;; field type (a `[:fn …]` shape). `(:args parent-info)` wins
+      ;; Type-row parents (e.g. `:Storage`, `:ResolveVersionedRowsInput`)
+      ;; declare their abstract operations as record FIELDS, not as the
+      ;; rich-type `:args` slot map (which is empty for type-rows).
+      ;; Concrete impls (`:postgres-storage-impl :parent :Storage :args
+      ;; {:query :pg-query …}`) bind those fields. Inject the resolved
+      ;; fields from EVERY parent in the MI list (primary OR secondary)
+      ;; so the per-binding type-check verifies that bindings satisfy
+      ;; the type-row's field contracts. `(:args parent-info)` wins
       ;; on a key collision — that's the normal slot map.
-      (let [type-row-fields (let [resolved (and (keyword? primary-parent)
-                                                (types/resolve-alias primary-parent))
-                                  ret (:return parent-info)]
-                              (cond
-                                (types/record-type? resolved) resolved
-                                (types/record-type? ret) ret
-                                :else {}))
+      ;;
+      ;; Resolving every parent (not just primary) closes the MI bug
+      ;; surfaced by `:resolve-versioned-rows :parents [:filter
+      ;; :ResolveVersionedRowsInput]`: the type-row is the SECONDARY
+      ;; parent, so a primary-only resolver missed its fields entirely
+      ;; (`:version-id-field` etc. showed up as "unknown slot").
+      (let [parent-list (or (seq (:parents fn-def))
+                            (when (:parent fn-def) [(:parent fn-def)]))
+            type-row-fields (reduce
+                              (fn [acc p]
+                                (let [resolved (and (keyword? p)
+                                                    (types/resolve-alias p))]
+                                  (cond
+                                    (types/record-type? resolved)
+                                    (merge acc resolved)
+
+                                    :else acc)))
+                              (let [ret (:return parent-info)]
+                                (if (types/record-type? ret) ret {}))
+                              parent-list)
             parent-args (merge type-row-fields (:args parent-info))]
         (check-effect-categories! fn-def)
         (check-unknown-slots! fn-def primary-parent parent-args parent-info)
         (check-ref-type-overrides! fn-def primary-parent)
         (check-binding-monotonicity! fn-def primary-parent parent-args)
         (check-branch-local-monotonicity! fn-def))
-      (let [type-row-fields (let [resolved (and (keyword? primary-parent)
-                                                (types/resolve-alias primary-parent))
-                                  ret (:return parent-info)]
-                              (cond
-                                (types/record-type? resolved) resolved
-                                (types/record-type? ret) ret
-                                :else {}))
+      (let [parent-list (or (seq (:parents fn-def))
+                            (when (:parent fn-def) [(:parent fn-def)]))
+            type-row-fields (reduce
+                              (fn [acc p]
+                                (let [resolved (and (keyword? p)
+                                                    (types/resolve-alias p))]
+                                  (if (types/record-type? resolved)
+                                    (merge acc resolved)
+                                    acc)))
+                              (let [ret (:return parent-info)]
+                                (if (types/record-type? ret) ret {}))
+                              parent-list)
             parent-args (merge type-row-fields (:args parent-info))
             ;; Effective parent-args includes resolved bindings from
             ;; further up the chain — gives rules a transitive view of

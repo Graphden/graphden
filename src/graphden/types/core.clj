@@ -845,15 +845,27 @@
 
 
 (defn- list-subtype?
+  "List subtyping — covariant in element type. Typevar on sup side
+   accepts any concrete sub elem; same rationale as `map-subtype?`."
   [sub sup]
-  (subtype? (list-elem sub) (list-elem sup)))
+  (or (type-var? (list-elem sup))
+      (subtype? (list-elem sub) (list-elem sup))))
 
 
 (defn- map-subtype?
-  "Homogeneous-map subtyping — covariant in both key and value type."
+  "Homogeneous-map subtyping — covariant in both key and value type.
+   Typevars on the sup side accept any concrete sub component (the
+   slot is parametric, the call-site picks a binding); without this
+   `[:map :keyword :any] ⊆ [:map a :any]` fails at the first key
+   subtype check. The TOP-level `subtype?` deliberately does NOT
+   blanket-accept typevar-sup (would short-circuit `unify`'s typevar
+   binding step). Structural helpers like THIS, where the typevar
+   is passive recursion context, do."
   [sub sup]
-  (and (subtype? (map-key sub) (map-key sup))
-       (subtype? (map-val sub) (map-val sup))))
+  (and (or (type-var? (map-key sup))
+           (subtype? (map-key sub) (map-key sup)))
+       (or (type-var? (map-val sup))
+           (subtype? (map-val sub) (map-val sup)))))
 
 
 (defn- tuple-subtype?
@@ -1500,6 +1512,19 @@
                b-rest    (vec (clojure.set/difference b-members common))]
            (when (and (seq common) (= 1 (count a-rest)) (= 1 (count b-rest)))
              (let [s (unify (first a-rest) (first b-rest) subst)]
+               (when-not (= s ::fail) s))))
+         ;; Branch-try: concrete on one side, union with a typevar
+         ;; member on the other (`:text` vs `[:union :null 'a]`,
+         ;; common case at `:coalesce`-style sites whose `:value` is
+         ;; `[:union :null a]` and the caller supplies a non-null
+         ;; refined type). Pick the typevar arm and bind. Skip when
+         ;; there are multiple typevar members — ambiguity.
+         (let [concrete (if (union-type? a) b a)
+               union-side (if (union-type? a) a b)
+               tv-members (filter type-var? (union-members union-side))]
+           (when (and (not (union-type? concrete))
+                      (= 1 (count tv-members)))
+             (let [s (unify concrete (first tv-members) subst)]
                (when-not (= s ::fail) s))))
          ::fail)
        ;; Subtype-aware unification — succeeds without further binding

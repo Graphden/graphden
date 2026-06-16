@@ -2693,11 +2693,10 @@
    `polarity` argument is `:taken` (test was truthy) or `:not-taken`
    (test was falsy) and inverts the operation."
   [pred-kind polarity target-static]
-  (let [strip? (or (and (= pred-kind :some?) (= polarity :taken))
-                   (and (= pred-kind :nil?)  (= polarity :not-taken)))]
-    (if strip?
-      (strip-null-from-type target-static)
-      :null)))
+  (if (or (and (= pred-kind :some?) (= polarity :taken))
+          (and (= pred-kind :nil?)  (= polarity :not-taken)))
+    (strip-null-from-type target-static)
+    :null))
 
 
 (defn- if-branch-overrides

@@ -61,14 +61,14 @@
 
   {:name :get-in
    :description "Look up a value at a nested path (Clojure's `get-in`). Falls back to `:default` if any segment is missing."
-   :args {:map {:type :jsonb :description "Map to read from."}
+   :args {:map {:type [:union :null [:map a :any]] :description "Map to read from. Nil treated as empty."}
           :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
           :default {:type :any :required false :description "Returned when the path is absent."}}
    :return-type :any}
 
   {:name :assoc
    :description "Set a single key in a map (Clojure's `assoc`). Returns a new map."
-   :args {:map {:type :any :description "Map to update (nil treated as empty)."}
+   :args {:map {:type [:union :null [:map a :any]] :description "Map to update (nil treated as empty)."}
           :key {:type :any :description "Key to set."}
           :value {:type :any :description "Value to write."}}
    :return-type :any}
@@ -106,17 +106,17 @@
 
   {:name :count
    :description "Count items in a collection (Clojure's `count`). Returns 0 for nil. Always non-negative."
-   :args {:coll {:type :jsonb :description "Collection to size."}}
+   :args {:coll {:type [:union :null :text [:map a :any] [:list :any]] :description "Collection to size — map, list, string, or nil. Strings count by code point."}}
    :return-type :non-negative-int}
 
   {:name :empty?
    :description "True iff the collection has no items (Clojure's `empty?`). True for nil."
-   :args {:coll {:type :jsonb :description "Collection to test."}}
+   :args {:coll {:type [:union :null :text [:map a :any] [:list :any]] :description "Collection to test — map, list, string, or nil."}}
    :return-type :bool}
 
   {:name :contains?
    :description "True iff the collection contains the given key (Clojure's `contains?`). For vectors this checks the index, NOT the value."
-   :args {:coll {:type :jsonb :description "Collection to test."}
+   :args {:coll {:type [:union :null [:map a :any] [:list :any]] :description "Collection to test. Nil treated as empty."}
           :key {:type :any :description "Key (or index) to look up."}}
    :return-type :bool}
 
@@ -142,13 +142,13 @@
 
   {:name :into
    :description "Pour items from one collection into another (Clojure's `into`). The destination's type is preserved."
-   :args {:to {:type :jsonb :description "Destination collection."}
-          :from {:type :jsonb :description "Source items."}}
+   :args {:to {:type [:union :null [:map a :any] [:list :any]] :description "Destination collection. Nil treated as empty."}
+          :from {:type [:union :null [:map a :any] [:list :any]] :description "Source items. Nil treated as empty."}}
    :return-type :jsonb}
 
   {:name :assoc-in
    :description "Set the value at a nested path in a map (Clojure's `assoc-in`). Creates intermediate maps as needed."
-   :args {:m {:type :any :description "Map to update (nil treated as empty)."}
+   :args {:m {:type [:union :null [:map a :any]] :description "Map to update (nil treated as empty)."}
           :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
           :v {:type :any :description "Value to write at the path."}}
    :return-type :any}
@@ -160,7 +160,7 @@
   ;; the only leftover; map arg whose keys match all hof-free → merge).
   {:name :update-in
    :description "Apply a callable to the value at a nested path (Clojure's `update-in`). The `:f` slot is :fn-typed; impl invokes `(f existing-value)` per call."
-   :args {:m {:type :any :description "Map to update (nil treated as empty)."}
+   :args {:m {:type [:union :null [:map a :any]] :description "Map to update (nil treated as empty)."}
           :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
           :f {:type [:fn {:existing a} b] :description "Callable receiving the existing value at the path under the convention name `:existing` (alpha-equivalent for 1-arg callees), returning the new value."}}
    :return-type :any}
@@ -210,7 +210,7 @@
 
   {:name :flatten
    :description "Flatten nested sequences into a single flat one (Clojure's `flatten`)."
-   :args {:coll {:type :jsonb :description "Possibly-nested collection."}}
+   :args {:coll {:type [:union :null [:list :any]] :description "Possibly-nested list. Nil treated as empty."}}
    :return-type [:list :any]}
 
   {:name :distinct

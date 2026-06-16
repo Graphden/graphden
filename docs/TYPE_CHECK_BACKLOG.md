@@ -38,18 +38,64 @@ slot. The 11 affected fn-defs:
 * `:_delete-apply-existing` / `-do-delete` / `-do-invalidate` /
   `-do-notify`
 
-Root cause: each binds `:entity-type :_X-apply-entity-type-str`
-where `:_X-apply-entity-type-str = (:name (:get :parsed
-:entity-type :default nil))`. `:name`'s declared return is
-`[:union :null :text]` (because `(name nil)` is `nil`); the chain
-through `:any`-typed `(:get …)` doesn't narrow. The downstream
-slot expects strict `:text`.
+Root cause (refined 2026-06-16):
 
-The `:_create-apply` outer `:if` already guards the success path
-(`:else`) by checking `:_create-apply-error?` — when control
-reaches `-do-invalidate`, `:entity-type` IS non-nil. But the
-type-checker doesn't propagate `:if`-guard knowledge through
-branches.
+Each binds `:entity-type :_X-apply-entity-type-str` where
+`:_X-apply-entity-type-str = (:name (:get :parsed :entity-type
+:default nil))`. `:name`'s declared return is `[:union :null
+:text]` (because `(name nil)` is `nil`); for the chain to narrow
+to `:text`, the type-checker needs to see `:get`'s return as a
+non-null keyword. That requires `:parsed`'s `coll-type` to be a
+known record with `:entity-type :keyword`.
+
+The `:parsed` SLOT is shared globally across the CREATE / UPDATE
+/ DELETE flows with structurally DIFFERENT record shapes:
+
+| Flow   | Shape                                          | `:id`? |
+|--------|------------------------------------------------|--------|
+| create | `:_create-parsed-shape` (no `:id`)             | no  |
+| update | `:_update-parsed-shape` (has `:id-str`/`:id-uuid`) | no  |
+| delete | `:_delete-parsed-shape` (has `:id`)            | yes |
+
+Any global tightening — e.g. annotating
+`{:as :parsed :type :_create-parsed-shape}` at one create-flow
+site, OR declaring `:return-type :_create-parsed-shape` on
+`:_create-parsed` — propagates the type to the SHARED slot and
+breaks delete-flow / update-flow fn-defs that do
+`(:get :parsed :id …)`: my new `:get` rule (commit 240aef5e)
+correctly typo-throws on a literal key absent from the now-typed
+record, surfacing those siblings as new failures.
+
+So the principled fix is one of:
+
+A. Flow-specific slot rename — replace `{:as :parsed}` with
+   `{:as :create-parsed}` / `{:as :update-parsed}` /
+   `{:as :delete-parsed}` everywhere, then each per-flow
+   `:_X-parsed` can be typed independently. Mechanical but
+   touches dozens of fn-defs across web/crud.
+
+B. Flow-sensitive type-checker — walk the rename chain from
+   each binding-site back to a TYPED upstream, narrow per-chain.
+   Substantial type-system addition; intersects with the broader
+   control-flow narrowing work below.
+
+Neither fits a single session. The 11 surface only as missing
+editor effect/return strips — runtime is unaffected.
+
+### Partial enablement landed 2026-06-16
+
+Two general-purpose primitives added that make per-chain typing
+PRODUCTIVE once flow-disambiguation lands:
+
+* `:name` return-rule: typed input narrows to typed output
+  (`:keyword` → `:text`, `[:union :null :keyword]` → `[:union
+  :null :text]`).
+* `:assert-some` base-fn: runtime non-null assertion + type-level
+  `:null` strip. Companion to `:coalesce` for the audit-as-
+  unreachable case.
+
+Once `:parsed` slots are disambiguated per flow, these primitives
+close the chains without further type-checker changes.
 
 ### Failure 12 — `:_value-form-root-attrs`
 

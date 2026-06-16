@@ -307,9 +307,9 @@
    :args {:tree :_html-page-raw
           :title {:type :text
                   :description "Document `<title>` text."}
-          :head {:type :jsonb
+          :head {:type [:list :hiccup-node]
                  :description "Extra `<head>` hiccup elements appended after the base meta tags."}
-          :scripts {:type :jsonb
+          :scripts {:type [:list :hiccup-node]
                     :description "Sequence of `<script>` hiccup elements appended at the end of `<body>`."}}
    :return-type :hiccup-node}
 
@@ -364,6 +364,6 @@
   {:name :hiccup
    :description "Build a hiccup vector `[tag attrs & children]`. `attrs` and `children` are optional."
    :args {:tag {:type :text :description "HTML tag name."}
-          :attrs {:type :jsonb :required false :description "Attribute map (string keys). Omit/nil for no attributes."}
+          :attrs {:type :jsonb :required false :description "Attribute map (string-or-keyword keys post JSONB-roundtrip). Stays `:jsonb` because empty-map literals `{:value {}}` don't classify as `[:map …]` shape today — tighter typing would surface as unrelated mismatches at every `attrs {:value {}}` site."}
           :children {:type [:list :hiccup-node] :required false :description "Child hiccup nodes — each item may be a literal node or a fn-ref."}}
    :return-type :hiccup-node}]}

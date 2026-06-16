@@ -22,7 +22,7 @@
    :description "Run a SELECT-shape HoneySQL map against graphden's own datasource and return rows. Each row is `{:column value}` with unqualified, lower-snake-case column keys."
    :args {:hsql {:type :jsonb
                  :description "HoneySQL map, e.g. `{:select [:id :name] :from :users :where [:= :id ?]}`. See honeysql docs for the full vocabulary."}}
-   :return-type [:list :jsonb]
+   :return-type [:list [:map :text :any]]
    :effects #{:db}}
 
   ;; ---------------------------------------------------------------------
@@ -76,11 +76,11 @@
   ;; ---------------------------------------------------------------------
   {:name :decode-row
    :description "Decode one raw next.jdbc row into graphden's canonical entity shape (snake_case → kebab-case kw, enum strings → keywords, jsonb PGobjects → Clojure data, etc.). Field metadata is fetched per `entity-type`."
-   :args {:row {:type :jsonb
-                :description "Raw row map from `:pg-query` — snake_case column keys with undecoded values."}
+   :args {:row {:type [:union :null [:map :text :any]]
+                :description "Raw row map from `:pg-query` — snake_case STRING column keys with undecoded values. Nullable at type level so callers can pass `:first` of an empty result; the impl handles nil by returning nil."}
           :entity-type {:type :text
                         :description "Entity table name (e.g. `\"service\"`, `\"fn\"`). Used to look up field-specs for decoding."}}
-   :return-type :jsonb
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{:db}}
 
   ;; ---------------------------------------------------------------------

@@ -24,7 +24,7 @@
   {:name :resolve-branch-ref
    :description "Look up a branch by `:ref` — accepts either a stringified UUID or a branch name. Returns the row, or nil when not found / ref is blank / ref isn't a string. Operates on the unwrapped base storage so reads see across versions."
    :args {:ref {:type [:union :null :text] :required false :description "UUID string or branch name. Non-string / blank → nil."}}
-   :return-type [:union :null :jsonb]
+   :return-type [:union :null :_entity-field-map]
    :effects #{:db}}
 
   ;; ---------------------------------------------------------------------
@@ -187,7 +187,7 @@
                  :_branch-row-name
                  :_branch-base-id-str
                  :_branch-created-at-str]
-          :branch-row {:type :jsonb
+          :branch-row {:type [:union :null :_entity-field-map]
                        :description "Storage row of a `:branch` entity — fields stringified for the JSON wire."}}}
 
   {:name :_get-branch-ref
@@ -894,7 +894,7 @@
    :description "Atomic library boundary over `vs/create-branch!` — writes a new branch row with `:branch-name` + `:base-branch-id` and returns the row."
    :args {:branch-name {:type :text :description "New branch's display name."}
           :base-branch-id {:type :uuid :description "Parent branch's id; the new branch forks from this point."}}
-   :return-type :jsonb
+   :return-type :_entity-field-map
    :effects #{:db}}
 
   {:name :_create-branch-apply-row

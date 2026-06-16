@@ -39,11 +39,11 @@
 
   {:name :_create-parsed-shape
    :description "Output of `:_create-parsed` — the URI entity-type, the form-decoded body, the per-type-parsed entity field map, and a `:parse-error` string set when the per-type parser threw."
-   :type {:entity-type :keyword :type-str :text :form-data :jsonb :entity-data :jsonb :parse-error :text}}
+   :type {:entity-type :keyword :type-str :text :form-data :_entity-field-map :entity-data :_entity-field-map :parse-error :text}}
 
   {:name :_update-parsed-shape
    :description "Output of `:_update-parsed` — like `:_create-parsed-shape` plus the `:id` URI segment (`:id-str` / `:id-uuid`) and `:pre-existing`, the pre-read of the row being updated."
-   :type {:entity-type :keyword :type-str :text :id-str :text :id-uuid :uuid :form-data :jsonb :pre-existing :jsonb :entity-data :jsonb :parse-error :text}}
+   :type {:entity-type :keyword :type-str :text :id-str :text :id-uuid :uuid :form-data :_entity-field-map :pre-existing :_entity-field-map :entity-data :_entity-field-map :parse-error :text}}
 
   {:name :_delete-parsed-shape
    :description "Output of `:_delete-parsed` — the URI entity-type and the parsed UUID. Validation downstream rejects unknown entity-type / malformed id, so the apply-flow sees them as non-null at runtime; the type asserts that post-validation invariant."
@@ -157,6 +157,10 @@
    :description "An entity's field map — `{column-keyword → value}`. The sparse shape a form parser extracts and `create` / `update-entity` writes."
    :map {:key :keyword :value :any}}
 
+  {:name :_form-data-shape
+   :description "Pre-parser form payload: `{field-name field-value}` keyed by FORM field name (string-or-keyword post JSONB-roundtrip). Wider than `:_entity-field-map` — covers the wire layer where keys may still be strings."
+   :map {:key [:union :keyword :text] :value :any}}
+
   ;; Query functions (context-aware)
   {:name :get-entity
    :description "Look up a single entity by id."
@@ -214,9 +218,9 @@
   {:name :try-apply-create
    :description "Atomic create-with-rollback unit. Returns `{:created <id>}` on success or `{:error <human-msg>}` on capability-rej / write-failure / post-check rejection. The post-check + rollback for binding mutations live inside; admins extending the validation chain do so AROUND this primitive in graph."
    :args {:entity-type {:type :text :description "Entity name as text."}
-          :entity-data {:type :jsonb :description "Pre-validated row payload."}
+          :entity-data {:type [:union :null :_entity-field-map] :description "Pre-validated row payload. Type accepts `:null` because the apply branch is reached only when validation passed; the runtime contract is non-null."}
           :type-str {:type :text :description "Original string form of entity-type (`\"fn\"`, `\"binding\"`, …) used to gate rename-slot + post-check dispatch."}
-          :form-data {:type :jsonb :description "Original form payload (preserves `:rename-to` / `:list-append` / etc.)."}}
+          :form-data {:type [:union :null :_entity-field-map] :description "Original form payload (preserves `:rename-to` / `:list-append` / etc.). Nullable at type level; non-null at runtime."}}
    :return-type :jsonb
    :effects #{:db}}
 
@@ -227,9 +231,9 @@
    :description "Atomic update unit. Returns `{:updated <id>}` on success or `{:error <msg>}` on write failure. Rename-slot failure is logged but never escalated."
    :args {:entity-type {:type :text :description "Entity name as text."}
           :id-uuid {:type :uuid :description "Target row id."}
-          :entity-data {:type :jsonb :description "Pre-validated row patch."}
+          :entity-data {:type [:union :null :_entity-field-map] :description "Pre-validated row patch. Nullable at type level; non-null at runtime."}
           :type-str {:type :text :description "Original string form of entity-type."}
-          :form-data {:type :jsonb :description "Original form payload."}}
+          :form-data {:type [:union :null :_entity-field-map] :description "Original form payload. Nullable at type level; non-null at runtime."}}
    :return-type :jsonb
    :effects #{:db}}
 
@@ -1630,13 +1634,13 @@
   {:name :write-rej
    :description "Stage-2 write-time validation for create/update flows. Returns `{:reason …}` rejection or nil."
    :args {:entity-type {:type :text :description "Canonical entity-name as text (`fn`, `slot`, `binding`, …)."}
-          :entity-data {:type :jsonb :description "Entity row to validate (the merged post-write view on update)."}}
+          :entity-data {:type [:union :null :_entity-field-map] :description "Entity row to validate (the merged post-write view on update). Nullable at type level; validation upstream guarantees non-null at runtime."}}
    :return-type :_rejection-shape
    :effects #{:db}}
 
   {:name :type-check-binding-rej
    :description "Stage-2 type-check for `:binding` flows. nil on success. Throws structured ExceptionInfo on mismatch (the executor surfaces the throw with `:data` intact)."
-   :args {:entity-data {:type :jsonb :description "Binding row to type-check."}
+   :args {:entity-data {:type [:union :null :_entity-field-map] :description "Binding row to type-check. Nullable at type level."}
           :id {:type [:union :null :uuid] :description "Existing binding id (UPDATE) or nil (CREATE)."}}
    :return-type :_rejection-shape
    :effects #{:db}}
@@ -3353,7 +3357,7 @@
                  :_parse-fn-form-element-fn-id-fragment
                  :_parse-fn-form-expects-effects-fragment
                  :_parse-fn-form-constraint-fragment]
-          :form-data {:type :jsonb
+          :form-data {:type :_form-data-shape
                       :description "Parsed application/x-www-form-urlencoded form-data map (`{field-name field-value}`). Each per-field fragment looks up its key here."}}}
 
   ;; --- :parse-ns-from-form (Variant-2). Was defbase delegating to a
@@ -3414,7 +3418,7 @@
                  :_parse-ns-form-name-fragment
                  :_parse-ns-form-parent-id-fragment
                  :_parse-ns-form-description-fragment]
-          :form-data {:type :jsonb
+          :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
   ;; --- :parse-slot-from-form (Variant-2). Same per-field-fragment
@@ -3483,7 +3487,7 @@
                  :_parse-slot-form-type-fn-id-fragment
                  :_parse-slot-form-description-fragment
                  :_parse-slot-form-required-fragment]
-          :form-data {:type :jsonb
+          :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
   ;; --- :parse-fn-slot-from-form (Variant-2). Same per-field-fragment
@@ -3537,7 +3541,7 @@
                  :_parse-fn-slot-form-fn-id-fragment
                  :_parse-fn-slot-form-slot-id-fragment
                  :_parse-fn-slot-form-position-fragment]
-          :form-data {:type :jsonb
+          :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
   ;; --- :parse-binding-from-form (Variant-2). Same per-field-fragment
@@ -3724,7 +3728,7 @@
                  :_parse-bnd-form-list-append-fragment
                  :_parse-bnd-form-list-closed-fragment
                  :_parse-bnd-form-required-fragment]
-          :form-data {:type :jsonb
+          :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
   ;; --- :parse-binding-list-item-from-form (Variant-2). Same pattern.
@@ -3819,7 +3823,7 @@
                  :_parse-bli-form-value-fragment
                  :_parse-bli-form-ref-fn-id-fragment
                  :_parse-bli-form-literal-fragment]
-          :form-data {:type :jsonb
+          :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
   ;; --- :parse-service-from-form. Same fragment-merge shape as the
@@ -3897,7 +3901,7 @@
                  :_parse-svc-form-enabled-fragment
                  :_parse-svc-form-restart-policy-fragment
                  :_parse-svc-form-branch-id-fragment]
-          :form-data {:type :jsonb
+          :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
   ;; =============================================================================

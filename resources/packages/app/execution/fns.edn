@@ -1086,8 +1086,8 @@
   ;; `:stopper-set?` without touching Clojure.
   {:name :running-entry
    :description "Raw per-service running-info entry from `@recon/running` — `{:stopper :started-at :start-attempts :start-failed-at}` or nil. Atomic boundary; the JSON shape reshape lives in `:enrich-running`."
-   :args {:service-id {:type :any :description "Service's row id."}}
-   :return-type :jsonb
+   :args {:service-id {:type :uuid :description "Service's row id."}}
+   :return-type [:union :null [:map :keyword :any]]
    :effects #{}}
 
   ;; --- :enrich-running graph composition --------------------------

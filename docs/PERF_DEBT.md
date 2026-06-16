@@ -126,19 +126,28 @@ Expected total: bring per-graph-node overhead from ~10 µs
 ~50× speedup on the resolve-versioned-rows fixture, which would
 make `:resolve-versioned-rows` over the full graph fit in ~1 s.
 
-## Workaround in the meantime
+## Workaround status — 2026-06-16: NOT needed today
 
-`bb ci` runs tests inside a single JVM with kaocha's in-JVM
-parallelism (=4 for integration). Under that path each parallel
-NS does its own `ig/init` concurrently → 4 systems × 38 s in the
-same JVM → severe memory pressure and swap → `tests` step times
-out at the 600 s ceiling.
+Historically CI hit the 600 s `tests` ceiling under in-JVM
+parallel runs because each NS bootstrap (`ig/init :exec/compiled-
+registry`) was ~38 s, and 4 concurrent bootstraps in one heap
+caused memory pressure / swap. The fix used to be `bb test-parallel
+4` (4 separate JVM workers).
 
-`bb test-parallel 4` spawns 4 separate JVM workers (one
-testcontainer each through `shared-container`'s per-NS logical
-DB). Wall time settles around **480 s**, well under the 600 s
-ceiling. CI was switched to this path (see `scripts/ci.clj`'s
-`tests` entry).
+Several intervening changes brought in-JVM under ceiling:
 
-When the executor work above lands, `bb ci` should switch back
-to in-JVM `bb test`.
+- The executor-eager-compile refactor (lazy semantics via Clojure-
+  native delays) — ~2000× faster worst-case.
+- Shared golden DB via `CREATE DATABASE … TEMPLATE`: one
+  bootstrap per JVM × package-set, NS clones in ~100 ms.
+- Per-execute DRY memo: handlers don't fire siblings twice.
+- Rich-types race fix + the snapshot-at-bind isolation pattern.
+
+CI is now back on in-JVM `bb test` (`scripts/ci.clj :: test-cmd`),
+with measured walls of ~6:30–7:00 for all 1400+ tests / 0
+failures and the `tests` ceiling at 900 s. The TL;DR's 900×
+figure above predates the eager-compile refactor — a fresh
+measurement could revise it downward significantly. Holding the
+real-fix design as still-valid; benchmarking it on the new
+executor pipeline is the next step before allocating the
+multi-commit fix.

@@ -35,7 +35,7 @@
  [;; --- construction ---
   ;;
   ;; Both literals are valid for a `:nullable-text` slot. The
-  ;; :nullable-text alias resolves to `[:union :null :text]`, so
+  ;; :nullable-text alias resolves to `:nullable-text`, so
   ;; nil ∈ :null and "hello" ∈ :text both subtype the union.
   {:name :ex-nullable-nil
    :description "Carries `nil`. For a `:nullable-text` slot this is the :null half of the union; for a non-null `:text` slot it would FAIL the type check."
@@ -69,11 +69,11 @@
 
   ;; --- nullable producer: :env reads OS variable ---
   ;;
-  ;; :env's declared return is `:nullable-text` (`[:union :null :text]`)
+  ;; :env's declared return is `:nullable-text` (`:nullable-text`)
   ;; — it yields the variable's value or nil if unset. Use a
   ;; substitute pattern below to narrow it to non-null `:text`.
   {:name :ex-env-maybe
-   :description "Read $UNSET_GRAPHDEN_VAR — returns nil because the var isn't set in the test environment. A clean `:nullable-text` producer: `:env`'s declared return is `[:union :null :text]`, so callers must narrow explicitly before using it where non-null `:text` is required."
+   :description "Read $UNSET_GRAPHDEN_VAR — returns nil because the var isn't set in the test environment. A clean `:nullable-text` producer: `:env`'s declared return is `:nullable-text`, so callers must narrow explicitly before using it where non-null `:text` is required."
    :parent :env
    :args {:name "UNSET_GRAPHDEN_VAR"}}
 

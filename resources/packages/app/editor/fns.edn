@@ -81,7 +81,7 @@
   {:name :script
    :description "Bundled editor JS with `__BUILD_HASH__` substituted by `:build-hash-frontend-short`. The in-page console marker mirrors the `frontend` value returned by `GET /version`, so the browser bundle's identity is never out of step with what the server reports. `:str-replace` is nil-flow-through; `:_script-raw` is loaded from a baked-in JAR resource and is never nil, but the declared return follows the parent's union to keep the contract explicit."
    :parent :str-replace
-   :return-type [:union :null :text]
+   :return-type :nullable-text
    :args {:s        {:ref :_script-raw                :type :text}
           :match    "__BUILD_HASH__"
           :replacement :build-hash-frontend-short}}

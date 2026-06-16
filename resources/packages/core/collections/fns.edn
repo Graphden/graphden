@@ -254,10 +254,10 @@
    :args {:f :_str-coerce-key}}
 
   {:name :select-keys
-   :description "Submap containing only the specified keys (Clojure's `select-keys`). Records in graphden are keyword-keyed, so the result is a `[:map :keyword :any]`."
+   :description "Submap containing only the specified keys (Clojure's `select-keys`). Records in graphden are keyword-keyed, so the result is a `:keyword-map`."
    :args {:m {:type [:union :null [:map a :any]] :description "Source map. Nil treated as empty."}
           :ks {:type [:list :keyword] :description "Keys to keep — keyword each (records in graphden are keyword-keyed). Each item may be a literal or a fn-ref."}}
-   :return-type [:map :keyword :any]}
+   :return-type :keyword-map}
 
   {:name :zipmap
    :description "Build a map from parallel `keys` and `vals` sequences (Clojure's `zipmap`)."

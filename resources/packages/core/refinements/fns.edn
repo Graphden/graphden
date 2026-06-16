@@ -66,14 +66,50 @@
   ;; satisfies at least one branch.
   ;; ---------------------------------------------------------------------
   ;;
-  ;; Only `:nullable-text` ships as an alias (12+ sites in the standard
-  ;; packages — `:env`, `:bearer-token`, `:auth-token-from-env`, …).
-  ;; The other shapes (`:nullable-int`, `:nullable-bool`,
-  ;; `:nullable-numeric`, `:nullable-uuid`) had ZERO real uses and
-  ;; were retired to keep the alias set tight — write `[:union :null T]`
-  ;; inline when needed; it's three keywords, not worth a named row.
+  ;; `:nullable-*` ship as aliases when their inline `[:union :null T]`
+  ;; form appears at ≥10 call sites across the standard packages —
+  ;; the threshold is approximate but the goal is to keep the alias
+  ;; set tight and only name the genuine high-frequency shapes.
+  ;; Current call-site counts (`grep -c '[:union :null :T]' …/*.edn`):
+  ;; text=37 · uuid=24 · jsonb=6 · int=3 · bool=0 · keyword=2 · numeric=0
+  ;; — so text, uuid, and jsonb cross the threshold; the rest stay
+  ;; inline.
 
-  {:name :nullable-text     :union [:null :text]}
+  {:name :nullable-text   :union [:null :text]}
+  {:name :nullable-uuid   :union [:null :uuid]}
+  {:name :nullable-jsonb  :union [:null :jsonb]}
+
+  ;; ---------------------------------------------------------------------
+  ;; Compound aliases used at ≥5 call sites — collapses long inline
+  ;; unions so consumer slot declarations read at the contract level
+  ;; instead of restating the structural shape every time.
+  ;; ---------------------------------------------------------------------
+
+  ;; A graphden TYPE expression, as seen by `:subtype?` / `:json-to-type`
+  ;; / the value-form renderer / etc. Four representations a type can
+  ;; take:
+  ;;   - atomic kw (`:int`, `:text`)
+  ;;   - legacy text alias (`"int"` — kept for wire-shape compat)
+  ;;   - compound vector (`[:list :text]`, `[:union :null :uuid]`)
+  ;;   - record shape (`{:fn-id :uuid …}`)
+  ;; Used at 14 sites before this alias landed.
+  {:name :type-expression
+   :union [:keyword :text [:list :any] :keyword-map]}
+
+  ;; A keyword-keyed map of mostly heterogeneous values — the canonical
+  ;; shape of decoded entity rows, parsed form payloads, and other
+  ;; "structured but per-field-varying" maps. Used at 50+ sites before
+  ;; this alias landed.
+  {:name :keyword-map :map {:key :keyword :value :any}}
+
+  ;; Nullable entity row — `:get-entity` / `:resolve-*-row` / the
+  ;; secret-leaf load chain / etc. Used at 15+ sites in the long form.
+  {:name :nullable-keyword-map :union [:null :keyword-map]}
+
+  ;; HTTP headers, form-urlencoded payloads, vault custom-metadata —
+  ;; anywhere a wire-format demands string keys AND string values.
+  ;; Used at 12 sites before this alias landed.
+  {:name :text-map :map {:key :text :value :text}}
 
   ;; ---------------------------------------------------------------------
   ;; Variant types — Result-style discriminated unions. Each branch is

@@ -55,7 +55,7 @@
 
   {:name :str-to-keyword
    :description "Coerce a string into a keyword (Clojure's `keyword`). Nil-safe — returns nil for nil input."
-   :args {:string {:type [:union :null :text] :description "String to convert (nil-safe)."}}
+   :args {:string {:type :nullable-text :description "String to convert (nil-safe)."}}
    :return-type [:union :null :keyword]}
 
   {:name :keyword-to-str
@@ -76,7 +76,7 @@
   {:name :name
    :description "Clojure's `(name x)` — strip the leading `:` from a keyword, return a string as-is. Differs from `:to-str` on keywords: `(name :foo)` returns `\"foo\"`, `(to-str :foo)` returns `\":foo\"`. Use at boundaries that expect bare identifier text (entity-type slot names, SQL identifiers, …)."
    :args {:value {:type a :description "Keyword, string, or nil."}}
-   :return-type [:union :null :text]}
+   :return-type :nullable-text}
 
   ;; ----------------------------------------------------------------
   ;; :parse-query-string is now a pure graph composition over
@@ -148,7 +148,7 @@
 
   {:name :blank?
    :description "True iff the string is nil, empty, or contains only whitespace (Clojure's `clojure.string/blank?`)."
-   :args {:string {:type [:union :null :text] :required false :description "String to test (nil-safe)."}}
+   :args {:string {:type :nullable-text :required false :description "String to test (nil-safe)."}}
    :return-type :bool}
 
   {:name :non-blank?
@@ -163,22 +163,22 @@
 
   {:name :str-contains?
    :description "True iff `string` contains `substring` (Clojure's `clojure.string/includes?`). Nil-safe — returns false for nil `string`, so callers needn't pre-guard."
-   :args {:string {:type [:union :null :text] :description "String to search (nil → returns false)."}
+   :args {:string {:type :nullable-text :description "String to search (nil → returns false)."}
           :substring {:type :text :description "Substring to find."}}
    :return-type :bool}
 
   {:name :str-starts-with?
    :description "True iff `string` starts with `prefix` (Java `String.startsWith`). Nil-safe — returns false for nil input. `:string` accepts the nullable form so callers needn't pre-guard."
-   :args {:string {:type [:union :null :text] :description "String to test (nil → returns false)."}
+   :args {:string {:type :nullable-text :description "String to test (nil → returns false)."}
           :prefix {:type :text :description "Required leading substring."}}
    :return-type :bool}
 
   {:name :str-replace
    :description "Replace every occurrence of `:match` with `:replacement` in `:s` (Clojure's `clojure.string/replace`). All three args are plain strings — no regex. Nil `:s` flows through unchanged."
-   :args {:s {:type [:union :null :text] :description "Source string (nil → returns nil)."}
+   :args {:s {:type :nullable-text :description "Source string (nil → returns nil)."}
           :match {:type :text :description "Literal substring to find."}
           :replacement {:type :text :description "Replacement string."}}
-   :return-type [:union :null :text]}
+   :return-type :nullable-text}
 
   {:name :re-find?
    :description "True iff `:pattern` (a regex) matches somewhere inside `:string`. Returns false for nil / non-string input. Building block for refinement narrowers like `:ensure-url` and `:ensure-non-blank-text`."

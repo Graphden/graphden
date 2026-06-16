@@ -23,8 +23,8 @@
 
   {:name :resolve-branch-ref
    :description "Look up a branch by `:ref` — accepts either a stringified UUID or a branch name. Returns the row, or nil when not found / ref is blank / ref isn't a string. Operates on the unwrapped base storage so reads see across versions."
-   :args {:ref {:type [:union :null :text] :required false :description "UUID string or branch name. Non-string / blank → nil."}}
-   :return-type [:union :null :_entity-field-map]
+   :args {:ref {:type :nullable-text :required false :description "UUID string or branch name. Non-string / blank → nil."}}
+   :return-type :nullable-keyword-map
    :effects #{:db}}
 
   ;; ---------------------------------------------------------------------
@@ -187,7 +187,7 @@
                  :_branch-row-name
                  :_branch-base-id-str
                  :_branch-created-at-str]
-          :branch-row {:type [:union :null :_entity-field-map]
+          :branch-row {:type :nullable-keyword-map
                        :description "Storage row of a `:branch` entity — fields stringified for the JSON wire."}}}
 
   {:name :_get-branch-ref
@@ -532,7 +532,7 @@
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :fn-id} {:value :count} {:value :versions}]
           :vals [{:value true} :_lfv-fn-id-str :_lfv-version-count :_lfv-versions-json]
-          :fn-id {:type [:union :null :uuid]
+          :fn-id {:type :nullable-uuid
                   :description "Logical fn-id whose version history is being listed; nil → empty `:versions`. The JSON envelope stringifies via `:_lfv-fn-id-str`."}}}
 
   ;; Handler entry point.
@@ -637,7 +637,7 @@
    :description "Atomic library boundary over `mrg/diff-branches` — returns the resolved-view diff between the two branches' ancestor chains: `{:source-branch-id :target-branch-id :diffs [...]}`."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}}
-   :return-type [:map :keyword :any]
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :_diff-apply-raw
@@ -894,7 +894,7 @@
    :description "Atomic library boundary over `vs/create-branch!` — writes a new branch row with `:branch-name` + `:base-branch-id` and returns the row."
    :args {:branch-name {:type :text :description "New branch's display name."}
           :base-branch-id {:type :uuid :description "Parent branch's id; the new branch forks from this point."}}
-   :return-type :_entity-field-map
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :_create-branch-apply-row
@@ -1169,7 +1169,7 @@
    :description "Atomic library boundary over `mrg/detect-conflicts` — returns `{:conflicts [...] :fork-point <uuid-or-nil>}` for the merge-oriented framing (source → target)."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}}
-   :return-type [:map :keyword :any]
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :_conflicts-apply-raw
@@ -1439,8 +1439,8 @@
    :description "Atomic library boundary over `vs/switch-branch` + `vs/merge-branch!` — switches to target then folds source in. Throws ex-info `{:type :merge-conflict :conflicts [...]}` when resolutions don't cover every conflict; other failures surface as plain Exception."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
           :target-branch-id {:type :uuid :description "Target branch id."}
-          :resolutions {:type [:union :null [:map :keyword :any]] :required false :description "Per-conflict resolution map; absent for first-attempt merges."}}
-   :return-type [:map :keyword :any]
+          :resolutions {:type :nullable-keyword-map :required false :description "Per-conflict resolution map; absent for first-attempt merges."}}
+   :return-type :keyword-map
    :effects #{:db}}
 
   ;; --- Success path: build the response body off the merge record.
@@ -1513,14 +1513,14 @@
    :return-type {:ok :bool
                  :reason :keyword
                  :error :text
-                 :target {:id [:union :null :text]
+                 :target {:id :nullable-text
                           :name :any
-                          :base-branch-id [:union :null :text]
-                          :created-at [:union :null :text]}
-                 :source {:id [:union :null :text]
+                          :base-branch-id :nullable-text
+                          :created-at :nullable-text}
+                 :source {:id :nullable-text
                           :name :any
-                          :base-branch-id [:union :null :text]
-                          :created-at [:union :null :text]}
+                          :base-branch-id :nullable-text
+                          :created-at :nullable-text}
                  :conflicts [:list {:entity-name :any
                                     :entity-id :text
                                     :source-version :jsonb

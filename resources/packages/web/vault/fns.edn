@@ -84,7 +84,7 @@
    :description "Read KV v2 metadata at `<:path>` — `created_time`, `current_version`, `custom_metadata`. Returns the inner `:data` map (JSON-decoded with keyword keys). Throws `:vault/lookup-failed` if the path is missing."
    :args {:path {:type :text
                  :description "KV v2 path to introspect."}}
-   :return-type [:map :keyword :any]
+   :return-type :keyword-map
    :effects #{:network}}
 
   ;; ---------------------------------------------------------------------
@@ -97,7 +97,7 @@
    :tags #{:admin-only-vault}
    :args {:path {:type :text
                  :description "KV v2 path whose metadata to update."}
-          :metadata {:type [:map :text :text]
+          :metadata {:type :text-map
                      :description "Map of string→string. Becomes `custom_metadata` on the path."}}
    :return-type :null
    :effects #{:network}}]}

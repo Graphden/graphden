@@ -15,38 +15,38 @@
 
   {:name :_types-compatible-parsed-shape
    :description "Output of `:_types-compatible-parsed` — the two type expressions to subtype-check."
-   :type {:expected [:union :keyword :text [:list :any] [:map :keyword :any]]
-          :candidate [:union :keyword :text [:list :any] [:map :keyword :any]]}}
+   :type {:expected :type-expression
+          :candidate :type-expression}}
 
   {:name :_types-candidates-parsed-shape
    :description "Output of `:_types-candidates-parsed` — the target type plus optional effect-set / name-prefix filters. `:allowed-effects` and `:name-prefix` are nullable (caller may omit either) — `:_types-candidates-apply` treats nil as 'no filter'."
-   :type {:expected [:union :keyword :text [:list :any] [:map :keyword :any]]
+   :type {:expected :type-expression
           :allowed-effects [:union :null [:list [:union :keyword :null]]]
-          :name-prefix [:union :null :text]}}
+          :name-prefix :nullable-text}}
 
   {:name :_types-usages-parsed-shape
    :description "Output of `:_types-usages-parsed` — the type-row id to search references for. `:target-id` is nullable to match the parse stage's `(when raw (try uuid-parse ...))` semantics; the downstream validation guard catches the nil case."
-   :type {:target-id [:union :null :uuid]}}
+   :type {:target-id :nullable-uuid}}
 
   {:name :_create-record-type-parsed-shape
    :description "Output of `:_create-record-type-parsed` — a record type-row's name, owning namespace, description and field list. `:name`/`:ns-id` are nullable post-parse; `:description` is loosely-typed (the JSON body may carry non-string descriptions); `:fields` is the per-field record list (`:vec` of the body's `:fields` value)."
-   :type {:name [:union :null :text] :ns-id [:union :null :uuid] :description :any :fields [:list :any]}}
+   :type {:name :nullable-text :ns-id :nullable-uuid :description :any :fields [:list :any]}}
 
   {:name :_create-list-type-parsed-shape
    :description "Output of `:_create-list-type-parsed` — a list type-row's name, owning namespace, description and element-type reference. Nullable shape mirrors `:_create-record-type-parsed-shape`'s tolerant parse."
-   :type {:name [:union :null :text] :ns-id [:union :null :uuid] :description :any :element-ref :any}}
+   :type {:name :nullable-text :ns-id :nullable-uuid :description :any :element-ref :any}}
 
   {:name :_update-record-type-parsed-shape
    :description "Output of `:_update-record-type-parsed` — the target fn-id plus the submitted name / description / field list. `:has-description?` distinguishes a submitted-nil description from an absent key. `:name` nullable text; `:description` loosely-typed; `:fields` is the per-field record list (`:vec` of the body's `:fields` value). The validation guard catches the missing-fn-id / blank-name cases downstream."
-   :type {:fn-id [:union :null :uuid] :name [:union :null :text] :has-description? :bool :description :any :fields [:list :any]}}
+   :type {:fn-id :nullable-uuid :name :nullable-text :has-description? :bool :description :any :fields [:list :any]}}
 
   {:name :_create-parsed-shape
    :description "Output of `:_create-parsed` — the URI entity-type, the form-decoded body, the per-type-parsed entity field map, and a `:parse-error` string set when the per-type parser threw."
-   :type {:entity-type :keyword :type-str :text :form-data :_entity-field-map :entity-data :_entity-field-map :parse-error :text}}
+   :type {:entity-type :keyword :type-str :text :form-data :keyword-map :entity-data :keyword-map :parse-error :text}}
 
   {:name :_update-parsed-shape
    :description "Output of `:_update-parsed` — like `:_create-parsed-shape` plus the `:id` URI segment (`:id-str` / `:id-uuid`) and `:pre-existing`, the pre-read of the row being updated."
-   :type {:entity-type :keyword :type-str :text :id-str :text :id-uuid :uuid :form-data :_entity-field-map :pre-existing :_entity-field-map :entity-data :_entity-field-map :parse-error :text}}
+   :type {:entity-type :keyword :type-str :text :id-str :text :id-uuid :uuid :form-data :keyword-map :pre-existing :keyword-map :entity-data :keyword-map :parse-error :text}}
 
   {:name :_delete-parsed-shape
    :description "Output of `:_delete-parsed` — the URI entity-type and the parsed UUID. Validation downstream rejects unknown entity-type / malformed id, so the apply-flow sees them as non-null at runtime; the type asserts that post-validation invariant."
@@ -156,12 +156,8 @@
    :description "Parsed `application/x-www-form-urlencoded` fields — `{field-keyword → string-value}`."
    :map {:key :keyword :value :text}}
 
-  {:name :_entity-field-map
-   :description "An entity's field map — `{column-keyword → value}`. The sparse shape a form parser extracts and `create` / `update-entity` writes."
-   :map {:key :keyword :value :any}}
-
   {:name :_form-data-shape
-   :description "Pre-parser form payload: `{field-name field-value}` keyed by FORM field name (string-or-keyword post JSONB-roundtrip). Wider than `:_entity-field-map` — covers the wire layer where keys may still be strings."
+   :description "Pre-parser form payload: `{field-name field-value}` keyed by FORM field name (string-or-keyword post JSONB-roundtrip). Wider than `:keyword-map` — covers the wire layer where keys may still be strings."
    :map {:key [:union :keyword :text] :value :any}}
 
   ;; Query functions (context-aware)
@@ -169,7 +165,7 @@
    :description "Look up a single entity by id."
    :args {:entity-type {:type :text :description "Entity-name keyword as string."}
           :id {:type :uuid :description "Entity UUID."}}
-   :return-type [:union :null [:map :keyword :any]]
+   :return-type :nullable-keyword-map
    :effects #{:db}}
 
   {:name :delete-entity
@@ -196,20 +192,20 @@
   ;; without forcing a downstream-package dependency.
   {:name :free-arg-slot-map
    :description "Map of `arg-name → slot-id` for `fn-id`'s free args. `{}` when fn-id is nil."
-   :args {:fn-id {:type [:union :null :uuid] :description "Target fn-id; nil short-circuits to empty map."}}
+   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil short-circuits to empty map."}}
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
   {:name :list-all-graph-entities
    :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`."
    :args {}
-   :return-type [:map :keyword :any]
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :all-rich-types
    :description "Snapshot of the in-memory rich-type registry. Returns `{fn-name {:return type :args {arg-name type}}}` for every base-fn AND composed fn-def the type-checker has processed. Powers `/api/types` — editor and external tools use this to know what each slot accepts."
    :args {}
-   :return-type [:map :keyword :any]
+   :return-type :keyword-map
    :effects #{:db}}
 
   ;; §3.3 atomic core of POST /api/entities/:type — the unit that
@@ -221,10 +217,10 @@
   {:name :try-apply-create
    :description "Atomic create-with-rollback unit. Returns `{:created <id>}` on success or `{:error <human-msg>}` on capability-rej / write-failure / post-check rejection. The post-check + rollback for binding mutations live inside; admins extending the validation chain do so AROUND this primitive in graph."
    :args {:entity-type {:type :text :description "Entity name as text."}
-          :entity-data {:type [:union :null :_entity-field-map] :description "Pre-validated row payload. Type accepts `:null` because the apply branch is reached only when validation passed; the runtime contract is non-null."}
+          :entity-data {:type :nullable-keyword-map :description "Pre-validated row payload. Type accepts `:null` because the apply branch is reached only when validation passed; the runtime contract is non-null."}
           :type-str {:type :text :description "Original string form of entity-type (`\"fn\"`, `\"binding\"`, …) used to gate rename-slot + post-check dispatch."}
-          :form-data {:type [:union :null :_entity-field-map] :description "Original form payload (preserves `:rename-to` / `:list-append` / etc.). Nullable at type level; non-null at runtime."}}
-   :return-type [:map :keyword :any]
+          :form-data {:type :nullable-keyword-map :description "Original form payload (preserves `:rename-to` / `:list-append` / etc.). Nullable at type level; non-null at runtime."}}
+   :return-type :keyword-map
    :effects #{:db}}
 
   ;; Atomic update unit. Simpler than try-apply-create — no post-write
@@ -234,28 +230,28 @@
    :description "Atomic update unit. Returns `{:updated <id>}` on success or `{:error <msg>}` on write failure. Rename-slot failure is logged but never escalated."
    :args {:entity-type {:type :text :description "Entity name as text."}
           :id-uuid {:type :uuid :description "Target row id."}
-          :entity-data {:type [:union :null :_entity-field-map] :description "Pre-validated row patch. Nullable at type level; non-null at runtime."}
+          :entity-data {:type :nullable-keyword-map :description "Pre-validated row patch. Nullable at type level; non-null at runtime."}
           :type-str {:type :text :description "Original string form of entity-type."}
-          :form-data {:type [:union :null :_entity-field-map] :description "Original form payload. Nullable at type level; non-null at runtime."}}
-   :return-type [:map :keyword :any]
+          :form-data {:type :nullable-keyword-map :description "Original form payload. Nullable at type level; non-null at runtime."}}
+   :return-type :keyword-map
    :effects #{:db}}
 
   ;; §3.3 sequence-write atomic units. Same `{:created/:updated}` /
   ;; `{:error}` shape the graph dispatches on.
   {:name :try-apply-seq-append
    :description "§3.3 core of sequence-append. Returns `{:created <item-id> :position <int> :fn-id <fn-id>}` or `{:error <reason>}`."
-   :args {:parsed {:type {:fn-id [:union :null :uuid] :body [:union :null :jsonb]}
+   :args {:parsed {:type {:fn-id :nullable-uuid :body :nullable-jsonb}
                    :description "Parsed POST /api/sequence/append/:fn-id payload (`{:fn-id :body}`)."}
-          :seq-binding {:type [:union :null :_entity-field-map] :description "Resolved sequence-binding row (real or synthetic)."}}
-   :return-type [:map :keyword :any]
+          :seq-binding {:type :nullable-keyword-map :description "Resolved sequence-binding row (real or synthetic)."}}
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :try-apply-seq-update
    :description "§3.3 core of sequence-update. Returns `{:updated <item-id>}` or `{:error <reason>}`."
-   :args {:parsed {:type {:item-id [:union :null :uuid] :body [:union :null :jsonb]}
+   :args {:parsed {:type {:item-id :nullable-uuid :body :nullable-jsonb}
                    :description "Parsed PUT /api/sequence/item/:item-id payload."}
-          :item {:type [:union :null :_entity-field-map] :description "Pre-read binding-list-item row."}}
-   :return-type [:map :keyword :any]
+          :item {:type :nullable-keyword-map :description "Pre-read binding-list-item row."}}
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :fn-names-with-tag
@@ -291,7 +287,7 @@
   {:name :json-to-type
    :description "Decode the JSON wire-shape of a type expression back to its Clojure AST. Strings become keywords (except inside refinement constraints, where literal-string predicates like `[:not= \"\"]` stay strings — `:non-empty-text` depends on this)."
    :args {:json {:type :jsonb :description "JSON-decoded value (post-cheshire) — string / vector / map / scalar."}}
-   :return-type [:union :keyword :text [:list :any] [:map :keyword :any]]}
+   :return-type :type-expression}
 
   {:name :_types-compatible-parsed
    :description "Stage 1 of types-compatible — JSON body → `{:expected :candidate}`, each decoded from the wire shape produced by `/api/types`."
@@ -332,14 +328,14 @@
   ;; by reparenting the per-row composition below.
   {:name :subtype?
    :description "True iff `candidate` is a subtype of `expected` under graphden's type hierarchy (refinement / list / union / record / fn-shape recursion in `types/core`)."
-   :args {:expected {:type [:union :keyword :text [:list :any] [:map :keyword :any]] :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
-          :candidate {:type [:union :keyword :text [:list :any] [:map :keyword :any]] :description "The candidate (binding-side) type expression."}}
+   :args {:expected {:type :type-expression :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
+          :candidate {:type :type-expression :description "The candidate (binding-side) type expression."}}
    :return-type :bool}
 
   {:name :describe-type-mismatch
    :description "One-line human-readable explanation of why `candidate` ⊄ `expected`. Used by the editor's type-picker tooltip."
-   :args {:expected {:type [:union :keyword :text [:list :any] [:map :keyword :any]] :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
-          :candidate {:type [:union :keyword :text [:list :any] [:map :keyword :any]] :description "The candidate (binding-side) type expression."}}
+   :args {:expected {:type :type-expression :description "The expected (slot-side) type expression — atomic (`:int`, `\"int\"`), vector (`[:list :text]`), or record (`{...}`)."}
+          :candidate {:type :type-expression :description "The candidate (binding-side) type expression."}}
    :return-type :text}
 
   ;; --- :_types-compatible-apply — pure graph composition over
@@ -369,8 +365,8 @@
    :description "Stage 3c-ok — `{:ok true :expected :candidate}` envelope."
    :parent :zipmap
    :return-type {:ok :bool
-                 :expected [:union :keyword :text [:list :any] [:map :keyword :any]]
-                 :candidate [:union :keyword :text [:list :any] [:map :keyword :any]]}
+                 :expected :type-expression
+                 :candidate :type-expression}
    :args {:keys [{:value :ok} {:value :expected} {:value :candidate}]
           :vals [{:value true}
                  :_types-compatible-parsed-expected
@@ -380,8 +376,8 @@
    :description "Stage 3c-not-ok — `{:ok false :expected :candidate :reason}` envelope."
    :parent :zipmap
    :return-type {:ok :bool
-                 :expected [:union :keyword :text [:list :any] [:map :keyword :any]]
-                 :candidate [:union :keyword :text [:list :any] [:map :keyword :any]]
+                 :expected :type-expression
+                 :candidate :type-expression
                  :reason :text}
    :args {:keys [{:value :ok} {:value :expected} {:value :candidate} {:value :reason}]
           :vals [{:value false}
@@ -1357,7 +1353,7 @@
   ;; and stays inside the Clojure primitive. False for nil fn-id.
   {:name :chain-has-process-effect?
    :description "True iff `fn-id` or any ancestor (via `parent-ids`) declares the `:process` effect in its rich-type entry. False for nil fn-id."
-   :args {:fn-id {:type [:union :null :uuid] :description "Target fn-id; nil short-circuits to false."}}
+   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil short-circuits to false."}}
    :return-type :bool
    :effects #{:db}}
 
@@ -1642,14 +1638,14 @@
   {:name :write-rej
    :description "Stage-2 write-time validation for create/update flows. Returns `{:reason …}` rejection or nil."
    :args {:entity-type {:type :text :description "Canonical entity-name as text (`fn`, `slot`, `binding`, …)."}
-          :entity-data {:type [:union :null :_entity-field-map] :description "Entity row to validate (the merged post-write view on update). Nullable at type level; validation upstream guarantees non-null at runtime."}}
+          :entity-data {:type :nullable-keyword-map :description "Entity row to validate (the merged post-write view on update). Nullable at type level; validation upstream guarantees non-null at runtime."}}
    :return-type :_rejection-shape
    :effects #{:db}}
 
   {:name :type-check-binding-rej
    :description "Stage-2 type-check for `:binding` flows. nil on success. Throws structured ExceptionInfo on mismatch (the executor surfaces the throw with `:data` intact)."
-   :args {:entity-data {:type [:union :null :_entity-field-map] :description "Binding row to type-check. Nullable at type level."}
-          :id {:type [:union :null :uuid] :description "Existing binding id (UPDATE) or nil (CREATE)."}}
+   :args {:entity-data {:type :nullable-keyword-map :description "Binding row to type-check. Nullable at type level."}
+          :id {:type :nullable-uuid :description "Existing binding id (UPDATE) or nil (CREATE)."}}
    :return-type :_rejection-shape
    :effects #{:db}}
 
@@ -1907,7 +1903,7 @@
                    :description "HTTP status code (e.g. 400, 409, 500). Flows into the response's `:status` field."}
           :reason {:type :text
                    :description "Human-readable failure reason — rendered inside the `<p class=\"error\">…</p>` body."}}
-   :return-type {:status :int :headers [:map :text :text] :body :text}}
+   :return-type {:status :int :headers :text-map :body :text}}
 
   ;; --- delete-entity primitives (C5 decomposition). The handler
   ;; itself is the `:process-delete-entity` `:cond` graph fn-def below.
@@ -1921,7 +1917,7 @@
   {:name :extract-entity-params
    :description "Pull `{:type-str :id-str :entity-type}` from a Ring request — reitit `:path-params` preferred, URI fallback for the http-kit passthrough path."
    :args {:request {:type :ring-request-shape}}
-   :return-type {:type-str [:union :null :text] :id-str [:union :null :text] :entity-type [:union :null :keyword]}}
+   :return-type {:type-str :nullable-text :id-str :nullable-text :entity-type [:union :null :keyword]}}
 
   ;; --- :query-param — atomic boundary. Pulls a named query-string
   ;; parameter from a Ring request; tolerates both reitit-enriched
@@ -1930,7 +1926,7 @@
    :description "Read a named query-string parameter from a Ring request. Returns nil when absent."
    :args {:request {:type :ring-request-shape}
           :param-name {:type :text :description "Parameter name (e.g. `\"fn-id\"`)."}}
-   :return-type [:union :null :text]}
+   :return-type :nullable-text}
 
   ;; --- :_delete-parsed (Variant-2). Was defbase delegating to a
   ;; since-removed `parse-delete-entity-request` helper. Now graph
@@ -2580,8 +2576,8 @@
 
   {:name :_seq-append-load-binding
    :description "Read-only sequence-binding lookup. Returns the existing binding row, a synthetic placeholder (materialized by apply), or nil when the fn has no sequence slot."
-   :args {:parsed {:type {:fn-id [:union :null :uuid] :body [:union :null :jsonb]}}}
-   :return-type [:union :null [:map :keyword :any]]
+   :args {:parsed {:type {:fn-id :nullable-uuid :body :nullable-jsonb}}}
+   :return-type :nullable-keyword-map
    :effects #{:db}}
 
   {:name :_seq-append-no-seq-slot?
@@ -2705,7 +2701,7 @@
   {:name :_seq-remove-load-item
    :description "Read the binding-list-item row for the parsed item-id. Returns nil when the id is invalid (caught by guard #1) OR when no row matches."
    :args {:parsed {:type {:item-id :uuid}}}
-   :return-type [:union :null [:map :keyword :any]]
+   :return-type :nullable-keyword-map
    :effects #{:db}}
 
   {:name :_seq-remove-item-not-found?
@@ -2780,8 +2776,8 @@
 
   {:name :_seq-update-load-item
    :description "Read the binding-list-item row for the parsed id."
-   :args {:parsed {:type {:item-id [:union :null :uuid] :body [:union :null :jsonb]}}}
-   :return-type [:union :null [:map :keyword :any]]
+   :args {:parsed {:type {:item-id :nullable-uuid :body :nullable-jsonb}}}
+   :return-type :nullable-keyword-map
    :effects #{:db}}
 
   {:name :_seq-update-item-not-found?
@@ -3014,7 +3010,7 @@
   {:name :try-apply-tighten
    :description "§3.3 core of tighten-fn-effects: narrows the fn-typed binding's effective type. Returns `{:status :reason :result}` — graph dispatches on `:status`."
    :args {:parsed {:type :_tighten-parsed-shape}}
-   :return-type [:map :keyword :any]
+   :return-type :keyword-map
    :effects #{:db}}
 
   ;; --- :parse-form-body / :parse-json-body (Variant-2). Both were
@@ -3090,7 +3086,7 @@
   {:name :resolve-type-fn-id
    :description "Resolve a type-row reference (UUID string OR fn name) to its fn-id. nil on blank input; throws `:crud/unknown-type-ref` when a name doesn't match."
    :args {:v {:type :text :description "Form value — UUID string or type-row fn name."}}
-   :return-type [:union :null :uuid]
+   :return-type :nullable-uuid
    :effects #{:db}}
 
   {:name :parse-constraint

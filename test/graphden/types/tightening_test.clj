@@ -43,11 +43,18 @@
 ;; :ring-request-shape.headers — record-typed map of text → text
 
 (deftest ring-request-shape-headers-is-map-of-text-to-text
-  (testing ":ring-request-shape's :headers field is [:map :text :text]"
-    (let [shape (get (types/aliases-snapshot) :ring-request-shape)]
+  (testing ":ring-request-shape's :headers field is text→text map"
+    (let [shape (get (types/aliases-snapshot) :ring-request-shape)
+          headers-resolved (types/resolve-alias (:headers shape))]
       (is (map? shape) ":ring-request-shape resolves to a record alias")
-      (is (= [:map :text :text] (:headers shape))
-          "headers field is [:map :text :text], not :jsonb")
+      ;; `:headers` is declared via the `:text-map` alias (`[:map :text
+      ;; :text]`) — accept either the alias name OR its resolved form,
+      ;; whichever the snapshot returns.
+      (is (or (= :text-map (:headers shape))
+              (= [:map :text :text] (:headers shape)))
+          "headers field is named :text-map or inline [:map :text :text]")
+      (is (= [:map :text :text] headers-resolved)
+          "headers field structurally resolves to [:map :text :text]")
       (is (and (vector? (:body shape))
                (= :union (first (:body shape)))
                (contains? (set (rest (:body shape))) :input-stream)

@@ -150,7 +150,7 @@
   {:name :resolve-fn
    :description "Resolve `parsed.{:fn-id, :fn-name}` to a full `:fn` row; nil when neither identifier resolves."
    :args {:parsed {:type :_execute-parsed-shape}}
-   :return-type [:union :null [:map :keyword :any]]
+   :return-type :nullable-keyword-map
    :effects #{:db}}
 
   ;; --- :_execute-fn-not-found-err (Variant-2). Was defbase delegating
@@ -618,7 +618,7 @@
   {:name :_execute-apply
    :description "Stage 3 — submit future, deref with timeout. Returns inline `{:status :succeeded :result …}` for fast pure fns, or `{:status :pending :execution-id}` when timeout/effects/persist? forced async."
    :args {:parsed {:type :_execute-parsed-shape}}
-   :return-type [:map :keyword :any]
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :_execute-rejected?
@@ -691,14 +691,14 @@
   ;; --- :get-execution / :cancel-execution! — atomic DB primitives.
   {:name :get-execution
    :description "Read a :fn-execution row by id (joined with arg + arg-item rows). nil when id is nil or doesn't resolve."
-   :args {:id {:type [:union :null :uuid] :description "Target execution id."}}
-   :return-type [:union :null [:map :keyword :any]]
+   :args {:id {:type :nullable-uuid :description "Target execution id."}}
+   :return-type :nullable-keyword-map
    :effects #{:db}}
 
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
-   :args {:id {:type [:union :null :uuid] :description "Target execution id."}}
-   :return-type [:union :null [:map :keyword :any]]
+   :args {:id {:type :nullable-uuid :description "Target execution id."}}
+   :return-type :nullable-keyword-map
    :effects #{:db :process}}
 
   {:name :_get-exec-loaded
@@ -920,7 +920,7 @@
   {:name :resolve-fn-version-id
    :description "Resolve a logical fn-id to its current-branch version-id. nil when the fn has no version visible on the active branch."
    :args {:fn-id {:type :uuid}}
-   :return-type [:union :null :uuid]
+   :return-type :nullable-uuid
    :effects #{:db}}
 
   {:name :_list-exec-apply-by-fn
@@ -961,7 +961,7 @@
    :args {:map {:parent :zipmap
                 :args {:keys [{:value :limit} {:value :fn-id}]
                        :vals [{:as :outer-limit :type [:union :int :null]}
-                              {:as :fn-id :type [:union :null :uuid]}]}}
+                              {:as :fn-id :type :nullable-uuid}]}}
           :key {:value :version-id}
           :value {:as :version-id}}}
 
@@ -1087,7 +1087,7 @@
   {:name :running-entry
    :description "Raw per-service running-info entry from `@recon/running` — `{:stopper :started-at :start-attempts :start-failed-at}` or nil. Atomic boundary; the JSON shape reshape lives in `:enrich-running`."
    :args {:service-id {:type :uuid :description "Service's row id."}}
-   :return-type [:union :null [:map :keyword :any]]
+   :return-type :nullable-keyword-map
    :effects #{}}
 
   ;; --- :enrich-running graph composition --------------------------
@@ -1132,9 +1132,9 @@
    :description "4-field JSON shape — `{:stopper-set? :started-at :start-attempts :start-failed-at}`. Admins can reparent / reorder to vary the response shape."
    :parent :zipmap
    :return-type {:stopper-set? :bool
-                 :started-at [:union :null :text]
+                 :started-at :nullable-text
                  :start-attempts :any
-                 :start-failed-at [:union :null :text]}
+                 :start-failed-at :nullable-text}
    :args {:keys [{:value :stopper-set?} {:value :started-at} {:value :start-attempts} {:value :start-failed-at}]
           :vals [:_enrich-running-stopper-set?
                  :_enrich-running-started-at

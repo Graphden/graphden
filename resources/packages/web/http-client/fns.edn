@@ -17,14 +17,14 @@
   {:name :http-response-shape
    :description "Result of `:http-get` — `{status, headers, body}` mirroring http-kit's response map (headers stringified, body slurped to text)."
    :type {:status :int
-          :headers [:map :text :text]
+          :headers :text-map
           :body :text}}
 
   {:name :http-get
-   :description "Perform an HTTP GET against `:url` with the supplied `:headers` map. Returns `{:status :headers :body}` — body slurped to text, headers stringified. 10s connect+read timeout. Throws `http-client/request-failed` on transport errors (DNS, refused, timeout); non-2xx responses are returned with their actual status so callers can branch on it. The `:headers` slot is `[:map :text :text]` so it REFUSES secret-typed values structurally — use `:http-get-with-bearer` for any auth flow that pulls a token from `:vault-get`."
+   :description "Perform an HTTP GET against `:url` with the supplied `:headers` map. Returns `{:status :headers :body}` — body slurped to text, headers stringified. 10s connect+read timeout. Throws `http-client/request-failed` on transport errors (DNS, refused, timeout); non-2xx responses are returned with their actual status so callers can branch on it. The `:headers` slot is `:text-map` so it REFUSES secret-typed values structurally — use `:http-get-with-bearer` for any auth flow that pulls a token from `:vault-get`."
    :args {:url {:type :text
                 :description "Absolute URL, e.g. `https://httpbin.org/bearer`."}
-          :headers {:type [:map :text :text]
+          :headers {:type :text-map
                     :value {}
                     :description "Header map. Keys + values are strings, e.g. `{\"Authorization\" \"bearer …\"}`. Defaults to empty. Plain `:text` values only — secret-typed values are rejected at sync-time."}}
    :return-type :http-response-shape
@@ -34,7 +34,7 @@
   ;; :http-get-with-authorization — generalised auth-aware HTTP GET.
   ;;
   ;; The secret-flow problem: plain `:http-get`'s `:headers` slot is
-  ;; `[:map :text :text]`, which deliberately refuses secret-typed
+  ;; `:text-map`, which deliberately refuses secret-typed
   ;; values. That closes the leak path (a literal map can't sneak a
   ;; secret through a generic shape) but also blocks the legitimate
   ;; "wire a vault token into the Authorization header" use case.
@@ -52,11 +52,11 @@
   ;; scheme — just a new fn-def.
   ;; ---------------------------------------------------------------------
   {:name :http-get-with-authorization
-   :description "Variant of `:http-get` that takes a secret-typed `:auth-value` (the full `Authorization` header value, e.g. `\"Bearer xxx\"`) and injects it directly into the request headers. The slot's `[:secret :text]` shape IS the secret-flow boundary — secret values never cross a generic `[:map :text :text]` slot."
+   :description "Variant of `:http-get` that takes a secret-typed `:auth-value` (the full `Authorization` header value, e.g. `\"Bearer xxx\"`) and injects it directly into the request headers. The slot's `[:secret :text]` shape IS the secret-flow boundary — secret values never cross a generic `:text-map` slot."
    :args {:url {:type :text :description "Absolute URL."}
           :auth-value {:type [:secret :text]
                        :description "Full Authorization header value — scheme keyword (`Bearer`/`Token`/`Basic`/…) included. Slot is `[:secret :text]`, so a secret-typed value (`:vault-get` ref, any `:str`-composed secret) is accepted structurally."}
-          :extra-headers {:type [:map :text :text]
+          :extra-headers {:type :text-map
                           :value {}
                           :description "Additional headers merged BEFORE the Authorization header (auth always wins on key collision). Plain text only — secrets here would leak through the generic `:map` shape."}}
    :return-type :http-response-shape

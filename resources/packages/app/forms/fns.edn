@@ -208,7 +208,7 @@
   {:name :resolve-slot-effective-type
    :description "Resolve the slot's effective type from the parsed shape."
    :args {:parsed {:type :_value-form-parsed-shape}}
-   :return-type [:union :keyword :text [:list :any] [:map :keyword :any]]
+   :return-type :type-expression
    :effects #{:db}}
 
   {:name :current-slot-value
@@ -219,7 +219,7 @@
 
   {:name :build-value-form
    :description "§3.3 type-aware form-renderer — returns a hiccup vector describing the form control(s)."
-   :args {:eff-type {:type [:union :keyword :text [:list :any] [:map :keyword :any]]
+   :args {:eff-type {:type :type-expression
                      :description "Effective type of the slot — atomic kw (`:int`, `:text`), legacy text alias, vector compound (`[:list T]`), or record (`{...}`)."}
           :current-value {:type :any
                           :description "Slot's currently-bound value, used to seed the form. Polymorphic by design."}}

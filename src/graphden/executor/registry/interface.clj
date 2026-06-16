@@ -98,6 +98,16 @@
            all-name->id (merge base-name->id fn-def-name->id)]
        (sync-primitives! storage)
        (register-base-fns! base-fn-defs)
+       ;; Register type-row aliases (`:refine`, `:union`, `:map`,
+       ;; `:list`, `:variant`, `:type {}`) from the composed fn-defs
+       ;; BEFORE syncing base-fns — base-fn declarations may reference
+       ;; aliases in their `:return-type` (e.g. `:storage-query-
+       ;; identities` returns `[:list :keyword-map]`). Without this
+       ;; step the validation in `sync-defs-to-storage!` rejects the
+       ;; alias keyword as "unknown return type". Mirrors the
+       ;; production `system/core` init path.
+       ((requiring-resolve 'graphden.system.core/register-type-aliases!)
+        (:fn-defs packages))
        (sync-defs-to-storage! storage base-fn-defs {} all-name->id)
        storage)
      (catch Exception e

@@ -37,7 +37,7 @@
 
   {:name :ring-request-shape
    :description "Structural shape of an inbound Ring HTTP request map."
-   ;; `:headers` is `[:map :text :text]` (lowercased string keys / string
+   ;; `:headers` is `:text-map` (lowercased string keys / string
    ;; values, per http-kit). `:body` is the canonical Ring body union —
    ;; nil for missing, raw `:input-stream` straight from http-kit,
    ;; pre-slurped `:text` for middlewares that stringify, parsed `:jsonb`
@@ -47,7 +47,7 @@
    :type {:request-method :keyword
           :uri            :text
           :query-string   :text
-          :headers        [:map :text :text]
+          :headers        :text-map
           :body           [:union :null :input-stream :text :jsonb]}}
 
   {:name :security-headers-shape
@@ -299,7 +299,7 @@
    :args {:string :authorization-header :prefix "Bearer "}}
 
   {:name :bearer-token-raw
-   :description "Substring of the `Authorization` header after the `\"Bearer \"` prefix — only meaningful when `:has-bearer-prefix?` is true. The `:subs` parent returns plain `:text` (no `:null` branch — `(subs nil 7)` throws NPE, doesn't return nil), so declare matching narrow type to avoid the type-drift sweep warning. `:string` carries a `:type :text` author-assertion: `:authorization-header`'s declared `[:union :null :text]` is non-null in this fn-def's runtime context because the sole consumer `:bearer-token` gates this evaluation behind `:has-bearer-prefix?`."
+   :description "Substring of the `Authorization` header after the `\"Bearer \"` prefix — only meaningful when `:has-bearer-prefix?` is true. The `:subs` parent returns plain `:text` (no `:null` branch — `(subs nil 7)` throws NPE, doesn't return nil), so declare matching narrow type to avoid the type-drift sweep warning. `:string` carries a `:type :text` author-assertion: `:authorization-header`'s declared `:nullable-text` is non-null in this fn-def's runtime context because the sole consumer `:bearer-token` gates this evaluation behind `:has-bearer-prefix?`."
    :parent :subs
    :return-type :text
    :args {:string {:ref :authorization-header :type :text} :start 7}}

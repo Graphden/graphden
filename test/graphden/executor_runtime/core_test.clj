@@ -167,8 +167,12 @@
   (testing "System fails to start without JDBC URL"
     (let [config (sys/read-config :test)]
       ;; :db/postgres has jdbc-url = nil in test config
-      ;; Starting should fail because AGE can't connect
-      (is (thrown? Exception
+      ;; Starting should fail because AGE can't connect.
+      ;; Integrant wraps the underlying HikariCP failure in its own
+      ;; ExceptionInfo (`:reason :integrant.core/build-threw-exception`),
+      ;; so that's the type we assert on — `Exception` would also catch
+      ;; an unrelated NPE from a botched test config.
+      (is (thrown? clojure.lang.ExceptionInfo
             (ig/init config [:db/schema :db/postgres]))))))
 
 

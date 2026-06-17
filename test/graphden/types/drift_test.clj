@@ -87,7 +87,8 @@
   ;; relation already held. We just confirm enforce-declared still
   ;; throws on a NON-subtype declaration (drift code path isn't even
   ;; reached).
-  (is (thrown? Exception
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                        #"return-type"
         (check/check-fn-def! {:name :decl-incomparable
                               :parent :first
                               :args {:coll [1 2 3]}

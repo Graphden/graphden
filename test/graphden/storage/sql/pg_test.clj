@@ -118,9 +118,9 @@
 (deftest sql-execution-error-propagates
   (testing "Postgres errors come back as plain SQLException; we don't swallow them"
     (let [ctx (ctx-for-test)]
-      (is (thrown? Exception
+      (is (thrown? java.sql.SQLException
             (pg/pg-query ctx {:select [:*] :from :nonexistent_table})))
-      (is (thrown? Exception
+      (is (thrown? java.sql.SQLException
             (pg/pg-execute ctx {:insert-into :nonexistent_table
                                 :values [{:x 1}]}))))))
 
@@ -182,7 +182,7 @@
       (pg/pg-execute ctx {:create-table :pg_demo
                           :with-columns [[:id :int [:primary-key]]
                                          [:name :text]]})
-      (is (thrown? Exception
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"boom"
             (pg/pg-tx ctx
                       (fn []
                         (pg/pg-execute ctx {:insert-into :pg_demo

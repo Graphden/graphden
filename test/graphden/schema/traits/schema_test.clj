@@ -68,7 +68,7 @@
   (testing "trait name is unique"
     (let [storage (create-test-storage)]
       (sp/create-entity storage :trait {:name "unique-trait"})
-      (is (thrown? Exception
+      (is (thrown? clojure.lang.ExceptionInfo
             (sp/create-entity storage :trait {:name "unique-trait"})))
       (sp/close storage))))
 
@@ -115,7 +115,7 @@
       (sp/create-entity storage :binding-trait
                         {:binding-id (:id b-row)
                          :trait-id (:id trait)})
-      (is (thrown? Exception
+      (is (thrown? clojure.lang.ExceptionInfo
             (sp/create-entity storage :binding-trait
                               {:binding-id (:id b-row)
                                :trait-id (:id trait)})))

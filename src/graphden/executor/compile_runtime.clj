@@ -411,6 +411,16 @@
     (swap! *effect-trace* conj category)))
 
 
+(defn- throw-fn-not-found!
+  "Canonical `:execution-error/fn-not-found` for a missing compiled-
+   registry entry. The same shape was inlined at two call sites; lifted
+   here so the next caller doesn't have to copy-paste."
+  [fn-id]
+  (throw (ex-info (str "Function not found: " fn-id)
+                  {:type :execution-error/fn-not-found
+                   :fn-id fn-id})))
+
+
 ;; =============================================================================
 ;; Execute
 ;; =============================================================================
@@ -438,11 +448,7 @@
         (fn-id (first (vals args)))
         (fn-id args)))
     (let [reg (registry ctx)
-          closure (get reg fn-id)]
-      (when-not closure
-        (throw (ex-info (str "Function not found: " fn-id)
-                        {:type :execution-error/fn-not-found
-                         :fn-id fn-id})))
+          closure (or (get reg fn-id) (throw-fn-not-found! fn-id))]
       ;; compile-eager closure signature: `(fn [free-args ctx])`.
       ;; Child callables are captured at compile time — `reg`
       ;; is no longer needed by the runtime.
@@ -477,11 +483,7 @@
   (if (fn? fn-id)
     fn-id
     (let [reg (registry ctx)
-          closure (get reg fn-id)
+          closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
           free-names (free-arg-ext-names ctx fn-id)]
-      (when-not closure
-        (throw (ex-info (str "Function not found: " fn-id)
-                        {:type :execution-error/fn-not-found
-                         :fn-id fn-id})))
       (ce/make-shape-callable free-names
                               (fn [args] (closure (or args {}) ctx))))))

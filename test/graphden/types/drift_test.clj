@@ -30,8 +30,13 @@
 (use-fixtures :each
   exec/with-clean-registry
   (fn [test-fn]
+    ;; Bulk-replay every alias the `core` package declares so a
+    ;; `core-base-fns` arg-spec referencing e.g. `[:list :path-segment]`
+    ;; doesn't trip `validate-arg-type!` during the per-test reseed.
+    ;; Same pattern as `check_test`'s :each fixture.
     (types-core/clear-aliases!)
-    (types-core/register-type-alias! :positive-int [:refine :int [:> 0]])
+    ((requiring-resolve 'graphden.system.core/register-type-aliases!)
+     (:fn-defs (loader/load-packages ["core"])))
     (test-fn))
   (fn [t]
     (doseq [[fn-name fn-def] core-base-fns]

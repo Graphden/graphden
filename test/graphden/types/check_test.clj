@@ -43,11 +43,21 @@
   exec/with-clean-registry
   (fn [test-fn]
     ;; Built-ins normally registered by the package loader at boot —
-    ;; tests here run outside that path, so seed manually.
+    ;; tests here run outside that path, so seed manually. Replay
+    ;; every alias the `core` package declares so a `core-base-fns`
+    ;; entry whose return-type references e.g. `[:list :path-segment]`
+    ;; doesn't trip `validate-arg-type!` here.
     (types-core/clear-aliases!)
     (types-core/register-type-alias! :positive-int     [:refine :int     [:> 0]])
     (types-core/register-type-alias! :non-negative-int [:refine :int     [:>= 0]])
     (types-core/register-type-alias! :non-empty-text   [:refine :text    [:not= ""]])
+    ;; Bulk-replay every fn-row in `core` that resolves to a
+    ;; structural type-alias (`:refine` / `:union` / `:variant` /
+    ;; `:list` / `:map` / record `:type {…}`) so the per-test
+    ;; `record-rich-types!` reseed doesn't reject any return-type
+    ;; that names a `core/refinements`-declared alias.
+    ((requiring-resolve 'graphden.system.core/register-type-aliases!)
+     (:fn-defs (loader/load-packages ["core"])))
     (test-fn))
   (fn [t]
     ;; Real core base-fns first — their per-base-fn type-rules ride in

@@ -898,7 +898,7 @@
    :args {:values [{:parent :nil? :args {:value :_list-exec-limit-parsed}}
                    :_list-exec-limit-less-than-1?]}}
 
-  ;; `:_list-exec-limit-parsed` declares `[:union :int :null]` —
+  ;; `:_list-exec-limit-parsed` declares `:nullable-int` —
   ;; non-null asserted here because the sole consumer
   ;; `:_list-exec-limit-invalid?` short-circuits on `:or` after the
   ;; preceding `(:nil? :_list-exec-limit-parsed)` clause, so this
@@ -960,7 +960,7 @@
    :parent :assoc
    :args {:map {:parent :zipmap
                 :args {:keys [{:value :limit} {:value :fn-id}]
-                       :vals [{:as :outer-limit :type [:union :int :null]}
+                       :vals [{:as :outer-limit :type :nullable-int}
                               {:as :fn-id :type :nullable-uuid}]}}
           :key {:value :version-id}
           :value {:as :version-id}}}

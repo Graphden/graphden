@@ -107,7 +107,7 @@
    ;; `:value` is `[:union :null a]` — pinning the contract that the
    ;; argument is either nil or some type `a` (which the default's
    ;; type also pins). Concrete non-null inputs (e.g. `:int`) still
-   ;; type-check via subtype: `:int ⊆ [:union :null :int]` after
+   ;; type-check via subtype: `:int ⊆ :nullable-int` after
    ;; unification binds `a := :int`. `coalesce-return-rule` then
    ;; strips `:null` and unions with the default's type.
    :args {:value {:type [:union :null a] :description "Primary value; used when non-nil. Either nil or some `a` (matching the default's type)."}

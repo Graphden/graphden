@@ -439,7 +439,12 @@
    in compressed form so tests can ask about loaded :schedule and
    friends without spinning up a container."
   []
-  (let [{:keys [base-fn-defs fn-defs]} (loader/load-packages ["core"])]
+  (let [{:keys [base-fn-defs fn-defs] :as packages} (loader/load-packages ["core"])]
+    ;; Register every `core/refinements`-declared alias BEFORE
+    ;; `record-rich-types!` walks base-fn arg-specs — otherwise a
+    ;; base-fn whose `:type` is an alias keyword like `[:list
+    ;; :path-segment]` trips `validate-arg-type!`.
+    ((requiring-resolve 'graphden.system.core/register-type-aliases!) fn-defs)
     (registry/register-base-fns! base-fn-defs)
     (doseq [[nm fd] base-fn-defs]
       (registry/record-rich-types! nm fd))

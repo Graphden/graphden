@@ -42,7 +42,7 @@
    :description "Split a string by separator (Clojure's `(str/split s (re-pattern separator) limit)`). Separator is a regex. Optional `:limit` caps the number of parts — handy for `key=value=more` style parsing where you want exactly 2 parts even if the value contains the separator."
    :args {:string {:type :text :description "String to split."}
           :separator {:type :text :description "Regex pattern that delimits parts."}
-          :limit {:type [:union :null :int]
+          :limit {:type :nullable-int
                   :required false
                   :description "Maximum number of parts. Non-positive / nil → no limit (default)."}}
    :return-type [:list :text]}
@@ -56,7 +56,7 @@
   {:name :str-to-keyword
    :description "Coerce a string into a keyword (Clojure's `keyword`). Nil-safe — returns nil for nil input."
    :args {:string {:type :nullable-text :description "String to convert (nil-safe)."}}
-   :return-type [:union :null :keyword]}
+   :return-type :nullable-keyword}
 
   {:name :keyword-to-str
    :description "Coerce a keyword into a string without the leading colon (Clojure's `name`)."

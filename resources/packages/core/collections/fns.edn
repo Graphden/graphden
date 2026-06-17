@@ -62,7 +62,7 @@
   {:name :get-in
    :description "Look up a value at a nested path (Clojure's `get-in`). Falls back to `:default` if any segment is missing."
    :args {:map {:type [:union :null [:map a :any]] :description "Map to read from. Nil treated as empty."}
-          :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
+          :path {:type [:list :path-segment] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
           :default {:type :any :required false :description "Returned when the path is absent."}}
    :return-type :any}
 
@@ -149,7 +149,7 @@
   {:name :assoc-in
    :description "Set the value at a nested path in a map (Clojure's `assoc-in`). Creates intermediate maps as needed."
    :args {:m {:type [:union :null [:map a :any]] :description "Map to update (nil treated as empty)."}
-          :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
+          :path {:type [:list :path-segment] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
           :v {:type :any :description "Value to write at the path."}}
    :return-type :any}
 
@@ -161,7 +161,7 @@
   {:name :update-in
    :description "Apply a callable to the value at a nested path (Clojure's `update-in`). The `:f` slot is :fn-typed; impl invokes `(f existing-value)` per call."
    :args {:m {:type [:union :null [:map a :any]] :description "Map to update (nil treated as empty)."}
-          :path {:type [:list [:union :keyword :int :text]] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
+          :path {:type [:list :path-segment] :description "Path to traverse — each item may be a literal key (`:keyword` for records, `:int` for vector index, `:text` for string-keyed maps) or a fn-ref."}
           :f {:type [:fn {:existing a} b] :description "Callable receiving the existing value at the path under the convention name `:existing` (alpha-equivalent for 1-arg callees), returning the new value."}}
    :return-type :any}
 
@@ -287,7 +287,7 @@
    :description "Index of the first occurrence of `:value` in `:coll`, or nil if absent (Java `List/.indexOf`, but nil instead of -1). Lazy `:seq` bindings work — they're `vec`'d at the boundary. Companion to `:get` for indexed-lookup-style traversal (e.g. `position-in segs marker` then `get segs (inc idx)`)."
    :args {:coll {:type [:list :any] :description "Collection to search. Lazy seqs are realised."}
           :value {:type :any :description "Element to look for (Clojure `=` equality)."}}
-   :return-type [:union :null :int]}
+   :return-type :nullable-int}
 
   ;; (update-in m path #(merge defaults %)) — Clojure-style closure.
   ;; `:defaults` is captured from caller's outer scope (callers source-id

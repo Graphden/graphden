@@ -75,9 +75,19 @@
   ;; — so text, uuid, and jsonb cross the threshold; the rest stay
   ;; inline.
 
-  {:name :nullable-text   :union [:null :text]}
-  {:name :nullable-uuid   :union [:null :uuid]}
-  {:name :nullable-jsonb  :union [:null :jsonb]}
+  {:name :nullable-text    :union [:null :text]}
+  {:name :nullable-uuid    :union [:null :uuid]}
+  {:name :nullable-jsonb   :union [:null :jsonb]}
+  ;; `:nullable-int` was retired earlier when it had zero adopters.
+  ;; Restored now: 5 inline `:nullable-int` / `:nullable-int`
+  ;; sites — most heavily used by sequence-position fields and
+  ;; nullable timeout/limit query params.
+  {:name :nullable-int     :union [:null :int]}
+  ;; 3 inline sites — variant tags often parse to either form.
+  {:name :nullable-keyword :union [:null :keyword]}
+  ;; `:keyword-or-text` — keyword OR string, the post-JSONB-roundtrip
+  ;; ambiguity for identifiers. 4 inline sites.
+  {:name :keyword-or-text  :union [:keyword :text]}
 
   ;; ---------------------------------------------------------------------
   ;; Compound aliases used at ≥5 call sites — collapses long inline
@@ -110,6 +120,16 @@
   ;; anywhere a wire-format demands string keys AND string values.
   ;; Used at 12 sites before this alias landed.
   {:name :text-map :map {:key :text :value :text}}
+
+  ;; A path-item for `:get-in` / `:assoc-in` / `:update-in` — each
+  ;; segment may be a keyword (record field), int (vector index), or
+  ;; text (string-keyed map key). 3 inline sites in the long form.
+  {:name :path-segment :union [:keyword :int :text]}
+
+  ;; NOTE: `:ring-handler` lives in `web/ring-adapter/fns.edn` — it
+  ;; needs `:ring-request-shape` / `:ring-response-shape` (declared in
+  ;; that package) and adding it here would invert the dependency
+  ;; (`core` doesn't depend on `web`).
 
   ;; ---------------------------------------------------------------------
   ;; Variant types — Result-style discriminated unions. Each branch is

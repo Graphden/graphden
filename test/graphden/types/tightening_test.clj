@@ -85,13 +85,16 @@
 
 
 (deftest get-in-path-item-type-is-key-union
-  (testing ":get-in.path is declared [:list [:union :keyword :int :text]]"
-    (is (= [:union :int :keyword :text]
-           (let [t (expected-path-item-type)]
-             ;; types/make-union sorts; either ordering is fine —
-             ;; compare as sets.
-             (when (and (vector? t) (= :union (first t)))
-               (into [:union] (sort-by pr-str (rest t)))))))))
+  (testing ":get-in.path is declared keyword | int | text (via `:path-segment` alias OR inline)"
+    (let [t (expected-path-item-type)
+          resolved (types/resolve-alias t)]
+      (is (or (= :path-segment t)
+              (and (vector? t) (= :union (first t))))
+          "path item is the :path-segment alias or an inline union")
+      (is (= [:union :int :keyword :text]
+             (when (and (vector? resolved) (= :union (first resolved)))
+               (into [:union] (sort-by pr-str (rest resolved)))))
+          "resolved structurally to [:union :keyword :int :text]"))))
 
 
 (deftest assoc-in-and-update-in-share-tightened-path

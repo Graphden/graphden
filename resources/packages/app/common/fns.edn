@@ -53,7 +53,7 @@
    :description "Generic reitit route — `[path method-data]`. Own pins: `:path`, `:method`, `:handler`. Method-specific shortcuts below bind `:method`."
    :parent :list
    :args {:items [{:as :path} :method-map]
-          :method {:type [:union :text :keyword]
+          :method {:type :keyword-or-text
                    :description "HTTP method literal — e.g. `\"GET\"` / `\"POST\"`. Bound to a concrete value by method shortcuts (`:get-route`, `:post-route`, …)."}}}
 
   ;; Level 4: HTTP method shortcuts (`get-route`, `post-route`, …) live in
@@ -80,7 +80,7 @@
    :description "Reitit route that carries its own `:middleware` list — `[path {<method> {\"handler\" h \"middleware\" mw}}]`. Own pins: `:path`, `:method`, `:handler`, `:middleware`."
    :parent :list
    :args {:items [{:as :path} :_method-map-with-middleware]
-          :method {:type [:union :text :keyword]
+          :method {:type :keyword-or-text
                    :description "HTTP method literal — bound to a concrete value by `:*-route-with-middleware` shortcuts."}
           :middleware {:type [:list :any]
                        :description "Reitit middleware spec list — composed around the route handler."}}}

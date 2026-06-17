@@ -339,27 +339,59 @@ on this type: Timestamp` when handed a decoded `:started-at` /
 `.toString` — `YYYY-MM-DD HH:MM:SS.…`. First 16 chars cover
 both that and ISO `YYYY-MM-DDTHH:MM:SS…`.
 
-### 10. The type-checker can't flow-narrow through `cond + get`
+### 10. `:cond` + `:get` narrowing — annotate error-branch return-types
 
-When a fn-def is a `:cond` returning different envelope shapes
-(success vs error union), downstream `:get :key X` on the result
-returns `:any` from the type-checker's POV, and a `:count` /
-`:empty?` / `:str-join` on that often trips
-`types/sweep-regression`. Runtime is fine — the cond's apply
-branch is the only path the partial-renderer's caller reaches.
+When a fn-def's chain wraps a `:cond` whose branches return
+DIFFERENT envelope shapes (success vs error union), downstream
+`:get :key X` on the result may opaque out to `:any` for the
+non-success branches, and `:count` / `:empty?` / `:str-join`
+downstream trips the type-check sweep.
 
-Investigation status: `get-return-rule` (`core/collections/impls.clj`
-line 432) ALREADY narrows through union-typed `:coll` by mapping
-over `union-members` and re-unioning the per-member results. So
-the gap is upstream — `cond-return-rule` likely emits the
-combined return as `[:union [:map :any :any] …]` rather than a
-union of NARROW shape-records, and the per-member narrowing then
-opaqued out at the first member that's `[:map :any :any]`.
+`get-return-rule` (`core/collections/impls.clj`) ALREADY narrows
+through union-typed `:coll` by mapping over union members. The
+opacifier is upstream: a `:cond` branch that uses `:parent
+:zipmap` with literal keys but NO `:return-type` annotation
+infers to `[:map :any [:union <val-types>]]` instead of the
+precise record. That opaque entry, unioned with the
+success-shape record, then dominates `:get`'s per-member
+narrowing — `:get :key :diffs` on `[:map :any T]` falls to the
+default's type, so the union of "default" + "diff-list" can't
+type-check `:count`.
 
-Until the cond shape-inference is tightened, the work-around is
-to add the affected fn-def names to
-`graphden.types.check/allowed-type-check-failures` with a comment
-pointing at this section.
+**Fix**: pin `:return-type :<your-record-shape>` on every error-
+branch fn-def. The record-shape type can be a shared alias
+(e.g. `:_error-result-shape` = `{:ok :bool :error :text}` in
+`web/crud/fns.edn`) so several handlers reuse it.
+
+Branch-diff example: `:_diff-err-target-missing` and
+`:_diff-err-source-missing` both use `:parent :zipmap` —
+adding `:return-type :_error-result-shape` to each turned the
+cond's combined return into a union of precise records, and 4
+allowlisted partial fn-defs (`:_partial-bd-count` /
+`:-empty?` / `:-source-name` / `:-target-name`) type-checked
+cleanly without the allowlist band-aid.
+
+Sweep-search heuristic — find more sites like this:
+
+```clojure
+;; REPL — fn-defs whose computed return is a union including an
+;; opaque [:map :any …] entry:
+(require '[graphden.executor.registry.core :as reg]
+         '[clojure.string :as s])
+(->> (reg/rich-types-snapshot)
+     (filter (fn [[k v]]
+               (and (s/starts-with? (str k) ":_")
+                    (let [r (:return v)]
+                      (and (vector? r) (= :union (first r))
+                           (some (fn [m] (and (vector? m) (= :map (first m))))
+                                 (rest r)))))))
+     (map first) sort)
+```
+
+~85 fn-defs across the graph today match this pattern. Each is a
+candidate — but not all are bugs (some genuinely hold open-shape
+map data). Audit at need; the systemic fix is the same — pin
+`:return-type` to a precise record-shape on the opaque branch.
 
 ### 11. Convention: string-input base-fns use `:string`, NOT `:s`
 

@@ -601,8 +601,9 @@
    :args {:value {:as :source-branch}}}
 
   {:name :_diff-err-target-missing
-   :description "Dynamic error — cites the raw target-ref. Shared by diff / conflicts / merge via `:parent`."
+   :description "Dynamic error — cites the raw target-ref. Shared by diff / conflicts / merge via `:parent`. `:return-type` pinned so the parent `:cond`'s union of error envelopes + success envelope stays a union of PRECISE record shapes (otherwise the bare `:zipmap` inference opaques out to `[:map :any …]` and downstream `:get :key …` can't narrow per-branch)."
    :parent :zipmap
+   :return-type :_error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -618,8 +619,9 @@
    :args {:value {:ok false :error "Query parameter 'against' is required"}}}
 
   {:name :_diff-err-source-missing
-   :description "Dynamic error — cites the raw against-ref. Only diff uses `:against-ref` as the source key (conflicts/merge use `:source-ref`)."
+   :description "Dynamic error — cites the raw against-ref. Only diff uses `:against-ref` as the source key (conflicts/merge use `:source-ref`). Pinned `:return-type` mirrors `:_diff-err-target-missing` — keeps the cond's union of precise record shapes intact."
    :parent :zipmap
+   :return-type :_error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str

@@ -96,6 +96,12 @@
    :parent :get-auth-required
    :args {:path "/partials/branch-diff" :handler :_partial-branch-diff-handler}}
 
+  {:name :partial-execute-result-effects
+   :description "GET /partials/execute-result-effects?runtime=db,io&declared=db — runtime-effects chip strip below an execute-popover result. Both params are comma-separated effect names; empty lists render an empty (hidden) span. JS in `editor-execute.js` swaps the response into the result host."
+   :parent :get-route
+   :args {:path "/partials/execute-result-effects" :handler :_partial-execute-result-effects-handler}
+   :expects-effects #{}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

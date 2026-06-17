@@ -225,9 +225,9 @@ async function pollOnce(execId, resultHostEl) {
         cancelled.textContent = 'Cancelled.';
         resultHostEl.appendChild(cancelled);
       }
-      const rtStrip = renderRuntimeEffectsStrip(row['runtime-effects'],
-                                                row['declared-effects']);
-      if (rtStrip) resultHostEl.appendChild(rtStrip);
+      appendRuntimeEffectsStrip(resultHostEl,
+                                row['runtime-effects'],
+                                row['declared-effects']);
       stopPolling();
       return;
     }
@@ -296,9 +296,9 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
       pre.textContent = JSON.stringify(body, null, 2);
       resultHostEl.appendChild(pre);
     }
-    const rtStrip = renderRuntimeEffectsStrip(body['runtime-effects'],
-                                              body['declared-effects']);
-    if (rtStrip) resultHostEl.appendChild(rtStrip);
+    appendRuntimeEffectsStrip(resultHostEl,
+                              body['runtime-effects'],
+                              body['declared-effects']);
   } catch (e) {
     resultHostEl.textContent = '';
     resultHostEl.appendChild(renderErrorPane('Network error: ' + e.message));

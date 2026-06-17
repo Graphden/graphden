@@ -1509,6 +1509,216 @@
    :parent :html-ok-response
    :args {:body :_partial-bd-html}}
 
+  ;; ---------------------------------------------------------------------
+  ;; Runtime-effects strip — chips for {runtime, declared} effect sets
+  ;; with drift detection. Slimmed out of editor-execute-result.js
+  ;; (rendered per-execution-result, was the most isolated of that
+  ;; module's render helpers — single input shape, no recursive
+  ;; rendering of arbitrary result values).
+  ;;
+  ;; Effects come in as comma-separated kebab-case names via query
+  ;; string (`?runtime=db,io&declared=db`) so the JS caller can build
+  ;; the URL without JSON-encoding. Empty list → empty string → split
+  ;; returns `[""]` so we filter blanks.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-rfx-runtime-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "runtime"}}}
+
+  {:name :_partial-rfx-declared-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "declared"}}}
+
+  {:name :_partial-rfx-runtime-split
+   :parent :str-split
+   :args {:string {:parent :coalesce :args {:value :_partial-rfx-runtime-raw :default ""}}
+          :separator {:value ","}}}
+
+  {:name :_partial-rfx-declared-split
+   :parent :str-split
+   :args {:string {:parent :coalesce :args {:value :_partial-rfx-declared-raw :default ""}}
+          :separator {:value ","}}}
+
+  {:name :_partial-rfx-blank?
+   :parent :blank?
+   :args {:string {:as :item}}}
+
+  {:name :_partial-rfx-not-blank?
+   :parent :not
+   :args {:value :_partial-rfx-blank?}}
+
+  {:name :_partial-rfx-runtime
+   :description "Cleaned runtime-effects list — drops empty strings produced by `str-split` on empty input."
+   :parent :filter
+   :args {:pred :_partial-rfx-not-blank? :coll :_partial-rfx-runtime-split}}
+
+  {:name :_partial-rfx-declared
+   :parent :filter
+   :args {:pred :_partial-rfx-not-blank? :coll :_partial-rfx-declared-split}}
+
+  {:name :_partial-rfx-empty?
+   :description "Both sets empty → return empty fragment (caller's host stays untouched)."
+   :parent :and
+   :args {:values [{:parent :empty? :args {:coll :_partial-rfx-runtime}}
+                   {:parent :empty? :args {:coll :_partial-rfx-declared}}]}}
+
+  ;; --- Runtime chips (effects that ACTUALLY fired). Drift detection:
+  ;; chip carries `execute-effects-drift` when the runtime effect isn't
+  ;; in the declared set (impl widens what the rich-type promised).
+  ;;
+  ;; `:contains?` over a list checks INDEX, not value — so we build a
+  ;; set-as-map `{eff true}` via `:into {} <pairs>` and `:contains?` it
+  ;; by key. Pair HOF: `:_partial-rfx-pair-true` returns `[item true]`.
+  {:name :_partial-rfx-pair-true
+   :description "Per-item HOF — returns `[item true]` as a VECTOR (not list); `:into {} <list-of-pairs>` requires vector-shaped Map$Entry items at runtime."
+   :parent :vec
+   :args {:coll [{:as :item} {:value true}]}}
+
+  {:name :_partial-rfx-declared-pairs
+   :parent :map
+   :args {:func :_partial-rfx-pair-true :coll :_partial-rfx-declared}}
+
+  {:name :_partial-rfx-runtime-declared-set
+   :parent :into
+   :args {:to {:value {}} :from :_partial-rfx-declared-pairs}}
+
+  {:name :_partial-rfx-runtime-drift?
+   :parent :not
+   :args {:value {:parent :contains?
+                  :args {:coll :_partial-rfx-runtime-declared-set
+                         :key {:as :item}}}}}
+
+  {:name :_partial-rfx-runtime-chip-class-base
+   :parent :str-join
+   :args {:coll [{:value "effects-chip effects-chip-"} {:as :item}]
+          :separator {:value ""}}}
+
+  {:name :_partial-rfx-runtime-chip-class
+   :parent :if
+   :args {:test :_partial-rfx-runtime-drift?
+          :then {:parent :str-join
+                 :args {:coll [:_partial-rfx-runtime-chip-class-base
+                               {:value " execute-effects-drift"}]
+                        :separator {:value ""}}}
+          :else :_partial-rfx-runtime-chip-class-base}}
+
+  {:name :_partial-rfx-runtime-chip-attrs
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :class}
+          :value :_partial-rfx-runtime-chip-class}}
+
+  {:name :_partial-rfx-runtime-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs :_partial-rfx-runtime-chip-attrs
+          :children [{:as :item}]}}
+
+  {:name :_partial-rfx-runtime-chips
+   :parent :map
+   :args {:func :_partial-rfx-runtime-chip :coll :_partial-rfx-runtime}}
+
+  ;; --- Declared-but-unobserved chips (declared but didn't fire on this
+  ;; run). Skipped entirely when no runtime data was recorded — "missing"
+  ;; in that case means "unknown", not "unobserved". The check is
+  ;; `runtime-non-empty? AND not (item in runtime-set)`. Same set-as-map
+  ;; trick as the drift check above.
+  {:name :_partial-rfx-runtime-pairs
+   :parent :map
+   :args {:func :_partial-rfx-pair-true :coll :_partial-rfx-runtime}}
+
+  {:name :_partial-rfx-runtime-set
+   :parent :into
+   :args {:to {:value {}} :from :_partial-rfx-runtime-pairs}}
+
+  {:name :_partial-rfx-runtime-non-empty?
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll :_partial-rfx-runtime}}}}
+
+  {:name :_partial-rfx-declared-show-unobserved?
+   :parent :and
+   :args {:values [:_partial-rfx-runtime-non-empty?
+                   {:parent :not :args {:value {:parent :contains?
+                                                :args {:coll :_partial-rfx-runtime-set
+                                                       :key {:as :item}}}}}]}}
+
+  {:name :_partial-rfx-declared-chip-class
+   :parent :str-join
+   :args {:coll [{:value "effects-chip effects-chip-"} {:as :item}
+                 {:value " execute-effects-unobserved"}]
+          :separator {:value ""}}}
+
+  {:name :_partial-rfx-declared-chip-shown
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :assoc :args {:map {:value {}}
+                                        :key {:value :class}
+                                        :value :_partial-rfx-declared-chip-class}}
+          :children [{:as :item}]}}
+
+  ;; Hidden span (zero-width sentinel) when the chip should be skipped —
+  ;; keeps the children-vec shape uniform across runs.
+  {:name :_partial-rfx-declared-chip-hidden
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
+  {:name :_partial-rfx-declared-chip
+   :parent :if
+   :args {:test :_partial-rfx-declared-show-unobserved?
+          :then :_partial-rfx-declared-chip-shown
+          :else :_partial-rfx-declared-chip-hidden}}
+
+  {:name :_partial-rfx-declared-chips
+   :parent :map
+   :args {:func :_partial-rfx-declared-chip :coll :_partial-rfx-declared}}
+
+  ;; --- Composition.
+  {:name :_partial-rfx-label
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "execute-runtime-effects-label"}}
+          :children ["ran: "]}}
+
+  ;; Wrap the label in a 1-element list so `:concat :colls` sees a
+  ;; collection of collections (the inner `[:_partial-rfx-label]`
+  ;; literal would store as `[:literal-kw]`, not as a ref to the
+  ;; label fn-def — `:value` literals don't resolve refs).
+  {:name :_partial-rfx-label-list
+   :parent :list
+   :args {:items [:_partial-rfx-label]}}
+
+  {:name :_partial-rfx-strip-children
+   :parent :concat
+   :args {:colls [:_partial-rfx-label-list
+                  :_partial-rfx-runtime-chips
+                  :_partial-rfx-declared-chips]}}
+
+  {:name :_partial-rfx-strip-populated
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-runtime-effects-strip"}}
+          :children :_partial-rfx-strip-children}}
+
+  {:name :_partial-rfx-strip-empty
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
+  {:name :_partial-rfx-strip
+   :parent :if
+   :args {:test :_partial-rfx-empty?
+          :then :_partial-rfx-strip-empty
+          :else :_partial-rfx-strip-populated}}
+
+  {:name :_partial-rfx-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-rfx-strip}}
+
+  {:name :_partial-execute-result-effects-handler
+   :description "Ring handler for `GET /partials/execute-result-effects?runtime=db,io&declared=db` — returns the runtime-effects strip hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the result host below the result body."
+   :parent :html-ok-response
+   :args {:body :_partial-rfx-html}}
+
   ;; Concrete editor routes (`/`, `/favicon.ico`, `/partials/...`,
   ;; `/api/entities/...`, `/api/sequence/...`) live in `app.routes`;
   ;; they reference the handler fn-defs above by name.

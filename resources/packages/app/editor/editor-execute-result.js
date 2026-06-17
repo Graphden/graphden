@@ -177,61 +177,34 @@ function renderPendingPane(execId) {
 }
 
 
-// Runtime-effects strip — shown below result/error pane when the
-// fn-execution row carries non-empty `:runtime-effects` OR when
-// `:declared-effects` set is non-empty (we still want to surface the
-// "promised but unobserved" case). Two drift visuals:
+// Runtime-effects strip — content lives in the graph
+// (`/partials/execute-result-effects?runtime=…&declared=…`). The graph
+// fragment owns chip rendering + drift detection (`execute-effects-
+// drift` for runtime ∉ declared, `execute-effects-unobserved` for
+// declared ∉ runtime when runtime is non-empty). JS only fetches the
+// hiccup and swaps it in.
 //
-//   * `execute-effects-drift` (runtime ∉ declared) — impl widens its
-//     effect set vs the rich-type promise. Red dashed outline.
-//   * `execute-effects-unobserved` (declared ∉ runtime) — impl
-//     declared an effect that didn't fire on this run. Could be a
-//     conditional branch that wasn't taken, OR an over-declaration.
-//     Grey dashed outline + greyed-out chip.
-function renderRuntimeEffectsStrip(runtimeEffects, declaredEffects) {
+// Async by necessity — callers used to receive a DOM node synchronously
+// and append it; the partial fetch is fire-and-forget into the host
+// element since the result body has already been painted and the strip
+// is purely informational below it.
+async function appendRuntimeEffectsStrip(hostEl, runtimeEffects, declaredEffects) {
   const runtime = runtimeEffects || [];
   const declared = declaredEffects || [];
-  if (runtime.length === 0 && declared.length === 0) return null;
-  const strip = document.createElement('div');
-  strip.className = 'execute-runtime-effects-strip';
-  const lbl = document.createElement('span');
-  lbl.className = 'execute-runtime-effects-label';
-  lbl.textContent = 'ran: ';
-  strip.appendChild(lbl);
-  const declaredSet = new Set(declared.map(String));
-  const runtimeSet = new Set(runtime.map(String));
-  // First — observed effects, in execution order. Drift outline when
-  // not in the declared set.
-  for (const cat of runtime) {
-    const chip = document.createElement('span');
-    chip.className = 'effects-chip effects-chip-' + cat;
-    chip.textContent = cat;
-    if (declaredEffects && !declaredSet.has(String(cat))) {
-      chip.classList.add('execute-effects-drift');
-      chip.title = 'Runtime effect not in declared :effects set — '
-        + 'impl widens what its rich-type promised.';
-    }
-    strip.appendChild(chip);
-  }
-  // Then — declared effects that did NOT fire on this run. Render as
-  // muted unobserved chips. Skipped entirely when no runtime data
-  // was recorded (would imply pre-instrumentation row OR fn that
-  // wasn't actually run with tracing; either way "missing" doesn't
-  // mean "unobserved", just "unknown").
-  if (runtime.length > 0) {
-    for (const cat of declared) {
-      if (runtimeSet.has(String(cat))) continue;
-      const chip = document.createElement('span');
-      chip.className = 'effects-chip effects-chip-' + cat
-        + ' execute-effects-unobserved';
-      chip.textContent = cat;
-      chip.title = 'Declared but not observed at runtime — either a '
-        + 'conditional branch that didn\'t run, or an over-declaration '
-        + 'in the rich-type :effects set.';
-      strip.appendChild(chip);
-    }
-  }
-  return strip;
+  if (runtime.length === 0 && declared.length === 0) return;
+  const url = '/partials/execute-result-effects'
+    + '?runtime='  + encodeURIComponent(runtime.map(String).join(','))
+    + '&declared=' + encodeURIComponent(declared.map(String).join(','));
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return;   // Strip is best-effort; the result body still renders.
+    const wrap = document.createElement('div');
+    wrap.innerHTML = await r.text();
+    // The partial returns a single root <div> (populated or hidden);
+    // skip the hidden form so the host doesn't gain an empty sibling.
+    const child = wrap.firstElementChild;
+    if (child && child.getAttribute('hidden') !== '1') hostEl.appendChild(child);
+  } catch (_) { /* swallow — informational */ }
 }
 
 

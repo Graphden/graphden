@@ -73,9 +73,9 @@ function makeRowExpander(resultHostEl) {
         note.textContent = status;
         resultHostEl.appendChild(note);
       }
-      const rtStrip = renderRuntimeEffectsStrip(body['runtime-effects'],
-                                                body['declared-effects']);
-      if (rtStrip) resultHostEl.appendChild(rtStrip);
+      appendRuntimeEffectsStrip(resultHostEl,
+                                body['runtime-effects'],
+                                body['declared-effects']);
     } catch (e) {
       resultHostEl.appendChild(renderErrorPane('Load error: ' + e.message));
     }

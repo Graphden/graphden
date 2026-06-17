@@ -893,8 +893,9 @@
                    {:parent :nil? :args {:value {:as :resolved-parent}}}]}}
 
   {:name :_create-branch-err-name-taken
-   :description "Dynamic error — cites the rejected name."
+   :description "Dynamic error — cites the rejected name. `:return-type` pinned so the parent cond's union stays a union of precise record shapes for downstream `:get` narrowing."
    :parent :zipmap
+   :return-type :_error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -907,6 +908,7 @@
   {:name :_create-branch-err-base-missing
    :description "Dynamic error — cites the base-ref that didn't resolve."
    :parent :zipmap
+   :return-type :_error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str
@@ -1182,8 +1184,9 @@
    :args {:value {:ok false :error "Query parameter 'source' is required"}}}
 
   {:name :_conflicts-err-source-missing
-   :description "Dynamic error — cites the raw source-ref. Shared with `:_merge-err-source-missing` via `:parent`."
+   :description "Dynamic error — cites the raw source-ref. Shared with `:_merge-err-source-missing` via `:parent`. `:return-type` pinned so the parent cond's union stays a union of precise record shapes for downstream `:get` narrowing."
    :parent :zipmap
+   :return-type :_error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str

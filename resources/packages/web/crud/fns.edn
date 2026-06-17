@@ -907,8 +907,9 @@
    :args {:value {:ok false :error "id required (UUID)"}}}
 
   {:name :_update-record-type-err-not-found
-   :description "Dynamic error builder — cites the parsed fn-id of the row that didn't exist."
+   :description "Dynamic error builder — cites the parsed fn-id of the row that didn't exist. `:return-type` pinned to keep the parent cond's union of precise record shapes."
    :parent :zipmap
+   :return-type :_error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str

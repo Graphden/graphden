@@ -677,8 +677,9 @@
                  :_exec-id-raw]}}
 
   {:name :_exec-err-not-found
-   :description "Dynamic 404 builder — cites the raw id-segment. Shared between get + cancel."
+   :description "Dynamic 404 builder — cites the raw id-segment. Shared between get + cancel. `:return-type` pinned so downstream `:cond` unions of error + success retain precise record shapes (otherwise bare `:zipmap` infers `[:map :any [:union :bool :text]]` and the per-member narrowing in `get-return-rule` opaques out)."
    :parent :zipmap
+   :return-type :_error-result-shape
    :args {:keys [:ok :error]
           :vals [false
                  {:parent :str

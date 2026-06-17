@@ -279,8 +279,12 @@
    :return-type :bool
    :args {:value :_auth-token-blank?}}
 
+  ;; Use the constant-time comparator, NOT `:equal?` — a plain `=` on
+  ;; the bearer token leaks a per-byte timing channel that lets an
+  ;; attacker probe one matching prefix at a time. See
+  ;; `:constant-time-equal?` doc for the underlying invariant.
   {:name :_bearer-equals-env?
-   :parent :equal?
+   :parent :constant-time-equal?
    :return-type :bool
    :args {:a :bearer-token :b :auth-token-from-env}}
 

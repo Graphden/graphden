@@ -146,6 +146,19 @@
   (= a b))
 
 
+(defbase constant-time-equal?-fn
+  [a b]
+  ;; `MessageDigest/isEqual` is constant-time relative to the LONGER
+  ;; input — it XOR-accumulates every byte instead of short-circuiting
+  ;; on first mismatch. nil / non-string inputs short-circuit at the
+  ;; boundary so a callable that's never seen a bearer token returns
+  ;; false rather than throwing.
+  (let [^bytes ab (when (string? a) (.getBytes ^String a "UTF-8"))
+        ^bytes bb (when (string? b) (.getBytes ^String b "UTF-8"))]
+    (and (some? ab) (some? bb)
+         (java.security.MessageDigest/isEqual ab bb))))
+
+
 ;; === Type-rules ===
 ;; :const / :identity — `(:const :value V)` returns V. `:identity`
 ;; is `:parent :const` so the rule covers both via the type-checker's
@@ -479,4 +492,6 @@
    :coalesce {:impl coalesce :return-type-rule (types/wrap-with-taint coalesce-return-rule)}
    :const {:impl const :return-type-rule (types/wrap-with-taint const-return-rule)}
    :equal? {:impl equal?-fn :return-type-rule (types/wrap-with-taint nil)}
+   :constant-time-equal? {:impl constant-time-equal?-fn
+                          :return-type-rule (types/wrap-with-taint nil)}
    :is-a? {:impl is-a?-fn :return-type-rule (types/wrap-with-taint nil)}})

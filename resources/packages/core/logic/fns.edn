@@ -150,4 +150,10 @@
    :description "Two-arg equality (Clojure's `=`). Composition-friendly variant of `:eq`."
    :args {:a {:type :any :description "Left operand."}
           :b {:type :any :description "Right operand."}}
+   :return-type :bool}
+
+  {:name :constant-time-equal?
+   :description "Two-string equality in constant time relative to the longer input — comparison never short-circuits on the first differing byte. Use for any equality check on secret material (bearer tokens, HMAC tags, …); a regular `:equal?` leaks a per-byte timing channel that lets an attacker probe one prefix at a time. Behavioural semantics match `:equal?` for strings; nil/non-string inputs short-circuit to false at the boundary."
+   :args {:a {:type [:union :null :text] :description "First string (nil-safe — nil ↔ non-nil compares false)."}
+          :b {:type [:union :null :text] :description "Second string."}}
    :return-type :bool}]}

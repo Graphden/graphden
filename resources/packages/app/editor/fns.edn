@@ -303,6 +303,112 @@
    :parent :cached-svg-ok-response
    :args {:body :_favicon-svg-body}}
 
+  ;; =============================================================================
+  ;; HTMX PARTIALS — server-rendered fragments swapped into editor mount-points
+  ;;
+  ;; First migration: the effect-explainer popover. Previously a JS
+  ;; module (`editor-effect-explainer.js`) built the popover DOM from
+  ;; a hard-coded `EFFECT_DESCRIPTIONS` lookup table. Now the lookup
+  ;; lives in `:_effect-descriptions` below (one fn-def, editable
+  ;; through the editor itself), rendered to hiccup, and served at
+  ;; `GET /partials/effect?effect=db`. JS keeps only positioning +
+  ;; dismissal — the content lives in the graph.
+  ;;
+  ;; Pattern for future partials: keep the lookup/data as fn-defs,
+  ;; the hiccup composition as fn-defs, the handler is a thin
+  ;; `:html-ok-response` wrap. The full chain — including which
+  ;; effect names are documented — becomes inspectable / branchable
+  ;; / type-checked through the same surface as everything else.
+  ;; =============================================================================
+
+  {:name :_effect-descriptions
+   :description "Lookup table: effect tag (string) → plain-English description shown in the popover. Adding a new tracked effect means adding a row here, no JS edit needed."
+   :parent :const
+   :args {:value {"db"      "Reads or writes storage (database / persistent state)."
+                  "env"     "Reads environment variables."
+                  "io"      "Reads or writes files / classpath resources."
+                  "network" "Makes outbound HTTP / network calls."
+                  "time"    "Uses wall-clock time — call returns a different value over time."
+                  "random"  "Generates random or otherwise non-deterministic values."
+                  "process" "Spawns supervised background work (thread / loop / listener) that lives past the call and needs explicit stopping. Required for a fn to become a :service."}}}
+
+  {:name :_partial-effect-name
+   :description "Read the `effect` query-string parameter from the inbound request. Empty string when absent so downstream lookups fall to the default."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "effect"}}}
+
+  ;; `:_effect-descriptions`'s literal map sticks keyword keys after
+  ;; the JSONB round-trip (`{\"db\" ...}` → `{:db ...}`), so the
+  ;; query-string lookup-key has to be coerced from string to
+  ;; keyword before `:get`.
+  {:name :_partial-effect-name-kw
+   :parent :str-to-keyword
+   :args {:string :_partial-effect-name}}
+
+  {:name :_partial-effect-description
+   :description "Plain-English description for the requested effect tag; fallback for tags not in the lookup table."
+   :parent :get
+   :args {:coll :_effect-descriptions
+          :key :_partial-effect-name-kw
+          :default {:value "Side effect that the type-checker tracks but doesn't name yet."}}}
+
+  {:name :_partial-effect-structural-text
+   :description "`:tag` form of the effect name (e.g. `:db`) — surfaced in the structural row so users can map the popover content back to the chip label."
+   :parent :str-join
+   :args {:coll [":" :_partial-effect-name]
+          :separator ""}}
+
+  ;; Hiccup composition for the popover content. Each tag with a
+  ;; computed child (description / structural text) gets its own
+  ;; `:hiccup`-based fn-def — `:value`-literal hiccup stores
+  ;; keyword fn-refs as literal keywords, so dynamic content can't
+  ;; sit inline. Pure-literal sub-trees (header) DO use `:const`
+  ;; below where they don't depend on the request.
+  {:name :_partial-effect-header
+   :description "Popover header — title + close button. Pure literal (no per-request data); rendered as a fixed hiccup constant. The close button carries `data-explainer-close` so the post-swap JS handler binds dismissal without selectors."
+   :parent :const
+   :args {:value
+          [:div {:class "type-explainer-header"}
+           [:span {:class "type-explainer-title"} "Effect"]
+           [:button {:type "button"
+                     :class "type-explainer-close"
+                     :data-explainer-close "1"
+                     :aria-label "Close effect explainer"} "×"]]}}
+
+  {:name :_partial-effect-description-div
+   :description "`<div class=\"type-explainer-human\">{description}</div>` — one-line natural-language description of the effect."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-explainer-human"}}
+          :children [:_partial-effect-description]}}
+
+  {:name :_partial-effect-structural-div
+   :description "`<div class=\"type-explainer-structural\">{:effect-tag}</div>` — canonical effect tag in the structural row."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-explainer-structural"}}
+          :children [:_partial-effect-structural-text]}}
+
+  {:name :_partial-effect-fragment
+   :description "Full hiccup fragment for one effect's popover — header + description + structural row, wrapped in the `.type-explainer-content` container."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-explainer-content"}}
+          :children [:_partial-effect-header
+                     :_partial-effect-description-div
+                     :_partial-effect-structural-div]}}
+
+  {:name :_partial-effect-html
+   :description "Rendered HTML string for the effect-explainer fragment."
+   :parent :render-hiccup
+   :args {:hiccup :_partial-effect-fragment}}
+
+  {:name :_partial-effect-handler
+   :description "Ring handler for `GET /partials/effect?effect=<tag>` — returns the popover hiccup as `text/html`. JS swaps the response body into the explainer mount-point and handles positioning + dismissal."
+   :parent :html-ok-response
+   :args {:body :_partial-effect-html}}
+
   ;; Concrete editor routes (`/`, `/favicon.ico`, `/partials/...`,
   ;; `/api/entities/...`, `/api/sequence/...`) live in `app.routes`;
   ;; they reference the handler fn-defs above by name.

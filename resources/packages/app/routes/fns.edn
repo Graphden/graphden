@@ -66,6 +66,16 @@
    :args {:path "/assets/editor.css" :handler :_editor-css-handler}
    :expects-effects #{:io}}                   ; reads classpath CSS
 
+  ;; HTMX partials — server-rendered HTML fragments that the editor's
+  ;; JS swaps into mount-points instead of building DOM client-side.
+  ;; The fragment fn-defs live in `app.editor`; this route just
+  ;; exposes the handler.
+  {:name :partial-effect
+   :description "GET /partials/effect?effect=<tag> — popover hiccup for one tracked side-effect, served as `text/html`. Editor JS fetches this and swaps the response body into the explainer mount-point."
+   :parent :get-route
+   :args {:path "/partials/effect" :handler :_partial-effect-handler}
+   :expects-effects #{}}                      ; pure lookup over a literal map
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

@@ -86,6 +86,11 @@
    :parent :get-auth-required
    :args {:path "/partials/fn-version-executions" :handler :_partial-fn-version-executions-handler}}
 
+  {:name :partial-execute-history
+   :description "GET /partials/execute-history?fn-id=X — history panel hiccup for one fn (rows across all of its versions on the current branch). JS in `editor-execute.js` swaps the response into the panel host and binds Repeat / row-expand handlers post-swap."
+   :parent :get-auth-required
+   :args {:path "/partials/execute-history" :handler :_partial-execute-history-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

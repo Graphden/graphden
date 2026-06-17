@@ -826,6 +826,207 @@
    :parent :html-ok-response
    :args {:body :_partial-fnv-exec-html}}
 
+  ;; ---------------------------------------------------------------------
+  ;; Execute-history panel — list of persisted runs for one fn (across
+  ;; all of its versions, current branch). Lazy-fetched when the user
+  ;; clicks the "History" toggle in the execute popover header.
+  ;;
+  ;; v1 scope: status pill + timestamp + preview + Repeat button. The
+  ;; tainted/audit badges and the audit-filter chip are deferred —
+  ;; surfacing them server-side needs richer per-row taint + secret
+  ;; introspection than the current /api/executions exposes, and the
+  ;; existing e2e contract (status + preview + repeat-btn) doesn't
+  ;; depend on them.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-exec-hist-data
+   :description "Live by-fn executions data. Reuses `:_list-executions-by-fn` — same cond / parsed shape `/api/executions` uses, so the partial is the HTML projection of that JSON."
+   :parent :_list-executions-by-fn}
+
+  {:name :_partial-exec-hist-rows
+   :description "`:executions` list out of the envelope. Falls to `[]` for the error envelope path (no fn-id supplied) so the empty-state renders cleanly."
+   :parent :get
+   :args {:coll :_partial-exec-hist-data
+          :key {:value :executions}
+          :default {:value []}}}
+
+  {:name :_partial-exec-hist-empty?
+   :parent :empty?
+   :args {:coll :_partial-exec-hist-rows}}
+
+  ;; --- Per-row HOF callback.
+  {:name :_partial-eh-row-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default {:value ""}}}
+
+  {:name :_partial-eh-row-status-kw
+   :parent :get
+   :args {:coll {:as :item} :key {:value :status} :default nil}}
+
+  ;; Status is keyword (`:succeeded` / `:failed` / `:cancelled`) —
+  ;; `:name` strips the leading `:` for both class suffix and visible
+  ;; text. `:coalesce` survives the rare nil-status row.
+  {:name :_partial-eh-row-status-text
+   :parent :coalesce
+   :args {:value {:parent :name :args {:value :_partial-eh-row-status-kw}}
+          :default {:value "?"}}}
+
+  {:name :_partial-eh-row-status-class
+   :parent :str-join
+   :args {:coll [{:value "execute-history-status execute-history-status-"}
+                 :_partial-eh-row-status-text]
+          :separator {:value ""}}}
+
+  {:name :_partial-eh-row-status-attrs
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :class}
+          :value :_partial-eh-row-status-class}}
+
+  {:name :_partial-eh-row-status-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs :_partial-eh-row-status-attrs
+          :children [:_partial-eh-row-status-text]}}
+
+  ;; `:decode-row` parses timestamptz columns into `java.sql.Timestamp`
+  ;; objects, not strings — `:subs` on one throws
+  ;; `count not supported on type Timestamp`. Stringify first via
+  ;; `:to-str` (Timestamp's `.toString` is the SQL shape
+  ;; "YYYY-MM-DD HH:MM:SS.…", which fits the 16-char truncation
+  ;; cleanly).
+  {:name :_partial-eh-row-started-at
+   :parent :get
+   :args {:coll {:as :item} :key {:value :started-at} :default {:value ""}}}
+
+  {:name :_partial-eh-row-started-at-text
+   :parent :to-str
+   :args {:value :_partial-eh-row-started-at}}
+
+  {:name :_partial-eh-row-ts-short
+   :parent :subs
+   :args {:string :_partial-eh-row-started-at-text
+          :start {:value 0}
+          :end {:value 16}}}
+
+  {:name :_partial-eh-row-ts-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "execute-history-ts"}}
+          :children [:_partial-eh-row-ts-short]}}
+
+  ;; Repeat button — carries `data-execution-id` so the post-swap JS
+  ;; handler can wire `applyHistoryArgs(fnEntity, id)` by selector.
+  {:name :_partial-eh-row-repeat-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "execute-history-repeat-btn"
+                        :title "Re-fill the form with this run's args"}}
+          :key {:value :data-execution-id}
+          :value :_partial-eh-row-id}}
+
+  {:name :_partial-eh-row-repeat-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_partial-eh-row-repeat-attrs
+          :children ["Repeat"]}}
+
+  ;; Preview text dispatch by status. JSON-stringifying the result
+  ;; server-side keeps the format identical to what `shortPreview`
+  ;; produced in JS. Error path picks `:error`; cancelled is literal.
+  {:name :_partial-eh-row-result-json
+   :parent :to-json-string
+   :args {:data {:parent :get :args {:coll {:as :item}
+                                     :key {:value :result}
+                                     :default nil}}}}
+
+  {:name :_partial-eh-row-error-text
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :item}
+                                      :key {:value :error}
+                                      :default nil}}
+          :default {:value ""}}}
+
+  {:name :_partial-eh-row-succeeded?
+   :parent :equal?
+   :args {:a :_partial-eh-row-status-kw :b {:value :succeeded}}}
+
+  {:name :_partial-eh-row-failed?
+   :parent :equal?
+   :args {:a :_partial-eh-row-status-kw :b {:value :failed}}}
+
+  {:name :_partial-eh-row-preview-text
+   :parent :cond
+   :args {:clauses [:_partial-eh-row-succeeded?  :_partial-eh-row-result-json
+                    :_partial-eh-row-failed?     :_partial-eh-row-error-text
+                    {:value true}                :_partial-eh-row-status-text]}}
+
+  {:name :_partial-eh-row-preview-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-preview"}}
+          :children [:_partial-eh-row-preview-text]}}
+
+  ;; Row header (status + timestamp + Repeat) + preview body.
+  {:name :_partial-eh-row-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-row-head"}}
+          :children [:_partial-eh-row-status-span
+                     :_partial-eh-row-ts-span
+                     :_partial-eh-row-repeat-btn]}}
+
+  {:name :_partial-eh-row-attrs
+   :parent :assoc
+   :args {:map {:value {:class "execute-history-row"}}
+          :key {:value :data-execution-id}
+          :value :_partial-eh-row-id}}
+
+  {:name :_partial-eh-row
+   :description "Per-row hiccup. Row carries `data-execution-id` for the post-swap row-click expand binding; the Repeat button carries the same attribute for its own binding."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_partial-eh-row-attrs
+          :children [:_partial-eh-row-head :_partial-eh-row-preview-div]}}
+
+  {:name :_partial-eh-rendered-rows
+   :parent :map
+   :args {:func :_partial-eh-row :coll :_partial-exec-hist-rows}}
+
+  {:name :_partial-eh-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-list"}}
+          :children :_partial-eh-rendered-rows}}
+
+  {:name :_partial-eh-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-empty"}}
+          :children ["No saved runs yet. Tick \"Save to history\" before clicking Run to populate."]}}
+
+  {:name :_partial-eh-body
+   :parent :if
+   :args {:test :_partial-exec-hist-empty?
+          :then :_partial-eh-empty-msg
+          :else :_partial-eh-list}}
+
+  {:name :_partial-eh-fragment
+   :description "Full execute-history panel hiccup — empty-state OR the list of rows."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-history-panel"}}
+          :children [:_partial-eh-body]}}
+
+  {:name :_partial-eh-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-eh-fragment}}
+
+  {:name :_partial-execute-history-handler
+   :description "Ring handler for `GET /partials/execute-history?fn-id=X` — returns the history panel hiccup as `text/html`. JS in `editor-execute.js` swaps the response into the panel host and binds Repeat / row-expand handlers post-swap."
+   :parent :html-ok-response
+   :args {:body :_partial-eh-html}}
+
   ;; Concrete editor routes (`/`, `/favicon.ico`, `/partials/...`,
   ;; `/api/entities/...`, `/api/sequence/...`) live in `app.routes`;
   ;; they reference the handler fn-defs above by name.

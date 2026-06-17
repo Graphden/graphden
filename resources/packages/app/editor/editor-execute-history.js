@@ -2,62 +2,17 @@
 //
 // Persisted runs for the current fn (across all of its versions),
 // fetched lazily when the user clicks the "History" toggle in the
-// execute popover header. Rows are summary-only; clicking a row
-// expands to the full result via GET /api/execute/:id (reusing the
-// `renderResultBody` / `renderErrorPane` helpers from
-// editor-execute-result.js), and "Repeat" re-fills the form widgets
-// with that run's args.
+// execute popover header. Server owns the panel hiccup
+// (`/partials/execute-history?fn-id=…` returns the rows or empty
+// state). This module owns: fetch glue, post-swap binding of the
+// row-click expand handler + Repeat button, the `applyHistoryArgs`
+// form-refill flow, and the per-row result expansion (which still
+// reaches `renderResultBody` / `renderErrorPane` from
+// editor-execute-result.js).
 //
 // Reads the shared `argFormHosts` registry from editor-execute.js —
 // the editor JS bundle concatenates these scripts into one scope so
 // the `let` survives. No own state.
-
-// Hoisted from a per-row literal — the timestamp shape is fixed and
-// the same regex object can match every row. Saves a compile per
-// history row on each panel render.
-const HISTORY_TS_REGEX = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})/;
-
-
-async function fetchHistory(fnId) {
-  try {
-    const r = await authFetch('/api/executions?fn-id=' + encodeURIComponent(fnId),
-                              { method: 'GET' });
-    if (!r.ok) return [];
-    const body = await r.json();
-    return Array.isArray(body?.executions) ? body.executions : [];
-  } catch (_) {
-    return [];
-  }
-}
-
-
-function shortDuration(startedAt, finishedAt) {
-  if (!startedAt || !finishedAt) return '';
-  const s = new Date(startedAt).getTime();
-  const f = new Date(finishedAt).getTime();
-  const ms = Math.max(0, f - s);
-  if (ms < 1000) return ms + ' ms';
-  if (ms < 60000) return (ms / 1000).toFixed(1) + ' s';
-  return Math.round(ms / 1000) + ' s';
-}
-
-
-function shortPreview(row) {
-  if (typeof isTaintedExecuteResponse === 'function' && isTaintedExecuteResponse(row)) {
-    return 'hidden — secret-typed';
-  }
-  if (row.status === 'succeeded' || row.status === ':succeeded') {
-    const s = JSON.stringify(row.result);
-    return s == null ? '' : (s.length > 60 ? s.slice(0, 60) + '…' : s);
-  }
-  if (row.status === 'failed' || row.status === ':failed') {
-    return row.error || '';
-  }
-  if (row.status === 'cancelled' || row.status === ':cancelled') {
-    return 'cancelled';
-  }
-  return '';
-}
 
 
 async function applyHistoryArgs(fnEntity, execId) {
@@ -78,9 +33,11 @@ async function applyHistoryArgs(fnEntity, execId) {
         // in :position order — get-execution already sort-by-position.
         argsBySlot[a['slot-id']] = a.items.map(i => i.value);
       }
-      // For ref args we'd need to look up the ref's logical fn-id
-      // — skipped in this MVP. The form leaves the user to pick.
     }
+    // argFormHosts comes from editor-execute.js's closure — bundled
+    // into the same scope. Each host carries `:hostEl` + `:slotId`;
+    // we refill via the same `fillFormValue` helper the inline edit
+    // popovers use, against the form's `[data-form-root]` mount.
     for (const ah of argFormHosts) {
       const v = argsBySlot[ah.slotId];
       if (v !== undefined) {
@@ -92,142 +49,11 @@ async function applyHistoryArgs(fnEntity, execId) {
 }
 
 
-function buildHistoryRow(fnEntity, row, resultHostEl, onExpand) {
-  const wrap = document.createElement('div');
-  wrap.className = 'execute-history-row';
-  wrap.dataset.executionId = row.id;
-  const status = String(row.status || '').replace(/^:/, '');
-  wrap.classList.add('execute-history-row-' + status);
-
-  const head = document.createElement('div');
-  head.className = 'execute-history-row-head';
-
-  const statusChip = document.createElement('span');
-  statusChip.className = 'execute-history-status execute-history-status-' + status;
-  statusChip.textContent = status;
-  head.appendChild(statusChip);
-
-  if (typeof isTaintedExecuteResponse === 'function' && isTaintedExecuteResponse(row)) {
-    const lock = document.createElement('span');
-    lock.className = 'execute-history-tainted-badge';
-    lock.textContent = '🔒'; // 🔒
-    lock.title = 'Run returned a secret — result hidden';
-    head.appendChild(lock);
-  }
-
-  // audit-trail badge. Distinct from the tainted-result
-  // badge above: `:touched-secret?` fires whenever the fn's
-  // rich-type touches `:secret` ANYWHERE (input OR return) AND the
-  // run observed side-effects. `:sql-exec` with a secret password
-  // and an `:int` return trips this without tripping the tainted
-  // result-hide. Click the badge to filter the panel by it.
-  if (row['touched-secret?']) {
-    const audit = document.createElement('span');
-    audit.className = 'execute-history-audit-badge';
-    audit.textContent = 'audit';
-    audit.title = 'Audit: run touched a secret AND observed a side-effect';
-    head.appendChild(audit);
-  }
-
-  const ts = document.createElement('span');
-  ts.className = 'execute-history-ts';
-  // ISO timestamps from postgres look like "2026-05-21T15:03:35Z".
-  // For today's runs show time only ("15:03:35") for compactness;
-  // for older runs include date ("05-20 15:03") so a yesterday run
-  // doesn't masquerade as today.
-  const tStr = row['started-at'] || '';
-  const m = tStr.match(HISTORY_TS_REGEX);
-  if (m) {
-    const todayIso = new Date().toISOString().slice(0, 10);
-    const rowDate = m[1] + '-' + m[2] + '-' + m[3];
-    ts.textContent = (rowDate === todayIso)
-      ? m[4]
-      : (m[2] + '-' + m[3] + ' ' + m[4].slice(0, 5));
-  } else {
-    ts.textContent = tStr;
-  }
-  head.appendChild(ts);
-
-  const dur = shortDuration(row['started-at'], row['finished-at']);
-  if (dur) {
-    const dspan = document.createElement('span');
-    dspan.className = 'execute-history-duration';
-    dspan.textContent = dur;
-    head.appendChild(dspan);
-  }
-
-  const repeatBtn = document.createElement('button');
-  repeatBtn.type = 'button';
-  repeatBtn.className = 'execute-history-repeat-btn';
-  repeatBtn.title = 'Re-fill the form with this run\'s args';
-  repeatBtn.textContent = 'Repeat';
-  repeatBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    await applyHistoryArgs(fnEntity, row.id);
-  });
-  head.appendChild(repeatBtn);
-
-  wrap.appendChild(head);
-
-  const preview = document.createElement('div');
-  preview.className = 'execute-history-preview';
-  preview.textContent = shortPreview(row);
-  wrap.appendChild(preview);
-
-  wrap.addEventListener('click', async (e) => {
-    if (e.target.closest('button')) return;
-    e.stopPropagation();
-    onExpand(row.id);
-  });
-
-  return wrap;
-}
-
-
-// when at least one row in the panel has the audit
-// flag, surface a filter chip at the top so an admin can quickly
-// page just the audit-relevant rows.
-function buildAuditFilterChip(panel, rows) {
-  const wrap = document.createElement('label');
-  wrap.className = 'execute-history-audit-filter';
-  const cb = document.createElement('input');
-  cb.type = 'checkbox';
-  const txt = document.createElement('span');
-  txt.textContent = 'Only audit-relevant runs';
-  wrap.appendChild(cb);
-  wrap.appendChild(txt);
-  const auditCount = rows.filter(r => r['touched-secret?']).length;
-  const cnt = document.createElement('span');
-  cnt.className = 'execute-history-audit-filter-count';
-  cnt.textContent = '(' + auditCount + ')';
-  wrap.appendChild(cnt);
-  cb.addEventListener('change', () => {
-    panel.querySelectorAll('.execute-history-row').forEach((rowEl) => {
-      const id = rowEl.dataset.executionId;
-      const row = rows.find(r => r.id === id);
-      const keep = !cb.checked || row?.['touched-secret?'];
-      rowEl.style.display = keep ? '' : 'none';
-    });
-  });
-  return wrap;
-}
-
-
-async function buildHistoryPanel(fnEntity, resultHostEl) {
-  const panel = document.createElement('div');
-  panel.className = 'execute-history-panel';
-  const rows = await fetchHistory(fnEntity.id);
-  if (rows.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'execute-history-empty';
-    empty.textContent = 'No saved runs yet. Tick "Save to history" before clicking Run to populate.';
-    panel.appendChild(empty);
-    return panel;
-  }
-  if (rows.some(r => r['touched-secret?'])) {
-    panel.appendChild(buildAuditFilterChip(panel, rows));
-  }
-  const onExpand = async (execId) => {
+// Build the per-row expand handler. The handler closes over the
+// popover's `resultHost` so clicking a row paints the full result /
+// error / runtime-effects in the same pane the inline submit uses.
+function makeRowExpander(resultHostEl) {
+  return async (execId) => {
     resultHostEl.textContent = '';
     resultHostEl.appendChild(renderSubmitSpinner('Loading…'));
     try {
@@ -254,8 +80,57 @@ async function buildHistoryPanel(fnEntity, resultHostEl) {
       resultHostEl.appendChild(renderErrorPane('Load error: ' + e.message));
     }
   };
-  for (const row of rows) {
-    panel.appendChild(buildHistoryRow(fnEntity, row, resultHostEl, onExpand));
+}
+
+
+// Post-swap action wiring — both selectors point at markers the
+// server fragment carries (`data-execution-id` on the row + the
+// Repeat button; `.execute-history-repeat-btn` for the click target).
+function bindHistoryActions(panel, fnEntity, resultHostEl) {
+  const onExpand = makeRowExpander(resultHostEl);
+  panel.querySelectorAll('.execute-history-repeat-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();   // don't bubble to row-click expand
+      await applyHistoryArgs(fnEntity, btn.getAttribute('data-execution-id'));
+    });
+  });
+  panel.querySelectorAll('.execute-history-row[data-execution-id]').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      e.stopPropagation();
+      onExpand(row.getAttribute('data-execution-id'));
+    });
+  });
+}
+
+
+// Fetch the server-rendered panel hiccup, return a populated DOM
+// element ready for the caller to append. Signature matches the
+// legacy `buildHistoryPanel(fnEntity, resultHost) → element` so
+// editor-execute.js's call-sites stay untouched.
+async function buildHistoryPanel(fnEntity, resultHostEl) {
+  const wrap = document.createElement('div');
+  wrap.className = 'execute-history-host-wrap';
+  try {
+    const r = await authFetch('/partials/execute-history?fn-id='
+                              + encodeURIComponent(fnEntity.id));
+    if (!r.ok) {
+      const err = document.createElement('div');
+      err.className = 'execute-history-error';
+      err.textContent = r.status === 401
+        ? 'Sign in to view run history.'
+        : ('HTTP ' + r.status);
+      wrap.appendChild(err);
+      return wrap;
+    }
+    wrap.innerHTML = await r.text();
+    if (window.htmx?.process) window.htmx.process(wrap);
+    bindHistoryActions(wrap, fnEntity, resultHostEl);
+  } catch (e) {
+    const err = document.createElement('div');
+    err.className = 'execute-history-error';
+    err.textContent = 'Failed: ' + (e?.message || 'network error');
+    wrap.appendChild(err);
   }
-  return panel;
+  return wrap;
 }

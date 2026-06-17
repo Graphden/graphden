@@ -20,6 +20,7 @@
                   :partial-effect
                   :partial-fn-versions
                   :partial-fn-version-executions
+                  :partial-execute-history
                   :health
                   :metrics
                   :version

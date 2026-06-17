@@ -102,24 +102,28 @@
         (log/error e "NOTIFY dispatch callback threw" {:event event})))))
 
 
+(def ^:private default-poll-timeout-ms
+  "Production poll timeout — low enough that halt is responsive, high
+   enough that an idle pod doesn't busy-poll. Tests can shrink it via
+   `:poll-timeout-ms` on `create-listener` to cut Thread/sleep waits."
+  1000)
+
+
 (defn- listen-loop
   "Blocking loop — `poll-once!` then dispatch, while `running?` is
-   true. Runs on a dedicated thread spawned by `create-listener`.
-
-   Timeout is 1s: low enough that halt is responsive, high enough
-   that an idle pod doesn't busy-poll."
-  [^Connection conn callbacks running?]
+   true. Runs on a dedicated thread spawned by `create-listener`."
+  [^Connection conn callbacks running? poll-timeout-ms]
   (try
     (while @running?
       (try
-        (doseq [event (poll-once! conn 1000)]
+        (doseq [event (poll-once! conn poll-timeout-ms)]
           (dispatch! callbacks event))
         (catch InterruptedException _
           (Thread/.interrupt (Thread/currentThread)))
         (catch Exception e
           (when @running?
             (log/error e "NOTIFY listen loop iteration failed — continuing"))
-          (Thread/sleep 1000))))
+          (Thread/sleep (long poll-timeout-ms)))))
     (finally
       (log/info "NOTIFY listen loop exiting"))))
 
@@ -131,21 +135,27 @@
 (defn create-listener
   "Open the LISTEN connection, subscribe to `graphden_events`, start
    the background dispatch thread. Returns a handle map; pass it to
-   `register!` / `unregister!` / `close-listener!`."
-  [pg-opts]
-  (let [conn (pg-conn/open-dedicated! pg-opts "notify-listener")
-        callbacks (atom #{})
-        running? (atom true)]
-    (run-listen! conn)
-    (let [thread (doto (Thread. ^Runnable
-                        #(listen-loop conn callbacks running?)
-                                "graphden-notify-listener")
-                   (Thread/.setDaemon true)
-                   Thread/.start)]
-      {:connection conn
-       :callbacks callbacks
-       :running? running?
-       :thread thread})))
+   `register!` / `unregister!` / `close-listener!`.
+
+   Optional `:poll-timeout-ms` (default 1000) shrinks the
+   `getNotifications` blocking interval. Tests use ~250 to cut their
+   post-emit `Thread/sleep` wait windows."
+  ([pg-opts] (create-listener pg-opts {}))
+  ([pg-opts {:keys [poll-timeout-ms]
+             :or {poll-timeout-ms default-poll-timeout-ms}}]
+   (let [conn (pg-conn/open-dedicated! pg-opts "notify-listener")
+         callbacks (atom #{})
+         running? (atom true)]
+     (run-listen! conn)
+     (let [thread (doto (Thread. ^Runnable
+                         #(listen-loop conn callbacks running? poll-timeout-ms)
+                                 "graphden-notify-listener")
+                    (Thread/.setDaemon true)
+                    Thread/.start)]
+       {:connection conn
+        :callbacks callbacks
+        :running? running?
+        :thread thread}))))
 
 
 (defn register!

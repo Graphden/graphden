@@ -63,7 +63,10 @@
     (let [pg-opts (pg-opts-from-fixture)
           ;; Sibling pod's listener — receives events the writer
           ;; emits.
-          listener (pg-notify/create-listener pg-opts)
+          ;; Shorter poll-timeout cuts the post-emit Thread/sleep wait —
+          ;; default 1000 ms forces tests to sleep 1500 ms per emit, 250 ms
+          ;; lets us sleep 400 ms instead.
+          listener (pg-notify/create-listener pg-opts {:poll-timeout-ms 250})
           received (atom [])
           callback (pg-notify/register! listener
                                         (fn [event] (swap! received conj event)))]
@@ -85,8 +88,9 @@
                              ["SELECT pg_notify('graphden_events', ?)"
                               "service:write:event-1"])
               (finally (Connection/.close writer-conn))))
-          ;; Allow the listener's 1s poll window to fire.
-          (Thread/sleep 1500)
+          ;; Allow the listener's 250 ms poll window to fire +
+          ;; dispatch headroom.
+          (Thread/sleep 400)
           (is (= [{:kind :service :op :write :id "event-1"}] @received)))
 
         (finally
@@ -97,7 +101,10 @@
 (deftest multiple-callbacks-fan-out-test
   (testing "every registered callback receives every NOTIFY"
     (let [pg-opts (pg-opts-from-fixture)
-          listener (pg-notify/create-listener pg-opts)
+          ;; Shorter poll-timeout cuts the post-emit Thread/sleep wait —
+          ;; default 1000 ms forces tests to sleep 1500 ms per emit, 250 ms
+          ;; lets us sleep 400 ms instead.
+          listener (pg-notify/create-listener pg-opts {:poll-timeout-ms 250})
           seen-a (atom [])
           seen-b (atom [])
           cb-a (pg-notify/register! listener (fn [e] (swap! seen-a conj e)))
@@ -112,7 +119,7 @@
                            ["SELECT pg_notify('graphden_events', ?)"
                             "fn:invalidate:abc"])
             (finally (Connection/.close writer-conn))))
-        (Thread/sleep 1500)
+        (Thread/sleep 400)
         (is (= [{:kind :fn :op :invalidate :id "abc"}] @seen-a))
         (is (= [{:kind :fn :op :invalidate :id "abc"}] @seen-b))
         (finally
@@ -124,7 +131,10 @@
 (deftest unregister-stops-dispatching-test
   (testing "after `unregister!` the callback no longer fires"
     (let [pg-opts (pg-opts-from-fixture)
-          listener (pg-notify/create-listener pg-opts)
+          ;; Shorter poll-timeout cuts the post-emit Thread/sleep wait —
+          ;; default 1000 ms forces tests to sleep 1500 ms per emit, 250 ms
+          ;; lets us sleep 400 ms instead.
+          listener (pg-notify/create-listener pg-opts {:poll-timeout-ms 250})
           received (atom [])
           callback (pg-notify/register! listener
                                         (fn [event] (swap! received conj event)))]
@@ -139,7 +149,7 @@
                            ["SELECT pg_notify('graphden_events', ?)"
                             "service:write:should-be-ignored"])
             (finally (Connection/.close writer-conn))))
-        (Thread/sleep 1500)
+        (Thread/sleep 400)
         (is (= [] @received) "no fire because the callback was unregistered")
         (finally
           (pg-notify/close-listener! listener))))))

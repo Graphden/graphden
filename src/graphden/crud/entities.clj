@@ -821,6 +821,100 @@
             (recur next-frontier seen')))))))
 
 
+(defn- humanise-create-exception
+  "Render the user-facing form of a create-entity failure — Postgres
+   unique-violation messages read like internal log lines; rewrite the
+   common shape and fall back to any `:reason` carried in `ex-data` or
+   the original message."
+  [^Exception e entity-type entity-data type-str]
+  (let [msg (or (Throwable/.getMessage e) "")
+        nm (some-> entity-data :name)]
+    (cond
+      (and (re-find #"(?i)duplicate key" msg) nm)
+      (str (name entity-type) " " (pr-str nm)
+           " already exists here — pick a different name")
+      (re-find #"(?i)duplicate key" msg)
+      (str (name entity-type) " already exists with these fields")
+      :else (or (some-> (ex-data e) :reason) msg
+                (str "Failed to create " type-str)))))
+
+
+(defn- try-create-or-error
+  "Run `sp/create-entity` with capability gating + humanised exception
+   formatting. Returns `{:created <id>}` or `{:error <human-msg>}`.
+
+   Capability gate: secret-shaped fn-defs (parent=[:vault-get]) can
+   only be created via /api/secrets — the form-driven path never
+   carries the in-memory `:_admin-secret-create` marker, so any
+   attempt to sneak one through /api/entities/fn bounces with a 409.
+   Closes the orthogonal hole to the delete-side guard at
+   `process-delete-entity`.
+
+   Projects to `:id` — leaving the whole record in `:created` makes
+   the NOTIFY emitter stringify the map and the listener's
+   `UUID/fromString` throws \"UUID string too large\"."
+  [storage entity-type entity-data type-str]
+  (let [cap-rej (when (= entity-type :fn)
+                  (secret-leaf-capability-rej storage entity-data))]
+    (cond
+      cap-rej {:error (:reason cap-rej)}
+      :else (try
+              {:created (:id (sp/create-entity storage entity-type entity-data))}
+              (catch Exception e
+                (log/error e "create-entity failed for"
+                           entity-type entity-data)
+                {:error (humanise-create-exception e entity-type entity-data type-str)})))))
+
+
+(defn- forward-rename-slot!
+  "Phase 6c — forward a form `:rename-to` to the dedicated renamed-view
+   slot. A failure here is logged, not fatal — the binding is still
+   useful without the rename slot."
+  [storage form-data entity-data]
+  (try (ensure-rename-slot! storage
+                            (:fn-id entity-data)
+                            (:slot-id entity-data)
+                            (when-not (str/blank? (:rename-to form-data))
+                              (str (:rename-to form-data))))
+       (catch Exception e
+         (log/error e "ensure-rename-slot! failed"))))
+
+
+(defn- post-create-type-check-fn-id
+  "Resolve the OWNING fn-id for a binding-shaped mutation so the
+   post-create type-check sees the aggregate of every sibling binding."
+  [storage type-str entity-data]
+  (cond
+    (= type-str "binding")
+    (:fn-id entity-data)
+    (= type-str "binding-list-item")
+    (some-> (:binding-id entity-data)
+            (#(sp/read-entity storage :binding %))
+            :fn-id)))
+
+
+(defn- verify-post-create-or-rollback!
+  "Post-create whole-fn type-check for binding mutations. A binding can
+   be individually valid yet break the OWNING fn-def's aggregate
+   check; on failure delete the just-created row so DB state stays
+   consistent. Returns the rejection map (with `:reason`) when the
+   check rejects, nil when the row stays."
+  [storage create-result type-str entity-data entity-type]
+  (when (and (:created create-result)
+             (#{"binding" "binding-list-item"} type-str))
+    (when-let [fn-id (post-create-type-check-fn-id storage type-str entity-data)]
+      (when-let [rej (tc/type-check-fn-after-mutation! storage fn-id)]
+        ;; Roll back the just-created row when the post-write check
+        ;; rejects. Silently nil'ing the rollback failure would mask
+        ;; orphan rows surviving the rejection — log so dashboards see it.
+        (try (sp/delete-entity storage entity-type (:created create-result))
+             (catch Exception e
+               (log/warn e "Rollback delete-entity failed after type-check rejection"
+                         {:entity-type entity-type
+                          :id (:created create-result)})))
+        rej))))
+
+
 (defn apply-create-core
   "§3.3 atomic core of the create-apply flow: capability gate +
    `sp/create-entity` (with unique-violation humanisation) + Phase-6c
@@ -838,88 +932,13 @@
    is conditional on the post-check result, not on an exception."
   [{:keys [entity-type type-str form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
-        humanise
-        (fn [e]
-          ;; Postgres unique-violation messages read like internal log
-          ;; lines; render the user-facing form.
-          (let [msg (or (Throwable/.getMessage e) "")
-                nm (some-> entity-data :name)]
-            (cond
-              (and (re-find #"(?i)duplicate key" msg) nm)
-              (str (name entity-type) " " (pr-str nm)
-                   " already exists here — pick a different name")
-              (re-find #"(?i)duplicate key" msg)
-              (str (name entity-type) " already exists with these fields")
-              :else (or (some-> (ex-data e) :reason) msg
-                        (str "Failed to create " type-str)))))
-        ;; Capability gate — secret-shaped fn-defs (parent=[:vault-get])
-        ;; can only be created via /api/secrets, which sets the
-        ;; in-memory `:_admin-secret-create` marker. The form-driven
-        ;; path here never carries the marker, so any attempt to
-        ;; sneak a `parent :vault-get` fn-def through /api/entities/fn
-        ;; bounces with a 409. Closes the orthogonal hole to the
-        ;; delete-side guard at `process-delete-entity`.
-        cap-rej (when (= entity-type :fn)
-                  (secret-leaf-capability-rej storage entity-data))
-        create-result (cond
-                        cap-rej {:error (:reason cap-rej)}
-                        :else (try
-                                ;; `sp/create-entity` returns the full
-                                ;; created record; downstream
-                                ;; (invalidate / notify / response)
-                                ;; only need the id, so we project to
-                                ;; `:id` here. Leaving the whole record
-                                ;; in `:created` makes the NOTIFY-
-                                ;; emitter `(str seed)` stringify the
-                                ;; map, and the listener's
-                                ;; `UUID/fromString` then throws
-                                ;; "UUID string too large" — observed
-                                ;; on every type-row create.
-                                {:created (:id (sp/create-entity
-                                                 storage entity-type
-                                                 entity-data))}
-                                (catch Exception e
-                                  (log/error e "create-entity failed for"
-                                             entity-type entity-data)
-                                  {:error (humanise e)})))]
-    ;; Phase 6c — forward a form `:rename-to` to the dedicated
-    ;; renamed-view slot. A failure here is logged, not fatal — the
-    ;; binding is still useful without the rename slot.
+        create-result (try-create-or-error storage entity-type entity-data type-str)]
     (when (and (:created create-result)
                (= type-str "binding")
                (contains? form-data :rename-to))
-      (try (ensure-rename-slot! storage
-                                (:fn-id entity-data)
-                                (:slot-id entity-data)
-                                (when-not (str/blank? (:rename-to form-data))
-                                  (str (:rename-to form-data))))
-           (catch Exception e
-             (log/error e "ensure-rename-slot! failed"))))
-    ;; Post-create whole-fn type-check for binding mutations. A binding
-    ;; can be individually-valid yet break the OWNING fn-def's aggregate
-    ;; check; on failure delete the just-created row so DB state stays
-    ;; consistent.
-    (if-let [post-rej (when (and (:created create-result)
-                                 (#{"binding" "binding-list-item"} type-str))
-                        (when-let [fn-id (cond
-                                           (= type-str "binding")
-                                           (:fn-id entity-data)
-                                           (= type-str "binding-list-item")
-                                           (some-> (:binding-id entity-data)
-                                                   (#(sp/read-entity storage :binding %))
-                                                   :fn-id))]
-                          (when-let [rej (tc/type-check-fn-after-mutation! storage fn-id)]
-                            ;; Roll back the just-created row when a post-write
-                            ;; type-check rejects. Silently nil'ing the rollback
-                            ;; failure would mask orphan rows surviving a failed
-                            ;; type-check rejection — log so dashboards see it.
-                            (try (sp/delete-entity storage entity-type
-                                                   (:created create-result))
-                                 (catch Exception e
-                                   (log/warn e "Rollback delete-entity failed after type-check rejection"
-                                             {:entity-type entity-type
-                                              :id (:created create-result)})))
-                            rej)))]
+      (forward-rename-slot! storage form-data entity-data))
+    (if-let [post-rej (verify-post-create-or-rollback!
+                        storage create-result type-str entity-data entity-type)]
       {:error (:reason post-rej)}
       (if (:created create-result)
         create-result

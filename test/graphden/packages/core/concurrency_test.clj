@@ -183,11 +183,23 @@
                         (recur))
                       (catch InterruptedException _ nil)))
           stopper ((impl-of :future) {:body (delay body-fn)} nil)]
-      (Thread/sleep 120)
+      ;; Poll-with-deadline instead of a fixed sleep — under
+      ;; parallel-test CPU contention a fixed 120 ms wait can starve
+      ;; the worker thread of every iteration before we ever read it.
+      (let [deadline (+ (System/currentTimeMillis) 2000)]
+        (while (and (< @iters 2)
+                    (< (System/currentTimeMillis) deadline))
+          (Thread/sleep 20)))
       (stopper)
-      (Thread/sleep 100)
+      ;; Capture the iter count right after the stopper returns; the
+      ;; in-flight iteration may have completed its `swap!` between
+      ;; the stopper and the read, but no subsequent iteration may
+      ;; start once `Thread/.interrupt` has fired.
       (let [n @iters]
         (is (<= 2 n) (str "expected >=2 iterations before stop, got " n))
+        ;; 200 ms ≥ 4 × the body's 50 ms sleep — if the stopper
+        ;; failed to interrupt, every cycle in this window would
+        ;; tick iters.
         (Thread/sleep 200)
         (is (= n @iters)
             "no further iterations after stopper called")))))

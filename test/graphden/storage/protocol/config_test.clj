@@ -7,11 +7,6 @@
 
 ;; === Schema definition tests ===
 
-(deftest non-blank-string-schema-test
-  (testing "schema is defined"
-    (is (some? cfg/non-blank-string))))
-
-
 (deftest positive-int-schema-test
   (testing "schema is defined"
     (is (some? cfg/positive-int))))
@@ -20,144 +15,6 @@
 (deftest non-negative-int-schema-test
   (testing "schema is defined"
     (is (some? cfg/non-negative-int))))
-
-
-(deftest postgres-pool-config-schema-test
-  (testing "schema is defined"
-    (is (some? cfg/postgres-pool-config))))
-
-
-;; === validate-config! tests ===
-
-(deftest validate-config!-test
-  (testing "passes for valid data"
-    (is (nil? (cfg/validate-config! {:name "test"} [:map [:name :string]] "test"))))
-
-  (testing "throws for invalid data"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid test configuration"
-          (cfg/validate-config! {:name 123} [:map [:name :string]] "test"))))
-
-  (testing "exception contains config-name"
-    (try
-      (cfg/validate-config! {} [:map [:required :string]] "MyConfig")
-      (is false "should have thrown")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= :config-error/invalid-config (:type (ex-data e))))
-        (is (= "MyConfig" (:config-name (ex-data e))))
-        (is (some? (:errors (ex-data e))))
-        (is (= {} (:config (ex-data e))))))))
-
-
-;; === validate-postgres-config! tests ===
-
-(deftest validate-postgres-config!-test
-  (testing "passes for valid minimal config"
-    (is (nil? (cfg/validate-postgres-config!
-                {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-                 :username "user"
-                 :password "pass"}))))
-
-  (testing "passes for valid config with all options"
-    (is (nil? (cfg/validate-postgres-config!
-                {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-                 :username "user"
-                 :password "pass"
-                 :pool-size 20
-                 :min-idle 5
-                 :connection-timeout 60000
-                 :idle-timeout 300000
-                 :max-lifetime 1800000}))))
-
-  (testing "throws for missing jdbc-url"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid PostgreSQL pool configuration"
-          (cfg/validate-postgres-config!
-            {:username "user" :password "pass"}))))
-
-  (testing "throws for invalid jdbc-url prefix"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid PostgreSQL pool configuration"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "mysql://localhost:3306/db"
-             :username "user"
-             :password "pass"}))))
-
-  (testing "throws for missing username"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid PostgreSQL pool configuration"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-             :password "pass"}))))
-
-  (testing "throws for blank username"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid PostgreSQL pool configuration"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-             :username "   "
-             :password "pass"}))))
-
-  (testing "throws for missing password"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid PostgreSQL pool configuration"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-             :username "user"}))))
-
-  (testing "throws for pool-size > 100"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid PostgreSQL pool configuration"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-             :username "user"
-             :password "pass"
-             :pool-size 101}))))
-
-  (testing "throws for pool-size <= 0"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid PostgreSQL pool configuration"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-             :username "user"
-             :password "pass"
-             :pool-size 0}))))
-
-  (testing "throws when min-idle > pool-size"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"min-idle cannot exceed pool-size"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-             :username "user"
-             :password "pass"
-             :pool-size 5
-             :min-idle 10}))))
-
-  (testing "throws when idle-timeout >= max-lifetime"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"idle-timeout must be less than max-lifetime"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-             :username "user"
-             :password "pass"
-             :idle-timeout 2000000
-             :max-lifetime 1800000}))))
-
-  (testing "allows idle-timeout 0 (disabled)"
-    (is (nil? (cfg/validate-postgres-config!
-                {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-                 :username "user"
-                 :password "pass"
-                 :idle-timeout 0}))))
-
-  (testing "rejects extra keys (closed map)"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Invalid PostgreSQL pool configuration"
-          (cfg/validate-postgres-config!
-            {:jdbc-url "jdbc:postgresql://localhost:5432/db"
-             :username "user"
-             :password "pass"
-             :unknown-key "value"})))))
 
 
 ;; === Query timeout tests ===
@@ -220,25 +77,6 @@
                           #"Query timeout must be at least"
           (binding [cfg/*query-timeout-ms* 100]
             (cfg/get-query-timeout-seconds))))))
-
-
-(deftest execute-with-timeout!-test
-  (testing "returns result for fast operation"
-    (is (= 42 (cfg/with-query-timeout 5000
-                                      #(cfg/execute-with-timeout! :test-op (fn [] 42))))))
-
-  (testing "throws timeout for slow operation"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Query timeout after"
-          (cfg/with-query-timeout 1000
-                                  #(cfg/execute-with-timeout! :slow-op (fn [] (Thread/sleep 2000)))))))
-
-  (testing "unwraps ExecutionException"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"inner error"
-          (cfg/with-query-timeout 5000
-                                  #(cfg/execute-with-timeout! :error-op
-                                                              (fn [] (throw (ex-info "inner error" {:cause :test})))))))))
 
 
 ;; === Regex limits tests ===

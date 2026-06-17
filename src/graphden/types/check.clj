@@ -1742,6 +1742,82 @@
       (if (= recomputed :any) static recomputed))))
 
 
+(defn- binding-info-entry
+  "Classify a single fn-def binding shape into the `{:type … :value …
+   :ref ?}` entry the type-rules read. See `bindings-info-for-rule`'s
+   docstring for the broader contract; this is the per-binding cond
+   dispatch."
+  [b-form]
+  (cond
+    ;; Bare rename `{:as :name}` — slot stays free with the renamed
+    ;; name. If `:type T` is also given, the rule should see T (matches
+    ;; the rename's type-override semantics in `collect-free-args`).
+    ;;
+    ;; Phase α' caller-narrowing: when the outer caller has propagated
+    ;; a narrowed type for this AS-name, use it. Resolution:
+    ;; author-pinned > caller-narrowing > `:any`.
+    (rename-binding? b-form)
+    {:type (or (some-> (:type b-form) types/resolve-alias)
+               (some-> *caller-narrowings* (get (:as b-form)))
+               :any)
+     :value nil}
+
+    (and (map? b-form) (contains? b-form :value))
+    {:type (or (some-> (:type b-form) types/resolve-alias)
+               (classify-literal (:value b-form))
+               :any)
+     :value (:value b-form)
+     :value-present true}
+
+    ;; `{:type T}` alone — author pins the static type without
+    ;; supplying a value. The slot stays free at runtime; the
+    ;; override flows through to consumers / rules verbatim. No `:ref`
+    ;; in the info entry → `effective-binding-type` returns `:type`
+    ;; directly, without re-firing any ref's rule.
+    (type-only-binding? b-form)
+    {:type (or (some-> (:type b-form) types/resolve-alias) :any)
+     :value nil}
+
+    (ref-binding? b-form)
+    {:type (or (:return (registry/rich-type-of b-form)) :any)
+     :value nil
+     :ref b-form}
+
+    ;; `{:ref :name :type T}` — explicit ref-with-type-override (parser
+    ;; writes the binding's `:type-override-fn-id`). The override is
+    ;; the author's narrowed contract; prefer it over the ref's
+    ;; recorded return so the type-rule sees the tighter shape. When
+    ;; the author pinned a `:type`, OMIT `:ref` from the info entry so
+    ;; `effective-binding-type` doesn't re-fire the ref's rule and
+    ;; clobber the override.
+    (and (map? b-form) (contains? b-form :ref))
+    (cond-> {:type (or (some-> (:type b-form) types/resolve-alias)
+                       (ref-return-narrowed (:ref b-form))
+                       :any)
+             :value nil}
+      (not (contains? b-form :type))
+      (assoc :ref (:ref b-form)))
+
+    (vector? b-form)
+    ;; `:elem-types` carries the PER-ITEM types the rule may need to
+    ;; look at (e.g. `:merge` walks each :maps element to union their
+    ;; record fields). The lubbed `:type` keeps the shape every other
+    ;; rule already reads.
+    (let [et (vector-binding-elem-types b-form)]
+      {:type [:list (types/coarse-lub et)]
+       :elem-types et
+       :value b-form
+       :value-present true})
+
+    (keyword? b-form)
+    {:type :any :value b-form :value-present true}
+
+    :else
+    {:type (or (classify-literal b-form) :any)
+     :value b-form
+     :value-present true}))
+
+
 (defn- bindings-info-for-rule
   "Build the `{arg-name {:type … :value … :ref ?}}` map the type-rule
    reads. Literal values pass through; refs resolve via the registry's
@@ -1765,84 +1841,7 @@
   ([args parent-args]
    (let [own (into {}
                    (map (fn [[arg-name b-form]]
-                          [arg-name
-                           (cond
-                             ;; Bare rename `{:as :name}` — slot stays free with
-                             ;; the renamed name. If `:type T` is also given, the
-                             ;; rule should see T (matches the rename's type-
-                             ;; override semantics in `collect-free-args`).
-                             ;;
-                             ;; Phase α' caller-narrowing: when the outer caller
-                             ;; has propagated a narrowed type for this AS-name,
-                             ;; use it. Resolution: author-pinned > caller-
-                             ;; narrowing > `:any`.
-                             (rename-binding? b-form)
-                             {:type (or (some-> (:type b-form) types/resolve-alias)
-                                        (some-> *caller-narrowings* (get (:as b-form)))
-                                        :any)
-                              :value nil}
-
-                             (and (map? b-form) (contains? b-form :value))
-                             {:type (or (some-> (:type b-form) types/resolve-alias)
-                                        (classify-literal (:value b-form))
-                                        :any)
-                              :value (:value b-form)
-                              :value-present true}
-
-                             ;; `{:type T}` alone — author pins the static
-                             ;; type without supplying a value. The slot
-                             ;; stays free at runtime; the override flows
-                             ;; through to consumers / rules verbatim.
-                             ;; No `:ref` in the info entry → `effective-
-                             ;; binding-type` returns `:type` directly,
-                             ;; without re-firing any ref's rule.
-                             (type-only-binding? b-form)
-                             {:type (or (some-> (:type b-form) types/resolve-alias) :any)
-                              :value nil}
-
-                             (ref-binding? b-form)
-                             {:type (or (:return (registry/rich-type-of b-form)) :any)
-                              :value nil
-                              :ref b-form}
-
-                             ;; `{:ref :name :type T}` — explicit ref-with-
-                             ;; type-override (parser writes the binding's
-                             ;; `:type-override-fn-id`). The override is the
-                             ;; author's narrowed contract; prefer it over
-                             ;; the ref's recorded return so the type-rule
-                             ;; sees the tighter shape. When the author
-                             ;; pinned a `:type`, OMIT `:ref` from the
-                             ;; info entry so `effective-binding-type`
-                             ;; doesn't re-fire the ref's rule and clobber
-                             ;; the override.
-                             (and (map? b-form) (contains? b-form :ref))
-                             (cond-> {:type (or (some-> (:type b-form) types/resolve-alias)
-                                                (ref-return-narrowed (:ref b-form))
-                                                :any)
-                                      :value nil}
-                               (not (contains? b-form :type))
-                               (assoc :ref (:ref b-form)))
-
-                             (vector? b-form)
-                             ;; `:elem-types` carries the PER-ITEM types
-                             ;; the rule may need to look at (e.g.
-                             ;; `:merge` walks each :maps element to
-                             ;; union their record fields). The lubbed
-                             ;; `:type` keeps the shape every other
-                             ;; rule already reads.
-                             (let [et (vector-binding-elem-types b-form)]
-                               {:type [:list (types/coarse-lub et)]
-                                :elem-types et
-                                :value b-form
-                                :value-present true})
-
-                             (keyword? b-form)
-                             {:type :any :value b-form :value-present true}
-
-                             :else
-                             {:type (or (classify-literal b-form) :any)
-                              :value b-form
-                              :value-present true})]))
+                          [arg-name (binding-info-entry b-form)]))
                    args)
          from-parent (into {}
                            (keep (fn [[arg-name arg-info]]

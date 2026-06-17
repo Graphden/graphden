@@ -278,7 +278,196 @@ clojure -M:dev tools/reachability_audit.clj 2>&1 | grep -A50 'Unreachable COMPOS
 grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages/
 ```
 
-## 5. Порядок проверки существующих пакетов
+### 4.3 Multi-parent (`:parents [A B]`) — правило
+
+`graphden-fn-design` §5 даёт три «оправданных» случая (категоризация,
+trait-mixin, refinement). Здесь — более жёсткое **БИНАРНОЕ ПРАВИЛО для
+момента написания**, плюс `bb`-проверяемый sanity-test.
+
+**Правило (formulated):**
+
+> MI оправдан **тогда и только тогда**, когда каждый родитель
+> представляет **отдельную ось описания** child'а — а не отдельный шаг
+> в его поведении. Каждая ось добавляет НЕ-пересекающийся набор слотов
+> и НЕ-конфликтующий контракт.
+
+**Тест осей — «конъюнкция существительных» vs «конъюнкция глаголов»:**
+переведи `(child :parents [A B])` в естественный язык:
+
+- ✅ **Существительные** (this **IS-A** A AND **IS-A** B):
+  - «`:postgres-storage-impl` IS-A `:Storage` (type-row protocol)
+    AND IS-A concrete-impl-with-binding-set (own slots для pg-query
+    binding'ов)». Type-row + impl-shape = две ортогональные оси.
+  - «`:authed-get-route` IS-A `:get-route` (path + handler shape)
+    AND IS-A `:auth-required` (middleware chain)». Маршрут-форма +
+    capability-marker.
+  - «`:assoc-handler` IS-A `:assoc-fn` (slot types) AND IS-A
+    `:assoc-empty` (empty-map seed)». Type-shape + initial-value.
+- ❌ **Глаголы** (this **DOES** A AND **DOES** B):
+  - «`:_my-handler` parses AND validates AND writes» — это поведение
+    в три шага, оно собирается через `:if`/`:cond`-скреп +
+    ref-биндинги в `:args` (см. `graphden-fn-refactor` § «handler =
+    parse → validate → apply»), НЕ через MI.
+
+**Бинарный slot-collision тест (то, что sync будет проверять
+автоматически)**: пусть `own-slots(P)` — set of slot-names, которые
+parent `P` ВНОСИТ в своё `:fn-slots`-junction. MI допустим iff:
+
+```
+own-slots(A) ∩ own-slots(B)  ⊆  {slots that child OVERRIDES via :args}
+```
+
+Если пересечение не покрыто override'ами — sync упадёт на slot-
+collision check (`composition.validation`). Если ты «покрываешь
+override'ами потому что семантически парятся, но я зажму обе» —
+**это смесь**: ты уже не описываешь shape, ты режешь конфликт. В
+таком случае переписывай на single-parent + composition.
+
+**Эвристика отказа `MI экономит запись»**: если выбор между
+single-parent + 5 ref-биндингов **vs** двух parents без ref-биндингов
+делается ради **краткости** — MI не выбор. MI описывает что child IS,
+не строит behavior через короткий путь.
+
+**Sanity check для существующей MI fn-def — через БД** (см. § 5 ниже —
+БД лучше grep'а для этого):
+
+```clojure
+;; В REPL — реальные slot-имена fn-def'а после MI-merge:
+(let [fn-id (:id (first (sp/query-entities storage :fn {:name "my-mi-fn"})))]
+  (->> (sp/query-entities storage :fn-slot {:fn-id fn-id})
+       (map (fn [fs]
+              (let [slot (sp/read-entity storage :slot (:slot-id fs))
+                    type-fn (sp/read-entity storage :fn (:type-fn-id slot))]
+                {:slot-name (:name slot)
+                 :slot-type (:name type-fn)
+                 :from-parent? (not= (:fn-id fs) fn-id)})))))
+;; Каждый слот должен быть объясним: "это от parent A" / "от parent B"
+;; / "own override". Слот «не пойми откуда» → parent внёс лишнего →
+;; MI не оправдан, разбирай.
+```
+
+**Common MI-в-сегодняшнем-графе примеры** для калибровки чутья:
+
+| Fn-def | Parents | Почему MI |
+|---|---|---|
+| `:postgres-storage-impl` | `[:Storage]` (singleton) | type-row impl pattern; type-row сам устанавливает protocol-обязательства, child привязывает их к pg-query |
+| `:authed-get-route` | `[:get :auth-required]` | route-shape + middleware (две оси) |
+| `:resolve-versioned-rows` | `[:filter :ResolveVersionedRowsInput]` | поведение filter'а + type-row контракт входа (`:version-id-field` etc.) |
+
+## 5. EDN-grep vs БД-query — методология
+
+EDN — это **исходник**, БД (после `bb rebuild` / `bb deploy`) — это
+**синхронизованный граф**. У них разный уровень видимости, и для
+разных вопросов правильный инструмент разный.
+
+### 5.1 Когда БД лучше grep'а
+
+| Вопрос | Почему БД | EDN-grep промахнётся |
+|---|---|---|
+| «Где используется fn-def `X`?» | `:binding :ref-fn-id X` + `:binding-list-item :ref-fn-id X` | EDN не видит synthetic `_anon-*` ref'ы, которые parser создал из inline `{:parent :X …}` форм |
+| «Какие fn-def'ы дублируются по shape?» | `(group-by :anonymous-hash)` — shape-dedup сделан БД-уровне | EDN видит две `{:input {:a :int}}` — но не знает что они shape-deduped в одну fn-row |
+| «Какие slot'ы реально у fn-def `X` после MI?» | `:fn-slot {:fn-id X}` (полный набор после parent BFS) | EDN видит только OWN slots, не унаследованные |
+| «Где используется тип `:jsonb`?» | `(query-entities :slot {:type-fn-id :jsonb-id})` | EDN видит `:type :jsonb` в declarations, но не computed types (когда type-checker вывел shape) |
+| «Какие refinement'ы по факту фигурируют в graph?» | `(query-entities :fn {})` filter by `:base-fn-id` | EDN видит declarations, но не runtime-эффективный набор |
+| «Что у fn-def `X` за computed return-type?» | rich-types registry в JVM — не сериализовано в БД, но из REPL виден | EDN видит DECLARED return-type, не INFERRED |
+
+### 5.2 Когда EDN-grep правильный
+
+| Вопрос | Почему EDN |
+|---|---|
+| «Где declared `:type :jsonb`?» (для сужения) | Источник правки — EDN; нужно найти DECLARATIONS, не runtime-эффект |
+| «Где docstring / `:description` упоминает X?» | БД хранит description, но grep по тексту EDN читабельнее |
+| «Куда вписать новую fn-def?» (namespace pick) | Нужно посмотреть как соседи структурированы — EDN с комментариями понятнее БД-dump'а |
+| «Какой shape у inline literal в `:value`?» | Литералы хранятся как JSONB — EDN читать проще |
+
+### 5.3 Идиоматический workflow для поиска / правки
+
+1. **Запрос к БД** (REPL `sp/query-entities`, `curl /api/graph/entities`,
+   `pg-query` базовой fn в живом графе). Получи список fn-name'ов /
+   fn-id'ов.
+2. **Грепни по fn-name в EDN** — `grep -rE ":name :the-name\b"
+   resources/packages` чтобы найти исходник.
+3. **Правь EDN**, делай `bb rebuild`.
+4. **Verify через БД** — повтори тот же query и убедись, что результат
+   изменился как ожидалось.
+
+### 5.4 Практические запросы
+
+```clojure
+;; ── В REPL ────────────────────────────────────────────────────────
+;; Из живой системы (`bb repl` подключился к dev) или через test:
+(require '[graphden.storage.protocol.core :as sp])
+(def storage (-> integrant.repl.state/system :db/versioned))
+
+;; (a) Все ref'ы на :equal? — где и в каком слоте:
+(let [equal?-id (:id (first (sp/query-entities storage :fn {:name "equal?"})))]
+  (->> (sp/query-entities storage :binding {:ref-fn-id equal?-id})
+       (map (fn [b]
+              {:owner (-> (sp/read-entity storage :fn (:fn-id b)) :name)
+               :slot  (-> (sp/read-entity storage :slot (:slot-id b)) :name)}))))
+;; → [{:owner "_bearer-equals-env?" :slot "a"} …]
+
+;; (b) Все fn-row с одинаковым shape (структурные дубликаты):
+(->> (sp/query-entities storage :fn {})
+     (filter :anonymous-hash)
+     (group-by :anonymous-hash)
+     (filter (fn [[_ fns]] (> (count fns) 1))))
+;; → пусто = shape-dedup отработал; иначе — баг в parser'е
+
+;; (c) Все slot'ы типа :jsonb (потенциально слишком широкие):
+(let [jsonb-id (:id (first (sp/query-entities storage :fn {:name "jsonb"})))]
+  (->> (sp/query-entities storage :slot {:type-fn-id jsonb-id})
+       (map (fn [s]
+              {:slot-name (:name s)
+               :owners (->> (sp/query-entities storage :fn-slot {:slot-id (:id s)})
+                            (map #(-> (sp/read-entity storage :fn (:fn-id %)) :name)))}))))
+;; → группированно по slot-name; смотри лишние widely-shaped declarations
+```
+
+```bash
+# ── Через curl + jq ───────────────────────────────────────────────
+AUTH=Bearer $AUTH_TOKEN  # if /api/graph/entities is auth-required
+
+# (a) Все fns с заданным name-prefix:
+curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
+  | jq '.fns | map(select(.name | startswith("_secret-")))'
+
+# (b) Композированные fn-def'ы, у которых пусто parent-ids — кандидаты
+#     на type-row OR base-fn (по impl-hash отличить):
+curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
+  | jq '.fns | map(select((.parent_ids == null or (.parent_ids | length == 0))
+                          and (.impl_hash == null)
+                          and (.name != null)))'
+# → type-rows (base-fn'ы имели бы impl_hash; composed имели бы parent_ids)
+```
+
+```clojure
+;; ── Через :pg-query base-fn (если хочется выполнять из самого графа) ──
+;; В REPL:
+(exec/execute-by-name *context* "pg-query"
+                      {:hsql {:select [:name]
+                              :from [:fn]
+                              :where [:and
+                                      [:= :impl_hash nil]
+                                      [:is :parent_ids nil]
+                                      [:not= :name nil]]}})
+;; → список type-row names
+```
+
+### 5.5 Когда БД ещё не в нужном состоянии
+
+Если вы только что добавили fn-def в EDN, БД его ещё не видит до
+`bb rebuild` / `bb deploy`. Декларативный sync **не удаляет** строки,
+выпавшие из EDN — они копятся в dev-БД. Поэтому:
+
+- Для **поиска мёртвого кода** (что в БД, но не в EDN) — нужен
+  `bb deploy` (truncate + clean sync), не `bb rebuild` (см.
+  `graphden-fn-refactor` §7).
+- Для **поиска что-в-EDN-но-сломано** — `bb rebuild` достаточен.
+- Для **production-debug** — БД production-сервера, БЕЗ rebuild'а
+  (его делают только при деплое — НИКАКОГО `bb rebuild` против prod).
+
+## 6. Порядок проверки существующих пакетов
 
 ```bash
 # 1. Reachability — есть ли мёртвый код?
@@ -301,7 +490,7 @@ grep -rE ':name :_anon-' resources/packages --include='*.edn'
 #  делается интерактивно, не по checklist'у)
 ```
 
-## 6. Тесты для нового / правленого пакета
+## 7. Тесты для нового / правленого пакета
 
 **Tests для security-critical fn'ов** (см. `graphden-code-quality` §12)
 — обязательны как regression sentinel.
@@ -321,9 +510,9 @@ packages/core/logic_test.clj` создан с тестом на:
 test.clj` / `refinements_test.clj`). Драйверит fn-def через executor
 по реально synced graph.
 
-## 7. Workflow
+## 8. Workflow
 
-### 7.1 Новый base-fn
+### 8.1 Новый base-fn
 
 1. Перед написанием — пройди user-composability test (`graphden-fn-
    refactor` §3) — может, это композиция, а не base-fn.
@@ -331,38 +520,44 @@ test.clj` / `refinements_test.clj`). Драйверит fn-def через execut
    объяви тип в `fns.edn` (узкий тип, см. §1; alias если повторяется,
    см. §2).
 3. Если security-critical (любой compare-with-secret, любой `:secret
-   T` потребитель) — пиши test-sentinel (см. §6).
+   T` потребитель) — пиши test-sentinel (см. §7).
 4. `bb rebuild` → `bb verify` → smoke.
 
-### 7.2 Новый fn-def
+### 8.2 Новый fn-def
 
 1. Реши: named (public) / `_`-private / inline (см. §4).
-2. Объяви через `:parent <p>` (или `:parents [a b]` для MI).
+2. Объяви через `:parent <p>` (для одного родителя) или
+   `:parents [a b]` для MI — НО только когда §4.3 binary-test
+   проходит. По умолчанию single-parent + ref-биндинги в `:args`.
 3. Сузь типы slot'ов (см. §1); используй alias если структура
    повторяется (см. §2).
 4. Если ≥ 4-5 ref-bindings → подумай о decomposition (`graphden-fn-
    design` §7).
-5. `bb rebuild` → smoke. Если тест не покрывает — пиши hello-world.
+5. `bb rebuild` → smoke. **Verify через БД** (см. §5.3 шаг 4) —
+   повтори ту же query, что использовалась для поиска, и убедись
+   что результат изменился ожидаемо.
 
-### 7.3 Audit существующих пакетов
+### 8.3 Audit существующих пакетов
 
 1. **Baseline** — §0 sanity + reachability audit + список slow tests.
-2. **Сканируй по §5** — сколько кандидатов на каждый вид правки.
+2. **Сканируй по §6** — сколько кандидатов на каждый вид правки.
+   **Для structural-вопросов используй БД** (см. §5.1), не grep.
 3. **Резюме** перед правками — приоритет: security/correctness >
-   widening types > dead code > naming hygiene > alias unification.
+   widening types > dead code > naming hygiene > alias unification >
+   MI-clean-up.
 4. **Правь per-target, per-commit** — каждое значимое изменение —
    отдельный commit. Применяй `graphden-code-quality` §13.3 commit
    rules.
 5. **`bb rebuild` + `bb verify` + focused tests** после каждого
-   commit'а.
+   commit'а. **Verify через БД** что правка достигла цели.
 6. **Финальный sweep** — `bb test` или `bb ci`.
 
-## 8. Анти-паттерны
+## 9. Анти-паттерны
 
 - **«Сужу типы» без проверки runtime-семантики.** Slot type'а
-  `:jsonb` → `:keyword-map` — добавь breakpoint / REPL-проверку:
-  binding'и в самом деле всегда keyword-keyed? Сужать без verify =
-  ломать runtime.
+  `:jsonb` → `:keyword-map` — добавь breakpoint / REPL-проверку
+  (см. §5.4): binding'и в самом деле всегда keyword-keyed? Сужать
+  без verify = ломать runtime.
 - **Alias ради alias'а.** Имя нужно только когда оно добавляет
   СМЫСЛ. `:int-or-text` хуже чем inline `[:union :int :text]` —
   потому что для тех 2 use-site чтение `[:union :int :text]`
@@ -383,8 +578,27 @@ test.clj` / `refinements_test.clj`). Драйверит fn-def через execut
   получишь runtime crash. Сузай типы там, где входной контракт
   явный (admin-formy, parsed-bodies); НЕ для transit-types между
   internal fn'ями.
+- **MI ради «склейки behavior».** «Я хочу что-fn делала и X и Y» —
+  это композиция шагов, не axes-of-shape (см. §4.3). MI описывает
+  что child IS-A, не то что он DOES. Переписывай через `:if`/`:cond`
+  + ref-биндинги.
+- **MI вместо single-parent + ref-биндингов «ради краткости».**
+  Если выбор «двух parents без `:args`» vs «одного parent + 5
+  `:args` биндингов» делается ради компактного fns.edn — это
+  иллюзия экономии. Sync-time slot-collision check ловит часть
+  таких смесей, но не все — некоторые проползают и читатель видит
+  слоты «откуда-то».
+- **Grep по EDN там, где нужна БД.** Поиск «где используется fn-def
+  `X`» через grep по `:parent :X` промахивается на synthetic
+  `_anon-*` refs (parser создал из inline `{:parent :X …}` форм).
+  Аналогично: grep по shape промахивается на `anonymous-hash`-
+  deduped fns. Для structural-вопросов используй БД (см. §5.1).
+- **БД-query без `bb rebuild` после правки EDN.** Декларативный sync
+  привязывает EDN ⇄ БД только при rebuild'е. Правка → ОБЯЗАТЕЛЬНО
+  rebuild → verify через БД. Без rebuild'а query покажет старое
+  состояние, легко поверить «не сработало».
 
-## 9. Связи с другими скиллами
+## 10. Связи с другими скиллами
 
 - **`graphden-fn-refactor`** — детали по декомпозиции impls (§3 user-
   composability test, §4 рецепт). Этот скилл вызывает его для
@@ -400,7 +614,7 @@ test.clj` / `refinements_test.clj`). Драйверит fn-def через execut
 - **CLAUDE.md** + **docs/PACKAGES.md § Composition Best Practices** —
   первоисточник проектных принципов. Этот скилл — operational арм.
 
-## 10. Что считается «не докопаться» (для пакетного слоя)
+## 11. Что считается «не докопаться» (для пакетного слоя)
 
 Финальный self-check перед закрытием:
 
@@ -412,7 +626,14 @@ test.clj` / `refinements_test.clj`). Драйверит fn-def через execut
       получили alias имя (§2.2)
 - [ ] Все новые base-fn impls прошли user-composability test (§3)
 - [ ] Все security-critical impls покрыты regression sentinel'ом
-      (§6)
+      (§7)
+- [ ] Каждая `:parents [A B]` декларация прошла §4.3 binary-test
+      (axes-of-shape, не behavior-mix) И REPL-проверку реальных
+      slot-имён (нет «откуда это?»-слотов)
+- [ ] Для structural-вопросов (use-sites, дубликаты, computed
+      shapes) был использован БД-query (§5.1), не EDN-grep
+- [ ] Каждая значимая правка верифицирована через БД (§5.3 шаг 4) —
+      повторённый query показывает ожидаемое НОВОЕ состояние
 - [ ] Каждый новый named fn-def оправдан reuse'ом или domain-
       сущностью (§4.1, прав. 1)
 - [ ] Каждый `_`-private fn-def оправдан (§4.1, прав. 2)

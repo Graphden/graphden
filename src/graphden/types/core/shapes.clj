@@ -1,0 +1,372 @@
+(ns graphden.types.core.shapes
+  "Type-system shape primitives — predicates, accessors, and
+   secret-taint helpers. The PURE structural side of the type module:
+   given a type value, answer \"what kind is it?\" and \"give me the
+   inner part(s)\". No reasoning (subtyping / unification / alias
+   resolution) lives here — that belongs to `graphden.types.core`.
+
+   Loaded as a leaf-level dependency of `types.core` (and direct
+   consumers that only need shape detection). Cycle-free by design:
+   no fn here calls into `types.core` operations.
+
+   Re-exported through `graphden.types.core` for backwards-compat —
+   callers that say `(:require [graphden.types.core :as types])` still
+   resolve `types/fn-type?` / `types/record-type?` / … as before. New
+   code that ONLY needs predicates can require this ns directly."
+  (:require
+    [clojure.set]))
+
+
+;; -----------------------------------------------------------------------------
+;; Primitives
+
+(def primitives
+  "The flat enum of value-kind primitives. A superset of
+   `value-kind-values` in schema/graph/schema.clj — every storage
+   value-kind is a primitive here, but a few primitives are
+   type-system-only and never reach the `value_kind` column
+   (`:float`, `:keyword`, `:never`, `:input-stream`, `:decimal`).
+   `:fn` is included as a primitive for backwards compat with
+   declarations that use the bare keyword instead of a structural
+   `[:fn …]`; structurally, it acts like `[:fn {} :any]` (any
+   callable).
+
+   `:never` is the BOTTOM type — the dual of `:any` (top). It is a
+   subtype of every type and the type of a computation that never
+   produces a value (`:throw`). In a union it is absorbed
+   (`[:union :never T]` = `T`), so `(:if c (:throw …) x)` is typed
+   exactly `x`. `:float` and `:keyword` are type-system-only —
+   emitted by `classify-literal` for float / keyword literals — and
+   never reach the storage `value_kind` column.
+
+   `:input-stream` is the type of a transient `java.io.InputStream`
+   (Ring request bodies, file streams) — values are never stored as
+   data, so it's type-system-only too. `type->storage-kind` degrades
+   it to `:any`.
+
+   `:decimal` is arbitrary-precision rational (Clojure's `BigDecimal`
+   / Java `java.math.BigDecimal`). Subtype of `:numeric` alongside
+   `:int` and `:float`."
+  #{:null :uuid :text :int :bool :numeric :timestamptz :jsonb :bytes
+    :any :fn :float :keyword :sequence :never :input-stream :decimal})
+
+
+(defn primitive?
+  [t]
+  (boolean (and (keyword? t) (primitives t))))
+
+
+;; Runtime test for "is this value an instance of `tag`?", keyed on
+;; the canonical type-tag. Used by the `:is-a?` base-fn (and any
+;; future runtime-classification consumer).
+;;
+;; Covers every member of `primitives` plus a few `structural-class`
+;; tags (`:map`, `:vector`) that don't appear in `primitives` because
+;; the type-system's general container is `:jsonb` — but at runtime
+;; the user often does want to distinguish "this is a map" from
+;; "this is a vector".
+;;
+;; KEEP THIS IN SYNC WITH `primitives`: every primitive whose values
+;; have a Clojure runtime check belongs here. A startup `assert`
+;; verifies the covering — adding to `primitives` without updating
+;; this map fails the assert at namespace load.
+;;
+;; Special cases:
+;; - `:never` is BOTTOM; no value matches → always false.
+;; - `:any` is TOP; every value matches → always true.
+;; - `:fn` matches Clojure callables (subset of values; in
+;;   structural fn-types the type-system is richer).
+;; - `:jsonb` is "JSON-encodable shape" — map / vector / scalar.
+;; - `:input-stream` is the transient `java.io.InputStream` carrier.
+(def runtime-predicates
+  (let [m {:null         nil?
+           :bool         boolean?
+           :int          integer?
+           :float        float?
+           :numeric      number?
+           :text         string?
+           :keyword      keyword?
+           :uuid         uuid?
+           :decimal      decimal?
+           :jsonb        (some-fn map? vector? string? number? boolean? nil?)
+           :sequence     sequential?
+           :bytes        bytes?
+           :timestamptz  inst?
+           :fn           fn?
+           :any          (constantly true)
+           :never        (constantly false)
+           :input-stream (fn [v] (instance? java.io.InputStream v))
+           ;; Structural-class additions beyond `primitives`:
+           :map          map?
+           :vector       vector?}]
+    (assert (every? m primitives)
+            (str "types/core/shapes/runtime-predicates is missing primitives — "
+                 "every member of `primitives` must have an entry here. "
+                 "Missing: " (pr-str (remove m primitives))))
+    m))
+
+
+;; -----------------------------------------------------------------------------
+;; Predicates
+
+(defn type-var?
+  [t]
+  (symbol? t))
+
+
+(defn record-type?
+  [t]
+  (and (map? t) (every? keyword? (keys t))))
+
+
+(defn fn-type?
+  "`[:fn args ret effects]` — canonical four-element form. `effects`
+   is either:
+     - `:any` — the slot declares no constraint; callable may have
+       any effects.
+     - a set of effect-category keywords (`#{}` pure-only,
+       `#{:io :time}` read-only system state, …) — the bound fn's
+       `:effects` must be a subset.
+
+   `[:fn args ret]` — legacy three-element form, equivalent to the
+   four-element form with `:any` as the 4th element. Accepted on
+   read (storage / EDN authors may still write it); `normalise`
+   canonicalises to four-element before any subtype/unify check."
+  [t]
+  (and (vector? t) (= :fn (first t)) (#{3 4} (count t))))
+
+
+(defn make-fn-type
+  "Canonical constructor for a function type. Always produces the
+   four-element form; `eff` defaults to `:any` (unconstrained slot)
+   when omitted. New code should prefer this over hand-rolled
+   `[:fn args ret …]` vectors so the wire format stays consistent."
+  ([args ret]      (make-fn-type args ret :any))
+  ([args ret eff]  [:fn (or args {}) ret eff]))
+
+
+(defn list-type?
+  [t]
+  (and (vector? t) (= :list (first t)) (= 2 (count t))))
+
+
+(defn refine-type?
+  "`[:refine base-type constraint]` — a NAMED subtype of `base-type`
+   carrying an opaque `constraint` payload (e.g. `[:gt 0]` for
+   :positive-int). Phase 4 of TYPES.md.
+
+   The constraint is opaque to subtype reasoning — two refinement
+   types are subtype-related ONLY when they share the same
+   constraint AND base. The system does NOT prove that `:positive-int`
+   is a subtype of `[:refine :int [:gte 0]]`; it forces an explicit
+   `:validate-refinement` conversion node instead."
+  [t]
+  (and (vector? t) (= :refine (first t)) (= 3 (count t))))
+
+
+(defn secret-type?
+  "`[:secret <inner-type>]` — a monotone information-flow marker on
+   top of `<inner-type>`. Subtype-asymmetric: a secret value flows
+   only into another secret slot. The marker propagates through
+   composition via per-base-fn `:return-type-rule`s (see
+   `graphden.types.check`).
+
+   Distinct from refinements (which are subtypes of their base —
+   exactly the property we MUST NOT have for secrets, otherwise the
+   marker leaks)."
+  [t]
+  (and (vector? t) (= :secret (first t)) (= 2 (count t))))
+
+
+(defn secret-inner
+  "The inner type wrapped by `[:secret T]`."
+  [t]
+  (when (secret-type? t) (nth t 1)))
+
+
+(defn make-secret-type
+  "Smart constructor — idempotent: wrapping a value that's already
+   `[:secret T]` returns the same shape. Lets propagation rules
+   apply it blindly without producing `[:secret [:secret T]]`."
+  [inner]
+  (if (secret-type? inner)
+    inner
+    [:secret inner]))
+
+
+(defn coarse-lub
+  "Coarse least-upper-bound of a collection of types: all equal → that
+   type, otherwise (or empty input) → `:any`. Used where a precise
+   join isn't worth computing — e.g. the element type of a
+   heterogeneous list or a record's `:vals`."
+  [types]
+  (let [ts (set types)]
+    (cond
+      (empty? ts)      :any
+      (= 1 (count ts)) (first ts)
+      :else            :any)))
+
+
+(defn union-type?
+  "`[:union T1 T2 …]` — a sum / disjoint type. A value of union type
+   is either a T1 or a T2 or … No tagged constructor: callers
+   discriminate by runtime check (the executor's lenient :null /
+   :any handling provides the practical escape).
+
+   Unlike refinements, unions DO compose with subtyping rules:
+     T ⊆ [:union …] iff T ⊆ Tᵢ for some i
+     [:union …] ⊆ S iff every Tᵢ ⊆ S"
+  [t]
+  (and (vector? t) (= :union (first t)) (>= (count t) 2)))
+
+
+(defn refine-base
+  [t]
+  (when (refine-type? t) (nth t 1)))
+
+
+(defn refine-constraint
+  [t]
+  (when (refine-type? t) (nth t 2)))
+
+
+(defn union-members
+  "The list of branch types of a union (or nil for non-unions).
+   Unions are flattened on construction (see `make-union`), so
+   members are never themselves unions."
+  [t]
+  (when (union-type? t) (vec (rest t))))
+
+
+(defn fn-args
+  "{arg-name arg-type} of a function type."
+  [t]
+  (when (fn-type? t) (nth t 1)))
+
+
+(defn fn-ret
+  [t]
+  (when (fn-type? t) (nth t 2)))
+
+
+(defn fn-effects
+  "Slot-level effect constraint of a fn-type. Always returns a value
+   for fn-types: the declared 4th element if present, else `:any`
+   (the legacy three-element form is treated as the canonical
+   four-element form with `:any` as the slot meaning — unconstrained,
+   any callable passes). nil for non-fn-types.
+
+   `effects-compatible?` reads this and handles `:any` (sup-side =
+   unconstrained, sub-side = can't satisfy concrete) — see its
+   docstring for the directional rule."
+  [t]
+  (cond
+    (not (fn-type? t)) nil
+    (= 4 (count t))    (nth t 3)
+    :else              :any))
+
+
+(defn list-elem
+  [t]
+  (when (list-type? t) (nth t 1)))
+
+
+(defn map-type?
+  "`[:map key-type val-type]` — a homogeneous map: every key is of
+   `key-type`, every value of `val-type`. Distinct from a record
+   (`{:field T …}`), which has a FIXED set of named fields. Subtyping
+   is covariant in both key and value."
+  [t]
+  (and (vector? t) (= :map (first t)) (= 3 (count t))))
+
+
+(defn map-key
+  [t]
+  (when (map-type? t) (nth t 1)))
+
+
+(defn map-val
+  [t]
+  (when (map-type? t) (nth t 2)))
+
+
+(defn tuple-type?
+  "`[:tuple T1 T2 …]` — a fixed-length heterogeneous sequence: position
+   i holds a value of type Tᵢ. Distinct from `[:list T]` (homogeneous,
+   any length). Subtyping requires equal length and is covariant
+   per-position."
+  [t]
+  (and (vector? t) (= :tuple (first t)) (>= (count t) 1)))
+
+
+(defn tuple-elems
+  [t]
+  (when (tuple-type? t) (vec (rest t))))
+
+
+;; -----------------------------------------------------------------------------
+;; Secret-taint helpers — pure on shape, no alias / subtype dependency.
+
+(defn contains-secret?
+  "True iff `t` contains a `[:secret …]` anywhere in its structure.
+   Used by `:return-type-rule` propagators: an arg whose type holds a
+   secret ANYWHERE (top-level, list element, record field, union
+   branch) taints the fn's return.
+
+   Mirrors the recursion shape of `well-formed?` / `occurs?` — a
+   missing arm here lets a secret slip through propagation silently,
+   so keep this in sync when adding new type-kinds."
+  [t]
+  (cond
+    (or (primitive? t) (type-var? t)) false
+    (secret-type? t)  true
+    (fn-type? t)      (or (some contains-secret? (vals (fn-args t)))
+                          (contains-secret? (fn-ret t)))
+    (list-type? t)    (contains-secret? (list-elem t))
+    (map-type? t)     (or (contains-secret? (map-key t))
+                          (contains-secret? (map-val t)))
+    (tuple-type? t)   (some contains-secret? (tuple-elems t))
+    (refine-type? t)  (contains-secret? (refine-base t))
+    (union-type? t)   (some contains-secret? (union-members t))
+    (record-type? t)  (some contains-secret? (vals t))
+    :else             false))
+
+
+(defn taint-with-secret-if-tainted
+  "Pluggable `:return-type-rule` propagator — if ANY arg in
+   `bindings-info` carries a `[:secret …]` anywhere in its type,
+   wrap the static return in `[:secret …]`. Otherwise return the
+   static return verbatim.
+
+   `bindings-info` is the shape `compute-return-type` passes to a
+   rule: `{slot-name {:type T :value V? :ref R? …}}`. We look at
+   `:type` only.
+
+   Base-fns with no other return-type-rule opt into propagation by
+   registering this fn directly. Base-fns that ALREADY have a
+   structural return-type-rule (`:first`, `:get`, etc.) wrap their
+   rule via `wrap-with-taint` so the structural computation runs
+   first AND the taint propagates if applicable."
+  [bindings-info default-ret]
+  (if (some (fn [[_slot info]] (contains-secret? (:type info))) bindings-info)
+    (make-secret-type default-ret)
+    default-ret))
+
+
+(defn wrap-with-taint
+  "Compose an existing `:return-type-rule` with taint propagation.
+   The wrapped rule runs `rule` to produce the structural return,
+   then taints the result if any input was already secret. When
+   `rule` is nil, returns the bare taint propagator.
+
+   Usage in `impls.clj`:
+     :first {:impl first-fn
+             :return-type-rule (types/wrap-with-taint first-return-rule)}
+
+   Keeps the existing structural narrowing (`:first` reads the elem
+   type out of `:coll`) AND adds the taint layer on top."
+  [rule]
+  (if rule
+    (fn [bindings-info default-ret]
+      (taint-with-secret-if-tainted bindings-info (rule bindings-info default-ret)))
+    taint-with-secret-if-tainted))

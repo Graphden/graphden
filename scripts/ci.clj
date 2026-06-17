@@ -32,6 +32,29 @@
 (def clear-line "[2K\r")
 
 
+(defn- terminal-cols
+  "Best-effort terminal width detection. Falls back to 120 cols
+   when not running under a real TTY (piped output, CI logs, …) —
+   wider than the typical 80-col default but narrow enough for
+   the `print-status` clamping to kick in for the common laptop
+   case before the elapsed counter pushes the line into wrap."
+  []
+  (or (try (some-> (System/getenv "COLUMNS") Integer/parseInt) (catch Exception _ nil))
+      (try (let [r (p/shell {:out :string :continue true} "tput" "cols")]
+             (when (zero? (:exit r))
+               (Integer/parseInt (str/trim (:out r)))))
+           (catch Exception _ nil))
+      120))
+
+
+(defn- visible-len
+  "Length of `s` with ANSI SGR sequences stripped — colour codes
+   render to zero visible width but the raw `(count …)` would
+   include them and over-count, forcing premature truncation."
+  [s]
+  (count (str/replace s #"\[[0-9;]*[A-Za-z]" "")))
+
+
 ;; ===========================================================================
 ;; Per-check timeouts. Each value is a CEILING — a healthy run finishes well
 ;; below it. The numbers are sized off observed local + CI durations × 2 to
@@ -289,17 +312,44 @@
             failed (atom false)
             start-time (System/currentTimeMillis)
 
-            ;; Progress display
+            ;; Progress display. The status line is rendered every
+            ;; 200 ms. Naive `\r`-only update breaks once the line
+            ;; exceeds the terminal width: ANSI's `\033[2K` clears
+            ;; the CURRENT row only, so wrapped tail rows accumulate
+            ;; and the user sees the status repeat instead of
+            ;; updating in place. Track the row count we previously
+            ;; emitted and explicitly move-up + clear each one
+            ;; before re-rendering.
+            cols (terminal-cols)
+            esc (str (char 27))
+            cursor-up (fn [n] (str esc "[" n "A"))
+            ;; ESC[J — clear from cursor to end of screen. Wipes
+            ;; every previously-emitted row at once, no need to
+            ;; clear-each.
+            clear-below (str esc "[J")
+            last-rows (atom 1)
             print-status (fn []
                            (let [elapsed (/ (- (System/currentTimeMillis) start-time) 1000.0)
-                                 line (str clear-line
-                                           (str/join " │ "
+                                 line (str (str/join " │ "
                                                      (map (fn [c]
-                                                            (str (status-char (get @status (:name c))) " " (:name c)))
+                                                            (str (status-char (get @status (:name c)))
+                                                                 " " (:name c)))
                                                           checks))
-                                           (format " │ %.1fs" elapsed))]
-                             (print line)
-                             (flush)))
+                                           (format " │ %.1fs" elapsed))
+                                 rows-needed (max 1 (-> (visible-len line)
+                                                        (quot cols)
+                                                        inc))
+                                 up (dec @last-rows)
+                                 ;; Build the prefix in ONE write so the
+                                 ;; cursor movement + clears land before
+                                 ;; the new line and the terminal doesn't
+                                 ;; flash a half-erased state.
+                                 prefix (str (when (pos? up) (cursor-up up))
+                                             "\r"
+                                             clear-below)]
+                             (print (str prefix line))
+                             (flush)
+                             (reset! last-rows rows-needed)))
 
             ;; Progress display thread
             progress-running (atom true)

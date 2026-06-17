@@ -1475,6 +1475,71 @@
               (vals rec)))))
 
 
+(defn- ^:no-doc union-rest-and-tv
+  "Helper for the union-fallback chain: project both sides to their
+   member sets, compute the common intersection, and report the
+   leftovers (`a-rest` / `b-rest`) plus their typevar subsets
+   (`a-rest-tvs` / `b-rest-tvs`)."
+  [a b]
+  (let [a-mems     (if (union-type? a) (set (union-members a)) #{a})
+        b-mems     (if (union-type? b) (set (union-members b)) #{b})
+        common     (clojure.set/intersection a-mems b-mems)
+        a-rest     (vec (clojure.set/difference a-mems common))
+        b-rest     (vec (clojure.set/difference b-mems common))
+        a-rest-tvs (filter type-var? a-rest)
+        b-rest-tvs (filter type-var? b-rest)]
+    {:common common :a-rest a-rest :b-rest b-rest
+     :a-rest-tvs a-rest-tvs :b-rest-tvs b-rest-tvs}))
+
+
+(defn- try-unify-unions
+  "Unify two types when one or both sides is a union. HM unifier
+   doesn't naturally pick a branch (multiple valid choices), so this
+   runs a documented fallback chain and returns the first successful
+   substitution — or `::fail` if every arm fails:
+
+   1. **Subtype-direction success** — `:null ⊆ [:union :null T]` etc.;
+      matches the lenient `:any` handling in `unify`.
+   2. **Common-member strip + single-leftover unify** —
+      `[:union :null 'a]` vs `[:union :null :text]` strips the shared
+      `:null` and unifies `'a` with `:text`.
+   3. **Concrete vs union-with-single-typevar** — pick the typevar arm
+      and bind. Common at `:coalesce` and other nullable-default sites.
+   4. **LHS-rest single typevar, RHS-rest concrete** — bind the typevar
+      to the full leftover RHS (preserves slot constraints across
+      polymorphic chains like `:first` ↦ `[:union :null a]`).
+   5. **Mirror of (4)** with sides swapped."
+  [a b subst]
+  (or
+    (when (or (subtype? a b) (subtype? b a)) subst)
+    (let [{:keys [common a-rest b-rest]} (union-rest-and-tv a b)]
+      (when (and (seq common) (= 1 (count a-rest)) (= 1 (count b-rest)))
+        (let [s (unify (first a-rest) (first b-rest) subst)]
+          (when-not (= s ::fail) s))))
+    (let [concrete   (if (union-type? a) b a)
+          union-side (if (union-type? a) a b)
+          tv-members (filter type-var? (union-members union-side))]
+      (when (and (not (union-type? concrete))
+                 (= 1 (count tv-members)))
+        (let [s (unify concrete (first tv-members) subst)]
+          (when-not (= s ::fail) s))))
+    (let [{:keys [common a-rest b-rest a-rest-tvs b-rest-tvs]}
+          (union-rest-and-tv a b)]
+      (when (and (seq common)
+                 (= 1 (count a-rest)) (= 1 (count a-rest-tvs))
+                 (seq b-rest) (empty? b-rest-tvs))
+        (let [s (unify (first a-rest-tvs) (make-union b-rest) subst)]
+          (when-not (= s ::fail) s))))
+    (let [{:keys [common a-rest b-rest a-rest-tvs b-rest-tvs]}
+          (union-rest-and-tv a b)]
+      (when (and (seq common)
+                 (= 1 (count b-rest)) (= 1 (count b-rest-tvs))
+                 (seq a-rest) (empty? a-rest-tvs))
+        (let [s (unify (first b-rest-tvs) (make-union a-rest) subst)]
+          (when-not (= s ::fail) s))))
+    ::fail))
+
+
 (defn unify
   "Unify two types. Returns an updated substitution, or `::fail` if
    they cannot be made equal. Substitution is a `{type-var type}` map.
@@ -1520,84 +1585,13 @@
        ;; merely succeeding without a binding.
        (or (= a :never) (= b :never)) subst
        ;; Unions: HM unifier doesn't naturally pick a branch (multiple
-       ;; valid choices), so defer to subtype? — succeed without
-       ;; binding when the relation holds in either direction. This
-       ;; matches the lenient :any handling above and the practical
-       ;; reality that unions appear as DECLARED slot types, not as
-       ;; type-var bindings.
+       ;; valid choices), so `try-unify-unions` runs the documented
+       ;; fallback chain (subtype-direction success, common-member
+       ;; strip, single-typevar arm-pick, single-typevar absorption).
+       ;; Reduces this `cond` arm to the dispatch only — the chain
+       ;; itself reads as a small list of helpers.
        (or (union-type? a) (union-type? b))
-       (or
-         ;; Subtype-direction success — `:null ⊆ [:union :null T]`
-         ;; etc.; matches the lenient `:any` handling above.
-         (when (or (subtype? a b) (subtype? b a)) subst)
-         ;; Strip mutually-present members. `[:union :null 'a]` vs
-         ;; `[:union :null :text]` after the strip becomes `'a` vs
-         ;; `:text` — unify binds `'a := :text` and we're done.
-         ;; Without this step a free typevar nested inside a
-         ;; nullable union (very common: every fn-ref whose return
-         ;; could be nil and carries a polymorphic non-null
-         ;; branch) was stuck against the slot's same-shaped
-         ;; nullable type because both unions failed subtype
-         ;; each-way (the typevar member subtypes nothing concrete).
-         (let [a-members (if (union-type? a) (set (union-members a)) #{a})
-               b-members (if (union-type? b) (set (union-members b)) #{b})
-               common    (clojure.set/intersection a-members b-members)
-               a-rest    (vec (clojure.set/difference a-members common))
-               b-rest    (vec (clojure.set/difference b-members common))]
-           (when (and (seq common) (= 1 (count a-rest)) (= 1 (count b-rest)))
-             (let [s (unify (first a-rest) (first b-rest) subst)]
-               (when-not (= s ::fail) s))))
-         ;; Branch-try: concrete on one side, union with a typevar
-         ;; member on the other (`:text` vs `[:union :null 'a]`,
-         ;; common case at `:coalesce`-style sites whose `:value` is
-         ;; `[:union :null a]` and the caller supplies a non-null
-         ;; refined type). Pick the typevar arm and bind. Skip when
-         ;; there are multiple typevar members — ambiguity.
-         (let [concrete (if (union-type? a) b a)
-               union-side (if (union-type? a) a b)
-               tv-members (filter type-var? (union-members union-side))]
-           (when (and (not (union-type? concrete))
-                      (= 1 (count tv-members)))
-             (let [s (unify concrete (first tv-members) subst)]
-               (when-not (= s ::fail) s))))
-         ;; Both sides are unions, but after stripping common members
-         ;; LHS-rest has exactly one typevar and RHS-rest has at least
-         ;; one non-typevar member that's compatible. Bind the typevar
-         ;; to ONE of the RHS-rest members — practical compromise for
-         ;; polymorphic-return chains like `:first` over `[:list a]`
-         ;; producing `[:union :null a-N]` consumed by a slot typed
-         ;; `[:union :null [:list :any] [:map a :any]]`. Bind to the
-         ;; full leftover union so the typevar carries the slot's
-         ;; constraint forward instead of an arbitrarily-picked branch.
-         (let [a-mems (if (union-type? a) (set (union-members a)) #{a})
-               b-mems (if (union-type? b) (set (union-members b)) #{b})
-               common (clojure.set/intersection a-mems b-mems)
-               a-rest (vec (clojure.set/difference a-mems common))
-               b-rest (vec (clojure.set/difference b-mems common))
-               a-rest-tvs (filter type-var? a-rest)
-               b-rest-tvs (filter type-var? b-rest)]
-           (when (and (seq common)
-                      (= 1 (count a-rest)) (= 1 (count a-rest-tvs))
-                      (seq b-rest) (empty? b-rest-tvs))
-             (let [s (unify (first a-rest-tvs) (make-union b-rest) subst)]
-               (when-not (= s ::fail) s))))
-         (let [a-mems (if (union-type? a) (set (union-members a)) #{a})
-               b-mems (if (union-type? b) (set (union-members b)) #{b})
-               common (clojure.set/intersection a-mems b-mems)
-               a-rest (vec (clojure.set/difference a-mems common))
-               b-rest (vec (clojure.set/difference b-mems common))
-               a-rest-tvs (filter type-var? a-rest)
-               b-rest-tvs (filter type-var? b-rest)]
-           ;; Symmetric case: RHS has a single typevar leftover that
-           ;; should absorb LHS's concrete remainder. Mirror the arm
-           ;; above with the roles swapped so the direction of the
-           ;; consumer's binding doesn't matter.
-           (when (and (seq common)
-                      (= 1 (count b-rest)) (= 1 (count b-rest-tvs))
-                      (seq a-rest) (empty? a-rest-tvs))
-             (let [s (unify (first b-rest-tvs) (make-union a-rest) subst)]
-               (when-not (= s ::fail) s))))
-         ::fail)
+       (try-unify-unions a b subst)
        ;; Subtype-aware unification — succeeds without further binding
        ;; when one of the relations holds:
        ;;

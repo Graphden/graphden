@@ -247,8 +247,8 @@
   (boolean (and string (str/starts-with? string prefix))))
 
 
-(defbase str-replace-fn [s match replacement]
-  (when s (str/replace s match replacement)))
+(defbase str-replace-fn [string match replacement]
+  (when string (str/replace string match replacement)))
 
 
 (defbase re-find?-fn

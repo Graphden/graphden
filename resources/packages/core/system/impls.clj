@@ -190,13 +190,13 @@
 
 
 (defbase parse-uuid-fn
-  "Parse `:s` as a UUID. Returns nil for non-string / blank / malformed
-   input — every failure mode collapses to nil so graph callers don't
-   need a try/catch wrapper. Defensive boundary mirroring
-   `crud.request/parse-uuid-or-clear`."
-  [s]
-  (when (and (string? s) (not (str/blank? s)))
-    (try (java.util.UUID/fromString s)
+  "Parse `:string` as a UUID. Returns nil for non-string / blank /
+   malformed input — every failure mode collapses to nil so graph
+   callers don't need a try/catch wrapper. Defensive boundary
+   mirroring `crud.request/parse-uuid-or-clear`."
+  [string]
+  (when (and (string? string) (not (str/blank? string)))
+    (try (java.util.UUID/fromString string)
          (catch IllegalArgumentException _ nil))))
 
 

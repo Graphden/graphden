@@ -385,6 +385,6 @@
    :return-type :nullable-jsonb}
 
   {:name :parse-uuid
-   :description "Parse `:s` as a `:uuid`. Returns nil for non-string / blank / malformed input — every failure mode collapses to nil so graph callers don't need a try/catch wrap. Defensive boundary mirroring `crud.request/parse-uuid-or-clear`."
-   :args {:s {:type :any :required false :description "Candidate string. Non-string / blank → nil."}}
+   :description "Parse `:string` as a `:uuid`. Returns nil for non-string / blank / malformed input — every failure mode collapses to nil so graph callers don't need a try/catch wrap. Defensive boundary mirroring `crud.request/parse-uuid-or-clear`."
+   :args {:string {:type :any :required false :description "Candidate string. Non-string / blank → nil."}}
    :return-type :nullable-uuid}]}

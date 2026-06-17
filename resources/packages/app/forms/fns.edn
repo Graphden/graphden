@@ -157,10 +157,10 @@
    :description "Stage 1 of value-form — JSON body -> {:binding-id :fn-id :slot-id :item-id}, each coerced to a UUID."
    :parent :zipmap
    :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
-          :vals [{:parent :parse-uuid :args {:s {:parent :get :args {:coll :_value-form-body :key {:value :binding-id} :default nil}}}}
-                 {:parent :parse-uuid :args {:s {:parent :get :args {:coll :_value-form-body :key {:value :fn-id} :default nil}}}}
-                 {:parent :parse-uuid :args {:s {:parent :get :args {:coll :_value-form-body :key {:value :slot-id} :default nil}}}}
-                 {:parent :parse-uuid :args {:s {:parent :get :args {:coll :_value-form-body :key {:value :item-id} :default nil}}}}]}}
+          :vals [{:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :binding-id} :default nil}}}}
+                 {:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :fn-id} :default nil}}}}
+                 {:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :slot-id} :default nil}}}}
+                 {:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :item-id} :default nil}}}}]}}
 
   ;; --- :_value-form-validation (Variant-2). Was defbase wrapping
   ;; `validate-value-form` — `(when-not (or binding-id (and fn-id

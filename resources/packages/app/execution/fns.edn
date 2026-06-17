@@ -58,7 +58,7 @@
   {:name :_execute-fn-id
    :description "`:fn-id` parsed UUID; nil for blank / non-string / malformed input. Mirrors `parse-uuid-or-clear`'s defensive collapse — every failure path returns nil so downstream guards can produce a clean error response."
    :parent :parse-uuid
-   :args {:s :_execute-body-fn-id}}
+   :args {:string :_execute-body-fn-id}}
 
   {:name :_execute-fn-name
    :description "`:fn-name` coerced to string when present, nil when absent. Nil-safe `(some-> body :fn-name str)` pattern."
@@ -491,7 +491,7 @@
   {:name :_execute-arg-ref-bad?
    :description "True iff the ref under `args[item]` doesn't parse as a UUID."
    :parent :nil?
-   :args {:value {:parent :parse-uuid :args {:s :_execute-arg-ref}}}}
+   :args {:value {:parent :parse-uuid :args {:string :_execute-arg-ref}}}}
 
   {:name :_execute-arg-is-malformed-ref?
    :description "Pure per-key predicate for `:filter` — ref-shape AND ref doesn't parse."
@@ -673,7 +673,7 @@
    :description "Parse the `:id` path segment for both `/api/execute/:id` and `/api/execute/:id/cancel` into `{:id <uuid|nil> :id-raw <raw>}`. Raw form preserved for the dynamic 404 message."
    :parent :zipmap
    :args {:keys [{:value :id} {:value :id-raw}]
-          :vals [{:parent :parse-uuid :args {:s :_exec-id-raw}}
+          :vals [{:parent :parse-uuid :args {:string :_exec-id-raw}}
                  :_exec-id-raw]}}
 
   {:name :_exec-err-not-found
@@ -810,8 +810,8 @@
    :description "Parse `GET /api/executions` query-string into `{:fn-id :version-id :limit}`."
    :parent :zipmap
    :args {:keys [{:value :fn-id} {:value :version-id} {:value :limit}]
-          :vals [{:parent :parse-uuid :args {:s :_list-exec-fn-id-raw}}
-                 {:parent :parse-uuid :args {:s :_list-exec-version-id-raw}}
+          :vals [{:parent :parse-uuid :args {:string :_list-exec-fn-id-raw}}
+                 {:parent :parse-uuid :args {:string :_list-exec-version-id-raw}}
                  :_list-exec-limit]}}
 
   {:name :_list-exec-no-anchor?

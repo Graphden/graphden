@@ -34,9 +34,11 @@
   [fn-id]
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
-        base    (if (instance? graphden.versioning.storage.core.VersionedStorage storage)
-                  (graphden.versioning.storage.core.VersionedStorage/.base-storage storage)
-                  storage)]
+        ;; VersionedStorage is a defrecord — `:base-storage` keyword
+        ;; access reads its field via the auto-generated ILookup
+        ;; impl. Cleaner than reflection and dodges splint's
+        ;; method-vs-field nag on the `.base-storage` interop form.
+        base    (or (:base-storage storage) storage)]
     (bl/effective-branch-local? base fn-id)))
 
 

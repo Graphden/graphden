@@ -82,7 +82,7 @@
    :description "Bundled editor JS with `__BUILD_HASH__` substituted by `:build-hash-frontend-short`. The in-page console marker mirrors the `frontend` value returned by `GET /version`, so the browser bundle's identity is never out of step with what the server reports. `:str-replace` is nil-flow-through; `:_script-raw` is loaded from a baked-in JAR resource and is never nil, but the declared return follows the parent's union to keep the contract explicit."
    :parent :str-replace
    :return-type :nullable-text
-   :args {:s        {:ref :_script-raw                :type :text}
+   :args {:string   {:ref :_script-raw                :type :text}
           :match    "__BUILD_HASH__"
           :replacement :build-hash-frontend-short}}
 
@@ -440,7 +440,7 @@
   {:name :_partial-fn-versions-fn-id
    :description "Parsed UUID for `fn-id`; nil when absent or malformed (`:list-fn-versions` returns an empty list on nil)."
    :parent :parse-uuid
-   :args {:s :_partial-fn-versions-fn-id-str}}
+   :args {:string :_partial-fn-versions-fn-id-str}}
 
   {:name :_partial-fn-versions-current-branch
    :description "Currently-selected branch name (from `?current-branch=`), used to highlight the matching row in the timeline. Empty string when absent — no row gets the `-current` class."
@@ -1134,7 +1134,7 @@
   {:name :_partial-bd-row-fn-id-uuid
    :parent :if
    :args {:test :_partial-bd-row-is-fn?
-          :then {:parent :parse-uuid :args {:s :_partial-bd-row-entity-id}}
+          :then {:parent :parse-uuid :args {:string :_partial-bd-row-entity-id}}
           :else nil}}
 
   {:name :_partial-bd-row-branch-local?

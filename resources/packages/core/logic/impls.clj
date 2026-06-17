@@ -48,6 +48,10 @@
   (nil? value))
 
 
+(defbase zero?-fn [number]
+  (zero? number))
+
+
 ;; === Type predicate ===
 ;;
 ;; ONE primitive instead of N per-type predicates. Dispatches on the
@@ -482,6 +486,7 @@
    :not {:impl not-fn :return-type-rule (types/wrap-with-taint nil)}
    :some? {:impl some?-fn :return-type-rule (types/wrap-with-taint nil)}
    :nil? {:impl nil?-fn :return-type-rule (types/wrap-with-taint nil)}
+   :zero? {:impl zero?-fn :return-type-rule (types/wrap-with-taint nil)}
    :assert-some {:impl assert-some-fn
                  :return-type-rule (types/wrap-with-taint assert-some-return-rule)}
    :if {:impl if-fn :return-type-rule (types/wrap-with-taint if-return-rule)}

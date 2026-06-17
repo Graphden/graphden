@@ -610,11 +610,11 @@
    :parent :zipmap
    :args {:keys [{:value :target-id}]
           :vals [{:parent :parse-uuid
-                  :args {:s {:parent :to-str
-                             :args {:value {:parent :get
-                                            :args {:coll :_parsed-body
-                                                   :key {:value :type-fn-id}
-                                                   :default nil}}}}}}]}
+                  :args {:string {:parent :to-str
+                                  :args {:value {:parent :get
+                                                 :args {:coll :_parsed-body
+                                                        :key {:value :type-fn-id}
+                                                        :default nil}}}}}}]}
    :return-type :_types-usages-parsed-shape}
 
   {:name :_types-usages-validation
@@ -657,7 +657,7 @@
                          :then {:parent :to-str :args {:value :_create-record-type-parsed-name-raw}}
                          :else {:value nil}}}
                  {:parent :parse-uuid
-                  :args {:s {:parent :to-str :args {:value :_create-record-type-parsed-ns-id-raw}}}}
+                  :args {:string {:parent :to-str :args {:value :_create-record-type-parsed-ns-id-raw}}}}
                  {:parent :get :args {:coll :_parsed-body :key {:value :description} :default nil}}
                  {:parent :vec
                   :args {:coll {:parent :get
@@ -753,7 +753,7 @@
                          :then {:parent :to-str :args {:value :_create-list-type-parsed-name-raw}}
                          :else {:value nil}}}
                  {:parent :parse-uuid
-                  :args {:s {:parent :to-str :args {:value :_create-list-type-parsed-ns-id-raw}}}}
+                  :args {:string {:parent :to-str :args {:value :_create-list-type-parsed-ns-id-raw}}}}
                  {:parent :get :args {:coll :_parsed-body :key {:value :description} :default nil}}
                  {:parent :get :args {:coll :_parsed-body :key {:value :element-type} :default nil}}]}
    :return-type :_create-list-type-parsed-shape}
@@ -828,8 +828,8 @@
    :parent :zipmap
    :args {:keys [{:value :fn-id} {:value :name} {:value :has-description?} {:value :description} {:value :fields}]
           :vals [{:parent :parse-uuid
-                  :args {:s {:parent :to-str :args {:value {:parent :get
-                                                            :args {:coll :_parsed-body :key {:value :id} :default nil}}}}}}
+                  :args {:string {:parent :to-str :args {:value {:parent :get
+                                                                 :args {:coll :_parsed-body :key {:value :id} :default nil}}}}}}
                  {:parent :if
                   :args {:test {:parent :some? :args {:value :_update-record-type-parsed-name-raw}}
                          :then {:parent :to-str :args {:value :_update-record-type-parsed-name-raw}}
@@ -1564,7 +1564,7 @@
 
   {:name :_update-id-uuid
    :parent :parse-uuid
-   :args {:s :_update-id-str}}
+   :args {:string :_update-id-str}}
 
   ;; Pre-existing row read — guarded by entity-type + id-uuid both
   ;; present. When entity-type is nil OR id-uuid didn't parse, return
@@ -1960,10 +1960,10 @@
                          :key {:value :entity-type}
                          :default nil}}
                  {:parent :parse-uuid
-                  :args {:s {:parent :get
-                             :args {:coll :_delete-parsed-extracted
-                                    :key {:value :id-str}
-                                    :default nil}}}}]}
+                  :args {:string {:parent :get
+                                  :args {:coll :_delete-parsed-extracted
+                                         :key {:value :id-str}
+                                         :default nil}}}}]}
    :return-type :_delete-parsed-shape}
 
   {:name :_delete-request-invalid?
@@ -2574,7 +2574,7 @@
    :description "Parse the URI + body of `POST /api/sequence/append/:fn-id` into `{:fn-id <uuid|nil> :body <map|nil>}`."
    :parent :zipmap
    :args {:keys [{:value :fn-id} {:value :body}]
-          :vals [{:parent :parse-uuid :args {:s :_seq-append-fn-id-raw}}
+          :vals [{:parent :parse-uuid :args {:string :_seq-append-fn-id-raw}}
                  :_seq-append-body]}}
 
   {:name :_seq-append-fn-id-invalid?
@@ -2704,7 +2704,7 @@
    :description "Parse the URI path of `DELETE /api/sequence/item/:item-id` into `{:item-id <uuid|nil>}`."
    :parent :zipmap
    :args {:keys [{:value :item-id}]
-          :vals [{:parent :parse-uuid :args {:s :_seq-remove-item-id-raw}}]}}
+          :vals [{:parent :parse-uuid :args {:string :_seq-remove-item-id-raw}}]}}
 
   {:name :_seq-remove-item-id-invalid?
    :description "Guard #1 — the item-id path-segment didn't parse as a UUID."
@@ -2774,7 +2774,7 @@
    :description "Parse `PUT /api/sequence/item/:item-id` into `{:item-id <uuid|nil> :body <map|nil>}`. Reuses `:_seq-remove-item-id-raw` for URL extraction."
    :parent :zipmap
    :args {:keys [{:value :item-id} {:value :body}]
-          :vals [{:parent :parse-uuid :args {:s :_seq-remove-item-id-raw}}
+          :vals [{:parent :parse-uuid :args {:string :_seq-remove-item-id-raw}}
                  :_seq-update-body]}}
 
   {:name :_seq-update-item-id-invalid?
@@ -2880,7 +2880,7 @@
 
   {:name :_tighten-binding-id
    :parent :parse-uuid
-   :args {:s :_tighten-binding-id-str}}
+   :args {:string :_tighten-binding-id-str}}
 
   {:name :_tighten-body
    :parent :parse-json-body
@@ -3149,7 +3149,7 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :parent-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s :_parse-fn-form-parent-id-raw}}]}}
+                                :args {:string :_parse-fn-form-parent-id-raw}}]}}
           :else {:value {}}}}
 
   {:name :_parse-fn-form-namespace-id-raw
@@ -3162,7 +3162,7 @@
                  :args {:value {:parent :blank?
                                 :args {:string :_parse-fn-form-namespace-id-raw}}}}
           :then {:parent :parse-uuid
-                 :args {:s :_parse-fn-form-namespace-id-raw}}
+                 :args {:string :_parse-fn-form-namespace-id-raw}}
           :else nil}}
 
   {:name :_parse-fn-form-namespace-id-fragment
@@ -3222,7 +3222,7 @@
   {:name :_parse-fn-form-pid-parse-uuid
    :description "Per-item UUID parse — HOF callback."
    :parent :parse-uuid
-   :args {:s {:as :item}}}
+   :args {:string {:as :item}}}
 
   {:name :_parse-fn-form-parent-ids-coerced
    :description "Parsed parent-ids vec — `[]` on blank input; otherwise the parsed UUID list."
@@ -3412,7 +3412,7 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :parent-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s :_parse-ns-form-parent-id-raw}}]}}
+                                :args {:string :_parse-ns-form-parent-id-raw}}]}}
           :else {:value {}}}}
 
   {:name :_parse-ns-form-description-fragment
@@ -3463,10 +3463,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :type-fn-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :type-fn-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :type-fn-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-slot-form-description-fragment
@@ -3518,10 +3518,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :fn-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :fn-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :fn-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-fn-slot-form-slot-id-fragment
@@ -3531,10 +3531,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :slot-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :slot-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :slot-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-fn-slot-form-position-fragment
@@ -3575,10 +3575,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :fn-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :fn-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :fn-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-bnd-form-slot-id-fragment
@@ -3588,10 +3588,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :slot-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :slot-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :slot-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-bnd-form-value-raw
@@ -3625,10 +3625,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :ref-fn-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :ref-fn-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :ref-fn-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-bnd-form-override-kind-raw
@@ -3661,10 +3661,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :type-override-fn-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :type-override-fn-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :type-override-fn-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-bnd-form-description-fragment
@@ -3760,10 +3760,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :binding-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :binding-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :binding-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-bli-form-position-fragment
@@ -3810,10 +3810,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :ref-fn-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :ref-fn-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :ref-fn-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-bli-form-literal-fragment
@@ -3863,10 +3863,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :fn-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :fn-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :fn-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-svc-form-enabled-fragment
@@ -3904,10 +3904,10 @@
           :then {:parent :zipmap
                  :args {:keys [{:value :branch-id}]
                         :vals [{:parent :parse-uuid
-                                :args {:s {:parent :get
-                                           :args {:coll {:as :form-data}
-                                                  :key {:value :branch-id}
-                                                  :default nil}}}}]}}
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :branch-id}
+                                                       :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :parse-service-from-form

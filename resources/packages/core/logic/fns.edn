@@ -31,6 +31,11 @@
    :args {:value {:type a :description "Value to test for nilness."}}
    :return-type :bool}
 
+  {:name :zero?
+   :description "True iff number is zero. Pure library wrap of Clojure's `zero?` — added for the readable-in-graph case (`:if :test :_count-zero?` over `:zero? :number :my-count`) instead of routing every numeric-empty check through `:empty?` on the underlying collection."
+   :args {:number {:type :numeric :description "Number to test."}}
+   :return-type :bool}
+
   ;; === Type predicate ===
   ;;
   ;; ONE primitive replacing the per-type `keyword?` / `string?` /

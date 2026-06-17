@@ -174,8 +174,8 @@
    :return-type :bool}
 
   {:name :str-replace
-   :description "Replace every occurrence of `:match` with `:replacement` in `:s` (Clojure's `clojure.string/replace`). All three args are plain strings — no regex. Nil `:s` flows through unchanged."
-   :args {:s {:type :nullable-text :description "Source string (nil → returns nil)."}
+   :description "Replace every occurrence of `:match` with `:replacement` in `:string` (Clojure's `clojure.string/replace`). All three args are plain strings — no regex. Nil `:string` flows through unchanged."
+   :args {:string {:type :nullable-text :description "Source string (nil → returns nil)."}
           :match {:type :text :description "Literal substring to find."}
           :replacement {:type :text :description "Replacement string."}}
    :return-type :nullable-text}

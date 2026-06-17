@@ -297,6 +297,72 @@ both will fire (HTMX listens at the same bubble phase as regular
 listeners). The existing pattern in `bindFnVersionsActions` does
 this correctly.
 
+### 8. JSON serialises enum fields as STRINGS, in-graph they're KEYWORDS
+
+Server data layers return keywords for enum-shaped fields (`:status
+:succeeded`, `:change :modified`, `:entity-name :fn`); the JSON-handler
+flattens to strings on the wire (`"succeeded"` / `"modified"` /
+`"fn"`). Inside the graph, your `:equal?` comparison must use the
+KEYWORD literal:
+
+```edn
+;; WRONG — :a is a kw at runtime, :b is a string, never equal
+{:parent :equal? :args {:a :_row-status :b {:value "succeeded"}}}
+
+;; RIGHT — match against the keyword form
+{:parent :equal? :args {:a :_row-status :b {:value :succeeded}}}
+```
+
+The trap is observability: the partial silently renders empty
+sections / wrong dispatch instead of failing loudly. After this
+gotcha hit twice (execute-history `:status`, branch-diff `:change`
+and `:entity-name`), the affected fields got closed-enum types
+(`:diff-change-kw`, `:diff-entity-name-kw`) so downstream sites
+can pin the kind explicitly. `:equal?` itself stays untyped today
+— sync-time guard for `:kw` vs `:string` compares would need a
+typed-equal variant; deferred.
+
+### 9. `:decode-row` parses timestamptz to `java.sql.Timestamp`, not a String
+
+`:subs` (and other string ops) directly throw `count not supported
+on this type: Timestamp` when handed a decoded `:started-at` /
+`:created-at`. Coerce first:
+
+```edn
+{:name :_partial-X-ts-text  :parent :to-str  :args {:value :_partial-X-row-ts}}
+{:name :_partial-X-ts-short :parent :subs    :args {:string :_partial-X-ts-text
+                                                    :start {:value 0}
+                                                    :end {:value 16}}}
+```
+
+`:to-str` calls `(str ts)` which uses Timestamp's SQL-shape
+`.toString` — `YYYY-MM-DD HH:MM:SS.…`. First 16 chars cover
+both that and ISO `YYYY-MM-DDTHH:MM:SS…`.
+
+### 10. The type-checker can't flow-narrow through `cond + get`
+
+When a fn-def is a `:cond` returning different envelope shapes
+(success vs error union), downstream `:get :key X` on the result
+returns `:any` from the type-checker's POV, and a `:count` /
+`:empty?` / `:str-join` on that often trips
+`types/sweep-regression`. Runtime is fine — the cond's apply
+branch is the only path the partial-renderer's caller reaches.
+
+Until the type-checker grows cond-then-get narrowing, the
+work-around is to add the affected fn-def names to
+`graphden.types.check/allowed-type-check-failures` with a
+comment pointing at this section.
+
+### 11. Convention: string-input base-fns use `:string`, NOT `:s`
+
+`:subs`, `:str-len`, `:str-upper`, `:str-lower`, `:str-trim`,
+`:str-split`, `:str-to-keyword`, `:str-replace`, and
+`:parse-uuid` ALL use `:string` as the input slot name (the last
+two were renamed from `:s` for consistency). When you add a new
+string-input base-fn, follow the convention; the type-checker
+catches `:s` vs `:string` mistakes at sync time with the
+"non-existent slot" error.
+
 ---
 
 ## File map (current migrations)

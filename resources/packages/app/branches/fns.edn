@@ -262,7 +262,7 @@
   {:name :_list-fn-versions-fn-id
    :description "Parsed UUID (nil when missing / malformed)."
    :parent :parse-uuid
-   :args {:s :_list-fn-versions-fn-id-raw}}
+   :args {:string :_list-fn-versions-fn-id-raw}}
 
   ;; --- Query #1: versions for the fn-id.
   ;; Block 1 Step 2 migration: direct `:pg-query` + per-row
@@ -633,6 +633,20 @@
   ;; Single library call over `mrg/diff-branches`. The per-entry
   ;; reshape + envelope are graph composition below — admins can vary
   ;; the diff-entry shape or the envelope without Clojure edits.
+
+  ;; Closed enums for diff-entry fields. They make the `{:value :modified}`
+  ;; vs `{:value \"modified\"}` mistake visible at sync-time — the
+  ;; type-checker rejects a string-literal compare against
+  ;; `:diff-change-kw` since `:text` ⊄ `:diff-change-kw`. Mirrors the
+  ;; Clojure source of truth in `graphden.versioning.storage.merge`.
+  {:name :diff-change-kw
+   :description "Closed enum for the `:change` field on a `:diff-branches` entry. Same keyword set the Clojure merge layer emits."
+   :refine {:base :keyword :constraint [:in [:added-in-source :added-in-target :modified]]}}
+
+  {:name :diff-entity-name-kw
+   :description "Closed enum for the `:entity-name` field on a `:diff-branches` entry — the versioned entity kinds the diff walker considers."
+   :refine {:base :keyword :constraint [:in [:fn :fn-slot :binding :binding-list-item]]}}
+
   {:name :diff-branches
    :description "Atomic library boundary over `mrg/diff-branches` — returns the resolved-view diff between the two branches' ancestor chains: `{:source-branch-id :target-branch-id :diffs [...]}`."
    :args {:source-branch-id {:type :uuid :description "Source branch id."}
@@ -669,6 +683,21 @@
   {:name :_diff-entry-target-version
    :parent :get
    :args {:coll {:as :item} :key {:value :target-version} :default nil}}
+
+  ;; Typed accessors for the two enum-shaped fields. Downstream
+  ;; readers that bind these get the closed-enum type, making
+  ;; ":kw vs \"string\""-style compare typos surface against the
+  ;; declared shape (documentation today; sync-time guard once
+  ;; `:equal?` gains the per-arg type-check rule).
+  {:name :_diff-entry-change-kw
+   :parent :get
+   :return-type [:union :null :diff-change-kw]
+   :args {:coll {:as :item} :key {:value :change} :default nil}}
+
+  {:name :_diff-entry-entity-name-kw
+   :parent :get
+   :return-type [:union :null :diff-entity-name-kw]
+   :args {:coll {:as :item} :key {:value :entity-name} :default nil}}
 
   {:name :_diff-apply-entry
    :description "HOF callback per diff row — `{:entity-name :entity-id (str) :change :source-version (stringify-uuids) :target-version (stringify-uuids)}`. Mirrors the Clojure `prepare-diff-entry`."
@@ -1304,7 +1333,7 @@
   {:name :_merge-resolution-eid
    :description "`(parse-uuid (:entity-id item))` — nil when missing/malformed."
    :parent :parse-uuid
-   :args {:s {:parent :get :args {:coll {:as :item} :key {:value :entity-id} :default nil}}}}
+   :args {:string {:parent :get :args {:coll {:as :item} :key {:value :entity-id} :default nil}}}}
 
   {:name :_merge-resolution-choice-kw
    :description "`(some-> (:choice item) keyword)`."

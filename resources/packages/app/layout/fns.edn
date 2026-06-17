@@ -25,7 +25,7 @@
 
   {:name :_parse-layout-request-shape
    :description "Output of `:_parse-layout-request` — the layout root and the per-fn expansion-level map keyed by cytoscape node-id."
-   :type {:root-id :uuid :expansions [:map :text :any]}}
+   :type {:root-id :uuid :expansions :text-keyed-map}}
 
   {:name :_graph-snapshot-shape
    :description "Output of `:_load-graph-cached` — every fn / slot / fn-slot / binding / list-item row plus the derived `:args` slot views. Each list element is one entity record (heterogeneous columns → `:jsonb`)."

@@ -13,7 +13,7 @@
  :fns
  [{:name :Storage
    :description "Storage protocol — contract for application-level storage backends. Bind via free-arg injection at the top of a consumer chain. Concrete implementations parent to this type-row and supply each slot with a concrete callable (e.g. :pg-query for :query)."
-   :type {:query   [:fn {:hsql :keyword-map} [:list [:map :text :any]]]
+   :type {:query   [:fn {:hsql :keyword-map} [:list :text-keyed-map]]
           :execute [:fn {:hsql :keyword-map} :int]
           :tx      [:fn {:body [:fn {} :any]} :any]}}
 

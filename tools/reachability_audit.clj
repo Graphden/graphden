@@ -37,7 +37,8 @@
                      (into {}
                            (keep (fn [k] [(name k) k]))
                            (keys fn-defs-by-name)))]
-    (letfn [(walk [x]
+    (letfn [(walk
+              [x]
               (cond
                 (keyword? x)
                 (if (contains? fn-defs-by-name x) #{x} #{})

@@ -56,6 +56,19 @@
    :description "Output of `:_tighten-parsed` — the target binding-id and the raw `effects` / `args` / `ret` body components plus the assembled `:delta` map."
    :type {:binding-id :uuid :effects-val :jsonb :args-val :jsonb :ret-val :jsonb :delta :jsonb}}
 
+  ;; Sequence-write parsed-shape aliases: each of the four
+  ;; consumers (load + try-apply, both append + update) declared the
+  ;; same record-shape inline. Naming them as type-rows lets the
+  ;; consumer slot read at the contract level instead of restating
+  ;; the structural shape every time.
+  {:name :_seq-append-parsed-shape
+   :description "Output of `:_seq-append-parsed` — `{:fn-id <uuid|nil> :body <json-or-nil>}`."
+   :type {:fn-id :nullable-uuid :body :nullable-jsonb}}
+
+  {:name :_seq-update-parsed-shape
+   :description "Output of `:_seq-update-parsed` — `{:item-id <uuid|nil> :body <json-or-nil>}`."
+   :type {:item-id :nullable-uuid :body :nullable-jsonb}}
+
   ;; A write-time validation rejection. The `_*-validation` stages
   ;; return this when a guard fails (or nil when the request passes);
   ;; `_rejection-response` renders the `:reason` into a 400.
@@ -240,7 +253,7 @@
   ;; `{:error}` shape the graph dispatches on.
   {:name :try-apply-seq-append
    :description "§3.3 core of sequence-append. Returns `{:created <item-id> :position <int> :fn-id <fn-id>}` or `{:error <reason>}`."
-   :args {:parsed {:type {:fn-id :nullable-uuid :body :nullable-jsonb}
+   :args {:parsed {:type :_seq-append-parsed-shape
                    :description "Parsed POST /api/sequence/append/:fn-id payload (`{:fn-id :body}`)."}
           :seq-binding {:type :nullable-keyword-map :description "Resolved sequence-binding row (real or synthetic)."}}
    :return-type :keyword-map
@@ -248,7 +261,7 @@
 
   {:name :try-apply-seq-update
    :description "§3.3 core of sequence-update. Returns `{:updated <item-id>}` or `{:error <reason>}`."
-   :args {:parsed {:type {:item-id :nullable-uuid :body :nullable-jsonb}
+   :args {:parsed {:type :_seq-update-parsed-shape
                    :description "Parsed PUT /api/sequence/item/:item-id payload."}
           :item {:type :nullable-keyword-map :description "Pre-read binding-list-item row."}}
    :return-type :keyword-map
@@ -2576,7 +2589,7 @@
 
   {:name :_seq-append-load-binding
    :description "Read-only sequence-binding lookup. Returns the existing binding row, a synthetic placeholder (materialized by apply), or nil when the fn has no sequence slot."
-   :args {:parsed {:type {:fn-id :nullable-uuid :body :nullable-jsonb}}}
+   :args {:parsed {:type :_seq-append-parsed-shape}}
    :return-type :nullable-keyword-map
    :effects #{:db}}
 
@@ -2776,7 +2789,7 @@
 
   {:name :_seq-update-load-item
    :description "Read the binding-list-item row for the parsed id."
-   :args {:parsed {:type {:item-id :nullable-uuid :body :nullable-jsonb}}}
+   :args {:parsed {:type :_seq-update-parsed-shape}}
    :return-type :nullable-keyword-map
    :effects #{:db}}
 

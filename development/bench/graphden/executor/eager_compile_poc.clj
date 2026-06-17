@@ -11,12 +11,15 @@
 
 (def ^:dynamic *container* nil)
 
-(defn bench [label n f]
-  (dotimes [_ 100] (f))           ;; warmup
+
+(defn bench
+  [label n f]
+  (dotimes [_ 100] (f))           ; warmup
   (let [t0 (System/nanoTime)]
     (dotimes [_ n] (f))
     (let [ns-per-call (/ (- (System/nanoTime) t0) (double n))]
       (printf "%-40s %10.1f ns/call (n=%d)%n" label ns-per-call n) (flush))))
+
 
 ((pth/create-container-fixture #'*container*)
  (fn []
@@ -42,7 +45,7 @@
             ;; C. Ideal eager compile — what target architecture WOULD produce:
             ;;    static knowledge of bindings lifted to closure capture,
             ;;    impl call invokes directly.
-            neg-impl (fn [n] (- n))   ;; the bound base-fn impl
+            neg-impl (fn [n] (- n))   ; the bound base-fn impl
             ideal-callable (fn [free-args] (neg-impl (get free-args :number)))
             ideal-call (fn [] (ideal-callable {:number 5}))
 
@@ -61,4 +64,6 @@
         (bench "B. make-single-arg-callable+call" 1000000 current-call)
         (bench "C. ideal eager compile (closure)" 10000000 ideal-call)
         (bench "D. naked Clojure fn (baseline)"   10000000 naked-call)))))
+
+
 (println "DONE")

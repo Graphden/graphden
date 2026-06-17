@@ -121,6 +121,11 @@
   ;; Used at 12 sites before this alias landed.
   {:name :text-map :map {:key :text :value :text}}
 
+  ;; Raw JDBC rows, layout expansion maps — string-keyed but values
+  ;; are heterogeneous. The `:Storage :query` return-element shape,
+  ;; `:pg-query` return element, `:decode-row :row` arg. 4 sites.
+  {:name :text-keyed-map :map {:key :text :value :any}}
+
   ;; A path-item for `:get-in` / `:assoc-in` / `:update-in` — each
   ;; segment may be a keyword (record field), int (vector index), or
   ;; text (string-keyed map key). 3 inline sites in the long form.

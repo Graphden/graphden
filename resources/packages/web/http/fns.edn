@@ -1,49 +1,34 @@
-;; HTTP server base functions using http-kit
+;; HTTP server + the per-request handler wrap chain.
+;;
+;; The chain composed in `app/server/fns.edn` is:
+;;
+;;   :response-cache-wrap        (outermost; short-circuit on hit)
+;;     :encode-stringify-wrap    (encode response + stringify keyword header keys)
+;;       :realize-body-wrap      (slurp :body InputStream → String)
+;;         <application handler> (the routed Ring handler)
+;;
+;; Mirrors `web.branch-router/branch-routing-wrap` — wraps are pure
+;; fn-defs over `:if` + `:call` + small base-fns; per-request the
+;; executor evaluates the wrap graph for each request. Each wrap
+;; exposes `:base-handler` as a free arg; composition pins it.
 
 
 {:namespace "web.http"
- :description "HTTP server primitive (http-kit) and the slurp helper for request bodies."
+ :description "HTTP server primitive (http-kit) plus the per-request handler-wrap chain that injects body realisation, response post-processing, and the immutable-response cache."
  :fns
- [;; Type-alias for the http-kit stop-callable. http-kit's
-  ;; `run-server` returns a 0-arg fn whose only effect is to stop
-  ;; the running server — `(server)` shuts it down. Typing it as
-  ;; `[:fn {} :null]` documents the contract AND lets type-check
-  ;; reject any non-callable argument to `:http-stop`.
+ [;; Type-alias for the http-kit stop-callable.
   {:name :http-server-handle
    :description "Handle of a running http-kit server — a 0-arg callable that stops the server when invoked. Returned by `:http-server`, consumed by `:http-stop`."
    :fn-type [{} :null]}
 
-  ;; Starts http-kit server. `:handler` is structurally typed —
-  ;; `[:fn {:request :ring-request-shape} :ring-response-shape]`
-  ;; declares only the SINGLE arg http-kit will pass per call.
-  ;; The consuming fn-graph (`:_app-ring-response` etc.) typically
-  ;; lists more compile-time free args; graphden's fn-subtype rule
-  ;; recognises that hof-wrap captures the rest from the environment,
-  ;; so `extra args on the callee are fine`. The `:request` key and
-  ;; the return shape ARE checked structurally — passing `:add` (an
-  ;; arithmetic fn-def whose return is `:numeric`) gets rejected at
-  ;; sync time instead of crashing on the first request.
   {:name :http-server
-   :description "Start an http-kit HTTP server. The `:handler` is a Ring-style fn `(fn [request] response)`; the executor's hof-wrap turns the bound fn-graph into a single-arg Ring callable per request."
+   :description "Start an http-kit HTTP server. The `:handler` is a Ring-style fn `(fn [request] response)`; the executor's hof-wrap turns the bound fn-graph into a single-arg Ring callable per request. http-server itself does nothing beyond starting the listener and forwarding the request — body realisation, response post-processing, and the response cache are composed in via the wraps below."
    :args {:handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
-                    :description "Ring-style handler — receives the request map, returns the response map."}
+                    :description "Ring-style handler — typically the full wrap chain (see this package's fn-defs below)."}
           :port {:type :port
                  :description "TCP port to listen on (e.g., 8080) — refinement narrows :int to 1..65535."}}
    :return-type :http-server-handle
-   ;; :process marks this fn as service-eligible: it spawns a
-   ;; supervised background listener that lives past the call and
-   ;; requires explicit stopping. validate-create's :service branch
-   ;; consults this set; without :process, /api/entities/service is
-   ;; rejected with a "must declare :process" message. :http-stop
-   ;; stays :network-only — it kills the server but doesn't spawn
-   ;; anything itself.
    :effects #{:network :process}
-   ;; Runtime-config marker — see graphden.versioning.branch-local.
-   ;; A web-server's port + handler are environment-specific; merging
-   ;; a dev http-server config into prod would clobber the production
-   ;; listener. The monotonic-OR walker makes every descendant
-   ;; ({:parent :http-server …}) sticky-local too, so user-defined
-   ;; servers inherit the policy without per-fn-def opt-in.
    :branch-local? true}
 
   {:name :http-stop
@@ -51,4 +36,142 @@
    :args {:server {:type :http-server-handle
                    :description "Server handle returned by `:http-server`."}}
    :return-type :null
-   :effects #{:network}}]}
+   :effects #{:network}}
+
+  ;; =============================================================================
+  ;; PRIMITIVE BASE-FNS that the wrap chain composes against
+  ;; =============================================================================
+
+  {:name :realize-request-body
+   :description "Slurp `:body InputStream` into a UTF-8 String so downstream handlers can read it more than once. Pass-through on non-stream bodies. Used by `:realize-body-wrap`."
+   :args {:request {:type :ring-request-shape
+                    :description "Inbound Ring request."}}
+   :return-type :ring-request-shape}
+
+  {:name :process-response
+   :description "Stringify keyword header keys + maybe-encode the body. Encoding picks `br` over `gzip` from `Accept-Encoding`; skips when body is not compressible (Content-Type), already encoded, or under 1 KB. Library-adapter helper for the encode-stringify wrap."
+   :args {:request  {:type :ring-request-shape
+                     :description "Inbound request — `Accept-Encoding` header drives the encoder choice."}
+          :response {:type :ring-response-shape
+                     :description "Raw response from the inner handler — keyword header keys, String body."}}
+   :return-type :ring-response-shape}
+
+  {:name :response-cache-get
+   :description "Lookup the per-JVM immutable-response cache. Returns the stored Ring response (already post-process) or nil on miss."
+   :args {:key {:type [:list :any]
+                :description "Cache key tuple (typically `[uri method accept-encoding]`)."}}
+   :return-type [:union :null :ring-response-shape]}
+
+  {:name :response-cache-put-if!
+   :description "If `when?` is truthy, store `value` in the immutable-response cache under `key`. Always returns `value` — the conditional is in the `when?` arg so callers compose this in a single graph step."
+   :args {:key   {:type [:list :any]
+                  :description "Cache key tuple."}
+          :value {:type :ring-response-shape
+                  :description "Fully-processed response to cache."}
+          :when? {:type [:union :null :bool]
+                  :description "Truthy → store; nil/false → no-op."}}
+   :return-type :ring-response-shape
+   :effects #{:state}}
+
+  {:name :response-immutable?
+   :description "Predicate — does the response carry `Cache-Control: ... immutable ...`? Trigger for the response cache to remember the URL."
+   :args {:response {:type :ring-response-shape
+                     :description "Response to inspect."}}
+   :return-type [:union :null :bool]}
+
+  ;; =============================================================================
+  ;; HANDLER-WRAP CHAIN — fn-def composition over :call + :if
+  ;;
+  ;; Each wrap has `:base-handler` as a free arg. Composition pins
+  ;; it via plain fn-ref. The CALLER (app/server/fns.edn) builds the
+  ;; chain by pinning `:base-handler` at each level.
+  ;; =============================================================================
+
+  ;; --- Smallest reusable unit: invoke the wrapped handler ---
+
+  {:name :_call-base-handler
+   :description "Invoke the wrapped `:base-handler` with the current `:request`. The leaf reused by every wrap below."
+   :parent :call
+   :args {:func {:as :base-handler :type [:fn {:request :ring-request-shape} :ring-response-shape]}
+          :arg  {:as :request      :type :ring-request-shape}}}
+
+  ;; --- realize-body wrap: slurps :body InputStream before the handler ---
+
+  {:name :_realized-request
+   :description "Request with `:body` slurped into a String."
+   :parent :realize-request-body
+   :args {:request {:as :request :type :ring-request-shape}}}
+
+  {:name :realize-body-wrap
+   :description "Handler wrap — slurps `:body InputStream` into a String, then invokes `:base-handler` with the realised request. Free args: `:base-handler`, `:request`."
+   :parent :call
+   :args {:func {:as :base-handler :type [:fn {:request :ring-request-shape} :ring-response-shape]}
+          :arg  :_realized-request}
+   :return-type :ring-response-shape}
+
+  ;; --- encode-stringify wrap: post-processes the response ---
+
+  {:name :encode-stringify-wrap
+   :description "Handler wrap — invokes `:base-handler` and post-processes the response: stringify keyword header keys + maybe-encode body (`br` > `gzip` > identity from `Accept-Encoding`, only for compressible content-types over 1 KB). Free args: `:base-handler`, `:request`."
+   :parent :process-response
+   :args {:request  {:as :request :type :ring-request-shape}
+          :response :_call-base-handler}
+   :return-type :ring-response-shape}
+
+  ;; --- response-cache wrap: short-circuit on `Cache-Control: immutable` ---
+  ;;
+  ;; Key is `[uri method accept-encoding]`. The cache stores POST-process
+  ;; responses, so a HIT serves bytes directly — no executor work, no
+  ;; encoding, no body realisation. MISS calls `:base-handler` (which
+  ;; itself is the chain above), then stores iff `Cache-Control:
+  ;; immutable`.
+
+  {:name :_request-accept-encoding
+   :description "Raw `Accept-Encoding` header from the request, or `\"\"`. Different headers (`br, gzip` vs `gzip`) land on different cache slots because they get different encoded bodies."
+   :parent :get
+   :args {:coll :ring-headers
+          :key {:value "accept-encoding"}
+          :default {:value ""}}}
+
+  {:name :_response-cache-key
+   :description "`[uri method accept-encoding]` — distinguishes one cached response from another."
+   :parent :list
+   :args {:items [:ring-uri :ring-method :_request-accept-encoding]}}
+
+  {:name :_cached-response
+   :description "Cache lookup result for the current request — nil on miss."
+   :parent :response-cache-get
+   :args {:key :_response-cache-key}}
+
+  {:name :_cache-hit?
+   :description "True iff the cache lookup returned a stored response."
+   :parent :some?
+   :args {:value :_cached-response}}
+
+  {:name :_fresh-response
+   :description "Run the wrapped handler chain to produce a fresh, fully-processed response (used only on cache miss)."
+   :parent :encode-stringify-wrap
+   :args {:base-handler {:as :base-handler}}}
+
+  {:name :_fresh-immutable?
+   :description "Whether the fresh response should be cached for later hits."
+   :parent :response-immutable?
+   :args {:response :_fresh-response}}
+
+  {:name :_fresh-with-maybe-store
+   :description "Compute the fresh response and conditionally store it under the cache key. Returns the response either way."
+   :parent :response-cache-put-if!
+   :args {:key   :_response-cache-key
+          :value :_fresh-response
+          :when? :_fresh-immutable?}}
+
+  {:name :response-cache-wrap
+   :description "Outermost handler wrap. On cache HIT serves the stored response verbatim — no executor work, no encoding, no body realisation. On MISS calls `:base-handler` to produce a fresh response, then stores iff the response is `Cache-Control: immutable`. Free args: `:base-handler` (the inner chain — typically `:realize-body-wrap` over the app handler), `:request`."
+   :parent :if
+   :args {:test :_cache-hit?
+          :then :_cached-response
+          :else :_fresh-with-maybe-store
+          :base-handler {:type [:fn {:request :ring-request-shape} :ring-response-shape]
+                         :description "Inner handler chain. NOT called on cache hit."}
+          :request {:as :request :type :ring-request-shape}}
+   :return-type :ring-response-shape}]}

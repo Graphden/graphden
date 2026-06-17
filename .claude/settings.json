@@ -12,6 +12,18 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/root/projects/graphden/.claude/hooks/remind-packages-quality-on-impls-edit.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

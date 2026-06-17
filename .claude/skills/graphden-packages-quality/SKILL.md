@@ -1,6 +1,6 @@
 ---
 name: graphden-packages-quality
-description: Качество `resources/packages/**/{fns.edn,impls.clj}` — узкие типы и type-aliases, минимальные base-fn impls, корректное использование именованных vs анонимных fn-defs. Применяй при ЛЮБОМ касании пакетного слоя (новые типы / impls / fn-defs пишем сразу чисто) И как explicit-проверку существующего ("пройдись по пакетам", "сузь типы", "почисти fns.edn", "проверь impls на лишнюю логику"). Триггеры — фразы вроде "fn-def", "fns.edn", "impls.clj", "base-fn", "тип слишком широкий", ":jsonb", ":any", "type alias", "длинный union", ":nullable-*", "именованный или анонимный", "extract в helper", "impl содержит логику", "MI vs single-parent", "namespace для fn", "переиспользование fn-def", "доступно для админа", "должно быть конкретным типом". SKIP для: чисто Clojure src/test — кода (→ `graphden-code-quality`), pure REPL-debug гипотез (→ `graphden-repl`), frontend (.js/.css) — отдельный скилл.
+description: Качество `resources/packages/**/{fns.edn,impls.clj}` — узкие типы и type-aliases, минимальные base-fn impls, **аудит ЛЮБЫХ Clojure-helpers в impls (включая private `defn-`, middleware closures, handler wraps — не только `defbase` тела)**, корректное использование именованных vs анонимных fn-defs. Применяй при ЛЮБОМ касании пакетного слоя — даже если правка выглядит как «просто добавил private helper в impls» или «Ring middleware glue», это всё равно пакетный слой и кандидат на graph-decomposition. Также как explicit-проверка существующего ("пройдись по пакетам", "сузь типы", "почисти fns.edn", "проверь impls на лишнюю логику"). Триггеры — фразы вроде "fn-def", "fns.edn", "impls.clj", "base-fn", "private helper", "defn- в impls", "middleware", "ring wrap", "handler closure", "orchestration", "cache wrap", "post-process", "тип слишком широкий", ":jsonb", ":any", "type alias", "длинный union", ":nullable-*", "именованный или анонимный", "extract в helper", "impl содержит логику", "MI vs single-parent", "namespace для fn", "переиспользование fn-def", "доступно для админа", "должно быть конкретным типом". SKIP для: чисто Clojure src/test — кода (→ `graphden-code-quality`), pure REPL-debug гипотез (→ `graphden-repl`), frontend (.js/.css) — отдельный скилл.
 ---
 
 # graphden-packages-quality — типы, impls, fn-defs в `resources/packages/`
@@ -222,6 +222,85 @@ EOF
 
 ≥ 20 строк defbase — пройди по `graphden-fn-refactor` §3-§4. Каждое
 обоснование «не режу» — explicit (§1.5 fn-refactor).
+
+### 3.3 Скрытая композиция в private helpers (не только в `defbase`)
+
+**Самая частая дыра:** ты добавляешь `(defn- foo …)` в `impls.clj` для
+«склейки» (Ring middleware, cache wrap, multi-step orchestration). С
+точки зрения существующих чек-листов это не `defbase`, не fn-def, не
+тип — формально проскальзывает. Но семантически это **композиция,
+которой место в графе**.
+
+Симптомы (любой ≥ 1 — повод остановиться):
+
+| Симптом | Что это значит |
+|---|---|
+| `defn-` возвращает `(fn [req] …)` (closure-handler) | Wrap-style middleware — должен быть fn-def через `:if`/`:call`/`:cond` (паттерн `:branch-routing-wrap` в `web/branch-router/fns.edn`). |
+| `defn-` оркеструет ≥ 3 шага: `(let [a (step1 …) b (step2 a) …] (final …))` | Это композиция. Каждый шаг — кандидат в base-fn, склейка — fn-def. |
+| `defn-` имеет ветвление по условию response/request shape (`if-let`, `cond` по headers, `when` по content-type) | Условная логика принадлежит графу (`:if`/`:cond` over predicate base-fns). Pure runtime branching — единственное исключение. |
+| `defn-` мутирует state (`swap!`/`reset!`/`alter`) И принимает данные с request-side | Mutation — нормально в impls (state живёт там), НО доступ к ней должен быть через узкие base-fn'ы (`*-get`, `*-put!`), а решение «когда читать / когда писать» — в fn-def. |
+| `defn-` использует фразу «orchestrate», «process», «pipeline», «wrap», «chain» в имени или docstring | Семантический маркер композиции. |
+| `defn-` вызывается из `defbase` body как «удобный helper» | Если базовый impl делегирует в helper — composition уже скрыта. Извлеки helper в отдельный base-fn (или серию base-fn'ов) и склей через fn-def. |
+
+```bash
+# Find every private helper in impls.clj — каждый > 10 lines проверь:
+python3 << 'EOF'
+import re, os
+for root, _, files in os.walk('/root/projects/graphden/resources/packages'):
+    for f in files:
+        if f != 'impls.clj': continue
+        path = os.path.join(root, f)
+        with open(path) as fh: content = fh.read()
+        matches = list(re.finditer(r'^\(defn-?\s+(\S+)', content, re.M))
+        for i, m in enumerate(matches):
+            start = m.start()
+            end = matches[i+1].start() if i+1 < len(matches) else len(content)
+            n = content[start:end].count('\n')
+            if n >= 10:
+                line = content[:start].count('\n') + 1
+                print(f"  {n:4d} {m.group(1):28s} {path.split('packages/')[1]}:{line}")
+EOF
+```
+
+```bash
+# Closure-returning helpers (wraps/middleware) — почти всегда композиция:
+grep -rEn '^\(defn-?\s+\S+.*\n.*\(fn\s+\[req' resources/packages --include='impls.clj' | head
+# Pipeline helpers с тремя+ шагами:
+grep -rEnB1 '\(->>\s+\S+\s+\S+\s+\S+\s+\S+' resources/packages --include='impls.clj' | head
+# Имена с маркерами оркестрации:
+grep -rEn '^\(defn-?\s+(\S*orchestr|\S*pipeline|\S*-wrap|run-handler|process-\S+|chain-)' resources/packages --include='impls.clj'
+```
+
+**Рефактор-рецепт:**
+
+1. **Расщепи** private helper на 2-N узких base-fn'ов — каждый делает
+   один шаг (cache lookup, encode-body, header-attach, etc.). Их impl —
+   одна-две строки.
+2. **Объяви** каждый base-fn в `fns.edn` рядом — типы аргументов,
+   возврат, effects.
+3. **Склей** их в graph wrap через `:if` / `:cond` / `:call` —
+   эталонный пример `:branch-routing-wrap` в
+   `resources/packages/web/branch-router/fns.edn`:
+   ```edn
+   {:name :branch-routing-wrap
+    :parent :if
+    :args {:test :_branch-router-installed?
+           :then :_branch-dispatched
+           :else :base-handler-fallback
+           :base-handler {:type [:fn …] :description "…"}}}
+   ```
+4. **Удали** старый private helper. Composition теперь видна.
+5. **Перекройся тестом** на graph-уровне — handler chain через wrap
+   должен работать end-to-end (smoke + integration suite).
+
+**Когда private helper в impls OK:**
+
+- Тонкая boundary-coercion для library-call (`String/.getBytes`,
+  `(java.io.InputStream/.read …)`, etc.) внутри одного base-fn.
+- Один-выражение helper (≤ 3 строки), нет ветвления, нет state.
+- Internal state-management для одной atomic примитивы (FIFO
+  eviction inside a cache-put base-fn — но если eviction-decision
+  зависит от данных request, она в графе).
 
 ## 4. fn-defs — named vs anonymous
 

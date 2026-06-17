@@ -109,7 +109,32 @@
    :parent :branch-routing-wrap
    :args {:base-handler :_app-ring-response}}
 
+  ;; Per-request handler wrap chain (outer → inner):
+  ;;   :_app-cached → :_app-encoded → :_app-realized → :_branch-routed-handler
+  ;;
+  ;; - cache wrap is OUTERMOST so it can short-circuit the entire
+  ;;   chain on hit (no executor work, no encoding, no body slurp)
+  ;; - encode-stringify wraps the body realisation + handler so the
+  ;;   cache stores fully-processed responses
+  ;; - realize-body wraps just the handler — body realisation only
+  ;;   needs to happen when we'll actually run the handler
+
+  {:name :_app-realized
+   :description "Branch-routed handler with request-body realisation (`:body InputStream` → String)."
+   :parent :realize-body-wrap
+   :args {:base-handler :_branch-routed-handler}}
+
+  {:name :_app-encoded
+   :description "Realized + branch-routed handler with response post-processing: keyword header keys → strings, body encoded (`br` > `gzip` > identity) when compressible."
+   :parent :encode-stringify-wrap
+   :args {:base-handler :_app-realized}}
+
+  {:name :_app-cached
+   :description "Encoded + realized + branch-routed handler with `Cache-Control: immutable` response caching. Cache hit returns the stored response verbatim — no executor work."
+   :parent :response-cache-wrap
+   :args {:base-handler :_app-encoded}}
+
   {:name :web-server
-   :description "Application root — starts the http-kit server on port 8080 with the branch-aware Ring handler chain. Pure transport: the handler tree (including its storage binding) is supplied through `:handler`; this node only knows about the network surface."
+   :description "Application root — starts the http-kit server on port 8080 with the full handler wrap chain (cache → encode → realize-body → branch-routed → app)."
    :parent :http-server
-   :args {:handler :_branch-routed-handler :port 8080}}]}
+   :args {:handler :_app-cached :port 8080}}]}

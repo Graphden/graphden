@@ -49,6 +49,23 @@
    :args {:path "/" :handler :_editor-handler}
    :expects-effects #{:io}}                   ; reads classpath resources (HTML/JS/CSS)
 
+  ;; The editor JS/CSS bundles are SEPARATE responses (not inlined
+  ;; into the HTML). The URLs carry `?v=<frontend-build-hash>` so the
+  ;; `immutable` `Cache-Control` is safe: a new deploy changes the
+  ;; URL → cache miss → fresh fetch; in-between the browser serves
+  ;; the body from cache without a conditional request.
+  {:name :editor-js-asset
+   :description "GET /assets/editor.js — bundled editor JS with 1-year `immutable` `Cache-Control`. Hash-busted via `?v=` query string on the inbound `<script src>`."
+   :parent :get-route
+   :args {:path "/assets/editor.js" :handler :_editor-js-handler}
+   :expects-effects #{:io}}                   ; reads classpath JS bundle
+
+  {:name :editor-css-asset
+   :description "GET /assets/editor.css — bundled editor stylesheet with 1-year `immutable` `Cache-Control`. Hash-busted via `?v=` query string on the inbound `<link href>`."
+   :parent :get-route
+   :args {:path "/assets/editor.css" :handler :_editor-css-handler}
+   :expects-effects #{:io}}                   ; reads classpath CSS
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

@@ -459,6 +459,13 @@ See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 - Internal namespaces: `core.clj`, `util.clj`, `constraints.clj`, etc.
 - Error types use canonical `:type` keywords (see [docs/ERROR_CODES.md](docs/ERROR_CODES.md))
 - Dynamic vars for configuration: `*query-timeout-ms*`, `*max-graph-iterations*`
+- **Before modifying any `resources/packages/**/impls.clj`** — load
+  the `graphden-packages-quality` skill. It catches not just
+  oversized `defbase` bodies but also the bigger pitfall: private
+  `defn-` helpers that quietly accrete composition (Ring wraps,
+  cache orchestration, multi-step pipelines) which belongs in
+  fn-defs over small base-fns. The canonical pattern is
+  `:branch-routing-wrap` in `web/branch-router/fns.edn`.
 
 ## File Locations
 

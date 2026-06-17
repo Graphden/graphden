@@ -11,7 +11,7 @@
   ;; =============================================================================
 
   {:name :styles
-   :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css`. Wrapped into `<style>` by `:style-element`."
+   :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css`. Served by `:_editor-css-handler` at `/assets/editor.css?v=<hash>` with a 1-year `immutable` `Cache-Control` so the browser fetches the body exactly once per deploy."
    :parent :read-resource
    :return-type :text
    :args {:path "packages/app/editor/editor-styles.css"}}
@@ -156,16 +156,70 @@
                [:button {:class "nav-btn" :onclick "navResetZoom()"
                          :aria-label "Reset zoom" :title "Reset zoom"} "\u2299"]]]]]]}}
 
-  ;; Wrapped elements — fn-defs using wrap-style/wrap-script
-  {:name :style-element
-   :description "`<style>…</style>` element wrapping `:styles` (the editor CSS bundle)."
-   :parent :wrap-style
-   :args {:content :styles}}
+  ;; =============================================================================
+  ;; HASH-BUSTED ASSET URLs + LINK/SCRIPT-SRC ELEMENTS
+  ;;
+  ;; The editor JS/CSS bundles are not inlined into the HTML response —
+  ;; they're served at `/assets/editor.{js,css}?v=<hash>` with a 1-year
+  ;; `immutable` `Cache-Control`. The query-string hash is the
+  ;; FRONTEND build hash (`:build-hash-frontend-short`), so a new
+  ;; deploy changes the URL and the browser fetches the new bundle;
+  ;; in between deploys the browser serves the bundle from cache
+  ;; without even a conditional request.
+  ;; =============================================================================
 
-  {:name :script-element
-   :description "`<script>…</script>` element wrapping `:script` (the editor JS bundle)."
-   :parent :wrap-script
-   :args {:content :script}}
+  {:name :_editor-js-url
+   :description "`/assets/editor.js?v=<frontend-build-hash>` — `<script src>` URL for the bundled editor JS. Hash busts the cache when the frontend section changes."
+   :parent :str-join
+   :return-type :text
+   :args {:coll ["/assets/editor.js?v=" :build-hash-frontend-short]
+          :separator ""}}
+
+  {:name :_editor-css-url
+   :description "`/assets/editor.css?v=<frontend-build-hash>` — `<link href>` URL for the bundled editor stylesheet."
+   :parent :str-join
+   :return-type :text
+   :args {:coll ["/assets/editor.css?v=" :build-hash-frontend-short]
+          :separator ""}}
+
+  ;; `<script src=…>` element. NOT `:_cdn-script-element` — that template
+  ;; type-checks `:url` against the `:url` refinement (`^https?://`),
+  ;; which our same-origin `/assets/editor.js?v=…` path doesn't match.
+  ;; Build hiccup directly, mirroring the `:_editor-css-link` shape.
+  {:name :_editor-script-attrs
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :src}
+          :value {:ref :_editor-js-url}}}
+
+  {:name :_editor-script-tag
+   :description "`<script src=\"/assets/editor.js?v=…\"></script>` element appended at end of `<body>`. Replaces the previous inline `<script>` so the bundle is cached across page loads."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs :_editor-script-attrs
+          :children {:value []}}}
+
+  ;; `<link rel="stylesheet" href="…">` attrs map — built via two
+  ;; assoc calls because the editor-css URL is a runtime composition
+  ;; over `:build-hash-frontend-short` (can't be a literal map).
+  {:name :_editor-css-link-attrs-rel
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :rel}
+          :value {:value "stylesheet"}}}
+
+  {:name :_editor-css-link-attrs
+   :parent :assoc
+   :args {:map :_editor-css-link-attrs-rel
+          :key {:value :href}
+          :value {:ref :_editor-css-url}}}
+
+  {:name :_editor-css-link
+   :description "`<link rel=\"stylesheet\" href=\"/assets/editor.css?v=…\">` element in `<head>`. Replaces the previous inline `<style>` so the browser can cache the CSS body across page loads."
+   :parent :hiccup
+   :args {:tag {:value "link"}
+          :attrs :_editor-css-link-attrs
+          :children {:value []}}}
 
   ;; =============================================================================
   ;; PAGE COMPOSITION (fn-defs)
@@ -173,25 +227,25 @@
 
   ;; Build head elements list for cytoscape
   {:name :head-elements-0
-   :description "Initial head-elements vector — single entry: `:style-element`. Subsequent fn-defs append CDN scripts."
+   :description "Initial head-elements vector — single entry: `:_editor-css-link` (`<link rel=\"stylesheet\">` to the cached `/assets/editor.css` bundle). Subsequent fn-defs append CDN scripts."
    :parent :conj
-   :args {:coll [] :item :style-element}}
+   :args {:coll [] :item :_editor-css-link}}
 
-  ;; Final editor <head> — style + the Cytoscape.js CDN script.
+  ;; Final editor <head> — stylesheet link + the Cytoscape.js CDN script.
   {:name :head
-   :description "Final editor `<head>` element vector — `:style-element` plus the Cytoscape.js CDN `<script>` (Cytoscape becomes `window.cytoscape`)."
+   :description "Final editor `<head>` element vector — `:_editor-css-link` (cached stylesheet) plus the Cytoscape.js CDN `<script>` (Cytoscape becomes `window.cytoscape`)."
    :parent :with-cdn-script
    :args {:head :head-elements-0
           :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
 
   ;; Complete HTML page
-  ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)
+  ;; Scripts: single editor JS reference (layout is computed server-side, no dagre needed)
   {:name :_editor-scripts
    :parent :list
-   :args {:items [:script-element]}}
+   :args {:items [:_editor-script-tag]}}
 
   {:name :page
-   :description "Full editor HTML page — title, head (styles + CDN scripts), body (sidebar + graph), and the editor JS bundle as a `<script>` at end of body. Rendered by `:_editor-handler` on `GET /`."
+   :description "Full editor HTML page — title, head (stylesheet link + CDN scripts), body (sidebar + graph), and an end-of-body `<script src>` pointing at the cached editor JS bundle. Rendered by `:_editor-handler` on `GET /`."
    :parent :html-page
    :args {:title "Graphden - Graph Editor"
           :head :head
@@ -210,6 +264,32 @@
   {:name :_editor-handler
    :parent :html-ok-response
    :args {:body :_editor-rendered-page}}
+
+  ;; =============================================================================
+  ;; ASSET HANDLERS — bundled JS / CSS at /assets/editor.{js,css}
+  ;; Each returns the bundle body with a 1-year `immutable`
+  ;; `Cache-Control`. Hash-busting lives in the URL query string.
+  ;; =============================================================================
+
+  ;; `:script` is declared `:nullable-text` because `:str-replace` is
+  ;; nil-flow-through; in practice the placeholder substitution over a
+  ;; baked-in resource is never nil. `:assert-some` is the type-system
+  ;; bridge — narrows back to `:text` for the strict `:body` slot.
+  {:name :_editor-js-body
+   :description "`:script` narrowed from `:nullable-text` to `:text` via `:assert-some` — the JS bundle is a baked-in resource that can't be nil at runtime, but `:str-replace`'s nil-flow-through type forces the explicit narrowing."
+   :parent :assert-some
+   :return-type :text
+   :args {:value :script}}
+
+  {:name :_editor-js-handler
+   :description "Ring handler for `GET /assets/editor.js` — returns the concatenated editor JS bundle (with `__BUILD_HASH__` substituted) as `application/javascript` with `Cache-Control: public, max-age=31536000, immutable`."
+   :parent :immutable-js-ok-response
+   :args {:body :_editor-js-body}}
+
+  {:name :_editor-css-handler
+   :description "Ring handler for `GET /assets/editor.css` — returns the editor stylesheet as `text/css` with `Cache-Control: public, max-age=31536000, immutable`."
+   :parent :immutable-css-ok-response
+   :args {:body :styles}}
 
   ;; =============================================================================
   ;; FAVICON (SVG icon with caching)

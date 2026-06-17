@@ -15,6 +15,8 @@
    :parent :list
    :args {:items [:favicon
                   :editor
+                  :editor-js-asset
+                  :editor-css-asset
                   :health
                   :metrics
                   :version

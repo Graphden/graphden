@@ -1311,6 +1311,90 @@
       (vector? b-form)))
 
 
+(defn- strip-closure-captures
+  "Given the slot's `expected` `[:fn …]` type and the ref's assembled
+   `actual` `[:fn …]` type, return the `actual` reduced to the slot's
+   call-site contract — extra positional args drop out, captured-arg
+   effects (per-arg slots on the rich-type registry of `b-form`) drop
+   out.
+
+   Three special cases survive on the boundary so `unify-fn`'s
+   cardinality check passes without losing return/effect coverage:
+
+   - **Variadic-ignore**: a 0-arg callable accepts any call-site
+     arity; the executor's hof-wrap drops the supplied args at
+     invocation. Adopt the slot's args so cardinality matches.
+   - **Closure-capture strip**: actual carries MORE args than the
+     slot declares. The runtime's hof-wrap closes the surplus over
+     from the OUTER binding-chain — they don't participate in the
+     slot's per-invocation contract. Drop args whose names aren't in
+     the slot's call-site set (docs/CLOSURE_CAPTURE.md).
+   - **Stripped-to-empty**: every actual arg was a closure capture →
+     the residual `{}` is the variadic-ignore shape; re-adopt the
+     slot's args.
+
+   If neither args nor effects changed, return `actual` unchanged
+   (avoids needless allocation in the common path)."
+  [expected actual b-form]
+  (let [call-site-keys (set (keys (types/fn-args expected)))
+        raw-args       (types/fn-args actual)
+        args-after-var (if (and (empty? raw-args)
+                                (seq call-site-keys))
+                         (types/fn-args expected)
+                         raw-args)
+        extras         (when (> (count args-after-var)
+                                (count call-site-keys))
+                         (remove call-site-keys (keys args-after-var)))
+        stripped       (if (seq extras)
+                         (apply dissoc args-after-var extras)
+                         args-after-var)
+        final-args     (if (and (empty? stripped) (seq call-site-keys))
+                         (types/fn-args expected)
+                         stripped)
+        stripped-keys  (set extras)
+        actual-effects (types/fn-effects actual)
+        per-arg        (or (some-> (registry/rich-type-of b-form) :arg-effects)
+                           {})
+        capture-eff    (reduce into #{}
+                               (vals (select-keys per-arg stripped-keys)))
+        final-effects  (if (seq stripped-keys)
+                         (set/difference actual-effects capture-eff)
+                         actual-effects)]
+    (if (and (= final-args raw-args)
+             (= final-effects actual-effects))
+      actual
+      (types/make-fn-type final-args (types/fn-ret actual) final-effects))))
+
+
+(defn- throw-literal-bound-to-fn-slot!
+  "A `:fn`-typed slot received `{:value <literal>}`. The runtime would
+   either throw on the call OR silently wrap the literal into a
+   constant-returning thunk depending on the call site — either way
+   the author meant SOMETHING else (a fn-ref or an inline anon).
+   Catch at sync time with a directly-actionable hint."
+  [primary-parent fn-name arg-name b-form expected]
+  (let [actual (classify-literal (:value b-form))]
+    (throw (ex-info
+             (str "Type-check failed in fn-def " (pr-str fn-name)
+                  "\n  arg "        (pr-str arg-name) " ← " (describe-binding b-form)
+                  "\n  parent "     (pr-str primary-parent)
+                  (source-suffix primary-parent)
+                  " expects a callable shape: " (pr-str expected)
+                  "\n  actual:                " (pr-str actual)
+                  " (literal value, not a callable)"
+                  "\n  hint: bind a fn-ref (`:_my-fn`) or an inline"
+                  " `{:parent :some-fn :args {…}}`; a literal of"
+                  " primitive type cannot be invoked as a HOF arg.")
+             (merge {:fn-name fn-name
+                     :parent-name primary-parent
+                     :arg-name arg-name
+                     :binding b-form
+                     :expected expected
+                     :actual actual
+                     :type :types/literal-bound-to-fn-slot}
+                    *source-info*)))))
+
+
 (defn- check-one-binding
   [primary-parent fn-name parent-args subst arg-name b-form]
   (let [expected (get parent-args arg-name)]
@@ -1340,82 +1424,7 @@
       ;; legitimately closure-captured per the runtime contract.
       (and (types/fn-type? expected) (ref-binding? b-form))
       (if-let [actual (assemble-fn-type b-form)]
-        (let [call-site-keys (set (keys (types/fn-args expected)))
-              raw-args       (types/fn-args actual)
-              ;; Variadic-ignore: a 0-arg callable accepts any
-              ;; call-site arity (the executor's hof-wrap drops the
-              ;; supplied args at invocation). Adopt the slot's arg
-              ;; map so unify-fn's cardinality check passes; the
-              ;; rest of the contract (return + effects) still gets
-              ;; verified. Example: `:_list-exec-limit-on-throw`
-              ;; declared `[:fn {} :null #{}]` binds to `:try
-              ;; :on-throw [:fn {:exception :any} a :any]` via the
-              ;; variadic-ignore wrap.
-              args-after-var (if (and (empty? raw-args)
-                                      (seq call-site-keys))
-                               (types/fn-args expected)
-                               raw-args)
-              extras         (when (> (count args-after-var)
-                                      (count call-site-keys))
-                               ;; Closure-capture stripping: the
-                               ;; actual signature carries MORE args
-                               ;; than the slot's callable contract
-                               ;; declares. The runtime's hof-wrap
-                               ;; closes the surplus over from the
-                               ;; OUTER binding-chain, so they don't
-                               ;; participate in the slot's
-                               ;; per-invocation contract. Drop the
-                               ;; args whose names aren't in the
-                               ;; slot's call-site set — that's the
-                               ;; documented capture rule
-                               ;; (docs/CLOSURE_CAPTURE.md).
-                               ;; If cardinalities match, every
-                               ;; actual arg is alpha-equivalent to
-                               ;; the slot's positional arg via
-                               ;; `unify-fn`'s sort-by-key path;
-                               ;; stripping would wrongly empty a
-                               ;; 1-arg `:str-upper :func` binding
-                               ;; to `:map`'s `{:item a}` slot.
-                               (remove call-site-keys
-                                       (keys args-after-var)))
-              stripped       (cond
-                               (seq extras) (apply dissoc args-after-var extras)
-                               :else        args-after-var)
-              ;; If the strip wiped every arg but the slot expects
-              ;; some (every actual arg was a closure-capture),
-              ;; the resulting `[:fn {}` looks like a 0-arg
-              ;; callable to `unify-fn` — same shape as the
-              ;; variadic-ignore case. Adopt the slot's args so
-              ;; `unify-fn`'s cardinality check passes; the
-              ;; return + effect contract still gets verified.
-              final-args     (if (and (empty? stripped)
-                                      (seq call-site-keys))
-                               (types/fn-args expected)
-                               stripped)
-              ;; Effect-strip: captured args' effects are wrap-time —
-              ;; they belong to the OUTER scope's effect computation,
-              ;; not the callable's per-invocation contract. Subtract
-              ;; per-arg contributions for stripped keys; if no
-              ;; per-arg map is recorded (base-fn or pre-arg-effects
-              ;; entries) keep the original effects.
-              stripped-keys  (set extras)
-              actual-effects (types/fn-effects actual)
-              per-arg        (or (some-> (registry/rich-type-of b-form)
-                                         :arg-effects)
-                                 {})
-              capture-eff    (reduce into #{}
-                                     (vals (select-keys per-arg
-                                                        stripped-keys)))
-              final-effects  (if (seq stripped-keys)
-                               (set/difference actual-effects capture-eff)
-                               actual-effects)
-              actual'        (if (and (= final-args raw-args)
-                                      (= final-effects actual-effects))
-                               actual
-                               (types/make-fn-type
-                                 final-args
-                                 (types/fn-ret actual)
-                                 final-effects))]
+        (let [actual' (strip-closure-captures expected actual b-form)]
           (check-binding! primary-parent arg-name expected actual' subst fn-name b-form))
         subst)
 
@@ -1437,26 +1446,7 @@
            (contains? b-form :value)
            (let [classified (classify-literal (:value b-form))]
              (and (some? classified) (not= classified :any))))
-      (throw (ex-info
-               (str "Type-check failed in fn-def " (pr-str fn-name)
-                    "\n  arg "        (pr-str arg-name) " ← " (describe-binding b-form)
-                    "\n  parent "     (pr-str primary-parent)
-                    (source-suffix primary-parent)
-                    " expects a callable shape: " (pr-str expected)
-                    "\n  actual:                "
-                    (pr-str (classify-literal (:value b-form)))
-                    " (literal value, not a callable)"
-                    "\n  hint: bind a fn-ref (`:_my-fn`) or an inline"
-                    " `{:parent :some-fn :args {…}}`; a literal of"
-                    " primitive type cannot be invoked as a HOF arg.")
-               (merge {:fn-name fn-name
-                       :parent-name primary-parent
-                       :arg-name arg-name
-                       :binding b-form
-                       :expected expected
-                       :actual (classify-literal (:value b-form))
-                       :type :types/literal-bound-to-fn-slot}
-                      *source-info*)))
+      (throw-literal-bound-to-fn-slot! primary-parent fn-name arg-name b-form expected)
 
       ;; Structural fn-type slot, non-ref binding — runtime will
       ;; hof-wrap whatever's there. No structural info; defer.

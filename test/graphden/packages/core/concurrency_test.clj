@@ -218,9 +218,16 @@
              (fn []
                (loop-impl {:body (delay body-fn)} nil)))]
       (Thread/.start t)
-      (Thread/sleep 100)
+      ;; Poll-with-deadline instead of a fixed sleep — under
+      ;; parallel-test CPU contention a fixed 100 ms wait can starve
+      ;; the worker thread of every iteration. Wait up to 2 s for ≥3
+      ;; iterations to be observed.
+      (let [deadline (+ (System/currentTimeMillis) 2000)]
+        (while (and (< @iters 3)
+                    (< (System/currentTimeMillis) deadline))
+          (Thread/sleep 20)))
       (Thread/.interrupt t)
-      (Thread/.join t 300)
+      (Thread/.join t 1000)
       (is (>= @iters 3)
           (str "expected several iterations before interrupt, got " @iters))
       (is (not (Thread/.isAlive t))

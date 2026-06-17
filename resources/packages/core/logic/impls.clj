@@ -153,8 +153,8 @@
   ;; on first mismatch. nil / non-string inputs short-circuit at the
   ;; boundary so a callable that's never seen a bearer token returns
   ;; false rather than throwing.
-  (let [^bytes ab (when (string? a) (.getBytes ^String a "UTF-8"))
-        ^bytes bb (when (string? b) (.getBytes ^String b "UTF-8"))]
+  (let [^bytes ab (when (string? a) (String/.getBytes ^String a "UTF-8"))
+        ^bytes bb (when (string? b) (String/.getBytes ^String b "UTF-8"))]
     (and (some? ab) (some? bb)
          (java.security.MessageDigest/isEqual ab bb))))
 

@@ -85,9 +85,10 @@
   (cond
     error
     ;; `Throwable/.getMessage` can return nil (`new IOException()` for
-    ;; example); `str` wraps to "" so the panic surface stays a
-    ;; non-null sentence.
-    (throw (ex-info (str "Vault request failed: " (str (Throwable/.getMessage error)))
+    ;; example) — the outer `str` already coerces nil to "", so the
+    ;; panic surface stays a non-null sentence without a redundant
+    ;; nested wrap.
+    (throw (ex-info (str "Vault request failed: " (Throwable/.getMessage error))
                     {:type :vault/lookup-failed :path path :op op}))
 
     (not (contains? expected status))

@@ -84,7 +84,10 @@
   [{:keys [status body error]} expected path op]
   (cond
     error
-    (throw (ex-info (str "Vault request failed: " (Throwable/.getMessage error))
+    ;; `Throwable/.getMessage` can return nil (`new IOException()` for
+    ;; example); `str` wraps to "" so the panic surface stays a
+    ;; non-null sentence.
+    (throw (ex-info (str "Vault request failed: " (str (Throwable/.getMessage error)))
                     {:type :vault/lookup-failed :path path :op op}))
 
     (not (contains? expected status))

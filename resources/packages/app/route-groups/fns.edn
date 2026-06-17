@@ -21,6 +21,7 @@
                   :partial-fn-versions
                   :partial-fn-version-executions
                   :partial-execute-history
+                  :partial-branch-diff
                   :health
                   :metrics
                   :version

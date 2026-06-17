@@ -1,12 +1,14 @@
 // Editor branch-diff modal — opened from the Δ button in the branch
-// popover. Calls GET /api/branches/:target/diff?against=:source and
-// renders the entry list grouped by :change tag, each with a brief
-// preview of the affected entity. Read-only; merge / delete live in
-// the popover.
+// popover. Fills its body from `/partials/branch-diff?target=…
+// &source=…`; the server-rendered hiccup carries the 3-section
+// grouping, the branch-local annotations, and the per-row
+// `data-diff-*` markers the navigation handler binds against.
 //
-// Backed by `graphden.crud.branches/diff-branches` →
-// `graphden.versioning.storage.merge/diff-branches`. Closes via the
-// X button, Esc, or click on the overlay backdrop.
+// This module owns: modal chrome (overlay + card + header + close
+// button), fetch glue, dismissal (X / Esc / overlay-click), and
+// post-swap navigation binding (row click → either switchToBranch
+// for added-in-source rows or selectFn for the others). The body
+// hiccup itself lives in `app.editor` fn-defs.
 
 let _branchDiffModal = null;
 
@@ -32,6 +34,12 @@ function closeBranchDiffModal() {
   if (_branchDiffModal) _branchDiffModal.classList.add('hidden');
 }
 
+function escapeText(s) {
+  const d = document.createElement('div');
+  d.textContent = s === undefined || s === null ? '' : String(s);
+  return d.innerHTML;
+}
+
 async function showBranchDiff(targetName, sourceName) {
   if (!targetName || !sourceName) return;
   const modal = ensureBranchDiffModal();
@@ -51,107 +59,45 @@ async function showBranchDiff(targetName, sourceName) {
   modal.querySelector('.branch-diff-close')
     .addEventListener('click', closeBranchDiffModal);
 
-  let body;
+  const body = modal.querySelector('.branch-diff-body');
   try {
     const resp = await window.authFetch(
-      '/api/branches/' + encodeURIComponent(targetName)
-      + '/diff?against=' + encodeURIComponent(sourceName));
+      '/partials/branch-diff?target=' + encodeURIComponent(targetName)
+      + '&source=' + encodeURIComponent(sourceName));
     if (resp.status === 401) {
-      replaceDiffBody(modal,
-        '<div class="branch-diff-error">Sign in to view branch diffs.</div>');
+      body.classList.remove('branch-diff-loading');
+      body.innerHTML = '<div class="branch-diff-error">Sign in to view branch diffs.</div>';
       return;
     }
     if (!resp.ok) {
-      replaceDiffBody(modal,
-        '<div class="branch-diff-error">HTTP ' + resp.status + '</div>');
+      body.classList.remove('branch-diff-loading');
+      body.innerHTML = '<div class="branch-diff-error">HTTP ' + resp.status + '</div>';
       return;
     }
-    body = await resp.json();
-  } catch (err) {
-    replaceDiffBody(modal,
-      '<div class="branch-diff-error">Failed: '
-      + escapeText(err?.message || 'network error') + '</div>');
-    return;
-  }
-
-  if (body?.ok === false) {
-    replaceDiffBody(modal,
-      '<div class="branch-diff-error">'
-      + escapeText(body.error || 'Diff failed') + '</div>');
-    return;
-  }
-
-  renderDiffBody(modal, body, targetName, sourceName);
-}
-
-function replaceDiffBody(modal, innerHtml) {
-  const body = modal.querySelector('.branch-diff-body');
-  if (body) {
     body.classList.remove('branch-diff-loading');
-    body.innerHTML = innerHtml;
+    body.innerHTML = await resp.text();
+    if (window.htmx?.process) window.htmx.process(body);
+    bindDiffRowNavigation(body, sourceName);
+  } catch (err) {
+    body.classList.remove('branch-diff-loading');
+    body.innerHTML = '<div class="branch-diff-error">Failed: '
+      + escapeText(err?.message || 'network error') + '</div>';
   }
 }
 
-function renderDiffBody(modal, body, targetName, sourceName) {
-  const diffs = body.diffs || [];
-  if (diffs.length === 0) {
-    replaceDiffBody(modal,
-      '<div class="branch-diff-empty">No differences — '
-      + escapeText(sourceName) + ' and ' + escapeText(targetName)
-      + ' resolve to the same view.</div>');
-    return;
-  }
-  // Group by change tag so the user reads "what's new vs modified vs gone"
-  // in stable order.
-  const grouped = {
-    'added-in-source': [],
-    'added-in-target': [],
-    modified: [],
-  };
-  for (const d of diffs) {
-    if (!grouped[d.change]) grouped[d.change] = [];
-    grouped[d.change].push(d);
-  }
-
-  const sectionHtml = (label, key, hint) => {
-    const rows = grouped[key];
-    if (!rows || rows.length === 0) return '';
-    return ''
-      + '<div class="branch-diff-section">'
-      +   '<div class="branch-diff-section-head">'
-      +     escapeText(label) + ' <span class="branch-diff-count">'
-      +     rows.length + '</span>'
-      +     '<span class="branch-diff-section-hint">' + escapeText(hint) + '</span>'
-      +   '</div>'
-      +   '<div class="branch-diff-rows">'
-      +     rows.map(diffRowHtml).join('')
-      +   '</div>'
-      + '</div>';
-  };
-
-  replaceDiffBody(modal, ''
-    + '<div class="branch-diff-summary">'
-    +   diffs.length + ' difference' + (diffs.length === 1 ? '' : 's')
-    + '</div>'
-    + sectionHtml('Added in ' + sourceName, 'added-in-source',
-                  'present on ' + sourceName + ', missing on ' + targetName)
-    + sectionHtml('Added in ' + targetName, 'added-in-target',
-                  'present on ' + targetName + ', missing on ' + sourceName)
-    + sectionHtml('Modified', 'modified',
-                  'resolves differently on the two branches'));
-
-  modal.querySelectorAll('[data-diff-fn-id]').forEach((row) => {
+// Post-swap row-click navigation. Each `.branch-diff-row[data-diff-fn-id]`
+// either:
+//   - `added-in-source` → switch to source branch first (the fn
+//     doesn't exist on the current branch), push the hash so the
+//     post-reload resolver finds it by name
+//   - else → selectFn directly
+function bindDiffRowNavigation(rootEl, sourceName) {
+  rootEl.querySelectorAll('[data-diff-fn-id]').forEach((row) => {
     row.addEventListener('click', () => {
       const id = row.getAttribute('data-diff-fn-id');
       if (!id) return;
       const change = row.getAttribute('data-diff-change');
       const fnName = row.getAttribute('data-diff-fn-name');
-      // `added-in-source` — the fn lives ONLY on the source branch.
-      // The current branch's `lookups.fnMap` won't know it; `selectFn`
-      // would set `selectedFnId` and then no-op visibly (no hash push,
-      // no card, no namespace expand). Offer to switch first; the
-      // post-reload hash-handler picks up the fn name on the target
-      // branch where it actually exists.
       if (change === 'added-in-source' && fnName
           && typeof switchToBranch === 'function') {
         const proceed = confirm(
@@ -159,200 +105,16 @@ function renderDiffBody(modal, body, targetName, sourceName) {
           + 'Switch to that branch to view :' + fnName + '?');
         if (!proceed) return;
         closeBranchDiffModal();
-        try {
-          window.history.pushState(null, '', '#' + fnName);
-        } catch (_) {}
+        try { window.history.pushState(null, '', '#' + fnName); } catch (_) {}
         switchToBranch(sourceName);
         return;
       }
       if (typeof selectFn === 'function') {
         closeBranchDiffModal();
-        // `added-in-target` / `modified` — the fn exists on the
-        // current branch. selectFn works normally.
         selectFn(id);
       }
     });
   });
-}
-
-// Walk parent-ids transitively through `lookups.fnMap` to see if
-// any ancestor carries `branch-local? === true`. Mirrors the server-
-// side `effective-branch-local?` (graphden.versioning.branch-local).
-// Used to annotate diff rows so the user can see at a glance which
-// entries WOULDN'T merge across branches even though the diff lists
-// them.
-//
-// `seed` (optional) — the row from the diff payload itself, used when
-// `lookups.fnMap` doesn't know about the fn yet (fn lives ONLY on the
-// source branch, hasn't propagated to the editor's current view). The
-// seed carries `:branch-local?` + `:parent-ids` straight from the
-// version row, so we can start the walk from the seed and only need
-// the fnMap for ancestor lookups (which usually DO exist on main).
-function isFnBranchLocal(fnId, seed) {
-  const fnMap = typeof lookups === 'object' ? lookups?.fnMap : null;
-  const startRow = fnMap?.get(fnId) || seed;
-  if (!startRow) return false;
-  const visited = new Set();
-  const queue = [startRow];
-  while (queue.length) {
-    const f = queue.shift();
-    if (!f || visited.has(f.id)) continue;
-    visited.add(f.id);
-    if (f['branch-local?'] === true) return true;
-    for (const pid of (f['parent-ids'] || [])) {
-      const pf = fnMap?.get(pid);
-      if (pf) queue.push(pf);
-    }
-  }
-  return false;
-}
-
-function diffRowHtml(d) {
-  const entityName = d['entity-name'];
-  const entityId = d['entity-id'];
-  const change = d.change;
-  const sv = d['source-version'];
-  const tv = d['target-version'];
-  const summary = previewSummary(entityName, sv, tv);
-  // Only :fn entities are clickable — they're the things the editor
-  // knows how to render. :binding / :binding-list-item navigate via
-  // their owning fn-id, but we don't always have that on the wire;
-  // skip the data attr in that case to disable navigation.
-  // `data-diff-change` flags `added-in-source` so the click handler
-  // knows the target fn lives ONLY on the OTHER branch — selectFn on
-  // the current branch would no-op silently; switch first.
-  // `data-diff-fn-name` carries the source-version's `:name` (preferred,
-  // since fnMap on current branch may not know this fn-id) so the
-  // post-switch reload's hash-resolution can find it.
-  const fnName = sv?.name || tv?.name || '';
-  const fnNav = entityName === 'fn'
-    ? (' data-diff-fn-id="' + escapeAttr(entityId) + '"'
-       + ' data-diff-change="' + escapeAttr(change || '') + '"'
-       + (fnName ? ' data-diff-fn-name="' + escapeAttr(fnName) + '"' : ''))
-    : '';
-  // Pass the source-version (or target-version) as the seed so the
-  // walker can resolve `:branch-local?` for fns that ONLY exist on
-  // one of the two branches — the editor's `lookups.fnMap` is built
-  // from the active branch's view, so an `added-in-source` fn won't
-  // be there. The seed carries the row's `:parent-ids` straight from
-  // the diff payload, which is enough to start the walk.
-  const seed = entityName === 'fn'
-    ? Object.assign({ id: entityId }, sv || tv || {})
-    : null;
-  const branchLocal = entityName === 'fn' && isFnBranchLocal(entityId, seed);
-  const klass = 'branch-diff-row'
-                + (entityName === 'fn' ? ' branch-diff-row-clickable' : '')
-                + (branchLocal ? ' branch-diff-row-local' : '');
-  const localBadge = branchLocal
-    ? '<span class="branch-diff-row-local-badge" title="Won\'t propagate on merge — branch-local fn">📍 branch-local</span>'
-    : '';
-  return ''
-    + '<div class="' + klass + '"' + fnNav + '>'
-    +   '<div class="branch-diff-row-head">'
-    +     '<span class="branch-diff-entity">' + escapeText(entityName) + '</span>'
-    +     '<span class="branch-diff-id">' + escapeText(entityId) + '</span>'
-    +     localBadge
-    +   '</div>'
-    +   '<div class="branch-diff-row-summary">' + summary + '</div>'
-    + '</div>';
-}
-
-function previewSummary(entityName, sv, tv) {
-  if (entityName === 'fn') return fnPreview(sv, tv);
-  if (entityName === 'binding') return bindingPreview(sv, tv);
-  if (entityName === 'binding-list-item') return listItemPreview(sv, tv);
-  if (entityName === 'fn-slot') return fnSlotPreview(sv, tv);
-  // Fallback for anything new — just show field names that differ.
-  return diffKeysPreview(sv, tv);
-}
-
-function fnPreview(sv, tv) {
-  const present = sv || tv || {};
-  const lines = [];
-  if (present.name) lines.push('<strong>' + escapeText(present.name) + '</strong>');
-  const s = sv?.description, t = tv?.description;
-  if (s !== t) {
-    lines.push('description: <em>' + previewField(s)
-               + '</em> vs <em>' + previewField(t) + '</em>');
-  }
-  if (sv?.['return-type-fn-id'] !== tv?.['return-type-fn-id']) {
-    lines.push('return-type changed');
-  }
-  if (sv?.constraint !== tv?.constraint) {
-    lines.push('constraint changed');
-  }
-  if (sv?.['impl-hash'] !== tv?.['impl-hash']) {
-    lines.push('impl-hash changed');
-  }
-  if (sv?.['deleted-at'] && !tv?.['deleted-at']) lines.push('DELETED on source');
-  if (tv?.['deleted-at'] && !sv?.['deleted-at']) lines.push('DELETED on target');
-  if (lines.length === 0) lines.push('(no field-level details)');
-  return lines.join('<br>');
-}
-
-function bindingPreview(sv, tv) {
-  if (sv?.value !== tv?.value) {
-    return 'value: <em>' + previewField(sv?.value) + '</em> vs <em>'
-           + previewField(tv?.value) + '</em>';
-  }
-  if (sv?.['ref-fn-id'] !== tv?.['ref-fn-id']) {
-    return 'ref-fn-id changed';
-  }
-  return diffKeysPreview(sv, tv);
-}
-
-function listItemPreview(sv, tv) {
-  if (sv?.position !== tv?.position) {
-    return 'position: ' + previewField(sv?.position) + ' vs '
-           + previewField(tv?.position);
-  }
-  if (sv?.value !== tv?.value) {
-    return 'value: <em>' + previewField(sv?.value) + '</em> vs <em>'
-           + previewField(tv?.value) + '</em>';
-  }
-  return diffKeysPreview(sv, tv);
-}
-
-function fnSlotPreview(sv, tv) {
-  if (sv?.position !== tv?.position) {
-    return 'position: ' + previewField(sv?.position) + ' vs '
-           + previewField(tv?.position);
-  }
-  return diffKeysPreview(sv, tv);
-}
-
-function diffKeysPreview(sv, tv) {
-  const sKeys = sv ? Object.keys(sv) : [];
-  const tKeys = tv ? Object.keys(tv) : [];
-  const all = Array.from(new Set([...sKeys, ...tKeys]));
-  const changed = all.filter((k) =>
-    JSON.stringify(sv?.[k]) !== JSON.stringify(tv?.[k]));
-  if (changed.length === 0) return '(no diff data)';
-  return 'fields changed: ' + changed.map(escapeText).join(', ');
-}
-
-function previewField(v) {
-  if (v === undefined || v === null) return '(absent)';
-  if (typeof v === 'string') return escapeText(truncateText(v, 60));
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  try { return escapeText(truncateText(JSON.stringify(v), 60)); }
-  catch (_) { return escapeText(String(v)); }
-}
-
-function truncateText(s, n) {
-  s = String(s);
-  return s.length > n ? s.slice(0, n - 1) + '…' : s;
-}
-
-function escapeText(s) {
-  const d = document.createElement('div');
-  d.textContent = s === undefined || s === null ? '' : String(s);
-  return d.innerHTML;
-}
-
-function escapeAttr(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 window.showBranchDiff = showBranchDiff;

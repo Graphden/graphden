@@ -91,6 +91,11 @@
    :parent :get-auth-required
    :args {:path "/partials/execute-history" :handler :_partial-execute-history-handler}}
 
+  {:name :partial-branch-diff
+   :description "GET /partials/branch-diff?target=X&source=Y — branch-diff body hiccup (3 sections grouped by `:change` + branch-local annotations). JS in `editor-branch-diff.js` owns the modal chrome; this fills the body mount."
+   :parent :get-auth-required
+   :args {:path "/partials/branch-diff" :handler :_partial-branch-diff-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

@@ -1027,6 +1027,488 @@
    :parent :html-ok-response
    :args {:body :_partial-eh-html}}
 
+  ;; ---------------------------------------------------------------------
+  ;; Branch-diff modal — three sections grouped by `:change`:
+  ;;   added-in-source  — present on source, missing on target
+  ;;   added-in-target  — present on target, missing on source
+  ;;   modified         — resolves differently on the two branches
+  ;;
+  ;; Reuses the existing `:_diff-apply` chain by shadowing `:parsed`
+  ;; with our own query-string-derived shape (`?target=X&source=Y`)
+  ;; — same chain `/api/branches/:ref/diff?against=` walks, just
+  ;; from a different URL convention. Per-row hiccup carries
+  ;; `data-diff-fn-id` + `data-diff-change` + `data-diff-fn-name`
+  ;; for the post-swap navigation binder in JS; `effective-branch-
+  ;; local?` annotates `:fn` rows with the dim+badge marker the
+  ;; existing e2e (`edit-branch-local.test.js`) asserts.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-bd-target-ref
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "target"}}}
+
+  {:name :_partial-bd-source-ref
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "source"}}}
+
+  {:name :_partial-bd-parsed
+   :description "Synthetic `:parsed` shape the inner `:_diff-branches-data` chain consumes — same keys (`:target-ref` / `:against-ref`) it expects from the URL-path-based API."
+   :parent :zipmap
+   :args {:keys [{:value :target-ref} {:value :against-ref}]
+          :vals [:_partial-bd-target-ref :_partial-bd-source-ref]}}
+
+  {:name :_partial-bd-data
+   :description "Live diff data — `{:ok :target :source :count :diffs [...]}` from the existing `:_diff-branches-data` chain, with our query-string-derived `:parsed` shadowing the URL-path parser."
+   :parent :_diff-branches-data
+   :args {:parsed :_partial-bd-parsed}}
+
+  {:name :_partial-bd-diffs
+   :parent :get
+   :args {:coll :_partial-bd-data :key {:value :diffs} :default {:value []}}}
+
+  {:name :_partial-bd-count
+   :parent :count
+   :args {:coll :_partial-bd-diffs}}
+
+  {:name :_partial-bd-empty?
+   :parent :empty?
+   :args {:coll :_partial-bd-diffs}}
+
+  {:name :_partial-bd-source-name
+   :parent :get
+   :args {:coll {:parent :get :args {:coll :_partial-bd-data :key {:value :source} :default {:value {}}}}
+          :key {:value :name}
+          :default {:value "(source)"}}}
+
+  {:name :_partial-bd-target-name
+   :parent :get
+   :args {:coll {:parent :get :args {:coll :_partial-bd-data :key {:value :target} :default {:value {}}}}
+          :key {:value :name}
+          :default {:value "(target)"}}}
+
+  ;; --- Per-row HOF callback ---
+
+  {:name :_partial-bd-row-entity-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :entity-name} :default {:value ""}}}
+
+  {:name :_partial-bd-row-entity-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :entity-id} :default {:value ""}}}
+
+  {:name :_partial-bd-row-change
+   :parent :get
+   :args {:coll {:as :item} :key {:value :change} :default {:value ""}}}
+
+  {:name :_partial-bd-row-source-version
+   :parent :get
+   :args {:coll {:as :item} :key {:value :source-version} :default nil}}
+
+  {:name :_partial-bd-row-target-version
+   :parent :get
+   :args {:coll {:as :item} :key {:value :target-version} :default nil}}
+
+  ;; The fn's name, preferred from source-version (won't be in
+  ;; current-branch fnMap for added-in-source rows), falling back
+  ;; to target. Becomes `data-diff-fn-name` so the JS post-switch
+  ;; hash-resolution can find the fn on the target branch.
+  {:name :_partial-bd-row-fn-name
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll :_partial-bd-row-source-version :key {:value :name} :default nil}}
+          :default {:parent :coalesce
+                    :args {:value {:parent :get :args {:coll :_partial-bd-row-target-version :key {:value :name} :default nil}}
+                           :default {:value ""}}}}}
+
+  ;; `:entity-name` is also a kw in-graph (`:fn` / `:binding` / …)
+  ;; — same JSON-flattens-but-graph-keeps-kw shape as `:change`.
+  {:name :_partial-bd-row-is-fn?
+   :parent :equal?
+   :args {:a :_partial-bd-row-entity-name :b {:value :fn}}}
+
+  ;; entity-id is a String in the entry (stringified by
+  ;; `:_diff-apply-entry`). `:effective-branch-local?` wants a UUID.
+  ;; Parse only when the row is a `:fn` (other entity-names → nil →
+  ;; predicate returns false).
+  {:name :_partial-bd-row-fn-id-uuid
+   :parent :if
+   :args {:test :_partial-bd-row-is-fn?
+          :then {:parent :parse-uuid :args {:s :_partial-bd-row-entity-id}}
+          :else nil}}
+
+  {:name :_partial-bd-row-branch-local?
+   :parent :effective-branch-local?
+   :args {:fn-id :_partial-bd-row-fn-id-uuid}}
+
+  ;; Row CSS class: base + clickable (when fn) + local (when
+  ;; effective-branch-local).
+  {:name :_partial-bd-row-class-step-1
+   :description "Base `branch-diff-row` + `branch-diff-row-clickable` when entity is `:fn`."
+   :parent :if
+   :args {:test :_partial-bd-row-is-fn?
+          :then {:value "branch-diff-row branch-diff-row-clickable"}
+          :else {:value "branch-diff-row"}}}
+
+  {:name :_partial-bd-row-class
+   :description "Append `branch-diff-row-local` if effective-branch-local."
+   :parent :if
+   :args {:test :_partial-bd-row-branch-local?
+          :then {:parent :str-join
+                 :args {:coll [:_partial-bd-row-class-step-1 {:value " branch-diff-row-local"}]
+                        :separator {:value ""}}}
+          :else :_partial-bd-row-class-step-1}}
+
+  ;; Row attributes: class + (when fn) data-diff-fn-id +
+  ;; data-diff-change + data-diff-fn-name. Non-fn rows omit the
+  ;; data-* attrs — JS click handler matches on `[data-diff-fn-id]`
+  ;; so non-fn rows are naturally non-clickable.
+  {:name :_partial-bd-row-attrs-step-1
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :class}
+          :value :_partial-bd-row-class}}
+
+  {:name :_partial-bd-row-attrs-with-data
+   :description "When entity is `:fn`, add the three `data-diff-*` attrs the JS click handler reads."
+   :parent :assoc
+   :args {:map {:parent :assoc
+                :args {:map {:parent :assoc
+                             :args {:map :_partial-bd-row-attrs-step-1
+                                    :key {:value :data-diff-fn-id}
+                                    :value :_partial-bd-row-entity-id}}
+                       :key {:value :data-diff-change}
+                       :value :_partial-bd-row-change}}
+          :key {:value :data-diff-fn-name}
+          :value :_partial-bd-row-fn-name}}
+
+  {:name :_partial-bd-row-attrs
+   :parent :if
+   :args {:test :_partial-bd-row-is-fn?
+          :then :_partial-bd-row-attrs-with-data
+          :else :_partial-bd-row-attrs-step-1}}
+
+  ;; Row content: entity-name pill + id + (optional) local-badge +
+  ;; minimal summary (fn-name when present).
+  {:name :_partial-bd-row-entity-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-entity"}}
+          :children [:_partial-bd-row-entity-name]}}
+
+  {:name :_partial-bd-row-id-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-id"}}
+          :children [:_partial-bd-row-entity-id]}}
+
+  {:name :_partial-bd-row-local-badge-shown
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-row-local-badge"
+                          :title "Won't propagate on merge — branch-local fn"}}
+          :children ["📍 branch-local"]}}
+
+  {:name :_partial-bd-row-local-badge-hidden
+   :description "Empty span when the row isn't effective-branch-local — keeps the children-vector shape uniform."
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:hidden "1"}}
+          :children {:value []}}}
+
+  {:name :_partial-bd-row-local-badge
+   :parent :if
+   :args {:test :_partial-bd-row-branch-local?
+          :then :_partial-bd-row-local-badge-shown
+          :else :_partial-bd-row-local-badge-hidden}}
+
+  {:name :_partial-bd-row-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-row-head"}}
+          :children [:_partial-bd-row-entity-span
+                     :_partial-bd-row-id-span
+                     :_partial-bd-row-local-badge]}}
+
+  ;; Summary line: fn-name wrapped in `<strong>` for visual weight
+  ;; (matches the legacy `fnPreview` shape the e2e selector reads).
+  ;; Rich per-type previews (description diffs, impl-hash markers,
+  ;; binding value comparisons …) are deferred to v2.
+  {:name :_partial-bd-row-name-strong
+   :parent :hiccup
+   :args {:tag {:value "strong"}
+          :attrs {:value {}}
+          :children [:_partial-bd-row-fn-name]}}
+
+  {:name :_partial-bd-row-summary
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-row-summary"}}
+          :children [:_partial-bd-row-name-strong]}}
+
+  {:name :_partial-bd-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_partial-bd-row-attrs
+          :children [:_partial-bd-row-head :_partial-bd-row-summary]}}
+
+  ;; --- Section grouping by `:change` ---
+
+  ;; `:diff-branches` returns `:change` as a keyword (`:modified` /
+  ;; `:added-in-source` / `:added-in-target`); JSON serialisation
+  ;; flattens to string for the wire, but in-graph it stays a kw.
+  {:name :_partial-bd-row-change-eq?-added-src
+   :parent :equal?
+   :args {:a :_partial-bd-row-change :b {:value :added-in-source}}}
+
+  {:name :_partial-bd-row-change-eq?-added-tgt
+   :parent :equal?
+   :args {:a :_partial-bd-row-change :b {:value :added-in-target}}}
+
+  {:name :_partial-bd-row-change-eq?-modified
+   :parent :equal?
+   :args {:a :_partial-bd-row-change :b {:value :modified}}}
+
+  {:name :_partial-bd-added-in-source-rows
+   :parent :filter
+   :args {:pred :_partial-bd-row-change-eq?-added-src
+          :coll :_partial-bd-diffs}}
+
+  {:name :_partial-bd-added-in-target-rows
+   :parent :filter
+   :args {:pred :_partial-bd-row-change-eq?-added-tgt
+          :coll :_partial-bd-diffs}}
+
+  {:name :_partial-bd-modified-rows
+   :parent :filter
+   :args {:pred :_partial-bd-row-change-eq?-modified
+          :coll :_partial-bd-diffs}}
+
+  ;; --- Per-section render: head + count + rendered rows.
+  ;; Each section uses the SAME row-renderer (`:_partial-bd-row`)
+  ;; but a DIFFERENT input list. Three separate `:map` invocations
+  ;; — one per section.
+
+  {:name :_partial-bd-added-src-rendered
+   :parent :map
+   :args {:func :_partial-bd-row :coll :_partial-bd-added-in-source-rows}}
+
+  {:name :_partial-bd-added-tgt-rendered
+   :parent :map
+   :args {:func :_partial-bd-row :coll :_partial-bd-added-in-target-rows}}
+
+  {:name :_partial-bd-modified-rendered
+   :parent :map
+   :args {:func :_partial-bd-row :coll :_partial-bd-modified-rows}}
+
+  {:name :_partial-bd-added-src-count-text
+   :parent :to-str
+   :args {:value {:parent :count :args {:coll :_partial-bd-added-in-source-rows}}}}
+
+  {:name :_partial-bd-added-tgt-count-text
+   :parent :to-str
+   :args {:value {:parent :count :args {:coll :_partial-bd-added-in-target-rows}}}}
+
+  {:name :_partial-bd-modified-count-text
+   :parent :to-str
+   :args {:value {:parent :count :args {:coll :_partial-bd-modified-rows}}}}
+
+  ;; Section head: "<label> <count>". Label includes the branch
+  ;; name for "Added in" sections.
+  {:name :_partial-bd-added-src-label
+   :parent :str-join
+   :args {:coll [{:value "Added in "} :_partial-bd-source-name]
+          :separator {:value ""}}}
+
+  {:name :_partial-bd-added-tgt-label
+   :parent :str-join
+   :args {:coll [{:value "Added in "} :_partial-bd-target-name]
+          :separator {:value ""}}}
+
+  {:name :_partial-bd-added-src-head-text
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-section-label"}}
+          :children [:_partial-bd-added-src-label]}}
+
+  {:name :_partial-bd-added-tgt-head-text
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-section-label"}}
+          :children [:_partial-bd-added-tgt-label]}}
+
+  {:name :_partial-bd-modified-head-text
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-section-label"}}
+          :children ["Modified"]}}
+
+  {:name :_partial-bd-added-src-count-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-count"}}
+          :children [:_partial-bd-added-src-count-text]}}
+
+  {:name :_partial-bd-added-tgt-count-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-count"}}
+          :children [:_partial-bd-added-tgt-count-text]}}
+
+  {:name :_partial-bd-modified-count-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-diff-count"}}
+          :children [:_partial-bd-modified-count-text]}}
+
+  {:name :_partial-bd-added-src-section-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-section-head"}}
+          :children [:_partial-bd-added-src-head-text :_partial-bd-added-src-count-span]}}
+
+  {:name :_partial-bd-added-tgt-section-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-section-head"}}
+          :children [:_partial-bd-added-tgt-head-text :_partial-bd-added-tgt-count-span]}}
+
+  {:name :_partial-bd-modified-section-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-section-head"}}
+          :children [:_partial-bd-modified-head-text :_partial-bd-modified-count-span]}}
+
+  {:name :_partial-bd-added-src-rows-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-rows"}}
+          :children :_partial-bd-added-src-rendered}}
+
+  {:name :_partial-bd-added-tgt-rows-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-rows"}}
+          :children :_partial-bd-added-tgt-rendered}}
+
+  {:name :_partial-bd-modified-rows-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-rows"}}
+          :children :_partial-bd-modified-rendered}}
+
+  ;; Hidden section when the corresponding rows list is empty — keeps
+  ;; the children-vector shape stable across diff payloads.
+  {:name :_partial-bd-added-src-hidden
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
+  {:name :_partial-bd-added-tgt-hidden
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
+  {:name :_partial-bd-modified-hidden
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
+  {:name :_partial-bd-added-src-section-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-section"}}
+          :children [:_partial-bd-added-src-section-head :_partial-bd-added-src-rows-div]}}
+
+  {:name :_partial-bd-added-tgt-section-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-section"}}
+          :children [:_partial-bd-added-tgt-section-head :_partial-bd-added-tgt-rows-div]}}
+
+  {:name :_partial-bd-modified-section-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-section"}}
+          :children [:_partial-bd-modified-section-head :_partial-bd-modified-rows-div]}}
+
+  {:name :_partial-bd-added-src-section
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-bd-added-in-source-rows}}
+          :then :_partial-bd-added-src-hidden
+          :else :_partial-bd-added-src-section-shown}}
+
+  {:name :_partial-bd-added-tgt-section
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-bd-added-in-target-rows}}
+          :then :_partial-bd-added-tgt-hidden
+          :else :_partial-bd-added-tgt-section-shown}}
+
+  {:name :_partial-bd-modified-section
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-bd-modified-rows}}
+          :then :_partial-bd-modified-hidden
+          :else :_partial-bd-modified-section-shown}}
+
+  ;; --- Top-level body: summary + 3 sections, OR empty state.
+  {:name :_partial-bd-count-text
+   :parent :to-str
+   :args {:value :_partial-bd-count}}
+
+  {:name :_partial-bd-summary-text
+   :parent :str-join
+   :args {:coll [:_partial-bd-count-text {:value " difference(s)"}]
+          :separator {:value ""}}}
+
+  {:name :_partial-bd-summary-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-summary"}}
+          :children [:_partial-bd-summary-text]}}
+
+  {:name :_partial-bd-empty-msg-text
+   :parent :str-join
+   :args {:coll [{:value "No differences — "}
+                 :_partial-bd-source-name
+                 {:value " and "}
+                 :_partial-bd-target-name
+                 {:value " resolve to the same view."}]
+          :separator {:value ""}}}
+
+  {:name :_partial-bd-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-empty"}}
+          :children [:_partial-bd-empty-msg-text]}}
+
+  {:name :_partial-bd-body-populated
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-body-populated"}}
+          :children [:_partial-bd-summary-div
+                     :_partial-bd-added-src-section
+                     :_partial-bd-added-tgt-section
+                     :_partial-bd-modified-section]}}
+
+  {:name :_partial-bd-body
+   :parent :if
+   :args {:test :_partial-bd-empty?
+          :then :_partial-bd-empty-msg
+          :else :_partial-bd-body-populated}}
+
+  {:name :_partial-bd-fragment
+   :description "Full branch-diff body hiccup. JS owns the surrounding modal chrome (overlay + card + header + close button) — this partial fills the `.branch-diff-body` mount inside it."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-diff-body-content"}}
+          :children [:_partial-bd-body]}}
+
+  {:name :_partial-bd-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-bd-fragment}}
+
+  {:name :_partial-branch-diff-handler
+   :description "Ring handler for `GET /partials/branch-diff?target=X&source=Y` — returns the diff body hiccup as `text/html`. JS in `editor-branch-diff.js` swaps the response into the modal body and binds row-click navigation handlers post-swap."
+   :parent :html-ok-response
+   :args {:body :_partial-bd-html}}
+
   ;; Concrete editor routes (`/`, `/favicon.ico`, `/partials/...`,
   ;; `/api/entities/...`, `/api/sequence/...`) live in `app.routes`;
   ;; they reference the handler fn-defs above by name.

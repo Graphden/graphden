@@ -66,6 +66,13 @@
    :parent :branch-chain
    :args {:branch-id :current-branch-id}}
 
+  {:name :effective-branch-local?
+   :description "True iff `:fn-id` (or any ancestor in its `:parent-ids` closure) carries `:branch-local? true`. The monotonic-OR walker that powers merge-time skip decisions, exposed for UI annotations (the branch-diff modal greys out rows whose entities won't propagate across branches). Memoized per base-storage; nil fn-id → false."
+   :args {:fn-id {:type :nullable-uuid
+                  :description "Logical fn-id to check; nil → false."}}
+   :return-type :bool
+   :effects #{:db}}
+
   ;; Initial state: `{:chain [branch-id] :cur branch-id}`.
   {:name :_branch-chain-initial-state
    :parent :zipmap

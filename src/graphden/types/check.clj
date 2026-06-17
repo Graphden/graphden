@@ -2429,7 +2429,23 @@
   ;; type-assertions for runtime-guaranteed nullability narrowings
   ;; that the type-checker can't (yet) see through control-flow
   ;; guards. See `docs/TYPE_CHECK_BACKLOG.md` for the running ledger.
-  #{})
+  ;;
+  ;; Re-opened 2026-06-17 for the branch-diff partial — the
+  ;; `:_diff-branches-data` chain is a `:cond` that returns the
+  ;; success envelope `{:ok :target :source :count :diffs [...]}`
+  ;; OR an error envelope `{:ok false :error "..."}`. The type-
+  ;; checker can't statically pick one branch (request-shape
+  ;; dependent), so `:get :key :diffs` / `:source` / `:target` on
+  ;; the union returns a union-of-shapes the downstream `:count`,
+  ;; `:empty?`, and `:str-join` can't always pin to a single type.
+  ;; Runtime: the cond's apply-branch is the only path that lands
+  ;; in the renderer (error-branch responses skip rendering via
+  ;; the JS-side error pane). Re-add once the type-checker can
+  ;; flow-narrow through cond-then-get.
+  #{:_partial-bd-count
+    :_partial-bd-empty?
+    :_partial-bd-source-name
+    :_partial-bd-target-name})
 
 
 (defn assert-sweep-failures-match-allowlist!

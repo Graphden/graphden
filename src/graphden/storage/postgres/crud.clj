@@ -67,6 +67,28 @@
           (junction/write-ref-many-fields-batch! ds entity-name pairs))))))
 
 
+(defn- batch-execute!
+  "Run a JDBC batch query with the canonical batch-error wrap. SQL
+   exceptions get the op-context (`entity-name` + `batch-ids`) folded
+   into the classified envelope; non-SQL throwables get the raw
+   `sp/wrap-batch-error` envelope. `op` is the operation keyword used
+   by error classifiers (`:create-entities` / `:update-entities` /
+   `:upsert-entities`). Lifted from three open-coded copies inside
+   create/update/upsert — the shape was identical modulo the `op`."
+  [ds query op entity-name batch-ids batch-size]
+  (try
+    (jdbc/execute! ds query (util/query-opts))
+    (catch java.sql.SQLException e
+      ;; Index is -1 because PostgreSQL batch INSERT/UPDATE doesn't
+      ;; reveal which row failed.
+      (let [wrapped (errors/wrap-sql-error e "Database error" op
+                                           {:entity-name entity-name
+                                            :batch-ids batch-ids})]
+        (throw (sp/wrap-batch-error wrapped -1 batch-size nil))))
+    (catch Exception e
+      (throw (sp/wrap-batch-error e -1 batch-size nil)))))
+
+
 (defn create-entity
   "Creates a new entity record in the database.
    Returns the created record with generated id if not provided.
@@ -277,18 +299,8 @@
                                :values values
                                :returning [:*]}
                               {:quoted true})
-            result-rows (try
-                          (jdbc/execute! ds query (util/query-opts))
-                          (catch java.sql.SQLException e
-                            ;; Wrap SQL exceptions with proper classification and batch context
-                            ;; Index is -1 because PostgreSQL batch INSERT doesn't reveal which row failed
-                            (let [wrapped (errors/wrap-sql-error e "Database error" :create-entities
-                                                                 {:entity-name entity-name
-                                                                  :batch-ids batch-ids})]
-                              (throw (sp/wrap-batch-error wrapped -1 batch-size nil))))
-                          (catch Exception e
-                            ;; Non-SQL exceptions (rare)
-                            (throw (sp/wrap-batch-error e -1 batch-size nil))))
+            result-rows (batch-execute! ds query :create-entities
+                                        entity-name batch-ids batch-size)
             expected-count batch-size
             actual-count (count result-rows)]
         ;; Validate that all records were inserted
@@ -413,15 +425,8 @@
                   ;; Flatten values for parameters
                   params (vec (mapcat identity values))
                   query (into [sql] params)
-                  result-rows (try
-                                (jdbc/execute! ds query (util/query-opts))
-                                (catch java.sql.SQLException e
-                                  (let [wrapped (errors/wrap-sql-error e "Database error" :update-entities
-                                                                       {:entity-name entity-name
-                                                                        :batch-ids batch-ids})]
-                                    (throw (sp/wrap-batch-error wrapped -1 batch-size nil))))
-                                (catch Exception e
-                                  (throw (sp/wrap-batch-error e -1 batch-size nil))))
+                  result-rows (batch-execute! ds query :update-entities
+                                              entity-name batch-ids batch-size)
                   actual-count (count result-rows)]
               ;; Validate that all records were updated
               (when (not= batch-size actual-count)
@@ -472,15 +477,8 @@
                                :do-update-set update-columns
                                :returning [:*]}
                               {:quoted true})
-            result-rows (try
-                          (jdbc/execute! ds query (util/query-opts))
-                          (catch java.sql.SQLException e
-                            (let [wrapped (errors/wrap-sql-error e "Database error" :upsert-entities
-                                                                 {:entity-name entity-name
-                                                                  :batch-ids batch-ids})]
-                              (throw (sp/wrap-batch-error wrapped -1 batch-size nil))))
-                          (catch Exception e
-                            (throw (sp/wrap-batch-error e -1 batch-size nil))))
+            result-rows (batch-execute! ds query :upsert-entities
+                                        entity-name batch-ids batch-size)
             expected-count batch-size
             actual-count (count result-rows)]
         ;; Validate that all records were upserted

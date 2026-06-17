@@ -1136,8 +1136,6 @@
         {:status 200 :body ""}))))
 
 
-
-
 ;; === Re-exports from sub-namespaces ==========================================
 ;;
 ;; The sequence-ops and tighten domains live in
@@ -1160,45 +1158,54 @@
   ((requiring-resolve 'graphden.crud.entities.seq/find-sequence-binding)
    ctx fn-id))
 
+
 (defn resolve-sequence-payload
   [storage body]
   ((requiring-resolve 'graphden.crud.entities.seq/resolve-sequence-payload)
    storage body))
+
 
 (defn find-seq-append-binding
   [parsed ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/find-seq-append-binding)
    parsed ctx))
 
+
 (defn apply-seq-append-core
   [parsed seq-binding ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-append-core)
    parsed seq-binding ctx))
+
 
 (defn apply-seq-append
   [parsed seq-binding ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-append)
    parsed seq-binding ctx))
 
+
 (defn load-seq-remove-item
   [parsed ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/load-seq-remove-item)
    parsed ctx))
+
 
 (defn apply-seq-remove
   [parsed item ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-remove)
    parsed item ctx))
 
+
 (defn load-seq-update-item
   [parsed ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/load-seq-update-item)
    parsed ctx))
 
+
 (defn apply-seq-update-core
   [parsed item ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-update-core)
    parsed item ctx))
+
 
 (defn apply-seq-update
   [parsed item ctx]
@@ -1211,20 +1218,24 @@
   ((requiring-resolve 'graphden.crud.entities.tighten/commit-tighten!)
    storage binding-id b new-c effects-vec))
 
+
 (defn tighten-fn-type-impl!
   [storage binding-id delta]
   ((requiring-resolve 'graphden.crud.entities.tighten/tighten-fn-type-impl!)
    storage binding-id delta))
+
 
 (defn tighten-effects-impl!
   [storage binding-id effects-vec]
   ((requiring-resolve 'graphden.crud.entities.tighten/tighten-effects-impl!)
    storage binding-id effects-vec))
 
+
 (defn apply-tighten-core
   [parsed ctx]
   ((requiring-resolve 'graphden.crud.entities.tighten/apply-tighten-core)
    parsed ctx))
+
 
 (defn apply-tighten
   [parsed ctx]

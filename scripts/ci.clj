@@ -313,43 +313,71 @@
             start-time (System/currentTimeMillis)
 
             ;; Progress display. The status line is rendered every
-            ;; 200 ms. Naive `\r`-only update breaks once the line
-            ;; exceeds the terminal width: ANSI's `\033[2K` clears
-            ;; the CURRENT row only, so wrapped tail rows accumulate
-            ;; and the user sees the status repeat instead of
-            ;; updating in place. Track the row count we previously
-            ;; emitted and explicitly move-up + clear each one
-            ;; before re-rendering.
+            ;; 200 ms and is clamped to a single terminal row — no
+            ;; row-tracking / cursor-up, so we can never overshoot
+            ;; above the start of the status output and erase the
+            ;; user's terminal scrollback.
+            ;;
+            ;; Format:
+            ;;   +3 ⚠1 ✗1 ◐3 │ ✗ cljstyle │ ◐ tests biome … │ 12.3s
+            ;;   └counter────┘ └failed────┘ └running greedy┘ └time┘
+            ;;
+            ;; Counter shows each non-zero category once. Failed names
+            ;; always fit (the user cares about them most); running
+            ;; names are added greedily within the remaining budget,
+            ;; truncated with `…` when they don't all fit.
             cols (terminal-cols)
-            esc (str (char 27))
-            cursor-up (fn [n] (str esc "[" n "A"))
-            ;; ESC[J — clear from cursor to end of screen. Wipes
-            ;; every previously-emitted row at once, no need to
-            ;; clear-each.
-            clear-below (str esc "[J")
-            last-rows (atom 1)
-            print-status (fn []
-                           (let [elapsed (/ (- (System/currentTimeMillis) start-time) 1000.0)
-                                 line (str (str/join " │ "
-                                                     (map (fn [c]
-                                                            (str (status-char (get @status (:name c)))
-                                                                 " " (:name c)))
-                                                          checks))
-                                           (format " │ %.1fs" elapsed))
-                                 rows-needed (max 1 (-> (visible-len line)
-                                                        (quot cols)
-                                                        inc))
-                                 up (dec @last-rows)
-                                 ;; Build the prefix in ONE write so the
-                                 ;; cursor movement + clears land before
-                                 ;; the new line and the terminal doesn't
-                                 ;; flash a half-erased state.
-                                 prefix (str (when (pos? up) (cursor-up up))
-                                             "\r"
-                                             clear-below)]
-                             (print (str prefix line))
-                             (flush)
-                             (reset! last-rows rows-needed)))
+            sep " │ "
+            print-status
+            (fn []
+                (let [elapsed-s (/ (- (System/currentTimeMillis) start-time) 1000.0)
+                      elapsed-part (str sep (format "%.1fs" elapsed-s))
+                      statuses @status
+                      n-passed (count (filter #(= :passed (val %)) statuses))
+                      n-warn (count (filter #(= :warning (val %)) statuses))
+                      n-failed (count (filter #(#{:failed :timeout} (val %)) statuses))
+                      n-running (count (filter #(= :running (val %)) statuses))
+                      failed-names (->> checks
+                                        (filter #(#{:failed :timeout} (get statuses (:name %))))
+                                        (mapv :name))
+                      running-names (->> checks
+                                         (filter #(= :running (get statuses (:name %))))
+                                         (mapv :name))
+                      counter (str/join " "
+                                        (cond-> []
+                                          (pos? n-passed) (conj (str green "+" n-passed reset))
+                                          (pos? n-warn) (conj (str yellow "⚠" n-warn reset))
+                                          (pos? n-failed) (conj (str red "✗" n-failed reset))
+                                          (pos? n-running) (conj (str yellow "◐" n-running reset))))
+                      failed-part (when (seq failed-names)
+                                    (str sep red "✗" reset " " (str/join " " failed-names)))
+                      running-marker (str sep yellow "◐" reset " ")
+                      cols-budget (dec cols)
+                      fixed-len (+ (visible-len counter)
+                                   (visible-len (or failed-part ""))
+                                   (visible-len elapsed-part))
+                      running-budget (- cols-budget fixed-len (visible-len running-marker))
+                      ;; Greedy fit running names; reserve 2 cols for " …"
+                      ;; until we know whether overflow occurs.
+                      [fitted overflow?]
+                      (if (and (seq running-names) (pos? running-budget))
+                        (loop [acc "" remaining running-names]
+                          (if (empty? remaining)
+                            [acc false]
+                            (let [nm (first remaining)
+                                  candidate (if (empty? acc) nm (str acc " " nm))]
+                              (if (<= (+ (count candidate) 2) running-budget)
+                                (recur candidate (next remaining))
+                                [acc (seq acc)]))))
+                        ["" false])
+                      running-part (when (seq fitted)
+                                     (str running-marker fitted (when overflow? " …")))
+                      line (str counter
+                                (or failed-part "")
+                                (or running-part "")
+                                elapsed-part)]
+                  (print (str "\r\033[2K" line))
+                  (flush)))
 
             ;; Progress display thread
             progress-running (atom true)

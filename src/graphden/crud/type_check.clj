@@ -274,7 +274,10 @@
       (types-check/check-fn-def! fn-def))
     nil
     (catch clojure.lang.ExceptionInfo e
-      {:reason (Throwable/.getMessage e)})
+      ;; `.getMessage` is nullable; `str` keeps the response field a
+      ;; string instead of a JSON-`null` the client would render as
+      ;; "rejected, no reason".
+      {:reason (str (Throwable/.getMessage e))})
     (catch Exception e
       ;; Defensive: any unexpected error during reconstruction is
       ;; surfaced (better than silent broken state, worse than

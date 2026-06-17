@@ -406,12 +406,15 @@
            (catch Exception e
              (log/warn e "Rollback delete-entity failed for"
                        et id "— manual cleanup may be required")))))
-  (if (instance? clojure.lang.ExceptionInfo exception)
-    {:ok false
-     :error (Throwable/.getMessage ^Throwable exception)
-     :data (ex-data exception)}
-    {:ok false
-     :error (str (Throwable/.getMessage ^Throwable exception))}))
+  ;; `Throwable/.getMessage` can return null (Java API contract); wrap
+  ;; both branches in `str` so the `:error` field is always a string.
+  ;; Earlier the ExceptionInfo arm returned raw `.getMessage` and the
+  ;; fallback arm wrapped in `str` — a serialised response would
+  ;; carry a JSON-`null` only on the ExceptionInfo arm.
+  (let [msg (str (Throwable/.getMessage ^Throwable exception))]
+    (cond-> {:ok false :error msg}
+      (instance? clojure.lang.ExceptionInfo exception)
+      (assoc :data (ex-data exception)))))
 
 
 (defn apply-create-record-type

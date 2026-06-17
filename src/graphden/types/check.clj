@@ -686,6 +686,105 @@
     :else []))
 
 
+(defn- mi-slot-type-conflict
+  "Across the registry entries of an MI fn-def's parents, find the
+   first slot where the parents declare INCOMPATIBLE types — neither
+   is a subtype of the other under `subtype?`. Returns `[slot
+   distinct-ts]` for the conflict, or nil when every shared slot has a
+   compatible chain (identical / primitive subtype / record extras /
+   typevars). The MI merge would silently keep the last-listed
+   parent's type otherwise; surfacing the conflict lets the author
+   pick a pinning override at the child."
+  [infos]
+  (let [parent-args-list (mapv #(:args % {}) (filter some? infos))
+        slot-types-by-name
+        (reduce (fn [m args]
+                  (reduce-kv (fn [acc k v]
+                               (update acc k (fnil conj []) v))
+                             m args))
+                {}
+                parent-args-list)]
+    (some (fn [[slot ts]]
+            (let [distinct-ts (distinct ts)]
+              (when (> (count distinct-ts) 1)
+                (let [related? (some (fn [a]
+                                       (every? (fn [b]
+                                                 (or (= a b)
+                                                     (types/subtype? a b)
+                                                     (types/subtype? b a)))
+                                               distinct-ts))
+                                     distinct-ts)]
+                  (when-not related?
+                    [slot distinct-ts])))))
+          slot-types-by-name)))
+
+
+(defn- mi-slot-value-conflict
+  "Across the registry entries of an MI fn-def's parents, find the
+   first slot bound to DIFFERENT values (literal `:value` or fn-`:ref`)
+   by multiple parents. Returns `[slot pins]` for the conflict, or nil
+   when every binding agrees (or only one parent binds the slot).
+
+   PB' own-slot declarations (`{:type T}` with no `:value` or `:ref`)
+   surface in `:resolved-bindings` as `{:type T :value nil}` — the
+   `:value-present` flag distinguishes the PB' decl from a genuine
+   `{:value nil}` binding so the latter still participates in conflict
+   detection while the former defers to its sibling's real binding."
+  [infos]
+  (let [actual-binding? (fn [binding]
+                          (or (contains? binding :ref)
+                              (true? (:value-present binding))))
+        rbs-by-slot
+        (reduce (fn [acc info]
+                  (reduce-kv (fn [a slot binding]
+                               (let [pin (select-keys binding [:value :ref])]
+                                 (if (and (actual-binding? binding)
+                                          (not (contains? (a slot) pin)))
+                                   (update a slot (fnil conj #{}) pin)
+                                   a)))
+                             acc
+                             (:resolved-bindings info {})))
+                {}
+                (filter some? infos))]
+    (some (fn [[slot pins]] (when (> (count pins) 1) [slot pins]))
+          rbs-by-slot)))
+
+
+(defn- check-mi-conflicts!
+  "Throw on the first MI parent conflict found (slot type, then slot
+   value). No-op when both pass."
+  [infos parent-list]
+  (when-let [[slot ts] (mi-slot-type-conflict infos)]
+    (throw (ex-info
+             (str "MI parent slot type conflict on " (pr-str slot)
+                  ": parents declare incompatible types "
+                  (pr-str (vec ts))
+                  " — neither is a subtype of the other. The merged"
+                  " contract would silently keep just the last"
+                  " parent's type. Pick parents with compatible"
+                  " slot types or override the slot at the MI"
+                  " child to pin one contract.")
+             {:type :bindings/mi-slot-type-conflict
+              :slot-name slot
+              :conflicting-types (vec ts)
+              :parents parent-list})))
+  (when-let [[slot pins] (mi-slot-value-conflict infos)]
+    (throw (ex-info
+             (str "MI parent slot value conflict on " (pr-str slot)
+                  ": parents bind the slot to "
+                  (count pins) " different values "
+                  (pr-str (vec pins))
+                  " — the merged `:resolved-bindings` would"
+                  " silently keep only the last-listed parent's"
+                  " binding. Either override the slot at the MI"
+                  " child to pin the intended value, or choose"
+                  " parents that don't both bind the same slot.")
+             {:type :bindings/mi-slot-value-conflict
+              :slot-name slot
+              :conflicting-bindings (vec pins)
+              :parents parent-list}))))
+
+
 (defn- merge-mi-parent-infos
   "Combine N parent registry entries into one parent-info for an MI
    fn-def. Returns nil when none of the parents have a registry entry
@@ -706,112 +805,18 @@
    bindings its parents accumulated up the chain, so a return-type
    rule re-firing on it (or a descendant) can't see slots bound deeper
    up — e.g. the `:assoc` record-builder loses `:map`/`:key`/`:value`
-   and collapses the response record to `:jsonb`."
+   and collapses the response record to `:jsonb`.
+
+   Pre-merge conflict detection (`check-mi-conflicts!`) surfaces type
+   and value conflicts so they're not silently masked by `apply merge`."
   [parent-list]
   (let [infos (mapv registry/rich-type-of parent-list)]
     (cond
       (every? nil? infos) nil
       (= 1 (count infos)) (first infos)
       :else
-      ;; Slot type-incompatibility check: when N parents share a slot
-      ;; name but declare INCOMPATIBLE types (neither is a subtype of
-      ;; the other), the silent `apply merge` would keep the last
-      ;; parent's type. A subsequent binding check would then verify
-      ;; against an arbitrary contract, not the union of intended
-      ;; contracts. Throw on conflict.
-      ;;
-      ;; Compatible cases (silent-pass): identical types, primitive
-      ;; subtype chains (`:positive-int ⊆ :int`), record extras
-      ;; (`{:a A :b B} ⊆ {:a A}` via `record-subtype?`), typevars on
-      ;; either side. The check uses `subtype?` bidirectionally, so a
-      ;; parent A typed `:positive-int` and parent B typed `:int` for
-      ;; the same slot stays compatible — the merged contract is the
-      ;; wider one (`:int`).
-      (let [parent-args-list (mapv #(:args % {}) (filter some? infos))
-            slot-types-by-name (reduce (fn [m args]
-                                         (reduce-kv (fn [acc k v]
-                                                      (update acc k (fnil conj []) v))
-                                                    m args))
-                                       {}
-                                       parent-args-list)
-            incompatible (keep (fn [[slot ts]]
-                                 (let [distinct-ts (distinct ts)]
-                                   (when (> (count distinct-ts) 1)
-                                     (let [related? (some (fn [a]
-                                                            (every? (fn [b]
-                                                                      (or (= a b)
-                                                                          (types/subtype? a b)
-                                                                          (types/subtype? b a)))
-                                                                    distinct-ts))
-                                                          distinct-ts)]
-                                       (when-not related?
-                                         [slot distinct-ts])))))
-                               slot-types-by-name)]
-        (when (seq incompatible)
-          (let [[slot ts] (first incompatible)]
-            (throw (ex-info
-                     (str "MI parent slot type conflict on " (pr-str slot)
-                          ": parents declare incompatible types "
-                          (pr-str (vec ts))
-                          " — neither is a subtype of the other. The merged"
-                          " contract would silently keep just the last"
-                          " parent's type. Pick parents with compatible"
-                          " slot types or override the slot at the MI"
-                          " child to pin one contract.")
-                     {:type :bindings/mi-slot-type-conflict
-                      :slot-name slot
-                      :conflicting-types (vec ts)
-                      :parents parent-list}))))
-        ;; Slot-VALUE conflict: same slot has DIFFERENT bound values
-        ;; (literal `:value` or fn-`:ref`) across parents. The merged
-        ;; `:resolved-bindings` would silently keep just the
-        ;; last-listed parent's binding. Distinguish from inherited-
-        ;; same-source: only compare the discriminating fields
-        ;; (`:value` and `:ref`), not `:type` (which slot-type
-        ;; conflict above handles).
-        ;;
-        ;; PB' own-slot declarations (`{:type T}` with no `:value` or
-        ;; `:ref`) surface in `:resolved-bindings` as `{:type T :value
-        ;; nil}` — same shape as a legitimate `{:value nil}` binding.
-        ;; Distinguish via the `:value-present` flag set by
-        ;; `bindings-info-for-rule`: true iff the author wrote a
-        ;; literal value (incl. nil), false/absent for PB' decl or
-        ;; ref-binding. A real `{:value nil}` binding then DOES
-        ;; participate in conflict detection (a sibling binding to
-        ;; `{:value :foo}` will trip), while PB' decls correctly
-        ;; defer to the sibling's real binding.
-        (let [actual-binding? (fn [binding]
-                                (or (contains? binding :ref)
-                                    (true? (:value-present binding))))
-              rbs-by-slot
-              (reduce (fn [acc info]
-                        (reduce-kv (fn [a slot binding]
-                                     (let [pin (select-keys binding [:value :ref])]
-                                       (if (and (actual-binding? binding)
-                                                (not (contains? (a slot) pin)))
-                                         (update a slot (fnil conj #{}) pin)
-                                         a)))
-                                   acc
-                                   (:resolved-bindings info {})))
-                      {}
-                      (filter some? infos))
-              conflicting-vals (filter (fn [[_ s]] (> (count s) 1)) rbs-by-slot)]
-          (when (seq conflicting-vals)
-            (let [[slot pins] (first conflicting-vals)]
-              (throw (ex-info
-                       (str "MI parent slot value conflict on " (pr-str slot)
-                            ": parents bind the slot to "
-                            (count pins) " different values "
-                            (pr-str (vec pins))
-                            " — the merged `:resolved-bindings` would"
-                            " silently keep only the last-listed parent's"
-                            " binding. Either override the slot at the MI"
-                            " child to pin the intended value, or choose"
-                            " parents that don't both bind the same slot.")
-                       {:type :bindings/mi-slot-value-conflict
-                        :slot-name slot
-                        :conflicting-bindings (vec pins)
-                        :parents parent-list})))))
+      (do
+        (check-mi-conflicts! infos parent-list)
         (let [bound (into #{}
                           (mapcat #(keys (:resolved-bindings % {})))
                           infos)]

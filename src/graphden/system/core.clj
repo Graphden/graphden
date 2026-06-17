@@ -344,6 +344,53 @@
       :base-fns base-fns-map})))
 
 
+(defn- run-type-check-sweep!
+  "Topological-order type-check sweep across `expanded-fn-defs`.
+
+   - **Pass 1** isolates each fn-def's per-fn check; failures populate
+     the registry with whatever rich-type the partial run could
+     produce and get DEBUG-logged.
+   - **Pass 2/3** rebuilds caller-narrowings (Phase α') + ref-return
+     overrides (Phase #170) over the topologically-sorted list and
+     re-runs each fn-def with both bound — that fixpoint replaces
+     pass 1's isolation view; the FINAL failure set is what the
+     allowlist gates against.
+   - Sweep summary WARN runs when any fn-def failed (DEBUG-logged
+     per-fn).
+   - **Allowlist gate** — `types-check/allowed-type-check-failures`
+     enumerates the known-failing fn-defs (closed over time as the
+     type system gains expressiveness). Any failure NOT in the
+     allowlist is a regression; any allowlisted name that's NO LONGER
+     failing must be removed from the allowlist. Throws at sync time
+     so CI catches both. `skip-allowlist-gate?` opts a test bootstrap
+     out — useful when loading a SUBSET of production packages."
+  [expanded-fn-defs skip-allowlist-gate?]
+  (let [sorted (deps/topological-sort expanded-fn-defs)
+        failed-names (atom #{})]
+    (doseq [fd sorted]
+      (try (types-check/check-fn-def! fd)
+           (catch Exception e
+             (swap! failed-names conj (:name fd))
+             (log/debug "Type-check failed for fn-def" (:name fd) "—"
+                        (ex-message e)))))
+    (let [narrowings (types-check/build-caller-narrowings sorted)
+          overrides  (types-check/build-ref-return-overrides sorted)]
+      (reset! failed-names #{})
+      (doseq [fd sorted]
+        (try (types-check/check-fn-def-with-narrowings! fd narrowings overrides)
+             (catch Exception e
+               (swap! failed-names conj (:name fd))
+               (log/debug "Type-check failed for fn-def" (:name fd) "—"
+                          (ex-message e))))))
+    (when (pos? (count @failed-names))
+      (log/warn "Type-check sweep: " (count @failed-names)
+                "fn-defs failed (DEBUG-logged) — runtime unaffected,"
+                " editor effect/return strips may be missing for those names —"
+                " docs/TYPE_CHECK_BACKLOG.md"))
+    (when-not skip-allowlist-gate?
+      (types-check/assert-sweep-failures-match-allowlist! @failed-names))))
+
+
 (defn sync-fn-entities-from-packages!
   "Pure side-effects: sync composed fn-defs to storage, snapshot their
    rich-types, run a topological-order type-check sweep. Returns the
@@ -447,55 +494,7 @@
                 (catch Exception e
                   (log/debug e "Re-seed record-rich-types! failed for" fn-name)))))
        (when-not skip-type-check?
-         (let [sorted (deps/topological-sort expanded-fn-defs)
-               failed-names (atom #{})]
-           ;; Pass 1 — isolated per-fn-def check populates registry.
-           (doseq [fd sorted]
-             (try (types-check/check-fn-def! fd)
-                  (catch Exception e
-                    (swap! failed-names conj (:name fd))
-                    (log/debug "Type-check failed for fn-def" (:name fd) "—"
-                               (ex-message e)))))
-           ;; Pass 2/3 — Phase α' caller-context propagation +
-           ;; Phase #170 control-flow ref-return overrides.
-           ;; Build narrowings for rename-host fn-defs AND per-fn-def
-           ;; ref-return overrides driven by `:if`/`:cond` direct
-           ;; `:some?`/`:nil?` guards. Re-check each fn-def with both
-           ;; bound. Pass 3's record replaces Pass 1's isolation
-           ;; view; the FINAL failure set is what the allowlist
-           ;; gates against.
-           (let [narrowings (types-check/build-caller-narrowings sorted)
-                 overrides  (types-check/build-ref-return-overrides sorted)]
-             (reset! failed-names #{})
-             (doseq [fd sorted]
-               (try (types-check/check-fn-def-with-narrowings! fd narrowings overrides)
-                    (catch Exception e
-                      (swap! failed-names conj (:name fd))
-                      (log/debug "Type-check failed for fn-def" (:name fd) "—"
-                                 (ex-message e))))))
-           (when (pos? (count @failed-names))
-             (log/warn "Type-check sweep: " (count @failed-names)
-                       "fn-defs failed (DEBUG-logged) — runtime unaffected,"
-                       " editor effect/return strips may be missing for those names —"
-                       " docs/TYPE_CHECK_BACKLOG.md"))
-           ;; Phase E: hard gate. The allowlist
-           ;; (`types-check/allowed-type-check-failures`) enumerates
-           ;; the known-failing fn-defs (closed over time as the
-           ;; type-system gains expressiveness). Any failure NOT in
-           ;; the allowlist is a regression — throw at sync time so
-           ;; CI catches it loud. Conversely, any allowlisted name
-           ;; that's NO LONGER failing must be removed from the
-           ;; allowlist (the registry is shrinking, hence the
-           ;; assertion).
-           ;;
-           ;; `skip-allowlist-gate?` — opt-out for test mocks that
-           ;; load a SUBSET of the production packages (the allowlist
-           ;; names live in `web/crud`'s create/update/delete-apply
-           ;; chains — a unit test passing two mock fn-defs would
-           ;; trip the stale-allowlist arm spuriously).
-           (when-not skip-allowlist-gate?
-             (types-check/assert-sweep-failures-match-allowlist!
-               @failed-names)))
+         (run-type-check-sweep! expanded-fn-defs skip-allowlist-gate?)
          ;; Port-collision scan — runs against the expanded fn-def
          ;; set so synthetic anons that bind `:port` get inspected
          ;; too. Logs a WARN per colliding port; doesn't fail

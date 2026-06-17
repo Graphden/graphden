@@ -19,6 +19,7 @@
                   :editor-css-asset
                   :partial-effect
                   :partial-fn-versions
+                  :partial-fn-version-executions
                   :health
                   :metrics
                   :version

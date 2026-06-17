@@ -3,17 +3,15 @@
 // below the ⌛ History action in the fn-card row-actions popover (see
 // editor-overlay-fn.js).
 //
-// The popover CONTENT lives in the graph: `app/editor/fns.edn`
-// renders the hiccup fragment, `GET /partials/fn-versions?fn-id=...`
-// serves it as `text/html`. This module owns mount-point lifecycle,
-// fetch, anchoring, dismissal, and the post-swap action wiring
-// (switch / restore / row expansion). Per-row click handlers find
-// their targets by the `data-fn-version-id` / `data-switch-to-branch`
-// markers the server fragment carries.
+// Server owns the HTML projection (`/partials/fn-versions` returns
+// hiccup composed in `app/editor/fns.edn`). Each row carries `hx-*`
+// attributes that lazy-fetch the executions sub-list on click via
+// `/partials/fn-version-executions` — no JS expansion code needed.
 //
-// The lazy executions sub-panel (toggled on row click) still goes
-// through `/api/executions` + JS rendering — keeping it in JS for
-// this commit, separate POC migration when the next list is moved.
+// This module owns: mount-point lifecycle, fetch (auth-aware), HTMX
+// process-after-swap, anchoring, dismissal, plus the post-swap
+// binding for switch + restore actions (those need page navigation /
+// confirm() — wiring them through HTMX is a separate POC).
 
 let _fnVersionsPopover = null;
 let _fnVersionsAnchor = null;
@@ -50,6 +48,17 @@ function closeFnVersionsPopover() {
   }
 }
 
+// HTMX-aware swap: replace innerHTML and ALSO run htmx.process so the
+// fresh `hx-*` attributes inside the swapped content get bound. Without
+// this, HTMX only auto-binds at page load; subsequent innerHTML writes
+// stay inert until we tell HTMX about them.
+function swapAndProcess(el, html) {
+  el.innerHTML = html;
+  if (window.htmx && typeof window.htmx.process === 'function') {
+    window.htmx.process(el);
+  }
+}
+
 async function showFnVersionsPopover(fnEntity, anchorEl) {
   if (!fnEntity?.id) return;
   const popover = ensureFnVersionsPopover();
@@ -82,7 +91,7 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
         + resp.status + '</div>';
       return;
     }
-    popover.innerHTML = await resp.text();
+    swapAndProcess(popover, await resp.text());
   } catch (err) {
     popover.innerHTML = '<div class="fn-versions-error">'
       + 'Failed: ' + (err?.message || 'network error') + '</div>';
@@ -100,15 +109,14 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
   }
 }
 
-// Post-swap action wiring. The server fragment marks each switch /
-// restore / row-expand target with a data-attribute; we find them
-// by selector and bind handlers. Same contract the old JS-built
-// markup had, so the e2e tests that select on the same classes
-// keep passing.
+// Post-swap action wiring. Only switch + restore stay here — both
+// need behavior HTMX doesn't replicate cleanly (page navigation,
+// confirm() dialog). Row-expand-into-executions is HTMX-driven via
+// the row's `hx-get` attributes; nothing to bind for it.
 function bindFnVersionsActions(popover, fnEntity) {
   popover.querySelectorAll('[data-switch-to-branch]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
-      e.stopPropagation();
+      e.stopPropagation();   // don't trigger row-top hx-get
       const target = btn.getAttribute('data-switch-to-branch');
       if (target && typeof switchToBranch === 'function') switchToBranch(target);
     });
@@ -116,17 +124,8 @@ function bindFnVersionsActions(popover, fnEntity) {
 
   popover.querySelectorAll('.fn-versions-restore').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
+      e.stopPropagation();   // don't trigger row-top hx-get
       await restoreFnVersion(fnEntity, btn.getAttribute('data-fn-version-id'));
-    });
-  });
-
-  popover.querySelectorAll('.fn-versions-row[data-fn-version-id]').forEach((row) => {
-    row.addEventListener('click', (e) => {
-      if (e.target.closest('.fn-versions-switch')
-          || e.target.closest('.fn-versions-restore')
-          || e.target.closest('.fn-versions-execs')) return;
-      toggleVersionExecutions(row, row.getAttribute('data-fn-version-id'));
     });
   });
 }
@@ -193,100 +192,10 @@ async function restoreFnVersion(fnEntity, versionId) {
 }
 
 
-async function toggleVersionExecutions(rowEl, versionId) {
-  const existing = rowEl.querySelector('.fn-versions-execs');
-  if (existing) {
-    existing.remove();
-    rowEl.classList.remove('fn-versions-row-expanded');
-    return;
-  }
-  const host = document.createElement('div');
-  host.className = 'fn-versions-execs';
-  host.innerHTML = '<div class="fn-versions-execs-loading">Loading runs…</div>';
-  rowEl.appendChild(host);
-  rowEl.classList.add('fn-versions-row-expanded');
-  try {
-    const resp = await window.authFetch(
-      '/api/executions?fn-version-id=' + encodeURIComponent(versionId));
-    if (resp.status === 401) {
-      host.innerHTML = '<div class="fn-versions-execs-error">'
-        + 'Sign in to view runs.</div>';
-      return;
-    }
-    if (!resp.ok) {
-      host.innerHTML = '<div class="fn-versions-execs-error">HTTP '
-        + resp.status + '</div>';
-      return;
-    }
-    const body = await resp.json();
-    if (body?.ok === false) {
-      host.innerHTML = '<div class="fn-versions-execs-error">'
-        + escapeText(body.error || 'Failed') + '</div>';
-      return;
-    }
-    renderVersionExecutions(host, body.executions || []);
-  } catch (err) {
-    host.innerHTML = '<div class="fn-versions-execs-error">'
-      + escapeText(err?.message || 'network error') + '</div>';
-  }
-  if (typeof anchorBelowClamped === 'function' && _fnVersionsAnchor) {
-    // Content grew — re-anchor so the popover stays on-screen.
-    anchorBelowClamped(_fnVersionsPopover, _fnVersionsAnchor,
-                       { fallbackW: 320, fallbackH: 240 });
-  }
-}
-
-
-function renderVersionExecutions(host, executions) {
-  if (executions.length === 0) {
-    host.innerHTML = '<div class="fn-versions-execs-empty">'
-      + 'No runs of this version.</div>';
-    return;
-  }
-  const rows = executions.map(execRowHtml).join('');
-  host.innerHTML = '<div class="fn-versions-execs-list">' + rows + '</div>';
-}
-
-
-function execRowHtml(e) {
-  const status = e.status || '?';
-  const started = shortTimestamp(e['started-at'] || '');
-  const result = e.result !== undefined && e.result !== null
-                 ? truncate(String(typeof e.result === 'string'
-                                   ? e.result : JSON.stringify(e.result)), 32)
-                 : (e.error ? truncate(String(e.error), 32) : '');
-  return ''
-    + '<div class="fn-versions-execs-row">'
-    +   '<span class="fn-versions-execs-status fn-versions-execs-status-'
-    +     escapeAttr(status) + '">'
-    +     escapeText(status)
-    +   '</span>'
-    +   '<span class="fn-versions-execs-ts">' + escapeText(started) + '</span>'
-    +   (result
-        ? '<span class="fn-versions-execs-result">' + escapeText(result) + '</span>'
-        : '')
-    + '</div>';
-}
-
 function shortTimestamp(ts) {
   if (!ts) return '';
   const m = ts.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
   return m ? (m[1] + ' ' + m[2]) : ts;
-}
-
-function truncate(s, n) {
-  return s.length > n ? s.slice(0, n - 1) + '…' : s;
-}
-
-function escapeText(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
-
-function escapeAttr(s) {
-  return (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 window.showFnVersionsPopover = showFnVersionsPopover;

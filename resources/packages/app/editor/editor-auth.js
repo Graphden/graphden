@@ -320,5 +320,16 @@ async function submitAuth() {
 // Bootstrapped from editor-main.js after DOMContentLoaded.
 window.initAuthLock = initAuthLock;
 window.authFetch = authFetch;
+
+// HTMX bridge — HTMX makes its own `fetch()` calls (`hx-get`/`hx-post`),
+// bypassing authFetch. Without this hook, every HTMX-driven partial
+// on an auth-required route would 401. The `htmx:configRequest`
+// event fires before each request; we attach the Bearer token from
+// the same localStorage entry authFetch reads, so HTMX inherits the
+// session login automatically.
+document.body.addEventListener('htmx:configRequest', (evt) => {
+  const pw = getAuthPassword();
+  if (pw) evt.detail.headers.Authorization = 'Bearer ' + pw;
+});
 window.authMutate = authMutate;
 window.isAuthenticated = isAuthenticated;

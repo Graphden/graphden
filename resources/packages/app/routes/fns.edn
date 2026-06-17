@@ -81,6 +81,11 @@
    :parent :get-auth-required
    :args {:path "/partials/fn-versions" :handler :_partial-fn-versions-handler}}
 
+  {:name :partial-fn-version-executions
+   :description "GET /partials/fn-version-executions?fn-version-id=X — executions sub-list for one version row, served as `text/html`. HTMX-fetched from each `:partial-fn-versions` row on click."
+   :parent :get-auth-required
+   :args {:path "/partials/fn-version-executions" :handler :_partial-fn-version-executions-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

@@ -1,0 +1,24 @@
+# Force-text source extensions so git's auto-detect heuristic (which
+# trips on any embedded \x00 byte) doesn't silently switch to binary
+# mode. Real-world example that motivated this file: editor-literal-
+# types.js once had a raw NUL inside a cache-key string literal —
+# git treated the whole file as binary, `grep` without `-a` skipped
+# it, and three downstream popovers looked dead from the outside
+# even though they worked at runtime. The file was un-binary'd in
+# a follow-up commit (escape sequence instead of raw byte), but
+# this attributes file keeps the failure from recurring silently.
+
+*.clj   text diff
+*.cljc  text diff
+*.cljs  text diff
+*.edn   text diff
+*.js    text diff
+*.mjs   text diff
+*.cjs   text diff
+*.css   text diff
+*.html  text diff
+*.svg   text diff
+*.md    text diff
+*.sql   text diff
+*.sh    text diff
+*.bb    text diff

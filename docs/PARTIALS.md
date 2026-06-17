@@ -348,10 +348,18 @@ returns `:any` from the type-checker's POV, and a `:count` /
 `types/sweep-regression`. Runtime is fine — the cond's apply
 branch is the only path the partial-renderer's caller reaches.
 
-Until the type-checker grows cond-then-get narrowing, the
-work-around is to add the affected fn-def names to
-`graphden.types.check/allowed-type-check-failures` with a
-comment pointing at this section.
+Investigation status: `get-return-rule` (`core/collections/impls.clj`
+line 432) ALREADY narrows through union-typed `:coll` by mapping
+over `union-members` and re-unioning the per-member results. So
+the gap is upstream — `cond-return-rule` likely emits the
+combined return as `[:union [:map :any :any] …]` rather than a
+union of NARROW shape-records, and the per-member narrowing then
+opaqued out at the first member that's `[:map :any :any]`.
+
+Until the cond shape-inference is tightened, the work-around is
+to add the affected fn-def names to
+`graphden.types.check/allowed-type-check-failures` with a comment
+pointing at this section.
 
 ### 11. Convention: string-input base-fns use `:string`, NOT `:s`
 

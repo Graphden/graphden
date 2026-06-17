@@ -152,9 +152,9 @@
    :parent :const}
 
   {:name :equal?
-   :description "Two-arg equality (Clojure's `=`). Composition-friendly variant of `:eq`."
-   :args {:a {:type :any :description "Left operand."}
-          :b {:type :any :description "Right operand."}}
+   :description "Two-arg equality (Clojure's `=`). Composition-friendly variant of `:eq`. The typevar `a` requires both operands to unify to a compatible type — sync-time guard against `:keyword` vs `:text` and similar cross-type compare typos (the dominant gotcha when comparing a server-derived kw field to a string-literal `{:value \"foo\"}`)."
+   :args {:a {:type a :description "Left operand."}
+          :b {:type a :description "Right operand."}}
    :return-type :bool}
 
   {:name :constant-time-equal?

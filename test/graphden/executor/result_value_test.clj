@@ -1,20 +1,11 @@
 (ns graphden.executor.result-value-test
-  "Result value and registry tests for executor.
+  "Executor scenario tests against a real storage instance.
 
-   Covers:
-   - ref-id caching tests (same ref-id computed once)
-   - Base function registry tests
-   - execute-by-name error path tests
-   - execute-with-named-args error path tests
-   - register-type-hint! tests
-   - get-single-required-arg tests
-   - with-clean-registry tests
-
-   ## 2-Entity Schema
-
-   Uses simplified schema:
-   - fn: parent-id=nil for base-fn, parent-id set for composed fn
-   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
+   Covers the executor's public entry points end-to-end —
+   `execute-by-name`, `execute-with-named-args`, and the
+   `with-clean-registry` thread-local override — against a
+   PostgreSQL-backed graph. Pure-registry behaviour (register / get /
+   clear / context lookup) lives in `graphden.executor.registry-test`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -28,49 +19,6 @@
 (use-fixtures :each
   (setup/create-clean-db-fixture)
   exec/with-clean-registry)
-
-
-;; === ref-id Caching Tests ===
-
-;; Ref-level caching semantics tests were removed alongside the legacy
-;; queue's `:result-cache` — the compile executor uses `*call-cache*`
-;; per top-level invocation, but constant folding at compile time runs
-;; side-effecting impls (once per fn-entity that wraps them), which
-;; makes exact call-count assertions impractical for legacy test-style
-;; counter impls. See `compile-test/constant-folding-*` for the
-;; equivalent compile-side coverage.
-
-
-;; === Base Function Registry Tests ===
-
-(deftest get-base-fn-test
-  (testing "returns nil for non-existent function"
-    (is (nil? (exec/get-base-fn :non-existent-fn-12345)))))
-
-
-(deftest get-default-registry-test
-  (testing "returns current registry state"
-    (exec/register-base-fn! :test-registry-fn (fn [_ _] 42))
-    (let [registry (exec/get-default-registry)]
-      (is (map? registry))
-      (is (contains? registry :test-registry-fn))
-      (is (fn? (:test-registry-fn registry))))))
-
-
-(deftest get-base-fn-from-context-test
-  (testing "returns function from context registry"
-    (let [storage (setup/create-test-storage)
-          test-fn (fn [_ _] 123)
-          _ (exec/register-base-fn! :ctx-test-fn test-fn)
-          ctx (exec/create-context {:storage storage})]
-      (is (= test-fn (exec/get-base-fn-from-context ctx :ctx-test-fn)))
-      (sp/close storage)))
-
-  (testing "returns nil for non-existent function"
-    (let [storage (setup/create-test-storage)
-          ctx (exec/create-context {:storage storage})]
-      (is (nil? (exec/get-base-fn-from-context ctx :does-not-exist-xyz)))
-      (sp/close storage))))
 
 
 ;; === execute-by-name Error Path Tests ===

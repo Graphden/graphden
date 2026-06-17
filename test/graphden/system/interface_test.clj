@@ -21,7 +21,23 @@
       (is (map? config) "Config should be a map")
       (is (contains? config :db/schema) "Config should have :db/schema")
       (is (contains? config :db/postgres) "Config should have :db/postgres")
-      (is (contains? config :db/versioned) "Config should have :db/versioned")))
+      (is (contains? config :db/versioned) "Config should have :db/versioned")
+      (is (contains? config :exec/base-fns) "Config should have :exec/base-fns")
+      (is (contains? config :exec/context) "Config should have :exec/context")))
+
+  (testing "read-config returns valid config for :dev profile"
+    (let [config (sys/read-config :dev)]
+      (is (map? config))
+      (is (contains? config :db/schema))
+      (is (contains? config :db/postgres))))
+
+  (testing "read-config returns valid config for :prod profile (incl. service reconciler)"
+    (let [config (sys/read-config :prod)]
+      (is (map? config))
+      (is (contains? config :db/schema))
+      (is (contains? config :db/postgres))
+      (is (contains? config :exec/service-reconciler)
+          ":prod must wire the service reconciler (see docs/SERVICES.md)")))
 
   (testing "read-config throws for invalid profile"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo

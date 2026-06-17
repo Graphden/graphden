@@ -66,16 +66,14 @@
         (is (= -1 (sub-fn {:a (literal-delay 3) :b (literal-delay 4)} nil))))))
 
   (testing "register-base-fns! handles empty defs map"
-    ;; This tests the doseq with empty input
     (registry/register-base-fns! {})
-    ;; Should not throw, just do nothing
-    (is true))
+    (is (nil? (exec/get-base-fn :nonexistent))
+        "no spurious side-effects on empty input"))
 
   (testing "register-base-fns! handles nil defs map"
-    ;; This tests the doseq with nil input
     (registry/register-base-fns! nil)
-    ;; Should not throw, just do nothing
-    (is true))
+    (is (nil? (exec/get-base-fn :nonexistent))
+        "no spurious side-effects on nil input"))
 
   (testing "register-base-fns! handles def with nil :impl"
     ;; When :impl is nil, register-base-fn! receives nil function
@@ -111,7 +109,8 @@
 
   (testing "handles empty defs"
     (core/register-base-fns! {})
-    (is true)))
+    (is (nil? (exec/get-base-fn :nonexistent))
+        "no spurious side-effects on empty input")))
 
 
 ;; === initialize-with-base-fns! Tests ===

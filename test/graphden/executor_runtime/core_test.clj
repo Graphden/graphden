@@ -41,32 +41,10 @@
 ;; Config Tests
 ;; =============================================================================
 
-(deftest read-config-test
-  (testing "read-config returns valid Integrant config for :test profile"
-    (let [config (sys/read-config :test)]
-      (is (map? config))
-      (is (contains? config :db/schema))
-      (is (contains? config :db/postgres))
-      (is (contains? config :db/versioned))
-      (is (contains? config :exec/base-fns))
-      (is (contains? config :exec/context))))
-
-  (testing "read-config returns valid config for :dev profile"
-    (let [config (sys/read-config :dev)]
-      (is (map? config))
-      (is (contains? config :db/schema))
-      (is (contains? config :db/postgres))))
-
-  (testing "read-config returns valid config for :prod profile"
-    (let [config (sys/read-config :prod)]
-      (is (map? config))
-      (is (contains? config :db/schema))
-      (is (contains? config :db/postgres))
-      ;; Phase 1 service registry replaced :http/server with the
-      ;; service reconciler — the supervisor reads enabled :service
-      ;; rows and falls back to package-declared :startup-fn when no
-      ;; rows exist (see docs/SERVICES.md).
-      (is (contains? config :exec/service-reconciler)))))
+;; `read-config-test` lives in `graphden.system.interface-test` — the
+;; unit-level home for `sys/read-config`. It covers :test/:dev/:prod
+;; profiles, the :exec/service-reconciler key in :prod, and the
+;; invalid-profile throw. Don't re-test here.
 
 
 (deftest config-dependencies-test
@@ -182,11 +160,8 @@
 ;; Error Handling Tests
 ;; =============================================================================
 
-(deftest invalid-profile-test
-  (testing "Invalid profile throws on read-config"
-    (is (thrown? Exception
-          (sys/read-config :invalid-profile)))))
-
+;; `invalid-profile-test` for `sys/read-config` lives in
+;; `graphden.system.interface-test` — see "throws for invalid profile".
 
 (deftest missing-jdbc-url-test
   (testing "System fails to start without JDBC URL"

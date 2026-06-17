@@ -134,115 +134,116 @@
         result))))
 
 
+(defn- constraint-tagged?
+  "True when `f`'s `:constraint` is a vector whose first element is
+   `tag` — the shape of structural-type markers (`[:union …]`,
+   `[:variant …]`, `[:fn …]`, `[:map …]`, `[:tuple …]`)."
+  [f tag]
+  (and (vector? (:constraint f))
+       (= tag (first (:constraint f)))))
+
+
+(defn- marker-type?
+  "Marker-bearing rows carry their structural form via FK fields
+   (`:base-fn-id` / `:element-fn-id`) or a tagged `:constraint`
+   vector. Used to skip the `record-shape` interpretation for type
+   rows that would otherwise misclassify (e.g. `:positive-int` has a
+   synthesised `:value` slot that `record-shape` would read as the
+   record `{:value :int}`, losing the refinement constraint)."
+  [f]
+  (or (some? (:base-fn-id f))
+      (some? (:element-fn-id f))
+      (constraint-tagged? f :union)
+      (constraint-tagged? f :variant)
+      (constraint-tagged? f :fn)
+      (constraint-tagged? f :map)
+      (constraint-tagged? f :tuple)))
+
+
+(defn- type-row?
+  "Fn rows we'll surface as type-rows in the augmented snapshot:
+   - refinements / lists / unions / variants (marker-bearing), OR
+   - genuine record-types (no parent-ids, no impl-hash, has fn-slots)."
+  [f slots-by-fn]
+  (and (:name f)
+       (or (marker-type? f)
+           (and (empty? (:parent-ids f))
+                (nil? (:impl-hash f))
+                (seq (get slots-by-fn (:id f)))))))
+
+
+(defn- record-shape
+  "Project a fn-row's own slots into the record map
+   `{slot-name slot-type-name}`, in `:position` order. Returns nil
+   when the fn-row owns no slots (every other shape is handled by
+   `rich-type-from-row`)."
+  [f slots-by-fn slot-by-id fns-by-id]
+  (when-let [own (seq (get slots-by-fn (:id f)))]
+    (into {}
+          (keep (fn [fs]
+                  (when-let [s (get slot-by-id (:slot-id fs))]
+                    (when-let [tn (some-> (:type-fn-id s)
+                                          fns-by-id
+                                          :name
+                                          keyword)]
+                      [(keyword (:name s)) tn]))))
+          (sort-by :position own))))
+
+
+(defn- type-row-entry
+  "Augment-snapshot entry for a single type-row. Returns nil when the
+   existing snapshot already has a CALLABLE entry the augmentation
+   would shadow (non-empty :args, non-`:any` :return)."
+  [f acc slots-by-fn slot-by-id fns-by-id]
+  (let [;; Marker-bearing rows (refinement / list / union / variant /
+        ;; …) carry their structural form via `rich-type-from-row` —
+        ;; `record-shape` would misclassify them. Fall back to
+        ;; `record-shape` only when no marker FK / tag is present.
+        structural (if (marker-type? f)
+                     (tc/rich-type-from-row f fns-by-id)
+                     (or (record-shape f slots-by-fn slot-by-id fns-by-id)
+                         (tc/rich-type-from-row f fns-by-id)))
+        n (some-> (:name f) keyword)
+        existing (get acc n)
+        ;; A real type-row's registry entry (when one exists from a
+        ;; prior pass) has empty :args — type-rows aren't called,
+        ;; they're just shapes. Base-fns whose declared `:return-type
+        ;; :any` would otherwise match the override criterion (`:invoke`,
+        ;; `:call`, …) would get clobbered by the structural-shape
+        ;; override and lose their real args. The empty-args guard
+        ;; keeps them out.
+        real-type-row? (or (nil? existing)
+                           (and (= :any (:return existing))
+                                (empty? (:args existing))))]
+    (when (and n structural real-type-row?)
+      ;; `:type-row? true` marks augmented entries so callers (e.g.
+      ;; `types-candidates`) can skip them — a type-row isn't itself
+      ;; callable, just a shape. Real fns whose declared return
+      ;; happens to be a structural type come through the original
+      ;; `record-rich-types-raw!` path and have no `:type-row?` flag,
+      ;; so they stay candidate-eligible.
+      [n (cond-> {:return structural :args {} :effects #{}
+                  :type-row? true}
+           (and (:description f) (seq (:description f)))
+           (assoc :description (:description f)))])))
+
+
 (defn- rich-types-with-type-rows-uncached
   [raw-snapshot graph]
-  (let [snapshot (update-vals raw-snapshot project-rich-type-entry)
-        fns (:fns graph)
-        slots (:slots graph)
-        fn-slots (:fn-slots graph)
-        fns-by-id (into {} (map (juxt :id identity)) fns)
-        slot-by-id (into {} (map (juxt :id identity)) slots)
-        slots-by-fn (group-by :fn-id fn-slots)
-        ;; Type-rows we'll surface:
-        ;; - refinements (have :base-fn-id)
-        ;; - list-types (have :element-fn-id)
-        ;; - record-types (empty parent-ids + no impl-hash + has fn-slots)
-        ;; - union / variant / fn-type rows (have :constraint shaped as
-        ;;   `[:union …]` / `[:variant …]` / `[:fn args ret]` —
-        ;;   payload goes through `rich-type-from-row` which knows
-        ;;   all three shapes)
-        constraint-tagged?
-        (fn [f tag]
-          (and (vector? (:constraint f))
-               (= tag (first (:constraint f)))))
-        ;; Marker-bearing rows = `:base-fn-id` / `:element-fn-id` set,
-        ;; or a `:constraint` whose first element is one of the closed
-        ;; structural-type tags. `type-row?` reuses this set to decide
-        ;; inclusion; the reduce body below reuses it to decide whether
-        ;; `record-shape` is a safe interpretation or would mis-read a
-        ;; marker-bearing row as a record.
-        marker-type?
-        (fn [f]
-          (or (some? (:base-fn-id f))
-              (some? (:element-fn-id f))
-              (constraint-tagged? f :union)
-              (constraint-tagged? f :variant)
-              (constraint-tagged? f :fn)
-              (constraint-tagged? f :map)
-              (constraint-tagged? f :tuple)))
-        type-row?
-        (fn [f]
-          (and (:name f)
-               (or (marker-type? f)
-                   (and (empty? (:parent-ids f))
-                        (nil? (:impl-hash f))
-                        (seq (get slots-by-fn (:id f)))))))
-        record-shape
-        (fn [f]
-          (when-let [own (seq (get slots-by-fn (:id f)))]
-            (into {}
-                  (keep (fn [fs]
-                          (when-let [s (get slot-by-id (:slot-id fs))]
-                            (when-let [tn (some-> (:type-fn-id s)
-                                                  fns-by-id
-                                                  :name
-                                                  keyword)]
-                              [(keyword (:name s)) tn]))))
-                  (sort-by :position own))))]
+  (let [snapshot    (update-vals raw-snapshot project-rich-type-entry)
+        fns         (:fns graph)
+        fns-by-id   (into {} (map (juxt :id identity)) fns)
+        slot-by-id  (into {} (map (juxt :id identity)) (:slots graph))
+        slots-by-fn (group-by :fn-id (:fn-slots graph))]
     ;; Single pass: walk every fn, skip non-type-rows inline. Cache-
     ;; miss path — acceptable perf — but one reduce reads cleaner
     ;; than the prior filter-then-reduce two-walk.
     (reduce (fn [acc f]
-              (if-not (type-row? f)
+              (if-not (type-row? f slots-by-fn)
                 acc
-                (let [;; Marker-bearing rows (refinement / list / union /
-                      ;; variant) carry their structural form via
-                      ;; `rich-type-from-row` — `record-shape` would
-                      ;; misclassify e.g. `:positive-int` (which has a
-                      ;; synthesised `:value` slot for the inner-type
-                      ;; binding) as the record `{:value :int}`,
-                      ;; losing the refinement constraint. Only fall
-                      ;; back to `record-shape` when no marker FK / tag
-                      ;; is present — the genuine record case.
-                      structural (if (marker-type? f)
-                                   (tc/rich-type-from-row f fns-by-id)
-                                   (or (record-shape f)
-                                       (tc/rich-type-from-row f fns-by-id)))
-                      n (some-> (:name f) keyword)
-                      existing (get acc n)
-                      ;; A real type-row's registry entry (when one
-                      ;; exists from a prior pass) has empty :args —
-                      ;; type-rows aren't called, they're just shapes.
-                      ;; Base-fns whose declared `:return-type :any`
-                      ;; would otherwise match the override criterion
-                      ;; (`:invoke`, `:call`, …) — they'd get clobbered
-                      ;; by the structural-shape override and lose
-                      ;; their real args. The empty-args guard keeps
-                      ;; them out.
-                      real-type-row? (or (nil? existing)
-                                         (and (= :any (:return existing))
-                                              (empty? (:args existing))))]
-                  ;; Prefer the structural form ([:refine …] / [:list …]
-                  ;; / record map) over a registry entry that just
-                  ;; records `:return :any` — without that, the type-
-                  ;; checker pass on a refinement / record type-row
-                  ;; overwrites the structural entry with a stub and the
-                  ;; editor loses constraint info.
-                  ;;
-                  ;; `:type-row? true` marks augmented entries so callers
-                  ;; (e.g. `types-candidates`) can skip them — a type-row
-                  ;; isn't itself callable, just a shape. Real fns whose
-                  ;; declared return happens to be a structural type
-                  ;; (`(:return-type :positive-int)` etc.) come through
-                  ;; the original `record-rich-types-raw!` path and have
-                  ;; no `:type-row?` flag, so they stay candidate-eligible.
-                  (if (and n structural real-type-row?)
-                    (assoc acc n (cond-> {:return structural :args {} :effects #{}
-                                          :type-row? true}
-                                   (and (:description f)
-                                        (seq (:description f)))
-                                   (assoc :description (:description f))))
-                    acc))))
+                (if-let [[n entry] (type-row-entry f acc slots-by-fn slot-by-id fns-by-id)]
+                  (assoc acc n entry)
+                  acc)))
             snapshot
             fns)))
 

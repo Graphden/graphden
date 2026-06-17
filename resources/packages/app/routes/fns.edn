@@ -76,6 +76,11 @@
    :args {:path "/partials/effect" :handler :_partial-effect-handler}
    :expects-effects #{}}                      ; pure lookup over a literal map
 
+  {:name :partial-fn-versions
+   :description "GET /partials/fn-versions?fn-id=X&current-branch=Y&title=Z — popover hiccup for one fn's version history, served as `text/html`. Reads from the same `:list-fn-versions` data chain `/api/fns/:id/versions` uses; the partial is the HTML projection of that JSON."
+   :parent :get-auth-required
+   :args {:path "/partials/fn-versions" :handler :_partial-fn-versions-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

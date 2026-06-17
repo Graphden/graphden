@@ -409,6 +409,269 @@
    :parent :html-ok-response
    :args {:body :_partial-effect-html}}
 
+  ;; ---------------------------------------------------------------------
+  ;; fn-versions popover (second migration). Pulls the existing
+  ;; `:list-fn-versions` data chain (in `app.branches`) for one fn-id
+  ;; from a query-string param, then maps each enriched version row
+  ;; into a hiccup `<div class="fn-versions-row">`. JS keeps only
+  ;; the fetch, anchoring, dismissal, AND the per-row switch /
+  ;; restore handlers (those rebind after innerHTML swap via the
+  ;; existing `data-switch-to-branch` / `data-fn-version-id` markers
+  ;; this fragment carries — same shape the legacy JS-built rows
+  ;; produced, so the e2e contract is preserved).
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-fn-versions-fn-id-str
+   :description "Raw `fn-id` query-string parameter — string UUID."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "fn-id"}}}
+
+  {:name :_partial-fn-versions-fn-id
+   :description "Parsed UUID for `fn-id`; nil when absent or malformed (`:list-fn-versions` returns an empty list on nil)."
+   :parent :parse-uuid
+   :args {:s :_partial-fn-versions-fn-id-str}}
+
+  {:name :_partial-fn-versions-current-branch
+   :description "Currently-selected branch name (from `?current-branch=`), used to highlight the matching row in the timeline. Empty string when absent — no row gets the `-current` class."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "current-branch"}}}
+
+  {:name :_partial-fn-versions-data
+   :description "Live versions data for the requested fn — wraps `:list-fn-versions`."
+   :parent :list-fn-versions
+   :args {:fn-id :_partial-fn-versions-fn-id}}
+
+  {:name :_partial-fn-versions-rows
+   :description "The `:versions` list out of `:list-fn-versions`'s envelope — already sorted latest-first, each row enriched with `:branch-name` and `:execution-count`."
+   :parent :get
+   :args {:coll :_partial-fn-versions-data
+          :key {:value :versions}
+          :default {:value []}}}
+
+  {:name :_partial-fn-versions-count
+   :parent :count
+   :args {:coll :_partial-fn-versions-rows}}
+
+  {:name :_partial-fn-versions-empty?
+   :parent :empty?
+   :args {:coll :_partial-fn-versions-rows}}
+
+  ;; --- Per-row HOF callback. Pure rendering: takes one enriched
+  ;; version row (`:item`), returns a hiccup `<div class="fn-versions-row">`
+  ;; with the same CSS classes + data-attributes the legacy JS produced
+  ;; (post-swap JS binds switch / restore handlers by selector).
+
+  {:name :_partial-fnv-row-branch-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :branch-name} :default {:value "(unknown)"}}}
+
+  {:name :_partial-fnv-row-version-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default {:value ""}}}
+
+  {:name :_partial-fnv-row-created-at
+   :parent :get
+   :args {:coll {:as :item} :key {:value :created-at} :default {:value ""}}}
+
+  ;; Timestamp shown as "YYYY-MM-DD HH:MM" — first 16 chars of either
+  ;; "2026-05-24 06:21:21.103" (SQL) or "2026-05-24T06:35Z" (ISO).
+  ;; `:subs` errors on shorter strings; coalesce to "" via the default
+  ;; above keeps us out of the edge.
+  {:name :_partial-fnv-row-ts-short
+   :parent :subs
+   :args {:string :_partial-fnv-row-created-at
+          :start {:value 0}
+          :end {:value 16}}}
+
+  {:name :_partial-fnv-row-on-current?
+   :parent :equal?
+   :args {:a :_partial-fnv-row-branch-name
+          :b :_partial-fn-versions-current-branch}}
+
+  {:name :_partial-fnv-row-branch-class
+   :description "`fn-versions-branch` plus `fn-versions-branch-current` when the row's branch matches the current-branch query param."
+   :parent :if
+   :args {:test :_partial-fnv-row-on-current?
+          :then {:value "fn-versions-branch fn-versions-branch-current"}
+          :else {:value "fn-versions-branch"}}}
+
+  {:name :_partial-fnv-row-branch-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :class}
+                         :value :_partial-fnv-row-branch-class}}
+          :children [:_partial-fnv-row-branch-name]}}
+
+  {:name :_partial-fnv-row-ts-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "fn-versions-ts"}}
+          :children [:_partial-fnv-row-ts-short]}}
+
+  ;; Description text (e.g. "desc=hello world, impl-hash") — same
+  ;; describeVersionContent logic the JS does. v1: just description
+  ;; when present, otherwise empty span — keeps the row layout stable.
+  {:name :_partial-fnv-row-description-text
+   :parent :get
+   :args {:coll {:as :item} :key {:value :description} :default {:value ""}}}
+
+  {:name :_partial-fnv-row-meta-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-row-meta"}}
+          :children [:_partial-fnv-row-description-text]}}
+
+  ;; Restore button — always rendered. The API rejects no-op restores,
+  ;; so leaving it visible on the current-branch latest is fine.
+  {:name :_partial-fnv-row-restore-attrs
+   :parent :assoc
+   :args {:map {:value {:class "fn-versions-restore"
+                        :title "Restore this version’s fn-level fields on the current branch"}}
+          :key {:value :data-fn-version-id}
+          :value :_partial-fnv-row-version-id}}
+
+  {:name :_partial-fnv-row-restore-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_partial-fnv-row-restore-attrs
+          :children ["restore"]}}
+
+  ;; Switch button — only when this row's branch differs from the
+  ;; currently-active branch. Stays as an empty placeholder span on
+  ;; the current-branch row so the children-list length is stable.
+  {:name :_partial-fnv-row-switch-title-prefix
+   :parent :str-join
+   :args {:coll [{:value "Switch the editor to "}
+                 :_partial-fnv-row-branch-name]
+          :separator {:value ""}}}
+
+  {:name :_partial-fnv-row-switch-attrs-base
+   :description "First step — `{:class \"fn-versions-switch\" :data-switch-to-branch <branch-name>}`."
+   :parent :assoc
+   :args {:map {:value {:class "fn-versions-switch"}}
+          :key {:value :data-switch-to-branch}
+          :value :_partial-fnv-row-branch-name}}
+
+  {:name :_partial-fnv-row-switch-attrs
+   :description "Second step — also assoc `:title \"Switch the editor to <branch>\"`."
+   :parent :assoc
+   :args {:map :_partial-fnv-row-switch-attrs-base
+          :key {:value :title}
+          :value :_partial-fnv-row-switch-title-prefix}}
+
+  {:name :_partial-fnv-row-switch-btn-shown
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_partial-fnv-row-switch-attrs
+          :children ["switch"]}}
+
+  {:name :_partial-fnv-row-switch-btn-hidden
+   :description "Empty span on current-branch rows — keeps the children-vector shape uniform across rows."
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "fn-versions-switch-placeholder" :hidden "1"}}
+          :children {:value []}}}
+
+  {:name :_partial-fnv-row-switch-btn
+   :parent :if
+   :args {:test :_partial-fnv-row-on-current?
+          :then :_partial-fnv-row-switch-btn-hidden
+          :else :_partial-fnv-row-switch-btn-shown}}
+
+  ;; Top row: branch chip + timestamp + restore + switch.
+  {:name :_partial-fnv-row-top
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-row-top"}}
+          :children [:_partial-fnv-row-branch-span
+                     :_partial-fnv-row-ts-span
+                     :_partial-fnv-row-restore-btn
+                     :_partial-fnv-row-switch-btn]}}
+
+  {:name :_partial-fnv-row-attrs
+   :parent :assoc
+   :args {:map {:value {:class "fn-versions-row" :role "listitem"}}
+          :key {:value :data-fn-version-id}
+          :value :_partial-fnv-row-version-id}}
+
+  {:name :_partial-fnv-row
+   :description "Per-row hiccup. Carries `data-fn-version-id` for post-swap action wiring (switch / restore bindings in JS)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_partial-fnv-row-attrs
+          :children [:_partial-fnv-row-top :_partial-fnv-row-meta-div]}}
+
+  ;; Map each enriched version row to a hiccup row.
+  {:name :_partial-fnv-rendered-rows
+   :parent :map
+   :args {:func :_partial-fnv-row :coll :_partial-fn-versions-rows}}
+
+  {:name :_partial-fnv-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-list" :role "list"}}
+          :children :_partial-fnv-rendered-rows}}
+
+  {:name :_partial-fnv-header-title
+   :description "`<{name}> · {N} versions` — concise header line. Title text passed via `?title=` so the JS doesn't need to fetch the fn first."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "title"}}}
+
+  {:name :_partial-fnv-count-text
+   :parent :to-str
+   :args {:value :_partial-fn-versions-count}}
+
+  ;; "<title> · <N> versions" — joined with literal separator. Singular/
+  ;; plural handling deferred (v1 always uses "versions", JS legacy
+  ;; matched singular when count == 1; can refine in v2 with an :if).
+  {:name :_partial-fnv-header-text
+   :parent :str-join
+   :args {:coll [:_partial-fnv-header-title
+                 {:value " · "}
+                 :_partial-fnv-count-text
+                 {:value " versions"}]
+          :separator {:value ""}}}
+
+  {:name :_partial-fnv-header
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-header"}}
+          :children [:_partial-fnv-header-text]}}
+
+  {:name :_partial-fnv-empty-msg
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-empty"}}
+          :children ["No version history rows yet."]}}
+
+  ;; On empty → header + empty-msg; otherwise header + list.
+  {:name :_partial-fnv-body
+   :parent :if
+   :args {:test :_partial-fn-versions-empty?
+          :then :_partial-fnv-empty-msg
+          :else :_partial-fnv-list}}
+
+  {:name :_partial-fnv-fragment
+   :description "Full hiccup fragment for the fn-versions popover — header + body (list or empty message)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "fn-versions-content"}}
+          :children [:_partial-fnv-header :_partial-fnv-body]}}
+
+  {:name :_partial-fnv-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-fnv-fragment}}
+
+  {:name :_partial-fn-versions-handler
+   :description "Ring handler for `GET /partials/fn-versions?fn-id=X&current-branch=Y&title=Z` — returns the popover hiccup as `text/html`. JS swaps the response into the popover and rebinds switch / restore handlers using the row-level `data-fn-version-id` markers."
+   :parent :html-ok-response
+   :args {:body :_partial-fnv-html}}
+
   ;; Concrete editor routes (`/`, `/favicon.ico`, `/partials/...`,
   ;; `/api/entities/...`, `/api/sequence/...`) live in `app.routes`;
   ;; they reference the handler fn-defs above by name.

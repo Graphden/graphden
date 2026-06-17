@@ -1,17 +1,24 @@
 // Editor fn-version history — popover showing every :fn-version row
 // for one fn, joined with the branch name it was authored on. Anchored
 // below the ⌛ History action in the fn-card row-actions popover (see
-// editor-overlay-fn.js). Read-only timeline: each row shows when the
-// version landed + which branch it lives on, with a "Switch" link
-// that jumps the editor to that branch via the existing
-// `switchToBranch` plumbing.
+// editor-overlay-fn.js).
 //
-// Backed by GET /api/fns/:fn-id/versions (auth-required) — see
-// graphden.crud.branches/list-fn-versions.
+// The popover CONTENT lives in the graph: `app/editor/fns.edn`
+// renders the hiccup fragment, `GET /partials/fn-versions?fn-id=...`
+// serves it as `text/html`. This module owns mount-point lifecycle,
+// fetch, anchoring, dismissal, and the post-swap action wiring
+// (switch / restore / row expansion). Per-row click handlers find
+// their targets by the `data-fn-version-id` / `data-switch-to-branch`
+// markers the server fragment carries.
+//
+// The lazy executions sub-panel (toggled on row click) still goes
+// through `/api/executions` + JS rendering — keeping it in JS for
+// this commit, separate POC migration when the next list is moved.
 
 let _fnVersionsPopover = null;
 let _fnVersionsAnchor = null;
 let _fnVersionsFnId = null;
+let _fnVersionsFnEntity = null;
 
 function ensureFnVersionsPopover() {
   if (_fnVersionsPopover) return _fnVersionsPopover;
@@ -39,6 +46,7 @@ function closeFnVersionsPopover() {
     _fnVersionsPopover.classList.add('hidden');
     _fnVersionsAnchor = null;
     _fnVersionsFnId = null;
+    _fnVersionsFnEntity = null;
   }
 }
 
@@ -47,6 +55,7 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
   const popover = ensureFnVersionsPopover();
   _fnVersionsAnchor = anchorEl;
   _fnVersionsFnId = fnEntity.id;
+  _fnVersionsFnEntity = fnEntity;
 
   popover.innerHTML = '<div class="fn-versions-loading">Loading history…</div>';
   popover.classList.remove('hidden');
@@ -54,10 +63,15 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
     anchorBelowClamped(popover, anchorEl, { fallbackW: 320, fallbackH: 180 });
   }
 
-  let body;
+  const currentBranch = (typeof getCurrentBranchName === 'function')
+    ? getCurrentBranchName() : 'main';
+  const title = fnEntity.name || '(anonymous)';
+  const url = '/partials/fn-versions?fn-id=' + encodeURIComponent(fnEntity.id)
+    + '&current-branch=' + encodeURIComponent(currentBranch)
+    + '&title=' + encodeURIComponent(title);
+
   try {
-    const resp = await window.authFetch(
-      '/api/fns/' + encodeURIComponent(fnEntity.id) + '/versions');
+    const resp = await window.authFetch(url);
     if (resp.status === 401) {
       popover.innerHTML = '<div class="fn-versions-error">'
         + 'Sign in to view version history.</div>';
@@ -68,7 +82,7 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
         + resp.status + '</div>';
       return;
     }
-    body = await resp.json();
+    popover.innerHTML = await resp.text();
   } catch (err) {
     popover.innerHTML = '<div class="fn-versions-error">'
       + 'Failed: ' + (err?.message || 'network error') + '</div>';
@@ -80,30 +94,18 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
     return;
   }
 
-  renderFnVersionsBody(popover, fnEntity, body);
+  bindFnVersionsActions(popover, fnEntity);
   if (typeof anchorBelowClamped === 'function') {
     anchorBelowClamped(popover, anchorEl, { fallbackW: 320, fallbackH: 180 });
   }
 }
 
-function renderFnVersionsBody(popover, fnEntity, body) {
-  const versions = body?.versions || [];
-  const currentBranch = (typeof getCurrentBranchName === 'function')
-    ? getCurrentBranchName() : 'main';
-  const title = fnEntity.name || '(anonymous)';
-  if (versions.length === 0) {
-    popover.innerHTML = '<div class="fn-versions-header">'
-      + escapeText(title) + '</div>'
-      + '<div class="fn-versions-empty">No version history rows yet.</div>';
-    return;
-  }
-  const rows = versions.map((v) => fnVersionRowHtml(v, currentBranch)).join('');
-  popover.innerHTML =
-    '<div class="fn-versions-header">'
-    + escapeText(title)
-    + ' · ' + versions.length + ' version' + (versions.length === 1 ? '' : 's')
-    + '</div>'
-    + '<div class="fn-versions-list" role="list">' + rows + '</div>';
+// Post-swap action wiring. The server fragment marks each switch /
+// restore / row-expand target with a data-attribute; we find them
+// by selector and bind handlers. Same contract the old JS-built
+// markup had, so the e2e tests that select on the same classes
+// keep passing.
+function bindFnVersionsActions(popover, fnEntity) {
   popover.querySelectorAll('[data-switch-to-branch]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -112,8 +114,6 @@ function renderFnVersionsBody(popover, fnEntity, body) {
     });
   });
 
-  // Restore — write a new version on the CURRENT branch with the
-  // historic version's data. Bindings aren't touched (see S1 caveat).
   popover.querySelectorAll('.fn-versions-restore').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -121,12 +121,10 @@ function renderFnVersionsBody(popover, fnEntity, body) {
     });
   });
 
-  // Click on a row body → expand inline executions for that version.
-  // Lazy-fetch so users who only want to glance at the timeline pay
-  // no per-version cost.
   popover.querySelectorAll('.fn-versions-row[data-fn-version-id]').forEach((row) => {
     row.addEventListener('click', (e) => {
       if (e.target.closest('.fn-versions-switch')
+          || e.target.closest('.fn-versions-restore')
           || e.target.closest('.fn-versions-execs')) return;
       toggleVersionExecutions(row, row.getAttribute('data-fn-version-id'));
     });
@@ -136,11 +134,9 @@ function renderFnVersionsBody(popover, fnEntity, body) {
 
 async function restoreFnVersion(fnEntity, versionId) {
   if (!fnEntity || !versionId) return;
-  // The version data is in the loaded list — find it. Avoids a
-  // round-trip to fetch what we already have.
-  const list = document.getElementById('fn-versions-popover');
-  // Cached body data is on the popover element via WeakMap-like
-  // closure — we keep it accessible by re-fetching here on demand.
+  // Fetch the version row from the JSON API to pull the historic
+  // field values — the partial is render-only, the data is in
+  // `/api/fns/:id/versions`.
   let target;
   try {
     const resp = await window.authFetch(
@@ -168,7 +164,6 @@ async function restoreFnVersion(fnEntity, versionId) {
     + ' (description, impl-hash, return-type, constraint, …) on the current'
     + ' branch. Bindings are NOT touched — see VERSIONING.md § Subtleties.';
   if (!confirm(msg)) return;
-  // Build the PATCH payload — only fn-level versioned fields.
   const payload = {};
   for (const k of ['description', 'impl-hash', 'constraint',
                    'base-fn-id', 'element-fn-id', 'return-type-fn-id',
@@ -176,7 +171,6 @@ async function restoreFnVersion(fnEntity, versionId) {
     if (target[k] !== undefined) payload[k] = target[k];
   }
   try {
-    // The entity-update handler accepts form-encoded body; use that.
     const params = new URLSearchParams();
     for (const [k, v] of Object.entries(payload)) {
       params.set(k, typeof v === 'string' ? v : JSON.stringify(v));
@@ -188,19 +182,14 @@ async function restoreFnVersion(fnEntity, versionId) {
         body: params.toString() });
     if (!resp.ok) {
       const text = await resp.text();
-      alert('Restore failed: HTTP ' + resp.status
-            + '\n' + text.replace(/<[^>]+>/g, '').trim().slice(0, 200));
+      alert('Restore failed: HTTP ' + resp.status + ' — ' + text);
       return;
     }
-    // Success — reload so the editor re-fetches the fn and shows the
-    // restored state. The fn-versions popover will rebuild on next open
-    // and pick up the new version row.
-    location.reload();
+    closeFnVersionsPopover();
+    if (typeof applyGraphDataRefresh === 'function') applyGraphDataRefresh();
   } catch (err) {
     alert('Restore failed: ' + (err?.message || 'network error'));
   }
-  // Silence unused warning — host of the list cache is intentional.
-  void list;
 }
 
 
@@ -279,76 +268,10 @@ function execRowHtml(e) {
     + '</div>';
 }
 
-function fnVersionRowHtml(v, currentBranch) {
-  const branchName = v['branch-name'] || '(unknown)';
-  const ts = v['created-at'] || '';
-  const onCurrent = branchName === currentBranch;
-  const changed = describeVersionContent(v);
-  const execCount = v['execution-count'] || 0;
-  const execBadge = execCount > 0
-    ? '<span class="fn-versions-runs" title="Click row to expand runs">'
-      + execCount + ' run' + (execCount === 1 ? '' : 's') + '</span>'
-    : '';
-  // Restore button — write a new version on CURRENT branch with this
-  // historic row's data, effectively reverting the fn-level fields
-  // (description, impl-hash, return-type, constraint, …). Doesn't
-  // touch bindings — those are versioned separately; documented in
-  // VERSIONING.md § Subtleties. Hidden on the row that already IS
-  // current-branch latest (`onCurrent` covers the branch but the
-  // version-row may be older than current latest; the API rejects
-  // a no-op restore so we leave the button regardless for "rewind
-  // within the same branch" use cases).
-  const restoreBtn = '<button class="fn-versions-restore"'
-    + ' data-fn-version-id="' + escapeAttr(v.id || '') + '"'
-    + ' title="Restore this version’s fn-level fields on the current branch">'
-    + 'restore</button>';
-  return ''
-    + '<div class="fn-versions-row" role="listitem"'
-    + ' data-fn-version-id="' + escapeAttr(v.id || '') + '">'
-    + '<div class="fn-versions-row-top">'
-    +   '<span class="fn-versions-branch'
-    +     (onCurrent ? ' fn-versions-branch-current' : '') + '">'
-    +     escapeText(branchName)
-    +   '</span>'
-    +   '<span class="fn-versions-ts">' + escapeText(shortTimestamp(ts)) + '</span>'
-    +   execBadge
-    +   restoreBtn
-    +   (onCurrent
-        ? ''
-        : '<button class="fn-versions-switch"'
-          + ' data-switch-to-branch="' + escapeAttr(branchName) + '"'
-          + ' title="Switch the editor to ' + escapeAttr(branchName) + '">'
-          + 'switch</button>')
-    + '</div>'
-    + (changed
-        ? '<div class="fn-versions-row-meta">' + escapeText(changed) + '</div>'
-        : '')
-    + '</div>';
-}
-
 function shortTimestamp(ts) {
-  // The API returns SQL-shaped timestamps like
-  // "2026-05-24 06:21:21.103753" or ISO "2026-05-24T06:35Z" — keep
-  // YYYY-MM-DD HH:MM for compact display.
   if (!ts) return '';
   const m = ts.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})/);
   return m ? (m[1] + ' ' + m[2]) : ts;
-}
-
-function describeVersionContent(v) {
-  // Compact summary of the version's loaded fields — what changed
-  // structurally. The API returns the full version-data-fields slice;
-  // we surface the most user-visible ones (description, impl-hash,
-  // return-type, anonymous-hash) so the row says "this was the rename
-  // from x→y" or "this is the impl-hash bump".
-  const parts = [];
-  if (v.description) parts.push('desc=' + truncate(v.description, 40));
-  if (v['impl-hash']) parts.push('impl-hash');
-  if (v.constraint) parts.push('constraint');
-  if (v['return-type-fn-id']) parts.push('return-type');
-  if (v['anonymous-hash']) parts.push('anonymous');
-  if (v['deleted-at']) parts.push('DELETED on this branch');
-  return parts.join(', ');
 }
 
 function truncate(s, n) {

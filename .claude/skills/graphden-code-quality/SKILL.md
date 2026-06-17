@@ -396,6 +396,180 @@ kaocha NS другие потоки видят рекдеф. Если NS не `^
 Решение: либо `^:serial` метa на ns, либо вынести тест в отдельный
 `^:serial`-NS.
 
+### 9.5 Quality of assertions — слабые `(is)` ничего не доказывают
+
+Скилл §9.1-9.4 ловит ПУСТЫЕ assertions. §9.5+ ловит **зелёные тесты,
+которые проверяют не то что заявляют**.
+
+#### 9.5.1 Tautologies — `(is (= X X))`
+
+```bash
+# (is (= literal literal)) — обе стороны идентичны:
+grep -rEn '\(is\s+\(=\s+(:?\w+)\s+\1\s*\)' test --include='*.clj'
+
+# (is (= (f arg) (f arg))) — одинаковый вызов в обе стороны:
+grep -rEn '\(is\s+\(=\s+(\([^)]+\))\s+\1\s*\)' test --include='*.clj'
+```
+
+Always green, проверяет НИЧЕГО. Удалить или заменить на конкретный
+expected value.
+
+#### 9.5.2 Лень: `(is (some? …))` / `(is (not= nil …))` где известен expected
+
+```bash
+# (is (some? (function-call ...))) — где можно проверить точное значение:
+grep -rEn '\(is\s+\(some\?\s+\(' test --include='*.clj' | head -10
+```
+
+`(is (some? (read-entity ...)))` зелёный для любого non-nil — НЕ
+гарантирует что данные правильные. `(is (= expected-shape (read-entity
+...)))` ловит regression на shape change.
+
+**Когда `(some? ...)` оправдан**:
+- Проверяемое значение — opaque handle (UUID, future, atom) без stable
+  representation
+- Тест на «не упало» в инициализации (но тогда лучше `(is (nil?
+  (init)))` — observable check)
+
+#### 9.5.3 `(is (thrown? Exception ...))` без класса/regex
+
+```bash
+grep -rEn '\(is\s+\(thrown\?\s+Exception\b' test --include='*.clj' | head -10
+grep -rEn '\(is\s+\(thrown\?\s+Throwable\b' test --include='*.clj' | head -10
+```
+
+`Exception` ловит ВСЁ — включая `NullPointerException` от опечатки в
+test setup. Заменить:
+- `(is (thrown-with-msg? ClassName #"specific msg" ...))` — точный
+  контракт
+- `(is (thrown? ClassName ...))` — конкретный класс (`ExceptionInfo`,
+  `ArithmeticException`, etc.)
+
+#### 9.5.4 Логика внутри `(is)` — `loop` / `if` / `cond`
+
+```bash
+grep -rEn '\(is\s+\((loop|if|cond|when|when-let|let)\b' test --include='*.clj' | head -10
+```
+
+```clojure
+;; BAD — логика внутри is. Если loop bug'нул, "тест зелёный" может
+;;       значить разные вещи.
+(is (loop [n 0]
+      (if (>= n 100) true (recur (compute n)))))
+
+;; GOOD — логика ДО is, is проверяет результат.
+(let [result (loop [n 0]
+               (if (>= n 100) :done (recur (compute n))))]
+  (is (= :done result)))
+```
+
+`when` / `when-let` особенно коварны: они возвращают nil когда
+условие false, и `(is nil)` — это FAIL! Так что `(is (when X Y))` —
+лишний слой.
+
+#### 9.5.5 Множественные `is` в одном `testing` без явной связи
+
+```bash
+# `testing` с >3 `is` подряд — кандидат на дробление:
+python3 << 'EOF'
+import re, os
+for root, _, files in os.walk('/root/projects/graphden/test'):
+    for f in files:
+        if not f.endswith('_test.clj'): continue
+        path = os.path.join(root, f)
+        with open(path) as fh: content = fh.read()
+        for m in re.finditer(r'\(testing\s+"([^"]+)"((?:\s*\([^()]*\([^()]*\)[^()]*\))+)', content):
+            label = m.group(1)
+            block = m.group(2)
+            is_count = len(re.findall(r'\(is\s+', block))
+            if is_count >= 4:
+                line = content[:m.start()].count('\n')+1
+                print(f"  {path.split('test/')[-1]}:{line}  testing \"{label[:40]}\"  ({is_count} is)")
+EOF
+```
+
+Если в `(testing "X" ...)` есть 4+ `is` НЕ-связанных проверок (разные
+аспекты системы) — failure не показывает что сломалось, и rerun-after-
+fix не понятен. Дроби на отдельные `testing` блоки.
+
+#### 9.5.6 Тестируется impl, не contract
+
+Маркер: тест ссылается на private symbols (`#'ns/private-fn`) или
+проверяет внутренние data structures.
+
+```bash
+grep -rEn "#'\S+/_?[a-z]" test --include='*.clj' | head -10
+```
+
+```clojure
+;; BAD — testing private impl
+(is (= 42 (#'my.ns/internal-counter-state ctx)))
+
+;; GOOD — testing observable contract
+(is (= 42 (public-api/get-counter ctx)))
+```
+
+Tests of private impl ломаются при refactor'ах, которые НЕ ломают
+поведение — это false negative debt.
+
+#### 9.5.7 Test names — описывают что проверяется
+
+```bash
+# Имена test'ов вида test-1 / my-test / works:
+grep -rE '^\(deftest\s+(test-?[0-9]+|my-?test|works?|test|t)\b' test --include='*.clj'
+
+# deftest без -test suffix:
+grep -rE '^\(deftest\s+[a-z]\w*[^-][^t]\b' test --include='*.clj' | grep -v '\-test\b' | head -5
+```
+
+Хорошее имя: `<concept>-<scenario>-test` или `<concept>-<expected-
+behavior>-test`. Пример: `register-base-fns-handles-empty-defs-map-
+test` лучше чем `test-1`.
+
+#### 9.5.8 Закомментированные тесты
+
+```bash
+grep -rEn '^\s*;;\s*\(deftest|^\s*\(comment\s+\(deftest' test --include='*.clj' | head -5
+```
+
+`(comment (deftest ...))` или `;;; (deftest ...)` — забытый код. Либо
+удалить, либо включить (если тест должен работать). Никогда не
+оставлять «на потом» — превращается в перманентный шум.
+
+#### 9.5.9 Inter-test dependencies через global state
+
+```bash
+# defonce / def в test ns — потенциальный shared state:
+grep -rEn '^\(defonce\b' test --include='*.clj' | head -5
+grep -rEn '^\(def\s+\^:private\s+\S+\s+\(atom' test --include='*.clj' | head -5
+```
+
+Тесты, делящие state через `defonce` атомы или global Vars, ломаются
+по порядку выполнения. Каждый test должен начинать с known state —
+через fixture `:each` или явный setup в `let`.
+
+#### 9.5.10 Over-mocking в integration-тестах
+
+```bash
+# Интеграционные тесты с >3 with-redefs:
+python3 << 'EOF'
+import os, re
+for root, _, files in os.walk('/root/projects/graphden/test/graphden/integration'):
+    for f in files:
+        if not f.endswith('.clj'): continue
+        path = os.path.join(root, f)
+        with open(path) as fh: content = fh.read()
+        count = len(re.findall(r'\(with-redefs\b', content))
+        if count >= 3:
+            print(f"  {path.split('test/')[-1]}: {count} with-redefs")
+EOF
+```
+
+Integration test с 3+ `with-redefs` — это unit test с заглушками,
+проиграл свой смысл (проверять production-shape). Либо убрать
+mocking, либо переименовать в unit test и переехать в `test/graphden/
+<module>/`.
+
 ## 10. Скорость тестов — что реально стоит чинить
 
 ### 10.1 Heavy fixtures — golden-bootstrap pattern
@@ -523,7 +697,213 @@ clojure -M:dev:test -m kaocha.runner --focus ...   # kaocha profiling plugin п�
   периодический audit, не CI-gate. Day-to-day — `bb check` +
   focused-тесты.
 
-## 15. Связи с другими скиллами
+## 15. Integration tests — `test/graphden/integration/`
+
+Integration suite сидит в `test/graphden/integration/` (6 NSes на
+момент 2026-06-17). Каждый — `^:integration` meta, идёт через
+shared PG testcontainer + golden-bootstrap. Это самое дорогое
+тестирование (`bb test` integration занимает ~70% wall-time), поэтому
+качество тут критично.
+
+### 15.1 Coverage matrix — какие user-flow ДОЛЖНЫ быть покрыты
+
+Список критических user-flows и их покрытия:
+
+| User-flow | Integration test | Если нет — risk |
+|---|---|---|
+| Server bootstrap (full sys/start-with-overrides!) | `smoke-pass-test` | regression в integrant wiring проходит до prod |
+| `/api/execute` happy path + cancellation + timeout | `execute-http-test` | execute pipeline регрессия не ловится unit'ами |
+| `/api/secrets/*` end-to-end (vault create/rotate/delete) | `secret-flow-test` | vault integration ломается тихо |
+| Cron `:schedule` → service registration → reconciler-driven fire | `cron-schedule-service-test` | cron breakage обнаруживается только в prod |
+| `find-fn-usages` через граф | `find-fn-usages-graph-test` | usage graph regression hides |
+| Storage protocol contract (any backend) | `storage-protocol-poc-test` | future backends не проверены |
+| **Branches** (create, switch, diff, merge) | **❌ gap** | branch CRUD только в `crud/branches-graph-test` (unit-уровень) |
+| **Services** (full reconciler lifecycle for HTTP server) | **❌ gap** | только cron purpose-covered |
+| **Auth middleware** (real bearer-token request → 200 / 401) | **❌ gap** | unit-level `execution_routes_test` только проверяет routing |
+
+Перед альфа-релизом GAP-флоу должны получить integration test (sentinel
+для regression) ИЛИ явное обоснование почему unit-level достаточен.
+
+### 15.2 Duplication audit — что integration НЕ ДОЛЖЕН делать
+
+Integration test НЕ дублирует unit test. Сценарий:
+
+| Слой | Что проверяется | Кому отдать |
+|---|---|---|
+| Unit | Pure logic (parse / validate / format / classify) | `test/graphden/<module>/<file>_test.clj` |
+| Integration через graph | DB write + read через VersionedStorage | `test/graphden/crud/<file>-graph-test.clj` (НЕ `integration/`) |
+| Integration через full system | Полный sys/start-with-overrides! + HTTP roundtrip + cleanup | `test/graphden/integration/` |
+
+Если integration test'а можно повторить через `crud/...-graph-test`
+без bootstrap'а full system — это перерасход. Перенести.
+
+### 15.3 Производительность integration suite
+
+```bash
+# Total wall time per integration test:
+clojure -M:dev:test -m kaocha.runner --config-file tests.edn :integration --reporter kaocha.report/documentation 2>&1 | tail -30
+```
+
+Целевые числа:
+- `smoke-pass-test`: 30-60 s (полный bootstrap + 1 проход)
+- `cron-schedule-service-test`: 60-120 s (включает 1+ s cron-fire)
+- `execute-http-test`: < 20 s
+- `secret-flow-test`: < 30 s
+
+Если test > target: либо лишний bootstrap (использовать golden), либо
+лишние `Thread/sleep`, либо реально heavy work — обосновать.
+
+```bash
+# Какие integration tests НЕ через golden?
+grep -L 'bootstrap-crud-graph-from-golden' test/graphden/integration/*_test.clj 2>/dev/null
+```
+
+### 15.4 Что должно быть в каждом integration test
+
+- **Один user-flow per NS** — НЕ ставить 5 несвязанных в одно
+  `^:integration` (один failure кидает всё)
+- **Cleanup gate** — каждый test чистит за собой (либо `:each` fixture
+  c clean-db, либо явный `(finally (sys/stop! system))`)
+- **Sleep по контракту, не по надежде** — `Thread/sleep 1100` для cron
+  оправдан (per-second contract); 5 s «на всякий случай» — нет
+- **Один assert цикл** — `(testing "complete flow" ...)`, НЕ
+  10 раздельных testing с независимыми submission'ами
+
+## 16. Browser tests — `tools/browser-test/*.test.js`
+
+Browser suite — 52 Playwright e2e-test'а в `tools/browser-test/`
++ visual-snapshot suite в `tools/visual-tests/`. ~9000 LOC JS,
+покрывают UI flow редактора.
+
+### 16.1 Coverage matrix — UI features → test files
+
+Editor `editor-*.js` модули и их e2e покрытие:
+
+| UI module | Coverage | Browser tests |
+|---|---|---|
+| Auth / login | ✅ | `edit-auth-login` |
+| Sidebar + ns tree | ✅ | `edit-sidebar-*` |
+| Branches (create/switch/diff/merge) | ✅ | `edit-branch-*` (3 tests) |
+| Secrets panel + create / rotate / delete | ✅ | `edit-secrets-*` (3 tests) |
+| Arg value / type edit | ✅ | `edit-arg-*` (4 tests) |
+| Fn create / edit / delete | ✅ | `edit-fn-*` (6 tests) |
+| Type-row CRUD | ✅ | `edit-type-*` (7 tests) |
+| Effects tighten | ✅ | `edit-effects-*` (3 tests) |
+| Re-parent / Phase-3 | ✅ | `edit-reparent`, `edit-phase3-reparent` |
+| Sequence ops | ✅ | `edit-sequence`, `edit-phase5-sequence` |
+| Execute popover + history | ✅ | `edit-execute` (2 tests) |
+| Free-arg propagation | ✅ | `edit-free-*` (3 tests) |
+| Service popover | ✅ | `edit-service` (2 tests) |
+| Description / tooltip / mismatch | ✅ | `edit-description`, `edit-mismatch` |
+| **Build hash verify** | **❌ gap** | нет browser-теста на `window.BUILD_HASH` после deploy |
+| **Layout edge labels click → expand** | **❌ gap** | сложный flow без e2e cover |
+| **Visual regression** | ✅ | `tools/visual-tests/*` (separate suite) |
+
+### 16.2 Duplication audit между browser tests
+
+```bash
+# Сколько раз каждый prefix tested:
+ls /root/projects/graphden/tools/browser-test/*.test.js | xargs -n1 basename | \
+  sed -E 's/(edit-[a-z]+|regression|type-system-ui).*/\1/' | sort | uniq -c | sort -rn
+```
+
+Если у prefix > 5 файлов и все они тестируют похожее API — кандидаты
+на слияние. Пример: 7 `edit-type-*` файлов — но каждый тестирует
+СВОЁ (variant / record / list / record-remove etc.) — это OK,
+single-test-per-shape.
+
+**Pattern smell**: два файла с почти-одинаковым setup (>50% same code)
++ разная assertion — кандидат на параметризацию (одна test-функция, два
+вызова с разными scenario'ами).
+
+```bash
+# Найди тесты которые открывают тот же initial state:
+grep -lE 'navigateTo.*"web-server"' tools/browser-test/*.test.js | wc -l
+grep -lE 'createComposedFn.*const' tools/browser-test/*.test.js | wc -l
+```
+
+### 16.3 Performance — total wall time + parallelization
+
+```bash
+# Сколько файлов = сколько Playwright процессов (если не paralleled):
+ls tools/browser-test/*.test.js | wc -l
+echo "Per-test setup cost: chromium launch + page navigation ~ 3-5 s"
+echo "Sequential total: ~50 tests * 30 s avg = 25 min"
+```
+
+Современные best practices:
+- **Shared `browser.newContext()` per file**, не per test (если файл
+  имеет 1 test — ok; если несколько — shared)
+- **Parallel run через `npx playwright test`** (если using `@playwright/
+  test` runner). Сейчас наши файлы — standalone `node *.js` scripts,
+  parallel НЕ работает out of the box → migration target
+- **Visual regression suite — отдельная фаза CI** (не каждый PR)
+
+### 16.4 Reliability — cleanup, wait strategies, selectors
+
+#### 16.4.1 Cleanup race
+
+```bash
+# Каждый browser test должен начинать с cleanup:
+grep -LE 'cleanup\(|deleteFnByName|delete.*before' tools/browser-test/*.test.js | head
+```
+
+Browser tests параллельно — каждый seed'ит fn-def с unique `RUN_ID`
+(`process.pid + Date.now`). Если cleanup не работает — мусор копится
+в dev-DB → следующий full reset через `bb deploy`.
+
+**Pattern check**: `RUN_ID = '-' + process.pid + '-' + Date.now()` —
+каждый probe-fn должен иметь suffix.
+
+#### 16.4.2 Wait strategies — `waitForSelector` > `page.waitForTimeout`
+
+```bash
+# page.waitForTimeout — флаки под загрузкой:
+grep -rEn 'waitForTimeout\s*\(\s*[1-9]' tools/browser-test/*.test.js | head
+```
+
+Fixed-time waits в browser tests = same as `Thread/sleep` в Clojure
+tests (см. §9.1). Заменять на polling: `page.waitForSelector(...)`,
+`page.waitForFunction(...)`, `await assert(...)` с retry.
+
+#### 16.4.3 Brittle selectors — `:nth-child` / class-by-text
+
+```bash
+# nth-child / nth-of-type — фрагильно к UI rearrangement:
+grep -rEn ':nth-child\(|:nth-of-type\(' tools/browser-test/*.test.js | head
+
+# CSS class by content — может ломаться при theme refactor:
+grep -rEn 'querySelector.*\.[\w-]+:has-text' tools/browser-test/*.test.js | head
+```
+
+Стабильные селекторы (от лучшего к худшему):
+1. `data-testid="foo"` — explicit test handle
+2. `getByRole('button', {name: 'Save'})` — semantic
+3. `text=Save` — content-based (ломается при i18n)
+4. `.css-class` — break on style refactor
+5. `:nth-child(3)` — break on layout change
+
+#### 16.4.4 Auth-token leakage в test output
+
+```bash
+# Tokens hardcoded vs env-var:
+grep -rEn 'Bearer\s+[a-zA-Z0-9]' tools/browser-test/*.test.js | head
+# Должно быть только process.env.AUTH_TOKEN
+```
+
+### 16.5 Что должно быть в каждом browser test
+
+- **Header docstring** — что тестирует + run command + exit codes
+- **Unique RUN_ID** — `'-' + process.pid + '-' + Date.now().toString(36)`
+- **Cleanup gate** — try/finally + `cleanup(page)` обёртка
+- **Console error listener** — `page.on('console', ...)` ловит UI
+  exception'ы во время теста
+- **Dialog handler** — `page.on('dialog', d => d.accept())` если
+  cleanup может trigger confirm-dialog
+- **Final `process.exit(0|1)`** — exit code определяет PASS / FAIL
+- **No `console.log` после assert success** — output чистый
+
+## 17. Связи с другими скиллами
 
 - **`graphden-packages-quality`** — те же принципы для `fns.edn` +
   `impls.clj` (типы, fn-def naming, минимальные base-fn). Если работа
@@ -538,21 +918,50 @@ clojure -M:dev:test -m kaocha.runner --focus ...   # kaocha profiling plugin п�
 - **CLAUDE.md** — первоисточник проектных принципов. Этот скилл — его
   operational арм.
 
-## 16. Что считается «не докопаться»
+## 18. Что считается «не докопаться»
 
 Финальный self-check перед закрытием:
 
+**Code & lint**
 - [ ] `bb check` зелёный (0 warnings)
 - [ ] focused-тесты touched ns'ов зелёные
 - [ ] `bb test` или `bb ci` (в зависимости от scope) зелёный
 - [ ] Reachability audit не показывает новых unreachable (если
       менял `fns.edn`)
 - [ ] Нет TODO/FIXME/XXX/HACK маркеров без issue link
-- [ ] Нет дубликатных deftests с одинаковыми observable assertion'ами
+
+**Structure**
 - [ ] Каждая функция ≥ 100 LOC ОБОСНОВАНА (см. §1.5) либо распилена
 - [ ] User-facing `:error` / `:reason` поля nil-safe
 - [ ] Каждый секретный compare — constant-time
+
+**Unit tests**
+- [ ] Нет дубликатных deftests с одинаковыми observable assertion'ами
 - [ ] Каждый sleep в тестах либо оправдан runtime-контрактом, либо
       заменён на poll-with-deadline
+- [ ] Нет tautological `(is (= X X))` / `(is (some? …))` где есть
+      конкретный expected (§9.5.1-9.5.2)
+- [ ] Нет `(is (thrown? Exception …))` без класса/regex (§9.5.3)
+- [ ] Нет логики (`loop` / `if` / `when`) внутри `(is …)` (§9.5.4)
+- [ ] `testing`-блоки тестируют ОДНУ вещь — не 4+ `is` подряд (§9.5.5)
+- [ ] Нет тестов на private symbols (`#'ns/_internal`) (§9.5.6)
+- [ ] Нет закомментированных deftests (§9.5.8)
+
+**Integration tests**
+- [ ] Каждый критический user-flow покрыт (§15.1 matrix gaps)
+- [ ] Integration НЕ дублирует unit-test слой (§15.2)
+- [ ] Все integration tests через golden-bootstrap (§15.3)
+- [ ] Один user-flow per NS (§15.4)
+
+**Browser tests**
+- [ ] Новый UI feature → новый `*.test.js` ИЛИ explicit «не нужно»
+      (§16.1 matrix)
+- [ ] Cleanup gate в каждом `*.test.js` с RUN_ID (§16.4.1)
+- [ ] Нет `page.waitForTimeout(N)` без обоснования (§16.4.2)
+- [ ] Селекторы — `data-testid` / `getByRole`, не `:nth-child`
+      (§16.4.3)
+- [ ] Auth-token через `process.env`, не hardcoded (§16.4.4)
+
+**Commit hygiene**
 - [ ] Каждый commit — отдельная concept-value-unit с verified-by
       линией в body

@@ -277,36 +277,14 @@
    :parent :decode-row
    :args {:row {:as :item} :entity-type {:value "fn-version"}}}
 
-  ;; ---- :fn-slot -------------------------------------------------------
-  {:name :resolve-fn-slot-rows
-   :description "Resolve the live `:fn-slot` row set on the current branch."
-   :parent :resolve-versioned-rows
-   :args {:version-id-field {:value :fn-slot-id}
-          :version-data-fields {:value [:fn-id :slot-id :position]}
-          :version-rows :_resolve-fn-slot-versions}}
-
-  {:name :_resolve-fn-slot-versions
-   :parent :map
-   :args {:func :_resolve-fn-slot-versions-decode
-          :coll :_resolve-fn-slot-versions-raw}}
-
-  {:name :_resolve-fn-slot-versions-raw
-   :parent :pg-query
-   :args {:hsql :_resolve-fn-slot-versions-hsql}}
-
-  {:name :_resolve-fn-slot-versions-hsql
-   :parent :assoc
-   :args {:map {:value {:select [:*] :from :fn-slot-version}}
-          :key {:value :where}
-          :value :_resolve-fn-slot-versions-hsql-where}}
-
-  {:name :_resolve-fn-slot-versions-hsql-where
-   :parent :vec
-   :args {:coll [{:value :in} {:value :branch-id} {:as :branch-chain}]}}
-
-  {:name :_resolve-fn-slot-versions-decode
-   :parent :decode-row
-   :args {:row {:as :item} :entity-type {:value "fn-slot-version"}}}
+  ;; `:resolve-fn-slot-rows` (+ its 5-step `_resolve-fn-slot-versions*`
+  ;; chain) USED to be the generic versioned-read for `:fn-slot`. It
+  ;; was retired when the secrets-handler bypass landed (see
+  ;; `app.secrets/_list-secrets-leaf-fn-slots-resolved`) — every
+  ;; remaining `:fn-slot` consumer either reads through the base
+  ;; storage path or has its own targeted SQL. No live caller; per
+  ;; the reachability audit (`tools/reachability_audit.clj`) the whole
+  ;; chain was unreachable.
 
   ;; ---- :binding -------------------------------------------------------
   {:name :resolve-binding-rows

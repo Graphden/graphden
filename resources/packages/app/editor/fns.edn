@@ -1319,7 +1319,8 @@
    :args {:id :_partial-execute-result-id}}
 
   {:name :_partial-execute-result-fragment
-   :parent :render-execute-result-hiccup
+   :description "Execute-result body hiccup for a persisted exec-id. Reparents `:_er-body` (the pure-graph chain in `app/execution/fns.edn`) — previously delegated to the `:render-execute-result-hiccup` defbase + Clojure helpers; §3.3 fix made the entire walker graph-composed."
+   :parent :_er-body
    :args {:exec :_partial-execute-result-exec}}
 
   {:name :_partial-execute-result-html
@@ -1341,13 +1342,14 @@
   ;; `body.result` / `body.error` and building DOM locally.
 
   {:name :_partial-execute-result-inline-body
-   :description "JSON request body — the execution-row shape `/api/execute` returns inline. `:parse-json-body` types its return as `:nullable-jsonb`; the orchestrator only calls this partial with a keyword-keyed map body, so we narrow to `:nullable-keyword-map` for the downstream `:render-execute-result-hiccup` slot."
+   :description "JSON request body — the execution-row shape `/api/execute` returns inline. `:parse-json-body` types its return as `:nullable-jsonb`; the orchestrator only calls this partial with a keyword-keyed map body, so we narrow to `:nullable-keyword-map` for the downstream `:_er-body` slot."
    :parent :parse-json-body
    :return-type :nullable-keyword-map
    :args {:request {:as :request}}}
 
   {:name :_partial-execute-result-inline-fragment
-   :parent :render-execute-result-hiccup
+   :description "Same `:_er-body` walker as the id-based GET sibling, but `:exec` comes from the POST body instead of storage."
+   :parent :_er-body
    :args {:exec :_partial-execute-result-inline-body}}
 
   {:name :_partial-execute-result-inline-html

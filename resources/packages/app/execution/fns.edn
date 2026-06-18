@@ -698,11 +698,11 @@
    :return-type :nullable-keyword-map
    :effects #{:db}}
 
-  {:name :render-execute-result-hiccup
-   :description "Body hiccup for one persisted execution row — replaces the JS `renderResultBody` / `renderTaintedPane` / `renderErrorPane` chain in `editor-execute-result.js`. Walks the row's `:status` / `:touched-secret?` / `:result-truncated?` / `:result` / `:error` / `:error-data` fields and returns the body hiccup. nil exec → an `[:span hidden]` placeholder so the partial returns 200 with an empty popover (the editor's `Loading…` → empty graceful path)."
-   :args {:exec {:type [:union :null :keyword-map]
-                 :description "Decoded execution row from `:get-execution`."}}
-   :return-type :hiccup-node}
+  ;; `:render-execute-result-hiccup` retired — entire result body now
+  ;; graph-composed in the `:_er-*` chain below (`:_er-body` is the
+  ;; entry; `:_partial-execute-result-fragment` /
+  ;; `:_partial-execute-result-inline-fragment` in `app/editor/fns.edn`
+  ;; both delegate here). §3.3 fix.
 
   ;; `:render-service-popover-hiccup` retired — entire popover body now
   ;; graph-composed in the `:_sp-*` chain below (`:_partial-service-
@@ -1259,13 +1259,495 @@
    :args {:rows :_list-services-rows
           :names :_list-services-fn-names}}
 
-  ;; ---------------------------------------------------------------------
-  ;; Pick-existing — admin-tweakable selection policy. Same preference
-  ;; order the JS used: row matching current branch first, then the
-  ;; legacy null-branch row, then any first match. Two chained
-  ;; `:coalesce`s express "first non-nil of three candidates" — admin
-  ;; who wants always-null-first can re-wire `:_sp-existing` directly.
-  ;; ---------------------------------------------------------------------
+  ;; =====================================================================
+  ;; Execute-result body chain (`:_er-*`). The previous
+  ;; `crud.fn-execution/render-execute-result-hiccup` + 5 private
+  ;; helpers (render-list-body / render-record-body / render-tainted-
+  ;; body / render-error-body / render-succeeded-body) hid the entire
+  ;; result-rendering policy in Clojure: every text label, every
+  ;; type-dispatch branch, the 50-item / 50-KB caps, the truncation
+  ;; messages. §3.3 fix moves it all to the graph.
+  ;;
+  ;; Entry: `:_er-body` takes `{:as :exec}` (nullable keyword-map —
+  ;; an execution row) and returns hiccup. Caller wraps via:
+  ;;
+  ;;   {:_partial-execute-result-fragment :parent :_er-body
+  ;;    :args {:exec :_partial-execute-result-exec}}
+  ;;
+  ;; The 50-item list cap + 50-KB JSON-preview cap live as `:value`
+  ;; bindings in `:_er-max-list-items` / `:_er-max-json-preview-bytes`
+  ;; so admins can re-tune without a backend rebuild.
+  ;; =====================================================================
+
+  {:name :_er-max-list-items
+   :description "Cap on visible list items — anything past this collapses to a `… N more` placeholder. Admin-tweakable."
+   :parent :const :args {:value 50}}
+
+  {:name :_er-max-json-preview-bytes
+   :description "Cap on serialized JSON shown for large payloads — preview cuts at this byte count. Admin-tweakable."
+   :parent :const :args {:value 50000}}
+
+  ;; --- Top-level dispatch predicates ---
+
+  {:name :_er-exec-nil?
+   :parent :nil? :args {:value {:as :exec}}}
+
+  {:name :_er-error-data
+   :parent :get :args {:coll {:as :exec} :key {:value :error-data} :default nil}}
+
+  {:name :_er-error-data-reason
+   :parent :get :args {:coll :_er-error-data :key {:value :reason} :default nil}}
+
+  {:name :_er-error-is-tainted?
+   :parent :equal? :args {:a :_er-error-data-reason :b {:value :tainted}}}
+
+  {:name :_er-touched-secret?
+   :parent :get :args {:coll {:as :exec} :key {:value :touched-secret?} :default nil}}
+
+  {:name :_er-tainted?
+   :parent :or :args {:values [:_er-error-is-tainted? :_er-touched-secret?]}}
+
+  ;; status comes back as a keyword from JSON parsing; coerce to text
+  ;; for safe `:equal?` comparison against the literal strings below.
+  {:name :_er-status-raw
+   :parent :get :args {:coll {:as :exec} :key {:value :status} :default nil}}
+
+  {:name :_er-status-some?
+   :parent :some? :args {:value :_er-status-raw}}
+
+  {:name :_er-status-name
+   :parent :if
+   :args {:test :_er-status-some?
+          :then {:parent :name :args {:value :_er-status-raw}}
+          :else {:value ""}}}
+
+  {:name :_er-status-succeeded?
+   :parent :equal? :args {:a :_er-status-name :b {:value "succeeded"}}}
+
+  {:name :_er-status-failed?
+   :parent :equal? :args {:a :_er-status-name :b {:value "failed"}}}
+
+  ;; --- Tainted pane — "Result hidden" notice ---
+
+  {:name :_er-tainted-icon
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "execute-tainted-icon"}}
+          :children [{:value "🔒"}]}}
+
+  {:name :_er-tainted-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-tainted-head"}}
+          :children [{:value "Result hidden"}]}}
+
+  {:name :_er-tainted-body-text
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-tainted-body"}}
+          :children [{:value "This fn's return type is :secret — the value never reaches the browser. Swap the secret-bound argument for a plain literal to debug visibly."}]}}
+
+  {:name :_er-tainted-text-wrap
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-tainted-text"}}
+          :children [:_er-tainted-head :_er-tainted-body-text]}}
+
+  {:name :_er-tainted-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane execute-result-tainted"}}
+          :children [:_er-tainted-icon :_er-tainted-text-wrap]}}
+
+  ;; --- Error pane (status=failed) ---
+
+  {:name :_er-error
+   :parent :get :args {:coll {:as :exec} :key {:value :error} :default nil}}
+
+  {:name :_er-error-text
+   :parent :coalesce :args {:value :_er-error :default {:value "Execution failed"}}}
+
+  {:name :_er-error-head
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-error-head"}}
+          :children [:_er-error-text]}}
+
+  {:name :_er-error-data-some?
+   :parent :some? :args {:value :_er-error-data}}
+
+  {:name :_er-error-data-json
+   :parent :to-json-string :args {:data :_er-error-data}}
+
+  {:name :_er-error-data-pre-shown
+   :parent :hiccup
+   :args {:tag {:value "pre"}
+          :attrs {:value {:class "execute-error-data"}}
+          :children [:_er-error-data-json]}}
+
+  {:name :_er-hidden-placeholder
+   :description "Empty `<span hidden=\"1\">` placeholder reused as the empty `:else` branch wherever a conditional section collapses to nothing — keeps the children-vector shape uniform."
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:hidden "1"}}
+          :children {:value []}}}
+
+  {:name :_er-error-data-pre
+   :parent :if
+   :args {:test :_er-error-data-some?
+          :then :_er-error-data-pre-shown
+          :else :_er-hidden-placeholder}}
+
+  {:name :_er-error-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-error-pane"}}
+          :children [:_er-error-head :_er-error-data-pre]}}
+
+  ;; --- Succeeded body — inner result-shape dispatch ---
+
+  {:name :_er-result
+   :parent :get :args {:coll {:as :exec} :key {:value :result} :default nil}}
+
+  {:name :_er-result-truncated?
+   :parent :get :args {:coll {:as :exec} :key {:value :result-truncated?} :default nil}}
+
+  {:name :_er-result-nil?
+   :parent :nil? :args {:value :_er-result}}
+
+  {:name :_er-result-as-json
+   :parent :to-json-string :args {:data :_er-result}}
+
+  {:name :_er-result-as-json-len
+   :parent :str-len :args {:string :_er-result-as-json}}
+
+  {:name :_er-result-too-large?
+   :parent :gt :args {:nums [:_er-result-as-json-len :_er-max-json-preview-bytes]}}
+
+  ;; --- Truncated-cap pane (5 MB persistence cap fired) ---
+
+  {:name :_er-truncated-note
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-truncated"}}
+          :children [{:value "Result exceeded 5 MB cap — not stored."}]}}
+
+  {:name :_er-truncated-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-truncated-note]}}
+
+  ;; --- nil-result pane (status=succeeded, value really was nil) ---
+
+  {:name :_er-nil-scalar
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-scalar"}}
+          :children [{:value "nil"}]}}
+
+  {:name :_er-nil-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-nil-scalar]}}
+
+  ;; --- Large-JSON preview pane (>50 KB serialized) ---
+
+  {:name :_er-large-preview-msg
+   :description "Byte-count caption above the JSON preview pane. Stable across browsers — no locale-dependent KB rounding (admins who want KB display can wire a divide+round once they want it)."
+   :parent :str
+   :args {:parts [{:value "Result preview only — full payload "}
+                  {:parent :to-str :args {:value :_er-result-as-json-len}}
+                  {:value " bytes. First 50 KB shown."}]}}
+
+  {:name :_er-large-preview-banner
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-truncated"}}
+          :children [:_er-large-preview-msg]}}
+
+  {:name :_er-large-preview-subs
+   :parent :subs
+   :args {:string :_er-result-as-json :start {:value 0} :end :_er-max-json-preview-bytes}}
+
+  {:name :_er-large-preview-text
+   :parent :str :args {:parts [:_er-large-preview-subs {:value "…"}]}}
+
+  {:name :_er-large-preview-pre
+   :parent :hiccup
+   :args {:tag {:value "pre"}
+          :attrs {:value {:class "execute-result-json"}}
+          :children [:_er-large-preview-text]}}
+
+  {:name :_er-large-preview-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-large-preview-banner :_er-large-preview-pre]}}
+
+  ;; --- Per-item simple-scalar predicate (used by list + record) ---
+  ;; `{:as :item}` is the current element. Simple scalars stringify
+  ;; via `:str`; everything else gets a `:pre` JSON dump.
+
+  {:name :_er-item-is-text?
+   :parent :is-a? :args {:value {:as :item} :type {:value :text}}}
+
+  {:name :_er-item-is-int?
+   :parent :is-a? :args {:value {:as :item} :type {:value :int}}}
+
+  {:name :_er-item-is-numeric?
+   :parent :is-a? :args {:value {:as :item} :type {:value :numeric}}}
+
+  {:name :_er-item-is-bool?
+   :parent :is-a? :args {:value {:as :item} :type {:value :bool}}}
+
+  {:name :_er-item-is-keyword?
+   :parent :is-a? :args {:value {:as :item} :type {:value :keyword}}}
+
+  {:name :_er-item-is-null?
+   :parent :is-a? :args {:value {:as :item} :type {:value :null}}}
+
+  {:name :_er-item-is-simple?
+   :parent :or
+   :args {:values [:_er-item-is-text? :_er-item-is-int? :_er-item-is-numeric?
+                   :_er-item-is-bool? :_er-item-is-keyword? :_er-item-is-null?]}}
+
+  {:name :_er-item-as-str
+   :parent :str :args {:parts [{:as :item}]}}
+
+  {:name :_er-item-as-json
+   :parent :to-json-string :args {:data {:as :item}}}
+
+  {:name :_er-item-pre-json
+   :parent :hiccup
+   :args {:tag {:value "pre"} :attrs {:value nil}
+          :children [:_er-item-as-json]}}
+
+  {:name :_er-item-content
+   :parent :if
+   :args {:test :_er-item-is-simple?
+          :then :_er-item-as-str
+          :else :_er-item-pre-json}}
+
+  ;; --- List pane (sequential result) ---
+
+  {:name :_er-list-li
+   :parent :hiccup
+   :args {:tag {:value "li"} :attrs {:value nil}
+          :children [:_er-item-content]}}
+
+  {:name :_er-result-as-list
+   :description "Narrow `:_er-result` (typed `:any` because it's plucked from a nullable keyword-map) down to `[:list :any]` for `:take` / `:count` consumption. The runtime invariant — only the list-pane branch reads this fn-def, AND that branch only fires when `:_er-result-is-list?` is true — is enforced by the surrounding `:cond` in `:_er-succeeded-body`. The type-checker can't see that dispatch invariant, so this narrowing is a controlled lie; the `:assert-some` keeps the runtime honest (throws on nil rather than passing nil into `:take`)."
+   :parent :assert-some
+   :return-type [:list :any]
+   :args {:value :_er-result}}
+
+  {:name :_er-list-items-taken
+   :parent :take :args {:count :_er-max-list-items :coll :_er-result-as-list}}
+
+  {:name :_er-list-items-count
+   :parent :count :args {:coll :_er-list-items-taken}}
+
+  {:name :_er-list-total-count
+   :parent :count :args {:coll :_er-result-as-list}}
+
+  {:name :_er-list-overflow
+   :parent :sub :args {:nums [:_er-list-total-count :_er-list-items-count]}}
+
+  {:name :_er-list-overflow-shown?
+   :parent :gt :args {:nums [:_er-list-overflow {:value 0}]}}
+
+  {:name :_er-list-li-hiccup
+   :parent :map :args {:func :_er-list-li :coll :_er-list-items-taken}}
+
+  {:name :_er-list-overflow-msg
+   :parent :str
+   :args {:parts [{:value "… "}
+                  {:parent :to-str :args {:value :_er-list-overflow}}
+                  {:value " more"}]}}
+
+  {:name :_er-list-overflow-li
+   :parent :hiccup
+   :args {:tag {:value "li"}
+          :attrs {:value {:class "execute-result-list-more"}}
+          :children [:_er-list-overflow-msg]}}
+
+  {:name :_er-list-children-with-overflow
+   :parent :concat :args {:colls [:_er-list-li-hiccup [:_er-list-overflow-li]]}}
+
+  {:name :_er-list-children
+   :parent :if
+   :args {:test :_er-list-overflow-shown?
+          :then :_er-list-children-with-overflow
+          :else :_er-list-li-hiccup}}
+
+  {:name :_er-list-ul
+   :parent :hiccup
+   :args {:tag {:value "ul"}
+          :attrs {:value {:class "execute-result-list"}}
+          :children :_er-list-children}}
+
+  {:name :_er-list-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-list-ul]}}
+
+  ;; --- Record pane (map-typed result) ---
+  ;; Iterates over the map — but :map HOFs iterate over sequences, so
+  ;; we need to walk the entries. Idiomatic graphden: `:keys` + `:map`
+  ;; per-key, looking up the value inside the callback via `:get`
+  ;; against the closure-captured outer map.
+
+  {:name :_er-result-as-map
+   :description "Narrow `:_er-result` to a map for `:keys`/`:get` consumption — see `:_er-result-as-list` rationale; same controlled narrowing, the record-pane branch is the only consumer and is gated by `:_er-result-is-map?`."
+   :parent :assert-some
+   :return-type [:map :any :any]
+   :args {:value :_er-result}}
+
+  {:name :_er-record-keys
+   :parent :keys :args {:map :_er-result-as-map}}
+
+  {:name :_er-record-key-value
+   :parent :get :args {:coll {:as :record-m} :key {:as :item} :default nil}}
+
+  {:name :_er-record-cell-content-is-simple?-cb
+   :parent :or
+   :args {:values [{:parent :is-a? :args {:value :_er-record-key-value :type {:value :text}}}
+                   {:parent :is-a? :args {:value :_er-record-key-value :type {:value :int}}}
+                   {:parent :is-a? :args {:value :_er-record-key-value :type {:value :numeric}}}
+                   {:parent :is-a? :args {:value :_er-record-key-value :type {:value :bool}}}
+                   {:parent :is-a? :args {:value :_er-record-key-value :type {:value :keyword}}}
+                   {:parent :is-a? :args {:value :_er-record-key-value :type {:value :null}}}]}}
+
+  {:name :_er-record-cell-as-str
+   :parent :str :args {:parts [:_er-record-key-value]}}
+
+  {:name :_er-record-cell-as-json
+   :parent :to-json-string :args {:data :_er-record-key-value}}
+
+  {:name :_er-record-cell-pre
+   :parent :hiccup
+   :args {:tag {:value "pre"} :attrs {:value nil}
+          :children [:_er-record-cell-as-json]}}
+
+  {:name :_er-record-cell-content
+   :parent :if
+   :args {:test :_er-record-cell-content-is-simple?-cb
+          :then :_er-record-cell-as-str
+          :else :_er-record-cell-pre}}
+
+  {:name :_er-record-th
+   :parent :hiccup
+   :args {:tag {:value "th"} :attrs {:value nil}
+          :children [{:parent :str :args {:parts [{:as :item}]}}]}}
+
+  {:name :_er-record-td
+   :parent :hiccup
+   :args {:tag {:value "td"} :attrs {:value nil}
+          :children [:_er-record-cell-content]}}
+
+  {:name :_er-record-tr
+   :parent :hiccup
+   :args {:tag {:value "tr"} :attrs {:value nil}
+          :children [:_er-record-th :_er-record-td]}}
+
+  {:name :_er-record-trs
+   :parent :map
+   :args {:func :_er-record-tr
+          :coll :_er-record-keys
+          :record-m :_er-result-as-map}}
+
+  {:name :_er-record-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "execute-result-record"}}
+          :children :_er-record-trs}}
+
+  {:name :_er-record-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-record-table]}}
+
+  ;; --- Scalar-fallback pane (non-nil, not list, not map) ---
+
+  {:name :_er-scalar-text
+   :parent :str :args {:parts [:_er-result]}}
+
+  {:name :_er-scalar-content
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-scalar"}}
+          :children [:_er-scalar-text]}}
+
+  {:name :_er-scalar-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-scalar-content]}}
+
+  ;; --- Succeeded-body dispatch — inner cond over result shape ---
+
+  {:name :_er-result-is-sequential?
+   :parent :is-a? :args {:value :_er-result :type {:value :sequence}}}
+
+  {:name :_er-result-is-vector?
+   :parent :is-a? :args {:value :_er-result :type {:value :vector}}}
+
+  {:name :_er-result-is-list?
+   :parent :or :args {:values [:_er-result-is-sequential? :_er-result-is-vector?]}}
+
+  {:name :_er-result-is-map?
+   :parent :is-a? :args {:value :_er-result :type {:value :map}}}
+
+  {:name :_er-succeeded-body
+   :parent :cond
+   :args {:clauses [:_er-result-truncated?  :_er-truncated-pane
+                    :_er-result-nil?        :_er-nil-pane
+                    :_er-result-too-large?  :_er-large-preview-pane
+                    :_er-result-is-list?    :_er-list-pane
+                    :_er-result-is-map?     :_er-record-pane
+                    {:value true}           :_er-scalar-pane]}}
+
+  ;; --- Neutral-status note (pending / cancelled / unknown) ---
+
+  {:name :_er-status-text-or-unknown
+   :parent :coalesce :args {:value :_er-status-name :default {:value "unknown"}}}
+
+  {:name :_er-status-text-non-blank
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_er-status-text-or-unknown :b {:value ""}}}
+          :then {:value "unknown"}
+          :else :_er-status-text-or-unknown}}
+
+  {:name :_er-neutral-note
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-cancelled"}}
+          :children [:_er-status-text-non-blank]}}
+
+  {:name :_er-neutral-pane
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "execute-result-pane"}}
+          :children [:_er-neutral-note]}}
+
+  ;; --- Top-level body — final dispatch ---
+
+  {:name :_er-body
+   :description "Full result body hiccup — exec → hiccup. Replaces `crud.fn-execution/render-execute-result-hiccup` per §3.3. nil exec → `<span hidden>`; tainted (touched-secret? OR `:error-data.reason == :tainted`) → `Result hidden` pane; status=succeeded → result-shape dispatch via `:_er-succeeded-body`; status=failed → error pane; other (pending/cancelled/unknown) → neutral status note."
+   :parent :cond
+   :args {:clauses [:_er-exec-nil?           :_er-hidden-placeholder
+                    :_er-tainted?            :_er-tainted-pane
+                    :_er-status-succeeded?   :_er-succeeded-body
+                    :_er-status-failed?      :_er-error-pane
+                    {:value true}            :_er-neutral-pane]
+          :exec {:type [:union :null :keyword-map]
+                 :description "Decoded execution row from `:get-execution` OR the inline-Run JSON body. Both call sites bind via `:_partial-execute-result-fragment` / `:_partial-execute-result-inline-fragment` wrappers in `app/editor/fns.edn`."}}}
+
+  ;; =====================================================================
 
   {:name :_sp-svc-row-fn-id
    :parent :get

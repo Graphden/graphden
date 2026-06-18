@@ -2578,7 +2578,26 @@
   ;; type-assertions for runtime-guaranteed nullability narrowings
   ;; that the type-checker can't (yet) see through control-flow
   ;; guards. See `docs/TYPE_CHECK_BACKLOG.md` for the running ledger.
-  #{})
+  ;;
+  ;; Reopened 2026-06-19 — execute-result body decomposition (§3.3
+  ;; fix) introduces ONE controlled type-narrowing the type-checker
+  ;; can't verify through `:cond` dispatch:
+  ;;
+  ;;   :_er-list-items-taken
+  ;;     :parent :take :args {:count :_er-max-list-items
+  ;;                          :coll :_er-result-as-list}
+  ;;
+  ;; `:_er-result-as-list` is `:assert-some` on `:_er-result` (typed
+  ;; `:any` from the nullable-keyword-map `:get`) with declared
+  ;; `:return-type [:list :any]`. Runtime invariant: the surrounding
+  ;; `:cond` in `:_er-succeeded-body` only routes to the list-pane
+  ;; when `:_er-result-is-list?` already returned true. `:count` /
+  ;; `:keys` against the same narrowed binding type-check fine
+  ;; (those slots are wider); only `:take :coll [:list a]` is strict
+  ;; enough to surface the `:any → [:list :any]` cast. Closing this
+  ;; debt needs Phase #170 control-flow narrowing through
+  ;; `:cond`-clauses' `:is-a?` predicates.
+  #{:_er-list-items-taken})
 
 
 (defn assert-sweep-failures-match-allowlist!

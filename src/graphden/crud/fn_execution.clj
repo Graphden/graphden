@@ -29,8 +29,6 @@
    (read-only DB navigation) live in `.lookup`; row writes + future
    plumbing + size caps live in `.persist`."
   (:require
-    [cheshire.core :as json]
-    [clojure.math :as math]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
@@ -494,132 +492,14 @@
       {:ok true :cancel-requested true})))
 
 
-;; =============================================================================
-;; Server-side rendering for `/partials/execute-result?id=X`
-;; =============================================================================
-;;
-;; Replaces the legacy JS renderResultBody / renderListResult /
-;; renderRecordResult / renderScalarResult / renderTaintedPane chain
-;; in `editor-execute-result.js`. Walks the persisted execution row,
-;; dispatches on status + secret-taint + result shape, and returns
-;; the body hiccup. Pure: no IO beyond the caller-supplied exec row.
-
-(def ^:private max-list-items 50)
-(def ^:private max-json-preview-bytes (* 50 1024))
-
-
-(defn- render-scalar-body
-  [value]
-  [:div {:class "execute-result-scalar"}
-   (if (nil? value) "nil" (str value))])
-
-
-(defn- render-list-body
-  [value]
-  (let [items (vec (take max-list-items value))
-        overflow (- (count value) (count items))
-        item-hiccup (fn [item]
-                      [:li (if (or (nil? item) (string? item)
-                                   (number? item) (boolean? item)
-                                   (keyword? item))
-                             (str item)
-                             [:pre (json/generate-string item {:pretty true})])])]
-    (into [:ul {:class "execute-result-list"}]
-          (concat (mapv item-hiccup items)
-                  (when (pos? overflow)
-                    [[:li {:class "execute-result-list-more"}
-                      (str "… " overflow " more")]])))))
-
-
-(defn- render-record-body
-  [value]
-  (into [:table {:class "execute-result-record"}]
-        (mapv (fn [[k v]]
-                [:tr [:th (str k)]
-                 [:td (if (or (nil? v) (string? v) (number? v)
-                              (boolean? v) (keyword? v))
-                        (str v)
-                        [:pre (json/generate-string v {:pretty true})])]])
-              value)))
-
-
-(defn- render-tainted-body
-  []
-  [:div {:class "execute-result-pane execute-result-tainted"}
-   [:span {:class "execute-tainted-icon"} "🔒"]
-   [:div {:class "execute-tainted-text"}
-    [:div {:class "execute-tainted-head"} "Result hidden"]
-    [:div {:class "execute-tainted-body"}
-     (str "This fn's return type is :secret — the value never reaches "
-          "the browser. Swap the secret-bound argument for a plain "
-          "literal to debug visibly.")]]])
-
-
-(defn- render-error-body
-  [error error-data]
-  (into [:div {:class "execute-error-pane"}
-         [:div {:class "execute-error-head"} (str (or error "Execution failed"))]]
-        (when error-data
-          [[:pre {:class "execute-error-data"}
-            (json/generate-string error-data {:pretty true})]])))
-
-
-(defn- render-succeeded-body
-  "Dispatch on the result-value shape — same priority the JS
-   `renderResultBody` walked: truncated note → nil/scalar → large-
-   JSON preview (>50 KB) → list → record (kw-keyed map) → scalar
-   fallback. `:result-truncated?` true means the value exceeded the
-   5 MB persistence cap and was stored as nil; surface the note
-   instead of pretending the nil is a real value."
-  [result result-truncated?]
-  (cond
-    result-truncated?
-    [:div {:class "execute-result-pane"}
-     [:div {:class "execute-result-truncated"}
-      "Result exceeded 5 MB cap — not stored."]]
-
-    (nil? result)
-    [:div {:class "execute-result-pane"} (render-scalar-body result)]
-
-    :else
-    (let [as-str (json/generate-string result)]
-      (if (> (count as-str) max-json-preview-bytes)
-        [:div {:class "execute-result-pane"}
-         [:div {:class "execute-result-truncated"}
-          (str "Result preview only — full payload "
-               (math/round (/ (count as-str) 1024.0))
-               " KB. First 50 KB shown.")]
-         [:pre {:class "execute-result-json"}
-          (str (subs as-str 0 max-json-preview-bytes) "…")]]
-        [:div {:class "execute-result-pane"}
-         (cond
-           (sequential? result) (render-list-body result)
-           (map? result)        (render-record-body result)
-           :else                (render-scalar-body result))]))))
-
-
-(defn render-execute-result-hiccup
-  "Body hiccup for one persisted execution row — the server-rendered
-   replacement for the JS `renderResultBody` + `renderTaintedPane` +
-   `renderErrorPane` chain. nil exec → an `[:span {:hidden \"1\"}]`
-   placeholder (the partial returns 200 with an empty popover instead
-   of 404 so the editor can show a `Loading…` → empty graceful path)."
-  [exec]
-  (cond
-    (nil? exec)
-    [:span {:hidden "1"}]
-
-    (or (= :tainted (some-> (:error-data exec) :reason))
-        (true? (:touched-secret? exec)))
-    (render-tainted-body)
-
-    :else
-    (let [status (some-> exec :status name)]
-      (case status
-        "succeeded" (render-succeeded-body (:result exec)
-                                           (:result-truncated? exec))
-        "failed"    (render-error-body (:error exec) (:error-data exec))
-        ;; pending / cancelled / unknown — return a neutral note so the
-        ;; popover still renders something readable.
-        [:div {:class "execute-result-pane"}
-         [:div {:class "execute-cancelled"} (or status "unknown")]]))))
+;; Server-side rendering for `/partials/execute-result?id=X` moved
+;; to the graph (`:_er-*` chain in `app/execution/fns.edn`, entry
+;; `:_er-body`). §3.3 fix — the previous Clojure-side walker
+;; (render-scalar/list/record/tainted/error/succeeded-body helpers
+;; + the public render-execute-result-hiccup) hid text labels,
+;; cap constants, and shape-dispatch policy in private defns where
+;; admins couldn't reach. Graph version exposes:
+;; - `:_er-max-list-items` (was Clojure const `max-list-items`)
+;; - `:_er-max-json-preview-bytes` (was `max-json-preview-bytes`)
+;; - every label, every conditional, every per-item type-dispatch
+;;   as named `_er-*` fn-defs.

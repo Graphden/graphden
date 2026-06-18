@@ -239,16 +239,9 @@
 ;; `:entity-type "service"`).
 
 
-(defbase render-execute-result-hiccup
-  "Body hiccup for one persisted execution row — the server-rendered
-   replacement for the JS `renderResultBody` + `renderTaintedPane` +
-   `renderErrorPane` chain in `editor-execute-result.js`. Walks the
-   row's `:status` / `:touched-secret?` / `:result-truncated?` /
-   `:result` / `:error` / `:error-data` fields, dispatches on shape,
-   returns the hiccup. nil exec → an `[:span hidden]` placeholder."
-  [exec]
-  (fn-exec/render-execute-result-hiccup exec))
-
+;; `:render-execute-result-hiccup` retired — entire result body
+;; now graph-composed in `fns.edn` (`:_er-*` chain → `:_er-body`).
+;; §3.3 fix.
 
 ;; `:render-service-popover-hiccup` retired — entire popover body
 ;; now graph-composed in `fns.edn` (`:_sp-*` chain →
@@ -261,11 +254,10 @@
 
 
 (def impls
-  {:resolve-fn                     resolve-fn
-   :_execute-apply                 _execute-apply
-   :get-execution                  get-execution
-   :render-execute-result-hiccup   render-execute-result-hiccup
-   :cancel-execution!              cancel-execution!
-   :resolve-fn-version-id          resolve-fn-version-id
-   :_reconcile-services-apply      _reconcile-services-apply
-   :running-entry                  running-entry})
+  {:resolve-fn                 resolve-fn
+   :_execute-apply             _execute-apply
+   :get-execution              get-execution
+   :cancel-execution!          cancel-execution!
+   :resolve-fn-version-id      resolve-fn-version-id
+   :_reconcile-services-apply  _reconcile-services-apply
+   :running-entry              running-entry})

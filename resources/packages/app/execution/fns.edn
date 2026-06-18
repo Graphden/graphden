@@ -704,19 +704,9 @@
                  :description "Decoded execution row from `:get-execution`."}}
    :return-type :hiccup-node}
 
-  {:name :render-service-popover-hiccup
-   :description "Body hiccup for the service settings popover — server-rendered replacement for `editor-service-popover.js showServicePopover`'s in-JS DOM construction. Picks the existing :service row (preferring `current-branch-id` over null-branch fallback), surfaces sibling warnings, and renders the form. Save / delete handlers stay JS-side, bound post-swap via `.service-popover-{save,delete,close}-btn` selectors."
-   :args {:fn-id              {:type :uuid
-                               :description "Target fn id."}
-          :fn-name            {:type :nullable-text
-                               :description "Display name for the popover header. nil → `(anonymous)`."}
-          :enriched-services  {:type [:list :keyword-map]
-                               :description "All :service rows already shaped by `:_list-services-enriched`."}
-          :branches           {:type [:list :branch-row-shape]
-                               :description "All :branch rows (`:_list-branches-rows`)."}
-          :current-branch-id  {:type :uuid
-                               :description "Active branch id — drives both existing-row selection and the picker's default."}}
-   :return-type :hiccup-node}
+  ;; `:render-service-popover-hiccup` retired — entire popover body now
+  ;; graph-composed in the `:_sp-*` chain below (`:_partial-service-
+  ;; popover-body` is the entry). §3.3 fix.
 
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
@@ -1269,9 +1259,668 @@
    :args {:rows :_list-services-rows
           :names :_list-services-fn-names}}
 
+  ;; ---------------------------------------------------------------------
+  ;; Pick-existing — admin-tweakable selection policy. Same preference
+  ;; order the JS used: row matching current branch first, then the
+  ;; legacy null-branch row, then any first match. Two chained
+  ;; `:coalesce`s express "first non-nil of three candidates" — admin
+  ;; who wants always-null-first can re-wire `:_sp-existing` directly.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-svc-row-fn-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+
+  {:name :_sp-svc-row-branch-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :branch-id} :default nil}}
+
+  {:name :_sp-row-matches-fn?-cb
+   :parent :equal?
+   :args {:a :_sp-svc-row-fn-id :b {:as :fn-id}}}
+
+  {:name :_sp-matches
+   :parent :filter
+   :args {:pred :_sp-row-matches-fn?-cb
+          :coll {:as :enriched-services}}}
+
+  {:name :_sp-on-current?-cb
+   :parent :equal?
+   :args {:a :_sp-svc-row-branch-id :b {:as :current-branch-id}}}
+
+  {:name :_sp-matches-on-current
+   :parent :filter
+   :args {:pred :_sp-on-current?-cb
+          :coll :_sp-matches
+          :current-branch-id {:as :current-branch-id}}}
+
+  {:name :_sp-existing-on-current
+   :parent :first
+   :args {:coll :_sp-matches-on-current}}
+
+  {:name :_sp-on-null-branch?-cb
+   :parent :nil?
+   :args {:value :_sp-svc-row-branch-id}}
+
+  {:name :_sp-matches-on-null
+   :parent :filter
+   :args {:pred :_sp-on-null-branch?-cb :coll :_sp-matches}}
+
+  {:name :_sp-existing-on-null
+   :parent :first
+   :args {:coll :_sp-matches-on-null}}
+
+  {:name :_sp-existing-first-match
+   :parent :first
+   :args {:coll :_sp-matches}}
+
+  {:name :_sp-existing-fallback
+   :description "Falls back to the legacy null-branch row first, then any first match."
+   :parent :coalesce
+   :args {:value :_sp-existing-on-null :default :_sp-existing-first-match}}
+
+  {:name :_sp-existing
+   :description "Picked :service row (or nil). Preference: row matching the active branch → null-branch fallback → first match."
+   :parent :coalesce
+   :args {:value :_sp-existing-on-current :default :_sp-existing-fallback}}
+
+  {:name :_sp-existing-id
+   :parent :get
+   :args {:coll :_sp-existing :key {:value :id} :default nil}}
+
+  {:name :_sp-existing-id-str
+   :description "Stringified existing-service id for `data-existing-service-id` HTML attr. Empty string when no existing row — JS reads `data.existingServiceId || ''` and picks POST vs PUT/DELETE."
+   :parent :if
+   :args {:test :_sp-has-existing?
+          :then {:parent :to-str :args {:value :_sp-existing-id}}
+          :else {:value ""}}}
+
+  {:name :_sp-has-existing?
+   :parent :some?
+   :args {:value :_sp-existing}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Siblings — services on OTHER branches for the same fn-id. The
+  ;; in-row id-check uses `:not :equal?` against the existing id;
+  ;; nil-vs-uuid compares safely (no row's id will ever equal nil).
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-svc-row-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default nil}}
+
+  {:name :_sp-not-existing?-cb
+   :parent :not
+   :args {:value {:parent :equal? :args {:a :_sp-svc-row-id :b {:as :existing-id}}}}}
+
+  {:name :_sp-siblings
+   :parent :filter
+   :args {:pred :_sp-not-existing?-cb
+          :coll :_sp-matches
+          :existing-id :_sp-existing-id}}
+
+  {:name :_sp-siblings-empty?
+   :parent :empty? :args {:coll :_sp-siblings}}
+
+  {:name :_sp-has-siblings?
+   :parent :not :args {:value :_sp-siblings-empty?}}
+
+  {:name :_sp-siblings-count
+   :parent :count :args {:coll :_sp-siblings}}
+
+  {:name :_sp-multiple-siblings?
+   :parent :gt :args {:nums [:_sp-siblings-count {:value 1}]}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Header — title text + × close button.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-title-prefix
+   :parent :if
+   :args {:test :_sp-has-existing?
+          :then {:value "Service: :"}
+          :else {:value "Make service: :"}}}
+
+  {:name :_sp-fn-name-or-anon
+   :parent :coalesce
+   :args {:value {:as :fn-name} :default {:value "(anonymous)"}}}
+
+  {:name :_sp-title-text
+   :parent :str
+   :args {:parts [:_sp-title-prefix :_sp-fn-name-or-anon]}}
+
+  {:name :_sp-title-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "service-popover-title"}}
+          :children [:_sp-title-text]}}
+
+  {:name :_sp-close-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "service-popover-close"
+                          :aria-label "Close service popover"}}
+          :children [{:value "×"}]}}
+
+  {:name :_sp-header-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-header"}}
+          :children [:_sp-title-span :_sp-close-btn]}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Status line (visible only when an existing :service row matches).
+  ;; 4-branch cond over the running entry:
+  ;;   nil running    → "Not yet started (reconcile to apply)."
+  ;;   start-failed?  → "Start failed — exhausted N retries at HH:MM:SS UTC."
+  ;;   stopper-set?   → "Running [since HH:MM:SS UTC]."
+  ;;   else           → "Tracked but no active stopper."
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-running
+   :parent :get
+   :args {:coll :_sp-existing :key {:value :running} :default nil}}
+
+  {:name :_sp-running-nil?
+   :parent :nil? :args {:value :_sp-running}}
+
+  {:name :_sp-start-failed-at
+   :parent :get :args {:coll :_sp-running :key {:value :start-failed-at} :default nil}}
+
+  {:name :_sp-start-failed?
+   :parent :some? :args {:value :_sp-start-failed-at}}
+
+  {:name :_sp-stopper-set?
+   :parent :get :args {:coll :_sp-running :key {:value :stopper-set?} :default nil}}
+
+  {:name :_sp-start-attempts-raw
+   :parent :get :args {:coll :_sp-running :key {:value :start-attempts} :default nil}}
+
+  {:name :_sp-start-attempts
+   :parent :coalesce :args {:value :_sp-start-attempts-raw :default {:value 1}}}
+
+  {:name :_sp-started-at
+   :parent :get :args {:coll :_sp-running :key {:value :started-at} :default nil}}
+
+  ;; Time-of-day extraction: "2026-06-18T17:58:24..." → "17:58:24".
+  ;; The `:coalesce` ahead of `:subs` keeps the type-checker happy
+  ;; (subs requires :text); empty string is harmless because the
+  ;; downstream :str caller only emits this when started-at is some?.
+  {:name :_sp-started-at-text
+   :parent :coalesce :args {:value :_sp-started-at :default {:value ""}}}
+
+  {:name :_sp-started-at-short
+   :parent :subs
+   :args {:string :_sp-started-at-text :start {:value 11} :end {:value 19}}}
+
+  {:name :_sp-start-failed-at-text
+   :parent :coalesce :args {:value :_sp-start-failed-at :default {:value ""}}}
+
+  {:name :_sp-start-failed-at-short
+   :parent :subs
+   :args {:string :_sp-start-failed-at-text :start {:value 11} :end {:value 19}}}
+
+  {:name :_sp-status-line-failed
+   :parent :str
+   :args {:parts [{:value "Start failed — exhausted "}
+                  :_sp-start-attempts
+                  {:value " retries at "}
+                  :_sp-start-failed-at-short
+                  {:value " UTC."}]}}
+
+  {:name :_sp-started-at-some?
+   :parent :some? :args {:value :_sp-started-at}}
+
+  {:name :_sp-status-line-running-since
+   :parent :if
+   :args {:test :_sp-started-at-some?
+          :then {:parent :str
+                 :args {:parts [{:value " since "}
+                                :_sp-started-at-short
+                                {:value " UTC"}]}}
+          :else {:value ""}}}
+
+  {:name :_sp-status-line-running
+   :parent :str
+   :args {:parts [{:value "Running"} :_sp-status-line-running-since {:value "."}]}}
+
+  {:name :_sp-status-line
+   :parent :cond
+   :args {:clauses [:_sp-running-nil?  {:value "Not yet started (reconcile to apply)."}
+                    :_sp-start-failed? :_sp-status-line-failed
+                    :_sp-stopper-set?  :_sp-status-line-running
+                    {:value true}      {:value "Tracked but no active stopper."}]}}
+
+  {:name :_sp-status-div-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-status"}}
+          :children [:_sp-status-line]}}
+
+  {:name :_sp-hidden-placeholder
+   :description "Empty `<span hidden=\"1\">` placeholder reused as the `:else` branch wherever a conditional section collapses to nothing — keeps the children-vector shape uniform."
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:hidden "1"}}
+          :children {:value []}}}
+
+  {:name :_sp-status-div
+   :parent :if
+   :args {:test :_sp-has-existing?
+          :then :_sp-status-div-shown
+          :else :_sp-hidden-placeholder}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Sibling warning. Maps each sibling to "<branch-name> (<state>)",
+  ;; joins with ", ", prepends pluralized header.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-sibling-running
+   :parent :get :args {:coll {:as :item} :key {:value :running} :default nil}}
+
+  {:name :_sp-sibling-stopper-set?
+   :parent :get :args {:coll :_sp-sibling-running :key {:value :stopper-set?} :default nil}}
+
+  {:name :_sp-sibling-start-failed-at
+   :parent :get :args {:coll :_sp-sibling-running :key {:value :start-failed-at} :default nil}}
+
+  {:name :_sp-sibling-failed?
+   :parent :some? :args {:value :_sp-sibling-start-failed-at}}
+
+  {:name :_sp-sibling-enabled?
+   :parent :get :args {:coll {:as :item} :key {:value :enabled?} :default nil}}
+
+  {:name :_sp-sibling-state
+   :parent :cond
+   :args {:clauses [:_sp-sibling-stopper-set? {:value "running"}
+                    :_sp-sibling-failed?      {:value "failed"}
+                    :_sp-sibling-enabled?     {:value "pending"}
+                    {:value true}             {:value "disabled"}]}}
+
+  ;; Find the branch whose :id matches the sibling's :branch-id —
+  ;; same in-list :filter+:first pattern as the branch-popover row
+  ;; helpers (closure-captured `{:as :branches}`).
+  {:name :_sp-sibling-branch-id
+   :parent :get :args {:coll {:as :item} :key {:value :branch-id} :default nil}}
+
+  {:name :_sp-branch-matches-sibling?-cb
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+          :b {:as :sibling-branch-id}}}
+
+  {:name :_sp-sibling-branch-matches
+   :parent :filter
+   :args {:pred :_sp-branch-matches-sibling?-cb
+          :coll {:as :branches}
+          :sibling-branch-id :_sp-sibling-branch-id}}
+
+  {:name :_sp-sibling-branch-row
+   :parent :first :args {:coll :_sp-sibling-branch-matches}}
+
+  {:name :_sp-sibling-branch-name-found
+   :parent :get :args {:coll :_sp-sibling-branch-row :key {:value :name} :default nil}}
+
+  ;; Fallback label when branch lookup fails: "(any)" for null-branch
+  ;; rows, "<unknown branch>" otherwise.
+  {:name :_sp-sibling-branch-id-nil?
+   :parent :nil? :args {:value :_sp-sibling-branch-id}}
+
+  {:name :_sp-sibling-branch-fallback
+   :parent :if
+   :args {:test :_sp-sibling-branch-id-nil?
+          :then {:value "(any)"}
+          :else {:value "<unknown branch>"}}}
+
+  {:name :_sp-sibling-branch-name
+   :parent :coalesce
+   :args {:value :_sp-sibling-branch-name-found :default :_sp-sibling-branch-fallback}}
+
+  {:name :_sp-sibling-label
+   :parent :str
+   :args {:parts [:_sp-sibling-branch-name {:value " ("} :_sp-sibling-state {:value ")"}]}}
+
+  {:name :_sp-sibling-labels
+   :parent :map
+   :args {:func :_sp-sibling-label
+          :coll :_sp-siblings
+          :branches {:as :branches}}}
+
+  {:name :_sp-sibling-labels-joined
+   :parent :str-join :args {:coll :_sp-sibling-labels :separator {:value ", "}}}
+
+  {:name :_sp-sibling-warn-prefix
+   :parent :if
+   :args {:test :_sp-multiple-siblings?
+          :then {:value "⚠ Also services on: "}
+          :else {:value "⚠ Also a service on: "}}}
+
+  {:name :_sp-sibling-warn-text
+   :parent :str
+   :args {:parts [:_sp-sibling-warn-prefix :_sp-sibling-labels-joined]}}
+
+  {:name :_sp-sibling-warn-shown
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-sibling-warn"
+                          :title "Same fn-id, different branch. Reconciler keeps each branch's instance separate — verify this is intentional before adding another."}}
+          :children [:_sp-sibling-warn-text]}}
+
+  {:name :_sp-sibling-warn-div
+   :parent :if
+   :args {:test :_sp-has-siblings?
+          :then :_sp-sibling-warn-shown
+          :else :_sp-hidden-placeholder}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Enabled checkbox. Default true for brand-new rows; existing rows
+  ;; pre-fill with their stored `:enabled?` flag.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-existing-enabled?
+   :parent :get :args {:coll :_sp-existing :key {:value :enabled?} :default {:value true}}}
+
+  {:name :_sp-enabled-input-attrs-base
+   :parent :assoc
+   :args {:map {:value {:type "checkbox"}}
+          :key {:value :class}
+          :value {:value "service-popover-enabled"}}}
+
+  {:name :_sp-enabled-input-attrs-with-checked
+   :parent :assoc
+   :args {:map :_sp-enabled-input-attrs-base
+          :key {:value :checked}
+          :value {:value "checked"}}}
+
+  {:name :_sp-enabled-input-attrs
+   :parent :if
+   :args {:test :_sp-existing-enabled?
+          :then :_sp-enabled-input-attrs-with-checked
+          :else :_sp-enabled-input-attrs-base}}
+
+  {:name :_sp-enabled-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs :_sp-enabled-input-attrs
+          :children {:value []}}}
+
+  {:name :_sp-enabled-label
+   :parent :hiccup
+   :args {:tag {:value "label"}
+          :attrs {:value {:class "service-popover-option"}}
+          :children [:_sp-enabled-input {:value " Enabled"}]}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Branch picker. Pre-selected value:
+  ;;   existing.branch-id-as-string   (if existing has explicit branch)
+  ;;   ELSE current-branch-id-as-string  (default for new rows)
+  ;;   ELSE ""                        (legacy null-branch)
+  ;; The "(any — legacy)" option always present so admins can opt out
+  ;; of per-branch scoping for a service that ought to run regardless.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-existing-branch-id
+   :parent :get :args {:coll :_sp-existing :key {:value :branch-id} :default nil}}
+
+  {:name :_sp-existing-branch-id-some?
+   :parent :some? :args {:value :_sp-existing-branch-id}}
+
+  {:name :_sp-existing-branch-id-str
+   :parent :if
+   :args {:test :_sp-existing-branch-id-some?
+          :then {:parent :to-str :args {:value :_sp-existing-branch-id}}
+          :else {:value nil}}}
+
+  {:name :_sp-current-branch-id-str
+   :parent :to-str :args {:value {:as :current-branch-id}}}
+
+  {:name :_sp-pre-selected-fallback
+   :parent :coalesce
+   :args {:value :_sp-current-branch-id-str :default {:value ""}}}
+
+  {:name :_sp-pre-selected
+   :description "Selected `value=` for the branch picker — existing row's branch-id wins, else current-branch default, else empty (the legacy `(any)` option)."
+   :parent :coalesce
+   :args {:value :_sp-existing-branch-id-str :default :_sp-pre-selected-fallback}}
+
+  {:name :_sp-pre-selected-is-any?
+   :parent :equal? :args {:a :_sp-pre-selected :b {:value ""}}}
+
+  ;; "(any — legacy)" option — selected iff nothing else matched.
+  {:name :_sp-option-any-attrs-shown
+   :parent :assoc
+   :args {:map {:value {:value ""}}
+          :key {:value :selected}
+          :value {:value "selected"}}}
+
+  {:name :_sp-option-any-attrs
+   :parent :if
+   :args {:test :_sp-pre-selected-is-any?
+          :then :_sp-option-any-attrs-shown
+          :else {:value {:value ""}}}}
+
+  {:name :_sp-option-any
+   :parent :hiccup
+   :args {:tag {:value "option"}
+          :attrs :_sp-option-any-attrs
+          :children [{:value "(any — legacy)"}]}}
+
+  ;; Per-branch option (HOF callback over branches).
+  {:name :_sp-branch-row-id-str
+   :parent :to-str :args {:value {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}}}
+
+  {:name :_sp-branch-row-name
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default nil}}
+
+  {:name :_sp-branch-row-selected?
+   :parent :equal?
+   :args {:a :_sp-branch-row-id-str :b {:as :pre-selected}}}
+
+  {:name :_sp-branch-option-attrs-base
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :value}
+          :value :_sp-branch-row-id-str}}
+
+  {:name :_sp-branch-option-attrs-with-selected
+   :parent :assoc
+   :args {:map :_sp-branch-option-attrs-base
+          :key {:value :selected}
+          :value {:value "selected"}}}
+
+  {:name :_sp-branch-option-attrs
+   :parent :if
+   :args {:test :_sp-branch-row-selected?
+          :then :_sp-branch-option-attrs-with-selected
+          :else :_sp-branch-option-attrs-base}}
+
+  {:name :_sp-branch-option
+   :parent :hiccup
+   :args {:tag {:value "option"}
+          :attrs :_sp-branch-option-attrs
+          :children [:_sp-branch-row-name]}}
+
+  {:name :_sp-branch-options
+   :parent :map
+   :args {:func :_sp-branch-option
+          :coll {:as :branches}
+          :pre-selected :_sp-pre-selected}}
+
+  {:name :_sp-branch-options-all
+   :parent :cons
+   :args {:item :_sp-option-any :coll :_sp-branch-options}}
+
+  {:name :_sp-branch-select
+   :parent :hiccup
+   :args {:tag {:value "select"}
+          :attrs {:value {:class "service-popover-branch-select"}}
+          :children :_sp-branch-options-all}}
+
+  {:name :_sp-branch-label-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-branch-label"}}
+          :children [{:value "Branch:"}]}}
+
+  {:name :_sp-branch-wrap
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-branch"}}
+          :children [:_sp-branch-label-div :_sp-branch-select]}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Restart-policy radios — 3 hardcoded enum values (matches the
+  ;; `:service.restart-policy` column). Per-radio :checked toggled by
+  ;; comparing against the existing row's policy (or "always" default
+  ;; for new rows).
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-existing-policy-raw
+   :parent :get :args {:coll :_sp-existing :key {:value :restart-policy} :default nil}}
+
+  {:name :_sp-existing-policy-keyword-name
+   :description "Strip the leading `:` from the keyword form (e.g. `:always` → `\"always\"`); nil-safe."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_sp-existing-policy-raw}}
+          :then {:parent :name :args {:value :_sp-existing-policy-raw}}
+          :else {:value nil}}}
+
+  {:name :_sp-current-policy
+   :parent :coalesce
+   :args {:value :_sp-existing-policy-keyword-name :default {:value "always"}}}
+
+  {:name :_sp-policies
+   :description "Hardcoded enum — matches the `:service.restart-policy` column. Admins MUST change the column enum + storage schema before adding values here."
+   :parent :list
+   :args {:items [{:value "always"} {:value "on-failure"} {:value "never"}]}}
+
+  ;; Per-radio callback. `{:as :item}` is the policy string.
+  {:name :_sp-policy-name
+   :parent :str :args {:parts [{:as :item}]}}
+
+  {:name :_sp-policy-selected?
+   :parent :equal? :args {:a :_sp-policy-name :b {:as :current-policy}}}
+
+  {:name :_sp-radio-attrs-base
+   :parent :assoc
+   :args {:map {:value {:type "radio" :name "service-restart-policy"}}
+          :key {:value :value}
+          :value :_sp-policy-name}}
+
+  {:name :_sp-radio-attrs-with-checked
+   :parent :assoc
+   :args {:map :_sp-radio-attrs-base
+          :key {:value :checked}
+          :value {:value "checked"}}}
+
+  {:name :_sp-radio-attrs
+   :parent :if
+   :args {:test :_sp-policy-selected?
+          :then :_sp-radio-attrs-with-checked
+          :else :_sp-radio-attrs-base}}
+
+  {:name :_sp-radio-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs :_sp-radio-attrs
+          :children {:value []}}}
+
+  {:name :_sp-radio-label-text
+   :parent :str :args {:parts [{:value " "} :_sp-policy-name]}}
+
+  {:name :_sp-radio-label
+   :parent :hiccup
+   :args {:tag {:value "label"}
+          :attrs {:value {:class "service-popover-policy-option"}}
+          :children [:_sp-radio-input :_sp-radio-label-text]}}
+
+  {:name :_sp-policy-radios
+   :parent :map
+   :args {:func :_sp-radio-label
+          :coll :_sp-policies
+          :current-policy :_sp-current-policy}}
+
+  {:name :_sp-policy-label-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-policy-label"}}
+          :children [{:value "Restart policy:"}]}}
+
+  {:name :_sp-policy-wrap-children
+   :parent :cons
+   :args {:item :_sp-policy-label-div :coll :_sp-policy-radios}}
+
+  {:name :_sp-policy-wrap
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-policy"}}
+          :children :_sp-policy-wrap-children}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Action bar: save (always) + delete (only when existing).
+  ;; `data-existing-service-id` carries the row id (or empty for new)
+  ;; so the JS save handler picks PUT-vs-POST and the delete handler
+  ;; knows which id to target.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-save-btn-label
+   :parent :if
+   :args {:test :_sp-has-existing?
+          :then {:value "Save & reconcile"}
+          :else {:value "Create & reconcile"}}}
+
+  {:name :_sp-save-btn-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "service-popover-save-btn"}}
+          :key {:value :data-existing-service-id}
+          :value :_sp-existing-id-str}}
+
+  {:name :_sp-save-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_sp-save-btn-attrs
+          :children [:_sp-save-btn-label]}}
+
+  {:name :_sp-delete-btn-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "service-popover-delete-btn"
+                        :title "Removes the :service row; reconcile stops the running fn."}}
+          :key {:value :data-existing-service-id}
+          :value :_sp-existing-id-str}}
+
+  {:name :_sp-delete-btn-shown
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_sp-delete-btn-attrs
+          :children [{:value "Delete service"}]}}
+
+  {:name :_sp-delete-btn
+   :parent :if
+   :args {:test :_sp-has-existing?
+          :then :_sp-delete-btn-shown
+          :else :_sp-hidden-placeholder}}
+
+  {:name :_sp-actions-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-actions"}}
+          :children [:_sp-save-btn :_sp-delete-btn]}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Top-level body — all sections in order.
+  ;; ---------------------------------------------------------------------
+
   {:name :_partial-service-popover-body
-   :parent :render-service-popover-hiccup
-   :args {:fn-id :_partial-service-popover-fn-id
+   :description "Full popover body. Pure-graph composition over the `:_sp-*` chain; previously delegated to `crud.services/render-service-popover-hiccup` (Clojure helper retired per §3.3)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {}}
+          :children [:_sp-header-div :_sp-status-div :_sp-sibling-warn-div
+                     :_sp-enabled-label :_sp-branch-wrap :_sp-policy-wrap
+                     :_sp-actions-div]
+          :fn-id :_partial-service-popover-fn-id
           :fn-name :_partial-service-popover-fn-name
           :enriched-services :_partial-service-popover-services
           :branches :_list-branches-rows

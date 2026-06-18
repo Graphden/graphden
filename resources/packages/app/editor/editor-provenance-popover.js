@@ -98,24 +98,17 @@ function bindProvPopoverPostSwap(el) {
 }
 
 
-// JS-only sections (steps 2-3 will server-side these too):
-//   - Allowed-values for closed-enum refinements
+// JS-only section (step 3 will server-side it too):
 //   - Slot-effect-bound for `[:fn args ret eff]` types
-// Both depend on `slotTypeProvenance(arg).winner` type — kept JS-side
+// Depends on `slotTypeProvenance(arg).winner` type — kept JS-side
 // for now because the server partial returns rendered HTML, not the
-// raw provenance data the helpers need. Step 2/3 will move them into
+// raw provenance data the helper needs. Step 3 will move it into
 // the server fragment.
 function appendProvJsOnlySections(el, arg) {
   if (typeof slotTypeProvenance !== 'function') return;
   const prov = slotTypeProvenance(arg);
   if (!prov?.winner) return;
   const winnerType = prov.tiers?.find(t => t.key === prov.winner)?.type;
-  if (winnerType != null && typeof closedEnumOf === 'function') {
-    const enumInfo = closedEnumOf(winnerType);
-    if (enumInfo && enumInfo.members.length > 0) {
-      appendClosedEnumSection(el, enumInfo);
-    }
-  }
   if (Array.isArray(winnerType) && winnerType[0] === 'fn'
       && winnerType.length === 4 && winnerType[3] !== 'any'
       && winnerType[3] !== ':any'

@@ -362,6 +362,13 @@
           :expected {:type :type-expression :description "Expected type expression — atomic, vector (`[:list T]`, `[:map K V]`, `[:tuple …]`, `[:union …]`, `[:refine base constraint]`), or record (`{k T …}`)."}}
    :return-type [:list {:path :text :expected :type-expression :actual :any}]}
 
+  {:name :closed-enum-of
+   :description "Returns `{:base :members}` when `expected` resolves to a closed-enum refinement (`[:refine base [:in [members]]]`). Members are sorted + colon-prefixed for `:keyword`-based enums. nil for any other shape (caller suppresses the section)."
+   :args {:expected {:type :type-expression
+                     :description "Type expression to test for the closed-enum shape."}}
+   :return-type [:union :null {:base :type-expression
+                               :members [:list {:value :text :label :text}]}]}
+
   ;; --- :_types-compatible-apply — pure graph composition over
   ;; `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope.
   ;; Admins can vary the response shape (e.g. add `:expected-kind`,

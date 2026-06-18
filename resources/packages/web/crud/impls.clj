@@ -337,6 +337,15 @@
   (types-check/diff-value-against-type value expected))
 
 
+(defbase closed-enum-of
+  "Atomic library boundary over `types.check/closed-enum-of` —
+   returns `{:base :members}` when `expected` resolves to a closed-
+   enum refinement (`[:refine base [:in [members]]]`), nil otherwise.
+   Members are sorted + colon-prefixed for `:keyword`-based enums."
+  [expected]
+  (types-check/closed-enum-of expected))
+
+
 ;; `:_types-compatible-apply` is now a graph fn-def — see fns.edn.
 ;; Pure composition over `:subtype?` + `:if`-wrapped
 ;; `:describe-type-mismatch` + envelope `:zipmap` / `:assoc`.
@@ -864,6 +873,7 @@
    :describe-type-mismatch describe-type-mismatch-fn
    :classify-literal classify-literal
    :diff-value-against-type diff-value-against-type
+   :closed-enum-of closed-enum-of
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

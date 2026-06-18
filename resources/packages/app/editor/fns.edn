@@ -954,13 +954,104 @@
                      :data-explainer-close "1"
                      :aria-label "Close type narrowing popover"} "×"]]}}
 
+  ;; STEP 2 — Allowed-values section. When the resolved slot type is
+  ;; a closed-enum refinement (`[:refine base [:in [...]]]`), surface
+  ;; the member list directly — saves the reader from opening the
+  ;; inline `▸/▾` panel to discover the (often tiny) set. Server-side
+  ;; via `:closed-enum-of` on the provenance winner's type; section
+  ;; hides when the winner isn't a closed-enum refinement.
+
+  {:name :_provenance-winner-tier
+   :description "The tier the resolver chose (matching `:_provenance-winner` key against the tier list). nil when no tier applied."
+   :parent :first
+   :args {:coll {:parent :filter
+                 :args {:pred :_provenance-tier-is-winner?
+                        :coll :_provenance-tiers}}}}
+
+  {:name :_provenance-winner-key
+   :parent :get
+   :args {:coll :_provenance :key {:value :winner} :default nil}}
+
+  {:name :_provenance-tier-is-winner?
+   :description "HOF predicate — true for the tier whose `:key` matches the winner. `:as :item` per the HOF callback convention."
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :key} :default nil}}
+          :b :_provenance-winner-key}}
+
+  {:name :_provenance-winner-type
+   :parent :get
+   :args {:coll :_provenance-winner-tier :key {:value :type} :default nil}}
+
+  {:name :_provenance-enum
+   :description "`{:base :members}` when the winner's type is a closed-enum refinement, nil otherwise."
+   :parent :closed-enum-of
+   :args {:expected :_provenance-winner-type}}
+
+  {:name :_provenance-enum-some?
+   :parent :some?
+   :args {:value :_provenance-enum}}
+
+  {:name :_provenance-enum-members
+   :parent :get
+   :args {:coll :_provenance-enum :key {:value :members} :default []}}
+
+  ;; Per-member chip — `<span class="provenance-popover-enum-chip">
+  ;; :value</span>`. `:label` is the user-facing text (colon-
+  ;; prefixed for keyword bases via `closed-enum-of`).
+  {:name :_provenance-enum-chip-label
+   :parent :get
+   :args {:coll {:as :item} :key {:value :label} :default ""}}
+
+  {:name :_provenance-enum-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "provenance-popover-enum-chip"}}
+          :children [:_provenance-enum-chip-label]}}
+
+  {:name :_provenance-enum-chips
+   :parent :map
+   :args {:func :_provenance-enum-chip
+          :coll :_provenance-enum-members}}
+
+  {:name :_provenance-enum-list
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-enum-list"}}
+          :children [:_provenance-enum-chips]}}
+
+  {:name :_provenance-enum-head
+   :parent :const
+   :args {:value [:div {:class "type-inline-resolution-head"} "Allowed values"]}}
+
+  {:name :_provenance-enum-section-built
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-enum"}}
+          :children [:_provenance-enum-head
+                     :_provenance-enum-list]}}
+
+  {:name :_provenance-enum-section
+   :description "Allowed-values section — chip list of every closed-enum member. Hidden when the winner isn't a closed-enum refinement."
+   :parent :if
+   :args {:test :_provenance-enum-some?
+          :then :_provenance-enum-section-built
+          :else {:value [:span {:hidden "1"}]}}}
+
+  ;; Wrapper that binds `:parsed` for the new section — same pattern
+  ;; as `:_partial-provenance-prov-section`. Lets the fragment include
+  ;; the section as a child without passing args at the hiccup level.
+  {:name :_partial-provenance-enum-section
+   :parent :_provenance-enum-section
+   :args {:parsed :_partial-provenance-parsed}}
+
   {:name :_partial-provenance-fragment
-   :description "Full provenance popover hiccup — header + Resolved-via section. Allowed-values + Slot-effect-bound sections are step-2/3."
+   :description "Full provenance popover hiccup — header + Resolved-via section + Allowed-values section. Slot-effect-bound section is step-3."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "provenance-popover-content"}}
           :children [:_partial-provenance-header
-                     :_partial-provenance-prov-section]}}
+                     :_partial-provenance-prov-section
+                     :_partial-provenance-enum-section]}}
 
   {:name :_partial-provenance-html
    :parent :render-hiccup

@@ -49,6 +49,7 @@
      equality only — no SMT-style narrowing reasoning."
   (:require
     [clojure.set :as set]
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.registry.core :as registry]
     [graphden.types.core :as types]))
@@ -99,6 +100,34 @@
     (vector? v)      (let [elems (into #{} (map #(or (classify-literal %) :any)) v)]
                        [:list (if (= 1 (count elems)) (first elems) :any)])
     :else            nil))
+
+
+(defn closed-enum-of
+  "When `expected` resolves to a closed-enum refinement —
+   `[:refine base [:in [m₁ m₂ …]]]` — return `{:base :members}` with
+   members sorted and colon-prefixed for `:keyword`-based enums.
+   nil for any other shape (the popover suppresses the section).
+
+   Mirrors the editor's `closedEnumOf` so the provenance / mismatch
+   popovers can surface the allowed-values list server-side instead
+   of duplicating the type-walk in JS."
+  [expected]
+  (let [t (or (types/resolve-alias expected) expected)]
+    (when (and (vector? t) (= :refine (first t)))
+      (let [base (nth t 1)
+            c    (nth t 2)]
+        (when (and (vector? c) (= :in (first c)) (sequential? (second c)))
+          (let [keyword-base? (or (= :keyword base) (= "keyword" base))
+                members       (->> (second c)
+                                   (map str)
+                                   sort
+                                   (mapv (fn [m]
+                                           (let [lit (if (and keyword-base?
+                                                              (not (str/starts-with? m ":")))
+                                                       (str ":" m)
+                                                       m)]
+                                             {:value lit :label lit}))))]
+            {:base base :members members}))))))
 
 
 (declare literal-satisfies-refinement?)

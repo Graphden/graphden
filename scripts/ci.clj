@@ -67,19 +67,15 @@
    "cljstyle"  120000
    "biome"      60000
    "stylelint" 120000
-   ;; tests check is unit-only under bb ci (`bb test-unit`). The full
-   ;; combined run (unit + integration) lives at `bb test`; integration-
-   ;; only at `bb test-integration` — neither runs in CI. Unit suite
-   ;; is ~3-5 min standalone (~1000 tests), so 10 min ceiling leaves
-   ;; ample headroom for the parallel load (cloverage in :coverage
-   ;; instruments the same NSes; CPU contention) while still surfacing
-   ;; a real hang (test deadlock, testcontainer stuck on Docker daemon)
-   ;; well before the limit.
-   "tests"     600000
-   ;; Unit-only coverage measured at ~1:13. Ceiling sized 4× to
-   ;; absorb cold-cache variance + cloverage's first-time JIT
-   ;; warmup pass through instrumented namespaces.
-   "coverage"  300000
+   ;; The single test check runs `bb test-unit-coverage` (unit suite +
+   ;; cloverage instrumentation). Combined wall measured ~1:30; sized
+   ;; to 5 min so cold-cache + cloverage first-time JIT warmup + CI
+   ;; parallel load have headroom while still surfacing a real hang
+   ;; (test deadlock, testcontainer stuck on Docker daemon).
+   ;; Integration + e2e suites live at `bb test-integration` /
+   ;; `bb test-e2e` and run outside CI on demand — their wall budgets
+   ;; (~10-12 min / ~15-25 min) are documented in `bb.edn`.
+   "tests-unit-coverage" 300000
    "outdated"  120000
    "security"  180000})
 
@@ -266,38 +262,36 @@
                                    ["clojure" "-M:cljstyle" "check"])
                                  lint-paths)
             splint-cmd (concat ["clojure" "-M:splint"] lint-paths)
-            ;; bb ci runs UNIT-only tests for fast pre-merge feedback.
-            ;; Integration tests live in a separate `bb test-integration`
-            ;; target — run manually before merging changes that touch
-            ;; storage / system / routes. Rationale: the integration
-            ;; suite is ~10-12 min wall (full system bootstrap + cron
-            ;; wall-clock waits + smoke pass — see the per-test
-            ;; profiling note in the test file headers), and a unit-
-            ;; level regression (lint / type-check / pure-fn test) has
-            ;; no business waiting on that. Combined `bb test` (unit +
-            ;; integration) stays available for the manual full run.
-            test-cmd ["bb" "test-unit"]
-            ;; Unit-only coverage in CI. Full coverage (`bb
-            ;; coverage-full`) is >20 min — cloverage's per-form
-            ;; instrumentation × integration parallelism contention
-            ;; on the counter atom — incompatible with the CI
-            ;; budget. Unit-only finishes in ~1:13 and covers core
-            ;; logic; integration paths stay uncovered here and need
-            ;; the manual full pass when a coverage audit is wanted.
-            coverage-cmd ["bb" "coverage"]
+            ;; bb ci runs UNIT-only tests under cloverage. Test results
+            ;; AND coverage report come out of the same kaocha run, so
+            ;; the previous separate `test-cmd = ["bb" "test-unit"]`
+            ;; check has been dropped (it was running the same suite a
+            ;; second time un-instrumented).
+            ;;
+            ;; Integration + e2e live at `bb test-integration` and
+            ;; `bb test-e2e` — manual runs before merging changes that
+            ;; touch storage / system / routes (integration) or the
+            ;; editor UI (e2e). Rationale: integration is ~10-12 min,
+            ;; e2e is ~15-25 min; a unit-level regression (lint /
+            ;; type-check / pure-fn test) shouldn't gate on them.
+            ;; Combined `bb test` (unit + integration) and `bb test-all`
+            ;; (everything) stay available for the manual full passes.
+            coverage-cmd ["bb" "test-unit-coverage"]
             outdated-cmd ["clojure" "-M:outdated"]
             biome-cmd ["npx" "biome" "check" "resources/packages/app/editor"]
             stylelint-cmd ["npx" "stylelint" "resources/packages/app/editor/**/*.css"]
 
             ;; Define checks. security check disabled — requires NVD API
-            ;; key, run manually with `bb security`.
+            ;; key, run manually with `bb security`. The `tests-unit-
+            ;; coverage` check is the single test run: kaocha :unit
+            ;; with cloverage. Test pass/fail AND coverage report come
+            ;; out of it together.
             checks [{:name "clj-kondo" :cmd kondo-cmd}
                     {:name "splint" :cmd splint-cmd}
                     {:name "cljstyle" :cmd cljstyle-cmd}
                     {:name "biome" :cmd biome-cmd}
                     {:name "stylelint" :cmd stylelint-cmd}
-                    {:name "tests" :cmd test-cmd}
-                    {:name "coverage" :cmd coverage-cmd}
+                    {:name "tests-unit-coverage" :cmd coverage-cmd}
                     {:name "outdated" :cmd outdated-cmd}]
 
             ;; Status tracking

@@ -135,17 +135,74 @@
   ;;
   ;; The multi-process path lives at `bb test-parallel` if a flake
   ;; reproduces only across separate JVMs.
+  ;; -------------------------------------------------------------------
+  ;; Test target matrix
+  ;; -------------------------------------------------------------------
+  ;; Tests split into THREE groups by what they exercise:
+  ;;   - unit:        pure logic + light fixtures, in-JVM, ~1.5 min
+  ;;   - integration: real PostgreSQL via testcontainers + full Ring
+  ;;                  chain, in-JVM, ~10-12 min
+  ;;   - e2e:         Playwright browsers against a running graphden
+  ;;                  deployment (Node, separate process), ~15-25 min
+  ;;                  — requires `bb rebuild` first + AUTH_TOKEN env
+  ;;
+  ;; Group runners (single group):
+  ;;   bb test-unit         — kaocha :unit suite
+  ;;   bb test-integration  — kaocha :integration suite
+  ;;   bb test-e2e          — Playwright browser-test suite
+  ;;
+  ;; Combinations:
+  ;;   bb test-all              — unit + integration + e2e (sequential)
+  ;;   bb test-unit-coverage    — unit with cloverage instrumentation
+  ;;   bb test-all-coverage     — unit-with-coverage + integration + e2e
+  ;;                              (coverage of integration would be ~35 min
+  ;;                               wall, so `bb coverage-full` is the
+  ;;                               opt-in for that; `test-all-coverage`
+  ;;                               picks the same compromise CI does —
+  ;;                               cloverage covers unit, the rest runs
+  ;;                               un-instrumented)
+  ;;
+  ;; What you can't do (by design):
+  ;;   integration / e2e with cloverage — covered above; the
+  ;;   instrumentation × parallel runtime blows the wall-clock
+  ;;   budget past what's useful for a development feedback loop.
+  ;;   The `bb coverage-full` opt-in remains for periodic audit.
+  ;;
+  ;; CI uses `bb test-unit-coverage` (drops the separate unit-tests
+  ;; check that was redundant once coverage runs the same suite with
+  ;; cloverage on).
+
   test
-  {:doc "Run ALL tests (unit + integration). Single JVM, NSs parallel via :kaocha.plugin/parallel. For fast unit-only feedback (~3-5 min) see `bb test-unit`. CI uses `bb test-unit` + `bb test-integration` separately so a unit-level regression isn't gated on the 14-min integration suite."
+  {:doc "Run unit + integration in one kaocha invocation. ~14 min. For e2e too see `bb test-all`. For fast unit-only feedback see `bb test-unit`."
    :task (clojure "-M:dev:test -m kaocha.runner")}
 
   test-unit
-  {:doc "Run UNIT tests only (skips ^:integration). ~3-5 min. Used by `bb ci` for fast pre-merge feedback."
+  {:doc "Unit tests only (skips ^:integration). ~1.5 min."
    :task (clojure "-M:dev:test -m kaocha.runner :unit")}
 
   test-integration
-  {:doc "Run INTEGRATION tests only (focus ^:integration). ~10-12 min. Run before merging changes that touch storage / system / routes; CI runs it separately so a unit-level regression doesn't wait on the integration suite."
+  {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~10-12 min."
    :task (clojure "-M:dev:test -m kaocha.runner :integration")}
+
+  test-e2e
+  {:doc "Playwright browser-test suite (~15-25 min). Requires `bb rebuild` first + AUTH_TOKEN env var matching the running stack. Hits http://localhost:9002 by default; override with GRAPHDEN_URL."
+   :task (p/shell "bash" "tools/browser-test/run-edit-tests.sh")}
+
+  test-all
+  {:doc "Run ALL tests (unit + integration + e2e), sequential. ~30-35 min wall. e2e requires `bb rebuild` first + AUTH_TOKEN."
+   :task (do (p/shell "bb" "test-unit")
+             (p/shell "bb" "test-integration")
+             (p/shell "bb" "test-e2e"))}
+
+  test-unit-coverage
+  {:doc "Unit tests with cloverage instrumentation. ~1.5 min. Same as `bb coverage`. Use this for the coverage report; `bb test-unit` for fast feedback without instrumentation."
+   :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
+
+  test-all-coverage
+  {:doc "Unit-with-coverage + integration + e2e. ~30-35 min. Coverage covers unit only; integration / e2e run un-instrumented (same compromise CI takes; `bb coverage-full` is the opt-in for kaocha-level full instrumentation, ~35 min on its own and STILL no e2e because e2e runs in a separate Node process)."
+   :task (do (p/shell "bb" "test-unit-coverage")
+             (p/shell "bb" "test-integration")
+             (p/shell "bb" "test-e2e"))}
 
   test-sequential
   {:doc "Run all tests sequentially in a single JVM (KAOCHA_PARALLELISM=1); use if a flake reproduces only sequentially."
@@ -237,7 +294,7 @@
              (System/exit 1)))}
 
   coverage
-  {:doc "Unit-only coverage (~1:26 wall, ~72.8% form / 82.3% line). Cloverage's per-form instrumentation × testcontainer round-trips brings full-coverage wall time to ~35 min (see `bb coverage-full`), so the day-to-day CI signal stays unit-only. Integration-only paths (cron / services / secrets / storage e2e / executor-runtime / branch-router) run every CI via `bb test` but their cloverage %-numbers only appear in `bb coverage-full`."
+  {:doc "Unit-only coverage (~1:26 wall, ~72.8% form / 82.3% line). Cloverage's per-form instrumentation × testcontainer round-trips brings full-coverage wall time to ~35 min (see `bb coverage-full`), so the day-to-day CI signal stays unit-only. Integration-only paths (cron / services / secrets / storage e2e / executor-runtime / branch-router) run every CI via `bb test` but their cloverage %-numbers only appear in `bb coverage-full`. Same as `bb test-unit-coverage` — kept for back-compat with scripts that already reference this name."
    :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
 
   coverage-full

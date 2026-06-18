@@ -143,7 +143,7 @@
          (if (seq base-leaves)
            base-leaves
            (let [sat (try (literal-satisfies-refinement? value constraint)
-                          (catch Throwable _ :unknown))]
+                          (catch Exception _ :unknown))]
              (if (false? sat) (leaf (classify-literal value)) []))))
 
        (and (vector? exp) (= :list (first exp)))

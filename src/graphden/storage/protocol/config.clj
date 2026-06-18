@@ -184,8 +184,13 @@
 (def ^:dynamic *max-batch-size*
   "Maximum number of entities in a single batch operation.
    Batch operations larger than this will throw an error.
-   Default: 5000 entities."
-  5000)
+   Default: 10000 entities. Bumped from 5000 once the bundled package
+   set grew past that — sync of `core + storage + web + app` writes
+   the whole fn-graph (fn + fn-slot + slot + binding + binding-list-
+   item rows) in a single batch and the count is now ~5100+; the cap
+   exists to guard OOM from user-supplied huge writes, not to throttle
+   the sync path."
+  10000)
 
 
 (defn validate-batch-size!

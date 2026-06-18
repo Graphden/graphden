@@ -272,42 +272,42 @@
           slot-id  (or slot-id (:slot-id bnd-pre))]
       (when slot-id
         (let [slot (sp/read-entity storage :slot slot-id)]
-        (when (:type-fn-id slot)
-          (let [bnd          (when binding-id (sp/read-entity storage :binding binding-id))
-                override-fid (:type-override-fn-id bnd)
-                ;; Tier 2 is skipped under an explicit override — mirrors
-                ;; resolve-slot-effective-type.
-                unified      (when (and (nil? override-fid) fn-id)
-                               (let [own-fn (sp/read-entity storage :fn fn-id)]
-                                 (when (:name own-fn)
-                                   (get-in (registry/rich-type-of
-                                             (keyword (:name own-fn)))
-                                           [:slot-types (keyword (:name slot))]))))
-                ref-fid      (:ref-fn-id bnd)
-                ref-fn       (when ref-fid (sp/read-entity storage :fn ref-fid))
-                own-fn       (when fn-id (sp/read-entity storage :fn fn-id))
-                declaring    (when fn-id (find-slot-declaring-fn storage fn-id slot-id))
-                tiers        [{:key :override :label "Binding type-override"
-                               :type (type-of-fn-id storage override-fid)
-                               :source (when (and override-fid (:name own-fn))
-                                         {:fn-name (:name own-fn) :fn-id fn-id})}
-                              {:key :unified :label "Backward-unified return type"
-                               :type unified
-                               :source (when (and (some? unified) (:name own-fn))
-                                         {:fn-name (:name own-fn) :fn-id fn-id})}
-                              {:key :ref-return :label "Bound fn return type"
-                               :type (type-of-fn-id storage (:return-type-fn-id ref-fn))
-                               :source (when (:name ref-fn)
-                                         {:fn-name (:name ref-fn) :fn-id ref-fid})}
-                              {:key :slot :label "Slot declaration"
-                               :type (type-of-fn-id storage (:type-fn-id slot))
-                               :source declaring}]
-                winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)
-                chain        (when fn-id
-                               (find-binding-override-chain storage fn-id slot-id))]
-            {:winner winner
-             :tiers tiers
-             :inheritance-chain (or chain [])})))))))
+          (when (:type-fn-id slot)
+            (let [bnd          (when binding-id (sp/read-entity storage :binding binding-id))
+                  override-fid (:type-override-fn-id bnd)
+                  ;; Tier 2 is skipped under an explicit override — mirrors
+                  ;; resolve-slot-effective-type.
+                  unified      (when (and (nil? override-fid) fn-id)
+                                 (let [own-fn (sp/read-entity storage :fn fn-id)]
+                                   (when (:name own-fn)
+                                     (get-in (registry/rich-type-of
+                                               (keyword (:name own-fn)))
+                                             [:slot-types (keyword (:name slot))]))))
+                  ref-fid      (:ref-fn-id bnd)
+                  ref-fn       (when ref-fid (sp/read-entity storage :fn ref-fid))
+                  own-fn       (when fn-id (sp/read-entity storage :fn fn-id))
+                  declaring    (when fn-id (find-slot-declaring-fn storage fn-id slot-id))
+                  tiers        [{:key :override :label "Binding type-override"
+                                 :type (type-of-fn-id storage override-fid)
+                                 :source (when (and override-fid (:name own-fn))
+                                           {:fn-name (:name own-fn) :fn-id fn-id})}
+                                {:key :unified :label "Backward-unified return type"
+                                 :type unified
+                                 :source (when (and (some? unified) (:name own-fn))
+                                           {:fn-name (:name own-fn) :fn-id fn-id})}
+                                {:key :ref-return :label "Bound fn return type"
+                                 :type (type-of-fn-id storage (:return-type-fn-id ref-fn))
+                                 :source (when (:name ref-fn)
+                                           {:fn-name (:name ref-fn) :fn-id ref-fid})}
+                                {:key :slot :label "Slot declaration"
+                                 :type (type-of-fn-id storage (:type-fn-id slot))
+                                 :source declaring}]
+                  winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)
+                  chain        (when fn-id
+                                 (find-binding-override-chain storage fn-id slot-id))]
+              {:winner winner
+               :tiers tiers
+               :inheritance-chain (or chain [])})))))))
 
 
 (defn resolve-form

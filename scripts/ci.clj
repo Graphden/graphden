@@ -67,14 +67,15 @@
    "cljstyle"  120000
    "biome"      60000
    "stylelint" 120000
-   ;; tests (no cloverage) under :kaocha.plugin/parallel typically
-   ;; finishes in ~3-5 min standalone but creeps to 7-8 min under
-   ;; bb ci parallel load (cloverage in :coverage runs concurrently
-   ;; and instruments the same NSes; CPU contention). Ceiling sized
-   ;; so a real hang (test deadlock, testcontainer stuck on Docker
-   ;; daemon) still surfaces — 15 min is well outside any realistic
-   ;; legitimate runtime, well inside any genuine hang.
-   "tests"     900000
+   ;; tests (no cloverage) under :kaocha.plugin/parallel — the bundled
+   ;; package set grew enough that standalone wall is now ~14 min
+   ;; (1432 tests / 5933 assertions), and under bb ci parallel load
+   ;; (cloverage in :coverage instruments the same NSes; CPU
+   ;; contention) it pushes past the prior 15 min ceiling. Bumped to
+   ;; 20 min — a real hang (test deadlock, testcontainer stuck on
+   ;; Docker daemon) still surfaces well inside that, and a
+   ;; legitimate run finishes with several minutes of headroom.
+   "tests"     1200000
    ;; Unit-only coverage measured at ~1:13. Ceiling sized 4× to
    ;; absorb cold-cache variance + cloverage's first-time JIT
    ;; warmup pass through instrumented namespaces.

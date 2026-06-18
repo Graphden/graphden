@@ -17,12 +17,12 @@
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
-    [graphden.types.check :as types-check]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry]
     [graphden.schema.graph.schema :as graph-schema]
     [graphden.storage.protocol.core :as sp]
+    [graphden.types.check :as types-check]
     [graphden.types.core :as types]))
 
 

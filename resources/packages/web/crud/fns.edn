@@ -1585,7 +1585,7 @@
           :id {:ref :_update-id-uuid :type :uuid}}}
 
   {:name :_update-pre-existing
-   :description "Pre-read of the existing row when entity-type AND id-uuid are both resolved; nil otherwise."
+   :description "Pre-read of the existing row when entity-type AND id-uuid are both resolved; nil otherwise. The return-type stays the unrefined `:nullable-keyword-map` because the entity-type is dynamic (parsed from request body) — see `:_update-pre-existing-fetched` for the same rationale."
    :parent :if
    :args {:test {:parent :and
                  :args {:values [{:parent :some?
@@ -2462,7 +2462,7 @@
    :args {:value :_delete-target-entity-type}}
 
   {:name :_delete-apply-existing
-   :description "Pre-read snapshot of the row about to be deleted. nil when no such row exists."
+   :description "Pre-read snapshot of the row about to be deleted. nil when no such row exists. The return-type stays the unrefined `:nullable-keyword-map` from `:get-entity` because the entity-type is dynamic (parsed from the URL) — every entity-type-shape alias would lie about non-matching callers."
    :parent :get-entity
    :args {:entity-type :_delete-apply-entity-type-str
           :id :_delete-target-id}}

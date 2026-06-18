@@ -140,6 +140,61 @@
           :ref-fn-id :nullable-uuid
           :literal [:union :null :bool]}}
 
+  {:name :fn-slot-version-row-shape
+   :description "Decoded `:fn-slot-version` storage row — the per-branch overlay of an `:fn-slot` junction. `:created-at` / `:deleted-at` are `java.sql.Timestamp` on the JVM side; omitted from the alias for the same reason `:branch-row-shape` omits `:created-at`."
+   :type {:id :uuid
+          :fn-slot-id :uuid
+          :branch-id :uuid
+          :fn-id :uuid
+          :slot-id :uuid
+          :position :int}}
+
+  {:name :binding-version-row-shape
+   :description "Decoded `:binding-version` storage row — the per-branch overlay of a `:binding`. Mirrors `:binding-row-shape` plus the version-identity columns (`:branch-id`)."
+   :type {:id :uuid
+          :binding-id :uuid
+          :branch-id :uuid
+          :fn-id :uuid
+          :slot-id :uuid
+          :value :nullable-jsonb
+          :value-present [:union :null :bool]
+          :ref-fn-id :nullable-uuid
+          :override-kind :nullable-keyword
+          :type-override-fn-id :nullable-uuid
+          :description :nullable-text
+          :list-append [:union :null :bool]
+          :list-closed [:union :null :bool]}}
+
+  {:name :binding-list-item-version-row-shape
+   :description "Decoded `:binding-list-item-version` storage row — the per-branch overlay of a `:binding-list-item`. Mirrors `:binding-list-item-row-shape` plus the version-identity columns (`:branch-id`)."
+   :type {:id :uuid
+          :item-id :uuid
+          :branch-id :uuid
+          :binding-id :uuid
+          :position :int
+          :value :nullable-jsonb
+          :ref-fn-id :nullable-uuid
+          :literal [:union :null :bool]}}
+
+  {:name :running-info-shape
+   :description "In-memory service-runtime info from the service reconciler — `:started-at`, `:start-attempts`, `:start-failed-at`. `:stopper` is a Clojure callable (typed `:any` because no executor-callable contract exists for arbitrary runtime fns)."
+   :type {:stopper :any
+          :started-at :any
+          :start-attempts :int
+          :start-failed-at :any}}
+
+  {:name :vault-metadata-shape
+   :description "Decoded vault metadata response from OpenBao KV v2 `/metadata/<path>` — the inner `:data` map. Keys carry OpenBao's wire-form (snake_case keywords) since vault is an external API, NOT graphden's `:decode-row` boundary. `:custom_metadata` is a user-defined free-form map; everything else carries OpenBao's audit-trail fields. All admit-nil at the boundary because OpenBao may omit fields under various error / not-found paths."
+   :type {:custom_metadata :nullable-jsonb
+          :current_version [:union :null :int]
+          :max_versions [:union :null :int]
+          :destroyed [:union :null :bool]
+          :deletion_time :nullable-text
+          :created_time :nullable-text
+          :updated_time :nullable-text
+          :oldest_version [:union :null :int]
+          :cas_required [:union :null :bool]}}
+
   ;; =====================================================================
   ;; Entry point.
   ;;
@@ -433,6 +488,7 @@
 
   {:name :_resolve-binding-versions-decode
    :parent :decode-row
+   :return-type :binding-version-row-shape
    :args {:row {:as :item} :entity-type {:value "binding-version"}}}
 
   ;; ---- :binding-list-item ---------------------------------------------
@@ -465,4 +521,5 @@
 
   {:name :_resolve-binding-list-item-versions-decode
    :parent :decode-row
+   :return-type :binding-list-item-version-row-shape
    :args {:row {:as :item} :entity-type {:value "binding-list-item-version"}}}]}

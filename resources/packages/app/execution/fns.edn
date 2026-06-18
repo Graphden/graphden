@@ -1107,6 +1107,7 @@
   {:name :_enrich-running-entry
    :description "Closure-capture seed — the raw entry pulled off the reconciler atom. Referenced by the per-field readers below."
    :parent :running-entry
+   :return-type [:union :null :running-info-shape]
    :args {:service-id {:as :service-id}}}
 
   {:name :_enrich-running-stopper-set?

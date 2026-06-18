@@ -86,12 +86,37 @@ async function cleanup(page) {
     // ===================================================================
     // Phase A: navigate, then mutate the in-page lookups so the row
     // value is "hello" — triggers `validateLiteralAgainstType` ≠ ok
-    // on the next render.
+    // on the next render and surfaces the `!` badge.
+    //
+    // Architecture note (post-migration): the badge is still JS-side
+    // (`editor-overlay-arg.js`'s `validateLiteralAgainstType` over the
+    // in-memory `lookups` map), so this in-browser mutation drives the
+    // mismatch indicator into view. The POPOVER content, however, is
+    // server-rendered off `GET /partials/mismatch-explainer?binding-
+    // id=…`, which reads the binding row straight from storage. That
+    // means popover content reflects the REAL DB value (42 in this
+    // test), not the spoofed in-memory value — which IS the desired
+    // UX: a stale client cache must not invent reasons; the popover
+    // tells the truth from the server. Public CRUD type-checks reject
+    // text-in-:int binds at write-time, so a "real" DB mismatch on
+    // this slot can't be created via the public API; rewriting this
+    // test against a true DB mismatch needs a different fixture path
+    // (direct storage write bypass, or a refinement-typed slot whose
+    // runtime predicate fails after a previously-valid bind).
     // ===================================================================
     await page.goto('about:blank');
     await page.goto('http://localhost:9002/#' + PROBE_FN);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
+    // The root fn renders with no arg-overlays until expanded.
+    // `selectFn` clears expansionState by design (editor-ui.js:25),
+    // so the hash-navigation path leaves the canvas with just the
+    // fn-card. Drive a depth-1 expansion so the `:ms` arg renders.
+    await page.evaluate(async (pid) => {
+      expansionState.set('fn-' + pid,
+                         { fullDepth: 1, partialFns: new Set() });
+      if (typeof renderGraph === 'function') await renderGraph(false);
+    }, probe.id);
     await page.waitForSelector('.arg-overlay-row', {timeout: 15000});
 
     await page.evaluate((probeId) => {
@@ -121,7 +146,15 @@ async function cleanup(page) {
            'parent overlay carries .arg-overlay-mismatch class');
 
     // ===================================================================
-    // Phase B: click badge → explainer popover opens.
+    // Phase B: click badge → server-rendered explainer popover opens.
+    //
+    // Popover content comes from `/partials/mismatch-explainer?binding-
+    // id=…` — server reads binding from DB. Real binding value is 42
+    // (a valid int for :ms), so the popover shows "Got: 42" and an
+    // EMPTY Reason row (no server-side mismatch). The Expected row
+    // names the slot's :int type, the Got row names the actual stored
+    // value. The "hello" we mutated in-memory above is intentionally
+    // ignored — see Phase A's architecture note for the why.
     // ===================================================================
     await page.click('.arg-mismatch-badge');
     await page.waitForSelector('.mismatch-explainer', {timeout: 5000});
@@ -136,7 +169,7 @@ async function cleanup(page) {
         rowCount: rows.length,
         hasExpected: text.includes('expected'),
         hasActual: text.includes('got') || text.includes('actual'),
-        hasHelloLiteral: text.includes('hello'),
+        hasRealValue: text.includes('42'),
         hasIntType: text.includes('int'),
       };
     });
@@ -147,8 +180,8 @@ async function cleanup(page) {
            'popover mentions "Expected"');
     assert(popoverState.hasActual,
            'popover has "Got" / "Actual" row');
-    assert(popoverState.hasHelloLiteral,
-           'popover quotes the offending "hello" literal');
+    assert(popoverState.hasRealValue,
+           'popover quotes the REAL stored value "42" (not the in-memory spoof "hello")');
     assert(popoverState.hasIntType,
            'popover names :int expected type');
 

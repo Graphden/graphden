@@ -183,13 +183,28 @@
       ;; When the identity row already exists (deterministic UUID re-sync),
       ;; resolve the current version directly from `existing` instead of
       ;; calling `resolve-entity` (which would re-fetch identity).
+      ;;
+      ;; `normalized` runs the same per-entity write-side rules the base
+      ;; `sp/create-entity` applies internally (notably `:binding`'s
+      ;; `:value-present true` when `:value` is present but the flag
+      ;; isn't). Without this, the BASE row gets `:value-present true`
+      ;; via the base-storage's own normalizer call, but the VERSION
+      ;; row was built off the un-normalized `data` map — every binding
+      ;; created here through CRUD landed in the version table with
+      ;; `:value-present nil`, and versioned reads (which overlay
+      ;; version-data over identity via `merge identity version`) then
+      ;; overwrote the base's `true` back to `nil`. Result: every freshly-
+      ;; created literal-bound arg disappeared from arg-overlays in the
+      ;; editor (the layout walker classifies `value-present=nil` as
+      ;; `:free`, no value-node).
       (let [id (or (:id data) (random-uuid))
-            full-data (assoc data :id id)
+            normalized (sp/standard-crud-normalize-data entity-name
+                                                        (assoc data :id id))
             _ (check-list-item-position-collision! base-storage branch-id
-                                                   entity-name full-data)
+                                                   entity-name normalized)
             existing (sp/read-entity base-storage entity-name id)]
         (when-not existing
-          (sp/create-entity base-storage entity-name full-data))
+          (sp/create-entity base-storage entity-name normalized))
         (let [{:keys [version-id-field version-data-fields]}
               (get res/entity-config entity-name)
               current-version (when existing
@@ -200,10 +215,10 @@
                                                          :id :branch-id :created-at
                                                          version-id-field))
                                           version-data-fields))
-              new-data (select-keys full-data version-data-fields)]
+              new-data (select-keys normalized version-data-fields)]
           (when (or (nil? current-version) (not= current-data new-data))
-            (create-version-record! base-storage entity-name id branch-id data)))
-        full-data)))
+            (create-version-record! base-storage entity-name id branch-id normalized)))
+        normalized)))
 
 
   (read-entity

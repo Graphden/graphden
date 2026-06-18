@@ -864,8 +864,30 @@
           :then :_partial-mismatch-prov-built
           :else {:value [:span {:hidden "1"}]}}}
 
+  ;; STEP 4 — Edit-action button. The partial route is `:get-auth-
+  ;; required`, so reaching this partial means the user is signed in;
+  ;; the JS `showMismatchExplainer` also guards `if (!bindingId)
+  ;; return`, so reaching this partial means we have a real binding
+  ;; (= a fn-def, not a base-fn) — which is the editability contract
+  ;; the JS `isEditableArg` was checking. So the button always
+  ;; renders; the JS post-swap binding attaches the click handler that
+  ;; opens the inline value-edit popover (the popover itself stays
+  ;; JS-side — it's an interactive component, not a render).
+
+  {:name :_partial-mismatch-edit-button
+   :parent :const
+   :args {:value [:button {:type "button"
+                           :class "mismatch-explainer-btn"
+                           :data-edit-action "1"} "Edit value"]}}
+
+  {:name :_partial-mismatch-actions
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-actions"}}
+          :children [:_partial-mismatch-edit-button]}}
+
   {:name :_partial-mismatch-fragment
-   :description "Full popover hiccup — header + Expected + Got + Reason rows + diff-leaves + provenance section, wrapped in `.mismatch-explainer-content`. Edit-action button still hydrates JS-side (step 4)."
+   :description "Full popover hiccup — header + Expected + Got + Reason rows + diff-leaves + provenance section + Edit-action button, all server-rendered (steps 1-4 complete). JS post-swap binds click handlers on `[data-explainer-close]`, `[data-fn-id]` (provenance nav links), and `[data-edit-action]` (the Edit button → opens the inline value-edit popover)."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "mismatch-explainer-content"}}
@@ -874,7 +896,8 @@
                      :_partial-mismatch-got-row
                      :_partial-mismatch-reason-row
                      :_partial-mismatch-diff-section
-                     :_partial-mismatch-prov-section]}}
+                     :_partial-mismatch-prov-section
+                     :_partial-mismatch-actions]}}
 
   {:name :_partial-mismatch-html
    :parent :render-hiccup

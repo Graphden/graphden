@@ -90,17 +90,15 @@ function formatActualLiteral(v) {
   } catch (_) { return String(v); }
 }
 
-function isEditableArg(arg) {
-  if (!arg) return false;
-  if (!implementationFnIds?.has(arg['fn-id'])) return false;
-  return typeof isAuthenticated === 'function' && isAuthenticated();
-}
-
-// Pure render helper — takes already-resolved info and paints the
-// popover. Split out from `showMismatchExplainer` so tests / probes
-// can drive the visual without going through the live lookups
-// chain. Real callers should prefer `showMismatchExplainer` so the
-// arg-derived info stays consistent.
+// Legacy JS render path — kept for `editor-fn-picker.js`'s
+// "candidate doesn't fit" explanation. That site passes a synthetic
+// `info` (no real binding-id; the candidate fn isn't yet bound), so
+// the server partial isn't applicable. New consumers should use
+// `showMismatchExplainer(arg, anchor)` instead — that fetches the
+// server-rendered hiccup off `/partials/mismatch-explainer` with the
+// full diff / provenance / Edit-action section. `buildMismatchHeader`
+// / `buildMismatchRow` / `formatActualLiteral` exist only to feed
+// this legacy path.
 function renderMismatchExplainer(info, anchorEl) {
   if (!info || !anchorEl) return false;
   // Mutually exclusive with the inline-expand panel — both render
@@ -221,16 +219,29 @@ function renderMismatchExplainer(info, anchorEl) {
   return true;
 }
 
-// Append the JS-only Edit-action button (step 4 will migrate this
-// too). Header / Expected / Got / Reason / diff-leaves / provenance
-// are all server-rendered as of step 3.
+// Post-swap binding for the three interactive surfaces the server
+// hiccup emits — all rendering is server-side as of step 4, but
+// click behaviour stays JS (it triggers other editor popovers /
+// navigation, both of which are interactive components that don't
+// fit a pure-render contract):
 //
-// Also wires the nav links the provenance section emits — every `<a
-// data-fn-id=…>` in the server hiccup gets a click handler that
-// navigates to the source fn (same behaviour the standalone
-// provenance popover offers, so users trace upstream from a mismatch
-// the same way they trace upstream from the `↳` badge).
-function appendJsOnlySections(el, arg, anchorEl) {
+//   * `[data-explainer-close]` — close button (same convention the
+//     effect-explainer partial uses).
+//   * `a[data-fn-id]` — provenance source links → `selectFn(fnId)`
+//     navigates and dismisses the popover. Same behaviour the
+//     standalone provenance popover offers.
+//   * `[data-edit-action]` — the Edit-value button → opens the inline
+//     value-edit popover via `enterArgValueEditMode(arg, anchorEl)`.
+//     The popover itself is JS-interactive (textarea + save / cancel),
+//     not a pure render — keeping it here is correct.
+function bindPostSwap(el, arg, anchorEl) {
+  const close = el.querySelector('[data-explainer-close]');
+  if (close) {
+    close.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideMismatchExplainer();
+    });
+  }
   el.querySelectorAll('a[data-fn-id]').forEach((link) => {
     const fnId = link.getAttribute('data-fn-id');
     if (!fnId) return;
@@ -243,46 +254,22 @@ function appendJsOnlySections(el, arg, anchorEl) {
       }
     });
   });
-  const editable = isEditableArg(arg)
-                   && typeof enterArgValueEditMode === 'function';
-  const actions = document.createElement('div');
-  actions.className = 'mismatch-explainer-actions';
-  if (editable) {
-    const editBtn = document.createElement('button');
-    editBtn.type = 'button';
-    editBtn.className = 'mismatch-explainer-btn';
-    editBtn.textContent = 'Edit value';
+  const editBtn = el.querySelector('[data-edit-action]');
+  if (editBtn && typeof enterArgValueEditMode === 'function') {
     editBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       hideMismatchExplainer();
       enterArgValueEditMode(arg, anchorEl);
     });
-    actions.appendChild(editBtn);
-  } else {
-    const hint = document.createElement('span');
-    hint.className = 'mismatch-explainer-hint';
-    hint.textContent = (typeof isAuthenticated === 'function' && !isAuthenticated())
-                       ? 'Sign in to edit values.'
-                       : 'Open the owning fn to edit this value.';
-    actions.appendChild(hint);
-  }
-  el.appendChild(actions);
-  // Server-emitted close button carries `data-explainer-close` —
-  // bind dismissal the same way the effect-explainer partial does.
-  const close = el.querySelector('[data-explainer-close]');
-  if (close) {
-    close.addEventListener('click', (e) => {
-      e.stopPropagation();
-      hideMismatchExplainer();
-    });
   }
 }
 
 
-// Fetch the server-rendered shell (header + Expected / Got / Reason
-// rows) and hydrate it with the JS-only sections (diff-leaves +
-// provenance + Edit-action). Step 1 of the JS→graph migration; steps
-// 2-4 push diff-leaves / provenance / edit-button server-side too.
+// Fetch the server-rendered popover (header + Expected / Got /
+// Reason rows + diff-leaves + provenance section + Edit-action
+// button) and bind the three post-swap interactive surfaces (close,
+// nav links, edit). Steps 1-4 complete — no rendering left JS-side,
+// only click behaviour for editor-internal interactions.
 async function showMismatchExplainer(arg, anchorEl) {
   if (!arg || !anchorEl) return;
   // Mutually exclusive with the inline-expand panel (same provenance
@@ -307,7 +294,7 @@ async function showMismatchExplainer(arg, anchorEl) {
   const el = ensureMismatchExplainerEl();
   el.innerHTML = html;
   mismatchExplainerArg = arg;
-  appendJsOnlySections(el, arg, anchorEl);
+  bindPostSwap(el, arg, anchorEl);
   el.classList.add('visible');
   el.style.display = '';
   anchorBelowClamped(el, anchorEl);

@@ -1280,12 +1280,16 @@
   ;; =====================================================================
 
   {:name :_er-max-list-items
-   :description "Cap on visible list items — anything past this collapses to a `… N more` placeholder. Admin-tweakable."
-   :parent :const :args {:value 50}}
+   :description "Cap on visible list items — anything past this collapses to a `… N more` placeholder. Admin-tweakable. `:take :count` and `:subs :start` slots require `:non-negative-int` (refinement), so declare narrower than `:const`'s inferred `:int`."
+   :parent :const
+   :return-type :non-negative-int
+   :args {:value 50}}
 
   {:name :_er-max-json-preview-bytes
-   :description "Cap on serialized JSON shown for large payloads — preview cuts at this byte count. Admin-tweakable."
-   :parent :const :args {:value 50000}}
+   :description "Cap on serialized JSON shown for large payloads — preview cuts at this byte count. Admin-tweakable. Narrowed return matches `:subs :end` slot's `:non-negative-int`."
+   :parent :const
+   :return-type :non-negative-int
+   :args {:value 50000}}
 
   ;; --- Top-level dispatch predicates ---
 
@@ -1537,20 +1541,23 @@
    :args {:tag {:value "li"} :attrs {:value nil}
           :children [:_er-item-content]}}
 
-  {:name :_er-result-as-list
-   :description "Narrow `:_er-result` (typed `:any` because it's plucked from a nullable keyword-map) down to `[:list :any]` for `:take` / `:count` consumption. The runtime invariant — only the list-pane branch reads this fn-def, AND that branch only fires when `:_er-result-is-list?` is true — is enforced by the surrounding `:cond` in `:_er-succeeded-body`. The type-checker can't see that dispatch invariant, so this narrowing is a controlled lie; the `:assert-some` keeps the runtime honest (throws on nil rather than passing nil into `:take`)."
-   :parent :assert-some
-   :return-type [:list :any]
-   :args {:value :_er-result}}
+  ;; `:_er-result` types as `:any` (plucked from a nullable-keyword-
+  ;; map via `:get`) but Phase #170 control-flow narrowing through
+  ;; the `:_er-result-is-list?` `:is-a?` predicate in
+  ;; `:_er-succeeded-body`'s `:cond` narrows it to `[:list :any]`
+  ;; inside the list-pane branch. The type-checker sees the narrowed
+  ;; type when checking these fn-defs (the override is propagated
+  ;; transitively from `:_er-list-pane` down through the ref tree).
+  ;; No `:assert-some` intermediate needed.
 
   {:name :_er-list-items-taken
-   :parent :take :args {:count :_er-max-list-items :coll :_er-result-as-list}}
+   :parent :take :args {:count :_er-max-list-items :coll :_er-result}}
 
   {:name :_er-list-items-count
    :parent :count :args {:coll :_er-list-items-taken}}
 
   {:name :_er-list-total-count
-   :parent :count :args {:coll :_er-result-as-list}}
+   :parent :count :args {:coll :_er-result}}
 
   {:name :_er-list-overflow
    :parent :sub :args {:nums [:_er-list-total-count :_er-list-items-count]}}
@@ -1600,14 +1607,11 @@
   ;; per-key, looking up the value inside the callback via `:get`
   ;; against the closure-captured outer map.
 
-  {:name :_er-result-as-map
-   :description "Narrow `:_er-result` to a map for `:keys`/`:get` consumption — see `:_er-result-as-list` rationale; same controlled narrowing, the record-pane branch is the only consumer and is gated by `:_er-result-is-map?`."
-   :parent :assert-some
-   :return-type [:map :any :any]
-   :args {:value :_er-result}}
-
+  ;; `:keys` accepts wider input than `:take` so no allowlist entry
+  ;; is needed for the record branch — direct read of `:_er-result`
+  ;; works.
   {:name :_er-record-keys
-   :parent :keys :args {:map :_er-result-as-map}}
+   :parent :keys :args {:map :_er-result}}
 
   {:name :_er-record-key-value
    :parent :get :args {:coll {:as :record-m} :key {:as :item} :default nil}}
@@ -1657,7 +1661,7 @@
    :parent :map
    :args {:func :_er-record-tr
           :coll :_er-record-keys
-          :record-m :_er-result-as-map}}
+          :record-m :_er-result}}
 
   {:name :_er-record-table
    :parent :hiccup
@@ -1690,14 +1694,16 @@
 
   ;; --- Succeeded-body dispatch — inner cond over result shape ---
 
-  {:name :_er-result-is-sequential?
-   :parent :is-a? :args {:value :_er-result :type {:value :sequence}}}
-
-  {:name :_er-result-is-vector?
-   :parent :is-a? :args {:value :_er-result :type {:value :vector}}}
-
+  ;; `:sequence` covers Clojure's `sequential?` — vectors, lists,
+  ;; lazy seqs. JSON arrays parse to vectors via cheshire, which are
+  ;; sequential, so a single `:is-a? :sequence` is enough. Keeping
+  ;; this as a direct `:is-a?` (not wrapped in `:or`) lets Phase #170
+  ;; control-flow narrowing recognize the predicate in the `:cond`
+  ;; clause below and narrow `:_er-result` to `[:list :any]` in the
+  ;; corresponding `:_er-list-pane` branch — which is what
+  ;; `:_er-result-as-list` declared `:return-type` matches.
   {:name :_er-result-is-list?
-   :parent :or :args {:values [:_er-result-is-sequential? :_er-result-is-vector?]}}
+   :parent :is-a? :args {:value :_er-result :type {:value :sequence}}}
 
   {:name :_er-result-is-map?
    :parent :is-a? :args {:value :_er-result :type {:value :map}}}

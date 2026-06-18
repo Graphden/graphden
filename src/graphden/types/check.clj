@@ -1928,7 +1928,7 @@
      :value nil}
 
     (ref-binding? b-form)
-    {:type (or (:return (registry/rich-type-of b-form)) :any)
+    {:type (or (ref-return-narrowed b-form) :any)
      :value nil
      :ref b-form}
 
@@ -2579,25 +2579,16 @@
   ;; that the type-checker can't (yet) see through control-flow
   ;; guards. See `docs/TYPE_CHECK_BACKLOG.md` for the running ledger.
   ;;
-  ;; Reopened 2026-06-19 — execute-result body decomposition (§3.3
-  ;; fix) introduces ONE controlled type-narrowing the type-checker
-  ;; can't verify through `:cond` dispatch:
-  ;;
-  ;;   :_er-list-items-taken
-  ;;     :parent :take :args {:count :_er-max-list-items
-  ;;                          :coll :_er-result-as-list}
-  ;;
-  ;; `:_er-result-as-list` is `:assert-some` on `:_er-result` (typed
-  ;; `:any` from the nullable-keyword-map `:get`) with declared
-  ;; `:return-type [:list :any]`. Runtime invariant: the surrounding
-  ;; `:cond` in `:_er-succeeded-body` only routes to the list-pane
-  ;; when `:_er-result-is-list?` already returned true. `:count` /
-  ;; `:keys` against the same narrowed binding type-check fine
-  ;; (those slots are wider); only `:take :coll [:list a]` is strict
-  ;; enough to surface the `:any → [:list :any]` cast. Closing this
-  ;; debt needs Phase #170 control-flow narrowing through
-  ;; `:cond`-clauses' `:is-a?` predicates.
-  #{:_er-list-items-taken})
+  ;; 2026-06-19 — Phase #170 extended to recognize `:is-a?` predicates
+  ;; in `:if` / `:cond` clauses (`direct-predicate-of-ref` +
+  ;; `is-a-tag->structural-type` + `narrowed-type-for-predicate`).
+  ;; Plumbed through bare-keyword ref-bindings in `binding-info-entry`
+  ;; via `ref-return-narrowed`. Execute-result decomposition's
+  ;; `:_er-list-items-taken` / `:_er-record-keys` now read `:_er-
+  ;; result` directly inside `:cond`-narrowed branches — narrowed to
+  ;; `[:list :any]` / `[:map :any :any]` by the new overrides. Sweep
+  ;; stays at 0.
+  #{})
 
 
 (defn assert-sweep-failures-match-allowlist!
@@ -2821,8 +2812,10 @@
 
 
 (defn- direct-predicate-of-ref
-  "If `ref-name`'s impl-chain root is `:some?` / `:nil?` and its
-   `:value` slot is a ref to fn-name T, return `[:some?|:nil? T]`.
+  "If `ref-name`'s impl-chain root is `:some?` / `:nil?` / `:is-a?`
+   and its target slot is a ref to fn-name T, return:
+     `[:some?|:nil? T]`           — null-guard predicates
+     `[:is-a? T type-tag]`        — type-shape predicate with literal `:type` arg
    Otherwise nil. Mirrors `predicate-of-ref` in
    `core/logic/impls.clj`; duplicated here because that one is
    `defn-` and importing would create a cycle (impls.clj loads
@@ -2831,11 +2824,41 @@
   (when ref-name
     (when-let [info (registry/rich-type-of ref-name)]
       (let [root (root-of-ref ref-name)
-            rb (:resolved-bindings info {})
-            value-binding (get rb :value)
-            target (:ref value-binding)]
-        (when (and target (#{:some? :nil?} root))
-          [root target])))))
+            rb (:resolved-bindings info {})]
+        (cond
+          (#{:some? :nil?} root)
+          (when-let [target (:ref (get rb :value))]
+            [root target])
+
+          ;; `:is-a?` with a ref `:value` AND a literal-keyword `:type`.
+          ;; Returns `[:is-a? target-fn-name type-tag-keyword]` so the
+          ;; branch narrowing can map the tag to a structural type.
+          (= :is-a? root)
+          (let [target (:ref (get rb :value))
+                type-binding (get rb :type)
+                type-tag (or (:value type-binding)
+                             (when (keyword? type-binding) type-binding))]
+            (when (and target (keyword? type-tag))
+              [:is-a? target type-tag])))))))
+
+
+;; `:is-a?` type-tag → structural type. Mirrors `runtime-predicates`
+;; in `graphden.types.core`, restricted to tags that map to a useful
+;; narrowing (skip `:any` — it widens, not narrows).
+(def ^:private is-a-tag->structural-type
+  {:sequence    [:list :any]
+   :vector      [:list :any]
+   :map         [:map :any :any]
+   :text        :text
+   :int         :int
+   :numeric     :numeric
+   :bool        :bool
+   :keyword     :keyword
+   :null        :null
+   :uuid        :uuid
+   :bytes       :bytes
+   :timestamptz :timestamptz
+   :float       :float})
 
 
 (defn- ref-of-binding-form
@@ -2866,15 +2889,25 @@
 
 
 (defn- narrowed-type-for-predicate
-  "Apply predicate-kind to target's static return: `:some?` taken
-   branch → strip-null; `:nil?` taken branch → `:null`. The
-   `polarity` argument is `:taken` (test was truthy) or `:not-taken`
-   (test was falsy) and inverts the operation."
-  [pred-kind polarity target-static]
-  (if (or (and (= pred-kind :some?) (= polarity :taken))
-          (and (= pred-kind :nil?)  (= polarity :not-taken)))
+  "Apply predicate-kind to target's static return. Supported predicates:
+   - `:some?` taken → strip-null; not-taken → `:null`
+   - `:nil?`  taken → `:null`; not-taken → strip-null
+   - `:is-a?` taken → structural-type-for-tag (uses `is-a-tag->
+     structural-type`); not-taken → original (no useful subtraction
+     without a row-poly type-system)
+   `polarity` is `:taken` or `:not-taken`."
+  [pred-kind polarity target-static & [type-tag]]
+  (cond
+    (= pred-kind :is-a?)
+    (if (= polarity :taken)
+      (or (get is-a-tag->structural-type type-tag) target-static)
+      target-static)
+
+    (or (and (= pred-kind :some?) (= polarity :taken))
+        (and (= pred-kind :nil?)  (= polarity :not-taken)))
     (strip-null-from-type target-static)
-    :null))
+
+    :else :null))
 
 
 (defn- if-branch-overrides
@@ -2890,10 +2923,10 @@
         else-ref  (ref-of-binding-form (get args :else))]
     (if-not pred
       {}
-      (let [[pred-kind target] pred
+      (let [[pred-kind target type-tag] pred
             target-static (:return (registry/rich-type-of target) :any)
-            taken-narrow     (narrowed-type-for-predicate pred-kind :taken     target-static)
-            not-taken-narrow (narrowed-type-for-predicate pred-kind :not-taken target-static)]
+            taken-narrow     (narrowed-type-for-predicate pred-kind :taken     target-static type-tag)
+            not-taken-narrow (narrowed-type-for-predicate pred-kind :not-taken target-static type-tag)]
         (cond-> {}
           (and then-ref (some? taken-narrow))
           (assoc then-ref {target taken-narrow})
@@ -2926,14 +2959,14 @@
                   pred         (direct-predicate-of-ref test-ref)
                   result-ref   (ref-of-binding-form result-item)
                   this-taken   (when pred
-                                 (let [[k t] pred
+                                 (let [[k t tag] pred
                                        static (:return (registry/rich-type-of t) :any)]
-                                   {t (narrowed-type-for-predicate k :taken static)}))
+                                   {t (narrowed-type-for-predicate k :taken static tag)}))
                   for-this     (merge prior-not-taken this-taken)
                   this-not-taken (when pred
-                                   (let [[k t] pred
+                                   (let [[k t tag] pred
                                          static (:return (registry/rich-type-of t) :any)]
-                                     {t (narrowed-type-for-predicate k :not-taken static)}))
+                                     {t (narrowed-type-for-predicate k :not-taken static tag)}))
                   acc'         (if (and result-ref (seq for-this))
                                  (assoc acc result-ref for-this)
                                  acc)

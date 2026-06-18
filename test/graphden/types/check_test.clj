@@ -1744,3 +1744,94 @@
           "clause-1 result sees :_nullable-text as :null (test was truthy)")
       (is (= :text (get-in overrides [:_else-result :_nullable-text]))
           "else-result sees :_nullable-text non-null (prior :nil? was false)"))))
+
+
+;; --- Phase #170 — `:is-a?` predicate narrowing -----------------------------
+;;
+;; `:is-a?` extension lets `:if`/`:cond` narrow a target's type to the
+;; structural type for the predicate's `:type` tag inside the taken
+;; branch. Mirrors the `:some?` / `:nil?` shape but the predicate
+;; carries TWO slots (`:value` + `:type`).
+
+(defn- seed-is-a-fixture!
+  "Register the same `:_anyv` target the `:is-a?` predicates point at,
+   plus the predicate itself with the right `:resolved-bindings` shape
+   (`{:value {:ref :_anyv} :type {:value <tag>}}`)."
+  [pred-name type-tag]
+  (registry/record-rich-types-raw! :_anyv {:args {} :return :any})
+  (registry/record-rich-types-raw!
+    pred-name
+    {:args {:value {:type :any} :type {:type :keyword}}
+     :resolved-bindings {:value {:ref :_anyv}
+                         :type {:type :keyword
+                                :value type-tag
+                                :value-present true}}
+     :primary-parent :is-a?
+     :return :bool}))
+
+
+(deftest phase-170-if-is-a-sequence-narrows-then-to-list
+  (testing ":if :test (:is-a? :v :sequence) → :then sees :_v as [:list :any]"
+    (seed-is-a-fixture! :_is-seq? :sequence)
+    (registry/record-rich-types-raw! :_then-list-consumer
+                                     {:args {} :return :any})
+    (let [fds [{:name :_guarded-seq
+                :parent :if
+                :args {:test :_is-seq?
+                       :then :_then-list-consumer
+                       :else nil}}
+               {:name :_then-list-consumer :args {} :return-type :any}]
+          overrides (check/build-ref-return-overrides fds)]
+      (is (= {:_anyv [:list :any]}
+             (get overrides :_then-list-consumer))
+          ":then ref-target sees :_anyv narrowed to [:list :any]"))))
+
+
+(deftest phase-170-if-is-a-map-narrows-then-to-map
+  (testing ":if :test (:is-a? :v :map) → :then sees :_v as [:map :any :any]"
+    (seed-is-a-fixture! :_is-map? :map)
+    (registry/record-rich-types-raw! :_then-map-consumer
+                                     {:args {} :return :any})
+    (let [fds [{:name :_guarded-map
+                :parent :if
+                :args {:test :_is-map?
+                       :then :_then-map-consumer
+                       :else nil}}
+               {:name :_then-map-consumer :args {} :return-type :any}]
+          overrides (check/build-ref-return-overrides fds)]
+      (is (= {:_anyv [:map :any :any]}
+             (get overrides :_then-map-consumer))
+          ":then ref-target sees :_anyv narrowed to [:map :any :any]"))))
+
+
+(deftest phase-170-cond-multi-is-a-narrows-each-clause-result
+  (testing ":cond over :is-a? clauses — each result sees its own taken-branch narrowing"
+    (registry/record-rich-types-raw! :_anyv {:args {} :return :any})
+    (registry/record-rich-types-raw!
+      :_is-seq?
+      {:args {:value {:type :any} :type {:type :keyword}}
+       :resolved-bindings {:value {:ref :_anyv}
+                           :type {:type :keyword :value :sequence :value-present true}}
+       :primary-parent :is-a? :return :bool})
+    (registry/record-rich-types-raw!
+      :_is-map?
+      {:args {:value {:type :any} :type {:type :keyword}}
+       :resolved-bindings {:value {:ref :_anyv}
+                           :type {:type :keyword :value :map :value-present true}}
+       :primary-parent :is-a? :return :bool})
+    (registry/record-rich-types-raw! :_list-result {:args {} :return :any})
+    (registry/record-rich-types-raw! :_map-result  {:args {} :return :any})
+    (registry/record-rich-types-raw! :_else-result {:args {} :return :any})
+    (let [fds [{:name :_cond-is-a
+                :parent :cond
+                :args {:clauses [:_is-seq? :_list-result
+                                 :_is-map? :_map-result
+                                 true      :_else-result]}}
+               {:name :_list-result :args {} :return-type :any}
+               {:name :_map-result  :args {} :return-type :any}
+               {:name :_else-result :args {} :return-type :any}]
+          overrides (check/build-ref-return-overrides fds)]
+      (is (= [:list :any] (get-in overrides [:_list-result :_anyv]))
+          "list-result sees :_anyv as [:list :any] (its own :is-a? :sequence was taken)")
+      (is (= [:map :any :any] (get-in overrides [:_map-result :_anyv]))
+          "map-result sees :_anyv as [:map :any :any] (its own :is-a? :map was taken)"))))

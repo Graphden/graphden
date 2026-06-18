@@ -704,6 +704,20 @@
                  :description "Decoded execution row from `:get-execution`."}}
    :return-type :hiccup-node}
 
+  {:name :render-service-popover-hiccup
+   :description "Body hiccup for the service settings popover — server-rendered replacement for `editor-service-popover.js showServicePopover`'s in-JS DOM construction. Picks the existing :service row (preferring `current-branch-id` over null-branch fallback), surfaces sibling warnings, and renders the form. Save / delete handlers stay JS-side, bound post-swap via `.service-popover-{save,delete,close}-btn` selectors."
+   :args {:fn-id              {:type :uuid
+                               :description "Target fn id."}
+          :fn-name            {:type :nullable-text
+                               :description "Display name for the popover header. nil → `(anonymous)`."}
+          :enriched-services  {:type [:list :keyword-map]
+                               :description "All :service rows already shaped by `:_list-services-enriched`."}
+          :branches           {:type [:list :branch-row-shape]
+                               :description "All :branch rows (`:_list-branches-rows`)."}
+          :current-branch-id  {:type :uuid
+                               :description "Active branch id — drives both existing-row selection and the picker's default."}}
+   :return-type :hiccup-node}
+
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
    :args {:id {:type :nullable-uuid :description "Target execution id."}}
@@ -1215,4 +1229,59 @@
   {:name :list-services-handler
    :description "Ring handler for GET /api/services."
    :parent :json-handler
-   :args {:data :_list-services-data}}]}
+   :args {:data :_list-services-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /partials/service-popover?fn-id=X — service settings popover
+  ;; body. Reuses `:_list-services-enriched` (provides the per-row
+  ;; `{:id :fn-id :fn-name :enabled? :restart-policy :branch-id
+  ;; :running}` shape the popover renderer expects). The fn-name for
+  ;; the popover title comes from the SAME `:_list-services-fn-names`
+  ;; index that drives `:fn-name` on enriched services — covers ANY
+  ;; fn (not just service-owners) because the index is built over the
+  ;; full `:fn` table with `:where {}`.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-service-popover-fn-id-str
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "fn-id"}}}
+
+  {:name :_partial-service-popover-fn-id-raw
+   :parent :parse-uuid
+   :args {:string :_partial-service-popover-fn-id-str}}
+
+  {:name :_partial-service-popover-fn-id
+   :description "Strict-uuid narrowing — `:render-service-popover-hiccup`'s `:fn-id` slot is `:uuid`. The JS caller only opens the popover with a real fn-id; a nil here is a programming error worth a 500 instead of silently rendering an empty popover."
+   :parent :assert-some
+   :return-type :uuid
+   :args {:value :_partial-service-popover-fn-id-raw}}
+
+  {:name :_partial-service-popover-fn-name
+   :description "Display name from the all-fns index built by the existing services chain — works for any fn (even those without a service), because `:_list-services-fn-names` is keyed off `:_list-services-fn-rows` which selects the full `:fn` table."
+   :parent :get
+   :args {:coll :_list-services-fn-names
+          :key :_partial-service-popover-fn-id
+          :default nil}}
+
+  {:name :_partial-service-popover-services
+   :description "Enriched services list — same shape `:_list-services-data` uses, but referenced standalone here so the popover only pays for the join it actually needs."
+   :parent :_list-services-enriched
+   :args {:rows :_list-services-rows
+          :names :_list-services-fn-names}}
+
+  {:name :_partial-service-popover-body
+   :parent :render-service-popover-hiccup
+   :args {:fn-id :_partial-service-popover-fn-id
+          :fn-name :_partial-service-popover-fn-name
+          :enriched-services :_partial-service-popover-services
+          :branches :_list-branches-rows
+          :current-branch-id :current-branch-id}}
+
+  {:name :_partial-service-popover-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-service-popover-body}}
+
+  {:name :_partial-service-popover-handler
+   :description "Ring handler for `GET /partials/service-popover?fn-id=X` — returns the popover body as `text/html`. JS swaps the response into the popover host and binds save/delete/close handlers via `.service-popover-*-btn` selectors + `data-existing-service-id` attrs the partial emits."
+   :parent :html-ok-response
+   :args {:body :_partial-service-popover-html}}]}

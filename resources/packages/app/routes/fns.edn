@@ -132,6 +132,11 @@
    :parent :get-auth-required
    :args {:path "/partials/branch-popover" :handler :_partial-branch-popover-handler}}
 
+  {:name :partial-service-popover
+   :description "GET /partials/service-popover?fn-id=X — service settings popover body (header + status + sibling-warning + enabled/branch/policy form + save/delete actions). Auth-gated. Save / delete / close handlers in `editor-service-popover.js` are bound post-swap against `.service-popover-{save,delete,close}-btn` + the `data-existing-service-id` attr the partial emits."
+   :parent :get-auth-required
+   :args {:path "/partials/service-popover" :handler :_partial-service-popover-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

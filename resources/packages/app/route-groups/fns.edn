@@ -29,6 +29,7 @@
                   :partial-execute-result
                   :partial-execute-result-inline
                   :partial-branch-popover
+                  :partial-service-popover
                   :health
                   :metrics
                   :version

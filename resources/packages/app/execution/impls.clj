@@ -7,6 +7,7 @@
     [graphden.crud.fn-execution :as fn-exec]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.request :as request]
+    [graphden.crud.services :as services]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.services.reconciler :as recon]))
@@ -250,17 +251,33 @@
   (fn-exec/render-execute-result-hiccup exec))
 
 
+(defbase render-service-popover-hiccup
+  "Body hiccup for the service settings popover — the server-rendered
+   replacement for `editor-service-popover.js showServicePopover`'s
+   in-JS DOM construction. Picks the existing :service row (preferring
+   `current-branch-id` over null-branch fallback), surfaces sibling
+   warnings, and renders the form (enabled / branch picker / restart-
+   policy radios / save+delete action bar). Save / delete handlers
+   stay in JS, bound post-swap via `.service-popover-{save,delete,
+   close}-btn` selectors; the `data-existing-service-id` attr the
+   partial emits tells JS PUT-vs-POST + which row id to DELETE."
+  [fn-id fn-name enriched-services branches current-branch-id]
+  (services/render-service-popover-hiccup
+    fn-id fn-name enriched-services branches current-branch-id))
+
+
 ;; `:_list-services-fn-names` is now a graph fn-def — `:list-entities`
 ;; of `:fn` + per-row `[id name]` HOF + `:into {}` fold. The previous
 ;; `fn-name-by-id` helper isn't needed anymore.
 
 
 (def impls
-  {:resolve-fn               resolve-fn
-   :_execute-apply           _execute-apply
-   :get-execution            get-execution
-   :render-execute-result-hiccup render-execute-result-hiccup
-   :cancel-execution!        cancel-execution!
-   :resolve-fn-version-id    resolve-fn-version-id
-   :_reconcile-services-apply _reconcile-services-apply
-   :running-entry            running-entry})
+  {:resolve-fn                     resolve-fn
+   :_execute-apply                 _execute-apply
+   :get-execution                  get-execution
+   :render-execute-result-hiccup   render-execute-result-hiccup
+   :render-service-popover-hiccup  render-service-popover-hiccup
+   :cancel-execution!              cancel-execution!
+   :resolve-fn-version-id          resolve-fn-version-id
+   :_reconcile-services-apply      _reconcile-services-apply
+   :running-entry                  running-entry})

@@ -238,6 +238,17 @@
 ;; `:_list-services-rows` is now a graph fn-def (`:list-entities`
 ;; `:entity-type "service"`).
 
+
+(defbase render-execute-result-hiccup
+  "Body hiccup for one persisted execution row — the server-rendered
+   replacement for the JS `renderResultBody` + `renderTaintedPane` +
+   `renderErrorPane` chain in `editor-execute-result.js`. Walks the
+   row's `:status` / `:touched-secret?` / `:result-truncated?` /
+   `:result` / `:error` / `:error-data` fields, dispatches on shape,
+   returns the hiccup. nil exec → an `[:span hidden]` placeholder."
+  [exec]
+  (fn-exec/render-execute-result-hiccup exec))
+
 ;; `:_list-services-fn-names` is now a graph fn-def — `:list-entities`
 ;; of `:fn` + per-row `[id name]` HOF + `:into {}` fold. The previous
 ;; `fn-name-by-id` helper isn't needed anymore.
@@ -247,6 +258,7 @@
   {:resolve-fn               resolve-fn
    :_execute-apply           _execute-apply
    :get-execution            get-execution
+   :render-execute-result-hiccup render-execute-result-hiccup
    :cancel-execution!        cancel-execution!
    :resolve-fn-version-id    resolve-fn-version-id
    :_reconcile-services-apply _reconcile-services-apply

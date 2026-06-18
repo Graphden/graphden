@@ -52,30 +52,37 @@ async function applyHistoryArgs(fnEntity, execId) {
 // Build the per-row expand handler. The handler closes over the
 // popover's `resultHost` so clicking a row paints the full result /
 // error / runtime-effects in the same pane the inline submit uses.
+//
+// Body hiccup comes from `/partials/execute-result?id=…` — the
+// server-rendered replacement for the JS `renderResultBody` /
+// `renderTaintedPane` / `renderErrorPane` chain. The runtime-effects
+// strip stays a separate fetch (already-migrated `/partials/execute-
+// result-effects?runtime=…&declared=…`); we still need one tiny
+// `/api/execute/:id` hit to pull `runtime-effects` + `declared-
+// effects` for the strip URL params.
 function makeRowExpander(resultHostEl) {
   return async (execId) => {
     resultHostEl.textContent = '';
     resultHostEl.appendChild(renderSubmitSpinner('Loading…'));
     try {
-      const r = await authFetch('/api/execute/' + encodeURIComponent(execId),
-                                { method: 'GET' });
-      const body = await r.json();
+      const [bodyResp, jsonResp] = await Promise.all([
+        authFetch('/partials/execute-result?id=' + encodeURIComponent(execId)),
+        authFetch('/api/execute/' + encodeURIComponent(execId),
+                  { method: 'GET' }),
+      ]);
       resultHostEl.textContent = '';
-      const status = String(body.status || '').replace(/^:/, '');
-      if (status === 'succeeded') {
-        resultHostEl.appendChild(renderResultBody(body.result,
-                                                  { truncated: body['result-truncated?'] }));
-      } else if (status === 'failed') {
-        resultHostEl.appendChild(renderErrorPane(body.error, body['error-data']));
+      if (bodyResp.ok) {
+        resultHostEl.innerHTML = await bodyResp.text();
       } else {
-        const note = document.createElement('div');
-        note.className = 'execute-cancelled';
-        note.textContent = status;
-        resultHostEl.appendChild(note);
+        resultHostEl.appendChild(renderErrorPane('Load error: HTTP '
+                                                 + bodyResp.status));
       }
-      appendRuntimeEffectsStrip(resultHostEl,
-                                body['runtime-effects'],
-                                body['declared-effects']);
+      if (jsonResp.ok) {
+        const body = await jsonResp.json();
+        appendRuntimeEffectsStrip(resultHostEl,
+                                  body['runtime-effects'],
+                                  body['declared-effects']);
+      }
     } catch (e) {
       resultHostEl.appendChild(renderErrorPane('Load error: ' + e.message));
     }

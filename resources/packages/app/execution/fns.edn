@@ -698,6 +698,12 @@
    :return-type :nullable-keyword-map
    :effects #{:db}}
 
+  {:name :render-execute-result-hiccup
+   :description "Body hiccup for one persisted execution row — replaces the JS `renderResultBody` / `renderTaintedPane` / `renderErrorPane` chain in `editor-execute-result.js`. Walks the row's `:status` / `:touched-secret?` / `:result-truncated?` / `:result` / `:error` / `:error-data` fields and returns the body hiccup. nil exec → an `[:span hidden]` placeholder so the partial returns 200 with an empty popover (the editor's `Loading…` → empty graceful path)."
+   :args {:exec {:type [:union :null :keyword-map]
+                 :description "Decoded execution row from `:get-execution`."}}
+   :return-type :hiccup-node}
+
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
    :args {:id {:type :nullable-uuid :description "Target execution id."}}

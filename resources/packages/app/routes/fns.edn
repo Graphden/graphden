@@ -117,6 +117,11 @@
    :parent :get-auth-required
    :args {:path "/partials/fn-picker-incompat" :handler :_partial-fn-picker-incompat-handler}}
 
+  {:name :partial-execute-result
+   :description "GET /partials/execute-result?id={uuid} — execution body hiccup (scalar / list / record / tainted / large-JSON / 5MB-truncated / error). Replaces the JS `renderResultBody` chain in `editor-execute-result.js`. Consumed by `editor-execute-history.js` row-expand + `editor-execute.js` orchestrator after Run."
+   :parent :get-auth-required
+   :args {:path "/partials/execute-result" :handler :_partial-execute-result-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

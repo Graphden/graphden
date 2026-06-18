@@ -1295,6 +1295,43 @@
    :args {:body :_partial-fpi-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; execute-result body partial. Replaces the JS `renderResultBody`
+  ;; chain in `editor-execute-result.js` — `renderListResult` /
+  ;; `renderRecordResult` / `renderScalarResult` / `renderTaintedPane`
+  ;; / large-JSON-preview / 5MB-truncated note all migrate into the
+  ;; source-side `render-execute-result-hiccup` walker; this partial
+  ;; reads the execution row + emits the body hiccup.
+  ;;
+  ;; URL: `GET /partials/execute-result?id={uuid}`. Consumers:
+  ;; `editor-execute-history.js` (row-expand body) + (future)
+  ;; `editor-execute.js` orchestrator (post-Run body).
+
+  {:name :_partial-execute-result-id-str
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "id"}}}
+
+  {:name :_partial-execute-result-id
+   :parent :parse-uuid
+   :args {:string :_partial-execute-result-id-str}}
+
+  {:name :_partial-execute-result-exec
+   :parent :get-execution
+   :args {:id :_partial-execute-result-id}}
+
+  {:name :_partial-execute-result-fragment
+   :parent :render-execute-result-hiccup
+   :args {:exec :_partial-execute-result-exec}}
+
+  {:name :_partial-execute-result-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-execute-result-fragment}}
+
+  {:name :_partial-execute-result-handler
+   :description "Ring handler for `GET /partials/execute-result?id={uuid}` — returns the execution body hiccup as `text/html`. nil execution → an `[:span hidden]` (the popover stays empty so the editor's `Loading…` → empty path is graceful)."
+   :parent :html-ok-response
+   :args {:body :_partial-execute-result-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; fn-versions popover (second migration). Pulls the existing
   ;; `:list-fn-versions` data chain (in `app.branches`) for one fn-id
   ;; from a query-string param, then maps each enriched version row

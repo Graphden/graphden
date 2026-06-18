@@ -160,6 +160,7 @@
   {:name :_execute-fn-row
    :description "Full :fn row for the parsed request, or nil when neither :fn-id nor :fn-name resolves."
    :parent :resolve-fn
+   :return-type [:union :null :fn-row-shape]
    :args {:parsed {:as :parsed}}}
 
   {:name :_execute-fn-row-id
@@ -338,6 +339,7 @@
 
   {:name :_execute-svc-conflicts-decode-row
    :parent :decode-row
+   :return-type :service-row-shape
    :args {:row {:as :item} :entity-type {:value "service"}}}
 
   {:name :_execute-conflict-svc
@@ -705,6 +707,7 @@
   {:name :_get-exec-loaded
    :description "Load the persisted execution row by id; nil when not found. Reuses the `:get-execution` primitive."
    :parent :get-execution
+   :return-type [:union :null :fn-execution-row-shape]
    :args {:id {:parent :get :args {:coll {:as :parsed} :key {:value :id} :default nil}}}}
 
   {:name :_get-exec-missing?
@@ -737,6 +740,7 @@
   {:name :_cancel-exec-applied
    :description "Call `:cancel-execution!` — no-op (returns nil) when id is invalid OR no row matches. Otherwise sets `:cancel-requested?` on the row + `future-cancel`s the in-process handle."
    :parent :cancel-execution!
+   :return-type [:union :null :fn-execution-row-shape]
    :args {:id {:parent :get :args {:coll {:as :parsed} :key {:value :id} :default nil}}}}
 
   {:name :_cancel-exec-missing?
@@ -863,6 +867,7 @@
 
   {:name :_list-exec-decode-row
    :parent :decode-row
+   :return-type :fn-execution-row-shape
    :args {:row {:as :item} :entity-type {:value "fn-execution"}}}
 
   {:name :_list-exec-by-version-raw
@@ -1042,6 +1047,7 @@
   {:name :_list-services-decode-row
    :description "HOF callback — decode one raw `:service` row to graphden's canonical shape."
    :parent :decode-row
+   :return-type :service-row-shape
    :args {:row {:as :item}
           :entity-type {:value "service"}}}
 

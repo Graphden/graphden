@@ -108,6 +108,7 @@
   ;; `:get :key :base-branch-id` finds the field under its decoded name.
   {:name :_branch-chain-cur-row
    :parent :decode-row
+   :return-type [:union :null :branch-row-shape]
    :args {:row :_branch-chain-cur-row-raw
           :entity-type {:value "branch"}}}
 

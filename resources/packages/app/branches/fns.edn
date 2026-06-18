@@ -24,7 +24,7 @@
   {:name :resolve-branch-ref
    :description "Look up a branch by `:ref` — accepts either a stringified UUID or a branch name. Returns the row, or nil when not found / ref is blank / ref isn't a string. Operates on the unwrapped base storage so reads see across versions."
    :args {:ref {:type :nullable-text :required false :description "UUID string or branch name. Non-string / blank → nil."}}
-   :return-type :nullable-keyword-map
+   :return-type [:union :null :branch-row-shape]
    :effects #{:db}}
 
   ;; ---------------------------------------------------------------------
@@ -62,6 +62,7 @@
   {:name :_list-branches-decode-row
    :description "HOF callback — decode one raw `:branch` row to graphden's canonical shape."
    :parent :decode-row
+   :return-type :branch-row-shape
    :args {:row {:as :item}
           :entity-type {:value "branch"}}}
 
@@ -290,6 +291,7 @@
 
   {:name :_lfv-versions-decode-row
    :parent :decode-row
+   :return-type :fn-version-row-shape
    :args {:row {:as :item} :entity-type {:value "fn-version"}}}
 
   {:name :_lfv-versions
@@ -356,6 +358,7 @@
 
   {:name :_lfv-branches-decode-row
    :parent :decode-row
+   :return-type :branch-row-shape
    :args {:row {:as :item} :entity-type {:value "branch"}}}
 
   {:name :_lfv-branches
@@ -418,6 +421,7 @@
 
   {:name :_lfv-execs-decode-row
    :parent :decode-row
+   :return-type :fn-execution-row-shape
    :args {:row {:as :item} :entity-type {:value "fn-execution"}}}
 
   {:name :_lfv-execs
@@ -657,16 +661,18 @@
    :effects #{:db}}
 
   {:name :_diff-apply-raw
-   :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_diff-target-branch`."
+   :description "Stage 1 — run the diff. The `:source-branch` / `:target-branch` free args come from the parent `:cond` which threaded them through `:_diff-source-branch` / `:_diff-target-branch`. The `:assert-some` wraps mirror the `:cond` guards (`:_diff-source-missing?` / `:_diff-target-missing?` reject nil branches upstream) — they bridge the type-checker's per-arm narrowing gap."
    :parent :diff-branches
-   :args {:source-branch-id {:parent :get
-                             :args {:coll {:as :source-branch}
-                                    :key {:value :id}
-                                    :default nil}}
-          :target-branch-id {:parent :get
-                             :args {:coll {:as :target-branch}
-                                    :key {:value :id}
-                                    :default nil}}}}
+   :args {:source-branch-id {:parent :assert-some
+                             :args {:value {:parent :get
+                                            :args {:coll {:as :source-branch}
+                                                   :key {:value :id}
+                                                   :default nil}}}}
+          :target-branch-id {:parent :assert-some
+                             :args {:value {:parent :get
+                                            :args {:coll {:as :target-branch}
+                                                   :key {:value :id}
+                                                   :default nil}}}}}}
 
   {:name :_diff-apply-diffs-raw
    :description "Stage 2 — pull the `:diffs` vec out of the diff result."
@@ -931,16 +937,17 @@
    :effects #{:db}}
 
   {:name :_create-branch-apply-row
-   :description "Stage 1 of the apply — write the branch row off the parsed name + resolved parent. Branch-name is non-null here because the `:_create-branch-name-blank?` guard rejects the request upstream."
+   :description "Stage 1 of the apply — write the branch row off the parsed name + resolved parent. Branch-name is non-null here because the `:_create-branch-name-blank?` guard rejects the request upstream. `:base-branch-id` is asserted non-null because the wrapping `:cond` reaches this arm only when `:_create-branch-parent-missing?` is false (`:resolved-parent` exists)."
    :parent :create-branch!
    :args {:branch-name {:parent :get :type :text
                         :args {:coll {:as :parsed}
                                :key {:value :branch-name}
                                :default nil}}
-          :base-branch-id {:parent :get
-                           :args {:coll {:as :resolved-parent}
-                                  :key {:value :id}
-                                  :default nil}}}}
+          :base-branch-id {:parent :assert-some
+                           :args {:value {:parent :get
+                                          :args {:coll {:as :resolved-parent}
+                                                 :key {:value :id}
+                                                 :default nil}}}}}}
 
   {:name :_create-branch-apply-shaped
    :description "Stage 2 — reshape the new row via the shared `:as-json-branch` converter (stringified ids + created-at)."
@@ -1012,8 +1019,13 @@
    :return-type :any
    :effects #{:db}}
 
+  ;; `:assert-some` strips the nullable from `:get :default nil` — the
+  ;; outer `:cond` already proved `:resolved` non-null via
+  ;; `:_delete-branch-missing?`, but the type-checker can't see that
+  ;; narrowing across the cond-arm boundary.
   {:name :_delete-branch-id
-   :parent :get :args {:coll {:as :resolved} :key {:value :id} :default nil}}
+   :parent :assert-some
+   :args {:value {:parent :get :args {:coll {:as :resolved} :key {:value :id} :default nil}}}}
 
   ;; --- Success path: delete returns nil; success envelope cites the
   ;; resolved branch's id + name. `:do` forces the side-effect before
@@ -1207,12 +1219,14 @@
    :effects #{:db}}
 
   {:name :_conflicts-apply-raw
-   :description "Stage 1 — run conflict detection."
+   :description "Stage 1 — run conflict detection. `:assert-some` wraps mirror the outer `:cond` (rejects nil source/target upstream); bridges the type-checker's per-arm narrowing gap."
    :parent :detect-conflicts
-   :args {:source-branch-id {:parent :get
-                             :args {:coll {:as :source} :key {:value :id} :default nil}}
-          :target-branch-id {:parent :get
-                             :args {:coll {:as :target} :key {:value :id} :default nil}}}}
+   :args {:source-branch-id {:parent :assert-some
+                             :args {:value {:parent :get
+                                            :args {:coll {:as :source} :key {:value :id} :default nil}}}}
+          :target-branch-id {:parent :assert-some
+                             :args {:value {:parent :get
+                                            :args {:coll {:as :target} :key {:value :id} :default nil}}}}}}
 
   {:name :_conflicts-apply-list-raw
    :parent :get
@@ -1479,12 +1493,14 @@
 
   ;; --- Success path: build the response body off the merge record.
   {:name :_merge-apply-record
-   :description "Stage 1 — actually run the merge. Throws on :merge-conflict; the `:try` outside catches."
+   :description "Stage 1 — actually run the merge. Throws on :merge-conflict; the `:try` outside catches. `:assert-some` wraps mirror the outer `:cond` (rejects nil source/target upstream); bridges the type-checker's per-arm narrowing gap."
    :parent :merge-branch!
-   :args {:source-branch-id {:parent :get
-                             :args {:coll {:as :source} :key {:value :id} :default nil}}
-          :target-branch-id {:parent :get
-                             :args {:coll {:as :target} :key {:value :id} :default nil}}
+   :args {:source-branch-id {:parent :assert-some
+                             :args {:value {:parent :get
+                                            :args {:coll {:as :source} :key {:value :id} :default nil}}}}
+          :target-branch-id {:parent :assert-some
+                             :args {:value {:parent :get
+                                            :args {:coll {:as :target} :key {:value :id} :default nil}}}}
           :resolutions {:parent :get
                         :args {:coll {:as :parsed} :key {:value :resolutions} :default nil}}}}
 

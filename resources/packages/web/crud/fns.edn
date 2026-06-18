@@ -1237,11 +1237,13 @@
   {:name :_create-fn-slot-fn-row
    :description "Owner fn row (the fn being given a slot). Read lazily — `:_create-fn-slot-rename-fires?`'s outer `:and` short-circuits non-fn-slot creates before this evaluates."
    :parent :get-entity
+   :return-type [:union :null :fn-row-shape]
    :args {:entity-type {:value "fn"} :id :_create-fn-slot-fn-id}}
 
   {:name :_create-fn-slot-slot-row
    :description "Slot row being attached. Read lazily — see `:_create-fn-slot-fn-row`."
    :parent :get-entity
+   :return-type [:union :null :slot-row-shape]
    :args {:entity-type {:value "slot"} :id :_create-fn-slot-slot-id}}
 
   {:name :_create-fn-slot-fn-row-name
@@ -1390,6 +1392,7 @@
   {:name :_create-svc-fn-row
    :description "Used solely for `(pr-str (:name fn-row))` in the rejection message; lazy via the outer `:if`'s short-circuit."
    :parent :get-entity
+   :return-type [:union :null :fn-row-shape]
    :args {:entity-type {:value "fn"} :id :_create-svc-fn-id}}
 
   {:name :_create-svc-fn-row-name
@@ -1572,7 +1575,7 @@
   ;; nil without touching storage. Mirrors the legacy
   ;; `(when (and entity-type id-uuid) (try (sp/read-entity ...)))`.
   {:name :_update-pre-existing-fetched
-   :description "Read the pre-existing row by type + id. Only executed under the `:_update-pre-existing` `:if`-guard that asserts both are non-nil, so the `:type` overrides on the bindings strip the nullable surface from `:_create-extracted.get` / `:parse-uuid` — without them the type-checker correctly rejects nullable values flowing into `:get-entity`'s strict slots."
+   :description "Read the pre-existing row by type + id. Only executed under the `:_update-pre-existing` `:if`-guard that asserts both are non-nil, so the `:type` overrides on the bindings strip the nullable surface from `:_create-extracted.get` / `:parse-uuid` — without them the type-checker correctly rejects nullable values flowing into `:get-entity`'s strict slots. The return-type stays the unrefined `:nullable-keyword-map` from `:get-entity` — at this site the entity-type is dynamic (parsed from form body) so we can't pin a specific entity-shape alias without lying about non-`:fn` callers."
    :parent :get-entity
    :args {:entity-type {:parent :get
                         :type :text
@@ -2006,6 +2009,7 @@
 
   {:name :_delete-target-fn-row
    :parent :get-entity
+   :return-type [:union :null :fn-row-shape]
    :args {:entity-type {:value "fn"} :id :_delete-target-id}}
 
   {:name :_delete-target-parent-ids
@@ -2333,6 +2337,7 @@
 
   {:name :_delete-ns-child-ns-decode
    :parent :decode-row
+   :return-type :ns-row-shape
    :args {:row {:as :item} :entity-type {:value "ns"}}}
 
   ;; `:fn` rows: versioned, push `:namespace-id` filter into the
@@ -2589,9 +2594,9 @@
    :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :body} :default nil}}}}
 
   {:name :_seq-append-load-binding
-   :description "Read-only sequence-binding lookup. Returns the existing binding row, a synthetic placeholder (materialized by apply), or nil when the fn has no sequence slot."
+   :description "Read-only sequence-binding lookup. Returns the existing binding row, a synthetic placeholder (materialized by apply), or nil when the fn has no sequence slot. The synthetic placeholder carries extra non-canonical fields; the open `:binding-row-shape` admits supersets."
    :args {:parsed {:type :_seq-append-parsed-shape}}
-   :return-type :nullable-keyword-map
+   :return-type [:union :null :binding-row-shape]
    :effects #{:db}}
 
   {:name :_seq-append-no-seq-slot?
@@ -2715,7 +2720,7 @@
   {:name :_seq-remove-load-item
    :description "Read the binding-list-item row for the parsed item-id. Returns nil when the id is invalid (caught by guard #1) OR when no row matches."
    :args {:parsed {:type {:item-id :uuid}}}
-   :return-type :nullable-keyword-map
+   :return-type [:union :null :binding-list-item-row-shape]
    :effects #{:db}}
 
   {:name :_seq-remove-item-not-found?
@@ -2791,7 +2796,7 @@
   {:name :_seq-update-load-item
    :description "Read the binding-list-item row for the parsed id."
    :args {:parsed {:type :_seq-update-parsed-shape}}
-   :return-type :nullable-keyword-map
+   :return-type [:union :null :binding-list-item-row-shape]
    :effects #{:db}}
 
   {:name :_seq-update-item-not-found?

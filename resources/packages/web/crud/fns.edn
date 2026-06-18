@@ -356,6 +356,12 @@
    :args {:value {:type :any :description "Literal value to classify (binding's `:value`, list-item's `:value`, etc.)."}}
    :return-type :type-expression}
 
+  {:name :diff-value-against-type
+   :description "Leaf-level disagreements between `value` and `expected` — `[{:path :expected :actual}, …]`, empty when the value satisfies the type. Used by the mismatch-explainer popover to point users at the EXACT failing field / element."
+   :args {:value {:type :any :description "Literal value to diff against the expected type."}
+          :expected {:type :type-expression :description "Expected type expression — atomic, vector (`[:list T]`, `[:map K V]`, `[:tuple …]`, `[:union …]`, `[:refine base constraint]`), or record (`{k T …}`)."}}
+   :return-type [:list {:path :text :expected :type-expression :actual :any}]}
+
   ;; --- :_types-compatible-apply — pure graph composition over
   ;; `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope.
   ;; Admins can vary the response shape (e.g. add `:expected-kind`,

@@ -554,15 +554,136 @@
                              :attrs {:value {:class "mismatch-explainer-value"}}
                              :children [:_partial-mismatch-reason]}}]}}
 
+  ;; STEP 2 — diff-leaves section. The recursive type-walking + leaf-
+  ;; level disagreement collection lives in `types/check.clj`; this
+  ;; chain just wraps + slices + per-leaf-formats into hiccup.
+
+  {:name :_partial-mismatch-diff-leaves
+   :description "Leaf-level disagreements `[{:path :expected :actual}, …]` between the bound value and the expected slot type. Empty when types match (the consumer hides the section)."
+   :parent :diff-value-against-type
+   :args {:value :_partial-mismatch-current-value
+          :expected :_partial-mismatch-expected-type}}
+
+  {:name :_partial-mismatch-diff-leaves-count
+   :parent :count
+   :args {:coll :_partial-mismatch-diff-leaves}}
+
+  {:name :_partial-mismatch-diff-has-leaves?
+   :parent :gt
+   :args {:nums [:_partial-mismatch-diff-leaves-count {:value 0}]}}
+
+  {:name :_partial-mismatch-diff-head-text
+   :description "`At` when there's exactly one leaf, `Disagreements` when many. Mirrors the JS render's headline."
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_partial-mismatch-diff-leaves-count :b {:value 1}}}
+          :then {:value "At"}
+          :else {:value "Disagreements"}}}
+
+  ;; Cap at 6 leaves, plus an overflow row when there are more. Same
+  ;; truncation rule the JS render used.
+  {:name :_partial-mismatch-diff-leaves-shown
+   :parent :take
+   :args {:count {:value 6}
+          :coll :_partial-mismatch-diff-leaves}}
+
+  {:name :_partial-mismatch-diff-leaves-overflow?
+   :parent :gt
+   :args {:nums [:_partial-mismatch-diff-leaves-count {:value 6}]}}
+
+  {:name :_partial-mismatch-diff-overflow-count
+   :parent :sub
+   :args {:nums [:_partial-mismatch-diff-leaves-count {:value 6}]}}
+
+  {:name :_partial-mismatch-diff-overflow-text
+   :parent :str-join
+   :args {:coll [{:value "… +"} :_partial-mismatch-diff-overflow-count {:value " more"}]
+          :separator ""}}
+
+  {:name :_partial-mismatch-diff-overflow-row
+   :description "`<div class=\"mismatch-explainer-leaf-more\">… +N more</div>` when more than 6 disagreements. Hidden via empty `:span` when within cap."
+   :parent :if
+   :args {:test :_partial-mismatch-diff-leaves-overflow?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "mismatch-explainer-leaf-more"}}
+                        :children [:_partial-mismatch-diff-overflow-text]}}
+          :else {:value [:span {:hidden "1"}]}}}
+
+  ;; Per-leaf row — `:map` over the truncated leaf list. Each leaf is
+  ;; `{:path :expected :actual}`. The `:as :leaf` rename gives the
+  ;; inner readers a stable name; readers use `:get :default <fallback>`
+  ;; so a missing path renders as `(top)` (same JS fallback).
+  {:name :_partial-mismatch-diff-leaf-path-raw
+   :parent :get :args {:coll {:as :leaf} :key {:value :path} :default ""}}
+
+  {:name :_partial-mismatch-diff-leaf-path
+   :description "Per-leaf path readout — empty path → `(top)` (root of the value)."
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-mismatch-diff-leaf-path-raw}}
+          :then {:value "(top)"}
+          :else :_partial-mismatch-diff-leaf-path-raw}}
+
+  {:name :_partial-mismatch-diff-leaf-expected
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :leaf} :key {:value :expected} :default nil}}}}
+
+  {:name :_partial-mismatch-diff-leaf-actual
+   :parent :to-str
+   :args {:value {:parent :get :args {:coll {:as :leaf} :key {:value :actual} :default nil}}}}
+
+  {:name :_partial-mismatch-diff-leaf-row
+   :description "One leaf row — `<div>{path}: expected {expected}, got {actual}</div>` with the same span classes the JS render used."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-leaf"}}
+          :children [{:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-leaf-path"}}
+                             :children [:_partial-mismatch-diff-leaf-path]}}
+                     {:value [:span {:class "mismatch-explainer-leaf-sep"} ": expected "]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-leaf-expected"}}
+                             :children [:_partial-mismatch-diff-leaf-expected]}}
+                     {:value [:span {:class "mismatch-explainer-leaf-sep"} ", got "]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-leaf-actual"}}
+                             :children [:_partial-mismatch-diff-leaf-actual]}}]}}
+
+  {:name :_partial-mismatch-diff-leaf-rows
+   :parent :map
+   :args {:func :_partial-mismatch-diff-leaf-row
+          :coll :_partial-mismatch-diff-leaves-shown}}
+
+  {:name :_partial-mismatch-diff-leaves-head-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-leaves-head"}}
+          :children [:_partial-mismatch-diff-head-text]}}
+
+  {:name :_partial-mismatch-diff-section
+   :description "Full diff-leaves section — head + per-leaf rows + overflow note. Hidden (`<span hidden=1>`) when the value matches the expected type (no leaves)."
+   :parent :if
+   :args {:test :_partial-mismatch-diff-has-leaves?
+          :then {:parent :hiccup
+                 :args {:tag {:value "div"}
+                        :attrs {:value {:class "mismatch-explainer-leaves"}}
+                        :children [:_partial-mismatch-diff-leaves-head-div
+                                   :_partial-mismatch-diff-leaf-rows
+                                   :_partial-mismatch-diff-overflow-row]}}
+          :else {:value [:span {:hidden "1"}]}}}
+
   {:name :_partial-mismatch-fragment
-   :description "Full popover hiccup — header + Expected + Got + Reason rows wrapped in `.mismatch-explainer-content`. Provenance section + diff-leaves + Edit-action button are step-2/3 of this migration; for now they stay in the JS render path so this step ships as a strict feature addition (the partial replaces only the data-fetch+top-rows)."
+   :description "Full popover hiccup — header + Expected + Got + Reason rows + diff-leaves section, wrapped in `.mismatch-explainer-content`. Provenance section + Edit-action button still hydrate JS-side (steps 3-4)."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "mismatch-explainer-content"}}
           :children [:_partial-mismatch-header
                      :_partial-mismatch-expected-row
                      :_partial-mismatch-got-row
-                     :_partial-mismatch-reason-row]}}
+                     :_partial-mismatch-reason-row
+                     :_partial-mismatch-diff-section]}}
 
   {:name :_partial-mismatch-html
    :parent :render-hiccup

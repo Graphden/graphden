@@ -104,6 +104,96 @@
 (declare literal-satisfies-refinement?)
 
 
+(defn diff-value-against-type
+  "Walk a literal value against an expected type expression, returning
+   the leaf-level disagreements as `[{:path :expected :actual}, …]`.
+   Empty vector when the value satisfies the type. Used by the mismatch-
+   explainer popover to point users at the EXACT failing field / element
+   instead of leaving them to spot the diff between two structural types
+   by eye. Mirrors `subtype?` on `classify-literal`'s output, but with
+   leaf-level locality.
+
+   Recurses into `:list` / `:map` / `:tuple` / record / `:refine` /
+   `:union` (best-near-miss branch). `:any` / `:jsonb` return empty
+   (no constraint). Primitive types check via `subtype?` on the
+   classified value."
+  ([value expected] (diff-value-against-type value expected ""))
+  ([value expected path]
+   (let [exp (or (types/resolve-alias expected) expected)
+         leaf (fn [actual] [{:path path :expected exp :actual actual}])]
+     (cond
+       (or (= :any exp) (= :jsonb exp))
+       []
+
+       (and (vector? exp) (= :union (first exp)))
+       (let [branches (rest exp)]
+         (loop [bs branches best nil]
+           (if (empty? bs)
+             (or best [])
+             (let [leaves (diff-value-against-type value (first bs) path)]
+               (cond
+                 (empty? leaves) []
+                 (or (nil? best) (< (count leaves) (count best)))
+                 (recur (rest bs) leaves)
+                 :else (recur (rest bs) best))))))
+
+       (and (vector? exp) (= :refine (first exp)))
+       (let [[_ base constraint] exp
+             base-leaves (diff-value-against-type value base path)]
+         (if (seq base-leaves)
+           base-leaves
+           (let [sat (try (literal-satisfies-refinement? value constraint)
+                          (catch Throwable _ :unknown))]
+             (if (false? sat) (leaf (classify-literal value)) []))))
+
+       (and (vector? exp) (= :list (first exp)))
+       (if-not (sequential? value)
+         (leaf (classify-literal value))
+         (let [[_ elem-type] exp]
+           (vec (mapcat (fn [i v]
+                          (diff-value-against-type v elem-type (str path "[" i "]")))
+                        (range) value))))
+
+       (and (vector? exp) (= :map (first exp)))
+       (if-not (map? value)
+         (leaf (classify-literal value))
+         (let [v-type (nth exp 2)]
+           (vec (mapcat (fn [[k v]]
+                          (diff-value-against-type v v-type (str path "." (name k))))
+                        value))))
+
+       (and (vector? exp) (= :tuple (first exp)))
+       (let [elems (rest exp)]
+         (cond
+           (not (sequential? value))
+           (leaf (classify-literal value))
+           (not= (count elems) (count value))
+           (leaf (str "tuple of length " (count value)))
+           :else
+           (vec (mapcat (fn [i v t]
+                          (diff-value-against-type v t (str path "[" i "]")))
+                        (range) value elems))))
+
+       (map? exp)
+       (if-not (map? value)
+         (leaf (classify-literal value))
+         (vec (mapcat (fn [[k field-type]]
+                        (if-not (contains? value k)
+                          [{:path (str path "." (name k))
+                            :expected field-type :actual "missing"}]
+                          (diff-value-against-type (get value k) field-type
+                                                   (str path "." (name k)))))
+                      exp)))
+
+       (or (keyword? exp) (string? exp))
+       (let [actual (classify-literal value)]
+         (if (and (some? actual) (not (types/subtype? actual exp)))
+           (leaf actual)
+           []))
+
+       :else []))))
+
+
 (defn- combine-and
   [results]
   ;; All true → true. Any false → false. Otherwise → :unknown

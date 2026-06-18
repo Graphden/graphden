@@ -328,6 +328,15 @@
   (types-check/classify-literal value))
 
 
+(defbase diff-value-against-type
+  "Atomic library boundary over `types.check/diff-value-against-type` —
+   leaf-level disagreements between `value` and `expected` as
+   `[{:path :expected :actual}, …]`. Empty vector when the value
+   satisfies the type."
+  [value expected]
+  (types-check/diff-value-against-type value expected))
+
+
 ;; `:_types-compatible-apply` is now a graph fn-def — see fns.edn.
 ;; Pure composition over `:subtype?` + `:if`-wrapped
 ;; `:describe-type-mismatch` + envelope `:zipmap` / `:assoc`.
@@ -854,6 +863,7 @@
    :subtype? subtype?-fn
    :describe-type-mismatch describe-type-mismatch-fn
    :classify-literal classify-literal
+   :diff-value-against-type diff-value-against-type
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

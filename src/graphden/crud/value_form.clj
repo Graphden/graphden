@@ -106,6 +106,23 @@
       (nav-key-type walked))))
 
 
+(defn- backward-unified-slot-type
+  "Tier-2 of the slot-type priority chain — the backward-unified type
+   the type-checker recorded on the owning fn's rich-type entry for
+   this slot. nil when the rich-types entry has nothing to say
+   (anonymous fn-def, no narrowing recorded, or owning/slot missing
+   a `:name`).
+
+   Shared by `resolve-slot-effective-type` (which picks the first
+   non-nil tier through `or`) and `slot-type-provenance` (which
+   exposes each tier separately under `:unified` and gates the
+   computation on `:override-fn-id` being absent)."
+  [owning-fn-row slot-row]
+  (when (and (:name owning-fn-row) (:name slot-row))
+    (get-in (registry/rich-type-of (keyword (:name owning-fn-row)))
+            [:slot-types (keyword (:name slot-row))])))
+
+
 (defn resolve-slot-effective-type
   "Effective rich type at a (binding | fn+slot) edit site, alias-
    resolved to structural form. Priority, most-specific first:
@@ -128,11 +145,8 @@
         slot-id   (or slot-id (:slot-id bnd))
         slot      (when slot-id (sp/read-entity storage :slot slot-id))
         owning    (when fn-id (sp/read-entity storage :fn fn-id))
-        unified   (when (and (:name owning) (:name slot))
-                    (get-in (registry/rich-type-of (keyword (:name owning)))
-                            [:slot-types (keyword (:name slot))]))
         slot-type (or (type-fn-rich storage (:type-override-fn-id bnd))
-                      unified
+                      (backward-unified-slot-type owning slot)
                       (type-fn-rich storage (:type-fn-id slot)))
         resolved  (some-> slot-type types/resolve-alias)]
     (cond
@@ -164,41 +178,50 @@
 ;; nav / element logic, not the slot chain.
 ;; =============================================================================
 
-(defn- inheritance-chain
+(defn- inheritance-chain-info
   "BFS the `:parent-ids` closure starting at `fn-id`, leaf-first
-   (closer-wins order). Returns a vec of fn-ids including `fn-id`
-   itself at position 0. Cycles can't form (sync-time topological-sort
-   rejects them), so no cycle guard is needed."
+   (closer-wins order). Returns `{:ids [fn-ids] :fn-map {id row}}`
+   where `:ids` lists every ancestor including `fn-id` itself at
+   position 0 and `:fn-map` carries the row for each id (populated
+   during the BFS, so downstream helpers can read `:name` etc. without
+   a second pass of `sp/read-entity` calls).
+
+   Cycles can't form (sync-time topological-sort rejects them), so no
+   cycle guard is needed."
   [storage fn-id]
   (loop [queue   [fn-id]
          seen    #{}
-         out     []]
+         ids     []
+         fn-map  {}]
     (if (empty? queue)
-      out
+      {:ids ids :fn-map fn-map}
       (let [fid (peek queue)
             rest-q (pop queue)]
         (if (contains? seen fid)
-          (recur rest-q seen out)
+          (recur rest-q seen ids fn-map)
           (let [fn-row  (sp/read-entity storage :fn fid)
                 parents (vec (:parent-ids fn-row))]
             (recur (into rest-q parents)
                    (conj seen fid)
-                   (conj out fid))))))))
+                   (conj ids fid)
+                   (assoc fn-map fid fn-row))))))))
 
 
 (defn- find-slot-declaring-fn
   "Walk inheritance chain in REVERSE (root-first) — return the deepest
-   ancestor that declares the slot via a `:fn-slot` junction row. Mirrors
-   the JS `findSlotDeclaringFn` (`getInheritanceChain` then reverse)."
-  [storage fn-id slot-id]
-  (let [chain (inheritance-chain storage fn-id)]
+   ancestor that declares the slot via a `:fn-slot` junction row.
+   Mirrors the JS `findSlotDeclaringFn`. Uses a single batched
+   `query-entities` over `:fn-slot` with `:fn-id` IN ancestor-ids
+   instead of one query per ancestor (~N round-trips → 1)."
+  [storage chain-info slot-id]
+  (let [{:keys [ids fn-map]} chain-info
+        fn-slot-rows (sp/query-entities storage :fn-slot
+                                        {:fn-id ids :slot-id slot-id})
+        owning-fn-ids (set (map :fn-id fn-slot-rows))]
     (some (fn [fid]
-            (let [fn-slots (sp/query-entities storage :fn-slot
-                                              {:fn-id fid :slot-id slot-id})]
-              (when (seq fn-slots)
-                (let [fn-row (sp/read-entity storage :fn fid)]
-                  {:fn-id fid :fn-name (:name fn-row)}))))
-          (reverse chain))))
+            (when (contains? owning-fn-ids fid)
+              {:fn-id fid :fn-name (:name (get fn-map fid))}))
+          (reverse ids))))
 
 
 (defn- find-binding-override-chain
@@ -206,19 +229,20 @@
    binding for this slot WITH `:type-override-fn-id`. Returns the list
    in closer-wins order (the first entry is the override actually
    applied; later entries are shadowed siblings the editor surfaces as
-   `(also by)` rows)."
-  [storage fn-id slot-id]
-  (let [chain (inheritance-chain storage fn-id)]
+   `(also by)` rows). Single batched `query-entities` over `:binding`
+   with `:fn-id` IN ancestor-ids replaces the per-ancestor N+1."
+  [storage chain-info slot-id]
+  (let [{:keys [ids fn-map]} chain-info
+        binding-rows (sp/query-entities storage :binding
+                                        {:fn-id ids :slot-id slot-id})
+        by-fn (into {} (map (juxt :fn-id identity)) binding-rows)]
     (vec (keep (fn [fid]
-                 (let [bnds (sp/query-entities storage :binding
-                                               {:fn-id fid :slot-id slot-id})
-                       bnd  (first bnds)
+                 (let [bnd (get by-fn fid)
                        override-fn-id (:type-override-fn-id bnd)]
                    (when override-fn-id
-                     (let [fn-row (sp/read-entity storage :fn fid)]
-                       {:fn-id fid :fn-name (:name fn-row)
-                        :override-fn-id override-fn-id}))))
-               chain))))
+                     {:fn-id fid :fn-name (:name (get fn-map fid))
+                      :override-fn-id override-fn-id})))
+               ids))))
 
 
 (defn- compute-slot-type-for-row
@@ -267,26 +291,29 @@
    `{:binding-id …}` and get a valid result."
   [storage {:keys [fn-id slot-id binding-id item-id]}]
   (when-not item-id
-    (let [bnd-pre  (when binding-id (sp/read-entity storage :binding binding-id))
-          fn-id    (or fn-id (:fn-id bnd-pre))
-          slot-id  (or slot-id (:slot-id bnd-pre))]
+    (let [bnd      (when binding-id (sp/read-entity storage :binding binding-id))
+          fn-id    (or fn-id (:fn-id bnd))
+          slot-id  (or slot-id (:slot-id bnd))]
       (when slot-id
         (let [slot (sp/read-entity storage :slot slot-id)]
           (when (:type-fn-id slot)
-            (let [bnd          (when binding-id (sp/read-entity storage :binding binding-id))
+            ;; One inheritance walk feeds BOTH the slot-declarer lookup
+            ;; AND the override-chain lookup AND the `own-fn` read —
+            ;; without sharing the result and the per-fn batch read, a
+            ;; popover open did ~N round-trips per helper (was ~25 for
+            ;; a 5-deep chain).
+            (let [chain-info   (when fn-id (inheritance-chain-info storage fn-id))
                   override-fid (:type-override-fn-id bnd)
-                  ;; Tier 2 is skipped under an explicit override — mirrors
-                  ;; resolve-slot-effective-type.
-                  unified      (when (and (nil? override-fid) fn-id)
-                                 (let [own-fn (sp/read-entity storage :fn fn-id)]
-                                   (when (:name own-fn)
-                                     (get-in (registry/rich-type-of
-                                               (keyword (:name own-fn)))
-                                             [:slot-types (keyword (:name slot))]))))
+                  own-fn       (when fn-id (get-in chain-info [:fn-map fn-id]))
+                  ;; Tier 2 is skipped under an explicit override —
+                  ;; mirrors `resolve-slot-effective-type`'s `or`-fall-
+                  ;; through where tier-1 takes precedence.
+                  unified      (when (nil? override-fid)
+                                 (backward-unified-slot-type own-fn slot))
                   ref-fid      (:ref-fn-id bnd)
                   ref-fn       (when ref-fid (sp/read-entity storage :fn ref-fid))
-                  own-fn       (when fn-id (sp/read-entity storage :fn fn-id))
-                  declaring    (when fn-id (find-slot-declaring-fn storage fn-id slot-id))
+                  declaring    (when chain-info
+                                 (find-slot-declaring-fn storage chain-info slot-id))
                   tiers        [{:key :override :label "Binding type-override"
                                  :type (type-of-fn-id storage override-fid)
                                  :source (when (and override-fid (:name own-fn))
@@ -303,8 +330,8 @@
                                  :type (type-of-fn-id storage (:type-fn-id slot))
                                  :source declaring}]
                   winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)
-                  chain        (when fn-id
-                                 (find-binding-override-chain storage fn-id slot-id))]
+                  chain        (when chain-info
+                                 (find-binding-override-chain storage chain-info slot-id))]
               {:winner winner
                :tiers tiers
                :inheritance-chain (or chain [])})))))))

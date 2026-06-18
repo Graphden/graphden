@@ -137,12 +137,44 @@ Refinements (`:_refinement-narrow` template) дают runtime check —
 - Семантическое имя добавляет смысл (`:port` лучше `[:int {:constraint
   [:and [:>= 1] [:<= 65535]]}]`).
 - Reuse внутри одного домена (HTTP-related shapes, secret-flow shapes).
+- **Decoded entity-row shape с фиксированной схемой** (`:fn-row-shape`,
+  `:branch-version-row-shape`, `:vault-metadata-shape`) — имя
+  документирует ИСТОЧНИК данных, даже на ОДНОМ callsite. См. § 2.2.1.
 
 **НЕТ** (alias не нужен):
-- 1-2 use-site'а — inline form проще читать.
+- 1-2 use-site'а **анонимной** структурной формы — inline form
+  проще читать (`{:keys [name id]}` vs `:_some-result-shape`).
 - «На всякий случай назовём» — засоряет alias-неймспейс.
 - Aliasing внутри одной fn-def — это inline composite type (см.
   `graphden-fn-design` §3), не alias.
+
+### 2.2.1 Single-use alias — НЕ удалять автоматически
+
+**Важно для аудитов:** правило «≥ 5 use-site'ов» применяется ТОЛЬКО
+к решению «вводить ли новый alias». Уже-существующий single-use alias
+**не подлежит автоматическому inlining'у** — его имя несёт информацию,
+которую inline-shape потерял бы.
+
+Концретно:
+- `:_resolve-binding-versions-decode :return-type :binding-version-row-shape`
+  читается за секунду — «эта функция декодирует строку binding-version».
+- Inline-вариант (`:return-type {:id :uuid :binding-id :uuid :branch-id :uuid
+  :fn-id :uuid :slot-id :uuid :value :nullable-jsonb :value-present
+  [:union :null :bool] :ref-fn-id :nullable-uuid ...}`) — 13 строк,
+  читателю надо вспомнить что это binding-version.
+
+Альфа-имя = бесплатная документация типа. Stripping ради «правила
+5+» режет смысл, не сложность.
+
+**Когда single-use alias РЕАЛЬНО можно убрать:**
+- Если имя синтетическое (`:_some-step1-result`) без доменного смысла —
+  это scaffolding, не alias. Inline в callsite.
+- Если shape настолько проста (1-2 поля) что имя добавляет шума, не
+  смысла (`:_count-result {:count :int}` → лучше inline).
+- Если alias дублирует другой уже-существующий с тем же shape — merge.
+
+Иначе single-use named shape — это **type documentation**, и она
+дешёвая. Оставляй.
 
 ### 2.3 Куда положить новый alias
 
@@ -338,6 +370,42 @@ decomposition). Кратко:
 **Anti-pattern**: дать public name «на всякий случай». Засоряет
 namespace + sidebar. → Делай `_`-private; promote'нем когда reuse
 появится.
+
+### 4.1.1 Single-use `_`-private fn-defs — НЕ inline'ить автоматически
+
+Зеркало § 2.2.1 для **fn-defs**. Когда аудит видит цепочку из 20-30
+`_private-prefix-*` fn-defs где каждый использован один раз — это НЕ
+автоматический повод inline'ить их в anonymous `{:parent :X :args …}`.
+
+Имена шагов — это **документация порядка преобразований**, даже без
+reuse:
+
+- `:_partial-mismatch-prov-tier-source-fn-id-text` → говорит читателю
+  «это stringified fn-id для HTML data-attr». Inline-вариант
+  `{:parent :to-str :args {:value {:parent :get :args {…}}}}` внутри
+  большой `:hiccup`-сборки прячет интент в безымянное вложение.
+- `:_partial-mismatch-prov-tier-has-source?` → boolean check с
+  читаемым именем; inline `{:parent :some? :args {:value …}}` теряет
+  «эта ветка зависит от факта source присутствует».
+- `:_partial-mismatch-prov-tier-row-built` → собранная hiccup-строка;
+  имя seam-марк что «это конечная row, прячется только под
+  conditional».
+
+**Когда single-use `_`-private реально inline'ить:**
+- Имя ПОЛНОСТЬЮ синтетическое (`:_step1`, `:_tmp`, `:_inner`) — это
+  scaffolding, у которого нет смыслового содержания.
+- Wrapping тривиален и единственное использование в SOSEDNEM fn-def
+  (`{:parent :str :args {:value :_x-as-text}}` где `_x-as-text` это
+  `:to-str` от соседа) — да, inline, если читатель в одном месте
+  видит ВСЁ.
+- 1-2-строчный `_`-private который читался бы лучше как `:let`-binding
+  внутри родителя (но fn-graph не поддерживает `:let`, так что это
+  моральная аналогия — реально оставь).
+
+**Иначе** named scaffolding = документация конвейера. § 4.1 правило
+«inline когда `_`-name был бы синтетический («step1»)» — это про
+ОТСУТСТВИЕ доменного имени, а не про «использовано один раз».
+`-fn-id-text` / `-has-source?` / `-row-built` — НЕ синтетические.
 
 ### 4.2 Sanity checks для fn-defs
 

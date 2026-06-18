@@ -98,33 +98,11 @@ function bindProvPopoverPostSwap(el) {
 }
 
 
-// JS-only section (step 3 will server-side it too):
-//   - Slot-effect-bound for `[:fn args ret eff]` types
-// Depends on `slotTypeProvenance(arg).winner` type — kept JS-side
-// for now because the server partial returns rendered HTML, not the
-// raw provenance data the helper needs. Step 3 will move it into
-// the server fragment.
-function appendProvJsOnlySections(el, arg) {
-  if (typeof slotTypeProvenance !== 'function') return;
-  const prov = slotTypeProvenance(arg);
-  if (!prov?.winner) return;
-  const winnerType = prov.tiers?.find(t => t.key === prov.winner)?.type;
-  if (Array.isArray(winnerType) && winnerType[0] === 'fn'
-      && winnerType.length === 4 && winnerType[3] !== 'any'
-      && winnerType[3] !== ':any'
-      && typeof makeEffectsReadOnly === 'function') {
-    const effRaw = winnerType[3];
-    const currentEff = Array.isArray(effRaw)
-      ? new Set(effRaw.map(e => typeof e === 'string' ? e.replace(/^:/, '') : String(e)))
-      : new Set([]);
-    appendEffectConstraintSection(el, currentEff);
-  }
-}
-
-
-// Fetch server-rendered popover (header + Resolved-via section) and
-// hydrate with JS-only sections. Migration step 1/3 — steps 2-3 move
-// Allowed-values + Slot-effect-bound server-side too.
+// Fetch server-rendered popover and bind interactive surfaces. Steps
+// 1-3 of the migration complete — header / Resolved-via / Allowed-
+// values / Slot-effect-bound sections all ship from the partial.
+// JS only attaches click handlers to `[data-explainer-close]` +
+// `a[data-fn-id]`.
 async function showProvenancePopover(arg, anchorEl) {
   if (!arg || !anchorEl) return;
   const bindingId = arg['binding-id'];
@@ -155,7 +133,6 @@ async function showProvenancePopover(arg, anchorEl) {
   const el = ensureProvenancePopoverEl();
   el.innerHTML = html;
   bindProvPopoverPostSwap(el);
-  appendProvJsOnlySections(el, arg);
   attachAndShow(anchorEl);
 }
 

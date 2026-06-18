@@ -1044,14 +1044,109 @@
    :parent :_provenance-enum-section
    :args {:parsed :_partial-provenance-parsed}}
 
+  ;; STEP 3 — Slot-effect-bound section. When the resolved slot type
+  ;; is `[:fn args ret eff]` with a CONCRETE eff (not `:any`), surface
+  ;; the constraint as a chip row so the reader sees "this slot
+  ;; demands a pure callable" / "this slot allows only :env reads"
+  ;; without opening the inline `▸/▾` panel. Empty eff → `pure` pill.
+
+  {:name :_provenance-eff
+   :description "Vec of effect-name strings when the winner type is `[:fn args ret eff]` with concrete eff, nil otherwise."
+   :parent :fn-type-bound-effects
+   :args {:expected :_provenance-winner-type}}
+
+  {:name :_provenance-eff-some?
+   :parent :some?
+   :args {:value :_provenance-eff}}
+
+  {:name :_provenance-eff-empty?
+   :description "Empty eff = `:pure` constraint — caller renders a `pure` pill instead of the chip list."
+   :parent :empty?
+   :args {:coll :_provenance-eff}}
+
+  {:name :_provenance-eff-pure-pill
+   :parent :const
+   :args {:value [:span {:class "type-inline-effects-pure"
+                         :title "This slot requires a PURE callable (no side effects)."}
+                  "pure"]}}
+
+  ;; Per-effect chip — `<span class="effects-chip effects-chip-{cat}"
+  ;; title="Allowed effect: {cat}">{cat}</span>`. `:as :item` per the
+  ;; HOF callback convention; `cat` is the bare effect name.
+  {:name :_provenance-eff-chip-class
+   :parent :str-join
+   :args {:coll [{:value "effects-chip effects-chip-"} {:as :item}]
+          :separator ""}}
+
+  {:name :_provenance-eff-chip-title
+   :parent :str-join
+   :args {:coll [{:value "Allowed effect: "} {:as :item}]
+          :separator ""}}
+
+  {:name :_provenance-eff-chip
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc
+                               :args {:map {:value {}}
+                                      :key {:value :class}
+                                      :value :_provenance-eff-chip-class}}
+                         :key {:value :title}
+                         :value :_provenance-eff-chip-title}}
+          :children [{:as :item}]}}
+
+  {:name :_provenance-eff-chips
+   :parent :map
+   :args {:func :_provenance-eff-chip
+          :coll :_provenance-eff}}
+
+  ;; Concrete-eff render: `pure` pill when empty, otherwise the chip
+  ;; list. Both go after the `eff:` label inside the readonly wrapper.
+  {:name :_provenance-eff-chips-or-pure
+   :parent :if
+   :args {:test :_provenance-eff-empty?
+          :then {:value [:_provenance-eff-pure-pill]}
+          :else :_provenance-eff-chips}}
+
+  {:name :_provenance-eff-readonly
+   :description "Mirrors `makeEffectsReadOnly` in `editor-overlay-type-expand.js` — `eff:` label + either the `pure` pill or one chip per allowed effect."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "type-inline-effects-readonly"}}
+          :children [{:value [:span {:class "type-inline-effects-label"} "eff:"]}
+                     :_provenance-eff-chips-or-pure]}}
+
+  {:name :_provenance-eff-head
+   :parent :const
+   :args {:value [:div {:class "type-inline-resolution-head"} "Slot effect bound"]}}
+
+  {:name :_provenance-eff-section-built
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-effects"}}
+          :children [:_provenance-eff-head
+                     :_provenance-eff-readonly]}}
+
+  {:name :_provenance-eff-section
+   :description "Slot-effect-bound section — head + the readonly chip row. Hidden when the winner type isn't a `[:fn args ret eff]` with concrete eff."
+   :parent :if
+   :args {:test :_provenance-eff-some?
+          :then :_provenance-eff-section-built
+          :else {:value [:span {:hidden "1"}]}}}
+
+  {:name :_partial-provenance-eff-section
+   :parent :_provenance-eff-section
+   :args {:parsed :_partial-provenance-parsed}}
+
   {:name :_partial-provenance-fragment
-   :description "Full provenance popover hiccup — header + Resolved-via section + Allowed-values section. Slot-effect-bound section is step-3."
+   :description "Full provenance popover hiccup — header + Resolved-via section + Allowed-values section + Slot-effect-bound section. All server-rendered (steps 1-3 complete)."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "provenance-popover-content"}}
           :children [:_partial-provenance-header
                      :_partial-provenance-prov-section
-                     :_partial-provenance-enum-section]}}
+                     :_partial-provenance-enum-section
+                     :_partial-provenance-eff-section]}}
 
   {:name :_partial-provenance-html
    :parent :render-hiccup

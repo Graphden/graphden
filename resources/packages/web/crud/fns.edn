@@ -369,6 +369,12 @@
    :return-type [:union :null {:base :type-expression
                                :members [:list {:value :text :label :text}]}]}
 
+  {:name :fn-type-bound-effects
+   :description "Vec of effect-name strings (without leading colon) when `expected` is a `[:fn args ret eff]` with CONCRETE `eff` (not `:any`); nil otherwise. Used by the provenance popover to surface the slot-level effect constraint server-side."
+   :args {:expected {:type :type-expression
+                     :description "Type expression to test for the fn-type shape with a bound effect set."}}
+   :return-type [:union :null [:list :text]]}
+
   ;; --- :_types-compatible-apply — pure graph composition over
   ;; `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope.
   ;; Admins can vary the response shape (e.g. add `:expected-kind`,

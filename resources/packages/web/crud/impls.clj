@@ -346,6 +346,15 @@
   (types-check/closed-enum-of expected))
 
 
+(defbase fn-type-bound-effects
+  "Atomic library boundary over `types.check/fn-type-bound-effects` —
+   returns a vec of effect-name strings (without the leading colon)
+   when `expected` is a `[:fn args ret eff]` with concrete eff, nil
+   otherwise (no constraint to surface)."
+  [expected]
+  (types-check/fn-type-bound-effects expected))
+
+
 ;; `:_types-compatible-apply` is now a graph fn-def — see fns.edn.
 ;; Pure composition over `:subtype?` + `:if`-wrapped
 ;; `:describe-type-mismatch` + envelope `:zipmap` / `:assoc`.
@@ -874,6 +883,7 @@
    :classify-literal classify-literal
    :diff-value-against-type diff-value-against-type
    :closed-enum-of closed-enum-of
+   :fn-type-bound-effects fn-type-bound-effects
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

@@ -102,6 +102,36 @@
     :else            nil))
 
 
+(defn fn-type-bound-effects
+  "When `expected` resolves to a 4-arity fn-type `[:fn args ret eff]`
+   with a CONCRETE `eff` set (not `:any`), return the eff entries as
+   a vec of plain strings (lower-case, no leading colon — same
+   convention the editor's effect-chip CSS classes use). Returns nil
+   for any other shape (the popover suppresses the section).
+
+   Mirrors the editor's slot-effect-bound surface from
+   `editor-provenance-popover.js` — surfaces the slot-level effect
+   constraint server-side so a closed-over fn-graph doesn't have to
+   re-implement the `[:fn …]`-shape parse in JS."
+  [expected]
+  (let [t (or (types/resolve-alias expected) expected)]
+    (when (and (vector? t) (= :fn (first t)) (= 4 (count t)))
+      (let [eff (nth t 3)]
+        (when-not (#{:any "any" :_any} eff)
+          (cond
+            (sequential? eff)
+            (vec (map (fn [e]
+                        (let [s (if (keyword? e) (name e) (str e))]
+                          (str/replace s #"^:" "")))
+                      eff))
+            (set? eff)
+            (vec (sort (map (fn [e]
+                              (let [s (if (keyword? e) (name e) (str e))]
+                                (str/replace s #"^:" "")))
+                            eff)))
+            :else nil))))))
+
+
 (defn closed-enum-of
   "When `expected` resolves to a closed-enum refinement —
    `[:refine base [:in [m₁ m₂ …]]]` — return `{:base :members}` with

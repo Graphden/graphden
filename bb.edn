@@ -136,8 +136,16 @@
   ;; The multi-process path lives at `bb test-parallel` if a flake
   ;; reproduces only across separate JVMs.
   test
-  {:doc "Run all tests (single JVM, NSs parallel via :kaocha.plugin/parallel)."
+  {:doc "Run ALL tests (unit + integration). Single JVM, NSs parallel via :kaocha.plugin/parallel. For fast unit-only feedback (~3-5 min) see `bb test-unit`. CI uses `bb test-unit` + `bb test-integration` separately so a unit-level regression isn't gated on the 14-min integration suite."
    :task (clojure "-M:dev:test -m kaocha.runner")}
+
+  test-unit
+  {:doc "Run UNIT tests only (skips ^:integration). ~3-5 min. Used by `bb ci` for fast pre-merge feedback."
+   :task (clojure "-M:dev:test -m kaocha.runner :unit")}
+
+  test-integration
+  {:doc "Run INTEGRATION tests only (focus ^:integration). ~10-12 min. Run before merging changes that touch storage / system / routes; CI runs it separately so a unit-level regression doesn't wait on the integration suite."
+   :task (clojure "-M:dev:test -m kaocha.runner :integration")}
 
   test-sequential
   {:doc "Run all tests sequentially in a single JVM (KAOCHA_PARALLELISM=1); use if a flake reproduces only sequentially."

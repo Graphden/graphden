@@ -67,15 +67,15 @@
    "cljstyle"  120000
    "biome"      60000
    "stylelint" 120000
-   ;; tests (no cloverage) under :kaocha.plugin/parallel — the bundled
-   ;; package set grew enough that standalone wall is now ~14 min
-   ;; (1432 tests / 5933 assertions), and under bb ci parallel load
-   ;; (cloverage in :coverage instruments the same NSes; CPU
-   ;; contention) it pushes past the prior 15 min ceiling. Bumped to
-   ;; 20 min — a real hang (test deadlock, testcontainer stuck on
-   ;; Docker daemon) still surfaces well inside that, and a
-   ;; legitimate run finishes with several minutes of headroom.
-   "tests"     1200000
+   ;; tests check is unit-only under bb ci (`bb test-unit`). The full
+   ;; combined run (unit + integration) lives at `bb test`; integration-
+   ;; only at `bb test-integration` — neither runs in CI. Unit suite
+   ;; is ~3-5 min standalone (~1000 tests), so 10 min ceiling leaves
+   ;; ample headroom for the parallel load (cloverage in :coverage
+   ;; instruments the same NSes; CPU contention) while still surfacing
+   ;; a real hang (test deadlock, testcontainer stuck on Docker daemon)
+   ;; well before the limit.
+   "tests"     600000
    ;; Unit-only coverage measured at ~1:13. Ceiling sized 4× to
    ;; absorb cold-cache variance + cloverage's first-time JIT
    ;; warmup pass through instrumented namespaces.
@@ -266,24 +266,17 @@
                                    ["clojure" "-M:cljstyle" "check"])
                                  lint-paths)
             splint-cmd (concat ["clojure" "-M:splint"] lint-paths)
-            ;; bb ci runs the in-JVM `bb test` (kaocha + the parallel
-            ;; plugin: :unit at parallelism 8, :integration at 4).
-            ;; The earlier `bb test-parallel 4` workaround — 4 separate
-            ;; JVMs — was put in because in-JVM consistently timed out
-            ;; at the 600 s ceiling: ~38 s × N parallel bootstraps in
-            ;; one heap, plus per-ns type-check sweeps, hit swap. The
-            ;; executor-eager-compile refactor (lazy semantics via
-            ;; Clojure-native delays, ~2000× faster worst-case),
-            ;; shared golden DB via `CREATE DATABASE … TEMPLATE` (one
-            ;; bootstrap per JVM × pkg-set, NS clones in ~100 ms),
-            ;; per-execute DRY memo (handlers don't fire siblings
-            ;; twice), and the rich-types race fix together brought
-            ;; in-JVM under ceiling — measured 6:59 wall for all 1393
-            ;; tests (0 failures). Single JVM avoids the
-            ;; 4× container + 4× JVM startup cost the multi-worker
-            ;; path was paying. The cloverage-instrumented variant
-            ;; lives in `bb coverage` separately.
-            test-cmd ["bb" "test"]
+            ;; bb ci runs UNIT-only tests for fast pre-merge feedback.
+            ;; Integration tests live in a separate `bb test-integration`
+            ;; target — run manually before merging changes that touch
+            ;; storage / system / routes. Rationale: the integration
+            ;; suite is ~10-12 min wall (full system bootstrap + cron
+            ;; wall-clock waits + smoke pass — see the per-test
+            ;; profiling note in the test file headers), and a unit-
+            ;; level regression (lint / type-check / pure-fn test) has
+            ;; no business waiting on that. Combined `bb test` (unit +
+            ;; integration) stays available for the manual full run.
+            test-cmd ["bb" "test-unit"]
             ;; Unit-only coverage in CI. Full coverage (`bb
             ;; coverage-full`) is >20 min — cloverage's per-form
             ;; instrumentation × integration parallelism contention

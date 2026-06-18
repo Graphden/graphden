@@ -122,6 +122,11 @@
    :parent :get-auth-required
    :args {:path "/partials/execute-result" :handler :_partial-execute-result-handler}}
 
+  {:name :partial-execute-result-inline
+   :description "POST /partials/execute-result-inline — same hiccup as the GET-by-id sibling, but reads the execution shape from the POST JSON body instead of storage. Used by the orchestrator's non-persisted inline-Run path (no execution-id to read by)."
+   :parent :post
+   :args {:path "/partials/execute-result-inline" :handler :_partial-execute-result-inline-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

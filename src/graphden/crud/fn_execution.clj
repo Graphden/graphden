@@ -30,6 +30,7 @@
    plumbing + size caps live in `.persist`."
   (:require
     [cheshire.core :as json]
+    [clojure.math :as math]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
@@ -586,7 +587,7 @@
         [:div {:class "execute-result-pane"}
          [:div {:class "execute-result-truncated"}
           (str "Result preview only — full payload "
-               (Math/round (/ (count as-str) 1024.0))
+               (math/round (/ (count as-str) 1024.0))
                " KB. First 50 KB shown.")]
          [:pre {:class "execute-result-json"}
           (str (subs as-str 0 max-json-preview-bytes) "…")]]

@@ -27,6 +27,7 @@
                   :partial-provenance
                   :partial-fn-picker-incompat
                   :partial-execute-result
+                  :partial-execute-result-inline
                   :health
                   :metrics
                   :version

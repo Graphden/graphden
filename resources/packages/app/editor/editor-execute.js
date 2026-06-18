@@ -211,19 +211,24 @@ async function pollOnce(execId, resultHostEl) {
     const row = await r.json();
     const status = String(row.status || '').replace(/^:/, '');
     if (status === 'succeeded' || status === 'failed' || status === 'cancelled') {
-      resultHostEl.textContent = '';
-      if (isTaintedExecuteResponse(row)) {
-        resultHostEl.appendChild(renderTaintedPane());
-      } else if (status === 'succeeded') {
-        resultHostEl.appendChild(renderResultBody(row.result,
-                                                  { truncated: row['result-truncated?'] }));
-      } else if (status === 'failed') {
-        resultHostEl.appendChild(renderErrorPane(row.error, row['error-data']));
-      } else {
-        const cancelled = document.createElement('div');
-        cancelled.className = 'execute-cancelled';
-        cancelled.textContent = 'Cancelled.';
-        resultHostEl.appendChild(cancelled);
+      // Body hiccup comes from `/partials/execute-result?id=…` — the
+      // server walks the row's status / taint / result / error and
+      // emits the matching pane (scalar / list / record / tainted /
+      // error). The /api/execute JSON we just got still feeds the
+      // runtime-effects strip URL params (declared+runtime arrays).
+      try {
+        const bodyResp = await authFetch('/partials/execute-result?id='
+                                         + encodeURIComponent(execId));
+        resultHostEl.textContent = '';
+        if (bodyResp.ok) {
+          resultHostEl.innerHTML = await bodyResp.text();
+        } else {
+          resultHostEl.appendChild(renderErrorPane('Load error: HTTP '
+                                                   + bodyResp.status));
+        }
+      } catch (e) {
+        resultHostEl.textContent = '';
+        resultHostEl.appendChild(renderErrorPane('Load error: ' + e.message));
       }
       appendRuntimeEffectsStrip(resultHostEl,
                                 row['runtime-effects'],
@@ -277,24 +282,42 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
       return;
     }
     const status = String(body?.status || '').replace(/^:/, '');
+    const execId = body?.['execution-id'];
     if (status === 'rejected') {
       resultHostEl.appendChild(renderErrorPane(body.error, body['error-data']));
     } else if (status === 'pending') {
-      resultHostEl.appendChild(renderPendingPane(body['execution-id']));
+      resultHostEl.appendChild(renderPendingPane(execId));
       cancelBtn.style.display = '';
-      cancelBtn.dataset.execId = body['execution-id'];
-      startPolling(body['execution-id'], resultHostEl);
-    } else if (isTaintedExecuteResponse(body)) {
-      resultHostEl.appendChild(renderTaintedPane());
-    } else if (status === 'succeeded') {
-      resultHostEl.appendChild(renderResultBody(body.result,
-                                                { truncated: body['result-truncated?'] }));
-    } else if (status === 'failed') {
-      resultHostEl.appendChild(renderErrorPane(body.error, body['error-data']));
+      cancelBtn.dataset.execId = execId;
+      startPolling(execId, resultHostEl);
     } else {
-      const pre = document.createElement('pre');
-      pre.textContent = JSON.stringify(body, null, 2);
-      resultHostEl.appendChild(pre);
+      // Terminal status (succeeded / failed / tainted / cancelled) —
+      // route the body through one of the two server partials so the
+      // editor's render stays exclusively server-side. Persisted runs
+      // (effectful + opt-in `persist?=true`) read off the stored row
+      // via `?id=…`; non-persisted inline runs POST the response back
+      // so the same `:render-execute-result-hiccup` walker emits the
+      // same hiccup. Result preview, truncation note, list/record/
+      // scalar dispatch, tainted pane all live source-side in
+      // `crud.fn-execution/render-execute-result-hiccup`.
+      try {
+        const bodyResp = execId
+          ? await authFetch('/partials/execute-result?id='
+                            + encodeURIComponent(execId))
+          : await authFetch('/partials/execute-result-inline', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+        if (bodyResp.ok) {
+          resultHostEl.innerHTML = await bodyResp.text();
+        } else {
+          resultHostEl.appendChild(renderErrorPane('Load error: HTTP '
+                                                   + bodyResp.status));
+        }
+      } catch (e) {
+        resultHostEl.appendChild(renderErrorPane('Load error: ' + e.message));
+      }
     }
     appendRuntimeEffectsStrip(resultHostEl,
                               body['runtime-effects'],

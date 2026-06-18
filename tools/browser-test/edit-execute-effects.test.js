@@ -137,15 +137,19 @@ async function openExecutePopoverFor(page, fnNameHash) {
            'no unobserved chips — declared :time was observed (got '
            + JSON.stringify(result.unobservedChips) + ')');
 
-    // === Phase D: unit-test the unobserved-chip render path via
-    // page.evaluate against the bundled renderRuntimeEffectsStrip. No
-    // current loaded fn has a declared-effects multiset large enough
-    // to trigger the "promised but unobserved" case in a real run, so
-    // we synthesise the input directly.
-    const stripUnit = await page.evaluate(() => {
-      const el = renderRuntimeEffectsStrip(['db'], ['db', 'network']);
-      if (!el) return { ok: false };
-      const chips = Array.from(el.querySelectorAll('.effects-chip'));
+    // === Phase D: probe the unobserved-chip render path through
+    // the server partial directly. The strip's `renderRuntimeEffects-
+    // Strip` JS helper was retired by commit `cc1658a2` — the strip
+    // is now `/partials/execute-result-effects?runtime=…&declared=…`,
+    // so test the same case (declared > observed) by hitting that
+    // URL and inspecting the returned HTML.
+    const stripUnit = await page.evaluate(async () => {
+      const r = await fetch('/partials/execute-result-effects'
+                            + '?runtime=db&declared=db,network');
+      if (!r.ok) return { ok: false };
+      const wrap = document.createElement('div');
+      wrap.innerHTML = await r.text();
+      const chips = Array.from(wrap.querySelectorAll('.effects-chip'));
       return {
         ok: true,
         chipCount: chips.length,
@@ -159,7 +163,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
           .find(c => c.classList.contains('execute-effects-unobserved'))?.title,
       };
     });
-    assert(stripUnit.ok, 'renderRuntimeEffectsStrip returns DOM for mismatched sets');
+    assert(stripUnit.ok, '/partials/execute-result-effects returns DOM for mismatched sets');
     assert(stripUnit.chipCount === 2,
            'strip renders 2 chips (1 observed + 1 unobserved), got '
            + stripUnit.chipCount);

@@ -1331,6 +1331,34 @@
    :parent :html-ok-response
    :args {:body :_partial-execute-result-html}}
 
+  ;; --- POST /partials/execute-result-inline — same hiccup off a
+  ;; POSTed body (not a persisted execution-id). The orchestrator's
+  ;; inline-Run path uses this when persist?=false: the result lives
+  ;; only in the POST response and never hits storage, so the
+  ;; `?id={uuid}` endpoint can't read it. We round-trip the JSON
+  ;; response back to the server purely so the editor's render layer
+  ;; stays exclusively server-side — no JS branch reading
+  ;; `body.result` / `body.error` and building DOM locally.
+
+  {:name :_partial-execute-result-inline-body
+   :description "JSON request body — the execution-row shape `/api/execute` returns inline. `:parse-json-body` types its return as `:nullable-jsonb`; the orchestrator only calls this partial with a keyword-keyed map body, so we narrow to `:nullable-keyword-map` for the downstream `:render-execute-result-hiccup` slot."
+   :parent :parse-json-body
+   :return-type :nullable-keyword-map
+   :args {:request {:as :request}}}
+
+  {:name :_partial-execute-result-inline-fragment
+   :parent :render-execute-result-hiccup
+   :args {:exec :_partial-execute-result-inline-body}}
+
+  {:name :_partial-execute-result-inline-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-execute-result-inline-fragment}}
+
+  {:name :_partial-execute-result-inline-handler
+   :description "Ring handler for `POST /partials/execute-result-inline` — body is the JSON shape `/api/execute` returns inline (with `:status` / `:result` / `:error` / `:touched-secret?` / etc.). Same `:render-execute-result-hiccup` walker the id-based GET partial uses; lets the orchestrator render non-persisted runs server-side too."
+   :parent :html-ok-response
+   :args {:body :_partial-execute-result-inline-html}}
+
   ;; ---------------------------------------------------------------------
   ;; fn-versions popover (second migration). Pulls the existing
   ;; `:list-fn-versions` data chain (in `app.branches`) for one fn-id
@@ -2561,12 +2589,22 @@
                  {:value " execute-effects-unobserved"}]
           :separator {:value ""}}}
 
+  {:name :_partial-rfx-declared-chip-title
+   :parent :str-join
+   :args {:coll [{:value "Declared by the fn-def but the runtime impl didn't fire it: "}
+                 {:as :item}]
+          :separator {:value ""}}}
+
   {:name :_partial-rfx-declared-chip-shown
    :parent :hiccup
    :args {:tag {:value "span"}
-          :attrs {:parent :assoc :args {:map {:value {}}
-                                        :key {:value :class}
-                                        :value :_partial-rfx-declared-chip-class}}
+          :attrs {:parent :assoc
+                  :args {:map {:parent :assoc
+                               :args {:map {:value {}}
+                                      :key {:value :class}
+                                      :value :_partial-rfx-declared-chip-class}}
+                         :key {:value :title}
+                         :value :_partial-rfx-declared-chip-title}}
           :children [{:as :item}]}}
 
   ;; Hidden span (zero-width sentinel) when the chip should be skipped —

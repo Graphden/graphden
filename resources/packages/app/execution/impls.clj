@@ -249,6 +249,7 @@
   [exec]
   (fn-exec/render-execute-result-hiccup exec))
 
+
 ;; `:_list-services-fn-names` is now a graph fn-def — `:list-entities`
 ;; of `:fn` + per-row `[id name]` HOF + `:into {}` fold. The previous
 ;; `fn-name-by-id` helper isn't needed anymore.

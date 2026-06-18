@@ -26,6 +26,19 @@
   (branches/resolve-branch-ref (branches/base-storage ctx) ref))
 
 
+(defbase render-branch-popover-hiccup
+  "Body hiccup for the top-bar branch popover — the server-rendered
+   replacement for `editor-branches.js renderBranchPopover` +
+   `branchRowHtml`. `branches` is the decoded `:branch` rows
+   (`:_list-branches-rows`), `current-name` resolves the active
+   branch's `:name` for highlight + diff/merge button targeting.
+   Click handlers stay JS-side and read the same `data-branch-name`
+   / `data-merge-source` / `data-diff-source` attrs the partial
+   emits."
+  [branches current-name]
+  (branches/render-branch-popover-hiccup branches current-name))
+
+
 ;; `:current-branch-id` migrated to `storage/branches/impls.clj` so
 ;; packages below `app` (e.g. `web/crud`) can reference the active
 ;; branch without taking an `app/branches` dep.
@@ -293,9 +306,10 @@
 
 
 (def impls
-  {:resolve-branch-ref      resolve-branch-ref
-   :diff-branches           diff-branches
-   :create-branch!          create-branch!
-   :delete-branch!          delete-branch!
-   :detect-conflicts        detect-conflicts
-   :merge-branch!           merge-branch!})
+  {:resolve-branch-ref            resolve-branch-ref
+   :diff-branches                 diff-branches
+   :create-branch!                create-branch!
+   :delete-branch!                delete-branch!
+   :detect-conflicts              detect-conflicts
+   :merge-branch!                 merge-branch!
+   :render-branch-popover-hiccup  render-branch-popover-hiccup})

@@ -27,6 +27,14 @@
    :return-type [:union :null :branch-row-shape]
    :effects #{:db}}
 
+  {:name :render-branch-popover-hiccup
+   :description "Body hiccup for the top-bar branch popover — the server-rendered replacement for `editor-branches.js renderBranchPopover` + `branchRowHtml`. Click handlers stay JS-side and read the same `data-branch-name` / `data-merge-source` / `data-diff-source` attrs this partial emits."
+   :args {:branches    {:type [:list :branch-row-shape]
+                        :description "Decoded `:branch` rows (`:_list-branches-rows`)."}
+          :current-name {:type :nullable-text
+                         :description "Name of the active branch. nil → falls back to `main`."}}
+   :return-type :hiccup-node}
+
   ;; ---------------------------------------------------------------------
   ;; GET /api/branches — list every branch row, ordered by created-at.
   ;; ---------------------------------------------------------------------
@@ -1630,4 +1638,43 @@
   {:name :merge-branch-handler
    :description "Ring handler for POST /api/branches/:ref/merge (auth-required)."
    :parent :json-handler
-   :args {:data :_merge-branch-data}}]}
+   :args {:data :_merge-branch-data}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /partials/branch-popover — top-bar branch chip popover body.
+  ;;
+  ;; Reuses the existing `:_list-branches-rows` decoded-rows chain
+  ;; (single source of truth for branch enumeration). `:current-name`
+  ;; is the active branch's `:name` resolved from `:current-branch-id`
+  ;; via `:get-entity` — the row shape carries `:name` directly so no
+  ;; per-row index lookup is needed.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-branch-popover-current-row
+   :description "Active branch's row — resolved from `:current-branch-id`. nil when the active branch was just deleted under a stale `?branch=` (defensive: render uses default `main`)."
+   :parent :get-entity
+   :args {:entity-type {:value "branch"}
+          :id :current-branch-id}}
+
+  {:name :_partial-branch-popover-current-name
+   :description "Active branch's `:name`; nil → falls back to `main` inside the render."
+   :parent :get
+   :args {:coll :_partial-branch-popover-current-row
+          :key {:value :name}
+          :default nil}}
+
+  {:name :_partial-branch-popover-body
+   :description "Full hiccup for the popover body — list + create form + error slot."
+   :parent :render-branch-popover-hiccup
+   :args {:branches :_list-branches-rows
+          :current-name :_partial-branch-popover-current-name}}
+
+  {:name :_partial-branch-popover-html
+   :description "Rendered HTML string for the branch-popover partial."
+   :parent :render-hiccup
+   :args {:hiccup :_partial-branch-popover-body}}
+
+  {:name :_partial-branch-popover-handler
+   :description "Ring handler for `GET /partials/branch-popover` — returns the popover body as `text/html`. JS swaps the response into `#branch-popover` and binds row / button click handlers via `data-*` attrs the partial emits."
+   :parent :html-ok-response
+   :args {:body :_partial-branch-popover-html}}]}

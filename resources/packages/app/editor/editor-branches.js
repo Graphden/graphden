@@ -57,19 +57,23 @@ function switchToBranch(name) {
   location.href = url.toString();
 }
 
-// Wrap `window.fetch` to add the branch header on every /api/* call.
-// Backend routes default to main when header is absent — emitting the
-// header only when on a non-default branch keeps wire shape stable
-// for anyone running the legacy single-branch backend.
+// Wrap `window.fetch` to add the branch header on every /api/* and
+// /partials/* call. Backend routes default to main when header is
+// absent — emitting the header only when on a non-default branch
+// keeps wire shape stable for anyone running the legacy single-branch
+// backend. /partials/* is in the same boat as /api/*: server-rendered
+// fragments that read per-branch graph state.
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);
   window.fetch = function branchAwareFetch(input, init) {
     const branch = getCurrentBranchName();
     if (branch === DEFAULT_BRANCH) return origFetch(input, init);
-    // Only add to same-origin /api/* requests — third-party fetches
-    // (CDN scripts, etc.) shouldn't see our internal header.
+    // Only add to same-origin /api/* and /partials/* — third-party
+    // fetches (CDN scripts, etc.) shouldn't see our internal header.
     const url = typeof input === 'string' ? input : (input?.url || '');
-    if (!url.startsWith('/api/')) return origFetch(input, init);
+    if (!url.startsWith('/api/') && !url.startsWith('/partials/')) {
+      return origFetch(input, init);
+    }
     const opts = Object.assign({}, init || {});
     const headers = new Headers(opts.headers || {});
     if (!headers.has(BRANCH_HEADER)) headers.set(BRANCH_HEADER, branch);
@@ -161,12 +165,16 @@ async function openBranchPopover() {
   const popover = document.getElementById('branch-popover');
   if (!popover) return;
   popover.classList.remove('hidden');
-  // Loading state first; replaced once /api/branches responds.
   popover.innerHTML = '<div class="branch-popover-loading">Loading branches…</div>';
   positionBranchPopover();
   try {
-    const branches = await fetchBranches();
-    renderBranchPopover(popover, branches);
+    const resp = await window.authFetch('/partials/branch-popover');
+    if (resp.status === 401) {
+      throw Object.assign(new Error('Sign in to manage branches'), { code: 'unauth' });
+    }
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    popover.innerHTML = await resp.text();
+    wireBranchPopoverHandlers(popover, getCurrentBranchName());
   } catch (err) {
     popover.innerHTML = '<div class="branch-popover-error">'
       + 'Failed to load branches: ' + (err?.message || 'unknown error')
@@ -176,164 +184,54 @@ async function openBranchPopover() {
   positionBranchPopover();
 }
 
-async function fetchBranches() {
-  // authFetch — /api/branches is auth-required. When not signed in we
-  // still want to render at least the current branch + a sign-in hint.
-  const resp = await window.authFetch('/api/branches');
-  if (resp.status === 401) {
-    const err = new Error('Sign in to manage branches');
-    err.code = 'unauth';
-    throw err;
-  }
-  if (!resp.ok) throw new Error('HTTP ' + resp.status);
-  const body = await resp.json();
-  if (!body || body.ok === false) throw new Error(body?.error || 'Bad response');
-  return body.branches || [];
-}
-
-function renderBranchPopover(popover, branches) {
-  const current = getCurrentBranchName();
-  const byName = Object.fromEntries(branches.map((b) => [b.name, b]));
-  const sorted = branches.slice().sort((a, b) => {
-    // main first, current second, then alphabetic.
-    if (a.name === DEFAULT_BRANCH) return -1;
-    if (b.name === DEFAULT_BRANCH) return 1;
-    if (a.name === current) return -1;
-    if (b.name === current) return 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  const rows = sorted.map((b) => branchRowHtml(b, current, byName)).join('');
-
-  popover.innerHTML =
-    '<div class="branch-popover-list" role="listbox" aria-label="Branches">'
-    + rows
-    + '</div>'
-    + '<div class="branch-popover-create">'
-    +   '<input id="branch-create-input" type="text" placeholder="New branch name (forks from ' + current + ')" autocomplete="off">'
-    +   '<button id="branch-create-btn" class="branch-popover-btn">Create</button>'
-    + '</div>'
-    + '<div id="branch-popover-error" class="branch-popover-error hidden"></div>';
-
-  // Row clicks switch branch. Action buttons inside the row stop
-  // propagation themselves so they don't double-fire as a switch.
-  // Clicking the CURRENT row is a no-op for switching but still
-  // dismisses the popover — otherwise the user is stuck with no
-  // visible affordance to close it (chip is now obscured behind the
-  // popover itself, and "click outside" isn't obvious).
+// Bind row + action click handlers to the swapped partial body. The
+// graph renders `data-branch-name` / `data-merge-source` /
+// `data-diff-source` attrs on every interactive element; this fn
+// translates those into the corresponding navigations / mutations.
+function wireBranchPopoverHandlers(popover, current) {
+  // Row clicks switch branch. Buttons inside `.branch-row-actions`
+  // stop propagation so they don't double-fire as a switch. Clicking
+  // the CURRENT row is a no-op for switching but still dismisses the
+  // popover.
   popover.querySelectorAll('.branch-row[data-branch-name]').forEach((row) => {
     row.addEventListener('click', (e) => {
       if (e.target.closest('.branch-row-actions')) return;
       const name = row.getAttribute('data-branch-name');
-      if (name !== current) {
-        switchToBranch(name); // navigates → popover closes via page reload
-      } else {
-        closeBranchPopover();
-      }
+      if (name !== current) switchToBranch(name);
+      else closeBranchPopover();
     });
   });
 
-  // Delete buttons.
   popover.querySelectorAll('.branch-row-delete').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const name = btn.getAttribute('data-branch-name');
-      deleteBranchWithConfirm(name);
+      deleteBranchWithConfirm(btn.getAttribute('data-branch-name'));
     });
   });
 
-  // Merge buttons.
   popover.querySelectorAll('.branch-row-merge').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      const source = btn.getAttribute('data-merge-source');
-      mergeBranchInto(source, current);
+      mergeBranchInto(btn.getAttribute('data-merge-source'), current);
     });
   });
 
-  // Diff buttons.
   popover.querySelectorAll('.branch-row-diff').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const source = btn.getAttribute('data-diff-source');
-      if (typeof showBranchDiff === 'function') {
-        showBranchDiff(current, source);
-      }
+      if (typeof showBranchDiff === 'function') showBranchDiff(current, source);
     });
   });
 
   const createInput = document.getElementById('branch-create-input');
   const createBtn = document.getElementById('branch-create-btn');
-  createBtn.addEventListener('click', () => createBranchFromInput(current));
-  createInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') createBranchFromInput(current);
-  });
-}
-
-function branchRowHtml(branch, current, byName) {
-  const isCurrent = branch.name === current;
-  const isMain = branch.name === DEFAULT_BRANCH;
-  const hasChildren = Object.values(byName).some(
-    (b) => b['base-branch-id'] === branch.id);
-  const parent = branch['base-branch-id']
-    ? Object.values(byName).find((b) => b.id === branch['base-branch-id'])
-    : null;
-  const parentText = parent ? ' forked from ' + parent.name : '';
-
-  // Diff button — visible for non-current rows. Shows the
-  // resolved-view diff between THAT branch and the CURRENT branch.
-  // Sits before merge so the natural left-to-right reading is
-  // "see what's different, then merge if you want it".
-  const diffBtn = isCurrent ? ''
-    : '<button class="branch-row-diff" data-diff-source="'
-      + escapeAttr(branch.name) + '"'
-      + ' title="Show what differs between ' + escapeAttr(branch.name)
-      + ' and ' + escapeAttr(current) + '"'
-      + ' aria-label="Diff ' + escapeAttr(branch.name) + ' vs ' + escapeAttr(current)
-      + '">Δ</button>';
-
-  // Merge button — visible for non-current rows. Merges THAT branch
-  // INTO the CURRENT branch (you're viewing main → click a feature
-  // row's merge button → feature gets pulled into main).
-  const mergeBtn = isCurrent ? ''
-    : '<button class="branch-row-merge" data-merge-source="'
-      + escapeAttr(branch.name) + '"'
-      + ' title="Merge ' + escapeAttr(branch.name) + ' INTO ' + escapeAttr(current) + '"'
-      + ' aria-label="Merge ' + escapeAttr(branch.name) + ' into ' + escapeAttr(current)
-      + '">⇢</button>';
-
-  // Delete button — main and branches with children are protected.
-  const deleteBtn = isMain || hasChildren || isCurrent ? ''
-    : '<button class="branch-row-delete" data-branch-name="'
-      + escapeAttr(branch.name)
-      + '" title="Delete branch" aria-label="Delete branch ' + escapeAttr(branch.name)
-      + '">×</button>';
-
-  return ''
-    + '<div class="branch-row' + (isCurrent ? ' branch-row-current' : '') + '"'
-    + ' data-branch-name="' + escapeAttr(branch.name) + '"'
-    + ' role="option" aria-selected="' + (isCurrent ? 'true' : 'false') + '"'
-    + ' tabindex="0">'
-    + '<span class="branch-row-name">' + escapeText(branch.name) + '</span>'
-    + (isCurrent ? '<span class="branch-row-tag">current</span>' : '')
-    + '<span class="branch-row-meta">' + escapeText(parentText) + '</span>'
-    + '<span class="branch-row-actions">'
-    +   diffBtn
-    +   mergeBtn
-    +   deleteBtn
-    + '</span>'
-    + '</div>';
-}
-
-function escapeText(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
-
-function escapeAttr(s) {
-  return (s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  if (createBtn && createInput) {
+    createBtn.addEventListener('click', () => createBranchFromInput(current));
+    createInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') createBranchFromInput(current);
+    });
+  }
 }
 
 async function createBranchFromInput(parentName) {

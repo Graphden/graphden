@@ -127,6 +127,11 @@
    :parent :post
    :args {:path "/partials/execute-result-inline" :handler :_partial-execute-result-inline-handler}}
 
+  {:name :partial-branch-popover
+   :description "GET /partials/branch-popover — top-bar branch chip popover body (sorted list + create input + error slot). Auth-gated: branch enumeration mirrors `/api/branches`. Click handlers in `editor-branches.js` bind via `data-branch-name` / `data-merge-source` / `data-diff-source` attrs the partial emits; 401 is surfaced by the same inline-error path as the legacy fetch."
+   :parent :get-auth-required
+   :args {:path "/partials/branch-popover" :handler :_partial-branch-popover-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

@@ -1158,6 +1158,143 @@
    :args {:body :_partial-provenance-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; fn-picker incompat-explainer. The fn-picker popover surfaces
+  ;; functions whose return type doesn't satisfy the slot's expected
+  ;; type under a separate "Other" section; clicking such a candidate
+  ;; opens this explainer with a "Pick anyway" affordance. JS used to
+  ;; call the legacy `renderMismatchExplainer` with a synthetic info
+  ;; map (the popover predated `/partials/mismatch-explainer`); this
+  ;; partial replaces that path so all mismatch-rendering goes through
+  ;; the server.
+  ;;
+  ;; URL: `GET /partials/fn-picker-incompat?expected={url-encoded-json}
+  ;;       &candidate-fn-id={uuid}`. `expected` is the slot's type
+  ;; expression in its JSON wire shape (same shape `/api/types`
+  ;; produces); the candidate fn-id resolves to the candidate's rich
+  ;; return-type via `:rich-return-of-fn`.
+
+  {:name :_partial-fpi-expected-raw
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "expected"}}}
+
+  {:name :_partial-fpi-expected-json
+   :description "JSON body of `expected`. `:assert-some` narrows from `:nullable-text` to `:text` for `:parse-json`'s strict slot — the picker's JS always supplies this param; missing-param is a programmer error worth surfacing as a 500."
+   :parent :parse-json
+   :args {:string {:parent :assert-some :args {:value :_partial-fpi-expected-raw}}}}
+
+  {:name :_partial-fpi-expected
+   :description "Expected slot type — decoded from JSON wire-shape back to the Clojure AST."
+   :parent :json-to-type
+   :args {:json :_partial-fpi-expected-json}}
+
+  {:name :_partial-fpi-candidate-fn-id-str
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "candidate-fn-id"}}}
+
+  {:name :_partial-fpi-candidate-fn-id
+   :parent :parse-uuid
+   :args {:string :_partial-fpi-candidate-fn-id-str}}
+
+  {:name :_partial-fpi-candidate
+   :description "Candidate fn's rich return-type (the type the user would store if they picked it). Reads through the registry by name."
+   :parent :rich-return-of-fn
+   :args {:fn-id :_partial-fpi-candidate-fn-id}}
+
+  {:name :_partial-fpi-reason
+   :description "One-line natural-language reason `candidate` ⊄ `expected` — same `:describe-type-mismatch` the `/api/types/compatible` endpoint produces, so the picker's text matches what a backend-validated `POST` would say."
+   :parent :describe-type-mismatch
+   :args {:expected :_partial-fpi-expected :candidate :_partial-fpi-candidate}}
+
+  {:name :_partial-fpi-expected-text
+   :parent :to-str :args {:value :_partial-fpi-expected}}
+
+  {:name :_partial-fpi-candidate-text
+   :parent :to-str :args {:value :_partial-fpi-candidate}}
+
+  {:name :_partial-fpi-candidate-fn-id-text
+   :parent :to-str :args {:value :_partial-fpi-candidate-fn-id}}
+
+  {:name :_partial-fpi-header
+   :parent :const
+   :args {:value
+          [:div {:class "mismatch-explainer-header"}
+           [:span {:class "mismatch-explainer-title"} "Type mismatch"]
+           [:button {:type "button"
+                     :class "mismatch-explainer-close"
+                     :data-explainer-close "1"
+                     :aria-label "Close mismatch explainer"} "×"]]}}
+
+  {:name :_partial-fpi-expected-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-expected"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Expected"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-fpi-expected-text]}}]}}
+
+  {:name :_partial-fpi-got-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-got"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Got"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-fpi-candidate-text]}}]}}
+
+  {:name :_partial-fpi-reason-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-reason"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Reason"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-fpi-reason]}}]}}
+
+  ;; "Pick anyway" — the picker's primary action when the user
+  ;; insists on a server-rejected type-mismatch. The button carries
+  ;; `data-pick-fn-id={uuid}` so the picker's post-swap binding can
+  ;; close the explainer + call its own pickFn(fnId) closure. Same
+  ;; data-attr pattern the mismatch-explainer's Edit button uses.
+  {:name :_partial-fpi-pick-button
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "mismatch-explainer-btn"}}
+                         :key {:value :data-pick-fn-id}
+                         :value :_partial-fpi-candidate-fn-id-text}}
+          :children [{:value "Pick anyway"}]}}
+
+  {:name :_partial-fpi-actions
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-actions"}}
+          :children [:_partial-fpi-pick-button]}}
+
+  {:name :_partial-fpi-fragment
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-content"}}
+          :children [:_partial-fpi-header
+                     :_partial-fpi-expected-row
+                     :_partial-fpi-got-row
+                     :_partial-fpi-reason-row
+                     :_partial-fpi-actions]}}
+
+  {:name :_partial-fpi-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-fpi-fragment}}
+
+  {:name :_partial-fn-picker-incompat-handler
+   :description "Ring handler for `GET /partials/fn-picker-incompat?expected={json}&candidate-fn-id={uuid}` — returns the fn-picker incompat-explainer hiccup as `text/html`. Replaces the editor's legacy JS `renderMismatchExplainer` path used by `editor-fn-picker.js`'s `explainAndOfferAnyway`."
+   :parent :html-ok-response
+   :args {:body :_partial-fpi-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; fn-versions popover (second migration). Pulls the existing
   ;; `:list-fn-versions` data chain (in `app.branches`) for one fn-id
   ;; from a query-string param, then maps each enriched version row

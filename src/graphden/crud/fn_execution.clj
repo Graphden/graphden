@@ -434,7 +434,14 @@
 (defn query-param
   "Pull a named query-string parameter from `request`, tolerating both
    reitit's enriched shapes AND raw http-kit requests that haven't
-   gone through the enrich middleware.
+   gone through the enrich middleware. Values from the raw fallback
+   are URL-decoded so callers see the same shape regardless of which
+   path produced them (reitit's enriched `:query-params` already
+   decodes; the regex-extracted fallback didn't, which broke any
+   handler whose param value carried percent-encoded JSON / spaces /
+   non-ASCII — see `/partials/fn-picker-incompat?expected=%22int%22`
+   parsing as a literal `%22int%22` instead of the JSON string
+   `\"int\"`).
 
    Also surfaced as the `:query-param` base-fn in
    `web/crud/impls.clj`."
@@ -443,7 +450,8 @@
       (get-in request [:query-params (keyword param-name)])
       (some->> (:query-string request)
                (re-find (re-pattern (str "(?:^|&)" param-name "=([^&]+)")))
-               second)))
+               second
+               (#(java.net.URLDecoder/decode ^String % "UTF-8")))))
 
 
 (defn apply-list-executions-by-version

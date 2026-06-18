@@ -375,6 +375,12 @@
                      :description "Type expression to test for the fn-type shape with a bound effect set."}}
    :return-type [:union :null [:list :text]]}
 
+  {:name :rich-return-of-fn
+   :description "Rich-types registry view of the named fn's `:return` field. Reads the fn-row by id, looks up the registered rich-type entry, returns its `:return`. nil for anonymous / unregistered / unknown fns. Used by the fn-picker incompat-explainer partial to surface the candidate's return type."
+   :args {:fn-id {:type :nullable-uuid :required false :description "Target fn's id."}}
+   :return-type :type-expression
+   :effects #{:db}}
+
   ;; --- :_types-compatible-apply — pure graph composition over
   ;; `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope.
   ;; Admins can vary the response shape (e.g. add `:expected-kind`,

@@ -25,6 +25,7 @@
                   :partial-execute-result-effects
                   :partial-mismatch-explainer
                   :partial-provenance
+                  :partial-fn-picker-incompat
                   :health
                   :metrics
                   :version

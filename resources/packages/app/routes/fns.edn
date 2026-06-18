@@ -112,6 +112,11 @@
    :parent :get-auth-required
    :args {:path "/partials/provenance" :handler :_partial-provenance-handler}}
 
+  {:name :partial-fn-picker-incompat
+   :description "GET /partials/fn-picker-incompat?expected={json}&candidate-fn-id={uuid} — incompat-explainer popover for the fn-picker's `explainAndOfferAnyway` flow. Replaces the legacy JS `renderMismatchExplainer` path with a server-rendered fragment."
+   :parent :get-auth-required
+   :args {:path "/partials/fn-picker-incompat" :handler :_partial-fn-picker-incompat-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

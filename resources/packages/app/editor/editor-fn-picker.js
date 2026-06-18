@@ -191,31 +191,56 @@ function openFnPicker(opts) {
     }
   }
 
-  function explainAndOfferAnyway(c, anchorRow) {
-    if (typeof renderMismatchExplainer !== 'function') {
-      // Fallback: just pick. The explainer module isn't loaded.
+  // Open the server-rendered explainer popover. Fetches
+  // `/partials/fn-picker-incompat` with the slot's expected type +
+  // the candidate fn-id; the partial calls `:describe-type-mismatch`
+  // server-side so the reason text matches the backend's own
+  // `/api/types/compatible` verdict (no client-only "best-effort
+  // reason" drift anymore). Mounts into the singleton `.mismatch-
+  // explainer` element so dismissal + anchor positioning reuse the
+  // mismatch-explainer machinery.
+  async function explainAndOfferAnyway(c, anchorRow) {
+    if (!expected) { pickFn(c); return; }
+    const params = new URLSearchParams({
+      expected: JSON.stringify(expected),
+      'candidate-fn-id': c.id,
+    });
+    let html;
+    try {
+      const r = await authFetch('/partials/fn-picker-incompat?' + params.toString());
+      if (!r.ok) { pickFn(c); return; }
+      html = await r.text();
+    } catch (_) {
       pickFn(c);
       return;
     }
-    const formatExpected = (typeof formatTypeHint === 'function')
-                           ? formatTypeHint(expected) : String(expected);
-    const formatGot = compactTypeChipText(c.richReturn, c.flatReturn) || '(unknown)';
-    // Best-effort reason — clientSubtype was already false. The
-    // backend /api/types/compatible would give a richer message, but
-    // it's a network roundtrip per click. For now, derive a generic
-    // explanation; later phases can fetch.
-    const reason = 'This fn returns ' + formatGot
-                 + ' which is not a subtype of ' + formatExpected
-                 + '. Picking it anyway will store the binding but the'
-                 + ' type-checker will flag it on save.';
-    renderMismatchExplainer({
-      expected: formatExpected,
-      actual: formatGot,
-      reason: reason,
-      onEdit: () => pickFn(c),
-      editLabel: 'Pick anyway',
-      hint: null,
-    }, anchorRow);
+    const el = (typeof ensureMismatchExplainerEl === 'function')
+               ? ensureMismatchExplainerEl()
+               : null;
+    if (!el) { pickFn(c); return; }
+    el.innerHTML = html;
+    // Close button
+    const close = el.querySelector('[data-explainer-close]');
+    if (close && typeof hideMismatchExplainer === 'function') {
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideMismatchExplainer();
+      });
+    }
+    // Pick-anyway button — bind to the picker's pickFn closure.
+    const pickBtn = el.querySelector('[data-pick-fn-id]');
+    if (pickBtn) {
+      pickBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof hideMismatchExplainer === 'function') hideMismatchExplainer();
+        pickFn(c);
+      });
+    }
+    el.classList.add('visible');
+    el.style.display = '';
+    if (typeof anchorBelowClamped === 'function') {
+      anchorBelowClamped(el, anchorRow);
+    }
   }
 
   // -------- Render --------

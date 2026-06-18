@@ -355,6 +355,19 @@
   (types-check/fn-type-bound-effects expected))
 
 
+(defbase rich-return-of-fn
+  "Rich-types registry view of the named fn's `:return` field. Takes
+   a fn-id, reads the fn-row to get the name, looks up the registry
+   entry. nil for anonymous fns / not-yet-registered / unknown."
+  [fn-id]
+  (cr/record-effect! :db)
+  (when fn-id
+    (let [storage (request/require-storage ctx)
+          fn-row  (sp/read-entity storage :fn fn-id)]
+      (when (:name fn-row)
+        (:return (registry/rich-type-of (keyword (:name fn-row))))))))
+
+
 ;; `:_types-compatible-apply` is now a graph fn-def — see fns.edn.
 ;; Pure composition over `:subtype?` + `:if`-wrapped
 ;; `:describe-type-mismatch` + envelope `:zipmap` / `:assoc`.
@@ -884,6 +897,7 @@
    :diff-value-against-type diff-value-against-type
    :closed-enum-of closed-enum-of
    :fn-type-bound-effects fn-type-bound-effects
+   :rich-return-of-fn rich-return-of-fn
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

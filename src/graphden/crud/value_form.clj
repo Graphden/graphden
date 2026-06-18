@@ -150,6 +150,166 @@
       :else resolved)))
 
 
+;; =============================================================================
+;; Slot type provenance — server-side mirror of the editor's
+;; `slotTypeProvenance` (editor-literal-types.js). Answers HOW a slot's
+;; effective type resolved: the 4-tier priority chain (binding type-
+;; override → backward-unified slot-type → bound-fn return-type → slot
+;; declaration), the type each tier contributes (nil when the tier
+;; doesn't apply), the source fn-name + fn-id per tier, which tier won,
+;; and the inheritance chain — every ancestor that contributed an
+;; override binding. Used by the mismatch-explainer popover (and the
+;; standalone provenance popover) to show users WHERE the expected
+;; type came from. List-item rows return nil — their type comes from
+;; nav / element logic, not the slot chain.
+;; =============================================================================
+
+(defn- inheritance-chain
+  "BFS the `:parent-ids` closure starting at `fn-id`, leaf-first
+   (closer-wins order). Returns a vec of fn-ids including `fn-id`
+   itself at position 0. Cycles can't form (sync-time topological-sort
+   rejects them), so no cycle guard is needed."
+  [storage fn-id]
+  (loop [queue   [fn-id]
+         seen    #{}
+         out     []]
+    (if (empty? queue)
+      out
+      (let [fid (peek queue)
+            rest-q (pop queue)]
+        (if (contains? seen fid)
+          (recur rest-q seen out)
+          (let [fn-row  (sp/read-entity storage :fn fid)
+                parents (vec (:parent-ids fn-row))]
+            (recur (into rest-q parents)
+                   (conj seen fid)
+                   (conj out fid))))))))
+
+
+(defn- find-slot-declaring-fn
+  "Walk inheritance chain in REVERSE (root-first) — return the deepest
+   ancestor that declares the slot via a `:fn-slot` junction row. Mirrors
+   the JS `findSlotDeclaringFn` (`getInheritanceChain` then reverse)."
+  [storage fn-id slot-id]
+  (let [chain (inheritance-chain storage fn-id)]
+    (some (fn [fid]
+            (let [fn-slots (sp/query-entities storage :fn-slot
+                                              {:fn-id fid :slot-id slot-id})]
+              (when (seq fn-slots)
+                (let [fn-row (sp/read-entity storage :fn fid)]
+                  {:fn-id fid :fn-name (:name fn-row)}))))
+          (reverse chain))))
+
+
+(defn- find-binding-override-chain
+  "Walk inheritance chain leaf-first — every ancestor that carries a
+   binding for this slot WITH `:type-override-fn-id`. Returns the list
+   in closer-wins order (the first entry is the override actually
+   applied; later entries are shadowed siblings the editor surfaces as
+   `(also by)` rows)."
+  [storage fn-id slot-id]
+  (let [chain (inheritance-chain storage fn-id)]
+    (vec (keep (fn [fid]
+                 (let [bnds (sp/query-entities storage :binding
+                                               {:fn-id fid :slot-id slot-id})
+                       bnd  (first bnds)
+                       override-fn-id (:type-override-fn-id bnd)]
+                   (when override-fn-id
+                     (let [fn-row (sp/read-entity storage :fn fid)]
+                       {:fn-id fid :fn-name (:name fn-row)
+                        :override-fn-id override-fn-id}))))
+               chain))))
+
+
+(defn- compute-slot-type-for-row
+  "Server-side mirror of editor's `computeSlotType`. Given a type-fn
+   row, prefer the named rich-type alias when one exists; otherwise
+   return the fn-row's name (string), or the structural form on
+   `:constraint` for anonymous fn-/map-/tuple-typed rows."
+  [type-fn-row]
+  (when type-fn-row
+    (let [constraint (:constraint type-fn-row)]
+      (cond
+        (and (vector? constraint)
+             (#{:fn :map :tuple} (first constraint)))
+        constraint
+
+        (not (:name type-fn-row)) nil
+
+        :else
+        (let [name-kw (keyword (:name type-fn-row))
+              rich    (registry/rich-type-of name-kw)]
+          (cond
+            (:type-row? rich)                         (:name type-fn-row)
+            (and (:return rich) (not= :any (:return rich))) (:return rich)
+            :else                                     (:name type-fn-row)))))))
+
+
+(defn- type-of-fn-id
+  "Resolve the rich type of the slot whose `:type-fn-id` is `fn-id`.
+   nil for nil id."
+  [storage fn-id]
+  (when fn-id
+    (compute-slot-type-for-row (sp/read-entity storage :fn fn-id))))
+
+
+(defn slot-type-provenance
+  "4-tier resolution chain + inheritance chain for the type at a
+   `(fn-id, slot-id, binding-id)` edit site. Mirrors the editor's
+   `slotTypeProvenance`. Returns nil for list-item rows (`:item-id`
+   present) — their type comes from nav / element logic, not the
+   slot chain. Returns nil for unresolved sites (no resolvable
+   slot / missing `:type-fn-id`).
+
+   When only `:binding-id` is supplied, `:fn-id` and `:slot-id` are
+   resolved off the binding row — same fallback chain
+   `resolve-slot-effective-type` uses, so callers can pass just
+   `{:binding-id …}` and get a valid result."
+  [storage {:keys [fn-id slot-id binding-id item-id]}]
+  (when-not item-id
+    (let [bnd-pre  (when binding-id (sp/read-entity storage :binding binding-id))
+          fn-id    (or fn-id (:fn-id bnd-pre))
+          slot-id  (or slot-id (:slot-id bnd-pre))]
+      (when slot-id
+        (let [slot (sp/read-entity storage :slot slot-id)]
+        (when (:type-fn-id slot)
+          (let [bnd          (when binding-id (sp/read-entity storage :binding binding-id))
+                override-fid (:type-override-fn-id bnd)
+                ;; Tier 2 is skipped under an explicit override — mirrors
+                ;; resolve-slot-effective-type.
+                unified      (when (and (nil? override-fid) fn-id)
+                               (let [own-fn (sp/read-entity storage :fn fn-id)]
+                                 (when (:name own-fn)
+                                   (get-in (registry/rich-type-of
+                                             (keyword (:name own-fn)))
+                                           [:slot-types (keyword (:name slot))]))))
+                ref-fid      (:ref-fn-id bnd)
+                ref-fn       (when ref-fid (sp/read-entity storage :fn ref-fid))
+                own-fn       (when fn-id (sp/read-entity storage :fn fn-id))
+                declaring    (when fn-id (find-slot-declaring-fn storage fn-id slot-id))
+                tiers        [{:key :override :label "Binding type-override"
+                               :type (type-of-fn-id storage override-fid)
+                               :source (when (and override-fid (:name own-fn))
+                                         {:fn-name (:name own-fn) :fn-id fn-id})}
+                              {:key :unified :label "Backward-unified return type"
+                               :type unified
+                               :source (when (and (some? unified) (:name own-fn))
+                                         {:fn-name (:name own-fn) :fn-id fn-id})}
+                              {:key :ref-return :label "Bound fn return type"
+                               :type (type-of-fn-id storage (:return-type-fn-id ref-fn))
+                               :source (when (:name ref-fn)
+                                         {:fn-name (:name ref-fn) :fn-id ref-fid})}
+                              {:key :slot :label "Slot declaration"
+                               :type (type-of-fn-id storage (:type-fn-id slot))
+                               :source declaring}]
+                winner       (some (fn [t] (when (some? (:type t)) (:key t))) tiers)
+                chain        (when fn-id
+                               (find-binding-override-chain storage fn-id slot-id))]
+            {:winner winner
+             :tiers tiers
+             :inheritance-chain (or chain [])})))))))
+
+
 (defn resolve-form
   "Classify a structural type into a form descriptor tree. Pure:
    alias-resolves the input, desugars variants, then dispatches on

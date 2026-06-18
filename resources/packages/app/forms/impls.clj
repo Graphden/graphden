@@ -55,9 +55,22 @@
                          "" nil current-value))
 
 
+(defbase slot-type-provenance
+  "Atomic library boundary over `value-form/slot-type-provenance` —
+   the 4-tier resolution chain + inheritance chain for the type at a
+   `(fn-id, slot-id, binding-id)` edit site. Mirrors the editor's JS
+   `slotTypeProvenance` so the mismatch-explainer + dedicated provenance
+   popover can show users WHERE the expected type came from without
+   recomputing locally. nil for list-item rows / unresolved sites."
+  [parsed]
+  (cr/record-effect! :db)
+  (value-form/slot-type-provenance (request/require-storage ctx) parsed))
+
+
 ;; The package loader pairs each base-fn declared in `fns.edn` with its
 ;; impl by looking up this `impls` map (keyword name -> impl fn).
 (def impls
   {:resolve-slot-effective-type resolve-slot-effective-type
    :current-slot-value current-slot-value
-   :build-value-form build-value-form})
+   :build-value-form build-value-form
+   :slot-type-provenance slot-type-provenance})

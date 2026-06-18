@@ -221,24 +221,28 @@ function renderMismatchExplainer(info, anchorEl) {
   return true;
 }
 
-// Append the JS-computed sections that the partial doesn't yet cover —
-// provenance (4-tier chain) + Edit-action button. Migration steps 3-4
-// will move these server-side too; for now they hydrate the server-
-// rendered shell. (Header / Expected / Got / Reason / diff-leaves are
-// all server-rendered as of step 2.)
+// Append the JS-only Edit-action button (step 4 will migrate this
+// too). Header / Expected / Got / Reason / diff-leaves / provenance
+// are all server-rendered as of step 3.
+//
+// Also wires the nav links the provenance section emits — every `<a
+// data-fn-id=…>` in the server hiccup gets a click handler that
+// navigates to the source fn (same behaviour the standalone
+// provenance popover offers, so users trace upstream from a mismatch
+// the same way they trace upstream from the `↳` badge).
 function appendJsOnlySections(el, arg, anchorEl) {
-  const provenance = (typeof slotTypeProvenance === 'function')
-                     ? slotTypeProvenance(arg) : null;
-  if (provenance && typeof appendResolutionSection === 'function') {
-    appendResolutionSection(el, provenance, {
-      onNavigate: (fnId) => {
-        if (typeof selectFn === 'function' && fnId) {
-          hideMismatchExplainer();
-          selectFn(fnId);
-        }
-      },
+  el.querySelectorAll('a[data-fn-id]').forEach((link) => {
+    const fnId = link.getAttribute('data-fn-id');
+    if (!fnId) return;
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof selectFn === 'function') {
+        hideMismatchExplainer();
+        selectFn(fnId);
+      }
     });
-  }
+  });
   const editable = isEditableArg(arg)
                    && typeof enterArgValueEditMode === 'function';
   const actions = document.createElement('div');

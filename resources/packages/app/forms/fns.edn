@@ -226,6 +226,12 @@
    :return-type :hiccup-node
    :effects #{:db}}
 
+  {:name :slot-type-provenance
+   :description "4-tier resolution chain + inheritance chain for the type at a `(fn-id, slot-id, binding-id)` edit site — mirrors the editor's JS `slotTypeProvenance`. Returns `{:winner :tiers [{:key :label :type :source}] :inheritance-chain [{:fn-id :fn-name :override-fn-id}]}` or nil (list-item rows / unresolved). Used by the mismatch-explainer popover."
+   :args {:parsed {:type :_value-form-parsed-shape}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
   {:name :_value-form-apply
    :description "Stage 3 of value-form — resolve the slot's effective type, pick the matching form-fn, execute it, and wrap the control in a data-form-root div. Returns {:ok true :form <hiccup> :value <current>}."
    :parent :zipmap

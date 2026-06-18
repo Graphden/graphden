@@ -138,8 +138,8 @@
   ;; string (no query-param precedent in the codebase).
 
   {:name :_value-form-parsed-shape
-   :description "Output of `:_value-form-parsed` — the slot-identifying ids (a binding-id, or an fn-id + slot-id, optionally an item-id), each a UUID."
-   :type {:binding-id :uuid :fn-id :uuid :slot-id :uuid :item-id :uuid}}
+   :description "Output of `:_value-form-parsed` — the slot-identifying ids (a binding-id, or an fn-id + slot-id, optionally an item-id). Each field is `:nullable-uuid` because the JSON parser returns nil for missing keys, and the validation step (`:_value-form-validation`) — NOT this shape — is what enforces the actual contract (either `:binding-id` is present, or both `:fn-id` + `:slot-id` are). Consumer base-fns (`:resolve-slot-effective-type`, `:current-slot-value`, `:build-value-form`) all handle nil-id inputs gracefully via `when` / `or` guards in the Clojure impl."
+   :type {:binding-id :nullable-uuid :fn-id :nullable-uuid :slot-id :nullable-uuid :item-id :nullable-uuid}}
 
   {:name :_value-form-result-shape
    :description "Output of `:_value-form-apply` — the resolved editor form: `:form` is the control hiccup, `:value` the binding's current value."

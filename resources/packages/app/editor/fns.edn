@@ -420,6 +420,160 @@
    :args {:body :_partial-effect-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; mismatch-explainer popover. JS used to compute expected /
+  ;; actual / reason locally (validateLiteralAgainstType +
+  ;; formatTypeHint + slotTypeProvenance), duplicating server-side
+  ;; logic that already exists. This partial reads the binding row
+  ;; from DB (single source of truth), reuses `:resolve-slot-
+  ;; effective-type` + `:current-slot-value` (both from `app.forms`)
+  ;; + `:classify-literal` + `:subtype?` + `:describe-type-mismatch`,
+  ;; and emits the same hiccup the JS used to build.
+  ;;
+  ;; URL: `GET /partials/mismatch-explainer?binding-id=X[&item-id=Y]`.
+  ;; STEP 1 — header + Expected / Got / Reason rows only; provenance
+  ;; chain and diff-leaves stay in JS for now (next steps).
+
+  {:name :_partial-mismatch-binding-id-str
+   :description "Read the `binding-id` query-string parameter; nil when absent."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "binding-id"}}}
+
+  {:name :_partial-mismatch-binding-id
+   :description "Parse the `binding-id` query param to a UUID; nil when absent / malformed (downstream lookups handle nil)."
+   :parent :parse-uuid
+   :args {:string :_partial-mismatch-binding-id-str}}
+
+  {:name :_partial-mismatch-item-id-str
+   :description "Read the `item-id` query-string parameter; nil when absent. Set for binding-list-item edits where the per-position elem type matters."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "item-id"}}}
+
+  {:name :_partial-mismatch-item-id
+   :description "Parse the `item-id` query param to a UUID; nil when absent / malformed."
+   :parent :parse-uuid
+   :args {:string :_partial-mismatch-item-id-str}}
+
+  ;; Build the `:_value-form-parsed-shape` map the existing
+  ;; `:resolve-slot-effective-type` + `:current-slot-value` base-fns
+  ;; expect. We only need `:binding-id` + `:item-id` from the URL —
+  ;; the resolver looks up `:fn-id` / `:slot-id` off the binding row.
+  {:name :_partial-mismatch-parsed
+   :description "Synthesise the `:_value-form-parsed-shape` map for `:resolve-slot-effective-type` / `:current-slot-value` — `:fn-id` and `:slot-id` are derived off the binding row server-side."
+   :parent :zipmap
+   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
+          :vals [:_partial-mismatch-binding-id
+                 {:value nil}
+                 {:value nil}
+                 :_partial-mismatch-item-id]}}
+
+  {:name :_partial-mismatch-expected-type
+   :description "Effective type at the slot edit site; nil when the binding-id doesn't resolve."
+   :parent :resolve-slot-effective-type
+   :args {:parsed :_partial-mismatch-parsed}}
+
+  {:name :_partial-mismatch-current-value
+   :description "The currently-bound value the mismatch is being reported against — read from `:binding.value` (or the item's `:value` when `:item-id` is set). Single source of truth: no JS payload."
+   :parent :current-slot-value
+   :args {:parsed :_partial-mismatch-parsed}}
+
+  {:name :_partial-mismatch-candidate-type
+   :description "Structural type expression of the bound value — `classify-literal` so `:subtype?` / `:describe-type-mismatch` can compare against `:_partial-mismatch-expected-type`."
+   :parent :classify-literal
+   :args {:value :_partial-mismatch-current-value}}
+
+  {:name :_partial-mismatch-ok?
+   :description "True iff the bound value's classified type is a subtype of the expected slot type."
+   :parent :subtype?
+   :args {:expected :_partial-mismatch-expected-type
+          :candidate :_partial-mismatch-candidate-type}}
+
+  {:name :_partial-mismatch-reason
+   :description "One-line natural-language reason `candidate` ⊄ `expected`. Always computed (lazy via the `:if` consumer); reads `\"\"` when the types match (and the consumer hides the row)."
+   :parent :if
+   :args {:test :_partial-mismatch-ok?
+          :then {:value ""}
+          :else {:parent :describe-type-mismatch
+                 :args {:expected :_partial-mismatch-expected-type
+                        :candidate :_partial-mismatch-candidate-type}}}}
+
+  {:name :_partial-mismatch-expected-text
+   :description "`pr-str`-form of the expected type for the Expected row. Full structural readout — the editor's JS `formatTypeHint` pretty-printer is the next step."
+   :parent :to-str
+   :args {:value :_partial-mismatch-expected-type}}
+
+  {:name :_partial-mismatch-got-text
+   :description "`pr-str`-form of the actual value for the Got row. JSON-encoded shape ≈ matches what the JS `formatActualLiteral` showed."
+   :parent :to-str
+   :args {:value :_partial-mismatch-current-value}}
+
+  ;; Hiccup composition. Each `:hiccup`-using fn-def folds in one
+  ;; dynamic child; pure-literal sub-trees use `:const`.
+
+  {:name :_partial-mismatch-header
+   :description "Popover header — title + close button. Pure literal. The close button carries `data-explainer-close` so the post-swap JS handler binds dismissal without selectors (same convention `:_partial-effect-header` uses)."
+   :parent :const
+   :args {:value
+          [:div {:class "mismatch-explainer-header"}
+           [:span {:class "mismatch-explainer-title"} "Type mismatch"]
+           [:button {:type "button"
+                     :class "mismatch-explainer-close"
+                     :data-explainer-close "1"
+                     :aria-label "Close mismatch explainer"} "×"]]}}
+
+  {:name :_partial-mismatch-expected-row
+   :description "`<div class=\"mismatch-explainer-row mismatch-row-expected\"><span class=\"...-label\">Expected</span><span class=\"...-value\">{type}</span></div>`."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-expected"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Expected"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-mismatch-expected-text]}}]}}
+
+  {:name :_partial-mismatch-got-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-got"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Got"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-mismatch-got-text]}}]}}
+
+  {:name :_partial-mismatch-reason-row
+   :description "`<div class=\"mismatch-explainer-row mismatch-row-reason\">…</div>` carrying the `:describe-type-mismatch` text. Always rendered; the JS consumer can hide the row when `:_partial-mismatch-ok?` is true (text is `\"\"`)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-row mismatch-row-reason"}}
+          :children [{:value [:span {:class "mismatch-explainer-label"} "Reason"]}
+                     {:parent :hiccup
+                      :args {:tag {:value "span"}
+                             :attrs {:value {:class "mismatch-explainer-value"}}
+                             :children [:_partial-mismatch-reason]}}]}}
+
+  {:name :_partial-mismatch-fragment
+   :description "Full popover hiccup — header + Expected + Got + Reason rows wrapped in `.mismatch-explainer-content`. Provenance section + diff-leaves + Edit-action button are step-2/3 of this migration; for now they stay in the JS render path so this step ships as a strict feature addition (the partial replaces only the data-fetch+top-rows)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "mismatch-explainer-content"}}
+          :children [:_partial-mismatch-header
+                     :_partial-mismatch-expected-row
+                     :_partial-mismatch-got-row
+                     :_partial-mismatch-reason-row]}}
+
+  {:name :_partial-mismatch-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-mismatch-fragment}}
+
+  {:name :_partial-mismatch-handler
+   :description "Ring handler for `GET /partials/mismatch-explainer?binding-id=X[&item-id=Y]` — returns the mismatch-explainer hiccup as `text/html`. STEP 1 of the JS→graph migration: replaces the JS-side validation + render with a server fetch reading the binding straight from DB. Provenance / diff-leaves / Edit button stay JS-side until steps 2-4."
+   :parent :html-ok-response
+   :args {:body :_partial-mismatch-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; fn-versions popover (second migration). Pulls the existing
   ;; `:list-fn-versions` data chain (in `app.branches`) for one fn-id
   ;; from a query-string param, then maps each enriched version row

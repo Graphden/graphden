@@ -351,6 +351,11 @@
           :candidate {:type :type-expression :description "The candidate (binding-side) type expression."}}
    :return-type :text}
 
+  {:name :classify-literal
+   :description "Infer the structural type expression of a literal Clojure value — `:text`, `:int`, `:bool`, `:keyword`, `:uuid`, `:null`, `[:list T]`, or a record-shape `{k T}` for keyword-keyed maps. nil for shapes the classifier can't decide (caller falls back to `:any`)."
+   :args {:value {:type :any :description "Literal value to classify (binding's `:value`, list-item's `:value`, etc.)."}}
+   :return-type :type-expression}
+
   ;; --- :_types-compatible-apply — pure graph composition over
   ;; `:subtype?` + `:if`-wrapped `:describe-type-mismatch` + envelope.
   ;; Admins can vary the response shape (e.g. add `:expected-kind`,

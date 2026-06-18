@@ -17,6 +17,7 @@
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
+    [graphden.types.check :as types-check]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.registry.core :as registry]
@@ -316,6 +317,15 @@
    themselves are §3.3 algorithm."
   [expected candidate]
   (types-api/describe-mismatch expected candidate))
+
+
+(defbase classify-literal
+  "Atomic library boundary over `types.check/classify-literal` —
+   infer the structural type expression of a literal Clojure value.
+   nil for shapes the classifier doesn't recognise; callers fall
+   back to `:any`."
+  [value]
+  (types-check/classify-literal value))
 
 
 ;; `:_types-compatible-apply` is now a graph fn-def — see fns.edn.
@@ -843,6 +853,7 @@
    :value-kinds value-kinds
    :subtype? subtype?-fn
    :describe-type-mismatch describe-type-mismatch-fn
+   :classify-literal classify-literal
    :_types-usages-apply _types-usages-apply
    :_apply-create-record-type-body _apply-create-record-type-body
    :_apply-create-record-type-rollback _apply-create-record-type-rollback

@@ -102,6 +102,11 @@
    :args {:path "/partials/execute-result-effects" :handler :_partial-execute-result-effects-handler}
    :expects-effects #{}}
 
+  {:name :partial-mismatch-explainer
+   :description "GET /partials/mismatch-explainer?binding-id=X[&item-id=Y] — mismatch-explainer hiccup (header + Expected / Got / Reason rows) computed server-side off the binding row. STEP 1 of the JS→graph migration: replaces JS-local validation; provenance / diff-leaves / Edit-button stay JS-side for now (steps 2-4)."
+   :parent :get-auth-required
+   :args {:path "/partials/mismatch-explainer" :handler :_partial-mismatch-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

@@ -23,6 +23,7 @@
                   :partial-execute-history
                   :partial-branch-diff
                   :partial-execute-result-effects
+                  :partial-mismatch-explainer
                   :health
                   :metrics
                   :version

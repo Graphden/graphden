@@ -221,39 +221,145 @@ function renderMismatchExplainer(info, anchorEl) {
   return true;
 }
 
-function showMismatchExplainer(arg, anchorEl) {
-  if (!arg || !anchorEl) return;
-  if (typeof expectedSlotType !== 'function'
-      || typeof validateLiteralAgainstType !== 'function'
-      || typeof formatTypeHint !== 'function') return;
-  const expected = expectedSlotType(arg);
+// Append the JS-computed sections that the partial doesn't yet cover —
+// diff-leaves (under the Reason row) and provenance (4-tier chain). Edit
+// button + hint row goes last. Migration steps 2-4 will move these
+// server-side too; for now they hydrate the server-rendered shell.
+function appendJsOnlySections(el, arg, anchorEl) {
+  // Compute the JS-side info ONLY for the parts the partial doesn't
+  // emit yet. Same dependency check the original render guarded on.
+  if (typeof formatTypeHint !== 'function'
+      || typeof validateLiteralAgainstType !== 'function') return;
+  const expected = (typeof expectedSlotType === 'function')
+                   ? expectedSlotType(arg) : null;
   if (!expected) return;
   const v = arg.value;
-  // Re-run the predicate the overlay uses so the message matches
-  // the indicator. Doing it fresh (rather than caching) keeps the
-  // explainer aligned even if the row's value has been edited live
-  // since the indicator was painted.
-  const result = validateLiteralAgainstType(v, expected);
-  const editable = isEditableArg(arg)
-                   && typeof enterArgValueEditMode === 'function';
   const diffLeaves = (typeof diffValueAgainstType === 'function')
                      ? diffValueAgainstType(v, expected, '')
                      : [];
-  const info = {
-    expected: formatTypeHint(expected),
-    actual: formatActualLiteral(v),
-    reason: result ? result.message : null,
-    diffLeaves,
-    provenance: (typeof slotTypeProvenance === 'function')
-                ? slotTypeProvenance(arg) : null,
-    onEdit: editable ? () => enterArgValueEditMode(arg, anchorEl) : null,
-    hint: editable ? null
-                   : ((typeof isAuthenticated === 'function' && !isAuthenticated())
-                      ? 'Sign in to edit values.'
-                      : 'Open the owning fn to edit this value.'),
-  };
+  if (diffLeaves && diffLeaves.length > 0) {
+    const leafSection = document.createElement('div');
+    leafSection.className = 'mismatch-explainer-leaves';
+    const head = document.createElement('div');
+    head.className = 'mismatch-explainer-leaves-head';
+    head.textContent = diffLeaves.length === 1 ? 'At' : 'Disagreements';
+    leafSection.appendChild(head);
+    for (const leaf of diffLeaves.slice(0, 6)) {
+      const row = document.createElement('div');
+      row.className = 'mismatch-explainer-leaf';
+      const pathEl = document.createElement('span');
+      pathEl.className = 'mismatch-explainer-leaf-path';
+      pathEl.textContent = leaf.path || '(top)';
+      const sep = document.createElement('span');
+      sep.className = 'mismatch-explainer-leaf-sep';
+      sep.textContent = ': expected ';
+      const expEl = document.createElement('span');
+      expEl.className = 'mismatch-explainer-leaf-expected';
+      expEl.textContent = formatTypeHint(leaf.expected);
+      const sep2 = document.createElement('span');
+      sep2.className = 'mismatch-explainer-leaf-sep';
+      sep2.textContent = ', got ';
+      const actEl = document.createElement('span');
+      actEl.className = 'mismatch-explainer-leaf-actual';
+      actEl.textContent = typeof leaf.actual === 'string'
+                          ? leaf.actual
+                          : JSON.stringify(leaf.actual);
+      row.appendChild(pathEl);
+      row.appendChild(sep);
+      row.appendChild(expEl);
+      row.appendChild(sep2);
+      row.appendChild(actEl);
+      leafSection.appendChild(row);
+    }
+    if (diffLeaves.length > 6) {
+      const more = document.createElement('div');
+      more.className = 'mismatch-explainer-leaf-more';
+      more.textContent = `… +${diffLeaves.length - 6} more`;
+      leafSection.appendChild(more);
+    }
+    el.appendChild(leafSection);
+  }
+  const provenance = (typeof slotTypeProvenance === 'function')
+                     ? slotTypeProvenance(arg) : null;
+  if (provenance && typeof appendResolutionSection === 'function') {
+    appendResolutionSection(el, provenance, {
+      onNavigate: (fnId) => {
+        if (typeof selectFn === 'function' && fnId) {
+          hideMismatchExplainer();
+          selectFn(fnId);
+        }
+      },
+    });
+  }
+  const editable = isEditableArg(arg)
+                   && typeof enterArgValueEditMode === 'function';
+  const actions = document.createElement('div');
+  actions.className = 'mismatch-explainer-actions';
+  if (editable) {
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'mismatch-explainer-btn';
+    editBtn.textContent = 'Edit value';
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideMismatchExplainer();
+      enterArgValueEditMode(arg, anchorEl);
+    });
+    actions.appendChild(editBtn);
+  } else {
+    const hint = document.createElement('span');
+    hint.className = 'mismatch-explainer-hint';
+    hint.textContent = (typeof isAuthenticated === 'function' && !isAuthenticated())
+                       ? 'Sign in to edit values.'
+                       : 'Open the owning fn to edit this value.';
+    actions.appendChild(hint);
+  }
+  el.appendChild(actions);
+  // Server-emitted close button carries `data-explainer-close` —
+  // bind dismissal the same way the effect-explainer partial does.
+  const close = el.querySelector('[data-explainer-close]');
+  if (close) {
+    close.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideMismatchExplainer();
+    });
+  }
+}
+
+
+// Fetch the server-rendered shell (header + Expected / Got / Reason
+// rows) and hydrate it with the JS-only sections (diff-leaves +
+// provenance + Edit-action). Step 1 of the JS→graph migration; steps
+// 2-4 push diff-leaves / provenance / edit-button server-side too.
+async function showMismatchExplainer(arg, anchorEl) {
+  if (!arg || !anchorEl) return;
+  // Mutually exclusive with the inline-expand panel (same provenance
+  // chain) — collapse it before swapping ours in.
+  if (typeof hideAllInlineHosts === 'function') hideAllInlineHosts();
+  // The partial requires a binding-id; for list-item rows we additionally
+  // pass item-id so the server picks the per-position elem type. Skip
+  // when neither is present (e.g. transient pre-binding overlays).
+  const bindingId = arg['binding-id'];
+  const itemId = arg['item-id'];
+  if (!bindingId) return;
+  const params = new URLSearchParams({ 'binding-id': bindingId });
+  if (itemId) params.set('item-id', itemId);
+  let html;
+  try {
+    const r = await authFetch('/partials/mismatch-explainer?' + params.toString());
+    if (!r.ok) return;
+    html = await r.text();
+  } catch (_) {
+    return;
+  }
+  const el = ensureMismatchExplainerEl();
+  el.innerHTML = html;
   mismatchExplainerArg = arg;
-  renderMismatchExplainer(info, anchorEl);
+  appendJsOnlySections(el, arg, anchorEl);
+  el.classList.add('visible');
+  el.style.display = '';
+  anchorBelowClamped(el, anchorEl);
+  mismatchExplainerAnchor = anchorEl;
 }
 
 function hideMismatchExplainer() {

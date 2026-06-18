@@ -24,6 +24,7 @@
                   :partial-branch-diff
                   :partial-execute-result-effects
                   :partial-mismatch-explainer
+                  :partial-provenance
                   :health
                   :metrics
                   :version

@@ -107,6 +107,11 @@
    :parent :get-auth-required
    :args {:path "/partials/mismatch-explainer" :handler :_partial-mismatch-handler}}
 
+  {:name :partial-provenance
+   :description "GET /partials/provenance?binding-id=X[&item-id=Y] — type-narrowing provenance popover (the `↳` badge target on arg-overlay type-chips). Shares the `_provenance-section` renderer with `/partials/mismatch-explainer`. STEP 1 — header + Resolved-via section; Allowed-values + Slot-effect-bound sections are steps 2-3."
+   :parent :get-auth-required
+   :args {:path "/partials/provenance" :handler :_partial-provenance-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

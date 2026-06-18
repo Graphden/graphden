@@ -684,112 +684,112 @@
   ;; non-empty. Nav-links carry `data-fn-id` so the JS post-swap
   ;; binding can attach `selectFn(fn-id)` click handlers.
 
-  {:name :_partial-mismatch-prov
-   :description "Server-side provenance computation for the binding under the cursor — `{:winner :tiers :inheritance-chain}` or nil (list-item rows / unresolved sites)."
+  {:name :_provenance
+   :description "Server-side provenance computation for the binding under the cursor — `{:winner :tiers :inheritance-chain}` or nil (list-item rows / unresolved sites). `:parsed` is read as a FREE-ARG (`{:as :parsed}`) so any partial — `/partials/mismatch-explainer`, `/partials/provenance`, future popovers — provides its OWN parsed-shape map at the call site and the whole chain (4-tier rows, inheritance section, nav-links) renders against it."
    :parent :slot-type-provenance
-   :args {:parsed :_partial-mismatch-parsed}}
+   :args {:parsed {:as :parsed}}}
 
-  {:name :_partial-mismatch-prov-some?
+  {:name :_provenance-some?
    :parent :some?
-   :args {:value :_partial-mismatch-prov}}
+   :args {:value :_provenance}}
 
   ;; Per-tier readers — each tier sits at a fixed index in the `:tiers`
   ;; vec (override / unified / ref-return / slot) so we extract by index
   ;; rather than name-lookup, mirroring the JS render order.
-  {:name :_partial-mismatch-prov-tiers
+  {:name :_provenance-tiers
    :parent :get
-   :args {:coll :_partial-mismatch-prov :key {:value :tiers} :default []}}
+   :args {:coll :_provenance :key {:value :tiers} :default []}}
 
-  {:name :_partial-mismatch-prov-inheritance
+  {:name :_provenance-inheritance
    :parent :get
-   :args {:coll :_partial-mismatch-prov :key {:value :inheritance-chain} :default []}}
+   :args {:coll :_provenance :key {:value :inheritance-chain} :default []}}
 
   ;; Per-tier helper: given a `{:key :label :type :source}` map (the
   ;; `:as :tier` rename) and the wrapping list-context, build one row.
   ;; Hidden via `<span hidden=1>` when `:type` is nil (tier doesn't
   ;; apply at this slot).
 
-  {:name :_partial-mismatch-prov-tier-type-raw
+  {:name :_provenance-tier-type-raw
    :parent :get
    :args {:coll {:as :item} :key {:value :type} :default nil}}
 
-  {:name :_partial-mismatch-prov-tier-applies?
+  {:name :_provenance-tier-applies?
    :parent :some?
-   :args {:value :_partial-mismatch-prov-tier-type-raw}}
+   :args {:value :_provenance-tier-type-raw}}
 
-  {:name :_partial-mismatch-prov-tier-type-text
+  {:name :_provenance-tier-type-text
    :parent :to-str
-   :args {:value :_partial-mismatch-prov-tier-type-raw}}
+   :args {:value :_provenance-tier-type-raw}}
 
-  {:name :_partial-mismatch-prov-tier-label
+  {:name :_provenance-tier-label
    :parent :get
    :args {:coll {:as :item} :key {:value :label} :default ""}}
 
-  {:name :_partial-mismatch-prov-tier-source
+  {:name :_provenance-tier-source
    :parent :get
    :args {:coll {:as :item} :key {:value :source} :default nil}}
 
-  {:name :_partial-mismatch-prov-tier-source-fn-name
+  {:name :_provenance-tier-source-fn-name
    :parent :get
-   :args {:coll :_partial-mismatch-prov-tier-source
+   :args {:coll :_provenance-tier-source
           :key {:value :fn-name} :default ""}}
 
-  {:name :_partial-mismatch-prov-tier-source-fn-id
+  {:name :_provenance-tier-source-fn-id
    :parent :get
-   :args {:coll :_partial-mismatch-prov-tier-source
+   :args {:coll :_provenance-tier-source
           :key {:value :fn-id} :default ""}}
 
-  {:name :_partial-mismatch-prov-tier-source-fn-id-text
+  {:name :_provenance-tier-source-fn-id-text
    :parent :to-str
-   :args {:value :_partial-mismatch-prov-tier-source-fn-id}}
+   :args {:value :_provenance-tier-source-fn-id}}
 
-  {:name :_partial-mismatch-prov-tier-has-source?
+  {:name :_provenance-tier-has-source?
    :parent :some?
-   :args {:value :_partial-mismatch-prov-tier-source}}
+   :args {:value :_provenance-tier-source}}
 
   ;; Source cell: `<a data-fn-id=…>name</a>` when source exists,
   ;; blank `<span>` otherwise. The data-fn-id attr lets the JS post-
   ;; swap binding attach `selectFn(fn-id) + hide` click handlers.
-  {:name :_partial-mismatch-prov-tier-source-cell
+  {:name :_provenance-tier-source-cell
    :parent :if
-   :args {:test :_partial-mismatch-prov-tier-has-source?
+   :args {:test :_provenance-tier-has-source?
           :then {:parent :hiccup
                  :args {:tag {:value "a"}
                         :attrs {:parent :assoc
                                 :args {:map {:value {:class "type-inline-resolution-source"
                                                      :href "#"}}
                                        :key {:value :data-fn-id}
-                                       :value :_partial-mismatch-prov-tier-source-fn-id-text}}
-                        :children [:_partial-mismatch-prov-tier-source-fn-name]}}
+                                       :value :_provenance-tier-source-fn-id-text}}
+                        :children [:_provenance-tier-source-fn-name]}}
           :else {:value [:span {:class "type-inline-resolution-source-empty"}]}}}
 
-  {:name :_partial-mismatch-prov-tier-row-built
+  {:name :_provenance-tier-row-built
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "type-inline-resolution-tier"}}
           :children [{:parent :hiccup
                       :args {:tag {:value "span"}
                              :attrs {:value {:class "type-inline-resolution-label"}}
-                             :children [:_partial-mismatch-prov-tier-label]}}
+                             :children [:_provenance-tier-label]}}
                      {:parent :hiccup
                       :args {:tag {:value "span"}
                              :attrs {:value {:class "type-inline-resolution-type"}}
-                             :children [:_partial-mismatch-prov-tier-type-text]}}
-                     :_partial-mismatch-prov-tier-source-cell]}}
+                             :children [:_provenance-tier-type-text]}}
+                     :_provenance-tier-source-cell]}}
 
-  {:name :_partial-mismatch-prov-tier-row
+  {:name :_provenance-tier-row
    :description "One tier row — built when the tier applies (non-nil type), hidden via `<span hidden=1>` when it doesn't. Same conditional pattern the diff overflow row uses."
    :parent :if
-   :args {:test :_partial-mismatch-prov-tier-applies?
-          :then :_partial-mismatch-prov-tier-row-built
+   :args {:test :_provenance-tier-applies?
+          :then :_provenance-tier-row-built
           :else {:value [:span {:hidden "1"}]}}}
 
-  {:name :_partial-mismatch-prov-tier-rows
+  {:name :_provenance-tier-rows
    :parent :map
-   :args {:func :_partial-mismatch-prov-tier-row
-          :coll :_partial-mismatch-prov-tiers}}
+   :args {:func :_provenance-tier-row
+          :coll :_provenance-tiers}}
 
-  {:name :_partial-mismatch-prov-resolved-head
+  {:name :_provenance-resolved-head
    :parent :const
    :args {:value [:div {:class "type-inline-resolution-head"} "Resolved via"]}}
 
@@ -797,19 +797,19 @@
   ;; entry. Render only when chain is non-empty; otherwise hide the
   ;; whole inheritance section.
 
-  {:name :_partial-mismatch-prov-inh-fn-name
+  {:name :_provenance-inh-fn-name
    :parent :get
    :args {:coll {:as :item} :key {:value :fn-name} :default ""}}
 
-  {:name :_partial-mismatch-prov-inh-fn-id
+  {:name :_provenance-inh-fn-id
    :parent :get
    :args {:coll {:as :item} :key {:value :fn-id} :default ""}}
 
-  {:name :_partial-mismatch-prov-inh-fn-id-text
+  {:name :_provenance-inh-fn-id-text
    :parent :to-str
-   :args {:value :_partial-mismatch-prov-inh-fn-id}}
+   :args {:value :_provenance-inh-fn-id}}
 
-  {:name :_partial-mismatch-prov-inh-row
+  {:name :_provenance-inh-row
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "type-inline-resolution-inheritance-row"}}
@@ -819,49 +819,49 @@
                                      :args {:map {:value {:class "type-inline-resolution-source"
                                                           :href "#"}}
                                             :key {:value :data-fn-id}
-                                            :value :_partial-mismatch-prov-inh-fn-id-text}}
-                             :children [:_partial-mismatch-prov-inh-fn-name]}}]}}
+                                            :value :_provenance-inh-fn-id-text}}
+                             :children [:_provenance-inh-fn-name]}}]}}
 
-  {:name :_partial-mismatch-prov-inh-rows
+  {:name :_provenance-inh-rows
    :parent :map
-   :args {:func :_partial-mismatch-prov-inh-row
-          :coll :_partial-mismatch-prov-inheritance}}
+   :args {:func :_provenance-inh-row
+          :coll :_provenance-inheritance}}
 
-  {:name :_partial-mismatch-prov-inh-count
+  {:name :_provenance-inh-count
    :parent :count
-   :args {:coll :_partial-mismatch-prov-inheritance}}
+   :args {:coll :_provenance-inheritance}}
 
-  {:name :_partial-mismatch-prov-inh-has?
+  {:name :_provenance-inh-has?
    :parent :gt
-   :args {:nums [:_partial-mismatch-prov-inh-count {:value 0}]}}
+   :args {:nums [:_provenance-inh-count {:value 0}]}}
 
-  {:name :_partial-mismatch-prov-inh-head
+  {:name :_provenance-inh-head
    :parent :const
    :args {:value [:div {:class "type-inline-resolution-head"} "Inherited via"]}}
 
-  {:name :_partial-mismatch-prov-inh-section
+  {:name :_provenance-inh-section
    :parent :if
-   :args {:test :_partial-mismatch-prov-inh-has?
+   :args {:test :_provenance-inh-has?
           :then {:parent :hiccup
                  :args {:tag {:value "div"}
                         :attrs {:value {:class "type-inline-resolution-inheritance"}}
-                        :children [:_partial-mismatch-prov-inh-head
-                                   :_partial-mismatch-prov-inh-rows]}}
+                        :children [:_provenance-inh-head
+                                   :_provenance-inh-rows]}}
           :else {:value [:span {:hidden "1"}]}}}
 
-  {:name :_partial-mismatch-prov-built
+  {:name :_provenance-built
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "type-inline-resolution"}}
-          :children [:_partial-mismatch-prov-inh-section
-                     :_partial-mismatch-prov-resolved-head
-                     :_partial-mismatch-prov-tier-rows]}}
+          :children [:_provenance-inh-section
+                     :_provenance-resolved-head
+                     :_provenance-tier-rows]}}
 
-  {:name :_partial-mismatch-prov-section
+  {:name :_provenance-section
    :description "Full provenance section — `.type-inline-resolution` wrapper with `Inherited via` chain (when non-empty) + `Resolved via` 4-tier rows. Hidden when no provenance (list-item rows / unresolved sites)."
    :parent :if
-   :args {:test :_partial-mismatch-prov-some?
-          :then :_partial-mismatch-prov-built
+   :args {:test :_provenance-some?
+          :then :_provenance-built
           :else {:value [:span {:hidden "1"}]}}}
 
   ;; STEP 4 — Edit-action button. The partial route is `:get-auth-
@@ -886,6 +886,14 @@
           :attrs {:value {:class "mismatch-explainer-actions"}}
           :children [:_partial-mismatch-edit-button]}}
 
+  ;; Thin wrapper that binds `:parsed` into the generic
+  ;; `:_provenance-section` chain. The prov chain reads `:parsed` as a
+  ;; free-arg so other partials (e.g. `/partials/provenance`) can share
+  ;; the same renderer with their own parsed-shape map.
+  {:name :_partial-mismatch-prov-section
+   :parent :_provenance-section
+   :args {:parsed :_partial-mismatch-parsed}}
+
   {:name :_partial-mismatch-fragment
    :description "Full popover hiccup — header + Expected + Got + Reason rows + diff-leaves + provenance section + Edit-action button, all server-rendered (steps 1-4 complete). JS post-swap binds click handlers on `[data-explainer-close]`, `[data-fn-id]` (provenance nav links), and `[data-edit-action]` (the Edit button → opens the inline value-edit popover)."
    :parent :hiccup
@@ -907,6 +915,61 @@
    :description "Ring handler for `GET /partials/mismatch-explainer?binding-id=X[&item-id=Y]` — returns the mismatch-explainer hiccup as `text/html`. STEP 1 of the JS→graph migration: replaces the JS-side validation + render with a server fetch reading the binding straight from DB. Provenance / diff-leaves / Edit button stay JS-side until steps 2-4."
    :parent :html-ok-response
    :args {:body :_partial-mismatch-html}}
+
+  ;; ---------------------------------------------------------------------
+  ;; provenance popover. The `↳` provenance badge on an arg-overlay's
+  ;; type-chip used to open a JS-built popover whose body was
+  ;; `appendResolutionSection(slotTypeProvenance(arg))` — the same
+  ;; chain the mismatch-explainer now renders server-side. Reusing
+  ;; the generic `_provenance-*` chain (extracted from mismatch's prov
+  ;; section), this partial wraps it in its own header so the
+  ;; standalone `↳`-trigger flow uses the same source of truth.
+  ;;
+  ;; URL: `GET /partials/provenance?binding-id=X[&item-id=Y]`.
+  ;; STEP 1 — header + Resolved-via section ONLY. Allowed-values
+  ;; (closed-enum refinement) + slot-effect-bound (fn-type eff) are
+  ;; step-2/3 of this migration.
+
+  {:name :_partial-provenance-parsed
+   :description "Same `:_value-form-parsed-shape` URL-param synth as `:_partial-mismatch-parsed` — `:fn-id` / `:slot-id` resolved server-side off the binding row, `:item-id` propagated for list-item rows."
+   :parent :zipmap
+   :args {:keys [{:value :binding-id} {:value :fn-id} {:value :slot-id} {:value :item-id}]
+          :vals [:_partial-mismatch-binding-id
+                 {:value nil}
+                 {:value nil}
+                 :_partial-mismatch-item-id]}}
+
+  {:name :_partial-provenance-prov-section
+   :description "Thin wrapper binding `:parsed` for the standalone provenance popover — shares the generic `_provenance-section` chain with `:_partial-mismatch-fragment`."
+   :parent :_provenance-section
+   :args {:parsed :_partial-provenance-parsed}}
+
+  {:name :_partial-provenance-header
+   :parent :const
+   :args {:value
+          [:div {:class "provenance-popover-header"}
+           [:span {:class "provenance-popover-title"} "Type narrowing"]
+           [:button {:type "button"
+                     :class "provenance-popover-close"
+                     :data-explainer-close "1"
+                     :aria-label "Close type narrowing popover"} "×"]]}}
+
+  {:name :_partial-provenance-fragment
+   :description "Full provenance popover hiccup — header + Resolved-via section. Allowed-values + Slot-effect-bound sections are step-2/3."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "provenance-popover-content"}}
+          :children [:_partial-provenance-header
+                     :_partial-provenance-prov-section]}}
+
+  {:name :_partial-provenance-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-provenance-fragment}}
+
+  {:name :_partial-provenance-handler
+   :description "Ring handler for `GET /partials/provenance?binding-id=X[&item-id=Y]` — returns the provenance popover hiccup as `text/html`. STEP 1 of the JS→graph migration: header + the shared `_provenance-section`. Steps 2-3 will add Allowed-values (closed-enum refinement member list) and Slot-effect-bound (`[:fn …]` eff constraint) sections."
+   :parent :html-ok-response
+   :args {:body :_partial-provenance-html}}
 
   ;; ---------------------------------------------------------------------
   ;; fn-versions popover (second migration). Pulls the existing

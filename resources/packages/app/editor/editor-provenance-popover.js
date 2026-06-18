@@ -72,51 +72,43 @@ function attachAndShow(anchorEl) {
   provenancePopoverAnchor = anchorEl;
 }
 
-function showProvenancePopover(arg, anchorEl) {
-  if (!arg || !anchorEl) return;
-  if (typeof slotTypeProvenance !== 'function'
-      || typeof appendResolutionSection !== 'function') return;
-  const prov = slotTypeProvenance(arg);
-  // No narrowing chain to show — bail rather than open an empty popover.
-  if (!prov?.winner) return;
-
-  const el = ensureProvenancePopoverEl();
-  el.textContent = '';
-
-  const head = document.createElement('div');
-  head.className = 'provenance-popover-header';
-  const titleEl = document.createElement('span');
-  titleEl.className = 'provenance-popover-title';
-  titleEl.textContent = 'Type narrowing';
-  head.appendChild(titleEl);
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.className = 'provenance-popover-close';
-  close.setAttribute('aria-label', 'Close type narrowing popover');
-  close.textContent = '×';
-  close.addEventListener('click', (e) => {
-    e.stopPropagation();
-    hideProvenancePopover();
-  });
-  head.appendChild(close);
-  el.appendChild(head);
-
-  // Reuses the shared 4-tier + inheritance-chain renderer; passing
-  // onNavigate makes ancestor / source-fn labels clickable links that
-  // select the owning fn-row and dismiss the popover.
-  appendResolutionSection(el, prov, {
-    onNavigate: (fnId) => {
-      if (typeof selectFn === 'function' && fnId) {
+// Post-swap binding for nav-links + close button. Same three-data-attr
+// pattern as mismatch-explainer: `[data-explainer-close]` for close,
+// `a[data-fn-id]` for provenance source-link navigation.
+function bindProvPopoverPostSwap(el) {
+  const close = el.querySelector('[data-explainer-close]');
+  if (close) {
+    close.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideProvenancePopover();
+    });
+  }
+  el.querySelectorAll('a[data-fn-id]').forEach((link) => {
+    const fnId = link.getAttribute('data-fn-id');
+    if (!fnId) return;
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof selectFn === 'function') {
         hideProvenancePopover();
         selectFn(fnId);
       }
-    },
+    });
   });
+}
 
-  // Closed-enum reveal — when the resolved slot type is a refinement
-  // pinning the value to a literal set (`[:refine kw [:in [...]]]`),
-  // surface the allowed values directly. Saves the reader from
-  // opening the inline `▸/▾` panel to discover the (often tiny) set.
+
+// JS-only sections (steps 2-3 will server-side these too):
+//   - Allowed-values for closed-enum refinements
+//   - Slot-effect-bound for `[:fn args ret eff]` types
+// Both depend on `slotTypeProvenance(arg).winner` type — kept JS-side
+// for now because the server partial returns rendered HTML, not the
+// raw provenance data the helpers need. Step 2/3 will move them into
+// the server fragment.
+function appendProvJsOnlySections(el, arg) {
+  if (typeof slotTypeProvenance !== 'function') return;
+  const prov = slotTypeProvenance(arg);
+  if (!prov?.winner) return;
   const winnerType = prov.tiers?.find(t => t.key === prov.winner)?.type;
   if (winnerType != null && typeof closedEnumOf === 'function') {
     const enumInfo = closedEnumOf(winnerType);
@@ -124,12 +116,6 @@ function showProvenancePopover(arg, anchorEl) {
       appendClosedEnumSection(el, enumInfo);
     }
   }
-
-  // Slot-effect constraint reveal — when the resolved slot type is a
-  // `[:fn args ret eff]` with a CONCRETE eff set (not `:any`), surface
-  // the constraint so the reader sees "this slot demands a pure
-  // callable" / "this slot allows only :env reads" without opening
-  // the inline `▸/▾` panel where the read-only effect row lives.
   if (Array.isArray(winnerType) && winnerType[0] === 'fn'
       && winnerType.length === 4 && winnerType[3] !== 'any'
       && winnerType[3] !== ':any'
@@ -140,7 +126,43 @@ function showProvenancePopover(arg, anchorEl) {
       : new Set([]);
     appendEffectConstraintSection(el, currentEff);
   }
+}
 
+
+// Fetch server-rendered popover (header + Resolved-via section) and
+// hydrate with JS-only sections. Migration step 1/3 — steps 2-3 move
+// Allowed-values + Slot-effect-bound server-side too.
+async function showProvenancePopover(arg, anchorEl) {
+  if (!arg || !anchorEl) return;
+  const bindingId = arg['binding-id'];
+  const itemId = arg['item-id'];
+  // Server partial requires a binding to read from DB. Skip when
+  // there's no binding-id (matches the original `!prov?.winner` bail).
+  if (!bindingId) return;
+  const params = new URLSearchParams({ 'binding-id': bindingId });
+  if (itemId) params.set('item-id', itemId);
+  let html;
+  try {
+    const r = await authFetch('/partials/provenance?' + params.toString());
+    if (!r.ok) return;
+    html = await r.text();
+  } catch (_) {
+    return;
+  }
+  // Server returns the popover shell unconditionally. When there's no
+  // narrowing chain to show (`:_provenance-some?` false), the resolved-
+  // via section degrades to a hidden span — the popover would be just
+  // a header. Skip showing in that case (same UX the original "bail
+  // on `!prov?.winner`" gave).
+  const probe = document.createElement('div');
+  probe.innerHTML = html;
+  const anyTier = probe.querySelector('.type-inline-resolution-tier');
+  if (!anyTier) return;
+
+  const el = ensureProvenancePopoverEl();
+  el.innerHTML = html;
+  bindProvPopoverPostSwap(el);
+  appendProvJsOnlySections(el, arg);
   attachAndShow(anchorEl);
 }
 

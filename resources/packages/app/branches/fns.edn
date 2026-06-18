@@ -27,14 +27,6 @@
    :return-type [:union :null :branch-row-shape]
    :effects #{:db}}
 
-  {:name :render-branch-popover-hiccup
-   :description "Body hiccup for the top-bar branch popover — the server-rendered replacement for `editor-branches.js renderBranchPopover` + `branchRowHtml`. Click handlers stay JS-side and read the same `data-branch-name` / `data-merge-source` / `data-diff-source` attrs this partial emits."
-   :args {:branches    {:type [:list :branch-row-shape]
-                        :description "Decoded `:branch` rows (`:_list-branches-rows`)."}
-          :current-name {:type :nullable-text
-                         :description "Name of the active branch. nil → falls back to `main`."}}
-   :return-type :hiccup-node}
-
   ;; ---------------------------------------------------------------------
   ;; GET /api/branches — list every branch row, ordered by created-at.
   ;; ---------------------------------------------------------------------
@@ -1663,10 +1655,409 @@
           :key {:value :name}
           :default nil}}
 
+  ;; ---------------------------------------------------------------------
+  ;; Per-row hiccup builders. Each is a HOF callback that runs once per
+  ;; branch via `:_bp-rows-hiccup :parent :map`. `{:as :item}` is the
+  ;; current branch row; `{:as :branches}` (closure-captured) is the
+  ;; full list so we can look up parents and detect children without
+  ;; an N+1 storage read; `{:as :current-name}` is the active-branch
+  ;; name (closure-captured) so each row knows whether it's the
+  ;; selected one.
+  ;;
+  ;; Decomposed from the previous `crud.branches/branch-row-hiccup`
+  ;; private helper that hid 4 conditionals + 3 button-visibility
+  ;; policies + symbol literals ("Δ" / "⇢" / "×") in Clojure. Each
+  ;; visual / policy decision is now an admin-tweakable graph step.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_bp-row-name
+   :parent :get
+   :args {:coll {:as :item} :key {:value :name} :default nil}}
+
+  {:name :_bp-row-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default nil}}
+
+  {:name :_bp-row-parent-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :base-branch-id} :default nil}}
+
+  {:name :_bp-row-on-current?
+   :parent :equal?
+   :args {:a :_bp-row-name :b {:as :current-name}}}
+
+  {:name :_bp-row-is-main?
+   :parent :equal?
+   :args {:a :_bp-row-name :b {:value "main"}}}
+
+  ;; Parent lookup — find the branch whose :id matches THIS row's
+  ;; :base-branch-id. O(n) per row but n=branch count is tiny.
+  {:name :_bp-row-is-parent?-cb
+   :description "HOF callback used by `:_bp-row-parent-row`'s `:filter`. `{:as :item}` here is a candidate branch from the outer list, NOT the current row — name collision is intentional: HOF callbacks are always passed the element via `:item`."
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
+          :b :_bp-row-parent-id}}
+
+  {:name :_bp-row-parent-matches
+   :parent :filter
+   :args {:pred :_bp-row-is-parent?-cb :coll {:as :branches}}}
+
+  {:name :_bp-row-parent-row
+   :parent :first
+   :args {:coll :_bp-row-parent-matches}}
+
+  {:name :_bp-row-parent-name
+   :parent :get
+   :args {:coll :_bp-row-parent-row :key {:value :name} :default nil}}
+
+  {:name :_bp-row-has-parent?
+   :parent :some?
+   :args {:value :_bp-row-parent-row}}
+
+  ;; "" when no parent, " forked from <name>" otherwise.
+  {:name :_bp-row-parent-text-shown
+   :parent :str
+   :args {:parts [{:value " forked from "} :_bp-row-parent-name]}}
+
+  {:name :_bp-row-parent-text
+   :parent :if
+   :args {:test :_bp-row-has-parent?
+          :then :_bp-row-parent-text-shown
+          :else {:value ""}}}
+
+  ;; has-children? — does any OTHER branch list THIS one as its
+  ;; parent? Same closure-capture pattern as parent lookup.
+  {:name :_bp-row-is-child-of-this?-cb
+   :parent :equal?
+   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :base-branch-id} :default nil}}
+          :b :_bp-row-id}}
+
+  {:name :_bp-row-children-matches
+   :parent :filter
+   :args {:pred :_bp-row-is-child-of-this?-cb :coll {:as :branches}}}
+
+  {:name :_bp-row-has-no-children?
+   :parent :empty?
+   :args {:coll :_bp-row-children-matches}}
+
+  {:name :_bp-row-has-children?
+   :parent :not
+   :args {:value :_bp-row-has-no-children?}}
+
+  ;; Delete-policy: × button shown unless this row is :main / has
+  ;; children / is the active branch. Three orthogonal protections —
+  ;; admin can reshape by re-wiring any predicate.
+  {:name :_bp-row-undeletable?
+   :parent :or
+   :args {:values [:_bp-row-is-main? :_bp-row-has-children? :_bp-row-on-current?]}}
+
+  {:name :_bp-row-deletable?
+   :parent :not
+   :args {:value :_bp-row-undeletable?}}
+
+  ;; --- Row class + aria attrs ---
+
+  {:name :_bp-row-class
+   :parent :if
+   :args {:test :_bp-row-on-current?
+          :then {:value "branch-row branch-row-current"}
+          :else {:value "branch-row"}}}
+
+  {:name :_bp-row-aria-selected
+   :parent :if
+   :args {:test :_bp-row-on-current?
+          :then {:value "true"}
+          :else {:value "false"}}}
+
+  {:name :_bp-row-attrs-1
+   :parent :assoc
+   :args {:map {:value {:role "option" :tabindex "0"}}
+          :key {:value :class}
+          :value :_bp-row-class}}
+
+  {:name :_bp-row-attrs-2
+   :parent :assoc
+   :args {:map :_bp-row-attrs-1
+          :key {:value :data-branch-name}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-attrs
+   :parent :assoc
+   :args {:map :_bp-row-attrs-2
+          :key {:value :aria-selected}
+          :value :_bp-row-aria-selected}}
+
+  ;; --- Children spans ---
+
+  {:name :_bp-row-name-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-row-name"}}
+          :children [:_bp-row-name]}}
+
+  {:name :_bp-row-tag-span-shown
+   :description "`<span class=\"branch-row-tag\">current</span>` — visible only on the active branch's row."
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-row-tag"}}
+          :children [{:value "current"}]}}
+
+  {:name :_bp-row-tag-span-hidden
+   :description "Empty hidden placeholder — keeps the children-vector shape uniform across rows so hiccup walks an evenly-shaped tree."
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-row-tag-placeholder" :hidden "1"}}
+          :children {:value []}}}
+
+  {:name :_bp-row-tag-span
+   :parent :if
+   :args {:test :_bp-row-on-current?
+          :then :_bp-row-tag-span-shown
+          :else :_bp-row-tag-span-hidden}}
+
+  {:name :_bp-row-meta-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-row-meta"}}
+          :children [:_bp-row-parent-text]}}
+
+  ;; --- Action buttons (Δ / ⇢ / ×) ---
+  ;; Per-button title + aria-label carry the row's name + the
+  ;; current-name so screen readers + tooltips read e.g.
+  ;; "Diff feat vs main". Each button is its own fn-def so admins
+  ;; can vary the label / glyph / class independently.
+
+  {:name :_bp-row-diff-title
+   :parent :str
+   :args {:parts [{:value "Show what differs between "}
+                  :_bp-row-name
+                  {:value " and "}
+                  {:as :current-name}]}}
+
+  {:name :_bp-row-diff-aria
+   :parent :str
+   :args {:parts [{:value "Diff "}
+                  :_bp-row-name
+                  {:value " vs "}
+                  {:as :current-name}]}}
+
+  {:name :_bp-row-diff-attrs-1
+   :parent :assoc
+   :args {:map {:value {:class "branch-row-diff"}}
+          :key {:value :data-diff-source}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-diff-attrs-2
+   :parent :assoc
+   :args {:map :_bp-row-diff-attrs-1
+          :key {:value :title}
+          :value :_bp-row-diff-title}}
+
+  {:name :_bp-row-diff-attrs
+   :parent :assoc
+   :args {:map :_bp-row-diff-attrs-2
+          :key {:value :aria-label}
+          :value :_bp-row-diff-aria}}
+
+  {:name :_bp-row-diff-btn-shown
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-diff-attrs
+          :children [{:value "Δ"}]}}
+
+  {:name :_bp-row-empty-placeholder
+   :description "Reusable hidden `<span hidden=\"1\">` placeholder for the three action-button slots when the row isn't eligible for that action. Keeps children-vector shape uniform; CSS-hidden so it takes no visual space."
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:hidden "1"}}
+          :children {:value []}}}
+
+  {:name :_bp-row-diff-btn
+   :parent :if
+   :args {:test :_bp-row-on-current?
+          :then :_bp-row-empty-placeholder
+          :else :_bp-row-diff-btn-shown}}
+
+  {:name :_bp-row-merge-title
+   :parent :str
+   :args {:parts [{:value "Merge "}
+                  :_bp-row-name
+                  {:value " INTO "}
+                  {:as :current-name}]}}
+
+  {:name :_bp-row-merge-aria
+   :parent :str
+   :args {:parts [{:value "Merge "}
+                  :_bp-row-name
+                  {:value " into "}
+                  {:as :current-name}]}}
+
+  {:name :_bp-row-merge-attrs-1
+   :parent :assoc
+   :args {:map {:value {:class "branch-row-merge"}}
+          :key {:value :data-merge-source}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-merge-attrs-2
+   :parent :assoc
+   :args {:map :_bp-row-merge-attrs-1
+          :key {:value :title}
+          :value :_bp-row-merge-title}}
+
+  {:name :_bp-row-merge-attrs
+   :parent :assoc
+   :args {:map :_bp-row-merge-attrs-2
+          :key {:value :aria-label}
+          :value :_bp-row-merge-aria}}
+
+  {:name :_bp-row-merge-btn-shown
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-merge-attrs
+          :children [{:value "⇢"}]}}
+
+  {:name :_bp-row-merge-btn
+   :parent :if
+   :args {:test :_bp-row-on-current?
+          :then :_bp-row-empty-placeholder
+          :else :_bp-row-merge-btn-shown}}
+
+  {:name :_bp-row-delete-aria
+   :parent :str
+   :args {:parts [{:value "Delete branch "} :_bp-row-name]}}
+
+  {:name :_bp-row-delete-attrs-1
+   :parent :assoc
+   :args {:map {:value {:class "branch-row-delete"
+                        :title "Delete branch"}}
+          :key {:value :data-branch-name}
+          :value :_bp-row-name}}
+
+  {:name :_bp-row-delete-attrs
+   :parent :assoc
+   :args {:map :_bp-row-delete-attrs-1
+          :key {:value :aria-label}
+          :value :_bp-row-delete-aria}}
+
+  {:name :_bp-row-delete-btn-shown
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs :_bp-row-delete-attrs
+          :children [{:value "×"}]}}
+
+  {:name :_bp-row-delete-btn
+   :parent :if
+   :args {:test :_bp-row-deletable?
+          :then :_bp-row-delete-btn-shown
+          :else :_bp-row-empty-placeholder}}
+
+  {:name :_bp-row-actions-span
+   :parent :hiccup
+   :args {:tag {:value "span"}
+          :attrs {:value {:class "branch-row-actions"}}
+          :children [:_bp-row-diff-btn :_bp-row-merge-btn :_bp-row-delete-btn]}}
+
+  ;; The full per-branch row — assembled via the named children.
+  {:name :_bp-row
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_bp-row-attrs
+          :children [:_bp-row-name-span :_bp-row-tag-span :_bp-row-meta-span :_bp-row-actions-span]}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Sort policy: main first, current second, rest alpha. Composite
+  ;; key `[rank name]` — clojure compares vectors lexicographically.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_bp-sort-is-main?
+   :parent :equal?
+   :args {:a :_bp-row-name :b {:value "main"}}}
+
+  {:name :_bp-sort-is-current?
+   :parent :equal?
+   :args {:a :_bp-row-name :b {:as :current-name}}}
+
+  {:name :_bp-sort-rank
+   :parent :cond
+   :args {:clauses [:_bp-sort-is-main?    {:value 0}
+                    :_bp-sort-is-current? {:value 1}
+                    {:value true}         {:value 2}]}}
+
+  {:name :_bp-sort-key
+   :parent :vec
+   :args {:coll [:_bp-sort-rank :_bp-row-name]}}
+
+  {:name :_bp-rows-sorted
+   :parent :sort-by
+   :args {:key-fn :_bp-sort-key
+          :coll {:as :branches}
+          :current-name {:as :current-name}}}
+
+  {:name :_bp-rows-hiccup
+   :parent :map
+   :args {:func :_bp-row
+          :coll :_bp-rows-sorted
+          :current-name {:as :current-name}
+          :branches {:as :branches}}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Top-level body — list + create form + error slot. Inputs:
+  ;; `:branches` (full decoded rows) + `:current-name` (active
+  ;; branch). Both flow in from the partial handler.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_bp-list-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-popover-list"
+                          :role "listbox"
+                          :aria-label "Branches"}}
+          :children :_bp-rows-hiccup}}
+
+  {:name :_bp-create-placeholder
+   :parent :str
+   :args {:parts [{:value "New branch name (forks from "}
+                  {:as :current-name}
+                  {:value ")"}]}}
+
+  {:name :_bp-create-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:id "branch-create-input"
+                                       :type "text"
+                                       :autocomplete "off"}}
+                         :key {:value :placeholder}
+                         :value :_bp-create-placeholder}}
+          :children {:value []}}}
+
+  {:name :_bp-create-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "branch-create-btn"
+                          :class "branch-popover-btn"}}
+          :children [{:value "Create"}]}}
+
+  {:name :_bp-create-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "branch-popover-create"}}
+          :children [:_bp-create-input :_bp-create-btn]}}
+
+  {:name :_bp-error-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:id "branch-popover-error"
+                          :class "branch-popover-error hidden"}}
+          :children {:value []}}}
+
   {:name :_partial-branch-popover-body
-   :description "Full hiccup for the popover body — list + create form + error slot."
-   :parent :render-branch-popover-hiccup
-   :args {:branches :_list-branches-rows
+   :description "Full hiccup for the popover body — list + create form + error slot. Pure-graph composition over `:_bp-*` chain; previously delegated to the `crud.branches/render-branch-popover-hiccup` Clojure helper (now removed per §3.3 — composition belongs in the graph)."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {}}
+          :children [:_bp-list-div :_bp-create-div :_bp-error-div]
+          :branches :_list-branches-rows
           :current-name :_partial-branch-popover-current-name}}
 
   {:name :_partial-branch-popover-html

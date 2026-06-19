@@ -187,7 +187,222 @@
             (swap! state update :in-progress-expansions disj in-progress-key)))))))
 
 
+;; ---------------------------------------------------------------------
+;; Migration target resolution — used by process-expanded-fn-impl to
+;; decide where a binding visualised on the expansion-root card should
+;; "migrate" to. Four resolution paths, all returning {:target fn-id
+;; :target-slot-id sid-or-nil :via tag}; see comments per branch for the
+;; case each one covers. Extracted (originally inline ~70 lines) so the
+;; orchestrator reads as a stage list, not a nested let.
+
+(defn- ancestor-ref-fn-id-index
+  "Build {descendant-fn-id → ref-id} where descendant-fn-id ranges
+   over each ancestor-ref's full inheritance chain. Lets the slot-
+   owner / PB' / fn-id-of-arg branches answer 'does any of these
+   fids appear inside an ancestor-ref's chain?' in O(1)."
+  [ancestor-refs lookups]
+  (into {}
+        (mapcat (fn [ref-arg]
+                  (let [chain (data/get-inheritance-chain* (:ref-id ref-arg) lookups)]
+                    (map (fn [fid] [fid (:ref-id ref-arg)]) chain))))
+        ancestor-refs))
+
+
+(defn- migration-via-pb-bridge
+  "PB' own-slots on a composed ancestor (e.g. `:router
+   :not-found-response`) carry `:source-slot-id` linking them to the
+   underlying base-fn slot (parser bridge, commit ffd07480). Walking
+   the source-slot-id chain finds the deep slot's owner — typically
+   a base-fn whose inheritance chain IS in `fn-id->ref-id-index` —
+   so the migration target falls out of the same fn-id-keyed lookup
+   the slot-owner branch uses. Records the deep slot-id so
+   `migrated-bindings-for-target` keys by the target's slot-id, not
+   the PB' own-slot id."
+  [sid fn-id->ref-id lookups]
+  (some (fn [chain-sid]
+          (let [chain-owner ((:slot-owner lookups) chain-sid)]
+            (when-let [target (some fn-id->ref-id
+                                    (data/get-inheritance-chain*
+                                      chain-owner lookups))]
+              {:target target :target-slot-id chain-sid :via :pb-bridge})))
+        (rest (renames/chain-source-slot-ids sid (:slot-map lookups)))))
+
+
+(defn- migration-via-free-arg-name
+  "FREE-ARG / use-site fallback (see memory
+   `expansion_substitution_model.md`, concrete failure pattern
+   2026-06-19). The slot-id-based paths only find a target when the
+   arg's slot is also a slot of an ancestor-ref. This branch
+   instead matches by NAME: if the arg's name appears in some
+   ancestor-ref's `deep-free-ext-names`, that ref is consuming the
+   binding through free-arg propagation and is the correct β-inline
+   target.
+
+   May return MULTIPLE targets — shared-arg case (the same name
+   read by N consumers ⇒ N edges to the same source node, matching
+   `let`-style binding visualisation)."
+  [arg ancestor-refs lookups]
+  (when-let [arg-kw (some-> (:arg-name arg) keyword)]
+    (->> ancestor-refs
+         (keep (fn [ref-arg]
+                 (let [ref-id (:ref-id ref-arg)]
+                   (when (and ref-id
+                              (some #{arg-kw}
+                                    (renames/deep-free-ext-names
+                                      ref-id lookups)))
+                     {:target ref-id :target-slot-id nil :via :free-arg}))))
+         (distinct))))
+
+
+(defn- migration-targets-for-arg
+  "Resolve migration targets for one arg in the expansion-root's
+   classified bucket. Returns a (possibly-empty) seq of
+   `{:target :target-slot-id :via}` records. The slot-id-based
+   branches (slot-owner / PB' / fn-id-of-arg) are tried in priority
+   order — first hit wins, each returns at most one target. If none
+   matches, falls through to `migration-via-free-arg-name` which may
+   return multiple targets (shared-arg)."
+  [arg arg-map fn-id->ref-id ancestor-refs lookups]
+  (when-let [a (get arg-map (:arg-id arg))]
+    (let [sid (:slot-id a)
+          slot-owner (some-> sid ((:slot-owner lookups)))
+          slot-target (or (when slot-owner
+                            (when-let [t (some fn-id->ref-id
+                                               (data/get-inheritance-chain*
+                                                 slot-owner lookups))]
+                              {:target t :target-slot-id nil
+                               :via :slot-owner}))
+                          (migration-via-pb-bridge sid fn-id->ref-id lookups)
+                          (when-let [t (some fn-id->ref-id
+                                             (data/get-inheritance-chain*
+                                               (:fn-id a) lookups))]
+                            {:target t :target-slot-id nil
+                             :via :fn-id-of-arg}))]
+      (if slot-target
+        [slot-target]
+        (seq (migration-via-free-arg-name arg ancestor-refs lookups))))))
+
+
+(defn- classify-arg-migrations
+  "Reduce over candidate args (level-0 refs/values + ancestor refs/
+   values) and group by migration target. Returns
+   `{:migrated {target-fn-id [arg+migration-meta …]}
+     :migrated-ids #{arg-id-of-each-migrated-arg}}`.
+
+   `:free-arg-migration true` is stamped on args that reached their
+   target via free-arg-name matching — process-expanded-fn-impl's
+   post-pass uses that flag to route them through the consumer-side
+   render (slot-id-keyed `migrated-bindings-for-target` can't
+   surface them because the consumer's surface slots don't carry the
+   caller's slot-id)."
+  [candidate-args arg-map fn-id->ref-id ancestor-refs lookups]
+  (reduce
+    (fn [acc arg]
+      (let [targets (migration-targets-for-arg
+                      arg arg-map fn-id->ref-id ancestor-refs lookups)
+            valid (->> targets
+                       (filter #(and (:target %)
+                                     (not= (:target %) (:ref-id arg))))
+                       (seq))]
+        (if valid
+          (-> (reduce (fn [a {:keys [target target-slot-id via]}]
+                        (update-in a [:migrated target] (fnil conj [])
+                                   (cond-> arg
+                                     target-slot-id (assoc :migrated-target-slot-id
+                                                           target-slot-id)
+                                     (= via :free-arg) (assoc :free-arg-migration true))))
+                      acc
+                      valid)
+              (update :migrated-ids conj (:arg-id arg)))
+          acc)))
+    {:migrated {} :migrated-ids #{}}
+    candidate-args))
+
+
+;; ---------------------------------------------------------------------
+;; Canonical visual ordering across an expansion-root's slot-set.
+
+(defn- canonical-sort-by-tier-position
+  "Stable-sort args by (deepest-ancestor-first, position-within-
+   that-ancestor). The 'deepest-ancestor' component puts inherited
+   slots from the OLDEST ancestor in the chain BEFORE newer
+   ancestors' own additions — so `:if`'s `:test :then :else`
+   (deepest, declaration-order) render before `:response-cache-
+   wrap`'s own `:base-handler`. The 'position' component preserves
+   each ancestor's `:args` map declaration order (encoded as
+   `:position` on the `fn-slot` row). Falls back to walk-order
+   (Long/MAX_VALUE rank) when slot/owner data is missing (test
+   fixtures, synth-args). Default-on — matches what authors
+   implicitly mean when they read the base-fn's `:args` declaration."
+  [args original-fn-id lookups]
+  (let [chain (data/get-inheritance-chain* original-fn-id lookups)
+        tier-of-fn (zipmap chain (range))
+        fn-slots-by-fn (:fn-slots-by-fn lookups)
+        slot-owner-fn (:slot-owner lookups)
+        arg-map* (:arg-map lookups)
+        position-of-fn-slot
+        (fn [fn-id slot-id]
+          (some (fn [fs] (when (= (:slot-id fs) slot-id) (:position fs)))
+                (get fn-slots-by-fn fn-id [])))]
+    (sort-by
+      (fn [arg]
+        (let [sid (or (:slot-id arg)
+                      (some-> (:arg-id arg) arg-map* :slot-id))
+              owner (some-> sid slot-owner-fn)
+              tier (get tier-of-fn owner)
+              pos (when (and owner sid)
+                    (position-of-fn-slot owner sid))]
+          ;; (-tier) so deeper ancestor (higher index in chain
+          ;; vector) sorts FIRST under ascending sort.
+          [(if tier (- tier) Long/MAX_VALUE)
+           (or pos Long/MAX_VALUE)]))
+      args)))
+
+
+;; ---------------------------------------------------------------------
+;; Migrated-bindings to leaf-bindings — slot-id-keyed channel that
+;; surfaces a migrated binding inside the target's render call.
+
+(defn- migrated-bindings-for-target
+  "Build `{slot-id → binding-shape}` from migration entries the
+   target receives. Keyed by `:migrated-target-slot-id` when PB'-
+   bridge migration recorded it (the deep slot in the target's
+   chain); otherwise by the source slot-id (legacy migrations where
+   source and target share the slot). The consumer's
+   `find-migrated` does `(get parent-bindings <slot-id>)`."
+  [args arg-map]
+  (reduce
+    (fn [b arg]
+      (let [source-sid (:slot-id (get arg-map (:arg-id arg)))
+            key-sid (or (:migrated-target-slot-id arg) source-sid)]
+        (if key-sid
+          (assoc b key-sid {:arg-name (:arg-name arg)
+                            :value (:value arg)
+                            :ref-id (:ref-id arg)
+                            :arg-id (:arg-id arg)
+                            :slot-id key-sid
+                            :fn-id (:fn-id (get arg-map (:arg-id arg)))})
+          b)))
+    {} args))
+
+
 (defn- process-expanded-fn-impl
+  "Render `original-fn-id` in expanded mode. Stages:
+
+   1. Classify args (level-0 / ancestor) by kind (ref/value/unset).
+   2. Resolve migration targets (slot-owner / PB' / fn-id-of-arg /
+      free-arg-name) — see `migration-targets-for-arg`.
+   3. Canonical-sort remaining (non-migrated) args.
+   4. Render level-0 children + unsets + values from this card.
+   5. Render ancestor-ref children, capturing each consumer's
+      node-id so step 6 can attach edges to them.
+   6. Free-arg β-inline pass: render free-arg-migrated bindings
+      from the consumer's node (where the use-site actually lives);
+      stamp consumer with `:deep-free-by-node` so the post-processor
+      can surface the `⇣` strip on the card.
+   7. Render ancestor unsets / values.
+
+   Returns the root node-id."
   [ctx original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns is-hof]
   (let [{:keys [state lookups fn-map arg-map inverse-source-map
                 parent-bound-terminals expansion-bindings]} ctx
@@ -201,7 +416,8 @@
         node-id (bh/add-fn-node state lookups original-fn-id is-root source-node-id source-arg-id)]
     (bh/add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
 
-    (let [raw-args (bh/collect-expanded-args lookups levels expand-set chain-bindings)
+    (let [;; Stage 1 — classify
+          raw-args (bh/collect-expanded-args lookups levels expand-set chain-bindings)
           all-args (filterv (fn [arg]
                               (if (= :unset (:kind arg))
                                 (not (bh/arg-determined? arg-map parent-bound-terminals (:arg-id arg)))
@@ -214,209 +430,24 @@
           level-0-refs (filter #(= (:kind %) :ref) level-0-args)
           level-0-values (filter #(= (:kind %) :value) level-0-args)
           level-0-unsets (filter #(= (:kind %) :unset) level-0-args)
-
           has-ancestor-refs (seq ancestor-refs)
 
-          fn-id->ancestor-ref-fn-id
-          (into {}
-                (mapcat (fn [ref-arg]
-                          (let [chain (data/get-inheritance-chain* (:ref-id ref-arg) lookups)]
-                            (map (fn [fid] [fid (:ref-id ref-arg)]) chain))))
-                ancestor-refs)
-
-          ;; PB' own-slots on a composed ancestor (e.g. `:router
-          ;; :not-found-response`) carry a `:source-slot-id` linking
-          ;; them to the underlying base-fn slot (parser bridge,
-          ;; commit ffd07480). Walking the source-slot-id chain
-          ;; finds the deep slot's owner — typically a base-fn whose
-          ;; inheritance chain IS in `fn-id->ancestor-ref-fn-id` —
-          ;; so the migration target falls out of the same fn-id-keyed
-          ;; lookup the slot-owner branch uses. We also record the
-          ;; deep slot-id so `migrated-bindings-for` can key by the
-          ;; target's slot-id (which `find-migrated` reads from the
-          ;; target card's classify), not the PB' own-slot id.
-          migration-target-via-pb-bridge
-          (fn [sid]
-            (some (fn [chain-sid]
-                    (let [chain-owner ((:slot-owner lookups) chain-sid)]
-                      (when-let [target (some fn-id->ancestor-ref-fn-id
-                                              (data/get-inheritance-chain*
-                                                chain-owner lookups))]
-                        {:target target :target-slot-id chain-sid})))
-                  (rest (renames/chain-source-slot-ids sid (:slot-map lookups)))))
-
-          ;; FREE-ARG / use-site fallback (see memory
-          ;; `expansion_substitution_model.md`, concrete failure
-          ;; pattern 2026-06-19). The three slot-id-based paths above
-          ;; only find a target when the arg's slot is also a slot
-          ;; (own / renamed / inherited) of an ancestor-ref. That
-          ;; misses free-arg propagation: the arg's NAME flows into
-          ;; the consumer's body as a free arg without ever becoming
-          ;; a slot of the consumer.
-          ;;
-          ;; Concrete case: `_app-cached` binds `:base-handler
-          ;; :_app-encoded`. `:base-handler`'s slot-owner is
-          ;; `:response-cache-wrap` (declarer); ancestor-refs after
-          ;; the `:if` expand are `:_cache-hit?`, `:_cached-response`,
-          ;; `:_fresh-with-maybe-store`; none of those have
-          ;; `:response-cache-wrap` in their inheritance chain. But
-          ;; `:_fresh-with-maybe-store`'s body READS `:base-handler`
-          ;; as a free arg (cache-miss invokes the handler), so its
-          ;; `deep-free-ext-names` set contains `:base-handler`. The
-          ;; correct β-inline substitutes `:_app-encoded` at the
-          ;; use-site → an edge from `_fresh-with-maybe-store`, not
-          ;; from the root card.
-          ;;
-          ;; SHARED-arg semantics: if multiple ancestor-refs read the
-          ;; same name (e.g. `:cached-response` ALSO invokes the
-          ;; handler), each becomes a migration target — the source
-          ;; node ends up shared with one incoming edge per consumer,
-          ;; matching `let`-style binding visualisation.
-          free-arg-targets
-          (fn [arg]
-            ;; `:arg-name` on a layout arg is the string slot.name
-            ;; (post-rename); `deep-free-ext-names` returns an
-            ;; ordered seq of keywords (the runtime fa map's keys).
-            ;; Keyword-convert for comparison; skip when arg-name is
-            ;; missing (item rows sometimes have nil).
-            (when-let [arg-kw (some-> (:arg-name arg) keyword)]
-              (->> ancestor-refs
-                   (keep (fn [ref-arg]
-                           (let [ref-id (:ref-id ref-arg)]
-                             (when (and ref-id
-                                        (some #{arg-kw}
-                                              (renames/deep-free-ext-names
-                                                ref-id lookups)))
-                               {:target ref-id :target-slot-id nil}))))
-                   (distinct))))
-
-          migration-targets-for
-          (fn [arg]
-            (when-let [a (get arg-map (:arg-id arg))]
-              (let [sid (:slot-id a)
-                    slot-owner (some-> sid ((:slot-owner lookups)))
-                    ;; Existing slot-id-based paths — each returns at
-                    ;; most one target. They handle the slot-owner /
-                    ;; PB' / fn-id-of-arg cases that pre-dated
-                    ;; use-site migration. Tried in priority order;
-                    ;; first hit wins (slot-identity is more specific
-                    ;; than name-match).
-                    slot-target (or (when slot-owner
-                                      (when-let [t (some fn-id->ancestor-ref-fn-id
-                                                         (data/get-inheritance-chain*
-                                                           slot-owner lookups))]
-                                        {:target t :target-slot-id nil
-                                         :via :slot-owner}))
-                                    (some-> (migration-target-via-pb-bridge sid)
-                                            (assoc :via :pb-bridge))
-                                    (when-let [t (some fn-id->ancestor-ref-fn-id
-                                                       (data/get-inheritance-chain*
-                                                         (:fn-id a) lookups))]
-                                      {:target t :target-slot-id nil
-                                       :via :fn-id-of-arg}))]
-                (if slot-target
-                  [slot-target]
-                  ;; Use-site fallback. May return MULTIPLE targets
-                  ;; (shared-arg) — every matching ancestor-ref gets
-                  ;; the binding migrated in so its sub-tree renders
-                  ;; the edge from the consumer side.
-                  (seq (map #(assoc % :via :free-arg)
-                            (free-arg-targets arg)))))))
-
-          classified
-          (reduce
-            (fn [acc arg]
-              (let [targets (migration-targets-for arg)
-                    valid (->> targets
-                               (filter #(and (:target %)
-                                             (not= (:target %) (:ref-id arg))))
-                               (seq))]
-                (if valid
-                  (-> (reduce (fn [a {:keys [target target-slot-id via]}]
-                                (update-in a [:migrated target] (fnil conj [])
-                                           (cond-> arg
-                                             target-slot-id (assoc :migrated-target-slot-id
-                                                                   target-slot-id)
-                                             (= via :free-arg) (assoc :free-arg-migration true))))
-                              acc
-                              valid)
-                      (update :migrated-ids conj (:arg-id arg)))
-                  acc)))
-            {:migrated {} :migrated-ids #{}}
+          ;; Stage 2 — migration target resolution
+          fn-id->ref-id (ancestor-ref-fn-id-index ancestor-refs lookups)
+          {:keys [migrated migrated-ids]}
+          (classify-arg-migrations
             (concat level-0-refs level-0-values
-                    ancestor-refs ancestor-values))
+                    ancestor-refs ancestor-values)
+            arg-map fn-id->ref-id ancestor-refs lookups)
+          not-migrated (fn [coll] (remove #(contains? migrated-ids (:arg-id %)) coll))
 
-          migrated-by-ref (:migrated classified)
-          migrated-id?    (:migrated-ids classified)
-          not-migrated    (fn [coll]
-                            (remove #(contains? migrated-id? (:arg-id %))
-                                    coll))
-
-          ;; Canonical visual order across the slot-set of a card:
-          ;; sort by (deepest-ancestor-first, position-within-that-
-          ;; ancestor). The "deepest-ancestor" component puts inherited
-          ;; slots from the OLDEST ancestor in the chain before the
-          ;; newer ancestors' own additions — so `:if`'s `:test :then
-          ;; :else` (deepest, declaration-order) come before
-          ;; `:response-cache-wrap`'s own `:base-handler`. The
-          ;; "position-within-ancestor" component preserves each
-          ;; ancestor's `:args` map declaration order (already stored
-          ;; on the `fn-slot` row as `:position`). Falls back to walk
-          ;; order when slot/owner data is missing (test fixtures,
-          ;; synth-args). Default-on — matches what authors implicitly
-          ;; expect when they read the base-fn's `:args` declaration.
-          chain-of-original
-          (data/get-inheritance-chain* original-fn-id lookups)
-          tier-of-fn (zipmap chain-of-original (range))
-          fn-slots-by-fn (:fn-slots-by-fn lookups)
-          slot-owner-fn (:slot-owner lookups)
-          arg-map* (:arg-map lookups)
-          position-of-fn-slot
-          (fn [fn-id slot-id]
-            (some (fn [fs] (when (= (:slot-id fs) slot-id) (:position fs)))
-                  (get fn-slots-by-fn fn-id [])))
-          canonical-sort-key
-          (fn [arg]
-            (let [sid (or (:slot-id arg)
-                          (some-> (:arg-id arg) arg-map* :slot-id))
-                  owner (some-> sid slot-owner-fn)
-                  tier (get tier-of-fn owner)
-                  pos (when (and owner sid)
-                        (position-of-fn-slot owner sid))]
-              ;; (-tier) so deeper ancestor (higher index in chain
-              ;; vector) sorts FIRST under ascending sort. Missing
-              ;; tier/pos → last (treat as opaque, preserve original
-              ;; relative order via stable-sort).
-              [(if tier (- tier) Long/MAX_VALUE)
-               (or pos Long/MAX_VALUE)]))
-          canonical-sort (fn [coll] (sort-by canonical-sort-key coll))
-
-          level-0-stay         (canonical-sort
-                                 (not-migrated (concat level-0-refs
-                                                       level-0-values)))
-          ancestor-refs-stay   (canonical-sort (not-migrated ancestor-refs))
-          ancestor-values-stay (canonical-sort (not-migrated ancestor-values))
-
-          migrated-bindings-for
-          (fn [args]
-            (reduce
-              (fn [b arg]
-                ;; Key by the target's slot-id when migration was via
-                ;; name-match (PB' own-slot → underlying same-named
-                ;; slot in the target's chain). Falls back to source
-                ;; slot-id for legacy migrations where source and
-                ;; target share the slot.
-                (let [source-sid (:slot-id (get arg-map (:arg-id arg)))
-                      key-sid (or (:migrated-target-slot-id arg) source-sid)]
-                  (if key-sid
-                    (assoc b key-sid {:arg-name (:arg-name arg)
-                                      :value (:value arg)
-                                      :ref-id (:ref-id arg)
-                                      :arg-id (:arg-id arg)
-                                      :slot-id key-sid
-                                      :fn-id (:fn-id (get arg-map (:arg-id arg)))})
-                    b)))
-              {} args))]
+          ;; Stage 3 — canonical sort the staying args
+          sort-it (fn [coll]
+                    (canonical-sort-by-tier-position coll original-fn-id lookups))
+          level-0-stay         (sort-it (not-migrated (concat level-0-refs
+                                                              level-0-values)))
+          ancestor-refs-stay   (sort-it (not-migrated ancestor-refs))
+          ancestor-values-stay (sort-it (not-migrated ancestor-values))]
 
       (swap! expansion-bindings assoc original-fn-id
              {:has-ancestor-refs has-ancestor-refs})
@@ -447,23 +478,23 @@
                   (bh/add-unset-arg-node state lookups inverse-source-map
                                          (:arg-name arg) (:arg-type arg)
                                          (:arg-id arg) node-id expand-set is-hof))))]
+
+        ;; Stage 4 — level-0 children
         (doseq [arg (filter #(= (:kind %) :ref) level-0-stay)]
           (process-any-fn ctx (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set (bh/child-hof arg-map (:arg-id arg) is-hof)))
-
         (doseq [arg level-0-unsets] (render-unset arg))
-
         (doseq [arg (filter #(= (:kind %) :value) level-0-stay)]
           (bh/add-arg-value-node state lookups arg node-id expand-set))
 
-        (let [;; Render each ancestor-ref child + capture its node-id
-              ;; so the free-arg migration pass below can attach edges
-              ;; to the consumer node.
-              consumer-node-ids
+        ;; Stage 5 — ancestor-ref children + capture consumer node-ids
+        ;; for stage 6
+        (let [consumer-node-ids
               (into {}
                     (for [arg ancestor-refs-stay]
                       (let [ref-target-id (:ref-id arg)
-                            migrated-to-this-ref (get migrated-by-ref ref-target-id [])
-                            leaf-bindings (migrated-bindings-for migrated-to-this-ref)
+                            migrated-to-this-ref (get migrated ref-target-id [])
+                            leaf-bindings (migrated-bindings-for-target
+                                            migrated-to-this-ref arg-map)
                             child-node-id (process-any-fn ctx ref-target-id node-id
                                                           (:arg-name arg) false leaf-bindings
                                                           (:arg-id arg)
@@ -471,19 +502,19 @@
                                                           (bh/child-hof arg-map (:arg-id arg) is-hof))]
                         [ref-target-id child-node-id])))]
 
-          ;; Free-arg β-inline pass: for each migrated binding tagged
-          ;; `:free-arg-migration`, render its ref-target as a child
-          ;; of the CONSUMER node (the ancestor-ref whose deep-free
-          ;; reads the arg-name). The slot-id-keyed leaf-bindings
-          ;; channel can't surface these because the consumer's
-          ;; surface slots don't carry the free-arg's slot-id —
-          ;; an explicit `process-any-fn` from the consumer's
-          ;; node is the equivalent of "the substituted body now
-          ;; references _app-encoded at this use-site". Shared-arg
-          ;; case (consumer set > 1) falls out — one extra
-          ;; `process-any-fn` per consumer, all targeting the same
-          ;; ref-id, dedup'd at the node level by the standard
-          ;; shared-node machinery.
+          ;; Stage 6 — free-arg β-inline post-pass.
+          ;; For each migrated binding tagged `:free-arg-migration`,
+          ;; render its ref-target as a child of the CONSUMER node
+          ;; (the ancestor-ref whose deep-free reads the arg-name).
+          ;; The slot-id-keyed leaf-bindings channel can't surface
+          ;; these because the consumer's surface slots don't carry
+          ;; the free-arg's slot-id — an explicit `process-any-fn`
+          ;; from the consumer's node is the equivalent of "the
+          ;; substituted body now references _app-encoded at this
+          ;; use-site". Shared-arg case (consumer set > 1) falls out
+          ;; — one extra `process-any-fn` per consumer, all
+          ;; targeting the same ref-id, dedup'd at the node level by
+          ;; the standard shared-node machinery.
           ;;
           ;; Each consumer also gets a `:deep-free-by-node` entry —
           ;; the post-processor turns those into the `⇣` strip on
@@ -492,7 +523,7 @@
           ;; accepts X as a free arg propagated to my body", which
           ;; misleads readers into thinking the slot must live on
           ;; one of the visible ancestor rows.
-          (doseq [[target migrated-args] migrated-by-ref
+          (doseq [[target migrated-args] migrated
                   arg migrated-args
                   :when (:free-arg-migration arg)
                   :let [consumer-node-id (get consumer-node-ids target)]
@@ -506,8 +537,8 @@
                      [:deep-free-by-node consumer-node-id]
                      (fnil conj #{}) nm))))
 
+        ;; Stage 7 — ancestor unsets / values
         (doseq [arg ancestor-unsets] (render-unset arg))
-
         (doseq [arg ancestor-values-stay]
           (bh/add-arg-value-node state lookups arg node-id expand-set))))
 

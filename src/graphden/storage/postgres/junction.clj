@@ -13,10 +13,23 @@
    The user-facing API treats the field as a vector of UUIDs - this namespace
    handles the translation between vector form and junction rows."
   (:require
-    [clojure.string :as str]
     [graphden.storage.postgres.ddl :as ddl]
     [graphden.storage.postgres.util :as util]
+    [honey.sql :as sql]
     [next.jdbc :as jdbc]))
+
+
+(defn- insert-junction-sql
+  "HoneySQL-generated SQL string for the per-row INSERT, with three
+   `?` placeholders for owner_id / target_id / ord. Used as the
+   prepared-statement template for `jdbc/execute-batch!`; the parent
+   passes the rows separately so JDBC's batch API stays in play."
+  [jt]
+  (first (sql/format {:insert-into [(keyword jt)]
+                      :columns [:owner_id :target_id :ord]
+                      ;; Placeholders — values discarded; we want
+                      ;; the `(?, ?, ?)` SQL shape only.
+                      :values [[0 0 0]]})))
 
 
 (defn ref-many-fields
@@ -63,7 +76,7 @@
       (util/with-sql-error-handling "Database error" :insert-junction
                                     {:entity-name entity-name :field-name field-name :owner-id owner-id}
                                     (jdbc/execute-batch! ds
-                                                         (str "INSERT INTO \"" jt "\" (owner_id, target_id, ord) VALUES (?, ?, ?)")
+                                                         (insert-junction-sql jt)
                                                          rows
                                                          {})))))
 
@@ -74,7 +87,8 @@
   (let [jt (ddl/junction-table-name entity-name field-name)]
     (util/with-sql-error-handling "Database error" :delete-junction
                                   {:entity-name entity-name :field-name field-name :owner-id owner-id}
-                                  (jdbc/execute! ds [(str "DELETE FROM \"" jt "\" WHERE owner_id = ?") owner-id]))))
+                                  (jdbc/execute! ds (sql/format {:delete-from [(keyword jt)]
+                                                                 :where [:= :owner_id owner-id]})))))
 
 
 (defn read-junction-rows
@@ -84,7 +98,10 @@
     (util/with-sql-error-handling "Database error" :read-junction
                                   {:entity-name entity-name :field-name field-name :owner-id owner-id}
                                   (let [rows (jdbc/execute! ds
-                                                            [(str "SELECT target_id FROM \"" jt "\" WHERE owner_id = ? ORDER BY ord") owner-id]
+                                                            (sql/format {:select [:target_id]
+                                                                         :from [(keyword jt)]
+                                                                         :where [:= :owner_id owner-id]
+                                                                         :order-by [:ord]})
                                                             (util/query-opts))]
                                     ;; query-opts uses :as-unqualified-lower-maps which converts underscore to underscore
                                     ;; (NOT to kebab-case), so column "target_id" becomes :target_id
@@ -103,7 +120,9 @@
     (util/with-sql-error-handling "Database error" :read-junction-owners
                                   {:entity-name entity-name :field-name field-name :target-id target-id}
                                   (let [rows (jdbc/execute! ds
-                                                            [(str "SELECT DISTINCT owner_id FROM \"" jt "\" WHERE target_id = ?") target-id]
+                                                            (sql/format {:select-distinct [:owner_id]
+                                                                         :from [(keyword jt)]
+                                                                         :where [:= :target_id target-id]})
                                                             (util/query-opts))]
                                     (mapv :owner_id rows)))))
 
@@ -115,10 +134,10 @@
   (if (empty? owner-ids)
     {}
     (let [jt (ddl/junction-table-name entity-name field-name)
-          placeholders (str/join "," (repeat (count owner-ids) "?"))
-          query (into [(str "SELECT owner_id, target_id FROM \"" jt
-                            "\" WHERE owner_id IN (" placeholders ") ORDER BY owner_id, ord")]
-                      owner-ids)]
+          query (sql/format {:select [:owner_id :target_id]
+                             :from [(keyword jt)]
+                             :where [:in :owner_id (vec owner-ids)]
+                             :order-by [:owner_id :ord]})]
       (util/with-sql-error-handling "Database error" :read-junction-batch
                                     {:entity-name entity-name :field-name field-name}
                                     (let [rows (jdbc/execute! ds query (util/query-opts))]
@@ -182,7 +201,7 @@
                                       {:entity-name entity-name :field-name field-name
                                        :owner-count (count owner->targets)}
                                       (jdbc/execute-batch! ds
-                                                           (str "INSERT INTO \"" jt "\" (owner_id, target_id, ord) VALUES (?, ?, ?)")
+                                                           (insert-junction-sql jt)
                                                            rows
                                                            {}))))))
 
@@ -192,9 +211,8 @@
   [ds entity-name field-name owner-ids]
   (when (seq owner-ids)
     (let [jt (ddl/junction-table-name entity-name field-name)
-          placeholders (str/join "," (repeat (count owner-ids) "?"))
-          query (into [(str "DELETE FROM \"" jt "\" WHERE owner_id IN (" placeholders ")")]
-                      owner-ids)]
+          query (sql/format {:delete-from [(keyword jt)]
+                             :where [:in :owner_id (vec owner-ids)]})]
       (util/with-sql-error-handling "Database error" :delete-junction-batch
                                     {:entity-name entity-name :field-name field-name
                                      :owner-count (count owner-ids)}

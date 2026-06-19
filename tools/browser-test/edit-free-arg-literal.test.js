@@ -6,7 +6,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, synthArgs, deleteFnByName} =
+const {assert, newContext, api, getEntities, synthArgs, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 const TEST_NAME = 'test-free-arg-literal';
@@ -62,16 +62,22 @@ const TEST_NAME = 'test-free-arg-literal';
       return {clicked: true};
     });
     assert(!litClicked.error, litClicked.error || 'literal button clicked');
-    await page.waitForTimeout(250);
+    // Value-form is fetched async from /api/value-form — wait for the
+    // input to mount rather than a fixed timeout. The host opens
+    // synchronously (`.value-form-host` + `.value-form-loading`
+    // visible immediately) but `.arg-value-edit-input` appears only
+    // after the fetch resolves.
+    const formReady = await waitFor(
+      () => page.evaluate(() => !!document.querySelector('.arg-value-edit-input')),
+      3000);
+    assert(formReady, 'value-edit input rendered');
 
-    // The value-edit popover should be open with the "Expected: text"
-    // hint already shown.
     const hintProbe = await page.evaluate(() => {
       const h = document.querySelector('.arg-value-edit-hint');
       const i = document.querySelector('.arg-value-edit-input');
       return {hint: h && h.textContent, hasInput: !!i};
     });
-    assert(hintProbe.hasInput, 'value-edit input rendered');
+    assert(hintProbe.hasInput, 'value-edit input rendered (post-waitFor)');
     assert(/Expected.*text/i.test(hintProbe.hint || ''),
            'hint reads "Expected: text" (the slot type from str-len): '
            + JSON.stringify(hintProbe.hint));
@@ -101,13 +107,20 @@ const TEST_NAME = 'test-free-arg-literal';
       Array.from(document.querySelectorAll('.arg-value-edit-buttons .arg-value-edit-btn'))
         .find(b => b.textContent.trim() === 'Save').click();
     });
-    await page.waitForTimeout(2000);
-
-    // Storage now has value="hello" on the inheriting binding.
-    const after = await getEntities(page);
-    const ownBinding = (after.bindings || []).find(
-      b => b['fn-id'] === fn.id && b['slot-id'] === stringArg['slot-id']);
-    assert(ownBinding && ownBinding.value === 'hello',
+    // Save is a POST to /api/entities/binding followed by initGraph
+    // which refetches the editor's lookups; poll for the binding row
+    // instead of a fixed 2s wait — under load (full e2e parallel
+    // pressure on docker), the save+refetch chain can exceed 2s and
+    // the original `waitForTimeout(2000)` produced a flake on cold
+    // cache.
+    let ownBinding;
+    const bound = await waitFor(async () => {
+      const after = await getEntities(page);
+      ownBinding = (after.bindings || []).find(
+        b => b['fn-id'] === fn.id && b['slot-id'] === stringArg['slot-id']);
+      return ownBinding && ownBinding.value === 'hello';
+    }, 5000);
+    assert(bound,
            'binding.value === "hello" after save: ' + JSON.stringify(ownBinding));
   } finally {
     await deleteFnByName(page, TEST_NAME).catch(() => {});

@@ -44,8 +44,8 @@ const {assert, newContext} = require('./edit-test-helpers');
     });
     assert(!probe.error, probe.error || 'probe ok');
     const tags = probe.chips.map(c => c.text).sort();
-    assert(JSON.stringify(tags) === JSON.stringify(['db', 'env', 'io', 'network', 'process', 'time']),
-           'web-server chips show all six categories: ' + JSON.stringify(tags));
+    assert(JSON.stringify(tags) === JSON.stringify(['db', 'env', 'io', 'network', 'process', 'state', 'time']),
+           'web-server chips show all seven categories (incl. :state from http-server wrap): ' + JSON.stringify(tags));
     for (const c of probe.chips) {
       assert(c.cls.includes('effects-chip-' + c.text),
              'chip "' + c.text + '" has matching colour class');

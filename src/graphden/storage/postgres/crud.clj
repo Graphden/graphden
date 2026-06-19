@@ -2,7 +2,6 @@
   "CRUD operations for PostgreSQL storage.
    Generic entity operations for create, read, update, delete, query."
   (:require
-    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.errors :as errors]
@@ -358,10 +357,9 @@
 
 (defn- build-batch-update-sql
   "Assemble the `UPDATE … FROM (VALUES …)` JDBC tuple for a batch
-   UPDATE. Pure SQL-string construction — extracted from
+   UPDATE. Pure HoneySQL composition — extracted from
    `update-entities` so the parent function reads as the
-   orchestrator (validate → build → execute → verify → junctions)
-   rather than 40 lines of string interpolation.
+   orchestrator (validate → build → execute → verify → junctions).
 
    Returns `[sql-string param1 param2 …]` suitable for `batch-execute!`.
 
@@ -374,39 +372,31 @@
      the `SET` clause."
   [table-name-str rows columns update-columns]
   (let [values (batch-row-values rows columns)
-        ;; PostgreSQL needs explicit type casts for UUID + non-string scalars
-        ;; in the VALUES clause; types/core's standard primitives map to
-        ;; the four PG casts below.
+        ;; PostgreSQL needs explicit type casts for UUID + non-string
+        ;; scalars in the VALUES clause; nil cast = pass through (text
+        ;; / numeric columns infer correctly without help).
         column-types (mapv #(column-type-cast % rows) columns)
-        ;; JDBC uses `?` placeholders, not PostgreSQL's `$N`.
-        values-sql (str "VALUES "
-                        (str/join
-                          ", "
-                          (map (fn [row-vals]
-                                 (str "("
-                                      (str/join
-                                        ", "
-                                        (map-indexed
-                                          (fn [col-idx _v]
-                                            (if-let [type-cast (get column-types col-idx)]
-                                              (str "?::" type-cast)
-                                              "?"))
-                                          row-vals))
-                                      ")"))
-                               values)))
-        col-aliases (str/join ", " (map #(str "\"" (name %) "\"") columns))
-        set-clause (str/join
-                     ", "
-                     (map #(let [col-str (str "\"" (name %) "\"")]
-                             (str col-str " = v." col-str))
-                          update-columns))
-        sql (str "UPDATE \"" table-name-str "\" AS t SET "
-                 set-clause
-                 " FROM (" values-sql ") AS v(" col-aliases ")"
-                 " WHERE t.\"id\" = v.\"id\""
-                 " RETURNING t.*")
-        params (vec (mapcat identity values))]
-    (into [sql] params)))
+        apply-cast (fn [v cast-type]
+                     (if cast-type [:cast v (keyword cast-type)] v))
+        value-rows (mapv (fn [row]
+                           (mapv apply-cast row column-types))
+                         values)
+        ;; SET col = v.col for each updatable column.
+        set-clause (into {}
+                         (map (fn [c] [c (keyword "v" (name c))]))
+                         update-columns)
+        col-aliases (mapv #(keyword (name %)) columns)]
+    ;; `:quoted true` — `user` / `order` / other entity names are PG
+    ;; reserved words; without quoting the unqualified table-name
+    ;; aborts the statement. Matches the original raw-SQL behavior
+    ;; which manually wrapped table-name in `"..."`.
+    (sql/format {:update [(keyword table-name-str) :t]
+                 :set set-clause
+                 :from [[{:values value-rows}
+                         [:v {:columns col-aliases}]]]
+                 :where [:= :t.id :v.id]
+                 :returning [:t.*]}
+                {:quoted true})))
 
 
 (defn update-entities

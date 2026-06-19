@@ -1121,3 +1121,90 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #":opts must be a map"
               (sp/query-entities storage :user {} [:not :a :map]))))
       (finally (sp/close storage)))))
+
+
+;; === build-batch-update-sql — per-cell PG type cast sentinels ===
+
+(deftest batch-update-entities-timestamptz-field-test
+  (testing "update-entities — :timestamptz column triggers per-cell CAST AS TIMESTAMPTZ"
+    ;; Sentinel for the `instance? java.time.Instant` branch of
+    ;; `column-type-cast`. boolean is already covered above; uuid
+    ;; + bigint exercised indirectly via :id and integer fields,
+    ;; but timestamptz had no direct test before the HoneySQL
+    ;; migration — without the cast, JDBC would bind `Instant` as
+    ;; the wrong PG type and a future-`org.postgresql.util.PSQLException`
+    ;; "could not infer column type" would slip through.
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema
+                   :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                   :type :text}
+                            :last-seen {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                        :type :timestamptz :nullable? true}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          t1 (java.time.Instant/parse "2026-01-01T00:00:00Z")
+          t2 (java.time.Instant/parse "2026-06-19T12:00:00Z")
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+          _ (sp/create-entity storage :user {:id id2 :name "Bob"})
+          results (sp/update-entities storage :user
+                                      [{:id id1 :last-seen t1}
+                                       {:id id2 :last-seen t2}])]
+      (try
+        (is (= 2 (count results)))
+        ;; Read-back may surface as Instant or Timestamp depending on
+        ;; codec decode; what we're actually testing is that the
+        ;; batch UPDATE survived (no "expression is of type text"
+        ;; error from PG inferring the wrong parameter type) AND
+        ;; round-tripped the EPOCH value.
+        (let [r1 (:last-seen (sp/read-entity storage :user id1))
+              r2 (:last-seen (sp/read-entity storage :user id2))
+              ->epoch (fn [v]
+                        (cond
+                          (instance? java.time.Instant v) (.toEpochMilli ^java.time.Instant v)
+                          (instance? java.sql.Timestamp v) (.getTime ^java.sql.Timestamp v)))]
+          (is (= (.toEpochMilli t1) (->epoch r1))
+              "row 1 :last-seen round-trips to the same epoch ms")
+          (is (= (.toEpochMilli t2) (->epoch r2))
+              "row 2 :last-seen round-trips to the same epoch ms"))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest batch-update-entities-partial-column-coverage-test
+  (testing "update-entities — heterogeneous batch (row A updates :name, row B updates :bio)"
+    ;; Exercises `collect-batch-columns` + per-cell nil handling.
+    ;; Each row provides a different column; the resulting VALUES
+    ;; clause must NULL-fill the column the row doesn't supply, AND
+    ;; `column-type-cast`'s "first non-nil sample" must look past
+    ;; the missing row to find the type. Without the migration's
+    ;; correctness this either errors on missing key or pins the
+    ;; wrong PG cast.
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema
+                   :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                   :type :text :nullable? true}
+                            :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                  :type :text :nullable? true}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice" :bio "dev"})
+          _ (sp/create-entity storage :user {:id id2 :name "Bob"   :bio "ops"})
+          ;; Row 1 updates :name only; Row 2 updates :bio only.
+          results (sp/update-entities storage :user
+                                      [{:id id1 :name "Alice2"}
+                                       {:id id2 :bio "ops2"}])]
+      (try
+        (is (= 2 (count results)))
+        ;; Each row's untouched field is overwritten to nil by the
+        ;; batch UPDATE (current semantics — the entire row gets
+        ;; rewritten from the merged column set, not delta-patched).
+        (let [r1 (sp/read-entity storage :user id1)
+              r2 (sp/read-entity storage :user id2)]
+          (is (= "Alice2" (:name r1)) "row 1 :name updated")
+          (is (nil? (:bio r1)) "row 1 :bio NULL'd (no supplied value)")
+          (is (nil? (:name r2)) "row 2 :name NULL'd (no supplied value)")
+          (is (= "ops2" (:bio r2)) "row 2 :bio updated"))
+        (finally
+          (sp/close storage))))))

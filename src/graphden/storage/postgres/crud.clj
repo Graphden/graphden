@@ -342,7 +342,16 @@
   "PostgreSQL type cast for one VALUES column. `:id` is always `uuid`;
    other columns inferred from the first non-nil sample value. Returns
    the cast string (`\"uuid\"` / `\"boolean\"` / `\"bigint\"` /
-   `\"timestamptz\"`) or nil when no cast is needed (text / numeric)."
+   `\"timestamptz\"`) or nil when no cast is needed (text / numeric).
+
+   Note: codec's `encode-row` runs BEFORE this fn, so timestamptz values
+   arrive as `java.sql.Timestamp` (post `Instant/from`), not raw
+   `java.time.Instant`. Both classes get matched here — `Instant` for
+   defensive coverage on the off-chance a row bypasses encode, and
+   `Timestamp` for the normal post-encode case. Without the
+   `Timestamp` arm a batch UPDATE on a `:timestamptz` column fails
+   with `expression is of type text` because PG can't infer the
+   parameter type without an explicit cast in the VALUES clause."
   [col rows]
   (if (= col :id)
     "uuid"
@@ -351,7 +360,8 @@
         (uuid? sample) "uuid"
         (boolean? sample) "boolean"
         (int? sample) "bigint"
-        (instance? java.time.Instant sample) "timestamptz"
+        (or (instance? java.time.Instant sample)
+            (instance? java.sql.Timestamp sample)) "timestamptz"
         :else nil))))
 
 

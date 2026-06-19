@@ -1835,3 +1835,84 @@
           "list-result sees :_anyv as [:list :any] (its own :is-a? :sequence was taken)")
       (is (= [:map :any :any] (get-in overrides [:_map-result :_anyv]))
           "map-result sees :_anyv as [:map :any :any] (its own :is-a? :map was taken)"))))
+
+
+(deftest phase-170-is-a-narrows-then-for-each-tag
+  (testing "every entry in is-a-tag->structural-type narrows :then branch correctly"
+    ;; Sentinel against silent drift in `is-a-tag->structural-type`
+    ;; — adding a tag without wiring (or removing one) immediately
+    ;; surfaces here. Covers primitives + collection shapes that
+    ;; weren't drilled in the :sequence / :map deftests above.
+    (doseq [[tag expected-narrowed]
+            {:text         :text
+             :int          :int
+             :numeric      :numeric
+             :bool         :bool
+             :keyword      :keyword
+             :null         :null
+             :uuid         :uuid
+             :bytes        :bytes
+             :timestamptz  :timestamptz
+             :float        :float
+             :vector       [:list :any]}]
+      (let [pred-name (keyword (str "_is-" (name tag) "?"))
+            then-name (keyword (str "_then-" (name tag) "-consumer"))]
+        (seed-is-a-fixture! pred-name tag)
+        (registry/record-rich-types-raw! then-name {:args {} :return :any})
+        (let [fds [{:name :_guarded-tag
+                    :parent :if
+                    :args {:test pred-name
+                           :then then-name
+                           :else nil}}
+                   {:name then-name :args {} :return-type :any}]
+              overrides (check/build-ref-return-overrides fds)]
+          (is (= {:_anyv expected-narrowed}
+                 (get overrides then-name))
+              (str ":then narrowing for :is-a? tag " tag
+                   " — expected " expected-narrowed)))))))
+
+
+(deftest phase-170-if-is-a-not-taken-leaves-type-unchanged
+  (testing ":else branch of :if (:is-a? :v :sequence) does NOT narrow :_anyv"
+    ;; Rationale (check.clj narrowed-type-for-predicate): no useful
+    ;; subtraction of a structural-type from `:any` without row-poly.
+    ;; This guards against future "smart" narrowings that introduce
+    ;; false positives in negative branches.
+    (seed-is-a-fixture! :_is-seq?-neg :sequence)
+    (registry/record-rich-types-raw! :_else-stays-any {:args {} :return :any})
+    (let [fds [{:name :_guarded-not-seq
+                :parent :if
+                :args {:test :_is-seq?-neg
+                       :then nil
+                       :else :_else-stays-any}}
+               {:name :_else-stays-any :args {} :return-type :any}]
+          overrides (check/build-ref-return-overrides fds)]
+      (is (= {:_anyv :any}
+             (get overrides :_else-stays-any))
+          ":else under :is-a? :sequence keeps :_anyv as :any (no subtraction)"))))
+
+
+(deftest phase-170-is-a-unknown-tag-skips-narrowing
+  (testing ":is-a? with a :type not in is-a-tag->structural-type falls through to target-static"
+    ;; Sentinel for map-churn — if someone removes a tag from the
+    ;; lookup table, callers see :_anyv :: target-static (`:any`)
+    ;; instead of crashing. Guards graceful fallback.
+    (registry/record-rich-types-raw! :_anyv {:args {} :return :any})
+    (registry/record-rich-types-raw!
+      :_is-unknown?
+      {:args {:value {:type :any} :type {:type :keyword}}
+       :resolved-bindings {:value {:ref :_anyv}
+                           :type {:type :keyword :value :totally-unknown-tag
+                                  :value-present true}}
+       :primary-parent :is-a? :return :bool})
+    (registry/record-rich-types-raw! :_unknown-then {:args {} :return :any})
+    (let [fds [{:name :_guarded-unknown
+                :parent :if
+                :args {:test :_is-unknown?
+                       :then :_unknown-then
+                       :else nil}}
+               {:name :_unknown-then :args {} :return-type :any}]
+          overrides (check/build-ref-return-overrides fds)]
+      (is (= {:_anyv :any}
+             (get overrides :_unknown-then))
+          "unknown tag → target-static fall-through, not crash"))))

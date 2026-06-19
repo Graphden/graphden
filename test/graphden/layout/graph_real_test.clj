@@ -176,3 +176,76 @@
             (is (seq (:nodes result)) (str nm " @" depth " produces nodes"))
             (is (:valid (:validation result))
                 (str nm " @" depth " grid is valid"))))))))
+
+
+;; ============================================================================
+;; Expand = β-inline — :base-handler must migrate to its use-site
+;; ============================================================================
+;;
+;; Mirrors `layout-router-default-handler-test` (the
+;; slot-OWNERSHIP migration case) but for the free-arg
+;; USE-SITE case the existing migration logic doesn't cover:
+;;
+;;   `_app-cached :parent response-cache-wrap :args
+;;     {:base-handler :_app-encoded}`
+;;   `response-cache-wrap :parent :if :args
+;;     {:test :_cache-hit?
+;;      :then :_cached-response
+;;      :else :_fresh-with-maybe-store
+;;      :base-handler {…declaration only…}}`
+;;
+;; `:base-handler`'s slot-owner is `:response-cache-wrap` — that fn
+;; doesn't appear in any ancestor-ref's inheritance chain on expand,
+;; so the slot-owner migration path stays silent. The CORRECT
+;; behaviour (see memory `expansion_substitution_model.md`,
+;; concrete failure pattern 2026-06-19):
+;;
+;;   - `:base-handler` is consumed inside `_fresh-with-maybe-store`'s
+;;     body (the cache-miss path actually invokes the handler).
+;;   - Expanding `response-cache-wrap` + `:if` should β-inline the
+;;     body — `:base-handler :_app-encoded` materialises at its use-
+;;     site → an edge from `_fresh-with-maybe-store`, NOT from the
+;;     root `_app-cached` card.
+;;
+;; Current bug: the edge stays anchored at the root, visually
+;; suggesting that `:if` itself takes a fourth arg `:base-handler`.
+;; This test pins the contract; the surgical fix is in
+;; `process-expanded-fn-impl`'s `migration-target-for` (needs a
+;; free-arg / `deep-free-ext-names` fallback alongside the existing
+;; slot-owner path).
+
+(deftest ^:integration layout-app-cached-base-handler-migrates-to-use-site
+  (let [root            (fn-id "_app-cached")
+        app-encoded     (fn-id "_app-encoded")
+        fresh-store     (fn-id "_fresh-with-maybe-store")]
+    (when (and root app-encoded fresh-store)
+      (let [result (layout root {(str "fn-" root) {:full-depth 2
+                                                   :partial-fns #{}}})
+            node-by-id (into {} (map (juxt #(:id (:data %)) identity))
+                             (:nodes result))
+            orig-of (fn [node-id]
+                      (some-> (node-by-id node-id) :data :originalFnId))
+            ;; All edges whose TARGET maps back to the _app-encoded
+            ;; fn-id — i.e. every place the editor draws an arrow to
+            ;; the _app-encoded card on this view.
+            to-app-encoded (filter
+                             #(= (str app-encoded)
+                                 (orig-of (:target (:data %))))
+                             (:edges result))
+            sources  (set (map #(:source (:data %)) to-app-encoded))
+            sources-orig (set (map orig-of sources))]
+        (testing "_app-encoded receives the :base-handler edge"
+          (is (seq to-app-encoded)
+              "_app-encoded must be referenced from the expanded view"))
+        (testing "edge does NOT source from the root _app-cached card"
+          (is (not (contains? sources (str "fn-" root)))
+              (str ":base-handler edge still anchored at the root "
+                   "_app-cached card — should have migrated to its "
+                   "use-site (_fresh-with-maybe-store). sources="
+                   (pr-str sources-orig))))
+        (testing "edge sources from _fresh-with-maybe-store (the use-site)"
+          (is (contains? sources-orig (str fresh-store))
+              (str ":base-handler edge must originate from "
+                   "_fresh-with-maybe-store (the only consumer of "
+                   ":base-handler inside the inlined response-cache-"
+                   "wrap body). sources=" (pr-str sources-orig))))))))

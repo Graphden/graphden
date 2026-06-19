@@ -1538,11 +1538,28 @@
    :parent :get
    :args {:coll :_merge-apply-record :key {:value :skipped} :default nil}}
 
-  {:name :_merge-apply-success
-   :description "Success envelope — `{:ok true :merge <record> :skipped {:branch-local […]}}`. Used as the `:body` callable of `:try`."
+  {:name :_merge-apply-success-envelope
+   :description "Success envelope — `{:ok true :merge <record> :skipped {:branch-local […]}}` without the cache-invalidation side effect (which is sequenced by `:_merge-apply-success`)."
    :parent :zipmap
    :args {:keys [{:value :ok} {:value :merge} {:value :skipped}]
           :vals [{:value true} :_merge-apply-record-shaped :_merge-apply-skipped]}}
+
+  ;; Merge writes a `:branch-merge` row that changes how target's
+  ;; versioned resolver views ancestry — every fn/slot/binding row
+  ;; visible to target is potentially affected. `:_merge-apply-do-
+  ;; invalidate` clears the per-ctx `cached-or-load-graph` snapshot
+  ;; so the next `/api/graph/entities` read sees the merged-in
+  ;; rows. Empty `:seeds` triggers a full clear (cheapest correct
+  ;; option; the merge surfaces a wide set of fns at once).
+  {:name :_merge-apply-do-invalidate
+   :parent :invalidate-graph-cache
+   :args {:seeds {:value []}}}
+
+  {:name :_merge-apply-success
+   :description "Success path — invalidate the graph cache first (so subsequent reads see the merge), then build the JSON envelope. `:do` runs steps in order and returns the last."
+   :parent :do
+   :args {:steps [:_merge-apply-do-invalidate
+                  :_merge-apply-success-envelope]}}
 
   ;; --- Error path: on-throw handler dispatching by ex-data :type.
   {:name :_merge-apply-ex-data

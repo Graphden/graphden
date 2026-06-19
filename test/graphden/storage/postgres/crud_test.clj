@@ -1161,11 +1161,11 @@
               r2 (:last-seen (sp/read-entity storage :user id2))
               ->epoch (fn [v]
                         (cond
-                          (instance? java.time.Instant v) (.toEpochMilli ^java.time.Instant v)
-                          (instance? java.sql.Timestamp v) (.getTime ^java.sql.Timestamp v)))]
-          (is (= (.toEpochMilli t1) (->epoch r1))
+                          (instance? java.time.Instant v) (java.time.Instant/.toEpochMilli v)
+                          (instance? java.sql.Timestamp v) (java.sql.Timestamp/.getTime v)))]
+          (is (= (java.time.Instant/.toEpochMilli t1) (->epoch r1))
               "row 1 :last-seen round-trips to the same epoch ms")
-          (is (= (.toEpochMilli t2) (->epoch r2))
+          (is (= (java.time.Instant/.toEpochMilli t2) (->epoch r2))
               "row 2 :last-seen round-trips to the same epoch ms"))
         (finally
           (sp/close storage))))))

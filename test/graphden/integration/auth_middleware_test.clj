@@ -21,6 +21,7 @@
    already wired through `:get-auth-required`, doesn't take query
    params, and renders quickly off `:_list-branches-rows`."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
@@ -89,7 +90,7 @@
       ;; Body should be the popover HTML — sanity-check it contains
       ;; the `branch-popover-list` class the JS handlers bind to.
       (is (and (string? (:body resp))
-               (.contains ^String (:body resp) "branch-popover-list"))
+               (str/includes? (:body resp) "branch-popover-list"))
           (str "200 response body contains the popover root class; "
                "got body=" (:body resp))))))
 
@@ -122,7 +123,7 @@
       ;; turn the 401 response into an oracle for token enumeration
       ;; via observable side-channels (logs, error tracking).
       (when-let [body (:body resp)]
-        (is (not (.contains ^String body "totally-wrong-token-value"))
+        (is (not (str/includes? body "totally-wrong-token-value"))
             (str "401 body does not echo the wrong token "
                  "(token-enumeration sentinel); body=" body))))))
 

@@ -339,6 +339,76 @@
                                        (into {} (map (fn [e] [(:id e) e])) populated)))))))
 
 
+(defn- column-type-cast
+  "PostgreSQL type cast for one VALUES column. `:id` is always `uuid`;
+   other columns inferred from the first non-nil sample value. Returns
+   the cast string (`\"uuid\"` / `\"boolean\"` / `\"bigint\"` /
+   `\"timestamptz\"`) or nil when no cast is needed (text / numeric)."
+  [col rows]
+  (if (= col :id)
+    "uuid"
+    (let [sample (some #(get % col) rows)]
+      (cond
+        (uuid? sample) "uuid"
+        (boolean? sample) "boolean"
+        (int? sample) "bigint"
+        (instance? java.time.Instant sample) "timestamptz"
+        :else nil))))
+
+
+(defn- build-batch-update-sql
+  "Assemble the `UPDATE … FROM (VALUES …)` JDBC tuple for a batch
+   UPDATE. Pure SQL-string construction — extracted from
+   `update-entities` so the parent function reads as the
+   orchestrator (validate → build → execute → verify → junctions)
+   rather than 40 lines of string interpolation.
+
+   Returns `[sql-string param1 param2 …]` suitable for `batch-execute!`.
+
+   Inputs:
+   - `table-name-str` — snake-case table name (PG identifier).
+   - `rows` — decoded entity rows (post `entity->row` projection).
+   - `columns` — every column key present across the batch
+     (`collect-batch-columns` output; superset includes `:id`).
+   - `update-columns` — `columns` minus `:id`; only these appear in
+     the `SET` clause."
+  [table-name-str rows columns update-columns]
+  (let [values (batch-row-values rows columns)
+        ;; PostgreSQL needs explicit type casts for UUID + non-string scalars
+        ;; in the VALUES clause; types/core's standard primitives map to
+        ;; the four PG casts below.
+        column-types (mapv #(column-type-cast % rows) columns)
+        ;; JDBC uses `?` placeholders, not PostgreSQL's `$N`.
+        values-sql (str "VALUES "
+                        (str/join
+                          ", "
+                          (map (fn [row-vals]
+                                 (str "("
+                                      (str/join
+                                        ", "
+                                        (map-indexed
+                                          (fn [col-idx _v]
+                                            (if-let [type-cast (get column-types col-idx)]
+                                              (str "?::" type-cast)
+                                              "?"))
+                                          row-vals))
+                                      ")"))
+                               values)))
+        col-aliases (str/join ", " (map #(str "\"" (name %) "\"") columns))
+        set-clause (str/join
+                     ", "
+                     (map #(let [col-str (str "\"" (name %) "\"")]
+                             (str col-str " = v." col-str))
+                          update-columns))
+        sql (str "UPDATE \"" table-name-str "\" AS t SET "
+                 set-clause
+                 " FROM (" values-sql ") AS v(" col-aliases ")"
+                 " WHERE t.\"id\" = v.\"id\""
+                 " RETURNING t.*")
+        params (vec (mapcat identity values))]
+    (into [sql] params)))
+
+
 (defn update-entities
   "Updates multiple entity records in a single batch.
    Each record must have :id. Returns seq of updated records.
@@ -376,55 +446,7 @@
                                  :missing-ids missing})))
               (map #(get existing (:id %)) records))
             ;; Normal case: have columns to update
-            (let [values (batch-row-values rows columns)
-                  ;; Build column type casts for VALUES clause
-                  ;; PostgreSQL needs explicit type casts for UUID and other types
-                  column-types (mapv (fn [col]
-                                       (cond
-                                         (= col :id) "uuid"
-                                         ;; Check first non-nil value for type inference
-                                         :else (let [sample (some #(get % col) rows)]
-                                                 (cond
-                                                   (uuid? sample) "uuid"
-                                                   (boolean? sample) "boolean"
-                                                   (int? sample) "bigint"
-                                                   (instance? java.time.Instant sample) "timestamptz"
-                                                   :else nil))))
-                                     columns)
-                  ;; Build VALUES clause with type casts using ? placeholders
-                  ;; JDBC uses ? placeholders, not PostgreSQL's $N
-                  values-sql (str "VALUES "
-                                  (str/join
-                                    ", "
-                                    (map (fn [row-vals]
-                                           (str "("
-                                                (str/join
-                                                  ", "
-                                                  (map-indexed
-                                                    (fn [col-idx _v]
-                                                      (if-let [type-cast (get column-types col-idx)]
-                                                        (str "?::" type-cast)
-                                                        "?"))
-                                                    row-vals))
-                                                ")"))
-                                         values)))
-                  ;; Column aliases for the VALUES subquery
-                  col-aliases (str/join ", " (map #(str "\"" (name %) "\"") columns))
-                  ;; SET clause: col = v.col for each update column
-                  set-clause (str/join
-                               ", "
-                               (map #(let [col-str (str "\"" (name %) "\"")]
-                                       (str col-str " = v." col-str))
-                                    update-columns))
-                  ;; Build full UPDATE ... FROM (VALUES ...) AS v(...) WHERE t.id = v.id
-                  sql (str "UPDATE \"" table-name-str "\" AS t SET "
-                           set-clause
-                           " FROM (" values-sql ") AS v(" col-aliases ")"
-                           " WHERE t.\"id\" = v.\"id\""
-                           " RETURNING t.*")
-                  ;; Flatten values for parameters
-                  params (vec (mapcat identity values))
-                  query (into [sql] params)
+            (let [query (build-batch-update-sql table-name-str rows columns update-columns)
                   result-rows (batch-execute! ds query :update-entities
                                               entity-name batch-ids batch-size)
                   actual-count (count result-rows)]

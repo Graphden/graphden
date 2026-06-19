@@ -19,7 +19,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Phase 1 service registry landed — it marks fns that spawn
     // supervised background work, the service-eligibility flag the
     // /api/entities/service create-guard reads.)
-    await page.goto('http://localhost:9002/#web-server');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#web-server');
     await page.waitForTimeout(2500);
 
     const probe = await page.evaluate(() => {
@@ -59,7 +59,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     // /health declares :expects-effects #{:time} AND computes #{:time}
     // — chip should be solid (no drift, no ghost).
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#health');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#health');
     await page.waitForTimeout(2500);
     const healthProbe = await page.evaluate(() => {
       const overlay = Array.from(document.querySelectorAll('.node-overlay'))
@@ -90,7 +90,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     // `all.size > 0 || (effectsEditable && computed.length === 0)`
     // condition in `appendFnMetadataStrips`.
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#add');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#add');
     await page.waitForTimeout(2500);
     const pureProbe = await page.evaluate(() => {
       // Anchor on the root fn-card whose text starts with "add" and

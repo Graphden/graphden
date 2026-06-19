@@ -76,7 +76,7 @@ const TEST_NAME = 'test-arg-value-validation';
     // === Editor live ✓/✗ ===
 
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + TEST_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForTimeout(2500);
 
     // Click the port arg-overlay to open the value-edit popover.

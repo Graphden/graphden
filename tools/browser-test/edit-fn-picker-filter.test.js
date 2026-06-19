@@ -38,7 +38,7 @@ const TEST_NAME = 'test-fn-picker-filter';
     // step the old test had here is gone.
 
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + TEST_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForTimeout(2500);
 
     // Find the unset-placeholder overlay (data-node-id starts with

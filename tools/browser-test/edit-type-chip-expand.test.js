@@ -35,7 +35,7 @@ const TARGET_FN = 'assoc-fn';
   console.log('edit-type-chip-expand — inline expand panel + provenance popover');
 
   try {
-    await page.goto('http://localhost:9002/#' + TARGET_FN);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TARGET_FN);
     await page.waitForTimeout(2500);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.type-chip-expandable', {timeout: 15000});

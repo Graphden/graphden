@@ -70,7 +70,7 @@ async function cleanup(page) {
     // Phase A: navigate, hover the i badge → tooltip in read-only mode.
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#app.' + FN_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#app.' + FN_NAME);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     // The fn's sidebar row carries the description-badge.

@@ -70,7 +70,7 @@ async function putDescription(page, fnId, desc) {
     const fn = (await getEntities(page)).fns.find((f) => f.name === FN_NAME);
     assert(fn, 'probe fn-def created with description=v1-seed');
 
-    await page.goto('http://localhost:9002/');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
     await page.waitForSelector('#branch-chip-btn', {timeout: 10000});
 
     let put = await putDescription(page, fn.id, 'v2-mid');
@@ -89,7 +89,7 @@ async function putDescription(page, fnId, desc) {
     // historic ones.
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + FN_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FN_NAME);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});

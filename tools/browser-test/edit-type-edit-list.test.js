@@ -45,7 +45,7 @@ async function cleanup(page) {
         body: JSON.stringify({name, 'element-type': 'int'}),
       });
       return r.json();
-    }, {base: 'http://localhost:9002', auth: 'test123', name: LIST_FN});
+    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: 'test123', name: LIST_FN});
     assert(seedResp.ok && seedResp.id,
            'list type-row created: ' + JSON.stringify(seedResp).slice(0, 120));
 
@@ -63,7 +63,7 @@ async function cleanup(page) {
     // ===================================================================
     // Navigate + open the edit popover.
     // ===================================================================
-    await page.goto('http://localhost:9002/#' + LIST_FN,
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + LIST_FN,
                     {waitUntil: 'networkidle'});
     await page.waitForFunction(
       () => typeof openTypeEditForm === 'function'

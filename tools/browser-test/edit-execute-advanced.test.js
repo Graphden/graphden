@@ -26,7 +26,7 @@ const SLEEP_MS = 15000;
 
 async function openExecutePopover(page, fnName) {
   await page.goto('about:blank');
-  await page.goto('http://localhost:9002/#' + fnName);
+  await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + fnName);
   await page.waitForTimeout(800);
   await page.evaluate(() => initGraph());
   await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});

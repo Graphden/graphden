@@ -63,7 +63,7 @@ async function putDescription(page, fnId, branch, desc) {
 
   try {
     await cleanup(page);
-    await page.goto('http://localhost:9002/');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
     await page.waitForSelector('#branch-chip-btn', {timeout: 10000});
 
     // ===================================================================
@@ -93,7 +93,7 @@ async function putDescription(page, fnId, branch, desc) {
     // popover via the row-actions group.
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + FN_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FN_NAME);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});

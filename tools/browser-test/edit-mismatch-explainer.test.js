@@ -105,7 +105,7 @@ async function cleanup(page) {
     // runtime predicate fails after a previously-valid bind).
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + PROBE_FN);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     // The root fn renders with no arg-overlays until expanded.

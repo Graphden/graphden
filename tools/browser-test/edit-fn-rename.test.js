@@ -31,7 +31,7 @@ const NEW = 'test-fn-rename-new';
     assert(fn, 'test fn created');
 
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + ORIG);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + ORIG);
     await page.waitForTimeout(2500);
 
     // Per-row action icons live in the `.row-actions-popover` triggered

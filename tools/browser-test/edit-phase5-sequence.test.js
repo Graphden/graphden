@@ -31,7 +31,7 @@ const TEST_NAME = 'test-edit-phase5';
     assert(created, 'test fn created');
 
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + TEST_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForTimeout(2500);
     // Force a refresh so the just-POSTed fn is in lookups.fnMap.
     await page.evaluate(() => initGraph());

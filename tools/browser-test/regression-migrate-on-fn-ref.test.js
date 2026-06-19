@@ -21,7 +21,7 @@ const {chromium} = require('playwright');
   console.log('regression-migrate-on-fn-ref — value-binding migrates, parent suppresses');
 
   try {
-    await page.goto('http://localhost:9002/#ex-outer');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#ex-outer');
     await page.waitForTimeout(2000);
 
     // Click "list" row to expand the inner wrapper's body.

@@ -26,7 +26,7 @@ const {assert, newContext} = require('./edit-test-helpers');
   console.log('edit-sidebar-filter — text-search narrows the namespace tree');
 
   try {
-    await page.goto('http://localhost:9002/#identity');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity');
     await page.waitForSelector('#search-input', {timeout: 15000});
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());

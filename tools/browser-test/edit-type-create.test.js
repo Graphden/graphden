@@ -71,7 +71,7 @@ async function openTypeCreate(page, nsName) {
 
   try {
     await cleanup(page);
-    await page.goto('http://localhost:9002/');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
     await page.waitForSelector('.ns-header', {timeout: 15000});
 
     // ===================================================================

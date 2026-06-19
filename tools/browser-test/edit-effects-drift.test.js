@@ -90,7 +90,7 @@ async function cleanup(page) {
     // Phase A: drift probe. :env chip should carry effects-chip-drift.
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + DRIFT_FN);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + DRIFT_FN);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.effects-chip-env', {timeout: 15000});
@@ -115,7 +115,7 @@ async function cleanup(page) {
     // effects-chip-ghost.
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + GHOST_FN);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + GHOST_FN);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.effects-chip-network', {timeout: 15000});

@@ -56,7 +56,7 @@ async function cleanup(page) {
     // ===================================================================
     // Navigate + force re-fetch.
     // ===================================================================
-    await page.goto('http://localhost:9002/#' + VAR_FN,
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + VAR_FN,
                     {waitUntil: 'networkidle'});
     await page.waitForFunction(
       () => typeof openTypeEditForm === 'function'

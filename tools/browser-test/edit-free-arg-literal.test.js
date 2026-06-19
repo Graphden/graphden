@@ -32,7 +32,7 @@ const TEST_NAME = 'test-free-arg-literal';
     // exposes the inherited :string slot automatically.
 
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + TEST_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForTimeout(2500);
 
     // Click the unset-placeholder's `.placeholder-binder` button →

@@ -28,7 +28,7 @@ const SERVICE_FN = 'core.system.current-time-ms';
 
 async function openRowActionsPopover(page, fnHash) {
   await page.goto('about:blank');
-  await page.goto('http://localhost:9002/#' + fnHash);
+  await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + fnHash);
   await page.waitForTimeout(2500);
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
   await page.waitForTimeout(500);

@@ -42,7 +42,7 @@ const TEST_NAME = 'test-edit-phase3';
     //    `removeParentInline` are auto-accepted.
     page.on('dialog', d => d.accept());
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + TEST_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForTimeout(2500);
     // The editor's initial /api/graph/entities load may race against
     // the just-POSTed fn. Force a refresh so `lookups.fnMap` sees it.

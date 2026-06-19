@@ -28,7 +28,7 @@ const {chromium} = require('playwright');
   console.log('regression-sequence-fn-ref — :sequence slot bound to fn-ref must produce an edge');
 
   try {
-    await page.goto('http://localhost:9002/#ex-regression-str-via-ref');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#ex-regression-str-via-ref');
     await page.waitForTimeout(2500);
 
     const snapshot = await page.evaluate(() => {

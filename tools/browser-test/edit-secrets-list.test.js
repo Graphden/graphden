@@ -61,7 +61,7 @@ async function cleanup(page) {
       } catch (err) {
         return {ok: false, error: 'fetch threw: ' + String(err).slice(0, 200)};
       }
-    }, {base: 'http://localhost:9002', auth: 'test123',
+    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: 'test123',
         name: SECRET_NAME, path: SECRET_PATH});
     if (!seed.ok) {
       console.log('  (Vault/server unavailable — skipping: '
@@ -76,7 +76,7 @@ async function cleanup(page) {
     // ===================================================================
     // Navigate to /, wait for sidebar wiring to be ready.
     // ===================================================================
-    await page.goto('http://localhost:9002/#identity',
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity',
                     {waitUntil: 'networkidle'});
     await page.waitForFunction(
       () => typeof loadSecrets === 'function'

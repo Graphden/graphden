@@ -63,7 +63,7 @@ async function cleanup(page) {
            'test namespace created: '
            + JSON.stringify(createResp).slice(0, 200));
 
-    await page.goto('http://localhost:9002/');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
     await page.waitForSelector('#search-input', {timeout: 10000});
     // Refresh sidebar so the new ns shows up.
     await page.evaluate(() => initGraph && initGraph());

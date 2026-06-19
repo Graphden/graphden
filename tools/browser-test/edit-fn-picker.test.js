@@ -26,7 +26,7 @@ const {assert, newContext} = require('./edit-test-helpers');
   console.log('edit-fn-picker — popover / search filter / row click / dismiss');
 
   try {
-    await page.goto('http://localhost:9002/#identity');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity');
     await page.waitForTimeout(2500);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForFunction(

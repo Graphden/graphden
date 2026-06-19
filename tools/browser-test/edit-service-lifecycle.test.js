@@ -59,7 +59,7 @@ async function cleanup(page) {
 
 async function openServicePopover(page) {
   await page.goto('about:blank');
-  await page.goto('http://localhost:9002/#' + PROBE_FN);
+  await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
   await page.waitForTimeout(800);
   await page.evaluate(() => initGraph());
   await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});

@@ -41,7 +41,7 @@ const {assert, newContext} = require('./edit-test-helpers');
   console.log('edit-secrets-panel — sidebar section + new-secret form + error path');
 
   try {
-    await page.goto('http://localhost:9002/');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
     await page.waitForSelector('.sidebar-secrets', {timeout: 15000});
 
     // ===================================================================

@@ -185,8 +185,9 @@
    :task (clojure "-M:dev:test -m kaocha.runner :integration")}
 
   test-e2e
-  {:doc "Playwright browser-test suite (~15-25 min). Requires `bb rebuild` first + AUTH_TOKEN env var matching the running stack. Hits http://localhost:9002 by default; override with GRAPHDEN_URL."
-   :task (p/shell "bash" "tools/browser-test/run-edit-tests.sh")}
+  {:doc "Playwright browser-test suite against an ISOLATED ephemeral stack via Testcontainers (postgres + user-postgres + openbao + `graphden-executor:latest`, dynamic host ports, Ryuk reaps everything on JVM exit). Demo on :9002 stays untouched. Requires `bb rebuild` (or `bb deploy`) first so `graphden-executor:latest` is present. ~30-60s for the stack to come healthy + ~15-25 min for the suite itself. See `graphden.dev.e2e-stack`."
+   :task (p/shell "clojure" "-M:dev" "-m" "graphden.dev.e2e-stack"
+                  "tools/browser-test/run-edit-tests.sh")}
 
   test-all
   {:doc "Run ALL tests (unit + integration + e2e), sequential. ~30-35 min wall. e2e requires `bb rebuild` first + AUTH_TOKEN."

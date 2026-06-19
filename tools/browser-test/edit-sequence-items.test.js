@@ -72,7 +72,7 @@ async function postSequenceAppend(page, fnId, body) {
 
     // Two sequence items via API. The first append also creates the
     // seq-anchor binding under the hood.
-    await page.goto('http://localhost:9002/');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
     await page.waitForSelector('#auth-lock-btn', {timeout: 10000});
     const append1 = await postSequenceAppend(page, probe.id, {value: 'a'});
     assert(append1.status >= 200 && append1.status < 300,
@@ -87,7 +87,7 @@ async function postSequenceAppend(page, fnId, body) {
     // Phase A: render the probe. Wait for the edge-label overlays.
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + PROBE_FN);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForFunction(

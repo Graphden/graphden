@@ -62,7 +62,7 @@ async function cleanup(page) {
         }),
       });
       return r.json();
-    }, {base: 'http://localhost:9002', auth: 'test123', name: REC_FN});
+    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: 'test123', name: REC_FN});
     assert(seedResp.ok && seedResp.id,
            'record type-row created: ' + JSON.stringify(seedResp).slice(0, 120));
 
@@ -86,7 +86,7 @@ async function cleanup(page) {
     // Hard reload — initial `newContext` already loaded `/` which ran
     // initGraph BEFORE the record was seeded; a hash-only navigation
     // wouldn't refetch.
-    await page.goto('http://localhost:9002/#' + REC_FN,
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + REC_FN,
                     {waitUntil: 'networkidle'});
     await page.waitForFunction(
       () => typeof openTypeEditForm === 'function'

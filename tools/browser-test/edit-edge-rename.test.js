@@ -61,7 +61,7 @@ async function cleanup(page) {
     // Phase A: navigate; verify the :nums edge-label visible.
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + PROBE_FN);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     // The edge-label name span has class .edge-label-name (label-span

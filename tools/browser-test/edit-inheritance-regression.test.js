@@ -28,7 +28,7 @@ async function layoutOf(page, rootId) {
       body: JSON.stringify({'root-id': args.rootId})
     });
     return r.json();
-  }, {base: 'http://localhost:9002', auth: process.env.AUTH_TOKEN || 'test123', rootId});
+  }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: process.env.AUTH_TOKEN || 'test123', rootId});
 }
 
 async function expandedLayoutOf(page, rootId, fullDepth) {
@@ -42,7 +42,7 @@ async function expandedLayoutOf(page, rootId, fullDepth) {
       })
     });
     return r.json();
-  }, {base: 'http://localhost:9002', auth: process.env.AUTH_TOKEN || 'test123',
+  }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: process.env.AUTH_TOKEN || 'test123',
        rootId, depth: fullDepth});
 }
 

@@ -39,7 +39,7 @@ const TEST_NAME = 'test-arg-type-flip';
     assert(arg && arg.value === 'hello', ':string="hello" seeded');
 
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + TEST_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     await page.waitForTimeout(2500);
 
     // The arg-overlay carries a `.arg-type-chip` showing the resolved

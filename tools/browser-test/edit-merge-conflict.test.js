@@ -83,7 +83,7 @@ async function putDescriptionOn(page, fnId, branch, desc) {
 
   try {
     await cleanup(page);
-    await page.goto('http://localhost:9002/');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
     await page.waitForSelector('#branch-chip-btn', {timeout: 10000});
 
     // ===================================================================

@@ -67,7 +67,7 @@ async function cleanup(page) {
     // Phase A: navigate. Verify type chip reads "any".
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + PROBE_FN);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.arg-type-chip', {timeout: 15000});

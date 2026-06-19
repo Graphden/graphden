@@ -75,7 +75,7 @@ async function cleanup(page) {
     // server-side new namespace-id, the next getEntities read can
     // surface the cached pre-move state. The single goto is enough
     // because newContext starts on about:blank already.
-    await page.goto('http://localhost:9002/#' + FROM_NS + '.' + FN_NAME);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FROM_NS + '.' + FN_NAME);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForFunction(

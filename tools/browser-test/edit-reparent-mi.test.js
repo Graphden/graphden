@@ -70,7 +70,7 @@ async function cleanup(page) {
     // both names.
     // ===================================================================
     await page.goto('about:blank');
-    await page.goto('http://localhost:9002/#' + PROBE_FN);
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.fn-overlay, .node-overlay', {timeout: 15000});

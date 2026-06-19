@@ -37,36 +37,6 @@ async function cleanup(page) {
   page.on('dialog', (d) => d.accept());
   console.log('edit-secrets-rotate — create / ↻ / new value / PUT 200');
 
-  // Backend-handler pre-flight (see edit-secrets-list.test.js for
-  // the full docstring). The rotate flow ALSO loads /api/secrets to
-  // find the seeded row in the sidebar; when the handler returns
-  // the executor's make_shape_callable HOF-leak error, the sidebar
-  // never shows the row and the 8s waitForFunction times out
-  // burying the real signal.
-  try {
-    const preflight = await page.evaluate(async () => {
-      const r = await fetch('http://localhost:9002/api/secrets', {
-        headers: {'Authorization': 'Bearer test123'},
-      });
-      const t = await r.text();
-      try { return {parsed: true, ok: r.ok, status: r.status, json: JSON.parse(t)}; }
-      catch (_) { return {parsed: false, status: r.status, body: t.slice(0, 400)}; }
-    });
-    if (!preflight.parsed || preflight.status >= 500) {
-      const hint = /make_shape_callable/.test(preflight.body || '')
-        ? 'compile_eager$make_shape_callable HOF leak — see edit-secrets-list.test.js docstring'
-        : ('handler error: ' + (preflight.body || '').slice(0, 160));
-      console.log('  (SKIP — backend /api/secrets broken: ' + hint + ')');
-      console.log('✓ SKIPPED — backend regression, not a test issue');
-      await browser.close();
-      return;
-    }
-  } catch (_) {
-    console.log('✓ SKIPPED — /api/secrets unreachable');
-    await browser.close();
-    return;
-  }
-
   try {
     await cleanup(page);
 

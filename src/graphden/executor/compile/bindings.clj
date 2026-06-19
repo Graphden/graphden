@@ -36,8 +36,21 @@
 ;;   ref   → row sets `:ref-fn-id`
 ;;   list  → row sets `:list-append true` (chain-append semantics)
 (defn value-binding?
+  "True when `b` carries an explicit literal value — including a
+   literal nil. The `:value-present` flag is the authoritative
+   marker: the storage column collapses literal-nil to SQL NULL, so
+   `(some? (:value b))` is FALSE for both `{:value nil}` (author
+   wrote `:default nil`) and `(absent)` (author wrote nothing).
+   Without the flag check, literal-nil bindings fall through to
+   `:free` and the slot's value is pulled from the caller's fa at
+   runtime — for `:_shape-secret-path :args :default nil`, that
+   surfaced the Ring request as the `:default` value, which `:get`
+   returned when `:coll` was nil (orphan secret-leaf fn-rows with
+   no `:secret-path` binding), producing
+   `Cannot JSON encode object of class: make_shape_callable` from
+   `to-json-string` on `/api/secrets`."
   [b]
-  (and b (some? (:value b)) (nil? (:ref-fn-id b))))
+  (and b (:value-present b) (nil? (:ref-fn-id b))))
 
 
 (defn ref-binding?

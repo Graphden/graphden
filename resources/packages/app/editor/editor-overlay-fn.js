@@ -1100,6 +1100,8 @@ function createFnOverlay(node, container) {
 
   appendHofCapturedArgsStrip(overlay, node.data('hofCapturedArgs'));
 
+  appendDeepFreeArgsStrip(overlay, node.data('deepFreeArgs'));
+
   appendFnActionToolbar(overlay, originalFnId, isNavRoot);
 
   createDragHandle(overlay, node);

@@ -351,10 +351,51 @@
           not-migrated    (fn [coll]
                             (remove #(contains? migrated-id? (:arg-id %))
                                     coll))
-          level-0-stay         (not-migrated (concat level-0-refs
-                                                     level-0-values))
-          ancestor-refs-stay   (not-migrated ancestor-refs)
-          ancestor-values-stay (not-migrated ancestor-values)
+
+          ;; Canonical visual order across the slot-set of a card:
+          ;; sort by (deepest-ancestor-first, position-within-that-
+          ;; ancestor). The "deepest-ancestor" component puts inherited
+          ;; slots from the OLDEST ancestor in the chain before the
+          ;; newer ancestors' own additions — so `:if`'s `:test :then
+          ;; :else` (deepest, declaration-order) come before
+          ;; `:response-cache-wrap`'s own `:base-handler`. The
+          ;; "position-within-ancestor" component preserves each
+          ;; ancestor's `:args` map declaration order (already stored
+          ;; on the `fn-slot` row as `:position`). Falls back to walk
+          ;; order when slot/owner data is missing (test fixtures,
+          ;; synth-args). Default-on — matches what authors implicitly
+          ;; expect when they read the base-fn's `:args` declaration.
+          chain-of-original
+          (data/get-inheritance-chain* original-fn-id lookups)
+          tier-of-fn (zipmap chain-of-original (range))
+          fn-slots-by-fn (:fn-slots-by-fn lookups)
+          slot-owner-fn (:slot-owner lookups)
+          arg-map* (:arg-map lookups)
+          position-of-fn-slot
+          (fn [fn-id slot-id]
+            (some (fn [fs] (when (= (:slot-id fs) slot-id) (:position fs)))
+                  (get fn-slots-by-fn fn-id [])))
+          canonical-sort-key
+          (fn [arg]
+            (let [sid (or (:slot-id arg)
+                          (some-> (:arg-id arg) arg-map* :slot-id))
+                  owner (some-> sid slot-owner-fn)
+                  tier (get tier-of-fn owner)
+                  pos (when (and owner sid)
+                        (position-of-fn-slot owner sid))]
+              ;; (-tier) so deeper ancestor (higher index in chain
+              ;; vector) sorts FIRST under ascending sort. Missing
+              ;; tier/pos → last (treat as opaque, preserve original
+              ;; relative order via stable-sort).
+              [(if tier (- tier) Long/MAX_VALUE)
+               (or pos Long/MAX_VALUE)]))
+          canonical-sort (fn [coll] (sort-by canonical-sort-key coll))
+
+          level-0-stay         (canonical-sort
+                                 (not-migrated (concat level-0-refs
+                                                       level-0-values)))
+          ancestor-refs-stay   (canonical-sort (not-migrated ancestor-refs))
+          ancestor-values-stay (canonical-sort (not-migrated ancestor-values))
 
           migrated-bindings-for
           (fn [args]
@@ -443,6 +484,14 @@
           ;; `process-any-fn` per consumer, all targeting the same
           ;; ref-id, dedup'd at the node level by the standard
           ;; shared-node machinery.
+          ;;
+          ;; Each consumer also gets a `:deep-free-by-node` entry —
+          ;; the post-processor turns those into the `⇣` strip on
+          ;; the card. Without it the card displays the outgoing
+          ;; edge but nothing on the card itself indicates "this fn
+          ;; accepts X as a free arg propagated to my body", which
+          ;; misleads readers into thinking the slot must live on
+          ;; one of the visible ancestor rows.
           (doseq [[target migrated-args] migrated-by-ref
                   arg migrated-args
                   :when (:free-arg-migration arg)
@@ -451,7 +500,11 @@
             (process-any-fn ctx (:ref-id arg) consumer-node-id
                             (:arg-name arg) false {} (:arg-id arg)
                             effective-expansion-root expand-set
-                            (bh/child-hof arg-map (:arg-id arg) is-hof))))
+                            (bh/child-hof arg-map (:arg-id arg) is-hof))
+            (when-let [nm (:arg-name arg)]
+              (swap! state update-in
+                     [:deep-free-by-node consumer-node-id]
+                     (fnil conj #{}) nm))))
 
         (doseq [arg ancestor-unsets] (render-unset arg))
 
@@ -593,19 +646,33 @@
 ;; =============================================================================
 
 (defn- annotate-optionals
-  "Attach `:optionalArgs` / `:hofCapturedArgs` arrays to each node's
-   `:data` from the state-atom's per-node maps. Pure transform."
+  "Attach `:optionalArgs` / `:hofCapturedArgs` / `:deepFreeArgs`
+   arrays to each node's `:data` from the state-atom's per-node
+   maps. Pure transform.
+
+   `:deepFreeArgs` is the union of free-arg names migrated INTO
+   this fn from the caller's expanded context — i.e. names this
+   card accepts as input but whose actual use-site lives in the
+   card's sub-tree (deeper than the visible slot surface). The
+   frontend renders these as a `⇣ name` strip below the effects
+   strip, telling the reader 'this card receives X as a free arg
+   and threads it down into its body'. Populated by the free-arg
+   β-inline pass in `process-expanded-fn-impl`."
   [nodes state]
   (mapv (fn [n]
           (let [node-id (get-in n [:data :id])
                 optionals (get (:optional-unsets-by-node @state) node-id)
-                hof-captured (get (:hof-captured-by-node @state) node-id)]
+                hof-captured (get (:hof-captured-by-node @state) node-id)
+                deep-free (get (:deep-free-by-node @state) node-id)]
             (cond-> n
               (seq optionals)
               (assoc-in [:data :optionalArgs] (vec (distinct optionals)))
 
               (seq hof-captured)
-              (assoc-in [:data :hofCapturedArgs] (vec (distinct hof-captured))))))
+              (assoc-in [:data :hofCapturedArgs] (vec (distinct hof-captured)))
+
+              (seq deep-free)
+              (assoc-in [:data :deepFreeArgs] (vec (sort deep-free))))))
         nodes))
 
 

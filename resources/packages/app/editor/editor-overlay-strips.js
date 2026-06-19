@@ -570,3 +570,37 @@ function appendHofCapturedArgsStrip(overlay, hofCapturedArgs) {
   strip.textContent = hofCapturedArgs.map(n => 'λ' + n).join(' ');
   overlay.appendChild(strip);
 }
+
+
+/**
+ * Deep-free-args strip — names this fn accepts as free args from the
+ * caller's expanded context whose actual use-sites live deeper than
+ * the visible slot surface. Populated when the layout pipeline's
+ * β-inline pass migrates a free-arg binding (e.g. `:base-handler` on
+ * `_app-cached`) to its consumer's node (`_fresh-with-maybe-store`)
+ * without that consumer declaring the arg as its own slot — the
+ * binding flows down into the sub-tree (here `_fresh-response`).
+ * Without this strip, the card shows the outgoing edge but nothing
+ * on the card itself indicates "I take this name", which misleads
+ * readers into hunting for the slot on one of the visible ancestor
+ * rows. The `⇣` glyph reads as "propagates downward".
+ */
+function appendDeepFreeArgsStrip(overlay, deepFreeArgs) {
+  if (!Array.isArray(deepFreeArgs) || !deepFreeArgs.length) return;
+  const strip = document.createElement('div');
+  Object.assign(strip.style, {
+    padding: '2px 8px',
+    color: 'var(--hof-fg)',
+    fontSize: '10px',
+    fontStyle: 'italic',
+    borderTop: '1px dashed var(--hof-border)',
+    background: 'var(--hof-bg)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  });
+  strip.title = 'Free args this fn accepts from the caller and threads into its sub-tree: '
+                + deepFreeArgs.join(', ');
+  strip.textContent = deepFreeArgs.map(n => '⇣' + n).join(' ');
+  overlay.appendChild(strip);
+}

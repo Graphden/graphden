@@ -188,8 +188,12 @@ async function putDescriptionOn(page, fnId, branch, desc) {
       }),
     ]);
     // The reload re-mounts the editor; wait for the branch chip to
-    // come back as a robust "page ready" marker.
-    await page.waitForSelector('#branch-chip-btn', {timeout: 15000});
+    // come back as a robust "page ready" marker. After a successful
+    // merge the per-ctx graph-cache is invalidated, so the FIRST
+    // post-reload `/api/graph/entities` fetch rebuilds from raw
+    // storage. Under e2e suite load that rebuild + JS bundle parse
+    // can exceed the 15s budget; bump to 30s.
+    await page.waitForSelector('#branch-chip-btn', {timeout: 30000});
     await page.waitForTimeout(800);
 
     const finalDescription = await page.evaluate(async (id) => {

@@ -64,7 +64,13 @@ const TEST_NAME = 'test-edit-phase5';
       const btns = document.querySelectorAll('.arg-value-edit-popover .arg-value-edit-btn');
       btns[btns.length - 1].click();
     });
-    await page.waitForTimeout(2000);
+    // Save click fires POST /api/sequence/append → initGraph re-fetch.
+    // Under e2e load the popover-close-after-save chain can exceed 2s.
+    // Wait for the popover to be gone before continuing.
+    await page.waitForFunction(
+      () => !document.querySelector('.arg-value-edit-popover'),
+      {timeout: 15000});
+    await page.waitForTimeout(500);
 
     function chainOf(ents) {
       const fnBindings = (ents.bindings || []).filter(b => b['fn-id'] === created.id);
@@ -78,16 +84,20 @@ const TEST_NAME = 'test-edit-phase5';
     assert(JSON.stringify(chain) === '[1]', 'first item appended as value=1');
 
     // 4. Append a second item via the tail `+` button.
+    await page.waitForSelector('.arg-seq-btn-add', {timeout: 10000});
     await page.evaluate(() => {
-      const add = document.querySelector('.arg-seq-btn-add');
-      if (add) add.click();
+      document.querySelector('.arg-seq-btn-add').click();
     });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(
+      () => document.querySelector('.free-arg-bind-chooser'),
+      {timeout: 5000});
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
         .find(b => b.textContent === 'Append literal').click();
     });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(
+      () => document.querySelector('.arg-value-edit-popover input'),
+      {timeout: 5000});
     await page.evaluate(() => {
       document.querySelector('.arg-value-edit-popover input').value = '2';
     });
@@ -95,7 +105,10 @@ const TEST_NAME = 'test-edit-phase5';
       const btns = document.querySelectorAll('.arg-value-edit-popover .arg-value-edit-btn');
       btns[btns.length - 1].click();
     });
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(
+      () => !document.querySelector('.arg-value-edit-popover'),
+      {timeout: 15000});
+    await page.waitForTimeout(500);
 
     chain = chainOf(await getEntities(page)).slice().sort();
     assert(JSON.stringify(chain) === '[1,2]', 'tail-append added value=2');

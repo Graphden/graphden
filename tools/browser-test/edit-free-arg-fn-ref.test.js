@@ -16,7 +16,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 
@@ -117,17 +117,26 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => !document.querySelector('.fn-picker-popover'),
       {timeout: 10000});
-    await page.waitForTimeout(800);
 
     // ===================================================================
     // Phase E: storage — binding row has :ref-fn-id pointing at CTM
     //          and no :value.
     // ===================================================================
-    const finalEnts = await getEntities(page);
-    const probeBindings = (finalEnts.bindings || [])
-      .filter((b) => b['fn-id'] === probe.id);
-    assert(probeBindings.length === 1,
-           'probe has 1 binding row: ' + probeBindings.length);
+    // saveArgRef → writeBindingFields → POST /api/entities/binding
+    // + initGraph re-fetch. Poll for the binding instead of a fixed
+    // 800 ms wait — under e2e suite load the chain regularly takes
+    // longer than 1 s, which produced the "probe has 1 binding row: 0"
+    // flake.
+    let probeBindings;
+    const bound = await waitFor(async () => {
+      const finalEnts = await getEntities(page);
+      probeBindings = (finalEnts.bindings || [])
+        .filter((b) => b['fn-id'] === probe.id);
+      return probeBindings.length === 1;
+    }, 5000);
+    assert(bound,
+           'probe has 1 binding row: '
+           + (probeBindings ? probeBindings.length : 'undefined'));
     const binding = probeBindings[0];
     assert(binding['ref-fn-id'] === ctmFn.id,
            'binding :ref-fn-id points at :current-time-ms: '

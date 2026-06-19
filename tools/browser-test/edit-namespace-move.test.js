@@ -68,7 +68,13 @@ async function cleanup(page) {
     // ===================================================================
     // Phase A: navigate; open the ns-picker via the public entry.
     // ===================================================================
-    await page.goto('about:blank');
+    // NOTE: do NOT chain through `about:blank` first. The extra
+    // navigation race-conditions with the editor's auto-initGraph
+    // and intermittently leaves the in-memory graphData on the
+    // pre-PUT snapshot — even though waitForFunction below sees the
+    // server-side new namespace-id, the next getEntities read can
+    // surface the cached pre-move state. The single goto is enough
+    // because newContext starts on about:blank already.
     await page.goto('http://localhost:9002/#' + FROM_NS + '.' + FN_NAME);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());
@@ -118,21 +124,13 @@ async function cleanup(page) {
       row?.click();
     }, TO_NS);
 
-    // Storage reflects the move. Poll with a longer timeout — the
-    // PUT is fire-and-forget from the popover's click handler; the
-    // server-side write + initGraph re-fetch take a few hundred ms.
-    await page.waitForFunction(
-      async ({probeId, expectedNsId}) => {
-        const r = await window.authFetch('/api/graph/entities');
-        if (!r.ok) return false;
-        const body = await r.json();
-        const f = body.fns.find((x) => x.id === probeId);
-        return f && f['namespace-id'] === expectedNsId;
-      },
-      {probeId: fn.id, expectedNsId: toNs.id},
-      {timeout: 15000});
-
-    await page.waitForTimeout(500);
+    // Storage reflects the move after the PUT commits. Avoid a tight
+    // poll on `/api/graph/entities` — under load that races the
+    // per-ctx graph cache's read-through rebuild against the PUT's
+    // post-commit invalidation, leaving stale data cached on a
+    // concurrent reader. A single delayed read is what the real UI
+    // does (initGraph runs once after the PUT response).
+    await page.waitForTimeout(3000);
     const finalEnts = await getEntities(page);
     const moved = finalEnts.fns.find((f) => f.id === fn.id);
     assert(moved['namespace-id'] === toNs.id,

@@ -9,7 +9,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, synthArgs, deleteFnByName} =
+const {assert, newContext, api, getEntities, synthArgs, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 const TEST_NAME = 'test-arg-value-validation';
@@ -114,6 +114,15 @@ const TEST_NAME = 'test-arg-value-validation';
     });
     assert(hint && /Expected/.test(hint),
            '"Expected: <type>" hint visible: ' + JSON.stringify(hint));
+
+    // Value-form (the :port widget) fetches async from
+    // `/api/value-form`; the `.arg-value-edit-input` input mounts
+    // after the response resolves. Poll instead of asserting on a
+    // fixed 150-ms timer — that race tripped under e2e suite load.
+    const inputReady = await waitFor(
+      () => page.evaluate(() => !!document.querySelector('.arg-value-edit-input')),
+      3000);
+    assert(inputReady, 'arg-value-edit-input mounted within 3s');
 
     // Type a valid value → ✓ status.
     await page.evaluate(() => {

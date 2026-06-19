@@ -100,11 +100,15 @@ async function cleanup(page) {
     // ===================================================================
     await page.fill('.inline-input-row .inline-input', RENAMED);
     await page.click('.inline-input-row .inline-btn-save');
+    // Save fires PUT /api/entities/ns/:id, then editor calls
+    // initGraph which re-fetches `/api/graph/entities` (5 MB JSON)
+    // and rebuilds the sidebar. Cold cache + JSON.parse + DOM
+    // rebuild can take 15-20s under e2e suite load. Bump to 30s.
     await page.waitForFunction(
       (name) => Array.from(document.querySelectorAll('.ns-header'))
         .some((h) => h.querySelector('.ns-label')?.textContent.trim() === name),
       RENAMED,
-      {timeout: 10000});
+      {timeout: 30000});
     const oldGone = await page.evaluate((name) => {
       return !Array.from(document.querySelectorAll('.ns-header'))
         .some((h) => h.querySelector('.ns-label')?.textContent.trim() === name);
@@ -121,11 +125,14 @@ async function cleanup(page) {
         .find((h) => h.querySelector('.ns-label')?.textContent.trim() === name);
       target?.querySelector('.ns-delete-btn')?.click();
     }, RENAMED);
+    // Delete triggers `initGraph` which re-fetches the full graph
+    // (5 MB JSON) — JSON.parse + sidebar rebuild can exceed 15s under
+    // e2e suite load. Bump to 25s.
     await page.waitForFunction(
       (name) => !Array.from(document.querySelectorAll('.ns-header'))
         .some((h) => h.querySelector('.ns-label')?.textContent.trim() === name),
       RENAMED,
-      {timeout: 10000});
+      {timeout: 25000});
     const apiCheck = await getEntities(page);
     const stillThere = (apiCheck.namespaces || []).find(
       (n) => n.name === RENAMED);

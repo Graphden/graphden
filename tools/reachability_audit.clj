@@ -136,6 +136,49 @@
           (find-clj-files "src/graphden"))))
 
 
+(defn- collect-test-roots
+  "Walk `test/` for `:name :the-fn-def-name` shapes — `protocol_test`
+   and friends iterate fn-defs by-name to assert pattern-exemplars
+   (`:postgres-storage-impl` IS-A `:Storage` etc.). Those fn-defs
+   are reachable through the test contract even though the static
+   graph walk doesn't see them. Without this, every documented-
+   pattern exemplar shows up as a false-positive unreachable."
+  [fn-defs-by-name]
+  (let [names (set (keys fn-defs-by-name))
+        pattern #":name\s+:([a-zA-Z_][a-zA-Z0-9_-]*[a-zA-Z0-9_?!])"]
+    (into #{}
+          (mapcat (fn [f]
+                    (let [src (slurp f)]
+                      (keep (fn [[_ name-str]]
+                              (let [kw (keyword name-str)]
+                                (when (contains? names kw) kw)))
+                            (re-seq pattern src)))))
+          (find-clj-files "test/graphden"))))
+
+
+(defn- collect-docs-roots
+  "Scan `docs/*.md` for fn-name back-tick mentions — pattern docs
+   (`PHILOSOPHY.md` etc.) reference `:wrap-element` / `wrap-style` /
+   `wrap-script` style exemplars to document the composition style.
+   Without this, those exemplars would be marked unreachable even
+   though the documentation contract requires them to exist."
+  [fn-defs-by-name]
+  (let [names (set (keys fn-defs-by-name))
+        ;; Match both bare and colon-prefixed back-ticked names.
+        pattern #"`:?([a-zA-Z_][a-zA-Z0-9_-]*[a-zA-Z0-9_?!])`"
+        md-files (->> (file-seq (io/file "docs"))
+                      (filter #(and (.isFile %)
+                                    (str/ends-with? (.getName %) ".md"))))]
+    (into #{}
+          (mapcat (fn [f]
+                    (let [src (slurp f)]
+                      (keep (fn [[_ name-str]]
+                              (let [kw (keyword name-str)]
+                                (when (contains? names kw) kw)))
+                            (re-seq pattern src)))))
+          md-files)))
+
+
 (defn- run-audit
   []
   (let [packages (pkg/load-packages ["core" "storage" "web" "app" "examples"])
@@ -157,11 +200,19 @@
                                         (:name fd))))
                                   fn-defs))
         dynamic-roots (collect-execute-by-name-roots all-by-name)
+        test-roots (collect-test-roots all-by-name)
+        docs-roots (collect-docs-roots all-by-name)
         roots (-> #{:web-server}
                   (into example-roots)
-                  (into dynamic-roots))
+                  (into dynamic-roots)
+                  (into test-roots)
+                  (into docs-roots))
         _ (println "Dynamic roots (from `execute-by-name` in src/):"
                    dynamic-roots)
+        _ (println "Test roots (from `:name :the-fn` in test/):"
+                   test-roots)
+        _ (println "Docs roots (from back-ticked names in docs/*.md):"
+                   docs-roots)
         reachable (bfs-reachable all-by-name roots)
         composed (filter #(composed? (val %)) fn-def-by-name)
         type-rows (filter #(type-row? (val %)) fn-def-by-name)

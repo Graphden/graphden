@@ -1681,10 +1681,6 @@
    :description "Live executions list for `?fn-version-id=`. Reuses the same decode + sort + clamp chain `/api/executions?fn-version-id=` exposes — the partial is the HTML projection of that data."
    :parent :_list-exec-by-version-rows}
 
-  {:name :_partial-fnv-execs-count
-   :parent :count
-   :args {:coll :_partial-fnv-execs-rows}}
-
   {:name :_partial-fnv-execs-empty?
    :parent :empty?
    :args {:coll :_partial-fnv-execs-rows}}

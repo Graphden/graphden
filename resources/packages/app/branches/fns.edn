@@ -692,21 +692,6 @@
    :parent :get
    :args {:coll {:as :item} :key {:value :target-version} :default nil}}
 
-  ;; Typed accessors for the two enum-shaped fields. Downstream
-  ;; readers that bind these get the closed-enum type, making
-  ;; ":kw vs \"string\""-style compare typos surface against the
-  ;; declared shape (documentation today; sync-time guard once
-  ;; `:equal?` gains the per-arg type-check rule).
-  {:name :_diff-entry-change-kw
-   :parent :get
-   :return-type [:union :null :diff-change-kw]
-   :args {:coll {:as :item} :key {:value :change} :default nil}}
-
-  {:name :_diff-entry-entity-name-kw
-   :parent :get
-   :return-type [:union :null :diff-entity-name-kw]
-   :args {:coll {:as :item} :key {:value :entity-name} :default nil}}
-
   {:name :_diff-apply-entry
    :description "HOF callback per diff row — `{:entity-name :entity-id (str) :change :source-version (stringify-uuids) :target-version (stringify-uuids)}`. Mirrors the Clojure `prepare-diff-entry`."
    :parent :zipmap

@@ -121,6 +121,62 @@
 ;; compute-layout — ancestor expansion
 ;; ============================================================================
 
+(deftest layout-canonical-slot-order-on-expand-test
+  ;; Pin for commit 0956763f's canonical sort. Before that, walk
+  ;; order produced REVERSE-of-declaration for the inherited slot
+  ;; trio (e.g. `:if`'s `:test :then :else` rendered as
+  ;; `:else :then :test` from top of the if-card). The fix sorts
+  ;; emitted children by (deepest-ancestor-first, position-within-
+  ;; ancestor) — inherited slots in declaration order BEFORE the
+  ;; closer ancestor's own additions.
+  ;;
+  ;; Synthetic graph mirrors `_app-cached` / `response-cache-wrap` /
+  ;; `:if` (depth-2 chain with 3 inherited slots + 1 own).
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [;; Deepest base-fn with 3 slots in declaration order.
+            deep  (setup/create-base-fn! storage "lcs-deep")
+            s-alpha (setup/create-slot! storage "alpha" :int)
+            s-beta  (setup/create-slot! storage "beta"  :int)
+            s-gamma (setup/create-slot! storage "gamma" :int)
+            _ (setup/attach-slot! storage (:id deep) (:id s-alpha) 0)
+            _ (setup/attach-slot! storage (:id deep) (:id s-beta)  1)
+            _ (setup/attach-slot! storage (:id deep) (:id s-gamma) 2)
+            ;; Closer wrapper adds its OWN slot.
+            wrap  (setup/create-composed-fn! storage "lcs-wrap" (:id deep))
+            s-delta (setup/create-slot! storage "delta" :int)
+            _ (setup/attach-slot! storage (:id wrap) (:id s-delta) 0)
+            ;; Targets for each slot (any base-fn body).
+            t-a (setup/create-base-fn! storage "lcs-t-a")
+            t-b (setup/create-base-fn! storage "lcs-t-b")
+            t-c (setup/create-base-fn! storage "lcs-t-c")
+            t-d (setup/create-base-fn! storage "lcs-t-d")
+            ;; Root binds all 4 slots via refs. Bind in NON-declaration
+            ;; order to make the canonical-sort do real work (insertion
+            ;; order would otherwise hide the bug).
+            root (setup/create-composed-fn! storage "lcs-root" (:id wrap))
+            _ (setup/bind-ref! storage (:id root) (:id s-delta) (:id t-d))
+            _ (setup/bind-ref! storage (:id root) (:id s-gamma) (:id t-c))
+            _ (setup/bind-ref! storage (:id root) (:id s-beta)  (:id t-b))
+            _ (setup/bind-ref! storage (:id root) (:id s-alpha) (:id t-a))
+            ;; Expand to depth 2 = inline both `wrap` and `deep` so all
+            ;; 4 slots appear as direct children of the root card.
+            result (layout storage (:id root)
+                           {(str "fn-" (:id root)) {:full-depth 2
+                                                    :partial-fns #{}}})
+            root-node-id (str "fn-" (:id root))
+            slot-order (->> (:edges result)
+                            (filter #(= root-node-id
+                                        (get-in % [:data :source])))
+                            (map #(get-in % [:data :argName])))]
+        (testing "deepest-ancestor slots first (in declaration order), then closer ancestor's own"
+          (is (= ["alpha" "beta" "gamma" "delta"] (vec slot-order))
+              (str "edges in walk order — should match `:args` "
+                   "declaration order (alpha/beta/gamma from deep, "
+                   "then delta from wrap); got: " (pr-str slot-order)))))
+      (finally (sp/close storage)))))
+
+
 (deftest layout-expansion-test
   (testing "expanding the root one level pulls in the parent's structure"
     (let [storage (setup/create-test-storage)]

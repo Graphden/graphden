@@ -120,6 +120,45 @@
       (finally (sp/close storage)))))
 
 
+(deftest collect-bindings-literal-nil-classifies-as-value-not-free-test
+  ;; Regression test for the executor HOF-leak fix in commit
+  ;; 0f63affb. Before that, `value-binding?` checked `(some? (:value
+  ;; b))` and returned false for `{:value-present true, :value nil}`
+  ;; — the storage shape of `:default nil` (or any `{:slot nil}`
+  ;; literal in an EDN `:args` map). The slot then fell through to
+  ;; `:free` and the executor pulled its runtime value from the
+  ;; caller's fa, surfacing the Ring request map at `:_shape-secret-
+  ;; path :default` and crashing `to-json-string` on `/api/secrets`.
+  ;;
+  ;; The contract: `:value-present true` is authoritative — any
+  ;; binding with the flag set is `:value`, regardless of nil-ness
+  ;; of `:value` itself. This unit-level pin is cheaper than the
+  ;; full /api/secrets integration round-trip and catches the
+  ;; regression directly at the classifier.
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [base (setup/create-base-fn! storage "cbn-base")
+            slot (setup/create-slot! storage "default" :any)
+            _    (setup/attach-slot! storage (:id base) (:id slot) 0)
+            cfn  (setup/create-composed-fn! storage "cbn-fn" (:id base))
+            ;; setup/bind-value! sets :value-present true even when
+            ;; value is nil — mirrors the EDN-parser shape for
+            ;; `:default nil` literal bindings.
+            _    (setup/bind-value! storage (:id cfn) (:id slot) nil)
+            entry (first (b/collect-bindings (:id cfn) (lookups-for storage)))]
+        (testing "value-binding with literal nil is classified as :value, not :free"
+          (is (= :value (:kind entry))
+              (str "literal-nil binding fell through to :free — the "
+                   "executor would pull this slot's runtime value "
+                   "from the caller's fa, surfacing whatever happens "
+                   "to share the slot name (see commit 0f63affb)"))
+          (is (nil? (:value entry))
+              "classifier preserves the literal nil value")
+          (is (not (contains? entry :required))
+              ":free-only key absent — confirms NOT classified as :free")))
+      (finally (sp/close storage)))))
+
+
 (deftest collect-bindings-optional-slot-test
   (let [storage (setup/create-test-storage)]
     (try

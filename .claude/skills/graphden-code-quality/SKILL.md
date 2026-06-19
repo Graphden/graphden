@@ -301,6 +301,72 @@ grep -rEn 'read-string|eval\s+\(' src --include='*.clj'
 `packages/loader.clj`'s `read-string` читает CLASSPATH-resource — OK
 (supply-chain, не runtime). Другие читать не должно.
 
+### 7.4 SQL — HoneySQL по умолчанию, raw-string только по carve-out
+
+**Правило**: каждый новый JDBC-запрос строится через `honey.sql/format`
+по data-map'е, не через `(str "SELECT … " var " …")`. Это уже
+сегодня доминирующий стиль в `storage/postgres/*.clj` (90%+ сайтов);
+любой новый raw-string в `src/` — повод обосновать carve-out.
+
+**Зачем:**
+- **Safety**: HoneySQL автоматически параметризует значения
+  (`?`-placeholders), исключает identifier-injection через
+  user-supplied table-name. Raw `(str "\"" jt "\"")` требует
+  ручного escape'а — легко забыть.
+- **Composability**: query — data; шаги (where, order-by) могут
+  собираться `cond->` / `merge` без string-concat акробатики.
+- **Consistency**: codebase уже HoneySQL-heavy; новые raw-сайты
+  ломают навигацию и стиль ревью.
+- **Refactor-friendly**: column rename = keyword edit, не grep+sed
+  по SQL-фрагментам.
+
+**Когда raw-string ОПРАВДАН** (carve-outs):
+
+| Carve-out | Пример | Reason |
+|---|---|---|
+| PG built-in RPC | `SELECT pg_notify(?, ?)`, `pg_try_advisory_lock(?)` | HoneySQL покрытие функций PG-RPC слабое; raw — идиоматично + 1 строка |
+| DDL edges | `CREATE TYPE … AS ENUM (…)`, динамические `CREATE INDEX` имена | HoneySQL DDL coverage частичное; ENUM с runtime-values неудобно |
+| Однострочный SQL без runtime-данных | `"SELECT pg_advisory_unlock_all()"` | Нечего параметризовать; HoneySQL overhead = чистый шум |
+
+**Detection:**
+
+```bash
+# Raw SQL стрингов с runtime-данными:
+grep -rEnB1 '\(str\s+"(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|VALUES|WITH)\b' src --include='*.clj' | head
+
+# JDBC execute с явно-строковым query (без HoneySQL):
+grep -rEn 'execute!.*\[\s*"(SELECT|INSERT|UPDATE|DELETE)\b' src --include='*.clj' | head
+```
+
+Каждое попадание — либо carve-out из таблицы выше (с inline-
+комментарием почему), либо migration-кандидат.
+
+**HoneySQL gotchas:**
+
+- **PG reserved words** (`user`, `order`, `group`, `from`, …) — entity
+  names могут попасть в table-arg. Без quoting `UPDATE user …` упадёт.
+  Решение: `(sql/format … {:quoted true})` для query-builder'ов,
+  принимающих entity-name снаружи. Внутри-storage queries с фиксированными
+  identifier'ами quoting не нужен. См. `build-batch-update-sql` в
+  `storage/postgres/crud.clj`.
+- **Batch INSERT через `jdbc/execute-batch!`** — JDBC API: один SQL
+  template + N param-sets. HoneySQL даёт `[sql & params]`, для
+  execute-batch берётся `(first formatted)` — SQL с `?`-placeholders.
+  Pattern: `insert-junction-sql` в `storage/postgres/junction.clj`.
+- **Per-cell casts в `VALUES (...)`** — для PG-specific type coercion
+  каждой ячейки используй `[:cast value :uuid]`. HoneySQL рендерит как
+  `CAST(? AS UUID)` — семантически идентично `?::uuid`.
+- **Derived table с column-aliases**: `:from [[{:values …}
+  [:v {:columns [:id :col1 :col2]}]]]` → `FROM (VALUES …) AS v(id,
+  col1, col2)`. Pattern: `build-batch-update-sql`.
+
+**Migration reference** (для аналогичных задач):
+
+- `storage/postgres/junction.clj` (6 raw-сайтов → HoneySQL,
+  preserved `execute-batch!`)
+- `storage/postgres/crud.clj build-batch-update-sql` (UPDATE FROM
+  VALUES + per-cell casts + RETURNING)
+
 ## 8. Nil safety — Throwable/.getMessage и аналоги
 
 Java-API контракт: `.getMessage` может вернуть null. Если результат
@@ -934,6 +1000,8 @@ grep -rEn 'Bearer\s+[a-zA-Z0-9]' tools/browser-test/*.test.js | head
 - [ ] Каждая функция ≥ 100 LOC ОБОСНОВАНА (см. §1.5) либо распилена
 - [ ] User-facing `:error` / `:reason` поля nil-safe
 - [ ] Каждый секретный compare — constant-time
+- [ ] Каждый новый JDBC-запрос через HoneySQL `sql/format`; raw-string
+      только по carve-out из §7.4 (PG-RPC / DDL edge / нет runtime-данных)
 
 **Unit tests**
 - [ ] Нет дубликатных deftests с одинаковыми observable assertion'ами

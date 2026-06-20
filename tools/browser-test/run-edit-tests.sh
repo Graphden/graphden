@@ -82,14 +82,20 @@ for f in $FILES; do
   fi
   CONSECUTIVE_DOWN=0
   # Per-test wall-clock cap. Individual tests should complete in
-  # < 1 min under load; bounded at 3 min hard, then SIGKILL via the
+  # < 1 min under load; bounded at 5 min hard, then SIGKILL via the
   # GNU coreutils `timeout`. Without this a stuck `page.evaluate`
   # against an unresponsive editor JS can pin a single test for
   # arbitrarily long (verified empirically: edit-effects-badges hung
   # 51 min on a slow server window). The cap turns the hang into a
   # discrete failure that gets cascade-counted, so the rest of the
   # suite isn't held hostage.
-  if timeout -k 5 "${PER_TEST_TIMEOUT:-180}" node "$f"; then
+  #
+  # 5 min is the chosen number because the heaviest test
+  # (edit-inheritance-regression, 30 await ops) was tripping a 3 min
+  # cap during slow-server windows even though it eventually would
+  # have completed correctly. 5 min preserves the hang-bound
+  # contract while reducing false-positive timeouts.
+  if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
     PASS=$((PASS+1))
   else
     rc=$?

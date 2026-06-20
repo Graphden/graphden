@@ -51,6 +51,7 @@ async function newContext(chromium) {
   }, AUTH);
   const page = await ctx.newPage();
   page.on('pageerror', e => console.log('  [pageerror]', e.message));
+  page.on('crash', () => console.log('  [page crash] renderer crashed'));
   await page.goto(BASE + '/');
   await page.waitForTimeout(300);
   return { browser, page };

@@ -121,26 +121,28 @@ const TEST_NAME = 'test-arg-type-flip';
         .find(b => b.textContent.trim() === 'Save');
       btn.click();
     });
-    // Save → backend writes → popover dismisses. Poll for popover
-    // dismissal so we don't race; ~2s upper bound is generous.
-    for (let i = 0; i < 20; i++) {
-      const open = await page.evaluate(
-        () => !!document.querySelector('.arg-value-edit-popover'));
-      if (!open) break;
-      await page.waitForTimeout(100);
-    }
-    // Storage check: the binding now carries `:type-override-fn-id`
-    // pointing at `:non-blank-text`. Verifies the full picker→PUT
-    // round-trip — the failure mode the original test was meant to
-    // catch (silent backend rejection or non-applied state).
-    const afterEnts = await getEntities(page);
-    const afterBinding = afterEnts.bindings.find(b => b.id === arg['binding-id']);
-    const refineFn = afterEnts.fns.find(
+    // Save → popover dismisses (synchronous, UI-side) → PUT fires
+    // async → storage reflects new :type-override-fn-id. The popover
+    // closes BEFORE the PUT round-trip completes; polling on dismissal
+    // then reading storage races the network — the symptom is the
+    // assertion seeing `:type-override-fn-id` still nil on a slow
+    // backend (reproduced on the isolated testcontainer e2e stack
+    // 2026-06-20). Poll storage directly until the override appears
+    // (5s upper bound), which is the actual contract we're verifying.
+    const refineFn = (await getEntities(page)).fns.find(
       f => f.name === 'non-blank-text' && (!f['parent-ids'] || f['parent-ids'].length === 0));
     assert(refineFn,
            ':non-blank-text type-row exists in the graph (precondition for the flip target)');
+    let afterBinding = null;
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const ents = await getEntities(page);
+      afterBinding = ents.bindings.find(b => b.id === arg['binding-id']);
+      if (afterBinding && afterBinding['type-override-fn-id'] === refineFn.id) break;
+      await page.waitForTimeout(150);
+    }
     assert(afterBinding && afterBinding['type-override-fn-id'] === refineFn.id,
-           'binding.type-override-fn-id points at :non-blank-text after save: '
+           'binding.type-override-fn-id points at :non-blank-text within 5s of save: '
            + JSON.stringify({override: afterBinding?.['type-override-fn-id'],
                              refineFn: refineFn.id}));
   } finally {

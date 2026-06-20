@@ -30,6 +30,7 @@
    container in reverse start order (Ryuk is the safety net)."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.clients.vault :as vault]
     [org.httpkit.client :as http])
@@ -164,12 +165,40 @@
 ;; Orchestration
 ;; =============================================================================
 
-(defn- stop-all!
-  "Stop every container in reverse start order. Each `.stop` call
-   is best-effort: the goal is graceful teardown, but Ryuk is the
-   safety net — if we throw on the way out, every container still
-   dies when this JVM exits."
+(defn- capture-executor-logs!
+  "On teardown, dump the executor container's stdout/stderr tail to
+   the orchestrator's log so a mid-suite crash leaves a forensic
+   trail. Without this, the testcontainer's logs vanish with the
+   container — and a `bb test-e2e` failure surfaces only as
+   'server unhealthy after 90s' in the runner, with no JVM
+   stacktrace.
+
+   Best-effort: log fetch can throw if the container is already
+   dead; swallowed so teardown still proceeds."
   [containers]
+  (doseq [^GenericContainer c containers]
+    (try
+      (when (= "graphden-executor:latest"
+               (GenericContainer/.getDockerImageName c))
+        (let [logs (GenericContainer/.getLogs c)
+              tail (->> (str/split-lines (or logs ""))
+                        (take-last 80)
+                        (str/join "\n"))]
+          (log/info (str "╭─ executor container logs (last 80 lines) ─╮\n"
+                         tail
+                         "\n╰─ end executor logs ─╯"))))
+      (catch Exception _))))
+
+
+(defn- stop-all!
+  "Stop every container in reverse start order. Captures executor
+   logs first so a mid-suite crash leaves a stacktrace in the
+   orchestrator's stdout. Each `.stop` call is best-effort: the
+   goal is graceful teardown, but Ryuk is the safety net — if we
+   throw on the way out, every container still dies when this JVM
+   exits."
+  [containers]
+  (capture-executor-logs! containers)
   (doseq [^GenericContainer c (reverse containers)]
     (try (GenericContainer/.stop c)
          (catch Exception e

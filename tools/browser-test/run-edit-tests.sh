@@ -51,14 +51,36 @@ WORST=0
 PASS=0
 FAIL=0
 FAILED_NAMES=""
+# Consecutive server-down counter. Demo (:9002) has docker restart-
+# policy so a single bounce recovers; an isolated testcontainer
+# stack does NOT auto-restart, so a single crash cascades through
+# every subsequent test as a 90s `ERR_CONNECTION_REFUSED` wait. Cap
+# the consecutive cascade — if the server stays down past N
+# attempts, mark remaining files as skipped and abort the loop.
+# Saves ~37 min on a full 47-test suite (90s × 25 = ~37 min wasted
+# in the cascade window).
+CONSECUTIVE_DOWN=0
+CASCADE_CAP=${CASCADE_CAP:-3}
+SKIP_AFTER_CASCADE=0
+REMAINING_FILES=""
 for f in $FILES; do
+  if [ "$SKIP_AFTER_CASCADE" = "1" ]; then
+    REMAINING_FILES="$REMAINING_FILES $f"
+    continue
+  fi
   echo "─── $f ───"
   if ! wait_for_server; then
     WORST=1
     FAIL=$((FAIL+1))
     FAILED_NAMES="$FAILED_NAMES $f(server-down)"
+    CONSECUTIVE_DOWN=$((CONSECUTIVE_DOWN+1))
+    if [ "$CONSECUTIVE_DOWN" -ge "$CASCADE_CAP" ]; then
+      echo "  (server down for $CONSECUTIVE_DOWN consecutive tests — aborting cascade)" >&2
+      SKIP_AFTER_CASCADE=1
+    fi
     continue
   fi
+  CONSECUTIVE_DOWN=0
   if node "$f"; then
     PASS=$((PASS+1))
   else
@@ -69,6 +91,16 @@ for f in $FILES; do
   echo
   if [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi
 done
+
+# Mark cascade-skipped tests in the failed-names list so the summary
+# is honest about what wasn't even attempted.
+if [ -n "$REMAINING_FILES" ]; then
+  for f in $REMAINING_FILES; do
+    FAIL=$((FAIL+1))
+    FAILED_NAMES="$FAILED_NAMES $f(cascade-skip)"
+  done
+  WORST=1
+fi
 
 echo "============================================================"
 echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"

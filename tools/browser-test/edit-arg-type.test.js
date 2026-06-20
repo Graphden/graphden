@@ -134,15 +134,23 @@ const TEST_NAME = 'test-arg-type-flip';
     assert(refineFn,
            ':non-blank-text type-row exists in the graph (precondition for the flip target)');
     let afterBinding = null;
-    const deadline = Date.now() + 5000;
+    // 5s was the original budget on a warm prod-shaped instance.
+    // The isolated testcontainer stack is markedly slower under
+    // sustained load (delta-recompile + compile-deps rebuild on
+    // every binding write, see api-graph-entities-oom-leak memory)
+    // — 15s gives ~3x headroom while staying short enough that a
+    // true regression still surfaces as a failure rather than a
+    // hang. Per-iteration poll bumped to 250ms to halve the request
+    // pressure on a slow server.
+    const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
       const ents = await getEntities(page);
       afterBinding = ents.bindings.find(b => b.id === arg['binding-id']);
       if (afterBinding && afterBinding['type-override-fn-id'] === refineFn.id) break;
-      await page.waitForTimeout(150);
+      await page.waitForTimeout(250);
     }
     assert(afterBinding && afterBinding['type-override-fn-id'] === refineFn.id,
-           'binding.type-override-fn-id points at :non-blank-text within 5s of save: '
+           'binding.type-override-fn-id points at :non-blank-text within 15s of save: '
            + JSON.stringify({override: afterBinding?.['type-override-fn-id'],
                              refineFn: refineFn.id}));
   } finally {

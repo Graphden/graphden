@@ -43,6 +43,7 @@
    ```"
   (:gen-class)
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.system.interface :as sys]))
 
@@ -137,13 +138,23 @@
   "Start a plain-nREPL server on `GRAPHDEN_NREPL_PORT` when set —
    debugging access into the live executor. No cider/refactor
    middleware (those live only in dev aliases); plain `nrepl.server`
-   is enough for `clojure_eval`-driven inspection."
+   is enough for `clojure_eval`-driven inspection.
+
+   Treats absent AND blank env vars as 'off' — docker-compose / k8s
+   YAMLs that thread the var with a `:default \"\"` substitution
+   (e.g. `GRAPHDEN_NREPL_PORT: \\${GRAPHDEN_NREPL_PORT:-}`) deliver
+   the literal empty string, which `Integer/parseInt` would crash on.
+   The crash kills the `main` thread but http-kit's listener has
+   already started in another thread, so the executor keeps serving
+   — masking the bug as a stack trace in the boot log with no
+   user-visible consequence. Guard `str/blank?` BEFORE parse."
   []
-  (when-let [p (some-> (System/getenv "GRAPHDEN_NREPL_PORT")
-                       Integer/parseInt)]
-    (let [start-server (requiring-resolve 'nrepl.server/start-server)]
-      (start-server :bind "0.0.0.0" :port p)
-      (log/info (str "nREPL listening on 0.0.0.0:" p)))))
+  (let [raw (System/getenv "GRAPHDEN_NREPL_PORT")]
+    (when-not (str/blank? raw)
+      (let [p (Integer/parseInt raw)
+            start-server (requiring-resolve 'nrepl.server/start-server)]
+        (start-server :bind "0.0.0.0" :port p)
+        (log/info (str "nREPL listening on 0.0.0.0:" p))))))
 
 
 (defn -main

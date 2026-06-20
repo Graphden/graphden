@@ -14,25 +14,44 @@
    so the rest of that file can go.")
 
 
-(defn- bindings-of
-  [fn-id bindings]
-  (filter #(= fn-id (:fn-id %)) bindings))
+(defn- index-bindings-by-fn
+  "Group `bindings` once by `:fn-id`. O(bindings); subsequent
+   `forward-deps-of` calls then look up their fn's bindings in O(1)
+   instead of re-filtering the whole binding list per fn (which was
+   O(fns × bindings) over the full graph — the GC-pressure hotspot
+   `prime-compile-deps!` hits on every CRUD write)."
+  [bindings]
+  (reduce (fn [acc b]
+            (update acc (:fn-id b) (fnil conj []) b))
+          {}
+          bindings))
 
 
-(defn- items-of
-  [binding-ids list-items]
-  (filter #(contains? binding-ids (:binding-id %)) list-items))
+(defn- index-items-by-binding
+  "Group `list-items` once by `:binding-id`. Same motivation as
+   `index-bindings-by-fn`."
+  [list-items]
+  (reduce (fn [acc i]
+            (update acc (:binding-id i) (fnil conj []) i))
+          {}
+          list-items))
 
 
 (defn forward-deps-of
   "Set of fn-ids whose mutation invalidates `fn-id`'s closure.
    Conservative — better to recompile a few extras than to ship a
-   stale closure."
-  [fn-id {:keys [fns bindings list-items]}]
+   stale closure.
+
+   `indexed-graph` must carry pre-built `:bindings-by-fn` and
+   `:items-by-binding` indexes — call `index-graph` once before
+   looping over fns. The old shape that took raw `bindings` /
+   `list-items` collections did an O(N) filter per call; on a
+   3000-fn graph that turned `build-reverse-deps` into a
+   billion-operation rebuild on every CRUD write."
+  [fn-id {:keys [fns bindings-by-fn items-by-binding]}]
   (let [f (get fns fn-id)
-        bs (bindings-of fn-id bindings)
-        binding-ids (into #{} (map :id) bs)
-        items (items-of binding-ids list-items)]
+        bs (get bindings-by-fn fn-id [])
+        items (mapcat #(get items-by-binding (:id %) []) bs)]
     (into #{}
           (comp cat (filter some?))
           [(:parent-ids f)
@@ -42,17 +61,36 @@
            (keep :ref-fn-id items)])))
 
 
+(defn index-graph
+  "Pre-build the indexes `forward-deps-of` needs. Pulled out so
+   `build-reverse-deps` does the indexing ONCE per call instead of
+   leaving callers to remember.
+
+   Accepts either a `fns`-collection map (raw `read-graph` shape) or
+   one whose `:fns` is already a `{fn-id → fn}` map — the indexes
+   end up identical either way."
+  [{:keys [fns bindings list-items] :as graph}]
+  (let [fns-map (if (map? fns) fns (into {} (map (juxt :id identity)) fns))]
+    (assoc graph
+           :fns fns-map
+           :bindings-by-fn (index-bindings-by-fn bindings)
+           :items-by-binding (index-items-by-binding list-items))))
+
+
 (defn build-reverse-deps
   "Produce `{fn-id → #{ids that depend on it}}` over the whole
-   graph. Inverts `forward-deps-of` once per full rebuild."
-  [{:keys [fns] :as graph}]
-  (let [fns-map (if (map? fns) fns (into {} (map (juxt :id identity)) fns))
-        graph' (assoc graph :fns fns-map)]
+   graph. Inverts `forward-deps-of` once per full rebuild.
+
+   O(fns + bindings + list-items) after `index-graph` is called
+   once at the top — was O(fns × bindings) before pre-indexing."
+  [graph]
+  (let [indexed (index-graph graph)
+        fns-map (:fns indexed)]
     (reduce
       (fn [acc f]
         (reduce (fn [a dep] (update a dep (fnil conj #{}) (:id f)))
                 acc
-                (forward-deps-of (:id f) graph')))
+                (forward-deps-of (:id f) indexed)))
       {}
       (vals fns-map))))
 

@@ -35,10 +35,17 @@
     [graphden.clients.vault :as vault]
     [org.httpkit.client :as http])
   (:import
+    (com.github.dockerjava.api.command
+      CreateContainerCmd)
+    (com.github.dockerjava.api.model
+      HostConfig
+      RestartPolicy)
     (org.testcontainers.containers
       GenericContainer
       Network
       PostgreSQLContainer)
+    (org.testcontainers.containers.output
+      Slf4jLogConsumer)
     (org.testcontainers.containers.wait.strategy
       HttpWaitStrategy
       Wait)))
@@ -128,11 +135,52 @@
       (vault/put-secret client path value))))
 
 
+(defn- apply-restart-and-memory!
+  "Docker-side recovery + safety belt. Installed via
+   `withCreateContainerCmdModifier` so it lands on the Docker create
+   call rather than relying on Testcontainers' default no-restart
+   policy.
+
+   - `restart=on-failure:3` — if the executor's main JVM exits
+     non-zero (NumberFormatException-class crashes, OOM-kills, etc.),
+     Docker brings it back up. Combined with run-edit-tests.sh's
+     `wait_for_server` 90s poll, a restart-window fault recovers
+     transparently within ≤ 1 cascade-cap step.
+
+   - `--memory 4g` — bounds the JVM container. With
+     `MaxRAMPercentage=75` (Dockerfile) the JVM gets ~3GB heap. A
+     tighter cap (2GB → 1.5GB heap) trips the in-memory accumulation
+     that GET /api/graph/entities does over a long e2e run; 4GB gives
+     enough headroom that ExitOnOutOfMemoryError + restart-policy can
+     handle the rare OOM cleanly rather than every-other-test. If the
+     executor enters a runaway-GC spiral it gets OOM-killed
+     deterministically (exit code 137 → triggers restart).
+
+   IMPORTANT: mutate Testcontainers' already-built `HostConfig`
+   rather than replacing it — Testcontainers populates network /
+   port-bindings / volumes there during create-cmd assembly, and a
+   fresh `HostConfig/newHostConfig` would wipe them."
+  [^CreateContainerCmd cmd]
+  (let [host-cfg (or (CreateContainerCmd/.getHostConfig cmd)
+                     (HostConfig/newHostConfig))]
+    (HostConfig/.withRestartPolicy
+      host-cfg (RestartPolicy/onFailureRestart (int 3)))
+    (HostConfig/.withMemory
+      host-cfg (long (* 4 1024 1024 1024)))
+    (CreateContainerCmd/.withHostConfig cmd host-cfg)))
+
+
 (defn- start-executor!
   "Graphden executor — reuses the `graphden-executor:latest` image
    the demo build produced (so this stack picks up the latest code
    without a second build step). All `JDBC_URL` / `VAULT_ADDR` /
-   `:user-postgres` references use the network aliases set above."
+   `:user-postgres` references use the network aliases set above.
+
+   `withLogConsumer` ships container stdout/stderr to SLF4J live, so
+   a mid-suite crash leaves a stack-trace in the orchestrator's log
+   stream — not just in the last 500 lines captured at teardown.
+   `withCreateContainerCmdModifier` installs a Docker restart policy
+   + memory cap (see `apply-restart-and-memory!`)."
   [^Network network auth-token]
   (doto (GenericContainer. "graphden-executor:latest")
     (GenericContainer/.withEnv "PORT" "8080")
@@ -153,6 +201,13 @@
       (into-array Integer [(Integer/valueOf 8080)]))
     (GenericContainer/.withNetwork network)
     (GenericContainer/.withNetworkAliases (into-array String ["executor"]))
+    (GenericContainer/.withLogConsumer
+      (-> (Slf4jLogConsumer.
+            (org.slf4j.LoggerFactory/getLogger "executor-container"))
+          (Slf4jLogConsumer/.withPrefix "exec")))
+    (GenericContainer/.withCreateContainerCmdModifier
+      (reify java.util.function.Consumer
+        (accept [_ cmd] (apply-restart-and-memory! cmd))))
     (GenericContainer/.waitingFor
       (-> (Wait/forHttp "/health")
           (HttpWaitStrategy/.forStatusCode 200)
@@ -164,6 +219,47 @@
 ;; =============================================================================
 ;; Orchestration
 ;; =============================================================================
+
+(defn- start-health-heartbeat!
+  "Background thread that pokes `<url>/health` every 10s and logs the
+   outcome. Goal: pin down the WALL-CLOCK moment the executor stops
+   responding mid-suite, so the surrounding bash output (which test
+   was running, which assertion fired last) frames the timeline.
+
+   Lives until `stop` (returned) is invoked. Bounded by interrupt;
+   no try-deref-block. Best-effort — any exception is swallowed and
+   the heartbeat keeps trying."
+  [url]
+  (let [stop? (atom false)
+        thread (Thread.
+                 ^Runnable
+                 (fn []
+                   (while (not @stop?)
+                     (let [t0 (System/currentTimeMillis)]
+                       (try
+                         (let [{:keys [status error]}
+                               @(http/get (str url "/health")
+                                          {:timeout 5000})
+                               dt (- (System/currentTimeMillis) t0)]
+                           (cond
+                             error
+                             (log/warn (format "♥ /health FAIL after %dms: %s"
+                                               dt (Throwable/.getMessage error)))
+                             (not= 200 status)
+                             (log/warn (format "♥ /health %d after %dms" status dt))
+                             (>= dt 1000)
+                             (log/info (format "♥ /health 200 (slow, %dms)" dt))))
+                         (catch Exception e
+                           (log/warn e "heartbeat probe threw"))))
+                     (try (Thread/sleep 10000)
+                          (catch InterruptedException _ (reset! stop? true)))))
+                 "e2e-health-heartbeat")]
+    (Thread/.setDaemon thread true)
+    (Thread/.start thread)
+    (fn []
+      (reset! stop? true)
+      (Thread/.interrupt thread))))
+
 
 (defn- capture-executor-logs!
   "On teardown, dump the executor container's stdout/stderr tail to
@@ -227,16 +323,19 @@
             host (GenericContainer/.getHost executor)
             port (GenericContainer/.getMappedPort executor
                                                   (Integer/valueOf 8080))
-            url (str "http://" host ":" port)]
+            url (str "http://" host ":" port)
+            stop-heartbeat! (start-health-heartbeat! url)]
         (println (str "▶ stack ready (" url "); running " script))
-        (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
-                                  (into-array String ["bash" script]))
-              env (ProcessBuilder/.environment pb)]
-          (java.util.Map/.put env "GRAPHDEN_URL" url)
-          (java.util.Map/.put env "AUTH_TOKEN" auth-token)
-          (ProcessBuilder/.inheritIO pb)
-          (let [proc (ProcessBuilder/.start pb)]
-            (Process/.waitFor proc))))
+        (try
+          (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
+                                    (into-array String ["bash" script]))
+                env (ProcessBuilder/.environment pb)]
+            (java.util.Map/.put env "GRAPHDEN_URL" url)
+            (java.util.Map/.put env "AUTH_TOKEN" auth-token)
+            (ProcessBuilder/.inheritIO pb)
+            (let [proc (ProcessBuilder/.start pb)]
+              (Process/.waitFor proc)))
+          (finally (stop-heartbeat!))))
       (finally
         (println "↓ stopping e2e stack")
         (stop-all! @containers)

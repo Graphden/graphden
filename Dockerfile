@@ -28,8 +28,20 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=90s --retries=3 \
   CMD curl -f http://localhost:8080/health || exit 1
 
-# Run the application with optimized JVM settings
+# Run the application with optimized JVM settings.
+#
+# `ExitOnOutOfMemoryError` makes the JVM exit on heap-OOM rather than
+# trying to continue in a degraded state. Without it, a request
+# handler that runs out of heap catches the OOM, returns a 500, and
+# the JVM keeps serving — every subsequent request also OOMs because
+# the leak is still there. With it, the container exits cleanly →
+# Docker's restart policy (compose `restart: unless-stopped` in prod,
+# `--restart=on-failure:3` in the e2e stack) brings up a fresh JVM
+# within ~10s. Found because the e2e isolated stack cascaded on a
+# memory leak around row->entity / cheshire-encode of the
+# `/api/graph/entities` payload (see 2026-06-20 logs).
 CMD ["java", \
      "-XX:+UseContainerSupport", \
      "-XX:MaxRAMPercentage=75.0", \
+     "-XX:+ExitOnOutOfMemoryError", \
      "-jar", "/app/executor-server.jar"]

@@ -60,7 +60,7 @@ async function cleanup(page) {
       } catch (err) {
         return {ok: false, error: 'fetch threw: ' + String(err).slice(0, 200)};
       }
-    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: 'test123',
+    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'),
         name: SECRET_NAME, path: SECRET_PATH});
     if (!seed.ok) {
       console.log('  (Vault/server unavailable — skipping happy-path: '

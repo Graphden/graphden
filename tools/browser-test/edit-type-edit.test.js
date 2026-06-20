@@ -62,7 +62,7 @@ async function cleanup(page) {
         }),
       });
       return r.json();
-    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: 'test123', name: REC_FN});
+    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'), name: REC_FN});
     assert(seedResp.ok && seedResp.id,
            'record type-row created: ' + JSON.stringify(seedResp).slice(0, 120));
 

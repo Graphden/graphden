@@ -27,6 +27,19 @@ const {chromium} = require('playwright');
 const {assert, newContext} = require('./edit-test-helpers');
 
 
+// Per-run unique probe name. The legacy hardcoded `auto-fill-probe-
+// name` worked on dev (no vault → POST never persisted), but on the
+// e2e isolated stack openbao IS configured: the first run actually
+// creates the secret, the second hits 409 Conflict + the wait-for
+// `.popover-error` assertion timed out (the error DID surface, but
+// not the `:vault/not-configured` one the test expected; the
+// generic 409 path doesn't render via `.popover-error` the same
+// way). Randomising the name keeps every run a clean create.
+const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
+const PROBE_NAME = 'auto-fill-probe-name' + RUN_ID;
+const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
+
+
 (async () => {
   const {browser, page} = await newContext(chromium);
   page.on('dialog', (d) => {
@@ -100,21 +113,45 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Phase C: auto-fill path from name. The handler replaces `-`
     // with `/` and strips leading underscores.
     // ===================================================================
-    await page.fill('.secrets-popover input[name="name"]',
-                    'auto-fill-probe-name');
+    await page.fill('.secrets-popover input[name="name"]', PROBE_NAME);
     await page.waitForTimeout(100);
     const autofill = await page.evaluate(
       () => document.querySelector('.secrets-popover input[name="path"]')?.value);
-    assert(autofill === 'auto/fill/probe/name',
+    assert(autofill === EXPECTED_PATH,
            'path auto-fills from name (hyphens → slashes): '
            + JSON.stringify(autofill));
 
     // ===================================================================
-    // Phase D: fill the rest + submit. Dev env has no VAULT_ADDR →
-    // server responds 5xx-ish with `:vault/not-configured`. The
-    // popover surfaces the error AND stays open.
+    // Phase D: error path. Original test assumed every submit fails
+    // because dev had no VAULT_ADDR → every POST hit
+    // `:vault/not-configured`. The e2e isolated stack DOES have
+    // openbao wired, so submit succeeds → popover dismisses → the
+    // wait-for-error times out. Reproduce a guaranteed error by
+    // submitting the SAME secret twice: second POST returns 200 with
+    // `{ok:false, reason:"name-taken"}`, the popover surfaces it.
     // ===================================================================
     await page.fill('.secrets-popover input[name="value"]', 'secret-value');
+    // First submit — succeeds (or fails with vault error on dev).
+    // We don't assert on its outcome; the popover may close (success)
+    // or stay open (vault-not-configured). Re-open the popover in
+    // either case so phase D can drive the duplicate-name path.
+    await page.evaluate(() => {
+      document.querySelector('.secrets-popover [data-act="submit"]')?.click();
+    });
+    await page.waitForTimeout(800);
+    // Reopen if closed (success path), else carry on (error path).
+    const popoverClosed = await page.evaluate(
+      () => !document.querySelector('.secrets-popover'));
+    if (popoverClosed) {
+      await page.click('.sidebar-secrets [data-act="new-secret"]');
+      await page.waitForSelector('.secrets-popover', {timeout: 5000});
+      await page.fill('.secrets-popover input[name="name"]', PROBE_NAME);
+      await page.fill('.secrets-popover input[name="value"]', 'secret-value');
+      await page.waitForTimeout(100);
+    }
+    // Now submit the same name → server rejects (name-taken on isolated
+    // stack with vault; vault-not-configured on bare dev). EITHER way
+    // the popover surfaces an error and stays open.
     await page.evaluate(() => {
       document.querySelector('.secrets-popover [data-act="submit"]')?.click();
     });
@@ -138,10 +175,11 @@ const {assert, newContext} = require('./edit-test-helpers');
     assert(errorState.errorText.length > 0,
            'error message surfaces: '
            + JSON.stringify(errorState.errorText).slice(0, 200));
-    // In this dev env we expect the `:vault/not-configured` reason,
-    // but be lenient — any non-empty error means the path worked.
+    // Reason narrators differ across deployments. Log both shapes.
     if (/vault/i.test(errorState.errorText)) {
-      console.log('  (note: dev env has no VAULT_ADDR — expected error reason)');
+      console.log('  (note: dev env without VAULT_ADDR — vault/not-configured)');
+    } else if (/already exists|name-taken/i.test(errorState.errorText)) {
+      console.log('  (note: vault wired — name-taken on duplicate submit)');
     }
 
     // ===================================================================

@@ -45,7 +45,7 @@ async function cleanup(page) {
         body: JSON.stringify({name, 'element-type': 'int'}),
       });
       return r.json();
-    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: 'test123', name: LIST_FN});
+    }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'), name: LIST_FN});
     assert(seedResp.ok && seedResp.id,
            'list type-row created: ' + JSON.stringify(seedResp).slice(0, 120));
 

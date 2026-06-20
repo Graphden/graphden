@@ -383,23 +383,51 @@
    - `:merges-by-target` — every `branch-merge` row landing on any
      branch in chain, grouped by `:target-branch-id`. Tells
      `resolve-version-from-cache` what to walk per chain level.
-   - `:versions-by-id` — versions grouped by entity-id. The
-     `:branch-id` filter union'd in the source-branch-ids of those
-     merges so source-branch overlays are available for merge-
-     candidate evaluation. WITHOUT this expansion the batch path
-     never sees the merged-in versions (#52) and merges were silently
-     no-ops at read time."
+   - `:versions-by-id` — versions grouped by entity-id.
+
+   The version loader is two-phase to keep the working set bounded:
+
+   * Chain branches: `query-latest-per-group` returns ONE row per
+     (entity-id, branch-id) — the latest. That's all
+     `resolve-version-from-cache` ever consults via
+     `latest-by-created-at`. Without this dedup the full version
+     history is materialised per call; on a long-running executor
+     `/api/graph/entities` and friends OOM the cheshire-encode step
+     (root cause of the 2026-06-20 e2e cascade).
+   * Source-merge branches: full history fetch with `query-entities`.
+     `merge-candidates-from-cache` needs every version with
+     `created-at <= merge.source-timestamp` per merge; if two merges
+     from the same source have different timestamps, the latest-per-
+     branch row may post-date the older merge's cutoff and we'd lose
+     visibility into what that merge actually carried. Source-merge
+     volume is small in practice (1-2 merges per chain in normal
+     use), so the full fetch on this slice is OK.
+
+   Both slices are filtered by `entity-ids` when the caller passes
+   them (batch path). Without entity-ids (used by `resolve-all-
+   entities`) the chain-branches fetch returns latest-per-entity
+   across the whole branch — still O(entities × branches), but no
+   longer multiplied by version history depth."
   [base-storage version-entity version-id-field entity-ids branch-id]
   (let [branch-chain (collect-branch-chain base-storage branch-id)
         all-merges (sp/query-entities base-storage :branch-merge
                                       {:target-branch-id (vec branch-chain)})
         source-branch-ids (into #{} (map :source-branch-id) all-merges)
-        all-branch-ids (vec (into (set branch-chain) source-branch-ids))
-        version-where (cond-> {:branch-id all-branch-ids}
-                        (seq entity-ids)
-                        (assoc version-id-field (vec entity-ids)))
-        all-versions (sp/query-entities base-storage version-entity
-                                        version-where)]
+        entity-where (when (seq entity-ids)
+                       {version-id-field (vec entity-ids)})
+        ;; Phase 1: chain branches — only the latest per (entity, branch).
+        chain-versions (sp/query-latest-per-group
+                         base-storage version-entity
+                         (merge entity-where {:branch-id (vec branch-chain)})
+                         [version-id-field :branch-id])
+        ;; Phase 2: merge source branches — full history (small slice).
+        source-versions (if (seq source-branch-ids)
+                          (sp/query-entities
+                            base-storage version-entity
+                            (merge entity-where
+                                   {:branch-id (vec source-branch-ids)}))
+                          [])
+        all-versions (into chain-versions source-versions)]
     {:versions-by-id (group-by version-id-field all-versions)
      :merges-by-target (group-by :target-branch-id all-merges)
      :branch-chain branch-chain}))

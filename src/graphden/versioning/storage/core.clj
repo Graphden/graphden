@@ -311,6 +311,18 @@
       (sp/query-entities base-storage entity-name where opts)))
 
 
+  (query-latest-per-group
+    [_ entity-name where group-cols]
+    ;; Pure pass-through to the base storage. The resolver layer
+    ;; (resolution/load-merge-aware-cache) drives this method
+    ;; against version-entity tables directly; it is NOT meant to be
+    ;; invoked on identity tables through VersionedStorage's
+    ;; resolution wrap. If a future caller asks for dedup on a
+    ;; versioned IDENTITY entity, we'd need a parallel resolution
+    ;; path — defer until that materialises.
+    (sp/query-latest-per-group base-storage entity-name where group-cols))
+
+
   sp/StorageBatchCRUD
 
   (create-entities

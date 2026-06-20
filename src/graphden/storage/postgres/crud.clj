@@ -199,6 +199,32 @@
                                           (jdbc/execute-one! ds query (util/query-opts)))))))
 
 
+(defn- build-where-clause
+  "Builds the HoneySQL `:where` vector from a `{field value}` map,
+   with the same semantics `query-entities` exposes: nil → IS NULL,
+   collection → IN, else → =. Returns nil when `where` is empty so
+   callers can `cond-> ... when-let`-style splice."
+  [where fields]
+  (when (seq where)
+    (into [:and]
+          (map (fn [[k v]]
+                 (let [col (keyword (util/kw->snake-case k))
+                       field-spec (get fields k)
+                       encoded-v (codec/encode-value v field-spec)]
+                   (cond
+                     (nil? encoded-v)
+                     [:is col nil]
+
+                     ;; Collection = IN clause (for batch lookups)
+                     (and (or (vector? v) (set? v) (seq? v))
+                          (not (map? v)))
+                     [:in col (vec (map #(codec/encode-value % field-spec) v))]
+
+                     :else
+                     [:= col encoded-v])))
+               where))))
+
+
 (defn query-entities
   "Queries entities by conditions.
    where is a map of field->value for equality matching.
@@ -222,24 +248,7 @@
    (sp/standard-query-validations! entity-name fields where)
    (sp/validate-query-opts! entity-name opts)
    (let [table-name (keyword (util/kw->snake-case entity-name))
-         where-clause (when (seq where)
-                        (into [:and]
-                              (map (fn [[k v]]
-                                     (let [col (keyword (util/kw->snake-case k))
-                                           field-spec (get fields k)
-                                           encoded-v (codec/encode-value v field-spec)]
-                                       (cond
-                                         (nil? encoded-v)
-                                         [:is col nil]
-
-                                         ;; Collection = IN clause (for batch lookups)
-                                         (and (or (vector? v) (set? v) (seq? v))
-                                              (not (map? v)))
-                                         [:in col (vec (map #(codec/encode-value % field-spec) v))]
-
-                                         :else
-                                         [:= col encoded-v])))
-                                   where)))
+         where-clause (build-where-clause where fields)
          order-by (when-let [ob (:order-by opts)]
                     (mapv (fn [[col dir]]
                             [(keyword (util/kw->snake-case col)) dir])
@@ -259,6 +268,59 @@
                                      (if (and fields (junction/has-ref-many? fields))
                                        (junction/populate-ref-many-fields ds entity-name records fields)
                                        records))))))
+
+
+(defn query-latest-per-group
+  "Returns ONE row per distinct `group-cols` tuple — the row with the
+   greatest `:created-at` (descending tie-break by `group-cols` order
+   for determinism). Postgres-specific via `DISTINCT ON`.
+
+   Used by the versioning layer's `load-merge-aware-cache` to bound
+   the per-call working set when downstream callers (`resolve-version-
+   from-cache`) only ever consult `latest-by-created-at` per
+   (entity-id, branch-id). Plain `query-entities` would pull every
+   historical version row — fine for short-lived test databases, but
+   on a long-running executor with N versioned writes per entity the
+   payload of `/api/graph/entities` (and `/api/types`, anything that
+   triggers `resolve-all-entities`) grows O(N) per entity instead of
+   O(1), and eventually heap-OOMs at the cheshire-encode boundary.
+
+   `where` shape matches `query-entities`. Passing nil/empty `where`
+   issues a full-table DISTINCT ON — fine, but logged at DEBUG.
+
+   `group-cols` MUST include the entity-id field — e.g.
+   `[:fn-id :branch-id]` for `:fn-version`. Mixing additional columns
+   (e.g. the unique-id `:id` of the version row itself) defeats the
+   dedup and reverts to query-entities behaviour."
+  [ds entity-name where group-cols fields]
+  (sp/standard-query-validations! entity-name fields where)
+  (when (or (empty? group-cols) (not (every? keyword? group-cols)))
+    (throw (ex-info "query-latest-per-group requires non-empty keyword group-cols"
+                    {:type :storage-error/invalid-group-cols
+                     :entity-name entity-name
+                     :group-cols group-cols})))
+  (let [table-name (keyword (util/kw->snake-case entity-name))
+        cols-snake (mapv #(keyword (util/kw->snake-case %)) group-cols)
+        where-clause (build-where-clause where fields)
+        ;; ORDER BY must lead with the DISTINCT-ON cols so Postgres
+        ;; can pick the row per group; the trailing `created_at DESC`
+        ;; is what makes it the LATEST.
+        order-by (conj (vec cols-snake) [:created_at :desc])
+        query (sql/format (cond-> {:select-distinct-on (into [cols-snake] [:*])
+                                   :from [table-name]
+                                   :order-by order-by}
+                            where-clause (assoc :where where-clause))
+                          {:quoted true})]
+    (when-not where-clause
+      (log/debug "Full table DISTINCT ON scan (no where clause)" {:entity-name entity-name}))
+    (util/with-sql-error-handling "Database error" :query-latest-per-group
+                                  {:entity-name entity-name :where where
+                                   :group-cols group-cols}
+                                  (let [rows (jdbc/execute! ds query (util/query-opts))
+                                        records (mapv #(codec/row->entity % fields) rows)]
+                                    (if (and fields (junction/has-ref-many? fields))
+                                      (junction/populate-ref-many-fields ds entity-name records fields)
+                                      records)))))
 
 
 ;; === Batch CRUD operations ===

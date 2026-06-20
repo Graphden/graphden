@@ -208,6 +208,71 @@
           (sp/close storage))))))
 
 
+(deftest crud-query-latest-per-group-test
+  (testing "returns one row per group, picking the latest by :created-at"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema
+                   :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                   :type :text}
+                            :group-key {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                        :type :text}
+                            :created-at {:uuid #uuid "00000000-0000-0000-0000-000000000004"
+                                         :type :timestamptz}})
+          _ (sp/initialize storage schema)
+          base #inst "2026-06-20T00:00:00Z"
+          older (java.time.OffsetDateTime/ofInstant (.toInstant base) java.time.ZoneOffset/UTC)
+          newer (.plusSeconds older 60)
+          solo (.plusSeconds older 30)
+          _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111"
+                                             :name "a-old" :group-key "A" :created-at older})
+          _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222"
+                                             :name "a-new" :group-key "A" :created-at newer})
+          _ (sp/create-entity storage :user {:id #uuid "33333333-3333-3333-3333-333333333333"
+                                             :name "b-only" :group-key "B" :created-at solo})
+          result (sp/query-latest-per-group storage :user {} [:group-key])]
+      (try
+        (is (= 2 (count result))
+            "DISTINCT ON group-key collapses A's two rows to one")
+        (is (= #{"a-new" "b-only"} (set (map :name result)))
+            "latest-by-created-at picks a-new (60s) over a-old (0s); b-only is the only B row")
+        (finally
+          (sp/close storage)))))
+
+  (testing "where-clause filters BEFORE the dedup"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema
+                   :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                   :type :text}
+                            :group-key {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                        :type :text}
+                            :created-at {:uuid #uuid "00000000-0000-0000-0000-000000000004"
+                                         :type :timestamptz}})
+          _ (sp/initialize storage schema)
+          base #inst "2026-06-20T00:00:00Z"
+          t0 (java.time.OffsetDateTime/ofInstant (.toInstant base) java.time.ZoneOffset/UTC)
+          t1 (.plusSeconds t0 30)
+          _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111"
+                                             :name "a" :group-key "A" :created-at t0})
+          _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222"
+                                             :name "b" :group-key "B" :created-at t1})
+          result (sp/query-latest-per-group storage :user {:group-key "A"} [:group-key])]
+      (try
+        (is (= 1 (count result)))
+        (is (= "a" (:name (first result))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "empty group-cols throws :invalid-group-cols"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema)
+          _ (sp/initialize storage schema)]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"non-empty keyword group-cols"
+              (sp/query-latest-per-group storage :user {} [])))
+        (finally
+          (sp/close storage))))))
+
+
 ;; === StorageBatchCRUD tests ===
 
 (deftest batch-create-entities-test

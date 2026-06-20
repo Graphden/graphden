@@ -296,6 +296,8 @@
               [_ entity-type _where]
               (get-in @state [:entities entity-type] []))
 
+            (query-latest-per-group [_ _ _ _] [])
+
             (update-entity [_ _ _ _] nil)
 
             (delete-entity [_ _ _] nil))
@@ -318,6 +320,8 @@
           (read-entity [_ _ _] nil)
 
           (query-entities [_ _ _] [])
+
+          (query-latest-per-group [_ _ _ _] [])
 
           (update-entity [_ _ _ _] nil)
 

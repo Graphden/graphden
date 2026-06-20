@@ -266,6 +266,10 @@
                       [_ entity-name where opts]
                       (sp/query-entities storage entity-name where opts))
 
+                    (query-latest-per-group
+                      [_ entity-name where group-cols]
+                      (sp/query-latest-per-group storage entity-name where group-cols))
+
 
                     sp/StorageBatchCRUD
 

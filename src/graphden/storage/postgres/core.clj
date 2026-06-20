@@ -236,6 +236,12 @@
                          opts))
 
 
+  (query-latest-per-group
+    [_this entity-name where group-cols]
+    (crud/query-latest-per-group pool entity-name where group-cols
+                                 (get-entity-fields pool metadata-cache rw-lock entity-name)))
+
+
   sp/StorageBatchCRUD
 
   (create-entities

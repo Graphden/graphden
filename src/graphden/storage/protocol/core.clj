@@ -147,7 +147,25 @@
      `opts` may be nil or empty. Backends that wrap a base storage
      (e.g. VersionedStorage) MAY refuse `opts` on entities whose
      semantics require post-query resolution (currently versioned
-     entities) by throwing `:storage-error/unsupported-opts`."))
+     entities) by throwing `:storage-error/unsupported-opts`.")
+
+  (query-latest-per-group
+    [this entity-name where group-cols]
+    "Returns ONE row per distinct `group-cols` tuple — the row with
+     the latest `:created-at`. Same `where`-semantics as
+     `query-entities`. `group-cols` is a non-empty vector of keyword
+     column names (e.g. `[:fn-id :branch-id]`).
+
+     Why this lives at the protocol level: versioned reads only ever
+     need the latest version per (entity-id, branch-id). Without a
+     dedup-at-source path, `query-entities` returns ALL historical
+     versions and the resolution layer drops most of them on the
+     floor — fine in tests, OOM in long-running executors.
+
+     Backends that can't push the dedup to the storage engine (e.g.
+     a hypothetical pure-in-memory backend) MAY implement this as
+     `query-entities` + in-memory grouping. The contract is the
+     result, not the mechanism."))
 
 
 (defprotocol StorageBatchCRUD

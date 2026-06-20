@@ -41,6 +41,8 @@
       [this entity-type where _opts]
       (sp/query-entities this entity-type where))
 
+    (query-latest-per-group [_ _ _ _] nil)
+
     (read-entity [_ _ _] nil)
 
     (create-entity [_ _ _] nil)

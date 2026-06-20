@@ -74,15 +74,16 @@ const TEST_NAME = 'test-arg-type-flip';
     // but `populateCompatibleTypes` is async — it POSTs /api/types/
     // compatible to discover which refinements narrow the current
     // slot. Until that resolves the <select> only has the current
-    // type as a placeholder. Wait for the second option to land
-    // before reading — otherwise `sel.value = 'non-blank-text'`
-    // silently no-ops (the value isn't in the option list yet) and
-    // the subsequent save fires a PUT with the SAME type, which
-    // 200s but doesn't actually change `:type-override-fn-id`.
+    // type + an empty `loading…` placeholder. Wait for the SPECIFIC
+    // target option (`non-blank-text`) to appear — checking just
+    // `length >= 2` matches the placeholder state and the save
+    // PUTs the unchanged type (200, but :type-override-fn-id
+    // doesn't actually change).
     await page.waitForFunction(
       () => {
         const sel = document.querySelector('.arg-value-edit-popover select');
-        return sel && sel.options.length >= 2;
+        if (!sel) return false;
+        return Array.from(sel.options).some(o => o.value === 'non-blank-text');
       },
       {timeout: 15000});
     const selectProbe = await page.evaluate(() => {

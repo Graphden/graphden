@@ -279,7 +279,7 @@ async function nodeApi(method, path, body) {
     }
   }
   const idempotent = method === 'GET' || method === 'DELETE';
-  const maxAttempts = idempotent ? 3 : 1;
+  const maxAttempts = idempotent ? 4 : 1;
   let lastErr = null;
   for (let i = 0; i < maxAttempts; i++) {
     try {
@@ -287,8 +287,13 @@ async function nodeApi(method, path, body) {
     } catch (err) {
       lastErr = err;
       if (!idempotent || !isTransientNetworkError(err) || i === maxAttempts - 1) throw err;
-      // Backoff covers the OOM-restart window (~10s).
-      await new Promise((r) => setTimeout(r, 5000 * (i + 1)));
+      // Backoff: 5s + 15s + 30s = 50s total. Covers JVM cold-start
+      // after OOM-restart (~30-40s — packages load + compile-eager
+      // build the 3000-fn registry) plus a small safety margin.
+      // Shorter backoff was retrying inside the restart window and
+      // exhausting attempts before the JVM was ready (verified
+      // empirically — edit-namespace-move 2026-06-21).
+      await new Promise((r) => setTimeout(r, [5000, 15000, 30000][i]));
     }
   }
   throw lastErr;

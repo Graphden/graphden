@@ -292,8 +292,15 @@ async function cleanupAll(page) {
              + JSON.stringify(childBinding));
     });
   } finally {
+    // Close browser FIRST so the editor JS stops polling and frees
+    // the server to handle our cleanup DELETEs at storage-only
+    // speed. nodeApi-routed deleteFnByName then doesn't need a
+    // live page. Without this, 8 sequential cleanupAll() calls
+    // through 8 fn-defs while the editor is still active can hit
+    // 5+ minutes during slow-server windows and trip the per-test
+    // timeout.
+    await browser.close().catch(() => {});
     await cleanupAll(page).catch(() => {});
-    await browser.close();
   }
   if (failed === 0) {
     console.log('inheritance-regression — PASS');

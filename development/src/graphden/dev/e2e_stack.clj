@@ -38,8 +38,13 @@
     (com.github.dockerjava.api.command
       CreateContainerCmd)
     (com.github.dockerjava.api.model
+      ExposedPort
       HostConfig
+      PortBinding
+      Ports$Binding
       RestartPolicy)
+    (java.net
+      ServerSocket)
     (org.testcontainers.containers
       GenericContainer
       Network
@@ -49,6 +54,29 @@
     (org.testcontainers.containers.wait.strategy
       HttpWaitStrategy
       Wait)))
+
+
+(defn- pick-free-host-port!
+  "Pre-allocate a host port by opening a `ServerSocket`, reading the
+   OS-assigned port, then closing. The port is now free again but the
+   number is ours to publish.
+
+   Why: Docker's auto-assign port (`-p 0:8080` shape) picks a NEW host
+   port on every container restart. Testcontainers caches the original
+   `getMappedPort()` value at `start()` — after restart the host
+   `localhost:<old-port>` is dead, the test runner's cached
+   `GRAPHDEN_URL` is stale, every subsequent request gets connection-
+   refused. By pinning the host port to a value WE chose, the mapping
+   survives `--restart=on-failure` because Docker uses the same
+   explicit binding when it re-creates the publish.
+
+   The brief window between socket close and Docker bind is a race
+   risk — another process could grab the same port. In practice the
+   window is microseconds and the test JVM has no other actor competing
+   for it; acceptable for a dev/CI e2e stack."
+  []
+  (with-open [sock (ServerSocket. 0)]
+    (ServerSocket/.getLocalPort sock)))
 
 
 ;; =============================================================================
@@ -136,10 +164,10 @@
 
 
 (defn- apply-restart-and-memory!
-  "Docker-side recovery + safety belt. Installed via
-   `withCreateContainerCmdModifier` so it lands on the Docker create
-   call rather than relying on Testcontainers' default no-restart
-   policy.
+  "Docker-side recovery + safety belt + stable host-port pinning.
+   Installed via `withCreateContainerCmdModifier` so it lands on the
+   Docker create call rather than relying on Testcontainers' default
+   no-restart policy.
 
    - `restart=on-failure:3` — if the executor's main JVM exits
      non-zero (NumberFormatException-class crashes, OOM-kills, etc.),
@@ -156,17 +184,32 @@
      executor enters a runaway-GC spiral it gets OOM-killed
      deterministically (exit code 137 → triggers restart).
 
+   - `--publish <host-port>:8080` — pins the host-side port so it
+     SURVIVES `--restart=on-failure`. Without this, Docker
+     auto-assigns a new host port on every restart (verified
+     empirically 2026-06-20: pre-restart 38675, post-restart 38676);
+     Testcontainers' cached `getMappedPort()` then points at a dead
+     mapping and the test runner cascades on connection-refused
+     after the very recovery the restart-policy was supposed to
+     provide.
+
    IMPORTANT: mutate Testcontainers' already-built `HostConfig`
    rather than replacing it — Testcontainers populates network /
    port-bindings / volumes there during create-cmd assembly, and a
    fresh `HostConfig/newHostConfig` would wipe them."
-  [^CreateContainerCmd cmd]
+  [^CreateContainerCmd cmd ^long host-port]
   (let [host-cfg (or (CreateContainerCmd/.getHostConfig cmd)
                      (HostConfig/newHostConfig))]
     (HostConfig/.withRestartPolicy
       host-cfg (RestartPolicy/onFailureRestart (int 3)))
     (HostConfig/.withMemory
       host-cfg (long (* 4 1024 1024 1024)))
+    (HostConfig/.withPortBindings
+      host-cfg
+      (into-array PortBinding
+                  [(PortBinding.
+                     (Ports$Binding/bindPort (int host-port))
+                     (ExposedPort/tcp 8080))]))
     (CreateContainerCmd/.withHostConfig cmd host-cfg)))
 
 
@@ -180,8 +223,9 @@
    a mid-suite crash leaves a stack-trace in the orchestrator's log
    stream — not just in the last 500 lines captured at teardown.
    `withCreateContainerCmdModifier` installs a Docker restart policy
-   + memory cap (see `apply-restart-and-memory!`)."
-  [^Network network auth-token]
+   + memory cap + pinned host port (see `apply-restart-and-memory!`).
+   `host-port` is pre-picked by the caller and survives restart."
+  [^Network network auth-token host-port]
   (doto (GenericContainer. "graphden-executor:latest")
     (GenericContainer/.withEnv "PORT" "8080")
     (GenericContainer/.withEnv "STORAGE_TYPE" "postgres")
@@ -207,7 +251,7 @@
           (Slf4jLogConsumer/.withPrefix "exec")))
     (GenericContainer/.withCreateContainerCmdModifier
       (reify java.util.function.Consumer
-        (accept [_ cmd] (apply-restart-and-memory! cmd))))
+        (accept [_ cmd] (apply-restart-and-memory! cmd host-port))))
     (GenericContainer/.waitingFor
       (-> (Wait/forHttp "/health")
           (HttpWaitStrategy/.forStatusCode 200)
@@ -318,11 +362,18 @@
             openbao (start-openbao! network)
             _ (swap! containers conj openbao)
             _ (seed-openbao! openbao)
-            executor (start-executor! network auth-token)
+            host-port (pick-free-host-port!)
+            executor (start-executor! network auth-token host-port)
             _ (swap! containers conj executor)
             host (GenericContainer/.getHost executor)
-            port (GenericContainer/.getMappedPort executor
-                                                  (Integer/valueOf 8080))
+            ;; Use the pinned host-port directly — `getMappedPort`
+            ;; would return the SAME value here, but reading it back
+            ;; from the container is an indirection that breaks on
+            ;; restart (Docker's iptables rule for the auto-port is
+            ;; what survives, and getMappedPort returns the bound
+            ;; value at start time). With pinning, host-port IS the
+            ;; binding, before AND after restart.
+            port (int host-port)
             url (str "http://" host ":" port)
             stop-heartbeat! (start-health-heartbeat! url)]
         (println (str "▶ stack ready (" url "); running " script))

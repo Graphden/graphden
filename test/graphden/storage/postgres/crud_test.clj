@@ -220,9 +220,10 @@
                                          :type :timestamptz}})
           _ (sp/initialize storage schema)
           base #inst "2026-06-20T00:00:00Z"
-          older (java.time.OffsetDateTime/ofInstant (.toInstant base) java.time.ZoneOffset/UTC)
-          newer (.plusSeconds older 60)
-          solo (.plusSeconds older 30)
+          older (java.time.OffsetDateTime/ofInstant
+                  (java.util.Date/.toInstant base) java.time.ZoneOffset/UTC)
+          newer (java.time.OffsetDateTime/.plusSeconds older 60)
+          solo (java.time.OffsetDateTime/.plusSeconds older 30)
           _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111"
                                              :name "a-old" :group-key "A" :created-at older})
           _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222"
@@ -249,8 +250,9 @@
                                          :type :timestamptz}})
           _ (sp/initialize storage schema)
           base #inst "2026-06-20T00:00:00Z"
-          t0 (java.time.OffsetDateTime/ofInstant (.toInstant base) java.time.ZoneOffset/UTC)
-          t1 (.plusSeconds t0 30)
+          t0 (java.time.OffsetDateTime/ofInstant
+               (java.util.Date/.toInstant base) java.time.ZoneOffset/UTC)
+          t1 (java.time.OffsetDateTime/.plusSeconds t0 30)
           _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111"
                                              :name "a" :group-key "A" :created-at t0})
           _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222"

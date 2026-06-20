@@ -263,12 +263,20 @@
         et (keyword entity-type)
         ;; Pre-read so we know the parent fn-id for binding /
         ;; fn-slot / binding-list-item before the row is gone.
-        ;; For :fn the row's :id IS the seed; we synthesize one
-        ;; rather than pay the read.
+        ;; For :fn we need the row anyway to drop its
+        ;; rich-types-registry entry by NAME (the registry is keyed
+        ;; on fn-name, not fn-id), so the read pays for itself.
         snapshot (if (= et :fn)
-                   {:id id}
+                   (or (sp/read-entity storage et id) {:id id})
                    (sp/read-entity storage et id))]
     (sp/delete-entity storage et id)
+    ;; rich-types-registry entry survives the storage delete unless
+    ;; we explicitly drop it. Without this the registry grows
+    ;; monotonically as fn-defs are created and deleted across an
+    ;; executor's lifetime — small per-entry but on a long-running
+    ;; prod instance it adds up to a real GC-pressure source.
+    (when (and (= et :fn) (:name snapshot))
+      (registry/unregister-rich-type! (keyword (:name snapshot))))
     (invalidate! ctx storage et snapshot)
     (notify-after-write! ctx storage et :delete {:id id})
     true))

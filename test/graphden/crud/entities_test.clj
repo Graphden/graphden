@@ -118,16 +118,21 @@
           (is (= :constraint-violation/constraint-shape (:type (ex-data ex))))
           (is (= (:id created) (:id (ex-data ex))))))
 
-      (testing "delete-entity :fn skips the pre-read fast-path"
-        ;; The `:fn` arm of delete-entity synthesizes `{:id id}` instead
-        ;; of pre-reading the row (lines 135-137). The behaviour is
-        ;; invisible without an actual :fn delete — this test pins it.
-        (let [fn-row (setup/create-base-fn! storage "delete-fast-path")
-              ;; No exception before the delete; the snapshot is the
-              ;; synthesized map, not a DB read.
+      (testing "delete-entity :fn pre-reads to capture name for rich-type unregister"
+        ;; The `:fn` arm of delete-entity now pre-reads the row so we
+        ;; can drop the rich-types-registry entry by name; the read
+        ;; pays for itself since the registry is keyed on fn-name,
+        ;; not fn-id. Before this change the arm synthesised
+        ;; `{:id id}` and the registry leaked.
+        (let [fn-row (setup/create-base-fn! storage "delete-with-name-capture")
               ok? (entities/delete-entity "fn" (:id fn-row) c)]
           (is (true? ok?))
-          (is (nil? (sp/read-entity storage :fn (:id fn-row))))))
+          (is (nil? (sp/read-entity storage :fn (:id fn-row))))
+          ;; The rich-type entry for this fn-name was registered when
+          ;; `create-base-fn!` ran above. After delete it should be
+          ;; gone — verifying the unregister-rich-type! wiring fires.
+          (is (nil? (registry/rich-type-of :delete-with-name-capture))
+              "rich-type entry dropped on :fn delete")))
       (finally (sp/close storage)))))
 
 

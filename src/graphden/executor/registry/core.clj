@@ -445,6 +445,23 @@
   (rich-types-view))
 
 
+(defn unregister-rich-type!
+  "Drop the entry for `fn-name`. Counterpart to `record-rich-types!`
+   on the delete side — without this the registry grows monotonically
+   across the executor's lifetime as fn-defs are created and deleted
+   (the entries are small, but tens of thousands of stale entries on
+   a long-running prod executor add up to GC pressure).
+
+   No-op if `fn-name` is absent — callers can invoke unconditionally
+   on every delete without checking first.
+
+   The thread-local override receives the dissoc when bound; otherwise
+   the global atom does. Mirror of `record-rich-types!`'s
+   `target-rich-types-atom` write target."
+  [fn-name]
+  (swap! (target-rich-types-atom) dissoc fn-name))
+
+
 (defn restore-rich-types!
   "Test-only: replace the `rich-types-registry` with `snapshot`. Pair
    with `rich-types-snapshot` to scope ad-hoc `record-rich-types(-raw)!`

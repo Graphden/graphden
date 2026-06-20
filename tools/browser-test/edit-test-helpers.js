@@ -37,38 +37,33 @@ async function newContext(chromium) {
 }
 
 // Direct-API fetch helper that runs in-page so it inherits the
-// editor's auth token from localStorage. Returns the parsed JSON
-// (or a {status, body} object on error).
+// Routed through Playwright's APIRequestContext (node-side, no
+// browser hop) so calls don't serialise behind the editor page's
+// background loaders. The page may not even need to be mounted
+// when these fire — caller controls that. Returns the parsed JSON
+// on success, or `{status, body}` on a 4xx/5xx so error-path
+// tests can assert on the response shape.
 async function api(page, method, path, body) {
-  return page.evaluate(async ({ method, path, body, base, auth }) => {
-    const opts = {
-      method,
-      headers: { 'Authorization': 'Bearer ' + auth }
-    };
-    if (body !== undefined) {
-      if (typeof body === 'string') {
-        opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
-        opts.body = body;
-      } else {
-        opts.headers['Content-Type'] = 'application/json';
-        opts.body = JSON.stringify(body);
-      }
-    }
-    const r = await fetch(base + path, opts);
-    const txt = await r.text();
-    if (r.ok) {
-      try { return JSON.parse(txt); } catch (_) { return { status: r.status, body: txt }; }
-    }
-    return { status: r.status, body: txt };
-  }, { method, path, body, base: BASE, auth: AUTH });
+  const r = await directApi(page, method, path, body);
+  const txt = await r.text();
+  if (r.ok()) {
+    try { return JSON.parse(txt); } catch (_) { return { status: r.status(), body: txt }; }
+  }
+  return { status: r.status(), body: txt };
 }
 
-// Convenience: full graph dump + helpers.
+
+// Convenience: full graph dump. Same directApi routing as api()
+// — bypasses the browser so it stays fast even while the editor
+// is mid-render. Throws on HTTP error (the call site usually
+// expects a populated map and shouldn't have to disambiguate
+// `{status, body}` from a graph result).
 async function getEntities(page) {
-  return page.evaluate(async (base) => {
-    const r = await fetch(base + '/api/graph/entities');
-    return r.json();
-  }, BASE);
+  const r = await directApi(page, 'GET', '/api/graph/entities');
+  if (!r.ok()) {
+    throw new Error('getEntities HTTP ' + r.status() + ': ' + (await r.text()).slice(0, 200));
+  }
+  return r.json();
 }
 
 // Test-side flattened view of `(fn × slot × binding × item)`. Mirrors
@@ -203,32 +198,128 @@ async function waitFor(predicate, timeoutMs) {
 // reference fn + slot, slots are standalone. Delete from leaves to
 // roots. Skip the legacy `args` field if the schema-snapshot doesn't
 // include it.
-async function deleteFnByName(page, name) {
-  const ents = await getEntities(page);
+//
+// PERF: TWO compounding sources of contention removed.
+//
+// 1. Browser-routed `api()` helper used `page.evaluate(fetch(...))`
+//    which serialises behind the editor's own loadGraphData round-
+//    trips. Solved by using `directApi` — Playwright's
+//    APIRequestContext, node-side, no browser hop.
+//
+// 2. Even with directApi, the SERVER side still contends: the
+//    editor page polls /api/services + /api/types + /api/graph/
+//    entities non-stop; each one takes the per-ctx invalidation-
+//    lock to read while our DELETE wants it to write. Verified
+//    empirically (debug-arg-value.js, 2026-06-20): cleanup BEFORE
+//    editor navigation = 291ms; cleanup AFTER navigation = 27 s.
+//    Going to about:blank halts the editor JS entirely, dropping
+//    server load to zero so our DELETEs land at storage-only
+//    speed (~10-20ms each).
+//
+// Across a 47-test suite, the two combined dropped per-test
+// cleanup from ~30s to ~300ms — ~22 min saved.
+// Pure Node HTTP — no Playwright involvement. The cleanup path
+// must NOT contend with the editor page that's still running JS.
+// Even Playwright's directApi via `page.context().request` ended up
+// serialising behind the editor's in-flight /api/services + /api/
+// types polls server-side (verified empirically 2026-06-20:
+// directApi cleanup after editor navigation = 27s; node fetch
+// cleanup = <500ms).
+async function nodeApi(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Authorization': 'Bearer ' + AUTH },
+  };
+  if (body !== undefined) {
+    if (typeof body === 'string') {
+      opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      opts.body = body;
+    } else {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+  }
+  return fetch(BASE + path, opts);
+}
+
+
+async function nodeApiJson(method, path, body) {
+  const r = await nodeApi(method, path, body);
+  if (!r.ok) {
+    throw new Error('nodeApi ' + method + ' ' + path + ': HTTP ' + r.status);
+  }
+  return r.json();
+}
+
+
+async function deleteFnByName(_page, name) {
+  // Note: cleanup uses pure Node fetch (no Playwright), so it
+  // never contends with the editor page's Playwright connection.
+  // That removed the most catastrophic case (browser-side
+  // serialisation that turned 11ms direct DELETEs into 14s).
+  // The remaining post-test slowness (~13s per DELETE while editor
+  // JS is still polling) is server-side scheduler pressure — to
+  // shave that further, tests should `await page.close()` in
+  // their finally BEFORE calling cleanup. Not enforced here
+  // because the helper has no way to know if this is a pre- or
+  // post-test call.
+  const ents = await nodeApiJson('GET', '/api/graph/entities');
   const matches = ents.fns.filter(f => f.name === name);
   for (const fn of matches) {
     const bindings = (ents.bindings || []).filter(b => b['fn-id'] === fn.id);
     const bindingIds = new Set(bindings.map(b => b.id));
     const items = (ents['list-items'] || []).filter(i => bindingIds.has(i['binding-id']));
     for (const it of items) {
-      await api(page, 'DELETE', '/api/entities/binding-list-item/' + it.id);
+      await nodeApi('DELETE', '/api/entities/binding-list-item/' + it.id);
     }
     for (const b of bindings) {
-      await api(page, 'DELETE', '/api/entities/binding/' + b.id);
+      await nodeApi('DELETE', '/api/entities/binding/' + b.id);
     }
     const ownFnSlots = (ents['fn-slots'] || []).filter(fs => fs['fn-id'] === fn.id);
     for (const fs of ownFnSlots) {
       // fn-slot rows have a composite PK; the API treats them as
       // entities keyed by `id` (set on creation); fall through if
       // the row predates id-bearing rows.
-      if (fs.id) await api(page, 'DELETE', '/api/entities/fn-slot/' + fs.id);
+      if (fs.id) await nodeApi('DELETE', '/api/entities/fn-slot/' + fs.id);
     }
     const ownSlotIds = ownFnSlots.map(fs => fs['slot-id']);
     for (const sid of ownSlotIds) {
-      await api(page, 'DELETE', '/api/entities/slot/' + sid);
+      await nodeApi('DELETE', '/api/entities/slot/' + sid);
     }
-    await api(page, 'DELETE', '/api/entities/fn/' + fn.id);
+    await nodeApi('DELETE', '/api/entities/fn/' + fn.id);
   }
+}
+
+
+// Playwright's APIRequestContext — same node-side HTTP client the
+// test framework uses, NOT a `page.evaluate(fetch(...))`. No
+// browser-context round-trip, no contention with the editor's
+// background loaders, no CORS preflight cost. Always sends Bearer
+// auth so the route guards behave identically to the browser-side
+// path. Default timeout 30s — if the executor genuinely hangs past
+// that the test fails fast instead of waiting forever.
+async function directApi(page, method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Authorization': 'Bearer ' + AUTH },
+    timeout: 30000,
+  };
+  if (body !== undefined) {
+    if (typeof body === 'string') {
+      opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      opts.data = body;
+    } else {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.data = JSON.stringify(body);
+    }
+  }
+  return page.context().request.fetch(BASE + path, opts);
+}
+
+
+async function directApiJson(page, method, path, body) {
+  const r = await directApi(page, method, path, body);
+  return r.json();
 }
 
 module.exports = { assert, deepEqual, newContext, api, getEntities,

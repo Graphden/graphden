@@ -70,7 +70,21 @@ const TEST_NAME = 'test-arg-type-flip';
            'chip shows "text" before flip: ' + JSON.stringify(chipClicked));
     await page.waitForTimeout(250);
 
-    // The type-edit popover renders a <select> with every VALUE_KIND.
+    // The type-edit popover renders a <select> with every VALUE_KIND,
+    // but `populateCompatibleTypes` is async — it POSTs /api/types/
+    // compatible to discover which refinements narrow the current
+    // slot. Until that resolves the <select> only has the current
+    // type as a placeholder. Wait for the second option to land
+    // before reading — otherwise `sel.value = 'non-blank-text'`
+    // silently no-ops (the value isn't in the option list yet) and
+    // the subsequent save fires a PUT with the SAME type, which
+    // 200s but doesn't actually change `:type-override-fn-id`.
+    await page.waitForFunction(
+      () => {
+        const sel = document.querySelector('.arg-value-edit-popover select');
+        return sel && sel.options.length >= 2;
+      },
+      {timeout: 15000});
     const selectProbe = await page.evaluate(() => {
       const sel = document.querySelector('.arg-value-edit-popover select');
       if (!sel) return {error: '<select> not rendered'};
@@ -138,12 +152,12 @@ const TEST_NAME = 'test-arg-type-flip';
            'PUT /api/entities/binding/:id returned 200 (got '
            + putResp.status() + ')');
 
-    const refineFn = (await getEntities(page)).fns.find(
+    const postSaveEnts = await getEntities(page);
+    const refineFn = postSaveEnts.fns.find(
       f => f.name === 'non-blank-text' && (!f['parent-ids'] || f['parent-ids'].length === 0));
     assert(refineFn,
            ':non-blank-text type-row exists in the graph (precondition for the flip target)');
-    const ents = await getEntities(page);
-    const afterBinding = ents.bindings.find(b => b.id === arg['binding-id']);
+    const afterBinding = postSaveEnts.bindings.find(b => b.id === arg['binding-id']);
     assert(afterBinding && afterBinding['type-override-fn-id'] === refineFn.id,
            'binding.type-override-fn-id points at :non-blank-text: '
            + JSON.stringify({override: afterBinding?.['type-override-fn-id'],

@@ -20,30 +20,35 @@ const {chromium} = require('playwright');
 const {assert, newContext, api, getEntities, synthArgs, deleteFnByName} =
   require('./edit-test-helpers');
 
-async function layoutOf(page, rootId) {
-  return page.evaluate(async (args) => {
-    const r = await fetch(args.base + '/api/graph/layout', {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + args.auth, 'Content-Type': 'application/json'},
-      body: JSON.stringify({'root-id': args.rootId})
-    });
-    return r.json();
-  }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: process.env.AUTH_TOKEN || 'test123', rootId});
+// Node-side fetch — bypasses Playwright entirely so we don't
+// serialise behind the editor page's background polls. Critical
+// here because the test does ~10 layout fetches sequentially;
+// going through page.evaluate cost ~10s per call at the tail of
+// a populated suite (verified empirically — the test was timing
+// out on the 5-min per-test cap despite each individual layout
+// being a sub-second operation server-side).
+const BASE_URL = process.env.GRAPHDEN_URL || 'http://localhost:9002';
+const AUTH_HDR = 'Bearer ' + (process.env.AUTH_TOKEN || 'test123');
+
+async function layoutOf(_page, rootId) {
+  const r = await fetch(BASE_URL + '/api/graph/layout', {
+    method: 'POST',
+    headers: {'Authorization': AUTH_HDR, 'Content-Type': 'application/json'},
+    body: JSON.stringify({'root-id': rootId}),
+  });
+  return r.json();
 }
 
-async function expandedLayoutOf(page, rootId, fullDepth) {
-  return page.evaluate(async (args) => {
-    const r = await fetch(args.base + '/api/graph/layout', {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + args.auth, 'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        'root-id': args.rootId,
-        expansions: {[`fn-${args.rootId}`]: {'full-depth': args.depth}}
-      })
-    });
-    return r.json();
-  }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: process.env.AUTH_TOKEN || 'test123',
-       rootId, depth: fullDepth});
+async function expandedLayoutOf(_page, rootId, fullDepth) {
+  const r = await fetch(BASE_URL + '/api/graph/layout', {
+    method: 'POST',
+    headers: {'Authorization': AUTH_HDR, 'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      'root-id': rootId,
+      expansions: {[`fn-${rootId}`]: {'full-depth': fullDepth}},
+    }),
+  });
+  return r.json();
 }
 
 // Per-scenario suffixes so leaked state from a failed earlier

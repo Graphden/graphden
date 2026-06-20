@@ -81,12 +81,25 @@ for f in $FILES; do
     continue
   fi
   CONSECUTIVE_DOWN=0
-  if node "$f"; then
+  # Per-test wall-clock cap. Individual tests should complete in
+  # < 1 min under load; bounded at 3 min hard, then SIGKILL via the
+  # GNU coreutils `timeout`. Without this a stuck `page.evaluate`
+  # against an unresponsive editor JS can pin a single test for
+  # arbitrarily long (verified empirically: edit-effects-badges hung
+  # 51 min on a slow server window). The cap turns the hang into a
+  # discrete failure that gets cascade-counted, so the rest of the
+  # suite isn't held hostage.
+  if timeout -k 5 "${PER_TEST_TIMEOUT:-180}" node "$f"; then
     PASS=$((PASS+1))
   else
+    rc=$?
     WORST=1
     FAIL=$((FAIL+1))
-    FAILED_NAMES="$FAILED_NAMES $f"
+    if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+      FAILED_NAMES="$FAILED_NAMES $f(timeout)"
+    else
+      FAILED_NAMES="$FAILED_NAMES $f"
+    fi
   fi
   echo
   if [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi

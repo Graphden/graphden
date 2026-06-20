@@ -20,8 +20,28 @@ const AUTH = process.env.AUTH_TOKEN || 'test123';
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
 // Standard browser+context setup with auth pre-seeded into localStorage.
+//
+// Renderer-heap hardening:
+// - `--js-flags=--max-old-space-size=4096` bumps V8's per-renderer
+//   heap cap to 4 GB (default 512 MB-2 GB depending on Chrome
+//   build). The editor's `graphData` is ~4.5 MB JSON parsed into
+//   ~30 MB of JS objects; a test that mounts the editor multiple
+//   times (createTypeChip, expansion previews, layout repaints)
+//   can accumulate enough cached state across renders to OOM the
+//   renderer at the default cap. Symptom: `page.goto: Page
+//   crashed` on what looks like a trivial navigation.
+// - `--disable-dev-shm-usage` falls back to /tmp instead of
+//   /dev/shm for Chrome's shared memory. Default /dev/shm in
+//   docker / minimal Linux is 64 MB; under heavy DOM mutation
+//   that's exhausted in seconds and Chrome OOM-kills the tab.
 async function newContext(chromium) {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      '--js-flags=--max-old-space-size=4096',
+      '--disable-dev-shm-usage',
+    ],
+  });
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
   await ctx.addInitScript((auth) => {
     // about:blank has no origin → localStorage access throws. The

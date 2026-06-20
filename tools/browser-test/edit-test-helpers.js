@@ -37,33 +37,30 @@ async function newContext(chromium) {
 }
 
 // Direct-API fetch helper that runs in-page so it inherits the
-// Routed through Playwright's APIRequestContext (node-side, no
-// browser hop) so calls don't serialise behind the editor page's
-// background loaders. The page may not even need to be mounted
-// when these fire — caller controls that. Returns the parsed JSON
-// on success, or `{status, body}` on a 4xx/5xx so error-path
-// tests can assert on the response shape.
-async function api(page, method, path, body) {
-  const r = await directApi(page, method, path, body);
+// Routed through Node-side fetch (NOT Playwright) so calls don't
+// serialise behind the editor page's background loaders AND get
+// the same transient-error retry as `deleteFnByName`. The `page`
+// arg is kept for backward signature compat but unused. Returns
+// the parsed JSON on success, or `{status, body}` on a 4xx/5xx so
+// error-path tests can assert on the response shape.
+async function api(_page, method, path, body) {
+  const r = await nodeApi(method, path, body);
   const txt = await r.text();
-  if (r.ok()) {
-    try { return JSON.parse(txt); } catch (_) { return { status: r.status(), body: txt }; }
+  if (r.ok) {
+    try { return JSON.parse(txt); } catch (_) { return { status: r.status, body: txt }; }
   }
-  return { status: r.status(), body: txt };
+  return { status: r.status, body: txt };
 }
 
 
-// Convenience: full graph dump. Same directApi routing as api()
-// — bypasses the browser so it stays fast even while the editor
-// is mid-render. Throws on HTTP error (the call site usually
-// expects a populated map and shouldn't have to disambiguate
-// `{status, body}` from a graph result).
-async function getEntities(page) {
-  const r = await directApi(page, 'GET', '/api/graph/entities');
-  if (!r.ok()) {
-    throw new Error('getEntities HTTP ' + r.status() + ': ' + (await r.text()).slice(0, 200));
-  }
-  return r.json();
+// Convenience: full graph dump. Same nodeApi routing as api() —
+// bypasses the browser so it stays fast even while the editor is
+// mid-render, AND retries on transient connection errors that
+// happen during the OOM/restart window. Throws on HTTP error
+// (the call site usually expects a populated map and shouldn't
+// have to disambiguate `{status, body}` from a graph result).
+async function getEntities(_page) {
+  return nodeApiJson('GET', '/api/graph/entities');
 }
 
 // Test-side flattened view of `(fn × slot × binding × item)`. Mirrors
@@ -225,6 +222,27 @@ async function waitFor(predicate, timeoutMs) {
 // types polls server-side (verified empirically 2026-06-20:
 // directApi cleanup after editor navigation = 27s; node fetch
 // cleanup = <500ms).
+// Retry on transient network errors (ECONNRESET, socket hang up).
+// The isolated e2e stack restarts the executor JVM on OOM via the
+// Docker restart-policy + pinned host port — recovery window is
+// ~10s. A request that hits that window throws a TypeError with
+// `cause.code` of ECONNRESET / ECONNREFUSED. Retrying once with
+// a generous backoff converts the OOM-recovery flake into a
+// transparent self-heal: the test sees a brief pause, then a
+// successful response from the freshly-restarted JVM.
+//
+// Only retry idempotent methods. POST/PUT might partially apply
+// before the connection drops; replaying could double-insert or
+// trip a 409. GET/DELETE are safe — DELETE is idempotent in our
+// CRUD layer (delete-of-already-gone returns 404, not 500).
+function isTransientNetworkError(err) {
+  const msg = String(err && err.message || err);
+  if (/socket hang up|ECONNRESET|ECONNREFUSED|fetch failed/i.test(msg)) return true;
+  const code = err && err.cause && err.cause.code;
+  return code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'UND_ERR_SOCKET';
+}
+
+
 async function nodeApi(method, path, body) {
   const opts = {
     method,
@@ -239,7 +257,20 @@ async function nodeApi(method, path, body) {
       opts.body = JSON.stringify(body);
     }
   }
-  return fetch(BASE + path, opts);
+  const idempotent = method === 'GET' || method === 'DELETE';
+  const maxAttempts = idempotent ? 3 : 1;
+  let lastErr = null;
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      return await fetch(BASE + path, opts);
+    } catch (err) {
+      lastErr = err;
+      if (!idempotent || !isTransientNetworkError(err) || i === maxAttempts - 1) throw err;
+      // Backoff covers the OOM-restart window (~10s).
+      await new Promise((r) => setTimeout(r, 5000 * (i + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 
@@ -290,37 +321,6 @@ async function deleteFnByName(_page, name) {
   }
 }
 
-
-// Playwright's APIRequestContext — same node-side HTTP client the
-// test framework uses, NOT a `page.evaluate(fetch(...))`. No
-// browser-context round-trip, no contention with the editor's
-// background loaders, no CORS preflight cost. Always sends Bearer
-// auth so the route guards behave identically to the browser-side
-// path. Default timeout 30s — if the executor genuinely hangs past
-// that the test fails fast instead of waiting forever.
-async function directApi(page, method, path, body) {
-  const opts = {
-    method,
-    headers: { 'Authorization': 'Bearer ' + AUTH },
-    timeout: 30000,
-  };
-  if (body !== undefined) {
-    if (typeof body === 'string') {
-      opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
-      opts.data = body;
-    } else {
-      opts.headers['Content-Type'] = 'application/json';
-      opts.data = JSON.stringify(body);
-    }
-  }
-  return page.context().request.fetch(BASE + path, opts);
-}
-
-
-async function directApiJson(page, method, path, body) {
-  const r = await directApi(page, method, path, body);
-  return r.json();
-}
 
 module.exports = { assert, deepEqual, newContext, api, getEntities,
                    synthArgs, waitFor, deleteFnByName, AUTH, BASE };

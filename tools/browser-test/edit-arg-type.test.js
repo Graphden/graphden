@@ -115,42 +115,37 @@ const TEST_NAME = 'test-arg-type-flip';
       sel.value = 'non-blank-text';
       sel.dispatchEvent(new Event('change', {bubbles: true}));
     });
+    // Arm the response wait BEFORE clicking — Save fires authFetch
+    // PUT to /api/entities/binding/:id, which is what we need to
+    // wait for. Polling storage blindly was racing the editor's
+    // own background fetches (loadGraphData, /api/services,
+    // /api/types) all running through the same browser network
+    // queue. With the response wait, we get a definitive signal
+    // that the PUT actually completed — then the storage read
+    // sees the persisted state immediately.
+    const putWait = page.waitForResponse(
+      r => /\/api\/entities\/binding\//.test(r.url())
+           && r.request().method() === 'PUT',
+      {timeout: 30000});
     await page.evaluate(() => {
       const btn = Array.from(document.querySelectorAll(
         '.arg-value-edit-buttons .arg-value-edit-btn'))
         .find(b => b.textContent.trim() === 'Save');
       btn.click();
     });
-    // Save → popover dismisses (synchronous, UI-side) → PUT fires
-    // async → storage reflects new :type-override-fn-id. The popover
-    // closes BEFORE the PUT round-trip completes; polling on dismissal
-    // then reading storage races the network — the symptom is the
-    // assertion seeing `:type-override-fn-id` still nil on a slow
-    // backend (reproduced on the isolated testcontainer e2e stack
-    // 2026-06-20). Poll storage directly until the override appears
-    // (5s upper bound), which is the actual contract we're verifying.
+    const putResp = await putWait;
+    assert(putResp.status() === 200,
+           'PUT /api/entities/binding/:id returned 200 (got '
+           + putResp.status() + ')');
+
     const refineFn = (await getEntities(page)).fns.find(
       f => f.name === 'non-blank-text' && (!f['parent-ids'] || f['parent-ids'].length === 0));
     assert(refineFn,
            ':non-blank-text type-row exists in the graph (precondition for the flip target)');
-    let afterBinding = null;
-    // 5s was the original budget on a warm prod-shaped instance.
-    // The isolated testcontainer stack is markedly slower under
-    // sustained load (delta-recompile + compile-deps rebuild on
-    // every binding write, see api-graph-entities-oom-leak memory)
-    // — 15s gives ~3x headroom while staying short enough that a
-    // true regression still surfaces as a failure rather than a
-    // hang. Per-iteration poll bumped to 250ms to halve the request
-    // pressure on a slow server.
-    const deadline = Date.now() + 15000;
-    while (Date.now() < deadline) {
-      const ents = await getEntities(page);
-      afterBinding = ents.bindings.find(b => b.id === arg['binding-id']);
-      if (afterBinding && afterBinding['type-override-fn-id'] === refineFn.id) break;
-      await page.waitForTimeout(250);
-    }
+    const ents = await getEntities(page);
+    const afterBinding = ents.bindings.find(b => b.id === arg['binding-id']);
     assert(afterBinding && afterBinding['type-override-fn-id'] === refineFn.id,
-           'binding.type-override-fn-id points at :non-blank-text within 15s of save: '
+           'binding.type-override-fn-id points at :non-blank-text: '
            + JSON.stringify({override: afterBinding?.['type-override-fn-id'],
                              refineFn: refineFn.id}));
   } finally {

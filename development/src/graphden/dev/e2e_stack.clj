@@ -182,9 +182,9 @@
                (GenericContainer/.getDockerImageName c))
         (let [logs (GenericContainer/.getLogs c)
               tail (->> (str/split-lines (or logs ""))
-                        (take-last 80)
+                        (take-last 500)
                         (str/join "\n"))]
-          (log/info (str "╭─ executor container logs (last 80 lines) ─╮\n"
+          (log/info (str "╭─ executor container logs (last 500 lines) ─╮\n"
                          tail
                          "\n╰─ end executor logs ─╯"))))
       (catch Exception _))))

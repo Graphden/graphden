@@ -46,14 +46,16 @@ async function waitForServerHealthy(deadlineMs = 60000) {
 // Standard browser+context setup with auth pre-seeded into localStorage.
 //
 // Renderer-heap hardening:
-// - `--js-flags=--max-old-space-size=4096` bumps V8's per-renderer
-//   heap cap to 4 GB (default 512 MB-2 GB depending on Chrome
-//   build). The editor's `graphData` is ~4.5 MB JSON parsed into
-//   ~30 MB of JS objects; a test that mounts the editor multiple
-//   times (createTypeChip, expansion previews, layout repaints)
-//   can accumulate enough cached state across renders to OOM the
-//   renderer at the default cap. Symptom: `page.goto: Page
-//   crashed` on what looks like a trivial navigation.
+// - `--js-flags=--max-old-space-size=1024` caps V8's per-renderer
+//   heap at 1 GB. The editor's `graphData` is ~4.5 MB JSON parsed
+//   into ~30 MB of JS objects — 1 GB is plenty for the heaviest
+//   test that mounts the editor multiple times. Previously this
+//   was set to 4 GB thinking "more headroom = stability", but the
+//   dev host runs e2e Chrome alongside the executor JVM (3 GB) +
+//   the always-on :9002 demo (1.5 GB) + Postgres + dev tooling —
+//   total demand exceeded host RAM and the kernel fired the
+//   GLOBAL OOM-killer (dmesg: CONSTRAINT_NONE), killing chrome AND
+//   java at random. Tighter Chrome cap keeps everyone alive.
 // - `--disable-dev-shm-usage` falls back to /tmp instead of
 //   /dev/shm for Chrome's shared memory. Default /dev/shm in
 //   docker / minimal Linux is 64 MB; under heavy DOM mutation
@@ -62,7 +64,7 @@ async function newContext(chromium) {
   const browser = await chromium.launch({
     headless: true,
     args: [
-      '--js-flags=--max-old-space-size=4096',
+      '--js-flags=--max-old-space-size=1024',
       '--disable-dev-shm-usage',
     ],
   });

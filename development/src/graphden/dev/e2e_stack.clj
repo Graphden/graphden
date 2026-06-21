@@ -175,17 +175,22 @@
      `wait_for_server` 90s poll, a restart-window fault recovers
      transparently within ≤ 1 cascade-cap step.
 
-   - `--memory 5g` — bounds the JVM container. With
-     `MaxRAMPercentage=75` (Dockerfile) the JVM gets ~3.75GB heap.
-     Lower caps trip the in-memory accumulation that the editor's
-     background polling + sustained CRUD churn drive across a 47-
-     test suite; 5GB pushes the OOM ceiling far enough that
-     `edit-namespace-move` (which races on a mid-test JVM-restart
-     window — see project_api_graph_entities_oom_leak) lands on the
-     happy path. 5GB chosen over 6GB because the dev host runs an
-     always-on :9002 graphden-executor + Postgres in parallel; 6GB
-     starts trading with host swap. ExitOnOutOfMemoryError +
-     restart-policy is still the safety net for the extreme case.
+   - `--memory 3g` — bounds the JVM container HARD. With
+     `MaxRAMPercentage=75` (Dockerfile) the JVM gets ~2.25GB heap.
+     COUNTERINTUITIVELY, a TIGHTER cap is better, not looser. The
+     dev host has 11GB RAM total but runs in parallel: e2e
+     testcontainer JVM + Chrome headless (Playwright) + the
+     always-on :9002 graphden-executor + its Postgres + dev tooling
+     + the test orchestrator JVM. Total demand can exceed host
+     RAM. When that happens the kernel fires the GLOBAL OOM-killer
+     (CONSTRAINT_NONE in dmesg — NOT cgroup-bound), randomly
+     killing the biggest tenants — including our JVM AND Chrome.
+     Previously we bumped to 5GB thinking more headroom meant
+     more stability; instead it let the JVM grow until it competed
+     with Chrome and tripped the host kill. 3GB keeps the JVM
+     small enough that it stays UNDER the global pressure threshold
+     even when Chrome is loaded. ExitOnOutOfMemoryError +
+     restart-policy handles the rare JVM-side OOM cleanly.
 
    - `--publish <host-port>:8080` — pins the host-side port so it
      SURVIVES `--restart=on-failure`. Without this, Docker
@@ -206,7 +211,7 @@
     (HostConfig/.withRestartPolicy
       host-cfg (RestartPolicy/onFailureRestart (int 3)))
     (HostConfig/.withMemory
-      host-cfg (long (* 5 1024 1024 1024)))
+      host-cfg (long (* 3 1024 1024 1024)))
     (HostConfig/.withPortBindings
       host-cfg
       (into-array PortBinding

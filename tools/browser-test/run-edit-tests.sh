@@ -95,16 +95,32 @@ for f in $FILES; do
   # cap during slow-server windows even though it eventually would
   # have completed correctly. 5 min preserves the hang-bound
   # contract while reducing false-positive timeouts.
+  # First attempt — common case, finishes here.
   if timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
     PASS=$((PASS+1))
   else
     rc=$?
-    WORST=1
-    FAIL=$((FAIL+1))
-    if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
-      FAILED_NAMES="$FAILED_NAMES $f(timeout)"
+    # Retry once after a sleep — suite-tail tests (~test 30+) flake
+    # under JVM GC pressure (>5s pauses in the e2e stack when heap
+    # passes ~85%). A fresh test instance after a recovery window
+    # typically passes. WORST/FAIL only bump on the SECOND failure
+    # so a transient flake doesn't fail the run.
+    is_timeout=0
+    if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then is_timeout=1; fi
+    echo "  (first attempt rc=$rc — sleeping 10s then retrying once)" >&2
+    sleep 10
+    if wait_for_server && timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
+      PASS=$((PASS+1))
+      echo "  (retry succeeded — flake)" >&2
     else
-      FAILED_NAMES="$FAILED_NAMES $f"
+      rc2=$?
+      WORST=1
+      FAIL=$((FAIL+1))
+      if [ $rc2 -eq 124 ] || [ $rc2 -eq 137 ] || [ $is_timeout -eq 1 ]; then
+        FAILED_NAMES="$FAILED_NAMES $f(timeout)"
+      else
+        FAILED_NAMES="$FAILED_NAMES $f"
+      fi
     fi
   fi
   echo

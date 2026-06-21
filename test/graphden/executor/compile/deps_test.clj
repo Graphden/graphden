@@ -122,3 +122,71 @@
   (testing "absent seed has no downstream — returns the seed itself"
     (let [X #uuid "00000000-0000-0000-0000-00000000000a"]
       (is (= #{X} (deps/transitive-blast {} [X]))))))
+
+
+(deftest incremental-update-matches-full-rebuild-test
+  ;; The invariant: after any sequence of CRUDs on a graph,
+  ;; incrementally updating the deps-state must produce the SAME
+  ;; reverse-deps + forward-deps maps that a from-scratch rebuild
+  ;; would produce. Without this guarantee, delta-recompile! ships
+  ;; stale closures.
+  (let [A #uuid "00000000-0000-0000-0000-00000000000a"
+        B #uuid "00000000-0000-0000-0000-00000000000b"
+        C #uuid "00000000-0000-0000-0000-00000000000c"
+        D #uuid "00000000-0000-0000-0000-00000000000d"
+        BIND-B #uuid "00000000-0000-0000-0000-00000000010b"
+        BIND-C #uuid "00000000-0000-0000-0000-00000000010c"
+        BIND-D #uuid "00000000-0000-0000-0000-00000000010d"]
+    (testing "CREATE — new fn pulls in its forward-deps"
+      (let [g0 {:fns [{:id A}] :bindings [] :list-items []}
+            g1 {:fns [{:id A} {:id B :parent-ids [A]}]
+                :bindings [] :list-items []}
+            s0 (deps/build-deps-state g0)
+            s1-incr (deps/incremental-update s0 g1 [B])
+            s1-full (deps/build-deps-state g1)]
+        (is (= s1-full s1-incr)
+            "creating B that depends on A → incremental == full")))
+    (testing "UPDATE — fn loses an edge, gains another"
+      (let [g0 {:fns [{:id A} {:id B} {:id C :parent-ids [A]}]
+                :bindings [] :list-items []}
+            g1 {:fns [{:id A} {:id B} {:id C :parent-ids [B]}]
+                :bindings [] :list-items []}
+            s0 (deps/build-deps-state g0)
+            s1-incr (deps/incremental-update s0 g1 [C])
+            s1-full (deps/build-deps-state g1)]
+        (is (= s1-full s1-incr)
+            "C reparented A→B → incremental == full")))
+    (testing "DELETE — fn's reverse-deps entry + outgoing edges drop"
+      (let [g0 {:fns [{:id A} {:id B :parent-ids [A]}]
+                :bindings [{:id BIND-B :fn-id B :ref-fn-id A}]
+                :list-items []}
+            g1 {:fns [{:id A}]
+                :bindings [] :list-items []}
+            s0 (deps/build-deps-state g0)
+            s1-incr (deps/incremental-update s0 g1 [B])
+            s1-full (deps/build-deps-state g1)]
+        (is (= s1-full s1-incr)
+            "deleting B → A's reverse-deps loses B; B's entries vanish")))
+    (testing "MIXED CRUD — three fns mutate in one batch"
+      (let [g0 {:fns [{:id A} {:id B :parent-ids [A]}
+                      {:id C :parent-ids [B]}]
+                :bindings [{:id BIND-B :fn-id B :ref-fn-id A}]
+                :list-items []}
+            g1 {:fns [{:id A} {:id C :parent-ids [A]}
+                      {:id D :parent-ids [C]}]
+                :bindings [{:id BIND-C :fn-id C :ref-fn-id A}
+                           {:id BIND-D :fn-id D :ref-fn-id A}]
+                :list-items []}
+            s0 (deps/build-deps-state g0)
+            s1-incr (deps/incremental-update s0 g1 [B C D])
+            s1-full (deps/build-deps-state g1)]
+        (is (= s1-full s1-incr)
+            "batch CRUD (delete B, update C, create D) — incremental == full")))
+    (testing "cold start — empty state → incremental == full rebuild"
+      (let [g {:fns [{:id A} {:id B :parent-ids [A]}]
+               :bindings [] :list-items []}
+            empty-state {:forward-deps {} :reverse-deps {}}
+            s-incr (deps/incremental-update empty-state g [A B])
+            s-full (deps/build-deps-state g)]
+        (is (= s-full s-incr)
+            "from empty state incrementally adding all fns == full build")))))

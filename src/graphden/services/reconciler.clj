@@ -363,7 +363,10 @@
    compile-deps isn't populated yet (cold start) or when no running
    service is affected."
   [ctx running-atom changed-fn-ids]
-  (let [reverse-deps (some-> (:compile-deps ctx) deref)]
+  ;; `:compile-deps` now holds `{:forward-deps :reverse-deps}` since
+  ;; the incremental-update refactor; only the reverse side matters
+  ;; for the service-restart blast walk.
+  (let [reverse-deps (some-> (:compile-deps ctx) deref :reverse-deps)]
     (if (or (nil? reverse-deps) (empty? changed-fn-ids))
       {:started [] :stopped [] :not-our-lock []}
       (let [blast (compile-deps/transitive-blast reverse-deps changed-fn-ids)

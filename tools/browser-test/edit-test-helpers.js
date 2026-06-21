@@ -78,6 +78,13 @@ async function newContext(chromium) {
   const page = await ctx.newPage();
   page.on('pageerror', e => console.log('  [pageerror]', e.message));
   page.on('crash', () => console.log('  [page crash] renderer crashed'));
+  // Block until /health is 200 BEFORE the initial goto. Without
+  // this, a test that starts during a JVM OOM-restart window has
+  // its initial page.goto fire editor's initGraph against a dead
+  // server; browser-side `branchAwareFetch` has no retry and the
+  // test dies on `TypeError: Failed to fetch`. The cost is at
+  // most ~30s during a cold-start window, ~500ms otherwise.
+  await waitForServerHealthy();
   await page.goto(BASE + '/');
   await page.waitForTimeout(300);
   return { browser, page };

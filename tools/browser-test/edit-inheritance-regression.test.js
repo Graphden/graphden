@@ -58,10 +58,14 @@ const D_PARENT = 'test-inh-d-parent' + RUN_ID;
 const D_CHILD  = 'test-inh-d-child' + RUN_ID;
 
 async function cleanupAll(page) {
-  for (const n of [A_CHILD, A_PARENT, B_CHILD, B_PARENT, C_CHILD, C_PARENT,
-                   D_CHILD, D_PARENT]) {
-    await deleteFnByName(page, n).catch(() => {});
-  }
+  // Parallel cleanup — 8 sequential DELETEs under e2e memory
+  // pressure used to take 4+ minutes and trip the per-test 5-min
+  // wrapper cap (the test's actual assertions finish quickly; the
+  // cap was killing the finally block). Promise.allSettled keeps
+  // failures from poisoning the other branches.
+  await Promise.allSettled(
+    [A_CHILD, A_PARENT, B_CHILD, B_PARENT, C_CHILD, C_PARENT,
+     D_CHILD, D_PARENT].map((n) => deleteFnByName(page, n).catch(() => {})));
 }
 
 (async () => {

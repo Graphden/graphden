@@ -407,6 +407,27 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
  * Fetches nodes, edges, and layout from backend in single request
  */
 async function renderGraph(shouldFit = true) {
+  // `initGraph` only loaded the scope=index sidebar payload. Fetch
+  // the subtree for the selected fn so overlays / edges read real
+  // slots / bindings / items out of `lookups`. ensureSubtreeFor
+  // short-circuits when the cache already matches selectedFnId.
+  if (selectedFnId && typeof ensureSubtreeFor === 'function') {
+    try { await ensureSubtreeFor(selectedFnId); }
+    catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('renderGraph: subtree fetch failed', err);
+      return;
+    }
+  }
+  // `selectFn` called rebuildImplementationFnIds before this point,
+  // but on the FIRST render after initGraph / a navigation switch
+  // lookups were partial (pre-ensureSubtreeFor), so impl-fn-ids
+  // came back as ∅ and overlays would gate as non-editable. Redo
+  // it now with the populated bindings/items index — idempotent
+  // on subsequent renders of the same fn.
+  if (selectedFnId && typeof rebuildImplementationFnIds === 'function') {
+    rebuildImplementationFnIds();
+  }
   // Capture anchor BEFORE await — anchorNodeId may be cleared by caller after async yield.
   // The anchor holds the FULL cytoscape node id (including `fn-{root}_{fn-id}`
   // scoping prefix where applicable) so scoped leaves stay stationary too.

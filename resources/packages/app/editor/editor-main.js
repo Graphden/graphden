@@ -2,6 +2,60 @@
 // Depends on: editor-state.js, editor-data.js, editor-ui.js, editor-cytoscape.js
 
 // ============================================================================
+// SUBTREE-AWARE GRAPH LOADER
+// ============================================================================
+
+// `initGraph` fetches `?scope=index` — just fns + namespaces (sidebar
+// payload, ~1.6 MB on a 3000-fn graph vs 4.5 MB full). Slots /
+// bindings / fn-slots / list-items load PER-FN-VIEW via
+// `?scope=subtree&root-id=X` (~1.5 KB - 50 KB typical, ~4.2 MB worst
+// case at the app's root fn).
+//
+// `selectFn` triggers `renderGraph` which awaits `ensureSubtreeFor
+// (selectedFnId)` — fetches the subtree for the newly-selected fn,
+// MERGES it into `graphData` (sidebar fns + namespaces from index +
+// subtree slots/bindings/items), rebuilds `lookups`.
+//
+// The cache key is the subtree's root fn-id. Navigating to a new fn
+// triggers a fresh fetch + lookups rebuild. Mutations
+// (`loadGraphData`) clear the cache so the next render re-fetches.
+let _subtreeRootId = null;
+let _subtreeFetchPromise = null;
+
+async function ensureSubtreeFor(fnId) {
+  if (!fnId) return;
+  if (_subtreeRootId === fnId && Array.isArray(graphData?.bindings)) return;
+  if (_subtreeFetchPromise) return _subtreeFetchPromise;
+  _subtreeFetchPromise = (async () => {
+    try {
+      const r = await fetch(
+        '/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(fnId));
+      if (!r.ok) throw new Error('ensureSubtreeFor HTTP ' + r.status);
+      const sub = await r.json();
+      // Merge: keep the full sidebar fns + namespaces from initGraph's
+      // scope=index, overlay the subtree's slots/bindings/items.
+      graphData = {
+        fns: graphData?.fns || sub.fns,
+        namespaces: graphData?.namespaces || sub.namespaces,
+        slots: sub.slots,
+        'fn-slots': sub['fn-slots'],
+        bindings: sub.bindings,
+        'list-items': sub['list-items'],
+      };
+      _subtreeRootId = fnId;
+      lookups = buildLookups(graphData);
+    } catch (err) {
+      _subtreeFetchPromise = null;
+      throw err;
+    } finally {
+      _subtreeFetchPromise = null;
+    }
+  })();
+  return _subtreeFetchPromise;
+}
+window.ensureSubtreeFor = ensureSubtreeFor;
+
+// ============================================================================
 // INITIALIZATION
 // ============================================================================
 
@@ -17,8 +71,14 @@ async function initGraph() {
   // visitors see no service badges (loadServicesEager swallows the
   // 401 silently). Cheap (<30B per row) and primed before the first
   // overlay render so the badge has data on first paint.
+  //
+  // `?scope=index` — fns + namespaces only. The heavy slot /
+  // binding / fn-slot / list-item rows fetch per-fn-view via
+  // `ensureSubtreeFor()` from `renderGraph`.
+  _subtreeRootId = null;
+  _subtreeFetchPromise = null;
   const [entResp, typeResp, vkResp] = await Promise.all([
-    fetch('/api/graph/entities'),
+    fetch('/api/graph/entities?scope=index'),
     fetch('/api/types').catch(() => null),
     fetch('/api/value-kinds').catch(() => null),
     (typeof loadServicesEager === 'function')
@@ -63,9 +123,20 @@ async function initGraph() {
 // fn from `init()` so it doesn't also re-fire the auth / hash
 // navigation work.
 async function loadGraphData() {
+  // Post-mutation refresh: re-fetch the sidebar index AND the
+  // current subtree (if any) so both reflect the write. Splitting
+  // the two fetches is still less data than the legacy 4.5 MB full
+  // pull, except when the selected fn is the app root (rare).
+  //
+  // Invalidate the subtree cache so `renderGraph`'s next
+  // `ensureSubtreeFor` re-fetches even when the selected fn hasn't
+  // changed.
+  const prevRoot = _subtreeRootId;
+  _subtreeRootId = null;
+  _subtreeFetchPromise = null;
   let r;
   try {
-    r = await fetch('/api/graph/entities');
+    r = await fetch('/api/graph/entities?scope=index');
   } catch (err) {
     // Surface network drops in DevTools — caller (post-mutation
     // refresh) silently leaves stale state on the screen otherwise.
@@ -80,6 +151,18 @@ async function loadGraphData() {
   }
   graphData = await r.json();
   lookups = buildLookups(graphData);
+  // Re-fetch subtree for the previously-rendered fn so overlays /
+  // type-chips reflect the mutation. `renderGraph` would do this
+  // anyway, but a fresh prime here keeps any synchronous reads of
+  // `lookups` from racing on stale-empty state between this
+  // function returning and the next paint.
+  if (prevRoot) {
+    try { await ensureSubtreeFor(prevRoot); }
+    catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('loadGraphData subtree refresh failed', err);
+    }
+  }
   updateEntityList(graphData);
   if (typeof renderGraph === 'function') renderGraph(true);
 

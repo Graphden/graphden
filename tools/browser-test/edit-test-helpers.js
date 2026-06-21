@@ -325,11 +325,23 @@ async function nodeApi(method, path, body) {
   const maxAttempts = idempotent ? 4 : 1;
   let lastErr = null;
   for (let i = 0; i < maxAttempts; i++) {
+    // Per-attempt 60s wall cap. Without this, a fetch against a
+    // server that's queued up requests but not responding (e.g. mid-
+    // GC pause or starved scheduler) waits indefinitely — node's
+    // default `fetch` has no timeout and inherits the kernel socket
+    // wait. One stuck request can blow past the per-test 5-min cap
+    // (verified empirically — edit-inheritance-regression makes
+    // ~15 sequential layout calls; under memory pressure a single
+    // stuck POST drowned out the whole test). 60s lets a genuinely-
+    // slow JVM finish; anything past that is a hang.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000);
     try {
-      return await fetch(BASE + path, opts);
+      return await fetch(BASE + path, { ...opts, signal: ctrl.signal });
     } catch (err) {
       lastErr = err;
-      if (!idempotent || !isTransientNetworkError(err) || i === maxAttempts - 1) throw err;
+      const aborted = err?.name === 'AbortError';
+      if (!idempotent || (!isTransientNetworkError(err) && !aborted) || i === maxAttempts - 1) throw err;
       // Backoff: 5s + 15s + 30s = 50s total. Covers JVM cold-start
       // after OOM-restart (~30-40s — packages load + compile-eager
       // build the 3000-fn registry) plus a small safety margin.
@@ -337,6 +349,8 @@ async function nodeApi(method, path, body) {
       // exhausting attempts before the JVM was ready (verified
       // empirically — edit-namespace-move 2026-06-21).
       await new Promise((r) => setTimeout(r, [5000, 15000, 30000][i]));
+    } finally {
+      clearTimeout(timer);
     }
   }
   throw lastErr;
@@ -392,5 +406,6 @@ async function deleteFnByName(_page, name) {
 
 
 module.exports = { assert, deepEqual, newContext, api, getEntities,
+                   nodeApi, nodeApiJson,
                    synthArgs, waitFor, waitForServerHealthy,
                    deleteFnByName, AUTH, BASE };

@@ -17,38 +17,28 @@
 // Run from this directory:  AUTH_TOKEN=... node edit-inheritance-regression.test.js
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, synthArgs, deleteFnByName} =
+const {assert, newContext, api, getEntities, synthArgs, deleteFnByName,
+       nodeApiJson} =
   require('./edit-test-helpers');
 
-// Node-side fetch — bypasses Playwright entirely so we don't
-// serialise behind the editor page's background polls. Critical
-// here because the test does ~10 layout fetches sequentially;
-// going through page.evaluate cost ~10s per call at the tail of
-// a populated suite (verified empirically — the test was timing
-// out on the 5-min per-test cap despite each individual layout
-// being a sub-second operation server-side).
-const BASE_URL = process.env.GRAPHDEN_URL || 'http://localhost:9002';
-const AUTH_HDR = 'Bearer ' + (process.env.AUTH_TOKEN || 'test123');
-
+// Layout endpoints route through `nodeApiJson` so they (1) carry
+// `Connection: close` — every leaked http-kit channel left over
+// from a keep-alive fetch was a contributor to the 1.8 GB heap-leak
+// fixed 2026-06-21; (2) inherit the helper's 60 s AbortController
+// timeout — a single stuck POST under memory pressure used to
+// drown the whole test out at the 5-min per-test cap. POST has no
+// auto-retry (server-side a duplicate layout would race), so a 60 s
+// hang surfaces as a discrete per-step error instead of a silent
+// stall.
 async function layoutOf(_page, rootId) {
-  const r = await fetch(BASE_URL + '/api/graph/layout', {
-    method: 'POST',
-    headers: {'Authorization': AUTH_HDR, 'Content-Type': 'application/json'},
-    body: JSON.stringify({'root-id': rootId}),
-  });
-  return r.json();
+  return nodeApiJson('POST', '/api/graph/layout', {'root-id': rootId});
 }
 
 async function expandedLayoutOf(_page, rootId, fullDepth) {
-  const r = await fetch(BASE_URL + '/api/graph/layout', {
-    method: 'POST',
-    headers: {'Authorization': AUTH_HDR, 'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      'root-id': rootId,
-      expansions: {[`fn-${rootId}`]: {'full-depth': fullDepth}},
-    }),
+  return nodeApiJson('POST', '/api/graph/layout', {
+    'root-id': rootId,
+    expansions: {[`fn-${rootId}`]: {'full-depth': fullDepth}},
   });
-  return r.json();
 }
 
 // Per-scenario suffixes so leaked state from a failed earlier

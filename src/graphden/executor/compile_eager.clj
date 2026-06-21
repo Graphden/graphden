@@ -87,12 +87,31 @@
       (select-keys fa ref-frees))))
 
 
+(def ^:private call-cache-max-size
+  "Cap on the per-execute call-cache. Hit empirically: a single
+   `/api/graph/entities` request that touches every fn-def can cache
+   the 4.5MB graph dump at multiple ref-binding sites (one cache
+   entry per (ref-id × free-args) tuple). With cardinality in the
+   thousands and individual cached values in the MB range, the
+   cache reached 1.8 GB on a single request (heap dump 2026-06-21).
+   At 10,000 entries the cache covers the dominant hit population
+   for any single execute call while bounding worst-case retention
+   to single-digit hundreds of MB. When the cap is hit we clear the
+   whole cache — simple, single-threaded, no LRU machinery; the next
+   miss repopulates lazily."
+  10000)
+
+
 (defn- call-with-cache
   "Invoke `(child fa ctx)` through the per-execute memo. Cache key is
    `[ref-id projected-fa]` where projected-fa is `fa` restricted to
    the ref-target's declared free args. Cache miss / absent cache /
    always-fresh fn-id all fall through to a fresh call. `::nil`
-   sentinel distinguishes a cached `nil` from miss."
+   sentinel distinguishes a cached `nil` from miss.
+
+   The cache clears itself when it reaches `call-cache-max-size` —
+   prevents pathological per-request growth (see the size constant's
+   doc for the empirical motivation)."
   [ref-id ref-frees child fa ctx]
   (let [^java.util.HashMap cache (::call-cache ctx)]
     (if (or (nil? cache) (contains? @*always-fresh-fn-ids* ref-id))
@@ -102,6 +121,8 @@
         (if (some? cached)
           (when-not (identical? cached ::nil) cached)
           (let [v (child fa ctx)]
+            (when (>= (java.util.HashMap/.size cache) call-cache-max-size)
+              (java.util.HashMap/.clear cache))
             (java.util.HashMap/.put cache k (if (nil? v) ::nil v))
             v))))))
 

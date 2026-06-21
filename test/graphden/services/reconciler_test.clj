@@ -595,7 +595,11 @@
       ;; `transitive-blast` includes the seed itself in the blast,
       ;; but A is the only RUNNING service whose fn-id matches the
       ;; closure — B is not in any blast we'll hit.
-      (reset! (:compile-deps c) {dep-fn-id #{(:id a-composed)}})
+      ;; New `:compile-deps` shape carries forward + reverse together.
+      ;; Tests only use the reverse side; forward-deps stays empty.
+      (reset! (:compile-deps c)
+              {:reverse-deps {dep-fn-id #{(:id a-composed)}}
+               :forward-deps {}})
 
       ;; Hit the restart hook with seeds = #{dep-fn-id}. Expected:
       ;; A stops + restarts, B untouched.
@@ -661,7 +665,9 @@
     (try
       (br/clear-active-router!)
       (recon/reconcile-once! c running)
-      (reset! (:compile-deps c) {(random-uuid) #{(:id composed)}})
+      (reset! (:compile-deps c)
+              {:reverse-deps {(random-uuid) #{(:id composed)}}
+               :forward-deps {}})
 
       (let [r (recon/restart-services-depending-on! c running #{})]
         (testing "empty seeds → empty diff"
@@ -725,12 +731,14 @@
 
       ;; Phase 2 — populate :compile-deps via the REAL rebuild path,
       ;; not a hand-rolled `(reset! ... {})`. This reads the storage
-      ;; graph, runs `deps/build-reverse-deps` over it, and primes
-      ;; the atom — the same code the production runtime exercises.
+      ;; graph, runs `deps/build-deps-state` over it, and primes the
+      ;; atom — the same code the production runtime exercises.
+      ;; New shape: `{:reverse-deps {} :forward-deps {}}`.
       (cr-runtime/rebuild! c)
-      (let [rev-deps @(:compile-deps c)]
+      (let [deps-state @(:compile-deps c)
+            rev-deps (:reverse-deps deps-state)]
         (is (some? rev-deps)
-            ":compile-deps populated by rebuild!")
+            ":compile-deps :reverse-deps populated by rebuild!")
         (is (contains? (get rev-deps (:id up-composed) #{})
                        (:id down-composed))
             (str "reverse-dep edge upstream → downstream present "

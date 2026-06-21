@@ -175,14 +175,17 @@
      `wait_for_server` 90s poll, a restart-window fault recovers
      transparently within ≤ 1 cascade-cap step.
 
-   - `--memory 4g` — bounds the JVM container. With
-     `MaxRAMPercentage=75` (Dockerfile) the JVM gets ~3GB heap. A
-     tighter cap (2GB → 1.5GB heap) trips the in-memory accumulation
-     that GET /api/graph/entities does over a long e2e run; 4GB gives
-     enough headroom that ExitOnOutOfMemoryError + restart-policy can
-     handle the rare OOM cleanly rather than every-other-test. If the
-     executor enters a runaway-GC spiral it gets OOM-killed
-     deterministically (exit code 137 → triggers restart).
+   - `--memory 5g` — bounds the JVM container. With
+     `MaxRAMPercentage=75` (Dockerfile) the JVM gets ~3.75GB heap.
+     Lower caps trip the in-memory accumulation that the editor's
+     background polling + sustained CRUD churn drive across a 47-
+     test suite; 5GB pushes the OOM ceiling far enough that
+     `edit-namespace-move` (which races on a mid-test JVM-restart
+     window — see project_api_graph_entities_oom_leak) lands on the
+     happy path. 5GB chosen over 6GB because the dev host runs an
+     always-on :9002 graphden-executor + Postgres in parallel; 6GB
+     starts trading with host swap. ExitOnOutOfMemoryError +
+     restart-policy is still the safety net for the extreme case.
 
    - `--publish <host-port>:8080` — pins the host-side port so it
      SURVIVES `--restart=on-failure`. Without this, Docker
@@ -203,7 +206,7 @@
     (HostConfig/.withRestartPolicy
       host-cfg (RestartPolicy/onFailureRestart (int 3)))
     (HostConfig/.withMemory
-      host-cfg (long (* 4 1024 1024 1024)))
+      host-cfg (long (* 5 1024 1024 1024)))
     (HostConfig/.withPortBindings
       host-cfg
       (into-array PortBinding

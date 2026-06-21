@@ -371,6 +371,13 @@
    logging at all because SIGKILL bypasses shutdown hooks).
    Stdout also shows the last 200 lines as before for at-a-glance.
 
+   Also extracts /tmp/heap-dump.hprof from the container if one
+   exists — JVM writes this on `HeapDumpOnOutOfMemoryError`
+   (Dockerfile CMD). The first OOM in a run is the interesting one;
+   subsequent restarts will overwrite the file inside the container,
+   so we extract immediately at teardown to capture whichever was
+   last.
+
    Best-effort: log fetch can throw if the container is already
    dead; swallowed so teardown still proceeds."
   [containers]
@@ -378,6 +385,24 @@
     (try
       (when (= "graphden-executor:latest"
                (GenericContainer/.getDockerImageName c))
+        ;; Heap dump extraction (best-effort, before logs)
+        (try
+          (let [container-id (GenericContainer/.getContainerId c)
+                dump-host "/tmp/e2e-executor-heap-dump.hprof"
+                pb (ProcessBuilder. ^"[Ljava.lang.String;"
+                                    (into-array String
+                                      ["docker" "cp"
+                                       (str container-id ":/tmp/heap-dump.hprof")
+                                       dump-host]))
+                proc (ProcessBuilder/.start pb)]
+            (when (zero? (Process/.waitFor proc))
+              (let [size-mb (-> (java.io.File. dump-host)
+                                java.io.File/.length
+                                (/ (* 1024.0 1024.0))
+                                Math/round)]
+                (log/info (format "🔥 heap dump extracted: %s (%dMB) — analyze with `jhat` or VisualVM"
+                                  dump-host size-mb)))))
+          (catch Exception _))
         (let [logs (or (GenericContainer/.getLogs c) "")
               dump-file "/tmp/e2e-executor-full.log"
               lines (str/split-lines logs)

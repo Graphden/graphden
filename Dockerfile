@@ -44,4 +44,6 @@ CMD ["java", \
      "-XX:+UseContainerSupport", \
      "-XX:MaxRAMPercentage=75.0", \
      "-XX:+ExitOnOutOfMemoryError", \
+     "-XX:+HeapDumpOnOutOfMemoryError", \
+     "-XX:HeapDumpPath=/tmp/heap-dump.hprof", \
      "-jar", "/app/executor-server.jar"]

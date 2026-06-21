@@ -15,8 +15,8 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
-  require('./edit-test-helpers');
+const {assert, newContext, api, getEntities, deleteFnByName,
+       waitForServerHealthy} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -98,6 +98,10 @@ async function submit(page) {
 
   try {
     await cleanup(page);
+    // The JVM may be mid-cold-start from an earlier OOM-restart;
+    // editor's initGraph fires browser-side fetches with no retry
+    // logic and dies on the cold-start window. Block until ready.
+    await waitForServerHealthy();
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
     await page.waitForSelector('.ns-header', {timeout: 15000});
 

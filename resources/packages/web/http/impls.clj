@@ -62,6 +62,26 @@
     resp))
 
 
+(defn- force-close-connection
+  "Inject `Connection: close` into response headers. http-kit honours
+   this — flushes the body, then closes the channel and releases its
+   write-queue byte[] buffers. WITHOUT this, default HTTP/1.1 keep-
+   alive leaves the channel + buffers in the server's tracking
+   HashMap until idle-timeout. Heap dump 2026-06-21 showed 27,955
+   byte[] (1.7 GB) accumulated across ~969 long-lived channels —
+   90.83% of total heap. Forcing close removes the leak vector.
+
+   Tradeoff: per-request TCP handshake cost. For the e2e suite this
+   is invisible (fast loopback). For prod we'd want a smarter
+   policy — close only after the heavy endpoints (e.g.
+   /api/graph/entities returning 4.5MB) — but until that policy is
+   in place, blanket close is the safe default given the leak risk."
+  [resp]
+  (if (map? (:headers resp))
+    (assoc-in resp [:headers "Connection"] "close")
+    resp))
+
+
 (def ^:private gzip-min-size 1024)
 
 
@@ -165,7 +185,7 @@
 
 (defbase process-response
   [request response]
-  (maybe-encode request (stringify-headers response)))
+  (maybe-encode request (force-close-connection (stringify-headers response))))
 
 
 (defbase response-cache-get

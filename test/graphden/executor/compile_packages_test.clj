@@ -202,7 +202,7 @@
   ;; seeds two secrets and asserts distinct `:path` per row, also
   ;; within a hard timeout — so it implicitly verifies termination
   ;; for N≥2 too). Don't duplicate the 1-secret seeding case here.
-  (testing "list-secrets-handler returns a Ring response within 2s"
+  (testing "list-secrets-handler returns a Ring response within 15s"
     (let [registry (graphden.executor.compile-runtime/registry *context*)
           pg-query-closure (get registry (fn-id "pg-query"))
           ;; Sibling tests in the ns may have already populated
@@ -218,11 +218,17 @@
                                            :headers {}}
                                  :storage-query storage-query-callable}
                                 *context*))
-          result (try (deref done 2000 ::timeout)
+          ;; 15 s budget: 2 s flaked under integration-suite parallel
+          ;; load AND under sequential-but-cold-JVM load — the original
+          ;; 2 s assumed warm steady-state with empty storage. The hang
+          ;; regression this test pins manifests as never-returning,
+          ;; not as a ~3 s response, so a generous wall-cap preserves
+          ;; the catch while removing the false-positive timeouts.
+          result (try (deref done 15000 ::timeout)
                       (finally (when-not (java.util.concurrent.Future/.isDone done)
                                  (java.util.concurrent.Future/.cancel done true))))]
       (is (not= ::timeout result)
-          "list-secrets-handler must terminate within 2 s — the hang here is the regression this test pins")
+          "list-secrets-handler must terminate within 15 s — the hang here is the regression this test pins")
       (when (map? result)
         (is (= 200 (:status result)))
         (is (string? (:body result)))))))
@@ -282,11 +288,19 @@
                                            :headers {}}
                                  :storage-query storage-query-callable}
                                 *context*))
-          result (try (deref done 5000 ::timeout)
+          ;; 15s budget: in isolation this handler returns in ~3.5 s; the
+          ;; previous 5 s budget flaked under integration-suite parallel
+          ;; load (sibling tests in `^:integration` compete for CPU + GC),
+          ;; which masked the *real* contract this test pins (the
+          ;; per-secret `:path` projection asserted below). The
+          ;; cache-projection regression — collapsing both secrets onto
+          ;; one path — would still surface as a wrong-value failure,
+          ;; not a borderline timeout.
+          result (try (deref done 15000 ::timeout)
                       (finally (when-not (java.util.concurrent.Future/.isDone done)
                                  (java.util.concurrent.Future/.cancel done true))))]
       (is (not= ::timeout result)
-          "handler must terminate within 5 s")
+          "handler must terminate within 15 s")
       (when (map? result)
         (is (= 200 (:status result)))
         (let [body (when (string? (:body result))

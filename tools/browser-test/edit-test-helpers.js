@@ -19,6 +19,30 @@ function deepEqual(a, b) {
 const AUTH = process.env.AUTH_TOKEN || 'test123';
 const BASE = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
+
+// Block until the executor's /health returns 200 OR `deadlineMs`
+// elapses. Use this BEFORE any browser-side operation that loads
+// the editor (which fires multiple in-browser fetches that have NO
+// retry); if the JVM is mid-restart from an OOM, those fetches
+// throw `TypeError: Failed to fetch` and the test dies.
+//
+// Pure node fetch + a short polling loop — no Playwright, no
+// browser involvement, so this can stand between API setup
+// (which uses retry-bearing nodeApi) and `await page.goto(...)`
+// without contending with anything.
+async function waitForServerHealthy(deadlineMs = 60000) {
+  const start = Date.now();
+  while (Date.now() - start < deadlineMs) {
+    try {
+      const r = await fetch(BASE + '/health', {signal: AbortSignal.timeout(2000)});
+      if (r.ok) return;
+    } catch (_) { /* swallow + retry */ }
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  throw new Error('server still unhealthy after ' + deadlineMs + 'ms');
+}
+
+
 // Standard browser+context setup with auth pre-seeded into localStorage.
 //
 // Renderer-heap hardening:
@@ -349,4 +373,5 @@ async function deleteFnByName(_page, name) {
 
 
 module.exports = { assert, deepEqual, newContext, api, getEntities,
-                   synthArgs, waitFor, deleteFnByName, AUTH, BASE };
+                   synthArgs, waitFor, waitForServerHealthy,
+                   deleteFnByName, AUTH, BASE };

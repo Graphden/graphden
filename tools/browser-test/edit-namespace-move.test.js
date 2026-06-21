@@ -17,8 +17,8 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
-  require('./edit-test-helpers');
+const {assert, newContext, api, getEntities, deleteFnByName,
+       waitForServerHealthy} = require('./edit-test-helpers');
 
 
 const RUN_ID = '-' + process.pid + '-' + Date.now().toString(36);
@@ -75,6 +75,13 @@ async function cleanup(page) {
     // server-side new namespace-id, the next getEntities read can
     // surface the cached pre-move state. The single goto is enough
     // because newContext starts on about:blank already.
+    //
+    // Pre-flight: if the JVM is mid-OOM-restart from accumulated
+    // suite load (this test runs near the alphabetic tail), the
+    // editor's initGraph fires multiple browser-side fetches that
+    // throw TypeError without retry. Block until /health is back
+    // before navigating.
+    await waitForServerHealthy();
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FROM_NS + '.' + FN_NAME);
     await page.waitForTimeout(800);
     await page.evaluate(() => initGraph && initGraph());

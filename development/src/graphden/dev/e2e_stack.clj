@@ -267,17 +267,54 @@
 ;; Orchestration
 ;; =============================================================================
 
+(defn- container-mem-snapshot
+  "Best-effort `docker stats` snapshot for `container-id`. Returns
+   a `{:mem-mb :limit-mb :mem-pct}` map or nil. Used by the
+   heartbeat thread to track memory growth across the suite — if
+   the container climbs steadily toward its limit, the eventual
+   cgroup SIGKILL surfaces with context instead of as a silent
+   restart."
+  [container-id]
+  (try
+    (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
+                              (into-array String
+                                ["docker" "stats" "--no-stream" "--format"
+                                 "{{.MemUsage}}|{{.MemPerc}}" container-id]))
+          proc (ProcessBuilder/.start pb)
+          out (slurp (Process/.getInputStream proc))]
+      (Process/.waitFor proc)
+      (when-let [m (re-find #"^([\d.]+)(\w+) / ([\d.]+)(\w+)\|([\d.]+)%"
+                            (or out ""))]
+        (let [to-mb (fn [n unit]
+                      (let [v (Double/parseDouble n)]
+                        (case unit
+                          ("KiB" "KB") (/ v 1024.0)
+                          ("MiB" "MB") v
+                          ("GiB" "GB") (* v 1024.0)
+                          v)))]
+          {:mem-mb (Math/round (to-mb (nth m 1) (nth m 2)))
+           :limit-mb (Math/round (to-mb (nth m 3) (nth m 4)))
+           :mem-pct (Double/parseDouble (nth m 5))})))
+    (catch Exception _)))
+
+
 (defn- start-health-heartbeat!
   "Background thread that pokes `<url>/health` every 10s and logs the
    outcome. Goal: pin down the WALL-CLOCK moment the executor stops
    responding mid-suite, so the surrounding bash output (which test
    was running, which assertion fired last) frames the timeline.
 
+   Also reports executor container memory every 5th tick (~50s) so
+   the run shows whether the JVM is climbing toward its cgroup
+   limit. Without this, a cgroup SIGKILL (no JVM-side log) is
+   indistinguishable from a slow recovery.
+
    Lives until `stop` (returned) is invoked. Bounded by interrupt;
    no try-deref-block. Best-effort — any exception is swallowed and
    the heartbeat keeps trying."
-  [url]
+  [url container-id]
   (let [stop? (atom false)
+        tick (atom 0)
         thread (Thread.
                  ^Runnable
                  (fn []
@@ -298,6 +335,11 @@
                              (log/info (format "♥ /health 200 (slow, %dms)" dt))))
                          (catch Exception e
                            (log/warn e "heartbeat probe threw"))))
+                     (when (and container-id (zero? (mod @tick 5)))
+                       (when-let [s (container-mem-snapshot container-id)]
+                         (log/info (format "💾 mem %dMB / %dMB (%.1f%%)"
+                                           (:mem-mb s) (:limit-mb s) (:mem-pct s)))))
+                     (swap! tick inc)
                      (try (Thread/sleep 10000)
                           (catch InterruptedException _ (reset! stop? true)))))
                  "e2e-health-heartbeat")]
@@ -316,6 +358,14 @@
    'server unhealthy after 90s' in the runner, with no JVM
    stacktrace.
 
+   Writes the FULL container log to `/tmp/e2e-executor-full.log`
+   (rotated if it exists). The Docker log buffer preserves output
+   from ALL JVM incarnations across restart-policy bounces, so this
+   captures every Starting Graphden line, every Terminating message,
+   AND any cgroup OOM-killer signature (which has no Java-side
+   logging at all because SIGKILL bypasses shutdown hooks).
+   Stdout also shows the last 200 lines as before for at-a-glance.
+
    Best-effort: log fetch can throw if the container is already
    dead; swallowed so teardown still proceeds."
   [containers]
@@ -323,13 +373,21 @@
     (try
       (when (= "graphden-executor:latest"
                (GenericContainer/.getDockerImageName c))
-        (let [logs (GenericContainer/.getLogs c)
-              tail (->> (str/split-lines (or logs ""))
-                        (take-last 500)
-                        (str/join "\n"))]
-          (log/info (str "╭─ executor container logs (last 500 lines) ─╮\n"
-                         tail
-                         "\n╰─ end executor logs ─╯"))))
+        (let [logs (or (GenericContainer/.getLogs c) "")
+              dump-file "/tmp/e2e-executor-full.log"
+              lines (str/split-lines logs)
+              starts (count (filter #(re-find #"Starting Graphden Executor Runtime" %) lines))
+              terminatings (count (filter #(re-find #"Terminating due to" %) lines))]
+          (spit dump-file logs)
+          (log/info (str "executor lifetime: " starts " startup(s), "
+                         terminatings " JVM-side Terminating message(s). "
+                         "If startups > terminatings + 1, the missing exits were "
+                         "SIGKILL (cgroup OOM-killer or similar — no Java log)."))
+          (log/info (str "Full log: " dump-file " (" (count lines) " lines)"))
+          (let [tail (->> lines (take-last 200) (str/join "\n"))]
+            (log/info (str "╭─ executor container logs (last 200 lines) ─╮\n"
+                           tail
+                           "\n╰─ end executor logs ─╯")))))
       (catch Exception _))))
 
 
@@ -378,7 +436,8 @@
             ;; binding, before AND after restart.
             port (int host-port)
             url (str "http://" host ":" port)
-            stop-heartbeat! (start-health-heartbeat! url)]
+            container-id (GenericContainer/.getContainerId executor)
+            stop-heartbeat! (start-health-heartbeat! url container-id)]
         (println (str "▶ stack ready (" url "); running " script))
         (try
           (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"

@@ -210,10 +210,13 @@
    :effects #{:db}}
 
   {:name :list-all-graph-entities
-   :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. With `scope :index`, drops `:slots / :fn-slots / :bindings / :list-items` for a ~95% smaller response (sidebar-only use)."
+   :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. With `scope :index`, drops `:slots / :fn-slots / :bindings / :list-items` for a ~95% smaller response (sidebar-only use). With `scope :subtree` + `root-id`, returns only the transitive closure reachable from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids (~98% smaller — typical per-fn editor view)."
    :args {:scope {:type :nullable-keyword
                   :value nil
-                  :description "`:index` returns `{:fns :namespaces}` only — for the editor's lightweight sidebar load. `nil` / `:full` (default) returns the complete graph dump."}}
+                  :description "`:index` returns `{:fns :namespaces}` only — for the editor's lightweight sidebar load. `:subtree` requires `root-id` and returns only the subgraph reachable from it. `nil` / `:full` (default) returns the complete graph dump."}
+          :root-id {:type :nullable-uuid
+                    :value nil
+                    :description "Required when `:scope :subtree`. Ignored otherwise. Anchor for the BFS closure."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -3994,11 +3997,19 @@
                    :args {:request {:as :request}
                           :param-name {:value "scope"}}}}}
 
+  {:name :_all-entities-root-id
+   :description "Pull `root-id` query param off the Ring request and parse to UUID. `nil` when absent or malformed."
+   :parent :parse-uuid
+   :args {:string {:parent :query-param
+                   :args {:request {:as :request}
+                          :param-name {:value "root-id"}}}}}
+
   {:name :all-entities-handler
-   :description "Ring handler that returns the graph dump as JSON. With `?scope=index`, returns only `{:fns :namespaces}` (~95% size reduction for sidebar). Bound by `app.routes.api-entities`."
+   :description "Ring handler that returns the graph dump as JSON. With `?scope=index`, returns only `{:fns :namespaces}` (~95% size reduction for sidebar). With `?scope=subtree&root-id=X`, returns only the subgraph reachable from X (~98% reduction, per-fn editor view). Bound by `app.routes.api-entities`."
    :parent :json-handler
    :args {:data {:parent :list-all-graph-entities
-                 :args {:scope :_all-entities-scope}}}}
+                 :args {:scope :_all-entities-scope
+                        :root-id :_all-entities-root-id}}}}
 
   {:name :all-rich-types-handler
    :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON. Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."

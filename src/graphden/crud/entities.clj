@@ -282,6 +282,69 @@
     true))
 
 
+(defn- subtree-fn-id-closure
+  "BFS the set of fn-ids transitively reachable from `root-id` via:
+   - `parent-ids` (inheritance chain)
+   - `binding.ref-fn-id` for bindings owned by an in-set fn
+   - `binding.type-override-fn-id` for those same bindings
+   - `binding-list-item.ref-fn-id` for items under those bindings
+   - `slot.type-fn-id` for slots in any in-set fn's `fn-slots` row
+
+   These are exactly the edges that the editor + layout + runtime
+   need to render or execute the root fn. Nothing else in the graph
+   contributes to that view.
+
+   `graph` is the full graph map from `cached-or-load-graph`."
+  [graph root-id]
+  (let [fns-by-id        (into {} (map (juxt :id identity)) (:fns graph))
+        fn-slots-by-fn   (group-by :fn-id (:fn-slots graph))
+        slots-by-id      (into {} (map (juxt :id identity)) (:slots graph))
+        bindings-by-fn   (group-by :fn-id (:bindings graph))
+        items-by-binding (group-by :binding-id (:list-items graph))
+        seen (java.util.HashSet.)
+        stack (java.util.ArrayDeque.)
+        push! (fn [^java.util.UUID id]
+                (when (and id (not (java.util.HashSet/.contains seen id)))
+                  (java.util.ArrayDeque/.push stack id)))]
+    (push! root-id)
+    (while (not (java.util.ArrayDeque/.isEmpty stack))
+      (let [fid (java.util.ArrayDeque/.pop stack)]
+        (when-not (java.util.HashSet/.contains seen fid)
+          (java.util.HashSet/.add seen fid)
+          (when-let [fn-row (get fns-by-id fid)]
+            (doseq [pid (:parent-ids fn-row)] (push! pid))
+            (doseq [b (get bindings-by-fn fid)]
+              (push! (:ref-fn-id b))
+              (push! (:type-override-fn-id b))
+              (doseq [it (get items-by-binding (:id b))]
+                (push! (:ref-fn-id it))))
+            (doseq [fs (get fn-slots-by-fn fid)]
+              (when-let [slot (get slots-by-id (:slot-id fs))]
+                (push! (:type-fn-id slot))))))))
+    (set seen)))
+
+
+(defn- filter-graph-to-fn-ids
+  "Filter every row in `graph` down to those that participate in the
+   given `fn-id-set`. Mirrors the `subtree-fn-id-closure` edge rules:
+   own bindings + own list-items + own fn-slots + their referenced
+   slots."
+  [graph fn-id-set]
+  (let [kept-fns        (filterv #(contains? fn-id-set (:id %))     (:fns graph))
+        kept-fn-slots   (filterv #(contains? fn-id-set (:fn-id %))  (:fn-slots graph))
+        kept-slot-ids   (into #{} (map :slot-id) kept-fn-slots)
+        kept-slots      (filterv #(contains? kept-slot-ids (:id %)) (:slots graph))
+        kept-bindings   (filterv #(contains? fn-id-set (:fn-id %))  (:bindings graph))
+        kept-binding-ids (into #{} (map :id) kept-bindings)
+        kept-items      (filterv #(contains? kept-binding-ids (:binding-id %))
+                                 (:list-items graph))]
+    {:fns        kept-fns
+     :slots      kept-slots
+     :fn-slots   kept-fn-slots
+     :bindings   kept-bindings
+     :list-items kept-items}))
+
+
 (defn list-all-graph-entities
   "Dump every storage row the editor needs to render the graph. Routes
    through the shared graph-cache (populated by layout / compile-
@@ -304,9 +367,17 @@
      `:slots`, `:fn-slots`, `:bindings`, `:list-items` entirely.
      ~95% size reduction (~250 KB on the same graph). Use when the
      caller only needs the sidebar / picker view and will fetch
-     per-fn detail on demand."
-  ([ctx] (list-all-graph-entities ctx nil))
-  ([ctx scope]
+     per-fn detail on demand.
+
+   - `:subtree` with `root-id` — only the fns transitively reachable
+     from `root-id` via inheritance + binding refs + type overrides +
+     list-item refs + own-slot type-fn-ids, plus the slots / fn-slots
+     / bindings / list-items they own. Typically 30-60 fns / ~50 KB
+     for a single editor fn-view. Falls back to `:full` shape if
+     `root-id` is nil or doesn't resolve to a fn-row."
+  ([ctx] (list-all-graph-entities ctx nil nil))
+  ([ctx scope] (list-all-graph-entities ctx scope nil))
+  ([ctx scope root-id]
    (let [storage (request/require-storage ctx)
          base (types-api/cached-or-load-graph ctx)
          fn-slots-by-fn (group-by :fn-id (:fn-slots base))
@@ -319,8 +390,36 @@
                                     rich-snapshot)))
                          (:fns base))
          namespaces (vec (sp/query-entities storage :ns {}))]
-     (if (= scope :index)
+     (cond
+       (= scope :index)
        {:fns roled-fns :namespaces namespaces}
+
+       (and (= scope :subtree) root-id)
+       (let [closure (subtree-fn-id-closure base root-id)
+             roled-by-id (into {} (map (juxt :id identity)) roled-fns)
+             sub (filter-graph-to-fn-ids base closure)
+             sub-roled-fns (mapv #(or (get roled-by-id (:id %)) %) (:fns sub))
+             ;; Include each fn's namespace AND its parent chain so
+             ;; the sidebar can render the full path (e.g. `web.crud
+             ;; .branches` needs `web` + `web.crud` + `web.crud
+             ;; .branches`). Without the parent walk a leaf-only ns
+             ;; slice has no recoverable label tree.
+             ns-by-id (into {} (map (juxt :id identity)) namespaces)
+             ns-ids (loop [acc #{} pending (into #{} (keep :namespace-id) sub-roled-fns)]
+                      (if-let [nid (first pending)]
+                        (if (contains? acc nid)
+                          (recur acc (disj pending nid))
+                          (let [n (get ns-by-id nid)
+                                p (:parent-id n)]
+                            (recur (conj acc nid)
+                                   (cond-> (disj pending nid)
+                                     (and p (not (contains? acc p)))
+                                     (conj p)))))
+                        acc))
+             sub-namespaces (filterv #(contains? ns-ids (:id %)) namespaces)]
+         (assoc sub :fns sub-roled-fns :namespaces sub-namespaces))
+
+       :else
        (-> base
            (assoc :fns roled-fns)
            (assoc :namespaces namespaces))))))

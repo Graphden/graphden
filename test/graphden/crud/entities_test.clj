@@ -194,6 +194,37 @@
         (is (= (entities/list-all-graph-entities c)
                (entities/list-all-graph-entities c :full))
             ":full echoes the unchanged default behaviour"))
+      (testing "scope :subtree + root-id — only the BFS closure"
+        (let [parent-id (java.util.UUID/randomUUID)
+              child-id  (java.util.UUID/randomUUID)
+              unrelated-id (java.util.UUID/randomUUID)
+              _ (sp/create-entity storage :fn
+                                  {:id parent-id :name "subtree-parent"
+                                   :parent-ids [] :impl-hash "h"})
+              _ (sp/create-entity storage :fn
+                                  {:id child-id :name "subtree-child"
+                                   :parent-ids [parent-id]})
+              _ (sp/create-entity storage :fn
+                                  {:id unrelated-id :name "subtree-unrelated"
+                                   :parent-ids [] :impl-hash "u"})
+              ;; sp/create-entity bypasses the graph-cache invalidation
+              ;; path that the public API uses (`apply-create` →
+              ;; `invalidate!`), so the prior sub-tests' cached graph
+              ;; doesn't include these new fns. Drop the cache so the
+              ;; next loader picks up the writes.
+              _ (ctx/invalidate-graph-cache! c)
+              dump (entities/list-all-graph-entities c :subtree child-id)
+              fn-ids (into #{} (map :id) (:fns dump))]
+          (is (contains? fn-ids child-id) "root in subtree")
+          (is (contains? fn-ids parent-id) "parent reachable via parent-ids")
+          (is (not (contains? fn-ids unrelated-id))
+              "unrelated fn excluded from subtree")
+          (is (every? #(contains? % :role) (:fns dump))
+              ":role still computed on subtree fns")))
+      (testing "scope :subtree without root-id falls back to full"
+        (is (= (entities/list-all-graph-entities c)
+               (entities/list-all-graph-entities c :subtree nil))
+            "nil root-id → full payload (silent fallback)"))
       (finally (sp/close storage)))))
 
 

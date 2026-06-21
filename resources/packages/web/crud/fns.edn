@@ -210,8 +210,10 @@
    :effects #{:db}}
 
   {:name :list-all-graph-entities
-   :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`."
-   :args {}
+   :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. With `scope :index`, drops `:slots / :fn-slots / :bindings / :list-items` for a ~95% smaller response (sidebar-only use)."
+   :args {:scope {:type :nullable-keyword
+                  :value nil
+                  :description "`:index` returns `{:fns :namespaces}` only — for the editor's lightweight sidebar load. `nil` / `:full` (default) returns the complete graph dump."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -3985,10 +3987,18 @@
   {:name :_json-handler-body
    :parent :to-json-string}
 
+  {:name :_all-entities-scope
+   :description "Pull `scope` query param off the Ring request and coerce to keyword. `nil` when absent → full dump."
+   :parent :str-to-keyword
+   :args {:string {:parent :query-param
+                   :args {:request {:as :request}
+                          :param-name {:value "scope"}}}}}
+
   {:name :all-entities-handler
-   :description "Ring handler that returns the full graph dump as JSON. Bound by `app.routes.api-entities`."
+   :description "Ring handler that returns the graph dump as JSON. With `?scope=index`, returns only `{:fns :namespaces}` (~95% size reduction for sidebar). Bound by `app.routes.api-entities`."
    :parent :json-handler
-   :args {:data :list-all-graph-entities}}
+   :args {:data {:parent :list-all-graph-entities
+                 :args {:scope :_all-entities-scope}}}}
 
   {:name :all-rich-types-handler
    :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON. Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."

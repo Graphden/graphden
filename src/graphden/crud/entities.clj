@@ -283,29 +283,47 @@
 
 
 (defn list-all-graph-entities
-  [ctx]
-  ;; Slot/fn-slot/binding model: dump every storage row the editor
-  ;; needs to render the graph. Routes through the shared graph-cache
-  ;; (populated by layout / compile-runtime) so editor refreshes after
-  ;; mutations don't re-query the same five tables every time.
-  ;;
-  ;; Each fn-row is augmented with a `:role` field so the sidebar can
-  ;; group entries into Types vs Functions sections without an extra
-  ;; round-trip through `/api/types`.
-  (let [storage (request/require-storage ctx)
-        base (types-api/cached-or-load-graph ctx)
-        fn-slots-by-fn (group-by :fn-id (:fn-slots base))
-        rich-snapshot (registry/rich-types-snapshot)
-        roled-fns (mapv (fn [f]
-                          (assoc f :role
-                                 (types-api/compute-fn-role
-                                   f
-                                   (boolean (seq (get fn-slots-by-fn (:id f))))
-                                   rich-snapshot)))
-                        (:fns base))]
-    (-> base
-        (assoc :fns roled-fns)
-        (assoc :namespaces (vec (sp/query-entities storage :ns {}))))))
+  "Dump every storage row the editor needs to render the graph. Routes
+   through the shared graph-cache (populated by layout / compile-
+   runtime) so editor refreshes after mutations don't re-query the
+   same five tables every time.
+
+   Each fn-row is augmented with a `:role` field so the sidebar can
+   group entries into Types vs Functions sections without an extra
+   round-trip through `/api/types`.
+
+   `scope` controls payload size:
+
+   - `nil` / `:full` (default, backward compatible) — every
+     `{:fns :slots :fn-slots :bindings :list-items :namespaces}`.
+     Response is ~4.5 MB on a 3000-fn graph; appropriate for the
+     editor's initial \"give me everything\" load.
+
+   - `:index` — only `{:fns :namespaces}` plus enough metadata for
+     the sidebar tree (every fn's role + namespace-id + name). Drops
+     `:slots`, `:fn-slots`, `:bindings`, `:list-items` entirely.
+     ~95% size reduction (~250 KB on the same graph). Use when the
+     caller only needs the sidebar / picker view and will fetch
+     per-fn detail on demand."
+  ([ctx] (list-all-graph-entities ctx nil))
+  ([ctx scope]
+   (let [storage (request/require-storage ctx)
+         base (types-api/cached-or-load-graph ctx)
+         fn-slots-by-fn (group-by :fn-id (:fn-slots base))
+         rich-snapshot (registry/rich-types-snapshot)
+         roled-fns (mapv (fn [f]
+                           (assoc f :role
+                                  (types-api/compute-fn-role
+                                    f
+                                    (boolean (seq (get fn-slots-by-fn (:id f))))
+                                    rich-snapshot)))
+                         (:fns base))
+         namespaces (vec (sp/query-entities storage :ns {}))]
+     (if (= scope :index)
+       {:fns roled-fns :namespaces namespaces}
+       (-> base
+           (assoc :fns roled-fns)
+           (assoc :namespaces namespaces))))))
 
 
 ;; === Compound type-row create / update ======================================

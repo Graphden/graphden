@@ -181,6 +181,19 @@
           (is (contains? dump :slots))
           (is (contains? dump :namespaces))
           (is (every? #(contains? % :role) (:fns dump)))))
+      (testing "scope :index — drops bindings / slots / fn-slots / list-items,"
+        (testing "keeps fns + namespaces; fns still carry :role"
+          (let [_    (setup/create-base-fn! storage "lage-fn-idx")
+                dump (entities/list-all-graph-entities c :index)]
+            (is (= #{:fns :namespaces} (set (keys dump)))
+                ":index payload is exactly {:fns :namespaces}")
+            (is (seq (:fns dump)) "fns are still populated")
+            (is (every? #(contains? % :role) (:fns dump))
+                ":role still computed on fns"))))
+      (testing "scope :full (explicit) matches the no-scope default"
+        (is (= (entities/list-all-graph-entities c)
+               (entities/list-all-graph-entities c :full))
+            ":full echoes the unchanged default behaviour"))
       (finally (sp/close storage)))))
 
 

@@ -205,14 +205,19 @@
 
 
 (defbase list-all-graph-entities
-  []
+  [scope]
   ;; Storage read (via `cached-or-load-graph` + an explicit `query-entities`
   ;; for namespaces). Without the record-effect! the runtime
   ;; `:runtime-effects` list returned by `/api/execute` would silently
   ;; drop `:db` for this call — the declared `:effects #{:db}` in fns.edn
   ;; says the effect IS there, the runtime audit must match.
+  ;;
+  ;; `scope :index` — skip the bindings / list-items / fn-slots / slots
+  ;; rows; return only `{:fns :namespaces}`. Editor sidebar uses this on
+  ;; initial load (~95% size reduction vs the full dump). Anything else
+  ;; — `nil`, `:full`, etc. — yields the unchanged full payload.
   (cr/record-effect! :db)
-  (entities/list-all-graph-entities ctx))
+  (entities/list-all-graph-entities ctx scope))
 
 
 (defbase all-rich-types

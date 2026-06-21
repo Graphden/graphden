@@ -585,7 +585,16 @@
 ;; Bounded LRU — 4 entries comfortably cover {dev system + a couple of
 ;; branches + a test bootstrap} without holding stale registries forever.
 
-(def ^:private compile-all-cache-max-size 4)
+;; 2 (was 4): each cached registry holds ~3000 closure references,
+;; and each closure captures references to its parent lookups
+;; (fn-map / slot-map / 4 index maps / 4 lazy atom caches). 4
+;; generations was ~10MB of accumulating heap that mostly never got
+;; queried — the cache hits are dominated by repeat calls within the
+;; SAME compilation window (sister branches share a graph snapshot)
+;; rather than across windows. Dropping to 2 cuts heap pressure
+;; without losing the dominant hit case (current branch + base
+;; branch).
+(def ^:private compile-all-cache-max-size 2)
 
 
 (def ^:private compile-all-cache

@@ -100,10 +100,17 @@
 
 (def ^:private cached-build-lookups-max-size
   "Bound on the identity-keyed cache. Sized to comfortably cover the
-   handful of active per-branch ctxs typical of dev workflows; one
-   entry per ctx's current graph snapshot. Same magnitude as the
-   branch-router's default cache."
-  8)
+   active per-branch ctxs typical of dev workflows.
+
+   2 (not 8): the cache is keyed on graph IDENTITY (`identical?`),
+   but `read-graph` returns a fresh map every call — so the cache
+   effectively never hits across calls from different read-graph
+   invocations. The 8 entries just held 8 generations of lookups
+   tables (each carrying fn-map + slot-map + 4 index maps + 4 lazy
+   atom caches), ~1MB of accumulating GC pressure for zero hit-
+   rate benefit. 2 covers the single-active-branch case + a
+   one-slot overlap for the branch-router ctx switching window."
+  2)
 
 
 (defonce ^:private cached-build-lookups-state

@@ -91,15 +91,21 @@
   "Cap on the per-execute call-cache. Hit empirically: a single
    `/api/graph/entities` request that touches every fn-def can cache
    the 4.5MB graph dump at multiple ref-binding sites (one cache
-   entry per (ref-id × free-args) tuple). With cardinality in the
-   thousands and individual cached values in the MB range, the
-   cache reached 1.8 GB on a single request (heap dump 2026-06-21).
-   At 10,000 entries the cache covers the dominant hit population
-   for any single execute call while bounding worst-case retention
-   to single-digit hundreds of MB. When the cap is hit we clear the
-   whole cache — simple, single-threaded, no LRU machinery; the next
-   miss repopulates lazily."
-  10000)
+   entry per (ref-id × free-args) tuple). Average entry observed
+   ~180 KB (large maps, JSON strings, etc.).
+
+   At 1,000 entries × ~180 KB average = ~180 MB worst-case cache
+   footprint, which sits comfortably under the JVM's 2.25 GB heap
+   even with the rest of the live working set. 10,000 was too loose
+   (still hit 1.8 GB OOMs — verified empirically). When the cap is
+   hit we clear the whole cache — simple, single-threaded, no LRU
+   machinery; the next miss repopulates lazily.
+
+   For pathological cases where even 1000 entries is too much,
+   the cache could be disabled via `:graphden.executor.compile-
+   eager/disable-call-cache?` on the ctx — but no current code path
+   needs that."
+  1000)
 
 
 (defn- call-with-cache

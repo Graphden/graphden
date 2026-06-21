@@ -298,9 +298,19 @@ function isTransientNetworkError(err) {
 
 
 async function nodeApi(method, path, body) {
+  // `Connection: close` is THE fix for the 1.8 GB http-kit AsyncChannel
+  // retention leak (heap dump 2026-06-21). With the default HTTP/1.1
+  // keep-alive, every fetch leaves the channel + the response's byte
+  // buffers held in http-kit's wrap-ring-websocket tracking HashMap
+  // until the TCP connection drops (idle timeout). Across 47 tests
+  // doing hundreds of fetches each, that accumulated to 27,955 byte[]
+  // (1.7 GB) — the dominant heap retainer, dwarfing every
+  // application-level cache. Forcing connection-close releases the
+  // channel immediately after the response is sent; no accumulation,
+  // no OOM cascade.
   const opts = {
     method,
-    headers: { 'Authorization': 'Bearer ' + AUTH },
+    headers: { 'Authorization': 'Bearer ' + AUTH, 'Connection': 'close' },
   };
   if (body !== undefined) {
     if (typeof body === 'string') {

@@ -27,7 +27,8 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor,
+       waitForServerHealthy} =
   require('./edit-test-helpers');
 
 
@@ -202,9 +203,15 @@ async function openServicePopover(page) {
     // Match by fn-id, NOT fn-name — the latter goes through a backend
     // JOIN that returns null for a brief window after row creation
     // (v12 diagnostic surfaced fn-name: null in that window).
+    //
+    // Before polling, make sure /health is back — under suite load
+    // the executor sometimes goes unresponsive for ~10s right after
+    // the Save click, and the POST itself hangs. waitForServerHealthy
+    // returns once /health is 200 again.
+    await waitForServerHealthy();
     let persistedSvc = null;
     {
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 30000;
       while (Date.now() < deadline) {
         const list = await api(page, 'GET', '/api/services');
         const s = (list?.services || [])
@@ -316,8 +323,9 @@ async function openServicePopover(page) {
     });
     // Wait for the toggle to settle into storage. Node-side poll to
     // avoid the page.waitForFunction-with-async-predicate quirk.
+    await waitForServerHealthy();
     {
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 30000;
       let settled = false;
       while (Date.now() < deadline) {
         const list = await api(page, 'GET', '/api/services');
@@ -325,7 +333,7 @@ async function openServicePopover(page) {
         if (s && !s['enabled?']) { settled = true; break; }
         await new Promise((r) => setTimeout(r, 200));
       }
-      if (!settled) throw new Error('service did not flip to enabled?=false within 15s');
+      if (!settled) throw new Error('service did not flip to enabled?=false within 30s');
     }
     const disabledSvc = await page.evaluate(async (svcId) => {
       const r = await window.authFetch('/api/services');
@@ -346,8 +354,9 @@ async function openServicePopover(page) {
     });
     // Wait for the row to disappear from /api/services. Node-side
     // poll (same reasoning as the Phase A and D loops above).
+    await waitForServerHealthy();
     {
-      const deadline = Date.now() + 15000;
+      const deadline = Date.now() + 30000;
       let gone = false;
       while (Date.now() < deadline) {
         const list = await api(page, 'GET', '/api/services');
@@ -356,7 +365,7 @@ async function openServicePopover(page) {
         }
         await new Promise((r) => setTimeout(r, 200));
       }
-      if (!gone) throw new Error('service row did not disappear within 15s');
+      if (!gone) throw new Error('service row did not disappear within 30s');
     }
     const afterDelete = await page.evaluate(async (svcId) => {
       const r = await window.authFetch('/api/services');

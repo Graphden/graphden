@@ -60,12 +60,24 @@ async function cleanup(page) {
 async function openServicePopover(page) {
   await page.goto('about:blank');
   await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
-  await page.waitForTimeout(800);
+  // Wait for cytoscape to mount the fn-card with its `⋯` trigger and
+  // for the post-mount fit animation to drain — without the
+  // cy.animated() gate, dispatchEvent below races autowait stability.
+  await page.waitForFunction(
+    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+          && !!document.querySelector('button.more-actions-trigger')
+          && !cy.animated(),
+    {timeout: 20000, polling: 100});
   await page.evaluate(() => initGraph());
-  await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-  await page.waitForTimeout(500);
+  // initGraph re-renders overlays; wait again for the post-rebuild
+  // settle before dispatching.
+  await page.waitForFunction(
+    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+          && !!document.querySelector('button.more-actions-trigger')
+          && !cy.animated(),
+    {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForTimeout(500);
+  await page.waitForSelector('.row-actions-popover', {timeout: 5000});
   const clicked = await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');
     const gear = Array.from(popover?.querySelectorAll('button') || [])
@@ -183,7 +195,19 @@ async function openServicePopover(page) {
     await page.evaluate(() => {
       document.querySelector('.service-popover-save-btn').click();
     });
-    await page.waitForTimeout(2500);
+    // Wait for the :service row to appear in storage AND for the
+    // reconciler atom to track it as running.
+    await page.waitForFunction(
+      async (name) => {
+        try {
+          const r = await window.authFetch('/api/services');
+          const body = await r.json();
+          const s = body.services?.find((x) => x['fn-name'] === name);
+          return !!s && !!s['enabled?'] && !!s.running;
+        } catch (_) { return false; }
+      },
+      PROBE_FN,
+      {timeout: 15000, polling: 200});
     const persistedSvc = await page.evaluate(async (name) => {
       const r = await window.authFetch('/api/services');
       const body = await r.json();
@@ -226,7 +250,9 @@ async function openServicePopover(page) {
     await page.evaluate(() => {
       if (typeof hideServicePopover === 'function') hideServicePopover();
     });
-    await page.waitForTimeout(200);
+    await page.waitForFunction(
+      () => !document.querySelector('.service-popover.visible'),
+      {timeout: 3000, polling: 50});
 
     const branchResp = await api(page, 'POST', '/api/branches',
                                  {name: PROBE_BRANCH});
@@ -288,7 +314,18 @@ async function openServicePopover(page) {
       cb.dispatchEvent(new Event('change', {bubbles: true}));
       document.querySelector('.service-popover-save-btn').click();
     });
-    await page.waitForTimeout(2500);
+    // Wait for the toggle to settle into storage.
+    await page.waitForFunction(
+      async (svcId) => {
+        try {
+          const r = await window.authFetch('/api/services');
+          const body = await r.json();
+          const s = body.services?.find((x) => x.id === svcId);
+          return s && !s['enabled?'];
+        } catch (_) { return false; }
+      },
+      persistedSvc.id,
+      {timeout: 15000, polling: 200});
     const disabledSvc = await page.evaluate(async (svcId) => {
       const r = await window.authFetch('/api/services');
       const body = await r.json();
@@ -306,7 +343,17 @@ async function openServicePopover(page) {
     await page.evaluate(() => {
       document.querySelector('.service-popover-delete-btn').click();
     });
-    await page.waitForTimeout(2000);
+    // Wait for the row to disappear from /api/services.
+    await page.waitForFunction(
+      async (svcId) => {
+        try {
+          const r = await window.authFetch('/api/services');
+          const body = await r.json();
+          return !body.services?.some((s) => s.id === svcId);
+        } catch (_) { return false; }
+      },
+      persistedSvc.id,
+      {timeout: 15000, polling: 200});
     const afterDelete = await page.evaluate(async (svcId) => {
       const r = await window.authFetch('/api/services');
       const body = await r.json();

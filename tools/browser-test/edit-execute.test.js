@@ -13,14 +13,20 @@ const {assert, newContext} = require('./edit-test-helpers');
 async function openExecutePopoverFor(page, fnNameHash) {
   await page.goto('about:blank');
   await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + fnNameHash);
-  await page.waitForTimeout(2500);
+  // Wait for cytoscape to mount the fn-card with its `⋯` trigger and
+  // for the post-mount fit animation to drain.
+  await page.waitForFunction(
+    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+          && !!document.querySelector('button.more-actions-trigger')
+          && !cy.animated(),
+    {timeout: 20000, polling: 100});
 
   // The ▶ button lives inside the row-actions popover, anchored to
   // the fn-card's `⋯` trigger. The trigger fires on mousedown (NOT
   // click) — Playwright's .click() doesn't dispatch mousedown by
   // itself, so use page.dispatchEvent.
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForTimeout(500);
+  await page.waitForSelector('.row-actions-popover', {timeout: 5000});
   // Find ▶ in the surfaced row-actions popover and click.
   const opened = await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');
@@ -32,8 +38,14 @@ async function openExecutePopoverFor(page, fnNameHash) {
     return true;
   });
   if (!opened) throw new Error('▶ button not surfaced in row-actions');
-  // Forms load via /api/value-form — give them time to mount.
-  await page.waitForTimeout(2500);
+  // Forms load via /api/value-form — wait for the form input to mount.
+  await page.waitForFunction(
+    () => {
+      const p = document.querySelector('.execute-popover.visible');
+      return p && (!!p.querySelector('textarea[data-form-field]')
+                   || !!p.querySelector('input[data-form-field]'));
+    },
+    {timeout: 10000, polling: 100});
 }
 
 
@@ -59,7 +71,14 @@ async function fillNumsAndRun(page, jsonText, persistFlag) {
 
 
 async function readResult(page) {
-  await page.waitForTimeout(2000);
+  // Wait until either the scalar result OR the error pane mounts.
+  await page.waitForFunction(
+    () => {
+      const p = document.querySelector('.execute-popover.visible');
+      return p && (!!p.querySelector('.execute-result-scalar')
+                   || !!p.querySelector('.execute-error-pane'));
+    },
+    {timeout: 10000, polling: 100});
   return await page.evaluate(() => {
     const popover = document.querySelector('.execute-popover.visible');
     if (!popover) return { ok: false };
@@ -87,8 +106,10 @@ async function readResult(page) {
     assert(argRowCountA === 1, 'one free-arg row rendered (nums)');
 
     // Auto-focus: the first form input should be the active element.
-    // requestAnimationFrame fires near-immediately but give it a beat.
-    await page.waitForTimeout(150);
+    await page.waitForFunction(
+      () => document.activeElement?.tagName === 'TEXTAREA'
+            || document.activeElement?.tagName === 'INPUT',
+      {timeout: 3000, polling: 50});
     const focusedTag = await page.evaluate(() =>
       document.activeElement?.tagName);
     assert(focusedTag === 'TEXTAREA' || focusedTag === 'INPUT',
@@ -105,7 +126,9 @@ async function readResult(page) {
     await page.evaluate(() => {
       document.querySelector('.execute-popover-close')?.click();
     });
-    await page.waitForTimeout(500);
+    await page.waitForFunction(
+      () => !document.querySelector('.execute-popover.visible'),
+      {timeout: 3000, polling: 50});
     await openExecutePopoverFor(page, 'core.arithmetic.add');
     await fillNumsAndRun(page, '[10, 20]', true);
     const resultB = await readResult(page);
@@ -117,7 +140,15 @@ async function readResult(page) {
     await page.evaluate(() => {
       document.querySelector('.execute-history-toggle').click();
     });
-    await page.waitForTimeout(1500);
+    // Panel renders rows after an async fetch — wait for the host to
+    // become visible AND at least one row to be in the DOM.
+    await page.waitForFunction(
+      () => {
+        const h = document.querySelector('.execute-history-host');
+        return h && h.style.display !== 'none'
+               && h.querySelectorAll('.execute-history-row').length >= 1;
+      },
+      {timeout: 10000, polling: 100});
     const historyState = await page.evaluate(() => {
       const host = document.querySelector('.execute-history-host');
       const visible = host && host.style.display !== 'none';
@@ -149,7 +180,16 @@ async function readResult(page) {
         '.execute-history-row .execute-history-repeat-btn');
       btn?.click();
     });
-    await page.waitForTimeout(800);  // applyHistoryArgs is async (fetch)
+    // applyHistoryArgs is async — wait until the textarea contains
+    // the prior run's args.
+    await page.waitForFunction(
+      () => {
+        const ta = document.querySelector(
+          '.execute-popover.visible textarea[data-form-field]');
+        const v = ta?.value || '';
+        return v.includes('10') && v.includes('20');
+      },
+      {timeout: 5000, polling: 50});
     const refilled = await page.evaluate(() => {
       const ta = document.querySelector(
         '.execute-popover.visible textarea[data-form-field]');
@@ -164,7 +204,14 @@ async function readResult(page) {
     // the textarea (where Enter inserts a newline — that path is
     // intentionally NOT intercepted).
     await fillNumsAndRun(page, '[100, 200]', false);   // baseline result via click
-    await page.waitForTimeout(800);
+    // Wait for baseline result (300) so we can detect the flip to 15.
+    await page.waitForFunction(
+      () => {
+        const s = document.querySelector(
+          '.execute-popover.visible .execute-result-scalar');
+        return s?.textContent === '300';
+      },
+      {timeout: 10000, polling: 100});
     await page.evaluate(() => {
       // Tab focus off the textarea — focus the popover root so the
       // keydown handler's "tag !== TEXTAREA" gate lets Enter through.
@@ -183,7 +230,14 @@ async function readResult(page) {
       popover?.dispatchEvent(new KeyboardEvent('keydown',
         { key: 'Enter', bubbles: true }));
     });
-    await page.waitForTimeout(2000);
+    // Wait for the scalar to flip from baseline 300 to 15.
+    await page.waitForFunction(
+      () => {
+        const s = document.querySelector(
+          '.execute-popover.visible .execute-result-scalar');
+        return s?.textContent === '15';
+      },
+      {timeout: 10000, polling: 100});
     const enterResult = await page.evaluate(() => {
       const scalar = document.querySelector(
         '.execute-popover.visible .execute-result-scalar');

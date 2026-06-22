@@ -19,7 +19,7 @@
 # pressure to reproduce.
 
 set -u
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 
 # Resolve the test list once so adding new files only takes a glob.
 FILES=$(ls edit-*.test.js 2>/dev/null)

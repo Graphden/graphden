@@ -81,6 +81,12 @@ fi
   echo "═══ UI checks failed (Stop hook) ═══"
   echo ""
   echo "Modified UI files:"
+  # Intentional word-splitting: `$modified` is a newline-separated list
+  # of file paths produced by `git diff --name-only`. Quote it and you
+  # get a single multi-line argument that printf collapses; leave it
+  # unquoted so each path becomes its own printf arg. None of the
+  # paths in this repo contain whitespace, so the split is safe.
+  # shellcheck disable=SC2086
   printf '  - %s\n' $modified
   echo ""
   if [ "$biome_failed" -eq 1 ]; then

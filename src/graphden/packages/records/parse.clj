@@ -349,12 +349,12 @@
                        (and single (keyword? single)) [single]
                        :else                   nil)]
     (when (seq parent-names)
-      (mapv (fn [pn]
-              (or (get name->id pn)
-                  (throw (ex-info (str "Unknown parent: " (pr-str pn))
+      (mapv (fn [parent-name]
+              (or (get name->id parent-name)
+                  (throw (ex-info (str "Unknown parent: " (pr-str parent-name))
                                   {:type :records/unknown-parent
                                    :name (:name fn-def)
-                                   :parent pn}))))
+                                   :parent parent-name}))))
             parent-names))))
 
 

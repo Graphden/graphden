@@ -16,6 +16,7 @@ Graphden is an experimental platform where:
 - **Integrant System** — component lifecycle management with hot reload
 
 **Goals**:
+
 1. Test the hypothesis that graph-based visual programming can be simpler and more readable than text code for high-level logic
 2. Leverage the graph structure for automatic parallelization — independent subgraphs can be computed concurrently on different executors
 
@@ -84,6 +85,28 @@ bb coverage  # Tests with coverage report
 bb check     # Linters only (parallel)
 bb fix       # Auto-fix formatting
 ```
+
+### Linter prerequisites
+
+Most linters install themselves on first run (no host setup
+required):
+
+- **Clojure** — clj-kondo / splint / cljstyle: pulled by `setup-clojure`
+  in CI; locally either install native binaries (`brew install
+  clj-kondo cljstyle`, etc.) or let `bb check` fall through to the
+  `clojure -M:kondo` / `-M:splint` / `-M:cljstyle` aliases.
+- **JS + CSS + markdown** — biome / stylelint / markdownlint-cli2:
+  npm devDeps in `package.json`; run `npm install` once after clone.
+- **shell / Dockerfile / secrets** — shellcheck / hadolint / gitleaks:
+  pulled as Docker images on first `bb shellcheck` / `bb hadolint` /
+  `bb gitleaks`. Requires Docker (already needed for the executor
+  and Postgres containers).
+- **Spelling** — `typos`: `bb typos` downloads the binary into
+  `.tools/typos` on first run (Linux x86_64 release tarball, pinned
+  version). `.tools/` is gitignored.
+
+For day-to-day work: `npm install`, then `bb check` runs every
+linter. CI runs the same set on every PR.
 
 ## Architecture
 

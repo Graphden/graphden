@@ -1098,9 +1098,9 @@
   "Effect tags graphden's runtime knows how to record. Each base-fn's
    side effects map to one of these via `cr/record-effect!`. A
    `:expects-effects` / `:effects` declaration carrying a tag outside
-   this set is almost always a typo (`:do` for `:db`, `:netowrk` for
-   `:network`); reject at sync time so the contract isn't a silent
-   no-op.
+   this set is almost always a typo (`:do` for `:db`, a misspelled
+   `:network` etc.); reject at sync time so the contract isn't a
+   silent no-op.
 
    Mirrors the docstring of `compile-runtime/record-effect!` plus
    `:process` from the service registry (services declare

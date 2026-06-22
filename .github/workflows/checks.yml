@@ -208,3 +208,101 @@ jobs:
 
       - name: Check outdated dependencies
         run: bb outdated
+
+  biome:
+    name: biome (JS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm devDeps
+        run: npm ci
+
+      - name: Run biome
+        run: npx biome check resources/packages/app/editor
+
+  stylelint:
+    name: stylelint (CSS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run stylelint
+        run: npx stylelint 'resources/packages/app/editor/**/*.css'
+
+  shellcheck:
+    name: shellcheck (.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run shellcheck via Docker
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src \
+            koalaman/shellcheck:stable \
+            tools/browser-test/run-edit-tests.sh \
+            .claude/hooks/check-ui-on-stop.sh \
+            .claude/hooks/remind-packages-quality-on-impls-edit.sh
+
+  hadolint:
+    name: hadolint (Dockerfile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint Dockerfile
+        run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile
+
+      - name: Lint Dockerfile.build
+        run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile.build
+
+  gitleaks:
+    name: gitleaks (secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so the scan covers every commit, not just HEAD.
+          fetch-depth: 0
+
+      - name: Scan for committed secrets
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            zricethezav/gitleaks:latest \
+            detect --no-banner
+
+  typos:
+    name: typos (spelling)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crate-ci/typos@v1.31.0
+
+  markdownlint:
+    name: markdownlint (.md)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run markdownlint
+        run: npx markdownlint-cli2

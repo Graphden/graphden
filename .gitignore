@@ -75,3 +75,8 @@ tools/visual-tests/playwright-report/
 /editor-*.png
 /.playwright-mcp/
 tools/browser-test/node_modules/
+
+# Local-cache for binary linters that bb downloads on demand —
+# currently just `typos` (typos-cli release tarball). Pinned via
+# version in `bb.edn :typos` task; refetched on bump.
+/.tools/

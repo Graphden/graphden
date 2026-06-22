@@ -110,6 +110,63 @@
   {:doc "Auto-fix stylelint violations where possible"
    :task (p/shell "npx" "stylelint" "--fix" "resources/packages/app/editor/**/*.css")}
 
+  ;; === Cross-cutting linters (docker-image or downloaded binary) ===
+  ;;
+  ;; Each task here works WITHOUT a host install: Docker pulls the
+  ;; image on first run, the typos binary is fetched + cached under
+  ;; `.tools/`. CI runs on a stock ubuntu-latest with docker + node
+  ;; present; no extra `apt-get install …` lines required.
+
+  shellcheck
+  {:doc "Lint .sh files via Docker koalaman/shellcheck:stable."
+   :task (p/shell "docker" "run" "--rm"
+                  "-v" (str (System/getenv "PWD") ":/src")
+                  "-w" "/src"
+                  "koalaman/shellcheck:stable"
+                  "tools/browser-test/run-edit-tests.sh"
+                  ".claude/hooks/check-ui-on-stop.sh"
+                  ".claude/hooks/remind-packages-quality-on-impls-edit.sh")}
+
+  hadolint
+  {:doc "Lint Dockerfile + Dockerfile.build via Docker hadolint/hadolint:v2.12.0-debian."
+   :task (do
+           (doseq [df ["Dockerfile" "Dockerfile.build"]]
+             (println (str "▶ hadolint " df))
+             (let [proc (p/shell {:in (slurp df)}
+                                 "docker" "run" "--rm" "-i"
+                                 "hadolint/hadolint:v2.12.0-debian")]
+               (p/check proc))))}
+
+  gitleaks
+  {:doc "Scan working tree for committed secrets via Docker zricethezav/gitleaks."
+   :task (p/shell "docker" "run" "--rm"
+                  "-v" (str (System/getenv "PWD") ":/repo")
+                  "-w" "/repo"
+                  "zricethezav/gitleaks:latest"
+                  "detect" "--no-banner" "--no-git")}
+
+  typos
+  {:doc "Spelling check over docs + src via crate-ci/typos. Downloads the binary to .tools/typos on first run (Linux x86_64). Config: _typos.toml at repo root."
+   :task (let [binary ".tools/typos"
+               version "v1.31.0"]
+           (when-not (fs/exists? binary)
+             (println "Downloading typos" version "…")
+             (fs/create-dirs ".tools")
+             (let [url (str "https://github.com/crate-ci/typos/releases/download/"
+                            version "/typos-" version "-x86_64-unknown-linux-musl.tar.gz")]
+               (p/shell "curl" "-sL" "-o" ".tools/typos.tar.gz" url)
+               (p/shell "tar" "xzf" ".tools/typos.tar.gz" "-C" ".tools/")
+               (fs/delete ".tools/typos.tar.gz")))
+           (p/shell binary))}
+
+  markdownlint
+  {:doc "Lint .md files via markdownlint-cli2 (npm-pinned). Config: .markdownlint-cli2.jsonc at repo root."
+   :task (p/shell "npx" "markdownlint-cli2")}
+
+  markdownlint-fix
+  {:doc "Auto-fix markdownlint violations where possible."
+   :task (p/shell "npx" "markdownlint-cli2" "--fix")}
+
   visual
   {:doc "Run Playwright visual-regression tests against running editor (default http://localhost:9002). Reads AUTH_TOKEN from env or .env. Use `bb visual-update` after intentional UI changes."
    :task (p/shell {:dir "tools/visual-tests"} "npx" "playwright" "test")}
@@ -309,15 +366,33 @@
    :task (load-file "scripts/ci.clj")}
 
   check
-  {:doc "Run linters only (parallel)"
+  {:doc "Run linters only (parallel) — Clojure (kondo/splint/cljstyle), JS (biome), CSS (stylelint), shell (shellcheck), Dockerfile (hadolint), secrets (gitleaks), spelling (typos), markdown (markdownlint)."
    :task (let [kondo-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which clj-kondo")))
                            (str "clj-kondo --lint " all-paths)
                            (str "clojure -M:kondo --lint " all-paths))
                cljstyle-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which cljstyle")))
                               (str "cljstyle check " all-paths)
                               (str "clojure -M:cljstyle check " all-paths))
-               splint-cmd (str "clojure -M:splint " all-paths)]
-           (run-parallel [kondo-cmd splint-cmd cljstyle-cmd])
+               splint-cmd (str "clojure -M:splint " all-paths)
+               biome-cmd "npx biome check resources/packages/app/editor"
+               stylelint-cmd "npx stylelint resources/packages/app/editor/**/*.css"
+               shellcheck-cmd (str "docker run --rm -v " (System/getenv "PWD")
+                                   ":/src -w /src koalaman/shellcheck:stable"
+                                   " tools/browser-test/run-edit-tests.sh"
+                                   " .claude/hooks/check-ui-on-stop.sh"
+                                   " .claude/hooks/remind-packages-quality-on-impls-edit.sh")
+               gitleaks-cmd (str "docker run --rm -v " (System/getenv "PWD")
+                                 ":/repo -w /repo zricethezav/gitleaks:latest"
+                                 " detect --no-banner --no-git")
+               markdownlint-cmd "npx markdownlint-cli2"]
+           ;; hadolint requires stdin redirection so we run it sequentially
+           ;; via `bb hadolint`; typos runs sequentially because it has to
+           ;; download the binary on first run.
+           (run-parallel [kondo-cmd splint-cmd cljstyle-cmd
+                          biome-cmd stylelint-cmd
+                          shellcheck-cmd gitleaks-cmd markdownlint-cmd])
+           (p/shell "bb" "hadolint")
+           (p/shell "bb" "typos")
            (println (str green "✓ All linters passed" reset)))}
 
   ;; === HELPERS ===

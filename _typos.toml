@@ -1,0 +1,108 @@
+# typos config — dictionary additions for genuine technical terms
+# the upstream dictionary mis-flags. Each entry has a one-line why,
+# and a fresh contributor can grep the codebase for the term to see
+# why it's not a typo.
+#
+# Per the project's "no ignores / no sweeping under the rug" linter
+# policy: every entry below is a LEGITIMATE term that was being
+# treated as a typo, not a "shut up the linter" suppression.
+
+[default]
+# Per-file extension defaults — see [files] for path-glob ignores
+# (binary artifacts, vendored payloads).
+
+[default.extend-words]
+# Clojure's data-notation file extension — appears in filenames
+# (`bb.edn`, `*.edn`) and code references ("see bb.edn", "*.edn
+# files"). 629 sites; not a typo.
+edn = "edn"
+EDN = "EDN"
+
+# `clojure.core/juxt` — standard library function ((juxt f g h)
+# returns a fn that runs f, g, h on its arg and returns
+# [(f x) (g x) (h x)]). 57 sites in the codebase.
+juxt = "juxt"
+
+# Test-fixture-naming convention — `inh-*` is short for
+# "inheritance" in the inheritance-regression test family
+# (parent / child / etc fns named `test-inh-{a,b,c,d}-parent`).
+# 30 sites, all inside test names.
+inh = "inh"
+
+# `Mis-shaped` / `mis-match` / `mis-typed` — English words with
+# the `mis-` prefix. typos otherwise tries to "fix" to `miss-shaped`.
+mis = "mis"
+Mis = "Mis"
+
+# `HashiCorp` (the company) appears in OpenBao / Vault context —
+# typos otherwise wants to truncate to `Hash`.
+Hashi = "Hashi"
+HashiCorp = "HashiCorp"
+
+# `overlayed` is a valid past-tense of "overlay" in widespread
+# technical use (CSS overlay, Linux overlayfs, network overlay).
+overlayed = "overlayed"
+
+# `invokable` and `unparseable` — common -able variants used
+# alongside `invoke` / `parse` callable APIs.
+invokable = "invokable"
+unparseable = "unparseable"
+
+# `wrk-host` / `wrk-child` — test-fixture prefix in
+# write-records test (short for "work-…" but kept as `wrk` to
+# match the test-file naming convention).
+wrk = "wrk"
+
+# `eles` — Cytoscape.js animation-API parameter (`cy.animate({
+# center: {eles: nodeCollection} })`). Third-party API, can't
+# rename.
+eles = "eles"
+
+# `lage-fn` — abbreviated test-fixture for
+# `list-all-graph-entities` (the long fn under test); `LAGE` is
+# the same abbreviation in test docstrings.
+lage = "lage"
+LAGE = "LAGE"
+
+# Image / SQL plural truncations — typos splits the trailing `s`
+# off the noun and tries to "fix" the stub (`PNGs`→`PN`+`s` etc.).
+# The stub is what the linter actually flags, so the dict entries
+# must cover the STUB, not the full word.
+PN = "PN"
+PNG = "PNG"
+PNGs = "PNGs"
+INSER = "INSER"
+INSERT = "INSERT"
+INSERTs = "INSERTs"
+DELETE = "DELETE"
+DELETEs = "DELETEs"
+DELET = "DELET"
+
+# 3-character distinct test values used to differentiate equal /
+# unequal map entries (`{:a (delay "abc") :b (delay "abd")}` —
+# both 3-char strings on purpose; renaming defeats the test's
+# point).
+abc = "abc"
+abd = "abd"
+
+# `"anc"` — short tag for "ancestor" used as a literal binding-
+# name in `list-item-position-collision-via-ancestor-test`.
+anc = "anc"
+
+# `:netowrk` — DELIBERATE typo used in
+# `check-effects-categories-must-be-known-tags-test` to verify
+# the sync-time guard rejects misspelled effect tags.
+netowrk = "netowrk"
+
+[files]
+# Skip generated / binary / vendored artifacts. None of these
+# are author-written prose.
+extend-exclude = [
+  "target/",
+  "node_modules/",
+  ".playwright-mcp/",
+  "tools/visual-tests/tests/editor.spec.js-snapshots/",
+  "*.lock",
+  "package-lock.json",
+  ".clj-kondo/.cache/",
+]

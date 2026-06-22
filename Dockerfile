@@ -3,8 +3,13 @@
 
 FROM eclipse-temurin:21-jre-jammy
 
-# Install curl for healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# Install curl for healthcheck. Pinned via base-image's apt repo
+# (jammy = Ubuntu 22.04 LTS) — a security update bumps the available
+# version and `apt-get update` warns; re-pin then. This is the
+# hadolint DL3008 contract: deliberate awareness of every dependency
+# patch instead of latent "whatever apt ships today" drift.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl=7.81.0-1ubuntu1.24 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

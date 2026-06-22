@@ -77,7 +77,16 @@
    ;; (~10-12 min / ~15-25 min) are documented in `bb.edn`.
    "tests-unit-coverage" 300000
    "outdated"  120000
-   "security"  180000})
+   "security"  180000
+   ;; Docker-based linters get extra headroom for first-run image
+   ;; pulls (~30-60 s for a 1-3 MB hadolint / shellcheck image,
+   ;; up to 90 s for gitleaks). Subsequent runs are sub-second
+   ;; from the local image cache.
+   "shellcheck" 120000
+   "hadolint"   120000
+   "gitleaks"   300000
+   "typos"       60000
+   "markdownlint" 60000})
 
 
 (def ^:private default-check-timeout-ms 60000)
@@ -280,6 +289,27 @@
             outdated-cmd ["clojure" "-M:outdated"]
             biome-cmd ["npx" "biome" "check" "resources/packages/app/editor"]
             stylelint-cmd ["npx" "stylelint" "resources/packages/app/editor/**/*.css"]
+            ;; Cross-cutting linters introduced as a single batch
+            ;; alongside the existing kondo/splint/cljstyle. Each is
+            ;; either docker-based (no host install) or pulls the
+            ;; binary into `.tools/` on first run — see bb.edn task
+            ;; docs for the install story per tool.
+            pwd (System/getenv "PWD")
+            shellcheck-cmd ["docker" "run" "--rm"
+                            "-v" (str pwd ":/src") "-w" "/src"
+                            "koalaman/shellcheck:stable"
+                            "tools/browser-test/run-edit-tests.sh"
+                            ".claude/hooks/check-ui-on-stop.sh"
+                            ".claude/hooks/remind-packages-quality-on-impls-edit.sh"]
+            ;; hadolint reads Dockerfile from stdin — wrap it through
+            ;; `bb hadolint` which iterates Dockerfile + Dockerfile.build.
+            hadolint-cmd ["bb" "hadolint"]
+            gitleaks-cmd ["docker" "run" "--rm"
+                          "-v" (str pwd ":/repo") "-w" "/repo"
+                          "zricethezav/gitleaks:latest"
+                          "detect" "--no-banner" "--no-git"]
+            typos-cmd ["bb" "typos"]
+            markdownlint-cmd ["npx" "markdownlint-cli2"]
 
             ;; Define checks. security check disabled — requires NVD API
             ;; key, run manually with `bb security`. The `tests-unit-
@@ -291,6 +321,11 @@
                     {:name "cljstyle" :cmd cljstyle-cmd}
                     {:name "biome" :cmd biome-cmd}
                     {:name "stylelint" :cmd stylelint-cmd}
+                    {:name "shellcheck" :cmd shellcheck-cmd}
+                    {:name "hadolint" :cmd hadolint-cmd}
+                    {:name "gitleaks" :cmd gitleaks-cmd}
+                    {:name "typos" :cmd typos-cmd}
+                    {:name "markdownlint" :cmd markdownlint-cmd}
                     {:name "tests-unit-coverage" :cmd coverage-cmd}
                     {:name "outdated" :cmd outdated-cmd}]
 

@@ -94,12 +94,21 @@ async function putDescription(page, fnId, branch, desc) {
     // ===================================================================
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FN_NAME);
-    await page.waitForTimeout(800);
+    // Wait for cytoscape + the `⋯` trigger + cy fit animation drain.
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
-    await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-    await page.waitForTimeout(500);
+    // initGraph rebuilds the canvas — wait again for stability.
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForTimeout(500);
+    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
 
     const clicked = await page.evaluate(() => {
       const popover = document.querySelector('.row-actions-popover');
@@ -151,7 +160,11 @@ async function putDescription(page, fnId, branch, desc) {
         .find((b) => b.getAttribute('data-switch-to-branch') === featName);
       btn?.click();
     }, FEAT_BRANCH);
-    await page.waitForTimeout(200);
+    // window.switchToBranch stub sets __switchCalled synchronously on
+    // click — wait until it's no longer null.
+    await page.waitForFunction(
+      () => window.__switchCalled !== null,
+      {timeout: 5000, polling: 50});
     const switchState = await page.evaluate(() => window.__switchCalled);
     assert(switchState === FEAT_BRANCH,
            'switchToBranch invoked with feat name: '
@@ -161,7 +174,12 @@ async function putDescription(page, fnId, branch, desc) {
     // Phase C: Escape dismisses the popover.
     // ===================================================================
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    await page.waitForFunction(
+      () => {
+        const p = document.getElementById('fn-versions-popover');
+        return !p || p.classList.contains('hidden');
+      },
+      {timeout: 3000, polling: 50});
     const dismissed = await page.evaluate(() => {
       const p = document.getElementById('fn-versions-popover');
       return p && p.classList.contains('hidden');

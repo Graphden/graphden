@@ -116,7 +116,91 @@ Hard cap: a file > 800 lines is a code smell. `editor-overlays.js` is the worst 
 
 ---
 
-## 6. What this skill DOESN'T do
+## 6. Graph-first frontend — prefer hiccup partials + htmx over JS
+
+**Default**: render content through the **graph** (fn-defs returning
+hiccup at `GET /partials/*`) and let **htmx** swap it in. Fall back
+to client-side JS only when graph+htmx would HURT one of:
+
+1. **Performance** — interactions that need to be sub-100ms locally
+   (drag, hover, keystroke-by-keystroke validation). htmx round-trip
+   costs ~30ms minimum even on localhost.
+2. **Architectural cleanliness** — visualization that intrinsically
+   binds to a stateful in-page object (Cytoscape canvas, dynamic
+   layout pipelines, the singleton arg-overlay manager). These have
+   no meaningful server-side representation.
+3. **Security** — anywhere the server should NOT see the editing
+   state (e.g. unsubmitted password / vault path while typing).
+   Once submitted, server takes over.
+4. **Speed of editing** — features behind keyboard shortcuts /
+   immediate clicks where waiting for the server makes the UI feel
+   "slow."
+
+**Concrete priority order when adding or refactoring a UI feature:**
+
+1. **fn-def returning hiccup at `GET /partials/X`** + htmx swap.
+   Reference: `:branch-popover`, `:service-popover`,
+   `:execute-result-pane`, `:mismatch-explainer-popover`,
+   `:fn-picker-incompat-explainer`, the entire `:partials/*` family
+   in `resources/packages/app/editor/fns.edn` /
+   `app/server/fns.edn`. See `docs/PARTIALS.md` for the recipe.
+2. **JS that mounts a server-fetched partial via `htmx.process` /
+   `authFetch(...).then(html => el.innerHTML = html)`** — JS owns
+   anchored positioning / dismissal lifecycle only, server owns the
+   markup.
+3. **JS that builds DOM by hand (`document.createElement`,
+   `el.appendChild`)** — last resort. Use only when the responsibility
+   is genuinely client-only (drag, in-place edit cursor, canvas
+   manipulation).
+
+**Anti-patterns this rule forbids:**
+
+- JS string-concatenating HTML (`el.innerHTML = '<div>' + … + '</div>'`)
+  when the same shape could live in a fn-def returning hiccup.
+- JS building popover body content inline when a `GET /partials/X`
+  would compose better.
+- JS data-shaping that recomputes server-known state
+  (formatting, role classification, free-arg derivation).
+
+**When refactoring is required AND it's a big job, DO IT, don't
+defer.** "This is a multi-PR effort" / "leave it to a follow-up
+session" / "let me just add a TODO" — these are the dodge. Per
+[[feedback_no_excuse_for_pre_existing]] / `feedback_no_halfmeasures`,
+the answer is plan it, present the plan, then execute. Past
+examples in this codebase: scope=subtree backend + editor migration
+(commits `bec65163` + `55bee689`, 2026-06-22 — multi-day in
+isolation but landed in one session after the third attempt found
+the right architecture); execute-result popover server-rendered
+partial (commit `5ba77e3a`, 2026-06-20).
+
+**Detection (auditable):**
+
+```bash
+# Long string-built HTML in JS (likely candidates):
+grep -nE "innerHTML\s*=\s*['\"]<" resources/packages/app/editor/*.js | head
+
+# DOM-builder hotspots — >10 createElement / appendChild calls in
+# one file → suspicious unless it's a placement/lifecycle utility:
+python3 << 'EOF'
+import re, os
+d = 'resources/packages/app/editor'
+for f in sorted(os.listdir(d)):
+    if not f.endswith('.js'): continue
+    with open(os.path.join(d, f)) as fh: s = fh.read()
+    n = len(re.findall(r'\b(?:createElement|appendChild|insertAdjacentHTML)\b', s))
+    if n >= 20: print(f"  {n:4d} {f}")
+EOF
+
+# Existing GET /partials/* binders — pattern to copy:
+grep -nE "/partials/" resources/packages/app/editor/*.js
+```
+
+Each candidate found here gets a judgment call against the four
+exceptions above — most should migrate; the ones that genuinely
+need client JS get a one-line `// graph-first-exception: <reason>`
+comment so the next audit doesn't re-flag them.
+
+## 7. What this skill DOESN'T do
 
 - It doesn't replace `bb rebuild`. You still ship via the build.
 - It doesn't write tests for you. UI tests live in `tools/browser-test/*.test.js`; if the change touches a tested feature, run the relevant test or update it.

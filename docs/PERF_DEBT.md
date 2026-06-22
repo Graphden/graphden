@@ -19,7 +19,9 @@ Fresh measurement (2026-06-16, full `core+web+app` package set,
 
 | path | wall | size | notes |
 |---|---|---|---|
-| `/api/graph/entities` (base-fn impl) | ~95 ms | 4.0 MB | direct Clojure call, no executor — baseline |
+| `/api/graph/entities` (base-fn impl) | ~95 ms | 4.5 MB | direct Clojure call, no executor — baseline. Full scope. |
+| `/api/graph/entities?scope=index` | ~30 ms | 1.6 MB | fns + namespaces only (sidebar payload). 65% smaller. Editor uses this on initGraph (commit `c7a14348`). |
+| `/api/graph/entities?scope=subtree&root-id=X` | ~5-40 ms | 1.5 KB - 4.2 MB | BFS closure from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids. Leaf fn = 1.5 KB; app-root = 4.2 MB. Editor uses this per `selectFn` (commit `bec65163` + `55bee689`). |
 | `/api/branches` (graph composition via `:resolve-fn-rows`) | ~20 ms | 498 B | small dataset |
 | `resolve-versioned-rows-matches-clojure-end-to-end` (test) | ~16 s | n/a | bootstrap-included; 4× executes + 4× Clojure SOT compares; per-execute slice estimated ~0.5–1 s |
 

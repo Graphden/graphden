@@ -155,7 +155,7 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 **5.1 REST API [PARTIAL]**
 - CRUD endpoints for fn / namespace / slot / fn-slot / binding /
   binding-list-item [DONE — `web/crud`]
-- GET `/api/graph/entities` [DONE]
+- GET `/api/graph/entities` [DONE] — with `?scope=index` (sidebar only, 1.6 MB) and `?scope=subtree&root-id=X` (BFS closure, 1.5 KB - 50 KB typical) variants for per-fn bandwidth savings
 - POST `/api/graph/layout` [DONE — `app/layout`]
 - POST `/api/sequence/append/:fn-id` + DELETE
   `/api/sequence/item/:item-id` [DONE]

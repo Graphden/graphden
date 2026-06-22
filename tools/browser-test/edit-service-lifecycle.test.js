@@ -211,14 +211,22 @@ async function openServicePopover(page) {
       },
       probe.id,
       {timeout: 15000, polling: 200});
-    const persistedSvc = await page.evaluate(async (fnId) => {
+    const persistedDump = await page.evaluate(async (fnId) => {
       const r = await window.authFetch('/api/services');
       const body = await r.json();
-      return body.services?.find((s) => s['fn-id'] === fnId);
+      return {
+        lookingForFnId: fnId,
+        services: body.services?.map((s) => ({
+          id: s.id, 'fn-id': s['fn-id'], 'fn-name': s['fn-name'],
+          'enabled?': s['enabled?'], running: !!s.running,
+        })) || null,
+        row: body.services?.find((s) => s['fn-id'] === fnId),
+      };
     }, probe.id);
+    const persistedSvc = persistedDump.row;
     assert(persistedSvc && persistedSvc['enabled?'],
-           ':service row persisted with :enabled? true: '
-           + JSON.stringify(persistedSvc).slice(0, 200));
+           ':service row persisted with :enabled? true (dump: '
+           + JSON.stringify(persistedDump).slice(0, 600) + ')');
     assert(persistedSvc.running,
            'reconciler tracked the start in the running atom: '
            + JSON.stringify(persistedSvc.running).slice(0, 200));

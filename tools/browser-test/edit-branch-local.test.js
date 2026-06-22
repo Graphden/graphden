@@ -70,16 +70,24 @@ async function deleteProbeAndBranch(page) {
 
 async function openServicePopover(page, fnHash) {
   await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + fnHash);
-  await page.waitForTimeout(2500);
+  // Wait for the fn-card to render with the `⋯` trigger + cy animation
+  // to drain. Without this, dispatchEvent below races the post-mount
+  // fit animation and the popover never settles.
+  await page.waitForFunction(
+    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+          && !!document.querySelector('button.more-actions-trigger')
+          && !cy.animated(),
+    {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForTimeout(500);
+  await page.waitForSelector('.row-actions-popover', {timeout: 5000});
   await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');
     const gear = Array.from(popover?.querySelectorAll('button') || [])
       .find((b) => b.textContent.trim() === '⚙');
     if (gear) gear.dispatchEvent(new MouseEvent('click', {bubbles: true}));
   });
-  await page.waitForTimeout(500);
+  // Popover loads through htmx fetch of /partials/service-popover.
+  await page.waitForSelector('.service-popover.visible', {timeout: 5000});
 }
 
 
@@ -138,14 +146,15 @@ async function openServicePopover(page, fnHash) {
     await page.evaluate(() => {
       if (typeof hideServicePopover === 'function') hideServicePopover();
     });
-    await page.waitForTimeout(200);
+    await page.waitForFunction(
+      () => !document.querySelector('.service-popover.visible'),
+      {timeout: 3000, polling: 50});
 
     // ====================================================================
     // Phase B: diff modal branch-local annotation
     // ====================================================================
     // Defensive pre-cleanup in case a prior failed run left state.
     await deleteProbeAndBranch(page);
-    await page.waitForTimeout(200);
 
     const branchResp = await api(page, 'POST', '/api/branches',
                                  {name: FEAT_BRANCH});
@@ -182,10 +191,21 @@ async function openServicePopover(page, fnHash) {
     // about the new fn — diff renders the row only if `fnMap` can be
     // walked to detect branch-local. `loadGraphData` rebuilds the
     // module-scope `lookups` from /api/graph/entities.
-    await page.evaluate(async () => {
+    await page.evaluate(async ({name}) => {
       if (typeof loadGraphData === 'function') await loadGraphData();
-    });
-    await page.waitForTimeout(400);
+      // Confirm the new fn surfaced in the in-page lookups; without
+      // this poll the next diff-render races the async cache rebuild.
+      await new Promise((res) => {
+        const deadline = Date.now() + 5000;
+        (function tick() {
+          const ok = typeof lookups !== 'undefined'
+                  && lookups?.fnMap
+                  && Array.from(lookups.fnMap.values()).some((f) => f.name === name);
+          if (ok || Date.now() > deadline) res();
+          else setTimeout(tick, 50);
+        })();
+      });
+    }, { name: PROBE_FN_NAME });
 
     // Drive the modal directly — UI flow goes through the branch-popover
     // Δ button; calling the public window helper exercises the same
@@ -195,7 +215,7 @@ async function openServicePopover(page, fnHash) {
         await showBranchDiff(target, source);
       }
     }, { target: 'main', source: FEAT_BRANCH });
-    await page.waitForTimeout(1500);
+    await page.waitForSelector('.branch-diff-modal', {timeout: 10000});
 
     const modalState = await page.evaluate((probeName) => {
       const modal = document.querySelector('.branch-diff-modal');

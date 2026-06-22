@@ -20,7 +20,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext} = require('./edit-test-helpers');
+const {assert, newContext, waitFor} = require('./edit-test-helpers');
 
 
 const SERVICE_FN = 'core.system.current-time-ms';
@@ -29,9 +29,17 @@ const SERVICE_FN = 'core.system.current-time-ms';
 async function openRowActionsPopover(page, fnHash) {
   await page.goto('about:blank');
   await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + fnHash);
-  await page.waitForTimeout(2500);
+  // Wait for the card to be rendered with its `⋯` trigger. Cytoscape
+  // also animates the post-mount fit, which moves overlays — wait for
+  // the animation queue to drain before clicking, otherwise playwright's
+  // stability autowait can race.
+  await page.waitForFunction(
+    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+          && !!document.querySelector('button.more-actions-trigger')
+          && !cy.animated(),
+    {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForTimeout(500);
+  await page.waitForSelector('.row-actions-popover', {timeout: 5000});
 }
 
 
@@ -80,7 +88,6 @@ async function deleteAnyExistingServiceFor(page, fnName) {
     // Defensive cleanup before we start.
     const cleanup = await deleteAnyExistingServiceFor(page, 'current-time-ms');
     console.log('  (pre-test cleanup: ' + cleanup + ')');
-    await page.waitForTimeout(500);
 
     // === Phase A: ⚙ visible in row-actions popover ===
     // :current-time-ms has no :process effect declared, so the server
@@ -144,7 +151,9 @@ async function deleteAnyExistingServiceFor(page, fnName) {
     await page.evaluate(() => {
       document.querySelector('.service-popover-save-btn').click();
     });
-    await page.waitForTimeout(2000);  // POST + 400 + alert
+    // Poll the Node-side flag set by the dialog handler — bounded
+    // 10s is enough for POST + 400 + alert under e2e load.
+    await waitFor(() => rejectionAlertSeen, 10000);
     assert(rejectionAlertSeen,
            ':process validation rejection alert appeared');
 

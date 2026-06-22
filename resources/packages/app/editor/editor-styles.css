@@ -42,6 +42,7 @@
   --shadow-xl: 0 4px 14px rgba(0,0,0,0.30);
   --overlay-hover: rgba(0,0,0,0.08);
   --overlay-pressed: rgba(127,127,127,0.20);
+  --modal-backdrop-bg: rgba(0,0,0,0.4);
   --sidebar-width: 280px;
   /* Touch-target sizing — Apple HIG / WCAG 2.5.5. The visible glyph
      stays small on desktop (15px etc.); these tokens are the
@@ -120,6 +121,7 @@ body.theme-dark {
   --shadow-lg: 0 4px 12px rgba(0,0,0,0.50);
   --shadow-xl: 0 4px 14px rgba(0,0,0,0.55);
   --overlay-hover: rgba(255,255,255,0.08);
+  --modal-backdrop-bg: rgba(0,0,0,0.65);
   /* Status colours — slight desaturation against the dark background
      so they don't vibrate. Hue still maps green=ok / red=error. */
   --success-fg: #5be08a;
@@ -588,7 +590,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .merge-conflicts-modal.hidden { display: none; }
 .merge-conflicts-overlay {
   position: absolute; inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--modal-backdrop-bg);
 }
 .merge-conflicts-card {
   position: relative;
@@ -675,7 +677,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .branch-diff-modal.hidden { display: none; }
 .branch-diff-overlay {
   position: absolute; inset: 0;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--modal-backdrop-bg);
 }
 .branch-diff-card {
   position: relative;

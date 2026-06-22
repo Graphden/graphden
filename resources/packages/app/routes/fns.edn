@@ -137,6 +137,11 @@
    :parent :get-auth-required
    :args {:path "/partials/service-popover" :handler :_partial-service-popover-handler}}
 
+  {:name :partial-secrets-panel
+   :description "GET /partials/secrets-panel — server-rendered sidebar Secrets section (collapsible header + count + per-row rotate/delete actions). Auth-gated; anonymous visitors keep the legacy 'Sign in to manage secrets' stub rendered client-side in `editor-secrets.js`. Navigate / toggle / create / rotate / delete handlers in JS bind via event-delegation on `[data-act]` attrs the partial emits."
+   :parent :get-auth-required
+   :args {:path "/partials/secrets-panel" :handler :_partial-secrets-panel-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

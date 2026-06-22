@@ -30,6 +30,7 @@
                   :partial-execute-result-inline
                   :partial-branch-popover
                   :partial-service-popover
+                  :partial-secrets-panel
                   :health
                   :metrics
                   :version

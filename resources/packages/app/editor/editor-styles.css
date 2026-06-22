@@ -3684,6 +3684,11 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
    ========================================================================= */
 
 .sidebar-secrets { display: block; }
+/* Server-rendered partial always emits the full section (header + children);
+   JS toggles .collapsed on the wrapper, CSS hides the children group + rotates
+   the arrow glyph. Matches the namespace-tree collapse behaviour visually. */
+.sidebar-secrets.collapsed .ns-children { display: none; }
+.sidebar-secrets.collapsed .ns-arrow { transform: rotate(-90deg); }
 
 #entity-list .entity-secret { display: flex; align-items: center; gap: 4px; }
 #entity-list .entity-secret .name { flex: 0 0 auto; }

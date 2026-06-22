@@ -208,17 +208,25 @@ async function openServicePopover(page) {
       },
       PROBE_FN,
       {timeout: 15000, polling: 200});
-    const persistedSvc = await page.evaluate(async (name) => {
+    // Re-fetch including the full response — when persistedSvc comes
+    // back undefined the surrounding shape is what diagnoses the race.
+    const persistedDump = await page.evaluate(async (name) => {
       const r = await window.authFetch('/api/services');
       const body = await r.json();
-      return body.services?.find((s) => s['fn-name'] === name);
+      return {
+        status: r.status,
+        serviceCount: body.services?.length ?? null,
+        fnNames: body.services?.map((s) => s['fn-name']) || [],
+        row: body.services?.find((s) => s['fn-name'] === name),
+      };
     }, PROBE_FN);
+    const persistedSvc = persistedDump.row;
     assert(persistedSvc && persistedSvc['enabled?'],
-           ':service row persisted with :enabled? true: '
-           + JSON.stringify(persistedSvc).slice(0, 200));
+           ':service row persisted with :enabled? true (dump: '
+           + JSON.stringify(persistedDump).slice(0, 400) + ')');
     assert(persistedSvc.running,
            'reconciler tracked the start in the running atom: '
-           + JSON.stringify(persistedSvc.running).slice(0, 200));
+           + JSON.stringify(persistedSvc.running ?? null));
 
     // ===================================================================
     // Phase B: re-open popover → EDIT mode.

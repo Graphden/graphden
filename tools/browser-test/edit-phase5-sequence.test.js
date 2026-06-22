@@ -32,10 +32,20 @@ const TEST_NAME = 'test-edit-phase5';
 
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
-    await page.waitForTimeout(2500);
+    // Wait for cytoscape + cards rendered and fit-animation drained.
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     // Force a refresh so the just-POSTed fn is in lookups.fnMap.
     await page.evaluate(() => initGraph());
-    await page.waitForTimeout(500);
+    // Same gate after initGraph rebuild — also wait for the empty-
+    // sequence placeholder which is what step 2 immediately checks.
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !cy.animated()
+            && !!document.querySelector('.placeholder-binder.is-seq-anchor'),
+      {timeout: 20000, polling: 100});
 
     // 2. Verify the empty-sequence placeholder — the button now shows
     //    a bare `+` glyph with the descriptive copy in `title=`.
@@ -51,12 +61,16 @@ const TEST_NAME = 'test-edit-phase5';
     await page.evaluate(() => {
       document.querySelector('.placeholder-binder.is-seq-anchor').click();
     });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(
+      () => !!document.querySelector('.free-arg-bind-chooser'),
+      {timeout: 5000, polling: 50});
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
         .find(b => b.textContent === 'Append literal').click();
     });
-    await page.waitForTimeout(300);
+    await page.waitForFunction(
+      () => !!document.querySelector('.arg-value-edit-popover input'),
+      {timeout: 5000, polling: 50});
     await page.evaluate(() => {
       document.querySelector('.arg-value-edit-popover input').value = '1';
     });
@@ -70,7 +84,23 @@ const TEST_NAME = 'test-edit-phase5';
     await page.waitForFunction(
       () => !document.querySelector('.arg-value-edit-popover'),
       {timeout: 15000});
-    await page.waitForTimeout(500);
+    // Storage poll — wait until the new list-item with value=1 is in
+    // the binding-list-items table. Node-side loop (no async-predicate
+    // in browser context).
+    {
+      const deadline = Date.now() + 15000;
+      let appeared = false;
+      while (Date.now() < deadline) {
+        const ents = await getEntities(page);
+        const fnBindings = (ents.bindings || []).filter((b) => b['fn-id'] === created.id);
+        const ids = new Set(fnBindings.map((b) => b.id));
+        const items = (ents['list-items'] || [])
+          .filter((it) => ids.has(it['binding-id']) && it.value !== null);
+        if (items.length >= 1) { appeared = true; break; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!appeared) throw new Error('first item never appeared in storage');
+    }
 
     function chainOf(ents) {
       const fnBindings = (ents.bindings || []).filter(b => b['fn-id'] === created.id);
@@ -108,7 +138,16 @@ const TEST_NAME = 'test-edit-phase5';
     await page.waitForFunction(
       () => !document.querySelector('.arg-value-edit-popover'),
       {timeout: 15000});
-    await page.waitForTimeout(500);
+    // Wait for chain to grow to 2 items.
+    {
+      const deadline = Date.now() + 15000;
+      let grew = false;
+      while (Date.now() < deadline) {
+        if (chainOf(await getEntities(page)).length >= 2) { grew = true; break; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!grew) throw new Error('chain never reached 2 items');
+    }
 
     chain = chainOf(await getEntities(page)).slice().sort();
     assert(JSON.stringify(chain) === '[1,2]', 'tail-append added value=2');
@@ -118,7 +157,16 @@ const TEST_NAME = 'test-edit-phase5';
     await page.evaluate(() => {
       document.querySelector('.arg-seq-btn-remove').click();
     });
-    await page.waitForTimeout(2000);
+    // Wait for chain to shrink to 1.
+    {
+      const deadline = Date.now() + 15000;
+      let shrunk = false;
+      while (Date.now() < deadline) {
+        if (chainOf(await getEntities(page)).length === 1) { shrunk = true; break; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!shrunk) throw new Error('chain never shrunk to 1 item');
+    }
 
     chain = chainOf(await getEntities(page));
     assert(chain.length === 1, '× button removed exactly one item');
@@ -145,7 +193,18 @@ const TEST_NAME = 'test-edit-phase5';
       // Restore eventually.
       setTimeout(() => { openNamespacePicker = origOpen; }, 100);
     }), { fnId: created.id, nsId: firstNsId });
-    await page.waitForTimeout(1500);
+    // Wait until the fn's namespace-id flips to the picked ns.
+    {
+      const deadline = Date.now() + 15000;
+      let moved = false;
+      while (Date.now() < deadline) {
+        const ns = (await getEntities(page)).fns
+          .find((f) => f.id === created.id)?.['namespace-id'];
+        if (ns === firstNsId) { moved = true; break; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!moved) throw new Error('ns-move never settled to ' + firstNsId);
+    }
 
     const movedNs = (await getEntities(page)).fns.find(f => f.id === created.id)['namespace-id'];
     assert(movedNs === firstNsId, 'fn now has the picked namespace-id');
@@ -159,7 +218,18 @@ const TEST_NAME = 'test-edit-phase5';
       enterNamespaceMoveEditMode(fn, document.body);
       setTimeout(() => { openNamespacePicker = origOpen; }, 100);
     }), created.id);
-    await page.waitForTimeout(1500);
+    // Wait for the ns to clear back to root (null / undefined).
+    {
+      const deadline = Date.now() + 15000;
+      let cleared = false;
+      while (Date.now() < deadline) {
+        const ns = (await getEntities(page)).fns
+          .find((f) => f.id === created.id)?.['namespace-id'];
+        if (ns === null || ns === undefined) { cleared = true; break; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!cleared) throw new Error('ns never cleared back to root');
+    }
 
     const backToRoot = (await getEntities(page)).fns.find(f => f.id === created.id)['namespace-id'];
     assert(backToRoot === null || backToRoot === undefined, 'ns cleared back to root');

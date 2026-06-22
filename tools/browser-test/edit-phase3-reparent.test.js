@@ -43,11 +43,19 @@ const TEST_NAME = 'test-edit-phase3';
     page.on('dialog', d => d.accept());
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     // The editor's initial /api/graph/entities load may race against
     // the just-POSTed fn. Force a refresh so `lookups.fnMap` sees it.
     await page.evaluate(() => initGraph());
-    await page.waitForTimeout(500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
 
     // 3. Remove parent `add` via the depth-1 row's row-actions popover.
     //    The editor exposes `removeParentInline(fn, parentId)` as the

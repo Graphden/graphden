@@ -208,11 +208,11 @@ async function openBranchPopover(page) {
     // first, then open fresh.)
     // ===================================================================
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
+    // (escape dispatched; the following assertion gates the next step)
     opened = await openBranchPopover(page);
     assert(opened, 'popover re-opens for dismiss test');
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
+    // (escape dispatched; the following assertion gates the next step)
     const dismissed = await page.evaluate(() => {
       const p = document.getElementById('branch-popover');
       return p.classList.contains('hidden');

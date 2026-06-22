@@ -37,7 +37,11 @@ const TARGET_FN = 'current-time-ms';
 
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TARGET_FN);
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.effects-chip-time', {timeout: 15000});
 

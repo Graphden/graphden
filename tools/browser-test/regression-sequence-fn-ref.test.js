@@ -30,7 +30,11 @@ const {chromium} = require('playwright');
 
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#ex-regression-str-via-ref');
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
 
     const snapshot = await page.evaluate(() => {
       if (typeof cy === 'undefined') return {error: 'cy not initialised'};

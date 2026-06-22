@@ -40,7 +40,11 @@ const TEST_NAME = 'test-arg-type-flip';
 
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
 
     // The arg-overlay carries a `.arg-type-chip` showing the resolved
     // type ("text" inherited from str-len's :string slot). Since the
@@ -68,7 +72,9 @@ const TEST_NAME = 'test-arg-type-flip';
     assert(!chipClicked.error, chipClicked.error || 'chip clicked');
     assert(chipClicked.chipText === 'text',
            'chip shows "text" before flip: ' + JSON.stringify(chipClicked));
-    await page.waitForTimeout(250);
+    // Type-edit popover opens after the chip click.
+    await page.waitForSelector('.arg-value-edit-popover',
+                               {timeout: 5000});
 
     // The type-edit popover renders a <select> with every VALUE_KIND,
     // but `populateCompatibleTypes` is async — it POSTs /api/types/

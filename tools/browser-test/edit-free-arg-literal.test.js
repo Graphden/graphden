@@ -33,7 +33,11 @@ const TEST_NAME = 'test-free-arg-literal';
 
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
 
     // Click the unset-placeholder's `.placeholder-binder` button →
     // chooser. The overlay wrapper has pointer-events:none (so drag

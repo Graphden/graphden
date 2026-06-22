@@ -189,7 +189,7 @@ async function freshContext() {
       {timeout: 5000});
     await page.locator('#auth-password-input').focus();
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
+    // (escape dispatched; the following assertion gates the next step)
     const escClosed = await page.evaluate(() => {
       const p = document.getElementById('auth-popover');
       return p.classList.contains('hidden');

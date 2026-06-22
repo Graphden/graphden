@@ -83,7 +83,11 @@ async function cleanup(page) {
     // before navigating.
     await waitForServerHealthy();
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FROM_NS + '.' + FN_NAME);
-    await page.waitForTimeout(800);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForFunction(
       () => typeof enterNamespaceMoveEditMode === 'function',

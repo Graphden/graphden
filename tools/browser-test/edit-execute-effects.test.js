@@ -21,9 +21,13 @@ const {assert, newContext} = require('./edit-test-helpers');
 async function openExecutePopoverFor(page, fnNameHash) {
   await page.goto('about:blank');
   await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + fnNameHash);
-  await page.waitForTimeout(2500);
+  await page.waitForFunction(
+    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+          && !!document.querySelector('button.more-actions-trigger')
+          && !cy.animated(),
+    {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForTimeout(500);
+    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
   const opened = await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');
     if (!popover) return false;

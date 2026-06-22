@@ -77,7 +77,11 @@ const TEST_NAME = 'test-arg-value-validation';
 
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
 
     // Click the port arg-overlay to open the value-edit popover.
     // The chip-row UI consolidation now packs value + chip + provenance
@@ -167,7 +171,7 @@ const TEST_NAME = 'test-arg-value-validation';
 
     // Close the popover (Escape).
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(100);
+    // (escape dispatched; the following assertion gates the next step)
   } finally {
     await deleteFnByName(page, TEST_NAME).catch(() => {});
     await browser.close();

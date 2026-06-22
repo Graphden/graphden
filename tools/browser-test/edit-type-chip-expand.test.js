@@ -36,7 +36,11 @@ const TARGET_FN = 'assoc-fn';
 
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TARGET_FN);
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.type-chip-expandable', {timeout: 15000});
     await page.waitForTimeout(800);
@@ -141,7 +145,7 @@ const TARGET_FN = 'assoc-fn';
     // Phase E: Escape dismisses the provenance popover.
     // ===================================================================
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    // (escape dispatched; the following assertion gates the next step)
     const dismissed = await page.evaluate(() => {
       const pop = document.querySelector('.provenance-popover');
       const visible = pop && pop.style.display !== 'none'

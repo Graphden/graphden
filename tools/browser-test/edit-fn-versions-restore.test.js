@@ -90,12 +90,16 @@ async function putDescription(page, fnId, desc) {
     // ===================================================================
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FN_NAME);
-    await page.waitForTimeout(800);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
     await page.waitForTimeout(500);
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForTimeout(500);
+    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
     await page.evaluate(() => {
       const popover = document.querySelector('.row-actions-popover');
       const btn = Array.from(popover?.querySelectorAll('button') || [])

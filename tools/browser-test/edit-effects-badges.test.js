@@ -20,7 +20,11 @@ const {assert, newContext} = require('./edit-test-helpers');
     // supervised background work, the service-eligibility flag the
     // /api/entities/service create-guard reads.)
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#web-server');
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
 
     const probe = await page.evaluate(() => {
       const overlay = Array.from(document.querySelectorAll('.node-overlay'))
@@ -60,7 +64,11 @@ const {assert, newContext} = require('./edit-test-helpers');
     // — chip should be solid (no drift, no ghost).
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#health');
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     const healthProbe = await page.evaluate(() => {
       const overlay = Array.from(document.querySelectorAll('.node-overlay'))
         .find(el => (el.textContent || '').trim().startsWith('health'));
@@ -91,7 +99,11 @@ const {assert, newContext} = require('./edit-test-helpers');
     // condition in `appendFnMetadataStrips`.
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#add');
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     const pureProbe = await page.evaluate(() => {
       // Anchor on the root fn-card whose text starts with "add" and
       // contains the standard root affordances (→ return-type) so we

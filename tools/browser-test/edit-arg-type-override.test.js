@@ -68,7 +68,11 @@ async function cleanup(page) {
     // ===================================================================
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
-    await page.waitForTimeout(800);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.arg-type-chip', {timeout: 15000});
 
@@ -130,11 +134,22 @@ async function cleanup(page) {
                   && !b.classList.contains('arg-value-edit-btn-danger'));
       btn?.click();
     });
-    // initGraph fires after save → wait for the popover to dismiss.
+    // initGraph fires after save → wait for the popover to dismiss
+    // AND for storage to reflect the new :type-override-fn-id.
     await page.waitForFunction(
       () => !document.querySelector('.arg-value-edit-popover'),
       {timeout: 10000});
-    await page.waitForTimeout(500);
+    {
+      const deadline = Date.now() + 15000;
+      let landed = false;
+      while (Date.now() < deadline) {
+        const ents = await getEntities(page);
+        const b = (ents.bindings || []).find((x) => x['fn-id'] === probe.id);
+        if (b && b['type-override-fn-id']) { landed = true; break; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!landed) throw new Error(':type-override-fn-id never landed in storage');
+    }
 
     // ===================================================================
     // Phase D: storage — probe's binding row has :type-override-fn-id

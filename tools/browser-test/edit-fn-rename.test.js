@@ -32,7 +32,11 @@ const NEW = 'test-fn-rename-new';
 
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + ORIG);
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
 
     // Per-row action icons live in the `.row-actions-popover` triggered
     // by hover/click on the `.more-actions-trigger` (⋯) on the root
@@ -41,7 +45,7 @@ const NEW = 'test-fn-rename-new';
     // FIRST, then look for the ✎ pencil inside it. (Same pattern the
     // edit-service.test.js uses for the ⚙ button.)
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForTimeout(500);
+    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
     const opened = await page.evaluate(() => {
       const popover = document.querySelector('.row-actions-popover');
       if (!popover) return {error: 'row-actions popover not found'};

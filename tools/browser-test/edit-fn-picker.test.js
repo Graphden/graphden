@@ -27,7 +27,11 @@ const {assert, newContext} = require('./edit-test-helpers');
 
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity');
-    await page.waitForTimeout(2500);
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !!document.querySelector('button.more-actions-trigger')
+            && !cy.animated(),
+      {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForFunction(
       () => typeof openFnPicker === 'function'

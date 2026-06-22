@@ -83,18 +83,19 @@ async function cleanup(page) {
     // before navigating.
     await waitForServerHealthy();
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FROM_NS + '.' + FN_NAME);
-    // Wait for either the fn-card (more-actions-trigger button) OR
-    // at least the sidebar to be populated — this test sometimes
-    // navigates to a NS-qualified hash that doesn't immediately
-    // resolve a card.
+    // Wait for the page bundle to finish loading so we can call
+    // initGraph (which is bundled at the page-script level).
+    await page.waitForFunction(
+      () => typeof initGraph === 'function',
+      {timeout: 20000, polling: 100});
+    await page.evaluate(() => initGraph());
+    // After initGraph: wait for sidebar to be populated AND
+    // enterNamespaceMoveEditMode (a window helper) to be defined.
     await page.waitForFunction(
       () => typeof graphData !== 'undefined' && graphData?.fns?.length > 0
-            && document.querySelectorAll('.entity-item').length > 0,
+            && document.querySelectorAll('.entity-item').length > 0
+            && typeof enterNamespaceMoveEditMode === 'function',
       {timeout: 20000, polling: 100});
-    await page.evaluate(() => initGraph && initGraph());
-    await page.waitForFunction(
-      () => typeof enterNamespaceMoveEditMode === 'function',
-      {timeout: 15000});
 
     await page.evaluate((fnName) => {
       const probeFn = (graphData?.fns || []).find((f) => f.name === fnName);

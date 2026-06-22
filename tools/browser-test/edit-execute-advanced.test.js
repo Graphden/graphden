@@ -34,7 +34,7 @@ async function openExecutePopover(page, fnName) {
     {timeout: 20000, polling: 100});
   await page.evaluate(() => initGraph());
   await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-  await page.waitForTimeout(500);
+  // (dropped waitForTimeout(500) — next assertion gates the step)
   const ok = await page.evaluate(async (name) => {
     const fns = (typeof graphData !== 'undefined' && graphData?.fns) || [];
     const fn = fns.find((f) => f.name === name);

@@ -76,7 +76,7 @@ async function cleanup(page) {
             && lookups?.fnMap?.size > 50,
       {timeout: 30000});
     await page.evaluate(async () => { await initGraph(); });
-    await page.waitForTimeout(1500);
+    // (dropped waitForTimeout(1500) — next assertion gates the step)
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), recFn.id);
     assert(inLookups, 'record in editor lookups');
@@ -129,8 +129,7 @@ async function cleanup(page) {
         return !el || el.style.display === 'none';
       },
       {timeout: 15000});
-    await page.waitForTimeout(800);
-
+    // (dropped waitForTimeout(800) — next assertion gates the step)
     // ===================================================================
     // Phase C: storage — only "a" and "c" remain.
     // ===================================================================

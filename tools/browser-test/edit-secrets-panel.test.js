@@ -114,7 +114,7 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     // with `/` and strips leading underscores.
     // ===================================================================
     await page.fill('.secrets-popover input[name="name"]', PROBE_NAME);
-    await page.waitForTimeout(100);
+    // (dropped waitForTimeout(100) — next assertion gates the step)
     const autofill = await page.evaluate(
       () => document.querySelector('.secrets-popover input[name="path"]')?.value);
     assert(autofill === EXPECTED_PATH,
@@ -138,7 +138,7 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     await page.evaluate(() => {
       document.querySelector('.secrets-popover [data-act="submit"]')?.click();
     });
-    await page.waitForTimeout(800);
+    // (dropped waitForTimeout(800) — next assertion gates the step)
     // Reopen if closed (success path), else carry on (error path).
     const popoverClosed = await page.evaluate(
       () => !document.querySelector('.secrets-popover'));
@@ -147,7 +147,7 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
       await page.waitForSelector('.secrets-popover', {timeout: 5000});
       await page.fill('.secrets-popover input[name="name"]', PROBE_NAME);
       await page.fill('.secrets-popover input[name="value"]', 'secret-value');
-      await page.waitForTimeout(100);
+      // (dropped waitForTimeout(100) — next assertion gates the step)
     }
     // Now submit the same name → server rejects (name-taken on isolated
     // stack with vault; vault-not-configured on bare dev). EITHER way

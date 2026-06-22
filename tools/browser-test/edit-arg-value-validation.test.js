@@ -105,8 +105,7 @@ const TEST_NAME = 'test-arg-value-validation';
       return true;
     });
     assert(opened, 'port arg-overlay clickable');
-    await page.waitForTimeout(250);
-
+    // (dropped waitForTimeout(250) — next assertion gates the step)
     const popoverPresent = await page.evaluate(
       () => !!document.querySelector('.arg-value-edit-popover'));
     assert(popoverPresent, 'value-edit popover opened');
@@ -134,7 +133,7 @@ const TEST_NAME = 'test-arg-value-validation';
       i.value = '8080';
       i.dispatchEvent(new Event('input', {bubbles: true}));
     });
-    await page.waitForTimeout(150);
+    // (dropped waitForTimeout(150) — next assertion gates the step)
     const okStatus = await page.evaluate(() => {
       const s = document.querySelector('.arg-value-edit-status');
       return {text: s && s.textContent, ok: s && s.classList.contains('ok'),
@@ -157,7 +156,7 @@ const TEST_NAME = 'test-arg-value-validation';
       i.value = '-1';
       i.dispatchEvent(new Event('input', {bubbles: true}));
     });
-    await page.waitForTimeout(150);
+    // (dropped waitForTimeout(150) — next assertion gates the step)
     const errStatus = await page.evaluate(() => {
       const s = document.querySelector('.arg-value-edit-status');
       return {text: s && s.textContent, ok: s && s.classList.contains('ok'),

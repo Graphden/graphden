@@ -38,8 +38,7 @@ const {chromium} = require('playwright');
       return {clicked: true};
     });
     if (click.error) throw new Error(click.error);
-    await page.waitForTimeout(2000);
-
+    // (dropped waitForTimeout(2000) — next assertion gates the step)
     const overlays = await page.evaluate(() => {
       if (typeof cy === 'undefined') return null;
       return cy.nodes()

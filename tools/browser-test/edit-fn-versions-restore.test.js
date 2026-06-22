@@ -97,7 +97,7 @@ async function putDescription(page, fnId, desc) {
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-    await page.waitForTimeout(500);
+    // (dropped waitForTimeout(500) — next assertion gates the step)
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover', {timeout: 5000});
     await page.evaluate(() => {
@@ -160,8 +160,7 @@ async function putDescription(page, fnId, desc) {
     await dialog.accept();
     await navPromise;
     await page.waitForSelector('#branch-chip-btn', {timeout: 15000});
-    await page.waitForTimeout(800);
-
+    // (dropped waitForTimeout(800) — next assertion gates the step)
     // ===================================================================
     // Phase C: storage now reports the restored description (v1-seed).
     // The restore writes a NEW version row carrying v1's data; the

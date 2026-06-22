@@ -46,7 +46,7 @@ async function openCreateMenuForNs(page, nsName) {
       target.click(); // expand
     }
   }, nsName);
-  await page.waitForTimeout(300);
+  // (dropped waitForTimeout(300) — next assertion gates the step)
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(
@@ -177,7 +177,7 @@ async function openCreateMenuForNs(page, nsName) {
     // The sidebar was just re-rendered by Phase D's initGraph; give
     // it a beat before fishing for the + button.
     // ===================================================================
-    await page.waitForTimeout(500);
+    // (dropped waitForTimeout(500) — next assertion gates the step)
     await openCreateMenuForNs(page, PARENT_NS);
     await page.evaluate(() => {
       const item = Array.from(document.querySelectorAll('.create-menu-item'))

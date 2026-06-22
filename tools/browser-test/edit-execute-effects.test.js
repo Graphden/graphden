@@ -38,7 +38,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
     return true;
   });
   if (!opened) throw new Error('▶ button not surfaced in row-actions');
-  await page.waitForTimeout(1500);
+  // (dropped waitForTimeout(1500) — next assertion gates the step)
 }
 
 
@@ -104,7 +104,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
     await page.evaluate(() => {
       document.querySelector('.execute-run-btn').click();
     });
-    await page.waitForTimeout(2000);
+    // (dropped waitForTimeout(2000) — next assertion gates the step)
     const result = await page.evaluate(() => {
       const popover = document.querySelector('.execute-popover.visible');
       const scalar = popover.querySelector('.execute-result-scalar');

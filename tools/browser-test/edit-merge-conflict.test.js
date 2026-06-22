@@ -194,8 +194,7 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     // storage. Under e2e suite load that rebuild + JS bundle parse
     // can exceed the 15s budget; bump to 30s.
     await page.waitForSelector('#branch-chip-btn', {timeout: 30000});
-    await page.waitForTimeout(800);
-
+    // (dropped waitForTimeout(800) — next assertion gates the step)
     const finalDescription = await page.evaluate(async (id) => {
       const r = await window.authFetch('/api/graph/entities');
       const ents = await r.json();

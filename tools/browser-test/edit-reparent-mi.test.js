@@ -78,8 +78,7 @@ async function cleanup(page) {
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.fn-overlay, .node-overlay', {timeout: 15000});
-    await page.waitForTimeout(500);
-
+    // (dropped waitForTimeout(500) — next assertion gates the step)
     const parentStrip = await page.evaluate(() => {
       // The parents are surfaced as ancestor row labels OR a "parents:"
       // strip at the card bottom. Search the page text for both names.

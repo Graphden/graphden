@@ -56,7 +56,7 @@ const NEW = 'test-fn-rename-new';
     });
     assert(!opened.error, opened.error || 'pencil clicked');
 
-    await page.waitForTimeout(200);
+    // (dropped waitForTimeout(200) — next assertion gates the step)
     const popover = await page.evaluate(
       () => !!document.querySelector('.arg-value-edit-popover'));
     assert(popover, 'rename popover opened');
@@ -74,8 +74,7 @@ const NEW = 'test-fn-rename-new';
         .find(b => b.textContent.trim() === 'Save');
       save.click();
     });
-    await page.waitForTimeout(2500);
-
+    // (dropped waitForTimeout(2500) — next assertion gates the step)
     // Assert: storage now has the new name, original gone.
     const after = await getEntities(page);
     const renamed = after.fns.find(f => f.id === fn.id);

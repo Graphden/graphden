@@ -113,7 +113,9 @@ async function deleteAnyExistingServiceFor(page, fnName) {
     // === Phase B: open service popover ===
     const opened = await clickGearButton(page);
     assert(opened, '⚙ click dispatched');
-    await page.waitForTimeout(500);
+    // Popover loads through htmx fetch of /partials/service-popover —
+    // 500ms is not enough under e2e contention.
+    await page.waitForSelector('.service-popover.visible', {timeout: 5000});
 
     const popoverState = await page.evaluate(() => {
       const p = document.querySelector('.service-popover.visible');

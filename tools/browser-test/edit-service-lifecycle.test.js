@@ -196,37 +196,32 @@ async function openServicePopover(page) {
       document.querySelector('.service-popover-save-btn').click();
     });
     // Wait for the :service row to appear in storage AND for the
-    // reconciler atom to track it as running.
+    // reconciler atom to track it as running. Match by fn-id, NOT
+    // fn-name — the latter goes through a backend JOIN that returns
+    // null for a brief window after row creation, which produced an
+    // observable race here (v11 / v12 diagnostic).
     await page.waitForFunction(
-      async (name) => {
+      async (fnId) => {
         try {
           const r = await window.authFetch('/api/services');
           const body = await r.json();
-          const s = body.services?.find((x) => x['fn-name'] === name);
+          const s = body.services?.find((x) => x['fn-id'] === fnId);
           return !!s && !!s['enabled?'] && !!s.running;
         } catch (_) { return false; }
       },
-      PROBE_FN,
+      probe.id,
       {timeout: 15000, polling: 200});
-    // Re-fetch including the full response — when persistedSvc comes
-    // back undefined the surrounding shape is what diagnoses the race.
-    const persistedDump = await page.evaluate(async (name) => {
+    const persistedSvc = await page.evaluate(async (fnId) => {
       const r = await window.authFetch('/api/services');
       const body = await r.json();
-      return {
-        status: r.status,
-        serviceCount: body.services?.length ?? null,
-        fnNames: body.services?.map((s) => s['fn-name']) || [],
-        row: body.services?.find((s) => s['fn-name'] === name),
-      };
-    }, PROBE_FN);
-    const persistedSvc = persistedDump.row;
+      return body.services?.find((s) => s['fn-id'] === fnId);
+    }, probe.id);
     assert(persistedSvc && persistedSvc['enabled?'],
-           ':service row persisted with :enabled? true (dump: '
-           + JSON.stringify(persistedDump).slice(0, 400) + ')');
+           ':service row persisted with :enabled? true: '
+           + JSON.stringify(persistedSvc).slice(0, 200));
     assert(persistedSvc.running,
            'reconciler tracked the start in the running atom: '
-           + JSON.stringify(persistedSvc.running ?? null));
+           + JSON.stringify(persistedSvc.running).slice(0, 200));
 
     // ===================================================================
     // Phase B: re-open popover → EDIT mode.

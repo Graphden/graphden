@@ -43,7 +43,8 @@ const TARGET_FN = 'assoc-fn';
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.type-chip-expandable', {timeout: 15000});
-    // (dropped waitForTimeout(800) — next assertion gates the step)
+    await page.waitForTimeout(800);
+
     // ===================================================================
     // Phase A: at least one expandable chip + one provenance badge.
     // ===================================================================

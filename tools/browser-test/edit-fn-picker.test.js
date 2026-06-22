@@ -73,7 +73,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Phase B: type filter "identity" → only matching rows visible.
     // ===================================================================
     await page.fill('.fn-picker-search', 'identity');
-    // (dropped waitForTimeout(400) — next assertion gates the step)
+    await page.waitForTimeout(400);
     const filtered = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
       const allRows = Array.from(p?.querySelectorAll('.fn-picker-list > *') || []);

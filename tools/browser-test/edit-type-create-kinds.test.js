@@ -40,7 +40,7 @@ async function openTypeCreate(page, nsName) {
     const arrow = target.querySelector('.ns-arrow');
     if (arrow && /▶/.test(arrow.textContent || '')) target.click();
   }, nsName);
-  // (dropped waitForTimeout(300) — next assertion gates the step)
+  await page.waitForTimeout(300);
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(

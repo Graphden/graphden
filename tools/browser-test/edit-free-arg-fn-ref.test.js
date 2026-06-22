@@ -111,7 +111,7 @@ async function cleanup(page) {
     // Phase D: filter to current-time-ms + click → ref written.
     // ===================================================================
     await page.fill('.fn-picker-popover .fn-picker-search', 'current-time-ms');
-    // (dropped waitForTimeout(400) — next assertion gates the step)
+    await page.waitForTimeout(400);
     // Programmatic .click() inside page.evaluate doesn't reliably
     // bubble through cytoscape's hover-state machinery; use the real
     // pointer click via Playwright.

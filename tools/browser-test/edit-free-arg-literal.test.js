@@ -54,7 +54,8 @@ const TEST_NAME = 'test-free-arg-literal';
       return {clicked: true};
     });
     assert(!placeholderClicked.error, placeholderClicked.error || 'placeholder clicked');
-    // (dropped waitForTimeout(200) — next assertion gates the step)
+    await page.waitForTimeout(200);
+
     // Pick "Bind literal" from the chooser.
     const litClicked = await page.evaluate(() => {
       const btn = Array.from(document.querySelectorAll(
@@ -96,7 +97,8 @@ const TEST_NAME = 'test-free-arg-literal';
       i.value = 'hello';
       i.dispatchEvent(new Event('input', {bubbles: true}));
     });
-    // (dropped waitForTimeout(150) — next assertion gates the step)
+    await page.waitForTimeout(150);
+
     // Live status should be ✓ (text into :text slot).
     const okStatus = await page.evaluate(() => {
       const s = document.querySelector('.arg-value-edit-status');

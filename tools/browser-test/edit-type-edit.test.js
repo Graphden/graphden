@@ -97,7 +97,7 @@ async function cleanup(page) {
     // Force a refetch in case the page's first initGraph fired before
     // the seed reached storage.
     await page.evaluate(async () => { await initGraph(); });
-    // (dropped waitForTimeout(1500) — next assertion gates the step)
+    await page.waitForTimeout(1500);
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), recFn.id);
     assert(inLookups, 'seeded record is in editor lookups after initGraph');
@@ -191,7 +191,8 @@ async function cleanup(page) {
         return !el || el.style.display === 'none';
       },
       {timeout: 15000});
-    // (dropped waitForTimeout(800) — next assertion gates the step)
+    await page.waitForTimeout(800);
+
     // ===================================================================
     // Phase C: storage reflects the new field.
     // ===================================================================

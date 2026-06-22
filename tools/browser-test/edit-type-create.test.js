@@ -39,7 +39,7 @@ async function openTypeCreate(page, nsName) {
     const arrow = target.querySelector('.ns-arrow');
     if (arrow && /▶/.test(arrow.textContent || '')) target.click();
   }, nsName);
-  // (dropped waitForTimeout(300) — next assertion gates the step)
+  await page.waitForTimeout(300);
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(
@@ -236,7 +236,7 @@ async function openTypeCreate(page, nsName) {
     await page.evaluate(() => {
       document.querySelector('.type-create-back')?.click();
     });
-    // (dropped waitForTimeout(500) — next assertion gates the step)
+    await page.waitForTimeout(500);
     const dismissed = await page.evaluate(() => {
       const p = document.querySelector('.type-create-popover');
       if (!p) return true;

@@ -90,7 +90,9 @@ async function cleanup(page) {
         updateEntityList(graphData);
       }
     });
-    await page.waitForTimeout(800);
+    // Wait for the secrets section to render in the sidebar.
+    await page.waitForSelector('.sidebar-secrets .ns-header',
+                               {timeout: 10000});
     // Expand the secrets section if collapsed (sidebar-secrets wraps
     // a ns-header-pseudo; arrow ▶ means collapsed, ▼ open). The
     // click triggers `expandedNamespaces.add(...)` + a sidebar
@@ -107,12 +109,14 @@ async function cleanup(page) {
         updateEntityList(graphData);
       }
     });
-    await page.waitForTimeout(500);
+    // The secret row is the actual signal — wait directly. Bumped
+    // from 8s → 15s since the prior 800+500ms buffers used to absorb
+    // some of the loadSecrets fetch latency.
     await page.waitForFunction(
       (name) => Array.from(document.querySelectorAll('.entity-secret'))
         .some((r) => (r.textContent || '').includes(name)),
       SECRET_NAME,
-      {timeout: 8000});
+      {timeout: 15000, polling: 100});
 
     // ===================================================================
     // Click ↻ on the secret row.
@@ -180,7 +184,8 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => !document.querySelector('[data-popover="rotate-secret"]'),
       {timeout: 5000});
-    await page.waitForTimeout(500);
+    // No additional sleep needed — the secret row's presence is the
+    // assertion right below; if it's still there, we're good.
     const rowStillThere = await page.evaluate((name) =>
       Array.from(document.querySelectorAll('.entity-secret'))
         .some((r) => (r.textContent || '').includes(name)),

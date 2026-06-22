@@ -100,6 +100,7 @@ All endpoints require bearer-token auth (`auth-required-middleware`).
 ### `POST /api/execute`
 
 **Request:**
+
 ```jsonc
 {
   "fn-id":      "uuid",       // XOR with fn-name
@@ -111,6 +112,7 @@ All endpoints require bearer-token auth (`auth-required-middleware`).
 ```
 
 Arg value shape (per slot):
+
 | Form                           | Stored as                                          |
 |--------------------------------|----------------------------------------------------|
 | `1`, `"hi"`, `true`, `null`    | `:value` (literal jsonb)                           |
@@ -217,11 +219,11 @@ signed-in users) opens the **execute popover**:
 - **Persist toggle** — "Save to history". Pre-checked + disabled for
   effect-bearing fns (backend auto-persists those).
 - **Run** → POST `/api/execute` → response handled:
-  * `:succeeded` → inline type-aware result pane (scalar chip / list
+  - `:succeeded` → inline type-aware result pane (scalar chip / list
     bullets / record table / JSON `<pre>` with > 50 KB truncation).
-  * `:pending` → spinner + execution-id + polling with exponential
+  - `:pending` → spinner + execution-id + polling with exponential
     backoff (500 ms → 1 s → 2 s → 5 s → 30 s) + Cancel button.
-  * `:failed` → error pane with message + ex-data.
+  - `:failed` → error pane with message + ex-data.
 - **History toggle** in the header — lazily fetches `/api/executions`
   and renders a collapsible panel. Each row: status chip + time +
   duration + result preview. Click expands full result; **Repeat**

@@ -147,11 +147,13 @@ when the fn is long-running; for fast fns the response carries
 the result directly.
 
 Poll status:
+
 ```bash
 curl http://localhost:8080/api/executions/<id> ...
 ```
 
 Cancel:
+
 ```bash
 curl -X POST http://localhost:8080/api/executions/<id>/cancel ...
 ```

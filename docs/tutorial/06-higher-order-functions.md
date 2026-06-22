@@ -6,8 +6,8 @@ behave differently from other slots, and reason about
 closure-capture (why `:request` from an outer Ring handler is
 available inside a deeply-nested callable).
 
-**Concepts introduced**: `:fn`-typed slot`, `HOF`, `closure-
-capture`, `lambda-params`, `iterating vs one-shot HOF`.
+**Concepts introduced**: `:fn`-typed slot`,`HOF`,`closure-
+capture`,`lambda-params`,`iterating vs one-shot HOF`.
 
 ## The two kinds of slot
 

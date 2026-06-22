@@ -333,6 +333,7 @@ Seeded defaults: `:http-server`, `:secret-leaf`, `:schedule`,
 queries), `:future` (transitively reaches `:schedule`).
 
 Implementation:
+
 - Walker + per-storage cache: `graphden.versioning.branch-local`
   (`effective-branch-local?` + `build-branch-local-set`).
 - Resolution filter: `versioning.storage.resolution/merge-

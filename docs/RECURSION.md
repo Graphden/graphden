@@ -33,6 +33,7 @@ We've narrowed the design space to two principled options:
 | Effort estimate | ~3 hours focused | ~1-2 days focused |
 
 Both approaches achieve correctness; the trade-off is **explicitness
+
 + minimum-change (A)** vs **user-side ergonomics (B)**.
 
 ---
@@ -155,14 +156,14 @@ approach B.
 
 ### Open questions
 
-- **Type-checker for recursive types**: when do we tighten from
++ **Type-checker for recursive types**: when do we tighten from
   `:any` to structurally-recursive? Costs ramp; benefit accrues
   to editor's return-type display and to compile-time arity
   verification.
-- **`:self` calling convention**: map-callable (current sketch) vs
++ **`:self` calling convention**: map-callable (current sketch) vs
   positional? Map is simpler to type-check (no arity ambiguity);
   positional is closer to Clojure idiom. MVP picks map.
-- **Effects propagation**: `:fix`'s declared effects = the union of
++ **Effects propagation**: `:fix`'s declared effects = the union of
   `:step`'s effects. Type-checker needs to handle the recursive
   effect propagation without infinite loop. Loose MVP: `:fix
   :effects :any`.
@@ -240,18 +241,18 @@ defended by the gain in user ergonomics.
 
 ### Risks
 
-- **`delta-recompile!` correctness**: invalidating an SCC is more
++ **`delta-recompile!` correctness**: invalidating an SCC is more
   complex than invalidating a forward dependency chain. Bugs here
   produce stale closures or unnecessary recompilations.
-- **Type-checker termination**: recursive types need explicit
++ **Type-checker termination**: recursive types need explicit
   bounds (equirecursive vs isorecursive trade-offs). Without
   careful handling, type-check infinite-loops on recursive defs.
-- **`*call-cache*` interaction**: the cache key is `[fn-id
++ **`*call-cache*` interaction**: the cache key is `[fn-id
   free-args]`. For recursive calls with different free-args, no
   collision. For recursive calls with the SAME free-args (rare but
   possible — e.g. memoization), the cache shortcuts the recursive
   call — actually CORRECT behavior (memo).
-- **Mutual recursion across packages**: if package A's fn refs
++ **Mutual recursion across packages**: if package A's fn refs
   package B's fn refs back to A, the topo-sort cycle now crosses
   package boundaries. Need to handle SCCs that span loader
   iterations.
@@ -259,11 +260,12 @@ defended by the gain in user ergonomics.
 ### Why this is more lift
 
 The cycle invariant is currently load-bearing in many subsystems:
-- `topological-sort` for compile order
-- `delta-recompile!` for invalidation
-- `delta-recompile!`'s reverse-deps index
-- Type-checker's dependency order
-- Layout's parent-chain rendering
+
++ `topological-sort` for compile order
++ `delta-recompile!` for invalidation
++ `delta-recompile!`'s reverse-deps index
++ Type-checker's dependency order
++ Layout's parent-chain rendering
 
 Each of these assumes the dependency graph is a DAG. Relaxing that
 invariant requires audits + targeted fixes in each.
@@ -287,7 +289,7 @@ invariant requires audits + targeted fixes in each.
 
 ## Cross-links
 
-- [ARCHITECTURE.md § Part 3 — Recursion and Cycles](ARCHITECTURE.md#part-3-recursion-and-cycles) — current state
-- [CLOSURE_CAPTURE.md](CLOSURE_CAPTURE.md) — the mechanism Approach A leverages for `:self` synthesis
-- [CONSTRAINTS.md § 1 — No Dependency Cycle](CONSTRAINTS.md) — the invariant Approach A preserves and Approach B relaxes
-- [PHILOSOPHY.md § Design Principles](PHILOSOPHY.md) — basis for the per-approach scoring above
++ [ARCHITECTURE.md § Part 3 — Recursion and Cycles](ARCHITECTURE.md#part-3-recursion-and-cycles) — current state
++ [CLOSURE_CAPTURE.md](CLOSURE_CAPTURE.md) — the mechanism Approach A leverages for `:self` synthesis
++ [CONSTRAINTS.md § 1 — No Dependency Cycle](CONSTRAINTS.md) — the invariant Approach A preserves and Approach B relaxes
++ [PHILOSOPHY.md § Design Principles](PHILOSOPHY.md) — basis for the per-approach scoring above

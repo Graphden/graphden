@@ -11,6 +11,7 @@ records that feed every walker; lookups are slot-id-keyed
 ## Overview
 
 The layout algorithm transforms a function graph into a 2D grid where:
+
 - Each node occupies exactly one cell
 - Edges go only RIGHT or DOWN (never left or up)
 - No nodes or edges overlap
@@ -27,6 +28,7 @@ Request → Load Data → Build Graph → Compute Paths → Sort Children → Pl
 **Input:** `root-id` (UUID), `expansions` (map of fn-id → level)
 
 **Process:**
+
 1. Load all `fn` / `slot` / `fn-slot` / `binding` /
    `binding-list-item` entities from storage.
 2. `derive-fn-slot-views` flattens each fn's inheritance closure
@@ -49,12 +51,14 @@ Transform the database entities into graph nodes and edges based on expansions.
 #### 2.1 Expansion Processing
 
 For each function, determine its "display level":
+
 - Level 0: Show function as single node with direct children (refs, values, unset args)
 - Level N > 0: Show function with N ancestors expanded (inheritance chain visible)
 
 **Inheritance chain:** `[fn-id, parent-id, grandparent-id, ...]`
 
 When expanding to level N:
+
 - Display function shows ancestors up to level N
 - Args from ancestors become visible
 - Bindings (arg values set by descendants) flow to ancestor arg positions
@@ -71,6 +75,7 @@ Critical for correct sharing behavior:
 | Canonical ref (level 0) | `fn-{ref-fn-id}` | Shared across all references |
 
 **Key insight:** Nodes inside an expansion context get prefixed IDs. This ensures:
+
 - Each expanded function has its own copy of ancestor structure (method-map, etc.)
 - Canonical nodes (level-0 refs) are shared and displayed once
 
@@ -88,6 +93,7 @@ When processing add-10:
 ```
 
 **Binding propagation rules:**
+
 - Bindings from expansion context apply to structural nodes (inside expansion)
 - Bindings do NOT apply to canonical nodes (refs at level 0)
 - This prevents false edges like `favicon-route → metrics-handler`
@@ -201,6 +207,7 @@ e2e test — parent layout exposes items, child layout doesn't.
 **Shared node:** A node with multiple parents (multiple incoming edges)
 
 For layout, we need to know:
+
 1. Which nodes are shared
 2. Which nodes lead to shared nodes (path-to-shared)
 3. Which path is "upper" vs "lower" for child ordering
@@ -230,6 +237,7 @@ fall into one of these categories:
 
 **Category 1: Neutral nodes**
 Nodes that do NOT lie on any path to any shared node.
+
 ```
 Example: A has children B, C, D. C and D lead to shared F. B does not.
 B is a neutral node.
@@ -239,6 +247,7 @@ B is a neutral node.
 Nodes that lie on ALL paths to a shared node, BEFORE the divergence point.
 This always includes the graph root. There may be additional nodes between
 root and the divergence point.
+
 ```
 Example: A → X → {C, D} → F (shared)
 A and X are pre-divergence nodes for F.
@@ -265,6 +274,7 @@ Nodes that lie on the path from a divergence root to the shared node, but are
 NOT the divergence root itself. These have siblings that may be neutral.
 
 Sorting rule for path nodes depends on whether they are on upper or lower path:
+
 - **Upper path:** Path-to-shared children go LAST (pushed to higher row numbers)
 - **Lower path:** Path-to-shared children go FIRST (stay at lower row numbers)
 
@@ -313,6 +323,7 @@ For each node, sort its children for optimal layout.
 #### 4.1 Classification
 
 Each child is classified as:
+
 - **Neutral:** Does not lead to any shared node
 - **Divergence root:** One of multiple siblings that lead to the same shared node
 - **Path-to-shared:** Leads to shared node (not a divergence root)
@@ -330,11 +341,13 @@ Sort children by: type (fn > fixed-arg > free-arg), then by original index.
 Divergence roots are grouped together at their original position but not moved.
 
 **Rule 2: Divergence root parents (on lower path)**
+
 - Path-to-shared children go **FIRST** (lower row numbers)
 - Neutral children go **LAST**
 - This makes the path-to-shared child the first child → horizontal branch → shared node at end
 
 **Rule 3: Divergence root parents (on upper path)**
+
 - Path-to-shared children go **LAST** (higher row numbers)
 - Neutral children go **FIRST**
 - This pushes the path-to-shared subtree down, making room for the lower path above
@@ -387,6 +400,7 @@ This is the core placement algorithm. It must be followed exactly.
 #### 6.2 Algorithm Steps
 
 **Step 1: Initialize**
+
 - SELECTED = graph root node
 - Matrix = empty grid
 - Edge reservations = empty (for collision detection)
@@ -394,6 +408,7 @@ This is the core placement algorithm. It must be followed exactly.
 **Step 2: Build Horizontal Branch**
 
 Starting from SELECTED:
+
 ```
 branch = [SELECTED]
 current = SELECTED
@@ -404,6 +419,7 @@ while current has children:
 ```
 
 Calculate branch length:
+
 ```
 length = count(branch) + sum(offset[node] for node in branch)
 ```
@@ -413,20 +429,24 @@ length = count(branch) + sum(offset[node] for node in branch)
 Determine placement position:
 
 **Column:**
+
 - If SELECTED is graph root: column = 0
 - Else: column = parent's column + 1 + SELECTED's offset (if any)
 
 **Row (with column-aware compaction):**
+
 - If SELECTED is graph root: row = 0
 - Else: min_row = parent's row + 1
 
 **Finding valid row (column-aware compaction):**
 Starting from min_row, search downward for a row where:
+
 1. All cells from (row, column) to (row, column + branch_length - 1) are FREE
 
 **Key insight:** Only the branch's columns are checked. If a sibling's branch uses columns 1-2 and the subtree uses columns 3-5, the sibling can share rows with the subtree because their columns don't overlap.
 
 **Column-aware compaction example:**
+
 ```
 Graph (with branch-A expanded):
   root (col 0)
@@ -451,6 +471,7 @@ with subtree nodes at row 1 (which are at col 3+).
 
 **Place the branch:**
 For each node in branch (left to right):
+
 - Place node at (row, current_column)
 - If node has offset, reserve edge cells before it
 - current_column += 1 + node's offset
@@ -475,6 +496,7 @@ for node in reverse(branch):
 **Step 5: Backtrack**
 
 When a branch has no more children to process:
+
 1. Return to branch ROOT's parent
 2. Find next unplaced sibling in parent's children list
 3. If found: SELECTED = sibling, goto Step 2
@@ -487,14 +509,17 @@ To prevent edge crossings, reserve cells for edges:
 
 **Horizontal edges (offsets):**
 When placing a node with offset N at (row, col):
+
 - Reserve cells (row, col-N) to (row, col-1) as "horizontal edge from parent to node"
 
 **Vertical edges (row gaps):**
 When placing a node at (row, col) but start_row was less than row:
+
 - Reserve cells (start_row, col) to (row-1, col) as "vertical edge to node"
 
 **Collision detection:**
 Before placing a node or edge, check if cell is already occupied by:
+
 - Another node
 - Another edge reservation
 
@@ -591,6 +616,7 @@ Convert matrix positions to response format:
 ## Validation
 
 After placement, verify:
+
 1. All nodes have positions
 2. No position collisions (multiple nodes at same cell)
 3. No edge crossings (check reservations)
@@ -601,6 +627,7 @@ When layout changes (expansion, preview), the **anchor node** stays stationary w
 all other nodes move relative to it. This prevents disorienting jumps.
 
 **Anchor selection priority:**
+
 1. Explicit `anchorFnId` — set by expansion click or preview hover/clear
 2. Preview node — first key in `previewLevel` map
 3. None — graph fits to viewport

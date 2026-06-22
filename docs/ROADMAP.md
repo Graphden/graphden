@@ -38,6 +38,7 @@
 ## Phase 1: Data Schema and Constraints [DONE]
 
 **1.1 graph-data-schema** — slot/binding model:
+
 - `fn` — function or type-row; M:N inheritance via `parent-ids`
 - `slot` — atomic `(name, type-fn-id)`; immutable post-create
 - `fn-slot` — junction `(fn-id, slot-id, position)`
@@ -45,9 +46,11 @@
 - `binding-list-item` — sequence content under a list-typed binding
 
 **1.2 GraphConstraints protocol** — runtime validator:
+
 - No dependency cycles via `binding.ref-fn-id` / `binding-list-item.ref-fn-id`
 
 **1.3 Schema-level uniqueness:**
+
 - `UNIQUE(fn.name)` (NULL allowed for anonymous fns)
 - `UNIQUE(fn-slot(fn-id, slot-id))`
 - `UNIQUE(binding(fn-id, slot-id))`
@@ -63,6 +66,7 @@ covers cycle detection + concurrent CRUD against any storage backend.
 ## Phase 2: CRUD Operations [DONE]
 
 **2.1 StorageCRUD protocol:**
+
 ```clojure
 (defprotocol StorageCRUD
   (create-entity [this entity-name data])
@@ -73,6 +77,7 @@ covers cycle detection + concurrent CRUD against any storage backend.
 ```
 
 **2.2 StorageBatchCRUD protocol (enhancement):**
+
 ```clojure
 (defprotocol StorageBatchCRUD
   (create-entities [this entity-name data-seq])
@@ -85,6 +90,7 @@ covers cycle detection + concurrent CRUD against any storage backend.
 ## Phase 3: Executor [DONE]
 
 **3.1 ExecutionGraph protocol:**
+
 ```clojure
 (defprotocol ExecutionGraph
   (resolve-execution-graph [this root-fn-id]))
@@ -97,11 +103,13 @@ bodies use bare symbols). `:fn`-typed refs bypass the thunk and go
 through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 
 **3.3 Result Caching:**
+
 - Per-invocation `*call-cache*` memoises `[ref-id, free-args]` pairs
 - Shared subgraphs (e.g. `:router-result` pulled from multiple slots)
   run once per top-level invocation
 
 **3.4 Executor:**
+
 - `execute` — execute a fn by id with named free args
 - `execute-by-name` — execute a fn looked up by name
 - `make-single-arg-callable` — public HOF-wrap entry for raw fn-ids
@@ -110,6 +118,7 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
   `ctx :compiled-registry` atom
 
 **3.5 fn-registry + package loader:**
+
 - `register-base-fn!` — register a single impl
 - `register-base-fns!` — bulk registration
 - `sync-defs-to-storage!` — sync fn-defs from `fns.edn` to storage
@@ -122,26 +131,31 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 ## Phase 4: Base Functions [PARTIAL]
 
 **4.1 Arithmetic and Strings [DONE]**
+
 - Arithmetic: `add`, `sub`, `mul`, `div`, `mod`, `neg`, `abs`
 - Comparison: `eq`, `neq`, `lt`, `lte`, `gt`, `gte`
 - Strings: `str`, `subs`, `str-len`, `str-upper`, `str-lower`, `str-trim`, `str-split`, `str-join`
 
 **4.2 Collections [DONE]**
+
 - Basic: `first`, `rest`, `cons`, `conj`, `get`, `assoc`, `dissoc`
 - Advanced: `count`, `empty?`, `contains?`, `keys`, `vals`, `merge`, `into`
 - Sequences: `range`, `repeat`, `take`, `drop`, `reverse`, `sort`, `concat`, `flatten`, `distinct`
 
 **4.3 Conditionals and HOF [DONE]**
+
 - Logic: `and`, `or`, `not` (with short-circuit for `and`/`or`)
 - Conditionals: `if`, `cond`
 - HOF: `map`, `filter`, `reduce`, `some`, `every?`, `find-first`, `group-by`, `sort-by`, `apply`
 - Utilities: `identity`, `constantly`
 
 **4.4 I/O (Client) [PLANNED]**
+
 - `http-request` — HTTP client (http-kit)
 - File operations
 
 **4.5 I/O (Server) [DONE]**
+
 - `http-server` — http-kit server wrapper (`web/http`)
 - Reitit-based routing (`web/reitit`): `ring-router`,
   `ring-create-default-handler`, `ring-handler`, `middleware`
@@ -153,6 +167,7 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 ## Phase 5: UI/API [PARTIAL]
 
 **5.1 REST API [PARTIAL]**
+
 - CRUD endpoints for fn / namespace / slot / fn-slot / binding /
   binding-list-item [DONE — `web/crud`]
 - GET `/api/graph/entities` [DONE] — with `?scope=index` (sidebar only, 1.6 MB) and `?scope=subtree&root-id=X` (BFS closure, 1.5 KB - 50 KB typical) variants for per-fn bandwidth savings
@@ -166,6 +181,7 @@ through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 - WebSocket for live updates [PLANNED]
 
 **5.2 Web Interface [PARTIAL]**
+
 - Namespace-grouped entity list in sidebar [DONE]
 - Graph editor (Cytoscape-based, server-computed layout) [DONE]
 - Entity create/edit/delete modals [DONE]
@@ -388,14 +404,14 @@ than text-diffs.
 
 #### Growth piece (~4–5 weeks, post-MVP)
 
-4. **Managed-model gateway.** Control-plane proxy for users who
+1. **Managed-model gateway.** Control-plane proxy for users who
    don't want to manage their own API keys; per-token markup on top
    of upstream cost. Closed source, lives with the cloud control
    plane. Self-hosted users keep BYOM. **~1.5 weeks.**
-5. **Dedicated proposal panel.** Richer per-fn-def diff cards with
+2. **Dedicated proposal panel.** Richer per-fn-def diff cards with
    inline reject-with-feedback and conversational follow-up;
    successor to the branch-diff-modal reuse from 9.2. **~2 weeks.**
-6. **Persistent AI sessions.** Store conversation transcripts +
+3. **Persistent AI sessions.** Store conversation transcripts +
    tool-call traces per branch, resume / share. **~1 week.**
 
 #### Dependencies
@@ -497,6 +513,7 @@ for the current-state writeup.
 | 6.4 Smart Partitioning | Cost-based optimizer for graph partitioning | High |
 
 **Key decisions needed:**
+
 - Data transfer strategy between executors (direct, via coordinator, via storage)
 - Granularity of distribution (coarse vs fine-grained)
 - Handling side effects and ordering guarantees
@@ -530,6 +547,7 @@ link. `slot-by-fn-source-slot` (in
 be located without walking the inheritance chain.
 
 **Lifecycle:**
+
 - Created via the inline rename popover (edit the edge label) — the
   CRUD impl emits `slot.source-slot-id` + a new `fn-slot` junction.
 - Cleared by saving an empty value through the same popover; the
@@ -539,6 +557,7 @@ be located without walking the inheritance chain.
   affecting siblings (each rename owns its own slot row).
 
 **UI Usage:**
+
 ```
 Execute function: calculate-report
 ┌─────────────────────────────────────┐
@@ -557,6 +576,7 @@ Execute function: calculate-report
 **Goal**: Static type checking, UI hints, automatic type inference.
 
 **What's needed:**
+
 - Types for functions (input types -> output type)
 - Parametric polymorphism (List[T], Map[K,V])
 - Type inference for compositions (Hindley-Milner or subset)
@@ -581,6 +601,7 @@ rings, but there is no graph-level error status or branch-wide error
 list.
 
 **What's needed:**
+
 - Type errors as DERIVED, non-blocking diagnostics — recorded per fn,
   always recomputed, never swallowed. Saving an invalid fn stays
   allowed; only the hard structural gates (cycles, name uniqueness,
@@ -607,18 +628,21 @@ no new entity kinds.
 **Goal**: Detect when base function implementations change to enable safe upgrades.
 
 **Implementation:**
+
 - `impl-hash` field in `fn` entity (SHA-256 hash)
 - `impl-source` stored in `defbase` macro output
 - Hash computed from: args, return-type, impl-source (body forms)
 - Canonical form normalization (sorted maps, pr-str)
 
 **What the hash detects:**
+
 - Function body changes
 - Argument type changes
 - Argument additions/removals
 - Return type changes
 
 **What the hash ignores:**
+
 - Whitespace/formatting changes
 - Comments
 - Map key ordering
@@ -663,17 +687,20 @@ no new entity kinds.
 | Delete branch | Forbid if child branches exist; delete all version records and branch_merge records, then branch |
 
 **Branch resolution at execution time:**
+
 - Executor context carries `branch_id`
 - `resolve-execution-graph` resolves each versioned entity by walking branch chain + branch_merge records
 - No branch specified = default branch (base_branch_id = NULL)
 - Branch is transparent to functions — they don't know which branch they're on
 
 **Component architecture:**
+
 - `versioned-storage` — independent component (storage decorator)
 - Any combination works: base only, versioned only
 - Executor works with any storage through unified `ExecutionGraph` protocol — no executor changes needed
 
 **Base function update strategy:**
+
 - Platform migrations update base-fns on a platform branch
 - Users' branches don't see the change until they merge
 - Compatible changes (new optional arg): single base fn name, Clojure code supports both old and new signatures
@@ -754,6 +781,7 @@ on the next migration pass.
 **Goal**: Access control.
 
 **Permission Model:**
+
 ```
 User:
   id, name, email
@@ -775,6 +803,7 @@ RolePermission:
 ```
 
 **Application:**
+
 - On CRUD operations - permission check
 - On execution - execute permission check
 - In UI - filter visible functions

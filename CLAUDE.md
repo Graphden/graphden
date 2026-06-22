@@ -18,6 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 8 | **Incrementality** | Adding features shouldn't require rewriting existing ones. |
 
 **Before making changes, ask:**
+
 - Which principle does this improve?
 - Does it violate any other principle?
 - Is there a simpler way?
@@ -29,11 +30,13 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full rationale and module mappi
 Graphden is a visual functional programming environment where functions and their compositions are stored as a graph in a database.
 
 **Key concepts:**
+
 - **Code = Graph in DB** — functions and arguments stored as entities
 - **Lazy Execution** — delay-based evaluation, only computes what's needed
 - **Storage backend** — PostgreSQL with recursive CTE for graph traversal
 
 **Core entities** (slot/binding model):
+
 - `fn` — function entity OR type-row. Inheritance via `parent-ids` (many-to-many).
   - empty `parent-ids` + `impl-hash` set → base-fn (Clojure impl)
   - empty `parent-ids` + `impl-hash=nil` + slots/refine/list → type-row
@@ -61,6 +64,7 @@ A composed fn inherits its parents' slots through `parent-ids` BFS closure. Each
 slot in that closure is exposed once at the descendant; bindings overlay closer-fn-wins.
 
 **Base function (no parents, has impl):**
+
 ```
 fn: add
   parent-ids: []
@@ -70,6 +74,7 @@ slot: {id: nums, name: "nums", type-fn-id: sequence}
 ```
 
 **Composed function (parent-ids set):**
+
 ```
 fn: add-10
   parent-ids: [add]     ; inherits add's :nums slot
@@ -78,6 +83,7 @@ binding-list-item: {binding-id: ..., position: 0, value: 10}
 ```
 
 **Using the composed function:**
+
 ```clojure
 ;; add-10 inherits :nums and seeds it with [10]; caller may
 ;; extend the chain or override.
@@ -261,6 +267,7 @@ node check-editor.js web-server root:1 router-fn:1
 ```
 
 **Output:**
+
 - Screenshot: `/tmp/editor-screenshot.png`
 - Console logs printed to terminal
 - Build timestamp verification
@@ -354,15 +361,18 @@ For complete examples, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) Part 5.5
 ### Transducers and Lazy Sequences
 
 HOFs like `map`, `filter` support two modes via optional `coll` argument:
+
 - **With coll**: `(map f coll)` — returns lazy sequence of results
 - **Without coll**: `(map f)` — returns transducer
 
 **Key functions for composition:**
+
 - `comp` — composes functions/transducers
 - `transduce` — applies transducer with reducing function in single pass
 - `call` — invokes function with argument
 
 **Example pipeline:**
+
 ```clojure
 ;; Efficient single-pass transformation
 (transduce (comp (filter pred) (map transform)) + 0 coll)
@@ -392,6 +402,7 @@ HOFs like `map`, `filter` support two modes via optional `coll` argument:
 A base-fn impl should ideally be **1-2 lines** of actual logic: call the library, return the result. Everything else — composition, defaults, transformation — belongs in fn-defs.
 
 ✅ **GOOD base-fns** (atomic, generic, small):
+
 - `add`, `sub`, `mul` — wrap Clojure arithmetic (1 line)
 - `render-hiccup` — wrap hiccup2 `html` (1 line)
 - `query-entities` — wrap storage protocol (1 line)
@@ -399,6 +410,7 @@ A base-fn impl should ideally be **1-2 lines** of actual logic: call the library
 - `wrap-element` — `[(keyword tag) content]` (1 line)
 
 ❌ **BAD base-fns** (anti-patterns to avoid):
+
 - Hardcoded HTML/CSS/JS content → use `:parent :const` fn-def
 - Hardcoded defaults → use arg `:value` in fns.edn
 - Calling another base-fn → hidden composition, must be fn-def
@@ -408,11 +420,13 @@ A base-fn impl should ideally be **1-2 lines** of actual logic: call the library
 **Key rule: base-fn MUST NOT call another base-fn.** If impl A calls impl B, and both are registered base-fns, the composition A→B is hidden in code instead of being visible in the graph. Fix: either compose via fn-def, or make the shared logic a private helper (not a base-fn).
 
 **Acceptable exceptions for longer impls:**
+
 - Input validation / size limits (e.g., `range` validates step≠0 and max-size)
 - Library adapter boilerplate (e.g., `http-server` builds Ring handler format)
 - These are part of safely wrapping the library, not business logic
 
 **Example: Graph Editor should be fn-defs:**
+
 ```clojure
 ;; CORRECT approach
 {:name :editor-styles, :parent :const, :args {:x "CSS here..."}}
@@ -427,6 +441,7 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) "Base Functions Philosophy" for ful
 ### Base Function impl-hash
 
 Each base function has an `impl-hash` stored in the `fn` entity for version tracking:
+
 - SHA-256 hash of canonical form (args, return-type, impl-source)
 - Detects: body changes, arg changes, return-type changes
 - Ignores: whitespace, comments, map key ordering
@@ -438,7 +453,7 @@ See [docs/EXTENDING.md](docs/EXTENDING.md) for details.
 Enforced at write time:
 
 1. **No dependency cycles** — any cycle through `binding.ref-fn-id`
-   + `parent-ids` + `type-override-fn-id` + `binding-list-item.ref-fn-id`
+   - `parent-ids` + `type-override-fn-id` + `binding-list-item.ref-fn-id`
    edges is rejected. Two layers: the per-binding write-time
    `GraphConstraints` check, AND the sync-time topological-sort over
    the whole fn-def set. Bare self-ref (`owner == ref`) passes the
@@ -540,24 +555,31 @@ Base functions and fn-defs live in `resources/packages/{pkg}/{module}/` as `fns.
 The full rationale and worked examples live in [docs/PACKAGES.md § Composition Best Practices](docs/PACKAGES.md#composition-best-practices). The bullets below are the bare minimum for AI-assisted edits — read PACKAGES.md before larger structural changes.
 
 ### 1. DRY via inheritance
+
 Extract a common parent when ≥ 2 fn-defs share an ancestor AND ≥ 1 bound arg with the same structure. Indicators: same parent, same bound args, repeated shape, can be named meaningfully. See [§ 1](docs/PACKAGES.md#1-use-inheritance-to-eliminate-duplication-dry).
 
 ### 2. Free-args propagation
+
 Unbound args of a referenced fn-def surface as free args of the caller — that's how reusable templates (`:get-route`, `:json-ok-response`, …) work. Arg names propagate up; renames via `{:as :name}` swap the public name. See [§ 2](docs/PACKAGES.md#2-free-arguments-pattern-argument-propagation).
 
 ### 3. Named vs one-off
+
 Name a fn-def when it's reused, has independent meaning, or represents a domain concept. Inline (no name) when used exactly once with no semantic identity. Heuristic: if you can't name it without describing wiring, it's one-off. See [§ 3](docs/PACKAGES.md#3-named-vs-anonymous-one-off-functions).
 
 ### 4. Hierarchy depth
+
 2–3 levels is normal, 4–5 acceptable for route/response composition, 6+ needs justification. Each level should have a name, potential reuse, and a cohesive concept. See [§ 4](docs/PACKAGES.md#4-hierarchy-depth-guidelines).
 
 ### 5. Base-fn vs fn-def
+
 Base-fn: has Clojure impl, wraps library, ≤ ~20 LOC body. Fn-def: pure composition, may carry hardcoded values, no impl. Base-fns MUST NOT call other base-fns — that's hidden composition. See [§ 5](docs/PACKAGES.md#5-base-function-vs-fn-def-decision-matrix) and [PHILOSOPHY § Base Functions](docs/PHILOSOPHY.md#base-functions-philosophy).
 
 ### 6. Naming (short names, context carries meaning)
+
 Names add the **last bit of distinction** — namespace, parent, and arg names convey the rest. Drop affixes the context already says; keep affixes that disambiguate vs a sibling. Verb-at-end (`entity-create`) when prefix-form clashes with a base-fn. Extract a sub-NS when ≥ ~5 fn-defs share a long prefix. Names are validated for **global** uniqueness at sync time, **including locals** (`_*`).
 
 Before renaming, grep:
+
 ```bash
 grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages/
 ```

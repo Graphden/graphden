@@ -298,6 +298,7 @@ A record type is defined as a fn-def with parent `:record`:
 ```
 
 This serves as both:
+
 - **Type definition** — `computed-type` describes the structure
 - **Constructor** — binding all args creates a concrete value
 - **Runtime schema source** — system can generate malli/JSON Schema for validation
@@ -607,8 +608,8 @@ needs out of the box:
 | `:http-status`     | `[:refine :int [:and [:>= 100] [:<= 599]]]`                       | HTTP status codes                |
 | `:bit`             | `[:refine :int [:or [:= 0] [:= 1]]]`                              | binary flags                     |
 | `:nullable-text`   | `[:union :null :text]`                                            | optional text (env vars, headers); other primitives use inline `[:union :null T]` |
-| `:result-T`        | tagged variant `{:ok T}|{:err :text}`                              | Result-style returns             |
-| `:validation`      | tagged variant `{:valid :any}|{:invalid :text}`                    | parsed-vs-error                  |
+| `:result-T`        | tagged variant `{:ok T}` &#124; `{:err :text}`                     | Result-style returns             |
+| `:validation`      | tagged variant `{:valid :any}` &#124; `{:invalid :text}`           | parsed-vs-error                  |
 
 Modules adding their own named type-rows just put the
 `:refine` / `:list` / `:union` / `:variant` / `:record` entries

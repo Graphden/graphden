@@ -64,7 +64,7 @@ suite (1439 tests, 5948 assertions) green.
 ### What v1 does NOT cover
 
 - Composed guards (e.g. `:_X-blank?` wrapping `:str-blank? + :get`
-  + `:and`/`:or` decomposition). The branch root must be `:some?`
+  - `:and`/`:or` decomposition). The branch root must be `:some?`
   or `:nil?` literally — chained shims with `:str-blank?` etc.
   bail out.
 - Field-level narrowings through `:get :coll {:as :parsed}
@@ -320,9 +320,9 @@ When a shared slot — e.g. `:get`'s `:coll`, or a renamed-view slot
 like `:parsed` — is used in CREATE / UPDATE / DELETE flows with
 different record shapes, the type-checker has TWO bad options:
 
-* **Type the slot globally** → bleeds across flows. Tightening one
+- **Type the slot globally** → bleeds across flows. Tightening one
   breaks siblings.
-* **Leave the slot `:any`** → loses narrowing in every flow.
+- **Leave the slot `:any`** → loses narrowing in every flow.
 
 Neither is sound + complete. The honest fix: types must be
 **call-context-local**, not slot-local.
@@ -490,10 +490,11 @@ Extend that mechanism to a **second post-pass** over the topology:
 
 ### Concrete worked example — 11 failures
 
-After Pass 1: `:_create-apply-entity-type-str :return [:union :null :text]`. 
+After Pass 1: `:_create-apply-entity-type-str :return [:union :null :text]`.
 `:process-create-entity :args {:parsed :_create-parsed}`.
 
 Pass 2 visits `:process-create-entity`:
+
 - `:parsed` ref'd to `:_create-parsed`, narrow type `:_create-parsed-shape`
   (assuming Phase A — see below — lets `:_create-parsed` declare it).
 - Transitive ref tree under `:_create-parsed`: includes `:_create-apply`,

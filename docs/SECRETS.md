@@ -264,12 +264,12 @@ The only remaining concern is `:throw` — see Known limits.
    typed binding transitively; tighter mitigation (rewrite the
    error message conditionally) is reserved for a later pass.
 
-2. **`:any`-typed slots** are the documented escape hatch. A
+3. **`:any`-typed slots** are the documented escape hatch. A
    `[:secret :text]` value flows into an `:any` slot and the marker
    is lost. A future audit pass could narrow specific `:any` slots
    to refuse secrets.
 
-3. **`:secret-leaf` is gated at the create path.** A user can't
+4. **`:secret-leaf` is gated at the create path.** A user can't
    `parent :secret-leaf` directly through `/api/entities/fn` or any
    other generic create path — the gate in `crud.entities/create-
    entity` + `apply-create` refuses any `:fn` create whose
@@ -287,14 +287,14 @@ The only remaining concern is `:throw` — see Known limits.
 `:fn-execution.touched-secret?` is set to `true` on rows where
 BOTH halves are satisfied:
 
-  - `(persist/touches-secret? fn-name)` — the rich-types registry
+- `(persist/touches-secret? fn-name)` — the rich-types registry
     entry for the executed fn-def carries a `:secret` marker on
     its return OR on any of its declared arg slots. Strictly
     broader than `tainted-fn?`: a sink like `:sql-exec` whose
     `:password` slot is `[:secret :text]` but whose return is
     `:int` still trips this predicate.
 
-  - `(seq runtime-effects)` — the run actually observed a
+- `(seq runtime-effects)` — the run actually observed a
     side-effect (`:network`, `:io`, `:db`, …). A pure tainted-
     aware run that produced no effects isn't an audit event.
 
@@ -312,11 +312,11 @@ each row. The future "Secret flows" history tab can filter on
 The secret lives as a TYPED BINDING, not a separate fn-def shape.
 Three pieces:
 
-  - **Schema**: `:secret-path` value in the `:override-kind` enum
+- **Schema**: `:secret-path` value in the `:override-kind` enum
     (`schema/graph/schema.clj`). Persisted alongside the existing
     `:fixed` / `:default` values.
 
-  - **Executor**: `compile/bindings.clj/classify-slot` recognises
+- **Executor**: `compile/bindings.clj/classify-slot` recognises
     `:override-kind :secret-path` and emits a `:kind :secret-value`
     shape. `compile.clj/build-args-and-aug` handles `:secret-value`
     by calling `clients.vault/get-secret` on `(:vault ctx)` with
@@ -325,7 +325,7 @@ Three pieces:
     `:aug` (so inner ref-chains that reference the slot by ext-name
     receive the same value).
 
-  - **Validation gate**: `crud/validation.clj/secret-path-rej`
+- **Validation gate**: `crud/validation.clj/secret-path-rej`
     refuses `:override-kind :secret-path` on slots whose effective
     rich-type doesn't carry the `:secret` marker. Without this
     gate, a user could mark any plain `:text`-typed binding as
@@ -335,29 +335,29 @@ Three pieces:
 
 The Secrets-panel admin flow writes new secrets with this shape:
 
-  - `:secret-leaf` base-fn (in `web/vault/fns.edn`) — a pure
+- `:secret-leaf` base-fn (in `web/vault/fns.edn`) — a pure
     passthrough whose `:in` slot is `[:secret :text]`. The impl
     just returns its arg; the executor's `:secret-value` case
     has already dereferenced via vault by the time the impl runs.
-  - `crud/secrets/create-secret` writes
+- `crud/secrets/create-secret` writes
     `parent-ids=[<secret-leaf-id>]` + a binding with
     `:override-kind :secret-path` + `:value=<path>`.
-  - `crud.secrets/find-usages`, `delete-secret`, `rotate-secret`
+- `crud.secrets/find-usages`, `delete-secret`, `rotate-secret`
     accept only the secret-leaf shape — `shape/secret-fn?` takes
     the secret-leaf id and checks `[secret-leaf-id]` parent-ids.
-  - `crud.entities/secret-leaf-capability-rej` gates
+- `crud.entities/secret-leaf-capability-rej` gates
     `:secret-leaf`, `:vault-put`, `:vault-delete`,
     `:vault-metadata-put`, so user-graph can't `parent` any of
     those via generic endpoints.
-  - Editor `isSecretFn` (in `editor-secrets.js`) renders the 🔒
+- Editor `isSecretFn` (in `editor-secrets.js`) renders the 🔒
     badge on every fn-def whose `parent-ids` is exactly
     `[:secret-leaf]`.
-  - `crud.secrets/create-secret` explicitly calls
+- `crud.secrets/create-secret` explicitly calls
     `tc/type-check-fn-after-mutation!` on the new fn-def so its
     inherited `[:secret :text]` return-type lands in the rich-
     types registry; otherwise `tainted-fn?` wouldn't see the
     marker and T4's redaction wouldn't fire.
-  - `validation/secret-path-rej` walks `binding.slot-id →
+- `validation/secret-path-rej` walks `binding.slot-id →
     fn-slot.fn-id → fn.name → rich-types[name] → :args →
     slot-name keyword → :type` and asks `contains-secret?`. The
     storage layer drops `[:secret T]` down to its inner type's
@@ -400,6 +400,7 @@ covered by `PUT /api/secrets/:fn-id/value` for the wrapper-fn-def
 shape only — inline rotation is followup work.
 
 Verified end-to-end in 2026-05-29 smoke:
+
 - Gate-reject on `:add/:nums` (`:sequence`) → `:capability/secret-path-on-non-secret-slot`, vault rolled back (subsequent read 404).
 - Positive bind on `:sql-exec/:password` of a freshly-created composed fn → `binding` row with `:override-kind :secret-path`, vault holds the value at the path.
 

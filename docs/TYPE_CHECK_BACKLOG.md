@@ -108,9 +108,9 @@ are now allowlisted in `graphden.types.check/allowed-type-check-
 failures`. `system.core/sync-fn-entities-from-packages!` calls
 `assert-sweep-failures-match-allowlist!` after every sync:
 
-* Any failure NOT in the allowlist throws `:types/sweep-regression`
+- Any failure NOT in the allowlist throws `:types/sweep-regression`
   at sync time — the system refuses to start. CI catches it loud.
-* Any allowlisted name that's NO LONGER failing throws
+- Any allowlisted name that's NO LONGER failing throws
   `:types/sweep-stale-allowlist` — the ledger must shrink as the
   type-system gains expressiveness.
 
@@ -135,9 +135,9 @@ promoting the per-fn `log/debug` to `log/warn` in
 `expected :text, actual [:union :null :text]` on `:entity-type`
 slot. The 11 affected fn-defs:
 
-* `:_create-apply-result` / `-do-invalidate` / `-do-notify`
-* `:_update-apply-result` / `-do-invalidate` / `-do-notify`
-* `:_delete-apply-existing` / `-do-delete` / `-do-invalidate` /
+- `:_create-apply-result` / `-do-invalidate` / `-do-notify`
+- `:_update-apply-result` / `-do-invalidate` / `-do-notify`
+- `:_delete-apply-existing` / `-do-delete` / `-do-invalidate` /
   `-do-notify`
 
 Root cause (refined 2026-06-16):
@@ -189,10 +189,10 @@ editor effect/return strips — runtime is unaffected.
 Two general-purpose primitives added that make per-chain typing
 PRODUCTIVE once flow-disambiguation lands:
 
-* `:name` return-rule: typed input narrows to typed output
+- `:name` return-rule: typed input narrows to typed output
   (`:keyword` → `:text`, `[:union :null :keyword]` → `[:union
   :null :text]`).
-* `:assert-some` base-fn: runtime non-null assertion + type-level
+- `:assert-some` base-fn: runtime non-null assertion + type-level
   `:null` strip. Companion to `:coalesce` for the audit-as-
   unreachable case.
 
@@ -209,13 +209,13 @@ V]`. Adjacent to the record/map subtype work in B8.
 
 ### Fix paths (deferred)
 
-* **Control-flow narrowing via `:if`/`:case` guard propagation** —
+- **Control-flow narrowing via `:if`/`:case` guard propagation** —
   the principled fix. Substantial type-system change.
-* **Mechanical `:coalesce`-with-sentinel** — wrap each
+- **Mechanical `:coalesce`-with-sentinel** — wrap each
   entity-type-str chain with `:coalesce :default :_unknown` to
   strip null. Runtime never hits the default (guarded upstream), but
   pollutes the type-spec and semantically lies.
-* **`record-type ⊆ [:map K V]` subtype rule** — fixes the
+- **`record-type ⊆ [:map K V]` subtype rule** — fixes the
   `:_value-form-root-attrs` case. Pure type-system addition.
 
 All 12 surface only as missing editor effect/return strips — runtime
@@ -408,7 +408,7 @@ All 7 originally identified remaining failures were resolved.
 Five additional type-system improvements landed; each unlocked
 one or more of the remaining failures:
 
-8. **Inline-anon `:type` override propagation**
+1. **Inline-anon `:type` override propagation**
    (`packages/records/parse.clj`). When `expand-inline-anons-in-module`
    lifts an inline `{:parent X :args Y :type T ...}` map to a
    synthetic `_anon-<hash>` fn-def, the `:type T` is now stripped
@@ -418,7 +418,7 @@ one or more of the remaining failures:
    semantics as bare `{:ref :foo :type T}` bindings). Fixes
    `:_update-pre-existing-fetched`-style guarded nullables.
 
-9. **`:type` honoured on vector binding-item closure-captures**
+2. **`:type` honoured on vector binding-item closure-captures**
    (`types/check.clj :: vector-binding-elem-types`,
    `sequence-item-actual-type`). The `{:as :name :type T}` and
    `{:ref :foo :type T}` shapes already worked as scalar bindings;
@@ -426,7 +426,7 @@ one or more of the remaining failures:
    element like `[{:ref :_uri-marker-pos :type :int} {:value 1}]`
    strips `:_uri-marker-pos`'s nullable surface for the type-check.
 
-10. **Refinement ↔ primitive subtype-aware unification**
+3. **Refinement ↔ primitive subtype-aware unification**
     (`types/core.clj :: unify`). Add an arm to the lenient
     subtype-aware branch (sibling of the existing primitive /
     `:jsonb` / `:empty-map` arms): when either side is a
@@ -435,7 +435,7 @@ one or more of the remaining failures:
     unifying `:int ↔ :non-negative-int` (or vice-versa) falls
     into `::fail` even though the relation holds.
 
-11. **`:zipmap-return-rule`** (`core/collections/impls.clj`). When
+4. **`:zipmap-return-rule`** (`core/collections/impls.clj`). When
     the `:keys` binding is a literal vector of `{:value <kw>}`
     items and the `:vals` binding's per-item types are known,
     return a record-type whose fields are exactly those keys.
@@ -443,19 +443,19 @@ one or more of the remaining failures:
     chain reconstruct the response shape `{:status :int :headers
     _ :body :text}` instead of collapsing to `[:map :keyword :any]`.
 
-12. **`:if-return-rule` literal-int refinement**
+5. **`:if-return-rule` literal-int refinement**
     (`core/logic/impls.clj`). When BOTH `:then` and `:else`
     bindings are positive integer literals, refine `[:union :int
     :int] = :int` to `:positive-int` (`:non-negative-int` when
     one branch is zero). Lets `:_drop-count` (returns `1` or `2`)
     satisfy `:drop :count :non-negative-int`.
 
-13. **Per-arg effect tracking + `:call-time-effects` registry
+6. **Per-arg effect tracking + `:call-time-effects` registry
     field** (`types/check.clj`). Splits a fn's `:effects` set
     into wrap-time vs call-time. Per-arg effect contributions are
     recorded; refs bound to BOUND args contribute wrap-time
     effects only; refs bound to FREE args (call-site lift-through)
-    + the parent's body effects form `:call-time-effects`.
+    - the parent's body effects form `:call-time-effects`.
     `assemble-fn-type` prefers `:call-time-effects` over the full
     `:effects` set when building the structural fn-type used at
     HOF binding sites. Fixes `:_list-secrets-filtered` /
@@ -489,6 +489,7 @@ key is a keyword). So a fn-def that binds `:headers
 | `:html-action-response`    | `packages/web/crud/fns.edn:547`  (via `:_action-headers` returning `[:map :any :any]`) |
 
 Fix candidates:
+
 - (a) Extend `classify-literal` to detect a fully string-valued map
   as `[:map :text :text]`. Risk: changes classification for any
   string-keyed map elsewhere.
@@ -509,6 +510,7 @@ Fix candidates:
 
 Both are in `packages/examples/*` so impact is documentation-only,
 not runtime. Fix candidates:
+
 - (a) Update the example to declare `:type :text` on the binding
   to bind the typevar.
 - (b) The check could treat `{:value nil}` on a typevar slot as
@@ -567,6 +569,7 @@ effect / return-type strips just won't surface a value for these six.
 ## B9: ~5–6 fn-defs skipped by `register-type-aliases-from-db!`
 
 Startup warnings (one per fn-def):
+
 ```
 register-type-aliases-from-db!: skipped :parse-binding-list-item-from-form — body not well-formed
 register-type-aliases-from-db!: skipped :create-entity — body not well-formed
@@ -597,6 +600,7 @@ fn-def has `:impl-hash`).
 
 Both surfaces are PRE-EXISTING tech-debt unrelated to the
 secret-flow series. Fixing them needs:
+
 - type-system extension for string-keyed map literals (B8.1, B9),
 - HOF/typevar unification work (B8.3),
 - example cleanups (B8.2),

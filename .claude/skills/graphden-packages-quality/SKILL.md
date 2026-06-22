@@ -93,6 +93,7 @@ grep -rEn '\[:union :null :[a-z]' resources/packages --include='*.edn' | head -1
 ```
 
 Для каждого случая — спросить:
+
 1. Что реально читает этот слот в runtime?
 2. Может ли значение быть нарушающим (record вместо int)?
 3. Есть ли реальный известный тип? Если да — сузить.
@@ -133,6 +134,7 @@ Refinements (`:_refinement-narrow` template) дают runtime check —
 ### 2.2 Когда вводить новый alias
 
 **ДА** (имя оправдано):
+
 - ≥ 5 use-site'ов одинаковой структурной формы.
 - Семантическое имя добавляет смысл (`:port` лучше `[:int {:constraint
   [:and [:>= 1] [:<= 65535]]}]`).
@@ -142,6 +144,7 @@ Refinements (`:_refinement-narrow` template) дают runtime check —
   документирует ИСТОЧНИК данных, даже на ОДНОМ callsite. См. § 2.2.1.
 
 **НЕТ** (alias не нужен):
+
 - 1-2 use-site'а **анонимной** структурной формы — inline form
   проще читать (`{:keys [name id]}` vs `:_some-result-shape`).
 - «На всякий случай назовём» — засоряет alias-неймспейс.
@@ -156,6 +159,7 @@ Refinements (`:_refinement-narrow` template) дают runtime check —
 которую inline-shape потерял бы.
 
 Концретно:
+
 - `:_resolve-binding-versions-decode :return-type :binding-version-row-shape`
   читается за секунду — «эта функция декодирует строку binding-version».
 - Inline-вариант (`:return-type {:id :uuid :binding-id :uuid :branch-id :uuid
@@ -167,6 +171,7 @@ Refinements (`:_refinement-narrow` template) дают runtime check —
 5+» режет смысл, не сложность.
 
 **Когда single-use alias РЕАЛЬНО можно убрать:**
+
 - Если имя синтетическое (`:_some-step1-result`) без доменного смысла —
   это scaffolding, не alias. Inline в callsite.
 - Если shape настолько проста (1-2 поля) что имя добавляет шума, не
@@ -313,6 +318,7 @@ grep -rEn '^\(defn-?\s+(\S*orchestr|\S*pipeline|\S*-wrap|run-handler|process-\S+
 3. **Склей** их в graph wrap через `:if` / `:cond` / `:call` —
    эталонный пример `:branch-routing-wrap` в
    `resources/packages/web/branch-router/fns.edn`:
+
    ```edn
    {:name :branch-routing-wrap
     :parent :if
@@ -321,6 +327,7 @@ grep -rEn '^\(defn-?\s+(\S*orchestr|\S*pipeline|\S*-wrap|run-handler|process-\S+
            :else :base-handler-fallback
            :base-handler {:type [:fn …] :description "…"}}}
    ```
+
 4. **Удали** старый private helper. Composition теперь видна.
 5. **Перекройся тестом** на graph-уровне — handler chain через wrap
    должен работать end-to-end (smoke + integration suite).
@@ -354,6 +361,7 @@ decomposition). Кратко:
 
 **Правило 1 (when name is required)**: дать explicit-public-name —
 обязательно если:
+
 - Узнаваемая доменная сущность (`web-server`, `json-ok-response`).
 - Уже планируется ≥ 2 use-site (явно сейчас или в roadmap).
 - Будет export'нуто из пакета (consumer'ы из других пакетов).
@@ -392,6 +400,7 @@ reuse:
   conditional».
 
 **Когда single-use `_`-private реально inline'ить:**
+
 - Имя ПОЛНОСТЬЮ синтетическое (`:_step1`, `:_tmp`, `:_inner`) — это
   scaffolding, у которого нет смыслового содержания.
 - Wrapping тривиален и единственное использование в SOSEDNEM fn-def
@@ -644,6 +653,7 @@ grep -rE ':name :_anon-' resources/packages --include='*.edn'
 
 Пример (этой сессии): `:constant-time-equal?` добавлен → `test/graphden/
 packages/core/logic_test.clj` создан с тестом на:
+
 - matching strings → true,
 - non-matching → false (mismatch at first / last / length boundary),
 - nil / non-string → false (отличается от `:equal?` поведения).
@@ -728,7 +738,7 @@ test.clj` / `refinements_test.clj`). Драйверит fn-def через execut
 - **MI ради «склейки behavior».** «Я хочу что-fn делала и X и Y» —
   это композиция шагов, не axes-of-shape (см. §4.3). MI описывает
   что child IS-A, не то что он DOES. Переписывай через `:if`/`:cond`
-  + ref-биндинги.
+  - ref-биндинги.
 - **MI вместо single-parent + ref-биндингов «ради краткости».**
   Если выбор «двух parents без `:args`» vs «одного parent + 5
   `:args` биндингов» делается ради компактного fns.edn — это

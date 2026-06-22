@@ -107,6 +107,7 @@ work the way it should.
 ### The Gap Between Intent and Instructions
 
 A programming language is a **bridge** between:
+
 - **Human intent** — fuzzy, incomplete, often unconscious desires ("I want this to work")
 - **Machine instructions** — fully deterministic, precise, unambiguous
 
@@ -123,6 +124,7 @@ Modern programming languages use **text** as the primary representation:
 2. **Human side**: Humans write and read text to express their thoughts. **This is where we see room for improvement.**
 
 Problems with text-based code:
+
 - **Reading is hard** — requires parsing symbols, understanding context, building mental model. Concrete instances: indentation in Python, paren balancing in Clojure, the various keyword/operator/annotation forms in other languages — all collapse to AST anyway, but the reader pays the cost of recognising them every time.
 - **Mental substitution between definition and call site** — to understand what a piece of code does, the reader jumps to each function's definition, mentally inlines its body with the actual arguments, then jumps back. This is the single largest cognitive cost of reading code, and it is not optional — it must be done every time.
 - **Writing is hard** — requires remembering syntax, conventions, boilerplate.
@@ -203,6 +205,7 @@ Almost all code, regardless of language, is first converted to an **Abstract Syn
 **Goal**: Match or exceed classical languages in execution speed, safety, and correctness.
 
 **Strategies**:
+
 - Multi-level caching (execution graph cache → O(1) resolution)
 - Multiple storage backends for different deployment scenarios
 - Distributed execution across multiple executors (planned)
@@ -220,11 +223,13 @@ This breaks down into:
 #### 2.1 Minimal Primitives
 
 Following SICP, a language has three aspects:
+
 1. **Primitives** — basic building blocks
 2. **Means of combination** — how to compose primitives
 3. **Means of abstraction** — how to name and reuse compositions
 
 In graphden:
+
 - **Primitives**: Five entity types — fn, slot, fn-slot, binding, binding-list-item (see [§ Language Aspects](#language-aspects-sicp) for the full breakdown)
 - **Combination**: Parent-fn-ids inheritance + binding overlays (`value` / `ref-fn-id`); `binding-list-item.position` for ordered chains
 - **Abstraction**: Base functions (Clojure implementations) and composed functions (`parent-ids` inheritance + bindings)
@@ -234,6 +239,7 @@ In graphden:
 #### 2.2 DRY (Don't Repeat Yourself)
 
 Abstractions must minimize the need to define anything twice:
+
 - Result caching (by `ref-fn-id` within execution) enables sharing computed results
 - Composed functions (via `parent-ids` + bindings) enable reuse without duplication
 - Base functions provide reusable implementations
@@ -244,6 +250,7 @@ Abstractions must minimize the need to define anything twice:
 **Must have**: Everything expressible in classical languages should be expressible in graphden. No "sorry, you can't do that here."
 
 **Must avoid**: Unnecessary expressiveness. Examples:
+
 - Design patterns in Clojure are possible but unnecessary
 - List comprehensions in Python make sense only in Python's ecosystem
 - `let` bindings in Clojure are essential for Clojure, but graphs name things differently
@@ -300,6 +307,7 @@ affordance, one concept.
 **Base functions are minimal primitives that wrap Clojure/Java capabilities.**
 
 They should be:
+
 - **Atomic** — a single operation that cannot be expressed as composition of other base-fns
 - **Generic** — no hardcoded business logic, values, or domain specifics
 - **Small** — typically 1-10 lines of implementation code
@@ -325,6 +333,7 @@ They should be:
 | `dashboard-page` | Hardcoded page structure | fn-def composing `html-page`, `with-htmx`, etc. |
 
 **Rule of thumb:** If a base function contains:
+
 - Hardcoded strings (except library defaults)
 - Hardcoded HTML/CSS/JS
 - Hardcoded routes
@@ -365,6 +374,7 @@ They should be:
 ```
 
 This approach:
+
 - Makes UI structure visible in the graph
 - Allows modification without Clojure knowledge
 - Follows DRY (shared components like `:json-ok-response` are reused)
@@ -382,6 +392,7 @@ fn report
 ```
 
 This enables:
+
 - Sharing expensive computations (same `ref-fn-id` = computed once)
 - Consistent snapshots (same value for multiple consumers)
 - Automatic caching within execution context
@@ -403,6 +414,7 @@ concept.
 #### Five entity types
 
 The minimum needed for the model we want:
+
 - `fn` carries inheritance + type-row metadata
 - `slot` and `fn-slot` separate "what is this parameter" from
   "which fns expose it" — sharing slot identity is what makes MI
@@ -421,6 +433,7 @@ versioning per-fn instead of per-binding, lost dedup).
 **Concern**: "Storing every function in a database will be slow."
 
 **Response**:
+
 1. Execution graph is loaded once, executed in memory
 2. Caching provides O(1) graph resolution after first load
 3. Database is storage, not runtime — similar to how IDEs index code
@@ -605,6 +618,7 @@ The boundaries between roles are enforced by the permission system, not by techn
 The core system is simple: base-fn implementations + graph composition (fn, slot, fn-slot, binding, binding-list-item) + executor. But production features — versioning, caching, logging, permissions, environment management, secret storage — all require modifications to either storage (new fields, tables, query logic) or executor (new resolution steps, middleware).
 
 Hardwiring these features into the core has problems:
+
 - Forces all users to use them, even when unnecessary
 - Makes modifications difficult without deep knowledge of internals and Clojure
 - Couples unrelated concerns
@@ -742,12 +756,14 @@ The system separates concerns into three distinct layers:
 ```
 
 The executor takes any storage through the unified protocols:
+
 ```clojure
 (executor/create-context {:storage storage
                           :base-fns (registry/get-base-fns)})
 ```
 
 This design follows Django's "apps" pattern where each feature is an independent module that can:
+
 1. Extend the schema (add entities/fields)
 2. Modify CRUD behavior (storage decorators)
 3. Modify graph-resolution behavior (`ExecutionGraph` implementations)
@@ -917,6 +933,7 @@ free-arg" ergonomics, which Shape 1 trades for working-today.
 ### Debugging and Observability
 
 **Problem**: Classical languages have:
+
 - Stack traces with line numbers
 - Breakpoints
 - Step-by-step debugging
@@ -924,6 +941,7 @@ free-arg" ergonomics, which Shape 1 trades for working-today.
 **Question**: What's the graphden equivalent?
 
 **Possible approaches**:
+
 - Execution path (sequence of fn-ids traversed)
 - Node highlighting in visual UI
 - Time-travel debugging (replay execution with cached intermediate results)
@@ -990,6 +1008,7 @@ which is the single failure mode that matters for this feature.
 **Question**: How to handle breaking changes?
 
 **Possible approaches**:
+
 - Versioning (implemented via `VersionedStorage` decorator + branch fork-point conflict detection)
 - Migration tools
 - Compatibility analysis before changes
@@ -1014,6 +1033,7 @@ which is the single failure mode that matters for this feature.
 **Every change to the project must improve at least one principle without violating others.**
 
 If a proposed change:
+
 - Improves performance but adds entity types → reject or find alternative
 - Improves expressiveness but makes behavior implicit → reject or find alternative
 - Adds complexity without clear benefit → reject
@@ -1036,6 +1056,7 @@ Acceptable exceptions for longer impls: input validation/size limits (safely wra
 If two base-fns do the same thing with different type signatures, keep one with `:any` types.
 
 **Examples:**
+
 - `assoc` + `assoc-any` → single `:assoc` with `:any` args
 - `conj` + `conj-any` → single `:conj`
 - `identity` → fn-def of `:const` (same implementation)
@@ -1047,6 +1068,7 @@ If two base-fns do the same thing with different type signatures, keep one with 
 When the same logic appears in multiple base-fns, extract it as a standalone base-fn.
 
 **Examples:**
+
 - `parse-query-string` — duplicated in 3 places in crud
 - `parse-json` — inline in layout and crud handlers
 - `stringify-map-keys` — inline closure in http-server
@@ -1057,6 +1079,7 @@ When the same logic appears in multiple base-fns, extract it as a standalone bas
 Base-fns must not contain hardcoded configuration values. Defaults belong in fn-defs (via arg bindings), not in implementation code. The impl should use the arg directly without `(or arg default)`.
 
 **Examples:**
+
 - Security headers: from hardcoded map in `http-server` → fn-def arg `:default-headers`
 - Error responses: from hardcoded maps in `router` → fn-defs via MI (`text-error-router`)
 - Default styles: from `cytoscape-container` → explicit required arg `:style`
@@ -1067,6 +1090,7 @@ Base-fns must not contain hardcoded configuration values. Defaults belong in fn-
 HTML, SVG, CSS, hardcoded strings belong in fn-defs (`:parent :const`), not in implementation code. Impl stays a pure library wrapper.
 
 **Examples:**
+
 - `editor-body` → `:const` fn-def with hiccup structure
 - `favicon-svg-body` → `:const` fn-def
 - CDN URLs → fn-def args (not constants in impl)
@@ -1077,6 +1101,7 @@ HTML, SVG, CSS, hardcoded strings belong in fn-defs (`:parent :const`), not in i
 Intermediate fn-defs that have no standalone semantic meaning use `_` prefix. This signals they exist only as wiring, not as reusable abstractions.
 
 **Examples:**
+
 - `health-handler-fn` → `_health-handler`
 - `editor-response` → `_editor-response`
 - `favicon-svg-body` → `_favicon-svg-body`
@@ -1086,6 +1111,7 @@ Intermediate fn-defs that have no standalone semantic meaning use `_` prefix. Th
 Generic arg names (`key`, `value`) should be renamed via `:as` to reflect domain semantics at the point of use.
 
 **Examples:**
+
 - `method-map.key` → `:method` (HTTP method)
 - `method-map.value` → `:handler` (request handler)
 - `assoc-status.value` → `:status` (status string)

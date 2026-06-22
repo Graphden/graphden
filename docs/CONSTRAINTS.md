@@ -38,6 +38,7 @@ or list-items) cannot form a cycle.
 time.
 
 **Example:**
+
 ```
 fn add-numbers
   binding {slot s-other, ref-fn-id multiply-numbers}

@@ -46,6 +46,7 @@ docker compose down
 ```
 
 This starts:
+
 - **age**: PostgreSQL with Apache AGE extension
 - **executor**: Graphden executor server
 

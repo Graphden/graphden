@@ -34,6 +34,7 @@ Concretely:
 
 When admin derives `:my-cron :parent :schedule :args {:cron … :fn …}`
 and the reconciler starts it:
+
 1. `:schedule` is invoked with `:cron` and `:fn` bound.
 2. Inside, `:future` HOF-wraps `:_cron-loop` and calls it as `(body)`.
 3. Existing wrapper signature: `(body args-map)` — but we pass zero
@@ -56,14 +57,17 @@ Each free-arg of a wrapped fn-graph belongs to ONE of two categories:
 | **captured** | Free-arg NOT in `args-shape` | At wrap time, executor captures the binding-chain |
 
 For `:map :fn [:fn {:item a} b]`:
+
 - `:item` is in `args-shape` → call-site (passed per element)
 - Any other free-arg of the wrapped fn-graph → captured
 
 For `:future :body [:fn {} :any]`:
+
 - `args-shape = {}` → no call-site args
 - ALL free-args of the wrapped fn-graph → captured
 
 For `:schedule` composition:
+
 - `:_cron-loop` wraps `:_cron-step` (via `:loop-until-interrupted`)
 - `:_cron-step` references `:_fire-target` which uses `:fn`
 - `:fn` is NOT in `:loop-until-interrupted`'s `:body` `args-shape` (`{}`)
@@ -77,6 +81,7 @@ For `:schedule` composition:
 ### Wrap-time capture (`hof-callable`)
 
 When a fn-graph is HOF-wrapped, the executor:
+
 1. Computes the call-site args from the slot's declared `[:fn ARGS _]` shape.
 2. For every OTHER free-arg of the fn-graph (transitively, through
    references), captures its value from the current binding-chain.
@@ -89,17 +94,20 @@ args resolve per invocation.
 ### Transitive free-arg propagation (`free-arg-slot-map`)
 
 A composed fn-def's free-args include:
+
 1. Slots in the inheritance chain that aren't bound (existing semantics)
 2. **PLUS** captured-args of any HOF-typed binding's referenced
    fn-graph that aren't bound at this fn-def's level (NEW)
 
 For `:schedule` (fn-def):
+
 - Inherited slots from `:future`: `{:body}` — bound to `:_cron-loop`
 - Captured args of `:_cron-loop`: `{:cron, :fn}` (transitive through
   `:_cron-step` → `:_fire-target`)
 - Neither bound at `:schedule` level → both become free-args of `:schedule`
 
 When admin derives `:my-cron :parent :schedule :args {:cron … :fn …}`:
+
 - `:cron` and `:fn` are now bound at `:my-cron`'s level
 - Inherited captured args from `:schedule` are now resolved
 - `:my-cron` has zero free-args → service-eligible
@@ -287,6 +295,7 @@ all use HOF wrap. After this change:
 
 **Compatibility check:** existing fn-defs that reference HOF args
 without binding the inner free-args were either:
+
 - Already broken (runtime error on call) — these would become "captured
   arg unresolved" errors instead, equivalent failure mode.
 - Working because the chain SOMEWHERE bound the args — these continue
@@ -294,6 +303,7 @@ without binding the inner free-args were either:
   before.
 
 No regressions expected for the existing HOF use cases. Specifically:
+
 - Ring handlers: their `:request` free-arg matches `:handler`'s
   `[:fn {:request _} _]` call-site arg. Unchanged.
 - Middleware: each middleware's wrapped body has `:request` /

@@ -54,12 +54,15 @@ Fallback (if MCPs unavailable): `tools/browser-test/check-editor.js <fn-name>` w
 If a new shade is genuinely needed, **add a token to both light and dark `:root` blocks first**, then reference it. Don't sprinkle one-off literals. Effect-chip categorical colours intentionally stay identical across themes — they encode kind, not surface.
 
 **Verification — preferred:**
+
 ```bash
 bb stylelint
 ```
+
 The `scale-unlimited/declaration-strict-value` rule fails the build on raw colours for `color`, `background[-color]`, `fill`, `stroke` declarations outside the theme blocks. Box-shadow values aren't covered automatically — when adding a colour-bearing `box-shadow`, route it through a token (`var(--error-fg)`, `var(--shadow-sm)`, etc.) yourself.
 
 Manual fallback:
+
 ```bash
 awk '/^body.theme-dark *\{/,/^}/{next} /^:root *\{/,/^}/{next} /#[0-9a-fA-F]{3,8}\b|rgba?\(/{print NR": "$0}' \
   resources/packages/app/editor/editor-styles.css

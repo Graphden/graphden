@@ -100,6 +100,7 @@ Each module is a directory containing:
 Contains a vector of function definitions. Each definition is either:
 
 **Base Function** (has Clojure implementation):
+
 ```edn
 {:name :add
  :args {:nums :jsonb}
@@ -107,6 +108,7 @@ Contains a vector of function definitions. Each definition is either:
 ```
 
 **Fn-def** (composition, no implementation):
+
 ```edn
 {:name :add-10
  :parent :add
@@ -124,6 +126,7 @@ Contains a vector of function definitions. Each definition is either:
 | `:lazy-args` | No | Set of arg names to NOT auto-deref |
 
 **Arg types:**
+
 - `:int`, `:numeric`, `:text`, `:bool` — primitive types
 - `:jsonb` — JSON-compatible data (arrays, maps)
 - `:any` — no type checking
@@ -131,6 +134,7 @@ Contains a vector of function definitions. Each definition is either:
 - `:uuid` — UUID value
 
 **Optional args:**
+
 ```edn
 {:name :filter
  :args {:pred :fn
@@ -147,6 +151,7 @@ Contains a vector of function definitions. Each definition is either:
 | `:args` | Yes | Map of arg-name → value or fn-reference |
 
 **Arg values:**
+
 - Literal: `{:port 8080}` — direct value
 - Reference: `{:handler :router-fn}` — reference to another function
 
@@ -240,6 +245,7 @@ execution context:
 When multiple fn-defs share structure, extract a common ancestor:
 
 **Problem — Duplication:**
+
 ```edn
 {:name :health-response
  :parent :ring-response
@@ -255,6 +261,7 @@ When multiple fn-defs share structure, extract a common ancestor:
 ```
 
 **Solution — Extract common ancestor:**
+
 ```edn
 ;; Common building block
 {:name :json-ok-response
@@ -273,6 +280,7 @@ When multiple fn-defs share structure, extract a common ancestor:
 ```
 
 **When to extract:**
+
 - Same ancestor (any level, not just immediate parent)
 - One or more identical bound arguments
 - Repeated structural pattern
@@ -323,17 +331,20 @@ When a fn-def references another fn-def with unbound arguments, those arguments 
 ### 3. Named vs Anonymous (One-off) Functions
 
 **Use named fn-def when:**
+
 - Function is reused multiple times
 - Function has clear semantic meaning
 - Function represents a domain concept
 - Function could be tested independently
 
 **Use one-off composition when:**
+
 - Combination is used exactly once
 - No semantic meaning beyond "connect A to B"
 - Specific path + specific handler (unlikely to reuse)
 
 **Example:**
+
 ```edn
 ;; Named: reusable building block
 {:name :json-ok-response
@@ -357,6 +368,7 @@ When a fn-def references another fn-def with unbound arguments, those arguments 
 | 6+ | Review needed | Ensure each level has independent meaning |
 
 Each level should:
+
 1. Have a meaningful, descriptive name
 2. Be potentially reusable elsewhere
 3. Represent a cohesive concept
@@ -408,6 +420,7 @@ grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages
 ```
 
 Common collision sources:
+
 - Base fn-defs in `core.*` (e.g. `core.collections.get`, `core.collections.list`).
 - Base fn-defs in `web.crud` (e.g. `get-entity`, `delete-entity` — both base-fns).
 - Sibling namespaces touching the same domain (e.g. `app.routes.entity-details` vs a hypothetical `web.crud.handlers.entity-details`).
@@ -460,6 +473,7 @@ Local fn-defs are stored with `name=nil` and don't appear in the sidebar or grap
 1. **Choose package and module** (or create new module)
 
 2. **Add definition to `fns.edn`:**
+
 ```edn
 {:name :my-new-fn
  :args {:input :jsonb
@@ -467,7 +481,8 @@ Local fn-defs are stored with `name=nil` and don't appear in the sidebar or grap
  :return-type :jsonb}
 ```
 
-3. **Add implementation to `impls.clj`:**
+1. **Add implementation to `impls.clj`:**
+
 ```clojure
 (defn my-new-fn
   [{:keys [input options]}]
@@ -481,13 +496,14 @@ Local fn-defs are stored with `name=nil` and don't appear in the sidebar or grap
    :my-new-fn my-new-fn})  ; Add here
 ```
 
-4. **Run tests:** `bb test`
+1. **Run tests:** `bb test`
 
 ### Adding a Fn-def
 
 1. **Choose package and module**
 
 2. **Add definition to `fns.edn`:**
+
 ```edn
 {:name :my-composed-fn
  :parent :existing-fn
@@ -495,16 +511,18 @@ Local fn-defs are stored with `name=nil` and don't appear in the sidebar or grap
         :options {:format "json"}}}
 ```
 
-3. **Run tests:** `bb test`
+1. **Run tests:** `bb test`
 
 ### Creating a New Module
 
 1. **Create module directory:**
+
 ```bash
 mkdir -p resources/packages/{package}/{module}
 ```
 
-2. **Create `fns.edn`:**
+1. **Create `fns.edn`:**
+
 ```edn
 ;; My new module functions
 [{:name :first-fn
@@ -512,7 +530,8 @@ mkdir -p resources/packages/{package}/{module}
   :return-type :any}]
 ```
 
-3. **Create `impls.clj`** (if has base functions):
+1. **Create `impls.clj`** (if has base functions):
+
 ```clojure
 (ns graphden.packages.{package}.{module}.impls
   (:require [graphden.executor.defbase :refer [defbase]]))
@@ -522,7 +541,8 @@ mkdir -p resources/packages/{package}/{module}
 (def impls {:first-fn first-fn})
 ```
 
-4. **Add module to `package.edn`:**
+1. **Add module to `package.edn`:**
+
 ```edn
 {:name "{package}"
  :modules ["existing" "new-module"]}  ; Add here
@@ -531,11 +551,13 @@ mkdir -p resources/packages/{package}/{module}
 ### Creating a New Package
 
 1. **Create package directory:**
+
 ```bash
 mkdir -p resources/packages/{new-package}
 ```
 
-2. **Create `package.edn`:**
+1. **Create `package.edn`:**
+
 ```edn
 {:name "{new-package}"
  :version "1.0.0"
@@ -544,6 +566,6 @@ mkdir -p resources/packages/{new-package}
  :modules ["first-module"]}
 ```
 
-3. **Create modules** (see above)
+1. **Create modules** (see above)
 
-4. **Update configuration** to include new package in load list
+2. **Update configuration** to include new package in load list

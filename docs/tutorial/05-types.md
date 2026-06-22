@@ -61,6 +61,7 @@ A refinement narrows an existing type with a constraint:
 ```
 
 `:refine` writes a fn-row with:
+
 - `:base-fn-id` = `:int`'s row id
 - `:constraint` = the predicate vector
 

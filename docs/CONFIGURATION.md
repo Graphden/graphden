@@ -42,6 +42,7 @@ Dependencies are expressed using Integrant references:
 ```
 
 Available reference types:
+
 - `#ig/ref :key` - Reference to a single component
 - `#ig/refset :key` - Reference to all components matching a key
 
@@ -277,7 +278,7 @@ Application-specific function definitions (referenced by `:exec/fn-entities`).
   )
 ```
 
-2. Add to configuration files:
+1. Add to configuration files:
 
 ```clojure
 :my/component
@@ -290,5 +291,6 @@ Application-specific function definitions (referenced by `:exec/fn-entities`).
 Logging is configured via `resources/logback.xml`. See the file for pattern and level configuration.
 
 Key MDC fields:
+
 - `correlation-id` - Request tracing ID
 - Custom fields via `graphden.logging.interface/with-context`

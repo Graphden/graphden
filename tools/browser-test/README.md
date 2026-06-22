@@ -31,6 +31,7 @@ node check-editor.js
 ## Expand Spec Format
 
 `node-name:level` where:
+
 - `node-name` - the name of the node (use `root` for the root/selected function)
 - `level` - how many ancestor levels to expand (1, 2, 3, ...)
 

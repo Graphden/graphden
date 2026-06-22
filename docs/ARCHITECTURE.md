@@ -120,7 +120,7 @@ impossible** in the current architecture:
 1. **Lower-level — `validate-no-dependency-cycle-impl`**
    (`storage/protocol/constraints.clj`). Per-binding write-time
    check. Walks `ref-fn-id` + `parent-ids` + `type-override-fn-id`
-   + `binding-list-item.ref-fn-id` edges from the bound ref. Rejects
+   - `binding-list-item.ref-fn-id` edges from the bound ref. Rejects
    when the chain closes back on the owner. Carves out
    `owner == ref` (the bare self-reference) as allowed — but see
    below: the higher-level check catches this anyway.
@@ -353,6 +353,7 @@ unchosen branch's symbol is never deref'd, so its thunk never fires.
 ```
 
 Structural benefits:
+
 - branches not taken (e.g. `:if`'s unchosen side) never evaluate;
 - the same `ref-fn-id` materialises at most once per execution
   through `result-cache`;
@@ -554,7 +555,8 @@ Backend interface contracts live in `storage/protocol/`:
 
 To add a new backend: implement these protocols and run
 `graphden.storage.protocol.contract-tests/run-graph-constraints-tests`
-+ `concurrent-read-write-test` to verify behavioural compliance.
+
+- `concurrent-read-write-test` to verify behavioural compliance.
 
 ## Appendix B: Module Dependency Graph
 

@@ -240,7 +240,7 @@ Anything compositional has to be a named fn-def, even when used once.
  :args {:map :_X-attrs-base :key {:value :b} :value …}}
 ```
 
-For complex hiccup attrs maps with multiple keys (class + data-*  +
+For complex hiccup attrs maps with multiple keys (class + data-*+
 hx-*), this means one named fn-def per `:assoc` step.
 
 ### 4. Literal-map keys are keywordized after JSONB roundtrip

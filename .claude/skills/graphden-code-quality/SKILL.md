@@ -74,6 +74,7 @@ EOF
 
 **Пример (этой сессии)** — `crud/entities/apply-create-core` был 106
 строк = nested let + cond. Распилен на:
+
 - `humanise-create-exception` (16 lines) — формат сообщения
 - `try-create-or-error` (24 lines) — capability-gate + create-entity wrap
 - `forward-rename-slot!` (10 lines) — Phase 6c side-effect
@@ -89,6 +90,7 @@ rename-slot → maybe rollback».
 
 Если extracted helper'у приходится передать > 5 аргументов, значит швы
 не там. Варианты:
+
 - Объединить связанные параметры в map (`{:storage :ctx :row}` → один
   `ctx`-map).
 - Найти другой шов — может, helper включает в себя ещё одну фазу,
@@ -131,6 +133,7 @@ linear-let constructing 8 index maps from raw rows. Распил создал
 entities.clj` + `crud/request.clj` + `crud/validation.clj` + …
 
 **Не режь файл, если:**
+
 - Все функции — одна логическая ответственность (`types/check.clj` —
   type-checker, 2858 LOC, но это ОДИН алгоритм).
 - Декомпозиция оставит много cross-references — плохой knife.
@@ -261,6 +264,7 @@ grep -rEn '\(map\s+#\(.*sp/query-entities' src --include='*.clj'
 ```
 
 Если найдено — заменить на batch API:
+
 - `sp/read-entities` (batch read by ids)
 - `sp/query-entities` с `:id` IN clause
 
@@ -309,6 +313,7 @@ grep -rEn 'read-string|eval\s+\(' src --include='*.clj'
 любой новый raw-string в `src/` — повод обосновать carve-out.
 
 **Зачем:**
+
 - **Safety**: HoneySQL автоматически параметризует значения
   (`?`-placeholders), исключает identifier-injection через
   user-supplied table-name. Raw `(str "\"" jt "\"")` требует
@@ -492,6 +497,7 @@ grep -rEn '\(is\s+\(some\?\s+\(' test --include='*.clj' | head -10
 ...)))` ловит regression на shape change.
 
 **Когда `(some? ...)` оправдан**:
+
 - Проверяемое значение — opaque handle (UUID, future, atom) без stable
   representation
 - Тест на «не упало» в инициализации (но тогда лучше `(is (nil?
@@ -506,6 +512,7 @@ grep -rEn '\(is\s+\(thrown\?\s+Throwable\b' test --include='*.clj' | head -10
 
 `Exception` ловит ВСЁ — включая `NullPointerException` от опечатки в
 test setup. Заменить:
+
 - `(is (thrown-with-msg? ClassName #"specific msg" ...))` — точный
   контракт
 - `(is (thrown? ClassName ...))` — конкретный класс (`ExceptionInfo`,
@@ -811,6 +818,7 @@ clojure -M:dev:test -m kaocha.runner --config-file tests.edn :integration --repo
 ```
 
 Целевые числа:
+
 - `smoke-pass-test`: 30-60 s (полный bootstrap + 1 проход)
 - `cron-schedule-service-test`: 60-120 s (включает 1+ s cron-fire)
 - `execute-http-test`: < 20 s
@@ -838,7 +846,8 @@ grep -L 'bootstrap-crud-graph-from-golden' test/graphden/integration/*_test.clj 
 ## 16. Browser tests — `tools/browser-test/*.test.js`
 
 Browser suite — 52 Playwright e2e-test'а в `tools/browser-test/`
-+ visual-snapshot suite в `tools/visual-tests/`. ~9000 LOC JS,
+
+- visual-snapshot suite в `tools/visual-tests/`. ~9000 LOC JS,
 покрывают UI flow редактора.
 
 ### 16.1 Coverage matrix — UI features → test files
@@ -879,7 +888,8 @@ ls /root/projects/graphden/tools/browser-test/*.test.js | xargs -n1 basename | \
 single-test-per-shape.
 
 **Pattern smell**: два файла с почти-одинаковым setup (>50% same code)
-+ разная assertion — кандидат на параметризацию (одна test-функция, два
+
+- разная assertion — кандидат на параметризацию (одна test-функция, два
 вызова с разными scenario'ами).
 
 ```bash
@@ -898,6 +908,7 @@ echo "Sequential total: ~50 tests * 30 s avg = 25 min"
 ```
 
 Современные best practices:
+
 - **Shared `browser.newContext()` per file**, не per test (если файл
   имеет 1 test — ok; если несколько — shared)
 - **Parallel run через `npx playwright test`** (если using `@playwright/
@@ -943,6 +954,7 @@ grep -rEn 'querySelector.*\.[\w-]+:has-text' tools/browser-test/*.test.js | head
 ```
 
 Стабильные селекторы (от лучшего к худшему):
+
 1. `data-testid="foo"` — explicit test handle
 2. `getByRole('button', {name: 'Save'})` — semantic
 3. `text=Save` — content-based (ломается при i18n)
@@ -989,6 +1001,7 @@ grep -rEn 'Bearer\s+[a-zA-Z0-9]' tools/browser-test/*.test.js | head
 Финальный self-check перед закрытием:
 
 **Code & lint**
+
 - [ ] `bb check` зелёный (0 warnings)
 - [ ] focused-тесты touched ns'ов зелёные
 - [ ] `bb test` или `bb ci` (в зависимости от scope) зелёный
@@ -997,6 +1010,7 @@ grep -rEn 'Bearer\s+[a-zA-Z0-9]' tools/browser-test/*.test.js | head
 - [ ] Нет TODO/FIXME/XXX/HACK маркеров без issue link
 
 **Structure**
+
 - [ ] Каждая функция ≥ 100 LOC ОБОСНОВАНА (см. §1.5) либо распилена
 - [ ] User-facing `:error` / `:reason` поля nil-safe
 - [ ] Каждый секретный compare — constant-time
@@ -1004,6 +1018,7 @@ grep -rEn 'Bearer\s+[a-zA-Z0-9]' tools/browser-test/*.test.js | head
       только по carve-out из §7.4 (PG-RPC / DDL edge / нет runtime-данных)
 
 **Unit tests**
+
 - [ ] Нет дубликатных deftests с одинаковыми observable assertion'ами
 - [ ] Каждый sleep в тестах либо оправдан runtime-контрактом, либо
       заменён на poll-with-deadline
@@ -1016,12 +1031,14 @@ grep -rEn 'Bearer\s+[a-zA-Z0-9]' tools/browser-test/*.test.js | head
 - [ ] Нет закомментированных deftests (§9.5.8)
 
 **Integration tests**
+
 - [ ] Каждый критический user-flow покрыт (§15.1 matrix gaps)
 - [ ] Integration НЕ дублирует unit-test слой (§15.2)
 - [ ] Все integration tests через golden-bootstrap (§15.3)
 - [ ] Один user-flow per NS (§15.4)
 
 **Browser tests**
+
 - [ ] Новый UI feature → новый `*.test.js` ИЛИ explicit «не нужно»
       (§16.1 matrix)
 - [ ] Cleanup gate в каждом `*.test.js` с RUN_ID (§16.4.1)
@@ -1031,5 +1048,6 @@ grep -rEn 'Bearer\s+[a-zA-Z0-9]' tools/browser-test/*.test.js | head
 - [ ] Auth-token через `process.env`, не hardcoded (§16.4.4)
 
 **Commit hygiene**
+
 - [ ] Каждый commit — отдельная concept-value-unit с verified-by
       линией в body

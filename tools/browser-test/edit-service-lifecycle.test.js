@@ -27,7 +27,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 
@@ -195,38 +195,27 @@ async function openServicePopover(page) {
     await page.evaluate(() => {
       document.querySelector('.service-popover-save-btn').click();
     });
-    // Wait for the :service row to appear in storage AND for the
-    // reconciler atom to track it as running. Match by fn-id, NOT
-    // fn-name — the latter goes through a backend JOIN that returns
-    // null for a brief window after row creation, which produced an
-    // observable race here (v11 / v12 diagnostic).
-    await page.waitForFunction(
-      async (fnId) => {
-        try {
-          const r = await window.authFetch('/api/services');
-          const body = await r.json();
-          const s = body.services?.find((x) => x['fn-id'] === fnId);
-          return !!s && !!s['enabled?'] && !!s.running;
-        } catch (_) { return false; }
-      },
-      probe.id,
-      {timeout: 15000, polling: 200});
-    const persistedDump = await page.evaluate(async (fnId) => {
-      const r = await window.authFetch('/api/services');
-      const body = await r.json();
-      return {
-        lookingForFnId: fnId,
-        services: body.services?.map((s) => ({
-          id: s.id, 'fn-id': s['fn-id'], 'fn-name': s['fn-name'],
-          'enabled?': s['enabled?'], running: !!s.running,
-        })) || null,
-        row: body.services?.find((s) => s['fn-id'] === fnId),
-      };
-    }, probe.id);
-    const persistedSvc = persistedDump.row;
+    // Poll from Node side — page.waitForFunction with an async
+    // predicate had inconsistent timing here (predicate returns a
+    // Promise; the polling loop sometimes saw the Promise as truthy
+    // and stopped without actually awaiting the inner fetch).
+    // Match by fn-id, NOT fn-name — the latter goes through a backend
+    // JOIN that returns null for a brief window after row creation
+    // (v12 diagnostic surfaced fn-name: null in that window).
+    let persistedSvc = null;
+    {
+      const deadline = Date.now() + 15000;
+      while (Date.now() < deadline) {
+        const list = await api(page, 'GET', '/api/services');
+        const s = (list?.services || [])
+          .find((x) => x['fn-id'] === probe.id);
+        if (s && s['enabled?'] && s.running) { persistedSvc = s; break; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
     assert(persistedSvc && persistedSvc['enabled?'],
-           ':service row persisted with :enabled? true (dump: '
-           + JSON.stringify(persistedDump).slice(0, 600) + ')');
+           ':service row persisted with :enabled? true: '
+           + JSON.stringify(persistedSvc).slice(0, 200));
     assert(persistedSvc.running,
            'reconciler tracked the start in the running atom: '
            + JSON.stringify(persistedSvc.running).slice(0, 200));
@@ -325,18 +314,19 @@ async function openServicePopover(page) {
       cb.dispatchEvent(new Event('change', {bubbles: true}));
       document.querySelector('.service-popover-save-btn').click();
     });
-    // Wait for the toggle to settle into storage.
-    await page.waitForFunction(
-      async (svcId) => {
-        try {
-          const r = await window.authFetch('/api/services');
-          const body = await r.json();
-          const s = body.services?.find((x) => x.id === svcId);
-          return s && !s['enabled?'];
-        } catch (_) { return false; }
-      },
-      persistedSvc.id,
-      {timeout: 15000, polling: 200});
+    // Wait for the toggle to settle into storage. Node-side poll to
+    // avoid the page.waitForFunction-with-async-predicate quirk.
+    {
+      const deadline = Date.now() + 15000;
+      let settled = false;
+      while (Date.now() < deadline) {
+        const list = await api(page, 'GET', '/api/services');
+        const s = (list?.services || []).find((x) => x.id === persistedSvc.id);
+        if (s && !s['enabled?']) { settled = true; break; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!settled) throw new Error('service did not flip to enabled?=false within 15s');
+    }
     const disabledSvc = await page.evaluate(async (svcId) => {
       const r = await window.authFetch('/api/services');
       const body = await r.json();
@@ -354,17 +344,20 @@ async function openServicePopover(page) {
     await page.evaluate(() => {
       document.querySelector('.service-popover-delete-btn').click();
     });
-    // Wait for the row to disappear from /api/services.
-    await page.waitForFunction(
-      async (svcId) => {
-        try {
-          const r = await window.authFetch('/api/services');
-          const body = await r.json();
-          return !body.services?.some((s) => s.id === svcId);
-        } catch (_) { return false; }
-      },
-      persistedSvc.id,
-      {timeout: 15000, polling: 200});
+    // Wait for the row to disappear from /api/services. Node-side
+    // poll (same reasoning as the Phase A and D loops above).
+    {
+      const deadline = Date.now() + 15000;
+      let gone = false;
+      while (Date.now() < deadline) {
+        const list = await api(page, 'GET', '/api/services');
+        if (!(list?.services || []).some((s) => s.id === persistedSvc.id)) {
+          gone = true; break;
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      if (!gone) throw new Error('service row did not disappear within 15s');
+    }
     const afterDelete = await page.evaluate(async (svcId) => {
       const r = await window.authFetch('/api/services');
       const body = await r.json();

@@ -28,9 +28,18 @@ const {assert, newContext} = require('./edit-test-helpers');
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#identity');
     await page.waitForSelector('#search-input', {timeout: 15000});
-    await page.waitForTimeout(800);
+    // Wait for the sidebar to be populated (at least a few entity-items)
+    // and the namespace headers (≥3) the baseline assertion expects.
+    await page.waitForFunction(
+      () => document.querySelectorAll('.entity-item').length >= 1
+            && document.querySelectorAll('.ns-header').length >= 3,
+      {timeout: 15000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
-    await page.waitForTimeout(800);
+    // Wait again after initGraph rebuilds the tree.
+    await page.waitForFunction(
+      () => document.querySelectorAll('.entity-item').length >= 1
+            && document.querySelectorAll('.ns-header').length >= 3,
+      {timeout: 15000, polling: 100});
 
     // ===================================================================
     // Phase A: baseline — sidebar shows at least one fn-row + several
@@ -50,7 +59,17 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Phase B: search for "identity" — matching entries stay.
     // ===================================================================
     await page.fill('#search-input', 'identity');
-    await page.waitForTimeout(400);
+    // Filter applies synchronously after the input event — wait until
+    // every visible entity-item carries "identity" (case-insensitive)
+    // AND the count is ≥1 AND ≤ baseline (filter narrowed something).
+    await page.waitForFunction(
+      (b) => {
+        const items = Array.from(document.querySelectorAll('.entity-item'));
+        if (items.length < 1 || items.length > b) return false;
+        return items.every((el) => /identity/i.test(el.textContent || ''));
+      },
+      baseline.entityCount,
+      {timeout: 5000, polling: 50});
     const matched = await page.evaluate(() => {
       const items = Array.from(document.querySelectorAll('.entity-item'));
       return {
@@ -68,7 +87,15 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Phase C: case-insensitive — same query in caps.
     // ===================================================================
     await page.fill('#search-input', 'IDENTITY');
-    await page.waitForTimeout(400);
+    // Same narrowing predicate — uppercase should match equivalently.
+    await page.waitForFunction(
+      (b) => {
+        const items = Array.from(document.querySelectorAll('.entity-item'));
+        if (items.length < 1 || items.length > b) return false;
+        return items.every((el) => /identity/i.test(el.textContent || ''));
+      },
+      baseline.entityCount,
+      {timeout: 5000, polling: 50});
     const caps = await page.evaluate(() =>
       document.querySelectorAll('.entity-item').length);
     assert(caps >= 1,
@@ -79,7 +106,10 @@ const {assert, newContext} = require('./edit-test-helpers');
     // ===================================================================
     await page.fill('#search-input',
                     'zzz-no-such-fn-anywhere-' + Date.now());
-    await page.waitForTimeout(400);
+    // Wait until the list is empty.
+    await page.waitForFunction(
+      () => document.querySelectorAll('.entity-item').length === 0,
+      {timeout: 5000, polling: 50});
     const empty = await page.evaluate(() =>
       document.querySelectorAll('.entity-item').length);
     assert(empty === 0,
@@ -89,7 +119,11 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Phase E: clear input → full tree restored.
     // ===================================================================
     await page.fill('#search-input', '');
-    await page.waitForTimeout(400);
+    // Wait until the list is restored to (≥) baseline size.
+    await page.waitForFunction(
+      (b) => document.querySelectorAll('.entity-item').length >= b,
+      baseline.entityCount,
+      {timeout: 5000, polling: 50});
     const restored = await page.evaluate(() =>
       document.querySelectorAll('.entity-item').length);
     assert(restored >= baseline.entityCount,

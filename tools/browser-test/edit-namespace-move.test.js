@@ -83,10 +83,13 @@ async function cleanup(page) {
     // before navigating.
     await waitForServerHealthy();
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FROM_NS + '.' + FN_NAME);
+    // Wait for either the fn-card (more-actions-trigger button) OR
+    // at least the sidebar to be populated — this test sometimes
+    // navigates to a NS-qualified hash that doesn't immediately
+    // resolve a card.
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
-            && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+      () => typeof graphData !== 'undefined' && graphData?.fns?.length > 0
+            && document.querySelectorAll('.entity-item').length > 0,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForFunction(
@@ -125,7 +128,17 @@ async function cleanup(page) {
     // Phase B: filter to `:core` then click the matching row.
     // ===================================================================
     await page.fill('.fn-picker-popover .fn-picker-search', TO_NS);
-    await page.waitForTimeout(300);
+    // Wait until the filter resolves to a row matching TO_NS.
+    await page.waitForFunction(
+      (target) => {
+        const rows = Array.from(
+          document.querySelectorAll('.fn-picker-popover .fn-picker-row'));
+        return rows.some(
+          (r) => r.querySelector('.fn-picker-row-name')?.textContent?.trim()
+                 === target);
+      },
+      TO_NS,
+      {timeout: 5000, polling: 50});
     await page.evaluate((target) => {
       const rows = Array.from(
         document.querySelectorAll('.fn-picker-popover .fn-picker-row'));
@@ -135,13 +148,21 @@ async function cleanup(page) {
       row?.click();
     }, TO_NS);
 
-    // Storage reflects the move after the PUT commits. Avoid a tight
-    // poll on `/api/graph/entities` — under load that races the
-    // per-ctx graph cache's read-through rebuild against the PUT's
-    // post-commit invalidation, leaving stale data cached on a
-    // concurrent reader. A single delayed read is what the real UI
-    // does (initGraph runs once after the PUT response).
-    await page.waitForTimeout(3000);
+    // Storage reflects the move after the PUT commits. Node-side
+    // poll on getEntities — bounded retries handle the per-ctx
+    // graph cache rebuild race more tightly than the historical
+    // fixed 3-second sleep.
+    {
+      const deadline = Date.now() + 15000;
+      let moved = false;
+      while (Date.now() < deadline) {
+        const ents = await getEntities(page);
+        const f = (ents.fns || []).find((x) => x.id === fn.id);
+        if (f && f['namespace-id'] === toNs.id) { moved = true; break; }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (!moved) throw new Error('ns-move never settled in storage');
+    }
     const finalEnts = await getEntities(page);
     const moved = finalEnts.fns.find((f) => f.id === fn.id);
     assert(moved['namespace-id'] === toNs.id,

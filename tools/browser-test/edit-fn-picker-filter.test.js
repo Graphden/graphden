@@ -39,7 +39,14 @@ const TEST_NAME = 'test-fn-picker-filter';
 
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
-    await page.waitForTimeout(2500);
+    // Wait for cytoscape and the unset-placeholder overlay (which
+    // is what the next step actually targets).
+    await page.waitForFunction(
+      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+            && !cy.animated()
+            && Array.from(document.querySelectorAll('.node-overlay'))
+                 .some((el) => /^unset-/.test(el.getAttribute('data-node-id') || '')),
+      {timeout: 20000, polling: 100});
 
     // Find the unset-placeholder overlay (data-node-id starts with
     // "unset-"). The click handler now sits on a `.placeholder-binder`
@@ -57,7 +64,10 @@ const TEST_NAME = 'test-fn-picker-filter';
       return {clicked: true};
     });
     assert(!opened.error, opened.error || 'placeholder clicked');
-    await page.waitForTimeout(200);
+    // Chooser popover renders synchronously after the click.
+    await page.waitForFunction(
+      () => !!document.querySelector('.free-arg-bind-chooser'),
+      {timeout: 5000, polling: 50});
 
     // The chooser popover offers "Bind literal" / "Bind fn-ref".
     // Pick fn-ref to reach the picker.
@@ -70,7 +80,11 @@ const TEST_NAME = 'test-fn-picker-filter';
       return {clicked: true};
     });
     assert(!refClicked.error, refClicked.error || 'fn-ref button clicked');
-    await page.waitForTimeout(300);
+    // fn-picker mounts after the click — wait for the popover with
+    // at least one row before probing.
+    await page.waitForFunction(
+      () => !!document.querySelector('.fn-picker-popover .fn-picker-row'),
+      {timeout: 5000, polling: 50});
 
     // Picker should now be open with expectedType = 'text' (the
     // :string slot's resolved type via :str-len's primary). Different
@@ -119,7 +133,16 @@ const TEST_NAME = 'test-fn-picker-filter';
         inp.dispatchEvent(new Event('input', {bubbles: true}));
       }
     });
-    await page.waitForTimeout(150);
+    // Filter is synchronous on the input event — wait until every
+    // visible row mentions "lower" and at least one survives.
+    await page.waitForFunction(
+      () => {
+        const rows = Array.from(document.querySelectorAll(
+          '.fn-picker-popover .fn-picker-row'));
+        if (rows.length === 0) return false;
+        return rows.every((r) => /lower/i.test(r.textContent || ''));
+      },
+      {timeout: 5000, polling: 50});
     const filterProbe = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(
         '.fn-picker-popover .fn-picker-row'));
@@ -140,7 +163,9 @@ const TEST_NAME = 'test-fn-picker-filter';
 
     // Close the picker to keep the page clean.
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(100);
+    await page.waitForFunction(
+      () => !document.querySelector('.fn-picker-popover'),
+      {timeout: 3000, polling: 50});
   } finally {
     await deleteFnByName(page, TEST_NAME).catch(() => {});
     await browser.close();

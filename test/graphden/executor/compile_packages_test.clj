@@ -218,17 +218,17 @@
                                            :headers {}}
                                  :storage-query storage-query-callable}
                                 *context*))
-          ;; 15 s budget: 2 s flaked under integration-suite parallel
-          ;; load AND under sequential-but-cold-JVM load — the original
-          ;; 2 s assumed warm steady-state with empty storage. The hang
-          ;; regression this test pins manifests as never-returning,
-          ;; not as a ~3 s response, so a generous wall-cap preserves
-          ;; the catch while removing the false-positive timeouts.
-          result (try (deref done 15000 ::timeout)
+          ;; 60 s budget: 2 s flaked under integration-suite parallel
+          ;; load; 15 s flaked under cloverage instrumentation
+          ;; (~6× overhead via `bb coverage-full`). The hang regression
+          ;; this test pins manifests as never-returning, not as a
+          ;; ~30 s response, so a generous wall-cap preserves the catch
+          ;; while removing the false-positive timeouts.
+          result (try (deref done 60000 ::timeout)
                       (finally (when-not (java.util.concurrent.Future/.isDone done)
                                  (java.util.concurrent.Future/.cancel done true))))]
       (is (not= ::timeout result)
-          "list-secrets-handler must terminate within 15 s — the hang here is the regression this test pins")
+          "list-secrets-handler must terminate within 60 s — the hang here is the regression this test pins")
       (when (map? result)
         (is (= 200 (:status result)))
         (is (string? (:body result)))))))
@@ -296,11 +296,11 @@
           ;; cache-projection regression — collapsing both secrets onto
           ;; one path — would still surface as a wrong-value failure,
           ;; not a borderline timeout.
-          result (try (deref done 15000 ::timeout)
+          result (try (deref done 60000 ::timeout)
                       (finally (when-not (java.util.concurrent.Future/.isDone done)
                                  (java.util.concurrent.Future/.cancel done true))))]
       (is (not= ::timeout result)
-          "handler must terminate within 15 s")
+          "handler must terminate within 60 s")
       (when (map? result)
         (is (= 200 (:status result)))
         (let [body (when (string? (:body result))

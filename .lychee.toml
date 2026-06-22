@@ -1,0 +1,53 @@
+# lychee — link checker for the repo's markdown corpus.
+# https://lychee.cli.rs/usage/config/
+#
+# Default mode for `bb lychee` is OFFLINE — file:// links + inline-anchor
+# checks only. External HTTP/HTTPS links are validated by the optional
+# `bb lychee-online` task (slow, network-dependent) and the periodic
+# GitHub Action — keeps the day-to-day `bb check` deterministic.
+
+# Files to crawl. `**/*.md` walks the tree; `exclude_path` below
+# carves out vendored / generated trees.
+include = []
+
+# Don't follow into vendored / generated trees — their README links
+# are not our prose to maintain.
+exclude_path = [
+  "node_modules",
+  "target",
+  ".playwright-mcp",
+  ".tools",
+  "tools/visual-tests/tests/editor.spec.js-snapshots",
+  ".git",
+]
+
+# Skip URL patterns that the offline check would still try to resolve
+# (rare with --offline but kept for the online run too).
+exclude = [
+  # Localhost references in docs — not real URLs to validate.
+  '^https?://localhost(:\d+)?($|/)',
+  '^https?://127\.0\.0\.1',
+  '^https?://0\.0\.0\.0',
+  # Example / placeholder hosts.
+  '^https?://example\.com',
+  '^https?://prod\.example\.com',
+  '^https?://your\.domain',
+]
+
+# Treat `[…]: (mailto:…)` and `[…]: (#anchor)` as fine even in offline mode.
+include_mail = false
+include_fragments = true
+
+# Network politeness for the eventual online run.
+max_concurrency = 16
+timeout = 20
+retry_wait_time = 2
+max_retries = 2
+
+# Accept 429 (rate limit) as ok — typical when the same host appears
+# many times across docs. Codes 200-299 + 301/302/308 also ok.
+accept = ["200..=299", "301", "302", "308", "429"]
+
+# Cache successful results — repeat invocations are sub-second.
+cache = true
+max_cache_age = "1w"

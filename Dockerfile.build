@@ -24,6 +24,12 @@ WORKDIR /app
 # Copy uberjar from builder
 COPY --from=builder /app/target/executor-server.jar /app/executor-server.jar
 
+# Mirror Dockerfile's non-root runtime user (trivy AVD-DS-0002).
+RUN useradd --system --uid 1001 --user-group --shell /sbin/nologin \
+        --home-dir /nonexistent graphden \
+    && chown -R graphden:graphden /app
+USER graphden
+
 # Set default port
 ENV PORT=8080
 ENV DB_POOL_SIZE=10

@@ -306,3 +306,108 @@ jobs:
 
       - name: Run markdownlint
         run: npx markdownlint-cli2
+
+  actionlint:
+    name: actionlint (workflows)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run actionlint via Docker
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+
+  lychee:
+    name: lychee (link check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Restore lychee cache
+        uses: actions/cache@v5
+        with:
+          path: .lycheecache
+          key: lychee-${{ github.sha }}
+          restore-keys: lychee-
+
+      - name: Run lychee (online — verifies external HTTP links too)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: |
+            --no-progress
+            --exclude-path node_modules
+            --exclude-path target
+            --exclude-path .tools
+            --exclude-path .playwright-mcp
+            '**/*.md'
+          fail: true
+
+  trivy:
+    name: trivy (CVE + misconfig)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run trivy fs (vulnerabilities)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          ignore-unfixed: false
+          skip-dirs: node_modules,target,.tools,.playwright-mcp,.git,.lsp
+
+      - name: Run trivy config (Dockerfile misconfig)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+          skip-dirs: node_modules,target,.tools
+
+  license-check:
+    name: license-check (npm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - uses: DeLaGuardo/setup-clojure@13.6.1
+        with:
+          bb: latest
+
+      - run: npm ci
+      - run: (cd tools/browser-test && npm install --no-save)
+      - run: (cd tools/visual-tests && npm install --no-save)
+
+      - name: Run license-check across npm trees
+        run: bb license-check
+
+  commitlint:
+    name: commitlint (PR commits)
+    runs-on: ubuntu-latest
+    # Only meaningful for PRs — `push` events don't have a base ref
+    # to lint against without manual range selection.
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Fetch full history so we can lint every commit in the PR
+          # range, not just HEAD.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run commitlint over the PR's commit range
+        run: |
+          npx commitlint \
+            --from ${{ github.event.pull_request.base.sha }} \
+            --to ${{ github.event.pull_request.head.sha }}

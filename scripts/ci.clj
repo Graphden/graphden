@@ -86,7 +86,14 @@
    "hadolint"   120000
    "gitleaks"   300000
    "typos"       60000
-   "markdownlint" 60000})
+   "markdownlint" 60000
+   ;; Newer cross-cutting linters; same docker-pull headroom as
+   ;; above for the first run.
+   "actionlint"   60000
+   "lychee"       60000
+   "trivy"       300000
+   "license-check" 120000
+   "commitlint"    60000})
 
 
 (def ^:private default-check-timeout-ms 60000)
@@ -310,6 +317,21 @@
                           "detect" "--no-banner" "--no-git"]
             typos-cmd ["bb" "typos"]
             markdownlint-cmd ["npx" "markdownlint-cli2"]
+            actionlint-cmd ["docker" "run" "--rm"
+                            "-v" (str pwd ":/repo") "-w" "/repo"
+                            "rhysd/actionlint:1.7.7" "-color"]
+            lychee-cmd ["docker" "run" "--rm"
+                        "-v" (str pwd ":/data") "-w" "/data"
+                        "lycheeverse/lychee:sha-467197f-alpine"
+                        "--offline" "--no-progress"
+                        "--exclude-path" "node_modules"
+                        "--exclude-path" "target"
+                        "--exclude-path" ".tools"
+                        "--exclude-path" ".playwright-mcp"
+                        "**/*.md"]
+            trivy-cmd ["bb" "trivy"]
+            license-check-cmd ["bb" "license-check"]
+            commitlint-cmd ["bb" "commitlint"]
 
             ;; Define checks. security check disabled — requires NVD API
             ;; key, run manually with `bb security`. The `tests-unit-
@@ -326,6 +348,11 @@
                     {:name "gitleaks" :cmd gitleaks-cmd}
                     {:name "typos" :cmd typos-cmd}
                     {:name "markdownlint" :cmd markdownlint-cmd}
+                    {:name "actionlint" :cmd actionlint-cmd}
+                    {:name "lychee" :cmd lychee-cmd}
+                    {:name "trivy" :cmd trivy-cmd}
+                    {:name "license-check" :cmd license-check-cmd}
+                    {:name "commitlint" :cmd commitlint-cmd}
                     {:name "tests-unit-coverage" :cmd coverage-cmd}
                     {:name "outdated" :cmd outdated-cmd}]
 

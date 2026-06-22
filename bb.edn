@@ -167,6 +167,83 @@
   {:doc "Auto-fix markdownlint violations where possible."
    :task (p/shell "npx" "markdownlint-cli2" "--fix")}
 
+  actionlint
+  {:doc "Lint GitHub Actions workflows via Docker rhysd/actionlint:1.7.7."
+   :task (p/shell "docker" "run" "--rm"
+                  "-v" (str (System/getenv "PWD") ":/repo")
+                  "-w" "/repo"
+                  "rhysd/actionlint:1.7.7" "-color")}
+
+  lychee
+  {:doc "Offline link-check (.md files) via Docker lycheeverse/lychee. External HTTP links are NOT contacted — run `bb lychee-online` for that. Config: .lychee.toml."
+   :task (p/shell "docker" "run" "--rm"
+                  "-v" (str (System/getenv "PWD") ":/data")
+                  "-w" "/data"
+                  "lycheeverse/lychee:sha-467197f-alpine"
+                  "--offline" "--no-progress"
+                  "--exclude-path" "node_modules"
+                  "--exclude-path" "target"
+                  "--exclude-path" ".tools"
+                  "--exclude-path" ".playwright-mcp"
+                  "**/*.md")}
+
+  lychee-online
+  {:doc "ONLINE link-check — verifies every external HTTP/HTTPS URL in docs. Slow + network-dependent; run before docs PRs, NOT on every `bb check`. Cached for 1 week (.lycheecache)."
+   :task (p/shell "docker" "run" "--rm"
+                  "-v" (str (System/getenv "PWD") ":/data")
+                  "-w" "/data"
+                  "lycheeverse/lychee:sha-467197f-alpine"
+                  "--no-progress"
+                  "--exclude-path" "node_modules"
+                  "--exclude-path" "target"
+                  "--exclude-path" ".tools"
+                  "--exclude-path" ".playwright-mcp"
+                  "**/*.md")}
+
+  trivy
+  {:doc "Supply-chain CVE + Dockerfile misconfig scan via Docker aquasec/trivy:0.58.2. Caches vulnerability DB in /tmp/trivy-cache."
+   :task (let [pwd (System/getenv "PWD")]
+           (println "▶ trivy config (Dockerfile misconfig)")
+           (p/shell "docker" "run" "--rm"
+                    "-v" (str pwd ":/repo")
+                    "-v" "/tmp/trivy-cache:/root/.cache/"
+                    "-w" "/repo"
+                    "aquasec/trivy:0.58.2"
+                    "config" "--severity" "HIGH,CRITICAL"
+                    "--skip-dirs" "node_modules,target,.tools"
+                    "--exit-code" "1" "--quiet" ".")
+           (println "▶ trivy fs (CVE in npm + maven deps)")
+           (p/shell "docker" "run" "--rm"
+                    "-v" (str pwd ":/repo")
+                    "-v" "/tmp/trivy-cache:/root/.cache/"
+                    "-w" "/repo"
+                    "aquasec/trivy:0.58.2"
+                    "fs" "--severity" "HIGH,CRITICAL"
+                    "--skip-dirs" "node_modules,target,.tools,.playwright-mcp,.git,.lsp"
+                    "--exit-code" "1" "--quiet" "."))}
+
+  license-check
+  {:doc "Audit npm dep licenses against the allowlist of permissive licenses. Fails on any package outside MIT/BSD/Apache/ISC/CC0/Unlicense family — catches an accidental GPL/AGPL pull before it ships."
+   :task (let [allow (str/join ";"
+                               ["MIT" "ISC" "BSD" "BSD-2-Clause" "BSD-3-Clause"
+                                "Apache-2.0" "CC0-1.0" "Unlicense" "0BSD"
+                                "Python-2.0" "MIT OR Apache-2.0" "MIT-0"
+                                "Apache-2.0 OR MIT" "(MIT OR CC0-1.0)"])]
+           (doseq [dir ["." "tools/browser-test" "tools/visual-tests"]]
+             (println (str "▶ license-check " dir))
+             (p/shell {:dir dir}
+                      "npx" "license-checker-rseidelsohn"
+                      "--summary" "--onlyAllow" allow)))}
+
+  commitlint
+  {:doc "Lint the most recent commit messages against the conventional-commits rules in commitlint.config.cjs. Pass a commit range as `bb commitlint HEAD~5..HEAD` to lint a larger window; default is the last 20."
+   :task (let [range (or (first *command-line-args*) "HEAD~20..HEAD")
+               splitter (re-pattern "\\.\\.")
+               parts (str/split range splitter)]
+           (println (str "▶ commitlint " range))
+           (p/shell "npx" "commitlint" "--from" (first parts)
+                    "--to" (or (second parts) "HEAD")))}
+
   visual
   {:doc "Run Playwright visual-regression tests against running editor (default http://localhost:9002). Reads AUTH_TOKEN from env or .env. Use `bb visual-update` after intentional UI changes."
    :task (p/shell {:dir "tools/visual-tests"} "npx" "playwright" "test")}
@@ -384,15 +461,32 @@
                gitleaks-cmd (str "docker run --rm -v " (System/getenv "PWD")
                                  ":/repo -w /repo zricethezav/gitleaks:latest"
                                  " detect --no-banner --no-git")
-               markdownlint-cmd "npx markdownlint-cli2"]
-           ;; hadolint requires stdin redirection so we run it sequentially
-           ;; via `bb hadolint`; typos runs sequentially because it has to
-           ;; download the binary on first run.
+               markdownlint-cmd "npx markdownlint-cli2"
+               actionlint-cmd (str "docker run --rm -v " (System/getenv "PWD")
+                                   ":/repo -w /repo"
+                                   " rhysd/actionlint:1.7.7 -color")
+               lychee-cmd (str "docker run --rm -v " (System/getenv "PWD")
+                               ":/data -w /data"
+                               " lycheeverse/lychee:sha-467197f-alpine"
+                               " --offline --no-progress"
+                               " --exclude-path node_modules"
+                               " --exclude-path target"
+                               " --exclude-path .tools"
+                               " --exclude-path .playwright-mcp"
+                               " **/*.md")]
+           ;; hadolint requires stdin redirection, typos downloads its
+           ;; binary on first run, trivy + license-check + commitlint
+           ;; chain multiple commands — all run sequentially after the
+           ;; parallel batch.
            (run-parallel [kondo-cmd splint-cmd cljstyle-cmd
                           biome-cmd stylelint-cmd
-                          shellcheck-cmd gitleaks-cmd markdownlint-cmd])
+                          shellcheck-cmd gitleaks-cmd markdownlint-cmd
+                          actionlint-cmd lychee-cmd])
            (p/shell "bb" "hadolint")
            (p/shell "bb" "typos")
+           (p/shell "bb" "trivy")
+           (p/shell "bb" "license-check")
+           (p/shell "bb" "commitlint")
            (println (str green "✓ All linters passed" reset)))}
 
   ;; === HELPERS ===

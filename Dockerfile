@@ -17,6 +17,14 @@ WORKDIR /app
 # Copy pre-built uberjar
 COPY target/executor-server.jar /app/executor-server.jar
 
+# Run as a non-root user — trivy AVD-DS-0002 best-practice. The
+# uberjar lives in /app, owned by `graphden`; nothing in the
+# runtime needs root.
+RUN useradd --system --uid 1001 --user-group --shell /sbin/nologin \
+        --home-dir /nonexistent graphden \
+    && chown -R graphden:graphden /app
+USER graphden
+
 # Set default environment variables
 ENV PORT=8080
 ENV STORAGE_TYPE=postgres

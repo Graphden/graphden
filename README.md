@@ -97,13 +97,23 @@ required):
   `clojure -M:kondo` / `-M:splint` / `-M:cljstyle` aliases.
 - **JS + CSS + markdown** — biome / stylelint / markdownlint-cli2:
   npm devDeps in `package.json`; run `npm install` once after clone.
-- **shell / Dockerfile / secrets** — shellcheck / hadolint / gitleaks:
-  pulled as Docker images on first `bb shellcheck` / `bb hadolint` /
-  `bb gitleaks`. Requires Docker (already needed for the executor
+- **shell / Dockerfile / secrets / workflows / supply-chain** —
+  shellcheck / hadolint / gitleaks / actionlint / trivy / lychee:
+  pulled as Docker images on first invocation (`bb shellcheck`,
+  `bb hadolint`, `bb gitleaks`, `bb actionlint`, `bb trivy`,
+  `bb lychee`). Requires Docker (already needed for the executor
   and Postgres containers).
 - **Spelling** — `typos`: `bb typos` downloads the binary into
   `.tools/typos` on first run (Linux x86_64 release tarball, pinned
   version). `.tools/` is gitignored.
+- **Licenses** — `bb license-check`: scans npm devDeps in the root,
+  `tools/browser-test`, and `tools/visual-tests` trees against the
+  allowlist of permissive licenses (MIT / BSD / Apache / ISC / CC0 /
+  Unlicense / Python-2.0). Fails on copyleft.
+- **Commit messages** — `bb commitlint [HEAD~N..HEAD]`: validates
+  recent commit messages against Conventional Commits (config in
+  `commitlint.config.cjs`). CI's `commitlint` job runs over each PR's
+  commit range.
 
 For day-to-day work: `npm install`, then `bb check` runs every
 linter. CI runs the same set on every PR.

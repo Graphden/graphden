@@ -24,7 +24,9 @@ const {assert, AUTH, BASE} = require('./edit-test-helpers');
 
 
 async function freshContext() {
-  const browser = await chromium.launch({headless: true});
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--no-zygote', '--in-process-gpu']});
   const ctx = await browser.newContext({viewport: {width: 1400, height: 900}});
   // NO password seeded — we want the locked initial state.
   const page = await ctx.newPage();

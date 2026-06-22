@@ -16,7 +16,8 @@
 const {chromium} = require('playwright');
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({
+    args: ['--no-sandbox', '--no-zygote', '--in-process-gpu']});
   const page = await browser.newPage();
   console.log('regression-migrate-on-fn-ref — value-binding migrates, parent suppresses');
 

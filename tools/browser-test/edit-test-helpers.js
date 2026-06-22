@@ -66,6 +66,18 @@ async function newContext(chromium) {
     args: [
       '--js-flags=--max-old-space-size=1024',
       '--disable-dev-shm-usage',
+      // Chrome refuses to start as root without --no-sandbox
+      // (crbug/638180). The e2e stack runs as root.
+      '--no-sandbox',
+      // The zygote pre-fork + GPU subprocess can't initialise in
+      // some restrictive namespaces (CapRover hosts, certain CI
+      // runners): every page.goto crashes with `[page crash]
+      // renderer crashed` (Compositor int3 in dmesg). `--no-zygote`
+      // disables the renderer pre-fork; `--in-process-gpu` collapses
+      // the GPU sub-process into main. Renderer itself stays in its
+      // own process — keeps Cytoscape responsive.
+      '--no-zygote',
+      '--in-process-gpu',
     ],
   });
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });

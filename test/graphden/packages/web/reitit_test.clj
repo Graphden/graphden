@@ -7,7 +7,9 @@
    pattern used by layout-test."
   (:require
     [clojure.java.io :as io]
-    [clojure.test :refer [deftest is testing]]))
+    [clojure.string :as str]
+    [clojure.test :refer [deftest is testing]]
+    [reitit.ring :as ring]))
 
 
 ;; =============================================================================
@@ -30,6 +32,18 @@
 
 
 (def ^:private middleware-impl (unwrap 'middleware))
+(def ^:private ring-route-paths-impl (unwrap 'ring-route-paths))
+(def ^:private routes->js-bundle-impl (unwrap 'routes->js-bundle))
+
+
+(defn- route-paths
+  [router]
+  (ring-route-paths-impl {:router router} nil))
+
+
+(defn- js-bundle
+  [paths]
+  (routes->js-bundle-impl {:paths paths} nil))
 
 
 (defn- call-mw
@@ -122,3 +136,110 @@
       (is (= 403 (:status resp)))
       (is (false? @inner-called)
           "outer's early-return must prevent inner from running"))))
+
+
+;; =============================================================================
+;; TESTS — ring-route-paths (path enumeration from compiled router)
+;; =============================================================================
+
+(deftest ring-route-paths-extracts-from-ring-handler
+  (testing "given a reitit ring handler, returns all path patterns in route order"
+    (let [handler (ring/ring-handler
+                    (ring/router
+                      [["/health" {:get (constantly {:status 200})}]
+                       ["/api/users/:id" {:get (constantly {:status 200})}]]))
+          paths (route-paths handler)]
+      (is (= ["/health" "/api/users/:id"] paths)))))
+
+
+(deftest ring-route-paths-extracts-from-bare-router
+  (testing "given a bare reitit.core/Router (not wrapped as ring-handler), still works — `or get-router self` coercion"
+    (let [router (ring/router
+                   [["/a" {:get (constantly {:status 200})}]
+                    ["/b/:x" {:get (constantly {:status 200})}]])
+          paths (route-paths router)]
+      (is (= ["/a" "/b/:x"] paths)))))
+
+
+(deftest ring-route-paths-flattens-nested-groups
+  (testing "nested reitit data shape — common prefix gets joined into each leaf"
+    (let [router (ring/router
+                   ["/api"
+                    ["/x" {:get (constantly {:status 200})}]
+                    ["/y/:z" {:get (constantly {:status 200})}]])]
+      (is (= ["/api/x" "/api/y/:z"] (route-paths router))))))
+
+
+;; =============================================================================
+;; TESTS — routes->js-bundle (codegen of `window.API`)
+;; =============================================================================
+
+(deftest js-bundle-wraps-in-iife
+  (testing "output is an IIFE assigning to window.API"
+    (let [out (js-bundle ["/api/health"])]
+      (is (str/includes? out "(function () {"))
+      (is (str/includes? out "window.API = {"))
+      (is (str/includes? out "})();")))))
+
+
+(deftest js-bundle-emits-static-paths-as-string-constants
+  (testing "static path → `key: \"path\"` entry"
+    (let [out (js-bundle ["/api/branches"])]
+      (is (str/includes? out "api_branches: \"/api/branches\","))
+      ;; sanity: no function for the static path
+      (is (not (str/includes? out "api_branches: function"))))))
+
+
+(deftest js-bundle-emits-parametric-paths-as-functions
+  (testing "param segment → `key: function(p){ return ... + encodeURIComponent(p) + ...; }`"
+    (let [out (js-bundle ["/api/fns/:id"])]
+      (is (str/includes? out "api_fns_id: function(id) { return"))
+      (is (str/includes? out "encodeURIComponent(id)"))
+      (is (str/includes? out "\"/api/fns/\"")))))
+
+
+(deftest js-bundle-hyphenated-params-become-underscored
+  (testing "JS function parameter names must be valid identifiers — `-` → `_` in param names AND key"
+    (let [out (js-bundle ["/api/fns/:fn-id/versions"])]
+      ;; function param ident — `fn_id`, not `fn-id`
+      (is (str/includes? out "function(fn_id)"))
+      (is (str/includes? out "encodeURIComponent(fn_id)"))
+      ;; key — `api_fns_fn_id_versions`
+      (is (str/includes? out "api_fns_fn_id_versions:")))))
+
+
+(deftest js-bundle-sorts-and-dedupes-entries
+  (testing "entries land in sorted order with duplicates collapsed (stable bundle hash)"
+    (let [out (js-bundle ["/api/zebra" "/api/apple" "/api/apple"])
+          entries (->> (str/split-lines out)
+                       (filter #(str/includes? % ": "))
+                       (filter #(str/includes? % "/api/")))]
+      (is (= 2 (count entries)) "dedup collapses repeated paths")
+      (is (str/starts-with? (str/triml (first entries)) "api_apple:")
+          "first entry is the alphabetically-first path"))))
+
+
+(deftest js-bundle-emits-leading-comment
+  (testing "output starts with an AUTO-GENERATED warning so editors don't manually edit"
+    (let [out (js-bundle ["/api/x"])]
+      (is (str/starts-with? out "// AUTO-GENERATED")))))
+
+
+(deftest js-bundle-empty-input-still-valid-js
+  (testing "no paths → an empty `window.API = {}` IIFE — must still parse as JS"
+    (let [out (js-bundle [])]
+      (is (str/includes? out "window.API = {"))
+      (is (str/includes? out "}"))
+      (is (str/includes? out "})();")))))
+
+
+(deftest js-bundle-roundtrip-from-router
+  (testing "compiled router → ring-route-paths → routes->js-bundle produces JS that mentions every path"
+    (let [router (ring/router
+                   [["/api/health" {:get (constantly {:status 200})}]
+                    ["/api/fns/:id" {:get (constantly {:status 200})}]
+                    ["/api/branches/:ref/diff" {:get (constantly {:status 200})}]])
+          out (-> router route-paths js-bundle)]
+      (is (str/includes? out "api_health: \"/api/health\","))
+      (is (str/includes? out "api_fns_id: function(id)"))
+      (is (str/includes? out "api_branches_ref_diff: function(ref)")))))

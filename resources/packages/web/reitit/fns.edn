@@ -73,6 +73,21 @@
           :default-handler {:type :any :description "Already-built Ring callable invoked when no route matches (e.g. from `:ring-create-default-handler`). `:any` because the value flows through unchanged."}}
    :return-type [:fn {:request :ring-request-shape} :ring-response-shape]}
 
+  ;; Route enumeration (used by the editor-bundle codegen below to
+  ;; close the backend↔frontend coupling loop).
+  {:name :ring-route-paths
+   :description "Vector of full path patterns the compiled reitit ring router serves, in route-table order. Wraps `reitit.core/routes` + `reitit.ring/get-router`."
+   :args {:router {:type :any :description "Compiled reitit Ring handler (e.g. from `:ring-handler`)."}}
+   :return-type [:list :text]}
+
+  ;; JS code generator. Pure data → string templating, no
+  ;; orchestration. See impls.clj for the JS shape; the user-facing
+  ;; lever is the input ROUTE TABLE (graph data), not the JS template.
+  {:name :routes->js-bundle
+   :description "Emit a `window.API = {…}` JS module from a vector of full route path patterns. Static paths → string constants; paths containing `:param` segments → functions that encodeURIComponent + concatenate. Paired with `:ring-route-paths` to close the backend↔frontend coupling loop."
+   :args {:paths {:type [:list :text] :description "Full route path patterns, e.g. `[\"/health\" \"/api/branches/:ref/diff\"]`."}}
+   :return-type :text}
+
   ;; =============================================================================
   ;; MIDDLEWARE CHAIN
   ;; =============================================================================

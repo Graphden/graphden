@@ -321,6 +321,14 @@ async function loadRowActionsContent(host, fnId, context, opts) {
                   : '')
               + (useSiteBindingId
                   ? '&binding-id=' + encodeURIComponent(useSiteBindingId)
+                  : '')
+              + (opts.editBlockReason
+                  ? '&edit-block-reason='
+                    + encodeURIComponent(opts.editBlockReason)
+                  : '')
+              + (opts.serviceBlockedReason
+                  ? '&service-blocked-reason='
+                    + encodeURIComponent(opts.serviceBlockedReason)
                   : '');
     const r = await fetch(url);
     if (!r.ok) {
@@ -374,6 +382,18 @@ function bindRowActionsDispatch(host) {
   host.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
+    // Disabled-with-reason guard — server marks the button with
+    // `aria-disabled="true"` + the reason in `title`. Surface the
+    // reason via `showIconReasonPopover` (same UX as the legacy
+    // `applyIconDisabledReason` for in-card icons) and stop here.
+    if (btn.getAttribute('aria-disabled') === 'true') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof showIconReasonPopover === 'function' && btn.title) {
+        showIconReasonPopover(btn, btn.title);
+      }
+      return;
+    }
     const action = btn.dataset.action;
     const fnId = btn.dataset.fnId || host.dataset.fnId;
     switch (action) {
@@ -460,6 +480,89 @@ function bindRowActionsDispatch(host) {
         const arg = _rowActionsUseSiteArgs.get(bindingId);
         if (arg && typeof enterFreeArgBindEditMode === 'function') {
           enterFreeArgBindEditMode(arg, btn);
+        }
+        break;
+      }
+      // --- Phase A4 root-row actions ---
+      case 'run-fn': {
+        e.preventDefault();
+        e.stopPropagation();
+        const fnEntity = lookups?.fnMap?.get(fnId);
+        if (fnEntity && typeof showExecutePopover === 'function') {
+          showExecutePopover(fnEntity, btn);
+        }
+        break;
+      }
+      case 'fn-versions': {
+        e.preventDefault();
+        e.stopPropagation();
+        const fnEntity = lookups?.fnMap?.get(fnId);
+        if (fnEntity && typeof showFnVersionsPopover === 'function') {
+          showFnVersionsPopover(fnEntity, btn);
+        }
+        break;
+      }
+      case 'service-settings': {
+        e.preventDefault();
+        e.stopPropagation();
+        const fnEntity = lookups?.fnMap?.get(fnId);
+        if (fnEntity && typeof showServicePopover === 'function') {
+          showServicePopover(fnEntity, btn);
+        }
+        break;
+      }
+      case 'rename-fn': {
+        e.preventDefault();
+        e.stopPropagation();
+        const fnEntity = lookups?.fnMap?.get(fnId);
+        if (fnEntity && typeof enterFnRenameEditMode === 'function') {
+          enterFnRenameEditMode(fnEntity, btn);
+        }
+        break;
+      }
+      case 'extend-fn': {
+        e.preventDefault();
+        e.stopPropagation();
+        const fnEntity = lookups?.fnMap?.get(fnId);
+        if (fnEntity && typeof enterExtendEditMode === 'function') {
+          enterExtendEditMode(fnEntity, btn);
+        }
+        break;
+      }
+      case 'delete-fn': {
+        // Destructive — confirm + cascade + reload via initGraph,
+        // mirroring the legacy in-card ✕ behaviour. `withBusy`
+        // surfaces the deletion as a top-bar banner while it runs.
+        e.preventDefault();
+        e.stopPropagation();
+        const fnEntity = lookups?.fnMap?.get(fnId);
+        if (!fnEntity) break;
+        const display = (typeof getQualifiedFnName === 'function')
+                      ? getQualifiedFnName(fnEntity)
+                      : (fnEntity.name || 'this fn');
+        if (!confirm('Delete fn "' + display + '"? '
+                     + 'Bindings that reference it will fail to load.')) break;
+        const opKey = 'delete-fn:' + fnEntity.id;
+        if (typeof isOpInflight === 'function' && isOpInflight(opKey)) break;
+        const work = async () => {
+          try {
+            const r = await deleteEntity('fn', fnEntity.id);
+            if (r && r.status >= 200 && r.status < 300) {
+              try { window.location.hash = ''; } catch (_) {}
+              if (typeof initGraph === 'function') await initGraph();
+            } else {
+              const text = r ? await r.text().catch(() => '') : '';
+              alert('Delete failed (' + (r?.status) + '): '
+                    + text.replace(/<[^>]+>/g, '').trim().slice(0, 200));
+            }
+          } catch (err) {
+            alert('Network error: ' + err.message);
+          }
+        };
+        if (typeof withBusy === 'function') {
+          withBusy(opKey, 'Deleting ' + display + '…', work);
+        } else {
+          work();
         }
         break;
       }

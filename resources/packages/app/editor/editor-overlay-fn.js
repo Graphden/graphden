@@ -647,6 +647,29 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       }
       return;
     }
+    // HTMX migration Phase A4: root-row context (▶⌛⚙✎+✕ plus the
+    // shared ns/i/↗ head). Client computes the gating strings the
+    // server uses to render disabled-with-reason states:
+    //   - `editable` (overall ✎/+/✕ enabled/disabled)
+    //   - `editBlockReason` (text for ✎/+/✕ title when disabled)
+    //   - `serviceBlockedReason` (text for ⚙ when fn has free args)
+    if (rootAffordancesVisible && lineFnEntity) {
+      if (typeof loadRowActionsContent !== 'function') return;
+      const serviceFreeArgs = (typeof freeArgsOf === 'function')
+                            ? freeArgsOf(lineFnEntity) : [];
+      const serviceBlockedReason = (serviceFreeArgs.length > 0)
+        ? ("Can't make a service — fn has free args: "
+           + serviceFreeArgs.map((a) => ':' + a.name).join(' ')
+           + '. Bind them in a derived fn-def first.')
+        : null;
+      loadRowActionsContent(host, lineFn.fnId, 'root-row', {
+        showOpen: !!lineShowOpen,
+        editable: !!lineEditable,
+        editBlockReason: lineEditBlockReason,
+        serviceBlockedReason: serviceBlockedReason
+      });
+      return;
+    }
     // ns badge — first slot in the popover so it reads "this fn lives
     // in <ns>, here's everything you can do with it".
     const fnEntity = lineFnEntity;
@@ -722,102 +745,11 @@ function renderSingleFnRow(line, levelInfo, ctx) {
           onClick: (anchor) => enterFreeArgBindEditMode(useSiteArg, anchor)
         }));
       }
-    } else if (rootAffordancesVisible && lineFnEntity) {
-      // Root row's per-fn actions: run, rename, extend, delete. Run
-      // (▶) goes first — it's the highest-leverage action on a fn
-      // card (read-only users will see no actions at all). When the
-      // fn can't be edited (referenced elsewhere), each EDIT icon
-      // goes into a disabled-with-reason state; ▶ stays enabled
-      // because executing doesn't mutate the fn itself.
-      if (typeof showExecutePopover === 'function') {
-        host.appendChild(createPinnedIconButton({
-          glyph: '▶',
-          title: 'Run this function',
-          inline: true,
-          onClick: (anchor) => showExecutePopover(lineFnEntity, anchor)
-        }));
-      }
-      // ⌛ — version history across all branches.
-      if (typeof showFnVersionsPopover === 'function') {
-        host.appendChild(createPinnedIconButton({
-          glyph: '⌛',
-          title: 'Version history across branches',
-          inline: true,
-          onClick: (anchor) => showFnVersionsPopover(lineFnEntity, anchor)
-        }));
-      }
-      // ⚙ — service settings. Phase 1 contract: a service needs zero
-      // free args. The check happens at server-validate-create time,
-      // but we surface the constraint here too: button disabled +
-      // explanatory title when the fn has any unbound slot. Hides
-      // entirely when the helper isn't loaded (defensive).
-      if (typeof showServicePopover === 'function'
-          && typeof freeArgsOf === 'function') {
-        const freeArgs = freeArgsOf(lineFnEntity);
-        const blocked = freeArgs.length > 0;
-        host.appendChild(createPinnedIconButton({
-          glyph: '⚙',
-          title: 'Service settings (declare / edit / delete a :service row)',
-          inline: true,
-          disabledReason: blocked
-            ? ('Can\'t make a service — fn has free args: '
-               + freeArgs.map((a) => ':' + a.name).join(' ')
-               + '. Bind them in a derived fn-def first.')
-            : null,
-          onClick: (anchor) => showServicePopover(lineFnEntity, anchor)
-        }));
-      }
-      const editBtn = createEditPencilButton({
-        onClick: (anchor) => enterFnRenameEditMode(lineFnEntity, anchor),
-        disabledReason: lineEditBlockReason
-      });
-      if (editBtn) host.appendChild(editBtn);
-      if (typeof enterExtendEditMode === 'function') {
-        host.appendChild(createPinnedIconButton({
-          glyph: '+',
-          title: 'Extend (create a child fn with this as :parent)',
-          inline: true,
-          onClick: (anchor) => enterExtendEditMode(lineFnEntity, anchor),
-          disabledReason: lineEditBlockReason
-        }));
-      }
-      host.appendChild(createPinnedIconButton({
-        glyph: '✕',
-        title: 'Delete this fn',
-        inline: true,
-        danger: true,
-        disabledReason: lineEditBlockReason,
-        onClick: async () => {
-          const display = (typeof getQualifiedFnName === 'function')
-                          ? getQualifiedFnName(lineFnEntity)
-                          : (lineFnEntity.name || 'this fn');
-          if (!confirm('Delete fn "' + display + '"? '
-                       + 'Bindings that reference it will fail to load.')) return;
-          const opKey = 'delete-fn:' + lineFnEntity.id;
-          if (typeof isOpInflight === 'function' && isOpInflight(opKey)) return;
-          const work = async () => {
-            try {
-              const r = await deleteEntity('fn', lineFnEntity.id);
-              if (r && r.status >= 200 && r.status < 300) {
-                try { window.location.hash = ''; } catch (_) {}
-                if (typeof initGraph === 'function') await initGraph();
-              } else {
-                const text = r ? await r.text().catch(() => '') : '';
-                alert('Delete failed (' + (r?.status) + '): '
-                      + text.replace(/<[^>]+>/g, '').trim().slice(0, 200));
-              }
-            } catch (err) {
-              alert('Network error: ' + err.message);
-            }
-          };
-          if (typeof withBusy === 'function') {
-            await withBusy(opKey, 'Deleting ' + display + '…', work);
-          } else {
-            await work();
-          }
-        }
-      }));
     }
+    // The `useSiteArg` and `rootAffordancesVisible` branches both
+    // short-circuit at the top of this function via
+    // `loadRowActionsContent` — only the `parentEditAllowed` legacy
+    // path reaches the chain below, until Phase A5 migrates it too.
   };
   // Service badge — only on the root row of an fn-card the cache
   // knows about. Click opens the same service popover the ⚙ button

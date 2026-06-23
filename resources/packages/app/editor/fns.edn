@@ -509,6 +509,30 @@
    :args {:request {:as :request}
           :param-name {:value "binding-id"}}}
 
+  ;; --- Phase A4 query params ---
+
+  {:name :_partial-row-actions-edit-block-reason-str
+   :description "Optional `edit-block-reason` — human-readable text JS gets from `getFnEditBlockReason(fnId)`. When non-empty + `editable=false`, the ✎ / + / ✕ buttons render in disabled-with-reason state (the reason shows via `showIconReasonPopover` on click)."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "edit-block-reason"}}}
+
+  {:name :_partial-row-actions-edit-blocked?
+   :description "True iff the fn isn't editable AND a reason was supplied."
+   :parent :and
+   :args {:values [{:parent :not :args {:value :_partial-row-actions-editable?}}
+                   {:parent :some? :args {:value :_partial-row-actions-edit-block-reason-str}}]}}
+
+  {:name :_partial-row-actions-service-blocked-reason-str
+   :description "Optional `service-blocked-reason` — text JS computes from `freeArgsOf(fnEntity)` (something like `\"Can't make a service — fn has free args: :a :b\"`). Empty / absent → ⚙ renders enabled."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "service-blocked-reason"}}}
+
+  {:name :_partial-row-actions-service-blocked?
+   :parent :some?
+   :args {:value :_partial-row-actions-service-blocked-reason-str}}
+
   ;; Fetch the fn row + project the three fields the buttons need.
   {:name :_partial-row-actions-fn-row
    :description "The decoded fn row for the popover's target fn."
@@ -767,6 +791,190 @@
           :attrs :_partial-row-actions-use-site-attrs
           :children :_partial-row-actions-use-site-children}}
 
+  ;; --- Phase A4 root-row buttons ---
+  ;;
+  ;; ▶ Run / ⌛ History are always enabled when the popover renders
+  ;; the root-row context (caller gated on signed-in + lineIsRoot).
+  ;; ⚙ Service is enabled unless `service-blocked-reason` is set.
+  ;; ✎ Rename / + Extend / ✕ Delete render disabled-with-reason
+  ;; when `editable=false` + `edit-block-reason` non-empty.
+
+  {:name :_partial-row-actions-run-button
+   :description "▶ — open the execute popover for this fn."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "run-fn"
+                          :title "Run this function"
+                          :aria-label "Run"}}
+          :children [{:value "▶"}]}}
+
+  {:name :_partial-row-actions-history-button
+   :description "⌛ — open the version-history popover for this fn (cross-branch)."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "fn-versions"
+                          :title "Version history across branches"
+                          :aria-label "Version history"}}
+          :children [{:value "⌛"}]}}
+
+  ;; ⚙ Service — two flavours based on whether the fn has free args
+  ;; (blocked → disabled + reason in the title + class).
+  {:name :_partial-row-actions-service-button-enabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "service-settings"
+                          :title "Service settings (declare / edit / delete a :service row)"
+                          :aria-label "Service settings"}}
+          :children [{:value "⚙"}]}}
+
+  {:name :_partial-row-actions-service-button-disabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "action-icon action-icon-disabled"
+                                       :data-action "service-settings"
+                                       :aria-label "Service settings (unavailable)"
+                                       :aria-disabled "true"}}
+                         :key {:value :title}
+                         :value :_partial-row-actions-service-blocked-reason-str}}
+          :children [{:value "⚙"}]}}
+
+  {:name :_partial-row-actions-service-button
+   :parent :if
+   :args {:test :_partial-row-actions-service-blocked?
+          :then :_partial-row-actions-service-button-disabled
+          :else :_partial-row-actions-service-button-enabled}}
+
+  ;; ✎ Rename — enabled when editable, disabled-with-reason otherwise.
+  {:name :_partial-row-actions-rename-button-enabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "rename-fn"
+                          :title "Rename this function"
+                          :aria-label "Rename"}}
+          :children [{:value "✎"}]}}
+
+  {:name :_partial-row-actions-rename-button-disabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "action-icon action-icon-disabled"
+                                       :data-action "rename-fn"
+                                       :aria-label "Rename (unavailable)"
+                                       :aria-disabled "true"}}
+                         :key {:value :title}
+                         :value :_partial-row-actions-edit-block-reason-str}}
+          :children [{:value "✎"}]}}
+
+  {:name :_partial-row-actions-rename-button
+   :parent :if
+   :args {:test :_partial-row-actions-edit-blocked?
+          :then :_partial-row-actions-rename-button-disabled
+          :else :_partial-row-actions-rename-button-enabled}}
+
+  ;; + Extend — same enabled/disabled pattern.
+  {:name :_partial-row-actions-extend-button-enabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "extend-fn"
+                          :title "Extend (create a child fn with this as :parent)"
+                          :aria-label "Extend"}}
+          :children [{:value "+"}]}}
+
+  {:name :_partial-row-actions-extend-button-disabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "action-icon action-icon-disabled"
+                                       :data-action "extend-fn"
+                                       :aria-label "Extend (unavailable)"
+                                       :aria-disabled "true"}}
+                         :key {:value :title}
+                         :value :_partial-row-actions-edit-block-reason-str}}
+          :children [{:value "+"}]}}
+
+  {:name :_partial-row-actions-extend-button
+   :parent :if
+   :args {:test :_partial-row-actions-edit-blocked?
+          :then :_partial-row-actions-extend-button-disabled
+          :else :_partial-row-actions-extend-button-enabled}}
+
+  ;; ✕ Delete — destructive, separate danger class. Same enabled
+  ;; vs disabled split.
+  {:name :_partial-row-actions-delete-button-enabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon action-icon-danger"
+                          :data-action "delete-fn"
+                          :title "Delete this fn"
+                          :aria-label "Delete"}}
+          :children [{:value "✕"}]}}
+
+  {:name :_partial-row-actions-delete-button-disabled
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "action-icon action-icon-danger action-icon-disabled"
+                                       :data-action "delete-fn"
+                                       :aria-label "Delete (unavailable)"
+                                       :aria-disabled "true"}}
+                         :key {:value :title}
+                         :value :_partial-row-actions-edit-block-reason-str}}
+          :children [{:value "✕"}]}}
+
+  {:name :_partial-row-actions-delete-button
+   :parent :if
+   :args {:test :_partial-row-actions-edit-blocked?
+          :then :_partial-row-actions-delete-button-disabled
+          :else :_partial-row-actions-delete-button-enabled}}
+
+  ;; Assembly — shared head (ns / i / ↗) + 6 root-row buttons.
+  {:name :_partial-row-actions-root-row-children-raw
+   :description "Full button list for the root-row context: ns / i / ↗ shared head + ▶ ⌛ ⚙ ✎ + ✕. Disabled-state for ⚙/✎/+/✕ baked in by the per-button `:if` wrappers."
+   :parent :list
+   :args {:items [:_partial-row-actions-ns-button
+                  :_partial-row-actions-i-button
+                  :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-run-button
+                  :_partial-row-actions-history-button
+                  :_partial-row-actions-service-button
+                  :_partial-row-actions-rename-button
+                  :_partial-row-actions-extend-button
+                  :_partial-row-actions-delete-button]}}
+
+  {:name :_partial-row-actions-root-row-children
+   :parent :filter
+   :args {:pred :some?
+          :coll :_partial-row-actions-root-row-children-raw}}
+
+  {:name :_partial-row-actions-root-row
+   :description "root-row context toolbar — ns/i/↗ + ▶⌛⚙✎+✕. Caller (`buildPopoverContent` when `rootAffordancesVisible`) is already gated on signed-in + lineIsRoot, so all action buttons render unconditionally; their disabled-state is server-baked via `editable` / `edit-block-reason` / `service-blocked-reason` query params."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "row-actions-content"
+                                       :role "toolbar"
+                                       :aria-label "Row actions"
+                                       :data-context "root-row"}}
+                         :key {:value :data-fn-id}
+                         :value :_partial-row-actions-fn-id-str}}
+          :children :_partial-row-actions-root-row-children}}
+
   ;; --- Context dispatch ---
 
   {:name :_partial-row-actions-context-is-col-header?
@@ -781,11 +989,21 @@
    :parent :equal?
    :args {:a :_partial-row-actions-context-str :b {:value "use-site-arg"}}}
 
+  {:name :_partial-row-actions-context-is-root-row?
+   :parent :equal?
+   :args {:a :_partial-row-actions-context-str :b {:value "root-row"}}}
+
+  {:name :_partial-row-actions-body-or-root-row
+   :parent :if
+   :args {:test :_partial-row-actions-context-is-root-row?
+          :then :_partial-row-actions-root-row
+          :else :_partial-row-actions-unknown}}
+
   {:name :_partial-row-actions-body-or-use-site
    :parent :if
    :args {:test :_partial-row-actions-context-is-use-site-arg?
           :then :_partial-row-actions-use-site
-          :else :_partial-row-actions-unknown}}
+          :else :_partial-row-actions-body-or-root-row}}
 
   {:name :_partial-row-actions-body-or-cell
    :parent :if
@@ -794,7 +1012,7 @@
           :else :_partial-row-actions-body-or-use-site}}
 
   {:name :_partial-row-actions-body
-   :description "Dispatch on context — A1 col-header, A2 cell, A3 use-site-arg. A4 will fold in root-row via the same nested-`:if` chain (a `:case` migration becomes worthwhile once there's a fifth context)."
+   :description "Dispatch on context — A1 col-header, A2 cell, A3 use-site-arg, A4 root-row. The nested-`:if` chain is the workaround for `:case`'s parametric-type-var unification on a single-clause input; with 4 contexts the chain is starting to look unwieldy but still readable enough."
    :parent :if
    :args {:test :_partial-row-actions-context-is-col-header?
           :then :_partial-row-actions-col-header

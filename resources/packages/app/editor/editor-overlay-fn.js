@@ -670,86 +670,31 @@ function renderSingleFnRow(line, levelInfo, ctx) {
       });
       return;
     }
-    // ns badge — first slot in the popover so it reads "this fn lives
-    // in <ns>, here's everything you can do with it".
-    const fnEntity = lineFnEntity;
-    if (fnEntity && rowWantsNamespaceBadge(lineFn)
-        && typeof createNamespaceBadge === 'function') {
-      const nsPath = (typeof getFnNamespace === 'function')
-                     ? getFnNamespace(fnEntity) : null;
-      const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
-      const editorReady = typeof enterNamespaceMoveEditMode === 'function';
-      const nsBadge = createNamespaceBadge(nsPath, {
-        inline: true,
-        onClick: (signedIn && lineEditable && editorReady)
-                 ? (anchor) => enterNamespaceMoveEditMode(fnEntity, anchor)
-                 : null,
-        // When the fn is in-use we still want the badge to feel like an
-        // affordance (hover → ✎ swap) but click should reveal the reason
-        // instead of opening the namespace picker.
-        disabledReason: (signedIn && !lineEditable) ? lineEditBlockReason : null
-      });
-      if (nsBadge) host.appendChild(nsBadge);
-    }
-    // Description badge — always; the dedicated tooltip handles empty
-    // description (turns into "click to add").
-    const descBadge = createDescriptionBadge(lineFn.description, {
-      name: lineFn.name,
-      namespace: fnEntity ? (typeof getFnNamespace === 'function'
-                              ? getFnNamespace(fnEntity) : null) : null,
-      entityType: 'fn',
-      entityId: lineFn.fnId
-    });
-    if (descBadge) host.appendChild(descBadge);
-    // ↗ open-in-new-tab — when the row's fn has a globally-resolvable
-    // name AND we're not already viewing it (root row).
-    if (lineShowOpen && fnEntity) {
-      const openBtn = createOpenInNewTabButton(fnEntity, {});
-      if (openBtn) host.appendChild(openBtn);
-    }
-    // Branch-specific buttons. Same handlers as the inline version
-    // used to wire — only the host changes.
+    // Parent-edit row (depth-1 of an editable card) — same toolbar
+    // shape as the MI cell context (ns/i/↗ + × Remove-parent + +
+    // Add-MI). Reuses the `cell` partial directly: the dispatcher
+    // cases for `remove-mi-parent` / `add-mi-parent` already operate
+    // on `data-card-fn-id` (the card-owning fn) + `data-fn-id` (the
+    // parent being acted on), which matches `removeParentInline
+    // (cardFnEntity, lineFn.fnId)` 1:1.
     if (parentEditAllowed && cardFnEntity) {
-      // `×` remove-this-parent.
-      host.appendChild(createPinnedIconButton({
-        glyph: '×',
-        title: 'Remove this parent',
-        inline: true,
-        onClick: () => {
-          if (typeof removeParentInline === 'function') {
-            removeParentInline(cardFnEntity, lineFn.fnId);
-          }
-        }
-      }));
-      // `+` add MI parent.
-      const addBtn = makeAddMIParentButton(cardFnEntity, null, 1);
-      if (addBtn) host.appendChild(addBtn);
-    } else if (useSiteArg) {
-      // `×` remove this binding (slot reverts to free-arg).
-      host.appendChild(createPinnedIconButton({
-        glyph: '×',
-        title: 'Remove this value (slot reverts to free-arg)',
-        inline: true,
-        onClick: () => {
-          if (typeof deleteUseSiteBinding === 'function') {
-            deleteUseSiteBinding(useSiteArg);
-          }
-        }
-      }));
-      // `✎` change value.
-      if (typeof enterFreeArgBindEditMode === 'function') {
-        host.appendChild(createPinnedIconButton({
-          glyph: '✎',
-          title: 'Change value (pick another fn / set a literal)',
-          inline: true,
-          onClick: (anchor) => enterFreeArgBindEditMode(useSiteArg, anchor)
-        }));
-      }
+      if (typeof loadRowActionsContent !== 'function') return;
+      loadRowActionsContent(host, lineFn.fnId, 'cell', {
+        showOpen: !!lineShowOpen,
+        editable: true,
+        cardFnId: cardFnEntity.id
+      });
+      return;
     }
-    // The `useSiteArg` and `rootAffordancesVisible` branches both
-    // short-circuit at the top of this function via
-    // `loadRowActionsContent` — only the `parentEditAllowed` legacy
-    // path reaches the chain below, until Phase A5 migrates it too.
+    // Fall-through: read-only viewers + non-root, non-parent-edit
+    // lines. ns/i/↗ shared head only — reuses the `col-header`
+    // partial (functionally identical 3-button shape; the
+    // `data-context` value is debug-only).
+    if (typeof loadRowActionsContent === 'function') {
+      loadRowActionsContent(host, lineFn.fnId, 'col-header', {
+        showOpen: !!lineShowOpen
+      });
+    }
   };
   // Service badge — only on the root row of an fn-card the cache
   // knows about. Click opens the same service popover the ⚙ button

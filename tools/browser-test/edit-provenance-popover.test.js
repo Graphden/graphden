@@ -40,20 +40,44 @@ async function cleanup(page) {
     await cleanup(page);
 
     // ===================================================================
-    // Seed: probe parented to :http-server. The :port slot inherits
-    // the refinement `[:refine :int [:and [:>= 1] [:<= 65535]]]`,
-    // which produces a non-trivial provenance chain (at least one
-    // ancestor tier + the refinement source).
+    // Seed: probe parented to :http-server + an explicit type-override
+    // on its :port slot. The override (port → user-port refinement)
+    // is what triggers `getTypeNarrowingInfo` → `kind: 'override'`,
+    // which is what renders the `↳` provenance badge.
     // ===================================================================
     const ents = await getEntities(page);
     const httpServer = ents.fns.find(
       (f) => f.name === 'http-server' && (f['parent-ids'] || []).length === 0);
     assert(httpServer, ':http-server baseline resolved');
+    const userPort = ents.fns.find((f) => f.name === 'user-port');
+    assert(userPort, ':user-port refinement type-row resolved');
+    // :http-server has a :port slot; find its id via fn-slot junctions.
+    const portSlotId = ents['fn-slots']
+      .filter((fs) => fs['fn-id'] === httpServer.id)
+      .map((fs) => fs['slot-id'])
+      .find((sid) => {
+        const slot = (ents.slots || []).find((s) => s.id === sid);
+        return slot?.name === 'port';
+      });
+    assert(portSlotId, ':http-server.port slot resolved');
+
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + httpServer.id);
     const probe = (await getEntities(page)).fns.find(
       (f) => f.name === PROBE_FN);
     assert(probe, 'probe fn-def created');
+
+    // Bind :port slot with a type-override → user-port. Need value=8080
+    // for the type-check to accept the override (8080 is in
+    // [1024..65535]).
+    const bindResp = await api(page, 'POST', '/api/entities/binding',
+                               'fn-id=' + probe.id
+                               + '&slot-id=' + portSlotId
+                               + '&type-override-fn-id=' + userPort.id
+                               + '&value=8080');
+    assert(JSON.stringify(bindResp).includes('created successfully'),
+           'binding with type-override created: '
+           + JSON.stringify(bindResp).slice(0, 200));
 
     // ===================================================================
     // Navigate; wait for the fn-card + at least one arg-overlay with

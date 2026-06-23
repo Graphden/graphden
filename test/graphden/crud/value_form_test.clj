@@ -118,6 +118,19 @@
     (is (nil? (vf/pick-form-fn [] :int)))))
 
 
+(deftest pick-form-fn-js-source-prefers-textarea-over-text-input-test
+  ;; Block 3.3 — when a slot declares `:js-source`, the registry's
+  ;; `js-source -> _form-js-source` entry must outrank the wider
+  ;; `text -> _form-text` entry. Pin this here so a future
+  ;; registry reorder / rename doesn't silently downgrade JS-body
+  ;; editing to a single-line input.
+  (let [reg [[:text "_form-text"] [:js-source "_form-js-source"]]]
+    (is (= "_form-js-source" (vf/pick-form-fn reg :js-source))
+        "the textarea widget wins for the dedicated alias")
+    (is (= "_form-text" (vf/pick-form-fn reg :text))
+        "the single-line widget still wins for plain :text")))
+
+
 ;; ============================================================================
 ;; collect-bounds / numeric-bounds — refinement → HTML min/max
 ;; ============================================================================

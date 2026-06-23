@@ -66,6 +66,21 @@
                               "data-form-field" ""
                               "data-field-kind" "json"}]}}
 
+  ;; Block 3.3 — JS source body textarea. Same shape as `:_form-json`
+  ;; but `data-field-kind="text"` so the value round-trips as a plain
+  ;; string instead of being JSON.parse'd. Used by `:custom-script` /
+  ;; `:wrap-custom-script` / `:dispatch-custom` (user-sites Block 3).
+  ;; No syntax highlighting / no Monaco for v0 — see
+  ;; docs/USER_SITES_PLAN.md Block 3 open question.
+  {:name :_form-js-source
+   :description "Multi-line textarea — the form for `:js-source` slots (escape-hatch JS bodies). Plain string, no JSON parsing."
+   :parent :const
+   :args {:value ["textarea" {"class" "arg-value-edit-input"
+                              "rows" 8
+                              "spellcheck" "false"
+                              "data-form-field" ""
+                              "data-field-kind" "text"}]}}
+
   ;; --- Tier 2 demo: a custom-widget form-fn ---
   ;;
   ;; `:vf-rating` is a 1-5 integer refinement; `:_form-rating` renders
@@ -127,6 +142,7 @@
                   ["keyword" "_form-keyword"]
                   ["jsonb" "_form-json"]
                   ["any" "_form-json"]
+                  ["js-source" "_form-js-source"]
                   ["vf-rating" "_form-rating"]]}}
 
   ;; --- /api/value-form endpoint — parse -> validate -> apply ---

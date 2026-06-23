@@ -95,8 +95,8 @@ const {assert, newContext} = require('./edit-test-helpers');
       fabPresent: !!document.getElementById('sidebar-expand-floating'),
     }));
     assert(collapsedState.collapsed, 'body.sidebar-collapsed set after click');
-    assert(collapsedState.stored === 'true',
-           'localStorage carries collapsed=true: ' + collapsedState.stored);
+    assert(collapsedState.stored === '1',
+           "localStorage carries collapsed='1': " + collapsedState.stored);
     assert(collapsedState.fabPresent,
            '#sidebar-expand-floating button appears when collapsed');
 
@@ -111,8 +111,8 @@ const {assert, newContext} = require('./edit-test-helpers');
       stored: localStorage.getItem('graphden.prefs.sidebar-collapsed'),
     }));
     assert(!expandedState.collapsed, 'body.sidebar-collapsed cleared');
-    assert(expandedState.stored === 'false',
-           'localStorage carries collapsed=false: ' + expandedState.stored);
+    assert(expandedState.stored === '0',
+           "localStorage carries collapsed='0': " + expandedState.stored);
 
     console.log('✓ prefs verified — theme + sidebar round-trips');
   } catch (e) {

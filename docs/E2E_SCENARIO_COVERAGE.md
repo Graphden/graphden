@@ -11,13 +11,16 @@ Generated: 2026-06-23 (49 e2e files in `tools/browser-test/`).
 ## What's covered (49 files, grouped by concern)
 
 ### Auth & access
+
 - ✓ Lock chip → password popover → login / sign-out (`edit-auth-login`)
 
 ### Sidebar & navigation
+
 - ✓ Text-search filter (`edit-sidebar-filter`)
 - ✓ Fn-picker open / filter / pick (`edit-fn-picker`, `edit-fn-picker-filter`)
 
 ### Fn lifecycle (create / edit / delete)
+
 - ✓ Create fn under a namespace (`edit-fn-create`)
 - ✓ Rename fn via pencil (`edit-fn-rename`)
 - ✓ Edit description (`edit-description`)
@@ -27,6 +30,7 @@ Generated: 2026-06-23 (49 e2e files in `tools/browser-test/`).
 - ✓ Delete fn (via deleteFnByName cleanup in 40+ tests)
 
 ### Arg / binding flows
+
 - ✓ Edit a bound arg's value (`edit-arg-value`)
 - ✓ Arg-value validation (`edit-arg-value-validation`)
 - ✓ Arg type flip + type-override
@@ -38,6 +42,7 @@ Generated: 2026-06-23 (49 e2e files in `tools/browser-test/`).
 - ✓ Mismatch explainer (`edit-mismatch-explainer`)
 
 ### Sequence (list) flows
+
 - ✓ Add / remove / first-item (`edit-phase5-sequence`)
 - ✓ Sequence-items full coverage (`edit-sequence-items`)
 - ✓ Regression: sequence with fn-ref (`regression-sequence-fn-ref`)
@@ -45,6 +50,7 @@ Generated: 2026-06-23 (49 e2e files in `tools/browser-test/`).
   (`regression-migrate-on-fn-ref`)
 
 ### Type-row CRUD
+
 - ✓ Type creation: refinement + cancel (`edit-type-create`)
 - ✓ Type creation: record + union (`edit-type-create-kinds`)
 - ✓ Type editing: record / list / variant / record-remove
@@ -53,21 +59,25 @@ Generated: 2026-06-23 (49 e2e files in `tools/browser-test/`).
 - ✓ Type chip ▸/▾ expand (`edit-type-chip-expand`)
 
 ### Effects display
+
 - ✓ Effect badges on fn-card (`edit-effects-badges`)
 - ✓ Effect drift annotation (`edit-effects-drift`)
 - ✓ Effect-chip click → explainer (`edit-effects-explainer`)
 
 ### Execute (Run)
+
 - ✓ Run popover smoke (`edit-execute` — Phase A-D inc. history Repeat)
 - ✓ Advanced run flows (`edit-execute-advanced`)
 - ✓ :process / :network effect confirm + drift
   (`edit-execute-effects`)
 
 ### Namespace lifecycle
+
 - ✓ Rename + delete ns (`edit-namespace-edit`)
 - ✓ Move fn to another ns (`edit-namespace-move`)
 
 ### Versioning (branches)
+
 - ✓ Branch create / switch / delete (`edit-branch-lifecycle`)
 - ✓ Branch diff modal navigation (`edit-branch-diff-navigate`)
 - ✓ Branch-local annotation (`edit-branch-local`)
@@ -76,11 +86,13 @@ Generated: 2026-06-23 (49 e2e files in `tools/browser-test/`).
 - ✓ Fn-versions Restore action (`edit-fn-versions-restore`)
 
 ### Services
+
 - ✓ ⚙ button + reject path (`edit-service`)
 - ✓ Full lifecycle: create / toggle / sibling-warn / delete
   (`edit-service-lifecycle`)
 
 ### Secrets
+
 - ✓ Sidebar secrets panel (`edit-secrets-panel`)
 - ✓ Secret list (`edit-secrets-list`)
 - ✓ Secret rotation (`edit-secrets-rotate`)

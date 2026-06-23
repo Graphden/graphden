@@ -31,20 +31,23 @@ architectural cleanliness.
 
 ## Phase 0 — Server-side primitives (PREREQUISITE)
 
-These don't exist yet. Estimated ~200-300 LOC.
+Total estimated ~100-150 LOC across two sub-phases. The `:fn-fix`-
+or-equivalent recursion concern got sidestepped — see 0b.
 
-| Primitive | Shape | Purpose |
-|---|---|---|
-| `:fn-row-by-id` | `defbase` over `sp/read-entity :fn id` | Read one fn entity by id. Used by every row-actions partial to look up name / description / namespace-id / parent-ids. |
-| `:fn-ns-path` | Recursive walker over `:namespace` parent-id chain | Produce `"core.refinements"` string from a `:namespace-id`. **Requires recursion** — graphden doesn't have `:fix` implemented (docs/RECURSION.md still roadmap). Options: (a) implement `:fix` as part of Phase 0 (unblocks recursion broadly), (b) hardcode max-depth-10 unroll using nested `:if` (kludge but works). |
-| `:fn-usage-count` | Multi-table count: `binding.ref-fn-id` + `binding-list-item.ref-fn-id` + `fn.parent-ids` membership | Used for `isFnEditable?` — fn is editable iff usage-count = 0. |
-| `:fn-is-editable?` | `(zero? :fn-usage-count)` | Gate ✎/×/+ edit buttons in popover. |
-| `:request-authed?` | Pull auth state from Ring request | Conditional rendering of edit affordances. Current partials use `:get-auth-required` parent (route-level) which 401s anonymous — we need per-button-level check inside the partial since some buttons should show for both. |
+| Primitive | Status | Shape | Purpose |
+|---|---|---|---|
+| `:fn-row-by-id` | ✅ shipped (commit `08c77e7a`) | Pure fn-def: `:storage-query-call` → `:first` → `:decode-row` | Read one fn entity by id. Used by every row-actions partial to look up name / description / namespace-id. |
+| `:request-authed?` | ✅ shipped (commit `08c77e7a`) | Thin alias of `:_bearer-equals-env?` | Conditional rendering of edit affordances. |
+| `:fn-ns-path` | ✅ shipped (commit `fa990ca9`) | `defbase` with depth-capped loop (no `:fix` needed — base-fn iteration carve-out) | Produce `"core.refinements"` string from a `:namespace-id`. |
+| `:fn-usage-count` | ⏳ deferred to Phase A4 | Multi-table count: `binding.ref-fn-id` + `binding-list-item.ref-fn-id` + `fn.parent-ids` membership | Only the root-row buttons need editability gating (✎ rename, ✕ delete). Col-header / MI-cell / use-site contexts gate editability CLIENT-SIDE in the dispatcher — server emits the button always, client re-checks `isFnEditable(fnId)` from `lookups` at click time. This keeps Phase A1-A3 unblocked. |
+| `:fn-is-editable?` | ⏳ with 0c | `(zero? :fn-usage-count)` | Same as above. |
 
-**Watch out**: existing fn-defs in `app.forms/app.execution`
-heavily use `:storage-query-call` for ad-hoc multi-table queries.
-The pattern is `query → row → :get fields`. The recursive
-`:fn-ns-path` is the only one without precedent.
+**Pattern note**: an existing `:_delete-fn-*` chain in
+`web/crud/fns.edn:2107+` already counts the same three sources
+for the delete-flow. When 0c lands, write a parallel chain over
+`:fn-id` free arg (vs the delete-flow's `:_delete-target-id`),
+OR refactor the delete-flow chain to take an `:fn-id` free arg
+and reuse it.
 
 ## Phase A — Row-actions popover migration
 

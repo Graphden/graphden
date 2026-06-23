@@ -261,6 +261,138 @@ function ensureRowActionsDismissHandler() {
 }
 ensureRowActionsDismissHandler();
 
+// ============================================================================
+// PARTIAL FETCH + DISPATCH (HTMX migration — Phase A1)
+// ============================================================================
+//
+// Server-rendered row-actions content: caller invokes
+// `loadRowActionsContent(host, fnId, context, opts)` instead of
+// building the toolbar DOM by hand. The popover lifecycle (open /
+// hover / dismiss / re-anchor on cy zoom-pan) stays JS-owned;
+// only the buttons' MARKUP and the conditional visibility logic
+// move to the server (`:partial-row-actions` in
+// `app/editor/fns.edn`).
+//
+// `bindRowActionsDispatch(host)` is a one-shot post-swap binder
+// that routes `data-action="…"` clicks (and the description-
+// badge's `mouseenter`) to the existing edit-mode handlers.
+// Client-side re-checks `isAuthenticated()` / `isFnEditable()`
+// before invoking write actions so the partial itself stays
+// public-readable.
+
+async function loadRowActionsContent(host, fnId, context, opts) {
+  opts = opts || {};
+  if (!host || !fnId) return;
+  host.textContent = '';
+  const loading = document.createElement('span');
+  loading.className = 'row-actions-loading';
+  loading.style.opacity = '0.55';
+  loading.style.fontSize = '11px';
+  loading.textContent = '…';
+  host.appendChild(loading);
+  try {
+    // `/partials/*` paths are out of scope for `window.API` (only
+    // `/api/*` flows through the validator + boot-cached constants);
+    // the literal stays explicit — drift validator doesn't touch it.
+    const url = '/partials/row-actions'
+              + '?fn-id=' + encodeURIComponent(fnId)
+              + '&context=' + encodeURIComponent(context)
+              + (opts.showOpen === false ? '&show-open=false' : '');
+    const r = await fetch(url);
+    if (!r.ok) {
+      host.textContent = '';
+      const err = document.createElement('span');
+      err.className = 'row-actions-error';
+      err.style.color = 'var(--error-fg)';
+      err.textContent = 'Failed';
+      host.appendChild(err);
+      return;
+    }
+    host.innerHTML = await r.text();
+    bindRowActionsDispatch(host);
+  } catch (_) {
+    host.textContent = '';
+    const err = document.createElement('span');
+    err.className = 'row-actions-error';
+    err.style.color = 'var(--error-fg)';
+    err.textContent = 'Network';
+    host.appendChild(err);
+  }
+}
+
+
+function bindRowActionsDispatch(host) {
+  // Description badge — hover-show + click-pin route into the
+  // existing description-tooltip flow (`editor-tooltips.js`). The
+  // server inlines `data-description` so the tooltip never makes
+  // its own fetch.
+  host.addEventListener('mouseenter', (e) => {
+    const btn = e.target.closest('[data-action="description"]');
+    if (!btn) return;
+    if (typeof hideFullNameTooltip === 'function') hideFullNameTooltip();
+    if (typeof showDescriptionTooltip !== 'function') return;
+    showDescriptionTooltip({
+      name: null,
+      namespace: null,
+      description: btn.dataset.description || '',
+      entityType: btn.dataset.entityType || null,
+      entityId: btn.dataset.fnId
+                || host.dataset.fnId
+                || null
+    }, e);
+  }, true);
+  host.addEventListener('mouseleave', (e) => {
+    const btn = e.target.closest('[data-action="description"]');
+    if (!btn) return;
+    if (typeof hideDescriptionTooltip === 'function') hideDescriptionTooltip();
+  }, true);
+
+  host.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const fnId = btn.dataset.fnId || host.dataset.fnId;
+    switch (action) {
+      case 'namespace-move': {
+        e.preventDefault();
+        e.stopPropagation();
+        const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
+        const editable = typeof isFnEditable === 'function' && isFnEditable(fnId);
+        const fnEntity = lookups?.fnMap?.get(fnId);
+        if (signedIn && editable && fnEntity
+            && typeof enterNamespaceMoveEditMode === 'function') {
+          enterNamespaceMoveEditMode(fnEntity, btn);
+        }
+        break;
+      }
+      case 'description': {
+        // Click toggles sticky — match the legacy badge behaviour.
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof descriptionTooltipSticky !== 'undefined') {
+          descriptionTooltipSticky = !descriptionTooltipSticky;
+        }
+        if (typeof showDescriptionTooltip === 'function') {
+          showDescriptionTooltip({
+            name: null,
+            namespace: null,
+            description: btn.dataset.description || '',
+            entityType: btn.dataset.entityType || null,
+            entityId: btn.dataset.fnId || host.dataset.fnId || null
+          }, e);
+        }
+        break;
+      }
+      case 'open':
+        // <a target="_blank"> default behaviour — no JS needed.
+        break;
+      default:
+        break;
+    }
+  });
+}
+
+
 // Cytoscape zoom/pan re-position — when the canvas zooms or pans
 // while a popover is open, the anchor's bounding rect moves AND
 // changes scale, so the popover would otherwise stick to its old

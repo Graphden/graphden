@@ -31,6 +31,7 @@
                   :partial-branch-popover
                   :partial-service-popover
                   :partial-secrets-panel
+                  :partial-row-actions
                   :health
                   :metrics
                   :version

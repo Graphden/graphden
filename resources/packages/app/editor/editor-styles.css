@@ -3885,5 +3885,48 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   font-size: 11px;
 }
 
+/* Row-actions popover content (server-rendered partial; HTMX
+   migration Phase A1). Flex container hosts ns / i / ↗ buttons.
+   The wrapping `.row-actions-popover` (built JS-side) handles
+   background / border / shadow; this rule covers only the inner
+   layout + the loading / error placeholders during the swap-in. */
+.row-actions-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.row-actions-loading,
+.row-actions-error {
+  font-size: 11px;
+  padding: 0 4px;
+}
+.action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  line-height: 1;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: var(--icon-font-size);
+  background: transparent;
+  color: currentColor;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+.action-icon:hover {
+  background: var(--hover-bg);
+}
+.row-actions-content .namespace-badge {
+  /* The legacy `applyActionIconBox` set font-size 1px smaller for
+     the 2-char "ns" glyph in the same 15×15 frame — preserve here. */
+  font-size: calc(var(--icon-font-size) - 1px);
+  font-style: italic;
+  font-weight: normal;
+}
+
 
 

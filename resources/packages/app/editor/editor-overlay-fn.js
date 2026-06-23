@@ -355,34 +355,17 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   // popover anchored to the more-actions trigger. The trigger sits
   // on top of the column divs so the user can hit it across the full
   // row width.
+  // HTMX migration Phase A1: the col-header row-actions content
+  // is now server-rendered via `/partials/row-actions`. JS keeps
+  // the popover lifecycle (open / hover / dismiss / re-anchor on
+  // cy zoom-pan) + the post-swap `data-action` dispatcher; the
+  // markup + per-fn conditionals (ns badge, i badge, ↗ link) live
+  // in `:partial-row-actions :_partial-row-actions-col-header`.
   const buildColPopoverContent = (host) => {
-    if (colFnEntity && rowWantsNamespaceBadge(colFn)
-        && typeof createNamespaceBadge === 'function') {
-      const nsPath = (typeof getFnNamespace === 'function')
-                     ? getFnNamespace(colFnEntity) : null;
-      const canEdit = typeof isAuthenticated === 'function' && isAuthenticated()
-                   && typeof isFnEditable === 'function' && isFnEditable(colFn.fnId)
-                   && typeof enterNamespaceMoveEditMode === 'function';
-      const nsBadge = createNamespaceBadge(nsPath, {
-        inline: true,
-        onClick: canEdit
-                 ? (anchor) => enterNamespaceMoveEditMode(colFnEntity, anchor)
-                 : null
-      });
-      if (nsBadge) host.appendChild(nsBadge);
-    }
-    const descBadge = createDescriptionBadge(colFn.description, {
-      name: colFn.name,
-      namespace: colFnEntity ? (typeof getFnNamespace === 'function'
-                                 ? getFnNamespace(colFnEntity) : null) : null,
-      entityType: 'fn',
-      entityId: colFn.fnId
+    if (typeof loadRowActionsContent !== 'function') return;
+    loadRowActionsContent(host, colFn.fnId, 'col-header', {
+      showOpen: colShowOpen
     });
-    if (descBadge) host.appendChild(descBadge);
-    if (colShowOpen && colFnEntity) {
-      const openBtn = createOpenInNewTabButton(colFnEntity, {});
-      if (openBtn) host.appendChild(openBtn);
-    }
   };
   if (typeof createMoreActionsTrigger === 'function') {
     const trigger = createMoreActionsTrigger({

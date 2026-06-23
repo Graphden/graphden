@@ -440,6 +440,183 @@
    :args {:body :_partial-effect-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; row-actions popover content. Phase A1 of the HTMX migration
+  ;; (docs/EDITOR_HTMX_MIGRATION_PLAN.md) — server-renders the
+  ;; per-row action buttons (ns / i / ↗ for col-header today; cell
+  ;; / use-site / root-row added in A2-A4). JS owns the lifecycle
+  ;; (hover/click/dismiss/position) + the post-swap dispatch from
+  ;; `data-action="…"` attrs to the existing edit-mode handlers.
+  ;;
+  ;; URL: `GET /partials/row-actions?fn-id=X&context=col-header[&show-open=false]`.
+  ;; Public route (`:get-route`, not auth-required) — the partial
+  ;; itself is read-only; click handlers re-check `isAuthenticated()`
+  ;; client-side before invoking write actions.
+
+  {:name :_partial-row-actions-fn-id-str
+   :description "Read the `fn-id` query-string parameter; nil when absent."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "fn-id"}}}
+
+  {:name :_partial-row-actions-fn-id
+   :description "Parsed fn-id UUID. nil-tolerant — downstream `:fn-row-by-id` returns nil and the partial renders an empty toolbar (caller's bug, not user-visible)."
+   :parent :parse-uuid
+   :args {:string :_partial-row-actions-fn-id-str}}
+
+  {:name :_partial-row-actions-context-str
+   :description "Read the `context` query-string parameter — one of `col-header` / `cell` / `use-site-arg` / `root-row`. A1 only handles `col-header`; other contexts trigger the default branch which emits an empty toolbar (Phase A2-A4 fills them in)."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "context"}}}
+
+  {:name :_partial-row-actions-show-open-str
+   :description "Optional `show-open` flag (`\"true\"` / `\"false\"`). Client passes `false` when the row IS the currently-selected root view (otherwise `↗` would open the same fn the user is already on)."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "show-open"}}}
+
+  {:name :_partial-row-actions-show-open?
+   :description "True iff `show-open` is absent OR not literally `\"false\"`. Default-on so callers who don't care don't have to pass the flag."
+   :parent :not
+   :args {:value {:parent :equal?
+                  :args {:a :_partial-row-actions-show-open-str
+                         :b {:value "false"}}}}}
+
+  ;; Fetch the fn row + project the three fields the buttons need.
+  {:name :_partial-row-actions-fn-row
+   :description "The decoded fn row for the popover's target fn."
+   :parent :fn-row-by-id
+   :args {:fn-id :_partial-row-actions-fn-id}}
+
+  {:name :_partial-row-actions-fn-name
+   :parent :get
+   :args {:coll :_partial-row-actions-fn-row :key {:value :name} :default ""}}
+
+  {:name :_partial-row-actions-fn-desc
+   :parent :get
+   :args {:coll :_partial-row-actions-fn-row :key {:value :description} :default ""}}
+
+  {:name :_partial-row-actions-fn-ns-id
+   :parent :get
+   :args {:coll :_partial-row-actions-fn-row :key {:value :namespace-id} :default nil}}
+
+  {:name :_partial-row-actions-fn-ns-path
+   :description "Dotted namespace path for the target fn (`\"core.refinements\"`). Empty string when the fn is root-namespaced."
+   :parent :fn-ns-path
+   :args {:ns-id :_partial-row-actions-fn-ns-id}}
+
+  ;; --- Button hiccup ---
+
+  {:name :_partial-row-actions-ns-button
+   :description "`<button class=\"namespace-badge\" data-action=\"namespace-move\" …>ns</button>` — JS dispatcher re-checks auth + editability before opening the namespace-picker."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "namespace-badge action-icon"
+                          :data-action "namespace-move"
+                          :title "Move to a different namespace"
+                          :aria-label "Move to a different namespace"}}
+          :children [{:value "ns"}]}}
+
+  {:name :_partial-row-actions-i-button
+   :description "`<button class=\"description-badge\" data-action=\"description\" …>i</button>` — JS dispatcher reads the inlined description / name / namespace from `data-*` attrs and opens the description tooltip without an additional fetch."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "button"
+                                       :class "description-badge action-icon"
+                                       :data-action "description"
+                                       :data-entity-type "fn"
+                                       :title "Description"
+                                       :aria-label "Description"}}
+                         :key {:value :data-description}
+                         :value :_partial-row-actions-fn-desc}}
+          :children [{:value "i"}]}}
+
+  {:name :_partial-row-actions-open-href
+   :description "Tab URL for the ↗ button — `?fn=<name>` (the editor's `selectFn` reads `?fn=` to navigate). Falls back to `?fn=` for anonymous fns; the JS dispatcher gates the button visibility on `:_partial-row-actions-show-open?` so an anonymous fn-id never gets rendered here in practice."
+   :parent :str
+   :args {:parts [{:value "?fn="} :_partial-row-actions-fn-name]}}
+
+  {:name :_partial-row-actions-open-button
+   :description "`<a class=\"open-in-new-tab\" data-action=\"open\" target=\"_blank\" href=\"?fn=<name>\">↗</a>`. Rendered only when `show-open=true`; otherwise the `:if` short-circuits to an empty `:list` slot."
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "open-in-new-tab action-icon"
+                                       :data-action "open"
+                                       :target "_blank"
+                                       :title "Open in new tab"}}
+                         :key {:value :href}
+                         :value :_partial-row-actions-open-href}}
+          :children [{:value "↗"}]}}
+
+  {:name :_partial-row-actions-open-button-or-nil
+   :description "The ↗ button when `show-open=true`; nil otherwise. nil entries downstream are filtered by `:filter :some?` before they reach hiccup."
+   :parent :if
+   :args {:test :_partial-row-actions-show-open?
+          :then :_partial-row-actions-open-button
+          :else {:value nil}}}
+
+  ;; --- Toolbar assembly ---
+
+  {:name :_partial-row-actions-col-header-children-raw
+   :description "Raw list of button candidates for the col-header context: ns badge, i badge, (optional) ↗ link. Nil entries are stripped by the next step so they don't render as `<></>` empties."
+   :parent :list
+   :args {:items [:_partial-row-actions-ns-button
+                  :_partial-row-actions-i-button
+                  :_partial-row-actions-open-button-or-nil]}}
+
+  {:name :_partial-row-actions-col-header-children
+   :description "Non-nil children — `↗` drops out when the caller requested `show-open=false`."
+   :parent :filter
+   :args {:pred :some?
+          :coll :_partial-row-actions-col-header-children-raw}}
+
+  {:name :_partial-row-actions-col-header
+   :description "Toolbar for the col-header context — wraps the three buttons in a flex container with `data-context` + `data-fn-id` attrs for the dispatcher."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:class "row-actions-content"
+                                       :role "toolbar"
+                                       :aria-label "Row actions"
+                                       :data-context "col-header"}}
+                         :key {:value :data-fn-id}
+                         :value :_partial-row-actions-fn-id-str}}
+          :children :_partial-row-actions-col-header-children}}
+
+  ;; Dispatch on context — A1 only handles col-header; A2-A4 add
+  ;; cell / use-site-arg / root-row branches.
+  {:name :_partial-row-actions-unknown
+   :description "Fallback toolbar for an unknown / unsupported context — empty `<div>` so the partial-fetch swap-in doesn't blow up while a context is being migrated."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "row-actions-content"
+                          :data-context "unknown"}}
+          :children {:value []}}}
+
+  {:name :_partial-row-actions-context-is-col-header?
+   :parent :equal?
+   :args {:a :_partial-row-actions-context-str :b {:value "col-header"}}}
+
+  {:name :_partial-row-actions-body
+   :description "Dispatch on context — A1 ships col-header, A2-A4 will fold in cell / use-site-arg / root-row. Using `:if` over a single-branch `:case` until there's a second supported context (avoids `:case`'s parametric-type-var unification on a single-clause input)."
+   :parent :if
+   :args {:test :_partial-row-actions-context-is-col-header?
+          :then :_partial-row-actions-col-header
+          :else :_partial-row-actions-unknown}}
+
+  {:name :_partial-row-actions-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-row-actions-body}}
+
+  {:name :_partial-row-actions-handler
+   :description "Ring handler for `GET /partials/row-actions` — see the comment block above for the URL shape + JS contract."
+   :parent :html-ok-response
+   :args {:body :_partial-row-actions-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; mismatch-explainer popover. JS used to compute expected /
   ;; actual / reason locally (validateLiteralAgainstType +
   ;; formatTypeHint + slotTypeProvenance), duplicating server-side

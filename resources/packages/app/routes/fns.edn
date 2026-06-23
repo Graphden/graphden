@@ -142,6 +142,11 @@
    :parent :get-auth-required
    :args {:path "/partials/secrets-panel" :handler :_partial-secrets-panel-handler}}
 
+  {:name :partial-row-actions
+   :description "GET /partials/row-actions?fn-id=X&context=col-header[&show-open=false] — server-rendered per-row action buttons (ns / i / ↗ for col-header; cell / use-site-arg / root-row contexts added in subsequent migration phases). Public read-only route — write actions re-check `isAuthenticated()` client-side in the row-actions dispatcher (`editor-row-actions.js` bindRowActionsDispatch). Phase A1 of the HTMX migration plan."
+   :parent :get-route
+   :args {:path "/partials/row-actions" :handler :_partial-row-actions-handler}}
+
   ;; =============================================================================
   ;; /api/* — application API surface. Adding `/v1` is a single wrap of
   ;; `:api-routes` in another group with prefix "/v1".

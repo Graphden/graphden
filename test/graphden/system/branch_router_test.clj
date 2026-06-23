@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.system.branch-router-test
+(ns ^:serial graphden.system.branch-router-test
   "Tests for `graphden.system.branch-router`.
 
    `^:serial` because the `dispatch-test-router` helper redefs
@@ -7,9 +7,11 @@
    redef window would see the stub's per-test resolutions map
    (default-id for nil/main, nil for everything else).
 
-   - Pure-function: extract-branch-ref + dispatch (with stubbed
+   - Pure-function (UNIT): extract-branch-ref + dispatch (with stubbed
      resolve-branch-id), invalidate, LRU eviction (testing the
-     private `evict-lru-if-full`).
+     private `evict-lru-if-full`). 16 of 17 deftests fall here — they
+     don't touch storage, they redef the protocol calls. Tagged at
+     the deftest level only for the one integration test below.
    - Integration: full create-router → dispatch chain against a real
      PG-backed storage with a compilable test fn, asserting the
      per-branch ctx ends up bound to the right branch."
@@ -335,7 +337,7 @@
     (vs/wrap-with-versioning storage "main")))
 
 
-(deftest dispatch-routes-to-per-branch-ctx-end-to-end-test
+(deftest ^:integration dispatch-routes-to-per-branch-ctx-end-to-end-test
   ;; Closes the gap noted in docs/VERSIONING.md § Known gaps. The
   ;; full chain (header → branch resolution → per-branch ctx build →
   ;; per-branch storage) is exercised against a real PG. The fake

@@ -1,8 +1,12 @@
-(ns ^:integration graphden.versioning.branch-local-test
+(ns graphden.versioning.branch-local-test
   "Tests for `graphden.versioning.branch-local` — effective-branch-
    local? walker + cache + monotonic OR over `:parent-ids`.
 
-   Storage stack mirrors `versioning.storage.core-test`."
+   Storage stack mirrors `versioning.storage.core-test`.
+
+   `pure-set-builder-test` is unit (in-memory fn map); the
+   storage-* tests are tagged per-deftest `^:integration` and skip in
+   `bb coverage` accordingly."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]
@@ -69,7 +73,7 @@
       (is (contains? (bl/build-branch-local-set fns) child)))))
 
 
-(deftest storage-walker-test
+(deftest ^:integration storage-walker-test
   (let [base (base-storage)]
     (try
       (let [root  (create-fn! base {:name "root-local" :parents []
@@ -90,7 +94,7 @@
       (finally (sp/close base) (bl/invalidate-all!)))))
 
 
-(deftest cache-invalidation-test
+(deftest ^:integration cache-invalidation-test
   (let [base (base-storage)]
     (try
       (let [foo (create-fn! base {:name "foo" :parents []})]

@@ -1,0 +1,41 @@
+;; Starter component library — Block 2 of the user-sites plan
+;; (docs/USER_SITES_PLAN.md). Each component is a thin fn-def over
+;; `:hiccup` exposing a small set of slots for variants + content +
+;; event-handler attrs. Wire click-handlers via `:dispatch-action`
+;; (see web/runtime).
+;;
+;; Composition convention:
+;;
+;;   - `:label` / `:content` / `:children` — visible content
+;;   - `:attrs` — optional attribute map (typically the result of
+;;     `:dispatch-action`, but any keyword-map works)
+;;
+;; Block 2.1 ships `:button` as the v0 pattern; subsequent sub-blocks
+;; add `:input`, `:textarea`, `:select`, `:checkbox`, `:form`,
+;; `:link`, `:image`, `:card` (modal deferred — needs JS lifecycle).
+
+
+{:namespace "web.components"
+ :description "Starter component library for user-built sites. Composable hiccup wrappers with optional event-handler attrs via :dispatch-action."
+ :fns
+ [;; Block 2.1 — :button. Renders `<button [attrs]>label</button>`.
+  ;; The `:attrs` slot is the wire for click-handler attrs (e.g.
+  ;; `(dispatch-action :action "run-fn")`); omit to render a plain
+  ;; button. Examples:
+  ;;
+  ;;   ;; Plain label-only button (no JS handler).
+  ;;   {:name :placeholder-button
+  ;;    :parent :button
+  ;;    :args {:label "Soon"}}
+  ;;
+  ;;   ;; Click-handler button — emits `<button data-action="run-fn">Run</button>`.
+  ;;   {:name :run-button
+  ;;    :parent :button
+  ;;    :args {:label "Run"
+  ;;           :attrs {:parent :dispatch-action :args {:action "run-fn"}}}}
+  {:name :button
+   :description "Standard button component — renders `<button [attrs]>label</button>`. Slot `:label` is the visible button text; slot `:attrs` is an optional hiccup attrs map (typically built by `:dispatch-action`) merged onto the tag."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :children [{:as :label :type :text
+                      :description "Visible button text."}]}}]}

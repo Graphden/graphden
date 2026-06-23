@@ -127,3 +127,49 @@
              (exec-name :form
                         {:attrs {:method "POST" :action "/contact"}
                          :children [email-input submit-btn]}))))))
+
+
+;; =============================================================================
+;; Block 2.3 — layout/content components
+;; =============================================================================
+
+(deftest link-renders-href-and-label-test
+  (testing "<a href=\"...\">label</a> — :href slot is required, :attrs optional"
+    (is (= [:a {:href "/contact"} "Contact us"]
+           (exec-name :link {:href "/contact" :label "Contact us"})))))
+
+
+(deftest link-with-extra-attrs-test
+  (testing "caller :attrs merge with platform-supplied :href; extras (rel, target) survive"
+    (is (= [:a {:rel "noopener" :target "_blank" :href "https://example.com"}
+            "Example"]
+           (exec-name :link {:href "https://example.com"
+                             :label "Example"
+                             :attrs {:rel "noopener" :target "_blank"}})))))
+
+
+(deftest image-renders-src-alt-test
+  (testing "<img src=... alt=.../> — both required slots present in output"
+    (is (= [:img {:src "/logo.png" :alt "Logo"}]
+           (exec-name :image {:src "/logo.png" :alt "Logo"})))))
+
+
+(deftest image-with-extra-attrs-test
+  (testing "platform :src / :alt merged onto caller's optional :attrs"
+    (is (= [:img {:width 64 :height 64 :src "/avatar.png" :alt "Avatar"}]
+           (exec-name :image {:src "/avatar.png" :alt "Avatar"
+                              :attrs {:width 64 :height 64}})))))
+
+
+(deftest card-renders-default-class-test
+  (testing "<div class=\"card\">children...</div> — default class merged in"
+    (is (= [:div {:class "card"} "Hello" "World"]
+           (exec-name :card {:children ["Hello" "World"]})))))
+
+
+(deftest card-with-attrs-can-override-class-test
+  (testing "caller :attrs wins on conflict (Clojure merge semantics: later overrides earlier)"
+    (is (= [:div {:class "card highlighted" :id "main"} "Content"]
+           (exec-name :card {:children ["Content"]
+                             :attrs {:class "card highlighted"
+                                     :id "main"}})))))

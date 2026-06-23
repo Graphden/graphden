@@ -111,8 +111,7 @@
    :description "Internal — merges `:type \"checkbox\"` onto the caller's optional `:attrs` map; gives `:checkbox` its `<input type=\"checkbox\">` shape without locking the rest of the attrs."
    :parent :merge
    :args {:maps [{:value {:type "checkbox"}}
-                 {:as :attrs :type [:union :null [:map :keyword-or-text :any]]
-                  :required false
+                 {:as :attrs :required false
                   :description "Extra attrs (`:name` / `:id` / `:checked` / …)."}]}}
 
   {:name :checkbox
@@ -137,4 +136,77 @@
    :parent :hiccup
    :args {:tag {:value "form"}
           :children {:as :children :type [:list :hiccup-node]
-                     :description "Form fields, labels, and submit buttons in render order."}}}]}
+                     :description "Form fields, labels, and submit buttons in render order."}}}
+
+  ;; Block 2.3 — layout/content set. `:link`, `:image`, `:card`.
+  ;; Each pre-merges the structurally-required attrs (`:href` for
+  ;; link, `:src`+`:alt` for image, `class="card"` for card) so the
+  ;; caller only has to think about the variable parts.
+
+  ;; `<a href="..." [extra-attrs]>label</a>`. `:href` is a dedicated
+  ;; slot (required) so the platform shape stays obvious; merge
+  ;; order places caller's `:attrs` FIRST so the platform-supplied
+  ;; href wins on conflict.
+  {:name :_link-attrs
+   :description "Internal — merges `{:href <href>}` onto the caller's optional `:attrs` map; gives `:link` its `<a href=...>` shape."
+   :parent :merge
+   :args {:maps [{:as :attrs :required false
+                  :description "Extra attrs (`:target` / `:rel` / …)."}
+                 {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :href}
+                         :value {:as :href :type :text
+                                 :description "Anchor target URL."}}}]}}
+
+  {:name :link
+   :description "HTML `<a href=\"...\" [attrs]>label</a>`. Slot `:href` is the link target (required); `:label` is the visible text; `:attrs` (optional) carries `:target` / `:rel` / etc."
+   :parent :hiccup
+   :args {:tag {:value "a"}
+          :attrs :_link-attrs
+          :children [{:as :label :type :text
+                      :description "Visible link text."}]}}
+
+  ;; `<img src="..." alt="..." [extra-attrs]/>`. Same pattern as
+  ;; `:link` — required platform attrs win on conflict. The image
+  ;; has no children (self-closing per HTML spec).
+  {:name :_image-attrs
+   :description "Internal — assembles `<img>` attrs from caller's `:attrs` plus the required `:src` + `:alt` slots."
+   :parent :merge
+   :args {:maps [{:as :attrs :required false
+                  :description "Extra attrs (`:width` / `:height` / `:loading` / …)."}
+                 {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :src}
+                         :value {:as :src :type :text
+                                 :description "Image source URL."}}}
+                 {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :alt}
+                         :value {:as :alt :type :text
+                                 :description "Accessibility alt text — use empty string for purely decorative images."}}}]}}
+
+  {:name :image
+   :description "HTML `<img src=\"...\" alt=\"...\" [attrs]/>`. Slots `:src` and `:alt` are required (alt may be the empty string for decorative images); `:attrs` (optional) carries `:width`/`:height`/`:loading`."
+   :parent :hiccup
+   :args {:tag {:value "img"}
+          :attrs :_image-attrs
+          :children {:value []}}}
+
+  ;; `<div class="card" [extra-attrs]>children...</div>`. Pre-merges
+  ;; `class="card"` so dropping a `:card` into a graph gives a
+  ;; predictable visual default; caller can override (later items
+  ;; in the merge win).
+  {:name :_card-attrs
+   :description "Internal — pre-merges `{:class \"card\"}` onto the caller's optional `:attrs` map; merge order makes caller's class override the default."
+   :parent :merge
+   :args {:maps [{:value {:class "card"}}
+                 {:as :attrs :required false
+                  :description "Extra attrs (`:id` / `:role` / extra `:class`)."}]}}
+
+  {:name :card
+   :description "HTML `<div class=\"card\" [attrs]>children...</div>` — generic surface container. `:children` is the list of hiccup nodes inside the card; `:attrs` (optional) overrides or extends the default class."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_card-attrs
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Card body hiccup nodes."}}}]}

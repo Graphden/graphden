@@ -10,8 +10,11 @@
 {:namespace "app.routes.groups"
  :description "The `:all` route bundle — the top-level nested-tree input to reitit's router."
  :fns
- [{:name :all
-   :description "Top-level reitit entries — the small list of standalone leaves and the `:api-routes` prefix group that the router walks. Adding a new path = either drop a new leaf in here (if it has no prefix-mate) or extend the appropriate sub-group inside `:api-routes`."
+ [;; Graphden-owned routes — the editor, /api, partials, asset
+  ;; handlers, the contact-demo. Stable list edited only by the
+  ;; graphden package itself.
+  {:name :_base-routes
+   :description "Graphden-owned top-level reitit entries. The user-site-routes mount-point appends after these via :all's :concat."
    :parent :list
    :args {:items [:favicon
                   :editor
@@ -38,4 +41,13 @@
                   :health
                   :metrics
                   :version
-                  :api-routes]}}]}
+                  :api-routes]}}
+
+  ;; :concat lets user-site-routes (a possibly-empty list) splice
+  ;; in as siblings of :_base-routes' entries — if the user has
+  ;; no routes the concat is a no-op; if they do, each entry
+  ;; appears at the top level of the router.
+  {:name :all
+   :description "Full reitit route tree — graphden's own routes followed by user-site entries spliced in via :concat. Adding a graphden route = extend :_base-routes; adding a user-site route = extend :user-site-routes (app/user-site/)."
+   :parent :concat
+   :args {:colls [:_base-routes :user-site-routes]}}]}

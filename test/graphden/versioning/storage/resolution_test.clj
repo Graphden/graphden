@@ -78,7 +78,7 @@
       (let [stripped (extract-version-data version-row :fn-id)]
         (is (= "my-fn"        (:name stripped)))
         (is (= "doc"          (:description stripped)))
-        (is (= false          (:branch-local? stripped)))))
+        (is (false? (:branch-local? stripped)))))
 
     (testing "different version-id-field stays / strips correctly"
       ;; e.g. :binding rows use :binding-id as the version-id-field;

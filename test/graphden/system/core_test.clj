@@ -10,6 +10,7 @@
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.core]
     [integrant.core :as ig]))
 
 

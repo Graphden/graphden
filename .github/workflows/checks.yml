@@ -365,7 +365,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Run trivy fs (vulnerabilities)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           severity: HIGH,CRITICAL
@@ -374,7 +374,7 @@ jobs:
           skip-dirs: node_modules,target,.tools,.playwright-mcp,.git,.lsp
 
       - name: Run trivy config (Dockerfile misconfig)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           severity: HIGH,CRITICAL

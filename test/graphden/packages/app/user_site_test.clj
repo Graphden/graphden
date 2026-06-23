@@ -109,6 +109,12 @@
 ;; :user-site-routes — mount-point starts empty
 ;; =============================================================================
 
-(deftest user-site-routes-defaults-to-empty-test
-  (testing "default :items is empty so the mount-point is a no-op until the user appends their routes"
-    (is (= () (exec-name :user-site-routes {})))))
+(deftest user-site-routes-mounts-shipped-demo-test
+  (testing ":user-site-routes ships the contact-form demo as a working example; result is a one-item list whose entry is the demo's multi-method route"
+    (let [entries (exec-name :user-site-routes {})]
+      (is (= 1 (count entries))
+          "exactly one route shipped (the contact-demo example)")
+      (let [[path methods] (vec (first entries))]
+        (is (= "/demo/contact" path))
+        (is (and (contains? methods "get") (contains? methods "post"))
+            "demo entry exposes both GET and POST")))))

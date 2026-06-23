@@ -37,7 +37,6 @@
                   :partial-service-popover
                   :partial-secrets-panel
                   :partial-row-actions
-                  :demo-contact
                   :health
                   :metrics
                   :version

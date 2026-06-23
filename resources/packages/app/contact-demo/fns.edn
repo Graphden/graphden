@@ -1,18 +1,21 @@
 ;; Contact-form demo — Block 2.5 of the user-sites plan
-;; (docs/USER_SITES_PLAN.md). End-to-end composition of a working
-;; form built entirely from `web.components` + `web.runtime`
-;; primitives, with a POST handler that returns a thanks partial
-;; swapped in via the `submit-form` action handler.
+;; (docs/USER_SITES_PLAN.md), refactored in Block 4.3 to use the
+;; `app.user-site` templates (`:user-page-handler`,
+;; `:user-runtime-scripts`) instead of hand-rolling the page +
+;; runtime-script chain.
 ;;
-;; Routes shipped (see app/routes/fns.edn):
-;;   GET  /demo/contact → :_contact-demo-page-handler
+;; Routes shipped:
+;;   GET  /demo/contact → :user-page-handler (via merged method-map)
 ;;   POST /demo/contact → :_contact-demo-post-handler
 ;;
-;; Mounted under `app.route-groups.all`. Visit the page, type
-;; anything in the email + message fields, click Send — the form
-;; POSTs via fetch (`submit-form` handler), and the server's
-;; thanks partial is swapped into the `#contact-result` div with
-;; no full-page reload.
+;; Mounted under `app.route-groups.all` via `:user-site-routes`
+;; (Block 4.2). Visit the page, type anything in the email +
+;; message fields, click Send — the form POSTs via fetch
+;; (`submit-form` handler), and the server's thanks partial is
+;; swapped into the `#contact-result` div with no full-page
+;; reload. The "Wave at me" button demonstrates the
+;; `:dispatch-custom` escape hatch — inline JS body evaluated on
+;; click with `btn`, `event`, `host` in scope.
 
 
 {:namespace "app.contact-demo"
@@ -99,7 +102,7 @@
                                          :style "padding:8px 16px;margin-top:6px;cursor:pointer;background:transparent;border:1px solid #ccc;border-radius:4px"}}]}}}}
 
   ;; ---------------------------------------------------------------------------
-  ;; PAGE BODY + PAGE HANDLER
+  ;; PAGE BODY
   ;; ---------------------------------------------------------------------------
 
   {:name :_contact-demo-page-body
@@ -120,60 +123,34 @@
                      :_contact-demo-result-panel
                      :_contact-demo-custom-button]}}
 
-  ;; Full HTML page. Loads `/assets/graphden-runtime.js` (the minimal
-  ;; runtime bundle — dispatcher + built-in submit-form/navigate
-  ;; handlers, see :_graphden-runtime-js-body) and bootstraps the
-  ;; dispatcher on document.body so the submit button's
-  ;; `data-action="submit-form"` is routed through the runtime
-  ;; without a page reload.
-  {:name :_contact-demo-runtime-script
-   :description "`<script src=\"/assets/graphden-runtime.js\">` — pulls in the runtime bundle (dispatcher + built-in submit-form / navigate handlers)."
-   :parent :hiccup
-   :args {:tag {:value "script"}
-          :attrs {:value {:src "/assets/graphden-runtime.js"}}
-          :children {:value []}}}
-
-  {:name :_contact-demo-bootstrap-script
-   :description "Inline `<script>` that wires the runtime's `bindActionDispatch` onto document.body after the page loads."
-   :parent :hiccup
-   :args {:tag {:value "script"}
-          :attrs {:value {}}
-          :children {:value ["document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });"]}}}
-
-  {:name :_contact-demo-scripts
-   :description "Scripts the demo page loads — the runtime bundle then the inline bootstrap."
-   :parent :list
-   :args {:items [:_contact-demo-runtime-script
-                  :_contact-demo-bootstrap-script]}}
-
-  {:name :_contact-demo-page
-   :description "Full HTML page for the contact demo. Loads the standalone runtime bundle (not editor.js — that one initialises Cytoscape and would crash a non-editor page) then bootstraps the click dispatcher."
-   :parent :html-page
-   :args {:title "Contact (Graphden demo)"
-          :head []
-          :scripts :_contact-demo-scripts
-          :body :_contact-demo-page-body}}
-
-  {:name :_contact-demo-rendered-page
-   :description "Render `:_contact-demo-page` to an HTML string for the Ring response body."
-   :parent :render-hiccup
-   :return-type :text
-   :args {:hiccup :_contact-demo-page}}
+  ;; ---------------------------------------------------------------------------
+  ;; GET HANDLER — via :user-page-handler template
+  ;; ---------------------------------------------------------------------------
+  ;;
+  ;; Block 4.3 refactor: the previous bespoke chain
+  ;; (`:_contact-demo-{runtime-script,bootstrap-script,scripts,
+  ;; page,rendered-page,page-handler}` — six fn-defs) collapses
+  ;; to a single `:parent :user-page-handler` declaration that
+  ;; pins `:title` / `:page-body` / `:scripts` and inherits the
+  ;; rest from `app.user-site` templates.
 
   {:name :_contact-demo-page-handler
-   :description "GET /demo/contact handler — returns the full HTML page."
-   :parent :html-ok-response
-   :args {:body :_contact-demo-rendered-page}}
+   :description "GET /demo/contact handler — full HTML page via :user-page-handler with the runtime scripts wired in."
+   :parent :user-page-handler
+   :args {:title "Contact (Graphden demo)"
+          :page-body :_contact-demo-page-body
+          :scripts :user-runtime-scripts}}
 
   ;; ---------------------------------------------------------------------------
   ;; POST HANDLER — returns the thanks partial
   ;; ---------------------------------------------------------------------------
+  ;;
+  ;; v0 doesn't echo the submitted email/message back — that
+  ;; would require accessing the parsed form body, threading it
+  ;; through `:parse-form-body`, and a couple of `:get` calls.
+  ;; Future iteration when we want to demonstrate form-data
+  ;; access end-to-end.
 
-  ;; Returns a thanks partial. For v0 we don't echo the submitted
-  ;; email/message back — that would require accessing the parsed
-  ;; form body, threading it through `:parse-form-body`, and a
-  ;; couple of `:get` calls. Future iteration when we want to
-  ;; demonstrate form-data access end-to-end.
   {:name :_contact-demo-thanks-partial
    :description "Thanks-partial hiccup — `<p style=...>Thanks! We got your message.</p>`."
    :parent :hiccup
@@ -190,4 +167,35 @@
   {:name :_contact-demo-post-handler
    :description "POST /demo/contact handler — returns a thanks partial that the runtime swaps into `#contact-result`."
    :parent :html-ok-response
-   :args {:body :_contact-demo-rendered-thanks}}]}
+   :args {:body :_contact-demo-rendered-thanks}}
+
+  ;; ---------------------------------------------------------------------------
+  ;; ROUTE ENTRIES — GET + POST merged into one /demo/contact path
+  ;; ---------------------------------------------------------------------------
+  ;;
+  ;; Reitit needs a single entry per path; for GET + POST on
+  ;; `/demo/contact` we build a method-map per method then
+  ;; merge — same shape as `:api-branches-root`. Mounted via
+  ;; `:user-site-routes` in `app.user-site`.
+
+  {:name :_demo-contact-get-data
+   :description "Method-data for GET on `/demo/contact`. Combined into `:demo-contact`."
+   :parent :method-map
+   :args {:method "get"
+          :handler :_contact-demo-page-handler}}
+
+  {:name :_demo-contact-post-data
+   :description "Method-data for POST on `/demo/contact`. Combined into `:demo-contact`."
+   :parent :method-map
+   :args {:method "post"
+          :handler :_contact-demo-post-handler}}
+
+  {:name :_demo-contact-methods
+   :description "Merged method-data — `{:get … :post …}` — for `/demo/contact`."
+   :parent :merge
+   :args {:maps [:_demo-contact-get-data :_demo-contact-post-data]}}
+
+  {:name :demo-contact
+   :description "Multi-method route entry `[\"/demo/contact\" {:get … :post …}]` for the contact-form demo. Mounted from `:user-site-routes` in `app.user-site`."
+   :parent :list
+   :args {:items ["/demo/contact" :_demo-contact-methods]}}]}

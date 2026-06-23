@@ -141,14 +141,23 @@ jobs:
           # improvements; never silently lower it on regression — that
           # defeats the gate.
           #
-          # Baseline 2026-06-23: 69.06% form (unit-only). The drop from
-          # the older 72.8% baseline is BY DESIGN: integration suite
-          # was removed from the cloverage pass (was inflating per-NS
-          # numbers misleadingly — see `bb coverage` docstring +
-          # `[[feedback_coverage_measurement]]`). Integration coverage
-          # now runs via `bb test` un-instrumented and is verified by
-          # the integration tests' own pass/fail signal, not by line %.
-          COV_FLOOR=65
+          # Baseline 2026-06-23: 71.50% form (unit-only) after a
+          # reclassification + new-unit-tests pass: 4 test files
+          # had ^:integration NS markers but contained pure-function
+          # deftests that didn't need a testcontainer (branch-router-
+          # test, branch-local-test, notify-test, type/refinements-
+          # test partly); switched to per-deftest tagging. Also added
+          # new pure-helper unit tests for versioning.storage.resolution
+          # + extended system.core-test / branch-local-test. Together
+          # pushed ALL FILES from 69.06 → 71.50 form (+2.44pp).
+          #
+          # Why 70 and not the older 72.8: integration suite is
+          # deliberately OUT of the cloverage pass (its per-NS
+          # attribution was misleading — see `bb coverage` docstring
+          # + `[[feedback_coverage_measurement]]`). Integration code
+          # paths run via `bb test` un-instrumented and are verified
+          # by the integration tests' own pass/fail signal.
+          COV_FLOOR=70
           if awk "BEGIN { exit !($COVERAGE < $COV_FLOOR) }"; then
             echo "Form coverage ${COVERAGE}% is below ${COV_FLOOR}% threshold"
             exit 1

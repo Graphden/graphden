@@ -280,9 +280,24 @@ ensureRowActionsDismissHandler();
 // before invoking write actions so the partial itself stays
 // public-readable.
 
+// Registry of rich `useSiteArg` objects keyed by binding-id. The
+// server-rendered × / ✎ buttons carry only `data-binding-id` (a
+// stable identifier); the dispatcher looks the full arg up here
+// before invoking `deleteUseSiteBinding` / `enterFreeArgBindEditMode`
+// which both need the arg's `:type` / `:item-id` / etc. fields.
+// Populated by `loadRowActionsContent` pre-fetch; trimmed by host
+// removal (each popover close wipes the entry).
+const _rowActionsUseSiteArgs = new Map();
+
+
 async function loadRowActionsContent(host, fnId, context, opts) {
   opts = opts || {};
   if (!host || !fnId) return;
+  // Register the rich arg before fetch — the dispatcher binds
+  // post-swap and reads by binding-id then.
+  if (opts.useSiteArg?.['binding-id']) {
+    _rowActionsUseSiteArgs.set(opts.useSiteArg['binding-id'], opts.useSiteArg);
+  }
   host.textContent = '';
   const loading = document.createElement('span');
   loading.className = 'row-actions-loading';
@@ -294,6 +309,8 @@ async function loadRowActionsContent(host, fnId, context, opts) {
     // `/partials/*` paths are out of scope for `window.API` (only
     // `/api/*` flows through the validator + boot-cached constants);
     // the literal stays explicit — drift validator doesn't touch it.
+    const useSiteBindingId = opts.useSiteArg
+                           ? opts.useSiteArg['binding-id'] : null;
     const url = '/partials/row-actions'
               + '?fn-id=' + encodeURIComponent(fnId)
               + '&context=' + encodeURIComponent(context)
@@ -301,6 +318,9 @@ async function loadRowActionsContent(host, fnId, context, opts) {
               + (opts.editable ? '&editable=true' : '')
               + (opts.cardFnId
                   ? '&card-fn-id=' + encodeURIComponent(opts.cardFnId)
+                  : '')
+              + (useSiteBindingId
+                  ? '&binding-id=' + encodeURIComponent(useSiteBindingId)
                   : '');
     const r = await fetch(url);
     if (!r.ok) {
@@ -412,6 +432,34 @@ function bindRowActionsDispatch(host) {
         const cardFnEntity = lookups?.fnMap?.get(cardFnId);
         if (cardFnEntity && typeof addMIParentInline === 'function') {
           addMIParentInline(cardFnEntity, btn);
+        }
+        break;
+      }
+      case 'remove-use-site-binding': {
+        // Look up the rich `useSiteArg` via the binding-id-keyed
+        // registry the caller populated pre-fetch. The arg carries
+        // `:type` / `:item-id` / etc. that `deleteUseSiteBinding`
+        // needs to choose between sequence-item-removal and binding-
+        // deletion code paths.
+        e.preventDefault();
+        e.stopPropagation();
+        const bindingId = host.dataset.bindingId;
+        const arg = _rowActionsUseSiteArgs.get(bindingId);
+        if (arg && typeof deleteUseSiteBinding === 'function') {
+          deleteUseSiteBinding(arg);
+        }
+        break;
+      }
+      case 'change-use-site-value': {
+        // `enterFreeArgBindEditMode` dispatches on the arg's
+        // effective type (fn-picker for `:fn` slots, literal form
+        // for the rest) — same registry lookup pattern as above.
+        e.preventDefault();
+        e.stopPropagation();
+        const bindingId = host.dataset.bindingId;
+        const arg = _rowActionsUseSiteArgs.get(bindingId);
+        if (arg && typeof enterFreeArgBindEditMode === 'function') {
+          enterFreeArgBindEditMode(arg, btn);
         }
         break;
       }

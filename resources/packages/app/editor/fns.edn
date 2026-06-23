@@ -501,6 +501,14 @@
    :parent :equal?
    :args {:a :_partial-row-actions-editable-str :b {:value "true"}}}
 
+  ;; --- Phase A3 query param ---
+
+  {:name :_partial-row-actions-binding-id-str
+   :description "Optional `binding-id` query parameter — identifies the use-site arg binding the × / ✎ buttons target. Goes onto the host div as `data-binding-id`; JS dispatcher uses it to look up the rich `useSiteArg` object from the client-side registry that `loadRowActionsContent` populates pre-fetch."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "binding-id"}}}
+
   ;; Fetch the fn row + project the three fields the buttons need.
   {:name :_partial-row-actions-fn-row
    :description "The decoded fn row for the popover's target fn."
@@ -687,6 +695,78 @@
           :attrs :_partial-row-actions-cell-attrs
           :children :_partial-row-actions-cell-children}}
 
+  ;; --- Phase A3 use-site-arg buttons ---
+
+  {:name :_partial-row-actions-remove-use-site-button
+   :description "`<button data-action=\"remove-use-site-binding\" …>×</button>` — JS dispatcher reads `data-binding-id` from the host, looks up the rich `useSiteArg` from the in-process registry, and calls `deleteUseSiteBinding(arg)`."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon action-icon-danger"
+                          :data-action "remove-use-site-binding"
+                          :title "Remove this value (slot reverts to free-arg)"
+                          :aria-label "Remove this value"}}
+          :children [{:value "×"}]}}
+
+  {:name :_partial-row-actions-change-use-site-button
+   :description "`<button data-action=\"change-use-site-value\" …>✎</button>` — JS dispatcher looks up `useSiteArg` by `data-binding-id` and calls `enterFreeArgBindEditMode(arg, btn)` (which dispatches on the arg's effective type to the right editor — fn-picker for `:fn` slots, literal form for the rest)."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "change-use-site-value"
+                          :title "Change value (pick another fn / set a literal)"
+                          :aria-label "Change value"}}
+          :children [{:value "✎"}]}}
+
+  {:name :_partial-row-actions-remove-use-site-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-remove-use-site-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-change-use-site-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-change-use-site-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-use-site-children-raw
+   :description "Raw button list for the use-site-arg context: ns / i / ↗ (always) + (when editable) × Remove-binding + ✎ Change-value. Matches the legacy `useSiteArg` branch of `buildPopoverContent` in editor-overlay-fn.js, plus the always-on shared head from the line context."
+   :parent :list
+   :args {:items [:_partial-row-actions-ns-button
+                  :_partial-row-actions-i-button
+                  :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-remove-use-site-button-or-nil
+                  :_partial-row-actions-change-use-site-button-or-nil]}}
+
+  {:name :_partial-row-actions-use-site-children
+   :parent :filter
+   :args {:pred :some?
+          :coll :_partial-row-actions-use-site-children-raw}}
+
+  {:name :_partial-row-actions-use-site-attrs-base
+   :parent :assoc
+   :args {:map {:value {:class "row-actions-content"
+                        :role "toolbar"
+                        :aria-label "Row actions"
+                        :data-context "use-site-arg"}}
+          :key {:value :data-fn-id}
+          :value :_partial-row-actions-fn-id-str}}
+
+  {:name :_partial-row-actions-use-site-attrs
+   :parent :assoc
+   :args {:map :_partial-row-actions-use-site-attrs-base
+          :key {:value :data-binding-id}
+          :value :_partial-row-actions-binding-id-str}}
+
+  {:name :_partial-row-actions-use-site
+   :description "use-site-arg context toolbar — 3 read-only buttons (ns/i/↗) + 2 editable (× Remove-binding / ✎ Change-value) when `editable=true`. Host attrs carry `data-fn-id` + `data-binding-id`; the dispatcher uses binding-id to recover the rich `useSiteArg` object."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_partial-row-actions-use-site-attrs
+          :children :_partial-row-actions-use-site-children}}
+
   ;; --- Context dispatch ---
 
   {:name :_partial-row-actions-context-is-col-header?
@@ -697,14 +777,24 @@
    :parent :equal?
    :args {:a :_partial-row-actions-context-str :b {:value "cell"}}}
 
+  {:name :_partial-row-actions-context-is-use-site-arg?
+   :parent :equal?
+   :args {:a :_partial-row-actions-context-str :b {:value "use-site-arg"}}}
+
+  {:name :_partial-row-actions-body-or-use-site
+   :parent :if
+   :args {:test :_partial-row-actions-context-is-use-site-arg?
+          :then :_partial-row-actions-use-site
+          :else :_partial-row-actions-unknown}}
+
   {:name :_partial-row-actions-body-or-cell
    :parent :if
    :args {:test :_partial-row-actions-context-is-cell?
           :then :_partial-row-actions-cell
-          :else :_partial-row-actions-unknown}}
+          :else :_partial-row-actions-body-or-use-site}}
 
   {:name :_partial-row-actions-body
-   :description "Dispatch on context — A1 shipped col-header, A2 adds cell. A3-A4 will fold in use-site-arg / root-row via nested `:if` (or `:case` once stability + type-var unification settle)."
+   :description "Dispatch on context — A1 col-header, A2 cell, A3 use-site-arg. A4 will fold in root-row via the same nested-`:if` chain (a `:case` migration becomes worthwhile once there's a fifth context)."
    :parent :if
    :args {:test :_partial-row-actions-context-is-col-header?
           :then :_partial-row-actions-col-header

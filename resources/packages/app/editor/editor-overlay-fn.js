@@ -625,6 +625,28 @@ function renderSingleFnRow(line, levelInfo, ctx) {
   // building the icons until the popover actually opens, so unhovered
   // rows pay no DOM cost.
   const buildPopoverContent = (host) => {
+    // HTMX migration Phase A3: when the row is a use-site-arg
+    // (signed-in user on an editable card with exactly one editable
+    // incoming arg), the toolbar — ns/i/↗ shared + × Remove-binding
+    // + ✎ Change-value — is server-rendered. JS keeps the popover
+    // lifecycle + the `data-action` dispatcher (which looks up the
+    // rich `useSiteArg` object by binding-id from the
+    // `_rowActionsUseSiteArgs` registry the loader populated).
+    //
+    // `_singleEditableIncomingArg` already gates `useSiteArg` on
+    // signed-in + edit-allowed, so passing `editable: true` here is
+    // safe — the dispatcher does a second `isAuthenticated()`
+    // check inside `deleteUseSiteBinding` as a defence in depth.
+    if (useSiteArg) {
+      if (typeof loadRowActionsContent === 'function') {
+        loadRowActionsContent(host, lineFn.fnId, 'use-site-arg', {
+          showOpen: !!lineShowOpen,
+          editable: true,
+          useSiteArg: useSiteArg
+        });
+      }
+      return;
+    }
     // ns badge — first slot in the popover so it reads "this fn lives
     // in <ns>, here's everything you can do with it".
     const fnEntity = lineFnEntity;

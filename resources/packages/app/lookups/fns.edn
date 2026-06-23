@@ -1,0 +1,69 @@
+;; Server-side lookups for partial renderers — Phase 0 of the
+;; HTMX migration plan (docs/EDITOR_HTMX_MIGRATION_PLAN.md).
+;;
+;; Each fn-def here reads a single piece of graph state and is the
+;; canonical primitive for partials that need it. They're built on
+;; top of the existing `:storage-query-call` / `:decode-row` chain
+;; that other modules use directly today; centralising them avoids
+;; duplicating the `:assoc` + `:vec` HSQL boilerplate at every
+;; call site.
+;;
+;; Naming convention: public (no `_`) primitives are intended for
+;; cross-module reuse. `_`-private fn-defs are scaffolding for the
+;; public ones in this same file.
+
+
+{:namespace "app.lookups"
+ :description "Server-side lookups for partial renderers — read fn rows / namespace paths / usage counts / request auth state. Primitives for the HTMX-migration row-actions + tooltip partials (docs/EDITOR_HTMX_MIGRATION_PLAN.md)."
+ :fns
+ [;; =============================================================================
+  ;; AUTH — per-partial request auth check
+  ;; =============================================================================
+  ;;
+  ;; The route-level `:get-auth-required` parent 401s anonymous
+  ;; visitors. Some partials (row-actions) need to render content
+  ;; for BOTH anonymous and authenticated callers but vary the
+  ;; affordance set (e.g. show ✎ rename only when authed). They use
+  ;; the public `:get-route` parent and consume `:request-authed?`
+  ;; inline to gate conditional buttons.
+
+  {:name :request-authed?
+   :description "True iff the current request carries a valid `Authorization: Bearer <token>` that matches `AUTH_TOKEN`. Public wrapper over the existing `:_bearer-equals-env?` predicate in `web/ring-adapter` — promoted so app-level partials can read it without crossing the `_`-private boundary."
+   :parent :_bearer-equals-env?}
+
+  ;; =============================================================================
+  ;; FN ROW READER — single fn entity by id
+  ;; =============================================================================
+  ;;
+  ;; HSQL → storage-query-call → first → decode-row. Returns nil
+  ;; when no row matches the id, matching the JS-side `lookups?.fnMap?.get(id)`
+  ;; semantics (also returns undefined for unknown ids). Callers
+  ;; that need to fail-loud should `:assert-some` the result.
+
+  {:name :_fn-row-by-id-where
+   :description "Build `[:= :id <fn-id>]` HSQL where clause from the free arg `:fn-id`."
+   :parent :vec
+   :args {:coll [{:value :=} {:value :id} {:as :fn-id}]}}
+
+  {:name :_fn-row-by-id-hsql
+   :description "Full HSQL bundle: `{:select [:*] :from :fn :where [:= :id <fn-id>]}`."
+   :parent :assoc
+   :args {:map {:value {:select [:*] :from :fn}}
+          :key {:value :where}
+          :value :_fn-row-by-id-where}}
+
+  {:name :_fn-row-by-id-raw
+   :description "Raw row vector (length 0 or 1) from `:storage-query-call`. Undecoded — string column keys, undecoded enum strings, jsonb PGobjects."
+   :parent :storage-query-call
+   :args {:arg :_fn-row-by-id-hsql}}
+
+  {:name :_fn-row-by-id-first
+   :description "First (and only) raw row, or nil when no fn matches the id."
+   :parent :first
+   :args {:coll :_fn-row-by-id-raw}}
+
+  {:name :fn-row-by-id
+   :description "Decoded fn entity row by id; nil when not found. Free arg: `:fn-id` (uuid). Returns `:nullable-keyword-map` matching `:decode-row`'s shape (kebab-case kw keys, decoded enums/jsonb)."
+   :parent :decode-row
+   :args {:row :_fn-row-by-id-first
+          :entity-type {:value "fn"}}}]}

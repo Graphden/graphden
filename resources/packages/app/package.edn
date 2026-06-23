@@ -6,7 +6,7 @@
  ;; direct `:pg-query` + `:decode-row` chains — both primitives live
  ;; in the `storage/pg` module.
  :dependencies ["core" "web" "storage"]
- :modules ["common" "routes-method" "editor" "layout" "forms" "execution" "branches" "secrets" "routes" "routes-auth" "route-groups" "server"]
+ :modules ["common" "lookups" "routes-method" "editor" "layout" "forms" "execution" "branches" "secrets" "routes" "routes-auth" "route-groups" "server"]
  :services [{:name :default
              :fn-name :web-server
              :enabled? true

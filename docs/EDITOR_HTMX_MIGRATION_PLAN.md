@@ -5,8 +5,10 @@ Documented here so a fresh session can execute without re-deriving
 the analysis.
 
 **Branch context**: `refactor/popovers-to-graph-htmx`. The four
-URL-coupling stages (Options 1+2) shipped in commits
-`caf68b18` → `78e517f1`; window.API is live.
+URL-coupling stages (Options 1+2) shipped earlier in this branch;
+`window.API` is live and editor JS uses it for every `/api/*` call.
+See the `feat(web/reitit) … feat(editor) … refactor(editor) …`
+commits at the branch tip.
 
 ## Why this is in a doc instead of already shipped
 

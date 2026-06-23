@@ -119,26 +119,65 @@ opening an editor outside graphden.
 
 ## Open design questions per block
 
-Each block has its own "what shape is right" questions that
-are easier to answer once the prior block has shipped and we
-have real ground truth. Listed here so they don't get forgotten:
+Each block had "what shape is right" questions answered as the
+block shipped. Decisions are recorded here so the resolution
+isn't lost; remaining open work is tracked under "v1 follow-
+ups" below.
 
-- **Block 1**: should the runtime ship as a separate
-  `runtime.js` resource (loaded ahead of editor.js) or stay
-  inlined in the editor bundle? Tradeoff is caching granularity
-  vs HTTP-request count.
-- **Block 2**: should `:return-type :component` be a real
-  type-row checked at sync time, or just a convention? Strict
-  typing helps the editor surface components in a picker; loose
-  typing keeps the type system simpler.
-- **Block 3**: should the textarea editor surface a syntax-
-  highlighting indicator (just a CSS hint like a code font), or
-  is plain textarea the right minimum? Monaco / CodeMirror is
-  out of scope for v1 but the indicator is cheap.
-- **Block 4**: multi-site (multiple deployments per graphden
-  instance, picker for which one to render) vs single-site
-  (graphden hosts ONE user site at a time, simpler routing
-  story)? Real usage will tell.
+- **Block 1** — runtime delivery: shipped as
+  `/assets/graphden-runtime.js` (separate route from
+  `/assets/editor.js`). User pages load the runtime bundle
+  without dragging in Cytoscape + WebSocket subscriptions.
+  See `app.editor/:_graphden-runtime-js-handler`.
+- **Block 2** — component typing: shipped as plain
+  convention (`:parent :hiccup`). No `:return-type
+  :component` type-row; the editor surfaces them via package
+  / namespace rather than type. Strict typing can land later
+  if a real use-case (e.g. picker UX) needs it.
+- **Block 3** — textarea editor: shipped as plain textarea
+  with `data-field-kind="text"` and `spellcheck="false"`.
+  No syntax-highlighting indicator either way — the +500 KB
+  Monaco bundle (or even a CodeMirror lite) waits for real
+  user demand.
+- **Block 4** — single-site v0 shipped. `:user-site-routes`
+  is a single shared mount-point; users edit
+  `app/user-site/fns.edn` directly to append routes. The
+  declarative-sync resets `:items` on every `bb deploy`, so
+  for v0 the EDN IS the source of truth. Multi-site,
+  branch-scoped routing, and auto-discovery of user-route
+  packages are v1 follow-ups (below).
+
+## v1 follow-ups
+
+Not gating v0 ("can a user build and deploy a site today?" =
+yes), but the natural extensions once real users surface real
+needs:
+
+- **Auto-discovery of user routes**. Today the user edits
+  graphden's EDN to add their routes to `:user-site-routes`.
+  Better: a convention where any fn-def in a package marked
+  `:user-mountable true` (or returning a `:reitit-route-entry`
+  type) gets auto-included at boot. Requires a small schema
+  field + a startup-time scan.
+- **Branch-scoped sites**. Use graphden's existing per-branch
+  fn-versioning to host MULTIPLE user sites on one instance,
+  each addressed via the branch picker. The infrastructure
+  exists; the routing decision (URL prefix vs hostname vs
+  query param) is the open question.
+- **Multi-site at the prefix level**. Mount user A's site at
+  `/sites/alice`, user B's at `/sites/bob`. Requires a
+  `:site-prefix` slot on each route entry + a per-site
+  isolation story (auth, secrets, DB).
+- **Form-data echo in the demo**. The shipped
+  `/demo/contact` POST handler returns a static "Thanks!"
+  partial. Demo-quality follow-up: parse the form body
+  (`:parse-form-body`), echo the submitted email back in
+  the response. Shows the `:parse-form-body` → `:get` →
+  `:str` chain end-to-end.
+- **Monaco / CodeMirror inline editor** for `:js-source`
+  textarea widgets — only worth doing once `:custom-script`
+  bodies get long enough that plain `<textarea>` editing
+  becomes the friction.
 
 ## Status
 
@@ -147,7 +186,7 @@ have real ground truth. Listed here so they don't get forgotten:
 | 1 | shipped | runtime + `editor-row-actions.js` consumer + `:dispatch-action` DSL (`web/runtime`) — landed 2026-06-23 |
 | 2 | shipped | starter library (`web/components`): `:button`, `:input`, `:textarea`, `:option`, `:select`, `:checkbox`, `:form`, `:link`, `:image`, `:card` + `:_*-attrs` helpers; built-in handlers `navigate` / `submit-form` (`editor-actions-builtin.js` + `/assets/graphden-runtime.js` bundle); contact-form demo at `/demo/contact` (`app/contact-demo`). Landed 2026-06-23. |
 | 3 | shipped | `:js-source` type alias + `:custom-script` + `:wrap-custom-script` for page-level inline JS; `:dispatch-custom` DSL + `custom` action handler for inline button handlers; `:_form-js-source` textarea widget; contact-demo "Wave at me" button demonstrates the escape hatch end-to-end. Landed 2026-06-23. |
-| 4 | pending | unblocked by Blocks 2 + 3 |
+| 4 | shipped (v0) | `app.user-site` templates (`:user-page-route`, `:user-page-handler`, `:user-page-rendered`, `:user-runtime-scripts`, `:graphden-runtime-script-tag`, `:user-bootstrap-script`); `:user-site-routes` mount-point spliced into `:all` via `:concat`; contact-demo refactored to consume the templates; Lesson 14 walks through building + deploying. Open questions (multi-site, branch-scoped routing, auto-discovery) deferred to follow-up. Landed 2026-06-23. |
 
 ## Related docs
 

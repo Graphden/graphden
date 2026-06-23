@@ -154,7 +154,7 @@
 
     (testing "everything else off"
       (doseq [no [""    "0"  "false" "FALSE" "no" "off"
-                  "  true  "   ;; whitespace not stripped — intentional
+                  "  true  "   ; whitespace not stripped — intentional
                   "yeah" "enabled" "yep"]]
         (is (false? (demo-branches-enabled? no))
             (str "should be disabled: " (pr-str no)))))

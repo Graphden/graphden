@@ -337,6 +337,28 @@
     (vs/wrap-with-versioning storage "main")))
 
 
+;; =============================================================================
+;; Active-router singleton — round-trip set! / current / clear!. Pure
+;; atom op, no router state required.
+;; =============================================================================
+
+(deftest active-router-singleton-roundtrip-test
+  (testing "set-active-router! → current-router → clear-active-router!"
+    (let [fake-router (br/->BranchRouter nil default-id (atom {}) :stub-fn-id)]
+      ;; Start clean (sibling tests may have left state — `^:serial`
+      ;; protects against parallel writes but not from carry-over).
+      (br/clear-active-router!)
+      (is (nil? (br/current-router)) "clean precondition")
+
+      (br/set-active-router! fake-router)
+      (is (identical? fake-router (br/current-router))
+          "current returns whatever was last set")
+
+      (br/clear-active-router!)
+      (is (nil? (br/current-router))
+          "after clear, current returns nil"))))
+
+
 (deftest ^:integration dispatch-routes-to-per-branch-ctx-end-to-end-test
   ;; Closes the gap noted in docs/VERSIONING.md § Known gaps. The
   ;; full chain (header → branch resolution → per-branch ctx build →

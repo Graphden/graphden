@@ -961,7 +961,7 @@ async function putTypeEdit(kind, fnId, name, payload) {
   if (payload.kind === 'record') {
     const body = { id: fnId, name, description: desc, fields: payload.body.fields };
     const fetchFn = (typeof authFetch === 'function') ? authFetch : fetch;
-    const r = await fetchFn('/api/types/record-update', {
+    const r = await fetchFn(API.api_types_record_update, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -981,7 +981,7 @@ async function putTypeEdit(kind, fnId, name, payload) {
     delete form['element-type'];
   }
   const r = await authMutate('PUT',
-    '/api/entities/fn/' + encodeURIComponent(fnId), form);
+    API.api_entities_type_id('fn', fnId), form);
   if (!(r.status >= 200 && r.status < 300)) {
     const text = await r.text().catch(() => '');
     throw new Error((text || '').slice(0, 200) || ('HTTP ' + r.status));
@@ -992,12 +992,12 @@ async function putTypeEdit(kind, fnId, name, payload) {
 async function postTypeCreate(kind, parentNsId, name, payload) {
   const desc = payload.description || '';
   if (payload.kind === 'record') {
-    return postRecordOrList('/api/types/record', name, parentNsId,
+    return postRecordOrList(API.api_types_record, name, parentNsId,
                             Object.assign({ fields: payload.body.fields },
                                           desc ? { description: desc } : {}));
   }
   if (payload.kind === 'list') {
-    return postRecordOrList('/api/types/list', name, parentNsId,
+    return postRecordOrList(API.api_types_list, name, parentNsId,
                             Object.assign({ 'element-type': payload.body['element-type'] },
                                           desc ? { description: desc } : {}));
   }
@@ -1008,7 +1008,7 @@ async function postTypeCreate(kind, parentNsId, name, payload) {
     'namespace-id': parentNsId || '',
   }, payload.body);
   if (desc) form.description = desc;
-  const r = await authMutate('POST', '/api/entities/fn', form);
+  const r = await authMutate('POST', API.api_entities_type('fn'), form);
   if (!(r.status >= 200 && r.status < 300)) {
     const text = await r.text().catch(() => '');
     throw new Error((text || '').slice(0, 200) || ('HTTP ' + r.status));

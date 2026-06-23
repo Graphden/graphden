@@ -278,7 +278,7 @@ async function fetchValueForm(arg) {
   if (arg['slot-id'])    body['slot-id']    = arg['slot-id'];
   if (arg['item-id'])    body['item-id']    = arg['item-id'];
   try {
-    const r = await fetch('/api/value-form', {
+    const r = await fetch(API.api_value_form, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)

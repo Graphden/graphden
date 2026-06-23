@@ -37,7 +37,7 @@ async function typesCompatible(expected, candidate) {
   }
   let ok = false;
   try {
-    const r = await fetch('/api/types/compatible', {
+    const r = await fetch(API.api_types_compatible, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ expected, candidate }),

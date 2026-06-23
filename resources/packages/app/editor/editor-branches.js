@@ -245,7 +245,7 @@ async function createBranchFromInput(parentName) {
   }
   err.classList.add('hidden');
   try {
-    const resp = await window.authFetch('/api/branches', {
+    const resp = await window.authFetch(API.api_branches, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, 'base-branch-id': parentName }),
@@ -275,7 +275,7 @@ async function deleteBranchWithConfirm(name) {
   const err = document.getElementById('branch-popover-error');
   try {
     const resp = await window.authFetch(
-      '/api/branches/' + encodeURIComponent(name),
+      API.api_branches_ref(name),
       { method: 'DELETE' });
     const body = await resp.json();
     if (resp.status === 401) {
@@ -323,7 +323,7 @@ async function mergeBranchInto(sourceName, targetName, conflictResolutions) {
   };
   try {
     const resp = await window.authFetch(
-      '/api/branches/' + encodeURIComponent(targetName) + '/merge',
+      API.api_branches_ref_merge(targetName),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -505,7 +505,7 @@ async function submitConflictResolutions(conflicts, sourceName, targetName) {
   const errBox = document.getElementById('merge-conflicts-error');
   try {
     const resp = await window.authFetch(
-      '/api/branches/' + encodeURIComponent(targetName) + '/merge',
+      API.api_branches_ref_merge(targetName),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

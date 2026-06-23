@@ -283,7 +283,7 @@ function enterSecretBindingEditMode(arg, anchorEl) {
       if (!path) return { ok: false, error: 'Vault path is required.' };
       if (!value) return { ok: false, error: 'Initial value is required.' };
       try {
-        const r = await authFetch('/api/secret-bindings', {
+        const r = await authFetch(API.api_secret_bindings, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -363,9 +363,9 @@ async function writeBindingFields(arg, fields) {
   try {
     const r = bindingId
       ? await authMutate('PUT',
-                          '/api/entities/binding/' + encodeURIComponent(bindingId),
+                          API.api_entities_type_id('binding', bindingId),
                           body)
-      : await authMutate('POST', '/api/entities/binding',
+      : await authMutate('POST', API.api_entities_type('binding'),
                           'fn-id=' + encodeURIComponent(fnId) +
                           '&slot-id=' + encodeURIComponent(slotId) +
                           (body ? '&' + body : ''));
@@ -383,7 +383,7 @@ async function writeBindingFields(arg, fields) {
 async function putSequenceItemValue(itemId, value) {
   if (!itemId) return { ok: false, error: 'No sequence item.' };
   try {
-    const r = await authFetch('/api/sequence/item/' + encodeURIComponent(itemId), {
+    const r = await authFetch(API.api_sequence_item_item_id(itemId), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: value })
@@ -524,7 +524,7 @@ function enterFnRenameEditMode(fn, anchorEl) {
       if (!newName) return false;
       try {
         const r = await authMutate('PUT',
-                                   '/api/entities/fn/' + encodeURIComponent(fn.id),
+                                   API.api_entities_type_id('fn', fn.id),
                                    { name: newName });
         if (r?.ok) return true;
       } catch (_) {}
@@ -632,7 +632,7 @@ function enterExpectsEffectsEditMode(fn, anchorEl, currentDeclared) {
                               value.join(',');
       try {
         const r = await authMutate('PUT',
-          '/api/entities/fn/' + encodeURIComponent(fn.id),
+          API.api_entities_type_id('fn', fn.id),
           { 'expects-effects': wireValue });
         if (r?.ok) {
           patchFnFieldInState(fn.id, 'expects-effects', value);
@@ -674,7 +674,7 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
     async doSave(select) {
       try {
         const r = await authMutate('PUT',
-                                   '/api/entities/fn/' + encodeURIComponent(fn.id),
+                                   API.api_entities_type_id('fn', fn.id),
                                    { 'return-type': select.value });
         if (r?.ok) {
           patchFnFieldInState(fn.id, 'return-type', select.value || null);
@@ -978,7 +978,7 @@ function enterNamespaceMoveEditMode(fn, anchorEl) {
           ? { 'namespace-id': picked.id }
           : 'namespace-id=';
         const r = await authMutate('PUT',
-                                   '/api/entities/fn/' + encodeURIComponent(fn.id),
+                                   API.api_entities_type_id('fn', fn.id),
                                    body);
         if (r?.ok && typeof initGraph === 'function') initGraph();
       } catch (_) {}
@@ -1099,7 +1099,7 @@ function promptLiteralForAppend(fnId, anchorEl, expectedType) {
 
 async function postSequenceAppend(fnId, body) {
   try {
-    const r = await authFetch('/api/sequence/append/' + encodeURIComponent(fnId), {
+    const r = await authFetch(API.api_sequence_append_fn_id(fnId), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
@@ -1116,7 +1116,7 @@ async function removeSequenceItem(itemId) {
   if (!itemId) return false;
   try {
     const r = await authMutate('DELETE',
-                               '/api/sequence/item/' + encodeURIComponent(itemId));
+                               API.api_sequence_item_item_id(itemId));
     if (r?.ok) {
       if (typeof initGraph === 'function') initGraph();
       return true;
@@ -1148,7 +1148,7 @@ async function deleteUseSiteBinding(arg) {
                + '(default value, or pick a new one).')) return false;
   try {
     const r = await authMutate('DELETE',
-                               '/api/entities/binding/' + encodeURIComponent(bindingId));
+                               API.api_entities_type_id('binding', bindingId));
     if (r?.ok) {
       if (typeof initGraph === 'function') initGraph();
       return true;

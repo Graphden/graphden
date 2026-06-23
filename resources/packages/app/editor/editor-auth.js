@@ -293,7 +293,7 @@ async function submitAuth() {
   }
   // Validate against the auth-required ping endpoint BEFORE storing.
   try {
-    const response = await fetch('/api/auth/check', {
+    const response = await fetch(API.api_auth_check, {
       headers: { 'Authorization': 'Bearer ' + pw }
     });
     if (response.status === 200) {

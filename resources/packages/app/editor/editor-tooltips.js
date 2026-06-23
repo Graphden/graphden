@@ -248,8 +248,7 @@ function enterDescriptionEditMode() {
 async function saveEntityDescription(entityType, entityId, description) {
   try {
     const r = await authMutate('PUT',
-                               '/api/entities/' + encodeURIComponent(entityType)
-                               + '/' + encodeURIComponent(entityId),
+                               API.api_entities_type_id(entityType, entityId),
                                { description });
     return r?.ok;
   } catch (_) {

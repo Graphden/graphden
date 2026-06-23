@@ -73,7 +73,7 @@ async function loadSecrets() {
     return _secretsList;
   }
   try {
-    const r = await authFetch('/api/secrets');
+    const r = await authFetch(API.api_secrets);
     if (!r.ok) {
       // 401 is the common case (anonymous visitor); keep that quiet.
       // Other statuses indicate a real backend problem we should
@@ -335,7 +335,7 @@ function openCreateSecretForm(anchor) {
       return;
     }
     try {
-      const r = await authFetch('/api/secrets', {
+      const r = await authFetch(API.api_secrets, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -411,7 +411,7 @@ function openRotateSecretForm(anchor, secret) {
       return;
     }
     try {
-      const r = await authFetch('/api/secrets/' + encodeURIComponent(secret.id) + '/value', {
+      const r = await authFetch(API.api_secrets_fn_id_value(secret.id), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value })
@@ -444,7 +444,7 @@ async function deleteSecretConfirm(secret) {
     return;
   }
   try {
-    const r = await authFetch('/api/secrets/' + encodeURIComponent(secret.id), {
+    const r = await authFetch(API.api_secrets_fn_id(secret.id), {
       method: 'DELETE'
     });
     const data = await r.json().catch(() => ({}));

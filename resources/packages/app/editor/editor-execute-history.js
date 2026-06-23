@@ -17,7 +17,7 @@
 
 async function applyHistoryArgs(fnEntity, execId) {
   try {
-    const r = await authFetch('/api/execute/' + encodeURIComponent(execId),
+    const r = await authFetch(API.api_execute_id(execId),
                               { method: 'GET' });
     if (!r.ok) return;
     const row = await r.json();
@@ -67,7 +67,7 @@ function makeRowExpander(resultHostEl) {
     try {
       const [bodyResp, jsonResp] = await Promise.all([
         authFetch('/partials/execute-result?id=' + encodeURIComponent(execId)),
-        authFetch('/api/execute/' + encodeURIComponent(execId),
+        authFetch(API.api_execute_id(execId),
                   { method: 'GET' }),
       ]);
       resultHostEl.textContent = '';

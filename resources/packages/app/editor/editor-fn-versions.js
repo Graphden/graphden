@@ -139,7 +139,7 @@ async function restoreFnVersion(fnEntity, versionId) {
   let target;
   try {
     const resp = await window.authFetch(
-      '/api/fns/' + encodeURIComponent(fnEntity.id) + '/versions');
+      API.api_fns_fn_id_versions(fnEntity.id));
     if (!resp.ok) {
       alert('Restore failed: HTTP ' + resp.status);
       return;
@@ -175,7 +175,7 @@ async function restoreFnVersion(fnEntity, versionId) {
       params.set(k, typeof v === 'string' ? v : JSON.stringify(v));
     }
     const resp = await window.authFetch(
-      '/api/entities/fn/' + encodeURIComponent(fnEntity.id),
+      API.api_entities_type_id('fn', fnEntity.id),
       { method: 'PUT',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString() });

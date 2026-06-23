@@ -29,7 +29,7 @@ async function ensureSubtreeFor(fnId) {
   _subtreeFetchPromise = (async () => {
     try {
       const r = await fetch(
-        '/api/graph/entities?scope=subtree&root-id=' + encodeURIComponent(fnId));
+        API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(fnId));
       if (!r.ok) throw new Error('ensureSubtreeFor HTTP ' + r.status);
       const sub = await r.json();
       // Merge: keep the full sidebar fns + namespaces from initGraph's
@@ -78,9 +78,9 @@ async function initGraph() {
   _subtreeRootId = null;
   _subtreeFetchPromise = null;
   const [entResp, typeResp, vkResp] = await Promise.all([
-    fetch('/api/graph/entities?scope=index'),
-    fetch('/api/types').catch(() => null),
-    fetch('/api/value-kinds').catch(() => null),
+    fetch(API.api_graph_entities + '?scope=index'),
+    fetch(API.api_types).catch(() => null),
+    fetch(API.api_value_kinds).catch(() => null),
     (typeof loadServicesEager === 'function')
       ? loadServicesEager().catch(() => null)
       : null,
@@ -90,14 +90,14 @@ async function initGraph() {
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('/api/types JSON parse failed — type tooltips will be empty', err);
+      console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
       richTypes = {};
     }
   }
   if (vkResp?.ok) {
     try { VALUE_KINDS = await vkResp.json(); } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('/api/value-kinds JSON parse failed — type-picker may be incomplete', err);
+      console.error(API.api_value_kinds + ' JSON parse failed — type-picker may be incomplete', err);
       VALUE_KINDS = [];
     }
   }
@@ -136,7 +136,7 @@ async function loadGraphData() {
   _subtreeFetchPromise = null;
   let r;
   try {
-    r = await fetch('/api/graph/entities?scope=index');
+    r = await fetch(API.api_graph_entities + '?scope=index');
   } catch (err) {
     // Surface network drops in DevTools — caller (post-mutation
     // refresh) silently leaves stale state on the screen otherwise.

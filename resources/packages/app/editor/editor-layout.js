@@ -205,7 +205,7 @@ async function fetchBackendLayout() {
       expansions: expansions
     };
 
-    const response = await fetch('/api/graph/layout', {
+    const response = await fetch(API.api_graph_layout, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)

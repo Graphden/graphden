@@ -164,7 +164,7 @@ async function performReparentCascade(fnId, newParentIds) {
   for (const b of orphans) {
     try {
       const r = await authMutate('DELETE',
-                                 '/api/entities/binding/' + encodeURIComponent(b.id));
+                                 API.api_entities_type_id('binding', b.id));
       if (!r?.ok) return false;
     } catch (_) { return false; }
   }
@@ -180,7 +180,7 @@ async function performReparentCascade(fnId, newParentIds) {
       ? 'parent-ids='
       : { 'parent-ids': newParentIds.join(',') };
     const r = await authMutate('PUT',
-                               '/api/entities/fn/' + encodeURIComponent(fnId),
+                               API.api_entities_type_id('fn', fnId),
                                body);
     if (!r?.ok) return false;
   } catch (_) { return false; }

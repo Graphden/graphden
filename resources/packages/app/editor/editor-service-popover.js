@@ -52,18 +52,18 @@ function hideServicePopover() {
 
 async function fetchServices() {
   try {
-    const r = await authFetch('/api/services', { method: 'GET' });
+    const r = await authFetch(API.api_services, { method: 'GET' });
     if (!r.ok) {
       if (r.status !== 401) {
         // eslint-disable-next-line no-console
-        console.error('/api/services HTTP', r.status, r.statusText);
+        console.error(API.api_services + ' HTTP', r.status, r.statusText);
       }
       return null;
     }
     return await r.json();
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error('/api/services fetch threw', err);
+    console.error(API.api_services + ' fetch threw', err);
     return null;
   }
 }
@@ -137,8 +137,8 @@ async function saveService(existingId, fnId, data) {
   // can switch a service from "any branch" to "this branch" and back.
   if (data.branchId) body.set('branch-id', data.branchId);
   const url = existingId
-    ? '/api/entities/service/' + encodeURIComponent(existingId)
-    : '/api/entities/service';
+    ? API.api_entities_type_id('service', existingId)
+    : API.api_entities_type('service');
   return authFetch(url, {
     method: existingId ? 'PUT' : 'POST',
     headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -148,13 +148,13 @@ async function saveService(existingId, fnId, data) {
 
 
 async function deleteService(serviceId) {
-  return authFetch('/api/entities/service/' + encodeURIComponent(serviceId),
+  return authFetch(API.api_entities_type_id('service', serviceId),
                    {method: 'DELETE'});
 }
 
 
 async function reconcileServices() {
-  return authFetch('/api/services/reconcile', {method: 'POST'});
+  return authFetch(API.api_services_reconcile, {method: 'POST'});
 }
 
 

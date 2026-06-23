@@ -636,7 +636,7 @@ async function promptRenameFnTypeArg(fnId, currentFnType, oldArgName) {
     const newConstraint = ['fn', renamedArgs, currentFnType[2]];
     if (currentFnType.length === 4) newConstraint.push(currentFnType[3] || []);
     const r = await authMutate('PUT',
-      '/api/entities/fn/' + encodeURIComponent(fnId),
+      API.api_entities_type_id('fn', fnId),
       { constraint: JSON.stringify(newConstraint) });
     if (!(r.status >= 200 && r.status < 300)) {
       const text = await r.text().catch(() => '');
@@ -668,7 +668,7 @@ function appendPromoteAnonymousButton(host, fnId) {
     const trimmed = name.trim();
     try {
       const r = await authMutate('PUT',
-        '/api/entities/fn/' + encodeURIComponent(fnId),
+        API.api_entities_type_id('fn', fnId),
         { name: trimmed });
       if (!(r.status >= 200 && r.status < 300)) {
         const text = await r.text().catch(() => '');
@@ -773,7 +773,7 @@ function appendTypeUsagesSection(host, typeName) {
   }
   if (!typeFnId) return;
 
-  fetch('/api/types/usages', {
+  fetch(API.api_types_usages, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ 'type-fn-id': typeFnId })
@@ -789,7 +789,7 @@ function appendTypeUsagesSection(host, typeName) {
     })
     .catch((err) => {
       // eslint-disable-next-line no-console
-      console.error('/api/types/usages fetch failed', err);
+      console.error(API.api_types_usages + ' fetch failed', err);
       // UI: leave the placeholder header (no usage data shown).
     });
 }
@@ -955,7 +955,7 @@ function makeTightenButton(opts) {
     try {
       const fetchFn = (typeof authFetch === 'function') ? authFetch : fetch;
       const resp = await fetchFn(
-        '/api/bindings/' + encodeURIComponent(bindingId) + '/tighten-fn-effects',
+        API.api_bindings_binding_id_tighten_fn_effects(bindingId),
         { method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body) });

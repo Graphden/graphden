@@ -196,7 +196,7 @@ function nextPollDelay(attempt) {
 
 async function pollOnce(execId, resultHostEl) {
   try {
-    const r = await authFetch('/api/execute/' + encodeURIComponent(execId),
+    const r = await authFetch(API.api_execute_id(execId),
                               { method: 'GET' });
     if (!r.ok) {
       resultHostEl.textContent = '';
@@ -264,7 +264,7 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
   resultHostEl.textContent = '';
   resultHostEl.appendChild(renderSubmitSpinner('Submitting…'));
   try {
-    const r = await authFetch('/api/execute', {
+    const r = await authFetch(API.api_execute, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 'fn-id': fnEntity.id,
@@ -331,7 +331,7 @@ async function submitExecution(fnEntity, args, persist, resultHostEl, cancelBtn)
 
 async function submitCancel(execId, resultHostEl) {
   try {
-    await authFetch('/api/execute/' + encodeURIComponent(execId) + '/cancel',
+    await authFetch(API.api_execute_id_cancel(execId),
                     { method: 'POST' });
     // The polling loop will observe the status flip on its next tick.
   } catch (e) {

@@ -27,17 +27,17 @@ const TRASH_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" s
 // =============================================================================
 
 async function postEntity(type, fields) {
-  return authMutate('POST', '/api/entities/' + type, fields);
+  return authMutate('POST', API.api_entities_type(type), fields);
 }
 
 
 async function deleteEntity(type, id) {
-  return authMutate('DELETE', '/api/entities/' + type + '/' + id);
+  return authMutate('DELETE', API.api_entities_type_id(type, id));
 }
 
 
 async function putEntity(type, id, fields) {
-  return authMutate('PUT', '/api/entities/' + type + '/' + id, fields);
+  return authMutate('PUT', API.api_entities_type_id(type, id), fields);
 }
 
 // =============================================================================

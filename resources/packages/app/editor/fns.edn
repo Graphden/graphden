@@ -342,6 +342,29 @@
    :parent :immutable-js-ok-response
    :args {:body :_editor-js-body}}
 
+  ;; Block 2.5 — standalone runtime bundle for user-built pages
+  ;; (e.g. /demo/contact). Includes editor-runtime.js (the
+  ;; dispatcher / registry / loadPartial primitives) +
+  ;; editor-actions-builtin.js (navigate + submit-form). Loaded
+  ;; INSTEAD of editor.js on pages that don't host the editor
+  ;; canvas (editor.js is ~700 KB and initialises Cytoscape +
+  ;; WebSocket subscriptions that crash a stripped-down page).
+  {:name :_graphden-runtime-js-paths
+   :parent :const
+   :args {:value ["packages/app/editor/editor-runtime.js"
+                  "packages/app/editor/editor-actions-builtin.js"]}}
+
+  {:name :_graphden-runtime-js-body
+   :description "Concatenated `editor-runtime.js` + `editor-actions-builtin.js` — the platform JS primitives user pages need (action dispatch + built-in navigate / submit-form handlers)."
+   :parent :concat-resources
+   :return-type :text
+   :args {:paths :_graphden-runtime-js-paths}}
+
+  {:name :_graphden-runtime-js-handler
+   :description "Ring handler for `GET /assets/graphden-runtime.js` — minimal runtime bundle for user-built pages. Same 1-year `immutable` cache headers as editor.js (hash-bust via `?v=` on the script tag)."
+   :parent :immutable-js-ok-response
+   :args {:body :_graphden-runtime-js-body}}
+
   {:name :_editor-css-handler
    :description "Ring handler for `GET /assets/editor.css` — returns the editor stylesheet as `text/css` with `Cache-Control: public, max-age=31536000, immutable`."
    :parent :immutable-css-ok-response

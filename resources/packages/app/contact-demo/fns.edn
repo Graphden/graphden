@@ -1,0 +1,165 @@
+;; Contact-form demo — Block 2.5 of the user-sites plan
+;; (docs/USER_SITES_PLAN.md). End-to-end composition of a working
+;; form built entirely from `web.components` + `web.runtime`
+;; primitives, with a POST handler that returns a thanks partial
+;; swapped in via the `submit-form` action handler.
+;;
+;; Routes shipped (see app/routes/fns.edn):
+;;   GET  /demo/contact → :_contact-demo-page-handler
+;;   POST /demo/contact → :_contact-demo-post-handler
+;;
+;; Mounted under `app.route-groups.all`. Visit the page, type
+;; anything in the email + message fields, click Send — the form
+;; POSTs via fetch (`submit-form` handler), and the server's
+;; thanks partial is swapped into the `#contact-result` div with
+;; no full-page reload.
+
+
+{:namespace "app.contact-demo"
+ :description "Block-2 demo — graph-composed contact-form page using web.components + web.runtime + the built-in :submit-form action handler."
+ :fns
+ [;; ---------------------------------------------------------------------------
+  ;; FORM FIELDS
+  ;; ---------------------------------------------------------------------------
+
+  {:name :_contact-demo-email-input
+   :description "Email field for the contact form — `<input type=email name=email required ...>`."
+   :parent :input
+   :args {:attrs {:value {:type "email"
+                          :name "email"
+                          :placeholder "you@example.com"
+                          :required true
+                          :style "width:100%;padding:8px;margin:6px 0;box-sizing:border-box"}}}}
+
+  {:name :_contact-demo-message-textarea
+   :description "Message field — `<textarea name=message rows=5>`."
+   :parent :textarea
+   :args {:attrs {:value {:name "message"
+                          :rows 5
+                          :placeholder "Tell us how we can help..."
+                          :required true
+                          :style "width:100%;padding:8px;margin:6px 0;box-sizing:border-box"}}
+          :content ""}}
+
+  ;; Submit button. The composition pattern is the canonical
+  ;; "click-handler button with extra data-* payload":
+  ;;
+  ;;   :attrs = :dispatch-action {:action "submit-form"}
+  ;;            (gives `:data-action "submit-form"`)
+  ;;          + literal {:type "submit"
+  ;;                     :data-target "#contact-result"}
+  ;;            (the runtime swaps the response into the matched element)
+  {:name :_contact-demo-submit-button
+   :description "Send button — `data-action=\"submit-form\" data-target=\"#contact-result\"`."
+   :parent :button
+   :args {:label "Send"
+          :attrs {:parent :merge
+                  :args {:maps [{:parent :dispatch-action
+                                 :args {:action "submit-form"}}
+                                {:value {:type "submit"
+                                         :data-target "#contact-result"
+                                         :style "padding:10px 20px;cursor:pointer"}}]}}}}
+
+  ;; ---------------------------------------------------------------------------
+  ;; FORM + RESULT PANEL
+  ;; ---------------------------------------------------------------------------
+
+  ;; Empty result panel — populated post-submit by the runtime swapping
+  ;; the POST handler's hiccup into it. `<div id=\"contact-result\">`.
+  {:name :_contact-demo-result-panel
+   :description "Empty `#contact-result` div the submit-form handler swaps the POST response into."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:id "contact-result"
+                          :style "margin-top:1em;min-height:1.5em"}}
+          :children {:value [""]}}}
+
+  {:name :_contact-demo-form
+   :description "POST /demo/contact form with email + textarea + submit; the runtime intercepts the submit click and swaps the response."
+   :parent :form
+   :args {:attrs {:value {:method "POST"
+                          :action "/demo/contact"}}
+          :children [:_contact-demo-email-input
+                     :_contact-demo-message-textarea
+                     :_contact-demo-submit-button]}}
+
+  ;; ---------------------------------------------------------------------------
+  ;; PAGE BODY + PAGE HANDLER
+  ;; ---------------------------------------------------------------------------
+
+  {:name :_contact-demo-page-body
+   :description "Card-wrapped contact-form page body with heading + intro paragraph."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:style "max-width:520px;margin:2em auto;padding:0 1em;font-family:system-ui,-apple-system,sans-serif"}}
+          :children [{:value [:h1 "Contact us"]}
+                     {:value [:p {:style "color:#555"}
+                              "Block 2 demo — every element on this page is composed from "
+                              [:code "web.components"]
+                              " + "
+                              [:code "web.runtime"]
+                              " fn-defs. Submit goes through the runtime's "
+                              [:code "submit-form"]
+                              " action handler."]}
+                     :_contact-demo-form
+                     :_contact-demo-result-panel]}}
+
+  ;; Full HTML page. Loads `/assets/graphden-runtime.js` (the minimal
+  ;; runtime bundle — dispatcher + built-in submit-form/navigate
+  ;; handlers, see :_graphden-runtime-js-body) and bootstraps the
+  ;; dispatcher on document.body so the submit button's
+  ;; `data-action="submit-form"` is routed through the runtime
+  ;; without a page reload.
+  {:name :_contact-demo-bootstrap-script
+   :description "Inline `<script>` that wires the runtime's `bindActionDispatch` onto document.body after the page loads."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:value {}}
+          :children {:value ["document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });"]}}}
+
+  {:name :_contact-demo-page
+   :description "Full HTML page for the contact demo. Loads the standalone runtime bundle (not editor.js — that one initialises Cytoscape and would crash a non-editor page) then bootstraps the click dispatcher."
+   :parent :html-page
+   :args {:title "Contact (Graphden demo)"
+          :head []
+          :scripts [{:value [:script {:src "/assets/graphden-runtime.js"}]}
+                    :_contact-demo-bootstrap-script]
+          :body :_contact-demo-page-body}}
+
+  {:name :_contact-demo-rendered-page
+   :description "Render `:_contact-demo-page` to an HTML string for the Ring response body."
+   :parent :render-hiccup
+   :return-type :text
+   :args {:hiccup :_contact-demo-page}}
+
+  {:name :_contact-demo-page-handler
+   :description "GET /demo/contact handler — returns the full HTML page."
+   :parent :html-ok-response
+   :args {:body :_contact-demo-rendered-page}}
+
+  ;; ---------------------------------------------------------------------------
+  ;; POST HANDLER — returns the thanks partial
+  ;; ---------------------------------------------------------------------------
+
+  ;; Returns a thanks partial. For v0 we don't echo the submitted
+  ;; email/message back — that would require accessing the parsed
+  ;; form body, threading it through `:parse-form-body`, and a
+  ;; couple of `:get` calls. Future iteration when we want to
+  ;; demonstrate form-data access end-to-end.
+  {:name :_contact-demo-thanks-partial
+   :description "Thanks-partial hiccup — `<p style=...>Thanks! We got your message.</p>`."
+   :parent :hiccup
+   :args {:tag {:value "p"}
+          :attrs {:value {:style "color:green;font-weight:600"}}
+          :children {:value ["Thanks! We got your message."]}}}
+
+  {:name :_contact-demo-rendered-thanks
+   :description "Render `:_contact-demo-thanks-partial` to an HTML string for the Ring response body."
+   :parent :render-hiccup
+   :return-type :text
+   :args {:hiccup :_contact-demo-thanks-partial}}
+
+  {:name :_contact-demo-post-handler
+   :description "POST /demo/contact handler — returns a thanks partial that the runtime swaps into `#contact-result`."
+   :parent :html-ok-response
+   :args {:body :_contact-demo-rendered-thanks}}]}

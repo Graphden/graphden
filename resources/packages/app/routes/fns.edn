@@ -47,7 +47,36 @@
    :description "GET / — the graph-editor HTML page."
    :parent :get-route
    :args {:path "/" :handler :_editor-handler}
-   :expects-effects #{:io}}                   ; reads classpath resources (HTML/JS/CSS)
+   :expects-effects #{:io}}
+
+  ;; Block 2.5 contact-form demo — graph-composed page using
+  ;; web.components + web.runtime + the built-in `submit-form`
+  ;; action handler. See app/contact-demo/fns.edn for the
+  ;; composition. GET + POST share the path; reitit needs one
+  ;; entry with the method-data merged (same pattern as
+  ;; `:api-branches-root` below).
+
+  {:name :_demo-contact-get-data
+   :description "Method-data for GET on `/demo/contact`. Combined into `:demo-contact`."
+   :parent :method-map
+   :args {:method "get"
+          :handler :_contact-demo-page-handler}}
+
+  {:name :_demo-contact-post-data
+   :description "Method-data for POST on `/demo/contact`. Combined into `:demo-contact`."
+   :parent :method-map
+   :args {:method "post"
+          :handler :_contact-demo-post-handler}}
+
+  {:name :_demo-contact-methods
+   :description "Merged method-data — `{:get … :post …}` — for `/demo/contact`."
+   :parent :merge
+   :args {:maps [:_demo-contact-get-data :_demo-contact-post-data]}}
+
+  {:name :demo-contact
+   :description "Multi-method route entry `[\"/demo/contact\" {:get … :post …}]`."
+   :parent :list
+   :args {:items ["/demo/contact" :_demo-contact-methods]}}                   ; reads classpath resources (HTML/JS/CSS)
 
   ;; The editor JS/CSS bundles are SEPARATE responses (not inlined
   ;; into the HTML). The URLs carry `?v=<frontend-build-hash>` so the
@@ -64,6 +93,12 @@
    :description "GET /assets/api-routes.js — boot-cached `window.API = {…}` module derived from the live reitit router. 1-year `immutable` cache, hash-busted via `?v=` on the inbound `<script src>`. Loaded before editor.js so every editor module can resolve `/api/*` URLs via `window.API.<key>` at file-eval time."
    :parent :get-route
    :args {:path "/assets/api-routes.js" :handler :_api-routes-js-handler}}                   ; reads classpath JS bundle
+
+  {:name :graphden-runtime-js-asset
+   :description "GET /assets/graphden-runtime.js — minimal runtime bundle (editor-runtime.js + editor-actions-builtin.js) for user-built pages that don't host the editor canvas. Same 1-year `immutable` cache as editor.js."
+   :parent :get-route
+   :args {:path "/assets/graphden-runtime.js" :handler :_graphden-runtime-js-handler}
+   :expects-effects #{:io}}
 
   {:name :editor-css-asset
    :description "GET /assets/editor.css — bundled editor stylesheet with 1-year `immutable` `Cache-Control`. Hash-busted via `?v=` query string on the inbound `<link href>`."

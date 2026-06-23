@@ -17,6 +17,7 @@
                   :editor
                   :editor-js-asset
                   :api-routes-js-asset
+                  :graphden-runtime-js-asset
                   :editor-css-asset
                   :partial-effect
                   :partial-fn-versions
@@ -33,6 +34,7 @@
                   :partial-service-popover
                   :partial-secrets-panel
                   :partial-row-actions
+                  :demo-contact
                   :health
                   :metrics
                   :version

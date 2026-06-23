@@ -62,14 +62,22 @@ async function _runSubmitForm(btn, e) {
   e.preventDefault();
   const form = btn.closest('form');
   if (!form) return;
+  // FormData → URLSearchParams so the body posts as
+  // `application/x-www-form-urlencoded` (what `:parse-form-body`
+  // expects on the server). File uploads (multipart) are out of
+  // scope for v0; they'd need a separate handler.
   const formData = new FormData(form);
+  const params = new URLSearchParams();
+  for (const [k, v] of formData) {
+    params.append(k, typeof v === 'string' ? v : '');
+  }
   const action = form.getAttribute('action') || window.location.pathname;
   const method = (form.getAttribute('method') || 'POST').toUpperCase();
   let res;
   try {
     res = await fetch(action, {
       method,
-      body: method === 'GET' ? null : formData,
+      body: method === 'GET' ? null : params,
       credentials: 'same-origin',
     });
   } catch (err) {

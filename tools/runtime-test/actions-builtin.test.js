@@ -96,10 +96,16 @@ function loadActions(overrides) {
     },
     window: { location: locationStub },
     location: locationStub,
-    FormData: function FormData(form) {
-      this.form = form;
-      this._kvs = [];
+    // FormData stub: minimal iterable yielding 0 entries — the
+    // handler we test only does `for (const [k, v] of formData)`
+    // to copy fields into URLSearchParams; empty iteration is
+    // enough to assert "POSTed to the right URL with the right
+    // method". Real field-roundtrip lives in browser e2e.
+    FormData: function FormData() {
+      this[Symbol.iterator] = function* () {};
     },
+    URLSearchParams,
+    Symbol,
     fetch: overrides.fetch || (() => { throw new Error('no fetch'); }),
     console,
   };

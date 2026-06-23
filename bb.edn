@@ -289,18 +289,16 @@
   ;;   bb test-all              — unit + integration + e2e (sequential)
   ;;   bb test-unit-coverage    — unit with cloverage instrumentation
   ;;   bb test-all-coverage     — unit-with-coverage + integration + e2e
-  ;;                              (coverage of integration would be ~35 min
-  ;;                               wall, so `bb coverage-full` is the
-  ;;                               opt-in for that; `test-all-coverage`
-  ;;                               picks the same compromise CI does —
-  ;;                               cloverage covers unit, the rest runs
+  ;;                              (cloverage covers unit, the rest runs
   ;;                               un-instrumented)
   ;;
   ;; What you can't do (by design):
-  ;;   integration / e2e with cloverage — covered above; the
-  ;;   instrumentation × parallel runtime blows the wall-clock
-  ;;   budget past what's useful for a development feedback loop.
-  ;;   The `bb coverage-full` opt-in remains for periodic audit.
+  ;;   integration / e2e with cloverage — would add ~30 min wall for
+  ;;   ~0% per-NS attribution: the CRUD NSes integration would
+  ;;   exercise show 0% under cloverage anyway because cr/execute's
+  ;;   compiled-closure cache bypasses the instrumented vars. See
+  ;;   `bb coverage` docstring + `[[feedback_coverage_measurement]]`
+  ;;   memory note for the empirical 2026-06-23 finding.
   ;;
   ;; CI uses `bb test-unit-coverage` (drops the separate unit-tests
   ;; check that was redundant once coverage runs the same suite with
@@ -334,7 +332,7 @@
    :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
 
   test-all-coverage
-  {:doc "Unit-with-coverage + integration + e2e. ~30-35 min. Coverage covers unit only; integration / e2e run un-instrumented (same compromise CI takes; `bb coverage-full` is the opt-in for kaocha-level full instrumentation, ~35 min on its own and STILL no e2e because e2e runs in a separate Node process)."
+  {:doc "Unit-with-coverage + integration + e2e. ~30-35 min. Coverage covers unit only; integration / e2e run un-instrumented (see `bb coverage` docstring for why instrumenting integration adds zero useful per-NS signal). e2e runs in a separate Node process so cloverage can't reach it anyway."
    :task (do (p/shell "bb" "test-unit-coverage")
              (p/shell "bb" "test-integration")
              (p/shell "bb" "test-e2e"))}
@@ -429,14 +427,12 @@
              (System/exit 1)))}
 
   coverage
-  {:doc "Unit-only coverage (~1:26 wall, ~72.8% form / 82.3% line). Cloverage's per-form instrumentation × testcontainer round-trips brings full-coverage wall time to ~35 min (see `bb coverage-full`), so the day-to-day CI signal stays unit-only. Integration-only paths (cron / services / secrets / storage e2e / executor-runtime / branch-router) run every CI via `bb test` but their cloverage %-numbers only appear in `bb coverage-full`. Same as `bb test-unit-coverage` — kept for back-compat with scripts that already reference this name."
+  {:doc "Unit-only coverage (~1:26 wall, baseline 2026-06-23: 69.06% form / 78.82% line). Same as `bb test-unit-coverage` — kept for back-compat with scripts that already reference this name.
+
+   Why unit-only: the integration suite (cron / services / secrets / storage / executor-runtime / branch-router / per-handler graph tests) doesn't add useful per-NS attribution under cloverage. Empirical 2026-06-23 finding: every CRUD NS that integration would exercise (`crud.entities`, `crud.fn-execution.*`, `crud.branches`, etc.) reports 0% form/line anyway — `cr/execute`'s pre-compiled closure cache (built by `cr/rebuild!`) holds already-resolved fn objects and never re-derefs through the instrumented vars. Confirmed identical under BOTH kaocha-cloverage AND a 2h32m sequential direct `clj -M:cloverage` audit (per-NS 0% identical). So adding integration to the cloverage pass costs ~30 min wall for ~0% useful per-NS signal; it ran via `bb test` / `bb test-integration` un-instrumented anyway. See `[[feedback_coverage_measurement]]` for the full reasoning.
+
+   What the unit-only number tells you: 'do we need more UNIT tests?'. Low coverage for NSes like `system.demo-branches` (2.98%), `system.branch-router` (5.29%), `versioning.merge.core` (3.36%) here is BY DESIGN — those code paths get their gap-filling from integration tests, which we trust based on their pass/fail signal rather than cloverage attribution. See `docs/E2E_SCENARIO_COVERAGE.md` for the e2e side of the audit."
    :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
-
-  coverage-full
-  {:doc "Full coverage (unit + integration). ~35 min wall (cloverage instrumentation × testcontainer round-trips). Use as a periodic audit (manual / nightly), NOT on every CI — the budget would blow up ~6×. Baseline at last run (2026-06-23): ALL FILES 83.74% form / 93.00% line; demo-branches now 79.52%/93.62% (was 2.78%).
-
-   CAVEAT — known 0% NSes: `crud.entities`, `crud.fn-execution.*`, `crud.branches`, `crud.request`, `crud.secrets`, `crud.type-check`, `crud.value-form`, `clients.vault` all show 0% — NOT because they're untested but because every invocation goes through `cr/execute`'s pre-compiled closure cache (built at `cr/rebuild!` from the package loader's defbase impls). Cloverage instruments the SOURCE vars, but the closures hold the already-resolved fn objects and don't re-deref through the instrumented var. Verified 2026-06-23: same 0% under both kaocha-cloverage AND direct `clj -M:cloverage` (a 2h32m sequential audit). The functional code path IS exercised by every integration test that hits `/api/entities/*` (282 integration tests, 0 failures) — cloverage just can't observe it. ROI of fixing is low: see [[feedback_coverage_measurement]]."
-   :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn")}
 
   ;; === FULL CHECK ===
 

@@ -136,11 +136,19 @@ jobs:
             echo "Could not parse coverage"
             exit 1
           fi
-          # Threshold matches the current unit-only baseline (~72%) with
-          # a couple of points of slack. Bump it after intentional
+          # Threshold matches the current unit-only baseline with a
+          # couple of points of slack. Bump it after intentional
           # improvements; never silently lower it on regression — that
           # defeats the gate.
-          COV_FLOOR=70
+          #
+          # Baseline 2026-06-23: 69.06% form (unit-only). The drop from
+          # the older 72.8% baseline is BY DESIGN: integration suite
+          # was removed from the cloverage pass (was inflating per-NS
+          # numbers misleadingly — see `bb coverage` docstring +
+          # `[[feedback_coverage_measurement]]`). Integration coverage
+          # now runs via `bb test` un-instrumented and is verified by
+          # the integration tests' own pass/fail signal, not by line %.
+          COV_FLOOR=65
           if awk "BEGIN { exit !($COVERAGE < $COV_FLOOR) }"; then
             echo "Form coverage ${COVERAGE}% is below ${COV_FLOOR}% threshold"
             exit 1

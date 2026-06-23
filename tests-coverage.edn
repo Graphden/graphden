@@ -7,21 +7,26 @@
 ;; Activated by `bb coverage` only — `bb test` keeps using `tests.edn`
 ;; so day-to-day local runs don't pay the cloverage instrumentation
 ;; cost.
+;;
+;; UNIT SUITE ONLY: the integration suite is deliberately omitted from
+;; this config. Empirical 2026-06-23 finding: every CRUD NS that
+;; integration tests exercise (`crud.entities`, `crud.fn-execution.*`,
+;; etc.) reports 0% form/line coverage anyway because cr/execute's
+;; pre-compiled closure cache (built by `cr/rebuild!` from package
+;; loader's defbase impls) holds already-resolved fn objects — they
+;; never re-deref through cloverage's instrumented vars. Confirmed
+;; under BOTH kaocha-cloverage AND a 2h32m sequential direct cloverage
+;; CLI audit: total stayed 83.74% vs 83.77%, per-NS 0% identical.
+;; → Adding integration to the cloverage pass paid ~30 min wall for
+;;   ~0% useful per-NS attribution. Integration tests run via `bb test`
+;;   / `bb test-integration` un-instrumented; that's the signal we use
+;;   for those code paths.
 #kaocha/v1
 {:tests
  [{:id :unit
    :test-paths ["test"]
    :skip-meta [:integration]
-   :kaocha/parallelism 8}
-
-  {:id :integration
-   :test-paths ["test"]
-   :focus-meta [:integration]
-   ;; Per-NS logical DBs (shared-container plugin) keep integration
-   ;; tests isolated even when their NSs run on parallel threads.
-   ;; Capped at 4 (see comment in `tests.edn`) — concurrent
-   ;; `GenericContainer.start` calls race on Docker daemon throughput.
-   :kaocha/parallelism 4}]
+   :kaocha/parallelism 8}]
 
  :plugins [:kaocha.plugin/profiling
            :kaocha.plugin/parallel

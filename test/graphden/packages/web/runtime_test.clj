@@ -65,3 +65,23 @@
           extended (assoc base :data-fn-id "12345")]
       (is (= {:data-action "namespace-move" :data-fn-id "12345"}
              extended)))))
+
+
+;; =============================================================================
+;; :dispatch-custom — escape hatch DSL (Block 3.2)
+;; =============================================================================
+
+(deftest dispatch-custom-emits-action-and-handler-body-test
+  (testing "free arg :body → `{:data-action \"custom\" :data-custom-handler <body>}`"
+    (is (= {:data-action "custom"
+            :data-custom-handler "btn.title = 'hi';"}
+           (exec-name :dispatch-custom {:body "btn.title = 'hi';"})))))
+
+
+(deftest dispatch-custom-accepts-empty-body-test
+  (testing ":js-source has no narrowing constraint — empty body flows through"
+    ;; v0 design: the runtime's custom-handler is a no-op on
+    ;; empty `data-custom-handler`. Documenting here that the
+    ;; server side doesn't pre-reject empty bodies.
+    (is (= {:data-action "custom" :data-custom-handler ""}
+           (exec-name :dispatch-custom {:body ""})))))

@@ -38,4 +38,31 @@
    :args {:map {:value {}}
           :key {:value :data-action}
           :value {:as :action :type :non-blank-text
-                  :description "Registered handler name (see editor-runtime.js `registerActionHandler` calls)."}}}]}
+                  :description "Registered handler name (see editor-runtime.js `registerActionHandler` calls)."}}}
+
+  ;; Block 3.2 — escape-hatch DSL. Build attrs for a button that
+  ;; carries an inline JS body the runtime evaluates on click:
+  ;;
+  ;;   {:data-action "custom" :data-custom-handler <body>}
+  ;;
+  ;; The runtime's `custom` handler (see editor-actions-builtin.js)
+  ;; reads `data-custom-handler` and runs it as
+  ;; `(new Function('btn','event','host', body))(btn, event, host)`
+  ;; — so the body has `btn`, `event`, `host` bindings in scope.
+  ;;
+  ;; Example use:
+  ;;
+  ;;   {:name :my-tooltip-button
+  ;;    :parent :button
+  ;;    :args {:label "Hover me"
+  ;;           :attrs {:parent :dispatch-custom
+  ;;                   :args {:body "btn.title = 'Clicked!';"}}}}
+  {:name :dispatch-custom
+   :description "Hiccup attrs `{:data-action \"custom\" :data-custom-handler <body>}` — wires a button's click to the runtime's `custom` action handler, which evaluates the body as `(btn, event, host) => …`."
+   :parent :merge
+   :args {:maps [{:value {:data-action "custom"}}
+                 {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :data-custom-handler}
+                         :value {:as :body :type :js-source
+                                 :description "JavaScript body executed on click — has `btn`, `event`, `host` bindings in scope."}}}]}}]}

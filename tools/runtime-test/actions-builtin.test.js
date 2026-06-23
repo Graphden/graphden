@@ -83,6 +83,7 @@ function makeElement(tag, attrs) {
   if (attrs['data-action']) el.dataset.action = attrs['data-action'];
   if (attrs['data-href']) el.dataset.href = attrs['data-href'];
   if (attrs['data-target']) el.dataset.target = attrs['data-target'];
+  if (attrs['data-custom-handler']) el.dataset.customHandler = attrs['data-custom-handler'];
   return el;
 }
 
@@ -214,6 +215,59 @@ test('navigate no-op when data-href missing', () => {
     { preventDefault() {}, stopPropagation() {} });
   assert(form.innerHTML === '', 'form unchanged on non-OK');
 })();
+
+// =============================================================================
+// custom — escape hatch: data-custom-handler body evaluated as JS
+// =============================================================================
+
+test('custom handler runs the body with btn / event / host in scope', () => {
+  const ctx = loadActions();
+  // Body sets a property on btn we can observe.
+  const btn = makeElement('button', {
+    'data-action': 'custom',
+    'data-custom-handler': "btn.title = 'clicked: ' + event.detail;",
+  });
+  const host = makeElement('div');
+  host.appendChild(btn);
+  ctx.getActionHandler('custom')(btn, { detail: 'ok' }, host);
+  assert(btn.title === 'clicked: ok',
+         `body executed with btn + event in scope (title="${btn.title}")`);
+});
+
+test('custom handler: missing body is a silent no-op', () => {
+  const ctx = loadActions();
+  const btn = makeElement('button', { 'data-action': 'custom' });
+  // No data-custom-handler → handler must not throw.
+  let threw = false;
+  try { ctx.getActionHandler('custom')(btn, {}, btn); }
+  catch (_) { threw = true; }
+  assert(!threw, 'missing handler body is silently ignored');
+});
+
+test('custom handler: parse error is caught, no throw', () => {
+  const ctx = loadActions();
+  const btn = makeElement('button', {
+    'data-action': 'custom',
+    'data-custom-handler': '%%not valid JS%%',
+  });
+  let threw = false;
+  try { ctx.getActionHandler('custom')(btn, {}, btn); }
+  catch (_) { threw = true; }
+  assert(!threw, 'parse error is caught + logged, click is a no-op');
+});
+
+test('custom handler: runtime error is caught, no throw', () => {
+  const ctx = loadActions();
+  const btn = makeElement('button', {
+    'data-action': 'custom',
+    'data-custom-handler': "throw new Error('boom');",
+  });
+  let threw = false;
+  try { ctx.getActionHandler('custom')(btn, {}, btn); }
+  catch (_) { threw = true; }
+  assert(!threw, 'runtime error caught + logged, click is a no-op');
+});
+
 
 setTimeout(() => {
   console.log(`\nResults: ${passes} pass, ${failures} fail`);

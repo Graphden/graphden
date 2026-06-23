@@ -97,3 +97,41 @@ async function _runSubmitForm(btn, e) {
 }
 
 registerActionHandler('submit-form', _runSubmitForm);
+
+
+// =============================================================================
+// custom — escape hatch for inline JS
+// =============================================================================
+//
+// User-sites Block 3.2. When the platform components can't express
+// a behaviour the user needs, a button can carry a `data-custom-
+// handler` attribute with a JS body the runtime evaluates on
+// click. Composition (via :dispatch-custom in web.runtime):
+//
+//   data-action="custom"  data-custom-handler="btn.title = 'Hi!';"
+//
+// The body runs with `(btn, event, host)` in scope (via
+// `new Function`). On parse / runtime error the failure is
+// logged to console; the click is otherwise a no-op so a typo
+// in user JS doesn't break sibling buttons. Safety: this is
+// user-authored JS in their own page — same trust boundary as
+// any inline `<script>` on a page they wrote.
+
+function _runCustomHandler(btn, event, host) {
+  const body = btn.dataset.customHandler;
+  if (!body) return;
+  let fn;
+  try {
+    fn = new Function('btn', 'event', 'host', body);
+  } catch (err) {
+    console.error('custom handler: parse failed —', err?.message);
+    return;
+  }
+  try {
+    fn(btn, event, host);
+  } catch (err) {
+    console.error('custom handler: runtime error —', err?.message);
+  }
+}
+
+registerActionHandler('custom', _runCustomHandler);

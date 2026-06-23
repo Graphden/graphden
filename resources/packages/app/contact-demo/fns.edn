@@ -110,6 +110,13 @@
   ;; dispatcher on document.body so the submit button's
   ;; `data-action="submit-form"` is routed through the runtime
   ;; without a page reload.
+  {:name :_contact-demo-runtime-script
+   :description "`<script src=\"/assets/graphden-runtime.js\">` — pulls in the runtime bundle (dispatcher + built-in submit-form / navigate handlers)."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:value {:src "/assets/graphden-runtime.js"}}
+          :children {:value []}}}
+
   {:name :_contact-demo-bootstrap-script
    :description "Inline `<script>` that wires the runtime's `bindActionDispatch` onto document.body after the page loads."
    :parent :hiccup
@@ -117,13 +124,18 @@
           :attrs {:value {}}
           :children {:value ["document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });"]}}}
 
+  {:name :_contact-demo-scripts
+   :description "Scripts the demo page loads — the runtime bundle then the inline bootstrap."
+   :parent :list
+   :args {:items [:_contact-demo-runtime-script
+                  :_contact-demo-bootstrap-script]}}
+
   {:name :_contact-demo-page
    :description "Full HTML page for the contact demo. Loads the standalone runtime bundle (not editor.js — that one initialises Cytoscape and would crash a non-editor page) then bootstraps the click dispatcher."
    :parent :html-page
    :args {:title "Contact (Graphden demo)"
           :head []
-          :scripts [{:value [:script {:src "/assets/graphden-runtime.js"}]}
-                    :_contact-demo-bootstrap-script]
+          :scripts :_contact-demo-scripts
           :body :_contact-demo-page-body}}
 
   {:name :_contact-demo-rendered-page

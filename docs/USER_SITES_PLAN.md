@@ -144,8 +144,8 @@ have real ground truth. Listed here so they don't get forgotten:
 
 | Block | Status | Notes |
 |---|---|---|
-| 1 | in progress | started 2026-06-23 |
-| 2 | pending | unblocked by Block 1 |
+| 1 | shipped | runtime + `editor-row-actions.js` consumer + `:dispatch-action` DSL (`web/runtime`) — landed 2026-06-23 |
+| 2 | shipped | starter library (`web/components`): `:button`, `:input`, `:textarea`, `:option`, `:select`, `:checkbox`, `:form`, `:link`, `:image`, `:card` + `:_*-attrs` helpers; built-in handlers `navigate` / `submit-form` (`editor-actions-builtin.js` + `/assets/graphden-runtime.js` bundle); contact-form demo at `/demo/contact` (`app/contact-demo`). Landed 2026-06-23. |
 | 3 | pending | unblocked by Block 1 |
 | 4 | pending | unblocked by Blocks 2 + 3 |
 

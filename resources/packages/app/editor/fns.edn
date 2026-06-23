@@ -482,6 +482,25 @@
                   :args {:a :_partial-row-actions-show-open-str
                          :b {:value "false"}}}}}
 
+  ;; --- Phase A2 query params ---
+
+  {:name :_partial-row-actions-card-fn-id-str
+   :description "Optional `card-fn-id` query parameter — the fn that OWNS the card. Distinct from `fn-id` (which is the cell's fn) in the MI cell context. Used by the × Remove-MI / + Add-MI buttons whose target is the CARD's parent-set, not the cell's."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "card-fn-id"}}}
+
+  {:name :_partial-row-actions-editable-str
+   :description "Optional `editable` flag (`\"true\"` / `\"false\"`). Client computes the per-context editability gate (auth + `implementationFnIds.has(cardFnId)` for MI cells) and passes the result so the partial doesn't need an additional auth-state query. JS dispatcher RE-CHECKS at click time as a defence in depth."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "editable"}}}
+
+  {:name :_partial-row-actions-editable?
+   :description "True iff `editable=true`. Default-off — safer to omit edit affordances when the caller forgot to gate."
+   :parent :equal?
+   :args {:a :_partial-row-actions-editable-str :b {:value "true"}}}
+
   ;; Fetch the fn row + project the three fields the buttons need.
   {:name :_partial-row-actions-fn-row
    :description "The decoded fn row for the popover's target fn."
@@ -596,16 +615,100 @@
                           :data-context "unknown"}}
           :children {:value []}}}
 
+  ;; --- Phase A2 MI cell buttons ---
+
+  {:name :_partial-row-actions-remove-mi-button
+   :description "`<button data-action=\"remove-mi-parent\" …>×</button>` — JS dispatcher reads `data-fn-id` (the cell's fn = the parent being removed) + `data-card-fn-id` from the host (the fn whose parent-set we mutate) and calls `removeParentInline(card, cell)`."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon action-icon-danger"
+                          :data-action "remove-mi-parent"
+                          :title "Remove this parent"
+                          :aria-label "Remove this parent"}}
+          :children [{:value "×"}]}}
+
+  {:name :_partial-row-actions-add-mi-button
+   :description "`<button data-action=\"add-mi-parent\" …>+</button>` — JS dispatcher reads `data-card-fn-id` from the host and opens the MI picker. Compatibility gating (no candidates → disabled + reason text) stays JS-side because `compatibleMIParentInfo` reads client-cached `lookups`."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon"
+                          :data-action "add-mi-parent"
+                          :title "Add another parent (multi-inheritance)"
+                          :aria-label "Add another parent"}}
+          :children [{:value "+"}]}}
+
+  {:name :_partial-row-actions-remove-mi-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-remove-mi-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-add-mi-button-or-nil
+   :parent :if
+   :args {:test :_partial-row-actions-editable?
+          :then :_partial-row-actions-add-mi-button
+          :else {:value nil}}}
+
+  {:name :_partial-row-actions-cell-children-raw
+   :description "Raw button list for the MI cell context: ns / i / ↗ (shared with col-header) + (when editable) × Remove-MI + + Add-MI."
+   :parent :list
+   :args {:items [:_partial-row-actions-ns-button
+                  :_partial-row-actions-i-button
+                  :_partial-row-actions-open-button-or-nil
+                  :_partial-row-actions-remove-mi-button-or-nil
+                  :_partial-row-actions-add-mi-button-or-nil]}}
+
+  {:name :_partial-row-actions-cell-children
+   :parent :filter
+   :args {:pred :some?
+          :coll :_partial-row-actions-cell-children-raw}}
+
+  {:name :_partial-row-actions-cell-attrs-base
+   :parent :assoc
+   :args {:map {:value {:class "row-actions-content"
+                        :role "toolbar"
+                        :aria-label "Row actions"
+                        :data-context "cell"}}
+          :key {:value :data-fn-id}
+          :value :_partial-row-actions-fn-id-str}}
+
+  {:name :_partial-row-actions-cell-attrs
+   :parent :assoc
+   :args {:map :_partial-row-actions-cell-attrs-base
+          :key {:value :data-card-fn-id}
+          :value :_partial-row-actions-card-fn-id-str}}
+
+  {:name :_partial-row-actions-cell
+   :description "MI cell context toolbar — 3 read-only buttons (ns/i/↗) + 2 editable (× Remove-MI / + Add-MI) when `editable=true`. Host attrs carry BOTH `data-fn-id` (cell fn) AND `data-card-fn-id` (card-owning fn) — the JS dispatcher needs both for the × / + actions."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs :_partial-row-actions-cell-attrs
+          :children :_partial-row-actions-cell-children}}
+
+  ;; --- Context dispatch ---
+
   {:name :_partial-row-actions-context-is-col-header?
    :parent :equal?
    :args {:a :_partial-row-actions-context-str :b {:value "col-header"}}}
 
+  {:name :_partial-row-actions-context-is-cell?
+   :parent :equal?
+   :args {:a :_partial-row-actions-context-str :b {:value "cell"}}}
+
+  {:name :_partial-row-actions-body-or-cell
+   :parent :if
+   :args {:test :_partial-row-actions-context-is-cell?
+          :then :_partial-row-actions-cell
+          :else :_partial-row-actions-unknown}}
+
   {:name :_partial-row-actions-body
-   :description "Dispatch on context — A1 ships col-header, A2-A4 will fold in cell / use-site-arg / root-row. Using `:if` over a single-branch `:case` until there's a second supported context (avoids `:case`'s parametric-type-var unification on a single-clause input)."
+   :description "Dispatch on context — A1 shipped col-header, A2 adds cell. A3-A4 will fold in use-site-arg / root-row via nested `:if` (or `:case` once stability + type-var unification settle)."
    :parent :if
    :args {:test :_partial-row-actions-context-is-col-header?
           :then :_partial-row-actions-col-header
-          :else :_partial-row-actions-unknown}}
+          :else :_partial-row-actions-body-or-cell}}
 
   {:name :_partial-row-actions-html
    :parent :render-hiccup

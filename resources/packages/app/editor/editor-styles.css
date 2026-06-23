@@ -3920,6 +3920,16 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .action-icon:hover {
   background: var(--hover-bg);
 }
+.action-icon-danger {
+  color: var(--error-fg);
+}
+.action-icon-disabled {
+  opacity: 0.45;
+  cursor: help;
+}
+.action-icon-disabled:hover {
+  background: transparent;
+}
 .row-actions-content .namespace-badge {
   /* The legacy `applyActionIconBox` set font-size 1px smaller for
      the 2-char "ns" glyph in the same 15×15 frame — preserve here. */

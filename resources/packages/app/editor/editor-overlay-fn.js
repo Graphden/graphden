@@ -466,50 +466,19 @@ function renderMiRow(line, levelInfo, idx, ctx) {
     const miEditable = levelInfo.depth === 1
       && typeof isAuthenticated === 'function' && isAuthenticated()
       && implementationFnIds?.has(ctx.originalFnId);
+    // HTMX migration Phase A2: server-renders the MI cell's
+    // toolbar (ns / i / ↗ shared with col-header + when editable
+    // × Remove-MI / + Add-MI). Server-side gating on `editable=true`
+    // mirrors the JS `miEditable` flag exactly. The post-swap
+    // `bindRowActionsDispatch` re-applies the MI-add disabled-with-
+    // reason check using `compatibleMIParentInfo` (client-cached).
     const buildCellPopoverContent = (host) => {
-      // ns badge for THIS MI parent (each cell is its own fn).
-      if (cellFnEntity && rowWantsNamespaceBadge(f)
-          && typeof createNamespaceBadge === 'function') {
-        const nsPath = (typeof getFnNamespace === 'function')
-                       ? getFnNamespace(cellFnEntity) : null;
-        const canEdit = typeof isAuthenticated === 'function' && isAuthenticated()
-                     && typeof isFnEditable === 'function' && isFnEditable(f.fnId)
-                     && typeof enterNamespaceMoveEditMode === 'function';
-        const nsBadge = createNamespaceBadge(nsPath, {
-          inline: true,
-          onClick: canEdit
-                   ? (anchor) => enterNamespaceMoveEditMode(cellFnEntity, anchor)
-                   : null
-        });
-        if (nsBadge) host.appendChild(nsBadge);
-      }
-      const descBadge = createDescriptionBadge(f.description, {
-        name: f.name,
-        namespace: cellFnEntity ? (typeof getFnNamespace === 'function'
-                                    ? getFnNamespace(cellFnEntity) : null) : null,
-        entityType: 'fn',
-        entityId: f.fnId
+      if (typeof loadRowActionsContent !== 'function') return;
+      loadRowActionsContent(host, f.fnId, 'cell', {
+        showOpen: !!miShowOpen,
+        editable: !!miEditable && !!cardFnEntity,
+        cardFnId: cardFnEntity ? cardFnEntity.id : null
       });
-      if (descBadge) host.appendChild(descBadge);
-      if (miShowOpen && cellFnEntity) {
-        const openBtn = createOpenInNewTabButton(cellFnEntity, {});
-        if (openBtn) host.appendChild(openBtn);
-      }
-      // `×` remove-this-MI-parent + `+` add-MI-parent — both are
-      // card-level edits (modify the cardFnEntity's parent set), so
-      // they're available from any MI cell's popover.
-      if (miEditable && cardFnEntity && typeof removeParentInline === 'function') {
-        host.appendChild(createPinnedIconButton({
-          glyph: '×',
-          title: 'Remove this parent',
-          inline: true,
-          onClick: () => removeParentInline(cardFnEntity, f.fnId)
-        }));
-      }
-      if (miEditable && cardFnEntity) {
-        const addBtn = makeAddMIParentButton(cardFnEntity, null, 1);
-        if (addBtn) host.appendChild(addBtn);
-      }
     };
     if (typeof createMoreActionsTrigger === 'function') {
       const trigger = createMoreActionsTrigger({

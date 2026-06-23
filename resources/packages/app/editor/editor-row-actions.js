@@ -297,7 +297,11 @@ async function loadRowActionsContent(host, fnId, context, opts) {
     const url = '/partials/row-actions'
               + '?fn-id=' + encodeURIComponent(fnId)
               + '&context=' + encodeURIComponent(context)
-              + (opts.showOpen === false ? '&show-open=false' : '');
+              + (opts.showOpen === false ? '&show-open=false' : '')
+              + (opts.editable ? '&editable=true' : '')
+              + (opts.cardFnId
+                  ? '&card-fn-id=' + encodeURIComponent(opts.cardFnId)
+                  : '');
     const r = await fetch(url);
     if (!r.ok) {
       host.textContent = '';
@@ -386,10 +390,64 @@ function bindRowActionsDispatch(host) {
       case 'open':
         // <a target="_blank"> default behaviour — no JS needed.
         break;
+      case 'remove-mi-parent': {
+        // Remove THIS cell's fn from the CARD-owning fn's parent-set.
+        e.preventDefault();
+        e.stopPropagation();
+        const cardFnId = btn.dataset.cardFnId || host.dataset.cardFnId;
+        const cardFnEntity = lookups?.fnMap?.get(cardFnId);
+        if (cardFnEntity && typeof removeParentInline === 'function') {
+          removeParentInline(cardFnEntity, fnId);
+        }
+        break;
+      }
+      case 'add-mi-parent': {
+        // Open the MI picker for the CARD-owning fn. Compatibility
+        // check (no candidates → disable + reason) stays here in JS
+        // because `compatibleMIParentInfo` reads client-cached
+        // `lookups`; server has no view of that map.
+        e.preventDefault();
+        e.stopPropagation();
+        const cardFnId = btn.dataset.cardFnId || host.dataset.cardFnId;
+        const cardFnEntity = lookups?.fnMap?.get(cardFnId);
+        if (cardFnEntity && typeof addMIParentInline === 'function') {
+          addMIParentInline(cardFnEntity, btn);
+        }
+        break;
+      }
       default:
         break;
     }
   });
+  // Post-swap MI-add compatibility check — disable + tooltip when
+  // no MI parent candidates exist. Mirrors the legacy
+  // `makeAddMIParentButton`'s in-place gating; the button itself
+  // is server-rendered, only the disabled-with-reason state lives
+  // in JS because `compatibleMIParentInfo` walks client-cached
+  // `lookups`.
+  const addMiBtn = host.querySelector('[data-action="add-mi-parent"]');
+  if (addMiBtn && typeof compatibleMIParentInfo === 'function') {
+    const cardFnId = host.dataset.cardFnId;
+    const cardFnEntity = lookups?.fnMap?.get(cardFnId);
+    if (cardFnEntity) {
+      const info = compatibleMIParentInfo(cardFnEntity.id,
+                                          cardFnEntity['parent-ids'] || []);
+      if (info && info.candidateIds.size === 0) {
+        const reasons = Object.values(info.rejected || {});
+        const counts = {};
+        for (const r of reasons) counts[r] = (counts[r] || 0) + 1;
+        let topReason = null, topCount = 0;
+        for (const [r, c] of Object.entries(counts)) {
+          if (c > topCount) { topReason = r; topCount = c; }
+        }
+        addMiBtn.disabled = true;
+        addMiBtn.classList.add('action-icon-disabled');
+        addMiBtn.style.cursor = 'help';
+        addMiBtn.title = 'No compatible MI parent — '
+                      + (topReason || 'no compatible MI parent in the registry');
+      }
+    }
+  }
 }
 
 

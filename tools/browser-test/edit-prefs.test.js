@@ -44,12 +44,12 @@ const {assert, newContext} = require('./edit-test-helpers');
       {timeout: 3000, polling: 50});
     const afterFirst = await page.evaluate(() => ({
       dark: document.body.classList.contains('theme-dark'),
-      stored: localStorage.getItem('graphden.prefs.dark'),
+      stored: localStorage.getItem('graphden.prefs.theme'),
     }));
     assert(afterFirst.dark !== initialTheme,
            'theme flipped after first click (was '
            + initialTheme + ', now ' + afterFirst.dark + ')');
-    assert(afterFirst.stored === String(afterFirst.dark),
+    assert(afterFirst.stored === (afterFirst.dark ? 'dark' : 'light'),
            'localStorage carries the new theme: ' + afterFirst.stored);
 
     await page.click('#theme-toggle-btn');
@@ -59,11 +59,11 @@ const {assert, newContext} = require('./edit-test-helpers');
       {timeout: 3000, polling: 50});
     const afterSecond = await page.evaluate(() => ({
       dark: document.body.classList.contains('theme-dark'),
-      stored: localStorage.getItem('graphden.prefs.dark'),
+      stored: localStorage.getItem('graphden.prefs.theme'),
     }));
     assert(afterSecond.dark === initialTheme,
            'second click returns to initial theme: ' + afterSecond.dark);
-    assert(afterSecond.stored === String(afterSecond.dark),
+    assert(afterSecond.stored === (afterSecond.dark ? 'dark' : 'light'),
            'localStorage round-trips back: ' + afterSecond.stored);
 
     // ===================================================================

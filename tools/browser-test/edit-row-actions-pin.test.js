@@ -52,8 +52,9 @@ async function popoverVisible(page) {
     await cleanup(page);
 
     const ents = await getEntities(page);
-    const identity = ents.fns.find(
-      (f) => f.name === 'identity' && (f['parent-ids'] || []).length === 0);
+    // `identity` may have a parent-ids chain in the test e2e baseline;
+    // just pick whichever entry matches by name.
+    const identity = ents.fns.find((f) => f.name === 'identity');
     assert(identity, ':identity baseline resolved');
     await api(page, 'POST', '/api/entities/fn',
               'name=' + PROBE_FN + '&parent-ids=' + identity.id);

@@ -173,3 +173,25 @@
            (exec-name :card {:children ["Content"]
                              :attrs {:class "card highlighted"
                                      :id "main"}})))))
+
+
+;; =============================================================================
+;; Block 3 — :custom-script + :wrap-custom-script (escape hatch)
+;; =============================================================================
+
+(deftest custom-script-returns-body-verbatim-test
+  (testing ":custom-script just holds the JS body — no transformation"
+    (is (= "console.log('hi');"
+           (exec-name :custom-script {:body "console.log('hi');"})))))
+
+
+(deftest wrap-custom-script-emits-script-hiccup-test
+  (testing "<script>body</script> with no attrs (script content is raw JS)"
+    (is (= [:script {} "alert('hello world')"]
+           (exec-name :wrap-custom-script {:body "alert('hello world')"})))))
+
+
+(deftest wrap-custom-script-accepts-empty-body-test
+  (testing "empty body is valid (JS no-op); :js-source has no narrowing constraint"
+    (is (= [:script {} ""]
+           (exec-name :wrap-custom-script {:body ""})))))

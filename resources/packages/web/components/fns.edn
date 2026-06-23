@@ -209,4 +209,46 @@
    :args {:tag {:value "div"}
           :attrs :_card-attrs
           :children {:as :children :type [:list :hiccup-node]
-                     :description "Card body hiccup nodes."}}}]}
+                     :description "Card body hiccup nodes."}}}
+
+  ;; Block 3 — escape hatch. When the platform components can't
+  ;; express the behaviour the user needs (a custom hover effect,
+  ;; a one-off DOM manipulation, integration with a 3rd-party JS
+  ;; library), `:custom-script` lets the user drop raw JS into a
+  ;; page or a component event-handler without leaving the graph
+  ;; editor.
+  ;;
+  ;; Two use-sites:
+  ;;
+  ;;   1. **Page-level** — wrap a body in `:wrap-custom-script` and
+  ;;      put it in a page's `:scripts` list:
+  ;;
+  ;;        {:name :my-tooltip-script
+  ;;         :parent :wrap-custom-script
+  ;;         :args {:body "document.querySelectorAll('[data-tip]').forEach(e => e.title = e.dataset.tip);"}}
+  ;;
+  ;;        ;; then in your page:
+  ;;        :scripts [:graphden-runtime-script-tag :my-tooltip-script]
+  ;;
+  ;;   2. **Event-handler** — bind a button's `:attrs` to
+  ;;      `:dispatch-custom` (see web.runtime) which builds
+  ;;      `{:data-action "custom" :data-custom-handler <body>}`;
+  ;;      the runtime's `custom` action handler evaluates the
+  ;;      body as a JS function `(btn, event, host) => …`.
+  ;;
+  ;; v0: plain string body. No syntax highlighting, no Monaco. The
+  ;; `:js-source` type alias (in `core.refinements`) is what
+  ;; future linting / safety checks will hook into.
+
+  {:name :custom-script
+   :description "Named holder for a JavaScript source body. Compose with `:wrap-custom-script` to render as `<script>body</script>`, or with `:dispatch-custom` to attach as a button's `data-custom-handler` attr."
+   :parent :const
+   :return-type :js-source
+   :args {:value {:as :body :type :js-source
+                  :description "JavaScript source code (any valid JS body — runtime parser is the validator)."}}}
+
+  {:name :wrap-custom-script
+   :description "Render a JS body as `<script>body</script>` hiccup for inclusion in a page's `:scripts` list."
+   :parent :wrap-script
+   :args {:content {:as :body :type :js-source
+                    :description "JavaScript source body — wrapped verbatim inside `<script>…</script>`."}}}]}

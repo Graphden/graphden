@@ -658,8 +658,27 @@
            (fn []
              (let [r (get* "/")]
                (cond
-                 (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
-                 (not (str/includes? (:body r) "id=\"cy\"")) {:ok? false :detail "no #cy in body"}
+                 (not= 200 (:status r))
+                 {:ok? false :detail (str "HTTP " (:status r))}
+
+                 (not (str/includes? (:body r) "id=\"cy\""))
+                 {:ok? false :detail "no #cy in body"}
+
+                 ;; Without `<script src="/assets/editor.js">` the
+                 ;; page loads as a blank skeleton — see the
+                 ;; 2026-06-23 hiccup-postwalk regression where an
+                 ;; inline `<script>` sibling silently dropped this
+                 ;; tag from the rendered HTML. Cheap structural
+                 ;; check, catches the whole class.
+                 (not (str/includes? (:body r) "src=\"/assets/editor.js"))
+                 {:ok? false :detail "no editor.js <script src> in body — editor will not bootstrap"}
+
+                 (not (str/includes? (:body r) "src=\"/assets/api-routes.js"))
+                 {:ok? false :detail "no api-routes.js <script src> in body — window.API will be undefined"}
+
+                 (not (str/includes? (:body r) "href=\"/assets/editor.css"))
+                 {:ok? false :detail "no editor.css <link> in head — page will render unstyled"}
+
                  :else {:ok? true}))))
 
      (let [entities-resp (step "GET /api/graph/entities       returns JSON with fns"

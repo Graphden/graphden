@@ -16,6 +16,7 @@
    :args {:items [:favicon
                   :editor
                   :editor-js-asset
+                  :api-routes-js-asset
                   :editor-css-asset
                   :partial-effect
                   :partial-fn-versions

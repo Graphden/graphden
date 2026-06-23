@@ -199,23 +199,47 @@
           :attrs :_editor-script-attrs
           :children {:value []}}}
 
-  ;; Inline `<script>window.API = {…}</script>` rendered BEFORE
-  ;; `:_editor-script-tag` so every editor JS module can address
-  ;; `/api/*` routes by symbolic name (`window.API.api_branches`)
-  ;; instead of duplicating path literals. The body is the boot-
-  ;; time-cached output of `:cached-api-routes-js`. `:hiccup-
-  ;; normalize` in the page pipeline wraps the string child in
-  ;; `:h-raw` so the JS body is emitted verbatim (no HTML-escape).
-  {:name :_editor-api-routes-children
-   :parent :conj
-   :args {:coll [] :item :cached-api-routes-js}}
+  ;; `<script src="/assets/api-routes.js?v=…">` — loads the boot-
+  ;; time-cached `window.API = {…}` module so every editor JS
+  ;; module can address `/api/*` routes by symbolic name
+  ;; (`window.API.api_branches`) instead of duplicating path
+  ;; literals.
+  ;;
+  ;; Served as a SEPARATE static asset rather than inlined as
+  ;; `<script>{…}</script>` because an inline `<script>` with raw
+  ;; children placed before another `<script>` sibling triggered a
+  ;; hiccup-normalisation bug where the next sibling was silently
+  ;; dropped from the rendered HTML (editor.js never loaded, page
+  ;; came up blank). Standalone repro of the hiccup chain on the
+  ;; same inputs renders both siblings correctly, so the bug lives
+  ;; somewhere graphden-specific between fn-def execution and the
+  ;; hiccup output — see `test/graphden/regressions/inline_script_
+  ;; sibling_drop_test.clj` for the pinned regression. Using two
+  ;; `<script src>` siblings sidesteps the issue entirely.
+  {:name :_api-routes-js-url
+   :description "`/assets/api-routes.js?v=<frontend-build-hash>` — `<script src>` URL for the cached `window.API` module."
+   :parent :str-join
+   :return-type :text
+   :args {:coll ["/assets/api-routes.js?v=" :build-hash-frontend-short]
+          :separator ""}}
+
+  {:name :_api-routes-js-handler
+   :description "Ring handler for `GET /assets/api-routes.js` — returns the boot-cached `window.API` JS module as `application/javascript` with 1-year `immutable` `Cache-Control`."
+   :parent :immutable-js-ok-response
+   :args {:body :cached-api-routes-js}}
+
+  {:name :_editor-api-routes-script-attrs
+   :parent :assoc
+   :args {:map {:value {}}
+          :key {:value :src}
+          :value {:ref :_api-routes-js-url}}}
 
   {:name :_editor-api-routes-script-tag
-   :description "Inline `<script>` carrying the boot-time-generated `window.API = {…}` module. Rendered before the editor.js bundle so every module can read `window.API.<key>` to resolve a route URL."
+   :description "`<script src=\"/assets/api-routes.js?v=…\"></script>` — loads the boot-cached `window.API` module before the main editor.js bundle so every editor module can read `window.API.<key>` at file-eval time."
    :parent :hiccup
    :args {:tag {:value "script"}
-          :attrs {:value {}}
-          :children :_editor-api-routes-children}}
+          :attrs :_editor-api-routes-script-attrs
+          :children {:value []}}}
 
   ;; `<link rel="stylesheet" href="…">` attrs map — built via two
   ;; assoc calls because the editor-css URL is a runtime composition

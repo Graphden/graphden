@@ -66,4 +66,21 @@
    :description "Decoded fn entity row by id; nil when not found. Free arg: `:fn-id` (uuid). Returns `:nullable-keyword-map` matching `:decode-row`'s shape (kebab-case kw keys, decoded enums/jsonb)."
    :parent :decode-row
    :args {:row :_fn-row-by-id-first
-          :entity-type {:value "fn"}}}]}
+          :entity-type {:value "fn"}}}
+
+  ;; =============================================================================
+  ;; NAMESPACE PATH WALKER — joins ns chain into a dotted path
+  ;; =============================================================================
+  ;;
+  ;; Implemented as a base-fn (loop in impls.clj) because graphden's
+  ;; `:fix`-style recursion isn't built yet (docs/RECURSION.md is
+  ;; still roadmap). Once `:fix` lands, this can be rewritten as a
+  ;; pure fn-def composition; the call-site contract stays the
+  ;; same (free arg `:ns-id`, returns `:text`).
+
+  {:name :fn-ns-path
+   :description "Walk the `:ns` parent-id chain from `ns-id` to root, joining each name with `.`. `:_<core.refinements ns-id>` → `\"core.refinements\"`. Empty string when `ns-id` is nil. Depth-capped at 20."
+   :args {:ns-id {:type [:union :null :uuid]
+                  :description "Starting namespace id. `nil` (or unknown) → empty string return."}}
+   :return-type :text
+   :effects #{:db}}]}

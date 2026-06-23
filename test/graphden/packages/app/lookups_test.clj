@@ -90,3 +90,41 @@
       ;; can switch on it.
       (is (contains? row :namespace-id)
           ":namespace-id key always present — value is nil-or-uuid"))))
+
+
+;; =============================================================================
+;; :fn-ns-path — walk the ns parent-id chain
+;; =============================================================================
+
+(deftest fn-ns-path-nil-id-returns-empty-string
+  (testing "nil ns-id → empty string (the implicit root namespace has no path)"
+    (is (= "" (exec-name :fn-ns-path {:ns-id nil})))))
+
+
+(deftest fn-ns-path-unknown-id-returns-empty-string
+  (testing "unknown ns-id → empty string (sp/read-entity returns nil → fall-through)"
+    (let [bogus #uuid "ffffffff-ffff-ffff-ffff-ffffffffffff"]
+      (is (= "" (exec-name :fn-ns-path {:ns-id bogus}))))))
+
+
+(deftest fn-ns-path-builds-dotted-path-from-fn-namespace
+  (testing "Given the ns-id of a real fn, builds the canonical dotted path"
+    ;; `:_partial-effect-fragment` lives in `app.editor` — use its
+    ;; row to fetch a real namespace-id, then verify the walker
+    ;; recovers the canonical `app.editor` string. Drives the same
+    ;; data flow the row-actions partial will use: read fn → take
+    ;; its :namespace-id → resolve to a display path.
+    (let [{:keys [storage]} *bootstrap*
+          row (exec-name :fn-row-by-id
+                         {:fn-id (fn-id-of :_partial-effect-fragment)})
+          ns-id (:namespace-id row)
+          path  (exec-name :fn-ns-path {:ns-id ns-id})]
+      ;; Sanity — the seed graph DOES have a parent namespace.
+      (is (some? ns-id) ":_partial-effect-fragment must have a namespace-id")
+      (is (= "app.editor" path)
+          "ns-path walker recovers the canonical dotted name from the parent chain")
+      ;; The walker also tolerates being handed a nil even when storage is live.
+      (is (= "" (exec-name :fn-ns-path {:ns-id nil}))
+          "nil short-circuit still works after a successful previous call (no state leak)")
+      ;; Sanity check on storage availability in scope.
+      (is (some? storage) "storage wired into bootstrap"))))

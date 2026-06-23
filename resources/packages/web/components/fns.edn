@@ -38,4 +38,103 @@
    :parent :hiccup
    :args {:tag {:value "button"}
           :children [{:as :label :type :text
-                      :description "Visible button text."}]}}]}
+                      :description "Visible button text."}]}}
+
+  ;; Block 2.2 — form-input set. Each is a thin fn-def over `:hiccup`
+  ;; exposing slots specific to the form element. The `:attrs` slot is
+  ;; inherited from `:hiccup` (free, optional) — caller supplies the
+  ;; element-specific attrs map (`{:type "email" :name "email" …}` for
+  ;; `:input`; `{:method "POST" :action "/contact"}` for `:form`; etc).
+
+  ;; `<input attrs/>` — self-closing, no children. The only exposed
+  ;; slot is the inherited `:attrs` map. Example:
+  ;;
+  ;;   {:name :email-input
+  ;;    :parent :input
+  ;;    :args {:attrs {:value {:type "email" :name "email"
+  ;;                           :placeholder "you@example.com"}}}}
+  {:name :input
+   :description "HTML `<input [attrs]/>` — self-closing form input. Bind the inherited `:attrs` slot to a map containing `:type` / `:name` / `:placeholder` / etc."
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :children {:value []}}}
+
+  ;; `<textarea attrs>content</textarea>` — `:content` is the initial
+  ;; textarea body. Example:
+  ;;
+  ;;   {:name :message-textarea
+  ;;    :parent :textarea
+  ;;    :args {:attrs {:value {:name "message" :rows 6}}
+  ;;           :content ""}}
+  {:name :textarea
+   :description "HTML `<textarea [attrs]>content</textarea>`. Slot `:content` is the initial body text; `:attrs` (inherited) typically carries `:name` and `:rows`/`:cols`."
+   :parent :hiccup
+   :args {:tag {:value "textarea"}
+          :children [{:as :content :type :text
+                      :description "Initial textarea body text."}]}}
+
+  ;; `<option [attrs]>label</option>` — building block for `:select`.
+  ;; `:attrs` (inherited) typically carries `:value` / `:selected`.
+  {:name :option
+   :description "HTML `<option [attrs]>label</option>` — typically supplied as one of `:select`'s `:options`."
+   :parent :hiccup
+   :args {:tag {:value "option"}
+          :children [{:as :label :type :text
+                      :description "Visible option text."}]}}
+
+  ;; `<select attrs>options...</select>` — `:options` is a list of
+  ;; `:option` hiccup nodes. Example:
+  ;;
+  ;;   {:name :colour-select
+  ;;    :parent :select
+  ;;    :args {:attrs {:value {:name "colour"}}
+  ;;           :options [{:parent :option :args {:label "Red"
+  ;;                                              :attrs {:value {:value "red"}}}}
+  ;;                     {:parent :option :args {:label "Green"
+  ;;                                              :attrs {:value {:value "green"}}}}]}}
+  {:name :select
+   :description "HTML `<select [attrs]>options...</select>`. Slot `:options` is a list of `:option` hiccup nodes (or any hiccup-node list, but `:option` is the conventional element)."
+   :parent :hiccup
+   :args {:tag {:value "select"}
+          :children {:as :options :type [:list :hiccup-node]
+                     :description "List of option hiccup nodes — typically built via `:option`."}}}
+
+  ;; `<input type="checkbox" [attrs]/>` — convenience over `:input`
+  ;; that pre-merges `:type "checkbox"` so the caller doesn't have to
+  ;; remember it. Composition: `:_checkbox-attrs` merges the caller's
+  ;; optional `:attrs` onto the locked `{:type "checkbox"}` map.
+  ;;
+  ;;   {:name :agree-checkbox
+  ;;    :parent :checkbox
+  ;;    :args {:attrs {:value {:name "agree" :id "agree"}}}}
+  {:name :_checkbox-attrs
+   :description "Internal — merges `:type \"checkbox\"` onto the caller's optional `:attrs` map; gives `:checkbox` its `<input type=\"checkbox\">` shape without locking the rest of the attrs."
+   :parent :merge
+   :args {:maps [{:value {:type "checkbox"}}
+                 {:as :attrs :type [:union :null [:map :keyword-or-text :any]]
+                  :required false
+                  :description "Extra attrs (`:name` / `:id` / `:checked` / …)."}]}}
+
+  {:name :checkbox
+   :description "HTML `<input type=\"checkbox\" [attrs]/>`. The `type=\"checkbox\"` attr is merged in automatically; bind `:attrs` to add `:name` / `:id` / `:checked`."
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs :_checkbox-attrs
+          :children {:value []}}}
+
+  ;; `<form attrs>children...</form>` — `:children` is the list of
+  ;; form fields + buttons. Example:
+  ;;
+  ;;   {:name :contact-form
+  ;;    :parent :form
+  ;;    :args {:attrs {:value {:method "POST" :action "/contact"}}
+  ;;           :children [:email-input
+  ;;                      :message-textarea
+  ;;                      {:parent :button
+  ;;                       :args {:label "Send" :attrs {:value {:type "submit"}}}}]}}
+  {:name :form
+   :description "HTML `<form [attrs]>children...</form>`. Slot `:children` is the list of form fields + buttons; `:attrs` (inherited) typically carries `:method` / `:action`."
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :children {:as :children :type [:list :hiccup-node]
+                     :description "Form fields, labels, and submit buttons in render order."}}}]}

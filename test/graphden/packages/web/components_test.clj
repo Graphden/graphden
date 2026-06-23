@@ -57,3 +57,73 @@
     (let [attrs (exec-name :dispatch-action {:action "run-fn"})]
       (is (= [:button {:data-action "run-fn"} "Run"]
              (exec-name :button {:label "Run" :attrs attrs}))))))
+
+
+;; =============================================================================
+;; Block 2.2 — form-input components
+;; =============================================================================
+
+(deftest input-renders-self-closing-test
+  (testing "<input attrs/> — :children locked to [] so hiccup emits no body"
+    (is (= [:input {:type "email" :name "email"}]
+           (exec-name :input {:attrs {:type "email" :name "email"}}))))
+  (testing "no :attrs → bare [:input]"
+    (is (= [:input]
+           (exec-name :input {})))))
+
+
+(deftest textarea-renders-with-content-test
+  (testing "<textarea attrs>content</textarea>"
+    (is (= [:textarea {:name "msg" :rows 6} "hello world"]
+           (exec-name :textarea
+                      {:attrs {:name "msg" :rows 6}
+                       :content "hello world"})))))
+
+
+(deftest option-renders-with-label-test
+  (testing "<option attrs>label</option>"
+    (is (= [:option {:value "red"} "Red"]
+           (exec-name :option {:label "Red" :attrs {:value "red"}})))))
+
+
+(deftest select-with-option-children-test
+  (testing "<select attrs>options...</select> — :options is a list of hiccup nodes"
+    (let [red (exec-name :option {:label "Red"   :attrs {:value "red"}})
+          grn (exec-name :option {:label "Green" :attrs {:value "green"}})]
+      (is (= [:select {:name "colour"} red grn]
+             (exec-name :select {:attrs {:name "colour"}
+                                 :options [red grn]}))))))
+
+
+(deftest checkbox-pre-merges-type-attr-test
+  (testing "<input type=\"checkbox\" :attrs.../> — type=checkbox merged in automatically"
+    (is (= [:input {:type "checkbox" :name "agree" :id "agree"}]
+           (exec-name :checkbox {:attrs {:name "agree" :id "agree"}}))))
+  (testing "no :attrs → just `<input type=\"checkbox\"/>`"
+    (is (= [:input {:type "checkbox"}]
+           (exec-name :checkbox {})))))
+
+
+(deftest checkbox-caller-cannot-override-type-via-attrs-test
+  (testing "caller-supplied :type in :attrs OVERRIDES the pre-merged checkbox type (merge order: defaults first, caller wins)"
+    ;; This documents the current behavior — if a user passes
+    ;; `{:type "text"}` they silently get a text input from a fn-def
+    ;; called :checkbox. Acceptable for v0 (consistent with Clojure
+    ;; `(merge defaults user)` semantics); a future tightening could
+    ;; flip the order if it causes confusion.
+    (is (= [:input {:type "text" :name "weird"}]
+           (exec-name :checkbox {:attrs {:type "text" :name "weird"}})))))
+
+
+(deftest form-renders-children-test
+  (testing "<form attrs>field1 field2 button</form>"
+    (let [email-input (exec-name :input
+                                 {:attrs {:type "email" :name "email"}})
+          submit-btn  (exec-name :button
+                                 {:label "Send"
+                                  :attrs {:type "submit"}})]
+      (is (= [:form {:method "POST" :action "/contact"}
+              email-input submit-btn]
+             (exec-name :form
+                        {:attrs {:method "POST" :action "/contact"}
+                         :children [email-input submit-btn]}))))))

@@ -34,6 +34,7 @@
 | 10 | [Services — long-running fns supervised by graphden](10-services.md) | ✅ written |
 | 11 | [Packages — namespaces, fns.edn, impls.clj, deps](11-packages.md) | ✅ written |
 | 12 | [Composing pages from components](12-components-and-pages.md) | ✅ written |
+| 13 | [The `:custom-script` escape hatch](13-custom-script-escape-hatch.md) | ✅ written |
 
 New lessons are added as features ship. If a lesson would document
 a feature that doesn't yet exist or behaves differently from how

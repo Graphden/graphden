@@ -146,7 +146,7 @@ have real ground truth. Listed here so they don't get forgotten:
 |---|---|---|
 | 1 | shipped | runtime + `editor-row-actions.js` consumer + `:dispatch-action` DSL (`web/runtime`) — landed 2026-06-23 |
 | 2 | shipped | starter library (`web/components`): `:button`, `:input`, `:textarea`, `:option`, `:select`, `:checkbox`, `:form`, `:link`, `:image`, `:card` + `:_*-attrs` helpers; built-in handlers `navigate` / `submit-form` (`editor-actions-builtin.js` + `/assets/graphden-runtime.js` bundle); contact-form demo at `/demo/contact` (`app/contact-demo`). Landed 2026-06-23. |
-| 3 | pending | unblocked by Block 1 |
+| 3 | shipped | `:js-source` type alias + `:custom-script` + `:wrap-custom-script` for page-level inline JS; `:dispatch-custom` DSL + `custom` action handler for inline button handlers; `:_form-js-source` textarea widget; contact-demo "Wave at me" button demonstrates the escape hatch end-to-end. Landed 2026-06-23. |
 | 4 | pending | unblocked by Blocks 2 + 3 |
 
 ## Related docs

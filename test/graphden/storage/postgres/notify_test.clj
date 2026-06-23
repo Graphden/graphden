@@ -1,7 +1,9 @@
-(ns ^:integration graphden.storage.postgres.notify-test
-  "Integration tests for the LISTEN/NOTIFY transport.
+(ns graphden.storage.postgres.notify-test
+  "Tests for the LISTEN/NOTIFY transport.
 
-   Runs against the shared PG test container — uses TWO listeners
+   `payload-roundtrip-test` is a pure codec round-trip (unit-suite).
+   The 3 other deftests are tagged per-deftest `^:integration` —
+   they run against the shared PG test container using TWO listeners
    sharing one channel to simulate the multi-pod case: one writer
    pod NOTIFYs, sibling pod's listener thread observes."
   (:require
@@ -58,7 +60,7 @@
 ;; end-to-end: emitter → channel → listener callback
 ;; ============================================================================
 
-(deftest emit-then-listen-roundtrip-test
+(deftest ^:integration emit-then-listen-roundtrip-test
   (testing "writer pod NOTIFYs, sibling pod's listener observes the event"
     (let [pg-opts (pg-opts-from-fixture)
           ;; Sibling pod's listener — receives events the writer
@@ -98,7 +100,7 @@
           (pg-notify/close-listener! listener))))))
 
 
-(deftest multiple-callbacks-fan-out-test
+(deftest ^:integration multiple-callbacks-fan-out-test
   (testing "every registered callback receives every NOTIFY"
     (let [pg-opts (pg-opts-from-fixture)
           ;; Shorter poll-timeout cuts the post-emit Thread/sleep wait —
@@ -128,7 +130,7 @@
           (pg-notify/close-listener! listener))))))
 
 
-(deftest unregister-stops-dispatching-test
+(deftest ^:integration unregister-stops-dispatching-test
   (testing "after `unregister!` the callback no longer fires"
     (let [pg-opts (pg-opts-from-fixture)
           ;; Shorter poll-timeout cuts the post-emit Thread/sleep wait —

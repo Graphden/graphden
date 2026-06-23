@@ -1,0 +1,126 @@
+;; User-sites infrastructure — Block 4 of docs/USER_SITES_PLAN.md.
+;;
+;; This module is the user-facing surface for shipping a site
+;; alongside graphden's editor. It provides:
+;;
+;;   1. Drop-in runtime scripts (`:user-runtime-scripts`) so a
+;;      user page can wire dispatch with one slot binding.
+;;   2. A `:user-page-route` template that bundles the
+;;      common `:get-route + :html-ok-response + :render-hiccup
+;;      + :html-page` chain into a single entry-point — user
+;;      writes `:path`, `:title`, `:body`, `:scripts`, gets a
+;;      working route.
+;;   3. `:user-site-routes` — the mount-point list referenced
+;;      from `app.route-groups.all`. Default empty. Users
+;;      extend it by adding their route fn-defs as `:items`.
+;;
+;; v0 scope is single-site (one prefix, one shared root path
+;; on this graphden instance). Multi-site + branch-scoped
+;; routing are open questions tracked in USER_SITES_PLAN.md
+;; Block 4.
+
+
+{:namespace "app.user-site"
+ :description "User-site templates + mount-point. Drop-in runtime scripts, a one-step page-route template, and the routes-list reitit picks up."
+ :fns
+ [;; ---------------------------------------------------------------
+  ;; RUNTIME SCRIPTS
+  ;; ---------------------------------------------------------------
+  ;;
+  ;; The two `<script>` tags every user page wants in `:scripts`:
+  ;;   1. Loads the platform runtime bundle (dispatcher + handlers).
+  ;;   2. Bootstraps the dispatcher on `document.body` post-load.
+  ;;
+  ;; `:user-runtime-scripts` bundles them into a list so the user
+  ;; writes a single slot binding (`:scripts :user-runtime-scripts`).
+
+  {:name :graphden-runtime-script-tag
+   :description "`<script src=\"/assets/graphden-runtime.js\">` — loads the platform runtime bundle (dispatcher + built-in `submit-form` / `navigate` / `custom` handlers, see editor-runtime.js + editor-actions-builtin.js)."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:value {:src "/assets/graphden-runtime.js"}}
+          :children {:value []}}}
+
+  {:name :user-bootstrap-script
+   :description "Inline `<script>` that calls `bindActionDispatch(document.body)` on DOMContentLoaded. Required once per page so the runtime starts routing `data-action` clicks."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:value {}}
+          :children {:value ["document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });"]}}}
+
+  {:name :user-runtime-scripts
+   :description "Default `:scripts` list for a user page — runtime bundle then the dispatcher bootstrap. Drop in as `:scripts :user-runtime-scripts` and click handlers / form submits work without extra wiring."
+   :parent :list
+   :args {:items [:graphden-runtime-script-tag
+                  :user-bootstrap-script]}}
+
+  ;; ---------------------------------------------------------------
+  ;; PAGE-ROUTE TEMPLATE
+  ;; ---------------------------------------------------------------
+  ;;
+  ;; Collapses the 4-fn-def chain a hand-written page needed
+  ;; (`:html-page` → `:render-hiccup` → `:html-ok-response` →
+  ;; `:get-route`) into one fn-def with four free args. Inherits
+  ;; from `:get-route` so the result is a reitit-shaped entry.
+  ;;
+  ;; Usage:
+  ;;
+  ;;   {:name :my-about-page
+  ;;    :parent :user-page-route
+  ;;    :args {:path "/about"
+  ;;           :title "About"
+  ;;           :body :my-about-body            ; a fn-def returning hiccup
+  ;;           :scripts :user-runtime-scripts}}
+  ;;
+  ;; If you don't need JS, you can pass an empty list:
+  ;;
+  ;;           :scripts {:value []}
+
+  ;; Note on slot naming: the inner `:html-page :body` slot is
+  ;; renamed via `{:as :page-body}` so it doesn't propagate up
+  ;; under the name `:body` and collide with `:html-ok-response`'s
+  ;; own `:body` slot (Ring response body). The user-facing arg
+  ;; name is `:page-body` to make the distinction visible at the
+  ;; call site.
+  {:name :_user-page-rendered
+   :description "Internal — `:render-hiccup` over the user-supplied page hiccup. Free args: `:title`, `:page-body`, `:scripts` (propagated up to `:user-page-route` callers)."
+   :parent :render-hiccup
+   :return-type :text
+   :args {:hiccup {:parent :html-page
+                   :args {:title {:as :title :type :text
+                                  :description "Document `<title>` text."}
+                          :body {:as :page-body :type :hiccup-node
+                                 :description "Page body hiccup tree."}
+                          :head {:value []}
+                          :scripts {:as :scripts :type [:list :hiccup-node]
+                                    :description "End-of-body `<script>` hiccup nodes — typically `:user-runtime-scripts` (drop-in runtime bundle + dispatcher bootstrap)."}}}}}
+
+  {:name :_user-page-handler
+   :description "Internal — `:html-ok-response` wrapping `:_user-page-rendered`. Free args: `:title`, `:page-body`, `:scripts`."
+   :parent :html-ok-response
+   :args {:body :_user-page-rendered}}
+
+  {:name :user-page-route
+   :description "GET-route template for a user-built HTML page. Collapses `:html-page` + `:render-hiccup` + `:html-ok-response` + `:get-route` into one entry. Free args: `:path` (URL), `:title` (document title), `:page-body` (hiccup tree), `:scripts` (list of `<script>` hiccup nodes — pass `:user-runtime-scripts` for the standard runtime, or `{:value []}` for none)."
+   :parent :get-route
+   :args {:path {:as :path :type :text
+                 :description "URL path the route is mounted at (e.g. `\"/about\"`)."}
+          :handler :_user-page-handler}}
+
+  ;; ---------------------------------------------------------------
+  ;; MOUNT-POINT — Block 4.2 wires this from app.route-groups.all
+  ;; ---------------------------------------------------------------
+  ;;
+  ;; Default: empty list. Users extend `:items` with their own
+  ;; `:user-page-route` (or other `:*-route`) fn-defs. Note: the
+  ;; declarative sync sweeps `:user-site-routes` :items back to
+  ;; the EDN-declared value on every `bb deploy` — to ship a
+  ;; persistent site, the user keeps `:items` populated in their
+  ;; own fork of this file (or in a downstream package). Branch-
+  ;; scoped user sites + auto-discovery are tracked in
+  ;; docs/USER_SITES_PLAN.md Block 4 open questions.
+
+  {:name :user-site-routes
+   :description "Top-level reitit entries the user's site contributes. Default empty. Append your `:user-page-route` (and `:post-route` / `:put-route` / …) fn-defs here to mount them under graphden's router."
+   :parent :list
+   :args {:items []}}]}

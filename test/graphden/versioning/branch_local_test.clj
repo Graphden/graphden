@@ -73,6 +73,32 @@
       (is (contains? (bl/build-branch-local-set fns) child)))))
 
 
+(deftest nil-fn-id-short-circuit-test
+  (testing "effective-branch-local? returns false for nil fn-id (defensive)"
+    ;; Doesn't touch storage at all — early `(if (nil? fn-id) false ...)` guard.
+    (is (false? (bl/effective-branch-local? ::any-opaque-storage nil)))))
+
+
+(deftest invalidate-and-invalidate-all-test
+  (testing "invalidate! on a never-seen storage is a no-op (no NPE)"
+    ;; Per docstring: invalidate! drops a per-storage entry IF one
+    ;; exists. Fresh storage has no entry → noop, no throw.
+    (is (nil? (bl/invalidate! (Object.)))))
+
+  (testing "invalidate-all! resets the global cache map"
+    ;; Set up two fake storage objects, exercise cache-for-storage
+    ;; via effective-branch-local?-on-nil (which still goes through
+    ;; the nil-guard, NOT through cache-for-storage). Use the
+    ;; lookups directly: do a swap on the global atom to seed entries,
+    ;; then invalidate-all! and verify the global is empty.
+    (let [storage-caches @#'bl/storage-caches
+          fake-k 999999999]
+      (swap! storage-caches assoc fake-k (atom {:seeded-fn-id true}))
+      (is (contains? @storage-caches fake-k) "pre-condition: seeded")
+      (bl/invalidate-all!)
+      (is (= {} @storage-caches) "global cleared"))))
+
+
 (deftest ^:integration storage-walker-test
   (let [base (base-storage)]
     (try

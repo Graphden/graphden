@@ -71,7 +71,7 @@ function switchToBranch(name) {
     // Only add to same-origin /api/* and /partials/* — third-party
     // fetches (CDN scripts, etc.) shouldn't see our internal header.
     const url = typeof input === 'string' ? input : (input?.url || '');
-    if (!url.startsWith('/api/') && !url.startsWith('/partials/')) {
+    if (!url.startsWith('/api/') && !url.startsWith('/partials/')) { // api-url-drift-allow: prefix discriminator, not a URL we fetch
       return origFetch(input, init);
     }
     const opts = Object.assign({}, init || {});

@@ -41,6 +41,7 @@
     [graphden.storage.postgres.core :as postgres]
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.api-url-drift :as api-url-drift]
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
     [graphden.types.check :as types-check]
@@ -677,6 +678,55 @@
 
 
 ;; =============================================================================
+;; Backend↔frontend URL drift check
+;; =============================================================================
+;;
+;; Runs once after `:_router` is compiled. Enumerates the live
+;; router's `/api/*` paths, scans every editor JS file for `/api/*`
+;; string-literals, and throws if any literal doesn't match a known
+;; path or prefix. Catches "renamed a route fn-def, forgot to
+;; update the JS" silently-broken-deploys at boot time.
+;;
+;; See `graphden.system.api-url-drift` for the algorithm and
+;; `graphden.system.api-url-drift-test` for the per-helper unit
+;; tests. The check is enabled by default; `skip?` (env-backed) is
+;; a circuit breaker for test bootstraps that load a subset of
+;; packages.
+
+(defn env-truthy?
+  "Parse a wire-friendly truthy flag. Accepts the EDN literal `true`,
+   or any of `\"1\" \"true\" \"yes\" \"on\"` (case-insensitive) when
+   the value came through an env var. Anything else (including the
+   empty string from an unset env in `system-prod.edn`) is OFF.
+
+   Used wherever an integrant arg can come from Aero `#env` (which
+   collapses unset vars to `\"\"`, a truthy value in Clojure)."
+  [raw]
+  (cond
+    (true? raw)                  true
+    (or (false? raw) (nil? raw)) false
+    (string? raw)                (contains? #{"1" "true" "yes" "on"}
+                                            (str/lower-case raw))
+    :else                        (boolean raw)))
+
+
+(defmethod ig/init-key :exec/api-url-drift-check
+  [_ {:keys [context skip?]}]
+  ;; `skip?` reuses `env-truthy?` — unset env collapses to `""`,
+  ;; which must NOT count as truthy. Empty string / false / nil →
+  ;; run the check; "1" / "true" / "yes" / "on" → skip.
+  (if (env-truthy? skip?)
+    (do (log/info "API URL drift check skipped"
+                  "— set GRAPHDEN_SKIP_URL_DRIFT_CHECK= to re-enable")
+        :skipped)
+    (do (log/info "Checking editor JS for /api/* URL drift...")
+        (let [router (exec/execute-by-name context "_router" {})]
+          (api-url-drift/check-router! router)
+          (log/info "API URL drift check passed")
+          :ok))))
+
+
+;; =============================================================================
 ;; Demo branches (dev only — no-op in prod when `:branches` is absent/empty)
 ;; =============================================================================
 ;;
@@ -687,23 +737,8 @@
 ;;
 ;; See `graphden.system.demo-branches` for the declaration shape.
 
-(defn- demo-branches-enabled?
-  "Parse the `:enabled?` flag from the system config. Accepts a few
-   wire-friendly shapes: the EDN literal `true`, or any of
-   `\"1\" \"true\" \"yes\" \"on\"` (case-insensitive) when the value
-   came through an env var. Anything else (including the empty
-   string from an unset env in `system-prod.edn`) means OFF."
-  [raw]
-  (cond
-    (true? raw)                  true
-    (or (false? raw) (nil? raw)) false
-    (string? raw)                (contains? #{"1" "true" "yes" "on"}
-                                            (str/lower-case raw))
-    :else                        (boolean raw)))
-
-
 (defmethod ig/init-key :exec/demo-branches [_ {:keys [context enabled? branches]}]
-  (let [on? (demo-branches-enabled? enabled?)]
+  (let [on? (env-truthy? enabled?)]
     (cond
       (not on?)
       (log/info "[demo-branches] disabled"

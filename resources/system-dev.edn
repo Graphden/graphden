@@ -67,6 +67,12 @@
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
 
+ ;; Backend↔frontend URL drift check — see system-prod.edn block.
+ :exec/api-url-drift-check
+ {:context #ig/ref :exec/context
+  :_compiled-registry #ig/ref :exec/compiled-registry
+  :skip? #or [#env GRAPHDEN_SKIP_URL_DRIFT_CHECK ""]}
+
  ;; Service registry — see system-prod.edn for the full rationale.
  :exec/service-reconciler
  {:context #ig/ref :exec/context

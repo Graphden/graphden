@@ -87,6 +87,17 @@
  {:context #ig/ref :exec/context
   :_compiled-registry #ig/ref :exec/compiled-registry}
 
+ ;; Backend↔frontend URL drift check. Runs after the compiled
+ ;; registry is ready; walks the live router's `/api/*` paths and
+ ;; scans every editor JS for `/api/*` literals — throws on drift
+ ;; (rename a route fn-def, forget to update the JS → boot fails
+ ;; rather than silent runtime 404). Toggled off via
+ ;; `GRAPHDEN_SKIP_URL_DRIFT_CHECK=1` for emergency overrides.
+ :exec/api-url-drift-check
+ {:context #ig/ref :exec/context
+  :_compiled-registry #ig/ref :exec/compiled-registry
+  :skip? #or [#env GRAPHDEN_SKIP_URL_DRIFT_CHECK ""]}
+
  ;; Service registry: seeds packages' `:services` declarations into the
  ;; `:service` table (idempotent — deterministic ids), then reads
  ;; enabled rows and starts them under the supervisor. See

@@ -141,29 +141,29 @@
 ;; surfaces fast.
 ;; =============================================================================
 
-(deftest demo-branches-enabled?-test
-  (let [demo-branches-enabled? @#'graphden.system.core/demo-branches-enabled?]
+(deftest env-truthy?-test
+  (let [env-truthy? graphden.system.core/env-truthy?]
     (testing "boolean true / false / nil"
-      (is (true?  (demo-branches-enabled? true)))
-      (is (false? (demo-branches-enabled? false)))
-      (is (false? (demo-branches-enabled? nil))))
+      (is (true?  (env-truthy? true)))
+      (is (false? (env-truthy? false)))
+      (is (false? (env-truthy? nil))))
 
     (testing "wire-friendly strings (case-insensitive)"
       (doseq [yes ["1" "true" "TRUE" "True" "yes" "YES" "on" "ON"]]
-        (is (true? (demo-branches-enabled? yes))
+        (is (true? (env-truthy? yes))
             (str "should be enabled: " yes))))
 
     (testing "everything else off"
       (doseq [no [""    "0"  "false" "FALSE" "no" "off"
                   "  true  "   ; whitespace not stripped — intentional
                   "yeah" "enabled" "yep"]]
-        (is (false? (demo-branches-enabled? no))
+        (is (false? (env-truthy? no))
             (str "should be disabled: " (pr-str no)))))
 
     (testing "non-string truthy/falsy values pass through boolean"
-      (is (true?  (demo-branches-enabled? :keyword)))
-      (is (true?  (demo-branches-enabled? 42)))
-      (is (true?  (demo-branches-enabled? {:a 1}))))))
+      (is (true?  (env-truthy? :keyword)))
+      (is (true?  (env-truthy? 42)))
+      (is (true?  (env-truthy? {:a 1}))))))
 
 
 (deftest as-instant-test

@@ -83,6 +83,21 @@
                      :_contact-demo-message-textarea
                      :_contact-demo-submit-button]}}
 
+  ;; Block 3.4 — escape-hatch button. Inline JS body bound via
+  ;; `:dispatch-custom`; the runtime's `custom` handler evals it
+  ;; on click with `btn`, `event`, `host` in scope. This stays
+  ;; OUTSIDE the form (no submit) so it only demos the
+  ;; escape-hatch path, not the form-post path.
+  {:name :_contact-demo-custom-button
+   :description "Escape-hatch demo button — toggles the result panel's text via inline JS, demonstrating `:dispatch-custom` without any server roundtrip."
+   :parent :button
+   :args {:label "Wave at me"
+          :attrs {:parent :merge
+                  :args {:maps [{:parent :dispatch-custom
+                                 :args {:body "var t = document.getElementById('contact-result'); t.textContent = (t.textContent.trim() === '👋') ? '' : '👋';"}}
+                                {:value {:type "button"
+                                         :style "padding:8px 16px;margin-top:6px;cursor:pointer;background:transparent;border:1px solid #ccc;border-radius:4px"}}]}}}}
+
   ;; ---------------------------------------------------------------------------
   ;; PAGE BODY + PAGE HANDLER
   ;; ---------------------------------------------------------------------------
@@ -102,7 +117,8 @@
                               [:code "submit-form"]
                               " action handler."]}
                      :_contact-demo-form
-                     :_contact-demo-result-panel]}}
+                     :_contact-demo-result-panel
+                     :_contact-demo-custom-button]}}
 
   ;; Full HTML page. Loads `/assets/graphden-runtime.js` (the minimal
   ;; runtime bundle — dispatcher + built-in submit-form/navigate

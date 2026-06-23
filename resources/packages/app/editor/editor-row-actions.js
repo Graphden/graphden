@@ -262,102 +262,37 @@ function ensureRowActionsDismissHandler() {
 ensureRowActionsDismissHandler();
 
 // ============================================================================
-// PARTIAL FETCH + DISPATCH (HTMX migration — Phase A1)
+// ROW-ACTIONS PARTIAL — fetch + dispatcher registration
 // ============================================================================
 //
-// Server-rendered row-actions content: caller invokes
-// `loadRowActionsContent(host, fnId, context, opts)` instead of
-// building the toolbar DOM by hand. The popover lifecycle (open /
-// hover / dismiss / re-anchor on cy zoom-pan) stays JS-owned;
-// only the buttons' MARKUP and the conditional visibility logic
-// move to the server (`:partial-row-actions` in
-// `app/editor/fns.edn`).
+// Block-1 refactor: the generic dispatch + partial-load primitives
+// moved to `editor-runtime.js` (`loadPartial`, `bindActionDispatch`,
+// `registerActionHandler`). This file now does TWO things:
 //
-// `bindRowActionsDispatch(host)` is a one-shot post-swap binder
-// that routes `data-action="…"` clicks (and the description-
-// badge's `mouseenter`) to the existing edit-mode handlers.
-// Client-side re-checks `isAuthenticated()` / `isFnEditable()`
-// before invoking write actions so the partial itself stays
-// public-readable.
+//   (1) `loadRowActionsContent(host, fnId, context, opts)` — a
+//       thin wrapper over `loadPartial` that builds the
+//       row-actions partial URL from the per-context opts and
+//       registers the rich `useSiteArg` (when present) in the
+//       binding-id-keyed map below before fetch.
+//
+//   (2) At file-load time, registers each of the 10 row-actions
+//       `data-action` handlers via `registerActionHandler`. The
+//       runtime's `bindActionDispatch` (auto-invoked by
+//       `loadPartial`'s post-swap step) routes clicks to these.
+//
+// Description-badge hover + post-swap MI-add compatibility check
+// are row-actions-specific concerns — they flow in via the
+// `onSwap` callback we pass to `loadPartial`.
 
 // Registry of rich `useSiteArg` objects keyed by binding-id. The
 // server-rendered × / ✎ buttons carry only `data-binding-id` (a
 // stable identifier); the dispatcher looks the full arg up here
 // before invoking `deleteUseSiteBinding` / `enterFreeArgBindEditMode`
 // which both need the arg's `:type` / `:item-id` / etc. fields.
-// Populated by `loadRowActionsContent` pre-fetch; trimmed by host
-// removal (each popover close wipes the entry).
 const _rowActionsUseSiteArgs = new Map();
 
 
-async function loadRowActionsContent(host, fnId, context, opts) {
-  opts = opts || {};
-  if (!host || !fnId) return;
-  // Register the rich arg before fetch — the dispatcher binds
-  // post-swap and reads by binding-id then.
-  if (opts.useSiteArg?.['binding-id']) {
-    _rowActionsUseSiteArgs.set(opts.useSiteArg['binding-id'], opts.useSiteArg);
-  }
-  host.textContent = '';
-  const loading = document.createElement('span');
-  loading.className = 'row-actions-loading';
-  loading.style.opacity = '0.55';
-  loading.style.fontSize = '11px';
-  loading.textContent = '…';
-  host.appendChild(loading);
-  try {
-    // `/partials/*` paths are out of scope for `window.API` (only
-    // `/api/*` flows through the validator + boot-cached constants);
-    // the literal stays explicit — drift validator doesn't touch it.
-    const useSiteBindingId = opts.useSiteArg
-                           ? opts.useSiteArg['binding-id'] : null;
-    const url = '/partials/row-actions'
-              + '?fn-id=' + encodeURIComponent(fnId)
-              + '&context=' + encodeURIComponent(context)
-              + (opts.showOpen === false ? '&show-open=false' : '')
-              + (opts.editable ? '&editable=true' : '')
-              + (opts.cardFnId
-                  ? '&card-fn-id=' + encodeURIComponent(opts.cardFnId)
-                  : '')
-              + (useSiteBindingId
-                  ? '&binding-id=' + encodeURIComponent(useSiteBindingId)
-                  : '')
-              + (opts.editBlockReason
-                  ? '&edit-block-reason='
-                    + encodeURIComponent(opts.editBlockReason)
-                  : '')
-              + (opts.serviceBlockedReason
-                  ? '&service-blocked-reason='
-                    + encodeURIComponent(opts.serviceBlockedReason)
-                  : '');
-    const r = await fetch(url);
-    if (!r.ok) {
-      host.textContent = '';
-      const err = document.createElement('span');
-      err.className = 'row-actions-error';
-      err.style.color = 'var(--error-fg)';
-      err.textContent = 'Failed';
-      host.appendChild(err);
-      return;
-    }
-    host.innerHTML = await r.text();
-    bindRowActionsDispatch(host);
-  } catch (_) {
-    host.textContent = '';
-    const err = document.createElement('span');
-    err.className = 'row-actions-error';
-    err.style.color = 'var(--error-fg)';
-    err.textContent = 'Network';
-    host.appendChild(err);
-  }
-}
-
-
-function bindRowActionsDispatch(host) {
-  // Description badge — hover-show + click-pin route into the
-  // existing description-tooltip flow (`editor-tooltips.js`). The
-  // server inlines `data-description` so the tooltip never makes
-  // its own fetch.
+function _bindDescriptionBadgeHover(host) {
   host.addEventListener('mouseenter', (e) => {
     const btn = e.target.closest('[data-action="description"]');
     if (!btn) return;
@@ -378,198 +313,10 @@ function bindRowActionsDispatch(host) {
     if (!btn) return;
     if (typeof hideDescriptionTooltip === 'function') hideDescriptionTooltip();
   }, true);
+}
 
-  host.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
-    // Disabled-with-reason guard — server marks the button with
-    // `aria-disabled="true"` + the reason in `title`. Surface the
-    // reason via `showIconReasonPopover` (same UX as the legacy
-    // `applyIconDisabledReason` for in-card icons) and stop here.
-    if (btn.getAttribute('aria-disabled') === 'true') {
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof showIconReasonPopover === 'function' && btn.title) {
-        showIconReasonPopover(btn, btn.title);
-      }
-      return;
-    }
-    const action = btn.dataset.action;
-    const fnId = btn.dataset.fnId || host.dataset.fnId;
-    switch (action) {
-      case 'namespace-move': {
-        e.preventDefault();
-        e.stopPropagation();
-        const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
-        const editable = typeof isFnEditable === 'function' && isFnEditable(fnId);
-        const fnEntity = lookups?.fnMap?.get(fnId);
-        if (signedIn && editable && fnEntity
-            && typeof enterNamespaceMoveEditMode === 'function') {
-          enterNamespaceMoveEditMode(fnEntity, btn);
-        }
-        break;
-      }
-      case 'description': {
-        // Click toggles sticky — match the legacy badge behaviour.
-        e.preventDefault();
-        e.stopPropagation();
-        if (typeof descriptionTooltipSticky !== 'undefined') {
-          descriptionTooltipSticky = !descriptionTooltipSticky;
-        }
-        if (typeof showDescriptionTooltip === 'function') {
-          showDescriptionTooltip({
-            name: null,
-            namespace: null,
-            description: btn.dataset.description || '',
-            entityType: btn.dataset.entityType || null,
-            entityId: btn.dataset.fnId || host.dataset.fnId || null
-          }, e);
-        }
-        break;
-      }
-      case 'open':
-        // <a target="_blank"> default behaviour — no JS needed.
-        break;
-      case 'remove-mi-parent': {
-        // Remove THIS cell's fn from the CARD-owning fn's parent-set.
-        e.preventDefault();
-        e.stopPropagation();
-        const cardFnId = btn.dataset.cardFnId || host.dataset.cardFnId;
-        const cardFnEntity = lookups?.fnMap?.get(cardFnId);
-        if (cardFnEntity && typeof removeParentInline === 'function') {
-          removeParentInline(cardFnEntity, fnId);
-        }
-        break;
-      }
-      case 'add-mi-parent': {
-        // Open the MI picker for the CARD-owning fn. Compatibility
-        // check (no candidates → disable + reason) stays here in JS
-        // because `compatibleMIParentInfo` reads client-cached
-        // `lookups`; server has no view of that map.
-        e.preventDefault();
-        e.stopPropagation();
-        const cardFnId = btn.dataset.cardFnId || host.dataset.cardFnId;
-        const cardFnEntity = lookups?.fnMap?.get(cardFnId);
-        if (cardFnEntity && typeof addMIParentInline === 'function') {
-          addMIParentInline(cardFnEntity, btn);
-        }
-        break;
-      }
-      case 'remove-use-site-binding': {
-        // Look up the rich `useSiteArg` via the binding-id-keyed
-        // registry the caller populated pre-fetch. The arg carries
-        // `:type` / `:item-id` / etc. that `deleteUseSiteBinding`
-        // needs to choose between sequence-item-removal and binding-
-        // deletion code paths.
-        e.preventDefault();
-        e.stopPropagation();
-        const bindingId = host.dataset.bindingId;
-        const arg = _rowActionsUseSiteArgs.get(bindingId);
-        if (arg && typeof deleteUseSiteBinding === 'function') {
-          deleteUseSiteBinding(arg);
-        }
-        break;
-      }
-      case 'change-use-site-value': {
-        // `enterFreeArgBindEditMode` dispatches on the arg's
-        // effective type (fn-picker for `:fn` slots, literal form
-        // for the rest) — same registry lookup pattern as above.
-        e.preventDefault();
-        e.stopPropagation();
-        const bindingId = host.dataset.bindingId;
-        const arg = _rowActionsUseSiteArgs.get(bindingId);
-        if (arg && typeof enterFreeArgBindEditMode === 'function') {
-          enterFreeArgBindEditMode(arg, btn);
-        }
-        break;
-      }
-      // --- Phase A4 root-row actions ---
-      case 'run-fn': {
-        e.preventDefault();
-        e.stopPropagation();
-        const fnEntity = lookups?.fnMap?.get(fnId);
-        if (fnEntity && typeof showExecutePopover === 'function') {
-          showExecutePopover(fnEntity, btn);
-        }
-        break;
-      }
-      case 'fn-versions': {
-        e.preventDefault();
-        e.stopPropagation();
-        const fnEntity = lookups?.fnMap?.get(fnId);
-        if (fnEntity && typeof showFnVersionsPopover === 'function') {
-          showFnVersionsPopover(fnEntity, btn);
-        }
-        break;
-      }
-      case 'service-settings': {
-        e.preventDefault();
-        e.stopPropagation();
-        const fnEntity = lookups?.fnMap?.get(fnId);
-        if (fnEntity && typeof showServicePopover === 'function') {
-          showServicePopover(fnEntity, btn);
-        }
-        break;
-      }
-      case 'rename-fn': {
-        e.preventDefault();
-        e.stopPropagation();
-        const fnEntity = lookups?.fnMap?.get(fnId);
-        if (fnEntity && typeof enterFnRenameEditMode === 'function') {
-          enterFnRenameEditMode(fnEntity, btn);
-        }
-        break;
-      }
-      case 'extend-fn': {
-        e.preventDefault();
-        e.stopPropagation();
-        const fnEntity = lookups?.fnMap?.get(fnId);
-        if (fnEntity && typeof enterExtendEditMode === 'function') {
-          enterExtendEditMode(fnEntity, btn);
-        }
-        break;
-      }
-      case 'delete-fn': {
-        // Destructive — confirm + cascade + reload via initGraph,
-        // mirroring the legacy in-card ✕ behaviour. `withBusy`
-        // surfaces the deletion as a top-bar banner while it runs.
-        e.preventDefault();
-        e.stopPropagation();
-        const fnEntity = lookups?.fnMap?.get(fnId);
-        if (!fnEntity) break;
-        const display = (typeof getQualifiedFnName === 'function')
-                      ? getQualifiedFnName(fnEntity)
-                      : (fnEntity.name || 'this fn');
-        if (!confirm('Delete fn "' + display + '"? '
-                     + 'Bindings that reference it will fail to load.')) break;
-        const opKey = 'delete-fn:' + fnEntity.id;
-        if (typeof isOpInflight === 'function' && isOpInflight(opKey)) break;
-        const work = async () => {
-          try {
-            const r = await deleteEntity('fn', fnEntity.id);
-            if (r && r.status >= 200 && r.status < 300) {
-              try { window.location.hash = ''; } catch (_) {}
-              if (typeof initGraph === 'function') await initGraph();
-            } else {
-              const text = r ? await r.text().catch(() => '') : '';
-              alert('Delete failed (' + (r?.status) + '): '
-                    + text.replace(/<[^>]+>/g, '').trim().slice(0, 200));
-            }
-          } catch (err) {
-            alert('Network error: ' + err.message);
-          }
-        };
-        if (typeof withBusy === 'function') {
-          withBusy(opKey, 'Deleting ' + display + '…', work);
-        } else {
-          work();
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  });
+
+function _applyAddMICompatibilityState(host) {
   // Post-swap MI-add compatibility check — disable + tooltip when
   // no MI parent candidates exist. Mirrors the legacy
   // `makeAddMIParentButton`'s in-place gating; the button itself
@@ -577,29 +324,269 @@ function bindRowActionsDispatch(host) {
   // in JS because `compatibleMIParentInfo` walks client-cached
   // `lookups`.
   const addMiBtn = host.querySelector('[data-action="add-mi-parent"]');
-  if (addMiBtn && typeof compatibleMIParentInfo === 'function') {
-    const cardFnId = host.dataset.cardFnId;
-    const cardFnEntity = lookups?.fnMap?.get(cardFnId);
-    if (cardFnEntity) {
-      const info = compatibleMIParentInfo(cardFnEntity.id,
-                                          cardFnEntity['parent-ids'] || []);
-      if (info && info.candidateIds.size === 0) {
-        const reasons = Object.values(info.rejected || {});
-        const counts = {};
-        for (const r of reasons) counts[r] = (counts[r] || 0) + 1;
-        let topReason = null, topCount = 0;
-        for (const [r, c] of Object.entries(counts)) {
-          if (c > topCount) { topReason = r; topCount = c; }
-        }
-        addMiBtn.disabled = true;
-        addMiBtn.classList.add('action-icon-disabled');
-        addMiBtn.style.cursor = 'help';
-        addMiBtn.title = 'No compatible MI parent — '
-                      + (topReason || 'no compatible MI parent in the registry');
-      }
-    }
+  if (!addMiBtn || typeof compatibleMIParentInfo !== 'function') return;
+  const cardFnId = host.dataset.cardFnId;
+  const cardFnEntity = lookups?.fnMap?.get(cardFnId);
+  if (!cardFnEntity) return;
+  const info = compatibleMIParentInfo(cardFnEntity.id,
+                                      cardFnEntity['parent-ids'] || []);
+  if (info?.candidateIds.size !== 0) return;
+  const reasons = Object.values(info.rejected || {});
+  const counts = {};
+  for (const r of reasons) counts[r] = (counts[r] || 0) + 1;
+  let topReason = null, topCount = 0;
+  for (const [r, c] of Object.entries(counts)) {
+    if (c > topCount) { topReason = r; topCount = c; }
   }
+  addMiBtn.disabled = true;
+  addMiBtn.classList.add('action-icon-disabled');
+  addMiBtn.style.cursor = 'help';
+  addMiBtn.title = 'No compatible MI parent — '
+                + (topReason || 'no compatible MI parent in the registry');
 }
+
+
+async function loadRowActionsContent(host, fnId, context, opts) {
+  opts = opts || {};
+  if (!host || !fnId) return;
+  // Register the rich arg before fetch — the dispatcher binds
+  // post-swap and reads by binding-id then.
+  if (opts.useSiteArg?.['binding-id']) {
+    _rowActionsUseSiteArgs.set(opts.useSiteArg['binding-id'], opts.useSiteArg);
+  }
+  // `/partials/*` paths are out of scope for `window.API` (only
+  // `/api/*` flows through the validator + boot-cached constants);
+  // the literal stays explicit — drift validator doesn't touch it.
+  const useSiteBindingId = opts.useSiteArg
+                         ? opts.useSiteArg['binding-id'] : null;
+  const url = '/partials/row-actions'
+            + '?fn-id=' + encodeURIComponent(fnId)
+            + '&context=' + encodeURIComponent(context)
+            + (opts.showOpen === false ? '&show-open=false' : '')
+            + (opts.editable ? '&editable=true' : '')
+            + (opts.cardFnId
+                ? '&card-fn-id=' + encodeURIComponent(opts.cardFnId)
+                : '')
+            + (useSiteBindingId
+                ? '&binding-id=' + encodeURIComponent(useSiteBindingId)
+                : '')
+            + (opts.editBlockReason
+                ? '&edit-block-reason='
+                  + encodeURIComponent(opts.editBlockReason)
+                : '')
+            + (opts.serviceBlockedReason
+                ? '&service-blocked-reason='
+                  + encodeURIComponent(opts.serviceBlockedReason)
+                : '');
+  return loadPartial(host, url, {
+    loadingClass: 'row-actions-loading',
+    errorClass: 'row-actions-error',
+    onSwap: (h) => {
+      _bindDescriptionBadgeHover(h);
+      _applyAddMICompatibilityState(h);
+    }
+  });
+}
+
+
+// =============================================================================
+// HANDLER REGISTRATION
+// =============================================================================
+//
+// Each `data-action="X"` handler registered here is invoked by
+// the runtime's `bindActionDispatch` when the user clicks an
+// enabled button. Handlers may use the second `event` arg (for
+// preventDefault / stopPropagation) and the third `host` arg
+// (for fall-through to `host.dataset.*`).
+
+registerActionHandler('namespace-move', (btn, e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
+  const signedIn = typeof isAuthenticated === 'function' && isAuthenticated();
+  const editable = typeof isFnEditable === 'function' && isFnEditable(fnId);
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (signedIn && editable && fnEntity
+      && typeof enterNamespaceMoveEditMode === 'function') {
+    enterNamespaceMoveEditMode(fnEntity, btn);
+  }
+});
+
+
+registerActionHandler('description', (btn, e, host) => {
+  // Click toggles sticky — match the legacy badge behaviour.
+  e.preventDefault();
+  e.stopPropagation();
+  if (typeof descriptionTooltipSticky !== 'undefined') {
+    descriptionTooltipSticky = !descriptionTooltipSticky;
+  }
+  if (typeof showDescriptionTooltip === 'function') {
+    showDescriptionTooltip({
+      name: null,
+      namespace: null,
+      description: btn.dataset.description || '',
+      entityType: btn.dataset.entityType || null,
+      entityId: btn.dataset.fnId || host?.dataset.fnId || null
+    }, e);
+  }
+});
+
+
+registerActionHandler('open', () => {
+  // <a target="_blank"> default behaviour — no JS needed.
+});
+
+
+registerActionHandler('remove-mi-parent', (btn, e, host) => {
+  // Remove THIS cell's fn from the CARD-owning fn's parent-set.
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const cardFnId = btn.dataset.cardFnId || host?.dataset.cardFnId;
+  const cardFnEntity = lookups?.fnMap?.get(cardFnId);
+  if (cardFnEntity && typeof removeParentInline === 'function') {
+    removeParentInline(cardFnEntity, fnId);
+  }
+});
+
+
+registerActionHandler('add-mi-parent', (btn, e, host) => {
+  // Open the MI picker for the CARD-owning fn. Compatibility
+  // check (no candidates → disable + reason) stays in
+  // `_applyAddMICompatibilityState` because `compatibleMIParentInfo`
+  // reads client-cached `lookups`; server has no view of that map.
+  e.preventDefault();
+  e.stopPropagation();
+  const cardFnId = btn.dataset.cardFnId || host?.dataset.cardFnId;
+  const cardFnEntity = lookups?.fnMap?.get(cardFnId);
+  if (cardFnEntity && typeof addMIParentInline === 'function') {
+    addMIParentInline(cardFnEntity, btn);
+  }
+});
+
+
+registerActionHandler('remove-use-site-binding', (btn, e, host) => {
+  // Look up the rich `useSiteArg` via the binding-id-keyed
+  // registry the caller populated pre-fetch. The arg carries
+  // `:type` / `:item-id` / etc. that `deleteUseSiteBinding`
+  // needs to choose between sequence-item-removal and binding-
+  // deletion code paths.
+  e.preventDefault();
+  e.stopPropagation();
+  const bindingId = host?.dataset.bindingId;
+  const arg = _rowActionsUseSiteArgs.get(bindingId);
+  if (arg && typeof deleteUseSiteBinding === 'function') {
+    deleteUseSiteBinding(arg);
+  }
+});
+
+
+registerActionHandler('change-use-site-value', (btn, e, host) => {
+  // `enterFreeArgBindEditMode` dispatches on the arg's effective
+  // type (fn-picker for `:fn` slots, literal form for the rest) —
+  // same registry lookup pattern as above.
+  e.preventDefault();
+  e.stopPropagation();
+  const bindingId = host?.dataset.bindingId;
+  const arg = _rowActionsUseSiteArgs.get(bindingId);
+  if (arg && typeof enterFreeArgBindEditMode === 'function') {
+    enterFreeArgBindEditMode(arg, btn);
+  }
+});
+
+
+registerActionHandler('run-fn', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (fnEntity && typeof showExecutePopover === 'function') {
+    showExecutePopover(fnEntity, btn);
+  }
+});
+
+
+registerActionHandler('fn-versions', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (fnEntity && typeof showFnVersionsPopover === 'function') {
+    showFnVersionsPopover(fnEntity, btn);
+  }
+});
+
+
+registerActionHandler('service-settings', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (fnEntity && typeof showServicePopover === 'function') {
+    showServicePopover(fnEntity, btn);
+  }
+});
+
+
+registerActionHandler('rename-fn', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (fnEntity && typeof enterFnRenameEditMode === 'function') {
+    enterFnRenameEditMode(fnEntity, btn);
+  }
+});
+
+
+registerActionHandler('extend-fn', (btn, e, host) => {
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (fnEntity && typeof enterExtendEditMode === 'function') {
+    enterExtendEditMode(fnEntity, btn);
+  }
+});
+
+
+registerActionHandler('delete-fn', (btn, e, host) => {
+  // Destructive — confirm + cascade + reload via initGraph,
+  // mirroring the legacy in-card ✕ behaviour. `withBusy`
+  // surfaces the deletion as a top-bar banner while it runs.
+  e.preventDefault();
+  e.stopPropagation();
+  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnEntity = lookups?.fnMap?.get(fnId);
+  if (!fnEntity) return;
+  const display = (typeof getQualifiedFnName === 'function')
+                ? getQualifiedFnName(fnEntity)
+                : (fnEntity.name || 'this fn');
+  if (!confirm('Delete fn "' + display + '"? '
+               + 'Bindings that reference it will fail to load.')) return;
+  const opKey = 'delete-fn:' + fnEntity.id;
+  if (typeof isOpInflight === 'function' && isOpInflight(opKey)) return;
+  const work = async () => {
+    try {
+      const r = await deleteEntity('fn', fnEntity.id);
+      if (r && r.status >= 200 && r.status < 300) {
+        try { window.location.hash = ''; } catch (_) {}
+        if (typeof initGraph === 'function') await initGraph();
+      } else {
+        const text = r ? await r.text().catch(() => '') : '';
+        alert('Delete failed (' + (r?.status) + '): '
+              + text.replace(/<[^>]+>/g, '').trim().slice(0, 200));
+      }
+    } catch (err) {
+      alert('Network error: ' + err.message);
+    }
+  };
+  if (typeof withBusy === 'function') {
+    withBusy(opKey, 'Deleting ' + display + '…', work);
+  } else {
+    work();
+  }
+});
 
 
 // Cytoscape zoom/pan re-position — when the canvas zooms or pans

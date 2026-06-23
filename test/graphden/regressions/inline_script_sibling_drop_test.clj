@@ -32,7 +32,10 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.postgres-test-helpers :as pth]))
+    [graphden.storage.protocol.postgres-test-helpers :as pth])
+  (:import
+    (java.io
+      File)))
 
 
 (def ^:dynamic *container* nil)
@@ -50,13 +53,14 @@
    Path: `resources/graphden-build-hashes.json` at the project
    root — same place build.clj would write."
   []
-  (let [target (io/file "resources/graphden-build-hashes.json")]
-    (when-not (.exists target)
+  (let [target (io/file "resources/graphden-build-hashes.json")
+        hash64 (str/join (repeat 64 \0))]
+    (when-not (File/.exists target)
       (spit target
             (cheshire.core/generate-string
-              {"frontend" (apply str (repeat 64 \0))
-               "packages" (apply str (repeat 64 \0))
-               "backend"  (apply str (repeat 64 \0))})))))
+              {"frontend" hash64
+               "packages" hash64
+               "backend"  hash64})))))
 
 
 (use-fixtures :once

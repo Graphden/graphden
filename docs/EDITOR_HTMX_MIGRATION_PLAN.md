@@ -1,8 +1,8 @@
 # Editor HTMX Migration Plan (Option 3)
 
-**Status**: Planned, not started. Sized ~3-5 days of focused work.
-Documented here so a fresh session can execute without re-deriving
-the analysis.
+**Status**: Phase A complete (8 commits). Phase B/C deferred per
+post-A re-survey — see the "Post-Phase-A re-scoping" section at
+the bottom.
 
 **Branch context**: `refactor/popovers-to-graph-htmx`. The four
 URL-coupling stages (Options 1+2) shipped earlier in this branch;
@@ -49,18 +49,21 @@ for the delete-flow. When 0c lands, write a parallel chain over
 OR refactor the delete-flow chain to take an `:fn-id` free arg
 and reuse it.
 
-## Phase A — Row-actions popover migration
+## Phase A — Row-actions popover migration ✅ DONE
 
-Single partial `:partial-row-actions` handles 5 contexts via a
-`?context=…` query param:
+Single partial `:partial-row-actions` handles 4 server-rendered
+contexts via `?context=…`. Two more JS dispatch paths reuse the
+same contexts (parent-edit row → `cell`; read-only fall-through
+→ `col-header`).
 
-| Stage | Context | Buttons | Notes |
+| Stage | Commit | Context | Buttons |
 |---|---|---|---|
-| A1 | `col-header` | ns, i, ↗ | Simplest. `↗` conditional on `show-open` client flag. |
-| A2 | `cell` (MI cell) | ns, i, ↗, × Remove-MI, + Add-MI | × removes a parent from the cell-owning fn; + opens MI add picker. |
-| A3 | `use-site-arg` | ns, i, ↗, × Remove-binding, ✎ Change-value | × deletes the binding (slot reverts to free-arg); ✎ opens free-arg-bind edit mode. |
-| A4 | `root-row` | ▶ Run, ⌛ History, ⚙ Service, ✎ Rename, + Extend, ✕ Delete | Most complex. ⚙ disabled when fn has free args (check server-side). ✕ has destructive confirm + cascade. |
-| A5 | (cleanup) | — | Delete `createNamespaceBadge` / `createDescriptionBadge` / `createOpenInNewTabButton` / `applyActionIconBox` from `editor-icons.js` (~400 LOC). Delete `buildColPopoverContent` / `buildCellPopoverContent` / `buildPopoverContent` from `editor-overlay-fn.js` (~150 LOC). |
+| A1 | `79865f17` | `col-header` | ns / i / ↗ |
+| A2 | `7b251ebe` | `cell` (MI cell + Phase-A4.5 parent-edit) | ns / i / ↗ / × Remove-MI / + Add-MI (last two when `editable=true`) |
+| A3 | `179f8bc5` | `use-site-arg` | ns / i / ↗ / × Remove-binding / ✎ Change-value (last two when `editable=true`) |
+| A4 | `6076f1d2` | `root-row` | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ✎ Rename / + Extend / ✕ Delete (with `edit-block-reason` + `service-blocked-reason` disabled-with-reason variants) |
+| A4.5 | `6afddd33` | (reuses cell + col-header) | parent-edit row → cell; read-only fallthrough → col-header |
+| A5 | `e3f737b1` | (cleanup) | Deleted `createNamespaceBadge` / `createPinnedIconButton` / `createEditPencilButton` / `applyIconDisabledReason` / `makeAddMIParentButton` / `rowWantsNamespaceBadge` — `-261 LOC` editor JS |
 
 **Server output shape** (example for col-header):
 
@@ -169,32 +172,32 @@ function bindRowActionsDispatch(host) {
 }
 ```
 
-## Phase B — Description tooltip body
+## Post-Phase-A re-scoping: Phase B / C deferred
 
-Single partial `:partial-description-tooltip` returns the read-mode
-body (text + close × + Edit button). JS retains hover lifecycle +
-edit-mode textarea + save flow.
+The original plan assumed B/C would offer the same kind of win
+as A. Deep re-survey after A shipped revealed they don't:
 
-The Phase A row-actions dispatcher already opens the tooltip via
-`showDescriptionTooltip(...)` with data from `data-*` attrs (no
-graphData lookup). For NON-row-actions callers (e.g. the
-`createDescriptionBadge` factory used standalone — see Phase A5
-deletion), audit + migrate.
+| Original target | Status | Why deferred |
+|---|---|---|
+| **B — description-tooltip body** | ⏳ deferred | Post-A, the row-actions dispatcher already opens the tooltip with `data-description` inlined by the partial. Sidebar + edge-label callers read description from client-cached `graphData`. A partial would re-fetch what's already on the client AND add ~30ms latency on every hover. Net-negative. |
+| **C1 — service badge → server** | ⏳ deferred | Same pattern: `getServiceForFnId` reads from client-cached service map. The badge rendering is purely data-projection from already-loaded state. Partial = wasted roundtrip. |
+| **C2 — full-name tooltip → server** | ⏳ deferred | Pure JS DOM build from a string passed in by the caller. No server data ever involved. Migration would be pure code relocation with zero value. |
+| **edge-label overlay** (added to survey) | ⏳ deferred | Computes description via client-side BFS over `lookups`, type-chip via client helpers (`expectedSlotType`/`resolveArgType`), renders cytoscape-anchored DOM. Migrating requires building server-side equivalents of those resolvers (Phase-0-sized effort) AND splitting overlay render between client + server (fragile). |
 
-## Phase C — Other badges
+The structural insight: Phase A captured the **server-data-only**
+surface (route compilation, conditional auth/editability state,
+multi-button assembly with per-action data). Remaining JS is
+**client-cache-driven** (description/name/namespace from
+graphData) or **canvas-bound** (cytoscape overlays). Both fall
+under skill §6's `keep JS` criteria.
 
-| Stage | Target |
-|---|---|
-| C1 | Service badge (●) on root rows → server-rendered with status (running/failed/disabled/pending) computed server-side. |
-| C2 | Full-name tooltip → server-rendered. Trivial. |
+## Phase D — Cleanup ✅ DONE
 
-## Phase D — Cleanup
-
-| Stage | Target |
-|---|---|
-| D1 | Audit `graphData` usage post-migration. Remove client-side caching of fn-level metadata that the popovers no longer need (description, namespace-id). Keep sidebar index + currently-selected subtree (still required for Cytoscape rendering). |
-| D2 | Delete dead JS helpers (`applyActionIconBox`, `applyIconDisabledReason`, etc.). |
-| D3 | Lint pass + full `bb test` + browser smoke. |
+| Stage | Status | What |
+|---|---|---|
+| D1 | ✅ | Audited `graphData` usage — still needed by sidebar tree + cytoscape overlays + pickers, all of which are JS by skill §6.2. No safe trimming opportunity. |
+| D2 | ✅ | Removed dead CSS: `.edit-pencil` / `.pinned-icon-btn*` / `.action-disabled` (no JS adds these classes after A5). Consolidated `.row-actions-popover` selector list to use `.action-icon` instead of the dropped per-factory classes. |
+| D3 | ✅ | `bb check` + `bb rebuild` smoke + full `bb test` all clean. Phase 0c (`:fn-usage-count` + `:fn-is-editable?`) STAYS deferred — not needed at any current callsite. |
 
 ## Estimated net effect
 
@@ -267,5 +270,8 @@ mid-stage, roll back that stage only.
 
 ## When this doc is stale
 
-Delete this doc once Phase D ships. Until then it's the live
-plan; refresh as primitives land or scope shifts.
+Phase A + D shipped. B/C deferred per the re-scoping above. Keep
+this doc as the **as-shipped reference** for the row-actions
+partial's contract — the per-context query-param matrix is the
+canonical source for anyone extending it. Delete only if a
+future change makes the design fundamentally different.

@@ -1101,57 +1101,17 @@ body.sidebar-collapsed .sidebar-expand-floating {
 }
 .expects-effects-checkbox input:disabled + * { color: var(--muted-fg); }
 
-/* Edit pencil ✎ — right-pinned action icon, opacity transitions like
-   the open-in-new-tab and description-badge so it stays unobtrusive
-   when the user is just scanning. */
-.edit-pencil,
-.pinned-icon-btn,
+/* Namespace badge `ns` — left slot in the row-actions popover, hover
+   tinges to match the action-icon framework. The matching action-
+   icon-disabled / action-icon-danger variants live where the rest
+   of `.action-icon` styling is declared. */
 .namespace-badge {
   opacity: 0.85;
   transition: opacity 0.1s, background-color 0.1s, color 0.1s;
 }
-.edit-pencil:hover,
-.pinned-icon-btn:hover,
 .namespace-badge:hover {
   opacity: 1;
   background-color: color-mix(in srgb, currentColor 28%, transparent);
-}
-/* Danger variant — used for the Delete (✕) icon on the root fn-name
-   row. Tinted so the row's destructive action stands out against the
-   neutral i / ✎ / + siblings without also blowing up its size. */
-.pinned-icon-btn-danger {
-  color: var(--error-fg);
-}
-.pinned-icon-btn-danger:hover {
-  background-color: color-mix(in srgb, var(--error-fg) 22%, transparent);
-}
-/* Disabled variant — Add-MI-parent button greys out when no
-   compatible candidate exists. The `title=` carries the reason so
-   users know WHY (different base-fn, every arg already covered, …)
-   instead of clicking a dead button. Hover keeps the help cursor.
-   Pointer-events stay enabled so the title-tooltip still surfaces;
-   the click handler is intentionally a no-op in this state. */
-.pinned-icon-btn-disabled,
-.pinned-icon-btn-disabled:hover {
-  opacity: 0.45;
-  background-color: transparent;
-  cursor: help;
-}
-
-/* Generic disabled-with-reason variant — applied via
-   `applyIconDisabledReason` in editor-icons.js when an action icon
-   stays visible for discoverability but the action itself is blocked
-   (e.g. ✎ rename on a fn referenced by other fns). Click reveals the
-   reason in `icon-reason-popover` instead of running the action. */
-.edit-pencil.action-disabled,
-.edit-pencil.action-disabled:hover,
-.pinned-icon-btn.action-disabled,
-.pinned-icon-btn.action-disabled:hover,
-.namespace-badge.action-disabled,
-.namespace-badge.action-disabled:hover {
-  opacity: 0.45;
-  background-color: transparent;
-  cursor: help;
 }
 
 
@@ -1199,16 +1159,14 @@ body.sidebar-collapsed .sidebar-expand-floating {
 }
 .row-actions-popover .description-badge,
 .row-actions-popover .open-in-new-tab,
-.row-actions-popover .edit-pencil,
-.row-actions-popover .pinned-icon-btn,
+.row-actions-popover .action-icon,
 .row-actions-popover .namespace-badge {
   opacity: 0.95;
   transition: opacity 0.1s, background-color 0.1s;
 }
 .row-actions-popover .description-badge:hover,
 .row-actions-popover .open-in-new-tab:hover,
-.row-actions-popover .edit-pencil:hover,
-.row-actions-popover .pinned-icon-btn:hover,
+.row-actions-popover .action-icon:hover,
 .row-actions-popover .namespace-badge:hover {
   opacity: 1;
 }

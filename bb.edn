@@ -433,7 +433,9 @@
    :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
 
   coverage-full
-  {:doc "Full coverage (unit + integration). ~35 min wall (cloverage instrumentation × testcontainer round-trips). Use as a periodic audit (manual / nightly), NOT on every CI — the budget would blow up ~6×. Baseline at last run: 84.65% form / 93.72% line; only RED NS is `system.demo-branches` (2.78%)."
+  {:doc "Full coverage (unit + integration). ~35 min wall (cloverage instrumentation × testcontainer round-trips). Use as a periodic audit (manual / nightly), NOT on every CI — the budget would blow up ~6×. Baseline at last run (2026-06-23): ALL FILES 83.74% form / 93.00% line; demo-branches now 79.52%/93.62% (was 2.78%).
+
+   CAVEAT — known 0% NSes: `crud.entities`, `crud.fn-execution.*`, `crud.branches`, `crud.request`, `crud.secrets`, `crud.type-check`, `crud.value-form`, `clients.vault` all show 0% — NOT because they're untested but because every invocation goes through `cr/execute`'s pre-compiled closure cache (built at `cr/rebuild!` from the package loader's defbase impls). Cloverage instruments the SOURCE vars, but the closures hold the already-resolved fn objects and don't re-deref through the instrumented var. Verified 2026-06-23: same 0% under both kaocha-cloverage AND direct `clj -M:cloverage` (a 2h32m sequential audit). The functional code path IS exercised by every integration test that hits `/api/entities/*` (282 integration tests, 0 failures) — cloverage just can't observe it. ROI of fixing is low: see [[feedback_coverage_measurement]]."
    :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn")}
 
   ;; === FULL CHECK ===

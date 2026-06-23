@@ -73,6 +73,11 @@
   :_compiled-registry #ig/ref :exec/compiled-registry
   :skip? #or [#env GRAPHDEN_SKIP_URL_DRIFT_CHECK ""]}
 
+ ;; Boot-time-cached `window.API` JS module — see system-prod.edn.
+ :exec/api-routes-js-cache
+ {:context #ig/ref :exec/context
+  :_compiled-registry #ig/ref :exec/compiled-registry}
+
  ;; Service registry — see system-prod.edn for the full rationale.
  :exec/service-reconciler
  {:context #ig/ref :exec/context

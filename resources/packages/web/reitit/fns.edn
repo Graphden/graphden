@@ -88,6 +88,20 @@
    :args {:paths {:type [:list :text] :description "Full route path patterns, e.g. `[\"/health\" \"/api/branches/:ref/diff\"]`."}}
    :return-type :text}
 
+  ;; Atom-backed read of the boot-time-cached `window.API` JS
+  ;; module. `:effects #{}` is load-bearing — the editor JS asset
+  ;; reads this via `:_editor-api-routes-script-tag`, and any
+  ;; effect declared here would propagate up through the bundle's
+  ;; type-check sweep into `:editor-js-asset`'s `:expects-effects`
+  ;; contract. The cache is populated by `:exec/api-routes-js-cache`
+  ;; (Clojure init-key) AFTER `:_router` compiles; before then,
+  ;; reads return `""`.
+  {:name :cached-api-routes-js
+   :description "Return the boot-time-cached `window.API` JS module — built once after `:_router` compiles, kept in a JVM atom. Editor bundle reads this to expose every `/api/*` URL as `window.API.<key>` so JS modules never hardcode a path. Empty string when the cache hasn't been populated (test bootstraps)."
+   :args {}
+   :return-type :text
+   :effects #{}}
+
   ;; =============================================================================
   ;; MIDDLEWARE CHAIN
   ;; =============================================================================

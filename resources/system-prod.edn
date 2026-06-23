@@ -98,6 +98,15 @@
   :_compiled-registry #ig/ref :exec/compiled-registry
   :skip? #or [#env GRAPHDEN_SKIP_URL_DRIFT_CHECK ""]}
 
+ ;; Boot-time-cached `window.API = {…}` JS module. Computed once
+ ;; after `:_router` compiles; consumed by the editor JS bundle via
+ ;; the pure `:cached-api-routes-js` base-fn so editor modules can
+ ;; address routes by name (`API.api_branches`) instead of
+ ;; duplicating path literals.
+ :exec/api-routes-js-cache
+ {:context #ig/ref :exec/context
+  :_compiled-registry #ig/ref :exec/compiled-registry}
+
  ;; Service registry: seeds packages' `:services` declarations into the
  ;; `:service` table (idempotent — deterministic ids), then reads
  ;; enabled rows and starts them under the supervisor. See

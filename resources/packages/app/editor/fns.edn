@@ -199,6 +199,24 @@
           :attrs :_editor-script-attrs
           :children {:value []}}}
 
+  ;; Inline `<script>window.API = {…}</script>` rendered BEFORE
+  ;; `:_editor-script-tag` so every editor JS module can address
+  ;; `/api/*` routes by symbolic name (`window.API.api_branches`)
+  ;; instead of duplicating path literals. The body is the boot-
+  ;; time-cached output of `:cached-api-routes-js`. `:hiccup-
+  ;; normalize` in the page pipeline wraps the string child in
+  ;; `:h-raw` so the JS body is emitted verbatim (no HTML-escape).
+  {:name :_editor-api-routes-children
+   :parent :conj
+   :args {:coll [] :item :cached-api-routes-js}}
+
+  {:name :_editor-api-routes-script-tag
+   :description "Inline `<script>` carrying the boot-time-generated `window.API = {…}` module. Rendered before the editor.js bundle so every module can read `window.API.<key>` to resolve a route URL."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:value {}}
+          :children :_editor-api-routes-children}}
+
   ;; `<link rel="stylesheet" href="…">` attrs map — built via two
   ;; assoc calls because the editor-css URL is a runtime composition
   ;; over `:build-hash-frontend-short` (can't be a literal map).
@@ -249,10 +267,12 @@
           :url "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"}}
 
   ;; Complete HTML page
-  ;; Scripts: single editor JS reference (layout is computed server-side, no dagre needed)
+  ;; Scripts: API constants module (inline) THEN the editor JS
+  ;; bundle. Order matters — every module in editor.js may read
+  ;; `window.API.<key>` at file-eval time.
   {:name :_editor-scripts
    :parent :list
-   :args {:items [:_editor-script-tag]}}
+   :args {:items [:_editor-api-routes-script-tag :_editor-script-tag]}}
 
   {:name :page
    :description "Full editor HTML page — title, head (stylesheet link + CDN scripts), body (sidebar + graph), and an end-of-body `<script src>` pointing at the cached editor JS bundle. Rendered by `:_editor-handler` on `GET /`."

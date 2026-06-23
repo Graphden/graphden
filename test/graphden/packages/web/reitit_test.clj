@@ -195,7 +195,41 @@
     (let [out (js-bundle ["/api/fns/:id"])]
       (is (str/includes? out "api_fns_id: function(id) { return"))
       (is (str/includes? out "encodeURIComponent(id)"))
-      (is (str/includes? out "\"/api/fns/\"")))))
+      ;; Leading-`/` literal for the static prefix; the `/` separator
+      ;; before the param lives on the param-emit side.
+      (is (str/includes? out "\"/api/fns\""))
+      (is (str/includes? out "\"/\" + encodeURIComponent(id)")))))
+
+
+(deftest js-bundle-handles-static-segment-after-param
+  (testing "/api/branches/:ref/conflicts → no trailing slash leaks from the loop buffer"
+    (let [out (js-bundle ["/api/branches/:ref/conflicts"])]
+      ;; Correct path is `/conflicts` (no trailing slash). Buggy
+      ;; emit would land `/conflicts/` and the JS call would hit
+      ;; the wrong URL.
+      (is (str/includes? out "\"/conflicts\"") "trailing literal must keep no trailing slash")
+      (is (not (str/includes? out "\"/conflicts/\""))
+          "no spurious trailing slash from buffer-accumulation"))))
+
+
+(deftest js-bundle-preserves-trailing-slash-when-path-has-one
+  (testing "/api/foo/ (trailing slash in source) preserves trailing in output"
+    ;; Key has trailing `_` because slashes mangle to underscores —
+    ;; intentionally distinct from `/api/foo` (no slash) since
+    ;; reitit treats those as different routes.
+    (let [out (js-bundle ["/api/foo/"])]
+      (is (str/includes? out "api_foo_: \"/api/foo/\""))))
+
+  (testing "/api/bar/:id/ (param then trailing /) → trailing slash on final literal"
+    (let [out (js-bundle ["/api/bar/:id/"])]
+      (is (str/includes? out "\"/\" + encodeURIComponent(id) + \"/\"")))))
+
+
+(deftest js-bundle-consecutive-params
+  (testing "/api/:a/:b — both params get their own `/` separator"
+    (let [out (js-bundle ["/api/:a/:b"])]
+      (is (str/includes? out "function(a, b)"))
+      (is (str/includes? out "\"/api\" + \"/\" + encodeURIComponent(a) + \"/\" + encodeURIComponent(b)")))))
 
 
 (deftest js-bundle-hyphenated-params-become-underscored
@@ -242,4 +276,7 @@
           out (-> router route-paths js-bundle)]
       (is (str/includes? out "api_health: \"/api/health\","))
       (is (str/includes? out "api_fns_id: function(id)"))
-      (is (str/includes? out "api_branches_ref_diff: function(ref)")))))
+      (is (str/includes? out "api_branches_ref_diff: function(ref)"))
+      ;; Static literal after param keeps the no-trailing-slash shape.
+      (is (str/includes? out "\"/diff\""))
+      (is (not (str/includes? out "\"/diff/\""))))))

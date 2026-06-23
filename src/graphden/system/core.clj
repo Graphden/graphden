@@ -41,6 +41,7 @@
     [graphden.storage.postgres.core :as postgres]
     [graphden.storage.postgres.notify :as pg-notify]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.api-routes-js :as api-routes-js]
     [graphden.system.api-url-drift :as api-url-drift]
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
@@ -724,6 +725,32 @@
           (api-url-drift/check-router! router)
           (log/info "API URL drift check passed")
           :ok))))
+
+
+;; =============================================================================
+;; API routes JS cache
+;; =============================================================================
+;;
+;; Builds the `window.API = {…}` JS module once at boot from the
+;; live `:_router`. Stored in a process-global atom; read by the
+;; `cached-api-routes-js` defbase (declared `:effects #{}` so the
+;; bundle pipeline doesn't inherit handler effects through this
+;; chain). The editor JS bundle's `:_editor-api-routes-script-tag`
+;; renders the cached value into an inline `<script>` BEFORE the
+;; main editor.js loads, exposing `window.API.<key>` to every
+;; editor module.
+
+(defmethod ig/init-key :exec/api-routes-js-cache
+  [_ {:keys [context]}]
+  (log/info "Building cached api-routes JS module...")
+  (let [router (exec/execute-by-name context "_router" {})]
+    (api-routes-js/install-from-router! router)
+    (log/info "api-routes JS cache:" (count (api-routes-js/read-cache)) "bytes")
+    :ok))
+
+
+(defmethod ig/halt-key! :exec/api-routes-js-cache [_ _]
+  (api-routes-js/clear-cache!))
 
 
 ;; =============================================================================

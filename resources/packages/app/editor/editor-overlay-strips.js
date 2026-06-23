@@ -444,10 +444,11 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
     }
   }
 
-  // (Namespace surface lives as a left-pinned `ns` badge on the
-  // fn-name row — see `createNamespaceBadge` in editor-icons.js.
-  // Removed the dedicated bottom strip: same payload duplicated in
-  // two places turned the card into a noisy stack of labels.)
+  // (Namespace surface lives as the `ns` badge in the row-actions
+  // popover — served by `:partial-row-actions` and dispatched via
+  // `editor-row-actions.js`. Removed the dedicated bottom strip:
+  // same payload duplicated in two places turned the card into a
+  // noisy stack of labels.)
 
   // --- branch-local strip ---
   // Walk parent-ids transitively (mirror of

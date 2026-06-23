@@ -38,67 +38,14 @@ function _singleEditableIncomingArg(nodeId) {
   return editable.length === 1 ? editable[0] : null;
 }
 
-// `+` Add-MI-parent button — pinned on the parent row's right edge
-// when the parent set is editable. Two states:
-//   - Active: tooltip "Add another parent (MI)" / click → fn-picker
-//     filtered to candidates that share a base-fn AND set args the
-//     existing parent set hasn't covered.
-//   - Disabled: tooltip "<reason>" naming WHY no candidate is
-//     available so the user understands the affordance isn't broken.
-// `pinSlot` lets the caller stack this against neighbours
-// (single-parent uses slot 3; MI uses an inline-flex sibling cell).
-function makeAddMIParentButton(cardFnEntity, onEnter, pinSlot) {
-  if (typeof createPinnedIconButton !== 'function') return null;
-  if (typeof addMIParentInline !== 'function') return null;
-  const currentParents = cardFnEntity['parent-ids'] || [];
-  let candidateCount = 0;
-  let firstReason = null;
-  if (typeof compatibleMIParentInfo === 'function') {
-    const info = compatibleMIParentInfo(cardFnEntity.id, currentParents);
-    candidateCount = info.candidateIds.size;
-    if (candidateCount === 0) {
-      const allReasons = Object.values(info.rejected || {});
-      const counts = {};
-      for (const r of allReasons) counts[r] = (counts[r] || 0) + 1;
-      let topReason = null, topCount = 0;
-      for (const [r, c] of Object.entries(counts)) {
-        if (c > topCount) { topReason = r; topCount = c; }
-      }
-      firstReason = topReason || 'no compatible MI parent in the registry';
-    }
-  }
-  const btn = createPinnedIconButton({
-    glyph: '+',
-    title: candidateCount > 0
-      ? 'Add another parent (multi-inheritance)'
-      : ('No compatible MI parent — ' + firstReason),
-    inline: true,
-    onEnter,
-    onClick: candidateCount > 0
-      ? (anchor) => addMIParentInline(cardFnEntity, anchor)
-      : null
-  });
-  if (!btn) return null;
-  if (candidateCount === 0) {
-    btn.disabled = true;
-    btn.classList.add('pinned-icon-btn-disabled');
-    btn.style.cursor = 'help';
-  }
-  return btn;
-}
-
-// Should this fn-row carry a left-pinned `ns` namespace badge?
-// Anonymous / local fns have no addressable namespace, so the badge
-// would always read "(root)" with no actionable click — skip them.
-function rowWantsNamespaceBadge(rowFn) {
-  return !!(rowFn?.name);
-}
-
-// Attach the left-pinned namespace badge to a fn-row. The badge is
 // `attachNamespaceBadge` lived here in earlier iterations to pin a
 // `ns` badge inside each fn-row. Removed when the row-actions popover
 // (editor-row-actions.js) absorbed the ns badge alongside the other
-// per-row affordances; row-bodies now show only the fn name.
+// per-row affordances; row-bodies now show only the fn name. The
+// `+` Add-MI-parent factory also lived here until Phase A2/A4.5 of
+// the HTMX migration moved its rendering to `:partial-row-actions`
+// (cell context) — JS now just dispatches the `add-mi-parent` click
+// through the row-actions dispatcher to `addMIParentInline`.
 
 // --- Paint state factory used by createFnOverlay ----------------------------
 

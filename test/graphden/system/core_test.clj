@@ -132,3 +132,92 @@
             result (ig/init-key :exec/fn-entities opts)]
         (is (map? result))
         (is (empty? result))))))
+
+
+;; =============================================================================
+;; Pure helpers — small dispatch / parsing fns that don't need a system
+;; init. Pinned at the unit level so a regression in their behaviour
+;; surfaces fast.
+;; =============================================================================
+
+(deftest demo-branches-enabled?-test
+  (let [demo-branches-enabled? @#'graphden.system.core/demo-branches-enabled?]
+    (testing "boolean true / false / nil"
+      (is (true?  (demo-branches-enabled? true)))
+      (is (false? (demo-branches-enabled? false)))
+      (is (false? (demo-branches-enabled? nil))))
+
+    (testing "wire-friendly strings (case-insensitive)"
+      (doseq [yes ["1" "true" "TRUE" "True" "yes" "YES" "on" "ON"]]
+        (is (true? (demo-branches-enabled? yes))
+            (str "should be enabled: " yes))))
+
+    (testing "everything else off"
+      (doseq [no [""    "0"  "false" "FALSE" "no" "off"
+                  "  true  "   ;; whitespace not stripped — intentional
+                  "yeah" "enabled" "yep"]]
+        (is (false? (demo-branches-enabled? no))
+            (str "should be disabled: " (pr-str no)))))
+
+    (testing "non-string truthy/falsy values pass through boolean"
+      (is (true?  (demo-branches-enabled? :keyword)))
+      (is (true?  (demo-branches-enabled? 42)))
+      (is (true?  (demo-branches-enabled? {:a 1}))))))
+
+
+(deftest as-instant-test
+  (let [as-instant @#'graphden.system.core/as-instant
+        target (java.time.Instant/parse "2026-05-21T12:00:00Z")]
+    (testing "nil → nil"
+      (is (nil? (as-instant nil))))
+
+    (testing "Instant pass-through"
+      (is (identical? target (as-instant target))))
+
+    (testing "java.util.Date → Instant via .toInstant"
+      (is (= target (as-instant (java.util.Date/from target)))))
+
+    (testing "java.sql.Timestamp → Instant via .toInstant"
+      ;; Same toInstant path as java.util.Date — sql.Timestamp extends Date.
+      (is (= target (as-instant (java.sql.Timestamp/from target)))))
+
+    (testing "ISO-8601 string → Instant"
+      (is (= target (as-instant "2026-05-21T12:00:00Z"))))
+
+    (testing "SQL-style string `YYYY-MM-DD HH:MM:SS` → Instant"
+      ;; This is the codec's `replace space with T + strip .0 + append Z`
+      ;; fallback path.
+      (is (= target (as-instant "2026-05-21 12:00:00"))))
+
+    (testing "SQL-style with trailing .0 fractional → Instant"
+      (is (= target (as-instant "2026-05-21 12:00:00.0"))))))
+
+
+(deftest compute-all-fn-name-ids-test
+  (testing "extracts both base-fn-defs and fn-defs into one name→id map"
+    ;; keep over `:base-fn-defs` destructures `[fn-name fn-def]` from
+    ;; each map entry — `(when fn-name)` filters on the KEY only, so
+    ;; a nil-val pair still produces an entry (the val is ignored
+    ;; further on). nil-name fn-defs in the vector ARE skipped.
+    (let [packages {:base-fn-defs {:my-base {:namespace 'core.x}}
+                    :fn-defs [{:name "my-composed" :namespace 'app.y}
+                              {:name nil :namespace 'app.skip}
+                              {:name "other-composed" :namespace 'core.z}]}
+          result (graphden.system.core/compute-all-fn-name-ids packages)]
+      (is (= 3 (count result))
+          "1 base + 2 named fn-defs (nil-name fn-def skipped)")
+      (is (every? uuid? (vals result))
+          "all values are UUIDs")
+      (is (contains? result :my-base))
+      (is (contains? result "my-composed"))
+      (is (contains? result "other-composed"))))
+
+  (testing "deterministic — same input → same UUIDs across calls"
+    (let [packages {:base-fn-defs {} :fn-defs [{:name "x" :namespace 'a}]}
+          r1 (graphden.system.core/compute-all-fn-name-ids packages)
+          r2 (graphden.system.core/compute-all-fn-name-ids packages)]
+      (is (= r1 r2))))
+
+  (testing "empty input → empty map"
+    (is (= {} (graphden.system.core/compute-all-fn-name-ids
+                {:base-fn-defs {} :fn-defs []})))))

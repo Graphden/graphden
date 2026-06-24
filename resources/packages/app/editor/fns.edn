@@ -1483,17 +1483,43 @@
           :then {:parent :hiccup
                  :args {:tag {:value "a"}
                         :attrs {:parent :assoc
-                                :args {:map {:value {:class "type-inline-resolution-source"
+                                :args {:map {:value {:class "type-inline-resolution-source type-inline-resolution-link"
                                                      :href "#"}}
                                        :key {:value :data-fn-id}
                                        :value :_provenance-tier-source-fn-id-text}}
                         :children [:_provenance-tier-source-fn-name]}}
           :else {:value [:span {:class "type-inline-resolution-source-empty"}]}}}
 
+  ;; Per-tier "is THIS tier the resolver-chosen winner?". The HOF
+  ;; predicate `:_provenance-tier-is-winner?` (defined later) reads
+  ;; the same `{:as :item}` slot from the `:filter` callsite — we
+  ;; reuse the underlying key-lookup so the row picks up
+  ;; `type-inline-resolution-active` on the winning row, matching
+  ;; the JS-rendered version's class scheme that
+  ;; `editor-provenance-popover.js` (and the visual tests) expect.
+  {:name :_provenance-tier-key
+   :parent :get
+   :args {:coll {:as :item} :key {:value :key} :default nil}}
+
+  {:name :_provenance-tier-this-is-winner?
+   :parent :equal?
+   :args {:a :_provenance-tier-key
+          :b :_provenance-winner-key}}
+
+  {:name :_provenance-tier-row-class
+   :description "`type-inline-resolution-tier` for losing tiers, `+ type-inline-resolution-active` for the winning one."
+   :parent :if
+   :args {:test :_provenance-tier-this-is-winner?
+          :then {:value "type-inline-resolution-tier type-inline-resolution-active"}
+          :else {:value "type-inline-resolution-tier"}}}
+
   {:name :_provenance-tier-row-built
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "type-inline-resolution-tier"}}
+          :attrs {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :class}
+                         :value :_provenance-tier-row-class}}
           :children [{:parent :hiccup
                       :args {:tag {:value "span"}
                              :attrs {:value {:class "type-inline-resolution-label"}}
@@ -1543,7 +1569,7 @@
           :children [{:parent :hiccup
                       :args {:tag {:value "a"}
                              :attrs {:parent :assoc
-                                     :args {:map {:value {:class "type-inline-resolution-source"
+                                     :args {:map {:value {:class "type-inline-resolution-source type-inline-resolution-link"
                                                           :href "#"}}
                                             :key {:value :data-fn-id}
                                             :value :_provenance-inh-fn-id-text}}

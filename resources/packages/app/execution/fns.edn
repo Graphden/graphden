@@ -1151,7 +1151,7 @@
    :parent :zipmap
    :return-type {:stopper-set? :bool
                  :started-at :nullable-text
-                 :start-attempts :nullable-int
+                 :start-attempts :int
                  :start-failed-at :nullable-text}
    :args {:keys [{:value :stopper-set?} {:value :started-at} {:value :start-attempts} {:value :start-failed-at}]
           :vals [:_enrich-running-stopper-set?

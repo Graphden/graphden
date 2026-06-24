@@ -107,3 +107,35 @@
           "runtime bundle src tag present in <body> (with ?v= hash-bust)")
       (is (str/includes? html "bindActionDispatch")
           "bootstrap script present in <body>"))))
+
+
+;; =============================================================================
+;; :head slot wiring — :graphden-page-head bundles the components stylesheet
+;; =============================================================================
+
+(deftest graphden-page-head-bundles-stylesheet-link-test
+  (testing "the default :head bundle contains the components-css <link> tag (hash-busted)"
+    (let [head (exec-name :graphden-page-head {})]
+      (is (= 1 (count head))
+          "currently exactly one <link>")
+      (let [[tag attrs] (vec (first head))]
+        (is (= :link tag))
+        (is (= "stylesheet" (:rel attrs)))
+        (is (re-matches #"/assets/graphden-components\.css\?v=[0-9a-f]+"
+                        (:href attrs))
+            "href is hash-busted")))))
+
+
+(deftest html-page-route-with-page-head-includes-stylesheet-link-test
+  (testing "binding :head :graphden-page-head lands the <link rel=stylesheet> in <head>"
+    (let [route (exec-name :html-page-route
+                           {:path "/y"
+                            :title "Y"
+                            :page-body [:div "hi"]
+                            :head (exec-name :graphden-page-head {})
+                            :scripts []})
+          handler (get-in (second route) ["get" "handler"])
+          html (:body (handler {:request-method :get :uri "/y" :headers {}}))]
+      (is (re-find #"<head>.*<link href=\"/assets/graphden-components\.css\?v=[0-9a-f]+\" rel=\"stylesheet\""
+                   html)
+          "stylesheet link lands in <head> (with ?v= hash-bust)"))))

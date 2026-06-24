@@ -675,15 +675,6 @@
    :parent :get
    :args {:coll :_partial-row-actions-fn-row :key {:value :description} :default ""}}
 
-  {:name :_partial-row-actions-fn-ns-id
-   :parent :get
-   :args {:coll :_partial-row-actions-fn-row :key {:value :namespace-id} :default nil}}
-
-  {:name :_partial-row-actions-fn-ns-path
-   :description "Dotted namespace path for the target fn (`\"core.refinements\"`). Empty string when the fn is root-namespaced."
-   :parent :fn-ns-path
-   :args {:ns-id :_partial-row-actions-fn-ns-id}}
-
   ;; --- Button hiccup ---
 
   {:name :_partial-row-actions-ns-button

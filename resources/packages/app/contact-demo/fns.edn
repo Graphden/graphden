@@ -124,21 +124,34 @@
           :scripts :graphden-runtime-scripts}}
 
   ;; ---------------------------------------------------------------------------
-  ;; POST HANDLER — returns the thanks partial
+  ;; POST HANDLER — parses the form body and echoes back the email
   ;; ---------------------------------------------------------------------------
   ;;
-  ;; v0 doesn't echo the submitted email/message back — that
-  ;; would require accessing the parsed form body, threading it
-  ;; through `:parse-form-body`, and a couple of `:get` calls.
-  ;; Future iteration when we want to demonstrate form-data
-  ;; access end-to-end.
+  ;; Reads the submitted `email` field via `:parse-form-body` +
+  ;; `:get`, then renders a thanks partial that quotes it.
+  ;; End-to-end demo of form-data access from a graph handler:
+  ;; the POST handler's free arg `:request` propagates up from
+  ;; `:parse-form-body` and is provided by the Ring adapter.
+
+  {:name :_contact-demo-form-body
+   :description "Parsed POST body of `/demo/contact` — `{\"email\" \"...\" \"message\" \"...\"}` (string keys) or `{}` when the body is missing / wrong content-type."
+   :parent :parse-form-body}
+
+  {:name :_contact-demo-email-from-form
+   :description "Email field from the parsed form body, or empty string when the field is absent."
+   :parent :get
+   :args {:coll :_contact-demo-form-body
+          :key {:value "email"}
+          :default {:value ""}}}
 
   {:name :_contact-demo-thanks-partial
-   :description "Thanks-partial hiccup — `<p style=...>Thanks! We got your message.</p>`."
+   :description "Thanks-partial hiccup — `<p style=...>Thanks, {email}! We got your message.</p>`. Echoes the submitted email back so the demo proves form-data flowed end-to-end."
    :parent :hiccup
    :args {:tag {:value "p"}
           :attrs {:value {:style "color:green;font-weight:600"}}
-          :children {:value ["Thanks! We got your message."]}}}
+          :children [{:value "Thanks, "}
+                     :_contact-demo-email-from-form
+                     {:value "! We got your message."}]}}
 
   {:name :_contact-demo-rendered-thanks
    :description "Render `:_contact-demo-thanks-partial` to an HTML string for the Ring response body."

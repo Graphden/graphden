@@ -38,7 +38,9 @@ async function openExecutePopoverFor(page, fnNameHash) {
     return true;
   });
   if (!opened) throw new Error('▶ button not surfaced in row-actions');
-  await page.waitForTimeout(1500);
+  // Poll for the execute popover to render — replaces a fixed
+  // sleep that was flaky on slow Cytoscape loads.
+  await page.waitForSelector('.execute-popover', {timeout: 8000});
 }
 
 
@@ -104,7 +106,14 @@ async function openExecutePopoverFor(page, fnNameHash) {
     await page.evaluate(() => {
       document.querySelector('.execute-run-btn').click();
     });
-    await page.waitForTimeout(2000);
+    // Poll until the execution result + runtime-effects strip
+    // appear (server roundtrip + polling for result).
+    await page.waitForFunction(() => {
+      const popover = document.querySelector('.execute-popover.visible');
+      return popover
+        && popover.querySelector('.execute-result-scalar')
+        && popover.querySelector('.execute-runtime-effects-strip');
+    }, {timeout: 8000, polling: 100});
     const result = await page.evaluate(() => {
       const popover = document.querySelector('.execute-popover.visible');
       const scalar = popover.querySelector('.execute-result-scalar');

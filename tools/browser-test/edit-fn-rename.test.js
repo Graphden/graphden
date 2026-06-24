@@ -8,7 +8,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 const ORIG = 'test-fn-rename-orig';
@@ -74,7 +74,12 @@ const NEW = 'test-fn-rename-new';
         .find(b => b.textContent.trim() === 'Save');
       save.click();
     });
-    await page.waitForTimeout(2500);
+    // Poll storage until rename propagates (cold-start can be slow).
+    const renamePropagated = await waitFor(async () => {
+      const e = await getEntities(page);
+      return e.fns.find(f => f.id === fn.id)?.name === NEW;
+    }, 8000);
+    assert(renamePropagated, 'rename did not propagate to storage in 8s');
 
     // Assert: storage now has the new name, original gone.
     const after = await getEntities(page);

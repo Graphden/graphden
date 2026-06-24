@@ -76,7 +76,9 @@ async function cleanup(page) {
             && lookups?.fnMap?.size > 50,
       {timeout: 30000});
     await page.evaluate(async () => { await initGraph(); });
-    await page.waitForTimeout(1500);
+    await page.waitForFunction(
+      (fnId) => !!lookups?.fnMap?.get(fnId),
+      recFn.id, {timeout: 8000, polling: 100});
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), recFn.id);
     assert(inLookups, 'record in editor lookups');

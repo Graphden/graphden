@@ -97,7 +97,9 @@ async function cleanup(page) {
     // Force a refetch in case the page's first initGraph fired before
     // the seed reached storage.
     await page.evaluate(async () => { await initGraph(); });
-    await page.waitForTimeout(1500);
+    await page.waitForFunction(
+      (fnId) => !!lookups?.fnMap?.get(fnId),
+      recFn.id, {timeout: 8000, polling: 100});
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), recFn.id);
     assert(inLookups, 'seeded record is in editor lookups after initGraph');

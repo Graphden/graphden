@@ -38,7 +38,15 @@ const {chromium} = require('playwright');
       return {clicked: true};
     });
     if (click.error) throw new Error(click.error);
-    await page.waitForTimeout(2000);
+    // Poll until expansion settles — arg-* overlays render after
+    // the click triggers layout + Cytoscape paint.
+    await page.waitForFunction(() => {
+      if (typeof cy === 'undefined') return false;
+      const args = cy.nodes()
+        .filter(n => (n.data('id') || '').startsWith('arg-'))
+        .map(n => n.data('label'));
+      return args.length > 0 && !cy.animated();
+    }, {timeout: 8000, polling: 100});
 
     const overlays = await page.evaluate(() => {
       if (typeof cy === 'undefined') return null;

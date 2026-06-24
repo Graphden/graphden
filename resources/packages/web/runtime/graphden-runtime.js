@@ -1,7 +1,7 @@
-// Editor Runtime — generic dispatcher + partial-loader primitives
-// shared between the editor's row-actions popover, the contact-
-// demo page, and any future fn-def-built page that needs
-// `data-action="X"` click routing.
+// Graphden runtime — generic dispatcher + partial-loader
+// primitives shared between the editor's row-actions popover,
+// the contact-demo page, and any future fn-def-built page that
+// needs `data-action="X"` click routing.
 //
 // The dispatch + fetch-and-swap pattern was extracted from
 // editor-row-actions.js during the HTMX Phase-A migration so
@@ -16,9 +16,13 @@
 //   - getActionHandler(action)            // for tests
 //   - clearActionHandlers()                // for tests
 //
-// No external dependencies — this file loads BEFORE every
-// editor JS file that uses the runtime (see :_editor-script-paths
-// in app/editor/fns.edn).
+// No external dependencies. Two consumers:
+//   - editor bundle (/assets/editor.js) — loaded first in
+//     :_editor-script-paths so editor-row-actions.js sees
+//     these primitives.
+//   - user-page runtime bundle (/assets/graphden-runtime.js) —
+//     concat'd with graphden-actions-builtin.js by
+//     :_graphden-runtime-js-body (in app/editor/fns.edn).
 
 
 // =============================================================================

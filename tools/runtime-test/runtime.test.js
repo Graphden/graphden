@@ -1,4 +1,5 @@
-// Unit tests for editor-runtime.js — pure-JS sandbox via node vm.
+// Unit tests for graphden-runtime.js — pure-JS sandbox via
+// node vm.
 //
 // The runtime is loaded into an isolated `vm.Context` with a
 // minimal DOM mock (only the bits the runtime touches). No
@@ -12,8 +13,8 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 const runtimeSource = fs.readFileSync(
-  path.join(__dirname, '..', '..', 'resources', 'packages', 'app',
-            'editor', 'editor-runtime.js'),
+  path.join(__dirname, '..', '..', 'resources', 'packages', 'web',
+            'runtime', 'graphden-runtime.js'),
   'utf8',
 );
 

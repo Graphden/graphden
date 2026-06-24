@@ -260,7 +260,7 @@
    :args {:attrs {:parent :merge
                   :args {:maps [{:parent :dispatch-action
                                  :args {:action {:as :action :type :non-blank-text
-                                                 :description "Registered handler name (see editor-runtime.js `registerActionHandler` calls)."}}}
+                                                 :description "Registered handler name (see graphden-runtime.js `registerActionHandler` calls)."}}}
                                 {:as :extras :required false
                                  :description "Extra attrs merged onto the button (`:class` / per-handler `:data-*` / …)."}]}}}}
 

@@ -266,7 +266,7 @@ ensureRowActionsDismissHandler();
 // ============================================================================
 //
 // Block-1 refactor: the generic dispatch + partial-load primitives
-// moved to `editor-runtime.js` (`loadPartial`, `bindActionDispatch`,
+// moved to `graphden-runtime.js` (`loadPartial`, `bindActionDispatch`,
 // `registerActionHandler`). This file now does TWO things:
 //
 //   (1) `loadRowActionsContent(host, fnId, context, opts)` — a

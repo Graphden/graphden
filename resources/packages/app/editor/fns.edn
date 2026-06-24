@@ -38,8 +38,8 @@
                   "packages/app/editor/editor-widget-rating.js"
                   "packages/app/editor/editor-tooltips.js"
                   "packages/app/editor/editor-icons.js"
-                  "packages/app/editor/editor-runtime.js"
-                  "packages/app/editor/editor-actions-builtin.js"
+                  "packages/web/runtime/graphden-runtime.js"
+                  "packages/web/runtime/graphden-actions-builtin.js"
                   "packages/app/editor/editor-row-actions.js"
                   "packages/app/editor/editor-drag.js"
                   "packages/app/editor/editor-fn-picker.js"
@@ -342,20 +342,20 @@
    :parent :immutable-js-ok-response
    :args {:body :_editor-js-body}}
 
-  ;; Block 2.5 — standalone runtime bundle for user-built pages
-  ;; (e.g. /demo/contact). Includes editor-runtime.js (the
-  ;; dispatcher / registry / loadPartial primitives) +
-  ;; editor-actions-builtin.js (navigate + submit-form). Loaded
-  ;; INSTEAD of editor.js on pages that don't host the editor
-  ;; canvas (editor.js is ~700 KB and initialises Cytoscape +
-  ;; WebSocket subscriptions that crash a stripped-down page).
+  ;; Standalone runtime bundle for graph-composed pages (e.g.
+  ;; /demo/contact). Includes graphden-runtime.js (the dispatcher
+  ;; / registry / loadPartial primitives) + graphden-actions-
+  ;; builtin.js (navigate + submit-form + custom). Loaded INSTEAD
+  ;; of editor.js on pages that don't host the editor canvas
+  ;; (editor.js is ~700 KB and initialises Cytoscape + WebSocket
+  ;; subscriptions that crash a stripped-down page).
   {:name :_graphden-runtime-js-paths
    :parent :const
-   :args {:value ["packages/app/editor/editor-runtime.js"
-                  "packages/app/editor/editor-actions-builtin.js"]}}
+   :args {:value ["packages/web/runtime/graphden-runtime.js"
+                  "packages/web/runtime/graphden-actions-builtin.js"]}}
 
   {:name :_graphden-runtime-js-body
-   :description "Concatenated `editor-runtime.js` + `editor-actions-builtin.js` — the platform JS primitives user pages need (action dispatch + built-in navigate / submit-form handlers)."
+   :description "Concatenated `graphden-runtime.js` + `graphden-actions-builtin.js` (in `web/runtime/`) — the platform JS primitives graph-composed pages need (action dispatch + built-in navigate / submit-form / custom handlers)."
    :parent :concat-resources
    :return-type :text
    :args {:paths :_graphden-runtime-js-paths}}
@@ -386,7 +386,7 @@
           :separator ""}}
 
   {:name :graphden-runtime-script-tag
-   :description "`<script src=\"/assets/graphden-runtime.js?v=<hash>\">` — loads the graphden runtime bundle (dispatcher + built-in `submit-form` / `navigate` / `custom` handlers, see editor-runtime.js + editor-actions-builtin.js). Hash-busted so the immutable browser cache is invalidated on every deploy."
+   :description "`<script src=\"/assets/graphden-runtime.js?v=<hash>\">` — loads the graphden runtime bundle (dispatcher + built-in `submit-form` / `navigate` / `custom` handlers, see `web/runtime/graphden-runtime.js` + `graphden-actions-builtin.js`). Hash-busted so the immutable browser cache is invalidated on every deploy."
    :parent :hiccup
    :args {:tag {:value "script"}
           :attrs {:parent :assoc

@@ -7,8 +7,8 @@
 //                                swap response into `data-target`
 //                                (selector) or back into the form
 //
-// Loaded immediately after editor-runtime.js so the registrations
-// are visible to every later module.
+// Loaded immediately after graphden-runtime.js so the
+// registrations are visible to every later module.
 
 
 // =============================================================================

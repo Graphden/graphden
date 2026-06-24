@@ -1,6 +1,6 @@
-// Sandbox tests for editor-actions-builtin.js — exercises the
-// `navigate` and `submit-form` built-in action handlers in a Node
-// vm context with a minimal DOM + fetch mock.
+// Sandbox tests for graphden-actions-builtin.js — exercises
+// the `navigate`, `submit-form`, and `custom` built-in action
+// handlers in a Node vm context with a minimal DOM + fetch mock.
 //
 // Run:  node tools/runtime-test/actions-builtin.test.js
 // Exit: 0 on pass, 1 on first failure.
@@ -9,12 +9,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const editorDir = path.join(__dirname, '..', '..',
-                            'resources', 'packages', 'app', 'editor');
+const runtimeDir = path.join(__dirname, '..', '..',
+                             'resources', 'packages', 'web', 'runtime');
 const runtimeSrc = fs.readFileSync(
-  path.join(editorDir, 'editor-runtime.js'), 'utf8');
+  path.join(runtimeDir, 'graphden-runtime.js'), 'utf8');
 const actionsSrc = fs.readFileSync(
-  path.join(editorDir, 'editor-actions-builtin.js'), 'utf8');
+  path.join(runtimeDir, 'graphden-actions-builtin.js'), 'utf8');
 
 let failures = 0;
 let passes = 0;

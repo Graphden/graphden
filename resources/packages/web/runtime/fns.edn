@@ -1,4 +1,4 @@
-;; Server-side counterpart to `editor-runtime.js`: hiccup helpers
+;; Server-side counterpart to `graphden-runtime.js`: hiccup helpers
 ;; for building hiccup attrs the JS dispatcher knows how to
 ;; route on click.
 ;;
@@ -11,7 +11,7 @@
 
 
 {:namespace "web.runtime"
- :description "Server-side DSL for the JS runtime — build hiccup attrs that the client-side `bindActionDispatch` (in editor-runtime.js) routes to a registered handler."
+ :description "Server-side DSL for the JS runtime — build hiccup attrs that the client-side `bindActionDispatch` (in graphden-runtime.js) routes to a registered handler."
  :fns
  [;; Emit `{:data-action <name>}` as a hiccup attrs map.
   ;; Component fn-defs (`:button`, `:link`, …) merge this with
@@ -31,14 +31,14 @@
    :args {:map {:value {}}
           :key {:value :data-action}
           :value {:as :action :type :non-blank-text
-                  :description "Registered handler name (see editor-runtime.js `registerActionHandler` calls)."}}}
+                  :description "Registered handler name (see graphden-runtime.js `registerActionHandler` calls)."}}}
 
   ;; Escape-hatch DSL. Build attrs for a button that carries
   ;; an inline JS body the runtime evaluates on click:
   ;;
   ;;   {:data-action "custom" :data-custom-handler <body>}
   ;;
-  ;; The runtime's `custom` handler (see editor-actions-builtin.js)
+  ;; The runtime's `custom` handler (see graphden-actions-builtin.js)
   ;; reads `data-custom-handler` and runs it as
   ;; `(new Function('btn','event','host', body))(btn, event, host)`
   ;; — so the body has `btn`, `event`, `host` bindings in scope.

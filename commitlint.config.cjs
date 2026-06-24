@@ -4,14 +4,6 @@
 
 module.exports = {
   extends: ['@commitlint/config-conventional'],
-  // why: one-off pre-existing commit (`1a8fa2fc`) used the
-  // compound type `docs+css(editor):` which isn't in the type
-  // enum below. The commit is already on origin and amending
-  // would require force-push; the bad subject is documented
-  // here as a tolerated historical artefact. New commits use
-  // the standard single-type form.
-  ignores: [(message) => message.startsWith(
-    'docs+css(editor): Phase D — drop dead CSS')],
   rules: {
     // why: Conventional Commits default caps body lines at 100; this
     // repo writes prose-heavy commit bodies (architectural decisions,

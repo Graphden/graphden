@@ -43,7 +43,13 @@ const TARGET_FN = 'assoc-fn';
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.type-chip-expandable', {timeout: 15000});
-    await page.waitForTimeout(800);
+    // The arg-overlay strip is painted once graphData lands; wait for
+    // both a type chip AND its provenance badge to render so phase A's
+    // counts are stable.
+    await page.waitForFunction(
+      () => document.querySelectorAll('.type-chip-expandable').length >= 1
+            && document.querySelectorAll('.arg-type-provenance').length >= 1,
+      {timeout: 5000, polling: 100});
 
     // ===================================================================
     // Phase A: at least one expandable chip + one provenance badge.

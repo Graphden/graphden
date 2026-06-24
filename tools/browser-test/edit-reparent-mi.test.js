@@ -78,7 +78,15 @@ async function cleanup(page) {
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.fn-overlay, .node-overlay', {timeout: 15000});
-    await page.waitForTimeout(500);
+    // After initGraph, the parents strip is built once the post-MI fn
+    // lands in graphData. Poll for both parent names appearing in the
+    // overlay before asserting on the strip text below.
+    await page.waitForFunction(() => {
+      const root = document.querySelector('.fn-overlay, .node-overlay')
+                || document.body;
+      const text = root.textContent || '';
+      return text.includes('identity') && text.includes('add');
+    }, {timeout: 5000, polling: 100});
 
     const parentStrip = await page.evaluate(() => {
       // The parents are surfaced as ancestor row labels OR a "parents:"

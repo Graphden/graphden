@@ -73,7 +73,15 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Phase B: type filter "identity" → only matching rows visible.
     // ===================================================================
     await page.fill('.fn-picker-search', 'identity');
-    await page.waitForTimeout(400);
+    // The picker re-renders `.fn-picker-list` with FILTERED candidates
+    // (not show/hide) on every input event. Poll until the list shrinks
+    // and only matches are present instead of a fixed window.
+    await page.waitForFunction(() => {
+      const p = document.querySelector('.fn-picker-popover');
+      const rows = Array.from(p?.querySelectorAll('.fn-picker-row') || []);
+      if (rows.length === 0 || rows.length >= 50) return false;
+      return rows.every(r => /identity/.test(r.textContent || ''));
+    }, {timeout: 2000, polling: 50});
     const filtered = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
       const allRows = Array.from(p?.querySelectorAll('.fn-picker-list > *') || []);

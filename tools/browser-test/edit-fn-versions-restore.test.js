@@ -97,7 +97,12 @@ async function putDescription(page, fnId, desc) {
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
-    await page.waitForTimeout(500);
+    // initGraph rebuilds graphData asynchronously; wait for the target
+    // fn to land before opening row-actions on it.
+    await page.waitForFunction((name) => {
+      const fns = (typeof graphData !== 'undefined' && graphData?.fns) || [];
+      return fns.some(f => f.name === name);
+    }, FN_NAME, {timeout: 5000, polling: 100});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover', {timeout: 5000});
     await page.evaluate(() => {
@@ -160,7 +165,13 @@ async function putDescription(page, fnId, desc) {
     await dialog.accept();
     await navPromise;
     await page.waitForSelector('#branch-chip-btn', {timeout: 15000});
-    await page.waitForTimeout(800);
+    // Wait for the post-reload initGraph to repopulate graphData with
+    // the restored fn (so the subsequent API check observes the new
+    // versioned state) — substitutes for the 800 ms timer.
+    await page.waitForFunction((name) => {
+      const fns = (typeof graphData !== 'undefined' && graphData?.fns) || [];
+      return fns.some(f => f.name === name);
+    }, FN_NAME, {timeout: 5000, polling: 100});
 
     // ===================================================================
     // Phase C: storage now reports the restored description (v1-seed).

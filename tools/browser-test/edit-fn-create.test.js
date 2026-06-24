@@ -46,7 +46,14 @@ async function openCreateMenuForNs(page, nsName) {
       target.click(); // expand
     }
   }, nsName);
-  await page.waitForTimeout(300);
+  // Wait for the expansion (arrow flipped to ▼) instead of a fixed delay.
+  await page.waitForFunction((name) => {
+    const headers = Array.from(document.querySelectorAll('.ns-header'));
+    const target = headers.find(
+      (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
+    const arrow = target?.querySelector('.ns-arrow');
+    return arrow && /▼/.test(arrow.textContent || '');
+  }, nsName, {timeout: 2000, polling: 50});
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(
@@ -174,10 +181,14 @@ async function openCreateMenuForNs(page, nsName) {
 
     // ===================================================================
     // Phase E: re-create with same name → server rejection surfaces.
-    // The sidebar was just re-rendered by Phase D's initGraph; give
-    // it a beat before fishing for the + button.
+    // Wait for the sidebar re-render to settle: the newly-created fn's
+    // entity-item is the post-initGraph signal that the tree is rebuilt
+    // and the + button is wired again.
     // ===================================================================
-    await page.waitForTimeout(500);
+    await page.waitForFunction((name) => {
+      const items = Array.from(document.querySelectorAll('.entity-item'));
+      return items.some(h => (h.textContent || '').includes(name));
+    }, FN_NAME, {timeout: 5000, polling: 100});
     await openCreateMenuForNs(page, PARENT_NS);
     await page.evaluate(() => {
       const item = Array.from(document.querySelectorAll('.create-menu-item'))

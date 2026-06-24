@@ -105,10 +105,11 @@ const TEST_NAME = 'test-arg-value-validation';
       return true;
     });
     assert(opened, 'port arg-overlay clickable');
-    await page.waitForTimeout(250);
 
-    const popoverPresent = await page.evaluate(
-      () => !!document.querySelector('.arg-value-edit-popover'));
+    const popoverPresent = await waitFor(
+      () => page.evaluate(
+        () => !!document.querySelector('.arg-value-edit-popover')),
+      2000);
     assert(popoverPresent, 'value-edit popover opened');
 
     // Hint line should mention the slot's expected type.
@@ -134,13 +135,20 @@ const TEST_NAME = 'test-arg-value-validation';
       i.value = '8080';
       i.dispatchEvent(new Event('input', {bubbles: true}));
     });
-    await page.waitForTimeout(150);
+    // Live validator updates `.arg-value-edit-status` after a debounce;
+    // poll until ✓ instead of guessing the debounce window.
+    const okReady = await waitFor(
+      () => page.evaluate(() => {
+        const s = document.querySelector('.arg-value-edit-status');
+        return s && s.classList.contains('ok');
+      }),
+      2000);
     const okStatus = await page.evaluate(() => {
       const s = document.querySelector('.arg-value-edit-status');
       return {text: s && s.textContent, ok: s && s.classList.contains('ok'),
               err: s && s.classList.contains('err')};
     });
-    assert(okStatus.ok && !okStatus.err,
+    assert(okReady && okStatus.ok && !okStatus.err,
            'valid value shows ✓: ' + JSON.stringify(okStatus));
 
     // Type a refinement-violating value → ✗ status.
@@ -157,13 +165,18 @@ const TEST_NAME = 'test-arg-value-validation';
       i.value = '-1';
       i.dispatchEvent(new Event('input', {bubbles: true}));
     });
-    await page.waitForTimeout(150);
+    const errReady = await waitFor(
+      () => page.evaluate(() => {
+        const s = document.querySelector('.arg-value-edit-status');
+        return s && s.classList.contains('err');
+      }),
+      2000);
     const errStatus = await page.evaluate(() => {
       const s = document.querySelector('.arg-value-edit-status');
       return {text: s && s.textContent, ok: s && s.classList.contains('ok'),
               err: s && s.classList.contains('err')};
     });
-    assert(errStatus.err && !errStatus.ok,
+    assert(errReady && errStatus.err && !errStatus.ok,
            'invalid value (-1 below port range) shows ✗: '
            + JSON.stringify(errStatus));
     assert(/refine|>=|<=|range|satisfies|fails/i.test(errStatus.text || ''),

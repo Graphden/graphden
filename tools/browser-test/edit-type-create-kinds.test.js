@@ -40,7 +40,13 @@ async function openTypeCreate(page, nsName) {
     const arrow = target.querySelector('.ns-arrow');
     if (arrow && /▶/.test(arrow.textContent || '')) target.click();
   }, nsName);
-  await page.waitForTimeout(300);
+  await page.waitForFunction((name) => {
+    const headers = Array.from(document.querySelectorAll('.ns-header'));
+    const target = headers.find(
+      (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
+    const arrow = target?.querySelector('.ns-arrow');
+    return arrow && /▼/.test(arrow.textContent || '');
+  }, nsName, {timeout: 2000, polling: 50});
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(

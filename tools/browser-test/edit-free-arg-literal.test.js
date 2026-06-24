@@ -54,7 +54,11 @@ const TEST_NAME = 'test-free-arg-literal';
       return {clicked: true};
     });
     assert(!placeholderClicked.error, placeholderClicked.error || 'placeholder clicked');
-    await page.waitForTimeout(200);
+    // Wait for the chooser to appear instead of a fixed 200 ms.
+    await waitFor(
+      () => page.evaluate(
+        () => !!document.querySelector('.free-arg-bind-chooser')),
+      2000);
 
     // Pick "Bind literal" from the chooser.
     const litClicked = await page.evaluate(() => {
@@ -97,9 +101,13 @@ const TEST_NAME = 'test-free-arg-literal';
       i.value = 'hello';
       i.dispatchEvent(new Event('input', {bubbles: true}));
     });
-    await page.waitForTimeout(150);
-
-    // Live status should be ✓ (text into :text slot).
+    // Wait for the debounced live-validator to flip status to ✓.
+    await waitFor(
+      () => page.evaluate(() => {
+        const s = document.querySelector('.arg-value-edit-status');
+        return s && s.classList.contains('ok');
+      }),
+      2000);
     const okStatus = await page.evaluate(() => {
       const s = document.querySelector('.arg-value-edit-status');
       return {text: s && s.textContent, ok: s && s.classList.contains('ok')};

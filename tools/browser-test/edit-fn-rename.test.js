@@ -49,16 +49,19 @@ const NEW = 'test-fn-rename-new';
     const opened = await page.evaluate(() => {
       const popover = document.querySelector('.row-actions-popover');
       if (!popover) return {error: 'row-actions popover not found'};
-      const pencil = popover.querySelector('.edit-pencil');
-      if (!pencil) return {error: 'no .edit-pencil in row-actions popover'};
+      // The HTMX-migrated row-actions popover uses `data-action="rename-fn"`
+      // on the ✎ button (replaced the legacy `.edit-pencil` class).
+      const pencil = popover.querySelector('button[data-action="rename-fn"]');
+      if (!pencil) return {error: 'no rename-fn button in row-actions popover'};
       pencil.click();
       return {clicked: true};
     });
     assert(!opened.error, opened.error || 'pencil clicked');
 
-    await page.waitForTimeout(200);
-    const popover = await page.evaluate(
-      () => !!document.querySelector('.arg-value-edit-popover'));
+    const popover = await waitFor(
+      () => page.evaluate(
+        () => !!document.querySelector('.arg-value-edit-popover')),
+      2000);
     assert(popover, 'rename popover opened');
 
     // Type the new name and click Save.

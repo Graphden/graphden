@@ -39,7 +39,14 @@ async function openTypeCreate(page, nsName) {
     const arrow = target.querySelector('.ns-arrow');
     if (arrow && /▶/.test(arrow.textContent || '')) target.click();
   }, nsName);
-  await page.waitForTimeout(300);
+  // Wait for the arrow to flip to ▼ instead of guessing 300 ms.
+  await page.waitForFunction((name) => {
+    const headers = Array.from(document.querySelectorAll('.ns-header'));
+    const target = headers.find(
+      (h) => h.querySelector('.ns-label')?.textContent.trim() === name);
+    const arrow = target?.querySelector('.ns-arrow');
+    return arrow && /▼/.test(arrow.textContent || '');
+  }, nsName, {timeout: 2000, polling: 50});
   await page.evaluate((name) => {
     const headers = Array.from(document.querySelectorAll('.ns-header'));
     const target = headers.find(
@@ -236,14 +243,14 @@ async function openTypeCreate(page, nsName) {
     await page.evaluate(() => {
       document.querySelector('.type-create-back')?.click();
     });
-    await page.waitForTimeout(500);
-    const dismissed = await page.evaluate(() => {
+    // Wait for the popover to dismiss instead of guessing 500 ms.
+    const dismissed = await page.waitForFunction(() => {
       const p = document.querySelector('.type-create-popover');
       if (!p) return true;
       if (p.classList.contains('hidden')) return true;
       const style = window.getComputedStyle(p);
       return style.display === 'none' || style.visibility === 'hidden';
-    });
+    }, {timeout: 2000, polling: 50}).then(() => true).catch(() => false);
     assert(dismissed, 'Cancel dismisses the popover');
 
     console.log('✓ type-create verified — tabs / refinement submit / sidebar / cancel');

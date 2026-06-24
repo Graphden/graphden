@@ -114,7 +114,13 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     // with `/` and strips leading underscores.
     // ===================================================================
     await page.fill('.secrets-popover input[name="name"]', PROBE_NAME);
-    await page.waitForTimeout(100);
+    // Path autofills via input listener; poll for the expected value
+    // instead of guessing the listener's debounce window.
+    await page.waitForFunction(
+      (expected) =>
+        document.querySelector('.secrets-popover input[name="path"]')?.value
+          === expected,
+      EXPECTED_PATH, {timeout: 2000, polling: 50});
     const autofill = await page.evaluate(
       () => document.querySelector('.secrets-popover input[name="path"]')?.value);
     assert(autofill === EXPECTED_PATH,
@@ -138,16 +144,30 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     await page.evaluate(() => {
       document.querySelector('.secrets-popover [data-act="submit"]')?.click();
     });
-    await page.waitForTimeout(800);
+    // Wait until either the popover dismisses (success) OR a visible
+    // popover-error appears (vault-not-configured). Both are valid
+    // first-submit outcomes for this test.
+    await page.waitForFunction(() => {
+      const pop = document.querySelector('.secrets-popover');
+      if (!pop) return true;
+      const err = pop.querySelector('.popover-error');
+      return err && !err.hasAttribute('hidden')
+             && (err.textContent || '').trim().length > 0;
+    }, {timeout: 5000, polling: 100});
     // Reopen if closed (success path), else carry on (error path).
     const popoverClosed = await page.evaluate(
       () => !document.querySelector('.secrets-popover'));
     if (popoverClosed) {
-      await page.click('.sidebar-secrets [data-act="new-secret"]');
+      await page.click('.sidebar-secrets [data-act="create"]');
       await page.waitForSelector('.secrets-popover', {timeout: 5000});
       await page.fill('.secrets-popover input[name="name"]', PROBE_NAME);
       await page.fill('.secrets-popover input[name="value"]', 'secret-value');
-      await page.waitForTimeout(100);
+      // Path-autofill listener again — wait for the input to populate.
+      await page.waitForFunction(
+        (expected) =>
+          document.querySelector('.secrets-popover input[name="path"]')?.value
+            === expected,
+        EXPECTED_PATH, {timeout: 2000, polling: 50});
     }
     // Now submit the same name → server rejects (name-taken on isolated
     // stack with vault; vault-not-configured on bare dev). EITHER way

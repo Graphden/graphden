@@ -111,7 +111,18 @@ async function cleanup(page) {
     // Phase D: filter to current-time-ms + click → ref written.
     // ===================================================================
     await page.fill('.fn-picker-popover .fn-picker-search', 'current-time-ms');
-    await page.waitForTimeout(400);
+    // Filter debounces; wait until exactly the matching row is the
+    // sole visible candidate instead of guessing 400 ms.
+    await page.waitForFunction(() => {
+      const rows = Array.from(document.querySelectorAll(
+        '.fn-picker-popover .fn-picker-row'));
+      const visible = rows.filter(r => {
+        const st = window.getComputedStyle(r);
+        return st.display !== 'none' && st.visibility !== 'hidden';
+      });
+      return visible.length >= 1
+             && visible.every(r => /current-time-ms/.test(r.textContent || ''));
+    }, {timeout: 2000, polling: 50});
     // Programmatic .click() inside page.evaluate doesn't reliably
     // bubble through cytoscape's hover-state machinery; use the real
     // pointer click via Playwright.

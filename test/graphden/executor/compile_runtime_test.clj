@@ -329,3 +329,90 @@
                    " distinct fn-ids under the race")))
         (finally
           (sp/close storage))))))
+
+
+;; ============================================================================
+;; Phase 2 — public-API translator (`translate-named-args`)
+;; ============================================================================
+
+(deftest translate-named-args-no-op-empty-test
+  (testing "nil and empty args short-circuit unchanged"
+    (is (nil? (cr/translate-named-args :fn-id nil {})))
+    (is (= {} (cr/translate-named-args :fn-id {} {})))))
+
+
+(deftest translate-named-args-emits-dual-keys-test
+  (testing "single walker entry → write under BOTH ext-name and slot-id"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/build-fn! storage
+                                    {:name "txa-base"
+                                     :slots [{:name "x" :type :int}]})
+              composed (setup/build-fn! storage
+                                        {:name "txa-c" :parent base})
+              graph (#'graphden.executor.compile-runtime/read-graph storage)
+              lookups (#'graphden.executor.compile.lookups/build-lookups graph)
+              translated (cr/translate-named-args (-> composed :fn :id)
+                                                  {:x 42} lookups)
+              x-slot-id (-> base :slots (get "x") :id)]
+          (is (= 42 (get translated :x)) "name key preserved")
+          (is (= 42 (get translated x-slot-id)) "slot-id key added")
+          (is (= 2 (count translated))))
+        (finally (sp/close storage))))))
+
+
+(deftest translate-named-args-unknown-name-passes-through-test
+  (testing "names not in walker entries pass through unchanged"
+    ;; `execute` is lenient — `execute-with-named-args` upstream does
+    ;; the strict unknown-name validation. Tests calling `execute`
+    ;; directly with extra keys must continue to work.
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base (setup/build-fn! storage
+                                    {:name "txu-base"
+                                     :slots [{:name "x" :type :int}]})
+              composed (setup/build-fn! storage
+                                        {:name "txu-c" :parent base})
+              graph (#'graphden.executor.compile-runtime/read-graph storage)
+              lookups (#'graphden.executor.compile.lookups/build-lookups graph)
+              translated (cr/translate-named-args (-> composed :fn :id)
+                                                  {:nonsense 999} lookups)]
+          (is (= {:nonsense 999} translated)
+              "unknown :nonsense passes through with no slot-id companion"))
+        (finally (sp/close storage))))))
+
+
+(deftest translate-named-args-multi-slot-writes-all-test
+  (testing "name reaching multiple chain-leaf slots writes value under each slot-id"
+    ;; This is NOT a real collision — most fn-graphs have a single
+    ;; caller-name reaching multiple inner consumers (every `:get`
+    ;; reading the same name contributes its own root-slot id). The
+    ;; translator writes under EVERY matching slot-id so each inner
+    ;; consumer's chain-leaf-keyed read in Phase 4 finds the value.
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base-g (setup/build-fn! storage
+                                      {:name "txmulti-base-g"
+                                       :slots [{:name "x" :type :int}]})
+              fn-g   (setup/build-fn! storage
+                                      {:name "txmulti-g" :parent base-g})
+              base-f (setup/build-fn! storage
+                                      {:name "txmulti-base-f"
+                                       :slots [{:name "x" :type :int}
+                                               {:name "y" :type :int}]})
+              fn-f   (setup/build-fn! storage
+                                      {:name "txmulti-f"
+                                       :parent base-f
+                                       :bindings {"y" {:ref fn-g}}})
+              graph (#'graphden.executor.compile-runtime/read-graph storage)
+              lookups (#'graphden.executor.compile.lookups/build-lookups graph)
+              translated (cr/translate-named-args (-> fn-f :fn :id)
+                                                  {:x 1} lookups)
+              sid-f-x (-> base-f :slots (get "x") :id)
+              sid-g-x (-> base-g :slots (get "x") :id)]
+          (is (= 1 (get translated :x)) "ext-name :x preserved")
+          (is (= 1 (get translated sid-f-x)) "F's :x slot-id carries value")
+          (is (= 1 (get translated sid-g-x)) "G's :x slot-id also carries value")
+          (is (= 3 (count translated))
+              "one name key + two slot-id keys"))
+        (finally (sp/close storage))))))

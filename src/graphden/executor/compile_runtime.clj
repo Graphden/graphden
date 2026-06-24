@@ -363,6 +363,19 @@
 ;; Arg-name resolution
 ;; =============================================================================
 
+(defn- lookups-for-ctx
+  "Build lookups from ctx — prefers `:graph-cache` (populated by
+   `rebuild!`) so repeated calls reuse the same lookups identity via
+   `cached-build-lookups`. Falls back to a fresh `read-graph` only on
+   cold start. Shared by `free-arg-ext-names` and the slot-id-keyed
+   public-API translator."
+  [ctx]
+  (let [graph (or (some-> (:graph-cache ctx) deref)
+                  (read-graph (:storage ctx)))]
+    (assoc (l/cached-build-lookups graph)
+           :base-fns (:base-fns ctx))))
+
+
 (defn free-arg-ext-names
   "Ordered vector of external names for fn-id's free args reachable
    through its ref-chain — propagates names through non-HOF refs and
@@ -374,11 +387,76 @@
    override them; HOF dispatch is shielded by the structural-name
    fast-path in `hof-lambda-params`."
   [ctx fn-id]
-  (let [storage (:storage ctx)
-        graph (read-graph storage)
-        lookups (assoc (l/cached-build-lookups graph)
-                       :base-fns (:base-fns ctx))]
-    (vec (r/deep-free-ext-names fn-id lookups))))
+  (vec (r/deep-free-ext-names fn-id (lookups-for-ctx ctx))))
+
+
+;; =============================================================================
+;; Public-API translator (Phase 2 of the slot-id-keyed runtime refactor)
+;;
+;; At every public boundary (`execute`, `make-single-arg-callable`'s
+;; per-call closure), translate caller's `{ext-name → value}` into
+;; `{slot-id → value, ext-name → value}` via the walker's surface
+;; entries. The slot-id half is dead weight in Phase 2 — Phase 3 (per-
+;; ref translation) and Phase 4 (reader cutover) consume it — but
+;; landing the translator now is what lets ambiguous-name calls error
+;; explicitly RIGHT NOW instead of silently mis-routing through the
+;; name-keyed runtime.
+;;
+;; "Why not just write slot-id keys?" — inner readers (`arg-builder`'s
+;; `:free` case, seq-item-builder, env-bindings, `apply-rename-aliases`
+;; / `build-ref-renames`) all still index `fa` by name. Phase 4 flips
+;; those. Until then the translator writes BOTH so neither breaks.
+;; =============================================================================
+
+
+(defn translate-named-args
+  "Translate caller's `{ext-name → value}` to the dual-key
+   `{ext-name → value, slot-id → value, …}` shape the slot-id-keyed
+   runtime expects at its public boundary.
+
+   - Looks up `fn-id`'s surface free args via
+     `r/deep-free-ext-entries`. That walker emits one entry per
+     distinct chain-leaf slot the runtime will read from `fa`. Most
+     production fn-graphs have MANY chain-leaf slots reading the same
+     caller-supplied name — every `(:get :coll :the-name)` inside a
+     ref-tree contributes its own entry. They aren't a collision; the
+     caller's single value is meant to reach all of them.
+   - 0 walker entries → key passes through unchanged. Keeps
+     `execute`'s lenient contract for tests bypassing
+     `execute-with-named-args`'s upstream `unknown-arg-name` check.
+   - ≥1 entries → write the value under the ext-name AND under EVERY
+     matching slot-id. The slot-id half is dead weight in Phase 2
+     (inner readers still index by name); Phase 3's per-ref
+     translation + Phase 4's reader cutover consume the slot-id keys.
+     Writing all matching slot-ids — instead of one — saves Phase 3
+     from having to invent a per-call propagation just to satisfy
+     readers that are still name-keyed.
+
+   Phase 2 deliberately does NOT throw on multi-slot ext-names. The
+   #104 collision is structural — two slots sharing a name that are
+   semantically DIFFERENT, not just shared deep readers — and the
+   walker can't tell those apart without runtime context. The real
+   error surface lands in Phase 5/6 once `:as` workarounds drop and
+   the slot-id-keyed readers can prove which slot a caller meant.
+
+   `nil` / `{}` args short-circuit."
+  [_fn-id args lookups]
+  (cond
+    (nil? args) args
+    (empty? args) args
+    :else
+    (let [entries (r/deep-free-ext-entries _fn-id lookups)
+          by-name (group-by :ext-name entries)]
+      (reduce-kv
+        (fn [acc arg-name v]
+          (let [matches (get by-name arg-name)]
+            (if (empty? matches)
+              (assoc acc arg-name v)
+              (reduce (fn [m e] (assoc m (:slot-id e) v))
+                      (assoc acc arg-name v)
+                      matches))))
+        {}
+        args))))
 
 
 ;; =============================================================================
@@ -469,11 +547,20 @@
         (fn-id (first (vals args)))
         (fn-id args)))
     (let [reg (registry ctx)
-          closure (or (get reg fn-id) (throw-fn-not-found! fn-id))]
+          closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
+          ;; Phase 2: translate caller's name-keyed args into the
+          ;; dual-key shape (slot-id + name). The name half keeps
+          ;; today's readers working; the slot-id half is what
+          ;; Phase 3+ will route through per-ref translation. The
+          ;; immediate observable effect is that ambiguous-name calls
+          ;; now throw `:execution-error/ambiguous-arg-name` instead
+          ;; of silently mis-routing through the name-keyed `fa`.
+          translated (translate-named-args fn-id (or named-args {})
+                                           (lookups-for-ctx ctx))]
       ;; compile-eager closure signature: `(fn [free-args ctx])`.
       ;; Child callables are captured at compile time — `reg`
       ;; is no longer needed by the runtime.
-      (closure (or named-args {}) ctx))))
+      (closure translated ctx))))
 
 
 (defn execute-by-name
@@ -499,12 +586,21 @@
 
    If `fn-id` is already a callable, returns it as-is — convenience
    for HOF impls that may receive either a fn-id or an already-built
-   callable."
+   callable.
+
+   Phase 2: translates the caller's name-keyed map through
+   `translate-named-args` before invoking the closure, mirroring
+   `execute`'s public boundary. Ambiguous names throw
+   `:execution-error/ambiguous-arg-name`."
   [ctx fn-id]
   (if (fn? fn-id)
     fn-id
     (let [reg (registry ctx)
           closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
-          free-names (free-arg-ext-names ctx fn-id)]
+          lookups (lookups-for-ctx ctx)
+          free-names (vec (r/deep-free-ext-names fn-id lookups))]
       (ce/make-shape-callable free-names
-                              (fn [args] (closure (or args {}) ctx))))))
+                              (fn [args]
+                                (closure (translate-named-args
+                                           fn-id (or args {}) lookups)
+                                         ctx))))))

@@ -110,13 +110,14 @@ Acceptance: walker tests green; `bb test` green (no behaviour change yet — wal
 
 **Phase 2 — Public API translator**
 
-- `make-single-arg-callable` and friends: caller's `{name → val}` translated to `{slot-id → val}` via walker entries
-- Ambiguity (same name → multiple slot-ids) throws `:execution-error/ambiguous-arg-name` with a clear list of slot provenance
-- Runtime fa **starts** slot-id-keyed
-- **But** inner readers still by name — translator ALSO writes name keys (transitional dual-key, only at public boundary, NOT inside runtime)
-- This is the only dual-key bridge; it's safe because it happens once at entry, doesn't propagate through inner refs
+- `make-single-arg-callable` and friends: caller's `{name → val}` translated to `{name → val, slot-id → val, …}` via walker entries.
+- Translator writes the value under the ext-name AND under EVERY chain-leaf slot-id the walker reports for that name. Most production fn-graphs have ONE caller-name reaching N inner consumers (each `(:get :coll :the-name)` inside a ref-tree contributes its own root-slot id) — that is NOT a collision; the caller's value legitimately fans out to all of them. Writing all matching slot-ids saves Phase 3 from inventing per-call propagation while readers are still name-keyed.
+- **Original "throw on ambiguity" plan was wrong** — the walker can't distinguish "same name shared by N consumers" (which is intentional and ubiquitous) from "two semantically different slots that happen to share a name" (the #104 collision) without runtime context. The real collision will surface in Phase 5/6 when `:as` workarounds drop and slot-id-keyed readers can route distinctly.
+- Runtime fa **starts** slot-id-keyed (multi-slot-id flavour above).
+- Inner readers still by name — translator ALSO writes the name key. Transitional dual-key, only at public boundary, NOT inside runtime.
+- The only dual-key bridge; safe because it happens once at entry, doesn't propagate through inner refs.
 
-Acceptance: all tests green; public API behavior unchanged except ambiguous calls now error explicitly.
+Acceptance: all tests green; public API behavior is observably unchanged in Phase 2.
 
 **Phase 3 — Per-ref slot-id translation**
 

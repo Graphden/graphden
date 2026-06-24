@@ -14,6 +14,10 @@
     "target/**",
     ".playwright-mcp/**",
     "tools/visual-tests/tests/editor.spec.js-snapshots/**",
+    // Playwright test-run artefacts — auto-generated, gitignored;
+    // markdownlint-cli2 doesn't honor .gitignore on its own.
+    "tools/visual-tests/playwright-report/**",
+    "tools/visual-tests/test-results/**",
     ".git/**",
     ".tools/**"
   ],

@@ -30,9 +30,20 @@ function assert(cond, msg) {
 }
 
 (async () => {
+  // Args mirror edit-test-helpers.js — needed so the renderer
+  // doesn't crash in restrictive container environments
+  // (--no-zygote + --in-process-gpu collapse the renderer
+  // pre-fork + GPU subprocess that fail to initialise in some
+  // namespaces). See playwright.config.js for the rationale.
   const browser = await chromium.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
+    args: [
+      '--js-flags=--max-old-space-size=1024',
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--no-zygote',
+      '--in-process-gpu',
+    ],
   });
   const context = await browser.newContext({
     viewport: { width: 800, height: 600 },

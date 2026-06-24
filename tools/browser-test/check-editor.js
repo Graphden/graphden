@@ -16,7 +16,18 @@ const fnName = args[0] || '';
 const expandSpecs = args.slice(1); // e.g., ["root:2", "router-fn:1"]
 
 async function checkEditor() {
-  const browser = await chromium.launch({ headless: true });
+  // Args mirror edit-test-helpers.js — needed so the renderer
+  // doesn't crash in restrictive container environments.
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
+      '--js-flags=--max-old-space-size=1024',
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--no-zygote',
+      '--in-process-gpu',
+    ],
+  });
   const context = await browser.newContext({
     viewport: { width: 1400, height: 900 }
   });

@@ -16,6 +16,33 @@ const { defineConfig } = require('@playwright/test');
 
 const BASE_URL = process.env.GRAPHDEN_URL || 'http://localhost:9002';
 
+// Chromium launch flags applied to every project. Mirrors the
+// canonical set used by `tools/browser-test/edit-test-helpers.js`
+// (one source of truth for "what Chrome args make graphden's
+// editor render in restrictive container environments"):
+//
+// - `--js-flags=--max-old-space-size=1024` — cap V8 heap. Default
+//   ~4GB caused the dev container's chrome to compete with java +
+//   pg for host RAM and get OOM-killed.
+// - `--disable-dev-shm-usage` — fall back to /tmp; default
+//   /dev/shm in some containers is 64 MB, exhausted by heavy
+//   DOM mutation.
+// - `--no-sandbox` — required when running as root in a container
+//   (crbug/638180).
+// - `--no-zygote` + `--in-process-gpu` — the renderer zygote
+//   pre-fork + GPU subprocess fail to initialise in restrictive
+//   namespaces, every page.goto crashes with "Page crashed".
+//   `--no-zygote` disables the pre-fork; `--in-process-gpu`
+//   collapses the GPU sub-process into main; renderer itself
+//   stays in its own process so Cytoscape stays responsive.
+const CHROMIUM_LAUNCH_ARGS = [
+  '--js-flags=--max-old-space-size=1024',
+  '--disable-dev-shm-usage',
+  '--no-sandbox',
+  '--no-zygote',
+  '--in-process-gpu',
+];
+
 module.exports = defineConfig({
   testDir: './tests',
   retries: 0,
@@ -24,6 +51,7 @@ module.exports = defineConfig({
     deviceScaleFactor: 1,
     reducedMotion: 'reduce',
     serviceWorkers: 'block',
+    launchOptions: { args: CHROMIUM_LAUNCH_ARGS },
   },
   expect: {
     toHaveScreenshot: {

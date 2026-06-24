@@ -212,6 +212,85 @@
           :children {:as :children :type [:list :hiccup-node]
                      :description "Card body hiccup nodes."}}}
 
+  ;; ---------------------------------------------------------------------------
+  ;; CONVENIENCE BUTTON TEMPLATES
+  ;; ---------------------------------------------------------------------------
+  ;;
+  ;; Collapsing the canonical "click-handler button" boilerplate.
+  ;; The raw form is:
+  ;;
+  ;;   {:parent :button
+  ;;    :args {:label "Send"
+  ;;           :attrs {:parent :merge
+  ;;                   :args {:maps [{:parent :dispatch-action
+  ;;                                  :args {:action "submit-form"}}
+  ;;                                 {:value {:type "submit"
+  ;;                                          :data-target "#result"}}]}}}}
+  ;;
+  ;; With `:submit-button` it becomes:
+  ;;
+  ;;   {:parent :submit-button
+  ;;    :args {:label "Send"
+  ;;           :extras {:data-target "#result"}}}
+  ;;
+  ;; Each template exposes:
+  ;;   :label   — visible button text (inherited from `:button`)
+  ;;   :extras  — optional attrs map (default `{}`) merged LAST so
+  ;;              the caller can add `:class` / `:data-target` /
+  ;;              `:id` / etc.
+  ;;
+  ;; The merge order is platform-attrs first, caller-`:extras`
+  ;; last — caller's keys win on conflict.
+
+  ;; Submit-form button — the standard "POST this form" CTA.
+  {:name :submit-button
+   :description "`<button data-action=\"submit-form\" type=\"submit\" [extras]>label</button>`. Wires the runtime's `submit-form` handler so the enclosing `<form>` is POSTed via fetch on click; bind `:extras :data-target \"#some-selector\"` to swap the response into a specific element. Free args: `:label`, `:extras` (optional)."
+   :parent :button
+   :args {:attrs {:parent :merge
+                  :args {:maps [{:parent :dispatch-action
+                                 :args {:action {:value "submit-form"}}}
+                                {:value {:type "submit"}}
+                                {:as :extras :required false
+                                 :description "Extra attrs merged onto the button (`:class` / `:data-target` / `:id` / …)."}]}}}}
+
+  ;; Generic click-action button — caller picks the handler name.
+  {:name :click-button
+   :description "`<button data-action=\"<action>\" [extras]>label</button>`. Wires the runtime to invoke the registered handler for `:action` on click. Free args: `:label`, `:action` (registered handler name), `:extras` (optional attrs)."
+   :parent :button
+   :args {:attrs {:parent :merge
+                  :args {:maps [{:parent :dispatch-action
+                                 :args {:action {:as :action :type :non-blank-text
+                                                 :description "Registered handler name (see editor-runtime.js `registerActionHandler` calls)."}}}
+                                {:as :extras :required false
+                                 :description "Extra attrs merged onto the button (`:class` / per-handler `:data-*` / …)."}]}}}}
+
+  ;; Navigate-on-click button — like a styled link but as a button.
+  {:name :navigate-button
+   :description "`<button data-action=\"navigate\" data-href=\"<href>\" [extras]>label</button>`. The runtime's `navigate` handler sets `window.location.href = href` on click. Free args: `:label`, `:href` (target URL), `:extras` (optional attrs)."
+   :parent :button
+   :args {:attrs {:parent :merge
+                  :args {:maps [{:parent :dispatch-action
+                                 :args {:action {:value "navigate"}}}
+                                {:parent :assoc
+                                 :args {:map {:value {}}
+                                        :key {:value :data-href}
+                                        :value {:as :href :type :text
+                                                :description "URL the navigate handler sets `window.location.href` to."}}}
+                                {:as :extras :required false
+                                 :description "Extra attrs (`:class` / `:type` / `:id` / …)."}]}}}}
+
+  ;; Custom-handler button — inline JS body evaluated on click.
+  ;; The body has `btn`, `event`, `host` in scope.
+  {:name :custom-button
+   :description "`<button data-action=\"custom\" data-custom-handler=\"<body>\" [extras]>label</button>`. The runtime's `custom` handler evaluates the body as `(btn, event, host) => …` on click. Free args: `:label`, `:body` (JS source), `:extras` (optional attrs)."
+   :parent :button
+   :args {:attrs {:parent :merge
+                  :args {:maps [{:parent :dispatch-custom
+                                 :args {:body {:as :body :type :js-source
+                                               :description "JavaScript body executed on click."}}}
+                                {:as :extras :required false
+                                 :description "Extra attrs (`:class` / `:type` / per-handler `:data-*` / …)."}]}}}}
+
   ;; Escape hatch. When the platform components can't
   ;; express the behaviour the user needs (a custom hover effect,
   ;; a one-off DOM manipulation, integration with a 3rd-party JS

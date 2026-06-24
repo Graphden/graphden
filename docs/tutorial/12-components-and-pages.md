@@ -8,10 +8,13 @@ templates.
 
 **Concepts introduced**: `web.components`, `:button`, `:input`,
 `:textarea`, `:select`, `:option`, `:checkbox`, `:form`,
-`:link`, `:image`, `:card`, `:dispatch-action`, `data-action`,
+`:link`, `:image`, `:card`, convenience templates
+(`:submit-button`, `:click-button`, `:navigate-button`,
+`:custom-button`), `:dispatch-action`, `data-action`,
 `/assets/graphden-runtime.js`, `submit-form` handler,
 `navigate` handler, `:html-page-route`, `:html-page-handler`,
-`:html-page-rendered`, `:graphden-runtime-scripts`.
+`:html-page-rendered`, `:graphden-runtime-scripts`,
+`:graphden-page-head`, `/assets/graphden-components.css`.
 
 ## The starter component library
 
@@ -62,41 +65,73 @@ Now extend it with caller attrs:
 
 Execute. Result: `[:button {:class "primary" :data-cy "save"} "Save"]`.
 
-## Wiring a click handler — the DSL
+## Wiring a click handler
 
 Click behaviour rides on `data-action="X"` attributes that a
-small JS dispatcher routes to a registered handler. The
-`:dispatch-action` atom in `web.runtime` builds the
-`{:data-action <name>}` attrs map; merge it onto your button's
-`:attrs` to wire a click.
-
-The platform pre-registers two built-in handlers:
+small JS dispatcher routes to a registered handler. The platform
+pre-registers three handlers:
 
 | `data-action` | Behaviour |
 |---|---|
 | `navigate` | Reads `data-href`, sets `window.location.href`. |
 | `submit-form` | Finds the nearest `<form>` ancestor, POSTs its fields, swaps the response into `data-target` (CSS selector) or back into the form. |
+| `custom` | Evaluates `data-custom-handler` as `(btn, event, host) => …` — the escape hatch (see Lesson 13). |
 
-Example — a button that takes the user to /about:
+Four convenience templates cover the common cases — each pre-
+wires the matching `data-action` so you only think about the
+visible bits:
+
+| Template | Free args | Renders |
+|---|---|---|
+| `:submit-button` | `:label`, `:extras` | `<button data-action="submit-form" type="submit">label</button>` |
+| `:navigate-button` | `:label`, `:href`, `:extras` | `<button data-action="navigate" data-href="...">label</button>` |
+| `:click-button` | `:label`, `:action`, `:extras` | `<button data-action="<your-action>">label</button>` |
+| `:custom-button` | `:label`, `:body`, `:extras` | `<button data-action="custom" data-custom-handler="...">label</button>` |
+
+Example — a button that takes the user to `/about`:
 
 ```clojure
 {:name :goto-about
- :parent :button
+ :parent :navigate-button
  :args {:label "About"
-        :attrs {:parent :merge
-                :args {:maps [{:parent :dispatch-action
-                               :args {:action "navigate"}}
-                              {:value {:data-href "/about"}}]}}}}
+        :href "/about"
+        :extras {:value {}}}}
 ```
 
-Run it; the hiccup output is:
+Result hiccup:
 
 ```clojure
 [:button {:data-action "navigate" :data-href "/about"} "About"]
 ```
 
-Two `data-*` attrs: one tells the dispatcher which handler to
-run, the other carries the per-handler input.
+`:extras` is the catch-all for extra attrs (`:class`, `:id`,
+`:type "button"`, per-handler `data-*` payloads). Caller's
+`:extras` win on conflict (Clojure `merge` semantics) so you
+can always override platform defaults.
+
+### The raw form
+
+The convenience templates are sugar over a `:merge` +
+`:dispatch-action` chain on `:button`'s `:attrs`. If you need
+something the four templates don't cover (a handler that needs
+multiple `data-*` attrs the template doesn't expose, a button
+that combines two action sources), build it yourself:
+
+```clojure
+{:name :my-fancy-button
+ :parent :button
+ :args {:label "Save"
+        :attrs {:parent :merge
+                :args {:maps [{:parent :dispatch-action
+                               :args {:action "submit-form"}}
+                              {:value {:type "submit"
+                                       :data-target "#result"
+                                       :data-tracking-id "save-cta"}}]}}}}
+```
+
+The `:dispatch-action` atom (in `web.runtime`) builds the
+`{:data-action <name>}` half; the literal map adds the rest.
+Templates package this pattern.
 
 ## Adding a page route
 
@@ -112,14 +147,20 @@ collapses this 4-step chain into one template:
  :args {:path "/about"
         :title "About"
         :page-body :my-about-body          ; a fn-def returning hiccup
+        :head :graphden-page-head           ; default stylesheet
         :scripts {:value []}}}              ; no JS needed for this page
 ```
 
-That's it. Four pins — `:path`, `:title`, `:page-body`,
-`:scripts` — gets you a working reitit-shaped route entry. The
-template (`:html-page-route` in `app/page/fns.edn`) wraps
-`:html-page` → `:render-hiccup` → `:html-ok-response` →
-`:get-route` so you don't have to know that chain exists.
+Five pins — `:path`, `:title`, `:page-body`, `:head`, `:scripts`
+— get you a working reitit-shaped route entry. The template
+(`:html-page-route` in `app/page/fns.edn`) wraps `:html-page`
+→ `:render-hiccup` → `:html-ok-response` → `:get-route` so you
+don't have to know that chain exists.
+
+`:graphden-page-head` is a drop-in `:head` bundle that includes
+the components stylesheet `<link>` (default styling for
+`button`/`input`/`form`/etc — see "Default styling" below).
+Pass `{:value []}` if you want no stylesheet.
 
 > **Why `:page-body` and not `:body`?** The chain plumbs
 > `:body` through two layers — the hiccup page body and the
@@ -146,7 +187,26 @@ and append `:my-about-page` to `:all`'s `:items`. Run
   which returns the raw text.
 
 All three templates expose the same `:title` / `:page-body` /
-`:scripts` free args — pick the layer you need.
+`:head` / `:scripts` free args — pick the layer you need.
+
+## Default styling
+
+`:graphden-page-head` injects a `<link rel="stylesheet"
+href="/assets/graphden-components.css?v=…">` tag into `<head>`.
+The stylesheet (`resources/packages/app/editor/components.css`)
+uses tag-level selectors (`button`, `input`, `textarea`,
+`form`, `a`, `img`, `h1-h3`) so the platform components get
+sensible defaults — padding, focus rings, primary-button
+color for `type="submit"`, form gap — without any inline
+`:style` attrs at the call site.
+
+CSS design tokens (`--gd-primary-bg`, `--gd-radius`, etc.)
+live at the top of the file; re-theme by overriding them in
+your own stylesheet that you append to `:head`.
+
+If you don't want the default stylesheet — pass
+`:head {:value []}` and the page gets no styling beyond
+browser defaults.
 
 ## Wiring the runtime
 
@@ -212,18 +272,19 @@ shape:
 1. `:_contact-demo-email-input` — `:parent :input`, `:attrs`
    bound to a literal `{:type "email" :name "email" ...}`.
 2. `:_contact-demo-message-textarea` — same shape for textarea.
-3. `:_contact-demo-submit-button` — `:parent :button`, label
-   "Send", `:attrs` merged from `:dispatch-action` (action
-   "submit-form") + literal `{:type "submit" :data-target
-   "#contact-result"}`.
+3. `:_contact-demo-submit-button` — `:parent :submit-button`,
+   `:label "Send"`, `:extras {:data-target "#contact-result"}`.
 4. `:_contact-demo-result-panel` — empty `<div id="contact-result">`.
 5. `:_contact-demo-form` — `:parent :form`, children = the four
    items above in order.
 6. `:_contact-demo-page-body` — header + intro + form + result
-   panel wrapped in a sized `<div>`.
+   panel wrapped in a sized `<div>`. Plus an outside-the-form
+   `:_contact-demo-custom-button` (`:parent :custom-button`)
+   demonstrating the escape hatch.
 7. `:_contact-demo-page-handler` — one fn-def with
    `:parent :html-page-handler` pinning `:title` /
-   `:page-body` / `:scripts`. That's the WHOLE page handler.
+   `:page-body` / `:head` / `:scripts`. That's the WHOLE
+   page handler.
 8. `:_demo-contact-{get,post}-data`, `:_demo-contact-methods`,
    `:demo-contact` — the method-map merge so GET and POST
    share the `/demo/contact` path.

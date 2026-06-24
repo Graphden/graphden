@@ -25,49 +25,37 @@
   ;; ---------------------------------------------------------------------------
 
   {:name :_contact-demo-email-input
-   :description "Email field for the contact form — `<input type=email name=email required ...>`."
+   :description "Email field — `<input type=email name=email required>`. Styling comes from the default components stylesheet (input rule)."
    :parent :input
    :args {:attrs {:value {:type "email"
                           :name "email"
                           :placeholder "you@example.com"
-                          :required true
-                          :style "width:100%;padding:8px;margin:6px 0;box-sizing:border-box"}}}}
+                          :required true}}}}
 
   {:name :_contact-demo-message-textarea
-   :description "Message field — `<textarea name=message rows=5>`."
+   :description "Message field — `<textarea name=message rows=5>`. Styling comes from the default components stylesheet (textarea rule)."
    :parent :textarea
    :args {:attrs {:value {:name "message"
                           :rows 5
                           :placeholder "Tell us how we can help..."
-                          :required true
-                          :style "width:100%;padding:8px;margin:6px 0;box-sizing:border-box"}}
+                          :required true}}
           :content ""}}
 
-  ;; Submit button. The composition pattern is the canonical
-  ;; "click-handler button with extra data-* payload":
-  ;;
-  ;;   :attrs = :dispatch-action {:action "submit-form"}
-  ;;            (gives `:data-action "submit-form"`)
-  ;;          + literal {:type "submit"
-  ;;                     :data-target "#contact-result"}
-  ;;            (the runtime swaps the response into the matched element)
+  ;; Submit button via the :submit-button convenience template —
+  ;; the raw `:merge` + `:dispatch-action` + `:type "submit"` chain
+  ;; collapses to two slots: `:label` and `:extras`.
   {:name :_contact-demo-submit-button
-   :description "Send button — `data-action=\"submit-form\" data-target=\"#contact-result\"`."
-   :parent :button
+   :description "Send button — uses :submit-button (wires data-action=\"submit-form\" + type=submit) with :data-target so the runtime swaps the response into #contact-result."
+   :parent :submit-button
    :args {:label "Send"
-          :attrs {:parent :merge
-                  :args {:maps [{:parent :dispatch-action
-                                 :args {:action "submit-form"}}
-                                {:value {:type "submit"
-                                         :data-target "#contact-result"
-                                         :style "padding:10px 20px;cursor:pointer"}}]}}}}
+          :extras {:value {:data-target "#contact-result"}}}}
 
   ;; ---------------------------------------------------------------------------
   ;; FORM + RESULT PANEL
   ;; ---------------------------------------------------------------------------
 
   ;; Empty result panel — populated post-submit by the runtime swapping
-  ;; the POST handler's hiccup into it. `<div id=\"contact-result\">`.
+  ;; the POST handler's hiccup into it. `<div id="contact-result">`.
   {:name :_contact-demo-result-panel
    :description "Empty `#contact-result` div the submit-form handler swaps the POST response into."
    :parent :hiccup
@@ -85,33 +73,28 @@
                      :_contact-demo-message-textarea
                      :_contact-demo-submit-button]}}
 
-  ;; Block 3.4 — escape-hatch button. Inline JS body bound via
-  ;; `:dispatch-custom`; the runtime's `custom` handler evals it
-  ;; on click with `btn`, `event`, `host` in scope. This stays
-  ;; OUTSIDE the form (no submit) so it only demos the
-  ;; escape-hatch path, not the form-post path.
+  ;; Escape-hatch button via :custom-button — inline JS body
+  ;; evaluated on click (`btn` / `event` / `host` in scope). Lives
+  ;; OUTSIDE the form so it only demos the escape-hatch path.
   {:name :_contact-demo-custom-button
-   :description "Escape-hatch demo button — toggles the result panel's text via inline JS, demonstrating `:dispatch-custom` without any server roundtrip."
-   :parent :button
+   :description "Escape-hatch demo button via :custom-button — toggles the result panel's text via inline JS without any server roundtrip."
+   :parent :custom-button
    :args {:label "Wave at me"
-          :attrs {:parent :merge
-                  :args {:maps [{:parent :dispatch-custom
-                                 :args {:body "var t = document.getElementById('contact-result'); t.textContent = (t.textContent.trim() === '👋') ? '' : '👋';"}}
-                                {:value {:type "button"
-                                         :style "padding:8px 16px;margin-top:6px;cursor:pointer;background:transparent;border:1px solid #ccc;border-radius:4px"}}]}}}}
+          :body "var t = document.getElementById('contact-result'); t.textContent = (t.textContent.trim() === '👋') ? '' : '👋';"
+          :extras {:value {:type "button"}}}}
 
   ;; ---------------------------------------------------------------------------
   ;; PAGE BODY
   ;; ---------------------------------------------------------------------------
 
   {:name :_contact-demo-page-body
-   :description "Card-wrapped contact-form page body with heading + intro paragraph."
+   :description "Contact-form page body with heading + intro paragraph + form + result panel + escape-hatch button. Layout comes from the components stylesheet (form gap, button padding); only the page-width wrapper carries inline style."
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:style "max-width:520px;margin:2em auto;padding:0 1em;font-family:system-ui,-apple-system,sans-serif"}}
+          :attrs {:value {:style "max-width:520px;margin:2em auto;padding:0 1em"}}
           :children [{:value [:h1 "Contact us"]}
-                     {:value [:p {:style "color:#555"}
-                              "Block 2 demo — every element on this page is composed from "
+                     {:value [:p
+                              "Demo — every element on this page is composed from "
                               [:code "web.components"]
                               " + "
                               [:code "web.runtime"]
@@ -133,10 +116,11 @@
   ;; from `app.page` and `app.editor` templates.
 
   {:name :_contact-demo-page-handler
-   :description "GET /demo/contact handler — full HTML page via :html-page-handler with the graphden runtime scripts wired in."
+   :description "GET /demo/contact handler — full HTML page via :html-page-handler with the default components stylesheet + graphden runtime scripts wired in."
    :parent :html-page-handler
    :args {:title "Contact (Graphden demo)"
           :page-body :_contact-demo-page-body
+          :head :graphden-page-head
           :scripts :graphden-runtime-scripts}}
 
   ;; ---------------------------------------------------------------------------

@@ -1,0 +1,155 @@
+/* Default styles for the web.components starter library.
+ *
+ * Tag-level selectors — pages that load /assets/graphden-components.css
+ * get sensible defaults for the platform components (button, input,
+ * textarea, select, form, link, image, card) without specifying any
+ * inline :style or :class.
+ *
+ * Callers can override via :attrs {:class "..."} on any component;
+ * tag selectors are loose enough that adding a class doesn't fight
+ * with these defaults — it composes.
+ *
+ * Design tokens (CSS custom properties) live at the top so a user
+ * site can re-theme by re-declaring them once. Keep the palette
+ * minimal — anything fancier belongs in a real design system.
+ */
+
+:root {
+  --gd-fg: #1a1a1a;
+  --gd-bg: #fff;
+  --gd-muted-fg: #555;
+  --gd-border: #d1d5db;
+  --gd-focus: #2563eb;
+  --gd-primary-bg: #2563eb;
+  --gd-primary-fg: #fff;
+  --gd-primary-bg-hover: #1d4ed8;
+  --gd-card-bg: #fafafa;
+  --gd-card-border: #e5e7eb;
+  --gd-radius: 4px;
+  --gd-gap: 8px;
+}
+
+/* Pages built from web.components don't have a global reset; we
+ * scope everything to plain tag selectors with low specificity so
+ * an existing site's CSS (or component-level :class overrides)
+ * stay in charge. */
+
+body {
+  color: var(--gd-fg);
+  background: var(--gd-bg);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* === Buttons === */
+
+button {
+  display: inline-block;
+  padding: 8px 16px;
+  border: 1px solid var(--gd-border);
+  border-radius: var(--gd-radius);
+  background: var(--gd-bg);
+  color: var(--gd-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover { border-color: var(--gd-fg); }
+button:focus { outline: 2px solid var(--gd-focus); outline-offset: 2px; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Submit / primary CTA — emphasised by tag-attribute selector so
+ * `:submit-button` (which renders type="submit") gets the styling
+ * automatically without needing an extra class. */
+button[type="submit"] {
+  background: var(--gd-primary-bg);
+  color: var(--gd-primary-fg);
+  border-color: var(--gd-primary-bg);
+}
+
+button[type="submit"]:hover {
+  background: var(--gd-primary-bg-hover);
+  border-color: var(--gd-primary-bg-hover);
+}
+
+/* === Inputs === */
+
+input, textarea, select {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--gd-border);
+  border-radius: var(--gd-radius);
+  background: var(--gd-bg);
+  color: var(--gd-fg);
+  font: inherit;
+  box-sizing: border-box;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: 2px solid var(--gd-focus);
+  outline-offset: -1px;
+  border-color: var(--gd-focus);
+}
+
+/* Checkbox stays its native width — overriding `input` rule above. */
+input[type="checkbox"], input[type="radio"] {
+  display: inline-block;
+  width: auto;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+textarea {
+  min-height: 4em;
+  font-family: inherit;
+}
+
+/* === Form === */
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gd-gap);
+}
+
+form button {
+  align-self: flex-start;
+}
+
+/* === Links === */
+
+a {
+  color: var(--gd-primary-bg);
+  text-decoration: underline;
+}
+
+a:hover {
+  color: var(--gd-primary-bg-hover);
+}
+
+/* === Images === */
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* === Card — the only class-based selector because :card is the
+ * generic surface and tag (`div`) is too broad to safely style. */
+
+.card {
+  padding: 16px;
+  background: var(--gd-card-bg);
+  border: 1px solid var(--gd-card-border);
+  border-radius: var(--gd-radius);
+}
+
+/* === Headings — tight defaults that don't fight a host site === */
+
+h1, h2, h3 { line-height: 1.2; margin: 0.6em 0 0.3em; }
+h1 { font-size: 1.75rem; }
+h2 { font-size: 1.4rem; }
+h3 { font-size: 1.2rem; }

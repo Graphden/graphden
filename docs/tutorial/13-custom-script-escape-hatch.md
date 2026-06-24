@@ -103,22 +103,21 @@ button shipped on `/demo/contact`):
 
 ```clojure
 {:name :my-wave-button
- :parent :button
+ :parent :custom-button
  :args {:label "Wave at me"
-        :attrs {:parent :merge
-                :args {:maps [{:parent :dispatch-custom
-                               :args {:body "var t = document.getElementById('contact-result'); t.textContent = (t.textContent.trim() === '👋') ? '' : '👋';"}}
-                              {:value {:type "button"}}]}}}}
+        :body "var t = document.getElementById('contact-result'); t.textContent = (t.textContent.trim() === '👋') ? '' : '👋';"
+        :extras {:value {:type "button"}}}}
 ```
 
-The `:merge` shape is the canonical pattern:
+`:custom-button` (in `web.components`, Lesson 12) is the
+convenience template — its `:body` slot is `:js-source`-typed,
+which gives you the textarea editor widget instead of a
+single-line input.
 
-1. `:dispatch-custom` gives you the `data-action` + `data-custom-handler` pair.
-2. The literal `{:type "button"}` map adds a vanilla attr.
-
-Caller-supplied attrs on the right WIN (Clojure `merge`
-semantics), so you can never accidentally drop the platform
-attrs.
+If you'd rather see the underlying composition, the raw shape
+is `:button` with `:attrs` built from
+`:dispatch-custom` + `:extras` via `:merge`. The template just
+packages it.
 
 ## What happens on parse / runtime error
 
@@ -154,13 +153,10 @@ canned template:
 
 ```clojure
 {:name :_contact-demo-fill-template-button
- :parent :button
+ :parent :custom-button
  :args {:label "Use template"
-        :attrs {:parent :merge
-                :args {:maps [{:parent :dispatch-custom
-                               :args {:body "document.querySelector('textarea[name=message]').value = 'Hi, I\\'d like to know more about ...';"}}
-                              {:value {:type "button"
-                                       :style "margin-top:6px;padding:6px 12px;cursor:pointer"}}]}}}}
+        :body "document.querySelector('textarea[name=message]').value = 'Hi, I\\'d like to know more about ...';"
+        :extras {:value {:type "button"}}}}
 ```
 
 Append it to `:_contact-demo-page-body`'s `:children`, run

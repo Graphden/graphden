@@ -371,11 +371,28 @@
   ;; two tags). See :html-page-route in app/page for the
   ;; one-fn-def page-route template that pairs with these.
 
+  {:name :_graphden-runtime-js-url
+   :description "`/assets/graphden-runtime.js?v=<frontend-build-hash>` — `<script src>` URL for the runtime bundle. The query-string hash is the FRONTEND build hash so a new deploy invalidates the immutable browser cache; in between deploys the bundle is served from cache without even a conditional request."
+   :parent :str-join
+   :return-type :text
+   :args {:coll ["/assets/graphden-runtime.js?v=" :build-hash-frontend-short]
+          :separator ""}}
+
+  {:name :_graphden-components-css-url
+   :description "`/assets/graphden-components.css?v=<frontend-build-hash>` — `<link href>` URL for the components stylesheet. Hash-busted on every frontend-section change."
+   :parent :str-join
+   :return-type :text
+   :args {:coll ["/assets/graphden-components.css?v=" :build-hash-frontend-short]
+          :separator ""}}
+
   {:name :graphden-runtime-script-tag
-   :description "`<script src=\"/assets/graphden-runtime.js\">` — loads the graphden runtime bundle (dispatcher + built-in `submit-form` / `navigate` / `custom` handlers, see editor-runtime.js + editor-actions-builtin.js)."
+   :description "`<script src=\"/assets/graphden-runtime.js?v=<hash>\">` — loads the graphden runtime bundle (dispatcher + built-in `submit-form` / `navigate` / `custom` handlers, see editor-runtime.js + editor-actions-builtin.js). Hash-busted so the immutable browser cache is invalidated on every deploy."
    :parent :hiccup
    :args {:tag {:value "script"}
-          :attrs {:value {:src "/assets/graphden-runtime.js"}}
+          :attrs {:parent :assoc
+                  :args {:map {:value {}}
+                         :key {:value :src}
+                         :value :_graphden-runtime-js-url}}
           :children {:value []}}}
 
   {:name :graphden-bootstrap-script
@@ -391,10 +408,46 @@
    :args {:items [:graphden-runtime-script-tag
                   :graphden-bootstrap-script]}}
 
+  ;; Default <link> tag for the components stylesheet. Pages bind
+  ;; this into the `:head` slot of `:html-page-route` (typically via
+  ;; the `:graphden-page-head` bundle) so the web.components
+  ;; primitives get their default styling automatically.
+
+  {:name :graphden-components-stylesheet-tag
+   :description "`<link rel=\"stylesheet\" href=\"/assets/graphden-components.css?v=<hash>\">` — default stylesheet for web.components. Include via `:graphden-page-head` (or directly in a page's `:head` list). Hash-busted to invalidate the immutable browser cache on each deploy."
+   :parent :hiccup
+   :args {:tag {:value "link"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:rel "stylesheet"}}
+                         :key {:value :href}
+                         :value :_graphden-components-css-url}}
+          :children {:value []}}}
+
+  {:name :graphden-page-head
+   :description "Drop-in `:head` list — currently the components stylesheet `<link>`. Bind to the `:head` slot of `:html-page-route` / `:html-page-handler` / `:html-page` so pages get sensible default styling without inline `:style` attrs."
+   :parent :list
+   :args {:items [:graphden-components-stylesheet-tag]}}
+
   {:name :_editor-css-handler
    :description "Ring handler for `GET /assets/editor.css` — returns the editor stylesheet as `text/css` with `Cache-Control: public, max-age=31536000, immutable`."
    :parent :immutable-css-ok-response
    :args {:body :styles}}
+
+  ;; Components stylesheet — default look for the web.components
+  ;; primitives (button, input, form, …) so pages built from them
+  ;; don't look like raw browser-default elements. Loaded via
+  ;; `:graphden-components-stylesheet-tag` from `:graphden-page-head`.
+
+  {:name :_graphden-components-css
+   :description "Default stylesheet for web.components primitives — read from `packages/app/editor/components.css` (despite the path the styles target component tags, not the editor canvas)."
+   :parent :read-resource
+   :return-type :text
+   :args {:path "packages/app/editor/components.css"}}
+
+  {:name :_graphden-components-css-handler
+   :description "Ring handler for `GET /assets/graphden-components.css` — returns the components stylesheet with a 1-year `immutable` Cache-Control. Hash-bust via `?v=` on the inbound `<link href>`."
+   :parent :immutable-css-ok-response
+   :args {:body :_graphden-components-css}}
 
   ;; =============================================================================
   ;; FAVICON (SVG icon with caching)

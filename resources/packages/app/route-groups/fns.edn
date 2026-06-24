@@ -19,6 +19,7 @@
                   :api-routes-js-asset
                   :graphden-runtime-js-asset
                   :editor-css-asset
+                  :graphden-components-css-asset
                   :partial-effect
                   :partial-fn-versions
                   :partial-fn-version-executions

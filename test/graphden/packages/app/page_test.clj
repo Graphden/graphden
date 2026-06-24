@@ -39,6 +39,7 @@
     (let [html (exec-name :html-page-rendered
                           {:title "Test"
                            :page-body [:div "Hello"]
+                           :head []
                            :scripts []})]
       (is (string? html))
       (is (str/includes? html "<title>Test</title>"))
@@ -51,6 +52,7 @@
                                    {:path "/x"
                                     :title "X"
                                     :page-body [:p "ok"]
+                                    :head []
                                     :scripts []})
           handler (get-in (second handler-route) ["get" "handler"])
           response (handler {:request-method :get :uri "/x" :headers {}})]
@@ -67,6 +69,7 @@
                            {:path "/about"
                             :title "About"
                             :page-body [:div "about"]
+                            :head []
                             :scripts []})
           [path methods] (vec entry)]
       (is (= "/about" path))
@@ -79,12 +82,13 @@
 ;; =============================================================================
 
 (deftest graphden-runtime-scripts-bundles-two-tags-test
-  (testing "runtime bundle src tag first (loads bindActionDispatch), bootstrap second (calls it)"
-    (let [scripts (exec-name :graphden-runtime-scripts {})]
+  (testing "runtime bundle src tag first (loads bindActionDispatch), bootstrap second (calls it); src is hash-busted via ?v="
+    (let [scripts (exec-name :graphden-runtime-scripts {})
+          first-tag (first scripts)]
       (is (= 2 (count scripts)))
-      (is (= [:script {:src "/assets/graphden-runtime.js"}]
-             (first scripts))
-          "src tag must come first — bootstrap depends on it")
+      (is (= :script (first first-tag)) "src tag is :script")
+      (is (str/starts-with? (get-in first-tag [1 :src]) "/assets/graphden-runtime.js?v=")
+          "src tag URL hash-busted (so immutable-cached bundles invalidate on each deploy)")
       (is (str/includes? (str (second scripts)) "bindActionDispatch")
           "second tag wires the dispatcher"))))
 
@@ -95,10 +99,11 @@
                            {:path "/x"
                             :title "X"
                             :page-body [:div "hi"]
+                            :head []
                             :scripts (exec-name :graphden-runtime-scripts {})})
           handler (get-in (second route) ["get" "handler"])
           html (:body (handler {:request-method :get :uri "/x" :headers {}}))]
-      (is (str/includes? html "<script src=\"/assets/graphden-runtime.js\">")
-          "runtime bundle src tag present in <body>")
+      (is (re-find #"<script src=\"/assets/graphden-runtime\.js\?v=[0-9a-f]+\">" html)
+          "runtime bundle src tag present in <body> (with ?v= hash-bust)")
       (is (str/includes? html "bindActionDispatch")
           "bootstrap script present in <body>"))))

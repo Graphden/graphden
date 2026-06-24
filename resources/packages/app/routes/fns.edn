@@ -81,6 +81,12 @@
    :args {:path "/assets/editor.css" :handler :_editor-css-handler}
    :expects-effects #{:io}}                   ; reads classpath CSS
 
+  {:name :graphden-components-css-asset
+   :description "GET /assets/graphden-components.css — default stylesheet for web.components primitives. Same 1-year `immutable` cache + `?v=` hash-bust."
+   :parent :get-route
+   :args {:path "/assets/graphden-components.css" :handler :_graphden-components-css-handler}
+   :expects-effects #{:io}}
+
   ;; HTMX partials — server-rendered HTML fragments that the editor's
   ;; JS swaps into mount-points instead of building DOM client-side.
   ;; The fragment fn-defs live in `app.editor`; this route just

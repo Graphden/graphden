@@ -194,3 +194,42 @@
   (testing "empty body is valid (JS no-op); :js-source has no narrowing constraint"
     (is (= [:script {} ""]
            (exec-name :wrap-custom-script {:body ""})))))
+
+
+;; =============================================================================
+;; Convenience button templates — :submit-button :click-button :navigate-button :custom-button
+;; =============================================================================
+
+(deftest submit-button-emits-submit-form-attrs-test
+  (testing "submit-button collapses the dispatch-action + type='submit' merge"
+    (is (= [:button {:data-action "submit-form" :type "submit"} "Send"]
+           (exec-name :submit-button {:label "Send" :extras {}})))))
+
+
+(deftest submit-button-with-extras-merges-data-target-test
+  (testing "caller :extras land on the button; merge order = caller wins on conflict"
+    (is (= [:button {:data-action "submit-form" :type "submit" :data-target "#result"} "Save"]
+           (exec-name :submit-button
+                      {:label "Save"
+                       :extras {:data-target "#result"}})))))
+
+
+(deftest click-button-routes-to-arbitrary-action-test
+  (testing "click-button picks the action name from :action"
+    (is (= [:button {:data-action "run-fn"} "Run"]
+           (exec-name :click-button
+                      {:label "Run" :action "run-fn" :extras {}})))))
+
+
+(deftest navigate-button-emits-data-href-test
+  (testing "navigate-button wires the navigate handler with :href"
+    (is (= [:button {:data-action "navigate" :data-href "/about"} "About"]
+           (exec-name :navigate-button
+                      {:label "About" :href "/about" :extras {}})))))
+
+
+(deftest custom-button-wires-inline-js-body-test
+  (testing "custom-button wires the custom handler with the inline JS :body"
+    (is (= [:button {:data-action "custom" :data-custom-handler "alert('hi')"} "Greet"]
+           (exec-name :custom-button
+                      {:label "Greet" :body "alert('hi')" :extras {}})))))

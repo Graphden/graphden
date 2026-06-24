@@ -58,18 +58,36 @@ function hideProvenancePopover() {
 //     stale trigger doesn't keep claiming "I'm open"
 //   - the NEW anchor gets aria-expanded="true"
 // Then we anchor-clamp + reveal.
+//
+// Re-locate the anchor in the current DOM by `data-binding-id`
+// (+ optional `data-item-id`) before flipping aria-expanded — the
+// async `/partials/provenance` fetch in `showProvenancePopover` is
+// slow enough that the overlay manager can rebuild and replace the
+// originally-clicked badge with an equivalent one carrying the same
+// binding identifier. Setting the attribute on the detached badge is
+// a no-op; finding the live one keeps the disclosure state correct.
 function attachAndShow(anchorEl) {
-  if (provenancePopoverAnchor && provenancePopoverAnchor !== anchorEl) {
+  const liveAnchor = (() => {
+    if (anchorEl && document.body.contains(anchorEl)) return anchorEl;
+    const bid = anchorEl?.getAttribute?.('data-binding-id');
+    const iid = anchorEl?.getAttribute?.('data-item-id');
+    if (!bid) return anchorEl;
+    const sel = iid
+      ? `.arg-type-provenance[data-binding-id="${bid}"][data-item-id="${iid}"]`
+      : `.arg-type-provenance[data-binding-id="${bid}"]:not([data-item-id])`;
+    return document.querySelector(sel) || anchorEl;
+  })();
+  if (provenancePopoverAnchor && provenancePopoverAnchor !== liveAnchor) {
     try {
       provenancePopoverAnchor.setAttribute('aria-expanded', 'false');
     } catch (_) {}
   }
   try {
-    anchorEl.setAttribute('aria-expanded', 'true');
+    liveAnchor.setAttribute('aria-expanded', 'true');
   } catch (_) {}
   provenancePopoverEl.classList.add('visible');
-  anchorBelowClamped(provenancePopoverEl, anchorEl);
-  provenancePopoverAnchor = anchorEl;
+  anchorBelowClamped(provenancePopoverEl, liveAnchor);
+  provenancePopoverAnchor = liveAnchor;
 }
 
 // Post-swap binding for nav-links + close button. Same three-data-attr

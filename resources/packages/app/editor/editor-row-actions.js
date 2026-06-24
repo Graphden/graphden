@@ -426,7 +426,9 @@ registerActionHandler('description', (btn, e, host) => {
       namespace: null,
       description: btn.dataset.description || '',
       entityType: btn.dataset.entityType || null,
-      entityId: btn.dataset.fnId || host?.dataset.fnId || null
+      entityId: btn.dataset.fnId
+                || btn.closest('[data-fn-id]')?.dataset.fnId
+                || null
     }, e);
   }
 });
@@ -441,8 +443,9 @@ registerActionHandler('remove-mi-parent', (btn, e, host) => {
   // Remove THIS cell's fn from the CARD-owning fn's parent-set.
   e.preventDefault();
   e.stopPropagation();
-  const fnId = btn.dataset.fnId || host?.dataset.fnId;
-  const cardFnId = btn.dataset.cardFnId || host?.dataset.cardFnId;
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
+  const cardFnId = btn.dataset.cardFnId
+                  || btn.closest('[data-card-fn-id]')?.dataset.cardFnId;
   const cardFnEntity = lookups?.fnMap?.get(cardFnId);
   if (cardFnEntity && typeof removeParentInline === 'function') {
     removeParentInline(cardFnEntity, fnId);
@@ -457,7 +460,8 @@ registerActionHandler('add-mi-parent', (btn, e, host) => {
   // reads client-cached `lookups`; server has no view of that map.
   e.preventDefault();
   e.stopPropagation();
-  const cardFnId = btn.dataset.cardFnId || host?.dataset.cardFnId;
+  const cardFnId = btn.dataset.cardFnId
+                  || btn.closest('[data-card-fn-id]')?.dataset.cardFnId;
   const cardFnEntity = lookups?.fnMap?.get(cardFnId);
   if (cardFnEntity && typeof addMIParentInline === 'function') {
     addMIParentInline(cardFnEntity, btn);
@@ -473,7 +477,7 @@ registerActionHandler('remove-use-site-binding', (btn, e, host) => {
   // deletion code paths.
   e.preventDefault();
   e.stopPropagation();
-  const bindingId = host?.dataset.bindingId;
+  const bindingId = btn.closest('[data-binding-id]')?.dataset.bindingId;
   const arg = _rowActionsUseSiteArgs.get(bindingId);
   if (arg && typeof deleteUseSiteBinding === 'function') {
     deleteUseSiteBinding(arg);
@@ -487,7 +491,7 @@ registerActionHandler('change-use-site-value', (btn, e, host) => {
   // same registry lookup pattern as above.
   e.preventDefault();
   e.stopPropagation();
-  const bindingId = host?.dataset.bindingId;
+  const bindingId = btn.closest('[data-binding-id]')?.dataset.bindingId;
   const arg = _rowActionsUseSiteArgs.get(bindingId);
   if (arg && typeof enterFreeArgBindEditMode === 'function') {
     enterFreeArgBindEditMode(arg, btn);
@@ -498,7 +502,7 @@ registerActionHandler('change-use-site-value', (btn, e, host) => {
 registerActionHandler('run-fn', (btn, e, host) => {
   e.preventDefault();
   e.stopPropagation();
-  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fnEntity = lookups?.fnMap?.get(fnId);
   if (fnEntity && typeof showExecutePopover === 'function') {
     showExecutePopover(fnEntity, btn);
@@ -509,7 +513,7 @@ registerActionHandler('run-fn', (btn, e, host) => {
 registerActionHandler('fn-versions', (btn, e, host) => {
   e.preventDefault();
   e.stopPropagation();
-  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fnEntity = lookups?.fnMap?.get(fnId);
   if (fnEntity && typeof showFnVersionsPopover === 'function') {
     showFnVersionsPopover(fnEntity, btn);
@@ -520,7 +524,7 @@ registerActionHandler('fn-versions', (btn, e, host) => {
 registerActionHandler('service-settings', (btn, e, host) => {
   e.preventDefault();
   e.stopPropagation();
-  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fnEntity = lookups?.fnMap?.get(fnId);
   if (fnEntity && typeof showServicePopover === 'function') {
     showServicePopover(fnEntity, btn);
@@ -531,7 +535,7 @@ registerActionHandler('service-settings', (btn, e, host) => {
 registerActionHandler('rename-fn', (btn, e, host) => {
   e.preventDefault();
   e.stopPropagation();
-  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fnEntity = lookups?.fnMap?.get(fnId);
   if (fnEntity && typeof enterFnRenameEditMode === 'function') {
     enterFnRenameEditMode(fnEntity, btn);
@@ -542,7 +546,7 @@ registerActionHandler('rename-fn', (btn, e, host) => {
 registerActionHandler('extend-fn', (btn, e, host) => {
   e.preventDefault();
   e.stopPropagation();
-  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fnEntity = lookups?.fnMap?.get(fnId);
   if (fnEntity && typeof enterExtendEditMode === 'function') {
     enterExtendEditMode(fnEntity, btn);
@@ -556,7 +560,7 @@ registerActionHandler('delete-fn', (btn, e, host) => {
   // surfaces the deletion as a top-bar banner while it runs.
   e.preventDefault();
   e.stopPropagation();
-  const fnId = btn.dataset.fnId || host?.dataset.fnId;
+  const fnId = btn.dataset.fnId || btn.closest('[data-fn-id]')?.dataset.fnId;
   const fnEntity = lookups?.fnMap?.get(fnId);
   if (!fnEntity) return;
   const display = (typeof getQualifiedFnName === 'function')

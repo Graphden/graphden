@@ -383,6 +383,16 @@ function createProvenanceBadge(narrowingInfo, arg) {
   // becomes visible, back to "false" by `hideProvenancePopover`.
   badge.setAttribute('aria-expanded', 'false');
   badge.setAttribute('aria-haspopup', 'dialog');
+  // Stable identifier so `attachAndShow` can re-locate the current DOM
+  // badge after the async fetch — overlays can rebuild during the
+  // fetch, replacing the originally-clicked badge with an equivalent
+  // one carrying the same binding-id.
+  if (arg?.['binding-id']) {
+    badge.setAttribute('data-binding-id', arg['binding-id']);
+  }
+  if (arg?.['item-id']) {
+    badge.setAttribute('data-item-id', arg['item-id']);
+  }
   badge.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();

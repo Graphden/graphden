@@ -1021,7 +1021,7 @@
 
   {:name :_delete-branch-apply-response
    :parent :zipmap
-   :return-type {:ok :bool :id :text :name :any}
+   :return-type {:ok :bool :id :text :name :nullable-text}
    :args {:keys [{:value :ok} {:value :id} {:value :name}]
           :vals [{:value true}
                  {:parent :to-str :args {:value :_delete-branch-id}}

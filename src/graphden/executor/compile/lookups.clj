@@ -93,6 +93,7 @@
      ;; deep walk runs once per fn-id instead of once per ref-
      ;; binding pointing at it.
      :deep-frees-cache   (atom {})
+     :deep-free-ext-entries-cache (atom {})
      :cache-projection-frees-cache (atom {})
      :bindings-cache     (atom {})
      :global-env-cache   (atom nil)}))

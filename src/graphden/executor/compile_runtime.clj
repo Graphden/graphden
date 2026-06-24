@@ -440,12 +440,10 @@
    the slot-id-keyed readers can prove which slot a caller meant.
 
    `nil` / `{}` args short-circuit."
-  [_fn-id args lookups]
-  (cond
-    (nil? args) args
-    (empty? args) args
-    :else
-    (let [entries (r/deep-free-ext-entries _fn-id lookups)
+  [fn-id args lookups]
+  (if (or (nil? args) (empty? args))
+    args
+    (let [entries (r/deep-free-ext-entries fn-id lookups)
           by-name (group-by :ext-name entries)]
       (reduce-kv
         (fn [acc arg-name v]

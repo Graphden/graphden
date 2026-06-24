@@ -499,7 +499,7 @@
                     (swap! seen-slots conj sid)
                     (swap! result conj entry))))]
     (letfn [(rename-name-for
-              [bnd-slot-id own-rename-name outer-renames fid]
+              [bnd-slot-id outer-renames fid]
               ;; Same priority chain as `deep-free-ext-names*`'s
               ;; `translate`: prefer fid's own rename slot-id, else
               ;; the binding's raw slot-id. Returns the outer rename
@@ -547,8 +547,7 @@
                       :free (let [sid (:slot-id bnd)]
                               (when-not (next-covered sid)
                                 (emit! {:ext-name (or (rename-name-for
-                                                        sid nil
-                                                        next-renames fid)
+                                                        sid next-renames fid)
                                                       (:ext-name bnd))
                                         :slot-id sid})))
                       :ref  (when-not (:is-fn bnd)

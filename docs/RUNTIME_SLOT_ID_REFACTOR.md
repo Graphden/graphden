@@ -135,13 +135,31 @@ What landed:
 
 Acceptance: all tests green; runtime behavior unchanged; the helper is in place for Phase 4 if needed.
 
-**Phase 4 — Reader/writer cutover**
+**Phase 4 — Reader/writer cutover (deferred — needs key-shape change)**
 
-- `arg-builder :free`: `(get fa bnd.slot-id)` (no name fallback)
-- `arg-builder :seq` :as: `(get fa <as-name's slot-id at owner>)`
-- `env-builder`: `(assoc fa env-bnd.slot-id v)` only
-- `apply-rename-aliases`: remove (chain copying belongs at parser, not runtime — Phase 3's per-ref translation handles inter-fn slot mapping)
-- Cache-projection: `cache-projection-frees` returns `Set<slot-id>`; `fa-key-for-cache` uses slot-id keys
+Naive cutover plan: `arg-builder :free` reads `(get fa bnd.slot-id)`, `arg-builder :seq :as` reads `(get fa owner-rename-sid)`, `env-builder` writes `(assoc fa env-bnd.slot-id v)`, `apply-rename-aliases` retires, cache-projection switches to slot-id keys.
+
+**First attempt failed for the reason §5 already named** (2026-06-25): chain-leaf slot-ids are GLOBAL through their base-fn — every fn composed on `:assoc` shares the same UUID for `:value`, every `:get` shares the same `:m`/`:k`/`:default`, etc. The bug surfaced in `:image` (`:src` / `:alt` both bound via inline-anon `:assoc` calls with `{:as :…}` renames on `:value`) and in `ex-pair-greet` (`:first` / `:second` renames on the same base-fn's slot). When the reader keys `fa` by chain-leaf slot-id, both inline-anons read the SAME `fa[<assoc.value-sid>]` cell — caller's `:src` value bleeds into `:alt`, `:first` into `:second`.
+
+Today's name-keyed system avoids this because the inline-anons' positional `{:as :src}` / `{:as :alt}` renames produce DIFFERENT ext-names (`:src` ≠ `:alt`), so `fa[:src]` and `fa[:alt]` are distinct cells. Slot-ids alone don't carry that per-instance identity.
+
+The architecturally correct fix is to switch fa keys from `slot-id` to `[consumer-fn-id slot-id]` tuples: each inline-anon is its own fn-row with its own UUID, so `[inline-assoc-src.id, assoc.value-sid]` and `[inline-assoc-alt.id, assoc.value-sid]` are distinct keys. This requires:
+
+1. Walker emits `{:ext-name :slot-key [fn-id slot-id]}` instead of `{:slot-id sid}`.
+2. `arg-builder :free` reads `fa[[closure-fn-id, bnd.slot-id]]`.
+3. Seq `:as` reads `fa[[owner-fn-id, rename-slot-id]]`.
+4. `env-builder` writes `fa[[owner-fn-id, env-bnd.slot-id]]`.
+5. Phase 2 boundary translator writes under tuple keys.
+6. HOF lambda-args (Phase 5) write `fa[[R-fn-id, R-lambda-sid]]`.
+7. `apply-rename-aliases` retires.
+8. Cache-projection returns sets of tuple keys.
+
+This is a substantive change. Phase 4 is paused until the design is laid out in detail and the cutover happens with all the tuple-key infrastructure in place. The reverted attempt is preserved in branch history (`refactor/slot-id-keyed-runtime` post-Phase-3).
+
+What's still good from earlier phases:
+- Phase 1 walker (`deep-free-ext-entries`) is correct — its `:slot-id` field IS the chain-leaf, which is what the consumer's `bnd.slot-id` is. Future Phase 4 augments it with the consumer-fn-id to form the tuple key; no breaking change.
+- Phase 2 boundary translator writes both name AND slot-id keys today. The slot-id half is the redundant case (matches the chain-leaf bug); switching the boundary writer to tuple keys is part of the Phase 4 work.
+- Phase 3 `build-ref-slot-renames` is unchanged — still emits identity-skipped maps; per-ref translation continues to be obsoleted by the transitive walker regardless of whether keys are slot-ids or tuples.
 
 Acceptance: name-keyed reads/writes fully gone from runtime; all tests green.
 

@@ -14,7 +14,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 
@@ -193,7 +193,13 @@ async function cleanup(page) {
         return !el || el.style.display === 'none';
       },
       {timeout: 15000});
-    await page.waitForTimeout(800);
+    // Poll storage until the record grows to 3 fn-slots (b add).
+    const settled = await waitFor(async () => {
+      const e = await getEntities(page);
+      return e['fn-slots'].filter((fs) => fs['fn-id'] === recFn.id)
+                          .length === 3;
+    }, 5000);
+    assert(settled, 'record did not grow to 3 fn-slots in 5s');
 
     // ===================================================================
     // Phase C: storage reflects the new field.

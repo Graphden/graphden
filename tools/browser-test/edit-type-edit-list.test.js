@@ -11,7 +11,7 @@
 // Run from this directory:  node edit-type-edit-list.test.js
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 
@@ -133,7 +133,13 @@ async function cleanup(page) {
         return !el || el.style.display === 'none';
       },
       {timeout: 15000});
-    await page.waitForTimeout(800);
+    // Poll storage until element-fn-id flips to :text.
+    const settled = await waitFor(async () => {
+      const e = await getEntities(page);
+      return e.fns.find((f) => f.id === listFn.id)?.['element-fn-id']
+             === textFn.id;
+    }, 5000);
+    assert(settled, 'list element-fn-id did not flip to :text in 5s');
 
     // ===================================================================
     // Phase C: storage — element-fn-id now points at :text.

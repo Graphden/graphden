@@ -12,7 +12,7 @@
 // Run from this directory:  node edit-type-edit-record-remove.test.js
 
 const {chromium} = require('playwright');
-const {assert, newContext, getEntities, deleteFnByName} =
+const {assert, newContext, getEntities, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 
@@ -131,7 +131,13 @@ async function cleanup(page) {
         return !el || el.style.display === 'none';
       },
       {timeout: 15000});
-    await page.waitForTimeout(800);
+    // Poll storage until the record has exactly 2 fn-slots (b removed).
+    const settled = await waitFor(async () => {
+      const e = await getEntities(page);
+      const fnSlots = e['fn-slots'].filter((fs) => fs['fn-id'] === recFn.id);
+      return fnSlots.length === 2;
+    }, 5000);
+    assert(settled, 'record did not shrink to 2 fn-slots in 5s');
 
     // ===================================================================
     // Phase C: storage — only "a" and "c" remain.

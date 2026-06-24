@@ -13,7 +13,7 @@
 // Run from this directory:  node edit-type-edit-variant.test.js
 
 const {chromium} = require('playwright');
-const {assert, newContext, api, getEntities, deleteFnByName} =
+const {assert, newContext, api, getEntities, deleteFnByName, waitFor} =
   require('./edit-test-helpers');
 
 
@@ -139,7 +139,13 @@ async function cleanup(page) {
         return !el || el.style.display === 'none';
       },
       {timeout: 15000});
-    await page.waitForTimeout(800);
+    // Poll storage until the constraint has 3 branches (length 7).
+    const settled = await waitFor(async () => {
+      const e = await getEntities(page);
+      const f = e.fns.find((f) => f.id === varFn.id);
+      return f && Array.isArray(f.constraint) && f.constraint.length === 7;
+    }, 5000);
+    assert(settled, 'variant constraint did not settle to 3 branches in 5s');
 
     // ===================================================================
     // Phase C: storage — constraint has 3 branches now.

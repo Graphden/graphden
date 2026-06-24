@@ -1,37 +1,30 @@
 ;; Server-side counterpart to `editor-runtime.js`: hiccup helpers
-;; for building hiccup attrs that the editor / user-site JS
-;; runtime knows how to dispatch.
+;; for building hiccup attrs the JS dispatcher knows how to
+;; route on click.
 ;;
-;; Phase 1 of the user-sites plan (docs/USER_SITES_PLAN.md). The
-;; client-side runtime registers handlers under `data-action="X"`;
-;; this server-side DSL lets fn-defs (components) emit the right
-;; attrs without inlining `:data-action ...` literals everywhere.
-;; Composition is via `:assoc` / `:merge` for additional `data-*`
-;; attrs the handler needs (`:data-fn-id`, `:data-card-fn-id`, …).
+;; The client-side runtime registers handlers under
+;; `data-action="X"`; this server-side DSL lets fn-defs
+;; (components) emit the right attrs without inlining
+;; `:data-action ...` literals everywhere. Composition is via
+;; `:assoc` / `:merge` for additional `data-*` attrs the
+;; handler needs (`:data-fn-id`, `:data-card-fn-id`, …).
 
 
 {:namespace "web.runtime"
- :description "Server-side DSL for the editor / user-site JS runtime. Build hiccup attrs that the client-side `bindActionDispatch` (in editor-runtime.js) routes to a registered handler."
+ :description "Server-side DSL for the JS runtime — build hiccup attrs that the client-side `bindActionDispatch` (in editor-runtime.js) routes to a registered handler."
  :fns
- [;; The single Block-1-v0 atom: emit `{:data-action <name>}` as
-  ;; a hiccup attrs map. Component fn-defs (`:button`, `:link`,
-  ;; …) merge this with their own attrs (title, class, etc.) and
-  ;; the per-handler `data-*` payload via `:merge` / `:assoc`.
+ [;; Emit `{:data-action <name>}` as a hiccup attrs map.
+  ;; Component fn-defs (`:button`, `:link`, …) merge this with
+  ;; their own attrs (title, class, etc.) and the per-handler
+  ;; `data-*` payload via `:merge` / `:assoc`.
   ;;
-  ;; Example use from a future `:button` component:
+  ;; Example use from a `:button` component:
   ;;
   ;;   {:name :my-run-button
   ;;    :parent :button
   ;;    :args {:label "Run"
-  ;;           :on-click {:parent :dispatch-action
-  ;;                      :args {:action "run-fn"}}
-  ;;           :extras   {:data-fn-id …}}}
-  ;;
-  ;; Today's existing partials (`:_partial-row-actions-*-button`
-  ;; in `app/editor/fns.edn`) hand-roll the `:data-action`
-  ;; attribute inline. After Block 2 ships components, they
-  ;; migrate to use this DSL atom and the dispatch wiring
-  ;; becomes graph-visible.
+  ;;           :attrs {:parent :dispatch-action
+  ;;                   :args {:action "run-fn"}}}}
   {:name :dispatch-action
    :description "Hiccup attrs `{:data-action <name>}` for an element the runtime should dispatch on click. Merge with `:merge` / `:assoc` to add `:data-fn-id` / `:data-card-fn-id` / `:data-binding-id` / etc when the handler needs additional context."
    :parent :assoc
@@ -40,8 +33,8 @@
           :value {:as :action :type :non-blank-text
                   :description "Registered handler name (see editor-runtime.js `registerActionHandler` calls)."}}}
 
-  ;; Block 3.2 — escape-hatch DSL. Build attrs for a button that
-  ;; carries an inline JS body the runtime evaluates on click:
+  ;; Escape-hatch DSL. Build attrs for a button that carries
+  ;; an inline JS body the runtime evaluates on click:
   ;;
   ;;   {:data-action "custom" :data-custom-handler <body>}
   ;;

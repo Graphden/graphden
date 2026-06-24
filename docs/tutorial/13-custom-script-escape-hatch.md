@@ -144,8 +144,7 @@ multi-line `<textarea rows="8">` — the same shape as the JSON
 editor but skipping JSON.parse so the value round-trips as a
 plain string. No syntax highlighting; no Monaco. That decision
 is deliberate: the +500 KB bundle isn't worth it until the
-inline-edit experience is a real bottleneck (see
-`docs/USER_SITES_PLAN.md` Block 3 open question).
+inline-edit experience is a real bottleneck.
 
 ## Try it: extend `/demo/contact`
 
@@ -175,9 +174,12 @@ the textarea fills.
 | Graph model | fn-defs, slots, bindings, types, effects | 1–7 |
 | Process | branches, executing fns, services | 8–10 |
 | Code re-use | packages | 11 |
-| User-facing UI | components, dispatch | 12 |
+| User-facing UI | components, dispatch, page routes | 12 |
 | Escape hatch | `:custom-script` / `:dispatch-custom` | 13 |
 
-The remaining piece — taking what you've built and serving it
-under your own routes alongside the editor — is Block 4 of the
-user-sites plan (`docs/USER_SITES_PLAN.md`), still pending.
+Multi-tenancy (multiple users hosting their own sites on one
+graphden instance, each with their own deploys / secrets /
+auth-isolated routes) is a separate future phase. Today every
+fn-def in this graphden installation shares the same surface;
+Lesson 12 covers how to mount your own page routes alongside
+the editor's, Lesson 13 gives you the JS escape hatch.

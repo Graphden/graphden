@@ -45,8 +45,8 @@
   ;; The named type lets the editor's value-form widget dispatch to
   ;; a textarea instead of a single-line input, and gives static
   ;; analysers a hook for future linting / safety checks. Used by
-  ;; the user-sites escape hatch (`:custom-script` / `:wrap-custom-
-  ;; script` / `:dispatch-custom`).
+  ;; the inline-JS escape hatch (`:custom-script` /
+  ;; `:wrap-custom-script` / `:dispatch-custom`).
   {:name :js-source
    :refine {:base :text}}
 

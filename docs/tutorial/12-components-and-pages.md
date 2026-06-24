@@ -2,14 +2,16 @@
 
 **Goal**: by the end of this lesson you can build a working
 HTML page — header, form, submit button, response panel —
-entirely by composing the platform's `web.components` library,
-without writing a line of JS or hand-rolling hiccup.
+and mount it as a route, entirely by composing fn-defs from
+the platform's `web.components` library and the `app.page`
+templates.
 
 **Concepts introduced**: `web.components`, `:button`, `:input`,
 `:textarea`, `:select`, `:option`, `:checkbox`, `:form`,
 `:link`, `:image`, `:card`, `:dispatch-action`, `data-action`,
 `/assets/graphden-runtime.js`, `submit-form` handler,
-`navigate` handler.
+`navigate` handler, `:html-page-route`, `:html-page-handler`,
+`:html-page-rendered`, `:graphden-runtime-scripts`.
 
 ## The starter component library
 
@@ -96,18 +98,103 @@ Run it; the hiccup output is:
 Two `data-*` attrs: one tells the dispatcher which handler to
 run, the other carries the per-handler input.
 
+## Adding a page route
+
+Components give you HICCUP. To serve a hiccup tree as an HTML
+page at a URL you need: an `<html>`/`<head>`/`<body>` wrapper,
+a hiccup-to-string render, a 200 OK response with `text/html`
+content-type, and a route binding. The `app.page` module
+collapses this 4-step chain into one template:
+
+```clojure
+{:name :my-about-page
+ :parent :html-page-route
+ :args {:path "/about"
+        :title "About"
+        :page-body :my-about-body          ; a fn-def returning hiccup
+        :scripts {:value []}}}              ; no JS needed for this page
+```
+
+That's it. Four pins — `:path`, `:title`, `:page-body`,
+`:scripts` — gets you a working reitit-shaped route entry. The
+template (`:html-page-route` in `app/page/fns.edn`) wraps
+`:html-page` → `:render-hiccup` → `:html-ok-response` →
+`:get-route` so you don't have to know that chain exists.
+
+> **Why `:page-body` and not `:body`?** The chain plumbs
+> `:body` through two layers — the hiccup page body and the
+> HTTP response body. Without the rename they'd collide. The
+> caller-visible name is `:page-body` to keep it unambiguous.
+
+To mount it, edit `resources/packages/app/route-groups/fns.edn`
+and append `:my-about-page` to `:all`'s `:items`. Run
+`bb rebuild` (or `bb deploy` if your DB is dirty). Visit
+`http://localhost:9002/about`.
+
+### When the simple template isn't enough
+
+`:html-page-route` is GET-only. For other shapes drop down:
+
+- **Same path, multiple methods** (e.g. GET + POST on
+  `/contact`): use `:html-page-handler` (just the Ring
+  handler — no route wrap) on the GET side of a method-map
+  merge. The contact-form demo (`app/contact-demo/fns.edn`)
+  does this; copy `:_demo-contact-{get,post}-data` +
+  `:_demo-contact-methods` + `:demo-contact`.
+- **Non-Ring sinks** (write the rendered HTML to a file,
+  return it as an email body): use `:html-page-rendered`
+  which returns the raw text.
+
+All three templates expose the same `:title` / `:page-body` /
+`:scripts` free args — pick the layer you need.
+
+## Wiring the runtime
+
+If your page has any `data-action="..."` buttons (a form
+submit, a `navigate`, an inline `custom` handler), bind
+`:scripts` to `:graphden-runtime-scripts`:
+
+```clojure
+{:name :my-contact-page
+ :parent :html-page-route
+ :args {:path "/contact"
+        :title "Contact us"
+        :page-body :my-contact-body
+        :scripts :graphden-runtime-scripts}}    ; ← that's it
+```
+
+`:graphden-runtime-scripts` (in `app/editor/fns.edn`) is a
+two-element list:
+
+1. `<script src="/assets/graphden-runtime.js">` — loads the
+   dispatcher + built-in handlers (`submit-form`, `navigate`,
+   `custom`).
+2. An inline `<script>` calling
+   `bindActionDispatch(document.body)` on `DOMContentLoaded`
+   so the runtime starts routing clicks.
+
+After this any button in `:my-contact-body` whose `:attrs`
+were built with `:dispatch-action` / `:dispatch-custom` /
+`submit-form` will work — no extra wiring.
+
+> **Why not `/assets/editor.js`?** That bundle is ~700 KB
+> and initialises Cytoscape + WebSocket subscriptions that
+> crash a non-editor page. `/assets/graphden-runtime.js`
+> is the minimal subset (~9 KB) — just the dispatcher +
+> built-in handlers.
+
 ## A full page: the contact-form demo
 
-`app.contact-demo` (shipped) composes the ten primitives + the
-DSL into a working contact form. Visit `/demo/contact` in the
-running editor; the page is:
+`app.contact-demo` (shipped) composes the ten primitives, the
+DSL, and the page templates into a working contact form.
+Visit `/demo/contact` in the running editor; the page is:
 
 ```
 ┌──────────────────────────────────────────────────────┐
 │  Contact us                                          │
 │                                                      │
-│  Block 2 demo — every element on this page is        │
-│  composed from web.components + web.runtime fn-defs. │
+│  Demo — every element on this page is composed       │
+│  from web.components + web.runtime fn-defs.          │
 │                                                      │
 │  [you@example.com .....................]             │
 │  [Tell us how we can help.........]                  │
@@ -134,32 +221,12 @@ shape:
    items above in order.
 6. `:_contact-demo-page-body` — header + intro + form + result
    panel wrapped in a sized `<div>`.
-7. `:_contact-demo-page` — `:parent :html-page` with the runtime
-   bundle in `:scripts`.
-
-## The runtime bundle
-
-User pages load `/assets/graphden-runtime.js` (NOT `editor.js`
-— that one initialises Cytoscape and would crash a non-editor
-page). The runtime bundle is the concatenation of
-`editor-runtime.js` (dispatcher + handler registry + partial
-loader) and `editor-actions-builtin.js` (the `navigate` and
-`submit-form` handlers).
-
-Bootstrap requirement: after the bundle loads, the page must
-call `bindActionDispatch(document.body)` once to start
-listening for `data-action` clicks. The demo page ships this
-as an inline `<script>` in the page's `:scripts` list:
-
-```clojure
-{:name :_contact-demo-bootstrap-script
- :parent :hiccup
- :args {:tag {:value "script"}
-        :attrs {:value {}}
-        :children {:value
-                   ["document.addEventListener('DOMContentLoaded', "
-                    " function () { bindActionDispatch(document.body); });"]}}}
-```
+7. `:_contact-demo-page-handler` — one fn-def with
+   `:parent :html-page-handler` pinning `:title` /
+   `:page-body` / `:scripts`. That's the WHOLE page handler.
+8. `:_demo-contact-{get,post}-data`, `:_demo-contact-methods`,
+   `:demo-contact` — the method-map merge so GET and POST
+   share the `/demo/contact` path.
 
 ## Try it: extend the demo
 
@@ -190,6 +257,11 @@ Lessons 1–11 covered the graph model. Lesson 12 turns it on
 itself: every element on a user-facing page is a fn-def, the
 dispatch is graph-visible, the response is a fn-def too. The
 escape hatch for the 20% of behaviour the components don't
-cover (a custom hover effect, a one-off computed style) is the
-`:custom-script` block coming in user-sites Block 3 — see
-`docs/USER_SITES_PLAN.md`.
+cover (a custom hover effect, a one-off computed style) is
+Lesson 13's `:custom-script` block.
+
+Multi-tenancy — multiple users hosting their own sites on
+one graphden instance, with their own deploys, secrets, and
+auth-isolated routes — is a separate future phase. Today's
+mount-point is the single shared `:all` items list (you edit
+the EDN to add a route).

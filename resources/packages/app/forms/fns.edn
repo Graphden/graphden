@@ -66,12 +66,12 @@
                               "data-form-field" ""
                               "data-field-kind" "json"}]}}
 
-  ;; Block 3.3 — JS source body textarea. Same shape as `:_form-json`
-  ;; but `data-field-kind="text"` so the value round-trips as a plain
-  ;; string instead of being JSON.parse'd. Used by `:custom-script` /
-  ;; `:wrap-custom-script` / `:dispatch-custom` (user-sites Block 3).
-  ;; No syntax highlighting / no Monaco for v0 — see
-  ;; docs/USER_SITES_PLAN.md Block 3 open question.
+  ;; JS source body textarea. Same shape as `:_form-json`
+  ;; but `data-field-kind="text"` so the value round-trips as a
+  ;; plain string instead of being JSON.parse'd. Used by
+  ;; `:custom-script` / `:wrap-custom-script` / `:dispatch-custom`
+  ;; (the inline-JS escape hatch). No syntax highlighting / no
+  ;; Monaco — would be ~500 KB; revisit if/when bodies grow.
   {:name :_form-js-source
    :description "Multi-line textarea — the form for `:js-source` slots (escape-hatch JS bodies). Plain string, no JSON parsing."
    :parent :const

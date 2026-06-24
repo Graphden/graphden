@@ -49,11 +49,9 @@
    :args {:path "/" :handler :_editor-handler}
    :expects-effects #{:io}}
 
-  ;; The /demo/contact route entries live in app.user-site
-  ;; (Block 4.3 migration) — mounted via :user-site-routes
-  ;; rather than the graphden-owned :_base-routes, so the demo
-  ;; doubles as a working example of "a user route mounted
-  ;; through the user-site plumbing".                   ; reads classpath resources (HTML/JS/CSS)
+  ;; The /demo/contact route entry (`:demo-contact`) lives in
+  ;; app.contact-demo alongside its handlers; referenced
+  ;; directly from app.route-groups.all.
 
   ;; The editor JS/CSS bundles are SEPARATE responses (not inlined
   ;; into the HTML). The URLs carry `?v=<frontend-build-hash>` so the

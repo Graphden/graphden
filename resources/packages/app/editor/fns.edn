@@ -361,9 +361,35 @@
    :args {:paths :_graphden-runtime-js-paths}}
 
   {:name :_graphden-runtime-js-handler
-   :description "Ring handler for `GET /assets/graphden-runtime.js` — minimal runtime bundle for user-built pages. Same 1-year `immutable` cache headers as editor.js (hash-bust via `?v=` on the script tag)."
+   :description "Ring handler for `GET /assets/graphden-runtime.js` — minimal runtime bundle for graph-composed pages. Same 1-year `immutable` cache headers as editor.js (hash-bust via `?v=` on the script tag)."
    :parent :immutable-js-ok-response
    :args {:body :_graphden-runtime-js-body}}
+
+  ;; Reusable `<script>` tags + bundle list for graph-composed
+  ;; pages that need the dispatcher to be live. Bound to a page's
+  ;; `:scripts` slot via :graphden-runtime-scripts (one binding,
+  ;; two tags). See :html-page-route in app/page for the
+  ;; one-fn-def page-route template that pairs with these.
+
+  {:name :graphden-runtime-script-tag
+   :description "`<script src=\"/assets/graphden-runtime.js\">` — loads the graphden runtime bundle (dispatcher + built-in `submit-form` / `navigate` / `custom` handlers, see editor-runtime.js + editor-actions-builtin.js)."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:value {:src "/assets/graphden-runtime.js"}}
+          :children {:value []}}}
+
+  {:name :graphden-bootstrap-script
+   :description "Inline `<script>` calling `bindActionDispatch(document.body)` on DOMContentLoaded — required once per page so the runtime starts routing `data-action` clicks."
+   :parent :hiccup
+   :args {:tag {:value "script"}
+          :attrs {:value {}}
+          :children {:value ["document.addEventListener('DOMContentLoaded', function () { bindActionDispatch(document.body); });"]}}}
+
+  {:name :graphden-runtime-scripts
+   :description "Drop-in `:scripts` list — runtime bundle then dispatcher bootstrap. Bind to `:html-page-route` / `:html-page-handler` / `:html-page` `:scripts` slot when the page has buttons / forms wired through `:dispatch-action` / `:dispatch-custom`."
+   :parent :list
+   :args {:items [:graphden-runtime-script-tag
+                  :graphden-bootstrap-script]}}
 
   {:name :_editor-css-handler
    :description "Ring handler for `GET /assets/editor.css` — returns the editor stylesheet as `text/css` with `Cache-Control: public, max-age=31536000, immutable`."

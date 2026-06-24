@@ -1,7 +1,6 @@
-// Built-in action handlers — Block 2.4 of the user-sites plan
-// (docs/USER_SITES_PLAN.md). Two platform-provided handlers that
-// the component library's `:button` / `:link` etc. can target via
-// `:dispatch-action`:
+// Built-in action handlers — two platform-provided handlers
+// that the component library's `:button` / `:link` etc. can
+// target via `:dispatch-action`:
 //
 //   data-action="navigate"     → read `data-href`, set location
 //   data-action="submit-form"  → find nearest <form>, POST via fetch,
@@ -103,8 +102,8 @@ registerActionHandler('submit-form', _runSubmitForm);
 // custom — escape hatch for inline JS
 // =============================================================================
 //
-// User-sites Block 3.2. When the platform components can't express
-// a behaviour the user needs, a button can carry a `data-custom-
+// Escape hatch. When the platform components can't express a
+// behaviour the user needs, a button can carry a `data-custom-
 // handler` attribute with a JS body the runtime evaluates on
 // click. Composition (via :dispatch-custom in web.runtime):
 //

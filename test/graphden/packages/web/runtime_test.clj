@@ -1,11 +1,7 @@
 (ns ^:integration graphden.packages.web.runtime-test
   "Unit tests for the `web.runtime` package — server-side hiccup
    helpers that emit attrs the client-side `editor-runtime.js`
-   dispatcher routes via `data-action=\"…\"`.
-
-   Block 1.2 of the user-sites plan (docs/USER_SITES_PLAN.md):
-   single atom `:dispatch-action` today; subsequent blocks add
-   component fn-defs that compose it."
+   dispatcher routes via `data-action=\"…\"`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -68,7 +64,7 @@
 
 
 ;; =============================================================================
-;; :dispatch-custom — escape hatch DSL (Block 3.2)
+;; :dispatch-custom — escape hatch DSL
 ;; =============================================================================
 
 (deftest dispatch-custom-emits-action-and-handler-body-test

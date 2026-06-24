@@ -1,13 +1,13 @@
 // Editor Runtime — generic dispatcher + partial-loader primitives
-// shared between the editor and (eventually) user-built sites.
+// shared between the editor's row-actions popover, the contact-
+// demo page, and any future fn-def-built page that needs
+// `data-action="X"` click routing.
 //
-// Block 1 of the user-sites plan (docs/USER_SITES_PLAN.md): the
-// dispatch + fetch-and-swap pattern that grew up inside
-// editor-row-actions.js during the HTMX Phase-A migration is
-// extracted here as the platform building block. Future
-// components / partials register their `data-action` handlers via
-// `registerActionHandler`, then any partial fetched through
-// `loadPartial` automatically dispatches clicks to them.
+// The dispatch + fetch-and-swap pattern was extracted from
+// editor-row-actions.js during the HTMX Phase-A migration so
+// component fn-defs / partials register their `data-action`
+// handlers via `registerActionHandler`, then any partial fetched
+// through `loadPartial` automatically dispatches clicks to them.
 //
 // Public surface:
 //   - registerActionHandler(action, fn)

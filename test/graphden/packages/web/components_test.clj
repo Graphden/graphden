@@ -1,10 +1,9 @@
 (ns ^:integration graphden.packages.web.components-test
-  "Unit tests for the `web.components` starter component library —
-   Block 2 of the user-sites plan (docs/USER_SITES_PLAN.md).
+  "Unit tests for the `web.components` starter component library.
 
-   Each component is a fn-def over `:hiccup`; assertions here pin the
-   composed hiccup output so future renames / parent-swaps that change
-   the rendered shape fail loudly."
+   Each component is a fn-def over `:hiccup`; assertions here pin
+   the composed hiccup output so future renames / parent-swaps
+   that change the rendered shape fail loudly."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -60,7 +59,7 @@
 
 
 ;; =============================================================================
-;; Block 2.2 — form-input components
+;; Form-input components
 ;; =============================================================================
 
 (deftest input-renders-self-closing-test
@@ -130,7 +129,7 @@
 
 
 ;; =============================================================================
-;; Block 2.3 — layout/content components
+;; Layout/content components
 ;; =============================================================================
 
 (deftest link-renders-href-and-label-test
@@ -176,7 +175,7 @@
 
 
 ;; =============================================================================
-;; Block 3 — :custom-script + :wrap-custom-script (escape hatch)
+;; :custom-script + :wrap-custom-script (escape hatch)
 ;; =============================================================================
 
 (deftest custom-script-returns-body-verbatim-test

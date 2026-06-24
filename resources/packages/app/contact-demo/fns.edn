@@ -1,21 +1,20 @@
-;; Contact-form demo — Block 2.5 of the user-sites plan
-;; (docs/USER_SITES_PLAN.md), refactored in Block 4.3 to use the
-;; `app.user-site` templates (`:user-page-handler`,
-;; `:user-runtime-scripts`) instead of hand-rolling the page +
-;; runtime-script chain.
+;; Contact-form demo — graph-composed page using
+;; `web.components` + `web.runtime` + the built-in :submit-form
+;; action handler. End-to-end proof that the components +
+;; dispatcher pipeline works for a real interactive page.
 ;;
 ;; Routes shipped:
-;;   GET  /demo/contact → :user-page-handler (via merged method-map)
+;;   GET  /demo/contact → :html-page-handler (via merged method-map)
 ;;   POST /demo/contact → :_contact-demo-post-handler
 ;;
-;; Mounted under `app.route-groups.all` via `:user-site-routes`
-;; (Block 4.2). Visit the page, type anything in the email +
-;; message fields, click Send — the form POSTs via fetch
-;; (`submit-form` handler), and the server's thanks partial is
-;; swapped into the `#contact-result` div with no full-page
-;; reload. The "Wave at me" button demonstrates the
-;; `:dispatch-custom` escape hatch — inline JS body evaluated on
-;; click with `btn`, `event`, `host` in scope.
+;; Mounted in `app.route-groups.all` directly as `:demo-contact`.
+;; Visit the page, type anything in the email + message fields,
+;; click Send — the form POSTs via fetch (`submit-form`
+;; handler), and the server's thanks partial is swapped into
+;; the `#contact-result` div with no full-page reload. The
+;; "Wave at me" button demonstrates the `:dispatch-custom`
+;; escape hatch — inline JS body evaluated on click with
+;; `btn`, `event`, `host` in scope.
 
 
 {:namespace "app.contact-demo"
@@ -124,22 +123,21 @@
                      :_contact-demo-custom-button]}}
 
   ;; ---------------------------------------------------------------------------
-  ;; GET HANDLER — via :user-page-handler template
+  ;; GET HANDLER — via :html-page-handler template
   ;; ---------------------------------------------------------------------------
   ;;
-  ;; Block 4.3 refactor: the previous bespoke chain
-  ;; (`:_contact-demo-{runtime-script,bootstrap-script,scripts,
-  ;; page,rendered-page,page-handler}` — six fn-defs) collapses
-  ;; to a single `:parent :user-page-handler` declaration that
-  ;; pins `:title` / `:page-body` / `:scripts` and inherits the
-  ;; rest from `app.user-site` templates.
+  ;; Six fn-defs (the page + render-hiccup + html-ok-response +
+  ;; the two script tags + the script bundle) collapse to one
+  ;; `:parent :html-page-handler` declaration that pins
+  ;; `:title` / `:page-body` / `:scripts` and inherits the rest
+  ;; from `app.page` and `app.editor` templates.
 
   {:name :_contact-demo-page-handler
-   :description "GET /demo/contact handler — full HTML page via :user-page-handler with the runtime scripts wired in."
-   :parent :user-page-handler
+   :description "GET /demo/contact handler — full HTML page via :html-page-handler with the graphden runtime scripts wired in."
+   :parent :html-page-handler
    :args {:title "Contact (Graphden demo)"
           :page-body :_contact-demo-page-body
-          :scripts :user-runtime-scripts}}
+          :scripts :graphden-runtime-scripts}}
 
   ;; ---------------------------------------------------------------------------
   ;; POST HANDLER — returns the thanks partial
@@ -175,8 +173,8 @@
   ;;
   ;; Reitit needs a single entry per path; for GET + POST on
   ;; `/demo/contact` we build a method-map per method then
-  ;; merge — same shape as `:api-branches-root`. Mounted via
-  ;; `:user-site-routes` in `app.user-site`.
+  ;; merge — same shape as `:api-branches-root`. Mounted
+  ;; directly in `app.route-groups.all`'s items.
 
   {:name :_demo-contact-get-data
    :description "Method-data for GET on `/demo/contact`. Combined into `:demo-contact`."
@@ -196,6 +194,6 @@
    :args {:maps [:_demo-contact-get-data :_demo-contact-post-data]}}
 
   {:name :demo-contact
-   :description "Multi-method route entry `[\"/demo/contact\" {:get … :post …}]` for the contact-form demo. Mounted from `:user-site-routes` in `app.user-site`."
+   :description "Multi-method route entry `[\"/demo/contact\" {:get … :post …}]` for the contact-form demo. Mounted directly in `app.route-groups.all`."
    :parent :list
    :args {:items ["/demo/contact" :_demo-contact-methods]}}]}

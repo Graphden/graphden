@@ -117,7 +117,7 @@ failures`. `system.core/sync-fn-entities-from-packages!` calls
 The 10 entries map 1:1 to the `:get :parsed :entity-type → :name`
 chain through shared `:parsed` slot identity. Closing them requires
 Phase α' (slot-id-aware caller-context propagation) or Phase γ
-(row polymorphism) — see `docs/TYPE_SYSTEM_ROADMAP.md` for the
+(row polymorphism) — see `docs/TYPE_SYSTEM_DECISIONS.md` for the
 architectural tradeoffs and recommended path.
 
 ## 2026-06-16 — sweep regressed to 12 (control-flow narrowing gap)

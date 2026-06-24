@@ -1359,5 +1359,67 @@ upstream nil-check at runtime). Sweep at zero;
 `allowed-type-check-failures` is `#{}` and the Phase E hard-gate
 stays armed both directions. See `docs/TYPE_CHECK_BACKLOG.md`
 § 2026-06-16 entries for the closure ledger, and
-`docs/TYPE_SYSTEM_ROADMAP.md` for the deferred Phase #170 /
-Phase γ design notes.
+`docs/TYPE_SYSTEM_DECISIONS.md` for the rejected alternative
+phases (β / γ / #170 v2) with rationale.
+
+### Phase 10: Control-flow narrowing through `:if`/`:cond` guards (Phase #170 v1) ✅
+
+A focused subset of flow-sensitive narrowing shipped:
+`:if` / `:cond` whose `:test` ref (or clause-test ref) walks
+to a root `:some?` / `:nil?` whose `:value` slot is bound to
+a fn-name `:_T` get treated as control-flow guards. The
+non-null narrowing flows into the taken branch's transitive
+ref-tree.
+
+Implementation (`src/graphden/types/check.clj`):
+
+- `build-ref-return-overrides` — for each fn-def, collect any
+  `:if` / `:cond` guards whose root predicate matches the
+  recognised shapes (`:some?` / `:nil?` over a bare fn-ref).
+- `if-branch-overrides`, `cond-branch-overrides` — per-branch
+  narrowing maps for the `:then` / `:else` (`:if`) or per-
+  clause result (`:cond`).
+- `*ref-return-overrides*` dynvar — bound in Pass 3 alongside
+  `*caller-narrowings*` (`check-fn-def-with-narrowings!`).
+- `ref-return-narrowed` — every site that historically read
+  `:return` straight off the registry while type-checking a
+  binding now funnels through here:
+  `bindings-info-for-rule`'s `{:ref ...}` branch,
+  `ref-binding?` actual computation, sequence-item lookup,
+  and the vector-binding `:fn-ref` / `:ref-map` shape readers.
+
+Verified by removing the `:type :text` assertion on
+`:_list-exec-limit-parsed-body` — sweep stays at 0, full test
+suite green.
+
+**Boundaries** — what v1 does NOT cover (composed guards,
+record-field projections, `:and`/`:or` decomposition): each
+remaining site uses an explicit `:type T` author-assertion
+paired with a one-line `;; <invariant>` comment. The decision
+to NOT extend recognition (v2) is recorded in
+`docs/TYPE_SYSTEM_DECISIONS.md` — explicit assertion + comment
+beats implicit inference per project principle #3.
+
+### Author `:type T` assertions — the canonical pattern
+
+The seven sites below use explicit `:type T` overrides on
+binding forms to encode runtime invariants the type-checker
+can't yet trace. Each is sound (the invariant holds because
+of an upstream validation guard); each has a comment at the
+binding site naming the guard.
+
+| site | guard shape | reason inference can't cover |
+|---|---|---|
+| `:_bearer-token-raw` (`:ref :authorization-header :type :text`) | `:_has-bearer-prefix?` `:str-starts-with?` shim | non-`:some?`/`:nil?` predicate |
+| `:_list-exec-limit-less-than-1?` (`:ref :_list-exec-limit-parsed :type :int`) | `:or` short-circuit `:_list-exec-limit-parsed :nil?` | `:or`-shaped guard not yet recognised |
+| `:_list-exec-by-fn-version-id` (`:fn-id :type :uuid` via `:get :parsed`) | `:_list-exec-no-anchor? :and [...]` | `:and` of `:nil?` guards through field projection |
+| `:_seq-remove-apply-do-delete` (`:id :type :uuid` via `:get :parsed`) | `:nil? (get parsed :item-id)` | per-use-site anon split |
+| `:_create-branch-apply-row` (`:branch-name :type :text` via `:get :parsed`) | `:_blank?` (`:str-blank?` shim) | non-`:some?`/`:nil?` predicate |
+| `:_inline-bind-target-fn-row` / `:_delete-secret-fn-row` (`:id :type :uuid`) | validation upstream | per-use-site anon split |
+| `:_update-id-uuid` (`:ref :type :uuid` in `web/crud`) | parse-uuid + `:nil?` guard at caller | per-use-site anon split |
+
+Adding a new site follows the same recipe: when the sweep
+fails on a new fn-def because the checker can't trace a
+runtime guard, add `:type T` to the binding form with a
+one-line comment naming the guard. Phase E catches it loudly;
+fix is a 30-second edit.

@@ -101,7 +101,10 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles, rationale, module mapping | Before making architectural decisions |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical details, execution model, examples | When implementing features |
 | [docs/PACKAGES.md](docs/PACKAGES.md) | Package system, module structure, loading | When adding base-fns or fn-defs |
-| [docs/TYPES.md](docs/TYPES.md) | Type system design & semantics | When working with arg types |
+| [docs/TYPES.md](docs/TYPES.md) | Type system design & semantics — type hierarchy, inference, narrowing, refinements, variants, control-flow narrowing (Phase #170 v1), canonical author `:type T` assertion sites | When working with arg types |
+| [docs/TYPE_SYSTEM_DECISIONS.md](docs/TYPE_SYSTEM_DECISIONS.md) | ADR for the type system — current sweep-at-zero state, the root architectural tension (slots are global identities vs structurally-different flows), three alternatives (α/β/γ), why β was attempted + reverted, why #170 v2 + γ were rejected, outcome table | Before proposing a type-system change — read this first to avoid retrying paths that already closed |
+| [docs/TYPE_CHECK_BACKLOG.md](docs/TYPE_CHECK_BACKLOG.md) | Historical ledger of per-failure closures during the sweep-to-zero work | When tracing the history of a specific type-check fix |
+| [docs/PERF_NOTES.md](docs/PERF_NOTES.md) | Executor hot-path performance investigation — current measurements within budget, "smear not hot frame" diagnosis from 2026-05, two attempted point-fixes that didn't help (one made things slower), 4-step real-fix sketch held in reserve | Before allocating multi-commit performance work — re-benchmark first; the 2026-05 flame-graph predates eager-compile |
 | [docs/LAYOUT.md](docs/LAYOUT.md) | Graph-editor layout pipeline (Stages 1–7) | When touching layout impl or editor frontend |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |

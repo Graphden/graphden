@@ -2545,7 +2545,7 @@
 ;;
 ;; The set of fn-def names that are KNOWN to fail the type-check
 ;; sweep due to architectural gaps documented in
-;; `docs/TYPE_SYSTEM_ROADMAP.md` and `docs/TYPE_CHECK_BACKLOG.md`.
+;; `docs/TYPE_SYSTEM_DECISIONS.md` and `docs/TYPE_CHECK_BACKLOG.md`.
 ;; Each name here is a piece of known debt — runtime is unaffected,
 ;; the editor's effect/return strips for these names may be missing.
 ;;
@@ -2795,7 +2795,7 @@
 ;; over multiple `:nil?`s, custom `_X-blank?` shims with `:get` +
 ;; `:str-blank?` chains) still need `:type T` author-assertions. The
 ;; broader path-sensitive analysis is deferred — see
-;; `docs/TYPE_SYSTEM_ROADMAP.md`.
+;; `docs/TYPE_SYSTEM_DECISIONS.md`.
 
 (defn- root-of-ref
   "Walk `:primary-parent` chain to the root base-fn. Returns the root

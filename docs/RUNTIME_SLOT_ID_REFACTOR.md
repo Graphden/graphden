@@ -119,13 +119,21 @@ Acceptance: walker tests green; `bb test` green (no behaviour change yet — wal
 
 Acceptance: all tests green; public API behavior is observably unchanged in Phase 2.
 
-**Phase 3 — Per-ref slot-id translation**
+**Phase 3 — Per-ref slot-id translation (mostly obsoleted by the transitive walker)**
 
-Compile-time: for each `:ref` binding (and `:seq` :ref items), build translation `{callee-slot-id → caller-slot-id}` via name match between caller's walker entries and callee's walker entries.
+Original plan: build `{callee-slot-id → caller-slot-id}` per `:ref` binding + `:seq :ref` item, apply at the ref-call boundary; replaces today's name-keyed `build-ref-renames`.
 
-Runtime: at each ref call, translate caller's fa to callee's slot-id namespace. Replaces today's `build-ref-renames` (name → name).
+Outcome: the transitive walker shipped in Phase 1 (`deep-free-ext-entries`) emits CHAIN-LEAF slot-ids for every surface free arg, including ones reached by walking into ref-targets. Chain-leaf slot-ids are invariant — when F refs R, F's walker entries for R-surface use the SAME slot-ids R's own walker would emit. The Phase 2 boundary translator writes the value under those slot-ids directly. So a per-ref slot-id translation table is structurally always identity-skipped — it has nothing to copy.
 
-Acceptance: all tests green; inner consumers receive correctly-routed values regardless of ext-name collisions.
+This contrasts with the legacy name-keyed `build-ref-renames`, which IS load-bearing today: names CHANGE through renames, so caller's `fa[:outer]` has to be copied to callee's `fa[:inner]` at each ref call. Slot-ids don't change — the walker's `slot-id` field for an entry is the consumer's `bnd.slot-id` regardless of whose ext-name it surfaces under.
+
+What landed:
+
+- `build-ref-slot-renames callee-fn-id caller-fn-id lookups` exists in `renames.clj` with tests covering the empty / identity-skip / no-coverage branches. It's the structural reference for Phase 4 to read if any future codepath needs slot translation outside the boundary translator.
+- No runtime wiring — every code path that calls a child closure has its fa populated by the boundary translator first (via `cr/execute` or `make-single-arg-callable`'s inner closure), so per-ref translation is dead weight.
+- Today's name-keyed `build-ref-renames` stays in place until Phase 4 retires it alongside the name-keyed reader cutover.
+
+Acceptance: all tests green; runtime behavior unchanged; the helper is in place for Phase 4 if needed.
 
 **Phase 4 — Reader/writer cutover**
 

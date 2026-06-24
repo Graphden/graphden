@@ -895,6 +895,61 @@
     (merge binding-renames cross-tree-renames)))
 
 
+(defn build-ref-slot-renames
+  "Slot-id-keyed sibling of `build-ref-renames` — Phase 3 of the
+   slot-id-keyed runtime refactor (docs/RUNTIME_SLOT_ID_REFACTOR.md).
+
+   For ref R called from F, produce `{R-slot-id → F-slot-id}`
+   propagating value entries by ext-name match between R's surface
+   and F's surface.
+
+   - Walks R's surface via `deep-free-ext-entries` — each entry is
+     `{:ext-name K :slot-id chain-leaf-sid}` (slot-id is what R's
+     inner consumers actually read from `fa` at runtime).
+   - Walks F's surface the same way; group F's entries by
+     `:ext-name`.
+   - For each R entry, find F entries with the same ext-name. If F
+     ALREADY carries the same slot-id (the common case — F's walker
+     transitively included R's chain-leaf slot via its non-HOF ref
+     walk), no translation row is needed; F's fa already has the
+     value under that slot-id.
+   - Otherwise, emit `R-slot-id → first-F-slot-id`. F's slot-id is
+     the closest caller-side entry that semantically maps to the
+     same surface name.
+
+   Phase 3 is ADDITIVE: the runtime applies these translation rows
+   AND keeps the name-keyed `build-ref-renames` path. Phase 4 (reader
+   cutover) flips `arg-builder :free` to slot-id reads and the
+   name-keyed path retires. Until then, the slot-id rows are dead
+   weight for current readers but in place for Phase 4 to consume."
+  [callee-fn-id caller-fn-id lookups]
+  (let [callee-entries (deep-free-ext-entries callee-fn-id lookups)
+        caller-entries (deep-free-ext-entries caller-fn-id lookups)
+        caller-by-name (group-by :ext-name caller-entries)
+        caller-sids (into #{} (map :slot-id) caller-entries)]
+    (reduce (fn [acc {:keys [ext-name slot-id]}]
+              (cond
+                ;; F's walker already covers this slot-id directly
+                ;; (transitively bubbled R's chain-leaf up to F's
+                ;; surface). The Phase 2 boundary translator wrote
+                ;; the value under callee-sid already — no
+                ;; translation row required.
+                (contains? caller-sids slot-id) acc
+
+                ;; Otherwise pick the first F-side entry that
+                ;; matches by name and emit the slot-id mapping.
+                ;; "First" is good enough here: when multiple F-side
+                ;; entries share an ext-name they were all written
+                ;; with the same caller value at the Phase 2
+                ;; boundary, so any pick is equivalent.
+                :else
+                (if-let [m (first (get caller-by-name ext-name))]
+                  (assoc acc slot-id (:slot-id m))
+                  acc)))
+            {}
+            callee-entries)))
+
+
 (defn apply-renames
   "Apply `{R-name → F-name}`: for each entry, expose F's value under
    R's name and drop the F-name key. Extra keys pass through."

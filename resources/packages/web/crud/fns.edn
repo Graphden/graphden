@@ -2074,7 +2074,7 @@
 
   {:name :_delete-secret-leaf-identities
    :parent :storage-query-identities
-   :args {:entity-type {:value "fn"}}}
+   :args {:entity-type {:value "fn"} :where {:value {}}}}
 
   {:name :_delete-secret-leaf-filtered
    :parent :filter
@@ -2165,7 +2165,7 @@
 
   {:name :_delete-fn-ref-bindings-identities
    :parent :storage-query-identities
-   :args {:entity-type {:value "binding"}}}
+   :args {:entity-type {:value "binding"} :where {:value {}}}}
 
   {:name :_delete-fn-ref-binding-eq?
    :parent :equal?
@@ -2188,7 +2188,7 @@
 
   {:name :_delete-fn-ref-items-identities
    :parent :storage-query-identities
-   :args {:entity-type {:value "binding-list-item"}}}
+   :args {:entity-type {:value "binding-list-item"} :where {:value {}}}}
 
   {:name :_delete-fn-ref-item-eq?
    :parent :equal?

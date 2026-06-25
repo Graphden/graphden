@@ -1075,7 +1075,8 @@
 
   {:name :_list-services-fn-identities
    :parent :storage-query-identities
-   :args {:entity-type {:value "fn"}}}
+   :args {:entity-type {:value "fn"}
+          :where {:value {}}}}
 
   {:name :_list-services-fn-id-name-pair
    :description "HOF callback per fn-row — emit a `[:id :name]` 2-vec so `:into {}` folds the sequence into a `{id → name}` index."

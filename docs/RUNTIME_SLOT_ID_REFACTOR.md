@@ -188,11 +188,10 @@ Acceptance: `bb test` green; `app/page/fns.edn` `:as :page-body` removed (page w
 **Phase 6 — Workaround sweep**
 
 - `app/page/fns.edn`: `:as :page-body` → `:as :body` ✓ (landed with Phase 5)
-- `:where {:value {}}` defensive pins on `:storage-query-identities` — 11 sites removed (commit `c49f577c`).
 - Other `:as` workarounds in feedback memories:
   - `feedback_callable_slot_inline_literal` — STAYS. Two `:on-throw {:parent :const :args {:value nil}}` wraps in `app/secrets/fns.edn` + `app/execution/fns.edn`. Type-check level constraint orthogonal to runtime slot-id work — `[:fn :any]`-typed slots reject bare literal bindings (`types/check.clj:1598-1603`). Self-documenting at the call site.
   - `feedback_assoc_slot_named_map` — CLOSED at sync time by `slot-resolution`'s orphan-slot validator (`slot-resolution.clj:426` throws `:packages/orphan-slot-binding`). Not a workaround pattern.
-  - `feedback_optional_slot_free_arg_leak` — CLOSED with the pin sweep above.
+  - `feedback_optional_slot_free_arg_leak` — STAYS. `:where {:value {}}` defensive pin on `:storage-query-identities` consumers is load-bearing. Attempted to sweep 11 sites in commit `c49f577c`; `bb test` + smoke green; `bb test-e2e` reproduced the original failure on `GET /partials/secrets-panel` (`Unknown field 'request-method' in where clause`). Pins restored. Phase 5 HOF translation only covers HOF-boundary slot routing — non-HOF env-binding closure-capture paths still leak named free args by closure default.
 
 ### 7. What's shipped, what's not
 
@@ -208,11 +207,10 @@ An alternative was considered (env-builder slot-id-only + cross-fn rename slot-i
 - [x] Phases 1–5 landed (commits `21b02a65` walker → `d08c2f68` translator → `ff5b02b3` Phase 3 outcome (no helper) → `b446f3c7` rename-aware readers → `38c3fc6e` parser disambiguation → `ac390c32` HOF wrap-time translation → `dcc11101` thunk-skip + const-wrap revert)
 - [x] `bb test` green (1600 / 6351 / 0 — adds the new `types-api-graph-test`)
 - [x] page_test passes with `:body` (no `:as :page-body`)
-- [x] Workaround sweep (`:where {:value {}}` defensive pins, 11 sites) — commit `c49f577c`
 - [x] `feedback_104_*` memory archived as closed
 - [x] `docs/ARCHITECTURE.md` § Runtime fa documents the hybrid surface
-- [ ] `bb ci` green (run before merging)
-- [ ] All e2e tests green (run before merging)
+- [x] `bb ci` green (16/17 + cider-nrepl bump `ba7a4bfd` closes the 17th)
+- [ ] `bb test-e2e` green (pin sweep revert in progress; see § Phase 6 for the empirical lesson)
 
 ### 9. Out of scope
 

@@ -549,13 +549,10 @@
         (fn-id args)))
     (let [reg (registry ctx)
           closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
-          ;; Phase 2: translate caller's name-keyed args into the
-          ;; dual-key shape (slot-id + name). The name half keeps
-          ;; today's readers working; the slot-id half is what
-          ;; Phase 3+ will route through per-ref translation. The
-          ;; immediate observable effect is that ambiguous-name calls
-          ;; now throw `:execution-error/ambiguous-arg-name` instead
-          ;; of silently mis-routing through the name-keyed `fa`.
+          ;; Translate caller's name-keyed args into the dual-key
+          ;; shape (slot-id + name). Phase 4 readers prefer slot-id;
+          ;; the name half covers env-binding / lambda-arg / rename-
+          ;; alias paths that still flow under name keys today.
           translated (translate-named-args fn-id (or named-args {})
                                            (lookups-for-ctx ctx))]
       ;; compile-eager closure signature: `(fn [free-args ctx])`.
@@ -589,10 +586,12 @@
    for HOF impls that may receive either a fn-id or an already-built
    callable.
 
-   Phase 2: translates the caller's name-keyed map through
+   Translates the caller's name-keyed map through
    `translate-named-args` before invoking the closure, mirroring
-   `execute`'s public boundary. Ambiguous names throw
-   `:execution-error/ambiguous-arg-name`."
+   `execute`'s public boundary — slot-id keys get written for every
+   walker entry matching the caller's name, the original name key
+   stays so name-keyed paths (env-binding, lambda-args,
+   `apply-rename-aliases`) still find values."
   [ctx fn-id]
   (if (fn? fn-id)
     fn-id

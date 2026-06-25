@@ -112,10 +112,13 @@
      name when an ancestor rename applies, otherwise the inner's own
      slot name.
    - Multiple entries with the SAME `:ext-name` are allowed — that is
-     precisely the runtime collision case (#104 `:body`). Phase 2
-     decides what to do at the public API boundary (raise
-     `:execution-error/ambiguous-arg-name` when caller passes the
-     collided name).
+     precisely the runtime collision case (#104 `:body`).
+     `translate-named-args` writes the caller's value under EVERY
+     matching slot-id at the public boundary; Phase 5 HOF translation
+     (`build-hof-translation`) bridges past HOF surfaces. The parser-
+     side disambiguation (`resolve-slot-owner`'s type pass) decides
+     which slot wins for fn-def-level bindings (e.g. `:_contact-demo-
+     page-handler :body :_contact-demo-page-body`).
    - Deduped by `:slot-id` only: two inheritance paths reaching the
      same chain-leaf slot collapse into one entry (same underlying
      consumer); two distinct chain-leaf slots sharing a name do NOT

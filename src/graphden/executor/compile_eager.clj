@@ -206,14 +206,29 @@
        forced before the consumer sees it.
      - `:value` present — literal value.
      - `:ref-fn-id` — invoke pre-compiled child callable.
-     - everything nil — literal `nil`."
-  [item child-callables lookups]
+     - everything nil — literal `nil`.
+
+   `owner-fn-id` is the fn-id whose seq binding contains this item.
+   The positional `{:as :name}` resolves to that owner's OWN rename
+   slot (parser creates one per rename); the reader indexes `fa`
+   by that rename slot's id — pure slot-id, no name fallback."
+  [item child-callables lookups owner-fn-id]
   (cond
     (and (map? (:value item))
          (:as (:value item))
          (not (:literal item)))
-    (let [k (keyword (:as (:value item)))]
-      (fn [fa _ctx] (force-value (get fa k))))
+    (let [k (keyword (:as (:value item)))
+          ;; Phase 4 — rename-aware slot-id from owner's own rename
+          ;; slot for this `:as` name. Falls back to name fallback
+          ;; below when the rename slot doesn't exist (some seq
+          ;; binding shapes don't produce slot rows via parser).
+          sid (some-> (get (:slot-by-fn-name lookups) [owner-fn-id k])
+                      :id)]
+      (if sid
+        (fn [fa _ctx]
+          (let [v (get fa sid ::miss)]
+            (force-value (if (identical? v ::miss) (get fa k) v))))
+        (fn [fa _ctx] (force-value (get fa k)))))
 
     (some? (:value item))
     (constantly (:value item))
@@ -239,7 +254,7 @@
          the lambda-param's name. `:map`'s `:func`, `:filter`'s `:pred`.
    - 2+ → map-callable: caller passes `{lambda-name → value}`.
 
-   `invoke-with` is the bridge: it gets a Clojure map of the
+   `invoke-with` is the bridge: it gets a NAME-keyed map of the
    per-call lambda values (`nil` for the 0-arg variant) and returns
    the callable's return value. All three call sites in the executor
    — root-binding `hof-wrap`, env-binding HOF case, and the public
@@ -256,7 +271,9 @@
 (defn- hof-wrap
   "Root-binding HOF: returns a `(fn [fa ctx])` whose call yields the
    callable. The callable closes over `fa` (the wrap-time snapshot of
-   the caller's env)."
+   the caller's env). lambda-args are merged name-keyed; the slot-id
+   readers in R fall back to name lookups when no slot-id key is
+   present, so the dynamic lambda values flow correctly."
   [child lambda-params]
   (fn [fa ctx]
     (make-shape-callable lambda-params
@@ -316,13 +333,37 @@
    `cond-fn` that step past unforced items via `nnext`."
   [fn-id
    {:keys [kind ext-name value ref-id is-fn produces-callable? ref-renames
-           items lazy-seq? slot-id path]
+           items lazy-seq? slot-id path binder-fn-id]
     :as bnd}
    child-callables
    lookups]
   (case kind
     :value (constantly value)
-    :free  (let [k ext-name] (fn [fa _ctx] (get fa k)))
+    ;; Phase 4 — slot-id reader with name fallback.
+    ;;
+    ;; The rename-aware reader id (`l/effective-reader-slot-id`) is
+    ;; the PRIMARY key: two inline-anons of the same base-fn with
+    ;; their own `{:as :X}` renames have the SAME chain-leaf but
+    ;; DIFFERENT rename-slot ids, so each anon's reader finds its
+    ;; own caller value via slot-id without name collision.
+    ;;
+    ;; Name fallback covers paths that still write `fa` by name:
+    ;;   - env-builder writes `fa[env-name]` (per-fn synthetic
+    ;;     shared computations like `:_request-parsed`)
+    ;;   - hof-wrap's `make-shape-callable` merges `lambda-args`
+    ;;     under lambda-param names (per-call values)
+    ;;   - `build-ref-renames` slow path copies caller→callee names
+    ;; These name keys flow through the same `fa` and the reader's
+    ;; fallback finds them when there's no slot-id key. The fa is
+    ;; thus hybrid: slot-id keys distinguish structural ambiguity at
+    ;; the boundary translator, name keys cover dynamic flows. This
+    ;; is the architecture, not a transitional kludge — the two key
+    ;; spaces serve different needs.
+    :free  (let [sid (l/effective-reader-slot-id fn-id slot-id lookups)
+                 k ext-name]
+             (fn [fa _ctx]
+               (let [v (get fa sid ::miss)]
+                 (if (identical? v ::miss) (get fa k) v))))
     :secret-value
     (let [p path]
       (fn [_fa ctx]
@@ -377,7 +418,9 @@
                                    fa ref-renames)
                         ctx))))))
     :seq
-    (let [item-builders (mapv #(seq-item-builder % child-callables lookups) items)]
+    (let [item-builders (mapv #(seq-item-builder % child-callables lookups
+                                                 (or binder-fn-id fn-id))
+                              items)]
       (if lazy-seq?
         (fn [fa ctx]
           (map (fn [b] (delay (b fa ctx))) item-builders))

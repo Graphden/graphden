@@ -544,10 +544,23 @@
                                      (own-rename-chain-map fid lookups))]
                   (doseq [bnd bindings]
                     (case (:kind bnd)
-                      :free (let [sid (:slot-id bnd)]
+                      :free (let [chain-leaf (:slot-id bnd)
+                                  ;; Phase 4 — rename-aware reader
+                                  ;; slot-id. Two inline-anons of the
+                                  ;; same base-fn each with their own
+                                  ;; `{:as :X}` rename have the SAME
+                                  ;; chain-leaf (`bnd.slot-id`) but
+                                  ;; DIFFERENT rename slot ids on the
+                                  ;; renaming fns. The reader needs to
+                                  ;; index `fa` by the rename slot id
+                                  ;; — not the chain-leaf — so each
+                                  ;; anon's caller value lands in its
+                                  ;; own cell.
+                                  sid (l/effective-reader-slot-id
+                                        fid chain-leaf lookups)]
                               (when-not (next-covered sid)
                                 (emit! {:ext-name (or (rename-name-for
-                                                        sid next-renames fid)
+                                                        chain-leaf next-renames fid)
                                                       (:ext-name bnd))
                                         :slot-id sid})))
                       :ref  (when-not (:is-fn bnd)

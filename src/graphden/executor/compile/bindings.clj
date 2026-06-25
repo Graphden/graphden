@@ -224,6 +224,13 @@
 
       (list-binding? b)
       {:kind :seq :base-name base-name :ext-name ext-name :slot-id slot-id
+       ;; `:binder-fn-id` — the fn that OWNS this seq binding row
+       ;; (the closest ancestor that wrote `:items [...]`). seq-item
+       ;; positional `{:as :name}` renames create slots on THAT fn
+       ;; via the parser, so resolving the `:as`-name's slot-id at
+       ;; runtime needs this fn-id (not the iterating fn-id, which
+       ;; may be a descendant that just inherits the binding).
+       :binder-fn-id (:fn-id b)
        :items (list-items-for fn-id slot-id lookups)
        :lazy-seq? (contains? (or lazy-seq-args #{}) base-name)}
 

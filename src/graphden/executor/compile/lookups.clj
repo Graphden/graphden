@@ -281,3 +281,41 @@
                       (inheritance-chain* fn-id lookups))]
     (or renamed
         (some-> (get-in slot-map [slot-id :name]) keyword))))
+
+
+(defn effective-reader-slot-id
+  "Slot-id sibling of `rename-for-slot` — Phase 4 of the slot-id-keyed
+   runtime refactor.
+
+   For a `:free` reader at `fn-id` reading the chain-leaf
+   `slot-id`, returns the slot-id the runtime's `fa` actually carries
+   that value under. Walks the inheritance chain (closest-first); the
+   first own-slot whose `source-slot-id` chain transitively reaches
+   `slot-id` wins — its OWN id is the reader key. Falls back to the
+   chain-leaf itself.
+
+   Why this matters for collision-avoidance: two inline-anons of the
+   same base-fn (e.g. `{:parent :assoc :args {:value {:as :src}}}`
+   and `{:parent :assoc :args {:value {:as :alt}}}`) both have the
+   binding's `:slot-id` field = `:assoc.value-sid` (chain-leaf is
+   shared across all `:assoc` instances). Pure chain-leaf reading
+   collides — both inline-anons would index the same `fa` cell.
+
+   The rename binding creates a NEW slot row on the anon (parser
+   Phase 6c) whose `source-slot-id` chains back to `:assoc.value-sid`.
+   That rename slot has a UNIQUE id. With this resolver, each
+   anon's reader gets its own rename slot id as the `fa` key, and
+   the caller's `:src` / `:alt` values land in DISTINCT cells.
+
+   Mirrors `rename-for-slot`'s walk but returns `:id` instead of
+   `:name`."
+  [fn-id slot-id {:keys [slot-map fn-slots-by-fn] :as lookups}]
+  (or (some (fn [fid]
+              (let [own-slots (->> (get fn-slots-by-fn fid [])
+                                   (keep #(get slot-map (:slot-id %))))]
+                (some-> (first (filter #(rename-chain-reaches?
+                                          % slot-id slot-map)
+                                       own-slots))
+                        :id)))
+            (inheritance-chain* fn-id lookups))
+      slot-id))

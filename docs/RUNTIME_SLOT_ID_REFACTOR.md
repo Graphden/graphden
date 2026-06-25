@@ -127,13 +127,9 @@ Outcome: the transitive walker shipped in Phase 1 (`deep-free-ext-entries`) emit
 
 This contrasts with the legacy name-keyed `build-ref-renames`, which IS load-bearing today: names CHANGE through renames, so caller's `fa[:outer]` has to be copied to callee's `fa[:inner]` at each ref call. Slot-ids don't change — the walker's `slot-id` field for an entry is the consumer's `bnd.slot-id` regardless of whose ext-name it surfaces under.
 
-What landed:
+Outcome: no helper, no wiring. The transitive walker (`deep-free-ext-entries`) makes per-ref slot-id translation always identity-skip — there's nothing for it to copy. The name-keyed `build-ref-renames` stays as the load-bearing cross-fn cascade path. An earlier `build-ref-slot-renames` scaffold + tests was deleted alongside the Phase 5 ext cleanup (see acceptance note below).
 
-- `build-ref-slot-renames callee-fn-id caller-fn-id lookups` exists in `renames.clj` with tests covering the empty / identity-skip / no-coverage branches. It's the structural reference for Phase 4 to read if any future codepath needs slot translation outside the boundary translator.
-- No runtime wiring — every code path that calls a child closure has its fa populated by the boundary translator first (via `cr/execute` or `make-single-arg-callable`'s inner closure), so per-ref translation is dead weight.
-- Today's name-keyed `build-ref-renames` stays in place until Phase 4 retires it alongside the name-keyed reader cutover.
-
-Acceptance: all tests green; runtime behavior unchanged; the helper is in place for Phase 4 if needed.
+Acceptance: no code added.
 
 **Phase 4 — Rename-aware slot-id readers (hybrid fa)**
 
@@ -187,67 +183,36 @@ What DIDN'T flip:
 - `env-builder` still writes by **name only** (today's behaviour). The earlier attempt to dual-write slot-id alongside the name caused stack overflows in `:list-fn-versions`-style chains: when an env-binding's value is a thunk that calls `call-with-cache` on a ref, the slot-id write makes inner readers find the same thunk via slot-id key instead of falling back to name; the `force-value` re-enters the chain. Single-write (name) keeps the existing semantics intact while HOF translation handles the cross-boundary slot-id propagation.
 - Cross-fn slot-id rename cascades (e.g. `:method-map :handler` → `:assoc-handler :handler`) — still use name-fallback via `apply-rename-aliases`. Translating them to slot-ids needs env-builder slot-id writes + readers without name fallback, which the stack-overflow result above shows we can't ship as a one-shot change.
 
-`build-hof-translation` signature deliberately accepts `f-fn-id` even though the conservative scope doesn't use it — the Phase 5 extension would compute `F-slot-id → R-slot-id` entries and the caller already has the value.
+Acceptance: `bb test` green; `app/page/fns.edn` `:as :page-body` removed (page workaround landed alongside).
 
-Acceptance: `bb test` green; `app/page/fns.edn` `:as :page-body` removed (Phase 6 for this workaround landed alongside).
+**Phase 6 — Workaround sweep**
 
-**Phase 5 extension (deferred) — env-builder slot-id only + cross-fn rename slot-id translation**
+- `app/page/fns.edn`: `:as :page-body` → `:as :body` ✓ (landed with Phase 5)
+- `:where {:value {}}` defensive pins on `:storage-query-identities` — 11 sites removed (commit `c49f577c`).
+- Other `:as` workarounds in feedback memories:
+  - `feedback_callable_slot_inline_literal` — STAYS. Two `:on-throw {:parent :const :args {:value nil}}` wraps in `app/secrets/fns.edn` + `app/execution/fns.edn`. Type-check level constraint orthogonal to runtime slot-id work — `[:fn :any]`-typed slots reject bare literal bindings (`types/check.clj:1598-1603`). Self-documenting at the call site.
+  - `feedback_assoc_slot_named_map` — CLOSED at sync time by `slot-resolution`'s orphan-slot validator (`slot-resolution.clj:426` throws `:packages/orphan-slot-binding`). Not a workaround pattern.
+  - `feedback_optional_slot_free_arg_leak` — CLOSED with the pin sweep above.
 
-The slot-id-only `env-builder` change is what frees the runtime from the name-key shadow that still requires `:as :page-body`-style workarounds in some patterns. Blocking pieces:
+### 7. What's shipped, what's not
 
-- HOF translation must populate cross-fn rename slots too (F-side rename slot id → R-side rename slot id matched by ext-name).
-- Readers must drop name fallback so `env-builder`'s slot-id write is the only path.
-- `apply-rename-aliases` becomes redundant in the cross-fn case.
+The hybrid runtime fa described in § 4 + Phase 4 / 5 is the FINAL design, not a transitional state. Two key spaces (slot-id + name) serve different needs:
 
-This is the path the original Phase 5 doc described. Held in reserve.
+- slot-id keys distinguish structural ambiguity at the BOUNDARY (caller-side names that could land in two different consumers — the #104 collision class).
+- name keys cover DYNAMIC writes: env-binding values, HOF lambda-args, `apply-rename-aliases` cross-fn cascades. There's no structural ambiguity in these — a value flows under one name, set per call.
 
-**Phase 6 — Remove workarounds**
-
-- `app/page/fns.edn`: `:as :page-body` → `:as :body` ✓ (landed with Phase 5 conservative)
-- Audit other `:as` workarounds from feedback memories:
-  - `feedback_optional_slot_free_arg_leak`
-  - `feedback_callable_slot_inline_literal`
-  - `feedback_assoc_slot_named_map`
-- Tests + e2e + demo verify `:body`-named slots work without workaround
-
-Acceptance: all workarounds removed; `bb ci` + e2e green.
-
-**Phase 7 — Editor**
-
-Editor surface still by name (human display). Walker entries' name + slot-id available for:
-
-- arg-overlay rendering (one chip per surface free arg, by name; tooltip shows slot-id if requested)
-- value-form `/api/value-form` continues to take arg-name on input (translates via walker)
-
-Acceptance: no editor regression in visual baselines.
-
-**Phase 8 — Cleanup**
-
-- Remove transitional dual-key write at public API boundary (Phase 2's bridge)
-- Remove name-based helpers in `compile/renames.clj` that are no longer used
-- Document new architecture in `docs/ARCHITECTURE.md`
-
-### 7. Risks
-
-- **Performance**: per-ref translation adds compile-time work + small runtime map merge per ref call. Mitigation: cache translation maps in `lookups`; benchmark before/after.
-- **Cache hit rate**: cache key changes shape (slot-id keys instead of names). Same correctness, possibly different hit pattern. Mitigation: benchmark.
-- **HOF callable handlers from outside (e.g. middleware passing `{:request req :next-handler h}`)**: external callers use names. Phase 5 must accept name-keyed map at HOF entry boundary, translate inside. Same as Phase 2 public boundary.
-- **Editor frontend**: continues to use names; verify `/api/value-form` and similar still work.
-- **Hidden name-reads in base-fn impls**: `defbase` impls receive `(name → value)` map. Phase 4's slot-id-keyed fa must be translated back to name-keyed at impl invocation (impls don't change). Audit for any impl reading by raw name not in declared args.
+An alternative was considered (env-builder slot-id-only + cross-fn rename slot-id translation + readers drop name fallback) and dropped. Two attempts failed at runtime; the marginal benefit (closing 2 remaining `:on-throw :const` workaround sites) didn't justify the multi-day risk.
 
 ### 8. Definition of done
 
-- [x] Phases 1–5 (conservative) landed (commits `21b02a65` walker → `d08c2f68` translator → `ff5b02b3` slot-id renames helper → `b446f3c7` rename-aware readers → `38c3fc6e` parser disambiguation → `ac390c32` HOF wrap-time translation)
-- [x] `bb test` green (1594 / 6340 / 0)
-- [ ] `bb ci` green (run before merging)
+- [x] Phases 1–5 landed (commits `21b02a65` walker → `d08c2f68` translator → `ff5b02b3` Phase 3 outcome (no helper) → `b446f3c7` rename-aware readers → `38c3fc6e` parser disambiguation → `ac390c32` HOF wrap-time translation → `dcc11101` thunk-skip + const-wrap revert)
+- [x] `bb test` green (1600 / 6351 / 0 — adds the new `types-api-graph-test`)
 - [x] page_test passes with `:body` (no `:as :page-body`)
-- [ ] All e2e tests green (deferred to PR validation)
-- [ ] Performance benchmarks not regressed > 10% (deferred to PR validation)
-- [x] Workaround sweep (`:where {:value {}}` defensive pins + redundant scalar `:const` wraps) — commit `c49f577c`
-- [ ] Phase 5 extension (env-builder slot-id-only + cross-fn rename slot-id translation + readers drop name fallback) — held in reserve
-- [ ] Phase 8 cleanup (drop transitional dual-key write at public API boundary; drop name-based helpers in `compile/renames.clj`) — blocked on Phase 5 extension
-- [ ] `feedback_104_*` memory updated to "closed — page-body workaround removed; runtime is HOF-translation-bridged past sync"
-- [ ] `docs/ARCHITECTURE.md` section on executor updated to reflect hybrid (slot-id + name) runtime fa
+- [x] Workaround sweep (`:where {:value {}}` defensive pins, 11 sites) — commit `c49f577c`
+- [x] `feedback_104_*` memory archived as closed
+- [x] `docs/ARCHITECTURE.md` § Runtime fa documents the hybrid surface
+- [ ] `bb ci` green (run before merging)
+- [ ] All e2e tests green (run before merging)
 
 ### 9. Out of scope
 

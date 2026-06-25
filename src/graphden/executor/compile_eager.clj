@@ -442,8 +442,7 @@
         ;; impl invokes it directly.
         (and is-fn (not produces-callable?))
         (let [lambda-params (r/hof-lambda-params ref-id slot-id bnd fn-id lookups)
-              translation (r/build-hof-translation ref-id fn-id
-                                                   lambda-params lookups)]
+              translation (r/build-hof-translation ref-id lambda-params lookups)]
           (hof-wrap child lambda-params translation))
 
         ;; Two collapse into one — both want "invoke child with the
@@ -515,8 +514,7 @@
         ;; not have populated yet at construction).
         (and is-fn (not produces-callable?))
         (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)
-              translation (r/build-hof-translation ref-id fn-id
-                                                   lambda-params lookups)]
+              translation (r/build-hof-translation ref-id lambda-params lookups)]
           (fn [fa-ref ctx]
             (make-shape-callable
               lambda-params

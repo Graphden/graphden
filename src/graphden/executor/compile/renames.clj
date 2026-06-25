@@ -130,9 +130,8 @@
    threading the outer caller's fa.
 
    Memoised via `:deep-free-ext-entries-cache`. Consumers:
-   `translate-named-args` at the public boundary,
-   `build-hof-translation` at HOF wraps, `build-ref-slot-renames`
-   scaffold for the deferred Phase 5 extension. See
+   `translate-named-args` at the public boundary +
+   `build-hof-translation` at HOF wraps. See
    docs/RUNTIME_SLOT_ID_REFACTOR.md."
   [fn-id {:keys [deep-free-ext-entries-cache] :as lookups}]
   (if-let [cache deep-free-ext-entries-cache]
@@ -926,22 +925,12 @@
    wrap-time captured fa. Pre-translating them would create stale
    slot-id keys from the wrap snapshot that persist across iterations.
 
-   Scope (Phase 5 conservative): only handles the
-   ext-name→R-slot-id half. Cross-fn slot-id rename cascades (today
-   handled by `apply-rename-aliases` name copies inside each child
-   closure) are NOT collapsed here — flipping them to slot-id would
-   need env-builder-slot-id + deeper coordination. The narrow scope
-   is what closes the page-body / Ring-body collision (caller's
-   `:body` flows under name through translate-named-args' dual-key
-   write at the outer boundary AND under R's slot-id via this
-   translation) without changing the cross-fn name-cascade path
-   that today's tests depend on.
-
-   `f-fn-id` is currently unused — the conservative scope doesn't
-   need F's surface to build the translation. Kept in the signature
-   so Phase 5+ can extend to F-slot-id sources without a call-site
-   churn (every wrap site already passes the caller fn-id)."
-  [r-fn-id _f-fn-id lambda-params lookups]
+   Cross-fn slot-id rename cascades (e.g. `:method-map :handler` →
+   `:assoc-handler :handler` rename slot ids differ) stay on the
+   name-fallback path via `apply-rename-aliases` — that's the shipped
+   hybrid runtime fa (`docs/ARCHITECTURE.md § Runtime fa`), not a
+   transitional state."
+  [r-fn-id lambda-params lookups]
   (let [r-entries (deep-free-ext-entries r-fn-id lookups)
         lambda-set (set lambda-params)]
     (reduce (fn [acc {:keys [ext-name slot-id]}]
@@ -950,64 +939,6 @@
                 acc))
             {}
             r-entries)))
-
-
-(defn build-ref-slot-renames
-  "Slot-id-keyed sibling of `build-ref-renames` — Phase 3 of the
-   slot-id-keyed runtime refactor (docs/RUNTIME_SLOT_ID_REFACTOR.md).
-
-   For ref R called from F, produce `{R-slot-id → F-slot-id}`
-   propagating value entries by ext-name match between R's surface
-   and F's surface.
-
-   - Walks R's surface via `deep-free-ext-entries` — each entry is
-     `{:ext-name K :slot-id chain-leaf-sid}` (slot-id is what R's
-     inner consumers actually read from `fa` at runtime).
-   - Walks F's surface the same way; group F's entries by
-     `:ext-name`.
-   - For each R entry, find F entries with the same ext-name. If F
-     ALREADY carries the same slot-id (the common case — F's walker
-     transitively included R's chain-leaf slot via its non-HOF ref
-     walk), no translation row is needed; F's fa already has the
-     value under that slot-id.
-   - Otherwise, emit `R-slot-id → first-F-slot-id`. F's slot-id is
-     the closest caller-side entry that semantically maps to the
-     same surface name.
-
-   Status: not wired in production (Phase 4 readers prefer slot-id
-   via `effective-reader-slot-id` directly off `bnd.slot-id`; Phase 5
-   conservative ships HOF-boundary translation via
-   `build-hof-translation` instead of per-ref translation). The
-   helper + tests stay as scaffold for the deferred Phase 5 extension
-   that flips env-builder to slot-id-only writes — at that point the
-   non-HOF per-ref translation lands here, and `apply-rename-aliases`
-   retires."
-  [callee-fn-id caller-fn-id lookups]
-  (let [callee-entries (deep-free-ext-entries callee-fn-id lookups)
-        caller-entries (deep-free-ext-entries caller-fn-id lookups)
-        caller-by-name (group-by :ext-name caller-entries)
-        caller-sids (into #{} (map :slot-id) caller-entries)]
-    (reduce (fn [acc {:keys [ext-name slot-id]}]
-              (cond
-                ;; F's walker already covers this slot-id directly
-                ;; (transitively bubbled R's chain-leaf up to F's
-                ;; surface). The Phase 2 boundary translator wrote
-                ;; the value under callee-sid already — no
-                ;; translation row required.
-                (contains? caller-sids slot-id) acc
-
-                ;; Otherwise pick the first F-side entry that
-                ;; matches by name and emit the slot-id mapping.
-                ;; "First" is good enough here: when multiple F-side
-                ;; entries share an ext-name they were all written
-                ;; with the same caller value at the Phase 2
-                ;; boundary, so any pick is equivalent.
-                :else
-                (if-let [m (first (get caller-by-name ext-name))]
-                  (assoc acc slot-id (:slot-id m))
-                  acc)))
-            {}
-            callee-entries)))
 
 
 (defn apply-renames

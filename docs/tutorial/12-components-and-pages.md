@@ -146,13 +146,13 @@ collapses this 4-step chain into one template:
  :parent :html-page-route
  :args {:path "/about"
         :title "About"
-        :page-body :my-about-body          ; a fn-def returning hiccup
-        :head :graphden-page-head           ; default stylesheet
-        :scripts {:value []}}}              ; no JS needed for this page
+        :body :my-about-body              ; a fn-def returning hiccup
+        :head :graphden-page-head          ; default stylesheet
+        :scripts {:value []}}}             ; no JS needed for this page
 ```
 
-Five pins — `:path`, `:title`, `:page-body`, `:head`, `:scripts`
-— get you a working reitit-shaped route entry. The template
+Five pins — `:path`, `:title`, `:body`, `:head`, `:scripts` —
+get you a working reitit-shaped route entry. The template
 (`:html-page-route` in `app/page/fns.edn`) wraps `:html-page`
 → `:render-hiccup` → `:html-ok-response` → `:get-route` so you
 don't have to know that chain exists.
@@ -161,11 +161,6 @@ don't have to know that chain exists.
 the components stylesheet `<link>` (default styling for
 `button`/`input`/`form`/etc — see "Default styling" below).
 Pass `{:value []}` if you want no stylesheet.
-
-> **Why `:page-body` and not `:body`?** The chain plumbs
-> `:body` through two layers — the hiccup page body and the
-> HTTP response body. Without the rename they'd collide. The
-> caller-visible name is `:page-body` to keep it unambiguous.
 
 To mount it, edit `resources/packages/app/route-groups/fns.edn`
 and append `:my-about-page` to `:all`'s `:items`. Run
@@ -186,7 +181,7 @@ and append `:my-about-page` to `:all`'s `:items`. Run
   return it as an email body): use `:html-page-rendered`
   which returns the raw text.
 
-All three templates expose the same `:title` / `:page-body` /
+All three templates expose the same `:title` / `:body` /
 `:head` / `:scripts` free args — pick the layer you need.
 
 ## Default styling
@@ -219,7 +214,7 @@ submit, a `navigate`, an inline `custom` handler), bind
  :parent :html-page-route
  :args {:path "/contact"
         :title "Contact us"
-        :page-body :my-contact-body
+        :body :my-contact-body
         :scripts :graphden-runtime-scripts}}    ; ← that's it
 ```
 
@@ -283,7 +278,7 @@ shape:
    demonstrating the escape hatch.
 7. `:_contact-demo-page-handler` — one fn-def with
    `:parent :html-page-handler` pinning `:title` /
-   `:page-body` / `:head` / `:scripts`. That's the WHOLE
+   `:body` / `:head` / `:scripts`. That's the WHOLE
    page handler.
 8. `:_demo-contact-{get,post}-data`, `:_demo-contact-methods`,
    `:demo-contact` — the method-map merge so GET and POST

@@ -135,33 +135,32 @@ What landed:
 
 Acceptance: all tests green; runtime behavior unchanged; the helper is in place for Phase 4 if needed.
 
-**Phase 4 — Reader/writer cutover (deferred — needs key-shape change)**
+**Phase 4 — Rename-aware slot-id readers (hybrid fa)**
 
-Naive cutover plan: `arg-builder :free` reads `(get fa bnd.slot-id)`, `arg-builder :seq :as` reads `(get fa owner-rename-sid)`, `env-builder` writes `(assoc fa env-bnd.slot-id v)`, `apply-rename-aliases` retires, cache-projection switches to slot-id keys.
+Implemented 2026-06-25 (commit `b446f3c7`).
 
-**First attempt failed for the reason §5 already named** (2026-06-25): chain-leaf slot-ids are GLOBAL through their base-fn — every fn composed on `:assoc` shares the same UUID for `:value`, every `:get` shares the same `:m`/`:k`/`:default`, etc. The bug surfaced in `:image` (`:src` / `:alt` both bound via inline-anon `:assoc` calls with `{:as :…}` renames on `:value`) and in `ex-pair-greet` (`:first` / `:second` renames on the same base-fn's slot). When the reader keys `fa` by chain-leaf slot-id, both inline-anons read the SAME `fa[<assoc.value-sid>]` cell — caller's `:src` value bleeds into `:alt`, `:first` into `:second`.
+First attempt at Phase 4 used the chain-leaf slot-id as the reader's `fa` key. That failed because chain-leaf ids are GLOBAL through their base-fn — every fn composed on `:assoc` shares the same UUID for `:value`, every `:get` shares the same `:m`/`:k`/`:default`. The `:image` test (with two inline-anon `:assoc` calls each with their own `{:as :src}` / `{:as :alt}` renames) and `ex-pair-greet` cleanly surfaced the bug.
 
-Today's name-keyed system avoids this because the inline-anons' positional `{:as :src}` / `{:as :alt}` renames produce DIFFERENT ext-names (`:src` ≠ `:alt`), so `fa[:src]` and `fa[:alt]` are distinct cells. Slot-ids alone don't carry that per-instance identity.
+**Insight: rename-aware slot-ids already exist in storage.** Phase 6c made the parser create a NEW slot row on each renaming fn with `:source-slot-id` chaining back to the chain-leaf. Each `{:as :name}` rename is a distinct slot-id. Two inline-anons of the same `:assoc` with different `:as` renames each have their OWN rename slot id — distinct, no collision.
 
-The architecturally correct fix is to switch fa keys from `slot-id` to `[consumer-fn-id slot-id]` tuples: each inline-anon is its own fn-row with its own UUID, so `[inline-assoc-src.id, assoc.value-sid]` and `[inline-assoc-alt.id, assoc.value-sid]` are distinct keys. This requires:
+The runtime just wasn't reading at those slot-ids — it was indexing by the chain-leaf. Phase 4 wires in `l/effective-reader-slot-id fn-id slot-id lookups` — walks the reader's inheritance chain looking for the closest own-slot whose `:source-slot-id` chain transitively reaches the chain-leaf. Found → use that rename-slot id; not found → fall back to chain-leaf. Used by:
 
-1. Walker emits `{:ext-name :slot-key [fn-id slot-id]}` instead of `{:slot-id sid}`.
-2. `arg-builder :free` reads `fa[[closure-fn-id, bnd.slot-id]]`.
-3. Seq `:as` reads `fa[[owner-fn-id, rename-slot-id]]`.
-4. `env-builder` writes `fa[[owner-fn-id, env-bnd.slot-id]]`.
-5. Phase 2 boundary translator writes under tuple keys.
-6. HOF lambda-args (Phase 5) write `fa[[R-fn-id, R-lambda-sid]]`.
-7. `apply-rename-aliases` retires.
-8. Cache-projection returns sets of tuple keys.
+- Walker emits the rename-aware id per entry.
+- `arg-builder :free` reads `fa[effective-reader-slot-id]` with name fallback.
+- Seq positional `{:as :name}` items read the owner's rename slot id with name fallback.
 
-This is a substantive change. Phase 4 is paused until the design is laid out in detail and the cutover happens with all the tuple-key infrastructure in place. The reverted attempt is preserved in branch history (`refactor/slot-id-keyed-runtime` post-Phase-3).
+**Hybrid `fa`**: the boundary translator writes slot-id keys for caller args; env-builder, hof-wrap lambda-args, and `build-ref-renames` slow path continue to write name keys. Readers prefer slot-id and fall back to name. This is the architecture, not a transitional kludge — the two key spaces serve different needs:
 
-What's still good from earlier phases:
-- Phase 1 walker (`deep-free-ext-entries`) is correct — its `:slot-id` field IS the chain-leaf, which is what the consumer's `bnd.slot-id` is. Future Phase 4 augments it with the consumer-fn-id to form the tuple key; no breaking change.
-- Phase 2 boundary translator writes both name AND slot-id keys today. The slot-id half is the redundant case (matches the chain-leaf bug); switching the boundary writer to tuple keys is part of the Phase 4 work.
-- Phase 3 `build-ref-slot-renames` is unchanged — still emits identity-skipped maps; per-ref translation continues to be obsoleted by the transitive walker regardless of whether keys are slot-ids or tuples.
+- **slot-id keys** distinguish structural ambiguity at the BOUNDARY: caller-side names that could land in two different consumers (the #104 collision class).
+- **name keys** cover DYNAMIC writes: lambda-args, env-bindings, chain-rename copies. There's no structural ambiguity in these — just a value flowing under one name, set per call.
 
-Acceptance: name-keyed reads/writes fully gone from runtime; all tests green.
+Tests verifying the #104 collision class:
+- `:image` — two inline-anon `:assoc` calls of `{:as :src}` / `{:as :alt}` on `:value`. Each anon's rename slot now has a unique id; caller's `:src` and `:alt` land in different fa cells.
+- `ex-pair-greet` `{:first "A" :second "B"}` → "A meets B". Two renames on the shared base-fn slot resolve to distinct cells.
+
+**What didn't change** — `app/page/fns.edn`'s `:as :page-body` rename stays. It looks like a workaround in commit history, but the page templates have TWO semantically distinct `:body` slots: `:html-ok-response`'s Ring response body (text) and `:html-page`'s page-content body (hiccup). Naming them both `:body` collides at the PARSER level, not the runtime — when `:_contact-demo-page-handler` writes `:body :_contact-demo-page-body`, the parser resolves to the closest match in the inheritance chain (the Ring-body slot), overriding the inherited `:html-page-rendered` ref and breaking the rendering pipeline. The rename to `:page-body` gives the two slots distinct surface names so the parser's name-based binding resolution can disambiguate. That's correct design, not kostyl. Type-aware parser disambiguation could make the explicit rename optional — separate work outside the runtime-refactor scope.
+
+Acceptance: bb test 1591 / 6334 green; the `:image`, `ex-pair-greet`, `refinements-test` synthetic cases that exposed the collision class all pass.
 
 **Phase 5 — HOF closure capture**
 

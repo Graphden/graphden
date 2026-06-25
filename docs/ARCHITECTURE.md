@@ -394,6 +394,39 @@ Per call, the executor resolves a slot's value in this order:
 4. fail with `:execution-error/missing-required-arg` if the slot is
    required and unfilled
 
+### Runtime fa (hybrid slot-id + name keys)
+
+The runtime `fa` (free-args map) is hybrid-keyed past the public
+boundary. Two key spaces live in the same map; readers prefer
+slot-ids and fall back to names. The hybrid is the shipped
+architecture (not a transitional bridge):
+
+- **slot-id keys** — distinguish structural ambiguity at the public
+  boundary. `execute-by-name` / `make-single-arg-callable` route
+  caller args through `translate-named-args`, which walks the
+  callee's surface (`deep-free-ext-entries`) and writes the
+  caller's value under EVERY matching `(ext-name → slot-id)` pair.
+  HOF wraps further propagate slot-ids past their boundary via
+  `apply-hof-translation` so deep readers find their slot-id-keyed
+  values without falling back to names.
+- **name keys** — cover DYNAMIC writes: env-binding values
+  (`compile-fn`'s `env-builder` loop), HOF lambda-args
+  (`make-shape-callable` merges per-call values name-keyed), and
+  `apply-rename-aliases` cross-fn rename copies. There's no
+  structural ambiguity in these — a value flows under one name,
+  set per call.
+
+The `:free` arg-builder reads `fa[effective-reader-slot-id]` first
+(rename-aware Phase 4 path), then falls back to `fa[ext-name]`.
+The slot-id read distinguishes two inline-anon `:assoc` calls that
+each have their own `{:as :X}` rename slot (different slot ids,
+same chain-leaf); the name fallback covers dynamic per-call writes
+that haven't reached the slot-id key space.
+
+See [`docs/RUNTIME_SLOT_ID_REFACTOR.md`](RUNTIME_SLOT_ID_REFACTOR.md)
+for the phase-by-phase landing history and the deferred Phase 5
+extension that would unify the two key spaces.
+
 ### Limit checking
 
 ```clojure

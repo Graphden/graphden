@@ -236,15 +236,17 @@ Acceptance: no editor regression in visual baselines.
 
 ### 8. Definition of done
 
-- [ ] All phases landed
-- [ ] `bb test` green
-- [ ] `bb ci` green
-- [ ] page_test passes with `:body` (no `:as :page-body`)
-- [ ] All e2e tests green
-- [ ] Performance benchmarks not regressed > 10%
-- [ ] `feedback_104_*` memory updated to "closed — runtime is slot-id-keyed past sync"
-- [ ] `docs/ARCHITECTURE.md` section on executor updated to reflect slot-id-keyed runtime
-- [ ] All `:as :<workaround>` from feedback memories removed where the slot-id flip lets them go
+- [x] Phases 1–5 (conservative) landed (commits `21b02a65` walker → `d08c2f68` translator → `ff5b02b3` slot-id renames helper → `b446f3c7` rename-aware readers → `38c3fc6e` parser disambiguation → `ac390c32` HOF wrap-time translation)
+- [x] `bb test` green (1594 / 6340 / 0)
+- [ ] `bb ci` green (run before merging)
+- [x] page_test passes with `:body` (no `:as :page-body`)
+- [ ] All e2e tests green (deferred to PR validation)
+- [ ] Performance benchmarks not regressed > 10% (deferred to PR validation)
+- [x] Workaround sweep (`:where {:value {}}` defensive pins + redundant scalar `:const` wraps) — commit `c49f577c`
+- [ ] Phase 5 extension (env-builder slot-id-only + cross-fn rename slot-id translation + readers drop name fallback) — held in reserve
+- [ ] Phase 8 cleanup (drop transitional dual-key write at public API boundary; drop name-based helpers in `compile/renames.clj`) — blocked on Phase 5 extension
+- [ ] `feedback_104_*` memory updated to "closed — page-body workaround removed; runtime is HOF-translation-bridged past sync"
+- [ ] `docs/ARCHITECTURE.md` section on executor updated to reflect hybrid (slot-id + name) runtime fa
 
 ### 9. Out of scope
 

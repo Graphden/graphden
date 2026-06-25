@@ -205,12 +205,12 @@ An alternative was considered (env-builder slot-id-only + cross-fn rename slot-i
 ### 8. Definition of done
 
 - [x] Phases 1–5 landed (commits `21b02a65` walker → `d08c2f68` translator → `ff5b02b3` Phase 3 outcome (no helper) → `b446f3c7` rename-aware readers → `38c3fc6e` parser disambiguation → `ac390c32` HOF wrap-time translation → `dcc11101` thunk-skip + const-wrap revert)
-- [x] `bb test` green (1600 / 6351 / 0 — adds the new `types-api-graph-test`)
+- [x] `bb test` green (adds the new `types-api-graph-test`)
 - [x] page_test passes with `:body` (no `:as :page-body`)
 - [x] `feedback_104_*` memory archived as closed
 - [x] `docs/ARCHITECTURE.md` § Runtime fa documents the hybrid surface
 - [x] `bb ci` green (16/17 + cider-nrepl bump `ba7a4bfd` closes the 17th)
-- [ ] `bb test-e2e` green (pin sweep revert in progress; see § Phase 6 for the empirical lesson)
+- [x] `bb test-e2e` green (edit suite: 51 pass / 0 fail / 51 total; 4 retry-flakes recovered; 0 `Unknown field 'request-method'` leaks confirms the pin restore)
 
 ### 9. Out of scope
 

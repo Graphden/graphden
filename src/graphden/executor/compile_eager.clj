@@ -282,16 +282,29 @@
 
    PRESENCE — not truthiness — is the copy gate. A caller passing
    `:body nil` or `:flag false` deserves to land under R's slot-id
-   just like any other value; a falsy `if-let` here would silently
-   drop those."
+   just like any other value.
+
+   THUNKS are skipped at copy: an env-binding write puts a deferred
+   `(rt/thunk …)` under `fa[name]` whose body calls `call-with-cache`
+   on a ref. Copying that thunk under R's slot-id would let an inner
+   reader find it via slot-id AND name fallback — and the inner ref
+   target may itself trigger the same env-binding chain, causing
+   `call-with-cache` to miss (mid-computation) and recurse to
+   StackOverflow. Caller-supplied free args are plain values; the
+   thunk-skip preserves their copy while keeping env-binding writes
+   on their existing name-fallback path."
   [fa translation]
   (if (empty? translation)
     fa
     (reduce-kv (fn [acc r-sid src]
                  (cond
                    (contains? acc r-sid) acc
-                   (contains? acc src)   (assoc acc r-sid (get acc src))
-                   :else                 acc))
+                   (contains? acc src)
+                   (let [v (get acc src)]
+                     (if (rt/thunk? v)
+                       acc
+                       (assoc acc r-sid v)))
+                   :else acc))
                fa translation)))
 
 

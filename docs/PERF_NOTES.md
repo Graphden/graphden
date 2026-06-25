@@ -137,3 +137,35 @@ DB + DRY memo + rich-types snapshot fix brought walls to
 ~6:30–7:00 for all 1400+ tests / 0 failures. Ceiling now at
 900 s. The `bb test-parallel 4` worker-isolation workaround
 is no longer needed.
+
+## Phase 5 HOF translation — below noise floor
+
+`build-hof-translation` + `apply-hof-translation` shipped on
+`refactor/slot-id-keyed-runtime` add per-HOF-wrap-time work:
+
+- `build-hof-translation` runs at COMPILE time (once per HOF
+  binding's arg-builder construction). Inside is a single
+  `(deep-free-ext-entries r-fn-id lookups)` call (memoised via
+  `:deep-free-ext-entries-cache` in lookups) plus a reduce
+  filter — O(R-walker-entries), typically 1-20 entries.
+- `apply-hof-translation` runs at RUNTIME (per HOF callable
+  invocation). The empty-translation case short-circuits and
+  returns fa unchanged — the COMMON case for fns that don't
+  surface their ext-names through HOF boundaries. The non-
+  empty case is `reduce-kv` over translation entries (typically
+  1-5) with two `contains?` checks + one `rt/thunk?` check per
+  entry.
+
+Worst-case per-HOF-wrap runtime overhead: ~5 entries × ~10 ns
+per entry = ~50 ns. Per-request HOF wraps are O(log handler-
+chain-depth), typically 3-5. Total per-request: ~250 ns.
+
+Versus the actual per-request work — HTTP parsing, DB query,
+graph-compose response, JSON encode — typically 10-50 ms per
+endpoint per current measurements. The translation overhead
+is 5-6 orders of magnitude below the per-request budget.
+
+Smoke + e2e regression checked after ship: no measurable
+slowdown on any of the 11 smoke checks or the 51 e2e tests.
+No explicit benchmark added since the overhead is below
+`bb rebuild` round-trip noise (rebuild itself is ~3 minutes).

@@ -186,3 +186,77 @@
 
   (testing "a no-op rename is not exposed"
     (is (= #{} (sr/collect-exposed-names {:x {:as :x}} :f {})))))
+
+
+;; ============================================================================
+;; resolve-slot-owner — type-based disambiguation (#104 / Phase 5)
+;; ============================================================================
+
+(deftest resolve-slot-owner-disambiguates-by-value-type-test
+  ;; Two slots reachable from the composed fn share an ext-name `:body`
+  ;; but have DIFFERENT declared types. The binding's value is a fn-def
+  ;; with a known :return-type; the resolver picks the slot whose
+  ;; declared type matches.
+  (let [defs {;; Base fn declares an internal `:value` slot.
+              :ring-base   {:args {:value :text}}
+              ;; Composed fn renames `:value` to `:body` with :type :text
+              ;; — that's the inheritance-pass `:body` candidate (an
+              ;; explicit rename, not a no-op like `:body {:as :body}`).
+              :ring-rename {:parent :ring-base
+                            :args {:value {:as :body :type :text}}}
+              ;; A nested fn declares a `:body :hiccup-node` positional
+              ;; slot (reached via ref-targets in the chain below).
+              ;; Pattern matches production: `:parent :list-base
+              ;; :args {:items [{:as :body :type :hiccup-node}]}` — a
+              ;; composed fn-def, NOT a `:list` type-row shape (which
+              ;; would short-circuit `slot-type-of` to `:sequence`).
+              :list-base   {:args {:items :sequence}}
+              :page-list   {:parent :list-base
+                            :args {:items [{:as :body :type :hiccup-node}]}}
+              :page-wrap   {:parent :page-list}
+              ;; Composed fn inherits :ring-rename AND refs :page-wrap.
+              :composed    {:parent :ring-rename
+                            :args {:children :page-wrap}}
+              ;; Value 1: a fn-def whose :return-type is :hiccup-node.
+              :hiccup-val  {:parent :_x :return-type :hiccup-node}
+              ;; Value 2: a fn-def whose :return-type is :text.
+              :text-val    {:parent :_x :return-type :text}}]
+    (testing "value with :return-type :hiccup-node → picks ref-tree page-body slot"
+      (is (= [:page-list :body]
+             (sr/resolve-slot-owner :composed :body defs :hiccup-val))))
+
+    (testing "value with :return-type :text → picks inheritance Ring-body slot"
+      (is (= [:ring-rename :body]
+             (sr/resolve-slot-owner :composed :body defs :text-val))))
+
+    (testing "no binding-value → falls back to inheritance hit (backward compat)"
+      (is (= [:ring-rename :body]
+             (sr/resolve-slot-owner :composed :body defs))))
+
+    (testing "binding-value with unknown return-type → falls back to inheritance"
+      (is (= [:ring-rename :body]
+             (sr/resolve-slot-owner :composed :body defs :unknown-fn))))))
+
+
+(deftest resolve-slot-owner-no-ambiguity-uses-inheritance-test
+  ;; When only inheritance pass hits (no ref-tree alternative), no
+  ;; disambiguation logic applies — the inheritance hit wins as before.
+  (let [defs {:base     {:args {:x :int}}
+              :composed {:parent :base}
+              :val-fn   {:parent :_x :return-type :int}}]
+    (is (= [:base :x] (sr/resolve-slot-owner :composed :x defs :val-fn)))))
+
+
+(deftest resolve-slot-owner-types-tie-keeps-inheritance-test
+  ;; When BOTH candidates have types matching the binding value (e.g.
+  ;; both slots are :text and the value's :return-type is :text), the
+  ;; resolver falls back to the inheritance hit — no way to pick one
+  ;; over the other purely from type info.
+  (let [defs {:base-a    {:args {:body :text}}
+              :nested-b  {:args {:items [{:as :body :type :text}]}
+                          :list :text}
+              :composed  {:parent :base-a
+                          :args {:children :nested-b}}
+              :text-val  {:parent :_x :return-type :text}}]
+    (is (= [:base-a :body]
+           (sr/resolve-slot-owner :composed :body defs :text-val)))))

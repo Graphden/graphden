@@ -562,7 +562,9 @@
    `build-rename-slot-records`) AND the empty binding row are part
    of the contract."
   [own-id fn-name [arg-name arg-value] name->id defs-by-name]
-  (let [[owner-name owner-arg] (slot-res/resolve-slot-owner fn-name arg-name defs-by-name)
+  (let [[owner-name owner-arg] (slot-res/resolve-slot-owner fn-name arg-name
+                                                            defs-by-name
+                                                            arg-value)
         owner-fn-id (resolve-owner-fn-id owner-name name->id defs-by-name)
         slot (ids/slot-id owner-fn-id owner-arg)
         bid (ids/binding-id own-id slot)

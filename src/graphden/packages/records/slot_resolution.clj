@@ -79,10 +79,45 @@
     :else :any))
 
 
+(defn- rename-spec-type
+  "If `(:args fd)` contains an `{:as owner-arg :type T …}` rename
+   declaration (scalar `{X {:as owner-arg :type T}}` OR positional
+   list-item `:items [{:as owner-arg :type T} …]`), return T. Used
+   by `slot-type-of` to find the type of a RENAME slot — the slot
+   exists on `fd` under the rename's `:as` name, but `(:args fd)`'s
+   key is the source arg-name, not the rename target."
+  [fd owner-arg]
+  (some
+    (fn [[_ binding-value]]
+      (cond
+        ;; Scalar rename: `{X {:as owner-arg :type T}}`.
+        (and (map? binding-value)
+             (= owner-arg (some-> (:as binding-value) keyword))
+             (:type binding-value))
+        (:type binding-value)
+
+        ;; Positional list-item rename: `:items [{:as owner-arg :type T}]`.
+        (vector? binding-value)
+        (some (fn [item]
+                (when (and (map? item)
+                           (= owner-arg (some-> (:as item) keyword))
+                           (:type item))
+                  (:type item)))
+              binding-value)))
+    (:args fd)))
+
+
 (defn slot-type-of
   "Find the declared type of `[owner-name owner-arg]`. Inspects the
    owner's type-row / base-fn / record / refinement / list shape.
-   Returns a type keyword like `:sequence` / `:int` / `:any` / nil."
+   Returns a type keyword like `:sequence` / `:int` / `:any` / nil.
+
+   Also recognises rename slots — when `owner-arg` is the target of
+   an `{:as owner-arg :type T}` rename on `fd` (scalar OR positional
+   list-item), returns T. Without this, rename slots like
+   `:ring-response :body` (from `{:value {:as :body :type :text}}`)
+   would resolve to nil because `(:args fd)` is keyed by the source
+   arg-name (`:value`), not the rename target."
   [owner-name owner-arg defs-by-name]
   (let [fd (get defs-by-name owner-name)]
     (cond
@@ -93,7 +128,9 @@
       ;; Base-fn or composed with own :args declarations.
       (and (:args fd) (contains? (:args fd) owner-arg))
       (arg-spec-type (get (:args fd) owner-arg))
-      :else nil)))
+      ;; Rename slot — the slot name doesn't appear as an :args key,
+      ;; but a binding's `:as` does, with the type pinned alongside.
+      :else (rename-spec-type fd owner-arg))))
 
 
 (defn rename-target
@@ -248,6 +285,78 @@
                 (reverse chain))))))
 
 
+(defn- resolve-slot-owner-strict-inheritance
+  "Inheritance pass only — same as `resolve-slot-owner-strict`'s
+   first pass but without falling through to the ref-targets pass.
+   Used by `resolve-slot-owner` to collect inheritance + ref hits
+   independently for type-based disambiguation."
+  [composed-fn-name arg-name defs-by-name seen]
+  (when (and (not (contains? seen [composed-fn-name arg-name]))
+             (get defs-by-name composed-fn-name))
+    (let [seen' (conj seen [composed-fn-name arg-name])
+          chain (chain-of composed-fn-name defs-by-name)]
+      (some (fn [name-in-chain]
+              (let [ancestor (get defs-by-name name-in-chain)]
+                (cond
+                  (contains? (type-row-arg-names ancestor) arg-name)
+                  [name-in-chain arg-name]
+
+                  (rename-passthrough-ref ancestor arg-name)
+                  (resolve-slot-owner-strict
+                    (rename-passthrough-ref ancestor arg-name)
+                    arg-name defs-by-name seen')
+
+                  (rename-target ancestor arg-name)
+                  [name-in-chain arg-name]
+
+                  :else nil)))
+            chain))))
+
+
+(defn- resolve-slot-owner-strict-refs
+  "Ref-targets pass only — finds slot owners reachable via the
+   data-flow tree (`:ref` bindings, `:items [:fn-ref]`). Used by
+   `resolve-slot-owner` to collect candidates separately from
+   inheritance for type-based disambiguation."
+  [composed-fn-name arg-name defs-by-name seen]
+  (when (and (not (contains? seen [composed-fn-name arg-name]))
+             (get defs-by-name composed-fn-name))
+    (let [seen' (conj seen [composed-fn-name arg-name])
+          chain (chain-of composed-fn-name defs-by-name)]
+      (some (fn [name-in-chain]
+              (let [ancestor (get defs-by-name name-in-chain)]
+                (some (fn [ref-name]
+                        (resolve-slot-owner-strict ref-name arg-name
+                                                   defs-by-name seen'))
+                      (ref-targets-of ancestor defs-by-name))))
+            (reverse chain)))))
+
+
+(defn- value-return-type
+  "Extract the declared `:return-type` of a binding value, or nil
+   when the value is a literal / unresolvable.
+
+   `:body :_contact-demo-page-body` → look up `:_contact-demo-page-body`
+   in defs-by-name → return its `:return-type` (or infer from
+   `:parent`'s return-type for un-annotated composed fn-defs).
+
+   Returns the type keyword (`:hiccup-node` / `:text` / `:int` / …)
+   or nil when the value isn't a ref to a known fn-def."
+  [binding-value defs-by-name]
+  (let [ref-name (cond
+                   (keyword? binding-value) binding-value
+                   (and (map? binding-value) (keyword? (:ref binding-value)))
+                   (:ref binding-value))]
+    (when (and ref-name (get defs-by-name ref-name))
+      ;; Walk the parent chain so `{:parent :hiccup}` (which declares
+      ;; `:return-type :hiccup-node`) propagates to descendants that
+      ;; don't re-state it.
+      (some (fn [name-in-chain]
+              (when-let [fd (get defs-by-name name-in-chain)]
+                (:return-type fd)))
+            (chain-of ref-name defs-by-name)))))
+
+
 (defn resolve-slot-owner
   "Find `[owner-name slot-name]` for the slot that `composed-fn-name`
    targets when binding `arg-name`.
@@ -256,44 +365,77 @@
    - Pass 1: inheritance chain (parent-ids). Direct slot-name match
      on a type-row / base-fn ancestor wins, OR a `{X {:as arg-name}}`
      rename surfaces a rename slot owned by the ancestor.
-   - Pass 2: data-flow tree (ref-fn-id). Only consulted if pass 1
-     finds nothing; refs propagate the ref-target's renamed free
-     args outward, so the slot may live deep in the ref tree.
+   - Pass 2: data-flow tree (ref-fn-id). Refs propagate the
+     ref-target's renamed free args outward, so the slot may live
+     deep in the ref tree.
+
+   When BOTH passes find different owners (ambiguity), `binding-value`
+   (if supplied + a ref to a known fn-def) drives type-based
+   disambiguation: each candidate slot's declared type is compared
+   against the binding value's `:return-type`. If exactly one slot's
+   type matches, that owner wins. Otherwise the inheritance-pass hit
+   wins (existing behavior). This is what lets `:_contact-demo-page-
+   handler :body :_contact-demo-page-body` resolve to the INNER
+   page-body slot (type `:hiccup-node`) instead of the OUTER Ring-
+   body slot (type `:text`) — semantically distinct slots that happen
+   to share an ext-name.
 
    Throws `:packages/orphan-slot-binding` when both passes are
    exhausted AND the primary parent is in `defs-by-name` but doesn't
    declare `arg-name` — that combination produces a binding row
-   targeting a non-existent slot-id (silent no-op at runtime). The
-   `:n` vs `:take`'s `:count` mismatch was the canonical case caught
-   2026-06-12 before this guard landed.
+   targeting a non-existent slot-id (silent no-op at runtime).
 
    Falls back to `[primary-parent arg-name]` only when the primary
    parent is OUTSIDE `defs-by-name` — covers legacy bindings on slots
    whose owner is an external base-fn not registered through
-   `extra-defs`. Modern sync passes all base-fn declarations into
-   `defs-by-name`, so this fallback should be unreachable in
-   practice."
-  [composed-fn-name arg-name defs-by-name]
-  (let [fd (get defs-by-name composed-fn-name)
-        primary-parent (or (when fd (or (:parent fd) (first (:parents fd))))
-                           composed-fn-name)]
-    (or (resolve-slot-owner-strict composed-fn-name arg-name defs-by-name #{})
-        (let [parent-def (get defs-by-name primary-parent)]
-          (when (and parent-def
-                     (not (contains? (type-row-arg-names parent-def) arg-name)))
-            (throw (ex-info
-                     (str "Binding `" arg-name "` on fn-def `"
-                          composed-fn-name "` targets a non-existent slot — "
-                          "the resolved owner `" primary-parent "` doesn't "
-                          "declare `" arg-name "`. Check for a typo against "
-                          "the parent's `:args` keys (canonical example: "
-                          "`:n` on `:take` should be `:count`).")
-                     {:type :packages/orphan-slot-binding
-                      :fn-name composed-fn-name
-                      :arg-name arg-name
-                      :primary-parent primary-parent
-                      :parent-args (some-> parent-def :args keys vec)})))
-          [primary-parent arg-name]))))
+   `extra-defs`."
+  ([composed-fn-name arg-name defs-by-name]
+   (resolve-slot-owner composed-fn-name arg-name defs-by-name nil))
+  ([composed-fn-name arg-name defs-by-name binding-value]
+   (let [fd (get defs-by-name composed-fn-name)
+         primary-parent (or (when fd (or (:parent fd) (first (:parents fd))))
+                            composed-fn-name)
+         inh-hit (resolve-slot-owner-strict-inheritance
+                   composed-fn-name arg-name defs-by-name #{})
+         ref-hit (resolve-slot-owner-strict-refs
+                   composed-fn-name arg-name defs-by-name #{})
+         strict-hit
+         (cond
+           ;; Type-based disambiguation: both passes hit and we have a
+           ;; value-return-type to compare against the two slots'
+           ;; declared types.
+           (and inh-hit ref-hit (not= inh-hit ref-hit))
+           (if-let [vt (value-return-type binding-value defs-by-name)]
+             (let [inh-slot-type (apply slot-type-of (conj inh-hit defs-by-name))
+                   ref-slot-type (apply slot-type-of (conj ref-hit defs-by-name))
+                   inh-match? (and inh-slot-type (= vt inh-slot-type))
+                   ref-match? (and ref-slot-type (= vt ref-slot-type))]
+               (cond
+                 (and inh-match? (not ref-match?)) inh-hit
+                 (and ref-match? (not inh-match?)) ref-hit
+                 :else inh-hit))
+             inh-hit)
+
+           inh-hit inh-hit
+           ref-hit ref-hit
+           :else nil)]
+     (or strict-hit
+         (let [parent-def (get defs-by-name primary-parent)]
+           (when (and parent-def
+                      (not (contains? (type-row-arg-names parent-def) arg-name)))
+             (throw (ex-info
+                      (str "Binding `" arg-name "` on fn-def `"
+                           composed-fn-name "` targets a non-existent slot — "
+                           "the resolved owner `" primary-parent "` doesn't "
+                           "declare `" arg-name "`. Check for a typo against "
+                           "the parent's `:args` keys (canonical example: "
+                           "`:n` on `:take` should be `:count`).")
+                      {:type :packages/orphan-slot-binding
+                       :fn-name composed-fn-name
+                       :arg-name arg-name
+                       :primary-parent primary-parent
+                       :parent-args (some-> parent-def :args keys vec)})))
+           [primary-parent arg-name])))))
 
 
 (defn build-defs-by-name

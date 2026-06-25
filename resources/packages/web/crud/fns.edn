@@ -332,12 +332,12 @@
                                                        :description "Output of `:_types-compatible-parsed`."}
                                                 :key {:value :expected}
                                                 :default nil}}}}
-           {:parent :const :args {:value {:ok false :error "Request body must include 'expected'"}}}
+           {:value {:ok false :error "Request body must include 'expected'"}}
            {:parent :nil? :args {:value {:parent :get
                                          :args {:coll {:as :parsed}
                                                 :key {:value :candidate}
                                                 :default nil}}}}
-           {:parent :const :args {:value {:ok false :error "Request body must include 'candidate'"}}}
+           {:value {:ok false :error "Request body must include 'candidate'"}}
            {:value true} {:value nil}]}}
 
   ;; --- :subtype? + :describe-type-mismatch — atomic library
@@ -502,7 +502,7 @@
                                                             :description "Output of `:_types-candidates-parsed`."}
                                                      :key {:value :expected}
                                                      :default nil}}}}
-          :then {:parent :const :args {:value {:ok false :error "Request body must include 'expected'"}}}
+          :then {:value {:ok false :error "Request body must include 'expected'"}}
           :else {:value nil}}}
 
   ;; --- _types-candidates-apply graph decomposition. Mirrors
@@ -660,7 +660,7 @@
                                                             :description "Output of `:_types-usages-parsed`."}
                                                      :key {:value :target-id}
                                                      :default nil}}}}
-          :then {:parent :const :args {:value {:ok false :error "Request body must include valid 'type-fn-id'"}}}
+          :then {:value {:ok false :error "Request body must include valid 'type-fn-id'"}}
           :else {:value nil}}}
 
   {:name :_types-usages-apply
@@ -2074,7 +2074,7 @@
 
   {:name :_delete-secret-leaf-identities
    :parent :storage-query-identities
-   :args {:entity-type {:value "fn"} :where {:value {}}}}
+   :args {:entity-type {:value "fn"}}}
 
   {:name :_delete-secret-leaf-filtered
    :parent :filter
@@ -2165,7 +2165,7 @@
 
   {:name :_delete-fn-ref-bindings-identities
    :parent :storage-query-identities
-   :args {:entity-type {:value "binding"} :where {:value {}}}}
+   :args {:entity-type {:value "binding"}}}
 
   {:name :_delete-fn-ref-binding-eq?
    :parent :equal?
@@ -2188,7 +2188,7 @@
 
   {:name :_delete-fn-ref-items-identities
    :parent :storage-query-identities
-   :args {:entity-type {:value "binding-list-item"} :where {:value {}}}}
+   :args {:entity-type {:value "binding-list-item"}}}
 
   {:name :_delete-fn-ref-item-eq?
    :parent :equal?

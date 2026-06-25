@@ -155,27 +155,54 @@ The runtime just wasn't reading at those slot-ids — it was indexing by the cha
 - **name keys** cover DYNAMIC writes: lambda-args, env-bindings, chain-rename copies. There's no structural ambiguity in these — just a value flowing under one name, set per call.
 
 Tests verifying the #104 collision class:
+
 - `:image` — two inline-anon `:assoc` calls of `{:as :src}` / `{:as :alt}` on `:value`. Each anon's rename slot now has a unique id; caller's `:src` and `:alt` land in different fa cells.
 - `ex-pair-greet` `{:first "A" :second "B"}` → "A meets B". Two renames on the shared base-fn slot resolve to distinct cells.
 
-**What didn't change** — `app/page/fns.edn`'s `:as :page-body` rename stays. It looks like a workaround in commit history, but the page templates have TWO semantically distinct `:body` slots: `:html-ok-response`'s Ring response body (text) and `:html-page`'s page-content body (hiccup). Naming them both `:body` collides at the PARSER level, not the runtime — when `:_contact-demo-page-handler` writes `:body :_contact-demo-page-body`, the parser resolves to the closest match in the inheritance chain (the Ring-body slot), overriding the inherited `:html-page-rendered` ref and breaking the rendering pipeline. The rename to `:page-body` gives the two slots distinct surface names so the parser's name-based binding resolution can disambiguate. That's correct design, not kostyl. Type-aware parser disambiguation could make the explicit rename optional — separate work outside the runtime-refactor scope.
+**What didn't change at Phase 4** — `app/page/fns.edn`'s `:as :page-body` rename stayed because Phase 4 alone couldn't close the runtime collision; only the boundary translator and rename-aware readers shipped. Phase 5 (HOF wrap-time slot-id translation) + parser disambiguation (commit `38c3fc6e`) together let the workaround drop. See § Phase 5 for the runtime-side mechanism.
 
 Acceptance: bb test 1591 / 6334 green; the `:image`, `ex-pair-greet`, `refinements-test` synthetic cases that exposed the collision class all pass.
 
-**Phase 5 — HOF closure capture**
+**Phase 5 — HOF wrap-time slot-id translation (conservative)**
 
-HOF F → R binding: F's HOF binding row stores `ref-fn-id = R-id`. Compile-time:
-- Get R's walker entries (closure-captured slot-ids R will read)
-- Match by ext-name to F's walker entries
-- Build `{R-slot-id → F-slot-id}` translation
+Implemented 2026-06-25.
 
-Runtime: `hof-wrap` applies translation when constructing R's fa from F's fa + lambda-args.
+Diagnosis from the Phase 4 page-body bug attempt: removing the `:as :page-body` rename surfaces #104 at runtime even though parser-side disambiguation (commit `38c3fc6e`) routes the bindings to the right slots at sync time. Mechanism:
 
-Acceptance: HOF chains work, `make-shape-callable` lambda-args under slot-id keys.
+1. Caller invokes `:html-page-route` with `:body [:p "ok"]`.
+2. Walker for `:html-page-route` stops at the `:handler` HOF boundary — `translate-named-args` writes only the name key, no slot-id matches reach the deeper page-body slot.
+3. Inside `:html-page-handler`, the `:body :html-page-rendered` binding is an env-binding (Ring-body rename slot is non-root). `env-builder` writes `fa[:body] = <thunk>` BY NAME, overwriting the caller's `[:p "ok"]`.
+4. The deep `seq-item-builder` at `:_html-body-children-head`'s positional `:body` slot misses its slot-id key and falls back to `fa[:body]` — hits the env-binding thunk, forces it, renders the HTML page string into the inner `<body>` tag (escaped).
+
+Two coordinated pieces close it:
+
+1. **`hof-wrap` accepts a translation table** built by `r/build-hof-translation`. At wrap time (inside the HOF arg-builder), `apply-hof-translation` copies `fa[ext-name]` → `fa[R-slot-id]` for every R-side surface entry whose ext-name is NOT a lambda-param. Wired at BOTH HOF call sites — `arg-builder`'s `:ref :is-fn` case AND `env-arg-builder`'s `:ref :is-fn` case. This lets caller args past F's HOF surface (e.g. `:body` for the deep page-body slot when F's walker stops at the outer `:handler`) land under R's slot-id namespace BEFORE R's inner `env-builder` fires.
+2. **Lambda-params excluded from translation** — lambda values come from the per-call `lambda-args` merge after the wrap-time `fa*` capture. Pre-translating them would freeze the wrap-time value across iterations and break collection HOFs (`:filter` / `:map` `:item`).
+
+The page-body fix works because: at the outer `:html-page-route` level, the `:handler` env-binding is a HOF that wraps `:html-page-handler`. The HOF env-builder fires AT WRAP-CONSTRUCTION TIME (when the route is built) and captures fa-ref. When the wrapped callable is later INVOKED (a request hits), `apply-hof-translation` runs against the captured fa — caller's `:body` is still under the name key (`:html-page-handler`'s own Ring-body env-binding hasn't fired yet — it lives one level deeper). Translation copies `fa[:body]` → `fa[<page-body-sid>]`. Now when the inner `:html-page-handler` chain runs, its Ring-body env-binding overwrites `fa[:body]` with a thunk, but the page-body slot's reader uses its own slot-id — `fa[<page-body-sid>]` still has caller's value. Collision dodged.
+
+What DIDN'T flip:
+
+- `env-builder` still writes by **name only** (today's behaviour). The earlier attempt to dual-write slot-id alongside the name caused stack overflows in `:list-fn-versions`-style chains: when an env-binding's value is a thunk that calls `call-with-cache` on a ref, the slot-id write makes inner readers find the same thunk via slot-id key instead of falling back to name; the `force-value` re-enters the chain. Single-write (name) keeps the existing semantics intact while HOF translation handles the cross-boundary slot-id propagation.
+- Cross-fn slot-id rename cascades (e.g. `:method-map :handler` → `:assoc-handler :handler`) — still use name-fallback via `apply-rename-aliases`. Translating them to slot-ids needs env-builder slot-id writes + readers without name fallback, which the stack-overflow result above shows we can't ship as a one-shot change.
+
+`build-hof-translation` signature deliberately accepts `f-fn-id` even though the conservative scope doesn't use it — the Phase 5 extension would compute `F-slot-id → R-slot-id` entries and the caller already has the value.
+
+Acceptance: `bb test` green; `app/page/fns.edn` `:as :page-body` removed (Phase 6 for this workaround landed alongside).
+
+**Phase 5 extension (deferred) — env-builder slot-id only + cross-fn rename slot-id translation**
+
+The slot-id-only `env-builder` change is what frees the runtime from the name-key shadow that still requires `:as :page-body`-style workarounds in some patterns. Blocking pieces:
+
+- HOF translation must populate cross-fn rename slots too (F-side rename slot id → R-side rename slot id matched by ext-name).
+- Readers must drop name fallback so `env-builder`'s slot-id write is the only path.
+- `apply-rename-aliases` becomes redundant in the cross-fn case.
+
+This is the path the original Phase 5 doc described. Held in reserve.
 
 **Phase 6 — Remove workarounds**
 
-- `app/page/fns.edn`: `:as :page-body` → `:as :body`
+- `app/page/fns.edn`: `:as :page-body` → `:as :body` ✓ (landed with Phase 5 conservative)
 - Audit other `:as` workarounds from feedback memories:
   - `feedback_optional_slot_free_arg_leak`
   - `feedback_callable_slot_inline_literal`
@@ -187,6 +214,7 @@ Acceptance: all workarounds removed; `bb ci` + e2e green.
 **Phase 7 — Editor**
 
 Editor surface still by name (human display). Walker entries' name + slot-id available for:
+
 - arg-overlay rendering (one chip per surface free arg, by name; tooltip shows slot-id if requested)
 - value-form `/api/value-form` continues to take arg-name on input (translates via walker)
 

@@ -268,18 +268,52 @@
     invoke-with))
 
 
+(defn- apply-hof-translation
+  "Apply HOF wrap-time slot-id translation to fa.
+
+   `translation` is `{R-slot-id F-source-key}` — for each R-slot-id
+   the callee R reads, the source key in the captured F-side fa.
+   Phase 5 conservative scope: sources are ext-name keywords
+   (caller-supplied free args whose name lives in fa). A future
+   extension may also map R-slot-ids from F-slot-ids for cross-fn
+   rename cascades.
+
+   Empty translation short-circuits — fa passes through."
+  [fa translation]
+  (if (empty? translation)
+    fa
+    (reduce-kv (fn [acc r-sid src]
+                 (if-let [v (or (get acc r-sid) (get acc src))]
+                   (assoc acc r-sid v)
+                   acc))
+               fa translation)))
+
+
 (defn- hof-wrap
   "Root-binding HOF: returns a `(fn [fa ctx])` whose call yields the
    callable. The callable closes over `fa` (the wrap-time snapshot of
    the caller's env). lambda-args are merged name-keyed; the slot-id
    readers in R fall back to name lookups when no slot-id key is
-   present, so the dynamic lambda values flow correctly."
-  [child lambda-params]
-  (fn [fa ctx]
-    (make-shape-callable lambda-params
-                         (fn [lambda-args]
-                           (child (if lambda-args (merge fa lambda-args) fa)
-                                  ctx)))))
+   present, so the dynamic lambda values flow correctly.
+
+   `translation` (Phase 5) propagates F-side slot-id keys (and
+   ext-name keys for caller args that didn't reach F's walker surface)
+   into R's slot-id namespace — required for cross-fn rename cascades
+   (e.g. `:method-map :handler` rename slot → `:assoc-handler :handler`
+   rename slot have different ids) to survive the wrap."
+  [child lambda-params translation]
+  (if (empty? translation)
+    (fn [fa ctx]
+      (make-shape-callable lambda-params
+                           (fn [lambda-args]
+                             (child (if lambda-args (merge fa lambda-args) fa)
+                                    ctx))))
+    (fn [fa ctx]
+      (let [fa* (apply-hof-translation fa translation)]
+        (make-shape-callable lambda-params
+                             (fn [lambda-args]
+                               (child (if lambda-args (merge fa* lambda-args) fa*)
+                                      ctx)))))))
 
 
 (def ^:private vault-get-secret
@@ -388,7 +422,10 @@
         ;; call positionally. Value-shape, not delay-shape — the
         ;; impl invokes it directly.
         (and is-fn (not produces-callable?))
-        (hof-wrap child (r/hof-lambda-params ref-id slot-id bnd fn-id lookups))
+        (let [lambda-params (r/hof-lambda-params ref-id slot-id bnd fn-id lookups)
+              translation (r/build-hof-translation ref-id fn-id
+                                                   lambda-params lookups)]
+          (hof-wrap child lambda-params translation))
 
         ;; Two collapse into one — both want "invoke child with the
         ;; caller's env, wrap in a thunk for short-circuit":
@@ -458,13 +495,16 @@
         ;; Reads `fa-ref` at FORCE time (sibling env-bindings may
         ;; not have populated yet at construction).
         (and is-fn (not produces-callable?))
-        (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)]
+        (let [lambda-params (r/hof-lambda-params ref-id slot-id env-bnd fn-id lookups)
+              translation (r/build-hof-translation ref-id fn-id
+                                                   lambda-params lookups)]
           (fn [fa-ref ctx]
-            (make-shape-callable lambda-params
-                                 (fn [lambda-args]
-                                   (let [fa @fa-ref]
-                                     (child (if lambda-args (merge fa lambda-args) fa)
-                                            ctx))))))
+            (make-shape-callable
+              lambda-params
+              (fn [lambda-args]
+                (let [fa* (apply-hof-translation @fa-ref translation)]
+                  (child (if lambda-args (merge fa* lambda-args) fa*)
+                         ctx))))))
 
         ;; Target evaluates to a callable (`:_router` → reitit
         ;; ring-handler). Same as the regular `arg-builder` :ref

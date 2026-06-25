@@ -38,7 +38,7 @@
   (testing ":html-page-rendered returns an HTML text string with the page body inside <body>"
     (let [html (exec-name :html-page-rendered
                           {:title "Test"
-                           :page-body [:div "Hello"]
+                           :body [:div "Hello"]
                            :head []
                            :scripts []})]
       (is (string? html))
@@ -51,7 +51,7 @@
     (let [handler-route (exec-name :html-page-route
                                    {:path "/x"
                                     :title "X"
-                                    :page-body [:p "ok"]
+                                    :body [:p "ok"]
                                     :head []
                                     :scripts []})
           handler (get-in (second handler-route) ["get" "handler"])
@@ -60,7 +60,7 @@
       (is (str/starts-with? (or (get-in response [:headers :Content-Type]) "")
                             "text/html"))
       (is (str/includes? (:body response) "<p>ok</p>")
-          ":page-body slot renders into <body>"))))
+          ":body slot renders into <body>"))))
 
 
 (deftest html-page-route-yields-reitit-entry-test
@@ -68,7 +68,7 @@
     (let [entry (exec-name :html-page-route
                            {:path "/about"
                             :title "About"
-                            :page-body [:div "about"]
+                            :body [:div "about"]
                             :head []
                             :scripts []})
           [path methods] (vec entry)]
@@ -98,7 +98,7 @@
     (let [route (exec-name :html-page-route
                            {:path "/x"
                             :title "X"
-                            :page-body [:div "hi"]
+                            :body [:div "hi"]
                             :head []
                             :scripts (exec-name :graphden-runtime-scripts {})})
           handler (get-in (second route) ["get" "handler"])
@@ -131,7 +131,7 @@
     (let [route (exec-name :html-page-route
                            {:path "/y"
                             :title "Y"
-                            :page-body [:div "hi"]
+                            :body [:div "hi"]
                             :head (exec-name :graphden-page-head {})
                             :scripts []})
           handler (get-in (second route) ["get" "handler"])

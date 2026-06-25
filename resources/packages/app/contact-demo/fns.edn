@@ -112,14 +112,14 @@
   ;; Six fn-defs (the page + render-hiccup + html-ok-response +
   ;; the two script tags + the script bundle) collapse to one
   ;; `:parent :html-page-handler` declaration that pins
-  ;; `:title` / `:page-body` / `:scripts` and inherits the rest
+  ;; `:title` / `:body` / `:scripts` and inherits the rest
   ;; from `app.page` and `app.editor` templates.
 
   {:name :_contact-demo-page-handler
    :description "GET /demo/contact handler — full HTML page via :html-page-handler with the default components stylesheet + graphden runtime scripts wired in."
    :parent :html-page-handler
    :args {:title "Contact (Graphden demo)"
-          :page-body :_contact-demo-page-body
+          :body :_contact-demo-page-body
           :head :graphden-page-head
           :scripts :graphden-runtime-scripts}}
 

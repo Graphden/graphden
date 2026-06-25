@@ -32,35 +32,27 @@
 {:namespace "app.page"
  :description "HTML-page route templates — :html-page-rendered / :html-page-handler / :html-page-route, each collapsing one more layer of the :html-page → :render-hiccup → :html-ok-response → :get-route chain."
  :fns
- [;; Note on slot naming: the inner `:html-page :body` slot is
-  ;; renamed via `{:as :page-body}` so the propagated free arg
-  ;; doesn't collide with `:html-ok-response`'s own `:body`
-  ;; slot (the Ring response body). The caller-visible name is
-  ;; `:page-body` to make the distinction explicit at the call
-  ;; site. Auto-resolve at the parser level was attempted in #104
-  ;; — broke rename-slot materialization for unrelated inline
-  ;; anons; the explicit rename is the architecturally safe path.
-  {:name :html-page-rendered
-   :description "Render a full HTML page (`:html-page`) to a string via `:render-hiccup`. Free args: `:title`, `:page-body`, `:head`, `:scripts`. Use as the `:body` of an `:html-ok-response`, or drop into a non-Ring sink directly. NOTE on `:page-body`: it's deliberately NOT named `:body` — the parent chain's `:html-ok-response` already has a `:body` slot for the Ring response body, and unifying both names would route the caller's hiccup into the wrong layer."
+ [{:name :html-page-rendered
+   :description "Render a full HTML page (`:html-page`) to a string via `:render-hiccup`. Free args: `:title`, `:body`, `:head`, `:scripts`."
    :parent :render-hiccup
    :return-type :text
    :args {:hiccup {:parent :html-page
                    :args {:title {:as :title :type :text
                                   :description "Document `<title>` text."}
-                          :body {:as :page-body :type :hiccup-node
-                                 :description "Page body hiccup tree. (Not `:body` because that name is taken by `:html-ok-response`'s Ring response body further up the chain.)"}
+                          :body {:as :body :type :hiccup-node
+                                 :description "Page body hiccup tree."}
                           :head {:as :head :type [:list :hiccup-node]
                                  :description "Extra `<head>` hiccup nodes — typically `:graphden-page-head` for the default stylesheet, or `{:value []}` for none."}
                           :scripts {:as :scripts :type [:list :hiccup-node]
                                     :description "End-of-body `<script>` hiccup nodes — typically `:graphden-runtime-scripts` for the standard dispatcher bundle, or `{:value []}` for none."}}}}}
 
   {:name :html-page-handler
-   :description "Ring handler returning a full HTML page — `:html-ok-response` wrapping `:html-page-rendered`. Free args: `:title`, `:page-body`, `:head`, `:scripts`. Use as the `:handler` of a `:get-route`, or as the GET-side `:handler` of a method-map merge."
+   :description "Ring handler returning a full HTML page — `:html-ok-response` wrapping `:html-page-rendered`. Free args: `:title`, `:body`, `:head`, `:scripts`. Use as the `:handler` of a `:get-route`, or as the GET-side `:handler` of a method-map merge."
    :parent :html-ok-response
    :args {:body :html-page-rendered}}
 
   {:name :html-page-route
-   :description "GET-route template for a full HTML page. Collapses `:html-page` + `:render-hiccup` + `:html-ok-response` + `:get-route` into one entry. Free args: `:path` (URL), `:title`, `:page-body`, `:head`, `:scripts`. For GET + POST on the same path, use `:html-page-handler` on the GET side of a method-map merge."
+   :description "GET-route template for a full HTML page. Collapses `:html-page` + `:render-hiccup` + `:html-ok-response` + `:get-route` into one entry. Free args: `:path` (URL), `:title`, `:body`, `:head`, `:scripts`. For GET + POST on the same path, use `:html-page-handler` on the GET side of a method-map merge."
    :parent :get-route
    :args {:path {:as :path :type :text
                  :description "URL path the route is mounted at (e.g. `\"/about\"`)."}

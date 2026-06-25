@@ -907,6 +907,46 @@
     (merge binding-renames cross-tree-renames)))
 
 
+(defn build-hof-translation
+  "Phase 5 — slot-id translation table applied at HOF wrap-time.
+
+   Returns `{R-slot-id → ext-name}` — for each R-side surface entry
+   whose ext-name is NOT a lambda-param, the ext-name key under which
+   the captured F-side fa stores the caller-supplied value.
+   `apply-hof-translation` copies fa[ext-name] to fa[R-slot-id] so R's
+   slot-id-keyed readers find the value without the name-fallback path.
+
+   Lambda-param entries are EXCLUDED — those values come from the
+   per-call `lambda-args` merge after translation, not from the
+   wrap-time captured fa. Pre-translating them would create stale
+   slot-id keys from the wrap snapshot that persist across iterations.
+
+   Scope (Phase 5 conservative): only handles the
+   ext-name→R-slot-id half. Cross-fn slot-id rename cascades (today
+   handled by `apply-rename-aliases` name copies inside each child
+   closure) are NOT collapsed here — flipping them to slot-id would
+   need env-builder-slot-id + deeper coordination. The narrow scope
+   is what closes the page-body / Ring-body collision (caller's
+   `:body` flows under name through translate-named-args' dual-key
+   write at the outer boundary AND under R's slot-id via this
+   translation) without changing the cross-fn name-cascade path
+   that today's tests depend on.
+
+   `f-fn-id` is currently unused — the conservative scope doesn't
+   need F's surface to build the translation. Kept in the signature
+   so Phase 5+ can extend to F-slot-id sources without a call-site
+   churn (every wrap site already passes the caller fn-id)."
+  [r-fn-id _f-fn-id lambda-params lookups]
+  (let [r-entries (deep-free-ext-entries r-fn-id lookups)
+        lambda-set (set lambda-params)]
+    (reduce (fn [acc {:keys [ext-name slot-id]}]
+              (if (and slot-id ext-name (not (lambda-set ext-name)))
+                (assoc acc slot-id ext-name)
+                acc))
+            {}
+            r-entries)))
+
+
 (defn build-ref-slot-renames
   "Slot-id-keyed sibling of `build-ref-renames` — Phase 3 of the
    slot-id-keyed runtime refactor (docs/RUNTIME_SLOT_ID_REFACTOR.md).

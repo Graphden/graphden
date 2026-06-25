@@ -46,6 +46,7 @@ const TEST_NAME = 'test-fn-picker-filter';
             && !cy.animated()
             && Array.from(document.querySelectorAll('.node-overlay'))
                  .some((el) => /^unset-/.test(el.getAttribute('data-node-id') || '')),
+      null,
       {timeout: 20000, polling: 100});
 
     // Find the unset-placeholder overlay (data-node-id starts with
@@ -67,6 +68,7 @@ const TEST_NAME = 'test-fn-picker-filter';
     // Chooser popover renders synchronously after the click.
     await page.waitForFunction(
       () => !!document.querySelector('.free-arg-bind-chooser'),
+      null,
       {timeout: 5000, polling: 50});
 
     // The chooser popover offers "Bind literal" / "Bind fn-ref".
@@ -84,6 +86,7 @@ const TEST_NAME = 'test-fn-picker-filter';
     // at least one row before probing.
     await page.waitForFunction(
       () => !!document.querySelector('.fn-picker-popover .fn-picker-row'),
+      null,
       {timeout: 5000, polling: 50});
 
     // Picker should now be open with expectedType = 'text' (the
@@ -142,6 +145,7 @@ const TEST_NAME = 'test-fn-picker-filter';
         if (rows.length === 0) return false;
         return rows.every((r) => /lower/i.test(r.textContent || ''));
       },
+      null,
       {timeout: 5000, polling: 50});
     const filterProbe = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll(
@@ -165,6 +169,7 @@ const TEST_NAME = 'test-fn-picker-filter';
     await page.keyboard.press('Escape');
     await page.waitForFunction(
       () => !document.querySelector('.fn-picker-popover'),
+      null,
       {timeout: 3000, polling: 50});
   } finally {
     await deleteFnByName(page, TEST_NAME).catch(() => {});

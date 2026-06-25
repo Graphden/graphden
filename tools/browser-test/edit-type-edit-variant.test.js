@@ -63,6 +63,7 @@ async function cleanup(page) {
             && typeof initGraph === 'function'
             && typeof lookups === 'object'
             && lookups?.fnMap?.size > 50,
+      null,
       {timeout: 30000});
     await page.evaluate(async () => { await initGraph(); });
     // Poll until the variant lands in the editor's in-memory
@@ -84,6 +85,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => document.querySelectorAll('.type-create-popover .type-create-pair-row')
               .length >= 2,
+      null,
       {timeout: 5000});
 
     // ===================================================================
@@ -118,6 +120,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => document.querySelectorAll('.type-create-popover .type-create-pair-row')
               .length >= 3,
+      null,
       {timeout: 3000});
     await page.evaluate(() => {
       const rows = document.querySelectorAll('.type-create-popover .type-create-pair-row');
@@ -138,6 +141,7 @@ async function cleanup(page) {
         const el = document.querySelector('.type-create-popover');
         return !el || el.style.display === 'none';
       },
+      null,
       {timeout: 15000});
     // Poll storage until the constraint has 3 branches (length 7).
     const settled = await waitFor(async () => {

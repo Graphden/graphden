@@ -72,6 +72,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.arg-type-chip', {timeout: 15000});
@@ -116,6 +117,7 @@ async function cleanup(page) {
         const opts = Array.from(sel?.options || []);
         return opts.some((o) => o.value === 'int');
       },
+      null,
       {timeout: 10000});
 
     // ===================================================================
@@ -138,6 +140,7 @@ async function cleanup(page) {
     // AND for storage to reflect the new :type-override-fn-id.
     await page.waitForFunction(
       () => !document.querySelector('.arg-value-edit-popover'),
+      null,
       {timeout: 10000});
     {
       const deadline = Date.now() + 15000;

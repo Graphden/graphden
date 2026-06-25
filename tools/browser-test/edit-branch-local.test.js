@@ -77,6 +77,7 @@ async function openServicePopover(page, fnHash) {
     () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
           && !!document.querySelector('button.more-actions-trigger')
           && !cy.animated(),
+    null,
     {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
   await page.waitForSelector('.row-actions-popover', {timeout: 5000});
@@ -148,6 +149,7 @@ async function openServicePopover(page, fnHash) {
     });
     await page.waitForFunction(
       () => !document.querySelector('.service-popover.visible'),
+      null,
       {timeout: 3000, polling: 50});
 
     // ====================================================================

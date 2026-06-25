@@ -33,12 +33,14 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.waitForFunction(
       () => document.querySelectorAll('.entity-item').length >= 1
             && document.querySelectorAll('.ns-header').length >= 3,
+      null,
       {timeout: 15000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     // Wait again after initGraph rebuilds the tree.
     await page.waitForFunction(
       () => document.querySelectorAll('.entity-item').length >= 1
             && document.querySelectorAll('.ns-header').length >= 3,
+      null,
       {timeout: 15000, polling: 100});
 
     // ===================================================================
@@ -109,6 +111,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     // Wait until the list is empty.
     await page.waitForFunction(
       () => document.querySelectorAll('.entity-item').length === 0,
+      null,
       {timeout: 5000, polling: 50});
     const empty = await page.evaluate(() =>
       document.querySelectorAll('.entity-item').length);

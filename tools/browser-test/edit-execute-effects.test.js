@@ -25,6 +25,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
     () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
           && !!document.querySelector('button.more-actions-trigger')
           && !cy.animated(),
+    null,
     {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover', {timeout: 5000});
@@ -113,7 +114,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
       return popover
         && popover.querySelector('.execute-result-scalar')
         && popover.querySelector('.execute-runtime-effects-strip');
-    }, {timeout: 8000, polling: 100});
+    },null,  {timeout: 8000, polling: 100});
     const result = await page.evaluate(() => {
       const popover = document.querySelector('.execute-popover.visible');
       const scalar = popover.querySelector('.execute-result-scalar');

@@ -36,6 +36,7 @@ async function openBranchPopover(page) {
         return p && !p.classList.contains('hidden')
                && p.querySelector('.branch-popover-list');
       },
+      null,
       {timeout: 5000});
     return true;
   } catch (_) { return false; }
@@ -148,6 +149,7 @@ async function openBranchPopover(page) {
         const span = document.getElementById('branch-chip-name');
         return span && span.textContent.trim() === 'main';
       },
+      null,
       {timeout: 15000});
 
     // Re-open popover; verify the feat row now exposes Δ + ⇢ + ×.

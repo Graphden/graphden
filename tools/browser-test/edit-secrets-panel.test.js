@@ -153,7 +153,7 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
       const err = pop.querySelector('.popover-error');
       return err && !err.hasAttribute('hidden')
              && (err.textContent || '').trim().length > 0;
-    }, {timeout: 5000, polling: 100});
+    },null,  {timeout: 5000, polling: 100});
     // Reopen if closed (success path), else carry on (error path).
     const popoverClosed = await page.evaluate(
       () => !document.querySelector('.secrets-popover'));
@@ -181,6 +181,7 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
         return e && !e.hasAttribute('hidden')
                && (e.textContent || '').length > 0;
       },
+      null,
       {timeout: 10000});
     const errorState = await page.evaluate(() => {
       const p = document.querySelector('.secrets-popover');
@@ -210,6 +211,7 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     });
     await page.waitForFunction(
       () => !document.querySelector('.secrets-popover'),
+      null,
       {timeout: 3000});
     const dismissed = await page.evaluate(
       () => !document.querySelector('.secrets-popover'));

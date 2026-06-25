@@ -34,6 +34,7 @@ const {chromium} = require('playwright');
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
 
     const snapshot = await page.evaluate(() => {

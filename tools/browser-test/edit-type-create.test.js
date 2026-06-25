@@ -129,6 +129,7 @@ async function openTypeCreate(page, nsName) {
           .find((tab) => tab.textContent.trim() === 'Record');
         return t?.classList.contains('type-create-tab-active');
       },
+      null,
       {timeout: 3000});
     const recordState = await page.evaluate(() => {
       const p = document.querySelector('.type-create-popover');
@@ -250,7 +251,7 @@ async function openTypeCreate(page, nsName) {
       if (p.classList.contains('hidden')) return true;
       const style = window.getComputedStyle(p);
       return style.display === 'none' || style.visibility === 'hidden';
-    }, {timeout: 2000, polling: 50}).then(() => true).catch(() => false);
+    },null,  {timeout: 2000, polling: 50}).then(() => true).catch(() => false);
     assert(dismissed, 'Cancel dismisses the popover');
 
     console.log('✓ type-create verified — tabs / refinement submit / sidebar / cancel');

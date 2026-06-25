@@ -99,6 +99,7 @@ async function putDescription(page, fnId, branch, desc) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     // initGraph rebuilds the canvas — wait again for stability.
@@ -106,6 +107,7 @@ async function putDescription(page, fnId, branch, desc) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover', {timeout: 5000});
@@ -125,6 +127,7 @@ async function putDescription(page, fnId, branch, desc) {
         return p && !p.classList.contains('hidden')
                && !!p.querySelector('.fn-versions-list');
       },
+      null,
       {timeout: 10000});
 
     const popoverState = await page.evaluate(() => {
@@ -164,6 +167,7 @@ async function putDescription(page, fnId, branch, desc) {
     // click — wait until it's no longer null.
     await page.waitForFunction(
       () => window.__switchCalled !== null,
+      null,
       {timeout: 5000, polling: 50});
     const switchState = await page.evaluate(() => window.__switchCalled);
     assert(switchState === FEAT_BRANCH,
@@ -179,6 +183,7 @@ async function putDescription(page, fnId, branch, desc) {
         const p = document.getElementById('fn-versions-popover');
         return !p || p.classList.contains('hidden');
       },
+      null,
       {timeout: 3000, polling: 50});
     const dismissed = await page.evaluate(() => {
       const p = document.getElementById('fn-versions-popover');

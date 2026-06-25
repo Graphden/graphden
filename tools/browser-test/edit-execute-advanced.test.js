@@ -31,6 +31,7 @@ async function openExecutePopover(page, fnName) {
     () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
           && !!document.querySelector('button.more-actions-trigger')
           && !cy.animated(),
+    null,
     {timeout: 20000, polling: 100});
   await page.evaluate(() => initGraph());
   await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
@@ -123,6 +124,7 @@ async function openExecutePopover(page, fnName) {
           '.execute-popover .execute-cancel-btn');
         return cb && cb.style.display !== 'none';
       },
+      null,
       {timeout: 20000});
 
     const beforeCancel = await page.evaluate(() => {
@@ -150,6 +152,7 @@ async function openExecutePopover(page, fnName) {
           '.execute-popover .execute-cancelled');
         return el && /cancel/i.test(el.textContent || '');
       },
+      null,
       {timeout: 10000});
     const cancelled = await page.evaluate(() => {
       const el = document.querySelector(

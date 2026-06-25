@@ -44,6 +44,7 @@ const TEST_NAME = 'test-arg-type-flip';
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
 
     // The arg-overlay carries a `.arg-type-chip` showing the resolved
@@ -91,6 +92,7 @@ const TEST_NAME = 'test-arg-type-flip';
         if (!sel) return false;
         return Array.from(sel.options).some(o => o.value === 'non-blank-text');
       },
+      null,
       {timeout: 15000});
     const selectProbe = await page.evaluate(() => {
       const sel = document.querySelector('.arg-value-edit-popover select');

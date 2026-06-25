@@ -56,6 +56,7 @@ async function openBranchPopover(page) {
         return p && !p.classList.contains('hidden')
                && p.querySelector('.branch-popover-list');
       },
+      null,
       {timeout: 5000});
     return true;
   } catch (_) { return false; }
@@ -129,6 +130,7 @@ async function openBranchPopover(page) {
         const m = document.querySelector('.branch-diff-modal');
         return m && !m.querySelector('.branch-diff-loading');
       },
+      null,
       {timeout: 15000});
 
     const diffState = await page.evaluate(() => {
@@ -199,6 +201,7 @@ async function openBranchPopover(page) {
         const m = document.querySelector('.branch-diff-modal');
         return !m || m.classList.contains('hidden');
       },
+      null,
       {timeout: 5000});
 
     const navState = await page.evaluate(() => ({

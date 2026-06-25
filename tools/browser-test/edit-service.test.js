@@ -37,6 +37,7 @@ async function openRowActionsPopover(page, fnHash) {
     () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
           && !!document.querySelector('button.more-actions-trigger')
           && !cy.animated(),
+    null,
     {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
   await page.waitForSelector('.row-actions-popover', {timeout: 5000});

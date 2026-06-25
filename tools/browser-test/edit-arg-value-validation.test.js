@@ -81,6 +81,7 @@ const TEST_NAME = 'test-arg-value-validation';
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
 
     // Click the port arg-overlay to open the value-edit popover.

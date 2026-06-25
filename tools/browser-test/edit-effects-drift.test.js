@@ -95,6 +95,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.effects-chip-env', {timeout: 15000});
@@ -124,6 +125,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.effects-chip-network', {timeout: 15000});

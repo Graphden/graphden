@@ -68,6 +68,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.placeholder-binder', {timeout: 15000});
@@ -84,6 +85,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('button'))
         .some((b) => /Bind fn-ref/.test(b.textContent || '')),
+      null,
       {timeout: 5000});
 
     // ===================================================================
@@ -122,7 +124,7 @@ async function cleanup(page) {
       });
       return visible.length >= 1
              && visible.every(r => /current-time-ms/.test(r.textContent || ''));
-    }, {timeout: 2000, polling: 50});
+    },null,  {timeout: 2000, polling: 50});
     // Programmatic .click() inside page.evaluate doesn't reliably
     // bubble through cytoscape's hover-state machinery; use the real
     // pointer click via Playwright.
@@ -131,6 +133,7 @@ async function cleanup(page) {
     // before calling initGraph, so popover-gone implies storage-written.
     await page.waitForFunction(
       () => !document.querySelector('.fn-picker-popover'),
+      null,
       {timeout: 10000});
 
     // ===================================================================

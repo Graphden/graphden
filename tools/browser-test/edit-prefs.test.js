@@ -29,6 +29,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.waitForFunction(
       () => !!document.getElementById('theme-toggle-btn')
             && !!document.getElementById('sidebar-collapse-btn'),
+      null,
       {timeout: 10000, polling: 100});
 
     // ===================================================================
@@ -82,12 +83,14 @@ const {assert, newContext} = require('./edit-test-helpers');
       });
       await page.waitForFunction(
         () => !document.body.classList.contains('sidebar-collapsed'),
+        null,
         {timeout: 3000, polling: 50});
     }
 
     await page.click('#sidebar-collapse-btn');
     await page.waitForFunction(
       () => document.body.classList.contains('sidebar-collapsed'),
+      null,
       {timeout: 3000, polling: 50});
     const collapsedState = await page.evaluate(() => ({
       collapsed: document.body.classList.contains('sidebar-collapsed'),
@@ -105,6 +108,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     });
     await page.waitForFunction(
       () => !document.body.classList.contains('sidebar-collapsed'),
+      null,
       {timeout: 3000, polling: 50});
     const expandedState = await page.evaluate(() => ({
       collapsed: document.body.classList.contains('sidebar-collapsed'),

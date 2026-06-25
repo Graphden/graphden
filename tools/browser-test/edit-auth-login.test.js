@@ -86,6 +86,7 @@ async function freshContext() {
     await page.waitForFunction(
       () => !document.getElementById('auth-popover')
               ?.classList.contains('hidden'),
+      null,
       {timeout: 5000});
     const opened = await page.evaluate(() => {
       const p = document.getElementById('auth-popover');
@@ -111,6 +112,7 @@ async function freshContext() {
         return err && !err.classList.contains('hidden')
                && /wrong password/i.test(err.textContent || '');
       },
+      null,
       {timeout: 5000});
     const rejected = await page.evaluate(() => {
       const p = document.getElementById('auth-popover');
@@ -139,6 +141,7 @@ async function freshContext() {
         const btn = document.getElementById('auth-lock-btn');
         return btn && btn.classList.contains('auth-lock-open');
       },
+      null,
       {timeout: 5000});
     const unlocked = await page.evaluate(() => {
       const p = document.getElementById('auth-popover');
@@ -168,6 +171,7 @@ async function freshContext() {
         const btn = document.getElementById('auth-lock-btn');
         return btn && !btn.classList.contains('auth-lock-open');
       },
+      null,
       {timeout: 5000});
     const signedOut = await page.evaluate(() => ({
       lockClosed: !document.getElementById('auth-lock-btn')
@@ -186,6 +190,7 @@ async function freshContext() {
     await page.waitForFunction(
       () => !document.getElementById('auth-popover')
         ?.classList.contains('hidden'),
+      null,
       {timeout: 5000});
     await page.locator('#auth-password-input').focus();
     await page.keyboard.press('Escape');

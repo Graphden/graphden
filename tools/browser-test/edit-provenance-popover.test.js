@@ -90,6 +90,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !cy.animated()
             && !!document.querySelector('.arg-type-provenance'),
+      null,
       {timeout: 20000, polling: 100});
 
     // ===================================================================
@@ -153,6 +154,7 @@ async function cleanup(page) {
         const p = document.querySelector('.provenance-popover');
         return !p || !p.classList.contains('visible');
       },
+      null,
       {timeout: 3000, polling: 50});
     const dismissed = await page.evaluate(() => {
       const pop = document.querySelector('.provenance-popover');

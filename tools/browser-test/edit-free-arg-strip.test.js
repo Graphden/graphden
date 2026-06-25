@@ -66,6 +66,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.placeholder-binder', {timeout: 15000});
@@ -100,6 +101,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('button'))
         .some((b) => /literal|fn-ref/i.test(b.textContent || '')),
+      null,
       {timeout: 5000});
     const chooser = await page.evaluate(() => {
       const all = Array.from(document.querySelectorAll('button'));

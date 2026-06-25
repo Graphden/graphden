@@ -66,6 +66,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     // The edge-label name span has class .edge-label-name (label-span
@@ -73,6 +74,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('.edge-label-overlay, [class*="edge-label"]'))
         .some((el) => /nums/.test(el.textContent || '')),
+      null,
       {timeout: 15000});
     const initialLabel = await page.evaluate(() => {
       // Find the label span containing "nums".

@@ -80,6 +80,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => typeof loadSecrets === 'function'
             && lookups?.fnMap?.size > 50,
+      null,
       {timeout: 30000});
     // The secrets panel is its own collapsible; force a reload of
     // its data AND a sidebar re-render after the seed.
@@ -183,6 +184,7 @@ async function cleanup(page) {
     // ===================================================================
     await page.waitForFunction(
       () => !document.querySelector('[data-popover="rotate-secret"]'),
+      null,
       {timeout: 5000});
     // No additional sleep needed — the secret row's presence is the
     // assertion right below; if it's still there, we're good.

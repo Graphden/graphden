@@ -75,6 +75,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.fn-overlay, .node-overlay', {timeout: 15000});
@@ -86,7 +87,7 @@ async function cleanup(page) {
                 || document.body;
       const text = root.textContent || '';
       return text.includes('identity') && text.includes('add');
-    }, {timeout: 5000, polling: 100});
+    },null,  {timeout: 5000, polling: 100});
 
     const parentStrip = await page.evaluate(() => {
       // The parents are surfaced as ancestor row labels OR a "parents:"

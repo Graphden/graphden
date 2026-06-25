@@ -45,6 +45,7 @@ async function openBranchPopover(page) {
         return p && !p.classList.contains('hidden')
                && p.querySelector('.branch-popover-list');
       },
+      null,
       {timeout: 5000});
     return true;
   } catch (_) { return false; }

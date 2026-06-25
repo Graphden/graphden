@@ -138,6 +138,7 @@ async function openCreateMenuForNs(page, nsName) {
         const e = document.querySelector('.inline-input-row .inline-error');
         return e && /name required/i.test(e.textContent || '');
       },
+      null,
       {timeout: 3000});
     const emptyState = await page.evaluate(() => ({
       error: document.querySelector('.inline-input-row .inline-error')
@@ -206,6 +207,7 @@ async function openCreateMenuForNs(page, nsName) {
         const txt = e?.textContent || '';
         return txt.length > 0 && !/name required/i.test(txt);
       },
+      null,
       {timeout: 5000});
     const duplicate = await page.evaluate(() => ({
       error: document.querySelector('.inline-input-row .inline-error')
@@ -224,6 +226,7 @@ async function openCreateMenuForNs(page, nsName) {
     await page.click('.inline-input-row .inline-btn-cancel');
     await page.waitForFunction(
       () => !document.querySelector('.inline-input-row'),
+      null,
       {timeout: 3000});
     const cancelled = await page.evaluate(
       () => !document.querySelector('.inline-input-row'));

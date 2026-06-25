@@ -82,6 +82,7 @@ async function cleanup(page) {
       () => typeof loadSecrets === 'function'
             && typeof updateEntityList === 'function'
             && lookups?.fnMap?.size > 50,
+      null,
       {timeout: 30000});
 
     // ===================================================================

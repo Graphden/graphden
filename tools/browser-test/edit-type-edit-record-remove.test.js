@@ -74,6 +74,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => typeof openTypeEditForm === 'function'
             && lookups?.fnMap?.size > 50,
+      null,
       {timeout: 30000});
     await page.evaluate(async () => { await initGraph(); });
     await page.waitForFunction(
@@ -82,6 +83,15 @@ async function cleanup(page) {
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), recFn.id);
     assert(inLookups, 'record in editor lookups');
+    // Wait for the subtree to load — `initGraph`'s hash navigation
+    // kicks off the subtree fetch async without awaiting it; the
+    // prefill code below reads `fnSlotsByFn` which only fills from
+    // that subtree fetch (`scope=subtree`). Without this gate the
+    // form opens against an empty subtree and the pair-rows render
+    // empty.
+    await page.waitForFunction(
+      (fnId) => (lookups?.fnSlotsByFn?.get(fnId) || []).length >= 3,
+      recFn.id, {timeout: 8000, polling: 100});
 
     await page.evaluate((fnId) => {
       window.openTypeEditForm(fnId, document.body);
@@ -90,6 +100,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => document.querySelectorAll('.type-create-popover .type-create-pair-row')
               .length >= 3,
+      null,
       {timeout: 5000});
 
     // ===================================================================
@@ -120,6 +131,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => document.querySelectorAll('.type-create-popover .type-create-pair-row')
               .length === 2,
+      null,
       {timeout: 3000});
 
     await page.evaluate(() => {
@@ -130,6 +142,7 @@ async function cleanup(page) {
         const el = document.querySelector('.type-create-popover');
         return !el || el.style.display === 'none';
       },
+      null,
       {timeout: 15000});
     // Poll storage until the record has exactly 2 fn-slots (b removed).
     const settled = await waitFor(async () => {

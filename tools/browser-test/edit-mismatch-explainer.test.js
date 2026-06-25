@@ -110,6 +110,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     // The root fn renders with no arg-overlays until expanded.
@@ -200,6 +201,7 @@ async function cleanup(page) {
         const p = document.querySelector('.mismatch-explainer');
         return p && !p.classList.contains('visible');
       },
+      null,
       {timeout: 3000});
     const dismissed = await page.evaluate(() => {
       const p = document.querySelector('.mismatch-explainer');

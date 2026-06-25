@@ -94,7 +94,7 @@ async function putDescription(page, fnId, desc) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
-      {timeout: 20000, polling: 100});
+      null, {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('button.more-actions-trigger', {timeout: 15000});
     // initGraph rebuilds graphData asynchronously; wait for the target
@@ -105,6 +105,16 @@ async function putDescription(page, fnId, desc) {
     }, FN_NAME, {timeout: 5000, polling: 100});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
     await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+    // Row-actions popover is HTMX-loaded — the element appears
+    // immediately but its button content swaps in async. Wait for the
+    // ⌛ history button before dispatching the click.
+    await page.waitForFunction(
+      () => {
+        const p = document.querySelector('.row-actions-popover');
+        return !!Array.from(p?.querySelectorAll('button') || [])
+          .find((b) => b.textContent.trim() === '⌛');
+      },
+      null, {timeout: 5000});
     await page.evaluate(() => {
       const popover = document.querySelector('.row-actions-popover');
       const btn = Array.from(popover?.querySelectorAll('button') || [])
@@ -117,7 +127,7 @@ async function putDescription(page, fnId, desc) {
         return p && !p.classList.contains('hidden')
                && p.querySelectorAll('.fn-versions-restore').length >= 1;
       },
-      {timeout: 10000});
+      null, {timeout: 10000});
 
     const popoverState = await page.evaluate(() => {
       const p = document.getElementById('fn-versions-popover');

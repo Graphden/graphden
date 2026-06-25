@@ -36,6 +36,7 @@ const TEST_NAME = 'test-edit-phase5';
     await page.waitForFunction(
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     // Force a refresh so the just-POSTed fn is in lookups.fnMap.
     await page.evaluate(() => initGraph());
@@ -45,6 +46,7 @@ const TEST_NAME = 'test-edit-phase5';
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !cy.animated()
             && !!document.querySelector('.placeholder-binder.is-seq-anchor'),
+      null,
       {timeout: 20000, polling: 100});
 
     // 2. Verify the empty-sequence placeholder — the button now shows
@@ -63,6 +65,7 @@ const TEST_NAME = 'test-edit-phase5';
     });
     await page.waitForFunction(
       () => !!document.querySelector('.free-arg-bind-chooser'),
+      null,
       {timeout: 5000, polling: 50});
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
@@ -70,6 +73,7 @@ const TEST_NAME = 'test-edit-phase5';
     });
     await page.waitForFunction(
       () => !!document.querySelector('.arg-value-edit-popover input'),
+      null,
       {timeout: 5000, polling: 50});
     await page.evaluate(() => {
       document.querySelector('.arg-value-edit-popover input').value = '1';
@@ -83,6 +87,7 @@ const TEST_NAME = 'test-edit-phase5';
     // Wait for the popover to be gone before continuing.
     await page.waitForFunction(
       () => !document.querySelector('.arg-value-edit-popover'),
+      null,
       {timeout: 15000});
     // Storage poll — wait until the new list-item with value=1 is in
     // the binding-list-items table. Node-side loop (no async-predicate
@@ -120,6 +125,7 @@ const TEST_NAME = 'test-edit-phase5';
     });
     await page.waitForFunction(
       () => document.querySelector('.free-arg-bind-chooser'),
+      null,
       {timeout: 5000});
     await page.evaluate(() => {
       Array.from(document.querySelectorAll('.free-arg-bind-chooser button'))
@@ -127,6 +133,7 @@ const TEST_NAME = 'test-edit-phase5';
     });
     await page.waitForFunction(
       () => document.querySelector('.arg-value-edit-popover input'),
+      null,
       {timeout: 5000});
     await page.evaluate(() => {
       document.querySelector('.arg-value-edit-popover input').value = '2';
@@ -137,6 +144,7 @@ const TEST_NAME = 'test-edit-phase5';
     });
     await page.waitForFunction(
       () => !document.querySelector('.arg-value-edit-popover'),
+      null,
       {timeout: 15000});
     // Wait for chain to grow to 2 items.
     {

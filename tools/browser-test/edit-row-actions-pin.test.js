@@ -66,6 +66,7 @@ async function popoverVisible(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
 
     // ===================================================================
@@ -92,6 +93,7 @@ async function popoverVisible(page) {
         const style = window.getComputedStyle(p);
         return style.display === 'none' || style.visibility === 'hidden';
       },
+      null,
       {timeout: 3000, polling: 50});
     assert(!(await popoverVisible(page)),
            'popover hidden after second ⋯ click (sticky toggle)');
@@ -119,6 +121,7 @@ async function popoverVisible(page) {
         const style = window.getComputedStyle(p);
         return style.display === 'none' || style.visibility === 'hidden';
       },
+      null,
       {timeout: 3000, polling: 50});
     assert(!(await popoverVisible(page)),
            'popover dismissed by outside click');
@@ -138,6 +141,7 @@ async function popoverVisible(page) {
         const style = window.getComputedStyle(p);
         return style.display === 'none' || style.visibility === 'hidden';
       },
+      null,
       {timeout: 3000, polling: 50});
     assert(!(await popoverVisible(page)),
            'popover dismissed by Escape');

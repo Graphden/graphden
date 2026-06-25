@@ -87,6 +87,7 @@ async function cleanup(page) {
     // initGraph (which is bundled at the page-script level).
     await page.waitForFunction(
       () => typeof initGraph === 'function',
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph());
     // After initGraph: wait for sidebar to be populated AND
@@ -95,6 +96,7 @@ async function cleanup(page) {
       () => typeof graphData !== 'undefined' && graphData?.fns?.length > 0
             && document.querySelectorAll('.entity-item').length > 0
             && typeof enterNamespaceMoveEditMode === 'function',
+      null,
       {timeout: 20000, polling: 100});
 
     await page.evaluate((fnName) => {
@@ -108,6 +110,7 @@ async function cleanup(page) {
         const search = document.querySelector('.fn-picker-popover .fn-picker-search');
         return search && /namespace/i.test(search.placeholder || '');
       },
+      null,
       {timeout: 5000});
     const pickerState = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');

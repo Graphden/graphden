@@ -93,6 +93,7 @@ async function cleanup(page) {
             && typeof initGraph === 'function'
             && typeof lookups === 'object'
             && lookups?.fnMap?.size > 50,
+      null,
       {timeout: 30000});
     // Force a refetch in case the page's first initGraph fired before
     // the seed reached storage.
@@ -103,6 +104,15 @@ async function cleanup(page) {
     const inLookups = await page.evaluate(
       (fnId) => !!lookups?.fnMap?.get(fnId), recFn.id);
     assert(inLookups, 'seeded record is in editor lookups after initGraph');
+    // Wait for the subtree to load — scope=index gives us fns/
+    // namespaces but the prefill code reads `fnSlotsByFn` + `slotMap`
+    // which only populate from the subtree fetch (`ensureSubtreeFor`)
+    // that `initGraph`'s hash-navigation kicks off asynchronously and
+    // doesn't await. Without this gate the form opens against an
+    // empty subtree and renders empty pair-rows.
+    await page.waitForFunction(
+      (fnId) => (lookups?.fnSlotsByFn?.get(fnId) || []).length >= 2,
+      recFn.id, {timeout: 8000, polling: 100});
 
     await page.evaluate((fnId) => {
       window.openTypeEditForm(fnId, document.body);
@@ -115,6 +125,7 @@ async function cleanup(page) {
         const rows = el?.querySelectorAll('.type-create-pair-row') || [];
         return rows.length >= 2;
       },
+      null,
       {timeout: 5000});
 
     // ===================================================================
@@ -163,6 +174,7 @@ async function cleanup(page) {
     });
     await page.waitForFunction(
       () => document.querySelectorAll('.type-create-popover .type-create-pair-row').length >= 3,
+      null,
       {timeout: 3000});
     // Fill the LAST row's name + type inputs.
     await page.evaluate(() => {
@@ -192,6 +204,7 @@ async function cleanup(page) {
         const el = document.querySelector('.type-create-popover');
         return !el || el.style.display === 'none';
       },
+      null,
       {timeout: 15000});
     // Poll storage until the record grows to 3 fn-slots (b add).
     const settled = await waitFor(async () => {

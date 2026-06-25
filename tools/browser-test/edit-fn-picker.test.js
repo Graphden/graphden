@@ -31,12 +31,14 @@ const {assert, newContext} = require('./edit-test-helpers');
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForFunction(
       () => typeof openFnPicker === 'function'
             && typeof graphData !== 'undefined'
             && graphData?.fns?.length > 50,
+      null,
       {timeout: 15000});
 
     // ===================================================================
@@ -81,7 +83,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       const rows = Array.from(p?.querySelectorAll('.fn-picker-row') || []);
       if (rows.length === 0 || rows.length >= 50) return false;
       return rows.every(r => /identity/.test(r.textContent || ''));
-    }, {timeout: 2000, polling: 50});
+    },null,  {timeout: 2000, polling: 50});
     const filtered = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
       const allRows = Array.from(p?.querySelectorAll('.fn-picker-list > *') || []);
@@ -119,6 +121,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.waitForFunction(
       () => !document.querySelector('.fn-picker-popover')
             && window.__fnPicked,
+      null,
       {timeout: 5000});
     const picked = await page.evaluate(() => window.__fnPicked);
     assert(picked && /identity/i.test(picked.name || ''),
@@ -139,6 +142,7 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.keyboard.press('Escape');
     await page.waitForFunction(
       () => !document.querySelector('.fn-picker-popover'),
+      null,
       {timeout: 3000});
     const afterEsc = await page.evaluate(() => ({
       popoverGone: !document.querySelector('.fn-picker-popover'),

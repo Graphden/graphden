@@ -47,6 +47,7 @@ const TEST_NAME = 'test-edit-phase3';
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     // The editor's initial /api/graph/entities load may race against
     // the just-POSTed fn. Force a refresh so `lookups.fnMap` sees it.
@@ -55,6 +56,7 @@ const TEST_NAME = 'test-edit-phase3';
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
 
     // 3. Remove parent `add` via the depth-1 row's row-actions popover.

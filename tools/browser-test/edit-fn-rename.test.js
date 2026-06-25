@@ -36,6 +36,7 @@ const NEW = 'test-fn-rename-new';
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
 
     // Per-row action icons live in the `.row-actions-popover` triggered

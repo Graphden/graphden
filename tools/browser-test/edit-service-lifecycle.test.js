@@ -68,6 +68,7 @@ async function openServicePopover(page) {
     () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
           && !!document.querySelector('button.more-actions-trigger')
           && !cy.animated(),
+    null,
     {timeout: 20000, polling: 100});
   await page.evaluate(() => initGraph());
   // initGraph re-renders overlays; wait again for the post-rebuild
@@ -76,6 +77,7 @@ async function openServicePopover(page) {
     () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
           && !!document.querySelector('button.more-actions-trigger')
           && !cy.animated(),
+    null,
     {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
   await page.waitForSelector('.row-actions-popover', {timeout: 5000});
@@ -259,6 +261,7 @@ async function openServicePopover(page) {
     });
     await page.waitForFunction(
       () => !document.querySelector('.service-popover.visible'),
+      null,
       {timeout: 3000, polling: 50});
 
     const branchResp = await api(page, 'POST', '/api/branches',

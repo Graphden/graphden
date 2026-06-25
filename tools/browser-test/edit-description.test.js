@@ -75,6 +75,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     // The fn's sidebar row carries the description-badge.
@@ -100,6 +101,7 @@ async function cleanup(page) {
         const t = document.querySelector('.description-tooltip');
         return t && t.style.display !== 'none';
       },
+      null,
       {timeout: 5000});
     const hoverState = await page.evaluate(() => {
       const t = document.querySelector('.description-tooltip');
@@ -134,6 +136,7 @@ async function cleanup(page) {
           .find((b) => /Edit/.test(b.textContent || ''));
         return !!btn;
       },
+      null,
       {timeout: 5000});
     const stuckState = await page.evaluate(() => {
       const t = document.querySelector('.description-tooltip');

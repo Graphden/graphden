@@ -19,6 +19,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
     () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
           && !!document.querySelector('button.more-actions-trigger')
           && !cy.animated(),
+    null,
     {timeout: 20000, polling: 100});
 
   // The ▶ button lives inside the row-actions popover, anchored to
@@ -45,6 +46,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
       return p && (!!p.querySelector('textarea[data-form-field]')
                    || !!p.querySelector('input[data-form-field]'));
     },
+    null,
     {timeout: 10000, polling: 100});
 }
 
@@ -78,6 +80,7 @@ async function readResult(page) {
       return p && (!!p.querySelector('.execute-result-scalar')
                    || !!p.querySelector('.execute-error-pane'));
     },
+    null,
     {timeout: 10000, polling: 100});
   return await page.evaluate(() => {
     const popover = document.querySelector('.execute-popover.visible');
@@ -109,6 +112,7 @@ async function readResult(page) {
     await page.waitForFunction(
       () => document.activeElement?.tagName === 'TEXTAREA'
             || document.activeElement?.tagName === 'INPUT',
+      null,
       {timeout: 3000, polling: 50});
     const focusedTag = await page.evaluate(() =>
       document.activeElement?.tagName);
@@ -128,6 +132,7 @@ async function readResult(page) {
     });
     await page.waitForFunction(
       () => !document.querySelector('.execute-popover.visible'),
+      null,
       {timeout: 3000, polling: 50});
     await openExecutePopoverFor(page, 'core.arithmetic.add');
     await fillNumsAndRun(page, '[10, 20]', true);
@@ -148,6 +153,7 @@ async function readResult(page) {
         return h && h.style.display !== 'none'
                && h.querySelectorAll('.execute-history-row').length >= 1;
       },
+      null,
       {timeout: 10000, polling: 100});
     const historyState = await page.evaluate(() => {
       const host = document.querySelector('.execute-history-host');
@@ -189,6 +195,7 @@ async function readResult(page) {
         const v = ta?.value || '';
         return v.includes('10') && v.includes('20');
       },
+      null,
       {timeout: 5000, polling: 50});
     const refilled = await page.evaluate(() => {
       const ta = document.querySelector(
@@ -211,6 +218,7 @@ async function readResult(page) {
           '.execute-popover.visible .execute-result-scalar');
         return s?.textContent === '300';
       },
+      null,
       {timeout: 10000, polling: 100});
     await page.evaluate(() => {
       // Tab focus off the textarea — focus the popover root so the
@@ -237,6 +245,7 @@ async function readResult(page) {
           '.execute-popover.visible .execute-result-scalar');
         return s?.textContent === '15';
       },
+      null,
       {timeout: 10000, polling: 100});
     const enterResult = await page.evaluate(() => {
       const scalar = document.querySelector(

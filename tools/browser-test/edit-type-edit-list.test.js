@@ -68,6 +68,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => typeof openTypeEditForm === 'function'
             && lookups?.fnMap?.size > 50,
+      null,
       {timeout: 30000});
     await page.evaluate(async () => { await initGraph(); });
     await page.waitForFunction(
@@ -89,7 +90,7 @@ async function cleanup(page) {
       const inputs = document.querySelectorAll(
         '.type-create-popover input.type-create-input');
       return Array.from(inputs).some((i) => i.value === 'int');
-    }, {timeout: 5000});
+    },null,  {timeout: 5000});
 
     const prefill = await page.evaluate(() => {
       const el = document.querySelector('.type-create-popover');
@@ -132,6 +133,7 @@ async function cleanup(page) {
         const el = document.querySelector('.type-create-popover');
         return !el || el.style.display === 'none';
       },
+      null,
       {timeout: 15000});
     // Poll storage until element-fn-id flips to :text.
     const settled = await waitFor(async () => {

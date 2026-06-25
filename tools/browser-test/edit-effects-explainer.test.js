@@ -41,6 +41,7 @@ const TARGET_FN = 'current-time-ms';
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.effects-chip-time', {timeout: 15000});
@@ -72,6 +73,7 @@ const TARGET_FN = 'current-time-ms';
         const p = document.querySelector('.type-explainer.visible');
         return !!p && (p.textContent || '').length > 0;
       },
+      null,
       {timeout: 5000});
 
     const popoverState = await page.evaluate(() => {
@@ -106,6 +108,7 @@ const TARGET_FN = 'current-time-ms';
         const p = document.querySelector('.type-explainer');
         return !p || !p.classList.contains('visible');
       },
+      null,
       {timeout: 3000});
     const dismissed = await page.evaluate(() => {
       const p = document.querySelector('.type-explainer');

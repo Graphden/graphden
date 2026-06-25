@@ -40,6 +40,7 @@ const TARGET_FN = 'assoc-fn';
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.type-chip-expandable', {timeout: 15000});
@@ -49,6 +50,7 @@ const TARGET_FN = 'assoc-fn';
     await page.waitForFunction(
       () => document.querySelectorAll('.type-chip-expandable').length >= 1
             && document.querySelectorAll('.arg-type-provenance').length >= 1,
+      null,
       {timeout: 5000, polling: 100});
 
     // ===================================================================
@@ -78,6 +80,7 @@ const TARGET_FN = 'assoc-fn';
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('.type-inline-host'))
               .some((h) => h.style.display !== 'none'),
+      null,
       {timeout: 5000});
 
     const opened = await page.evaluate(() => {
@@ -111,6 +114,7 @@ const TARGET_FN = 'assoc-fn';
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('.type-inline-host'))
               .every((h) => h.style.display === 'none'),
+      null,
       {timeout: 5000});
     const collapsed = await page.evaluate(() => ({
       visibleHostCount: Array.from(

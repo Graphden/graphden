@@ -27,6 +27,7 @@ const {chromium} = require('playwright');
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
 
     // Click "list" row to expand the inner wrapper's body.
@@ -46,7 +47,7 @@ const {chromium} = require('playwright');
         .filter(n => (n.data('id') || '').startsWith('arg-'))
         .map(n => n.data('label'));
       return args.length > 0 && !cy.animated();
-    }, {timeout: 8000, polling: 100});
+    },null,  {timeout: 8000, polling: 100});
 
     const overlays = await page.evaluate(() => {
       if (typeof cy === 'undefined') return null;

@@ -24,6 +24,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
 
     const probe = await page.evaluate(() => {
@@ -68,6 +69,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     const healthProbe = await page.evaluate(() => {
       const overlay = Array.from(document.querySelectorAll('.node-overlay'))
@@ -103,6 +105,7 @@ const {assert, newContext} = require('./edit-test-helpers');
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     const pureProbe = await page.evaluate(() => {
       // Anchor on the root fn-card whose text starts with "add" and

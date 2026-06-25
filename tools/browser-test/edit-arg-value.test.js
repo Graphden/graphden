@@ -80,6 +80,7 @@ async function cleanup(page) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForSelector('.arg-overlay-row', {timeout: 15000});
@@ -150,6 +151,7 @@ async function cleanup(page) {
     // the overlay to re-render with the new value.
     await page.waitForFunction(
       () => !document.querySelector('.arg-value-edit-popover'),
+      null,
       {timeout: 10000});
     await page.waitForFunction(
       () => {
@@ -157,6 +159,7 @@ async function cleanup(page) {
         const content = row?.firstElementChild;
         return /99/.test(content?.textContent || '');
       },
+      null,
       {timeout: 10000});
     const after = await page.evaluate(() => {
       const row = document.querySelector('.arg-overlay-row');

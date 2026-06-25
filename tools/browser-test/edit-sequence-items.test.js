@@ -92,10 +92,12 @@ async function postSequenceAppend(page, fnId, body) {
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
             && !!document.querySelector('button.more-actions-trigger')
             && !cy.animated(),
+      null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     await page.waitForFunction(
       () => document.querySelectorAll('.arg-seq-btn-remove').length >= 2,
+      null,
       {timeout: 15000});
 
     const initial = await page.evaluate(() => ({
@@ -116,6 +118,7 @@ async function postSequenceAppend(page, fnId, body) {
     await page.waitForFunction(
       () => Array.from(document.querySelectorAll('button'))
         .some((b) => /Append literal/.test(b.textContent || '')),
+      null,
       {timeout: 5000});
     const chooser = await page.evaluate(() => {
       const all = Array.from(document.querySelectorAll('button'));
@@ -155,6 +158,7 @@ async function postSequenceAppend(page, fnId, body) {
     });
     await page.waitForFunction(
       () => document.querySelectorAll('.arg-seq-btn-remove').length === 3,
+      null,
       {timeout: 10000});
     const afterAppend = await page.evaluate(() => ({
       removeBtnCount: document.querySelectorAll('.arg-seq-btn-remove').length,
@@ -175,6 +179,7 @@ async function postSequenceAppend(page, fnId, body) {
     });
     await page.waitForFunction(
       () => document.querySelectorAll('.arg-seq-btn-remove').length === 2,
+      null,
       {timeout: 10000});
     const afterRemove = await page.evaluate(() => ({
       removeBtnCount: document.querySelectorAll('.arg-seq-btn-remove').length,

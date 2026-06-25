@@ -278,14 +278,20 @@
    extension may also map R-slot-ids from F-slot-ids for cross-fn
    rename cascades.
 
-   Empty translation short-circuits — fa passes through."
+   Empty translation short-circuits — fa passes through.
+
+   PRESENCE — not truthiness — is the copy gate. A caller passing
+   `:body nil` or `:flag false` deserves to land under R's slot-id
+   just like any other value; a falsy `if-let` here would silently
+   drop those."
   [fa translation]
   (if (empty? translation)
     fa
     (reduce-kv (fn [acc r-sid src]
-                 (if-let [v (or (get acc r-sid) (get acc src))]
-                   (assoc acc r-sid v)
-                   acc))
+                 (cond
+                   (contains? acc r-sid) acc
+                   (contains? acc src)   (assoc acc r-sid (get acc src))
+                   :else                 acc))
                fa translation)))
 
 

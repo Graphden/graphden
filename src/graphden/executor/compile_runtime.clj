@@ -425,19 +425,21 @@
      `execute`'s lenient contract for tests bypassing
      `execute-with-named-args`'s upstream `unknown-arg-name` check.
    - ≥1 entries → write the value under the ext-name AND under EVERY
-     matching slot-id. The slot-id half is dead weight in Phase 2
-     (inner readers still index by name); Phase 3's per-ref
-     translation + Phase 4's reader cutover consume the slot-id keys.
-     Writing all matching slot-ids — instead of one — saves Phase 3
-     from having to invent a per-call propagation just to satisfy
-     readers that are still name-keyed.
+     matching slot-id. Phase 4 readers prefer the slot-id half; the
+     ext-name half covers env-binding writes, HOF lambda-args, and
+     `apply-rename-aliases` cross-fn cascades that still flow through
+     name keys. The dual-key is load-bearing in the shipped hybrid
+     architecture (`docs/ARCHITECTURE.md` § Runtime fa).
 
-   Phase 2 deliberately does NOT throw on multi-slot ext-names. The
-   #104 collision is structural — two slots sharing a name that are
-   semantically DIFFERENT, not just shared deep readers — and the
-   walker can't tell those apart without runtime context. The real
-   error surface lands in Phase 5/6 once `:as` workarounds drop and
-   the slot-id-keyed readers can prove which slot a caller meant.
+   Does NOT throw on multi-slot ext-names. The #104 collision is
+   structural — two slots sharing a name that are semantically
+   DIFFERENT, not just shared deep readers — and the walker can't
+   tell those apart without runtime context. Phase 5 HOF translation
+   bridges past HOF boundaries (`r/build-hof-translation` +
+   `apply-hof-translation`); the parser disambiguates fn-def-level
+   bindings via `resolve-slot-owner`'s type pass. Public boundary
+   here writes everything; downstream Phase 5 + parser decide which
+   slot wins per call site.
 
    `nil` / `{}` args short-circuit."
   [fn-id args lookups]

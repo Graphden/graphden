@@ -209,7 +209,7 @@ An alternative was considered (env-builder slot-id-only + cross-fn rename slot-i
 - [x] page_test passes with `:body` (no `:as :page-body`)
 - [x] `feedback_104_*` memory archived as closed
 - [x] `docs/ARCHITECTURE.md` § Runtime fa documents the hybrid surface
-- [x] `bb ci` green (16/17 + cider-nrepl bump `ba7a4bfd` closes the 17th)
+- [x] `bb ci` green (17/17 — initial run had cider-nrepl outdated, bumped to 0.60.0)
 - [x] `bb test-e2e` green (edit suite: 51 pass / 0 fail / 51 total; 4 retry-flakes recovered; 0 `Unknown field 'request-method'` leaks confirms the pin restore)
 
 ### 9. Out of scope

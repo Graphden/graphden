@@ -396,16 +396,17 @@
 ;; At every public boundary (`execute`, `make-single-arg-callable`'s
 ;; per-call closure), translate caller's `{ext-name → value}` into
 ;; `{slot-id → value, ext-name → value}` via the walker's surface
-;; entries. The slot-id half is dead weight in Phase 2 — Phase 3 (per-
-;; ref translation) and Phase 4 (reader cutover) consume it — but
-;; landing the translator now is what lets ambiguous-name calls error
-;; explicitly RIGHT NOW instead of silently mis-routing through the
-;; name-keyed runtime.
+;; entries. Phase 4 `:free` readers prefer the slot-id half (rename-
+;; aware via `effective-reader-slot-id`); the ext-name half covers
+;; env-binding writes, HOF lambda-args, and `apply-rename-aliases`
+;; cross-fn cascades that still flow under name keys today. Both
+;; halves are load-bearing in the shipped hybrid architecture.
 ;;
-;; "Why not just write slot-id keys?" — inner readers (`arg-builder`'s
-;; `:free` case, seq-item-builder, env-bindings, `apply-rename-aliases`
-;; / `build-ref-renames`) all still index `fa` by name. Phase 4 flips
-;; those. Until then the translator writes BOTH so neither breaks.
+;; Phase 5 HOF wrap-time translation (`build-hof-translation` +
+;; `apply-hof-translation`) extends the slot-id route across HOF
+;; boundaries — the walker stops at HOF, so caller args past HOF
+;; only have the ext-name route until `apply-hof-translation` writes
+;; them under R's slot-id at wrap.
 ;; =============================================================================
 
 

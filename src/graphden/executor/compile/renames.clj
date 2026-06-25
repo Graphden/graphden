@@ -126,9 +126,11 @@
    surface through `hof-wrap`'s `make-shape-callable`, not by
    threading the outer caller's fa.
 
-   Memoised via `:deep-free-ext-entries-cache`. Pure walker — no
-   consumer yet (Phase 1 of the slot-id-keyed-runtime refactor;
-   docs/RUNTIME_SLOT_ID_REFACTOR.md)."
+   Memoised via `:deep-free-ext-entries-cache`. Consumers:
+   `translate-named-args` at the public boundary,
+   `build-hof-translation` at HOF wraps, `build-ref-slot-renames`
+   scaffold for the deferred Phase 5 extension. See
+   docs/RUNTIME_SLOT_ID_REFACTOR.md."
   [fn-id {:keys [deep-free-ext-entries-cache] :as lookups}]
   (if-let [cache deep-free-ext-entries-cache]
     (or (get @cache fn-id)
@@ -969,11 +971,14 @@
      the closest caller-side entry that semantically maps to the
      same surface name.
 
-   Phase 3 is ADDITIVE: the runtime applies these translation rows
-   AND keeps the name-keyed `build-ref-renames` path. Phase 4 (reader
-   cutover) flips `arg-builder :free` to slot-id reads and the
-   name-keyed path retires. Until then, the slot-id rows are dead
-   weight for current readers but in place for Phase 4 to consume."
+   Status: not wired in production (Phase 4 readers prefer slot-id
+   via `effective-reader-slot-id` directly off `bnd.slot-id`; Phase 5
+   conservative ships HOF-boundary translation via
+   `build-hof-translation` instead of per-ref translation). The
+   helper + tests stay as scaffold for the deferred Phase 5 extension
+   that flips env-builder to slot-id-only writes — at that point the
+   non-HOF per-ref translation lands here, and `apply-rename-aliases`
+   retires."
   [callee-fn-id caller-fn-id lookups]
   (let [callee-entries (deep-free-ext-entries callee-fn-id lookups)
         caller-entries (deep-free-ext-entries caller-fn-id lookups)

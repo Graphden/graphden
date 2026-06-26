@@ -46,6 +46,7 @@
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
     [graphden.types.check :as types-check]
+    [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
@@ -375,11 +376,11 @@
              (swap! failed-names conj (:name fd))
              (log/debug "Type-check failed for fn-def" (:name fd) "—"
                         (ex-message e)))))
-    (let [narrowings (types-check/build-caller-narrowings sorted)
-          overrides  (types-check/build-ref-return-overrides sorted)]
+    (let [narrowings (types-narrowing/build-caller-narrowings sorted)
+          overrides  (types-narrowing/build-ref-return-overrides sorted)]
       (reset! failed-names #{})
       (doseq [fd sorted]
-        (try (types-check/check-fn-def-with-narrowings! fd narrowings overrides)
+        (try (types-narrowing/check-fn-def-with-narrowings! fd narrowings overrides)
              (catch Exception e
                (swap! failed-names conj (:name fd))
                (log/debug "Type-check failed for fn-def" (:name fd) "—"

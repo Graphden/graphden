@@ -17,6 +17,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.loader :as loader]
     [graphden.types.check :as check]
+    [graphden.types.check.narrowing :as narrowing]
     [graphden.types.core :as types-core]))
 
 
@@ -1707,7 +1708,7 @@
                        :then :_then-consumer
                        :else nil}}
                {:name :_then-consumer :args {} :return-type :text}]
-          overrides (check/build-ref-return-overrides fds)]
+          overrides (narrowing/build-ref-return-overrides fds)]
       (is (= {:_nullable-text :text}
              (get overrides :_then-consumer))
           ":then ref-target inherits non-null narrowing"))))
@@ -1722,7 +1723,7 @@
                        :then nil
                        :else :_else-consumer}}
                {:name :_else-consumer :args {} :return-type :text}]
-          overrides (check/build-ref-return-overrides fds)]
+          overrides (narrowing/build-ref-return-overrides fds)]
       (is (= {:_nullable-text :text}
              (get overrides :_else-consumer))
           ":else under `:nil?` test gets non-null narrowing"))))
@@ -1739,7 +1740,7 @@
                                  true :_else-result]}}
                {:name :_clause-result-1 :args {} :return-type :text}
                {:name :_else-result :args {} :return-type :text}]
-          overrides (check/build-ref-return-overrides fds)]
+          overrides (narrowing/build-ref-return-overrides fds)]
       (is (= :null (get-in overrides [:_clause-result-1 :_nullable-text]))
           "clause-1 result sees :_nullable-text as :null (test was truthy)")
       (is (= :text (get-in overrides [:_else-result :_nullable-text]))
@@ -1781,7 +1782,7 @@
                        :then :_then-list-consumer
                        :else nil}}
                {:name :_then-list-consumer :args {} :return-type :any}]
-          overrides (check/build-ref-return-overrides fds)]
+          overrides (narrowing/build-ref-return-overrides fds)]
       (is (= {:_anyv [:list :any]}
              (get overrides :_then-list-consumer))
           ":then ref-target sees :_anyv narrowed to [:list :any]"))))
@@ -1798,7 +1799,7 @@
                        :then :_then-map-consumer
                        :else nil}}
                {:name :_then-map-consumer :args {} :return-type :any}]
-          overrides (check/build-ref-return-overrides fds)]
+          overrides (narrowing/build-ref-return-overrides fds)]
       (is (= {:_anyv [:map :any :any]}
              (get overrides :_then-map-consumer))
           ":then ref-target sees :_anyv narrowed to [:map :any :any]"))))
@@ -1830,7 +1831,7 @@
                {:name :_list-result :args {} :return-type :any}
                {:name :_map-result  :args {} :return-type :any}
                {:name :_else-result :args {} :return-type :any}]
-          overrides (check/build-ref-return-overrides fds)]
+          overrides (narrowing/build-ref-return-overrides fds)]
       (is (= [:list :any] (get-in overrides [:_list-result :_anyv]))
           "list-result sees :_anyv as [:list :any] (its own :is-a? :sequence was taken)")
       (is (= [:map :any :any] (get-in overrides [:_map-result :_anyv]))
@@ -1865,7 +1866,7 @@
                            :then then-name
                            :else nil}}
                    {:name then-name :args {} :return-type :any}]
-              overrides (check/build-ref-return-overrides fds)]
+              overrides (narrowing/build-ref-return-overrides fds)]
           (is (= {:_anyv expected-narrowed}
                  (get overrides then-name))
               (str ":then narrowing for :is-a? tag " tag
@@ -1886,7 +1887,7 @@
                        :then nil
                        :else :_else-stays-any}}
                {:name :_else-stays-any :args {} :return-type :any}]
-          overrides (check/build-ref-return-overrides fds)]
+          overrides (narrowing/build-ref-return-overrides fds)]
       (is (= {:_anyv :any}
              (get overrides :_else-stays-any))
           ":else under :is-a? :sequence keeps :_anyv as :any (no subtraction)"))))
@@ -1912,7 +1913,7 @@
                        :then :_unknown-then
                        :else nil}}
                {:name :_unknown-then :args {} :return-type :any}]
-          overrides (check/build-ref-return-overrides fds)]
+          overrides (narrowing/build-ref-return-overrides fds)]
       (is (= {:_anyv :any}
              (get overrides :_unknown-then))
           "unknown tag → target-static fall-through, not crash"))))

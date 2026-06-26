@@ -376,11 +376,6 @@ keeps its inline 📍 badge on the same rows.
 
 ## Known gaps
 
-- `diff-branches` only walks the ancestor chain — it does NOT
-  consult `branch_merge` records. Branches that have been merged in
-  either direction may understate the visible-via-merge surface.
-  Fix: extend `touched-entities-on-chain` to include the closure
-  over branch_merge.
 - Per-branch ctx cache has no eviction — fine for the dev workflow
   (handful of branches), needs LRU for multi-tenant prod.
 - The `:exec/branch-router` is unit-tested at the dispatcher level

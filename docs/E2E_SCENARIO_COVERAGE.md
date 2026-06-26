@@ -6,13 +6,21 @@ Per the project's coverage-measurement philosophy
 This document inventories user-facing flows in the editor and notes
 which have e2e tests + which don't.
 
-Generated: 2026-06-23 (49 e2e files in `tools/browser-test/`).
+Generated: 2026-06-23. Refreshed 2026-06-26 — the three "high-value
+gaps" originally flagged below have all shipped
+(`edit-provenance-popover.test.js`, `edit-row-actions-pin.test.js`,
+`edit-prefs.test.js`); the gap section is kept for context but the
+matrix above absorbs them.
 
 ## What's covered (49 files, grouped by concern)
 
 ### Auth & access
 
 - ✓ Lock chip → password popover → login / sign-out (`edit-auth-login`)
+
+### Prefs (theme + sidebar)
+
+- ✓ Theme toggle + sidebar collapse/expand (`edit-prefs`)
 
 ### Sidebar & navigation
 
@@ -64,6 +72,11 @@ Generated: 2026-06-23 (49 e2e files in `tools/browser-test/`).
 - ✓ Effect drift annotation (`edit-effects-drift`)
 - ✓ Effect-chip click → explainer (`edit-effects-explainer`)
 
+### Type provenance + row actions
+
+- ✓ Provenance ↳ popover from arg-type chip (`edit-provenance-popover`)
+- ✓ Row-actions ⋯ pin / outside-dismiss / Escape (`edit-row-actions-pin`)
+
 ### Execute (Run)
 
 - ✓ Run popover smoke (`edit-execute` — Phase A-D inc. history Repeat)
@@ -106,13 +119,10 @@ UI-only (no state mutation), so a regression surfaces as a visual
 quirk — not data loss — but a smoke test would still catch the
 "button doesn't render / popover doesn't appear" class of bug.
 
-### High-value gaps (state-affecting OR frequently-used)
+### High-value gaps
 
-| Flow | Module | Risk if broken | Why no test today |
-|---|---|---|---|
-| ↳ provenance popover on type-chip | `editor-provenance-popover` | Users can't see WHY the type narrowed; impossible to debug type errors | Inline; never had a dedicated test |
-| Pin / unpin row-actions popover (click ⋯ to pin) | `editor-row-actions` | Pinned-popover state regressions go unnoticed | Used indirectly in 30+ tests but pin/unpin not asserted |
-| Sidebar collapse + theme toggle (light/dark) | `editor-prefs` | Theme regressions visible only to people who run the demo | Not state-mutating, low business risk |
+_All previously-flagged high-value gaps (provenance popover, row-actions
+pin/unpin, prefs theme + sidebar) have shipped — see the matrix above._
 
 ### Medium-value gaps (UI-only, less critical)
 
@@ -146,20 +156,8 @@ which is the e2e signal we want:
 
 ## What user-flow audit recommends
 
-Three small e2e additions would close the meaningful gaps:
-
-1. **`edit-provenance-popover.test.js`** — click ↳ badge, assert
-   4-tier resolution panel renders with correct tier order; navigate
-   via the ancestor links. (~80 lines, ~10 min runtime)
-2. **`edit-row-actions-pin.test.js`** — click ⋯ trigger TWICE to
-   pin the popover; click outside should NOT dismiss; click X to
-   unpin. (~50 lines, ~3 min)
-3. **`edit-prefs.test.js`** — flip light/dark theme via the toggle,
-   assert `body.theme-dark` class flips; collapse/expand sidebar
-   asserting `body.sidebar-collapsed`. (~40 lines, ~2 min)
-
-Together = ~170 lines / ~15 min e2e runtime. Brings the
-state-affecting + frequently-used flows fully covered.
-
-The medium-value gaps (tooltips, drag, etc.) deliberately stay
-uncovered — their risk doesn't justify the e2e maintenance overhead.
+All three user-scenario gaps flagged in the 2026-06-23 audit have
+shipped (`edit-provenance-popover` / `edit-row-actions-pin` /
+`edit-prefs`). The medium-value gaps (tooltips, drag, etc.)
+deliberately stay uncovered — their risk doesn't justify the e2e
+maintenance overhead.

@@ -762,13 +762,6 @@ per-branch resolved view in
 DBs get the legacy index dropped by `migration/drop-retired-indexes!`
 on the next migration pass.
 
-**Remaining gaps:**
-
-- The `diff-branches` walker only considers each branch's ancestor
-  chain, NOT `branch_merge` edges. Branches that have been merged
-  in either direction need a follow-up — until then, post-merge
-  diffs may understate the visible-via-merge surface.
-
 ---
 
 ### User and Permission System

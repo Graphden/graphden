@@ -99,3 +99,34 @@
       (is (= "version-exists" (:reason body)))
       (is (= 1 (count (sp/query-entities (storage) :package-version {:name "demo.pkg"})))
           "no duplicate row written"))))
+
+
+(deftest list-and-fetch-package-versions
+  (sp/create-entity (storage) :package-version
+                    {:name "lf.pkg" :version "2.0.0" :ns-root "lf.pkg"
+                     :fns [{:name :x}] :dependencies [:dep-a] :content-hash "hh"})
+  (testing "GET /api/packages returns the index (metadata, no :fns blob)"
+    (let [resp (setup/via-graph *bootstrap* :list-packages-handler
+                                {:request-method :get :headers {}})
+          body (json/parse-string (:body resp) true)
+          entry (first (filter #(= "lf.pkg" (:name %)) body))]
+      (is (= 200 (:status resp)))
+      (is (some? entry))
+      (is (= "2.0.0" (:version entry)))
+      (is (= 1 (:fn-count entry)))
+      (is (not (contains? entry :fns)) "index omits the bundle")))
+  (testing "GET /api/packages/:name/:version returns the full bundle"
+    (let [resp (setup/via-graph *bootstrap* :fetch-package-handler
+                                {:request-method :get
+                                 :path-params {:name "lf.pkg" :version "2.0.0"}
+                                 :headers {}})
+          body (json/parse-string (:body resp) true)]
+      (is (= 200 (:status resp)))
+      (is (= "lf.pkg" (:name body)))
+      (is (= [{:name "x"}] (:fns body)) "the full :fns bundle is present")))
+  (testing "fetching an unknown version returns null"
+    (let [resp (setup/via-graph *bootstrap* :fetch-package-handler
+                                {:request-method :get
+                                 :path-params {:name "lf.pkg" :version "9.9.9"}
+                                 :headers {}})]
+      (is (= "null" (:body resp))))))

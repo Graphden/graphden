@@ -53,6 +53,36 @@
          :dependencies (:dependencies bundle)}))))
 
 
+;; Registry index — all published versions, metadata only (omits the
+;; heavy `:fns` bundle). `sp/query-entities` decodes the jsonb columns,
+;; so the result is plain Clojure data; `:id` / `:published-at` are
+;; stringified for clean JSON.
+(defbase list-package-versions
+  []
+  (cr/record-effect! :db)
+  (->> (sp/query-entities (request/require-storage ctx) :package-version {})
+       (mapv (fn [r]
+               {:id (str (:id r))
+                :name (:name r)
+                :version (:version r)
+                :ns-root (:ns-root r)
+                :content-hash (:content-hash r)
+                :published-at (str (:published-at r))
+                :fn-count (count (:fns r))
+                :dependencies (:dependencies r)}))))
+
+
+;; The full published bundle for one (name, version), or nil if absent.
+(defbase fetch-package-version
+  [pkg-name pkg-version]
+  (cr/record-effect! :db)
+  (when-let [r (first (sp/query-entities (request/require-storage ctx) :package-version
+                                         {:name pkg-name :version pkg-version}))]
+    (assoc r :id (str (:id r)) :published-at (str (:published-at r)))))
+
+
 (def impls
   {:export-namespace export-namespace
-   :publish-package publish-package})
+   :publish-package publish-package
+   :list-package-versions list-package-versions
+   :fetch-package-version fetch-package-version})

@@ -76,4 +76,61 @@
   {:name :api-packages-publish
    :description "POST /api/packages/publish — publish a namespace subtree as an immutable package version. Auth-required."
    :parent :post
-   :args {:path "/packages/publish" :handler :publish-package-handler}}]}
+   :args {:path "/packages/publish" :handler :publish-package-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/packages — registry index (metadata only).
+  ;; ---------------------------------------------------------------------
+
+  {:name :list-package-versions
+   :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle."
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_list-packages-result
+   :parent :list-package-versions}
+
+  {:name :list-packages-handler
+   :description "Ring handler for GET /api/packages (auth-required) — JSON array of the registry index."
+   :parent :json-handler
+   :args {:data :_list-packages-result}}
+
+  {:name :api-packages-list
+   :description "GET /api/packages — list every published package version (index). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/packages" :handler :list-packages-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/packages/:name/:version — full published bundle.
+  ;; ---------------------------------------------------------------------
+
+  {:name :fetch-package-version
+   :description "The full published bundle for `(:pkg-name, :pkg-version)`, or nil if not found."
+   :args {:pkg-name {:type :text :description "Package name."}
+          :pkg-version {:type :text :description "Semver version string."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_fetch-pkg-name
+   :description "`:name` path-param from /api/packages/:name/:version (reitit-enriched)."
+   :parent :get-in
+   :args {:map {:as :request} :path [{:value :path-params} {:value :name}] :default nil}}
+
+  {:name :_fetch-pkg-version
+   :description "`:version` path-param from /api/packages/:name/:version."
+   :parent :get-in
+   :args {:map {:as :request} :path [{:value :path-params} {:value :version}] :default nil}}
+
+  {:name :_fetch-pkg-result
+   :parent :fetch-package-version
+   :args {:pkg-name :_fetch-pkg-name :pkg-version :_fetch-pkg-version}}
+
+  {:name :fetch-package-handler
+   :description "Ring handler for GET /api/packages/:name/:version (auth-required) — JSON bundle, or null when absent."
+   :parent :json-handler
+   :args {:data :_fetch-pkg-result}}
+
+  {:name :api-packages-fetch
+   :description "GET /api/packages/:name/:version — the full published bundle. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/packages/:name/:version" :handler :fetch-package-handler}}]}

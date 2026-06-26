@@ -49,7 +49,6 @@
      equality only — no SMT-style narrowing reasoning."
   (:require
     [clojure.set :as set]
-    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.registry.core :as registry]
     [graphden.types.check.literals :as lit]

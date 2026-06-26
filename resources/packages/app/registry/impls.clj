@@ -6,8 +6,10 @@
     [cheshire.core :as json]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.composition.interface :as composition]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.export :as export]
+    [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]))
 
@@ -81,8 +83,48 @@
     (assoc r :id (str (:id r)) :published-at (str (:published-at r)))))
 
 
+;; Install a published version into the target graph. Transactional with
+;; an install precondition (packages-quality §3): the bundle's declared
+;; dependencies must ALL already exist, else reject without writing. The
+;; sync itself (namespaces + fn-defs) is a Clojure operation not
+;; expressible as graph composition, so the whole flow is one base-fn.
+;;
+;; Branch staging is FREE: `ctx`'s storage is already scoped to the
+;; request's branch (the branch-router), so installing through
+;; `X-Graphden-Branch: feature-x` writes the rows onto that branch — test
+;; there, then merge (PLATFORM_PLAN §2.4).
+;;
+;; Note: the rows are written but the compiled registry is not yet
+;; refreshed — the installed fns become executable on the next
+;; rebuild/restart. Hot-recompile-on-install is a follow-up.
+(defbase install-package
+  [pkg-name pkg-version]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)
+        row (first (sp/query-entities storage :package-version
+                                      {:name pkg-name :version pkg-version}))]
+    (if (nil? row)
+      {:ok false :reason "not-found" :name pkg-name :version pkg-version}
+      (let [fns (:fns row)
+            dep-names (mapv name (:dependencies row))
+            present (into #{}
+                          (map :name)
+                          (when (seq dep-names)
+                            (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))
+            missing (vec (distinct (remove present dep-names)))]
+        (if (seq missing)
+          {:ok false :reason "missing-dependencies" :missing (mapv keyword missing)}
+          (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))]
+            (composition/sync-fns-to-storage! storage fns ns-id-map)
+            {:ok true
+             :name pkg-name
+             :version pkg-version
+             :installed (count fns)}))))))
+
+
 (def impls
   {:export-namespace export-namespace
    :publish-package publish-package
    :list-package-versions list-package-versions
-   :fetch-package-version fetch-package-version})
+   :fetch-package-version fetch-package-version
+   :install-package install-package})

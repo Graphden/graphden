@@ -506,7 +506,19 @@
   ([storage namespace-paths descriptions]
    (if (empty? namespace-paths)
      {}
-     (let [sorted (sort-by #(count (str/split % #"\.")) namespace-paths)
+     (let [;; Expand each path to all its prefixes so the parent chain
+           ;; is always present — `"a.b.c"` ⇒ `#{"a" "a.b" "a.b.c"}`.
+           ;; Honours the docstring's "creates both core and
+           ;; core.arithmetic" promise even when the caller passes only
+           ;; leaf paths (e.g. package install). Idempotent for callers
+           ;; that already pre-expand (the package loader).
+           expanded (into #{}
+                          (mapcat (fn [p]
+                                    (let [segs (str/split p #"\.")]
+                                      (map #(str/join "." (take (inc %) segs))
+                                           (range (count segs))))))
+                          namespace-paths)
+           sorted (sort-by #(count (str/split % #"\.")) expanded)
            existing (into {}
                           (map (fn [ns-entity]
                                  [(str (:parent-id ns-entity) ":" (:name ns-entity))

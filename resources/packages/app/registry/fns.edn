@@ -133,4 +133,44 @@
   {:name :api-packages-fetch
    :description "GET /api/packages/:name/:version — the full published bundle. Auth-required."
    :parent :get-auth-required
-   :args {:path "/packages/:name/:version" :handler :fetch-package-handler}}]}
+   :args {:path "/packages/:name/:version" :handler :fetch-package-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/install — install a published version into the
+  ;; (branch-scoped) target graph. Body `{:name :version}`.
+  ;; ---------------------------------------------------------------------
+
+  {:name :install-package
+   :description "Install published `(:pkg-name, :pkg-version)` into the target graph: reject if not found or if any declared dependency is absent, else sync the bundle's namespaces + fn-defs. Returns a tagged `{:ok …}` result. Writes to the request's branch (staging)."
+   :args {:pkg-name {:type :text :description "Package name to install."}
+          :pkg-version {:type :text :description "Semver version to install."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  {:name :_install-body
+   :description "Parsed JSON body of POST /api/packages/install — `{:name :version}`."
+   :parent :parse-json-body}
+
+  {:name :_install-name-raw
+   :parent :get :args {:coll :_install-body :key {:value :name} :default nil}}
+  {:name :_install-name
+   :parent :to-str :args {:value :_install-name-raw}}
+
+  {:name :_install-version-raw
+   :parent :get :args {:coll :_install-body :key {:value :version} :default nil}}
+  {:name :_install-version
+   :parent :to-str :args {:value :_install-version-raw}}
+
+  {:name :_install-result
+   :parent :install-package
+   :args {:pkg-name :_install-name :pkg-version :_install-version}}
+
+  {:name :install-package-handler
+   :description "Ring handler for POST /api/packages/install (auth-required) — JSON `{ok, …}`."
+   :parent :json-handler
+   :args {:data :_install-result}}
+
+  {:name :api-packages-install
+   :description "POST /api/packages/install — install a published version into the (branch-scoped) graph. Auth-required."
+   :parent :post
+   :args {:path "/packages/install" :handler :install-package-handler}}]}

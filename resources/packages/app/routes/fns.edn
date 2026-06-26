@@ -541,6 +541,7 @@
                   :api-packages-publish
                   :api-packages-list
                   :api-packages-fetch
+                  :api-packages-install
                   :api-secrets-root
                   :api-secret-inline-binding
                   :api-secret-delete

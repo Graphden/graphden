@@ -130,3 +130,38 @@
                                  :path-params {:name "lf.pkg" :version "9.9.9"}
                                  :headers {}})]
       (is (= "null" (:body resp))))))
+
+
+(deftest install-package-syncs-or-rejects
+  (testing "installing a version writes its fns + namespace into the graph"
+    (sp/create-entity (storage) :package-version
+                      {:name "inst.demo" :version "1.0.0" :ns-root "installed.demo"
+                       :fns [{:name :installed-greeting :namespace "installed.demo"
+                              :parent :const :args {:value "hello from install"}}]
+                       :dependencies [:const] :content-hash "ih"})
+    (let [resp (setup/via-graph *bootstrap* :install-package-handler
+                                (publish-req {:name "inst.demo" :version "1.0.0"}))
+          body (json/parse-string (:body resp) true)]
+      (is (= 200 (:status resp)))
+      (is (true? (:ok body)))
+      (is (= 1 (:installed body)))
+      (is (seq (sp/query-entities (storage) :fn {:name "installed-greeting"}))
+          "the novel fn is now in the graph")
+      (is (seq (sp/query-entities (storage) :ns {:name "installed"}))
+          "the installed namespace subtree was created")))
+  (testing "install rejects when a declared dependency is absent"
+    (sp/create-entity (storage) :package-version
+                      {:name "inst.bad" :version "1.0.0" :ns-root "installed.bad"
+                       :fns [] :dependencies [:no-such-fn-xyz] :content-hash "bh"})
+    (let [resp (setup/via-graph *bootstrap* :install-package-handler
+                                (publish-req {:name "inst.bad" :version "1.0.0"}))
+          body (json/parse-string (:body resp) true)]
+      (is (false? (:ok body)))
+      (is (= "missing-dependencies" (:reason body)))
+      (is (= ["no-such-fn-xyz"] (:missing body)))))
+  (testing "installing an unknown version is not-found"
+    (let [resp (setup/via-graph *bootstrap* :install-package-handler
+                                (publish-req {:name "inst.demo" :version "9.9.9"}))
+          body (json/parse-string (:body resp) true)]
+      (is (false? (:ok body)))
+      (is (= "not-found" (:reason body))))))

@@ -20,6 +20,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry :as registry-base]
     [graphden.executor.registry.interface :as registry]
+    [graphden.executor.runtime :as rt]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
@@ -203,3 +204,81 @@
           (is (= 3 @call-count)
               "every execute installs a fresh memo — no cross-execute sharing"))
         (finally (sp/close storage))))))
+
+
+;; ============================================================================
+;; apply-hof-translation — pure logic (Phase 5 HOF wrap-time slot-id propagation)
+;; ============================================================================
+;;
+;; Two regressions live in this surface:
+;;
+;;   - 21c27588: `if-let` skipped falsy values; a caller passing `:body nil`
+;;     or `:flag false` past a HOF boundary lost its slot-id route. Fix:
+;;     presence-based (`contains?`) copy gate.
+;;
+;;   - dcc11101: when an outer env-binding had already written a `rt/thunk`
+;;     under the same ext-name, translation copied that thunk under R's
+;;     slot-id; R's reader found it via slot-id, forced it, re-entered
+;;     `call-with-cache` on the same ref → StackOverflow. Production-only
+;;     (caught by `bb rebuild` smoke, not `bb test`). Fix: skip thunks at
+;;     copy.
+;;
+;; `apply-hof-translation` is `defn-` so we reach it via the var.
+
+(def ^:private apply-hof-translation
+  #'graphden.executor.compile-eager/apply-hof-translation)
+
+
+(deftest apply-hof-translation-empty-translation-passes-fa-through-test
+  (let [fa {:a 1 :b 2}]
+    (is (identical? fa (apply-hof-translation fa {})))))
+
+
+(deftest apply-hof-translation-copies-value-under-slot-id-test
+  (testing "an ext-name key in fa lands under its R-slot-id"
+    (is (= {:body "hi" :slot-body "hi"}
+           (apply-hof-translation {:body "hi"} {:slot-body :body})))))
+
+
+(deftest apply-hof-translation-presence-not-truthiness-test
+  (testing "false/nil values copy under the slot-id (regression for 21c27588)"
+    (is (= {:flag false :slot-flag false}
+           (apply-hof-translation {:flag false} {:slot-flag :flag})))
+    (is (= {:body nil :slot-body nil}
+           (apply-hof-translation {:body nil} {:slot-body :body})))))
+
+
+(deftest apply-hof-translation-absent-source-is-noop-test
+  (testing "missing ext-name key in fa → no slot-id key written"
+    (is (= {:other 1} (apply-hof-translation {:other 1} {:slot-body :body})))))
+
+
+(deftest apply-hof-translation-preserves-existing-slot-id-key-test
+  (testing "if r-sid is already present, don't overwrite"
+    (is (= {:body "outer" :slot-body "inner"}
+           (apply-hof-translation {:body "outer" :slot-body "inner"}
+                                  {:slot-body :body})))))
+
+
+(deftest apply-hof-translation-skips-thunks-test
+  (testing "thunk under ext-name is NOT copied to slot-id (regression for dcc11101)"
+    (let [t (rt/thunk (fn [] (throw (ex-info "should not be forced" {}))))
+          fa {:body t}
+          result (apply-hof-translation fa {:slot-body :body})]
+      (is (not (contains? result :slot-body))
+          "thunk under :body must not appear under :slot-body — otherwise R's
+           slot-id reader finds it, forces it, and the env-binding chain
+           re-enters call-with-cache for the same ref → StackOverflow")
+      (is (identical? t (get result :body))
+          "thunk stays under its original ext-name (caller's env-binding
+           still writes / reads it via the name-fallback path)"))))
+
+
+(deftest apply-hof-translation-mixed-thunk-and-value-test
+  (testing "thunk-skip is per-entry — a sibling plain value still copies"
+    (let [t (rt/thunk (fn [] :unreachable))
+          fa {:body t :flag false}
+          result (apply-hof-translation fa
+                                        {:slot-body :body :slot-flag :flag})]
+      (is (not (contains? result :slot-body)))
+      (is (false? (get result :slot-flag))))))

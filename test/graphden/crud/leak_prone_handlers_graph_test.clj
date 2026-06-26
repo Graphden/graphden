@@ -102,3 +102,148 @@
            query")
       (is (vector? (:services body))
           "response body parses + has :services vector"))))
+
+
+;; =============================================================================
+;; Helper — the leak signature is the 500-status `Unknown field` error from
+;; `:storage-query-identities`. The shape is the same across every leak-prone
+;; handler. Each per-handler test below sends a Ring request just complete
+;; enough to reach the handler's identity-query chain; we don't assert the
+;; happy-path semantic outcome (some sites legitimately 404/400 on the test
+;; inputs), only the no-leak invariant.
+
+(defn- no-where-clause-leak?
+  "True iff `response` is not the specific `Unknown field 'request-method'`
+   500 produced when the Ring request map auto-binds into a removed-pin
+   identity query."
+  [response]
+  (not (and (= 500 (:status response))
+            (str/includes? (str (:body response))
+                           "Unknown field 'request-method'"))))
+
+
+;; =============================================================================
+;; GET /api/secrets — list-secrets-handler
+;; =============================================================================
+;;
+;; Reaches `_shape-secret-bindings-identities` (secrets/fns.edn:96) via the
+;; per-row shaping HOF, and `_list-secrets-leaf-rows-identities`
+;; (secrets/fns.edn:222) via the leaf-list lookup. Distinct call shape from
+;; `_partial-secrets-panel-handler` (different json-vs-html parent), so a
+;; pin removal that the partial happens to mask via short-circuit still
+;; trips here.
+
+(deftest list-secrets-handler-returns-json-without-leak-test
+  (testing "GET /api/secrets — JSON list; no `:where`-via-closure leak"
+    (let [response (via :list-secrets-handler
+                        {:uri "/api/secrets"
+                         :request-method :get
+                         :headers {}})]
+      (is (no-where-clause-leak? response)
+          "if 500 with `Unknown field 'request-method'`, the pin on
+           `_list-secrets-leaf-rows-identities` or
+           `_shape-secret-bindings-identities` was removed"))))
+
+
+;; =============================================================================
+;; POST /api/secrets — create-secret-handler
+;; =============================================================================
+;;
+;; Reaches `_secret-leaf-rows-identities` (secrets/fns.edn:767) via the
+;; secret-leaf lookup that gates the cond chain.
+
+(deftest create-secret-handler-reaches-identity-query-without-leak-test
+  (testing "POST /api/secrets — minimal body; no `:where`-via-closure leak"
+    (let [response (via :create-secret-handler
+                        {:uri "/api/secrets"
+                         :request-method :post
+                         :headers {"content-type" "application/json"}
+                         :body "{\"name\":\"leak-test-secret\",\"path\":\"kv/leak-test\",\"value\":\"x\"}"})]
+      (is (no-where-clause-leak? response)
+          "if 500 with `Unknown field 'request-method'`, the pin on
+           `_secret-leaf-rows-identities` was removed; non-leak failures
+           (400 validation / 500 OpenBao-unreachable) are accepted"))))
+
+
+;; =============================================================================
+;; POST /api/secrets/:fn-id/rotate — rotate-secret-handler
+;; =============================================================================
+;;
+;; Reaches `_rotate-secret-binding-identities` (secrets/fns.edn:1220) via the
+;; binding-lookup that finds the path-binding to overwrite.
+
+(deftest rotate-secret-handler-reaches-identity-query-without-leak-test
+  (testing "POST /api/secrets/:id/rotate — non-existent id; no `:where`-via-closure leak"
+    (let [response (via :rotate-secret-handler
+                        {:uri "/api/secrets/00000000-0000-0000-0000-000000000000/rotate"
+                         :request-method :post
+                         :headers {"content-type" "application/json"}
+                         :body "{\"value\":\"new-val\"}"
+                         :path-params {:fn-id "00000000-0000-0000-0000-000000000000"}})]
+      (is (no-where-clause-leak? response)
+          "if 500 with `Unknown field 'request-method'`, the pin on
+           `_rotate-secret-binding-identities` was removed"))))
+
+
+;; =============================================================================
+;; DELETE /api/secrets/:fn-id — delete-secret-handler
+;; =============================================================================
+;;
+;; Reaches three pin sites in one chain:
+;;   - `_find-fn-usages-binding-identities` (secrets/fns.edn:1415)
+;;   - `_find-fn-usages-li-identities`       (secrets/fns.edn:1436)
+;;   - `_delete-secret-leaf-identities`      (web/crud/fns.edn:2077)
+;; via the usage-check + cascade-delete pipeline.
+
+(deftest delete-secret-handler-reaches-identity-queries-without-leak-test
+  (testing "DELETE /api/secrets/:id — non-existent id; no `:where`-via-closure leak"
+    (let [response (via :delete-secret-handler
+                        {:uri "/api/secrets/00000000-0000-0000-0000-000000000000"
+                         :request-method :delete
+                         :headers {}
+                         :path-params {:fn-id "00000000-0000-0000-0000-000000000000"}})]
+      (is (no-where-clause-leak? response)
+          "if 500 with `Unknown field 'request-method'`, one of the three
+           pins on the usage-check + cascade chain was removed"))))
+
+
+;; =============================================================================
+;; POST /api/secrets/inline-bind — create-inline-binding-handler
+;; =============================================================================
+;;
+;; Reaches `_inline-bind-existing-identities` (secrets/fns.edn:1040) via the
+;; existing-binding-lookup that decides whether to insert or overwrite.
+
+(deftest create-inline-binding-handler-reaches-identity-query-without-leak-test
+  (testing "POST /api/secrets/inline-bind — minimal body; no `:where`-via-closure leak"
+    (let [response (via :create-inline-binding-handler
+                        {:uri "/api/secrets/inline-bind"
+                         :request-method :post
+                         :headers {"content-type" "application/json"}
+                         :body "{\"target-fn-id\":\"00000000-0000-0000-0000-000000000000\",\"slot-id\":\"00000000-0000-0000-0000-000000000000\",\"path\":\"kv/leak-test\",\"value\":\"x\"}"})]
+      (is (no-where-clause-leak? response)
+          "if 500 with `Unknown field 'request-method'`, the pin on
+           `_inline-bind-existing-identities` was removed"))))
+
+
+;; =============================================================================
+;; DELETE /api/entities/fn/:id — delete-entity-handler (for :fn entity)
+;; =============================================================================
+;;
+;; The fn-delete cascade in web/crud reaches two pin sites:
+;;   - `_delete-fn-ref-bindings-identities` (web/crud/fns.edn:2168)
+;;   - `_delete-fn-ref-items-identities`     (web/crud/fns.edn:2191)
+;; via the ref-cleanup pipeline that nulls out other fns' references to
+;; the deleted target.
+
+(deftest delete-entity-fn-handler-reaches-identity-queries-without-leak-test
+  (testing "DELETE /api/entities/fn/:id — non-existent id; no `:where`-via-closure leak"
+    (let [response (via :delete-entity-handler
+                        {:uri "/api/entities/fn/00000000-0000-0000-0000-000000000000"
+                         :request-method :delete
+                         :headers {}
+                         :path-params {:entity-type "fn"
+                                       :id "00000000-0000-0000-0000-000000000000"}})]
+      (is (no-where-clause-leak? response)
+          "if 500 with `Unknown field 'request-method'`, one of the two
+           pins on the ref-cleanup cascade was removed"))))

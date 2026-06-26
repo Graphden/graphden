@@ -67,6 +67,7 @@
    effects). This namespace is the faithful, all-roles inverse; the two
    should eventually converge on this core."
   (:require
+    [clojure.string :as str]
     [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs])
@@ -528,3 +529,99 @@
   "Export the entire stored graph as a vector of fns.edn fn-def maps."
   [storage]
   (records->fn-defs (graph->records storage)))
+
+
+;; =============================================================================
+;; Scoped export — a namespace subtree as a publishable bundle
+;; =============================================================================
+;;
+;; A package is a versioned export of a namespace SUBTREE: a root ns plus
+;; its children (`app.contact-demo` plus `app.contact-demo.*`). fns under
+;; the root are the package's content; references OUT of the subtree
+;; become its declared dependencies (what install must already have).
+
+(defn- under-ns?
+  "True iff dotted namespace `ns` is `root` or a descendant of it."
+  [ns root]
+  (boolean (and ns (or (= ns root) (str/starts-with? ns (str root "."))))))
+
+
+(defn- fn-ref-fn-ids
+  "Every fn-id that fn `F` references — across its own fn row, the slots
+   it exposes, its bindings, and those bindings' list items."
+  [fn-id ctx]
+  (let [fnr (get-in ctx [:fns fn-id])
+        slots (slots-of fn-id ctx)
+        bindings (get-in ctx [:bindings fn-id])
+        item-ids (mapcat (fn [b] (map :ref-fn-id (get-in ctx [:items (:id b)])))
+                         bindings)]
+    (concat (:parent-ids fnr)
+            (keep fnr [:return-type-fn-id :base-fn-id :element-fn-id])
+            (keep :type-fn-id slots)
+            (mapcat (fn [b] (keep b [:ref-fn-id :type-override-fn-id])) bindings)
+            (filter some? item-ids))))
+
+
+(defn- constraint-type-names
+  "Type-name keywords buried in a fn-row's structural `:constraint`
+   (`[:union :a :b]`, `[:variant :ok T …]`, `[:map K V]`, `[:tuple …]`,
+   `[:fn args ret …]`). These reference types by NAME, not by fn-id, so
+   they're invisible to `record-ref-fn-ids` and must be scanned for
+   dependency detection."
+  [constraint]
+  (when (vector? constraint)
+    (filter keyword? (tree-seq coll? seq (rest constraint)))))
+
+
+(defn export-namespace
+  "Serialise the namespace subtree rooted at `root` (a dotted path) into
+   a publishable bundle:
+
+     {:namespace    root
+      :namespaces   [every sub-namespace included]
+      :fns          [fn-def …]   ; the subtree's own fns
+      :dependencies [fn-name …]} ; external fns the subtree references
+
+   `:dependencies` is the set of fn NAMES referenced from inside the
+   subtree but DEFINED outside it (excluding primitives) — what an
+   installer must already have present. This is the core of
+   `POST /api/packages/publish` (cloud) and `extract` (self-hosted);
+   registry persistence + versioning wrap this."
+  [storage root]
+  (let [records (graph->records storage)
+        ctx (index-records records)
+        all-defs (records->fn-defs records)
+        owned-defs (filterv #(under-ns? (:namespace %) root) all-defs)
+        owned-fn-ids (into #{}
+                           (comp (filter #(under-ns? (:namespace-id %) root))
+                                 (map :id))
+                           (vals (:fns ctx)))
+        ;; name index for resolving constraint type-name keywords → ns.
+        name->ns (into {}
+                       (keep (fn [f]
+                               (when (:name f)
+                                 [(keyword (:name f)) (:namespace-id f)])))
+                       (vals (:fns ctx)))
+        ;; structural fn-id refs reachable from every owned fn.
+        ref-deps (into #{}
+                       (comp (mapcat #(fn-ref-fn-ids % ctx))
+                             (keep (fn [id]
+                                     (let [f (get-in ctx [:fns id])]
+                                       (when (and (:name f)
+                                                  (not (under-ns? (:namespace-id f) root))
+                                                  (not (contains? prim-id->kw id)))
+                                         (keyword (:name f)))))))
+                       owned-fn-ids)
+        ;; constraint type-name keywords (union / variant / map / tuple /
+        ;; fn-type) on owned fn rows whose target is defined outside.
+        constraint-deps (into #{}
+                              (comp (map #(get-in ctx [:fns %]))
+                                    (mapcat #(constraint-type-names (:constraint %)))
+                                    (filter (fn [nm]
+                                              (when-let [ns (name->ns nm)]
+                                                (not (under-ns? ns root))))))
+                              owned-fn-ids)]
+    {:namespace root
+     :namespaces (vec (sort (distinct (map :namespace owned-defs))))
+     :fns owned-defs
+     :dependencies (vec (sort (into ref-deps constraint-deps)))}))

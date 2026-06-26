@@ -188,3 +188,37 @@
             recs-b (parse/parse-module (export/records->fn-defs recs-a))]
         (is (= (norm recs-a) (norm recs-b))
             "re-parsing the storage export must be a fixpoint")))))
+
+
+;; =============================================================================
+;; Scoped publish bundle — namespace subtree export
+;; =============================================================================
+
+(deftest export-namespace-bundle
+  (testing "a leaf namespace exports only its own fns + external deps"
+    (let [bundle (export/export-namespace *storage* "app.contact-demo")
+          own-names (set (map :name (:fns bundle)))]
+      (is (seq (:fns bundle)))
+      (is (every? #(= "app.contact-demo" (:namespace %)) (:fns bundle))
+          "every fn in the bundle lives under the root")
+      (is (= ["app.contact-demo"] (:namespaces bundle)))
+      (testing "dependencies are external (never the subtree's own fns)"
+        (is (not-any? own-names (:dependencies bundle)))
+        (is (some #{:html-page-handler} (:dependencies bundle))
+            "contact-demo builds on :html-page-handler from app.page"))))
+  (testing "a self-contained foundational root (storage) has no upward deps"
+    ;; Proves the dependency detector produces a meaningful negative — the
+    ;; storage package references nothing under web/app. (core + web DO have
+    ;; a known upward leak into app.common — `:assoc-empty` + the
+    ;; `:*-response` builders — surfaced by this same tooling; that's a
+    ;; package-layering bug tracked separately, not an export defect.)
+    (let [bundle (export/export-namespace *storage* "storage")
+          name->ns (into {} (keep (fn [d] (when (:name d) [(:name d) (:namespace d)]))
+                                  (export/export-graph *storage*)))]
+      (is (seq (:fns bundle)))
+      (is (not-any? (fn [dep]
+                      (when-let [ns (name->ns dep)]
+                        (or (.startsWith ^String ns "web")
+                            (.startsWith ^String ns "app"))))
+                    (:dependencies bundle))
+          "storage must not depend upward on web/app"))))

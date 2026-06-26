@@ -17,6 +17,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.packages.loader :as loader]
     [graphden.types.check :as check]
+    [graphden.types.check.literals :as lit]
     [graphden.types.check.narrowing :as narrowing]
     [graphden.types.core :as types-core]))
 
@@ -86,36 +87,36 @@
 
 
 (deftest classify-literal-test
-  (is (= :int     (check/classify-literal 42)))
-  (is (= :float   (check/classify-literal 3.14)))
-  (is (= :text    (check/classify-literal "hi")))
-  (is (= :bool    (check/classify-literal true)))
-  (is (= :null    (check/classify-literal nil)))
-  (is (= :keyword (check/classify-literal :kw)))
+  (is (= :int     (lit/classify-literal 42)))
+  (is (= :float   (lit/classify-literal 3.14)))
+  (is (= :text    (lit/classify-literal "hi")))
+  (is (= :bool    (lit/classify-literal true)))
+  (is (= :null    (lit/classify-literal nil)))
+  (is (= :keyword (lit/classify-literal :kw)))
   (testing "vectors classify structurally as [:list T]"
-    (is (= [:list :int] (check/classify-literal [1 2 3])))
-    (is (= [:list :any] (check/classify-literal [1 "two"])) "mixed elems → :any")
-    (is (= [:list :any] (check/classify-literal []))        "empty → :any elem"))
+    (is (= [:list :int] (lit/classify-literal [1 2 3])))
+    (is (= [:list :any] (lit/classify-literal [1 "two"])) "mixed elems → :any")
+    (is (= [:list :any] (lit/classify-literal []))        "empty → :any elem"))
   (testing "keyword-keyed maps classify structurally as record-types"
-    (is (= {:a :int}          (check/classify-literal {:a 1})))
-    (is (= {:a :int :b :text} (check/classify-literal {:a 1 :b "x"})))
-    (is (= {:a {:b :int}}     (check/classify-literal {:a {:b 1}})) "recurses"))
+    (is (= {:a :int}          (lit/classify-literal {:a 1})))
+    (is (= {:a :int :b :text} (lit/classify-literal {:a 1 :b "x"})))
+    (is (= {:a {:b :int}}     (lit/classify-literal {:a {:b 1}})) "recurses"))
   (testing "string-keyed homogeneous-value maps classify as [:map :text V]"
-    (is (= [:map :text :int]  (check/classify-literal {"a" 1})))
-    (is (= [:map :text :text] (check/classify-literal {"Content-Type" "text/html"}))
+    (is (= [:map :text :int]  (lit/classify-literal {"a" 1})))
+    (is (= [:map :text :text] (lit/classify-literal {"Content-Type" "text/html"}))
         "headers-shaped literal classifies against [:map :text :text]"))
   (testing "string-keyed heterogeneous-value maps fall back to :jsonb"
-    (is (= :jsonb (check/classify-literal {"a" 1 "b" "x"}))
+    (is (= :jsonb (lit/classify-literal {"a" 1 "b" "x"}))
         "values disagree → :jsonb, the conservative catch-all"))
   (testing "mixed-keyed map stays :jsonb"
-    (is (= :jsonb (check/classify-literal {:a 1 "b" 2}))))
+    (is (= :jsonb (lit/classify-literal {:a 1 "b" 2}))))
   (testing "empty map classifies as :empty-map — vacuous-truth sentinel"
     ;; `(empty? v) → :empty-map` instead of `:jsonb` so a `{}` literal
     ;; subtypes any structural map shape (`[:map K V]`, record-type,
     ;; `:jsonb`) without bouncing off the `:jsonb ⊄ [:map …]` rule.
     ;; Drove `(74 → 63)` failures on the topo-sorted sweep. See
     ;; `docs/TYPE_CHECK_BACKLOG.md` § "In-session pass (2026-06-07)".
-    (is (= :empty-map (check/classify-literal {})))))
+    (is (= :empty-map (lit/classify-literal {})))))
 
 
 (deftest accepts-matching-literals
@@ -933,46 +934,46 @@
 
 (deftest literal-satisfies-and-or-compound-constraints
   (testing ":and — every child must hold"
-    (is (true?  (check/literal-satisfies-refinement? 50 [:and [:>= 0] [:<= 100]])))
-    (is (false? (check/literal-satisfies-refinement? -1 [:and [:>= 0] [:<= 100]])))
-    (is (false? (check/literal-satisfies-refinement? 101 [:and [:>= 0] [:<= 100]]))))
+    (is (true?  (lit/literal-satisfies-refinement? 50 [:and [:>= 0] [:<= 100]])))
+    (is (false? (lit/literal-satisfies-refinement? -1 [:and [:>= 0] [:<= 100]])))
+    (is (false? (lit/literal-satisfies-refinement? 101 [:and [:>= 0] [:<= 100]]))))
   (testing ":or — at least one must hold"
-    (is (true?  (check/literal-satisfies-refinement? 0   [:or [:= 0] [:= 1]])))
-    (is (true?  (check/literal-satisfies-refinement? 1   [:or [:= 0] [:= 1]])))
-    (is (false? (check/literal-satisfies-refinement? 7   [:or [:= 0] [:= 1]]))))
+    (is (true?  (lit/literal-satisfies-refinement? 0   [:or [:= 0] [:= 1]])))
+    (is (true?  (lit/literal-satisfies-refinement? 1   [:or [:= 0] [:= 1]])))
+    (is (false? (lit/literal-satisfies-refinement? 7   [:or [:= 0] [:= 1]]))))
   (testing "empty :and is true; empty :or is false"
-    (is (true?  (check/literal-satisfies-refinement? 0 [:and])))
-    (is (false? (check/literal-satisfies-refinement? 0 [:or]))))
+    (is (true?  (lit/literal-satisfies-refinement? 0 [:and])))
+    (is (false? (lit/literal-satisfies-refinement? 0 [:or]))))
   (testing "compound with mixed decidable + :unknown"
     ;; :matches is currently :unknown (regex shape); :and decisive false
     ;; from the second clause overrides the unknown.
-    (is (false? (check/literal-satisfies-refinement? "x" [:and [:matches #"."] [:= "y"]])))
+    (is (false? (lit/literal-satisfies-refinement? "x" [:and [:matches #"."] [:= "y"]])))
     ;; :or with one true short-circuits to true even if a sibling is unknown
-    (is (true?  (check/literal-satisfies-refinement? "x" [:or  [:matches #"."] [:= "x"]])))))
+    (is (true?  (lit/literal-satisfies-refinement? "x" [:or  [:matches #"."] [:= "x"]])))))
 
 
 (deftest literal-satisfies-atomic-ops
   (testing "every atomic op decides numeric literals correctly"
-    (is (true?  (check/literal-satisfies-refinement? 5  [:>  0])))
-    (is (false? (check/literal-satisfies-refinement? 0  [:>  0])))
-    (is (true?  (check/literal-satisfies-refinement? 5  [:>= 5])))
-    (is (false? (check/literal-satisfies-refinement? 4  [:>= 5])))
-    (is (true?  (check/literal-satisfies-refinement? 3  [:<  5])))
-    (is (false? (check/literal-satisfies-refinement? 5  [:<  5])))
-    (is (true?  (check/literal-satisfies-refinement? 5  [:<= 5])))
-    (is (false? (check/literal-satisfies-refinement? 6  [:<= 5])))
-    (is (true?  (check/literal-satisfies-refinement? 5  [:=  5])))
-    (is (false? (check/literal-satisfies-refinement? "" [:not= ""]))))
+    (is (true?  (lit/literal-satisfies-refinement? 5  [:>  0])))
+    (is (false? (lit/literal-satisfies-refinement? 0  [:>  0])))
+    (is (true?  (lit/literal-satisfies-refinement? 5  [:>= 5])))
+    (is (false? (lit/literal-satisfies-refinement? 4  [:>= 5])))
+    (is (true?  (lit/literal-satisfies-refinement? 3  [:<  5])))
+    (is (false? (lit/literal-satisfies-refinement? 5  [:<  5])))
+    (is (true?  (lit/literal-satisfies-refinement? 5  [:<= 5])))
+    (is (false? (lit/literal-satisfies-refinement? 6  [:<= 5])))
+    (is (true?  (lit/literal-satisfies-refinement? 5  [:=  5])))
+    (is (false? (lit/literal-satisfies-refinement? "" [:not= ""]))))
   (testing ":in membership decides on a set"
-    (is (true?  (check/literal-satisfies-refinement? :ok  [:in #{:ok :err}])))
-    (is (false? (check/literal-satisfies-refinement? :nope [:in #{:ok :err}]))))
+    (is (true?  (lit/literal-satisfies-refinement? :ok  [:in #{:ok :err}])))
+    (is (false? (lit/literal-satisfies-refinement? :nope [:in #{:ok :err}]))))
   (testing ":matches regex defers (non-statically-decidable)"
-    (is (= :unknown (check/literal-satisfies-refinement? "abc" [:matches #"."]))))
+    (is (= :unknown (lit/literal-satisfies-refinement? "abc" [:matches #"."]))))
   (testing "non-vector / unknown-shape / bad-arity constraints defer"
-    (is (= :unknown (check/literal-satisfies-refinement? 5 nil)))
-    (is (= :unknown (check/literal-satisfies-refinement? 5 [:bogus])))
-    (is (= :unknown (check/literal-satisfies-refinement? 5 [:>])))
-    (is (= :unknown (check/literal-satisfies-refinement? 5 [:> 0 1])))))
+    (is (= :unknown (lit/literal-satisfies-refinement? 5 nil)))
+    (is (= :unknown (lit/literal-satisfies-refinement? 5 [:bogus])))
+    (is (= :unknown (lit/literal-satisfies-refinement? 5 [:>])))
+    (is (= :unknown (lit/literal-satisfies-refinement? 5 [:> 0 1])))))
 
 
 ;; -----------------------------------------------------------------------------

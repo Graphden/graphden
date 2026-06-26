@@ -12,6 +12,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
+    [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
 
 
@@ -495,7 +496,7 @@
             ;; to types/check.
             (and base-id (some? head))
             (when-let [base-name (resolve-base-name storage base-id)]
-              (when-not (types-check/constraint-compatible-with-base? base-name c)
+              (when-not (types-lit/constraint-compatible-with-base? base-name c)
                 {:reason (str "Constraint op " (pr-str head)
                               " is not legal on base type :" (name base-name))}))))))))
 

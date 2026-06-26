@@ -29,6 +29,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
+    [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
 
 
@@ -566,12 +567,12 @@
    primitive subtype plus a lenient refinement check. A nil value
    fits any branch (caller falls back to branch 0)."
   [value t]
-  (let [actual (or (types-check/classify-literal value) :any)]
+  (let [actual (or (types-lit/classify-literal value) :any)]
     (or (nil? value) (= actual :any) (= t :any)
         (types/subtype? actual t)
         (and (types/refine-type? t)
              (types/subtype? actual (types/refine-base t))
-             (let [r (types-check/literal-satisfies-refinement?
+             (let [r (types-lit/literal-satisfies-refinement?
                        value (types/refine-constraint t))]
                (or (true? r) (= :unknown r)))))))
 

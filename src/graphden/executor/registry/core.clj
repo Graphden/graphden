@@ -71,7 +71,7 @@
   [constraint]
   (fn [args _ctx]
     (let [v (force (:value args))
-          check-fn (requiring-resolve 'graphden.types.check/literal-satisfies-refinement?)
+          check-fn (requiring-resolve 'graphden.types.check.literals/literal-satisfies-refinement?)
           result (check-fn v constraint)]
       (when (false? result)
         (throw (ex-info (str "refinement constraint failed: "
@@ -529,11 +529,11 @@
     (let [base (:base refine)
           constraint (:constraint refine)
           check-fn (or (requiring-resolve
-                         'graphden.types.check/constraint-compatible-with-base?)
+                         'graphden.types.check.literals/constraint-compatible-with-base?)
                        (throw (ex-info
                                 "constraint-compatible-with-base? unresolved — namespace rename?"
                                 {:type :sync/missing-symbol
-                                 :symbol 'graphden.types.check/constraint-compatible-with-base?})))]
+                                 :symbol 'graphden.types.check.literals/constraint-compatible-with-base?})))]
       (when (and constraint
                  (not (check-fn base constraint)))
         (throw (ex-info (str "Refinement constraint " (pr-str constraint)

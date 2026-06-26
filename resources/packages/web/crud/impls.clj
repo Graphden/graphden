@@ -23,6 +23,7 @@
     [graphden.schema.graph.schema :as graph-schema]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
+    [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
 
 
@@ -333,7 +334,7 @@
    nil for shapes the classifier doesn't recognise; callers fall
    back to `:any`."
   [value]
-  (types-check/classify-literal value))
+  (types-lit/classify-literal value))
 
 
 (defbase diff-value-against-type
@@ -342,7 +343,7 @@
    `[{:path :expected :actual}, …]`. Empty vector when the value
    satisfies the type."
   [value expected]
-  (types-check/diff-value-against-type value expected))
+  (types-lit/diff-value-against-type value expected))
 
 
 (defbase closed-enum-of
@@ -351,7 +352,7 @@
    enum refinement (`[:refine base [:in [members]]]`), nil otherwise.
    Members are sorted + colon-prefixed for `:keyword`-based enums."
   [expected]
-  (types-check/closed-enum-of expected))
+  (types-lit/closed-enum-of expected))
 
 
 (defbase fn-type-bound-effects
@@ -360,7 +361,7 @@
    when `expected` is a `[:fn args ret eff]` with concrete eff, nil
    otherwise (no constraint to surface)."
   [expected]
-  (types-check/fn-type-bound-effects expected))
+  (types-lit/fn-type-bound-effects expected))
 
 
 (defbase rich-return-of-fn

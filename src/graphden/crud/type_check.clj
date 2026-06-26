@@ -21,6 +21,7 @@
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
     [graphden.types.check :as types-check]
+    [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
 
 
@@ -313,12 +314,12 @@
 
       ;; Value-binding case: literal vs expected.
       (contains? entity-data :value)
-      (let [actual (or (types-check/classify-literal new-value) :any)]
+      (let [actual (or (types-lit/classify-literal new-value) :any)]
         (when-not (or (nil? new-value) (= actual :any)
                       (types/subtype? actual expected)
                       (and (types/refine-type? expected)
                            (types/subtype? actual (types/refine-base expected))
-                           (let [r (types-check/literal-satisfies-refinement?
+                           (let [r (types-lit/literal-satisfies-refinement?
                                      new-value (types/refine-constraint expected))]
                              (or (true? r) (= :unknown r)))))
           {:reason (str "Type mismatch on value: expected " (pr-str expected)

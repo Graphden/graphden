@@ -1,9 +1,10 @@
 ;; Common fn-def building blocks shared between web components
-;; Route composition, response status, content-type responses, health status
+;; Route composition, health status. (The HTTP response matrix moved to
+;; the web.response module.)
 
 
 {:namespace "app.common"
- :description "Shared application building blocks — route assembly, response status × content-type matrix, health status."
+ :description "Shared application building blocks — route assembly + health status. (HTTP response matrix lives in web.response.)"
  :fns
  [;; =============================================================================
   ;; COLLECTION BUILDING BLOCKS
@@ -86,116 +87,11 @@
   ;; Method shortcuts (`get-route-with-middleware`, …) live in
   ;; `app.routes.method` next to their plain-method twins.
 
-  ;; =============================================================================
-  ;; RESPONSE MATRIX (status × content-type via multiple inheritance)
-  ;;
-  ;; Two orthogonal axes inherit from :ring-response and bind one arg each:
-  ;;   STATUS axis     binds :status
-  ;;   CONTENT-TYPE    binds :headers
-  ;;
-  ;; Concrete responses combine one of each via :parents [<ct> <status>].
-  ;; Diamond inheritance from :ring-response is OK: each axis binds a
-  ;; different arg, the remaining :body propagates to the child.
-  ;; =============================================================================
-
-  ;; --- STATUS axis ---
-
-  {:name :ok-response
-   :description "Status axis: 200. Combine with a content-type fn-def to get a concrete response (e.g. `:json-ok-response`)."
-   :parent :ring-response
-   :args {:status 200}}
-
-  {:name :not-found-response
-   :description "Status axis: 404 Not Found."
-   :parent :ring-response
-   :args {:status 404}}
-
-  {:name :method-not-allowed-response
-   :description "Status axis: 405 Method Not Allowed."
-   :parent :ring-response
-   :args {:status 405}}
-
-  {:name :error-response
-   :description "Status axis: 500 Internal Server Error."
-   :parent :ring-response
-   :args {:status 500}}
-
-  ;; --- CONTENT-TYPE axis ---
-
-  {:name :json-content-type
-   :description "Content-type axis: `application/json`. Combine with a status fn-def via MI to make a concrete response."
-   :parent :ring-response
-   :args {:headers {"Content-Type" "application/json"}}}
-
-  {:name :html-content-type
-   :description "Content-type axis: `text/html; charset=utf-8`."
-   :parent :ring-response
-   :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
-
-  {:name :text-content-type
-   :description "Content-type axis: `text/plain`."
-   :parent :ring-response
-   :args {:headers {"Content-Type" "text/plain"}}}
-
-  ;; Cached SVG content-type — its own fn because the :headers map can't be
-  ;; merged via MI (it's a single arg, so the whole map is set in one place).
-  {:name :cached-svg-content-type
-   :description "Content-type axis: `image/svg+xml` + `Cache-Control: public, max-age=86400`. Separate fn because the headers map can't be merged via MI."
-   :parent :ring-response
-   :args {:headers {"Content-Type" "image/svg+xml"
-                    "Cache-Control" "public, max-age=86400"}}}
-
-  ;; Long-lived immutable cache for hash-busted JS/CSS bundles. The URL
-  ;; carries the frontend build hash (`?v=<hash>`); when the hash
-  ;; changes the URL changes, so the browser fetches the new bundle.
-  ;; With the URL stable, `immutable` lets the browser skip even the
-  ;; conditional request — much cheaper than re-validating ETag.
-  {:name :immutable-js-content-type
-   :description "Content-type axis: `application/javascript; charset=utf-8` + `Cache-Control: public, max-age=31536000, immutable`. Pair with a status axis for a hash-busted JS bundle response."
-   :parent :ring-response
-   :args {:headers {"Content-Type" "application/javascript; charset=utf-8"
-                    "Cache-Control" "public, max-age=31536000, immutable"}}}
-
-  {:name :immutable-css-content-type
-   :description "Content-type axis: `text/css; charset=utf-8` + `Cache-Control: public, max-age=31536000, immutable`. Pair with a status axis for a hash-busted CSS bundle response."
-   :parent :ring-response
-   :args {:headers {"Content-Type" "text/css; charset=utf-8"
-                    "Cache-Control" "public, max-age=31536000, immutable"}}}
-
-  ;; --- MATRIX (status × content-type) ---
-
-  {:name :json-ok-response
-   :description "200 OK with `application/json` content-type. Free arg: `:body` (already a JSON string)."
-   :parents [:json-content-type :ok-response]}
-  {:name :html-ok-response
-   :description "200 OK with `text/html` content-type. Free arg: `:body` (already an HTML string)."
-   :parents [:html-content-type :ok-response]}
-  {:name :text-ok-response
-   :description "200 OK with `text/plain` content-type. Free arg: `:body`."
-   :parents [:text-content-type :ok-response]}
-  {:name :cached-svg-ok-response
-   :description "200 OK with `image/svg+xml` content-type and a 24-hour `Cache-Control` header. Used for the favicon."
-   :parents [:cached-svg-content-type :ok-response]}
-
-  {:name :immutable-js-ok-response
-   :description "200 OK with `application/javascript` content-type and a 1-year `immutable` `Cache-Control`. Used for hash-busted editor JS bundle at `/assets/editor.js?v=<hash>`."
-   :parents [:immutable-js-content-type :ok-response]}
-
-  {:name :immutable-css-ok-response
-   :description "200 OK with `text/css` content-type and a 1-year `immutable` `Cache-Control`. Used for hash-busted editor CSS bundle at `/assets/editor.css?v=<hash>`."
-   :parents [:immutable-css-content-type :ok-response]}
-
-  {:name :text-method-not-allowed-response
-   :description "405 Method Not Allowed with `text/plain` content-type. Used by the reitit fallback handler."
-   :parents [:text-content-type :method-not-allowed-response]}
-
-  {:name :text-not-found-response
-   :description "404 Not Found with `text/plain` content-type. Used by the reitit fallback handler."
-   :parents [:text-content-type :not-found-response]}
-
-  {:name :text-error-response
-   :description "500 Internal Server Error with `text/plain` content-type. Used by the reitit fallback handler."
-   :parents [:text-content-type :error-response]}
+  ;; The HTTP RESPONSE MATRIX (status × content-type — `:ok-response`,
+  ;; `:json-content-type`, `:json-ok-response`, `:text-*-response`, …)
+  ;; moved to the `web.response` module: `web.crud` / `web.reitit-text`
+  ;; reach into it, and a web package can't depend on app. Referenced by
+  ;; name (resolves globally); app's uses are now app→web.
 
   ;; =============================================================================
   ;; HEALTH STATUS COMPOSITION

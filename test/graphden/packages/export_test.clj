@@ -206,22 +206,20 @@
         (is (not-any? own-names (:dependencies bundle)))
         (is (some #{:html-page-handler} (:dependencies bundle))
             "contact-demo builds on :html-page-handler from app.page"))))
-  (testing "foundational roots (core, storage) have no upward deps"
-    ;; The dependency detector surfaced 6 real package-layering inversions
-    ;; into app.common. `:assoc-empty` (core→app) is fixed — it moved to
-    ;; core.collections — so `core` is now clean. (`web` still leaks into
-    ;; app.common via the response matrix — that closure move is tracked
-    ;; separately.)
+  (testing "lower layers (core, storage, web) have no upward deps"
+    ;; The dependency detector surfaced real package-layering inversions
+    ;; into app.common, now fixed: `:assoc-empty` → core.collections, and
+    ;; the HTTP response matrix → the web.response module. core/storage
+    ;; must not reach web/app; web must not reach app.
     (let [name->ns (into {} (keep (fn [d] (when (:name d) [(:name d) (:namespace d)]))
                                   (export/export-graph *storage*)))
-          upward? (fn [bundle]
+          upward? (fn [bundle tops]
                     (some (fn [dep]
                             (when-let [ns (name->ns dep)]
-                              (or (.startsWith ^String ns "web")
-                                  (.startsWith ^String ns "app"))))
+                              (some #(.startsWith ^String ns ^String %) tops)))
                           (:dependencies bundle)))]
-      (doseq [root ["core" "storage"]]
+      (doseq [[root tops] {"core" ["web" "app"] "storage" ["web" "app"] "web" ["app"]}]
         (let [bundle (export/export-namespace *storage* root)]
           (is (seq (:fns bundle)))
-          (is (not (upward? bundle))
-              (str root " must not depend upward on web/app")))))))
+          (is (not (upward? bundle tops))
+              (str root " must not depend upward on " (pr-str tops))))))))

@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.integration.find-fn-usages-graph-test
+(ns ^:integration graphden.integration.find-fn-usages-graph-test
   "Graph-path tests for `:find-fn-usages` — the production HTTP path's
    reverse-reference scan that backs the `DELETE /api/secrets/:id`
    `in-use?` guard.

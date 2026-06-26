@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.crud.leak-prone-handlers-graph-test
+(ns ^:integration graphden.crud.leak-prone-handlers-graph-test
   "Graph-path tests for HTTP handlers historically prone to the
    `feedback_optional_slot_free_arg_leak` failure mode — fn-defs that
    parent on `:storage-query-identities` (or similar `:required false`

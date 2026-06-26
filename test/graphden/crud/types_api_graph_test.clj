@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.crud.types-api-graph-test
+(ns ^:integration graphden.crud.types-api-graph-test
   "Graph-path tests for `/api/types/candidates` + `/api/types/usages` +
    `/api/types/compatible`.
 

@@ -206,19 +206,22 @@
         (is (not-any? own-names (:dependencies bundle)))
         (is (some #{:html-page-handler} (:dependencies bundle))
             "contact-demo builds on :html-page-handler from app.page"))))
-  (testing "a self-contained foundational root (storage) has no upward deps"
-    ;; Proves the dependency detector produces a meaningful negative — the
-    ;; storage package references nothing under web/app. (core + web DO have
-    ;; a known upward leak into app.common — `:assoc-empty` + the
-    ;; `:*-response` builders — surfaced by this same tooling; that's a
-    ;; package-layering bug tracked separately, not an export defect.)
-    (let [bundle (export/export-namespace *storage* "storage")
-          name->ns (into {} (keep (fn [d] (when (:name d) [(:name d) (:namespace d)]))
-                                  (export/export-graph *storage*)))]
-      (is (seq (:fns bundle)))
-      (is (not-any? (fn [dep]
-                      (when-let [ns (name->ns dep)]
-                        (or (.startsWith ^String ns "web")
-                            (.startsWith ^String ns "app"))))
-                    (:dependencies bundle))
-          "storage must not depend upward on web/app"))))
+  (testing "foundational roots (core, storage) have no upward deps"
+    ;; The dependency detector surfaced 6 real package-layering inversions
+    ;; into app.common. `:assoc-empty` (core→app) is fixed — it moved to
+    ;; core.collections — so `core` is now clean. (`web` still leaks into
+    ;; app.common via the response matrix — that closure move is tracked
+    ;; separately.)
+    (let [name->ns (into {} (keep (fn [d] (when (:name d) [(:name d) (:namespace d)]))
+                                  (export/export-graph *storage*)))
+          upward? (fn [bundle]
+                    (some (fn [dep]
+                            (when-let [ns (name->ns dep)]
+                              (or (.startsWith ^String ns "web")
+                                  (.startsWith ^String ns "app"))))
+                          (:dependencies bundle)))]
+      (doseq [root ["core" "storage"]]
+        (let [bundle (export/export-namespace *storage* root)]
+          (is (seq (:fns bundle)))
+          (is (not (upward? bundle))
+              (str root " must not depend upward on web/app")))))))

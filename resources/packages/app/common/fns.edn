@@ -20,11 +20,9 @@
   ;; Pass-Through Args Pattern: each level sets one arg, free args propagate up
   ;; =============================================================================
 
-  ;; Level 1: assoc with empty map preset (free: key, value)
-  {:name :assoc-empty
-   :description "`:assoc` with `:map` pre-bound to `{}` — start with a fresh map and add one entry. Free args: `:key`, `:value`."
-   :parent :assoc
-   :args {:map {}}}
+  ;; Level 1 (`:assoc-empty`) moved to `core.collections` — it's a generic
+  ;; collection primitive that `core.system` / `web.crud` also use, so it
+  ;; can't live in `app.*`. Referenced by name below; resolves globally.
 
   ;; Level 2: assoc-handler (free: handler) - sets key="handler", renames value->handler
   ;; Diamond inheritance from :assoc: :assoc-fn refines :value to :fn-typed

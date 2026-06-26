@@ -91,6 +91,15 @@
    :parent :assoc
    :args {:value {:as :value :type [:fn {:arg a} b]}}}
 
+  ;; `:assoc` onto a fresh `{}` — a generic collection primitive. Lived
+  ;; in `app.common` until the package-layering audit found `core.system`
+  ;; and `web.crud` reaching UP into app for it; moved here next to
+  ;; `:assoc` / `:assoc-fn` so core/web stay independently publishable.
+  {:name :assoc-empty
+   :description "`:assoc` with `:map` pre-bound to `{}` — start with a fresh map and add one entry. Free args: `:key`, `:value`."
+   :parent :assoc
+   :args {:map {}}}
+
   {:name :dissoc
    :description "Remove a single key from a map (Clojure's `dissoc`)."
    ;; `:map` is `[:map a :any]`, not `[:map a b]`: a heterogeneous-

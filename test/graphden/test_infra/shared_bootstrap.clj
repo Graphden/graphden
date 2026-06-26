@@ -35,6 +35,7 @@
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
+    [graphden.schema.packages.schema :as pkgs]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.schema.services.schema :as svcs]
     [graphden.schema.traits.schema :as vts]
@@ -71,6 +72,7 @@
       (vds/extend-builder)
       (es/extend-builder)
       (svcs/extend-builder)
+      (pkgs/extend-builder)
       (ds/build)))
 
 

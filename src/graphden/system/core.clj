@@ -31,6 +31,7 @@
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
+    [graphden.schema.packages.schema :as pkgs]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.schema.services.schema :as svcs]
     [graphden.schema.traits.schema :as vts]
@@ -70,6 +71,9 @@
       ;; admin desired-state mutates in place; per-version trail is
       ;; carried by the :fn-execution rows services SPAWN.
       (svcs/extend-builder)
+      ;; Registry artifacts — immutable published package snapshots.
+      ;; Non-versioned (immutable by contract), refs nothing graph-side.
+      (pkgs/extend-builder)
       (ds/build)))
 
 

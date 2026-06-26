@@ -20,4 +20,60 @@
    :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract."
    :args {:root {:type :text :description "Dotted root namespace path, e.g. \"web.components\"."}}
    :return-type :package-bundle-shape
-   :effects #{:db}}]}
+   :effects #{:db}}
+
+  {:name :publish-package
+   :description "Atomically publish a bundle as a :package-version row — reject if `(:pkg-name, :pkg-version)` already exists (immutable), else hash + insert. Returns a tagged `{:ok …}` result (success or `:reason \"version-exists\"`)."
+   :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
+          :pkg-version {:type :text :description "Semver version string, e.g. \"1.2.0\"."}
+          :bundle {:type :package-bundle-shape :description "Bundle from :export-namespace."}}
+   :return-type :jsonb
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/publish — graph-composed handler.
+  ;; Body `{:name :version :ns-root}` → export subtree → publish row.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_publish-body
+   :description "Parsed JSON body of POST /api/packages/publish — `{:name :version :ns-root}`."
+   :parent :parse-json-body}
+
+  {:name :_publish-name-raw
+   :parent :get :args {:coll :_publish-body :key {:value :name} :default nil}}
+  {:name :_publish-name
+   :description "Nil-safe `(str (:name body))`."
+   :parent :to-str :args {:value :_publish-name-raw}}
+
+  {:name :_publish-version-raw
+   :parent :get :args {:coll :_publish-body :key {:value :version} :default nil}}
+  {:name :_publish-version
+   :description "Nil-safe `(str (:version body))`."
+   :parent :to-str :args {:value :_publish-version-raw}}
+
+  {:name :_publish-ns-root-raw
+   :parent :get :args {:coll :_publish-body :key {:value :ns-root} :default nil}}
+  {:name :_publish-ns-root
+   :description "Nil-safe `(str (:ns-root body))` — the subtree to export."
+   :parent :to-str :args {:value :_publish-ns-root-raw}}
+
+  {:name :_publish-bundle
+   :description "Exported bundle for the requested root namespace."
+   :parent :export-namespace :args {:root :_publish-ns-root}}
+
+  {:name :_publish-result
+   :description "Publish the exported bundle under the requested name + version."
+   :parent :publish-package
+   :args {:pkg-name :_publish-name
+          :pkg-version :_publish-version
+          :bundle :_publish-bundle}}
+
+  {:name :publish-package-handler
+   :description "Ring handler for POST /api/packages/publish (auth-required) — JSON `{ok, …}`."
+   :parent :json-handler
+   :args {:data :_publish-result}}
+
+  {:name :api-packages-publish
+   :description "POST /api/packages/publish — publish a namespace subtree as an immutable package version. Auth-required."
+   :parent :post
+   :args {:path "/packages/publish" :handler :publish-package-handler}}]}

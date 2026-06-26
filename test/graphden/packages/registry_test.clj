@@ -2,6 +2,7 @@
   "Tests for the package registry — the `:package-version` entity that
    stores immutable published bundles."
   (:require
+    [cheshire.core :as json]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
@@ -63,3 +64,38 @@
       (is (every? #(= "app.contact-demo" (:namespace %)) (:fns bundle)))
       (is (some #{:html-page-handler} (:dependencies bundle))
           "the bundle declares its external dependency"))))
+
+
+(defn- publish-req
+  [body]
+  {:request-method :post
+   :body (json/generate-string body)
+   :headers {"content-type" "application/json"}})
+
+
+(deftest publish-handler-creates-and-rejects-duplicate
+  (testing "POST /api/packages/publish exports + stores a package version"
+    (let [resp (setup/via-graph *bootstrap* :publish-package-handler
+                                (publish-req {:name "demo.pkg" :version "1.0.0"
+                                              :ns-root "app.contact-demo"}))
+          body (json/parse-string (:body resp) true)]
+      (is (= 200 (:status resp)))
+      (is (true? (:ok body)))
+      (is (= "demo.pkg" (:name body)))
+      (is (pos? (:fn-count body)))
+      (is (some #{"html-page-handler"} (:dependencies body))
+          "external dep surfaced (keyword → string over JSON)")
+      (testing "the row persisted with the exported subtree"
+        (let [rows (sp/query-entities (storage) :package-version {:name "demo.pkg"})]
+          (is (= 1 (count rows)))
+          (is (= "app.contact-demo" (:ns-root (first rows))))
+          (is (seq (:fns (first rows))))))))
+  (testing "re-publishing the same (name, version) is rejected — immutability"
+    (let [resp (setup/via-graph *bootstrap* :publish-package-handler
+                                (publish-req {:name "demo.pkg" :version "1.0.0"
+                                              :ns-root "app.contact-demo"}))
+          body (json/parse-string (:body resp) true)]
+      (is (false? (:ok body)))
+      (is (= "version-exists" (:reason body)))
+      (is (= 1 (count (sp/query-entities (storage) :package-version {:name "demo.pkg"})))
+          "no duplicate row written"))))

@@ -538,6 +538,7 @@
                   :api-branch-conflicts
                   :api-branch-merge
                   :api-fn-versions
+                  :api-packages-publish
                   :api-secrets-root
                   :api-secret-inline-binding
                   :api-secret-delete

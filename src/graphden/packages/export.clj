@@ -45,14 +45,19 @@
      the author's own form; the parser simply re-picks. The binding
      still binds the same ref to the same logical arg.
 
-   ## Why records-level, not storage-level (yet)
+   ## Pure core + storage adapter
 
-   Storage entities ARE records (same keyword keys), modulo three
-   transforms the storage layer owns: JSONB key-keywordisation,
-   `impl-hash` materialisation (sentinel → real SHA), and namespace-id
-   resolution. The pure core here works on raw records so it is
-   testable with no DB; a thin `graph->records` adapter (forthcoming)
-   will read live entities and normalise them into this shape.
+   `records->fn-defs` is a pure function of records, testable with no DB.
+   Stored entities ARE records (same keyword keys), modulo transforms the
+   storage layer owns: the codec restores JSONB on read (constraint /
+   value / effects), `impl-hash` is a real SHA (parse uses a sentinel),
+   and `namespace-id` is a UUID (parse uses the dotted path). The
+   `graph->records` adapter (below) reads the live graph — resolving the
+   versioned per-branch view and reversing namespace-id — and
+   `export-graph` is the convenience `records->fn-defs ∘ graph->records`.
+   Because of the codec transforms, a live-graph export matches the
+   in-memory export up to those storage normalisations, and re-parsing it
+   is a fixpoint (see the e2e test).
 
    ## Relationship to `crud.type-check/reconstruct-fn-def`
 
@@ -62,7 +67,12 @@
    effects). This namespace is the faithful, all-roles inverse; the two
    should eventually converge on this core."
   (:require
-    [graphden.packages.records.ids :as ids]))
+    [graphden.packages.records.ids :as ids]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs])
+  (:import
+    (graphden.versioning.storage.core
+      VersionedStorage)))
 
 
 ;; =============================================================================
@@ -449,3 +459,72 @@
          (remove #(contains? prim-id->kw (:id %)))
          (filter :name)
          (mapv #(fn-row->fn-def % ctx)))))
+
+
+;; =============================================================================
+;; Storage adapter — live graph → records
+;; =============================================================================
+;;
+;; `records->fn-defs` is a pure function of records. Stored entities ARE
+;; records (same keyword keys) once we (a) tag each with its `:kind` and
+;; (b) reverse `namespace-id` from a UUID back to the dotted path the
+;; parser keys fn-ids on. The storage codec already restores `:constraint`
+;; / `:value` / `:expects-effects` from JSONB on read, so no decode work
+;; is needed here.
+;;
+;; Layering note: this mirrors the 5-table read in
+;; `layout.data/load-graph-entities-uncached`, but reads against the
+;; STORAGE layer directly (`sp` + `vs`) rather than depending up into the
+;; editor/layout layer.
+
+(defn- ns-id->path-map
+  "Map every `:ns` row id → its dotted path (`core.arithmetic`), walking
+   `parent-id` to the root. Inverts `loader/sync-namespaces!`."
+  [storage]
+  (let [rows (sp/query-entities storage :ns {})
+        by-id (into {} (map (juxt :id identity)) rows)
+        path (fn path
+               [id]
+               (when-let [r (get by-id id)]
+                 (if-let [p (:parent-id r)]
+                   (str (path p) "." (:name r))
+                   (:name r))))]
+    (into {} (map (fn [r] [(:id r) (path (:id r))])) rows)))
+
+
+(defn- read-graph
+  "Fetch the five graph tables. VersionedStorage resolves the current
+   per-branch view; a plain storage reads the rows directly."
+  [storage]
+  (if (instance? VersionedStorage storage)
+    (vs/query-all-graph-entities storage)
+    {:fns        (vec (sp/query-entities storage :fn {}))
+     :slots      (vec (sp/query-entities storage :slot {}))
+     :fn-slots   (vec (sp/query-entities storage :fn-slot {}))
+     :bindings   (vec (sp/query-entities storage :binding {}))
+     :list-items (vec (sp/query-entities storage :binding-list-item {}))}))
+
+
+(defn graph->records
+  "Read the live graph from `storage` into the flat, `:kind`-tagged
+   record shape `records->fn-defs` consumes. Reverses each fn-row's
+   `namespace-id` UUID to its dotted path so re-parse re-derives the same
+   deterministic fn-ids."
+  [storage]
+  (let [{:keys [fns slots fn-slots bindings list-items]} (read-graph storage)
+        ns-path (ns-id->path-map storage)]
+    (vec
+      (concat
+        (map (fn [f]
+               (assoc f :kind :fn
+                      :namespace-id (get ns-path (:namespace-id f)))) fns)
+        (map #(assoc % :kind :slot) slots)
+        (map #(assoc % :kind :fn-slot) fn-slots)
+        (map #(assoc % :kind :binding) bindings)
+        (map #(assoc % :kind :binding-list-item) list-items)))))
+
+
+(defn export-graph
+  "Export the entire stored graph as a vector of fns.edn fn-def maps."
+  [storage]
+  (records->fn-defs (graph->records storage)))

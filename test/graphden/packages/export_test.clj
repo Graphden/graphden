@@ -11,6 +11,7 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.composition.deps :as deps]
+    [graphden.executor.test-setup :as setup]
     [graphden.packages.export :as export]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.parse :as parse]
@@ -22,6 +23,16 @@
 ;; itself doesn't read the registry, but keep the ns hermetic).
 (use-fixtures :each
   (fn [t] (types/clear-aliases!) (t) (types/clear-aliases!)))
+
+
+;; A storage with core+web+app synced, cloned once from the golden DB.
+(def ^:dynamic *storage* nil)
+
+
+(use-fixtures :once
+  (fn [t]
+    (binding [*storage* (:storage (setup/bootstrap-crud-graph-from-golden!))]
+      (t))))
 
 
 (defn- norm
@@ -153,3 +164,27 @@
       (let [diff (count (remove (norm recs2) (norm recs1)))]
         (is (< diff (* 0.05 (count recs1)))
             (str "first-round diff " diff " exceeded 5% — investigate a regression"))))))
+
+
+;; =============================================================================
+;; Storage adapter — end-to-end export from a live graph
+;; =============================================================================
+
+(deftest graph-export-end-to-end
+  (let [fns (export/export-graph *storage*)
+        by-name (into {} (map (juxt :name identity)) fns)]
+    (testing "exports the whole synced graph"
+      (is (> (count fns) 2000) "core+web+app should yield thousands of fn-defs"))
+    (testing "namespace-id UUIDs are reversed to dotted paths"
+      (is (every? #(or (nil? (:namespace %)) (string? (:namespace %))) fns))
+      (is (contains? (set (map :namespace fns)) "app.page")
+          "dotted ns paths reconstructed from the :ns parent tree"))
+    (testing "a known fn-def reconstructs structurally"
+      (let [hph (get by-name :html-page-handler)]
+        (is (= :html-ok-response (:parent hph)))
+        (is (= :html-page-rendered (get-in hph [:args :body])))))
+    (testing "the live-graph export reaches the same stable fixpoint"
+      (let [recs-a (parse/parse-module fns)
+            recs-b (parse/parse-module (export/records->fn-defs recs-a))]
+        (is (= (norm recs-a) (norm recs-b))
+            "re-parsing the storage export must be a fixpoint")))))

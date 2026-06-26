@@ -116,6 +116,24 @@ would create a dependency cycle through fn references.
 
 ## Execution Errors
 
+### `:execution/forbidden-effect`
+
+**Component:** executor (effect sandbox)
+**Description:** A base-fn impl tried to perform a side effect not
+permitted by the execution context's `:allowed-effects` set — the
+runtime half of the cloud effect gate (PLATFORM_PLAN §5). Thrown by
+`record-effect!` BEFORE the impl performs the effect. Only fires when the
+context restricts effects; an unrestricted context (`:allowed-effects`
+nil — self-hosted / mixed) never throws this.
+**Ex-data keys:**
+
+- `:effect` - The forbidden effect category (`:env` / `:io` / `:network` / …)
+- `:allowed` - The set of effects the context does permit
+
+**Solution:** Either the deployment intends to forbid this effect (the
+caller's graph must not use that primitive in a restricted context), or
+the context's `:allowed-effects` should include the category.
+
 ### `:execution-error/invalid-context`
 
 **Component:** executor

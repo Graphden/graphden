@@ -139,8 +139,14 @@
                 global registry snapshot).
    - :clock     Zero-arg fn returning current time in ms (default
                 `System/currentTimeMillis`). Inject in tests for
-                deterministic time."
-  [{:keys [storage base-fns clock]}]
+                deterministic time.
+   - :allowed-effects  Optional set of effect categories this context
+                permits (e.g. `#{:db :time}`). When set, `record-effect!`
+                throws `:execution/forbidden-effect` for any effect
+                outside it — the cloud sandbox boundary (PLATFORM_PLAN
+                §5). `nil`/absent (the default) = unrestricted
+                (self-hosted / mixed)."
+  [{:keys [storage base-fns clock allowed-effects]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -154,7 +160,11 @@
       ;; requests can prime `:graph-cache` / `:compile-deps` from
       ;; out-of-order storage snapshots and leave the caches
       ;; reflecting an older view than what storage already holds.
-      (assoc :invalidation-lock (Object.))))
+      (assoc :invalidation-lock (Object.))
+      ;; Effect sandbox — nil = unrestricted. Read on the hot path by
+      ;; `compile-runtime/execute`, which binds `*allowed-effects*` for
+      ;; the execution so `record-effect!` can gate.
+      (cond-> allowed-effects (assoc :allowed-effects (set allowed-effects)))))
 
 
 (defn current-time-ms

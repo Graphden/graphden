@@ -501,12 +501,34 @@
   nil)
 
 
+(def ^:dynamic *allowed-effects*
+  "Set of effect categories the current execution is permitted to
+   perform, or `nil` (the default) for UNRESTRICTED. Bound by
+   `execute` from the context's `:allowed-effects` (PLATFORM_PLAN §5
+   cloud sandbox). When a non-nil set is in effect, `record-effect!`
+   throws `:execution/forbidden-effect` for any category outside it —
+   the runtime half of the effect gate (the build-time registry filter
+   is the belt-and-suspenders second layer)."
+  nil)
+
+
 (defn record-effect!
   "Record that the calling impl is about to perform an effect of
    `category` (one of :env, :db, :io, :network, :time, :random — same
-   vocabulary as rich-type-of `:effects`). No-op outside an execution
-   trace context."
+   vocabulary as rich-type-of `:effects`).
+
+   GATE: when `*allowed-effects*` is a non-nil set and `category` is not
+   in it, throws `:execution/forbidden-effect` BEFORE the impl performs
+   the side effect (record-effect! is called first by convention). No-op
+   gate when unrestricted. Tracing into `*effect-trace*` is a no-op
+   outside an execution trace context."
   [category]
+  (when (and *allowed-effects* (not (contains? *allowed-effects* category)))
+    (throw (ex-info (str "Forbidden effect: " category
+                         " (allowed: " *allowed-effects* ")")
+                    {:type :execution/forbidden-effect
+                     :effect category
+                     :allowed *allowed-effects*})))
   (when *effect-trace*
     (swap! *effect-trace* conj category)))
 
@@ -542,23 +564,31 @@
    reaper which writes `:status :cancelled`."
   [ctx fn-id named-args]
   (check-cancel!)
-  (if (fn? fn-id)
-    (let [args (or named-args {})]
-      (if (= 1 (count args))
-        (fn-id (first (vals args)))
-        (fn-id args)))
-    (let [reg (registry ctx)
-          closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
-          ;; Translate caller's name-keyed args into the dual-key
-          ;; shape (slot-id + name). Phase 4 readers prefer slot-id;
-          ;; the name half covers env-binding / lambda-arg / rename-
-          ;; alias paths that still flow under name keys today.
-          translated (translate-named-args fn-id (or named-args {})
-                                           (lookups-for-ctx ctx))]
-      ;; compile-eager closure signature: `(fn [free-args ctx])`.
-      ;; Child callables are captured at compile time — `reg`
-      ;; is no longer needed by the runtime.
-      (closure translated ctx))))
+  ;; Effect sandbox: when the ctx restricts effects, bind
+  ;; `*allowed-effects*` so `record-effect!` can gate. `identical?`
+  ;; skips re-binding on recursive `execute` calls within the same ctx;
+  ;; an unrestricted ctx (the common case) pays zero binding overhead.
+  (let [allowed (:allowed-effects ctx)]
+    (if (and allowed (not (identical? allowed *allowed-effects*)))
+      (binding [*allowed-effects* allowed]
+        (execute ctx fn-id named-args))
+      (if (fn? fn-id)
+        (let [args (or named-args {})]
+          (if (= 1 (count args))
+            (fn-id (first (vals args)))
+            (fn-id args)))
+        (let [reg (registry ctx)
+              closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
+              ;; Translate caller's name-keyed args into the dual-key
+              ;; shape (slot-id + name). Phase 4 readers prefer slot-id;
+              ;; the name half covers env-binding / lambda-arg / rename-
+              ;; alias paths that still flow under name keys today.
+              translated (translate-named-args fn-id (or named-args {})
+                                               (lookups-for-ctx ctx))]
+          ;; compile-eager closure signature: `(fn [free-args ctx])`.
+          ;; Child callables are captured at compile time — `reg`
+          ;; is no longer needed by the runtime.
+          (closure translated ctx))))))
 
 
 (defn execute-by-name

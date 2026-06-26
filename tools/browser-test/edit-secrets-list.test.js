@@ -64,10 +64,25 @@ async function cleanup(page) {
     }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'),
         name: SECRET_NAME, path: SECRET_PATH});
     if (!seed.ok) {
-      console.log('  (Vault/server unavailable — skipping: '
-                  + JSON.stringify(seed).slice(0, 200) + ')');
-      console.log('✓ SKIPPED — Vault/server unreachable');
-      return;
+      // Default: Vault MUST be reachable. The e2e stack
+      // (development/dev/e2e_stack.clj) and demo (docker-compose.yml)
+      // both run OpenBao; a seed failure means the stack is
+      // misconfigured and we want a loud CI fail, not a silent skip.
+      //
+      // Opt-in `GRAPHDEN_VAULT_OPTIONAL=1` for ad-hoc local runs
+      // against a host without Vault — preserves the prior pattern
+      // for that case only.
+      if (process.env.GRAPHDEN_VAULT_OPTIONAL === '1') {
+        console.log('  (Vault unreachable, GRAPHDEN_VAULT_OPTIONAL=1 — skipping: '
+                    + JSON.stringify(seed).slice(0, 200) + ')');
+        console.log('✓ SKIPPED — opt-in skip');
+        return;
+      }
+      assert(false,
+             'POST /api/secrets must succeed (e2e/demo stack ships OpenBao). '
+             + 'Set GRAPHDEN_VAULT_OPTIONAL=1 to soft-skip on an ad-hoc host '
+             + 'without Vault. Response: '
+             + JSON.stringify(seed).slice(0, 200));
     }
     const seedId = seed.secret?.id || seed.id;
     assert(seedId, 'secret fn-def created: '

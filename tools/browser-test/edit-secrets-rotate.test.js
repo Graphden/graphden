@@ -63,10 +63,19 @@ async function cleanup(page) {
     }, {base: (process.env.GRAPHDEN_URL || 'http://localhost:9002')+'', auth: (process.env.AUTH_TOKEN || 'test123'),
         name: SECRET_NAME, path: SECRET_PATH});
     if (!seed.ok) {
-      console.log('  (Vault/server unavailable — skipping happy-path: '
-                  + JSON.stringify(seed).slice(0, 200) + ')');
-      console.log('✓ SKIPPED — Vault/server unreachable, see edit-secrets-panel.test.js for form-only coverage');
-      return;
+      // See edit-secrets-list.test.js for the rationale — default
+      // fail-loud, opt-in soft-skip via GRAPHDEN_VAULT_OPTIONAL=1.
+      if (process.env.GRAPHDEN_VAULT_OPTIONAL === '1') {
+        console.log('  (Vault unreachable, GRAPHDEN_VAULT_OPTIONAL=1 — skipping happy-path: '
+                    + JSON.stringify(seed).slice(0, 200) + ')');
+        console.log('✓ SKIPPED — opt-in skip; see edit-secrets-panel.test.js for form-only coverage');
+        return;
+      }
+      assert(false,
+             'POST /api/secrets must succeed (e2e/demo stack ships OpenBao). '
+             + 'Set GRAPHDEN_VAULT_OPTIONAL=1 to soft-skip on an ad-hoc host '
+             + 'without Vault. Response: '
+             + JSON.stringify(seed).slice(0, 200));
     }
     const seedId = seed.secret?.id || seed.id;
     assert(seedId, 'secret fn-def created: '

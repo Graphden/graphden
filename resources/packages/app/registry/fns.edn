@@ -1,0 +1,23 @@
+;; Package-registry primitives. The registry stores immutable published
+;; bundles in the `:package-version` entity; `:export-namespace` is the
+;; bridge that turns a live namespace subtree into a publishable bundle
+;; (graphden.packages.export/export-namespace). Publish / list / fetch
+;; routes (graph-composed) build on this primitive + the CRUD base-fns.
+
+{:namespace "app.registry"
+ :description "Package-registry primitives — export a namespace subtree as a publishable bundle for publish/extract."
+ :fns
+ [;; The shape `:export-namespace` returns — a fixed-schema artifact, so
+  ;; it gets a named record type-row rather than a wide `:jsonb`.
+  {:name :package-bundle-shape
+   :description "A publishable package bundle: the subtree root, the namespaces it spans, its fn-defs (each a keyword-keyed fn-def map), and the external fn-names it depends on."
+   :type {:namespace :text
+          :namespaces [:list :text]
+          :fns [:list :keyword-map]
+          :dependencies [:list :keyword]}}
+
+  {:name :export-namespace
+   :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract."
+   :args {:root {:type :text :description "Dotted root namespace path, e.g. \"web.components\"."}}
+   :return-type :package-bundle-shape
+   :effects #{:db}}]}

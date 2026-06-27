@@ -24,6 +24,7 @@
    straight through to `record-effect!`. Until a provider that resolves
    `:org` is wired, every request is public — a safe no-op."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
     [graphden.tenancy.auth :as tauth]
@@ -43,6 +44,15 @@
   ;; The fn `:db/postgres` applies to its pool so every connection carries
   ;; graphden.current_org — the RLS ops wiring (B5).
   rls/org-aware-datasource)
+
+
+(defmethod ig/init-key :tenancy/rls-enabler [_ {:keys [storage]}]
+  ;; Install the RLS policies at boot. Depends on `:db/postgres`, whose
+  ;; init-key already created the tables (initialize-with-cleanup!), so the
+  ;; ALTER TABLE / CREATE POLICY have something to attach to. Idempotent.
+  (log/info "Installing RLS policies on org-scoped tables")
+  (rls/enable-rls! (:pool storage))
+  :enabled)
 
 
 (defmethod ig/init-key :auth/multi-tenant-provider [_ {:keys [tokens]}]

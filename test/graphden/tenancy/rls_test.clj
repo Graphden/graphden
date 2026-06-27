@@ -6,8 +6,10 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.addon]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.rls :as rls]
+    [integrant.core :as ig]
     [next.jdbc :as jdbc])
   (:import
     (javax.sql
@@ -65,3 +67,20 @@
     (testing "public / admin / unbound borrow clears it (policy grants full access)"
       (is (= "" (tc/with-org tc/public-org (org-on-borrow))))
       (is (= "" (org-on-borrow))))))
+
+
+(deftest rls-enabler-init-key-installs-policies-on-every-scoped-table
+  (let [storage (setup/create-test-storage)
+        ds (:pool storage)
+        tables ["fn" "slot" "fn_slot" "binding" "binding_list_item"]]
+    (is (= :enabled (ig/init-key :tenancy/rls-enabler {:storage storage}))
+        "the addon component runs enable-rls! at boot")
+    (let [installed (->> (jdbc/execute! ds ["SELECT tablename FROM pg_policies WHERE policyname = 'org_isolation'"])
+                         (map :pg_policies/tablename)
+                         set)]
+      (is (= (set tables) installed)
+          "org_isolation policy installed on every org-scoped table"))
+    ;; clean up so a container-sharing sibling ns isn't left with FORCE RLS
+    (doseq [t tables]
+      (jdbc/execute! ds [(str "ALTER TABLE \"" t "\" NO FORCE ROW LEVEL SECURITY")])
+      (jdbc/execute! ds [(str "ALTER TABLE \"" t "\" DISABLE ROW LEVEL SECURITY")]))))

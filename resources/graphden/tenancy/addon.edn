@@ -33,7 +33,11 @@
  ;; can't-be-bypassed second isolation layer.
  :tenancy/datasource-wrap {}
 
- :db/postgres {:datasource-wrap #ig/ref :tenancy/datasource-wrap}}
+ :db/postgres {:datasource-wrap #ig/ref :tenancy/datasource-wrap}
+
+ ;; Install the RLS policies at boot. Depends on :db/postgres (tables
+ ;; already created by its init-key), so policies attach after migration.
+ :tenancy/rls-enabler {:storage #ig/ref :db/postgres}}
 
 ;; To turn the addon from a safe no-op into real multi-tenancy, a
 ;; deployment also overrides the :auth/provider seam with an org-resolving

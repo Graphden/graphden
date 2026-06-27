@@ -552,10 +552,13 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        пул `:db/postgres` (seam `:datasource-wrap`), ставит
        `graphden.current_org` из `*current-org*` на каждом borrow (tenant →
        org, public/admin/unbound → '' = видит всё); доказано тестом.
-     *Остаётся прод-деплой (не код):* `enable-rls!` на deploy; подключение
-     приложения non-superuser ролью; реальный token-source (storage/secret
-     вместо static-map). Дальше по плану: per-org LRU (R8) → org-скоуп
-     секретов (R9) → поддомены (R10, R11);
+     - **ops: enable-rls! автозапуск ✅** `:tenancy/rls-enabler` Integrant-
+       компонент (зависит от `:db/postgres` → таблицы уже созданы) ставит
+       политики на boot; доказано (policy на всех 5 scoped-таблицах).
+     *Остаётся чистый деплой/инфра:* приложение под non-superuser ролью
+     (superuser обходит RLS); реальный token-source (storage/secret вместо
+     static-map). Дальше по плану: per-org LRU (R8) → org-скоуп секретов
+     (R9) → поддомены (R10, R11);
   4. **проводка effect-gate** — ✅ **СДЕЛАНО**: request-scope wrap для
      реального тенанта (org ≠ public) биндит `cr/*allowed-effects*
      default-cloud-allowed-effects` вокруг хендлера → cloud-граф не может

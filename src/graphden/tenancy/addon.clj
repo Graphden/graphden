@@ -114,10 +114,23 @@
              ["write" "execute"])))
 
 
-(defn- with-capabilities-header
-  [resp capabilities]
+(defn- request-workspace
+  "The user's workspace (§4.4) for this request — the named namespaces their
+   grants cover, for the editor to organise / highlight the namespace tree.
+   Empty for platform/admin or no grant store (no workspace hint → editor
+   shows everything)."
+  [grant-store principal org]
+  (if (or (= org tc/public-org) (nil? grant-store))
+    []
+    (vec (grant/workspace grant-store (:user principal)))))
+
+
+(defn- with-tenancy-headers
+  [resp capabilities workspace]
   (cond-> resp
-    (map? resp) (assoc-in [:headers "X-Graphden-Capabilities"] (str/join "," capabilities))))
+    (map? resp)
+    (-> (assoc-in [:headers "X-Graphden-Capabilities"] (str/join "," capabilities))
+        (assoc-in [:headers "X-Graphden-Workspace"] (str/join "," workspace)))))
 
 
 (defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store]}]
@@ -138,9 +151,10 @@
           ;; known — see tenancy.authz).
           run (fn []
                 (try
-                  (with-capabilities-header
+                  (with-tenancy-headers
                     (thunk)
-                    (request-capabilities grant-store principal org))
+                    (request-capabilities grant-store principal org)
+                    (request-workspace grant-store principal org))
                   (catch clojure.lang.ExceptionInfo e
                     (if (= :authz/forbidden (:type (ex-data e)))
                       forbidden-response

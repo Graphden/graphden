@@ -121,6 +121,18 @@
                  (grants-for store subject))))
 
 
+(defn workspace
+  "A user's workspace (§4.4) — the union of the (named) namespaces their
+   grants cover. Each is a subtree the user can work in; with personal
+   namespaces wired, the user's own namespace is included. Root/blank grants
+   (whole-org admin) and the shared public namespace aren't listed — they're
+   not a bounded 'set of namespaces'. Returns a sorted set of paths."
+  [store user]
+  (into (sorted-set)
+        (comp (map :namespace) (remove str/blank?))
+        (grants-for store user)))
+
+
 (defn request->capability
   "The capability a Ring request needs: an `/execute` call → `:execute`, a
    mutating method (POST/PUT/PATCH/DELETE) → `:write`, anything else →

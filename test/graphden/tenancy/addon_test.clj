@@ -184,6 +184,25 @@
       (is (= "alice" (post (fn [_req] (:user tc/*current-principal*))))))))
 
 
+(deftest workspace-header-lists-the-users-namespaces
+  (let [grant-store (ig/init-key :tenancy/grant-store
+                                 {:grants [{:subject "alice" :capability :write :namespace "acme.team"}]
+                                  :personal-ns-prefix "users"})
+        scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})
+        base-ctx {:auth-provider provider :request-scope scope}
+        router (router-with base-ctx (fn [_req] {:status 200 :body "ok"}))
+        ws (fn [authz]
+             (get-in (br/dispatch router {:request-method :get :uri "/api/graph/entities"
+                                          :headers (cond-> {} authz (assoc "authorization" authz))
+                                          :query-string nil})
+                     [:headers "X-Graphden-Workspace"]))]
+    (testing "a tenant's workspace lists granted + personal namespaces (sorted)"
+      (is (= "acme.team,users.alice" (ws "Bearer alice-tok"))))
+    (testing "platform / no token → empty (no workspace hint)"
+      (is (= "" (ws nil))))))
+
+
 (deftest grant-enforcement-is-opt-in
   (let [scope (ig/init-key :tenancy/request-scope {})       ; no grant-store
         provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})

@@ -631,8 +631,14 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        в `:tenancy/grant-store`. Доказано: юзер владеет своим ns +
        потомками (все capabilities), не владеет чужим, base-гранты
        сохраняются. *(Provisioning самой `:ns`-сущности — follow-up.)*
-     *Остаётся:* `:terminal`/`:list-append` (R2) → workspaces (объединение
-     видимых неймспейсов);
+     - **workspaces ✅ (backend)** `grant/workspace` — union именованных
+       namespace'ов из грантов юзера (+ personal через декоратор; root/blank
+       и public исключены); сортированный set. Surface через
+       `X-Graphden-Workspace` header в request-scope (tenant → его
+       namespace'ы, platform → пусто). Доказано: pure + header через
+       dispatch. *Остаётся:* потребление в editor-JS (фильтр/подсветка
+       sidebar-дерева по workspace — фронт + Playwright).
+     *Остаётся:* `:terminal`/`:list-append` (R2);
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

@@ -65,3 +65,15 @@
       (is (not (grant/can? store "bob" :write "users.alice"))))
     (testing "a user with no base grants still owns their own namespace"
       (is (grant/can? store "bob" :write "users.bob")))))
+
+
+(deftest workspace-is-the-union-of-granted-namespaces
+  (let [base (grant/static-grant-store
+               [{:subject "alice" :capability :write :namespace "acme.team"}
+                {:subject "alice" :capability :read :namespace "shared.lib"}
+                {:subject "alice" :capability :admin :namespace nil}])
+        store (grant/with-personal-namespaces base "users")]
+    (testing "named granted namespaces + personal; root/blank grants excluded"
+      (is (= #{"acme.team" "shared.lib" "users.alice"} (grant/workspace store "alice"))))
+    (testing "a user with only their personal namespace"
+      (is (= #{"users.bob"} (grant/workspace store "bob"))))))

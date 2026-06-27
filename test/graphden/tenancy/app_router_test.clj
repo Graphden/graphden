@@ -64,6 +64,22 @@
            (app/run-with-timeout 1000 (fn [] (throw (RuntimeException. "boom"))))))))
 
 
+(deftest cached-handler-fn-id-test
+  (let [cache (atom {})
+        calls (atom 0)
+        read-fn (fn [_] (swap! calls inc) :the-fid)]
+    (testing "miss reads + caches; a hit within TTL doesn't re-read"
+      (is (= :the-fid (app/cached-handler-fn-id cache 1000 0 "acme" read-fn)))
+      (is (= :the-fid (app/cached-handler-fn-id cache 1000 500 "acme" read-fn)))
+      (is (= 1 @calls)))
+    (testing "expiry re-reads"
+      (app/cached-handler-fn-id cache 1000 2000 "acme" read-fn)
+      (is (= 2 @calls)))
+    (testing "a different org is a separate cache entry"
+      (app/cached-handler-fn-id cache 1000 2000 "beta" read-fn)
+      (is (= 3 @calls)))))
+
+
 (deftest make-app-router-non-execution-paths
   (let [handler-id (random-uuid)
         storage (org-storage {"acme" handler-id "beta" nil})

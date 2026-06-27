@@ -4,6 +4,9 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: graphden-postgres
+    # Survive host/daemon restarts — the executor (unless-stopped) crash-
+    # loops on `UnknownHostException: postgres` if this stays down.
+    restart: unless-stopped
     environment:
       POSTGRES_DB: graphden
       POSTGRES_USER: graphden
@@ -27,6 +30,7 @@ services:
   user-postgres:
     image: postgres:16-alpine
     container_name: graphden-user-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: userdb
       POSTGRES_USER: userapp
@@ -50,6 +54,10 @@ services:
   openbao:
     image: quay.io/openbao/openbao:latest
     container_name: graphden-openbao
+    # Comes back after a host restart so the executor can reconnect. NOTE:
+    # dev-mode is in-memory, so it returns BLANK — secrets need a re-seed
+    # (the one-shot `openbao-seed` only runs on `docker compose up`).
+    restart: unless-stopped
     cap_add:
       - IPC_LOCK
     environment:

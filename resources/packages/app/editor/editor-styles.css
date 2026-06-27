@@ -1151,11 +1151,31 @@ body.sidebar-collapsed .sidebar-expand-floating {
   background: var(--hover-bg);
 }
 
-/* Capability gating (PLATFORM_PLAN §4.3): a tenant the addon reports has no
-   :write capability loses the edit-actions entry (✎/+/✕/▶ all live behind
-   this trigger). No-op without the addon — the header is absent, so the
-   gd-no-write class is never set and the editor is unchanged. */
-body.gd-no-write .more-actions-trigger {
+/* Capability gating (PLATFORM_PLAN §4.3) — per-action. The addon reports
+   the caller's capabilities via X-Graphden-Capabilities; the fetch wrap sets
+   gd-no-write / gd-no-execute body classes. No-op without the addon (header
+   absent → classes never set → editor unchanged). Server-side enforcement
+   still applies; this is the matching UX so users don't see what they can't
+   do.
+
+   A fully read-only caller (no write AND no execute) loses the whole
+   entry; otherwise the trigger stays for the read actions (i / ↗ / ⌛) and
+   only the disallowed per-action items are hidden. */
+body.gd-no-write.gd-no-execute .more-actions-trigger {
+  display: none !important;
+}
+body.gd-no-write [data-action="rename-fn"],
+body.gd-no-write [data-action="extend-fn"],
+body.gd-no-write [data-action="delete-fn"],
+body.gd-no-write [data-action="add-mi-parent"],
+body.gd-no-write [data-action="remove-mi-parent"],
+body.gd-no-write [data-action="namespace-move"],
+body.gd-no-write [data-action="change-use-site-value"],
+body.gd-no-write [data-action="remove-use-site-binding"],
+body.gd-no-write [data-action="service-settings"] {
+  display: none !important;
+}
+body.gd-no-execute [data-action="run-fn"] {
   display: none !important;
 }
 

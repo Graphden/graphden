@@ -610,9 +610,14 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        Доказано: unit (extend-builder, seam, store) + **real-Postgres**
        (`:grant`-таблица, roundtrip, `can?`); boot backward-compat. Гранты
        теперь обычные entity → CRUD через `/api/entities/grant`.
-     *Остаётся:* per-action gating контента row-actions popover (сейчас
-     гейтится вход), per-namespace execute, `:terminal`/`:list-append` (R2)
-     → личные неймспейсы → workspaces;
+     - **per-action gating ✅** CSS по `data-action` в popover: `gd-no-write`
+       прячет write-экшены (rename/extend/delete/mi-parent/ns-move/use-site/
+       service-settings), `gd-no-execute` — `run-fn`; read-экшены
+       (i/↗/⌛) всегда видны; full read-only (нет write И execute) прячет
+       сам `⋯`-вход. **Проверено Playwright:** execute-only прячет write +
+       показывает run; write-only прячет run; read-only прячет вход.
+     *Остаётся:* per-namespace execute, `:terminal`/`:list-append` (R2) →
+     личные неймспейсы → workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

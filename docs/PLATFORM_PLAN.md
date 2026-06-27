@@ -520,10 +520,17 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
   отложена в аддон** (§3.0, §5): глобальный флаг на default-ctx ломает
   платформу. Билд-тайм фильтрация реестра — второй слой, follow-up.
 - **Фаза 2–3 (tenancy-аддон, по §3.0):** строго в порядке предусловий —
-  1. **auth-шов** (R13): вынести auth из хардкод-токена в инъектируемый
-     компонент (протокол/Integrant-ключ), который аддон переопределяет;
-  2. **манифест аддонов**: `executor-packages.edn` сплайсит Integrant-ключи
-     аддона в storage/router-цепочку;
+  1. **auth-шов** (R13) — ✅ **СДЕЛАНО** (ветка `feature/auth-seam`):
+     `graphden.auth.provider/AuthProvider` протокол + дефолтный
+     `SingleTokenAuthProvider`; Integrant-ключ `:auth/provider`; ctx-опт
+     `:auth-provider`; graph-шов `:authenticate-request` →
+     `:request-authenticated?`. Аддон переопределяет `:auth/provider`.
+  2. **манифест аддонов** — ✅ **СДЕЛАНО**: `config/read-config` deep-мержит
+     Aero-фрагменты аддонов из `GRAPHDEN_ADDON_CONFIGS` (env, comma-sep
+     classpath-ресурсы) поверх core-конфига; фрагмент аддона переопределяет
+     indirection-ключи (напр. `:auth/provider`) + добавляет свои; директива
+     `:graphden/require` грузит init-key-неймспейсы аддона. Без аддонов —
+     no-op (single-tenant). (Заменяет набросок `executor-packages.edn`.)
   3. **`OrgScopedStorage` + RLS** (R6, оба слоя; `org-id`-колонка default
      `public` в core) → per-org LRU (R8) → org-скоуп секретов (R9) →
      поддомены/домены (R10, R11);

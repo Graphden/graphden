@@ -1,0 +1,12 @@
+;; Stand-in tenancy-addon config fragment (PLATFORM_PLAN §3.0 prereq #2).
+;; A real addon ships this on the classpath via its deps.edn and names it
+;; in GRAPHDEN_ADDON_CONFIGS. It (a) requires its Clojure ns so the
+;; init-key defmethods load, (b) adds its own component, and (c) redefines
+;; the core's `:auth/provider` indirection to point at it.
+{:graphden/require [graphden.system.test-addon-fixture]
+
+ :auth/test-provider {:label "from-addon"}
+
+ ;; Redirect the auth seam to the addon's provider — deep-merge keeps the
+ ;; core `:exec/context`'s other keys (e.g. :storage) intact.
+ :exec/context {:auth-provider #ig/ref :auth/test-provider}}

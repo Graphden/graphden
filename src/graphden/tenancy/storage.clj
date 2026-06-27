@@ -23,7 +23,16 @@
 
 
 (def default-scoped-entities
-  "Graph entities that carry a tenant. Everything else is global."
+  "Graph entities that carry a tenant. Everything else is global.
+
+   NOTE: `:fn-execution` is deliberately NOT here. Executions run in a
+   background future, and `*current-org*` is a thread-local that isn't bound
+   in that thread — so OrgScoped's stamp would mis-tag the row AND its
+   own-guard would BLOCK the future's terminal-status UPDATE, silently
+   dropping every tenant's result. Org-scoping executions needs the org
+   captured at request time and propagated INTO the future (bound-fn /
+   explicit row field), not the dynamic-var stamp — a §3.3 follow-up. For
+   now executions stay id-gated (reachable only via an org-scoped fn-id)."
   #{:fn :slot :fn-slot :binding :binding-list-item})
 
 

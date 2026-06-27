@@ -389,7 +389,11 @@ tenant-ветка глобальна + пикер `/api/branches` перечис
 т.к. grant-store читает `:grant` из БАЗОВОГО storage, не из декоратора;
 branch-резолюция читает `:branch` в public-контексте (до request-scope), так
 что гвард её не трогает. (Read `:execution` — отдельно, защищён неугадываемым
-`fn-id`, низкая severity.) Доказано (storage-test, 9 тестов). *Полное
+`fn-id`, низкая severity. **Прямой stamp НЕ годится:** executions пишутся в
+background-future, где `*current-org*` (thread-local) не связан — OrgScoped
+mis-tag'нул бы строку И own-guard ЗАБЛОКИРОВАЛ бы terminal UPDATE из future,
+теряя результат тенанта. Нужен capture org в request-time + проброс в future,
+не stamp — §3.3 follow-up.) Доказано (storage-test, 9 тестов). *Полное
 решение §3.3 — сэндбокс для tenant-OWNED сервисов (org на `:service` +
 `:allowed-effects` в ctx реконсилера для tenant-сервиса) — обязательно ДО того,
 как деплой сервисов станет tenant-доступным.*

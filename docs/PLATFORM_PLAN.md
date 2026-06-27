@@ -602,9 +602,17 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        Postgres** (alice с грантом на acme.team пишет туда, но не в acme;
        admin/public не гейтится). Скоуп: `:fn`-записи с `:namespace-id`;
        прочие сущности/update без ns-id — coarse-гейт + RLS (follow-up).
-     *Остаётся:* storage-backed grant-store, per-action gating контента
-     row-actions popover (сейчас гейтится вход), `:terminal`/`:list-append`
-     (R2) → личные неймспейсы → workspaces;
+     - **storage-backed store ✅** новый seam `:db/schema {:extensions […]}`
+       (addon добавляет сущности без правки ядра) → `:grant`-entity
+       (`graphden.tenancy.grant-schema`) + `StorageBackedGrantStore` читает
+       `:grant`-строки (capability text→keyword), `:tenancy/grant-store`
+       полиморфен (`:storage` → storage-backed, `:grants` → static).
+       Доказано: unit (extend-builder, seam, store) + **real-Postgres**
+       (`:grant`-таблица, roundtrip, `can?`); boot backward-compat. Гранты
+       теперь обычные entity → CRUD через `/api/entities/grant`.
+     *Остаётся:* per-action gating контента row-actions popover (сейчас
+     гейтится вход), per-namespace execute, `:terminal`/`:list-append` (R2)
+     → личные неймспейсы → workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

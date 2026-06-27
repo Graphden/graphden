@@ -58,24 +58,27 @@
 ;; Schema (pure, no lifecycle)
 ;; =============================================================================
 
-(defmethod ig/init-key :db/schema [_ _]
+(defmethod ig/init-key :db/schema [_ {:keys [extensions]}]
   (log/info "Building schema...")
-  (-> (mds/create-builder)
-      (gds/extend-builder)
-      (vts/extend-builder)
-      (vds/extend-builder)
-      ;; Executions ref :fn-version (vds-registered above). Non-
-      ;; versioned (event-shaped, immutable), so they don't appear
-      ;; in versioning's entity-config.
-      (es/extend-builder)
-      ;; Services ref :fn (logical, not version). Also non-versioned —
-      ;; admin desired-state mutates in place; per-version trail is
-      ;; carried by the :fn-execution rows services SPAWN.
-      (svcs/extend-builder)
-      ;; Registry artifacts — immutable published package snapshots.
-      ;; Non-versioned (immutable by contract), refs nothing graph-side.
-      (pkgs/extend-builder)
-      (ds/build)))
+  (let [base (-> (mds/create-builder)
+                 (gds/extend-builder)
+                 (vts/extend-builder)
+                 (vds/extend-builder)
+                 ;; Executions ref :fn-version (vds-registered above). Non-
+                 ;; versioned (event-shaped, immutable), so they don't appear
+                 ;; in versioning's entity-config.
+                 (es/extend-builder)
+                 ;; Services ref :fn (logical, not version). Also non-versioned —
+                 ;; admin desired-state mutates in place; per-version trail is
+                 ;; carried by the :fn-execution rows services SPAWN.
+                 (svcs/extend-builder)
+                 ;; Registry artifacts — immutable published package snapshots.
+                 ;; Non-versioned (immutable by contract), refs nothing graph-side.
+                 (pkgs/extend-builder))]
+    ;; Addon schema-extension seam (PLATFORM_PLAN §3.0): each `extensions`
+    ;; entry is a `(builder → builder)` fn — the tenancy addon adds its
+    ;; `:grant` entity here without editing core. Absent → core schema.
+    (ds/build (reduce (fn [b extend] (extend b)) base (or extensions [])))))
 
 
 ;; =============================================================================

@@ -68,3 +68,17 @@
 ;; (a :fn write to a namespace the user lacks :write on → 403). With the
 ;; store on request-scope only, enforcement is org-coarse; add it to
 ;; :org/scoped-storage too for per-namespace.
+;;
+;; For PERSISTENT grants (a :grant table instead of a config map), splice
+;; the :grant entity into the schema and point the store at storage:
+;;
+;;   {:graphden/require [graphden.tenancy.addon]
+;;    :tenancy/grant-schema {}
+;;    :db/schema {:extensions [#ig/ref :tenancy/grant-schema]}
+;;    :tenancy/grant-store {:storage #ig/ref :db/postgres}
+;;    :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store}
+;;    :org/scoped-storage {:base #ig/ref :app/storage
+;;                         :grant-store #ig/ref :tenancy/grant-store}}
+;;
+;; Grant rows (subject, capability ["write"/"execute"/"admin"], namespace)
+;; are then ordinary entities — manage them via /api/entities/grant.

@@ -34,6 +34,7 @@
     [graphden.tenancy.authz :as authz]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.grant :as grant]
+    [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.rls :as rls]
     [graphden.tenancy.storage :as ts]
     [integrant.core :as ig]))
@@ -62,11 +63,19 @@
   :enabled)
 
 
-(defmethod ig/init-key :tenancy/grant-store [_ {:keys [grants]}]
-  ;; Authorization primitive (§4.2). A deployment supplies `:grants` (a
-  ;; coll of {:subject :capability :namespace}); a storage-backed store can
-  ;; replace this without touching `grant/can?`. Empty → default-deny.
-  (grant/static-grant-store (or grants [])))
+(defmethod ig/init-key :tenancy/grant-schema [_ _]
+  ;; The `(builder → builder)` fn `:db/schema`'s :extensions seam applies to
+  ;; add the `:grant` entity (§4.2 — storage-backed grants).
+  grant-schema/extend-builder)
+
+
+(defmethod ig/init-key :tenancy/grant-store [_ {:keys [grants storage]}]
+  ;; Authorization primitive (§4.2). `:storage` → a store reading `:grant`
+  ;; rows (persistent, manageable); else `:grants` → a static-map store.
+  ;; `grant/can?` is identical either way. Empty → default-deny.
+  (if storage
+    (grant-schema/storage-grant-store storage)
+    (grant/static-grant-store (or grants []))))
 
 
 (defmethod ig/init-key :auth/multi-tenant-provider [_ {:keys [tokens]}]

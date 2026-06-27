@@ -74,7 +74,9 @@
 ;;
 ;;   {:graphden/require [graphden.tenancy.addon]
 ;;    :tenancy/grant-schema {}
-;;    :db/schema {:extensions [#ig/ref :tenancy/grant-schema]}
+;;    :tenancy/org-schema {}   ; orgs registry (§3.4 FaaS app model)
+;;    :db/schema {:extensions [#ig/ref :tenancy/grant-schema
+;;                             #ig/ref :tenancy/org-schema]}
 ;;    :tenancy/grant-store {:storage #ig/ref :db/postgres}
 ;;    :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store}
 ;;    :org/scoped-storage {:base #ig/ref :app/storage

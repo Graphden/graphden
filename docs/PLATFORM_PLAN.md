@@ -400,6 +400,66 @@ mis-tag'нул бы строку И own-guard ЗАБЛОКИРОВАЛ бы term
 
 ---
 
+### 3.4. ADR: tenant-приложения = FaaS (handler-only), НЕ PaaS (свой сервер)
+
+**Решение (заменяет подход «service-sandbox» из §3.3-note).** Облачный
+тенант НЕ владеет `:service`/веб-сервером (Heroku-модель). Вместо этого —
+**FaaS / Cloudflare-Workers-модель**: платформа владеет web-server'ами
+(порты, кол-во инстансов, скейл, роутинг org→инстанс) — всё в графах,
+СКРЫТЫХ от тенанта; тенант даёт ТОЛЬКО **handler-функцию** (request→response,
+с внутренним path-роутингом). Для Graphden это родная модель: «код = граф
+функций», значит «приложение тенанта = функция, платформа её вызывает».
+
+**Почему лучше service-sandbox.** В PaaS-варианте тенант-`:service` биндит
+свой порт МИМО request-scope → надо изобретать `:service-scope` seam +
+per-request wrap через port/async-границу. В FaaS handler тенанта
+исполняется ВНУТРИ уже-сэндбокснутого request-пути платформы → effect-gate +
+org-scoping применяются автоматически. Самая сложная часть исчезает. Плюс:
+#2 минимум сущностей (тенант редактирует одно `:binding`, не создаёт
+`:service`), #3 explicit (один рычаг — handler; порты/инстансы — решения
+платформы).
+
+**Механика.**
+- **`:org`-сущность** (orgs-реестр, платформенная, tenant-forbidden):
+  `name` (= slug = поддомен = `*current-org*`), `handler-fn-id`, метаданные.
+  Endpoint регистрации (платформенный граф) создаёт строку + поддомен.
+- **Handler-слот:** per-org provisioned «locked» fn (нельзя удалить/
+  наследовать, можно только редактировать handler-binding) ИЛИ общая fn с
+  org-scoped binding'ом (тогда уникальность binding → `(fn,slot,org)`).
+  Вариант с per-org locked-fn чище. «Locked» выражается грантом: capability
+  только на этот слот, не на структуру fn.
+- **Два роутинга (резолвит R11):**
+  - **App** (handler тенанта, публичные посетители) → контекст org =
+    **поддомен/домен** (аноним OK). Безопасно: handler X — сам гейткипер,
+    OrgScoped не пускает его за данные X. Within-org exposure — отв-ть app.
+  - **Editor/API** (`/api/*`,`/partials/*`) → авторитет org = **токен**
+    (guard §3.2: чужой поддомен → 403).
+- **Web-server скрыт:** `:http-server`/`:service` — platform-only (уже
+  enforced write-deny). Порт — не фикс-литерал, а из функции (платформа
+  решает кол-во/инстансы).
+- **Кастомные домены** — тем же app-routing'ом: верифицированный
+  `hostname → org` (`tenancy.domain`, DNS-TXT уже есть) → handler org.
+
+**Предусловия/тонкости (честно):**
+- **R8 (per-org compiled-handler кэш)** из «scale-оптимизации» становится
+  **перформанс-предусловием** — иначе компиляция handler'а на каждый запрос.
+- **Resource-лимиты** (timeout/memory на tenant-handler) — effect-gate не
+  ограничивает CPU/память (noisy neighbor; верно для любой shared-модели).
+- App-путь должен биндить `*allowed-effects*` для tenant-handler (та же
+  механика, что в request-scope).
+
+**Bounded-шаги (план реализации):**
+1. `:org`-сущность + схема (`tenancy/org_schema`), tenant-forbidden, addon-wiring. ← ТЕКУЩИЙ
+2. Endpoint регистрации org (платформенный fn-def: создать `:org` + вывести поддомен).
+3. App-routing шов: отделить app-запрос (поддомен→org-контекст, аноним) от editor/API (токен).
+4. Handler-слот: provisioning per-org locked `app-handler` + резолв `handler-fn-id` из `:org`.
+5. Связать app-routing → исполнять handler org-scoped + effect-gated.
+6. R8 per-org handler-кэш (перф).
+7. Resource-лимиты (timeout/memory).
+8. Кастомные домены в app-routing (host→org уже есть).
+
+---
+
 ## 4. ФАЗА 3 — Пользователи и права
 
 ### 4.1. Аутентификация: заменить общий пароль

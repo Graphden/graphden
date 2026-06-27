@@ -36,6 +36,7 @@
     [graphden.tenancy.domain :as domain]
     [graphden.tenancy.grant :as grant]
     [graphden.tenancy.grant-schema :as grant-schema]
+    [graphden.tenancy.org-schema :as org-schema]
     [graphden.tenancy.rls :as rls]
     [graphden.tenancy.storage :as ts]
     [graphden.tenancy.subdomain :as subdomain]
@@ -69,6 +70,11 @@
   ;; The `(builder → builder)` fn `:db/schema`'s :extensions seam applies to
   ;; add the `:grant` entity (§4.2 — storage-backed grants).
   grant-schema/extend-builder)
+
+
+(defmethod ig/init-key :tenancy/org-schema [_ _]
+  ;; Adds the `:org` entity (§3.4 — orgs registry for the FaaS app model).
+  org-schema/extend-builder)
 
 
 (defmethod ig/init-key :tenancy/grant-store [_ {:keys [grants storage personal-ns-prefix]}]

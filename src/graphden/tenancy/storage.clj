@@ -56,10 +56,14 @@
      itself reads `:branch` with org = public (pre-request-scope), so it's
      unaffected by this guard.
 
+   - `:org`     — the orgs registry (§3.4). Platform-managed: tenants register
+     and configure their org through dedicated endpoints / the editor, never
+     by writing the registry row, and must not enumerate other orgs.
+
    Platform / admin (public org) is unrestricted. New privileged entity types
-   MUST be added here. (Proper long-term answers — a sandbox for tenant-OWNED
-   services and org-scoped branches/executions — are §3.3 follow-ups.)"
-  #{:service :grant :domain :branch})
+   MUST be added here. (Proper long-term answers — the FaaS app model §3.4 and
+   org-scoped branches/executions — are follow-ups.)"
+  #{:service :grant :domain :branch :org})
 
 
 (defn- row-org

@@ -91,6 +91,15 @@
 ;; namespace (§4.4) — `<prefix>.<user>`, no grant row needed:
 ;;   :tenancy/grant-store {:storage #ig/ref :db/postgres :personal-ns-prefix "users"}
 ;;
+;; SUBDOMAIN ROUTING (§3.2) — resolve the org from the request Host
+;; (`acme.graphden.app` → org `acme`) so a tenant reaches their workspace by
+;; URL. The subdomain wins; absent/unmapped falls back to the token's org.
+;; Wire a resolver + the base domain onto request-scope:
+;;   :tenancy/org-resolver {:subdomains {"acme" "acme" "beta" "beta-org"}}
+;;   :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store
+;;                           :org-resolver #ig/ref :tenancy/org-resolver
+;;                           :base-domain "graphden.app"}
+;;
 ;; The addon ships its own fns-packages (e.g. an org-admin UI) via the
 ;; fns-channel seam — append to :app/packages without restating the core
 ;; list, so they load ONLY when the addon is active:

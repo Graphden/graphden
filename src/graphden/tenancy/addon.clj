@@ -37,6 +37,7 @@
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.rls :as rls]
     [graphden.tenancy.storage :as ts]
+    [graphden.tenancy.subdomain :as subdomain]
     [integrant.core :as ig]))
 
 
@@ -95,6 +96,14 @@
   (tauth/token-map-provider (or tokens {})))
 
 
+(defmethod ig/init-key :tenancy/org-resolver [_ {:keys [subdomains]}]
+  ;; Static `{subdomain org}` map from config (§3.2) — `acme.<base-domain>`
+  ;; → org `acme`. Wired into `:tenancy/request-scope` with `:base-domain`.
+  ;; Empty / absent → nil → no subdomain routing (org from the token only).
+  (when (seq subdomains)
+    (subdomain/static-org-resolver subdomains)))
+
+
 (def ^:private forbidden-response
   {:status 403
    :headers {"Content-Type" "application/json"}
@@ -133,7 +142,7 @@
         (assoc-in [:headers "X-Graphden-Workspace"] (str/join "," workspace)))))
 
 
-(defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store]}]
+(defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store org-resolver base-domain]}]
   ;; (fn [ctx request thunk] …) — authenticate, bind the org, restrict
   ;; effects, enforce grants, then run the handler. A request the provider
   ;; can't authenticate (or one with no `:org`) is public → unrestricted,
@@ -144,7 +153,12 @@
   (fn [ctx request thunk]
     (let [principal (when-let [p (:auth-provider ctx)]
                       (auth/authenticate p request))
-          org (tc/org-from-principal principal)
+          ;; Org source (§3.2): the request's `Host` subdomain wins when it
+          ;; maps to an org (a tenant reaching their workspace by URL), else
+          ;; fall back to the authenticated principal's org. Both nil →
+          ;; public (single-tenant behaviour).
+          org (or (subdomain/org-from-request org-resolver request base-domain)
+                  (tc/org-from-principal principal))
           ;; Run the handler, attach the capability header, and map a
           ;; per-namespace `:authz/forbidden` thrown at the storage layer to
           ;; a clean 403 (the storage guard is where the target namespace is

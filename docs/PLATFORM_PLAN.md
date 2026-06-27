@@ -326,6 +326,14 @@ unrestricted. Механизм гейта уже готов и проверен 
   организации. Расширяем извлечение контекста: парсим поддомен из `Host` →
   резолвим в `org-id` (таблица `subdomain → org`). Маршрут создаётся
   автоматически при создании организации.
+  - **resolution ✅** `tenancy.subdomain` — `extract-subdomain` (Host →
+    label; strips port, rejects apex/multi-level) + `OrgResolver` протокол +
+    `static-org-resolver`; `request-scope` берёт org из поддомена (выигрывает
+    у токена, fallback на principal-org → public). `:tenancy/org-resolver`
+    init-key (config `{subdomain org}`) + `:base-domain` на request-scope.
+    Inert без резолвера (single-tenant). Доказано (4 теста / 20 ассертов, вкл.
+    request-scope-биндинг). *Остаётся:* storage-backed `subdomain → org`
+    таблица + авто-создание маршрута при регистрации org.
 - **Кастомные домены**: таблица `hostname → org`. Пользователь добавляет домен;
   **подтверждение владения** — DNS TXT-запись, которую мы один раз проверяем.
 - **Важно (R10):** проверка DNS — это сетевой **эффект**, который облачным

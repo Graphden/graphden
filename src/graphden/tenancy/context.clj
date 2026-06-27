@@ -55,4 +55,4 @@
   "Run `body` with `*current-org*` bound to `org` (nil → public-org)."
   [org & body]
   `(binding [*current-org* (or ~org ~public-org)]
-     ~@body))
+     (let [res# (do ~@body)] res#)))

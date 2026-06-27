@@ -164,7 +164,7 @@
     (if (and (not= req false) (nil? desc))
       t
       (cond-> {:type t}
-        (= req false) (assoc :required false)
+        (false? req) (assoc :required false)
         (some? desc)  (assoc :description desc)))))
 
 
@@ -185,7 +185,7 @@
    a binding on a non-existent inherited slot."
   [slot ctx]
   (cond-> {:type (id->type-ref (:type-fn-id slot) ctx)}
-    (= (:required slot) false) (assoc :required false)
+    (false? (:required slot)) (assoc :required false)
     (some? (:description slot)) (assoc :description (:description slot))))
 
 

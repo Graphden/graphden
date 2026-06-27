@@ -21,8 +21,8 @@
 (defn- sha256-hex
   [^String s]
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")
-        bytes (.digest digest (.getBytes s "UTF-8"))]
-    (apply str (map #(format "%02x" (bit-and % 0xff)) bytes))))
+        bytes (java.security.MessageDigest/.digest digest (String/.getBytes s "UTF-8"))]
+    (str/join (map #(format "%02x" (bit-and % 0xff)) bytes))))
 
 
 (defrecord TokenAuthProvider

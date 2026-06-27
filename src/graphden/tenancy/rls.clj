@@ -21,7 +21,8 @@
     [next.jdbc :as jdbc])
   (:import
     (java.sql
-      Connection)
+      Connection
+      PreparedStatement)
     (javax.sql
       DataSource)))
 
@@ -76,10 +77,10 @@
    (not LOCAL) so it covers every query on the borrow; the value is
    overwritten on every borrow, so nothing leaks between pool checkouts."
   [^Connection conn org]
-  (with-open [stmt (.prepareStatement conn "SELECT set_config(?, ?, false)")]
-    (.setString stmt 1 org-setting)
-    (.setString stmt 2 (if (= org tc/public-org) "" org))
-    (.execute stmt)))
+  (with-open [stmt (Connection/.prepareStatement conn "SELECT set_config(?, ?, false)")]
+    (PreparedStatement/.setString stmt 1 org-setting)
+    (PreparedStatement/.setString stmt 2 (if (= org tc/public-org) "" org))
+    (PreparedStatement/.execute stmt)))
 
 
 (defn org-aware-datasource
@@ -93,22 +94,22 @@
   (reify DataSource
     (getConnection
       [_]
-      (doto (.getConnection ds) (set-session-org! (tc/current-org))))
+      (doto (DataSource/.getConnection ds) (set-session-org! (tc/current-org))))
 
     (getConnection
       [_ user password]
-      (doto (.getConnection ds user password) (set-session-org! (tc/current-org))))
+      (doto (DataSource/.getConnection ds user password) (set-session-org! (tc/current-org))))
 
-    (getLoginTimeout [_] (.getLoginTimeout ds))
+    (getLoginTimeout [_] (DataSource/.getLoginTimeout ds))
 
-    (setLoginTimeout [_ seconds] (.setLoginTimeout ds seconds))
+    (setLoginTimeout [_ seconds] (DataSource/.setLoginTimeout ds seconds))
 
-    (getLogWriter [_] (.getLogWriter ds))
+    (getLogWriter [_] (DataSource/.getLogWriter ds))
 
-    (setLogWriter [_ writer] (.setLogWriter ds writer))
+    (setLogWriter [_ writer] (DataSource/.setLogWriter ds writer))
 
-    (getParentLogger [_] (.getParentLogger ds))
+    (getParentLogger [_] (DataSource/.getParentLogger ds))
 
-    (unwrap [_ iface] (.unwrap ds iface))
+    (unwrap [_ iface] (DataSource/.unwrap ds iface))
 
-    (isWrapperFor [_ iface] (.isWrapperFor ds iface))))
+    (isWrapperFor [_ iface] (DataSource/.isWrapperFor ds iface))))

@@ -59,7 +59,7 @@
   (let [storage (setup/create-test-storage)
         ^DataSource wrapped (rls/org-aware-datasource (:pool storage))
         org-on-borrow (fn []
-                        (with-open [c (.getConnection wrapped)]
+                        (with-open [c (DataSource/.getConnection wrapped)]
                           (:o (jdbc/execute-one!
                                 c ["SELECT current_setting('graphden.current_org', true) AS o"]))))]
     (testing "a tenant borrow sets the variable to the org"

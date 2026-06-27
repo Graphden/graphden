@@ -9,6 +9,7 @@
       asserts the exporter reaches a stable fixpoint (the property
       publish / install relies on)."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.test-setup :as setup]
@@ -216,7 +217,7 @@
           upward? (fn [bundle tops]
                     (some (fn [dep]
                             (when-let [ns (name->ns dep)]
-                              (some #(.startsWith ^String ns ^String %) tops)))
+                              (some #(str/starts-with? ns %) tops)))
                           (:dependencies bundle)))]
       (doseq [[root tops] {"core" ["web" "app"] "storage" ["web" "app"] "web" ["app"]}]
         (let [bundle (export/export-namespace *storage* root)]

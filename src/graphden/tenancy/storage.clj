@@ -140,7 +140,7 @@
     [_ entity-name id]
     (when-not (tenant-hidden? entity-name)
       (let [row (sp/read-entity base entity-name id)]
-        (if (and row (scoped? entity-name) (not (visible? row))) nil row))))
+        (when-not (and row (scoped? entity-name) (not (visible? row))) row))))
 
 
   (update-entity

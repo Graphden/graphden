@@ -1063,9 +1063,23 @@
           :then :_partial-row-actions-delete-button-disabled
           :else :_partial-row-actions-delete-button-enabled}}
 
-  ;; Assembly — shared head (ns / i / ↗) + 6 root-row buttons.
+  ;; ⌂ Set-as-app-handler (§3.4 4b self-serve deploy) — points the current
+  ;; org at this fn. Always emitted; editor-row-actions.js hides it unless the
+  ;; tenancy addon is active (body.gd-tenancy) and re-checks before POSTing.
+  {:name :_partial-row-actions-deploy-button
+   :description "⌂ — set this fn as the current org's app handler (FaaS self-serve deploy). CSS-hidden unless body.gd-tenancy; the handler POSTs /api/my-app/handler."
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button"
+                          :class "action-icon action-deploy"
+                          :data-action "set-app-handler"
+                          :title "Set as this org's app handler"
+                          :aria-label "Set as app handler"}}
+          :children [{:value "⌂"}]}}
+
+  ;; Assembly — shared head (ns / i / ↗) + root-row buttons.
   {:name :_partial-row-actions-root-row-children-raw
-   :description "Full button list for the root-row context: ns / i / ↗ shared head + ▶ ⌛ ⚙ ✎ + ✕. Disabled-state for ⚙/✎/+/✕ baked in by the per-button `:if` wrappers."
+   :description "Full button list for the root-row context: ns / i / ↗ shared head + ▶ ⌛ ⚙ ✎ + ✕ + ⌂. Disabled-state for ⚙/✎/+/✕ baked in by the per-button `:if` wrappers; ⌂ is CSS-gated client-side."
    :parent :list
    :args {:items [:_partial-row-actions-ns-button
                   :_partial-row-actions-i-button
@@ -1075,7 +1089,8 @@
                   :_partial-row-actions-service-button
                   :_partial-row-actions-rename-button
                   :_partial-row-actions-extend-button
-                  :_partial-row-actions-delete-button]}}
+                  :_partial-row-actions-delete-button
+                  :_partial-row-actions-deploy-button]}}
 
   {:name :_partial-row-actions-root-row-children
    :parent :filter

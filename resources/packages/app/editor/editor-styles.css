@@ -3943,3 +3943,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-grants-admin .grant-create-form { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
 .sidebar-grants-admin .grant-input { font-size: 11px; padding: 2px 4px; }
 .sidebar-grants-admin .grant-create-btn { font-size: 11px; padding: 2px 6px; cursor: pointer; align-self: flex-start; }
+
+/* Set-as-app-handler (⌂) row-action — FaaS self-serve deploy (§3.4 4b).
+   Hidden unless the tenancy addon is active (gd-tenancy set once a capability
+   header arrives), so single-tenant editors never show it. */
+body:not(.gd-tenancy) .action-deploy { display: none; }

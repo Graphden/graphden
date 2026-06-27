@@ -80,6 +80,9 @@ function captureCapabilities(resp) {
       graphdenCapabilities = new Set(cap.split(',').map((s) => s.trim()).filter(Boolean));
       document.body.classList.toggle('gd-no-write', !graphdenCapabilities.has('write'));
       document.body.classList.toggle('gd-no-execute', !graphdenCapabilities.has('execute'));
+      // Tenancy addon is active once a capability header arrives — gates
+      // addon-only affordances like the ⌂ set-as-app-handler button (§3.4 4b).
+      document.body.classList.add('gd-tenancy');
     }
     // Workspace (§4.4): the namespaces the user works in, for sidebar
     // highlighting. Empty / absent → no hint → nothing highlighted.

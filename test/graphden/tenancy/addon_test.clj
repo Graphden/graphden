@@ -141,6 +141,28 @@
       (is (= :ran (call :post "/api/entities/fn" nil))))))
 
 
+(deftest capabilities-header-reflects-grants
+  (let [grant-store (ig/init-key :tenancy/grant-store
+                                 {:grants [{:subject "alice" :capability :write :namespace "acme"}]})
+        scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}
+                                            "mallory-tok" {:user "mallory" :org "acme"}})
+        base-ctx {:auth-provider provider :request-scope scope}
+        ;; a handler that returns a Ring response map (so the header attaches)
+        router (router-with base-ctx (fn [_req] {:status 200 :body "ok"}))
+        caps (fn [authz]
+               (get-in (br/dispatch router {:request-method :get :uri "/api/graph/entities"
+                                            :headers (cond-> {} authz (assoc "authorization" authz))
+                                            :query-string nil})
+                       [:headers "X-Graphden-Capabilities"]))]
+    (testing "a tenant's header lists only the capabilities the user is granted"
+      (is (= "write" (caps "Bearer alice-tok"))))
+    (testing "an ungranted tenant gets an empty capability set"
+      (is (= "" (caps "Bearer mallory-tok"))))
+    (testing "platform / no token → all capabilities (admin edits freely)"
+      (is (= "write,execute" (caps nil))))))
+
+
 (deftest grant-enforcement-is-opt-in
   (let [scope (ig/init-key :tenancy/request-scope {})       ; no grant-store
         provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})

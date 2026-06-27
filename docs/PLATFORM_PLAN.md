@@ -580,9 +580,16 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        (POST/PUT/PATCH/DELETE→write, `/execute`→execute, else read) +
        `request-permitted?` → 403 если нет права на org; reads открыты
        (OrgScoped рулит видимостью); platform не гейтится. Доказано.
-     *Остаётся:* per-target-namespace (не org-level), storage-backed store,
-     gating редактора (UI), `:terminal`/`:list-append` (R2) → личные
-     неймспейсы → workspaces;
+     - **UI-сигнал ✅** request-scope вешает `X-Graphden-Capabilities`
+       (comma-list: `write,execute` / подмножество / пусто) на каждый
+       non-403 ответ — контракт, который редактор читает, чтобы прятать
+       affordances. Доказано (tenant с `:write` → "write", без грантов →
+       "", platform → "write,execute").
+     *Остаётся:* потребление сигнала в editor-JS (читать header в fetch-
+     wrap → прятать edit/run affordances; нужна Playwright-проверка, т.к.
+     правка центрального fetch-wrap рискованна), per-target-namespace (не
+     org-level), storage-backed store, `:terminal`/`:list-append` (R2) →
+     личные неймспейсы → workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

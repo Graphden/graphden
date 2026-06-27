@@ -26,6 +26,7 @@
    authorized for short-circuits to 403; reads stay open. Until a provider
    that resolves `:org` is wired, every request is public — a safe no-op."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
@@ -78,22 +79,45 @@
    :body "{\"ok\":false,\"error\":\"forbidden\"}"})
 
 
+(defn- request-capabilities
+  "The capabilities the editor uses to show/hide affordances for this
+   request. Platform / admin (public org) and a deployment with no grant
+   store → everything; a real tenant → the subset the user is granted on
+   their org. Read is implicit (OrgScoped governs visibility) so only the
+   action capabilities are surfaced."
+  [grant-store principal org]
+  (if (or (= org tc/public-org) (nil? grant-store))
+    ["write" "execute"]
+    (filterv #(grant/authorized? grant-store principal (keyword %) org)
+             ["write" "execute"])))
+
+
+(defn- with-capabilities-header
+  [resp capabilities]
+  (cond-> resp
+    (map? resp) (assoc-in [:headers "X-Graphden-Capabilities"] (str/join "," capabilities))))
+
+
 (defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store]}]
   ;; (fn [ctx request thunk] …) — authenticate, bind the org, restrict
   ;; effects, enforce grants, then run the handler. A request the provider
   ;; can't authenticate (or one with no `:org`) is public → unrestricted,
   ;; exactly as a single-tenant deployment behaves. Grant enforcement is
   ;; OPT-IN: only when a `:grant-store` is wired (else writes pass, subject
-  ;; only to OrgScopedStorage + the effect gate).
+  ;; only to OrgScopedStorage + the effect gate). Every non-403 response
+  ;; carries `X-Graphden-Capabilities` so the editor can gate affordances.
   (fn [ctx request thunk]
     (let [principal (when-let [p (:auth-provider ctx)]
                       (auth/authenticate p request))
-          org (tc/org-from-principal principal)]
+          org (tc/org-from-principal principal)
+          run #(with-capabilities-header
+                 (thunk)
+                 (request-capabilities grant-store principal org))]
       (tc/with-org org
                    (cond
                      ;; Platform / admin — no restriction.
                      (= org tc/public-org)
-                     (thunk)
+                     (run)
                      ;; Tenant lacking the capability for this request → 403.
                      (and grant-store
                           (not (grant/request-permitted? grant-store principal request org)))
@@ -101,4 +125,4 @@
                      ;; Tenant — gate effects (env / io / network / process), run.
                      :else
                      (binding [cr/*allowed-effects* cr/default-cloud-allowed-effects]
-                       (thunk)))))))
+                       (run)))))))

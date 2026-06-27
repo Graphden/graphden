@@ -227,6 +227,13 @@ executor, storage, versioning, packages-loader, web-примитивы, server-�
 `public`. Это **в напряжении с принципом #2** (минимум полей) — нужен явный ADR
 (R5): тенант — легитимное сквозное поле, не семантика графа.
 
+**Точка подключения effect-gate (см. §5):** per-org `ExecutionContext` —
+это и есть restricted-ctx для гейта эффектов. При создании org-ctx для
+user-graph исполнения: `(create-context {:storage org-storage :allowed-effects
+compile-runtime/default-cloud-allowed-effects})`. Platform-ctx остаётся
+unrestricted. Механизм гейта уже готов и проверен (Phase 1.5) — здесь только
+прокинуть значение.
+
 ### 3.2. Поддомены организаций и кастомные домены (Heroku-стиль)
 
 Сегодня (проверено): `Host`-заголовок не инспектируется; роутинг по веткам идёт
@@ -334,6 +341,34 @@ Workspace пользователя/контекста = множество не�
 сеть» **реальным**, а не декларативным. «Поднять свою БД в нашем облаке/приватной
 сети» — решается **политиками кубера/сети**, а не сервисом (ты прав); на уровне
 app достаточно гейта эффектов + egress-allowlist.
+
+### Статус реализации (обновлено)
+
+**Сделано (Phase 1.5):**
+
+- **Рантайм-гейт — РЕАЛИЗОВАН.** `ExecutionContext :allowed-effects` (set;
+  nil = unrestricted) → `compile-runtime/execute` биндит `*allowed-effects*` →
+  `record-effect!` кидает `:execution/forbidden-effect`. Perf: unrestricted =
+  ноль overhead. Тест + smoke зелёные.
+- **Coverage-аудит — ПРОЙДЕН.** Все 275 base-fn проверены: каждый
+  security-sensitive (`:env`/`:io`/`:network`/`:process`) зовёт `record-effect!`
+  → **0 дыр в sandbox**. `:process` = thread/server/cancel (контроль), shell/RCE
+  примитива нет. Один `:db`-gap (layout cache) починен.
+- **Артефакты:** `compile-runtime/cloud-forbidden-effects` `#{:env :io :network
+  :process}` + `default-cloud-allowed-effects` `#{:db :time :state :random}`
+  (вычисляется как `known-effects − forbidden`).
+
+**Wiring — ОТЛОЖЕН В PHASE 2 (осознанное архитектурное решение).** Глобальный
+флаг на default-ctx НЕ работает: дефолтный ctx исполняет САМУ платформу
+(web-server `:network`/`:process`, vault `:network`, config `:env`, asset-reads
+`:io`) — рестрикт дефолтного ctx ломает платформу. Граница «platform vs user
+execution» — это и есть граница тенантности. Гейт **ctx-based по дизайну**,
+поэтому правильная точка установки — **per-org ExecutionContext** (фаза 2,
+§3.1): user-граф исполняется в org-ctx с `:allowed-effects
+default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Когда org-ctx
+появится, wiring — одна строка через существующий механизм. Частичный wiring
+(гейт только `/api/execute` через биндинг в `run-future`) был отвергнут как
+параллельный механизм, не композирующийся с ctx-дизайном (стал бы долгом).
 
 ---
 

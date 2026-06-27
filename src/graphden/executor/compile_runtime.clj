@@ -10,6 +10,7 @@
    when missing (test paths that create contexts directly without going
    through the system-level `:exec/compiled-registry` init-key)."
   (:require
+    [clojure.set :as set]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.executor.compile-eager :as ce]
@@ -531,6 +532,31 @@
    keep this contract: any security-sensitive primitive MUST
    `record-effect!`, or it becomes a sandbox hole."
   #{:env :io :network :process})
+
+
+(def known-effects
+  "Every effect category the package layer currently records (the
+   `record-effect!` vocabulary). The registry of safe-vs-sensitive lives
+   in `cloud-forbidden-effects`; this is the full set so the safe
+   complement can be derived. Register a new SAFE category here; a new
+   SENSITIVE one goes in BOTH this set AND `cloud-forbidden-effects`."
+  #{:db :env :io :network :process :state :time :random})
+
+
+(def default-cloud-allowed-effects
+  "The `:allowed-effects` value a restricted (cloud / user-graph)
+   ExecutionContext should carry — the full vocabulary minus the
+   security-sensitive set, i.e. `#{:db :state :time :random}`.
+
+   WIRING (deferred to Phase 2 by design): the gate is ctx-based, so the
+   correct place to apply this is the per-tenant ExecutionContext that
+   Phase 2 (organizations) introduces — a USER-graph execution runs in an
+   org-ctx carrying this set, while the PLATFORM ctx stays unrestricted
+   (the platform's own web-server / vault / config NEED :network / :env /
+   :io / :process, so the default ctx can't be globally restricted). When
+   the org-ctx exists, wiring is one line:
+   `(create-context {:storage … :allowed-effects default-cloud-allowed-effects})`."
+  (set/difference known-effects cloud-forbidden-effects))
 
 
 (defn record-effect!

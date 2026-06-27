@@ -92,10 +92,12 @@
 ;;   :tenancy/grant-store {:storage #ig/ref :db/postgres :personal-ns-prefix "users"}
 ;;
 ;; SUBDOMAIN ROUTING (§3.2) — resolve the org from the request Host
-;; (`acme.graphden.app` → org `acme`) so a tenant reaches their workspace by
-;; URL. The subdomain wins; absent falls back to the token's org. The DEFAULT
-;; is identity (subdomain label IS the org-id — no table). Wire the resolver
-;; + base domain onto request-scope:
+;; (`acme.graphden.app` → org `acme`). The token is the org AUTHORITY (single-
+;; membership); the subdomain is a GUARD — a member on a foreign subdomain is
+;; denied (403), and it can never widen access (so a spoofed Host can't read
+;; another org). Anonymous → public. The DEFAULT resolver is identity
+;; (subdomain label IS the org-id — no table). Wire the resolver + base domain
+;; onto request-scope:
 ;;   :tenancy/org-resolver {}            ; identity: <org>.graphden.app → org
 ;;   :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store
 ;;                           :org-resolver #ig/ref :tenancy/org-resolver

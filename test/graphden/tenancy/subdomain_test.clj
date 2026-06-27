@@ -1,10 +1,22 @@
 (ns graphden.tenancy.subdomain-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.auth.provider :as auth]
     [graphden.tenancy.addon]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.subdomain :as sub]
     [integrant.core :as ig]))
+
+
+(defn- token-provider
+  "Authenticates `Bearer <tok>` against a `{tok {:user :org}}` map."
+  [tok->principal]
+  (reify auth/AuthProvider
+    (authenticate
+      [_ request]
+      (let [h (get-in request [:headers "authorization"])]
+        (when (and h (.startsWith ^String h "Bearer "))
+          (get tok->principal (subs h 7)))))))
 
 
 (deftest extract-subdomain-test
@@ -54,16 +66,35 @@
       (is (nil? (sub/org-from-request r (req "acme.graphden.app") nil))))))
 
 
-(deftest request-scope-binds-org-from-subdomain
-  (let [rs (ig/init-key :tenancy/request-scope
-                        {:org-resolver (sub/static-org-resolver {"acme" "org-acme"})
+(deftest request-scope-subdomain-is-a-guard-not-a-widener
+  ;; The token is the org authority (single-membership). The Host subdomain
+  ;; can only DENY a mismatched org, never grant another org's context.
+  (let [provider (token-provider {"acme-tok" {:user "alice" :org "acme"}})
+        rs (ig/init-key :tenancy/request-scope
+                        {:org-resolver (sub/identity-org-resolver)
                          :base-domain "graphden.app"})
+        ctx {:auth-provider provider}
         captured (atom nil)
-        thunk (fn [] (reset! captured (tc/current-org)) {:status 200 :body "ok"})]
-    (testing "a mapped Host subdomain binds *current-org* to its org"
-      (rs {} {:headers {"host" "acme.graphden.app"}} thunk)
-      (is (= "org-acme" @captured)))
-    (testing "the apex host has no subdomain org and no token → public"
+        thunk (fn [] (reset! captured (tc/current-org)) {:status 200 :body "ok"})
+        req (fn [host tok]
+              {:headers (cond-> {"host" host}
+                          tok (assoc "authorization" (str "Bearer " tok)))})]
+    (testing "a member on THEIR subdomain → their org"
       (reset! captured nil)
-      (rs {} {:headers {"host" "graphden.app"}} thunk)
-      (is (= tc/public-org @captured)))))
+      (let [resp (rs ctx (req "acme.graphden.app" "acme-tok") thunk)]
+        (is (= 200 (:status resp)))
+        (is (= "acme" @captured))))
+    (testing "a member on a FOREIGN subdomain → 403, thunk never runs (no leak)"
+      (reset! captured nil)
+      (let [resp (rs ctx (req "beta.graphden.app" "acme-tok") thunk)]
+        (is (= 403 (:status resp)))
+        (is (nil? @captured))))
+    (testing "anonymous on a subdomain → public, NOT the subdomain's org (no leak)"
+      (reset! captured nil)
+      (let [resp (rs ctx (req "acme.graphden.app" nil) thunk)]
+        (is (= 200 (:status resp)))
+        (is (= tc/public-org @captured))))
+    (testing "a member with no subdomain (apex) → their org from the token"
+      (reset! captured nil)
+      (rs ctx (req "graphden.app" "acme-tok") thunk)
+      (is (= "acme" @captured)))))

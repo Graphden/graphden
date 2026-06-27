@@ -331,11 +331,14 @@ unrestricted. Механизм гейта уже готов и проверен 
     **Дефолт — `identity-org-resolver`: label поддомена И ЕСТЬ org-id, НИКАКОЙ
     таблицы** (org — строка-слаг; неизвестный slug → пустой tenant-view через
     OrgScoped, валидировать нечего). `static-org-resolver` (map) — ТОЛЬКО для
-    vanity-алиасов (subdomain ≠ org-id). `request-scope` берёт org из
-    поддомена (выигрывает у токена, fallback → principal-org → public).
-    `:tenancy/org-resolver` init-key (по умолчанию identity; `:subdomains`
-    для алиасов) + `:base-domain`. Inert без резолвера. Доказано (5 тестов /
-    24 ассерта). *Остаётся:* авто-создание org при первом заходе на её
+    vanity-алиасов (subdomain ≠ org-id). **SECURITY: токен — авторитет org
+    (single-membership), поддомен — ГВАРД, не источник.** Member на чужом
+    поддомене → 403; поддомен НЕ расширяет доступ (спуф `Host` не прочитает
+    чужую org, т.к. reads не grant-gated и OrgScoped скоупит по `*current-org*`);
+    анонимус → public. `:tenancy/org-resolver` init-key (по умолчанию identity;
+    `:subdomains` для алиасов) + `:base-domain`. Inert без резолвера. Доказано
+    (5 тестов / 29 ассертов, вкл. cross-org 403 + anonymous-no-leak).
+    *Остаётся:* авто-создание org при первом заходе на её
     поддомен (если нужно); таблица — только для **кастомных доменов** (R10,
     `hostname → org`, не выводится из org) + DNS-TXT.
 - **Кастомные домены**: таблица `hostname → org`. Пользователь добавляет домен;

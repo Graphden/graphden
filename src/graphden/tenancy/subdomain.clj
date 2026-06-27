@@ -1,13 +1,17 @@
 (ns graphden.tenancy.subdomain
-  "Subdomain → org resolution (PLATFORM_PLAN §3.2). The tenancy addon can
-   resolve the org from the request's `Host` header — `acme.graphden.app`
-   → org `acme` — so a tenant reaches their workspace by URL, not just by
-   token. Pure + an injectable `OrgResolver` (mirrors `auth.provider`), so
-   the static-map default is swappable for a storage-backed `subdomain → org`
+  "Subdomain → org resolution (PLATFORM_PLAN §3.2). Resolves the org named by
+   the request's `Host` — `acme.graphden.app` → org `acme`. Pure + an
+   injectable `OrgResolver` (mirrors `auth.provider`); the identity default
+   (label IS the org-id) is swappable for vanity aliases or a storage-backed
    table without touching the request path.
 
-   Inert in single-tenant: no resolver wired → `org-from-request` returns nil
-   and the request-scope falls back to the auth principal's org."
+   SECURITY: this only NAMES the org the Host points at. The request-scope
+   treats it as a GUARD, never an authority — the authenticated token (single-
+   membership) is the org authority, and a subdomain that names a DIFFERENT
+   org than the principal's is denied (cross-org). The subdomain can never
+   WIDEN access, so a spoofed `Host` can't read another org's data.
+
+   Inert in single-tenant: no resolver wired → `org-from-request` returns nil."
   (:require
     [clojure.string :as str]))
 

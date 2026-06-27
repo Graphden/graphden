@@ -156,12 +156,19 @@
   (fn [ctx request thunk]
     (let [principal (when-let [p (:auth-provider ctx)]
                       (auth/authenticate p request))
-          ;; Org source (§3.2): the request's `Host` subdomain wins when it
-          ;; maps to an org (a tenant reaching their workspace by URL), else
-          ;; fall back to the authenticated principal's org. Both nil →
-          ;; public (single-tenant behaviour).
-          org (or (subdomain/org-from-request org-resolver request base-domain)
-                  (tc/org-from-principal principal))
+          ;; Org AUTHORITY is the authenticated principal (single-membership:
+          ;; the token carries the user's org). The `Host` subdomain (§3.2) is
+          ;; a routing GUARD, never a widener — it must NOT be able to set the
+          ;; org context to one the principal doesn't belong to, or any caller
+          ;; could read another org's data by spoofing the Host. So: the
+          ;; subdomain only ever DENIES (a tenant on a foreign subdomain →
+          ;; cross-org → 403); it never grants. Anonymous (no principal) → the
+          ;; subdomain is ignored → public.
+          org (tc/org-from-principal principal)
+          sub-org (subdomain/org-from-request org-resolver request base-domain)
+          cross-org? (and sub-org
+                          (not= org tc/public-org)
+                          (not= sub-org org))
           ;; Run the handler, attach the capability header, and map a
           ;; per-namespace `:authz/forbidden` thrown at the storage layer to
           ;; a clean 403 (the storage guard is where the target namespace is
@@ -181,6 +188,12 @@
       (binding [tc/*current-principal* principal]
         (tc/with-org org
                      (cond
+                       ;; Cross-org (§3.2): an authenticated tenant whose org
+                       ;; doesn't match the Host subdomain → wrong workspace →
+                       ;; 403. Guards against Host-spoofing to reach another
+                       ;; org; the subdomain can only deny, never widen.
+                       cross-org?
+                       forbidden-response
                        ;; Platform / admin — no restriction.
                        (= org tc/public-org)
                        (run)

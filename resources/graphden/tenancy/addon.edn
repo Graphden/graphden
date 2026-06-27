@@ -1,0 +1,20 @@
+;; Tenancy addon config fragment (PLATFORM_PLAN §3.0 B3).
+;;
+;; Activate by naming this resource in GRAPHDEN_ADDON_CONFIGS, e.g.
+;;   GRAPHDEN_ADDON_CONFIGS=graphden/tenancy/addon.edn
+;; The manifest (graphden.system.config) deep-merges it over the core
+;; config and runs :graphden/require so the addon's init-key loads.
+;;
+;; Effect: insert OrgScopedStorage BENEATH versioning by redirecting
+;; :db/versioned's base through :org/scoped-storage, which wraps the core
+;; :app/storage seam. Final stack: Versioned(OrgScoped(app/storage(Postgres))).
+;;
+;; NOTE: this wires the decorator only. Real per-request isolation also
+;; needs B4 (binding *current-org* from the auth principal) + B5 (RLS);
+;; without B4 every request runs at the public org, so the addon is a safe
+;; no-op-equivalent until B4 lands.
+{:graphden/require [graphden.tenancy.addon]
+
+ :org/scoped-storage {:base #ig/ref :app/storage}
+
+ :db/versioned {:base-storage #ig/ref :org/scoped-storage}}

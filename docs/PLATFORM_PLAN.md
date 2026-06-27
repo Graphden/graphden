@@ -531,14 +531,25 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      indirection-ключи (напр. `:auth/provider`) + добавляет свои; директива
      `:graphden/require` грузит init-key-неймспейсы аддона. Без аддонов —
      no-op (single-tenant). (Заменяет набросок `executor-packages.edn`.)
-  3. **`OrgScopedStorage` + RLS** (R6, оба слоя; `org-id`-колонка default
-     `public` в core) → per-org LRU (R8) → org-скоуп секретов (R9) →
-     поддомены/домены (R10, R11).
-     — *Core-сторона: storage-seam ✅* `:app/storage` (Integrant-ключ,
-     identity-passthrough по умолчанию) сидит ПОД versioning, чтобы
-     `vs/unwrap` branch-router'а сохранял tenant-фильтр (нюанс 1). Сам
-     `OrgScopedStorage`-декоратор + RLS + `org-id`-колонка + проброс
-     current-org из auth-principal — контент аддона, ещё не сделан;
+  3. **`OrgScopedStorage` + RLS** (R6, оба слоя) — ✅ **ПОСТРОЕНО И
+     ПРОТЕСТИРОВАНО** (B1–B5, ветка `feature/auth-seam`):
+     - *storage-seam* `:app/storage` (Integrant identity-passthrough) ПОД
+       versioning, чтобы `vs/unwrap` сохранял tenant-фильтр (нюанс 1);
+     - **B1** `OrgScopedStorage`-декоратор (own+public read, own write,
+       штамп org, делегирует 8 протоколов);
+     - **B2** `org-id`-колонка на всех 5 graph-сущностях (identity-level,
+       NULL≡public, не versioned);
+     - **B3** `:org/scoped-storage` init-key + addon-фрагмент → `Versioned(
+       OrgScoped(Postgres))` через манифест (real-Postgres интеграция);
+     - **B4** `:request-scope` шов → `dispatch` биндит `*current-org*` из
+       auth-principal per-request;
+     - **B5** Postgres RLS — own+public/own policy + `set_config`-сеттер,
+       enforcement доказан raw-query тестом через `SET ROLE` (non-superuser).
+     *Остаётся для прод-активации:* провайдер, реально резолвящий `:org`
+     (session/JWT); проброс `*current-org*`→session-var на каждом
+     connection (datasource-wrap); `enable-rls!` на deploy + подключение
+     приложения non-superuser ролью. Дальше по плану: per-org LRU (R8) →
+     org-скоуп секретов (R9) → поддомены/домены (R10, R11);
   4. **проводка effect-gate**: аддон ставит `:allowed-effects
      default-cloud-allowed-effects` на per-org ctx;
   5. **`grant`-примитив** (§4.2) + `:terminal`/`:list-append` (R2) → личные

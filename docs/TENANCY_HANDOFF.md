@@ -53,7 +53,49 @@ Everything is unit-tested; isolation/RLS/per-namespace also have real-Postgres
 integration tests; the editor gating was Playwright-verified 3×. Plan status
 is tracked in `PLATFORM_PLAN.md` §8 (look for ✅).
 
-## Next task: grants-admin panel (§6 product layer)
+## Next task: grants-admin panel (§6) — IN PROGRESS
+
+**Architectural decision taken (and why):** the panel lives in CORE (`app`),
+NOT a `tenancy-admin` addon package. Reason: the panel's route must sit in
+the core `:all` list (`app/route-groups/fns.edn`), and `:all` can't reference
+a conditionally-loaded addon route without breaking sync — and there's no
+route-collection seam. So the panel is in `app/admin` and DEGRADES gracefully
+(`:try`) when the addon's `:grant` entity is absent. The clean addon-package
+home is a future refactor once a route-collection seam exists (tag-based
+collection via `:fn-names-with-tag` is the likely path).
+
+**Done:** `app/admin` module + `:list-grants` base-fn (`(sp/query-entities
+(:storage ctx) :grant {})`, registered via the `impls` map, tested).
+
+**Remaining steps (each its own commit):**
+
+1. **Grants-admin partial** in `app/admin/fns.edn`. Patterns confirmed:
+   - hiccup nodes: `{:parent :hiccup :args {:tag {:value "td"} :attrs {:value
+     {:class "x"}} :children [ref-or-{:value "text"}]}}`. Inline anon
+     `{:parent …}` is NOT allowed in `:children` — extract every cell/row to a
+     named `_`-fn-def.
+   - row cells read the mapped item: `{:parent :get :args {:coll {:as :item}
+     :key {:value :subject} :default {:value ""}}}`.
+   - rows: `{:parent :map :args {:func :_grant-row :coll :list-grants}}`;
+     `tbody`'s `:children` takes the rows-list ref (hiccup flattens lists).
+   - degradation: `{:parent :try :args {:body :_grants-table :on-throw
+     {:parent :const :args {:value :_grants-disabled}}}}` — `:on-throw` is a
+     `[:fn :any]` callable, so wrap the fallback hiccup in `:const`.
+   - handler/route: `:render-hiccup` → `:html-ok-response` →
+     `:get-auth-required {:path {:value "/partials/grants-admin"} :handler …}`.
+     Mirror `app/secrets/fns.edn` lines ~528-650 + `:_partial-secrets-panel-handler`.
+2. **Register the route** — add `:partial-grants-admin` to `:all` in
+   `app/route-groups/fns.edn`.
+3. **Sync-validate** — bootstrap (`bb test` smoke or an integration test that
+   runs the full sync); the type-checker catches hiccup/`:get`/`:try` shape
+   errors. Iterate until the sweep is clean.
+4. **Editor-JS mount** — a sidebar section like `editor-secrets.js`: fetch
+   `/partials/grants-admin`, swap into a host, gate visibility on the admin
+   capability. `bb rebuild` + Playwright (cache-bust!).
+5. **Test** — degraded path (no addon → "Tenancy not active") is unit-able;
+   happy path needs the addon active (model on `grant_schema_integration_test`).
+
+## Next task (old, superseded): grants-admin panel (§6 product layer)
 
 Grants are ordinary `:grant` entities; **create/delete already work** via the
 generic `POST /api/entities/grant` + `DELETE /api/entities/grant/:id`. What's

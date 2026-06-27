@@ -2,7 +2,7 @@
  :fns
  [;; Base-fn: every :grant row, for the org-admin grants panel (§6).
   ;; Reads the tenancy addon's :grant entity, so it throws when the addon
-  ;; isn't active — the panel partial (next) wraps it in :try for graceful
+  ;; isn't active — the panel partial wraps it in :try for graceful
   ;; degradation. Lives in `app` (core) pragmatically: the partial's route
   ;; must sit in the core `:all` list, which can't reference a
   ;; conditionally-loaded addon package without breaking sync. The clean
@@ -11,4 +11,115 @@
    :description "All :grant rows as decoded entity maps (:subject :capability :namespace :id). Reads the tenancy addon's :grant entity via the storage protocol; throws if :grant isn't in the schema (addon inactive), so callers guard with :try."
    :args {}
    :return-type [:list :keyword-map]
-   :effects #{:db}}]}
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GRANTS-ADMIN PARTIAL — GET /partials/grants-admin. A table of every
+  ;; grant (subject | capability | namespace), wrapped in :try so it
+  ;; degrades to a "not active" notice when the addon's :grant entity is
+  ;; absent. Mirrors the secrets-panel composition.
+  ;; ---------------------------------------------------------------------
+
+  ;; --- header row ---
+  {:name :_grants-th-subject
+   :parent :hiccup
+   :args {:tag {:value "th"} :children [{:value "Subject"}]}}
+
+  {:name :_grants-th-capability
+   :parent :hiccup
+   :args {:tag {:value "th"} :children [{:value "Capability"}]}}
+
+  {:name :_grants-th-namespace
+   :parent :hiccup
+   :args {:tag {:value "th"} :children [{:value "Namespace"}]}}
+
+  {:name :_grants-thead-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :children [:_grants-th-subject :_grants-th-capability :_grants-th-namespace]}}
+
+  {:name :_grants-thead
+   :parent :hiccup
+   :args {:tag {:value "thead"} :children [:_grants-thead-row]}}
+
+  ;; --- body row (HOF over :item — one grant map per element) ---
+  {:name :_grant-subject-val
+   :parent :get
+   :args {:coll {:as :item} :key {:value :subject} :default {:value ""}}}
+
+  {:name :_grant-capability-val
+   :parent :get
+   :args {:coll {:as :item} :key {:value :capability} :default {:value ""}}}
+
+  {:name :_grant-namespace-val
+   :parent :get
+   :args {:coll {:as :item} :key {:value :namespace} :default {:value ""}}}
+
+  {:name :_grant-td-subject
+   :parent :hiccup
+   :args {:tag {:value "td"} :children [:_grant-subject-val]}}
+
+  {:name :_grant-td-capability
+   :parent :hiccup
+   :args {:tag {:value "td"} :children [:_grant-capability-val]}}
+
+  {:name :_grant-td-namespace
+   :parent :hiccup
+   :args {:tag {:value "td"} :children [:_grant-namespace-val]}}
+
+  {:name :_grant-row
+   :parent :hiccup
+   :args {:tag {:value "tr"}
+          :children [:_grant-td-subject :_grant-td-capability :_grant-td-namespace]}}
+
+  {:name :_grants-rows
+   :parent :map
+   :args {:func :_grant-row :coll :list-grants}}
+
+  {:name :_grants-tbody
+   :parent :hiccup
+   :args {:tag {:value "tbody"} :children :_grants-rows}}
+
+  {:name :_grants-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "grants-admin-table"}}
+          :children [:_grants-thead :_grants-tbody]}}
+
+  ;; --- degradation: addon inactive (:grant query throws) → a notice ---
+  {:name :_grants-disabled
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "grants-admin-disabled"}}
+          :children [{:value "Tenancy addon not active — no grants to manage."}]}}
+
+  {:name :_grants-safe
+   :description "The grants table, or the disabled notice when :list-grants throws (addon inactive). `:on-throw` is a `[:fn :any]` callable, so the fallback is wrapped in `:const`."
+   :parent :try
+   :args {:body :_grants-table
+          :on-throw {:parent :const :args {:value :_grants-disabled}}}}
+
+  ;; --- container + handler + route ---
+  {:name :_grants-admin-title
+   :parent :hiccup
+   :args {:tag {:value "h3"} :children [{:value "Grants"}]}}
+
+  {:name :_grants-admin-body
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "grants-admin"}}
+          :children [:_grants-admin-title :_grants-safe]}}
+
+  {:name :_grants-admin-html
+   :parent :render-hiccup
+   :args {:hiccup :_grants-admin-body}}
+
+  {:name :_partial-grants-admin-handler
+   :description "Ring handler for GET /partials/grants-admin — the org-admin grants table as text/html."
+   :parent :html-ok-response
+   :args {:body :_grants-admin-html}}
+
+  {:name :partial-grants-admin
+   :description "GET /partials/grants-admin — server-rendered grants table. Auth-required (admin-only); degrades to a notice when the tenancy addon is inactive."
+   :parent :get-auth-required
+   :args {:path "/partials/grants-admin" :handler :_partial-grants-admin-handler}}]}

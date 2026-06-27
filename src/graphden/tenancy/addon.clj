@@ -33,6 +33,7 @@
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.authz :as authz]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.domain :as domain]
     [graphden.tenancy.grant :as grant]
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.rls :as rls]
@@ -145,7 +146,7 @@
         (assoc-in [:headers "X-Graphden-Workspace"] (str/join "," workspace)))))
 
 
-(defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store org-resolver base-domain]}]
+(defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store org-resolver base-domain host-resolver]}]
   ;; (fn [ctx request thunk] …) — authenticate, bind the org, restrict
   ;; effects, enforce grants, then run the handler. A request the provider
   ;; can't authenticate (or one with no `:org`) is public → unrestricted,
@@ -165,10 +166,14 @@
           ;; cross-org → 403); it never grants. Anonymous (no principal) → the
           ;; subdomain is ignored → public.
           org (tc/org-from-principal principal)
-          sub-org (subdomain/org-from-request org-resolver request base-domain)
-          cross-org? (and sub-org
+          ;; The org the Host points at: a `<org>.<base-domain>` subdomain
+          ;; (§3.2) or a verified custom domain (R10). Same guard semantics
+          ;; either way — it can only deny, never widen.
+          host-org (or (subdomain/org-from-request org-resolver request base-domain)
+                       (domain/org-from-request host-resolver request))
+          cross-org? (and host-org
                           (not= org tc/public-org)
-                          (not= sub-org org))
+                          (not= host-org org))
           ;; Run the handler, attach the capability header, and map a
           ;; per-namespace `:authz/forbidden` thrown at the storage layer to
           ;; a clean 403 (the storage guard is where the target namespace is

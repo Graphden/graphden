@@ -103,8 +103,19 @@
 ;;                           :org-resolver #ig/ref :tenancy/org-resolver
 ;;                           :base-domain "graphden.app"}
 ;; Pass :subdomains {"vanity" "real-org"} ONLY for aliases where a subdomain
-;; differs from its org-id. A hostname→org table is a separate thing — only
-;; for CUSTOM domains (§3.2 R10), which also need DNS-TXT verification.
+;; differs from its org-id.
+;;
+;; CUSTOM DOMAINS (§3.2 R10) — a verified `{hostname org}` map (`app.acme.com`
+;; → org `acme`) on request-scope, same guard semantics as subdomains. Add a
+;; row ONLY after `graphden.tenancy.domain/verify-domain-ownership` confirms a
+;; `graphden-verify=<token>` DNS TXT record — a NETWORK call, so it's a
+;; privileged platform op (tenant graphs are network-forbidden), never a user
+;; fn. Wire the resolved domains in:
+;;   :tenancy/request-scope {:host-resolver #ig/ref :tenancy/host-resolver
+;;                           :org-resolver  #ig/ref :tenancy/org-resolver
+;;                           :base-domain   "graphden.app"}
+;;   ;; (host-resolver = a graphden.tenancy.domain/static-host-resolver over
+;;   ;;  the verified map; swap for a storage-backed one in production)
 ;;
 ;; The addon ships its own fns-packages (e.g. an org-admin UI) via the
 ;; fns-channel seam — append to :app/packages without restating the core

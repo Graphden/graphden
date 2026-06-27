@@ -53,6 +53,37 @@ Everything is unit-tested; isolation/RLS/per-namespace also have real-Postgres
 integration tests; the editor gating was Playwright-verified 3×. Plan status
 is tracked in `PLATFORM_PLAN.md` §8 (look for ✅).
 
+## Status after the org-admin-ui branch (23 commits, full suite GREEN)
+
+Built on top of the tenancy core, all tested, `bb test` = 1694 tests / 6706
+assertions / 0 failures:
+- **fns-channel seam** — addons append fns-packages via the manifest.
+- **Grants-admin panel** (§6) — view + create + delete (below).
+- **Subdomains** (§3.2) — `tenancy.subdomain`, identity resolver default.
+- **Custom domains** (R10) — `tenancy.domain`, host resolver + DNS-TXT verify.
+- **4 security fixes** (found auditing, each tested):
+  1. subdomain is a GUARD not an authority — token is the org authority, a
+     foreign subdomain → 403, never widens (was a cross-org read leak).
+  2. tenant WRITE of `:service`/`:grant`/`:domain` denied — `:service` runs
+     unsandboxed via the reconciler, so a tenant deploy escaped the effect gate.
+  3. tenant READ of those denied — `:list-grants` leaked every org's grants.
+  4. `:branch` added to the forbidden set — not org-scoped, picker leaked all
+     orgs' branches; tenants confined to `main`.
+
+### Substantial follow-ups (each a focused effort — design noted in PLATFORM_PLAN)
+
+- **Service sandbox (§3.3)** — to let tenants deploy services safely: an
+  `org-id` on `:service` + a `:service-scope` seam the reconciler applies
+  (binds `*current-org*` + `*allowed-effects*` for tenant services) + the
+  `:http-server` handler applying it per-request. Until then service deploy is
+  platform-only (fix #2).
+- **Org-scoped `:fn-execution`** — can't use the OrgScoped stamp (executions
+  run in a background future where `*current-org*` is unbound; the own-guard
+  would block the terminal UPDATE and drop the result). Needs request-time org
+  capture propagated into the future. Low severity now (id-gated).
+- **Org-scoped `:branch`** — needs a resolution-timing fix (branch resolves
+  before the org binds).
+
 ## Grants-admin panel (§6) — DONE (view + create + delete)
 
 Shipped in `app/admin` (core, pragmatic — see decision below):

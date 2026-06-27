@@ -86,3 +86,7 @@
 ;;
 ;; Grant rows (subject, capability ["write"/"execute"/"admin"], namespace)
 ;; are then ordinary entities — manage them via /api/entities/grant.
+;;
+;; Add :personal-ns-prefix to give every user implicit :admin on their own
+;; namespace (§4.4) — `<prefix>.<user>`, no grant row needed:
+;;   :tenancy/grant-store {:storage #ig/ref :db/postgres :personal-ns-prefix "users"}

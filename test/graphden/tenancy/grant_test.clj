@@ -46,3 +46,22 @@
   (testing "an unauthenticated principal is denied"
     (is (not (grant/authorized? store {:authenticated? false} :read "acme")))
     (is (not (grant/authorized? store nil :read "acme")))))
+
+
+(deftest personal-namespaces
+  (let [base (grant/static-grant-store
+               [{:subject "alice" :capability :write :namespace "shared"}])
+        store (grant/with-personal-namespaces base "users")]
+    (testing "the convention"
+      (is (= "users.alice" (grant/personal-namespace "users" "alice"))))
+    (testing "a user implicitly owns their personal namespace (full :admin → all caps)"
+      (is (grant/can? store "alice" :write "users.alice"))
+      (is (grant/can? store "alice" :execute "users.alice.proj") "descendant")
+      (is (grant/can? store "alice" :read "users.alice")))
+    (testing "the base store's grants still apply"
+      (is (grant/can? store "alice" :write "shared")))
+    (testing "a user does NOT own another user's personal namespace"
+      (is (not (grant/can? store "alice" :write "users.bob")))
+      (is (not (grant/can? store "bob" :write "users.alice"))))
+    (testing "a user with no base grants still owns their own namespace"
+      (is (grant/can? store "bob" :write "users.bob")))))

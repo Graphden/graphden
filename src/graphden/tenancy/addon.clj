@@ -69,13 +69,16 @@
   grant-schema/extend-builder)
 
 
-(defmethod ig/init-key :tenancy/grant-store [_ {:keys [grants storage]}]
+(defmethod ig/init-key :tenancy/grant-store [_ {:keys [grants storage personal-ns-prefix]}]
   ;; Authorization primitive (§4.2). `:storage` → a store reading `:grant`
   ;; rows (persistent, manageable); else `:grants` → a static-map store.
   ;; `grant/can?` is identical either way. Empty → default-deny.
-  (if storage
-    (grant-schema/storage-grant-store storage)
-    (grant/static-grant-store (or grants []))))
+  ;; `:personal-ns-prefix` (e.g. "users") → every user implicitly owns
+  ;; `<prefix>.<user>` (§4.4 personal namespaces).
+  (cond-> (if storage
+            (grant-schema/storage-grant-store storage)
+            (grant/static-grant-store (or grants [])))
+    personal-ns-prefix (grant/with-personal-namespaces personal-ns-prefix)))
 
 
 (defmethod ig/init-key :tenancy/execute-guard [_ {:keys [grant-store]}]

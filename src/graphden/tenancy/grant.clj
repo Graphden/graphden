@@ -62,6 +62,38 @@
   (->StaticGrantStore (group-by :subject grants)))
 
 
+(defn personal-namespace
+  "The namespace a user owns outright — `<prefix>.<user>` (e.g.
+   `users.alice`). `prefix` is the home segment for personal namespaces."
+  [prefix user]
+  (str prefix "." user))
+
+
+(defrecord PersonalNamespaceGrantStore
+  [base prefix]
+
+  GrantStore
+
+  (grants-for
+    [_ subject]
+    ;; Every user implicitly holds :admin on their own namespace, in
+    ;; addition to whatever the base store grants.
+    (conj (vec (grants-for base subject))
+          {:subject subject
+           :capability :admin
+           :namespace (personal-namespace prefix subject)})))
+
+
+(defn with-personal-namespaces
+  "Wrap a `GrantStore` so every user implicitly holds `:admin` on their
+   personal namespace (`<prefix>.<user>`) — no explicit grant row needed. A
+   user can therefore read / write / execute in their own namespace and its
+   descendants once that `:ns` exists, while still being governed elsewhere
+   by the base store's grants."
+  [base prefix]
+  (->PersonalNamespaceGrantStore base prefix))
+
+
 (defn can?
   "Does `subject` hold `capability` in `ns-path`, per `store`? A subject
    with no matching grant is denied (default-deny)."

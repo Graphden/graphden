@@ -624,8 +624,15 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        `:execute`; skip для public/admin + system (нет principal). Доказано:
        unit (guard по namespace, fires-once, denial/skip) + execute_http
        (реальный /api/execute через dispatch) + boot backward-compat.
-     *Остаётся:* `:terminal`/`:list-append` (R2) → личные неймспейсы →
-     workspaces;
+     - **личные неймспейсы ✅** `grant/with-personal-namespaces` —
+       GrantStore-декоратор: каждый юзер неявно держит `:admin` на
+       `<prefix>.<user>` (напр. `users.alice`), без grant-строки;
+       композируется со static/storage-backed store; `:personal-ns-prefix`
+       в `:tenancy/grant-store`. Доказано: юзер владеет своим ns +
+       потомками (все capabilities), не владеет чужим, base-гранты
+       сохраняются. *(Provisioning самой `:ns`-сущности — follow-up.)*
+     *Остаётся:* `:terminal`/`:list-append` (R2) → workspaces (объединение
+     видимых неймспейсов);
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

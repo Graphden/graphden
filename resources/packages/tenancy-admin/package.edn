@@ -1,9 +1,0 @@
-{:name "tenancy-admin"
- :version "1.0.0"
- ;; Org-admin product UI (PLATFORM_PLAN §6). Ships WITH the tenancy addon —
- ;; loaded only when the manifest adds it via :app/packages
- ;; :extra-package-names (see resources/graphden/tenancy/addon.edn). Depends
- ;; on the addon's :grant entity, so it must NOT be in the core package list.
- :description "Tenancy org-admin UI — grants management panel."
- :dependencies ["core" "web" "storage" "app"]
- :modules ["grants"]}

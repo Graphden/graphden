@@ -1,0 +1,14 @@
+{:namespace "app.admin"
+ :fns
+ [;; Base-fn: every :grant row, for the org-admin grants panel (§6).
+  ;; Reads the tenancy addon's :grant entity, so it throws when the addon
+  ;; isn't active — the panel partial (next) wraps it in :try for graceful
+  ;; degradation. Lives in `app` (core) pragmatically: the partial's route
+  ;; must sit in the core `:all` list, which can't reference a
+  ;; conditionally-loaded addon package without breaking sync. The clean
+  ;; addon-package home awaits a route-collection seam.
+  {:name :list-grants
+   :description "All :grant rows as decoded entity maps (:subject :capability :namespace :id). Reads the tenancy addon's :grant entity via the storage protocol; throws if :grant isn't in the schema (addon inactive), so callers guard with :try."
+   :args {}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}]}

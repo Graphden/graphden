@@ -100,9 +100,13 @@ function graphdenInWorkspace(nsPath) {
   }
   return false;
 }
+// The tenancy addon is active iff we've seen a capability header (absent in
+// single-tenant). Used to gate addon-only UI like the Grants admin section.
+function graphdenTenancyActive() { return graphdenCapabilities !== null; }
 window.graphdenCanWrite = graphdenCanWrite;
 window.graphdenCanExecute = graphdenCanExecute;
 window.graphdenInWorkspace = graphdenInWorkspace;
+window.graphdenTenancyActive = graphdenTenancyActive;
 
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);

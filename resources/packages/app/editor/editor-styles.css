@@ -3930,3 +3930,11 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 
 
 
+
+/* Org-admin Grants panel (PLATFORM_PLAN §6) — sidebar section rendered from
+   /partials/grants-admin. Only shown to authed users when the tenancy addon
+   is active (see editor-grants-admin.js). */
+.sidebar-grants-admin .grants-admin-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.sidebar-grants-admin .grants-admin-table th,
+.sidebar-grants-admin .grants-admin-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.sidebar-grants-admin .grants-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }

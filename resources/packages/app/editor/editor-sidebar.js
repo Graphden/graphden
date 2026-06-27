@@ -364,6 +364,11 @@ function updateEntityList(data) {
   if (!searchFilter && !onlyServicesFilter && typeof buildSecretsSection === 'function') {
     list.appendChild(buildSecretsSection());
   }
+  // Org-admin Grants section (§6) — returns null unless authed + addon active.
+  if (!searchFilter && !onlyServicesFilter && typeof buildGrantsAdminSection === 'function') {
+    const grantsSection = buildGrantsAdminSection();
+    if (grantsSection) list.appendChild(grantsSection);
+  }
 
   // Render top-level namespaces (sorted)
   const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));

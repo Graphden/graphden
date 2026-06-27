@@ -23,8 +23,45 @@ function buildGrantsAdminSection() {
     +   '<span class="ns-label">Grants</span>'
     + '</div>'
     + '<div class="ns-children"><div class="loading">Loading…</div></div>';
+  // One delegated listener on the wrap survives the .ns-children innerHTML
+  // swaps that refreshGrantsAdmin does, so wire it once here.
+  wireGrantsAdmin(wrap);
   refreshGrantsAdmin(wrap);
   return wrap;
+}
+
+// Event-delegation for the [data-act] buttons the partial emits:
+//   delete-grant → DELETE /api/entities/grant/:id (generic CRUD)
+//   create-grant → POST /api/grants with the form-encoded inputs
+function wireGrantsAdmin(wrap) {
+  wrap.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-act]');
+    if (!btn || !wrap.contains(btn)) return;
+    const act = btn.dataset.act;
+    if (act === 'delete-grant') {
+      const id = btn.dataset.grantId;
+      if (id && window.confirm('Delete this grant?')) {
+        await authFetch('/api/entities/grant/' + encodeURIComponent(id), { method: 'DELETE' });
+        refreshGrantsAdmin(wrap);
+      }
+    } else if (act === 'create-grant') {
+      const subjectEl = wrap.querySelector('[name="subject"]');
+      const capabilityEl = wrap.querySelector('[name="capability"]');
+      const namespaceEl = wrap.querySelector('[name="namespace"]');
+      const subject = subjectEl?.value.trim();
+      const capability = capabilityEl?.value.trim();
+      const namespace = namespaceEl?.value.trim();
+      if (subject && capability && namespace) {
+        const body = new URLSearchParams({ subject, capability, namespace }).toString();
+        await authFetch('/api/grants', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body,
+        });
+        refreshGrantsAdmin(wrap);
+      }
+    }
+  });
 }
 
 async function refreshGrantsAdmin(wrap) {

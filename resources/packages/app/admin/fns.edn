@@ -13,6 +13,16 @@
    :return-type [:list :keyword-map]
    :effects #{:db}}
 
+  ;; Base-fn: create a :grant from three text fields. Same addon-coupling
+  ;; caveat as :list-grants — throws when :grant is absent.
+  {:name :create-grant
+   :description "Create a :grant entity from subject/capability/namespace text. Reads the tenancy addon's :grant entity; throws if absent (addon inactive)."
+   :args {:subject {:type :text :description "Principal the grant is for."}
+          :capability {:type :text :description "read / write / execute / admin."}
+          :namespace {:type :text :description "Dot-path namespace the capability applies to."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   ;; ---------------------------------------------------------------------
   ;; GRANTS-ADMIN PARTIAL — GET /partials/grants-admin. A table of every
   ;; grant (subject | capability | namespace), wrapped in :try so it
@@ -33,10 +43,15 @@
    :parent :hiccup
    :args {:tag {:value "th"} :children [{:value "Namespace"}]}}
 
+  {:name :_grants-th-actions
+   :parent :hiccup
+   :args {:tag {:value "th"} :children [{:value ""}]}}
+
   {:name :_grants-thead-row
    :parent :hiccup
    :args {:tag {:value "tr"}
-          :children [:_grants-th-subject :_grants-th-capability :_grants-th-namespace]}}
+          :children [:_grants-th-subject :_grants-th-capability
+                     :_grants-th-namespace :_grants-th-actions]}}
 
   {:name :_grants-thead
    :parent :hiccup
@@ -67,10 +82,34 @@
    :parent :hiccup
    :args {:tag {:value "td"} :children [:_grant-namespace-val]}}
 
+  ;; per-row delete button — `:assoc` injects the row's :id as data-grant-id;
+  ;; editor-grants-admin.js reads it and DELETEs /api/entities/grant/:id.
+  {:name :_grant-id-val
+   :parent :get
+   :args {:coll {:as :item} :key {:value :id} :default {:value ""}}}
+
+  {:name :_grant-delete-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "grant-delete"
+                        :data-act "delete-grant"
+                        :title "Delete grant"}}
+          :key {:value :data-grant-id}
+          :value :_grant-id-val}}
+
+  {:name :_grant-delete-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_grant-delete-attrs :children [{:value "×"}]}}
+
+  {:name :_grant-td-actions
+   :parent :hiccup
+   :args {:tag {:value "td"} :children [:_grant-delete-btn]}}
+
   {:name :_grant-row
    :parent :hiccup
    :args {:tag {:value "tr"}
-          :children [:_grant-td-subject :_grant-td-capability :_grant-td-namespace]}}
+          :children [:_grant-td-subject :_grant-td-capability
+                     :_grant-td-namespace :_grant-td-actions]}}
 
   {:name :_grants-rows
    :parent :map
@@ -99,6 +138,35 @@
    :args {:body :_grants-table
           :on-throw {:parent :const :args {:value :_grants-disabled}}}}
 
+  ;; --- create form (editor-grants-admin.js reads the inputs + POSTs them) ---
+  {:name :_grant-input-subject
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "subject" :placeholder "subject" :class "grant-input"}}}}
+
+  {:name :_grant-input-capability
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "capability" :placeholder "read / write / execute / admin" :class "grant-input"}}}}
+
+  {:name :_grant-input-namespace
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "namespace" :placeholder "namespace" :class "grant-input"}}}}
+
+  {:name :_grant-create-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "button" :data-act "create-grant" :class "grant-create-btn"}}
+          :children [{:value "+ Add grant"}]}}
+
+  {:name :_grants-create-form
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "grant-create-form"}}
+          :children [:_grant-input-subject :_grant-input-capability
+                     :_grant-input-namespace :_grant-create-btn]}}
+
   ;; --- container + handler + route ---
   {:name :_grants-admin-title
    :parent :hiccup
@@ -108,7 +176,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "grants-admin"}}
-          :children [:_grants-admin-title :_grants-safe]}}
+          :children [:_grants-admin-title :_grants-safe :_grants-create-form]}}
 
   {:name :_grants-admin-html
    :parent :render-hiccup
@@ -122,4 +190,50 @@
   {:name :partial-grants-admin
    :description "GET /partials/grants-admin — server-rendered grants table. Auth-required (admin-only); degrades to a notice when the tenancy addon is inactive."
    :parent :get-auth-required
-   :args {:path "/partials/grants-admin" :handler :_partial-grants-admin-handler}}]}
+   :args {:path "/partials/grants-admin" :handler :_partial-grants-admin-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/grants — create a grant from the form-encoded body. The
+  ;; editor re-fetches the panel on success, so the response body is just
+  ;; the new id. Only reached when the addon is active (the editor gates
+  ;; the form); a stray call without :grant 500s, which is acceptable for
+  ;; a gated admin action.
+  ;; ---------------------------------------------------------------------
+  {:name :_grant-create-form-data
+   :parent :parse-form-body}
+
+  {:name :_grant-create-subject
+   :parent :get
+   :args {:coll :_grant-create-form-data :key {:value :subject} :default {:value ""}}}
+
+  {:name :_grant-create-capability
+   :parent :get
+   :args {:coll :_grant-create-form-data :key {:value :capability} :default {:value ""}}}
+
+  {:name :_grant-create-namespace
+   :parent :get
+   :args {:coll :_grant-create-form-data :key {:value :namespace} :default {:value ""}}}
+
+  {:name :_grant-create-do
+   :parent :create-grant
+   :args {:subject :_grant-create-subject
+          :capability :_grant-create-capability
+          :namespace :_grant-create-namespace}}
+
+  {:name :_grant-create-id
+   :parent :get
+   :args {:coll :_grant-create-do :key {:value :id} :default {:value ""}}}
+
+  {:name :_grant-create-id-text
+   :parent :to-str
+   :args {:value :_grant-create-id}}
+
+  {:name :_grant-create-handler
+   :description "Ring handler for POST /api/grants — creates the grant and returns its new id as text/html."
+   :parent :html-ok-response
+   :args {:body :_grant-create-id-text}}
+
+  {:name :create-grant-route
+   :description "POST /api/grants — create a grant from a form-encoded body (subject/capability/namespace). Auth-required."
+   :parent :post
+   :args {:path "/api/grants" :handler :_grant-create-handler}}]}

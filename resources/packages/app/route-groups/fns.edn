@@ -35,6 +35,7 @@
                   :partial-service-popover
                   :partial-secrets-panel
                   :partial-grants-admin
+                  :create-grant-route
                   :partial-row-actions
                   :demo-contact
                   :health

@@ -51,3 +51,13 @@
 ;;
 ;; Then the request's bearer resolves to its :org, B4 binds *current-org*,
 ;; and OrgScopedStorage (+ RLS) isolate the tenant.
+;;
+;; To ALSO enforce per-user grants (§4.2 — opt-in), wire a grant store onto
+;; the request-scope. Without this, tenant writes pass (subject only to
+;; OrgScoped + the effect gate):
+;;
+;;   {:graphden/require [graphden.tenancy.addon]
+;;    :tenancy/grant-store {:grants [{:subject "alice" :capability :write :namespace "acme"}]}
+;;    :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store}}
+;;
+;; A tenant write / execute the user isn't granted then returns 403.

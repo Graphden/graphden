@@ -21,8 +21,10 @@
    processes (PLATFORM_PLAN §5 — the effect gate). The platform (public org
    / admin) runs unrestricted. `execute` only re-binds `*allowed-effects*`
    from the ctx (never set for branch ctxs), so this ambient binding flows
-   straight through to `record-effect!`. Until a provider that resolves
-   `:org` is wired, every request is public — a safe no-op."
+   straight through to `record-effect!`. When a `:grant-store` is wired, the
+   wrap also enforces grants (§4.2): a tenant write / execute it isn't
+   authorized for short-circuits to 403; reads stay open. Until a provider
+   that resolves `:org` is wired, every request is public — a safe no-op."
   (:require
     [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
@@ -70,18 +72,33 @@
   (tauth/token-map-provider (or tokens {})))
 
 
-(defmethod ig/init-key :tenancy/request-scope [_ _]
-  ;; (fn [ctx request thunk] …) — authenticate, bind the org, and (for a
-  ;; real tenant) restrict effects, then run the handler. A request the
-  ;; provider can't authenticate (or one with no `:org`) is public →
-  ;; unrestricted, exactly as a single-tenant deployment behaves.
+(def ^:private forbidden-response
+  {:status 403
+   :headers {"Content-Type" "application/json"}
+   :body "{\"ok\":false,\"error\":\"forbidden\"}"})
+
+
+(defmethod ig/init-key :tenancy/request-scope [_ {:keys [grant-store]}]
+  ;; (fn [ctx request thunk] …) — authenticate, bind the org, restrict
+  ;; effects, enforce grants, then run the handler. A request the provider
+  ;; can't authenticate (or one with no `:org`) is public → unrestricted,
+  ;; exactly as a single-tenant deployment behaves. Grant enforcement is
+  ;; OPT-IN: only when a `:grant-store` is wired (else writes pass, subject
+  ;; only to OrgScopedStorage + the effect gate).
   (fn [ctx request thunk]
     (let [principal (when-let [p (:auth-provider ctx)]
                       (auth/authenticate p request))
           org (tc/org-from-principal principal)]
       (tc/with-org org
-                   (if (= org tc/public-org)
+                   (cond
+                     ;; Platform / admin — no restriction.
+                     (= org tc/public-org)
                      (thunk)
-                     ;; Real tenant — gate effects (env / io / network / process).
+                     ;; Tenant lacking the capability for this request → 403.
+                     (and grant-store
+                          (not (grant/request-permitted? grant-store principal request org)))
+                     forbidden-response
+                     ;; Tenant — gate effects (env / io / network / process), run.
+                     :else
                      (binding [cr/*allowed-effects* cr/default-cloud-allowed-effects]
                        (thunk)))))))

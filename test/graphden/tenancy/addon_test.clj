@@ -113,3 +113,40 @@
     (testing "*allowed-effects* is restored after dispatch (no leak)"
       (run :db "Bearer acme-tok")
       (is (nil? cr/*allowed-effects*)))))
+
+
+;; --- grant enforcement on the request-scope gate (§4.2) ---
+
+(deftest grant-enforcement-gates-tenant-writes
+  (let [grant-store (ig/init-key :tenancy/grant-store
+                                 {:grants [{:subject "alice" :capability :write :namespace "acme"}]})
+        scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}
+                                            "mallory-tok" {:user "mallory" :org "acme"}})
+        base-ctx {:auth-provider provider :request-scope scope}
+        router (router-with base-ctx (fn [_req] :ran))
+        call (fn [method uri authz]
+               (br/dispatch router {:request-method method :uri uri
+                                    :headers (cond-> {} authz (assoc "authorization" authz))
+                                    :query-string nil}))]
+    (testing "a granted tenant write proceeds"
+      (is (= :ran (call :post "/api/entities/fn" "Bearer alice-tok"))))
+    (testing "an ungranted tenant write → 403"
+      (is (= 403 (:status (call :post "/api/entities/fn" "Bearer mallory-tok")))))
+    (testing "reads are open even for the ungranted tenant (OrgScoped governs visibility)"
+      (is (= :ran (call :get "/api/graph/entities" "Bearer mallory-tok"))))
+    (testing "execute needs :execute — alice holds only :write"
+      (is (= 403 (:status (call :post "/api/execute" "Bearer alice-tok")))))
+    (testing "platform (public / no token) is never grant-gated"
+      (is (= :ran (call :post "/api/entities/fn" nil))))))
+
+
+(deftest grant-enforcement-is-opt-in
+  (let [scope (ig/init-key :tenancy/request-scope {})       ; no grant-store
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})
+        base-ctx {:auth-provider provider :request-scope scope}
+        router (router-with base-ctx (fn [_req] :ran))]
+    (is (= :ran (br/dispatch router {:request-method :post :uri "/api/entities/fn"
+                                     :headers {"authorization" "Bearer alice-tok"}
+                                     :query-string nil}))
+        "without a grant-store wired, tenant writes pass (subject only to OrgScoped + effects)")))

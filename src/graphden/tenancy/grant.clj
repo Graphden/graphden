@@ -78,3 +78,26 @@
   [store principal capability ns-path]
   (boolean (when-let [user (:user principal)]
              (can? store user capability ns-path))))
+
+
+(defn request->capability
+  "The capability a Ring request needs: an `/execute` call → `:execute`, a
+   mutating method (POST/PUT/PATCH/DELETE) → `:write`, anything else →
+   `:read`."
+  [request]
+  (cond
+    (some-> (:uri request) (str/includes? "/execute")) :execute
+    (contains? #{:post :put :patch :delete} (:request-method request)) :write
+    :else :read))
+
+
+(defn request-permitted?
+  "Coarse org-level enforcement for the request-scope gate: reads are open
+   (OrgScopedStorage governs read visibility); writes / execute require the
+   matching capability on the request's `org` (or broader — a root / org
+   grant covers it). Per-TARGET-namespace checks are a refinement that needs
+   the target ns lifted out of the request."
+  [store principal request org]
+  (let [cap (request->capability request)]
+    (or (= cap :read)
+        (authorized? store principal cap org))))

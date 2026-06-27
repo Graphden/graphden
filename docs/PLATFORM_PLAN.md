@@ -575,9 +575,14 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      потомков по dot-path; root = blank ns), `GrantStore` протокол +
      static-map impl + `:tenancy/grant-store` init-key + `authorized?`
      мост от auth-principal (`:user`). Доказано (5 тестов / 17 ассертов).
-     *Остаётся:* enforcement (вызов `authorized?` в edit/execute-хендлерах
-     + gating редактора), storage-backed store, `:terminal`/`:list-append`
-     (R2) → личные неймспейсы → workspaces;
+     - **enforcement ✅ (opt-in)** request-scope wrap при наличии
+       `:grant-store` гейтит write/execute тенанта: `request->capability`
+       (POST/PUT/PATCH/DELETE→write, `/execute`→execute, else read) +
+       `request-permitted?` → 403 если нет права на org; reads открыты
+       (OrgScoped рулит видимостью); platform не гейтится. Доказано.
+     *Остаётся:* per-target-namespace (не org-level), storage-backed store,
+     gating редактора (UI), `:terminal`/`:list-append` (R2) → личные
+     неймспейсы → workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

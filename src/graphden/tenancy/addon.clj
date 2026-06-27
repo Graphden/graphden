@@ -29,6 +29,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.grant :as grant]
     [graphden.tenancy.rls :as rls]
     [graphden.tenancy.storage :as ts]
     [integrant.core :as ig]))
@@ -53,6 +54,13 @@
   (log/info "Installing RLS policies on org-scoped tables")
   (rls/enable-rls! (:pool storage))
   :enabled)
+
+
+(defmethod ig/init-key :tenancy/grant-store [_ {:keys [grants]}]
+  ;; Authorization primitive (§4.2). A deployment supplies `:grants` (a
+  ;; coll of {:subject :capability :namespace}); a storage-backed store can
+  ;; replace this without touching `grant/can?`. Empty → default-deny.
+  (grant/static-grant-store (or grants [])))
 
 
 (defmethod ig/init-key :auth/multi-tenant-provider [_ {:keys [tokens]}]

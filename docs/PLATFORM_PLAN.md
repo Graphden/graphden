@@ -569,8 +569,15 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      unrestricted; binding восстанавливается (no leak). *(Реализация через
      dynamic var per-request, а не «:allowed-effects на ctx» — ctx общий
      per-branch, org — per-request.)*
-  5. **`grant`-примитив** (§4.2) + `:terminal`/`:list-append` (R2) → личные
-     неймспейсы → workspaces;
+  5. **`grant`-примитив** (§4.2) — ✅ **ПРИМИТИВ ГОТОВ**:
+     `tenancy.grant` — `(subject, capability, namespace)`, `can?`
+     (default-deny; `:admin` ⇒ остальные capabilities; ns-grant покрывает
+     потомков по dot-path; root = blank ns), `GrantStore` протокол +
+     static-map impl + `:tenancy/grant-store` init-key + `authorized?`
+     мост от auth-principal (`:user`). Доказано (5 тестов / 17 ассертов).
+     *Остаётся:* enforcement (вызов `authorized?` в edit/execute-хендлерах
+     + gating редактора), storage-backed store, `:terminal`/`:list-append`
+     (R2) → личные неймспейсы → workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

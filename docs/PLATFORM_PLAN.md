@@ -544,12 +544,15 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      - **B4** `:request-scope` шов → `dispatch` биндит `*current-org*` из
        auth-principal per-request;
      - **B5** Postgres RLS — own+public/own policy + `set_config`-сеттер,
-       enforcement доказан raw-query тестом через `SET ROLE` (non-superuser).
-     *Остаётся для прод-активации:* провайдер, реально резолвящий `:org`
-     (session/JWT); проброс `*current-org*`→session-var на каждом
-     connection (datasource-wrap); `enable-rls!` на deploy + подключение
-     приложения non-superuser ролью. Дальше по плану: per-org LRU (R8) →
-     org-скоуп секретов (R9) → поддомены/домены (R10, R11);
+       enforcement доказан raw-query тестом через `SET ROLE` (non-superuser);
+     - **provider** `tenancy.auth/TokenAuthProvider` резолвит bearer →
+       `{:user :org}` (hashed-token lookup); цепочка `token → org →
+       *current-org* → OrgScoped + RLS` доказана end-to-end.
+     *Остаётся только прод-обвязка (ops, не изоляция):* проброс
+     `*current-org*`→session-var на каждом connection (datasource-wrap);
+     `enable-rls!` на deploy; подключение приложения non-superuser ролью;
+     реальный token-source (storage/secret вместо static-map). Дальше по
+     плану: per-org LRU (R8) → org-скоуп секретов (R9) → поддомены (R10, R11);
   4. **проводка effect-gate**: аддон ставит `:allowed-effects
      default-cloud-allowed-effects` на per-org ctx;
   5. **`grant`-примитив** (§4.2) + `:terminal`/`:list-append` (R2) → личные

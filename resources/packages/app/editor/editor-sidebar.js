@@ -208,6 +208,11 @@ function renderNsNode(container, name, node, path) {
   // Namespace header
   const header = document.createElement('div');
   header.className = 'ns-header';
+  // Workspace highlight (§4.4): emphasise the namespaces the user works in.
+  // No-op without the addon (no workspace header → graphdenInWorkspace false).
+  if (typeof window.graphdenInWorkspace === 'function' && window.graphdenInWorkspace(nsPath)) {
+    header.classList.add('ns-in-workspace');
+  }
   header.dataset.nsPath = nsPath;
 
   const arrow = document.createElement('span');

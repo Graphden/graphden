@@ -70,20 +70,39 @@ function switchToBranch(name) {
 // ABSENT without the addon (single-tenant) — capabilities then stay unknown
 // and everything is allowed, so the editor is unchanged.
 const CAP_HEADER = 'X-Graphden-Capabilities';
+const WORKSPACE_HEADER = 'X-Graphden-Workspace';
 let graphdenCapabilities = null; // null = unknown → allow all
+let graphdenWorkspace = null;    // null = unknown / no workspace hint
 function captureCapabilities(resp) {
   try {
-    const hdr = resp?.headers?.get(CAP_HEADER);
-    if (hdr === null || hdr === undefined) return;
-    graphdenCapabilities = new Set(hdr.split(',').map((s) => s.trim()).filter(Boolean));
-    document.body.classList.toggle('gd-no-write', !graphdenCapabilities.has('write'));
-    document.body.classList.toggle('gd-no-execute', !graphdenCapabilities.has('execute'));
+    const cap = resp?.headers?.get(CAP_HEADER);
+    if (cap !== null && cap !== undefined) {
+      graphdenCapabilities = new Set(cap.split(',').map((s) => s.trim()).filter(Boolean));
+      document.body.classList.toggle('gd-no-write', !graphdenCapabilities.has('write'));
+      document.body.classList.toggle('gd-no-execute', !graphdenCapabilities.has('execute'));
+    }
+    // Workspace (§4.4): the namespaces the user works in, for sidebar
+    // highlighting. Empty / absent → no hint → nothing highlighted.
+    const ws = resp?.headers?.get(WORKSPACE_HEADER);
+    if (ws !== null && ws !== undefined) {
+      graphdenWorkspace = new Set(ws.split(',').map((s) => s.trim()).filter(Boolean));
+    }
   } catch (_) { /* never break a fetch over a header read */ }
 }
 function graphdenCanWrite() { return !graphdenCapabilities || graphdenCapabilities.has('write'); }
 function graphdenCanExecute() { return !graphdenCapabilities || graphdenCapabilities.has('execute'); }
+// A namespace path is in the workspace when it equals, or is a descendant
+// of, one of the workspace roots. No workspace → false (nothing highlighted).
+function graphdenInWorkspace(nsPath) {
+  if (!graphdenWorkspace || graphdenWorkspace.size === 0 || !nsPath) return false;
+  for (const w of graphdenWorkspace) {
+    if (nsPath === w || nsPath.startsWith(w + '.')) return true;
+  }
+  return false;
+}
 window.graphdenCanWrite = graphdenCanWrite;
 window.graphdenCanExecute = graphdenCanExecute;
+window.graphdenInWorkspace = graphdenInWorkspace;
 
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);

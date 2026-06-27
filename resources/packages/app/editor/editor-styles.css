@@ -252,6 +252,10 @@ body.sidebar-collapsed .sidebar-expand-floating {
 #entity-list { padding: 4px 0; margin: 0; }
 .ns-header { display: flex; align-items: center; padding: 3px 8px; cursor: pointer; user-select: none; }
 .ns-header:hover { background: var(--hover-bg); }
+/* Workspace highlight (PLATFORM_PLAN §4.4): namespaces the user works in get
+   a left accent. No-op without the addon — the class is only added when the
+   X-Graphden-Workspace header lists the namespace. */
+.ns-header.ns-in-workspace { border-left: 2px solid var(--accent); padding-left: 6px; }
 /* Section label inside a namespace: separates "Types" from
    "Functions" when both are present. Hidden when a namespace has
    only one kind so single-purpose folders don't grow extra chrome. */

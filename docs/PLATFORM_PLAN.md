@@ -636,8 +636,12 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        и public исключены); сортированный set. Surface через
        `X-Graphden-Workspace` header в request-scope (tenant → его
        namespace'ы, platform → пусто). Доказано: pure + header через
-       dispatch. *Остаётся:* потребление в editor-JS (фильтр/подсветка
-       sidebar-дерева по workspace — фронт + Playwright).
+       dispatch. **editor-frontend ✅** fetch-wrap читает header →
+       `graphdenWorkspace` + `window.graphdenInWorkspace(path)`; sidebar
+       вешает `.ns-in-workspace` на ns-header в workspace → CSS left-accent.
+       Без аддона — no-op. **Проверено Playwright:** helper есть, no-op без
+       workspace, CSS-акцент 2px, matching (exact+descendant да, parent/
+       sibling нет).
      *Остаётся:* `:terminal`/`:list-append` (R2);
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.

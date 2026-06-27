@@ -59,7 +59,8 @@
   {:name :_load-graph-cached
    :description "Load every fn/slot/binding entity for layout, served from the per-context graph cache when warm. Context-aware (reads storage from `ctx`)."
    :args {}
-   :return-type :_graph-snapshot-shape}
+   :return-type :_graph-snapshot-shape
+   :effects #{:db}}
 
   {:name :_parse-layout-body
    :description "Single library call — parse the Ring body into `{:root-id :expansions}`. Throws JsonParseException / ExceptionInfo / IllegalArgumentException on bad input; the graph's `:try` catches all three."

@@ -512,10 +512,33 @@
   nil)
 
 
+(def cloud-forbidden-effects
+  "The security-sensitive effect categories a cloud sandbox must forbid
+   (PLATFORM_PLAN §5). A cloud org context should set its
+   `:allowed-effects` to the full effect vocabulary MINUS this set.
+
+   Verified by the effect-gate coverage audit: every base-fn that
+   performs one of these calls `record-effect!`, so excluding them from
+   `:allowed-effects` actually blocks the operation (no silent bypass).
+
+   - `:env`     — environment variables / system properties
+   - `:io`      — file / classpath reads
+   - `:network` — outbound HTTP / sockets
+   - `:process` — thread / server / execution lifecycle control
+
+   The safe remainder — `:db`, `:time`, `:state`, `:random` — stays
+   allowed (internal infrastructure depends on it). New base-fns must
+   keep this contract: any security-sensitive primitive MUST
+   `record-effect!`, or it becomes a sandbox hole."
+  #{:env :io :network :process})
+
+
 (defn record-effect!
   "Record that the calling impl is about to perform an effect of
-   `category` (one of :env, :db, :io, :network, :time, :random — same
-   vocabulary as rich-type-of `:effects`).
+   `category`. The vocabulary in use across the package layer is
+   `:db`, `:env`, `:io`, `:network`, `:process`, `:state`, `:time`
+   (same vocabulary as rich-type-of `:effects`); `cloud-forbidden-effects`
+   marks the security-sensitive subset.
 
    GATE: when `*allowed-effects*` is a non-nil set and `category` is not
    in it, throws `:execution/forbidden-effect` BEFORE the impl performs

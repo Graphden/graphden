@@ -22,6 +22,7 @@
    storage, parse a request, build the cytoscape element lists, or
    grid-place them."
   (:require
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.layout.core :as layout]
@@ -36,9 +37,15 @@
    mutation defbase's calling `invalidate-graph-cache!` after writing."
   [ctx]
   (or (some-> (exec-ctx/cached-graph ctx) lgraph/ensure-synth-args)
-      (let [data (lgraph/load-graph-entities-uncached (:storage ctx))]
-        (exec-ctx/fill-graph-cache! ctx data)
-        data)))
+      ;; Cache miss → an actual storage read. Record `:db` HERE (not
+      ;; unconditionally) so the effect trace + gate see the DB access
+      ;; only when it really happens — a warm-cache hit performs no
+      ;; effect. Closes the coverage gap the effect-gate audit found.
+      (do
+        (cr/record-effect! :db)
+        (let [data (lgraph/load-graph-entities-uncached (:storage ctx))]
+          (exec-ctx/fill-graph-cache! ctx data)
+          data))))
 
 
 (defbase _load-graph-cached

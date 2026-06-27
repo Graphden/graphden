@@ -10,8 +10,17 @@
    The fragment redirects `:db/versioned`'s base through
    `:org/scoped-storage`, so the storage stack becomes
    `Versioned(OrgScoped(app/storage(Postgres)))` — the decorator sits
-   beneath versioning exactly where the §3.0 nuance-1 placement requires."
+   beneath versioning exactly where the §3.0 nuance-1 placement requires.
+
+   It also wires `:tenancy/request-scope` onto `:exec/context`'s
+   `:request-scope` seam (B4): the fn the branch-router's `dispatch` wraps
+   each handler call with, which authenticates the request via the ctx's
+   `:auth-provider` and binds `*current-org*` for the duration. Until a
+   provider that resolves `:org` is wired (session/JWT), every request
+   binds the public org — a safe no-op."
   (:require
+    [graphden.auth.provider :as auth]
+    [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]
     [integrant.core :as ig]))
 
@@ -20,3 +29,14 @@
   (if scoped-entities
     (ts/org-scoped-storage base scoped-entities)
     (ts/org-scoped-storage base)))
+
+
+(defmethod ig/init-key :tenancy/request-scope [_ _]
+  ;; (fn [ctx request thunk] …) — authenticate, then run the handler with
+  ;; `*current-org*` bound. A request the provider can't authenticate (or a
+  ;; provider that returns no `:org`) binds the public org.
+  (fn [ctx request thunk]
+    (let [principal (when-let [p (:auth-provider ctx)]
+                      (auth/authenticate p request))]
+      (tc/with-org (tc/org-from-principal principal)
+                   (thunk)))))

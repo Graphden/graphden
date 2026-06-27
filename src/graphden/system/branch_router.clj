@@ -418,8 +418,14 @@
        :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
 
       :else
-      (let [handler (handler-for router branch-id)]
-        (handler request)))))
+      (let [handler (handler-for router branch-id)
+            ;; Request-scope seam (§3.0 B4): when wired (the tenancy addon),
+            ;; it authenticates + binds `*current-org*` around the handler.
+            ;; Absent (core / single-tenant) → call the handler directly.
+            request-scope (:request-scope (:base-ctx router))]
+        (if request-scope
+          (request-scope (:base-ctx router) request #(handler request))
+          (handler request))))))
 
 
 ;; =============================================================================

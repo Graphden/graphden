@@ -637,7 +637,7 @@
 
 
 (defmethod ig/init-key :exec/context
-  [_ {:keys [storage vault-client pg-storage base-fns auth-provider]}]
+  [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -663,7 +663,11 @@
                    ;; The auth seam — read by `:authenticate-request` via
                    ;; `(:auth-provider ctx)`. Branch contexts inherit it
                    ;; (build-branch-ctx).
-                   auth-provider (assoc :auth-provider auth-provider))]
+                   auth-provider (assoc :auth-provider auth-provider)
+                   ;; Request-scope seam (§3.0 B4) — wrapped around each
+                   ;; handler by the branch-router. Only the tenancy addon
+                   ;; wires it; absent in core (single-tenant).
+                   request-scope (assoc :request-scope request-scope))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client))))

@@ -149,8 +149,13 @@
    - :auth-provider  Optional `graphden.auth.provider/AuthProvider` — the
                 authentication seam (§3.0). Read by the
                 `:authenticate-request` base-fn. Absent → that base-fn
-                fails closed (`{:authenticated? false}`)."
-  [{:keys [storage base-fns clock allowed-effects auth-provider]}]
+                fails closed (`{:authenticated? false}`).
+   - :request-scope  Optional request-scope seam (§3.0 B4) — a fn
+                `(fn [ctx request thunk] …)` the branch-router's `dispatch`
+                wraps each handler call with. The tenancy addon uses it to
+                authenticate + bind `*current-org*`. Absent → `dispatch`
+                calls the handler directly (single-tenant)."
+  [{:keys [storage base-fns clock allowed-effects auth-provider request-scope]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -170,7 +175,10 @@
       ;; the execution so `record-effect!` can gate.
       (cond-> allowed-effects (assoc :allowed-effects (set allowed-effects)))
       ;; Auth seam (§3.0) — read by the `:authenticate-request` base-fn.
-      (cond-> auth-provider (assoc :auth-provider auth-provider))))
+      (cond-> auth-provider (assoc :auth-provider auth-provider))
+      ;; Request-scope seam (§3.0 B4) — wrapped around each handler call by
+      ;; the branch-router's `dispatch`.
+      (cond-> request-scope (assoc :request-scope request-scope))))
 
 
 (defn current-time-ms

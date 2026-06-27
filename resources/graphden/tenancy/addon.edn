@@ -5,16 +5,24 @@
 ;; The manifest (graphden.system.config) deep-merges it over the core
 ;; config and runs :graphden/require so the addon's init-key loads.
 ;;
-;; Effect: insert OrgScopedStorage BENEATH versioning by redirecting
-;; :db/versioned's base through :org/scoped-storage, which wraps the core
-;; :app/storage seam. Final stack: Versioned(OrgScoped(app/storage(Postgres))).
+;; Effect:
+;;  - insert OrgScopedStorage BENEATH versioning by redirecting
+;;    :db/versioned's base through :org/scoped-storage, which wraps the core
+;;    :app/storage seam → Versioned(OrgScoped(app/storage(Postgres)));
+;;  - wire :tenancy/request-scope onto :exec/context's :request-scope seam
+;;    (B4) so the branch-router authenticates + binds *current-org* per
+;;    request.
 ;;
-;; NOTE: this wires the decorator only. Real per-request isolation also
-;; needs B4 (binding *current-org* from the auth principal) + B5 (RLS);
-;; without B4 every request runs at the public org, so the addon is a safe
-;; no-op-equivalent until B4 lands.
+;; Real per-org isolation still needs an auth provider that resolves :org
+;; (session/JWT) + B5 (RLS). With the default single-token provider every
+;; request binds the public org, so activating the addon is a safe
+;; no-op-equivalent until that provider lands.
 {:graphden/require [graphden.tenancy.addon]
 
  :org/scoped-storage {:base #ig/ref :app/storage}
 
- :db/versioned {:base-storage #ig/ref :org/scoped-storage}}
+ :db/versioned {:base-storage #ig/ref :org/scoped-storage}
+
+ :tenancy/request-scope {}
+
+ :exec/context {:request-scope #ig/ref :tenancy/request-scope}}

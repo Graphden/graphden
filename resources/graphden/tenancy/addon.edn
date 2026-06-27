@@ -90,3 +90,8 @@
 ;; Add :personal-ns-prefix to give every user implicit :admin on their own
 ;; namespace (§4.4) — `<prefix>.<user>`, no grant row needed:
 ;;   :tenancy/grant-store {:storage #ig/ref :db/postgres :personal-ns-prefix "users"}
+;;
+;; The addon ships its own fns-packages (e.g. an org-admin UI) via the
+;; fns-channel seam — append to :app/packages without restating the core
+;; list, so they load ONLY when the addon is active:
+;;   :app/packages {:extra-package-names ["tenancy-admin"]}

@@ -645,6 +645,15 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      *Остаётся:* `:terminal`/`:list-append` (R2);
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
+     - **fns-channel seam ✅** `:app/packages {:extra-package-names […]}` —
+       аддон добавляет свои fns-пакеты через манифест, не переписывая
+       core-список; грузятся ТОЛЬКО при активном аддоне (§2.1). Доказано:
+       extra грузится вместе с core, no-extra без изменений, boot ок.
+       *Это разблокирует org-admin UI как `tenancy-admin` fns-пакет.*
+     *Остаётся (org-admin UI):* граф-композированная grants-admin панель
+     (query `:grant` → таблица + create/delete, route, editor-JS mount —
+     по образцу secrets-panel ~200 fn-defs); тестируется только при
+     активном аддоне (full sync + `:grant`). Крупная продуктовая фича.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;
   смешанный режим = композиция «org-scoped storage API» + «их executor».
   Polylith — опционально, не блокер.

@@ -201,13 +201,18 @@
 ;; Package Loading
 ;; =============================================================================
 
-(defmethod ig/init-key :app/packages [_ {:keys [package-names]}]
-  (log/info "Loading packages:" package-names)
-  (let [packages (pkg/load-packages package-names)]
-    (log/info "Packages loaded:" (count (:packages packages)) "packages,"
-              (count (:base-fn-defs packages)) "base-fns,"
-              (count (:fn-defs packages)) "fn-defs")
-    packages))
+(defmethod ig/init-key :app/packages [_ {:keys [package-names extra-package-names]}]
+  ;; `:extra-package-names` is the addon fns-channel seam (PLATFORM_PLAN
+  ;; §2.1 / §3.0): the tenancy addon appends its own fns-package(s) — e.g.
+  ;; the org-admin UI — via the manifest WITHOUT restating the core list,
+  ;; so they load only when the addon is active.
+  (let [names (vec (concat package-names extra-package-names))]
+    (log/info "Loading packages:" names)
+    (let [packages (pkg/load-packages names)]
+      (log/info "Packages loaded:" (count (:packages packages)) "packages,"
+                (count (:base-fn-defs packages)) "base-fns,"
+                (count (:fn-defs packages)) "fn-defs")
+      packages)))
 
 
 ;; =============================================================================

@@ -4,6 +4,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.system.config :as config]
+    [graphden.system.core]
     [integrant.core :as ig]))
 
 
@@ -43,6 +44,20 @@
       (is (= (ig/ref :app/storage) (:base-storage (:db/versioned cfg)))
           (str ":db/versioned wraps the seam, so an addon can slip an org-scoped "
                "decorator BENEATH versioning (vs/unwrap then preserves the tenant filter)")))))
+
+
+(deftest app-packages-extra-seam-concatenates
+  ;; The addon fns-channel seam (§2.1 / §3.0): :extra-package-names appends
+  ;; to the core list — the tenancy addon adds its org-admin fns-package via
+  ;; the manifest without restating :package-names.
+  (testing "extra packages load alongside the core list"
+    (let [with-extra (ig/init-key :app/packages
+                                  {:package-names ["core"] :extra-package-names ["web"]})
+          core-only (ig/init-key :app/packages {:package-names ["core"]})]
+      (is (< (count (:packages core-only)) (count (:packages with-extra)))
+          "the extra package adds to what core alone loads")))
+  (testing "no extra → just the core list (unchanged)"
+    (is (pos? (count (:packages (ig/init-key :app/packages {:package-names ["core"]})))))))
 
 
 (deftest missing-addon-fragment-fails-fast

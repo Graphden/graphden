@@ -24,7 +24,21 @@
   (sp/create-entity (:storage ctx) :org {:name name}))
 
 
+;; Point an org at its app handler (§3.4 step 4) — the one thing a deployed
+;; tenant app needs. A focused controlled mutation: find the org row by its
+;; (unique) name, set `:handler-fn-id`. `handler-fn-id` may arrive as a string
+;; (form body) or a UUID. Platform-only by entity guard (`:org` is
+;; tenant-forbidden), so only the operator / a self-serve seam reaches it.
+(defbase set-org-handler
+  [name handler-fn-id]
+  (when-let [row (first (sp/query-entities (:storage ctx) :org {:name name}))]
+    (sp/update-entity (:storage ctx) :org (:id row)
+                      {:handler-fn-id (cond-> handler-fn-id
+                                        (string? handler-fn-id) parse-uuid)})))
+
+
 (def impls
   {:list-grants list-grants
    :create-grant create-grant
-   :create-org create-org})
+   :create-org create-org
+   :set-org-handler set-org-handler})

@@ -37,6 +37,7 @@
                   :partial-grants-admin
                   :create-grant-route
                   :create-org-route
+                  :set-org-handler-route
                   :partial-row-actions
                   :demo-contact
                   :health

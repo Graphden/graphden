@@ -460,7 +460,8 @@ org-scoping применяются автоматически. Самая сло
 2. ✅ Endpoint регистрации org (`POST /api/orgs`, platform-only).
 3. ✅ App-routing шов (`tenancy/app-router` + `:app-router` на ctx + dispatch): поддомен→org→исполнить `:org.handler-fn-id`; apex → editor/API.
 5. ✅ Исполнение handler org-scoped + effect-gated (в app-router: `with-org` + `:allowed-effects` + `:execute-guard nil`).
-4. ← СЛЕДУЮЩИЙ — Handler-слот: provisioning per-org locked `app-handler` + как тенант СТАВИТ `handler-fn-id` (сейчас всегда nil → app-router отдаёт 404 «not configured»).
+4a. ✅ Set-handler механизм: `set-org-handler` base-fn (update `:org.handler-fn-id` by name, str→uuid) + `POST /api/orgs/handler` (platform-only). Теперь app-router отдаёт реальный handler, когда он установлен.
+4b. ← СЛЕДУЮЩИЙ (self-serve) — тенант ставит СВОЙ handler: seam `:set-org-handler` (валидирует, что fn принадлежит org, + controlled update `:org` через base storage) + core route + editor-JS «set as app handler». Locked-fn через грант.
 6. R8 per-org handler-кэш (перф — `:org` читается на каждый app-запрос).
 7. Resource-лимиты (timeout/memory на tenant-handler).
 8. Кастомные домены в app-routing (host→org уже есть; app-router уже принимает `host-resolver`).

@@ -226,6 +226,35 @@
 
 
 ;; =============================================================================
+;; Field UUIDs — :org-id (tenancy, PLATFORM_PLAN §3.0 B2)
+;; Identity-level column on every graph entity. NULL ≡ the shared "public"
+;; org (core writes leave it NULL; the addon's OrgScopedStorage stamps the
+;; current org). NOT versioned — tenant ownership doesn't vary per branch,
+;; so it's excluded from `version-data-fields` and the version mirror, like
+;; `:parent-ids`.
+;; =============================================================================
+
+(def ^:private fn-org-id-field-uuid
+  #uuid "34ec3591-43fb-4248-aab9-2d0b58ab69d9")
+
+
+(def ^:private slot-org-id-field-uuid
+  #uuid "759d2294-4fe6-4339-b223-faa9079ccf99")
+
+
+(def ^:private fn-slot-org-id-field-uuid
+  #uuid "0db50482-5ca2-42bb-8598-dcb8b66f4664")
+
+
+(def ^:private binding-org-id-field-uuid
+  #uuid "049586d3-7aa3-4066-96b5-73565d07e87e")
+
+
+(def ^:private binding-list-item-org-id-field-uuid
+  #uuid "6b8713a2-5917-448f-a460-af64ee7340f1")
+
+
+;; =============================================================================
 ;; Field UUIDs — :slot
 ;; =============================================================================
 
@@ -449,7 +478,11 @@
                       ;; Identity-level monotonic flag (see ns-doc above).
                       :branch-local? {:uuid fn-branch-local-field-uuid
                                       :type :bool
-                                      :nullable? true}})
+                                      :nullable? true}
+                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
+                      :org-id {:uuid fn-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:namespace-id :name]})
       (ds/add-constraint :fn {:type :unique :fields [:anonymous-hash]})
 
@@ -479,7 +512,11 @@
                       :source-slot-id {:uuid slot-source-slot-id-field-uuid
                                        :type :ref
                                        :ref-entity :slot
-                                       :nullable? true}})
+                                       :nullable? true}
+                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
+                      :org-id {:uuid slot-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
 
       ;; -----------------------------------------------------------------
       ;; fn-slot: junction many-to-many. fn ⊃ slots с порядком.
@@ -493,7 +530,11 @@
                                 :type :ref
                                 :ref-entity :slot}
                       :position {:uuid fn-slot-position-field-uuid
-                                 :type :int}})
+                                 :type :int}
+                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
+                      :org-id {:uuid fn-slot-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
       (ds/add-constraint :fn-slot {:type :unique :fields [:fn-id :slot-id]})
 
       ;; -----------------------------------------------------------------
@@ -556,7 +597,11 @@
                                     :nullable? true}
                       :required {:uuid binding-required-field-uuid
                                  :type :bool
-                                 :nullable? true}})
+                                 :nullable? true}
+                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
+                      :org-id {:uuid binding-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
       (ds/add-constraint :binding {:type :unique :fields [:fn-id :slot-id]})
 
       ;; -----------------------------------------------------------------
@@ -577,7 +622,11 @@
                                   :nullable? true}
                       :literal {:uuid binding-list-item-literal-field-uuid
                                 :type :bool
-                                :nullable? true}})
+                                :nullable? true}
+                      ;; Tenant owner (§3.0 B2). NULL ≡ public.
+                      :org-id {:uuid binding-list-item-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
       ;; NOTE — `(binding-id, position)` UNIQUE was retired in favour of
       ;; a per-branch resolved-view check in `VersionedStorage`. The base
       ;; identity row represents cross-branch identity; multiple branches

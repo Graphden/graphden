@@ -27,20 +27,27 @@
   #{:fn :slot :fn-slot :binding :binding-list-item})
 
 
+(defn- row-org
+  "A row's tenant — NULL `:org-id` (the column default for core writes that
+   never went through this decorator) means the shared public org."
+  [row]
+  (or (:org-id row) tc/public-org))
+
+
 (defn- visible?
   "A row is readable by the current org iff it belongs to that org or to
    the shared public org."
   [row]
   ;; `conj`, not `#{a b}` — the set literal throws on a duplicate key when
   ;; the current org IS the public org.
-  (contains? (conj #{tc/public-org} (tc/current-org)) (:org-id row)))
+  (contains? (conj #{tc/public-org} (tc/current-org)) (row-org row)))
 
 
 (defn- own?
   "A row is writable by the current org iff it belongs to that org — public
    and other-org rows are read-only here (RLS enforces the same)."
   [row]
-  (= (tc/current-org) (:org-id row)))
+  (= (tc/current-org) (row-org row)))
 
 
 (defn- stamp

@@ -110,6 +110,23 @@
       (is (some? (tc/with-org "beta" (sp/read-entity s :execution 9)))))))
 
 
+(deftest nil-org-id-is-public
+  ;; Core writes (no decorator) leave :org-id NULL — that row must read as
+  ;; public to every org and be writable only in public scope.
+  (let [base (fake)
+        s (ts/org-scoped-storage base)]
+    ;; insert straight into the base, bypassing the decorator's stamp
+    (sp/create-entity base :fn {:id 1 :name "legacy"})
+    (is (nil? (:org-id (sp/read-entity base :fn 1))) "row has no :org-id")
+    (is (some? (tc/with-org "acme" (sp/read-entity s :fn 1)))
+        "a NULL-org row is visible to acme (treated as public)")
+    (is (= 1 (count (tc/with-org "beta" (sp/query-entities s :fn {}))))
+        "...and to beta")
+    (testing "acme cannot write a NULL-org (public) row"
+      (tc/with-org "acme" (sp/update-entity s :fn 1 {:name "x"}))
+      (is (= "legacy" (:name (sp/read-entity base :fn 1)))))))
+
+
 (deftest own-plus-public-write-isolation-roundtrip
   (let [s (ts/org-scoped-storage (fake))]
     (tc/with-org "acme" (sp/create-entity s :fn {:id 1 :name "a"}))

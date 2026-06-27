@@ -28,20 +28,29 @@
 
 
 (def tenant-forbidden-entities
-  "Privileged platform entities a tenant (org ≠ public) may NEVER write — they
-   aren't org-isolated, and writing them escalates out of the sandbox:
+  "Platform entities a tenant (org ≠ public) may neither read nor write —
+   they aren't org-isolated, so a tenant touching them escalates out of, or
+   enumerates across, the sandbox:
 
    - `:service` — runs via the reconciler in an UNSANDBOXED ctx (no effect
      gate), so a tenant deploying an `:http-server` service would escape the
      cloud effect restrictions (env / io / network / process) entirely.
-   - `:grant`   — a tenant could grant itself `:admin` and escalate authz.
-   - `:domain`  — a tenant could hijack custom-domain → org routing.
+   - `:grant`   — write: grant itself `:admin`; read: enumerate every org's
+     grants (the grants panel's `:list-grants`).
+   - `:domain`  — hijack / enumerate custom-domain → org routing.
+   - `:branch`  — branches aren't org-scoped: a tenant-created branch is a
+     global row, and the picker (`GET /api/branches`) would list every org's
+     branches. Tenants are confined to `main` until per-tenant ORG-SCOPED
+     branches exist — which needs a resolution-timing fix, since the
+     branch-router resolves the branch BEFORE the org is bound (so org-scoped
+     branch reads would see nothing at resolution time). Note: resolution
+     itself reads `:branch` with org = public (pre-request-scope), so it's
+     unaffected by this guard.
 
-   Platform / admin (public org) writes them freely. New privileged entity
-   types MUST be added here. (The sandbox for tenant-OWNED services — §3.3 —
-   is the proper long-term answer; until it exists, deployment is platform-
-   only.)"
-  #{:service :grant :domain})
+   Platform / admin (public org) is unrestricted. New privileged entity types
+   MUST be added here. (Proper long-term answers — a sandbox for tenant-OWNED
+   services and org-scoped branches/executions — are §3.3 follow-ups.)"
+  #{:service :grant :domain :branch})
 
 
 (defn- row-org

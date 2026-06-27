@@ -380,15 +380,16 @@ gate** (env/io/network/process), обходя весь облачный сэнд
 не org-scoped, а per-namespace write-guard пропускал не-`:fn`. То есть тенант с
 любым write-грантом мог `POST /api/entities/service` и развернуть
 несэндбокснутый веб-сервер. **Закрыто (storage-слой):**
-`tenant-forbidden-entities #{:service :grant :domain}` в OrgScopedStorage —
-тенант (org ≠ public) не может писать привилегированные сущности
-(`:service` → escape, `:grant` → эскалация authz, `:domain` → hijack
-роутинга); платформа (public) — свободно. **Read-зеркало:** тенант не может
-и ЧИТАТЬ их (`tenant-hidden?`) — иначе `:list-grants` грантовой панели
-перечислил бы гранты ВСЕХ org (enumeration-leak); authz не ломается, т.к.
-grant-store читает `:grant` из БАЗОВОГО storage, не из декоратора. (Read
-`:execution` — отдельно, защищён неугадываемым `fn-id`, низкая severity.)
-Доказано (storage-test, 9 тестов). *Полное
+`tenant-forbidden-entities #{:service :grant :domain :branch}` в
+OrgScopedStorage — тенант (org ≠ public) не может ни писать, ни читать
+привилегированные сущности (`:service` → escape, `:grant` → эскалация/
+enumeration authz, `:domain` → hijack роутинга, `:branch` → не org-scoped:
+tenant-ветка глобальна + пикер `/api/branches` перечислил бы ветки ВСЕХ org →
+тенанты заперты на `main`); платформа (public) — свободно. authz не ломается,
+т.к. grant-store читает `:grant` из БАЗОВОГО storage, не из декоратора;
+branch-резолюция читает `:branch` в public-контексте (до request-scope), так
+что гвард её не трогает. (Read `:execution` — отдельно, защищён неугадываемым
+`fn-id`, низкая severity.) Доказано (storage-test, 9 тестов). *Полное
 решение §3.3 — сэндбокс для tenant-OWNED сервисов (org на `:service` +
 `:allowed-effects` в ctx реконсилера для tenant-сервиса) — обязательно ДО того,
 как деплой сервисов станет tenant-доступным.*

@@ -142,7 +142,7 @@
   ;; or escalate via :grant / :domain. The platform (public org) may.
   (let [s (ts/org-scoped-storage (fake))]
     (testing "a tenant create of a privileged entity → :authz/forbidden"
-      (doseq [en [:service :grant :domain]]
+      (doseq [en [:service :grant :domain :branch]]
         (let [ex (try (tc/with-org "acme" (sp/create-entity s en {:id 1}))
                       nil
                       (catch clojure.lang.ExceptionInfo e e))]
@@ -152,7 +152,7 @@
       (is (thrown? clojure.lang.ExceptionInfo
             (tc/with-org "acme" (sp/update-entity s :service 1 {:enabled? true})))))
     (testing "the platform (public org) writes them freely"
-      (doseq [en [:service :grant :domain]]
+      (doseq [en [:service :grant :domain :branch]]
         (is (some? (tc/with-org tc/public-org (sp/create-entity s en {:id 2}))))))
     (testing "tenants still write their own graph entities"
       (is (some? (tc/with-org "acme" (sp/create-entity s :fn {:id 3 :name "ok"})))))))

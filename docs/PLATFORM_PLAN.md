@@ -585,11 +585,16 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        non-403 ответ — контракт, который редактор читает, чтобы прятать
        affordances. Доказано (tenant с `:write` → "write", без грантов →
        "", platform → "write,execute").
-     *Остаётся:* потребление сигнала в editor-JS (читать header в fetch-
-     wrap → прятать edit/run affordances; нужна Playwright-проверка, т.к.
-     правка центрального fetch-wrap рискованна), per-target-namespace (не
-     org-level), storage-backed store, `:terminal`/`:list-append` (R2) →
-     личные неймспейсы → workspaces;
+     - **editor-JS gating ✅** fetch-wrap читает `X-Graphden-Capabilities`
+       с каждого /api-ответа → `graphdenCapabilities` + body-классы
+       `gd-no-write`/`gd-no-execute`; CSS прячет `.more-actions-trigger`
+       (вход в ✎/+/✕/▶) при `gd-no-write`. Без аддона header отсутствует →
+       классы не ставятся → редактор без изменений. **Проверено Playwright
+       на localhost:9002:** редактор грузится чисто (fetch-wrap безопасен),
+       `graphdenCanWrite()` = true без header, CSS-гейт прячет affordance.
+     *Остаётся:* per-target-namespace (не org-level), storage-backed store,
+     per-action gating контента row-actions popover (сейчас гейтится вход),
+     `:terminal`/`:list-append` (R2) → личные неймспейсы → workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

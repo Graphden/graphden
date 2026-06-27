@@ -1151,6 +1151,14 @@ body.sidebar-collapsed .sidebar-expand-floating {
   background: var(--hover-bg);
 }
 
+/* Capability gating (PLATFORM_PLAN §4.3): a tenant the addon reports has no
+   :write capability loses the edit-actions entry (✎/+/✕/▶ all live behind
+   this trigger). No-op without the addon — the header is absent, so the
+   gd-no-write class is never set and the editor is unchanged. */
+body.gd-no-write .more-actions-trigger {
+  display: none !important;
+}
+
 /* Row-actions popover — floats outside the card to the right (or
    left if there's no room). Brief fade-in masks the position-shift
    when zoom changes apply scale/transform mid-frame. */

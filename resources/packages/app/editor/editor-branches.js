@@ -63,22 +63,51 @@ function switchToBranch(name) {
 // keeps wire shape stable for anyone running the legacy single-branch
 // backend. /partials/* is in the same boat as /api/*: server-rendered
 // fragments that read per-branch graph state.
+// Capability signal (PLATFORM_PLAN §4.3). The tenancy addon stamps
+// `X-Graphden-Capabilities` (a comma-list like "write,execute") on every
+// /api response. We read it off each response and toggle body classes the
+// editor CSS uses to hide affordances a tenant isn't granted. The header is
+// ABSENT without the addon (single-tenant) — capabilities then stay unknown
+// and everything is allowed, so the editor is unchanged.
+const CAP_HEADER = 'X-Graphden-Capabilities';
+let graphdenCapabilities = null; // null = unknown → allow all
+function captureCapabilities(resp) {
+  try {
+    const hdr = resp?.headers?.get(CAP_HEADER);
+    if (hdr === null || hdr === undefined) return;
+    graphdenCapabilities = new Set(hdr.split(',').map((s) => s.trim()).filter(Boolean));
+    document.body.classList.toggle('gd-no-write', !graphdenCapabilities.has('write'));
+    document.body.classList.toggle('gd-no-execute', !graphdenCapabilities.has('execute'));
+  } catch (_) { /* never break a fetch over a header read */ }
+}
+function graphdenCanWrite() { return !graphdenCapabilities || graphdenCapabilities.has('write'); }
+function graphdenCanExecute() { return !graphdenCapabilities || graphdenCapabilities.has('execute'); }
+window.graphdenCanWrite = graphdenCanWrite;
+window.graphdenCanExecute = graphdenCanExecute;
+
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);
   window.fetch = function branchAwareFetch(input, init) {
-    const branch = getCurrentBranchName();
-    if (branch === DEFAULT_BRANCH) return origFetch(input, init);
-    // Only add to same-origin /api/* and /partials/* — third-party
-    // fetches (CDN scripts, etc.) shouldn't see our internal header.
+    // Only touch same-origin /api/* and /partials/* — third-party fetches
+    // (CDN scripts, etc.) shouldn't see our internal header or be sniffed.
     const url = typeof input === 'string' ? input : (input?.url || '');
-    if (!url.startsWith('/api/') && !url.startsWith('/partials/')) { // api-url-drift-allow: prefix discriminator, not a URL we fetch
-      return origFetch(input, init);
+    const isInternal = url.startsWith('/api/') || url.startsWith('/partials/'); // api-url-drift-allow: prefix discriminator, not a URL we fetch
+    const branch = getCurrentBranchName();
+    let promise;
+    if (!isInternal || branch === DEFAULT_BRANCH) {
+      promise = origFetch(input, init);
+    } else {
+      const opts = Object.assign({}, init || {});
+      const headers = new Headers(opts.headers || {});
+      if (!headers.has(BRANCH_HEADER)) headers.set(BRANCH_HEADER, branch);
+      opts.headers = headers;
+      promise = origFetch(input, opts);
     }
-    const opts = Object.assign({}, init || {});
-    const headers = new Headers(opts.headers || {});
-    if (!headers.has(BRANCH_HEADER)) headers.set(BRANCH_HEADER, branch);
-    opts.headers = headers;
-    return origFetch(input, opts);
+    // Read the capability header off internal responses (headers only — the
+    // body is untouched, so no clone needed).
+    return isInternal
+      ? promise.then((resp) => { captureCapabilities(resp); return resp; })
+      : promise;
   };
 })();
 

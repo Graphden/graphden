@@ -131,6 +131,14 @@
 ;;   :exec/context {:app-router #ig/ref :tenancy/app-router
 ;;                  :request-scope #ig/ref :tenancy/request-scope}
 ;;
+;; SELF-SERVE DEPLOY (§3.4 4b) — let a tenant set its OWN org's app handler
+;; from the editor (POST /api/my-app/handler {fn-id}). The seam validates
+;; ownership + does the controlled :org update:
+;;   :tenancy/set-org-handler {}
+;;   :exec/context {:set-org-handler #ig/ref :tenancy/set-org-handler
+;;                  :app-router #ig/ref :tenancy/app-router
+;;                  :request-scope #ig/ref :tenancy/request-scope}
+;;
 ;; The addon ships its own fns-packages (e.g. an org-admin UI) via the
 ;; fns-channel seam — append to :app/packages without restating the core
 ;; list, so they load ONLY when the addon is active:

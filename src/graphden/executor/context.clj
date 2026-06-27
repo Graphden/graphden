@@ -160,7 +160,7 @@
                 per top-level execute; throws `:authz/forbidden` on a denied
                 tenant execute. Absent → no execute authorization."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
-           execute-guard app-router]}]
+           execute-guard app-router set-org-handler]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -190,7 +190,11 @@
       ;; `dispatch` BEFORE the editor/API flow: a request to a tenant's
       ;; subdomain is served by that org's handler fn (org-scoped + effect-
       ;; gated), never the editor.
-      (cond-> app-router (assoc :app-router app-router))))
+      (cond-> app-router (assoc :app-router app-router))
+      ;; Self-serve deploy seam (§3.4 4b) — `(fn [ctx fn-id] …)` the
+      ;; `:invoke-set-org-handler` base-fn calls so a tenant can point its
+      ;; own org at its own handler fn. Addon-only.
+      (cond-> set-org-handler (assoc :set-org-handler set-org-handler))))
 
 
 (defn current-time-ms

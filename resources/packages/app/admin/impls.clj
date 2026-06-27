@@ -37,8 +37,20 @@
                                         (string? handler-fn-id) parse-uuid)})))
 
 
+;; Self-serve deploy (§3.4 4b): invoke the injectable `:set-org-handler` seam
+;; (the tenancy addon's controlled-privilege update). Core stays addon-
+;; agnostic — no seam (single-tenant / no addon) → nil. The seam validates
+;; ownership + does the `:org` update; it throws :authz/forbidden (→ 403 via
+;; the request-scope) for a public/unauthorized caller.
+(defbase invoke-set-org-handler
+  [fn-id]
+  (when-let [seam (:set-org-handler ctx)]
+    (seam ctx (cond-> fn-id (string? fn-id) parse-uuid))))
+
+
 (def impls
   {:list-grants list-grants
    :create-grant create-grant
    :create-org create-org
-   :set-org-handler set-org-handler})
+   :set-org-handler set-org-handler
+   :invoke-set-org-handler invoke-set-org-handler})

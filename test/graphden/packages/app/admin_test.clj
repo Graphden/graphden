@@ -75,6 +75,19 @@
       (is (= [:org {:name "acme"}] @sink)))))
 
 
+(deftest invoke-set-org-handler-calls-the-ctx-seam
+  (load-file "resources/packages/app/admin/impls.clj")
+  (let [invoke (resolve 'graphden.packages.app.admin.impls/invoke-set-org-handler)
+        fid (random-uuid)
+        called (atom nil)
+        ctx {:set-org-handler (fn [_c fnid] (reset! called fnid) :ok)}]
+    (testing "calls the injected seam with the parsed uuid"
+      (is (= :ok (invoke {:fn-id (str fid)} ctx)))
+      (is (= fid @called)))
+    (testing "no seam (single-tenant / no addon) → nil"
+      (is (nil? (invoke {:fn-id (str fid)} {}))))))
+
+
 (deftest set-org-handler-points-org-at-its-handler-fn
   (load-file "resources/packages/app/admin/impls.clj")
   (let [set-org-handler (resolve 'graphden.packages.app.admin.impls/set-org-handler)

@@ -34,6 +34,7 @@
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.authz :as authz]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.deploy :as deploy]
     [graphden.tenancy.domain :as domain]
     [graphden.tenancy.grant :as grant]
     [graphden.tenancy.grant-schema :as grant-schema]
@@ -110,6 +111,13 @@
   ;; time-bounded. Wired onto `:exec/context`'s `:app-router`.
   (app-router/make-app-router org-resolver base-domain host-resolver
                               (or timeout-ms app-router/default-app-timeout-ms)))
+
+
+(defmethod ig/init-key :tenancy/set-org-handler [_ _]
+  ;; (§3.4 4b) Self-serve deploy seam — `(fn [ctx fn-id] …)`. Wired onto
+  ;; `:exec/context`'s `:set-org-handler`; the core `:invoke-set-org-handler`
+  ;; base-fn calls it. Validates ownership + does the controlled `:org` update.
+  deploy/set-org-handler!)
 
 
 (defmethod ig/init-key :tenancy/org-resolver [_ {:keys [subdomains]}]

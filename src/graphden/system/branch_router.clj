@@ -106,7 +106,10 @@
       (:auth-provider base-ctx) (assoc :auth-provider (:auth-provider base-ctx))
       ;; Inherit the per-namespace execute guard (§4.2) — branch execution
       ;; must enforce the same grants as the base context.
-      (:execute-guard base-ctx) (assoc :execute-guard (:execute-guard base-ctx)))))
+      (:execute-guard base-ctx) (assoc :execute-guard (:execute-guard base-ctx))
+      ;; Inherit the self-serve deploy seam (§3.4 4b) — the
+      ;; `:invoke-set-org-handler` base-fn runs in the per-branch handler ctx.
+      (:set-org-handler base-ctx) (assoc :set-org-handler (:set-org-handler base-ctx)))))
 
 
 (defn- ring-callable-for-ctx

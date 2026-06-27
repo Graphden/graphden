@@ -38,6 +38,7 @@
                   :create-grant-route
                   :create-org-route
                   :set-org-handler-route
+                  :set-my-app-handler-route
                   :partial-row-actions
                   :demo-contact
                   :health

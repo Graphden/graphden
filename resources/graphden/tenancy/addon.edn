@@ -126,7 +126,8 @@
 ;; the exec context:
 ;;   :tenancy/app-router {:org-resolver  #ig/ref :tenancy/org-resolver
 ;;                        :base-domain   "graphden.app"
-;;                        :host-resolver #ig/ref :tenancy/host-resolver}
+;;                        :host-resolver #ig/ref :tenancy/host-resolver
+;;                        :timeout-ms    10000}  ; per-request handler budget
 ;;   :exec/context {:app-router #ig/ref :tenancy/app-router
 ;;                  :request-scope #ig/ref :tenancy/request-scope}
 ;;

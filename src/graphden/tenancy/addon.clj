@@ -104,11 +104,12 @@
   (tauth/token-map-provider (or tokens {})))
 
 
-(defmethod ig/init-key :tenancy/app-router [_ {:keys [org-resolver base-domain host-resolver]}]
+(defmethod ig/init-key :tenancy/app-router [_ {:keys [org-resolver base-domain host-resolver timeout-ms]}]
   ;; (§3.4 FaaS) The seam the branch-router's dispatch consults first: a
-  ;; tenant-subdomain request is served by that org's handler fn, sandboxed.
-  ;; Wired onto `:exec/context`'s `:app-router`.
-  (app-router/make-app-router org-resolver base-domain host-resolver))
+  ;; tenant-subdomain request is served by that org's handler fn, sandboxed +
+  ;; time-bounded. Wired onto `:exec/context`'s `:app-router`.
+  (app-router/make-app-router org-resolver base-domain host-resolver
+                              (or timeout-ms app-router/default-app-timeout-ms)))
 
 
 (defmethod ig/init-key :tenancy/org-resolver [_ {:keys [subdomains]}]

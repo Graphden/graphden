@@ -463,7 +463,7 @@ org-scoping применяются автоматически. Самая сло
 4a. ✅ Set-handler механизм: `set-org-handler` base-fn (update `:org.handler-fn-id` by name, str→uuid) + `POST /api/orgs/handler` (platform-only). Теперь app-router отдаёт реальный handler, когда он установлен.
 4b. ← СЛЕДУЮЩИЙ (self-serve) — тенант ставит СВОЙ handler: seam `:set-org-handler` (валидирует, что fn принадлежит org, + controlled update `:org` через base storage) + core route + editor-JS «set as app handler». Locked-fn через грант.
 6. R8 per-org handler-кэш (перф — `:org` читается на каждый app-запрос).
-7. Resource-лимиты (timeout/memory на tenant-handler).
+7. ✅ (timeout) Resource-лимиты: `run-with-timeout` в app-router (future + deref-timeout → 504; `future-cancel` + interrupt-aware `*cancel-check*` → graph-handler кооперативно отменяется, не течёт тред). `:timeout-ms` конфигурируем (default 10s). *Остаётся:* memory-лимиты (JVM не кэпит per-thread память — нужен отдельный механизм; tight CPU-loop в impl не отменяется, но тенанты пишут только графы → каждый execute-step проверяет cancel).
 8. Кастомные домены в app-routing (host→org уже есть; app-router уже принимает `host-resolver`).
 
 ---

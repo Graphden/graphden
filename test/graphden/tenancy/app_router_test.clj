@@ -53,6 +53,17 @@
              (app/app-handler-target storage (req "ghost.graphden.app") resolver "graphden.app" nil))))))
 
 
+(deftest run-with-timeout-test
+  (testing "a fast thunk returns its value"
+    (is (= :done (app/run-with-timeout 1000 (fn [] :done)))))
+  (testing "an overrunning thunk → ::timeout (request bounded)"
+    (is (= :graphden.tenancy.app-router/timeout
+           (app/run-with-timeout 30 (fn [] (Thread/sleep 2000) :done)))))
+  (testing "a throwing thunk → ::error"
+    (is (= :graphden.tenancy.app-router/error
+           (app/run-with-timeout 1000 (fn [] (throw (RuntimeException. "boom"))))))))
+
+
 (deftest make-app-router-non-execution-paths
   (let [handler-id (random-uuid)
         storage (org-storage {"acme" handler-id "beta" nil})

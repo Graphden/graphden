@@ -160,7 +160,7 @@
                 per top-level execute; throws `:authz/forbidden` on a denied
                 tenant execute. Absent → no execute authorization."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
-           execute-guard]}]
+           execute-guard app-router]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -185,7 +185,12 @@
       ;; the branch-router's `dispatch`.
       (cond-> request-scope (assoc :request-scope request-scope))
       ;; Per-namespace execute guard (§4.2) — consulted by `execute`.
-      (cond-> execute-guard (assoc :execute-guard execute-guard))))
+      (cond-> execute-guard (assoc :execute-guard execute-guard))
+      ;; App-router seam (§3.4 FaaS) — consulted by the branch-router's
+      ;; `dispatch` BEFORE the editor/API flow: a request to a tenant's
+      ;; subdomain is served by that org's handler fn (org-scoped + effect-
+      ;; gated), never the editor.
+      (cond-> app-router (assoc :app-router app-router))))
 
 
 (defn current-time-ms

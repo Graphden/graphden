@@ -456,14 +456,14 @@ org-scoping применяются автоматически. Самая сло
   механика, что в request-scope).
 
 **Bounded-шаги (план реализации):**
-1. `:org`-сущность + схема (`tenancy/org_schema`), tenant-forbidden, addon-wiring. ← ТЕКУЩИЙ
-2. Endpoint регистрации org (платформенный fn-def: создать `:org` + вывести поддомен).
-3. App-routing шов: отделить app-запрос (поддомен→org-контекст, аноним) от editor/API (токен).
-4. Handler-слот: provisioning per-org locked `app-handler` + резолв `handler-fn-id` из `:org`.
-5. Связать app-routing → исполнять handler org-scoped + effect-gated.
-6. R8 per-org handler-кэш (перф).
-7. Resource-лимиты (timeout/memory).
-8. Кастомные домены в app-routing (host→org уже есть).
+1. ✅ `:org`-сущность + схема (`tenancy/org_schema`), tenant-forbidden, addon-wiring.
+2. ✅ Endpoint регистрации org (`POST /api/orgs`, platform-only).
+3. ✅ App-routing шов (`tenancy/app-router` + `:app-router` на ctx + dispatch): поддомен→org→исполнить `:org.handler-fn-id`; apex → editor/API.
+5. ✅ Исполнение handler org-scoped + effect-gated (в app-router: `with-org` + `:allowed-effects` + `:execute-guard nil`).
+4. ← СЛЕДУЮЩИЙ — Handler-слот: provisioning per-org locked `app-handler` + как тенант СТАВИТ `handler-fn-id` (сейчас всегда nil → app-router отдаёт 404 «not configured»).
+6. R8 per-org handler-кэш (перф — `:org` читается на каждый app-запрос).
+7. Resource-лимиты (timeout/memory на tenant-handler).
+8. Кастомные домены в app-routing (host→org уже есть; app-router уже принимает `host-resolver`).
 
 ---
 

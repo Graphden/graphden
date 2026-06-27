@@ -119,6 +119,17 @@
 ;;   ;; (host-resolver = a graphden.tenancy.domain/static-host-resolver over
 ;;   ;;  the verified map; swap for a storage-backed one in production)
 ;;
+;; FaaS APP-ROUTING (§3.4) — serve a tenant's subdomain/domain via that org's
+;; handler fn (`:org.handler-fn-id`), org-scoped + effect-gated, NOT the
+;; editor. Dispatch consults this BEFORE the editor/API flow; apex falls
+;; through. Wire the same resolvers onto :tenancy/app-router and hang it on
+;; the exec context:
+;;   :tenancy/app-router {:org-resolver  #ig/ref :tenancy/org-resolver
+;;                        :base-domain   "graphden.app"
+;;                        :host-resolver #ig/ref :tenancy/host-resolver}
+;;   :exec/context {:app-router #ig/ref :tenancy/app-router
+;;                  :request-scope #ig/ref :tenancy/request-scope}
+;;
 ;; The addon ships its own fns-packages (e.g. an org-admin UI) via the
 ;; fns-channel seam — append to :app/packages without restating the core
 ;; list, so they load ONLY when the addon is active:

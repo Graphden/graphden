@@ -652,7 +652,7 @@
 
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
-             execute-guard]}]
+             execute-guard app-router]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -684,7 +684,10 @@
                    ;; wires it; absent in core (single-tenant).
                    request-scope (assoc :request-scope request-scope)
                    ;; Per-namespace execute guard (§4.2). Addon-only.
-                   execute-guard (assoc :execute-guard execute-guard))]
+                   execute-guard (assoc :execute-guard execute-guard)
+                   ;; App-router seam (§3.4 FaaS) — serves a tenant's subdomain
+                   ;; via that org's handler fn. Addon-only.
+                   app-router (assoc :app-router app-router))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client))))

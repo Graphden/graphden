@@ -80,6 +80,15 @@
              (can? store user capability ns-path))))
 
 
+(defn has-capability?
+  "Does `subject` hold `capability` (or `:admin`) in ANY namespace? The
+   coarse 'is this subject a writer / executor at all' gate — the precise
+   per-target-namespace check runs later (writes: at the storage layer)."
+  [store subject capability]
+  (boolean (some #(or (= (:capability %) :admin) (= (:capability %) capability))
+                 (grants-for store subject))))
+
+
 (defn request->capability
   "The capability a Ring request needs: an `/execute` call → `:execute`, a
    mutating method (POST/PUT/PATCH/DELETE) → `:write`, anything else →
@@ -92,12 +101,13 @@
 
 
 (defn request-permitted?
-  "Coarse org-level enforcement for the request-scope gate: reads are open
-   (OrgScopedStorage governs read visibility); writes / execute require the
-   matching capability on the request's `org` (or broader — a root / org
-   grant covers it). Per-TARGET-namespace checks are a refinement that needs
-   the target ns lifted out of the request."
-  [store principal request org]
+  "Coarse request-scope gate: reads are open (OrgScopedStorage governs read
+   visibility); a write / execute requires the subject to hold that
+   capability SOMEWHERE (`has-capability?`). It deliberately does NOT pin the
+   org as the namespace — that would block a user granted only on a
+   sub-namespace. The PRECISE per-target-namespace check runs at the storage
+   layer (`tenancy.authz`), which can see the entity's `:namespace-id`."
+  [store principal request _org]
   (let [cap (request->capability request)]
     (or (= cap :read)
-        (authorized? store principal cap org))))
+        (has-capability? store (:user principal) cap))))

@@ -163,6 +163,27 @@
       (is (= "write,execute" (caps nil))))))
 
 
+(deftest authz-forbidden-throw-maps-to-403
+  ;; A per-namespace denial is thrown at the storage layer as :authz/forbidden;
+  ;; the request-scope catches it and returns a clean 403.
+  (let [grant-store (ig/init-key :tenancy/grant-store
+                                 {:grants [{:subject "alice" :capability :write :namespace "acme"}]})
+        scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})
+        base-ctx {:auth-provider provider :request-scope scope}
+        post (fn [handler]
+               (br/dispatch (router-with base-ctx handler)
+                            {:request-method :post :uri "/api/entities/fn"
+                             :headers {"authorization" "Bearer alice-tok"} :query-string nil}))]
+    (testing "a downstream :authz/forbidden becomes a 403"
+      (is (= 403 (:status (post (fn [_req] (throw (ex-info "no" {:type :authz/forbidden}))))))))
+    (testing "other exceptions are NOT swallowed as 403"
+      (is (thrown? clojure.lang.ExceptionInfo
+            (post (fn [_req] (throw (ex-info "boom" {:type :other})))))))
+    (testing "*current-principal* is bound for the handler / storage guard"
+      (is (= "alice" (post (fn [_req] (:user tc/*current-principal*))))))))
+
+
 (deftest grant-enforcement-is-opt-in
   (let [scope (ig/init-key :tenancy/request-scope {})       ; no grant-store
         provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})

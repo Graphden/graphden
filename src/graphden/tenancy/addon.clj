@@ -31,6 +31,7 @@
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
     [graphden.tenancy.auth :as tauth]
+    [graphden.tenancy.authz :as authz]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.grant :as grant]
     [graphden.tenancy.rls :as rls]
@@ -38,10 +39,12 @@
     [integrant.core :as ig]))
 
 
-(defmethod ig/init-key :org/scoped-storage [_ {:keys [base scoped-entities]}]
-  (if scoped-entities
-    (ts/org-scoped-storage base scoped-entities)
-    (ts/org-scoped-storage base)))
+(defmethod ig/init-key :org/scoped-storage [_ {:keys [base scoped-entities grant-store]}]
+  ;; `grant-store` (optional) turns on per-target-namespace write enforcement
+  ;; (§4.2 refinement) — a denied :fn write throws :authz/forbidden, which
+  ;; the request-scope maps to 403. Absent → org-scoping + RLS only.
+  (let [authorize-write (when grant-store (authz/authorize-writer grant-store base))]
+    (ts/org-scoped-storage base (or scoped-entities ts/default-scoped-entities) authorize-write)))
 
 
 (defmethod ig/init-key :tenancy/datasource-wrap [_ _]
@@ -110,19 +113,34 @@
     (let [principal (when-let [p (:auth-provider ctx)]
                       (auth/authenticate p request))
           org (tc/org-from-principal principal)
-          run #(with-capabilities-header
-                 (thunk)
-                 (request-capabilities grant-store principal org))]
-      (tc/with-org org
-                   (cond
-                     ;; Platform / admin — no restriction.
-                     (= org tc/public-org)
-                     (run)
-                     ;; Tenant lacking the capability for this request → 403.
-                     (and grant-store
-                          (not (grant/request-permitted? grant-store principal request org)))
-                     forbidden-response
-                     ;; Tenant — gate effects (env / io / network / process), run.
-                     :else
-                     (binding [cr/*allowed-effects* cr/default-cloud-allowed-effects]
-                       (run)))))))
+          ;; Run the handler, attach the capability header, and map a
+          ;; per-namespace `:authz/forbidden` thrown at the storage layer to
+          ;; a clean 403 (the storage guard is where the target namespace is
+          ;; known — see tenancy.authz).
+          run (fn []
+                (try
+                  (with-capabilities-header
+                    (thunk)
+                    (request-capabilities grant-store principal org))
+                  (catch clojure.lang.ExceptionInfo e
+                    (if (= :authz/forbidden (:type (ex-data e)))
+                      forbidden-response
+                      (throw e)))))]
+      ;; `*current-principal*` is read by the storage-layer per-namespace
+      ;; guard; `*current-org*` scopes storage + RLS.
+      (binding [tc/*current-principal* principal]
+        (tc/with-org org
+                     (cond
+                       ;; Platform / admin — no restriction.
+                       (= org tc/public-org)
+                       (run)
+                       ;; Tenant who isn't a writer/executor at all for this request →
+                       ;; 403 (the precise per-namespace check runs in `run` via the
+                       ;; storage guard).
+                       (and grant-store
+                            (not (grant/request-permitted? grant-store principal request org)))
+                       forbidden-response
+                       ;; Tenant — gate effects (env / io / network / process), run.
+                       :else
+                       (binding [cr/*allowed-effects* cr/default-cloud-allowed-effects]
+                         (run))))))))

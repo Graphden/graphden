@@ -592,9 +592,19 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        классы не ставятся → редактор без изменений. **Проверено Playwright
        на localhost:9002:** редактор грузится чисто (fetch-wrap безопасен),
        `graphdenCanWrite()` = true без header, CSS-гейт прячет affordance.
-     *Остаётся:* per-target-namespace (не org-level), storage-backed store,
-     per-action gating контента row-actions popover (сейчас гейтится вход),
-     `:terminal`/`:list-append` (R2) → личные неймспейсы → workspaces;
+     - **per-target-namespace ✅** request-scope теперь coarse-гейт
+       (`has-capability?` — «писатель/исполнитель вообще?»), а ТОЧНУЮ
+       проверку делает storage-слой (`tenancy.authz/authorize-writer`):
+       резолвит ns-path из дерева `:ns` (name+parent-id), проверяет грант
+       против реального target-namespace, бросает `:authz/forbidden` →
+       request-scope ловит → 403. `*current-principal*` биндится в
+       request-scope. Доказано: unit (ns-path/writable?/guard) + **real-
+       Postgres** (alice с грантом на acme.team пишет туда, но не в acme;
+       admin/public не гейтится). Скоуп: `:fn`-записи с `:namespace-id`;
+       прочие сущности/update без ns-id — coarse-гейт + RLS (follow-up).
+     *Остаётся:* storage-backed grant-store, per-action gating контента
+     row-actions popover (сейчас гейтится вход), `:terminal`/`:list-append`
+     (R2) → личные неймспейсы → workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

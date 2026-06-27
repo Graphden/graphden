@@ -57,7 +57,14 @@
 ;; OrgScoped + the effect gate):
 ;;
 ;;   {:graphden/require [graphden.tenancy.addon]
-;;    :tenancy/grant-store {:grants [{:subject "alice" :capability :write :namespace "acme"}]}
-;;    :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store}}
+;;    :tenancy/grant-store {:grants [{:subject "alice" :capability :write :namespace "acme.team"}]}
+;;    :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store}
+;;    ;; per-TARGET-namespace write enforcement (also wire the store here):
+;;    :org/scoped-storage {:base #ig/ref :app/storage
+;;                         :grant-store #ig/ref :tenancy/grant-store}}
 ;;
-;; A tenant write / execute the user isn't granted then returns 403.
+;; request-scope does the coarse "is this user a writer/executor at all"
+;; check (403); the storage guard does the precise per-namespace check
+;; (a :fn write to a namespace the user lacks :write on → 403). With the
+;; store on request-scope only, enforcement is org-coarse; add it to
+;; :org/scoped-storage too for per-namespace.

@@ -55,13 +55,22 @@
   (assoc data :org-id (tc/current-org)))
 
 
+(defn- guard-write!
+  "Run the per-namespace write guard when one is configured. It throws
+   `:authz/forbidden` on a denied write (caught → 403 by the request-scope)."
+  [authorize-write entity-name data]
+  (when authorize-write
+    (authorize-write entity-name data)))
+
+
 (defrecord OrgScopedStorage
-  [base scoped?]
+  [base scoped? authorize-write]
 
   sp/StorageCRUD
 
   (create-entity
     [_ entity-name data]
+    (guard-write! authorize-write entity-name data)
     (sp/create-entity base entity-name
                       (cond-> data (scoped? entity-name) stamp)))
 
@@ -74,6 +83,7 @@
 
   (update-entity
     [_ entity-name id data]
+    (guard-write! authorize-write entity-name data)
     (if (scoped? entity-name)
       ;; Only own rows are writable, and a tenant can never be reassigned.
       (when (some-> (sp/read-entity base entity-name id) own?)
@@ -111,6 +121,7 @@
 
   (create-entities
     [_ entity-name data-seq]
+    (run! #(guard-write! authorize-write entity-name %) data-seq)
     (sp/create-entities base entity-name
                         (cond->> data-seq (scoped? entity-name) (mapv stamp))))
 
@@ -131,6 +142,7 @@
 
   (upsert-entities
     [_ entity-name data-seq]
+    (run! #(guard-write! authorize-write entity-name %) data-seq)
     (sp/upsert-entities base entity-name
                         (cond->> data-seq (scoped? entity-name) (mapv stamp))))
 
@@ -216,7 +228,11 @@
 (defn org-scoped-storage
   "Wrap `base` so reads see {current-org, public} and writes stamp the
    current org. `scoped-entities` (default `default-scoped-entities`) is the
-   set of entity names that carry a tenant."
-  ([base] (org-scoped-storage base default-scoped-entities))
-  ([base scoped-entities]
-   (->OrgScopedStorage base (set scoped-entities))))
+   set of entity names that carry a tenant. `authorize-write` (optional) is a
+   `(fn [entity-name data])` write guard — `tenancy.authz/authorize-writer`
+   — that throws `:authz/forbidden` on a denied per-namespace write; nil =
+   no per-namespace enforcement."
+  ([base] (org-scoped-storage base default-scoped-entities nil))
+  ([base scoped-entities] (org-scoped-storage base scoped-entities nil))
+  ([base scoped-entities authorize-write]
+   (->OrgScopedStorage base (set scoped-entities) authorize-write)))

@@ -8,7 +8,9 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.authz :as authz]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.grant :as grant]
     [graphden.tenancy.storage :as ts]))
 
 
@@ -41,3 +43,26 @@
     (testing "the owner can delete its own row"
       (tc/with-org "acme" (sp/delete-entity s :fn acme-id))
       (is (nil? (tc/with-org "acme" (sp/read-entity s :fn acme-id)))))))
+
+
+(deftest per-namespace-write-enforcement-against-postgres
+  ;; Per-target-namespace write gate (§4.2): the storage guard resolves the
+  ;; fn's namespace path from the real :ns tree and checks the grant.
+  (let [base (setup/create-test-storage)
+        acme-ns (sp/create-entity base :ns {:name "acme"})
+        team-ns (sp/create-entity base :ns {:name "team" :parent-id (:id acme-ns)})
+        grants (grant/static-grant-store
+                 [{:subject "alice" :capability :write :namespace "acme.team"}])
+        s (ts/org-scoped-storage base ts/default-scoped-entities
+                                 (authz/authorize-writer grants base))]
+    (tc/with-org "acme"
+                 (binding [tc/*current-principal* {:user "alice"}]
+                   (testing "alice (granted on acme.team) can create a fn there"
+                     (is (some? (sp/create-entity s :fn {:name "pns-ok" :namespace-id (:id team-ns)}))))
+                   (testing "...but NOT in acme (root) — her grant doesn't cover the parent"
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           (sp/create-entity s :fn {:name "pns-bad" :namespace-id (:id acme-ns)}))))))
+    (testing "admin (public org) writes anywhere — guard skips"
+      (tc/with-org tc/public-org
+                   (binding [tc/*current-principal* {:user "root"}]
+                     (is (some? (sp/create-entity s :fn {:name "pns-admin" :namespace-id (:id acme-ns)}))))))))

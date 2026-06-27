@@ -35,6 +35,14 @@
   *current-org*)
 
 
+(def ^:dynamic *current-principal*
+  "The authenticated principal (`AuthProvider` result) for the current
+   request, bound by the addon's request-scope. Read by per-namespace grant
+   enforcement at the storage layer, which needs the `:user`. nil = no
+   authenticated principal."
+  nil)
+
+
 (defn org-from-principal
   "The org id carried by an auth principal — the addon's provider sets
    `:org` (see `auth/AuthProvider`). Falls back to the shared public org

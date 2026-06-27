@@ -464,7 +464,7 @@ org-scoping применяются автоматически. Самая сло
 4b. ← СЛЕДУЮЩИЙ (self-serve) — тенант ставит СВОЙ handler: seam `:set-org-handler` (валидирует, что fn принадлежит org, + controlled update `:org` через base storage) + core route + editor-JS «set as app handler». Locked-fn через грант.
 6. ✅ R8 per-org handler-кэш: `cached-handler-fn-id` (TTL-кэш org→handler-fn-id в app-router, default 5s) — убирает `:org`-чтение на каждый app-запрос; смена handler'а пропагируется в пределах TTL. (Compiled handler уже в shared-реестре по fn-id; кэшируем только lookup.)
 7. ✅ (timeout) Resource-лимиты: `run-with-timeout` в app-router (future + deref-timeout → 504; `future-cancel` + interrupt-aware `*cancel-check*` → graph-handler кооперативно отменяется, не течёт тред). `:timeout-ms` конфигурируем (default 10s). *Остаётся:* memory-лимиты (JVM не кэпит per-thread память — нужен отдельный механизм; tight CPU-loop в impl не отменяется, но тенанты пишут только графы → каждый execute-step проверяет cancel).
-8. Кастомные домены в app-routing (host→org уже есть; app-router уже принимает `host-resolver`).
+8. ✅ Кастомные домены в app-routing: `resolve-app-org` = `(or subdomain host-resolver)`, app-router принимает `host-resolver` → верифицированный кастомный домен → handler org тем же путём.
 
 ---
 

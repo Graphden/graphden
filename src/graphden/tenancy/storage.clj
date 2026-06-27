@@ -27,6 +27,23 @@
   #{:fn :slot :fn-slot :binding :binding-list-item})
 
 
+(def tenant-forbidden-entities
+  "Privileged platform entities a tenant (org ≠ public) may NEVER write — they
+   aren't org-isolated, and writing them escalates out of the sandbox:
+
+   - `:service` — runs via the reconciler in an UNSANDBOXED ctx (no effect
+     gate), so a tenant deploying an `:http-server` service would escape the
+     cloud effect restrictions (env / io / network / process) entirely.
+   - `:grant`   — a tenant could grant itself `:admin` and escalate authz.
+   - `:domain`  — a tenant could hijack custom-domain → org routing.
+
+   Platform / admin (public org) writes them freely. New privileged entity
+   types MUST be added here. (The sandbox for tenant-OWNED services — §3.3 —
+   is the proper long-term answer; until it exists, deployment is platform-
+   only.)"
+  #{:service :grant :domain})
+
+
 (defn- row-org
   "A row's tenant — NULL `:org-id` (the column default for core writes that
    never went through this decorator) means the shared public org."
@@ -56,9 +73,19 @@
 
 
 (defn- guard-write!
-  "Run the per-namespace write guard when one is configured. It throws
-   `:authz/forbidden` on a denied write (caught → 403 by the request-scope)."
+  "Enforce tenant write policy, then run the per-namespace write guard when
+   one is configured. Both throw `:authz/forbidden` on a denied write (caught
+   → 403 by the request-scope).
+
+   First, the unconditional tenant invariant (independent of any grant store):
+   a tenant may not write a `tenant-forbidden-entities` type — this is what
+   keeps a tenant from deploying an unsandboxed `:service` or escalating via
+   `:grant`."
   [authorize-write entity-name data]
+  (when (and (not= (tc/current-org) tc/public-org)
+             (contains? tenant-forbidden-entities entity-name))
+    (throw (ex-info (str "forbidden: tenants may not write privileged entity " entity-name)
+                    {:type :authz/forbidden :entity entity-name})))
   (when authorize-write
     (authorize-write entity-name data)))
 

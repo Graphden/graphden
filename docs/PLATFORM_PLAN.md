@@ -373,6 +373,21 @@ per-branch `ExecutionContext`, reconciler). Пользователь делае�
 **Конкретный баг-риск (R8):** LRU-кэш per-branch хендлеров (`max 16`) должен
 стать **per-org**, иначе ветки/хендлеры протекают между организациями.
 
+**🔴 SANDBOX-предусловие (найдено + закрыт временный риск):** `:http-server`-
+сервис биндит СВОЙ порт, его хендлер исполняется в ctx реконсилера, где НЕТ
+`:allowed-effects` → tenant-задеплоенный сервис исполнялся бы **вне effect-
+gate** (env/io/network/process), обходя весь облачный сэндбокс. Плюс `:service`
+не org-scoped, а per-namespace write-guard пропускал не-`:fn`. То есть тенант с
+любым write-грантом мог `POST /api/entities/service` и развернуть
+несэндбокснутый веб-сервер. **Закрыто (storage-слой):**
+`tenant-forbidden-entities #{:service :grant :domain}` в OrgScopedStorage —
+тенант (org ≠ public) не может писать привилегированные сущности
+(`:service` → escape, `:grant` → эскалация authz, `:domain` → hijack
+роутинга); платформа (public) — свободно. Доказано (storage-test). *Полное
+решение §3.3 — сэндбокс для tenant-OWNED сервисов (org на `:service` +
+`:allowed-effects` в ctx реконсилера для tenant-сервиса) — обязательно ДО того,
+как деплой сервисов станет tenant-доступным.*
+
 ---
 
 ## 4. ФАЗА 3 — Пользователи и права

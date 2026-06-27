@@ -135,3 +135,24 @@
         "acme sees only its own (no public rows here)")
     (is (= 1 (count (tc/with-org "beta" (sp/query-entities s :fn {}))))
         "beta sees only its own — full isolation")))
+
+
+(deftest tenants-cannot-write-privileged-entities
+  ;; Sandbox invariant: a tenant must not deploy a :service (runs unsandboxed)
+  ;; or escalate via :grant / :domain. The platform (public org) may.
+  (let [s (ts/org-scoped-storage (fake))]
+    (testing "a tenant create of a privileged entity → :authz/forbidden"
+      (doseq [en [:service :grant :domain]]
+        (let [ex (try (tc/with-org "acme" (sp/create-entity s en {:id 1}))
+                      nil
+                      (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex) (str en " create must be denied for a tenant"))
+          (is (= :authz/forbidden (:type (ex-data ex)))))))
+    (testing "a tenant update of a privileged entity is denied too"
+      (is (thrown? clojure.lang.ExceptionInfo
+            (tc/with-org "acme" (sp/update-entity s :service 1 {:enabled? true})))))
+    (testing "the platform (public org) writes them freely"
+      (doseq [en [:service :grant :domain]]
+        (is (some? (tc/with-org tc/public-org (sp/create-entity s en {:id 2}))))))
+    (testing "tenants still write their own graph entities"
+      (is (some? (tc/with-org "acme" (sp/create-entity s :fn {:id 3 :name "ok"})))))))

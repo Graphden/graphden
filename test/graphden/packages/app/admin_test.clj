@@ -64,3 +64,12 @@
       (create-grant {:subject "carol" :capability "admin" :namespace "ops"}
                     {:storage (capturing-storage sink)})
       (is (= [:grant {:subject "carol" :capability "admin" :namespace "ops"}] @sink)))))
+
+
+(deftest create-org-registers-an-org-entity
+  (load-file "resources/packages/app/admin/impls.clj")
+  (let [create-org (resolve 'graphden.packages.app.admin.impls/create-org)
+        sink (atom nil)]
+    (testing "the impl creates an :org from its name (= slug = subdomain)"
+      (create-org {:name "acme"} {:storage (capturing-storage sink)})
+      (is (= [:org {:name "acme"}] @sink)))))

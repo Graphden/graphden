@@ -236,4 +236,45 @@
   {:name :create-grant-route
    :description "POST /api/grants — create a grant from a form-encoded body (subject/capability/namespace). Auth-required."
    :parent :post
-   :args {:path "/api/grants" :handler :_grant-create-handler}}]}
+   :args {:path "/api/grants" :handler :_grant-create-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; ORG REGISTRATION (§3.4 step 2) — POST /api/orgs. Platform-only: a
+  ;; tenant POST is rejected by OrgScoped (`:org` is tenant-forbidden), so
+  ;; only the operator (public org) registers orgs. The org `name` IS the
+  ;; subdomain (identity resolver), so registration = creating the row.
+  ;; ---------------------------------------------------------------------
+  {:name :create-org
+   :description "Register an :org by name (= slug = subdomain). Reads the tenancy addon's :org entity; throws if absent (addon inactive)."
+   :args {:name {:type :text :description "Org slug — becomes the subdomain and the *current-org* value."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_org-create-form-data
+   :parent :parse-form-body}
+
+  {:name :_org-create-name
+   :parent :get
+   :args {:coll :_org-create-form-data :key {:value :name} :default {:value ""}}}
+
+  {:name :_org-create-do
+   :parent :create-org
+   :args {:name :_org-create-name}}
+
+  {:name :_org-create-id
+   :parent :get
+   :args {:coll :_org-create-do :key {:value :id} :default {:value ""}}}
+
+  {:name :_org-create-id-text
+   :parent :to-str
+   :args {:value :_org-create-id}}
+
+  {:name :_org-create-handler
+   :description "Ring handler for POST /api/orgs — registers the org and returns its new id as text/html."
+   :parent :html-ok-response
+   :args {:body :_org-create-id-text}}
+
+  {:name :create-org-route
+   :description "POST /api/orgs — register an org from a form-encoded body (name). Auth-required; platform-only (tenant writes of :org are denied)."
+   :parent :post
+   :args {:path "/api/orgs" :handler :_org-create-handler}}]}

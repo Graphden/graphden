@@ -36,6 +36,7 @@
                   :partial-secrets-panel
                   :partial-grants-admin
                   :create-grant-route
+                  :create-org-route
                   :partial-row-actions
                   :demo-contact
                   :health

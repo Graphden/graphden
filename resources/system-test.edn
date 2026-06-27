@@ -19,5 +19,9 @@
  :exec/base-fns
  {:storage #ig/ref :db/versioned}
 
+ :auth/provider
+ {:token #or [#env AUTH_TOKEN ""]}
+
  :exec/context
- {:storage #ig/ref :db/versioned}}
+ {:storage #ig/ref :db/versioned
+  :auth-provider #ig/ref :auth/provider}}

@@ -28,8 +28,8 @@
   ;; inline to gate conditional buttons.
 
   {:name :request-authed?
-   :description "True iff the current request carries a valid `Authorization: Bearer <token>` that matches `AUTH_TOKEN`. Public wrapper over the existing `:_bearer-equals-env?` predicate in `web/ring-adapter` — promoted so app-level partials can read it without crossing the `_`-private boundary."
-   :parent :_bearer-equals-env?}
+   :description "True iff the current request authenticated. Public wrapper over the provider-agnostic `:request-authenticated?` seam (web/ring-adapter) — promoted so app-level partials read it without crossing the `_`-private boundary. (Was the bearer-specific `:_bearer-equals-env?`; now follows whatever auth provider is wired — single-token in core, session/JWT in the tenancy addon.)"
+   :parent :request-authenticated?}
 
   ;; =============================================================================
   ;; FN ROW READER — single fn entity by id

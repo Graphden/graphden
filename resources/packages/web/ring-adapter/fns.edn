@@ -248,76 +248,27 @@
                      :description "Concrete router callable invoked per request. Bound by the consumer (typically a `:router` descendant)."}}}
 
   ;; =============================================================================
-  ;; AUTH — Bearer token primitives (opinionated defaults)
+  ;; AUTH SEAM (PLATFORM_PLAN §3.0) — the authentication DECISION delegates
+  ;; to the context's pluggable `:auth-provider`. Core wires the default
+  ;; single-token provider; the tenancy addon swaps it for session/JWT.
+  ;; The middleware + `:request-authed?` read ONLY `:request-authenticated?`,
+  ;; so they're provider-agnostic.
   ;; =============================================================================
 
-  ;; nil when AUTH_TOKEN is unset. `token-valid?` below explicitly
-  ;; rejects unset / blank env-tokens, so an unconfigured server
-  ;; cleanly returns 401 for every auth-required request instead of
-  ;; 500-ing through `env-required`'s throw. The `(= nil nil)` and
-  ;; `(= "" "")` bypasses are closed by the non-blank gate, not by
-  ;; env's throw.
-  {:name :auth-token-from-env
-   :description "`AUTH_TOKEN` env var, or nil when unset. `token-valid?` rejects unset / blank env-tokens to prevent the bypass — so a missing or empty AUTH_TOKEN means \"every authed request returns 401\", not \"the empty Bearer token validates\"."
-   :parent :env
-   :return-type :nullable-text
-   :args {:name "AUTH_TOKEN"}}
+  {:name :authenticate-request
+   :description "Authenticate the current request via the context's `:auth-provider` (single-token by default; session/JWT in the tenancy addon). Returns the principal — the CORE-visible contract is `{:authenticated? bool}`. A real provider also returns `:user`/`:org`, read by addon fn-defs that know that shape; core only contracts on `:authenticated?`."
+   :args {:request {:type :ring-request-shape :description "The Ring request (auth provider extracts creds from it)."}}
+   :return-type {:authenticated? :bool}}
 
-  {:name :_auth-token-blank?
-   :description "True iff `AUTH_TOKEN` is nil OR contains only whitespace. Nil-safe — `:blank?` returns true for nil."
-   :parent :blank?
-   :return-type :bool
-   :args {:string :auth-token-from-env}}
+  {:name :_request-principal
+   :description "Principal map for the current request (free arg `:request` propagates up)."
+   :parent :authenticate-request}
 
-  ;; Stricter than `some?`: rejects `AUTH_TOKEN=\"\"` and
-  ;; `AUTH_TOKEN=\"   \"` too. Defense in depth — without this the
-  ;; `(= \"\" \"\")` shape in `_bearer-equals-env?` would auth anyone
-  ;; sending `Authorization: Bearer ` (with no token after) when the
-  ;; operator misconfigured AUTH_TOKEN to an empty string.
-  {:name :_auth-token-configured?
-   :parent :not
-   :return-type :bool
-   :args {:value :_auth-token-blank?}}
-
-  ;; Use the constant-time comparator, NOT `:equal?` — a plain `=` on
-  ;; the bearer token leaks a per-byte timing channel that lets an
-  ;; attacker probe one matching prefix at a time. See
-  ;; `:constant-time-equal?` doc for the underlying invariant.
-  {:name :_bearer-equals-env?
-   :parent :constant-time-equal?
-   :return-type :bool
-   :args {:a :bearer-token :b :auth-token-from-env}}
-
-  ;; Missing `Authorization` header → `get` returns nil; downstream
-  ;; `has-bearer-prefix?` is nil-safe (returns false), so no default
-  ;; needed here. Keeps the node free of literal-default clutter.
-  {:name :authorization-header
-   :description "Raw `Authorization` header from the request (nil when absent)."
+  {:name :request-authenticated?
+   :description "True iff the current request authenticated, provider-agnostic. The single seam both the auth middleware and `app.lookups/:request-authed?` read — replaces the old bearer-specific `:token-valid?`."
    :parent :get
-   :args {:coll :ring-headers :key "authorization"}}
-
-  {:name :has-bearer-prefix?
-   :description "True iff the `Authorization` header starts with `\"Bearer \"`. Nil-safe — false for missing header."
-   :parent :str-starts-with?
    :return-type :bool
-   :args {:string :authorization-header :prefix "Bearer "}}
-
-  {:name :bearer-token-raw
-   :description "Substring of the `Authorization` header after the `\"Bearer \"` prefix — only meaningful when `:has-bearer-prefix?` is true. The `:subs` parent returns plain `:text` (no `:null` branch — `(subs nil 7)` throws NPE, doesn't return nil), so declare matching narrow type to avoid the type-drift sweep warning. `:string` carries a `:type :text` author-assertion: `:authorization-header`'s declared `:nullable-text` is non-null in this fn-def's runtime context because the sole consumer `:bearer-token` gates this evaluation behind `:has-bearer-prefix?`."
-   :parent :subs
-   :return-type :text
-   :args {:string {:ref :authorization-header :type :text} :start 7}}
-
-  {:name :bearer-token
-   :description "Bearer token value when the header has the `\"Bearer \"` prefix, else nil. Guards against treating arbitrary header content as a token."
-   :parent :if
-   :args {:test :has-bearer-prefix? :then :bearer-token-raw :else nil}}
-
-  {:name :token-valid?
-   :description "True iff AUTH_TOKEN is configured AND the request's bearer token equals it. The `some?` gate closes the `(= nil nil)` bypass — when AUTH_TOKEN is unset, requests without a header would otherwise spuriously validate."
-   :parent :and
-   :return-type :bool
-   :args {:values [:_auth-token-configured? :_bearer-equals-env?]}}
+   :args {:coll :_request-principal :key {:value :authenticated?} :default false}}
 
   ;; 401 response used by auth middleware on failure.
   {:name :_default-auth-fail-body
@@ -343,7 +294,7 @@
 
   {:name :_auth-required-body
    :parent :if
-   :args {:test :token-valid?
+   :args {:test :request-authenticated?
           :then :proceed
           :else :default-auth-fail-response}}
 

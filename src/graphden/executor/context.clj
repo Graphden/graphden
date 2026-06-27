@@ -145,8 +145,12 @@
                 throws `:execution/forbidden-effect` for any effect
                 outside it — the cloud sandbox boundary (PLATFORM_PLAN
                 §5). `nil`/absent (the default) = unrestricted
-                (self-hosted / mixed)."
-  [{:keys [storage base-fns clock allowed-effects]}]
+                (self-hosted / mixed).
+   - :auth-provider  Optional `graphden.auth.provider/AuthProvider` — the
+                authentication seam (§3.0). Read by the
+                `:authenticate-request` base-fn. Absent → that base-fn
+                fails closed (`{:authenticated? false}`)."
+  [{:keys [storage base-fns clock allowed-effects auth-provider]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -164,7 +168,9 @@
       ;; Effect sandbox — nil = unrestricted. Read on the hot path by
       ;; `compile-runtime/execute`, which binds `*allowed-effects*` for
       ;; the execution so `record-effect!` can gate.
-      (cond-> allowed-effects (assoc :allowed-effects (set allowed-effects)))))
+      (cond-> allowed-effects (assoc :allowed-effects (set allowed-effects)))
+      ;; Auth seam (§3.0) — read by the `:authenticate-request` base-fn.
+      (cond-> auth-provider (assoc :auth-provider auth-provider))))
 
 
 (defn current-time-ms

@@ -23,9 +23,9 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
-    [graphden.executor.runtime :as rt]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
@@ -46,17 +46,12 @@
       #(let [storage (setup/create-versioned-test-storage)
              _ (sys/bootstrap-from-packages! storage ["core" "web" "app"]
                                              {:skip-type-check? false})
-             ;; Override `:env` to inject the test token under
-             ;; `AUTH_TOKEN`; the auth-required middleware reads
-             ;; this key off the env at request time. Same pattern
-             ;; `execute_http_test` uses — see its docstring for
-             ;; the JVM 17 env-mutation rationale.
-             _ (exec/register-base-fn!
-                 :env
-                 (fn [args _ctx]
-                   (let [k (rt/resolve-arg args :name)]
-                     (if (= k "AUTH_TOKEN") test-auth-token (System/getenv k)))))
-             ctx (exec/create-context {:storage storage})
+             ;; Auth seam (§3.0): inject a single-token provider with the
+             ;; test token instead of the old `:env`-override trick — auth
+             ;; now reads `(:auth-provider ctx)`, captured at construction.
+             ctx (exec/create-context
+                   {:storage storage
+                    :auth-provider (auth/single-token-provider test-auth-token)})
              _ (cr/rebuild! ctx)
              router (br/create-router ctx "_app-ring-response")]
          (try

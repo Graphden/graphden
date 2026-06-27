@@ -15,6 +15,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.auth.provider :as auth]
     [graphden.clients.vault :as vault]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
     [graphden.executor.compile-runtime :as cr]
@@ -612,8 +613,18 @@
 ;; Executor Context
 ;; =============================================================================
 
+;; Authentication seam (PLATFORM_PLAN §3.0 / §4.1). Core wires the default
+;; single-token provider; the tenancy addon overrides this key with a
+;; session/JWT provider. Everything downstream (the `:authenticate-request`
+;; base-fn → `:request-authenticated?` → auth middleware) is provider-
+;; agnostic.
+(defmethod ig/init-key :auth/provider [_ {:keys [token]}]
+  (log/info "Wiring auth provider {:provider :single-token}")
+  (auth/single-token-provider token))
+
+
 (defmethod ig/init-key :exec/context
-  [_ {:keys [storage vault-client pg-storage base-fns]}]
+  [_ {:keys [storage vault-client pg-storage base-fns auth-provider]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -635,7 +646,11 @@
                   pg-notify/noop-emitter)
         ctx-opts (cond-> {:storage storage}
                    (and base-fns (:base-fns base-fns))
-                   (assoc :base-fns (:base-fns base-fns)))]
+                   (assoc :base-fns (:base-fns base-fns))
+                   ;; The auth seam — read by `:authenticate-request` via
+                   ;; `(:auth-provider ctx)`. Branch contexts inherit it
+                   ;; (build-branch-ctx).
+                   auth-provider (assoc :auth-provider auth-provider))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client))))

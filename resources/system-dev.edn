@@ -48,11 +48,16 @@
  {:address #or [#env VAULT_ADDR ""]
   :token #or [#env VAULT_TOKEN ""]}
 
+ ;; Auth seam (PLATFORM_PLAN §3.0) — default single-token provider.
+ :auth/provider
+ {:token #or [#env AUTH_TOKEN ""]}
+
  :exec/context
  {:storage #ig/ref :db/versioned
   :vault-client #ig/ref :vault/client
   :pg-storage #ig/ref :db/postgres
-  :base-fns #ig/ref :exec/base-fns}
+  :base-fns #ig/ref :exec/base-fns
+  :auth-provider #ig/ref :auth/provider}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on
  ;; fn-entities so every composed fn is already in storage before we

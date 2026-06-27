@@ -97,9 +97,13 @@
   [base-ctx branch-id]
   (let [base-storage (vs/unwrap (:storage base-ctx))
         branch-storage (vs/->VersionedStorage base-storage branch-id)]
-    (ctx/create-context {:storage branch-storage
-                         :base-fns (:base-fns base-ctx)
-                         :clock (:clock base-ctx)})))
+    (cond-> (ctx/create-context {:storage branch-storage
+                                 :base-fns (:base-fns base-ctx)
+                                 :clock (:clock base-ctx)
+                                 :allowed-effects (:allowed-effects base-ctx)})
+      ;; Inherit the off-record auth seam so per-branch execution
+      ;; authenticates through the same provider as the base context.
+      (:auth-provider base-ctx) (assoc :auth-provider (:auth-provider base-ctx)))))
 
 
 (defn- ring-callable-for-ctx

@@ -19,9 +19,9 @@
   (:require
     [cheshire.core :as json]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
-    [graphden.executor.runtime :as rt]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
@@ -52,21 +52,12 @@
              ;; this test mirrors production.
              _ (sys/bootstrap-from-packages! storage ["core" "web" "app"]
                                              {:skip-type-check? false})
-             ;; Override the `:env` base-fn AFTER bootstrap (which
-             ;; registers the production env-fn impl into the
-             ;; thread-local override atom). The auth-required
-             ;; middleware reads `AUTH_TOKEN` off the env — we
-             ;; intercept just that one key and pass everything else
-             ;; through to the real `System/getenv`. Reflection on
-             ;; `java.lang.ProcessEnvironment` doesn't survive
-             ;; `System/getenv` caching on JVM 17+, which is why
-             ;; this override path is cleaner than a real env set.
-             _ (exec/register-base-fn!
-                 :env
-                 (fn [args _ctx]
-                   (let [k (rt/resolve-arg args :name)]
-                     (if (= k "AUTH_TOKEN") test-auth-token (System/getenv k)))))
-             ctx (exec/create-context {:storage storage})
+             ;; Auth seam (§3.0): inject a single-token provider with the
+             ;; test token. Auth now reads `(:auth-provider ctx)` (captured
+             ;; at construction), so the old `:env`-override trick is gone.
+             ctx (exec/create-context
+                   {:storage storage
+                    :auth-provider (auth/single-token-provider test-auth-token)})
              _ (cr/rebuild! ctx)
              router (br/create-router ctx "_app-ring-response")]
          (try

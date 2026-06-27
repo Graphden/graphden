@@ -53,7 +53,25 @@ Everything is unit-tested; isolation/RLS/per-namespace also have real-Postgres
 integration tests; the editor gating was Playwright-verified 3×. Plan status
 is tracked in `PLATFORM_PLAN.md` §8 (look for ✅).
 
-## Next task: grants-admin panel (§6) — IN PROGRESS
+## Grants-admin panel (§6) — DONE (view + create + delete)
+
+Shipped in `app/admin` (core, pragmatic — see decision below):
+- `:list-grants` / `:create-grant` base-fns over the addon's `:grant` entity.
+- `GET /partials/grants-admin` — hiccup table (subject | capability |
+  namespace | delete), `:try`-degraded to a notice when the addon is absent.
+- `POST /api/grants` — create from a form body; delete via the generic
+  `DELETE /api/entities/grant/:id`.
+- `editor-grants-admin.js` — a "Grants" sidebar section gated on authed +
+  `graphdenTenancyActive()`; fetches the partial, wires create/delete via
+  `[data-act]` delegation.
+
+Tested: base-fn unit tests, full bootstrap + type-check sweep, degraded-GET
+integration (`grants_admin_test`), Playwright (gating + the wired handlers
+find every control). **Remaining = the addon-active happy-path** (create →
+list → delete in a live multi-tenant editor) — the user's verification, since
+it needs the addon manifest + `:grant` + real tokens.
+
+## (historical) Next task: grants-admin panel (§6) — IN PROGRESS
 
 **Architectural decision taken (and why):** the panel lives in CORE (`app`),
 NOT a `tenancy-admin` addon package. Reason: the panel's route must sit in

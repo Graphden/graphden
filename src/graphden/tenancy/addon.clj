@@ -20,6 +20,7 @@
    binds the public org — a safe no-op."
   (:require
     [graphden.auth.provider :as auth]
+    [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]
     [integrant.core :as ig]))
@@ -29,6 +30,13 @@
   (if scoped-entities
     (ts/org-scoped-storage base scoped-entities)
     (ts/org-scoped-storage base)))
+
+
+(defmethod ig/init-key :auth/multi-tenant-provider [_ {:keys [tokens]}]
+  ;; Overrides the core `:auth/provider` seam when a deployment wires it
+  ;; (with its own `:tokens` map / secret) — see addon.edn's note. An empty
+  ;; map authenticates nothing → every request public (safe).
+  (tauth/token-map-provider (or tokens {})))
 
 
 (defmethod ig/init-key :tenancy/request-scope [_ _]

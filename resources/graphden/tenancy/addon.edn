@@ -26,3 +26,16 @@
  :tenancy/request-scope {}
 
  :exec/context {:request-scope #ig/ref :tenancy/request-scope}}
+
+;; To turn the addon from a safe no-op into real multi-tenancy, a
+;; deployment also overrides the :auth/provider seam with an org-resolving
+;; provider — NOT shipped here because the token→org map is a deployment
+;; secret. Add to YOUR addon config (e.g. via a second GRAPHDEN_ADDON_CONFIGS
+;; entry merged after this one):
+;;
+;;   {:graphden/require [graphden.tenancy.addon]
+;;    :auth/multi-tenant-provider {:tokens {"<secret>" {:user "alice" :org "acme"}}}
+;;    :exec/context {:auth-provider #ig/ref :auth/multi-tenant-provider}}
+;;
+;; Then the request's bearer resolves to its :org, B4 binds *current-org*,
+;; and OrgScopedStorage (+ RLS) isolate the tenant.

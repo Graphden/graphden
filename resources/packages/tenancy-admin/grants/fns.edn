@@ -1,0 +1,9 @@
+{:namespace "tenancy-admin.grants"
+ :fns
+ [;; Base-fn: every :grant row. Reads the addon's :grant entity, so it
+  ;; errors when the addon isn't active — the panel wraps it in :try.
+  {:name :list-grants
+   :description "All :grant rows as decoded entity maps (:subject :capability :namespace :id). Reads the tenancy addon's :grant entity via the storage protocol; throws if :grant isn't in the schema (addon inactive), so callers guard with :try."
+   :args {}
+   :return-type [:list :keyword-map]
+   :effects #{:db}}]}

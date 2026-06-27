@@ -6,8 +6,12 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]
     [graphden.tenancy.rls :as rls]
-    [next.jdbc :as jdbc]))
+    [next.jdbc :as jdbc])
+  (:import
+    (javax.sql
+      DataSource)))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -45,3 +49,19 @@
     ;; leave the table as we found it for any container-sharing sibling ns
     (jdbc/execute! ds ["ALTER TABLE \"fn\" NO FORCE ROW LEVEL SECURITY"])
     (jdbc/execute! ds ["ALTER TABLE \"fn\" DISABLE ROW LEVEL SECURITY"])))
+
+
+(deftest org-aware-datasource-sets-session-var-from-current-org
+  ;; The ops wiring (B5): the wrapped pool carries *current-org* onto every
+  ;; borrowed connection as graphden.current_org, which is what RLS reads.
+  (let [storage (setup/create-test-storage)
+        ^DataSource wrapped (rls/org-aware-datasource (:pool storage))
+        org-on-borrow (fn []
+                        (with-open [c (.getConnection wrapped)]
+                          (:o (jdbc/execute-one!
+                                c ["SELECT current_setting('graphden.current_org', true) AS o"]))))]
+    (testing "a tenant borrow sets the variable to the org"
+      (is (= "acme" (tc/with-org "acme" (org-on-borrow)))))
+    (testing "public / admin / unbound borrow clears it (policy grants full access)"
+      (is (= "" (tc/with-org tc/public-org (org-on-borrow))))
+      (is (= "" (org-on-borrow))))))

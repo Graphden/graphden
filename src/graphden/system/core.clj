@@ -104,8 +104,14 @@
   (sp/close storage))
 
 
-(defmethod ig/init-key :db/postgres [_ opts]
-  (init-storage! "PostgreSQL" postgres/create-storage opts))
+(defmethod ig/init-key :db/postgres [_ {:keys [datasource-wrap] :as opts}]
+  ;; `:datasource-wrap` (a fn DataSource→DataSource) is the tenancy addon's
+  ;; RLS seam (§3.0 B5 ops wiring) — it wraps the pool so every connection
+  ;; carries `graphden.current_org`. Absent in core → plain pool.
+  (let [storage (init-storage! "PostgreSQL" postgres/create-storage
+                               (dissoc opts :datasource-wrap))]
+    (cond-> storage
+      datasource-wrap (assoc :pool (datasource-wrap (:pool storage))))))
 
 
 (defmethod ig/halt-key! :db/postgres [_ storage]

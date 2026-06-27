@@ -548,11 +548,14 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      - **provider** `tenancy.auth/TokenAuthProvider` резолвит bearer →
        `{:user :org}` (hashed-token lookup); цепочка `token → org →
        *current-org* → OrgScoped + RLS` доказана end-to-end.
-     *Остаётся только прод-обвязка (ops, не изоляция):* проброс
-     `*current-org*`→session-var на каждом connection (datasource-wrap);
-     `enable-rls!` на deploy; подключение приложения non-superuser ролью;
-     реальный token-source (storage/secret вместо static-map). Дальше по
-     плану: per-org LRU (R8) → org-скоуп секретов (R9) → поддомены (R10, R11);
+     - **ops: datasource-wrap ✅** `rls/org-aware-datasource` оборачивает
+       пул `:db/postgres` (seam `:datasource-wrap`), ставит
+       `graphden.current_org` из `*current-org*` на каждом borrow (tenant →
+       org, public/admin/unbound → '' = видит всё); доказано тестом.
+     *Остаётся прод-деплой (не код):* `enable-rls!` на deploy; подключение
+     приложения non-superuser ролью; реальный token-source (storage/secret
+     вместо static-map). Дальше по плану: per-org LRU (R8) → org-скоуп
+     секретов (R9) → поддомены (R10, R11);
   4. **проводка effect-gate** — ✅ **СДЕЛАНО**: request-scope wrap для
      реального тенанта (org ≠ public) биндит `cr/*allowed-effects*
      default-cloud-allowed-effects` вокруг хендлера → cloud-граф не может

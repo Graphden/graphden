@@ -28,6 +28,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
+    [graphden.tenancy.rls :as rls]
     [graphden.tenancy.storage :as ts]
     [integrant.core :as ig]))
 
@@ -36,6 +37,12 @@
   (if scoped-entities
     (ts/org-scoped-storage base scoped-entities)
     (ts/org-scoped-storage base)))
+
+
+(defmethod ig/init-key :tenancy/datasource-wrap [_ _]
+  ;; The fn `:db/postgres` applies to its pool so every connection carries
+  ;; graphden.current_org — the RLS ops wiring (B5).
+  rls/org-aware-datasource)
 
 
 (defmethod ig/init-key :auth/multi-tenant-provider [_ {:keys [tokens]}]

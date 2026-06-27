@@ -25,7 +25,15 @@
 
  :tenancy/request-scope {}
 
- :exec/context {:request-scope #ig/ref :tenancy/request-scope}}
+ :exec/context {:request-scope #ig/ref :tenancy/request-scope}
+
+ ;; RLS ops wiring (B5): wrap the shared :db/postgres pool so every
+ ;; connection carries graphden.current_org from *current-org*. Combined
+ ;; with enable-rls! at deploy + a non-superuser app role, RLS becomes the
+ ;; can't-be-bypassed second isolation layer.
+ :tenancy/datasource-wrap {}
+
+ :db/postgres {:datasource-wrap #ig/ref :tenancy/datasource-wrap}}
 
 ;; To turn the addon from a safe no-op into real multi-tenancy, a
 ;; deployment also overrides the :auth/provider seam with an org-resolving

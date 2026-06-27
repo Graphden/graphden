@@ -16,8 +16,14 @@
    request path sets the variable."
   (:require
     [graphden.storage.postgres.util :as util]
+    [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]
-    [next.jdbc :as jdbc]))
+    [next.jdbc :as jdbc])
+  (:import
+    (java.sql
+      Connection)
+    (javax.sql
+      DataSource)))
 
 
 (def ^:const org-setting
@@ -61,3 +67,48 @@
    transaction whose queries should be tenant-scoped. nil → cleared."
   [conn org]
   (jdbc/execute! conn ["SELECT set_config(?, ?, true)" org-setting (or org "")]))
+
+
+(defn- set-session-org!
+  "Set the RLS variable at SESSION level on a freshly-borrowed connection
+   from the current org. A real tenant → its org; public / admin / unbound
+   → '' so the policy's `unset` clause grants full access. Session-level
+   (not LOCAL) so it covers every query on the borrow; the value is
+   overwritten on every borrow, so nothing leaks between pool checkouts."
+  [^Connection conn org]
+  (with-open [stmt (.prepareStatement conn "SELECT set_config(?, ?, false)")]
+    (.setString stmt 1 org-setting)
+    (.setString stmt 2 (if (= org tc/public-org) "" org))
+    (.execute stmt)))
+
+
+(defn org-aware-datasource
+  "Wrap a `DataSource` so every borrowed connection carries
+   `graphden.current_org` set from `*current-org*` — making RLS enforce per
+   request without threading the org through every query. The wrap belongs
+   on the shared `:db/postgres` pool (not just the org-scoped path): every
+   borrow must (re)set the variable, or a stale value from a tenant borrow
+   would leak into a later admin borrow on the same physical connection."
+  ^DataSource [^DataSource ds]
+  (reify DataSource
+    (getConnection
+      [_]
+      (doto (.getConnection ds) (set-session-org! (tc/current-org))))
+
+    (getConnection
+      [_ user password]
+      (doto (.getConnection ds user password) (set-session-org! (tc/current-org))))
+
+    (getLoginTimeout [_] (.getLoginTimeout ds))
+
+    (setLoginTimeout [_ seconds] (.setLoginTimeout ds seconds))
+
+    (getLogWriter [_] (.getLogWriter ds))
+
+    (setLogWriter [_ writer] (.setLogWriter ds writer))
+
+    (getParentLogger [_] (.getParentLogger ds))
+
+    (unwrap [_ iface] (.unwrap ds iface))
+
+    (isWrapperFor [_ iface] (.isWrapperFor ds iface))))

@@ -165,6 +165,19 @@
 ;; Versioned Storage Decorator
 ;; =============================================================================
 
+;; Tenancy storage seam (PLATFORM_PLAN §3.0). Core wires an IDENTITY
+;; passthrough of the base storage; the tenancy addon overrides this key
+;; with an `OrgScopedStorage` decorator that injects the per-request
+;; `org-id` filter. Placement is deliberate: it sits BENEATH versioning
+;; (`Versioned(OrgScoped(Postgres))`), so the branch-router's `vs/unwrap`
+;; (which strips the VersionedStorage to rebuild a per-branch view) lands
+;; on the OrgScoped layer and the tenant filter survives — closing the
+;; ADR §3.0 nuance-1 `vs/unwrap` leak. (RLS is still the belt-and-
+;; suspenders second layer.)
+(defmethod ig/init-key :app/storage [_ {:keys [base]}]
+  base)
+
+
 (defmethod ig/init-key :db/versioned [_ {:keys [base-storage]}]
   (log/info "Enabling versioning...")
   (let [versioned (vs/wrap-with-versioning base-storage)]

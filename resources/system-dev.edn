@@ -13,8 +13,12 @@
   :pool-size 5
   :schema #ig/ref :db/schema}
 
+ ;; Tenancy storage seam (§3.0) — identity passthrough; addon overrides.
+ :app/storage
+ {:base #ig/ref :db/postgres}
+
  :db/versioned
- {:base-storage #ig/ref :db/postgres}
+ {:base-storage #ig/ref :app/storage}
 
  ;; Cross-process events (mirrors system-prod.edn block).
  :db/notify-listener

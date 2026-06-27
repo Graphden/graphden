@@ -533,7 +533,12 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      no-op (single-tenant). (Заменяет набросок `executor-packages.edn`.)
   3. **`OrgScopedStorage` + RLS** (R6, оба слоя; `org-id`-колонка default
      `public` в core) → per-org LRU (R8) → org-скоуп секретов (R9) →
-     поддомены/домены (R10, R11);
+     поддомены/домены (R10, R11).
+     — *Core-сторона: storage-seam ✅* `:app/storage` (Integrant-ключ,
+     identity-passthrough по умолчанию) сидит ПОД versioning, чтобы
+     `vs/unwrap` branch-router'а сохранял tenant-фильтр (нюанс 1). Сам
+     `OrgScopedStorage`-декоратор + RLS + `org-id`-колонка + проброс
+     current-org из auth-principal — контент аддона, ещё не сделан;
   4. **проводка effect-gate**: аддон ставит `:allowed-effects
      default-cloud-allowed-effects` на per-org ctx;
   5. **`grant`-примитив** (§4.2) + `:terminal`/`:list-append` (R2) → личные

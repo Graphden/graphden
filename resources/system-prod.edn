@@ -10,8 +10,15 @@
   :pool-size #long #or [#env DB_POOL_SIZE "10"]
   :schema #ig/ref :db/schema}
 
+ ;; Tenancy storage seam (PLATFORM_PLAN §3.0). Identity passthrough by
+ ;; default; the tenancy addon overrides :app/storage with an org-scoped
+ ;; decorator. Sits BENEATH versioning so the branch-router's vs/unwrap
+ ;; keeps the tenant filter.
+ :app/storage
+ {:base #ig/ref :db/postgres}
+
  :db/versioned
- {:base-storage #ig/ref :db/postgres}
+ {:base-storage #ig/ref :app/storage}
 
  ;; Cross-process events: every executor pod LISTENs on
  ;; `graphden_events` so that a mutation on one pod (e.g. an admin

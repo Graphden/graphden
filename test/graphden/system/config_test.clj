@@ -35,6 +35,16 @@
             "the addon's :auth/test-provider init-key is now callable")))))
 
 
+(deftest storage-seam-wiring
+  (testing "core routes :db/versioned through the :app/storage seam (default passthrough)"
+    (let [cfg (config/read-config :test [])]
+      (is (= (ig/ref :db/postgres) (:base (:app/storage cfg)))
+          ":app/storage defaults to passing :db/postgres through unchanged")
+      (is (= (ig/ref :app/storage) (:base-storage (:db/versioned cfg)))
+          (str ":db/versioned wraps the seam, so an addon can slip an org-scoped "
+               "decorator BENEATH versioning (vs/unwrap then preserves the tenant filter)")))))
+
+
 (deftest missing-addon-fragment-fails-fast
   (testing "a named-but-absent addon resource throws (no silent skip)"
     (is (thrown-with-msg?

@@ -13,8 +13,11 @@
   :pool-size 2
   :schema #ig/ref :db/schema}
 
+ :app/storage
+ {:base #ig/ref :db/postgres}
+
  :db/versioned
- {:base-storage #ig/ref :db/postgres}
+ {:base-storage #ig/ref :app/storage}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned}

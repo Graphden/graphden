@@ -156,3 +156,27 @@
         (is (some? (tc/with-org tc/public-org (sp/create-entity s en {:id 2}))))))
     (testing "tenants still write their own graph entities"
       (is (some? (tc/with-org "acme" (sp/create-entity s :fn {:id 3 :name "ok"})))))))
+
+
+(deftest tenants-cannot-read-privileged-entities
+  ;; Read mirror: a tenant must not enumerate platform state (:service/:grant/
+  ;; :domain) — e.g. the grants panel's :list-grants would leak every org's
+  ;; grants. The platform (public org) reads them.
+  (let [s (ts/org-scoped-storage (fake))]
+    (tc/with-org tc/public-org
+                 (sp/create-entity s :grant {:id 1 :subject "alice"})
+                 (sp/create-entity s :service {:id 2 :name "svc"})
+                 (sp/create-entity s :domain {:id 3 :hostname "app.acme.com"}))
+    (testing "a tenant sees nothing of the privileged entities"
+      (tc/with-org "acme"
+                   (is (= [] (sp/query-entities s :grant {})))
+                   (is (= [] (sp/query-entities s :service {})))
+                   (is (nil? (sp/read-entity s :grant 1)))
+                   (is (= [] (sp/query-latest-per-group s :grant {} [:subject])))))
+    (testing "the platform (public org) sees them"
+      (tc/with-org tc/public-org
+                   (is (= 1 (count (sp/query-entities s :grant {}))))
+                   (is (some? (sp/read-entity s :service 2)))))
+    (testing "a tenant still reads its own graph entities"
+      (tc/with-org "acme" (sp/create-entity s :fn {:id 9 :name "mine"}))
+      (is (some? (tc/with-org "acme" (sp/read-entity s :fn 9)))))))

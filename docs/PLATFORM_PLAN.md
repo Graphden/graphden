@@ -383,7 +383,12 @@ gate** (env/io/network/process), обходя весь облачный сэнд
 `tenant-forbidden-entities #{:service :grant :domain}` в OrgScopedStorage —
 тенант (org ≠ public) не может писать привилегированные сущности
 (`:service` → escape, `:grant` → эскалация authz, `:domain` → hijack
-роутинга); платформа (public) — свободно. Доказано (storage-test). *Полное
+роутинга); платформа (public) — свободно. **Read-зеркало:** тенант не может
+и ЧИТАТЬ их (`tenant-hidden?`) — иначе `:list-grants` грантовой панели
+перечислил бы гранты ВСЕХ org (enumeration-leak); authz не ломается, т.к.
+grant-store читает `:grant` из БАЗОВОГО storage, не из декоратора. (Read
+`:execution` — отдельно, защищён неугадываемым `fn-id`, низкая severity.)
+Доказано (storage-test, 9 тестов). *Полное
 решение §3.3 — сэндбокс для tenant-OWNED сервисов (org на `:service` +
 `:allowed-effects` в ctx реконсилера для tenant-сервиса) — обязательно ДО того,
 как деплой сервисов станет tenant-доступным.*

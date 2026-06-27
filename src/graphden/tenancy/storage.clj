@@ -90,6 +90,18 @@
     (authorize-write entity-name data)))
 
 
+(defn- tenant-hidden?
+  "True when the current tenant must not READ this entity type — the read
+   mirror of `tenant-forbidden-entities`. `:grant` / `:domain` / `:service`
+   are platform state; a tenant listing them (e.g. the grants panel's
+   `:list-grants`, which queries `:grant`) would enumerate EVERY org's rows.
+   Platform (public org) reads them normally. Authz is unaffected: the
+   grant-store reads `:grant` from the BASE storage, not this decorator."
+  [entity-name]
+  (and (not= (tc/current-org) tc/public-org)
+       (contains? tenant-forbidden-entities entity-name)))
+
+
 (defrecord OrgScopedStorage
   [base scoped? authorize-write]
 
@@ -104,8 +116,9 @@
 
   (read-entity
     [_ entity-name id]
-    (let [row (sp/read-entity base entity-name id)]
-      (if (and row (scoped? entity-name) (not (visible? row))) nil row)))
+    (when-not (tenant-hidden? entity-name)
+      (let [row (sp/read-entity base entity-name id)]
+        (if (and row (scoped? entity-name) (not (visible? row))) nil row))))
 
 
   (update-entity
@@ -128,20 +141,26 @@
 
   (query-entities
     [_ entity-name where]
-    (cond-> (sp/query-entities base entity-name where)
-      (scoped? entity-name) (->> (filterv visible?))))
+    (if (tenant-hidden? entity-name)
+      []
+      (cond-> (sp/query-entities base entity-name where)
+        (scoped? entity-name) (->> (filterv visible?)))))
 
 
   (query-entities
     [_ entity-name where opts]
-    (cond-> (sp/query-entities base entity-name where opts)
-      (scoped? entity-name) (->> (filterv visible?))))
+    (if (tenant-hidden? entity-name)
+      []
+      (cond-> (sp/query-entities base entity-name where opts)
+        (scoped? entity-name) (->> (filterv visible?)))))
 
 
   (query-latest-per-group
     [_ entity-name where group-cols]
-    (cond-> (sp/query-latest-per-group base entity-name where group-cols)
-      (scoped? entity-name) (->> (filterv visible?))))
+    (if (tenant-hidden? entity-name)
+      []
+      (cond-> (sp/query-latest-per-group base entity-name where group-cols)
+        (scoped? entity-name) (->> (filterv visible?)))))
 
 
   sp/StorageBatchCRUD
@@ -155,8 +174,10 @@
 
   (read-entities
     [_ entity-name ids]
-    (cond-> (sp/read-entities base entity-name ids)
-      (scoped? entity-name) (->> (filterv visible?))))
+    (if (tenant-hidden? entity-name)
+      []
+      (cond-> (sp/read-entities base entity-name ids)
+        (scoped? entity-name) (->> (filterv visible?)))))
 
 
   (update-entities

@@ -15,11 +15,17 @@
    It also wires `:tenancy/request-scope` onto `:exec/context`'s
    `:request-scope` seam (B4): the fn the branch-router's `dispatch` wraps
    each handler call with, which authenticates the request via the ctx's
-   `:auth-provider` and binds `*current-org*` for the duration. Until a
-   provider that resolves `:org` is wired (session/JWT), every request
-   binds the public org — a safe no-op."
+   `:auth-provider`, binds `*current-org*`, AND — for a real tenant (org ≠
+   public) — binds `*allowed-effects*` to `default-cloud-allowed-effects`,
+   so a cloud tenant's graph can't read env / files / network / spawn
+   processes (PLATFORM_PLAN §5 — the effect gate). The platform (public org
+   / admin) runs unrestricted. `execute` only re-binds `*allowed-effects*`
+   from the ctx (never set for branch ctxs), so this ambient binding flows
+   straight through to `record-effect!`. Until a provider that resolves
+   `:org` is wired, every request is public — a safe no-op."
   (:require
     [graphden.auth.provider :as auth]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]
@@ -40,11 +46,17 @@
 
 
 (defmethod ig/init-key :tenancy/request-scope [_ _]
-  ;; (fn [ctx request thunk] …) — authenticate, then run the handler with
-  ;; `*current-org*` bound. A request the provider can't authenticate (or a
-  ;; provider that returns no `:org`) binds the public org.
+  ;; (fn [ctx request thunk] …) — authenticate, bind the org, and (for a
+  ;; real tenant) restrict effects, then run the handler. A request the
+  ;; provider can't authenticate (or one with no `:org`) is public →
+  ;; unrestricted, exactly as a single-tenant deployment behaves.
   (fn [ctx request thunk]
     (let [principal (when-let [p (:auth-provider ctx)]
-                      (auth/authenticate p request))]
-      (tc/with-org (tc/org-from-principal principal)
-                   (thunk)))))
+                      (auth/authenticate p request))
+          org (tc/org-from-principal principal)]
+      (tc/with-org org
+                   (if (= org tc/public-org)
+                     (thunk)
+                     ;; Real tenant — gate effects (env / io / network / process).
+                     (binding [cr/*allowed-effects* cr/default-cloud-allowed-effects]
+                       (thunk)))))))

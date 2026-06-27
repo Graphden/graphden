@@ -4,9 +4,11 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.auth.provider :as auth]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.system.branch-router :as br]
     [graphden.system.config :as config]
     [graphden.tenancy.addon]
+    [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]
     [integrant.core :as ig]))
@@ -84,3 +86,30 @@
                                          :headers {"authorization" "Bearer tok"}
                                          :query-string nil}))
         "a provider that resolves no :org → public org (single-tenant behaviour)")))
+
+
+;; --- effect gate on the org ctx (§5) ---
+
+(deftest tenant-requests-are-effect-gated
+  (let [scope (ig/init-key :tenancy/request-scope {})
+        provider (tauth/token-map-provider {"acme-tok" {:user "a" :org "acme"}})
+        base-ctx {:auth-provider provider :request-scope scope}
+        ;; dispatch a request whose handler attempts `effect`
+        run (fn [effect authz]
+              (br/dispatch
+                (router-with base-ctx (fn [_req] (cr/record-effect! effect) :ran))
+                {:request-method :get :uri "/x"
+                 :headers (cond-> {} authz (assoc "authorization" authz))
+                 :query-string nil}))]
+    (testing "a tenant CANNOT perform a forbidden effect (env / network / io / process)"
+      (is (thrown? clojure.lang.ExceptionInfo (run :env "Bearer acme-tok")))
+      (is (thrown? clojure.lang.ExceptionInfo (run :network "Bearer acme-tok"))))
+    (testing "a tenant CAN perform an allowed effect (db / time)"
+      (is (= :ran (run :db "Bearer acme-tok")))
+      (is (= :ran (run :time "Bearer acme-tok"))))
+    (testing "platform (public / unauthenticated) is unrestricted"
+      (is (= :ran (run :env nil)))
+      (is (= :ran (run :network nil))))
+    (testing "*allowed-effects* is restored after dispatch (no leak)"
+      (run :db "Bearer acme-tok")
+      (is (nil? cr/*allowed-effects*)))))

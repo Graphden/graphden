@@ -553,8 +553,16 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      `enable-rls!` на deploy; подключение приложения non-superuser ролью;
      реальный token-source (storage/secret вместо static-map). Дальше по
      плану: per-org LRU (R8) → org-скоуп секретов (R9) → поддомены (R10, R11);
-  4. **проводка effect-gate**: аддон ставит `:allowed-effects
-     default-cloud-allowed-effects` на per-org ctx;
+  4. **проводка effect-gate** — ✅ **СДЕЛАНО**: request-scope wrap для
+     реального тенанта (org ≠ public) биндит `cr/*allowed-effects*
+     default-cloud-allowed-effects` вокруг хендлера → cloud-граф не может
+     env/io/network/process. `execute` re-биндит `*allowed-effects*` только
+     из ctx (у branch-ctx его нет), поэтому ambient-биндинг проходит до
+     `record-effect!`. Platform (public/admin) — без ограничений.
+     Доказано: тенант env/network → throw, db/time → ok; public —
+     unrestricted; binding восстанавливается (no leak). *(Реализация через
+     dynamic var per-request, а не «:allowed-effects на ctx» — ctx общий
+     per-branch, org — per-request.)*
   5. **`grant`-примитив** (§4.2) + `:terminal`/`:list-append` (R2) → личные
      неймспейсы → workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),

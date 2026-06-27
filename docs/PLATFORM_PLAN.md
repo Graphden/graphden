@@ -327,13 +327,17 @@ unrestricted. Механизм гейта уже готов и проверен 
   резолвим в `org-id` (таблица `subdomain → org`). Маршрут создаётся
   автоматически при создании организации.
   - **resolution ✅** `tenancy.subdomain` — `extract-subdomain` (Host →
-    label; strips port, rejects apex/multi-level) + `OrgResolver` протокол +
-    `static-org-resolver`; `request-scope` берёт org из поддомена (выигрывает
-    у токена, fallback на principal-org → public). `:tenancy/org-resolver`
-    init-key (config `{subdomain org}`) + `:base-domain` на request-scope.
-    Inert без резолвера (single-tenant). Доказано (4 теста / 20 ассертов, вкл.
-    request-scope-биндинг). *Остаётся:* storage-backed `subdomain → org`
-    таблица + авто-создание маршрута при регистрации org.
+    label; strips port, rejects apex/multi-level) + `OrgResolver` протокол.
+    **Дефолт — `identity-org-resolver`: label поддомена И ЕСТЬ org-id, НИКАКОЙ
+    таблицы** (org — строка-слаг; неизвестный slug → пустой tenant-view через
+    OrgScoped, валидировать нечего). `static-org-resolver` (map) — ТОЛЬКО для
+    vanity-алиасов (subdomain ≠ org-id). `request-scope` берёт org из
+    поддомена (выигрывает у токена, fallback → principal-org → public).
+    `:tenancy/org-resolver` init-key (по умолчанию identity; `:subdomains`
+    для алиасов) + `:base-domain`. Inert без резолвера. Доказано (5 тестов /
+    24 ассерта). *Остаётся:* авто-создание org при первом заходе на её
+    поддомен (если нужно); таблица — только для **кастомных доменов** (R10,
+    `hostname → org`, не выводится из org) + DNS-TXT.
 - **Кастомные домены**: таблица `hostname → org`. Пользователь добавляет домен;
   **подтверждение владения** — DNS TXT-запись, которую мы один раз проверяем.
 - **Важно (R10):** проверка DNS — это сетевой **эффект**, который облачным

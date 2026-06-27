@@ -93,12 +93,16 @@
 ;;
 ;; SUBDOMAIN ROUTING (§3.2) — resolve the org from the request Host
 ;; (`acme.graphden.app` → org `acme`) so a tenant reaches their workspace by
-;; URL. The subdomain wins; absent/unmapped falls back to the token's org.
-;; Wire a resolver + the base domain onto request-scope:
-;;   :tenancy/org-resolver {:subdomains {"acme" "acme" "beta" "beta-org"}}
+;; URL. The subdomain wins; absent falls back to the token's org. The DEFAULT
+;; is identity (subdomain label IS the org-id — no table). Wire the resolver
+;; + base domain onto request-scope:
+;;   :tenancy/org-resolver {}            ; identity: <org>.graphden.app → org
 ;;   :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store
 ;;                           :org-resolver #ig/ref :tenancy/org-resolver
 ;;                           :base-domain "graphden.app"}
+;; Pass :subdomains {"vanity" "real-org"} ONLY for aliases where a subdomain
+;; differs from its org-id. A hostname→org table is a separate thing — only
+;; for CUSTOM domains (§3.2 R10), which also need DNS-TXT verification.
 ;;
 ;; The addon ships its own fns-packages (e.g. an org-admin UI) via the
 ;; fns-channel seam — append to :app/packages without restating the core

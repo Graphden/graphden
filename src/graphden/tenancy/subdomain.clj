@@ -46,10 +46,30 @@
 
 
 (defn static-org-resolver
-  "An `OrgResolver` backed by a literal `{subdomain org}` map — the simplest
-   wiring; swap for a storage-backed resolver in production."
+  "An `OrgResolver` backed by a literal `{subdomain org}` map. Only needed
+   when a subdomain DIFFERS from its org-id (vanity aliases); for the plain
+   `<org>.<base-domain>` case use `identity-org-resolver` — no map needed."
   [subdomain->org]
   (->StaticOrgResolver subdomain->org))
+
+
+(defrecord IdentityOrgResolver
+  []
+
+  OrgResolver
+
+  (org-for-subdomain [_ subdomain] subdomain))
+
+
+(defn identity-org-resolver
+  "The default `OrgResolver`: the subdomain label IS the org-id
+   (`acme.<base-domain>` → org `acme`). No lookup table — orgs are string
+   slugs, and an unknown slug just yields an empty tenant view (OrgScoped
+   returns only public), so there's nothing to validate. Reach for
+   `static-org-resolver` only for vanity aliases, and a hostname→org table
+   only for custom domains (§3.2 R10)."
+  []
+  (->IdentityOrgResolver))
 
 
 (defn org-from-request

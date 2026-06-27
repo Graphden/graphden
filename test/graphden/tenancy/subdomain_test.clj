@@ -32,6 +32,16 @@
       (is (nil? (sub/org-for-subdomain r "nope"))))))
 
 
+(deftest identity-org-resolver-test
+  (testing "the subdomain label IS the org-id — no table needed"
+    (let [r (sub/identity-org-resolver)]
+      (is (= "acme" (sub/org-for-subdomain r "acme")))
+      (is (= "beta" (sub/org-for-subdomain r "beta")))
+      (is (= "acme" (sub/org-from-request r {:headers {"host" "acme.graphden.app"}} "graphden.app")))
+      (testing "apex still has no subdomain → nil → token-org fallback"
+        (is (nil? (sub/org-from-request r {:headers {"host" "graphden.app"}} "graphden.app")))))))
+
+
 (deftest org-from-request-test
   (let [r (sub/static-org-resolver {"acme" "org-acme"})
         req (fn [host] {:headers {"host" host}})]

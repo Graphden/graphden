@@ -97,11 +97,14 @@
 
 
 (defmethod ig/init-key :tenancy/org-resolver [_ {:keys [subdomains]}]
-  ;; Static `{subdomain org}` map from config (§3.2) — `acme.<base-domain>`
-  ;; → org `acme`. Wired into `:tenancy/request-scope` with `:base-domain`.
-  ;; Empty / absent → nil → no subdomain routing (org from the token only).
-  (when (seq subdomains)
-    (subdomain/static-org-resolver subdomains)))
+  ;; (§3.2) Resolve org from the Host subdomain. Default — IDENTITY: the
+  ;; subdomain label IS the org-id (`acme.<base-domain>` → org `acme`), no
+  ;; table needed. Pass `:subdomains {…}` only for vanity aliases where a
+  ;; subdomain differs from its org-id. Wired into `:tenancy/request-scope`
+  ;; with `:base-domain`.
+  (if (seq subdomains)
+    (subdomain/static-org-resolver subdomains)
+    (subdomain/identity-org-resolver)))
 
 
 (def ^:private forbidden-response

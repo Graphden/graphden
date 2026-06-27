@@ -56,12 +56,17 @@
       (is (some? schema-ref))
       (is (= :db/schema (:key schema-ref)))))
 
-  (testing ":db/versioned depends on :db/postgres"
+  (testing ":db/versioned depends on :db/postgres via the :app/storage seam"
+    ;; The §3.0 storage seam (`:app/storage`) sits between versioning and the
+    ;; raw datasource so the tenancy addon can swap an OrgScopedStorage in
+    ;; there. Core (no addon) wires it as an identity passthrough. The chain
+    ;; is now versioned → app/storage → postgres.
     (let [config (sys/read-config :test)
-          versioned-config (:db/versioned config)
-          base-ref (:base-storage versioned-config)]
+          base-ref (:base-storage (:db/versioned config))
+          seam-ref (:base (:app/storage config))]
       (is (some? base-ref))
-      (is (= :db/postgres (:key base-ref)))))
+      (is (= :app/storage (:key base-ref)))
+      (is (= :db/postgres (:key seam-ref)) "the seam passes through to postgres")))
 
   (testing ":exec/context depends on :db/versioned"
     (let [config (sys/read-config :test)

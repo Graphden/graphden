@@ -19,6 +19,8 @@
     (java.util
       Hashtable)
     (javax.naming.directory
+      Attribute
+      Attributes
       InitialDirContext)))
 
 
@@ -69,12 +71,12 @@
   [hostname]
   (try
     (let [env (doto (Hashtable.)
-                (.put "java.naming.factory.initial" "com.sun.jndi.dns.DnsContextFactory"))
+                (Hashtable/.put "java.naming.factory.initial" "com.sun.jndi.dns.DnsContextFactory"))
           ctx (InitialDirContext. env)
-          attrs (.getAttributes ctx ^String hostname (into-array String ["TXT"]))
-          txt (some-> attrs (.get "TXT"))]
+          attrs (InitialDirContext/.getAttributes ctx ^String hostname (into-array String ["TXT"]))
+          txt (some-> attrs (Attributes/.get "TXT"))]
       (if txt
-        (->> (enumeration-seq (.getAll txt))
+        (->> (enumeration-seq (Attribute/.getAll txt))
              (map #(str/replace (str %) #"\"" ""))
              (vec))
         []))

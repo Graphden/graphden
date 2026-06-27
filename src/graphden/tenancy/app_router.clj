@@ -75,7 +75,7 @@
   [timeout-ms thunk]
   (let [fut (future (thunk))
         result (try (deref fut timeout-ms ::timeout)
-                    (catch Throwable _ ::error))]
+                    (catch Exception _ ::error))]
     (when (identical? result ::timeout) (future-cancel fut))
     result))
 
@@ -123,7 +123,7 @@
                        ;; `check-cancel!`, so on `future-cancel` (interrupt) a graph
                        ;; handler aborts instead of leaking a thread.
                        (binding [cr/*cancel-check*
-                                 #(when (.isInterrupted (Thread/currentThread))
+                                 #(when (Thread/.isInterrupted (Thread/currentThread))
                                     (throw (InterruptedException. "app handler cancelled")))]
                          ;; Run INSIDE the sandbox (binding lands on the future's
                          ;; thread, where the thunk runs): `:allowed-effects` forbids

@@ -35,6 +35,7 @@ For each cluster:
 ### 1. Third-party (5 NSes)
 
 `storage.postgres.{sql_errors,edge_cases,crud,pool_and_edge_cases}_test`
+
 + `storage.protocol.redact_test` redef `next.jdbc/execute*`.
 
 **Approach**: introduce a thin internal indirection in
@@ -79,10 +80,10 @@ relevant integrant keys / reconciler hooks to the plugin's
 
 ## When to revisit
 
-- If `bb ci` wall-time regresses past ~300 s on a workhorse host.
-- If a new shared-state surface gets introduced (then ALL ^:serial
++ If `bb ci` wall-time regresses past ~300 s on a workhorse host.
++ If a new shared-state surface gets introduced (then ALL ^:serial
   pinning decisions deserve a re-look).
-- If the kaocha parallel plugin gains a per-test isolation primitive
++ If the kaocha parallel plugin gains a per-test isolation primitive
   (would obsolete most of this work).
 
 Otherwise: leave it.

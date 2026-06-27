@@ -380,54 +380,54 @@
             sep " │ "
             print-status
             (fn []
-                (let [elapsed-s (/ (- (System/currentTimeMillis) start-time) 1000.0)
-                      elapsed-part (str sep (format "%.1fs" elapsed-s))
-                      statuses @status
-                      n-passed (count (filter #(= :passed (val %)) statuses))
-                      n-warn (count (filter #(= :warning (val %)) statuses))
-                      n-failed (count (filter #(#{:failed :timeout} (val %)) statuses))
-                      n-running (count (filter #(= :running (val %)) statuses))
-                      failed-names (->> checks
-                                        (filter #(#{:failed :timeout} (get statuses (:name %))))
-                                        (mapv :name))
-                      running-names (->> checks
-                                         (filter #(= :running (get statuses (:name %))))
-                                         (mapv :name))
-                      counter (str/join " "
-                                        (cond-> []
-                                          (pos? n-passed) (conj (str green "+" n-passed reset))
-                                          (pos? n-warn) (conj (str yellow "⚠" n-warn reset))
-                                          (pos? n-failed) (conj (str red "✗" n-failed reset))
-                                          (pos? n-running) (conj (str yellow "◐" n-running reset))))
-                      failed-part (when (seq failed-names)
-                                    (str sep red "✗" reset " " (str/join " " failed-names)))
-                      running-marker (str sep yellow "◐" reset " ")
-                      cols-budget (dec cols)
-                      fixed-len (+ (visible-len counter)
-                                   (visible-len (or failed-part ""))
-                                   (visible-len elapsed-part))
-                      running-budget (- cols-budget fixed-len (visible-len running-marker))
-                      ;; Greedy fit running names; reserve 2 cols for " …"
-                      ;; until we know whether overflow occurs.
-                      [fitted overflow?]
-                      (if (and (seq running-names) (pos? running-budget))
-                        (loop [acc "" remaining running-names]
-                          (if (empty? remaining)
-                            [acc false]
-                            (let [nm (first remaining)
-                                  candidate (if (empty? acc) nm (str acc " " nm))]
-                              (if (<= (+ (count candidate) 2) running-budget)
-                                (recur candidate (next remaining))
-                                [acc (seq acc)]))))
-                        ["" false])
-                      running-part (when (seq fitted)
-                                     (str running-marker fitted (when overflow? " …")))
-                      line (str counter
-                                (or failed-part "")
-                                (or running-part "")
-                                elapsed-part)]
-                  (print (str "\r\033[2K" line))
-                  (flush)))
+              (let [elapsed-s (/ (- (System/currentTimeMillis) start-time) 1000.0)
+                    elapsed-part (str sep (format "%.1fs" elapsed-s))
+                    statuses @status
+                    n-passed (count (filter #(= :passed (val %)) statuses))
+                    n-warn (count (filter #(= :warning (val %)) statuses))
+                    n-failed (count (filter #(#{:failed :timeout} (val %)) statuses))
+                    n-running (count (filter #(= :running (val %)) statuses))
+                    failed-names (->> checks
+                                      (filter #(#{:failed :timeout} (get statuses (:name %))))
+                                      (mapv :name))
+                    running-names (->> checks
+                                       (filter #(= :running (get statuses (:name %))))
+                                       (mapv :name))
+                    counter (str/join " "
+                                      (cond-> []
+                                        (pos? n-passed) (conj (str green "+" n-passed reset))
+                                        (pos? n-warn) (conj (str yellow "⚠" n-warn reset))
+                                        (pos? n-failed) (conj (str red "✗" n-failed reset))
+                                        (pos? n-running) (conj (str yellow "◐" n-running reset))))
+                    failed-part (when (seq failed-names)
+                                  (str sep red "✗" reset " " (str/join " " failed-names)))
+                    running-marker (str sep yellow "◐" reset " ")
+                    cols-budget (dec cols)
+                    fixed-len (+ (visible-len counter)
+                                 (visible-len (or failed-part ""))
+                                 (visible-len elapsed-part))
+                    running-budget (- cols-budget fixed-len (visible-len running-marker))
+                    ;; Greedy fit running names; reserve 2 cols for " …"
+                    ;; until we know whether overflow occurs.
+                    [fitted overflow?]
+                    (if (and (seq running-names) (pos? running-budget))
+                      (loop [acc "" remaining running-names]
+                        (if (empty? remaining)
+                          [acc false]
+                          (let [nm (first remaining)
+                                candidate (if (empty? acc) nm (str acc " " nm))]
+                            (if (<= (+ (count candidate) 2) running-budget)
+                              (recur candidate (next remaining))
+                              [acc (seq acc)]))))
+                      ["" false])
+                    running-part (when (seq fitted)
+                                   (str running-marker fitted (when overflow? " …")))
+                    line (str counter
+                              (or failed-part "")
+                              (or running-part "")
+                              elapsed-part)]
+                (print (str "\r\033[2K" line))
+                (flush)))
 
             ;; Progress display thread
             progress-running (atom true)

@@ -22,7 +22,6 @@
     [graphden.executor.registry.core :as registry]
     [graphden.schema.graph.schema :as graph-schema]
     [graphden.storage.protocol.core :as sp]
-    [graphden.types.check :as types-check]
     [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
 

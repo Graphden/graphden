@@ -57,6 +57,7 @@ is tracked in `PLATFORM_PLAN.md` §8 (look for ✅).
 
 Built on top of the tenancy core, all tested, `bb test` = 1694 tests / 6706
 assertions / 0 failures:
+
 - **fns-channel seam** — addons append fns-packages via the manifest.
 - **Grants-admin panel** (§6) — view + create + delete (below).
 - **Subdomains** (§3.2) — `tenancy.subdomain`, identity resolver default.
@@ -87,6 +88,7 @@ assertions / 0 failures:
 ## Grants-admin panel (§6) — DONE (view + create + delete)
 
 Shipped in `app/admin` (core, pragmatic — see decision below):
+
 - `:list-grants` / `:create-grant` base-fns over the addon's `:grant` entity.
 - `GET /partials/grants-admin` — hiccup table (subject | capability |
   namespace | delete), `:try`-degraded to a notice when the addon is absent.

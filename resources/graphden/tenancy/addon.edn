@@ -39,6 +39,7 @@
  ;; already created by its init-key), so policies attach after migration.
  :tenancy/rls-enabler {:storage #ig/ref :db/postgres}}
 
+
 ;; To turn the addon from a safe no-op into real multi-tenancy, a
 ;; deployment also overrides the :auth/provider seam with an org-resolving
 ;; provider — NOT shipped here because the token→org map is a deployment

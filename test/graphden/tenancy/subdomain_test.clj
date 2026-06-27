@@ -1,5 +1,6 @@
 (ns graphden.tenancy.subdomain-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.auth.provider :as auth]
     [graphden.tenancy.addon]
@@ -15,7 +16,7 @@
     (authenticate
       [_ request]
       (let [h (get-in request [:headers "authorization"])]
-        (when (and h (.startsWith ^String h "Bearer "))
+        (when (and h (str/starts-with? h "Bearer "))
           (get tok->principal (subs h 7)))))))
 
 

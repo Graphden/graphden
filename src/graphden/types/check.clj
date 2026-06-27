@@ -55,7 +55,6 @@
     [graphden.types.core :as types]))
 
 
-
 (defn- binding-shape
   "Classify an AST binding form (the value in a fn-def's `:args` map)
    into one of six coarse shapes. Drives the predicates below and the
@@ -2318,8 +2317,6 @@
                 :stale stale-allowlist
                 :allowlist allowed-type-check-failures})))
     :ok))
-
-
 
 
 ;; -----------------------------------------------------------------------------

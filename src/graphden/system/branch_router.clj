@@ -424,25 +424,24 @@
         ;; (core / single-tenant) → straight to editor/API.
         app-router (:app-router base-ctx)
         app-resp (when app-router (app-router base-ctx request))]
-    (if app-resp
-      app-resp
-      (let [branch-ref (extract-branch-ref request)
-            branch-id (resolve-branch-id router branch-ref)]
-        (cond
-          (and (some? branch-ref) (nil? branch-id))
-          {:status 400
-           :headers {"Content-Type" "application/json"}
-           :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
+    (or app-resp
+        (let [branch-ref (extract-branch-ref request)
+              branch-id (resolve-branch-id router branch-ref)]
+          (cond
+            (and (some? branch-ref) (nil? branch-id))
+            {:status 400
+             :headers {"Content-Type" "application/json"}
+             :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
 
-          :else
-          (let [handler (handler-for router branch-id)
-                ;; Request-scope seam (§3.0 B4): when wired (the tenancy addon),
-                ;; it authenticates + binds `*current-org*` around the handler.
-                ;; Absent (core / single-tenant) → call the handler directly.
-                request-scope (:request-scope base-ctx)]
-            (if request-scope
-              (request-scope base-ctx request #(handler request))
-              (handler request))))))))
+            :else
+            (let [handler (handler-for router branch-id)
+                  ;; Request-scope seam (§3.0 B4): when wired (the tenancy addon),
+                  ;; it authenticates + binds `*current-org*` around the handler.
+                  ;; Absent (core / single-tenant) → call the handler directly.
+                  request-scope (:request-scope base-ctx)]
+              (if request-scope
+                (request-scope base-ctx request #(handler request))
+                (handler request))))))))
 
 
 ;; =============================================================================

@@ -282,9 +282,9 @@
   [container-id]
   (try
     (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
-                              (into-array String
-                                ["docker" "stats" "--no-stream" "--format"
-                                 "{{.MemUsage}}|{{.MemPerc}}" container-id]))
+              (into-array String
+                          ["docker" "stats" "--no-stream" "--format"
+                           "{{.MemUsage}}|{{.MemPerc}}" container-id]))
           proc (ProcessBuilder/.start pb)
           out (slurp (Process/.getInputStream proc))]
       (Process/.waitFor proc)
@@ -390,10 +390,10 @@
           (let [container-id (GenericContainer/.getContainerId c)
                 dump-host "/tmp/e2e-executor-heap-dump.hprof"
                 pb (ProcessBuilder. ^"[Ljava.lang.String;"
-                                    (into-array String
-                                      ["docker" "cp"
-                                       (str container-id ":/tmp/heap-dump.hprof")
-                                       dump-host]))
+                    (into-array String
+                                ["docker" "cp"
+                                 (str container-id ":/tmp/heap-dump.hprof")
+                                 dump-host]))
                 proc (ProcessBuilder/.start pb)]
             (when (zero? (Process/.waitFor proc))
               (let [size-mb (-> (java.io.File. dump-host)
@@ -471,7 +471,7 @@
         (println (str "▶ stack ready (" url "); running " script))
         (try
           (let [pb (ProcessBuilder. ^"[Ljava.lang.String;"
-                                    (into-array String ["bash" script]))
+                    (into-array String ["bash" script]))
                 env (ProcessBuilder/.environment pb)]
             (java.util.Map/.put env "GRAPHDEN_URL" url)
             (java.util.Map/.put env "AUTH_TOKEN" auth-token)

@@ -422,11 +422,12 @@ mis-tag'нул бы строку И own-guard ЗАБЛОКИРОВАЛ бы term
 per-request wrap через port/async-границу. В FaaS handler тенанта
 исполняется ВНУТРИ уже-сэндбокснутого request-пути платформы → effect-gate +
 org-scoping применяются автоматически. Самая сложная часть исчезает. Плюс:
-#2 минимум сущностей (тенант редактирует одно `:binding`, не создаёт
-`:service`), #3 explicit (один рычаг — handler; порты/инстансы — решения
-платформы).
+принцип №2 минимум сущностей (тенант редактирует одно `:binding`, не создаёт
+`:service`), принцип №3 explicit (один рычаг — handler; порты/инстансы —
+решения платформы).
 
 **Механика.**
+
 - **`:org`-сущность** (orgs-реестр, платформенная, tenant-forbidden):
   `name` (= slug = поддомен = `*current-org*`), `handler-fn-id`, метаданные.
   Endpoint регистрации (платформенный граф) создаёт строку + поддомен.
@@ -448,6 +449,7 @@ org-scoping применяются автоматически. Самая сло
   `hostname → org` (`tenancy.domain`, DNS-TXT уже есть) → handler org.
 
 **Предусловия/тонкости (честно):**
+
 - **R8 (per-org compiled-handler кэш)** из «scale-оптимизации» становится
   **перформанс-предусловием** — иначе компиляция handler'а на каждый запрос.
 - **Resource-лимиты** (timeout/memory на tenant-handler) — effect-gate не
@@ -456,18 +458,19 @@ org-scoping применяются автоматически. Самая сло
   механика, что в request-scope).
 
 **Bounded-шаги (план реализации):**
+
 1. ✅ `:org`-сущность + схема (`tenancy/org_schema`), tenant-forbidden, addon-wiring.
 2. ✅ Endpoint регистрации org (`POST /api/orgs`, platform-only).
 3. ✅ App-routing шов (`tenancy/app-router` + `:app-router` на ctx + dispatch): поддомен→org→исполнить `:org.handler-fn-id`; apex → editor/API.
-5. ✅ Исполнение handler org-scoped + effect-gated (в app-router: `with-org` + `:allowed-effects` + `:execute-guard nil`).
+4. ✅ Исполнение handler org-scoped + effect-gated (в app-router: `with-org` + `:allowed-effects` + `:execute-guard nil`).
 4a. ✅ Set-handler механизм: `set-org-handler` base-fn (update `:org.handler-fn-id` by name, str→uuid) + `POST /api/orgs/handler` (platform-only). Теперь app-router отдаёт реальный handler, когда он установлен.
 4b. self-serve — тенант ставит СВОЙ handler.
     - **seam ✅** `tenancy.deploy/set-org-handler!`: валидирует (org = токен; fn читаем тенантом через OrgScoped = свой/public), затем единственный controlled-write `:org.handler-fn-id` под временной public-эскалацией (только своя org row по name = токен). Доказано (forbidden для public + чужой fn; update для своего). Security-критичное ядро.
     - **backend ✅** `:set-org-handler` seam на ctx (create-context + system/core + build-branch-ctx inherit + `:tenancy/set-org-handler` init-key) + core base-fn `invoke-set-org-handler` (зовёт seam, str→uuid) + route `POST /api/my-app/handler`. sync+type-check+boot зелёные (13 тестов).
     - **editor-JS ✅** ⌂ «set as app handler» в row-actions popover (root-row): `data-action="set-app-handler"` → `registerActionHandler` POSTит `/api/my-app/handler`. CSS-gated `body.gd-tenancy` (ставится при первом capability-header) → в single-tenant скрыта. Playwright: partial эмитит кнопку, hidden без tenancy / shown с tenancy. **§3.4 ПОЛНОСТЬЮ ЗАКРЫТ.**
-6. ✅ R8 per-org handler-кэш: `cached-handler-fn-id` (TTL-кэш org→handler-fn-id в app-router, default 5s) — убирает `:org`-чтение на каждый app-запрос; смена handler'а пропагируется в пределах TTL. (Compiled handler уже в shared-реестре по fn-id; кэшируем только lookup.)
-7. ✅ (timeout) Resource-лимиты: `run-with-timeout` в app-router (future + deref-timeout → 504; `future-cancel` + interrupt-aware `*cancel-check*` → graph-handler кооперативно отменяется, не течёт тред). `:timeout-ms` конфигурируем (default 10s). *Остаётся:* memory-лимиты (JVM не кэпит per-thread память — нужен отдельный механизм; tight CPU-loop в impl не отменяется, но тенанты пишут только графы → каждый execute-step проверяет cancel).
-8. ✅ Кастомные домены в app-routing: `resolve-app-org` = `(or subdomain host-resolver)`, app-router принимает `host-resolver` → верифицированный кастомный домен → handler org тем же путём.
+5. ✅ R8 per-org handler-кэш: `cached-handler-fn-id` (TTL-кэш org→handler-fn-id в app-router, default 5s) — убирает `:org`-чтение на каждый app-запрос; смена handler'а пропагируется в пределах TTL. (Compiled handler уже в shared-реестре по fn-id; кэшируем только lookup.)
+6. ✅ (timeout) Resource-лимиты: `run-with-timeout` в app-router (future + deref-timeout → 504; `future-cancel` + interrupt-aware `*cancel-check*` → graph-handler кооперативно отменяется, не течёт тред). `:timeout-ms` конфигурируем (default 10s). *Остаётся:* memory-лимиты (JVM не кэпит per-thread память — нужен отдельный механизм; tight CPU-loop в impl не отменяется, но тенанты пишут только графы → каждый execute-step проверяет cancel).
+7. ✅ Кастомные домены в app-routing: `resolve-app-org` = `(or subdomain host-resolver)`, app-router принимает `host-resolver` → верифицированный кастомный домен → handler org тем же путём.
 
 ---
 
@@ -781,5 +784,6 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
 
 > **Фаза 1 + 1.5 — закрыты этой сессией** (16 коммитов пакетов + гейт). Фазы
 > 2–3 — это **один tenancy-аддон** по плану §3.0; начинать строго с auth-шва
-> + манифеста, иначе остальное не вклинить. Self-hosted без аддона работает
+>
+> - манифеста, иначе остальное не вклинить. Self-hosted без аддона работает
 > already (single-tenant) — аддон опционален по дизайну.

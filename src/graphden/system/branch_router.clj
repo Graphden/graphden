@@ -103,7 +103,10 @@
                                  :allowed-effects (:allowed-effects base-ctx)})
       ;; Inherit the off-record auth seam so per-branch execution
       ;; authenticates through the same provider as the base context.
-      (:auth-provider base-ctx) (assoc :auth-provider (:auth-provider base-ctx)))))
+      (:auth-provider base-ctx) (assoc :auth-provider (:auth-provider base-ctx))
+      ;; Inherit the per-namespace execute guard (§4.2) — branch execution
+      ;; must enforce the same grants as the base context.
+      (:execute-guard base-ctx) (assoc :execute-guard (:execute-guard base-ctx)))))
 
 
 (defn- ring-callable-for-ctx

@@ -616,8 +616,16 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        (i/↗/⌛) всегда видны; full read-only (нет write И execute) прячет
        сам `⋯`-вход. **Проверено Playwright:** execute-only прячет write +
        показывает run; write-only прячет run; read-only прячет вход.
-     *Остаётся:* per-namespace execute, `:terminal`/`:list-append` (R2) →
-     личные неймспейсы → workspaces;
+     - **per-namespace execute ✅** инъектируемый `:execute-guard` на ctx;
+       `cr/execute` консультирует его ОДИН раз на top-level (recursion-flag
+       `*execute-authorized*` держит его вне hot sub-fn пути), throw
+       `:authz/forbidden` → 403-bridge. `authz/authorize-executor` резолвит
+       namespace fn'а (read :fn → namespace-id → ns-path) + проверяет
+       `:execute`; skip для public/admin + system (нет principal). Доказано:
+       unit (guard по namespace, fires-once, denial/skip) + execute_http
+       (реальный /api/execute через dispatch) + boot backward-compat.
+     *Остаётся:* `:terminal`/`:list-append` (R2) → личные неймспейсы →
+     workspaces;
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;

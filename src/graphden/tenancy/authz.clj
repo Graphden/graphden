@@ -53,3 +53,27 @@
         (throw (ex-info "forbidden: no :write grant on the target namespace"
                         {:type :authz/forbidden
                          :namespace-id (:namespace-id data)}))))))
+
+
+(defn executable?
+  "May `principal` execute the fn whose `:namespace-id` is `ns-id`, per grant
+   `store`? Resolves the fn's namespace path and checks `:execute`."
+  [store storage principal ns-id]
+  (boolean (when-let [user (:user principal)]
+             (grant/can? store user :execute (namespace-path storage ns-id)))))
+
+
+(defn authorize-executor
+  "Build an execute guard `(fn [ctx fn-id])` for the executor's `:execute-
+   guard` seam: it throws `:authz/forbidden` when the current principal lacks
+   `:execute` on the fn's namespace. Skips platform / admin (public org) and
+   system execution (no principal) — services / cron run unrestricted."
+  [store]
+  (fn [ctx fn-id]
+    (when (and (not= (tc/current-org) tc/public-org)
+               tc/*current-principal*)
+      (let [storage (:storage ctx)
+            ns-id (:namespace-id (sp/read-entity storage :fn fn-id))]
+        (when-not (executable? store storage tc/*current-principal* ns-id)
+          (throw (ex-info "forbidden: no :execute grant on the fn's namespace"
+                          {:type :authz/forbidden :fn-id fn-id})))))))

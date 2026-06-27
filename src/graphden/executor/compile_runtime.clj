@@ -513,6 +513,14 @@
   nil)
 
 
+(def ^:dynamic *execute-authorized*
+  "True once the ctx's `:execute-guard` (the tenancy addon's per-namespace
+   execute check, PLATFORM_PLAN §4.2) has run for THIS top-level execute, so
+   the recursive sub-fn `execute` calls don't re-run it. Default false →
+   the next top-level `execute` consults the guard."
+  false)
+
+
 (def cloud-forbidden-effects
   "The security-sensitive effect categories a cloud sandbox must forbid
    (PLATFORM_PLAN §5). A cloud org context should set its
@@ -613,31 +621,39 @@
    reaper which writes `:status :cancelled`."
   [ctx fn-id named-args]
   (check-cancel!)
-  ;; Effect sandbox: when the ctx restricts effects, bind
-  ;; `*allowed-effects*` so `record-effect!` can gate. `identical?`
-  ;; skips re-binding on recursive `execute` calls within the same ctx;
-  ;; an unrestricted ctx (the common case) pays zero binding overhead.
-  (let [allowed (:allowed-effects ctx)]
-    (if (and allowed (not (identical? allowed *allowed-effects*)))
-      (binding [*allowed-effects* allowed]
-        (execute ctx fn-id named-args))
-      (if (fn? fn-id)
-        (let [args (or named-args {})]
-          (if (= 1 (count args))
-            (fn-id (first (vals args)))
-            (fn-id args)))
-        (let [reg (registry ctx)
-              closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
-              ;; Translate caller's name-keyed args into the dual-key
-              ;; shape (slot-id + name). Phase 4 readers prefer slot-id;
-              ;; the name half covers env-binding / lambda-arg / rename-
-              ;; alias paths that still flow under name keys today.
-              translated (translate-named-args fn-id (or named-args {})
-                                               (lookups-for-ctx ctx))]
-          ;; compile-eager closure signature: `(fn [free-args ctx])`.
-          ;; Child callables are captured at compile time — `reg`
-          ;; is no longer needed by the runtime.
-          (closure translated ctx))))))
+  ;; Per-namespace execute gate (§4.2): consult the ctx's `:execute-guard`
+  ;; ONCE per top-level execute (the recursion flag keeps it off the hot
+  ;; sub-fn path), then re-enter. The guard throws `:authz/forbidden` on a
+  ;; denied tenant execute; absent (core / system / admin) → no-op.
+  (if (and (not *execute-authorized*) (:execute-guard ctx))
+    (binding [*execute-authorized* true]
+      ((:execute-guard ctx) ctx fn-id)
+      (execute ctx fn-id named-args))
+    ;; Effect sandbox: when the ctx restricts effects, bind
+    ;; `*allowed-effects*` so `record-effect!` can gate. `identical?`
+    ;; skips re-binding on recursive `execute` calls within the same ctx;
+    ;; an unrestricted ctx (the common case) pays zero binding overhead.
+    (let [allowed (:allowed-effects ctx)]
+      (if (and allowed (not (identical? allowed *allowed-effects*)))
+        (binding [*allowed-effects* allowed]
+          (execute ctx fn-id named-args))
+        (if (fn? fn-id)
+          (let [args (or named-args {})]
+            (if (= 1 (count args))
+              (fn-id (first (vals args)))
+              (fn-id args)))
+          (let [reg (registry ctx)
+                closure (or (get reg fn-id) (throw-fn-not-found! fn-id))
+                ;; Translate caller's name-keyed args into the dual-key
+                ;; shape (slot-id + name). Phase 4 readers prefer slot-id;
+                ;; the name half covers env-binding / lambda-arg / rename-
+                ;; alias paths that still flow under name keys today.
+                translated (translate-named-args fn-id (or named-args {})
+                                                 (lookups-for-ctx ctx))]
+            ;; compile-eager closure signature: `(fn [free-args ctx])`.
+            ;; Child callables are captured at compile time — `reg`
+            ;; is no longer needed by the runtime.
+            (closure translated ctx)))))))
 
 
 (defn execute-by-name

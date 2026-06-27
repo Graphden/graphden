@@ -78,7 +78,11 @@
 ;;    :tenancy/grant-store {:storage #ig/ref :db/postgres}
 ;;    :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store}
 ;;    :org/scoped-storage {:base #ig/ref :app/storage
-;;                         :grant-store #ig/ref :tenancy/grant-store}}
+;;                         :grant-store #ig/ref :tenancy/grant-store}
+;;    ;; per-namespace EXECUTE: gate /api/execute by the fn's namespace:
+;;    :tenancy/execute-guard {:grant-store #ig/ref :tenancy/grant-store}
+;;    :exec/context {:request-scope #ig/ref :tenancy/request-scope
+;;                   :execute-guard #ig/ref :tenancy/execute-guard}}
 ;;
 ;; Grant rows (subject, capability ["write"/"execute"/"admin"], namespace)
 ;; are then ordinary entities — manage them via /api/entities/grant.

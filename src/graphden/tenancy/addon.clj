@@ -78,6 +78,13 @@
     (grant/static-grant-store (or grants []))))
 
 
+(defmethod ig/init-key :tenancy/execute-guard [_ {:keys [grant-store]}]
+  ;; Per-namespace execute gate (§4.2): `execute` consults this once per
+  ;; top-level call. nil grant-store → no guard (org-coarse only).
+  (when grant-store
+    (authz/authorize-executor grant-store)))
+
+
 (defmethod ig/init-key :auth/multi-tenant-provider [_ {:keys [tokens]}]
   ;; Overrides the core `:auth/provider` seam when a deployment wires it
   ;; (with its own `:tokens` map / secret) — see addon.edn's note. An empty

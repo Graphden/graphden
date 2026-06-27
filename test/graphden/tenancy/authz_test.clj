@@ -2,6 +2,7 @@
   "Per-target-namespace write enforcement (PLATFORM_PLAN §4.2 refinement)."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.authz :as authz]
     [graphden.tenancy.context :as tc]
@@ -14,11 +15,17 @@
   [rows]
   (reify sp/StorageCRUD
     (read-entity [_ entity-name id] (when (= entity-name :ns) (get rows id)))
+
     (create-entity [_ _ _] nil)
+
     (update-entity [_ _ _ _] nil)
+
     (delete-entity [_ _ _] nil)
+
     (query-entities [_ _ _] nil)
+
     (query-entities [_ _ _ _] nil)
+
     (query-latest-per-group [_ _ _ _] nil)))
 
 
@@ -68,3 +75,71 @@
       (tc/with-org tc/public-org
                    (binding [tc/*current-principal* {:user "nobody"}]
                      (is (nil? (guard :fn {:namespace-id "acme"}))))))))
+
+
+;; --- per-namespace execute (the :execute-guard seam) ---
+
+(defn- fn+ns-store
+  "Storage exposing :ns and :fn read-entity."
+  [ns-rows fn-rows]
+  (reify sp/StorageCRUD
+    (read-entity
+      [_ entity-name id]
+      (case entity-name
+        :ns (get ns-rows id)
+        :fn (get fn-rows id)
+        nil))
+
+    (create-entity [_ _ _] nil)
+
+    (update-entity [_ _ _ _] nil)
+
+    (delete-entity [_ _ _] nil)
+
+    (query-entities [_ _ _] nil)
+
+    (query-entities [_ _ _ _] nil)
+
+    (query-latest-per-group [_ _ _ _] nil)))
+
+
+(deftest authorize-executor-gates-by-the-fns-namespace
+  (let [storage (fn+ns-store
+                  {"acme" {:name "acme" :parent-id nil}
+                   "team" {:name "team" :parent-id "acme"}}
+                  {"f-team" {:namespace-id "team"}
+                   "f-acme" {:namespace-id "acme"}})
+        grants (grant/static-grant-store
+                 [{:subject "bob" :capability :execute :namespace "acme.team"}])
+        guard (authz/authorize-executor grants)
+        ctx {:storage storage}]
+    (tc/with-org "acme"
+                 (binding [tc/*current-principal* {:user "bob"}]
+                   (testing "execute of a fn in a granted namespace passes"
+                     (is (nil? (guard ctx "f-team"))))
+                   (testing "...but not one in an ungranted namespace"
+                     (is (thrown? clojure.lang.ExceptionInfo (guard ctx "f-acme"))))))
+    (testing "platform/admin (public org) skips"
+      (tc/with-org tc/public-org
+                   (binding [tc/*current-principal* {:user "bob"}]
+                     (is (nil? (guard ctx "f-acme"))))))
+    (testing "system execution (no principal) skips"
+      (tc/with-org "acme"
+                   (is (nil? (guard ctx "f-acme")))))))
+
+
+(deftest execute-consults-the-guard-once-at-top-level
+  (let [calls (atom 0)
+        ctx {:execute-guard (fn [_ctx _fn-id] (swap! calls inc))}
+        inner (fn [_] :inner)
+        outer (fn [_] (cr/execute ctx inner {:x 1}) :outer)]
+    (is (= :outer (cr/execute ctx outer {:y 1})))
+    (is (= 1 @calls) "the guard fires once, not on the recursive sub-execute")))
+
+
+(deftest execute-guard-denial-propagates-and-no-guard-runs-normally
+  (testing "a denying guard's throw propagates (→ 403 via the request-scope bridge)"
+    (let [ctx {:execute-guard (fn [_ _] (throw (ex-info "no" {:type :authz/forbidden})))}]
+      (is (thrown? clojure.lang.ExceptionInfo (cr/execute ctx (fn [_] :ran) {})))))
+  (testing "no guard → execute runs unchanged"
+    (is (= :ran (cr/execute {} (fn [_] :ran) {})))))

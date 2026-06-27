@@ -154,8 +154,13 @@
                 `(fn [ctx request thunk] …)` the branch-router's `dispatch`
                 wraps each handler call with. The tenancy addon uses it to
                 authenticate + bind `*current-org*`. Absent → `dispatch`
-                calls the handler directly (single-tenant)."
-  [{:keys [storage base-fns clock allowed-effects auth-provider request-scope]}]
+                calls the handler directly (single-tenant).
+   - :execute-guard  Optional per-namespace execute guard (§4.2) — a fn
+                `(fn [ctx fn-id] …)` `compile-runtime/execute` consults once
+                per top-level execute; throws `:authz/forbidden` on a denied
+                tenant execute. Absent → no execute authorization."
+  [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
+           execute-guard]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -178,7 +183,9 @@
       (cond-> auth-provider (assoc :auth-provider auth-provider))
       ;; Request-scope seam (§3.0 B4) — wrapped around each handler call by
       ;; the branch-router's `dispatch`.
-      (cond-> request-scope (assoc :request-scope request-scope))))
+      (cond-> request-scope (assoc :request-scope request-scope))
+      ;; Per-namespace execute guard (§4.2) — consulted by `execute`.
+      (cond-> execute-guard (assoc :execute-guard execute-guard))))
 
 
 (defn current-time-ms

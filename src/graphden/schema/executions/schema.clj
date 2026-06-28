@@ -131,6 +131,13 @@
   #uuid "5d9b6c0a-c3f4-49a8-9c01-0b1e8b5e4a2c")
 
 
+(def ^:private fn-execution-org-id-field-uuid
+  ;; Tenant owner (§3.0 B2 / §4 org-scoped executions). NULL ≡ public.
+  ;; Stamped by OrgScopedStorage at create-time; the conveyed *current-org*
+  ;; rides the completion future so the terminal UPDATE passes the own-guard.
+  #uuid "7c2e9a41-5b83-4d06-8f1a-3e6b0d27c594")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :fn-execution-arg
 ;; =============================================================================
@@ -274,7 +281,11 @@
                       ;; future Secret-flows history tab.
                       :touched-secret? {:uuid fn-execution-touched-secret-field-uuid
                                         :type :bool
-                                        :nullable? true}})
+                                        :nullable? true}
+                      ;; Tenant owner (§4 org-scoped executions). NULL ≡ public.
+                      :org-id {:uuid fn-execution-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
 
       ;; -----------------------------------------------------------------
       ;; :fn-execution-arg — one row per free-arg the executor was

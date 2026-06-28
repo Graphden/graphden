@@ -15,6 +15,7 @@
    every row is visible and writable — so installing RLS is safe before the
    request path sets the variable."
   (:require
+    [clojure.string :as str]
     [graphden.storage.postgres.util :as util]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]
@@ -51,13 +52,23 @@
           " WITH CHECK (" unset " OR " org-col " = " cur ")")]))
 
 
+(defn- table-exists?
+  [ds entity]
+  (boolean
+    (seq (jdbc/execute! ds ["SELECT 1 FROM information_schema.tables WHERE table_name = ?"
+                            (str/replace (name entity) "-" "_")]))))
+
+
 (defn enable-rls!
   "Install the org-isolation policy on each org-scoped table (default:
    `ts/default-scoped-entities`). Idempotent — re-running replaces the
-   policy. `ds` is a datasource/connection."
+   policy. Entities whose table isn't in the schema are skipped (a deployment
+   without, say, the executions schema simply has nothing to protect there).
+   `ds` is a datasource/connection."
   ([ds] (enable-rls! ds ts/default-scoped-entities))
   ([ds entities]
    (doseq [entity entities
+           :when (table-exists? ds entity)
            stmt (policy-statements entity)]
      (jdbc/execute! ds [stmt]))))
 

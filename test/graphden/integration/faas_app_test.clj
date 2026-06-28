@@ -328,6 +328,38 @@
       (is (nil? (cr/execute seam-ctx login-id {:username "ghost" :password "x"}))))))
 
 
+(deftest org-scoped-executions-isolated-and-finishable
+  ;; §4 org-scoped :fn-execution — the case the deferral worried about: the
+  ;; create runs in the request scope (stamped), the terminal UPDATE runs in a
+  ;; binding-conveyed completion future (inherits *current-org* → own-guard
+  ;; passes). Plus cross-org isolation.
+  (let [fv-id (:id (first (sp/query-entities (:storage *ctx*) :fn-version {})))
+        mk (fn [org]
+             (tc/with-org org
+                          (sp/create-entity (:storage *ctx*) :fn-execution
+                                            {:fn-version-id fv-id
+                                             :started-at (java.time.Instant/now)
+                                             :status :pending})))]
+    (is (some? fv-id) "fixture has a :fn-version to reference")
+    (let [acme-exec (mk "exec-acme")
+          beta-exec (mk "exec-beta")]
+      (testing "the row is stamped with the creating org"
+        (is (= "exec-acme" (:org-id acme-exec))))
+      (testing "a terminal UPDATE in a binding-conveyed future passes the own-guard"
+        @(tc/with-org "exec-acme"
+                      (future (sp/update-entity (:storage *ctx*) :fn-execution
+                                                (:id acme-exec) {:status :succeeded})))
+        ;; Read back in the SAME org — a scoped row is invisible to other orgs
+        ;; (incl. public), which is exactly the isolation we want.
+        (is (= :succeeded (:status (tc/with-org "exec-acme"
+                                                (sp/read-entity (:storage *ctx*) :fn-execution (:id acme-exec)))))))
+      (testing "a tenant sees only its OWN executions, never another org's"
+        (let [acme-visible (tc/with-org "exec-acme"
+                                        (set (map :id (sp/query-entities (:storage *ctx*) :fn-execution {}))))]
+          (is (contains? acme-visible (:id acme-exec)))
+          (is (not (contains? acme-visible (:id beta-exec)))))))))
+
+
 (deftest tenant-cannot-create-users
   (testing "a tenant writing :user directly is denied (no cross-org account mint)"
     (let [ex (try (tc/with-org "evil-org"

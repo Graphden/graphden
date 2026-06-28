@@ -420,6 +420,26 @@
 ;; Self-serve signup (§4.1) — a fresh account creates a NEW org (never joins an
 ;; existing one) and auto-logs-in.
 ;; ---------------------------------------------------------------------------
+(deftest login-handler-401-on-bad-creds
+  ;; Bad credentials → a real 401, not 200-with-empty-body. We execute the
+  ;; handler ONCE: the eager-compiled closure caches per fn-id across direct
+  ;; cr/execute calls, so a second execute of the same handler would reuse the
+  ;; first's result — a harness artifact the production request-callable avoids
+  ;; with a fresh per-request cache. The success path (non-blank token → html-ok
+  ;; 200) is the trivial :else branch, covered by the login round-trip tests.
+  (let [handler-id (fn-id-of (:storage *ctx*) "_login-handler")
+        seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!
+                                         :logout users/logout! :signup users/signup!})
+        bad-req {:request-method :post
+                 :headers {"content-type" "application/x-www-form-urlencoded"}
+                 :body "username=h401&password=WRONG"}]
+    (users/create-user! *ctx* "h401" "pw401" "acme")
+    (testing "bad credentials → 401 with a message (not 200 + empty body)"
+      (let [resp (cr/execute seam-ctx handler-id {:request bad-req})]
+        (is (= 401 (:status resp)))
+        (is (= "Invalid username or password." (:body resp)))))))
+
+
 (deftest legacy-pbkdf2-rehashed-to-bcrypt-on-login
   (let [login-id (fn-id-of (:storage *ctx*) "invoke-login")
         seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!

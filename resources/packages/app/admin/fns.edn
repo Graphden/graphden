@@ -699,12 +699,21 @@
    :parent :post
    :args {:path "/api/users" :handler :_user-create-handler}}
 
+  ;; --- shared 401 body for a failed credential attempt (login + signup) ----
+  {:name :_auth-401-body
+   :parent :const
+   :args {:value "Invalid username or password."}}
+
+  {:name :_auth-401
+   :parent :text-unauthorized-response
+   :args {:body :_auth-401-body}}
+
   ;; ---------------------------------------------------------------------
   ;; LOGIN (§4.1) — POST /api/login {username password}. UNAUTHENTICATED (you
   ;; log in to obtain a token). The `:invoke-login` base-fn calls the
   ;; `:user-ops` seam, which verifies credentials and mints a session `:token`
-  ;; (the storage-token-provider resolves it thereafter). Returns the raw token
-  ;; as the body (empty on bad credentials — the client treats empty as fail).
+  ;; (the storage-token-provider resolves it thereafter). 200 + the token, or
+  ;; 401 on bad credentials.
   ;; ---------------------------------------------------------------------
   {:name :invoke-login
    :description "Verify credentials via the addon's user-ops seam and mint a session token. Returns {:token :user :org} on success, nil on bad credentials / no addon."
@@ -737,10 +746,18 @@
    :parent :to-str
    :args {:value :_login-token}}
 
-  {:name :_login-handler
-   :description "Ring handler for POST /api/login — returns the minted session token (empty on bad credentials)."
+  {:name :_login-token-blank?
+   :parent :blank?
+   :args {:string :_login-token-text}}
+
+  {:name :_login-200
    :parent :html-ok-response
    :args {:body :_login-token-text}}
+
+  {:name :_login-handler
+   :description "Ring handler for POST /api/login — 200 + the minted session token, or 401 on bad credentials (blank token)."
+   :parent :if
+   :args {:test :_login-token-blank? :then :_auth-401 :else :_login-200}}
 
   ;; UNAUTHENTICATED — `:post-route` (no auth-required middleware, unlike
   ;; `:post`): login is the entry point to obtaining auth, so it must be
@@ -795,10 +812,18 @@
    :parent :to-str
    :args {:value :_signup-token}}
 
-  {:name :_signup-handler
-   :description "Ring handler for POST /api/signup — returns the new session token (empty on failure)."
+  {:name :_signup-token-blank?
+   :parent :blank?
+   :args {:string :_signup-token-text}}
+
+  {:name :_signup-200
    :parent :html-ok-response
    :args {:body :_signup-token-text}}
+
+  {:name :_signup-handler
+   :description "Ring handler for POST /api/signup — 200 + the new session token, or 401 when signup failed (taken / blank)."
+   :parent :if
+   :args {:test :_signup-token-blank? :then :_auth-401 :else :_signup-200}}
 
   {:name :signup-route
    :description "POST /api/signup — self-serve register a new org + user and get a session token. UNAUTHENTICATED."

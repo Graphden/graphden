@@ -106,6 +106,7 @@
   {:create-user users/create-user!
    :login users/login!
    :logout users/logout!
+   :logout-all users/logout-all!
    :signup users/signup!})
 
 

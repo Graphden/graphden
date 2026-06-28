@@ -196,6 +196,23 @@
                        true))))))
 
 
+(defn logout-all!
+  "Sign out everywhere — delete EVERY session `:token` for the current
+   authenticated user (e.g. after a password change or a lost device). The user
+   is read from `*current-principal*`, so a caller can only sweep its OWN
+   sessions. Returns the count deleted; 0 when unauthenticated."
+  [ctx]
+  (let [storage (:storage ctx)
+        user (:user tc/*current-principal*)]
+    (if (str/blank? user)
+      0
+      (tc/with-org tc/public-org
+                   (let [rows (sp/query-entities storage :token {:user user})]
+                     (doseq [row rows]
+                       (sp/delete-entity storage :token (:id row)))
+                     (count rows))))))
+
+
 (defn cleanup-expired-tokens!
   "Hard-delete every `:token` whose expiry is in the past — the provider already
    ignores them (`token-live?`), this stops the rows accumulating. Runs in the

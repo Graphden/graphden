@@ -47,6 +47,7 @@
                   :login-route
                   :signup-route
                   :logout-route
+                  :logout-all-route
                   :partial-row-actions
                   :demo-contact
                   :health

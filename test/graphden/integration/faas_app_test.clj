@@ -393,6 +393,27 @@
         (is (= {:authenticated? false} (auth/authenticate provider (bearer-req token))))))))
 
 
+(deftest logout-all-invalidates-every-session-of-the-user
+  (let [provider (tauth/storage-token-provider (:storage *ctx*))
+        future-ms (+ (System/currentTimeMillis) 100000)
+        seed (fn [tok user]
+               (sp/create-entity (:storage *ctx*) :token
+                                 {:token-hash (tauth/token-hash tok) :user user :org "acme"
+                                  :expires-at future-ms}))]
+    (seed "m1" "multi") (seed "m2" "multi") (seed "m3" "multi")
+    (seed "other1" "bystander")
+    (testing "logout-all deletes ALL the current user's sessions, never another user's"
+      (let [n (binding [tc/*current-principal* {:user "multi" :org "acme"}]
+                (users/logout-all! *ctx*))]
+        (is (= 3 n))
+        (is (= {:authenticated? false} (auth/authenticate provider (bearer-req "m1"))))
+        (is (= {:authenticated? false} (auth/authenticate provider (bearer-req "m3"))))
+        (is (= {:authenticated? true :user "bystander" :org "acme"}
+               (auth/authenticate provider (bearer-req "other1"))))))
+    (testing "unauthenticated caller → 0 (no principal)"
+      (is (zero? (binding [tc/*current-principal* nil] (users/logout-all! *ctx*)))))))
+
+
 (deftest session-cleanup-reaps-expired-tokens
   (let [now (System/currentTimeMillis)
         present? (fn [t]

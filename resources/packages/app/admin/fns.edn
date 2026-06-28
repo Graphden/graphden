@@ -858,4 +858,32 @@
   {:name :logout-route
    :description "POST /api/logout — delete the caller's session token. Auth-required (the bearer to invalidate is the request's own)."
    :parent :post
-   :args {:path "/api/logout" :handler :_logout-handler}}]}
+   :args {:path "/api/logout" :handler :_logout-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; LOGOUT-ALL (§4.1) — POST /api/logout-all. Sign out everywhere: delete
+  ;; EVERY session token for the current user (the seam reads
+  ;; *current-principal*). Auth-required.
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-logout-all
+   :description "Invoke the addon's logout-all seam — delete every session token for the current user. Returns the count deleted, or nil when the addon isn't active."
+   :args {}
+   :return-type [:union :null :int]
+   :effects #{:db}}
+
+  {:name :_logout-all-do
+   :parent :invoke-logout-all}
+
+  {:name :_logout-all-text
+   :parent :to-str
+   :args {:value :_logout-all-do}}
+
+  {:name :_logout-all-handler
+   :description "Ring handler for POST /api/logout-all — invalidates every session of the current user."
+   :parent :html-ok-response
+   :args {:body :_logout-all-text}}
+
+  {:name :logout-all-route
+   :description "POST /api/logout-all — sign out everywhere (delete all the current user's session tokens). Auth-required."
+   :parent :post
+   :args {:path "/api/logout-all" :handler :_logout-all-handler}}]}

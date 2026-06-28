@@ -131,6 +131,14 @@
     ((:logout ops) ctx request)))
 
 
+;; Logout-all (§4.1): delete EVERY session token for the current user (the seam
+;; reads *current-principal*). No addon → nil. The editor clears local too.
+(defbase invoke-logout-all
+  []
+  (when-let [ops (:user-ops ctx)]
+    ((:logout-all ops) ctx)))
+
+
 (def impls
   {:list-grants list-grants
    :list-users list-users
@@ -144,4 +152,5 @@
    :invoke-create-user invoke-create-user
    :invoke-login invoke-login
    :invoke-logout invoke-logout
+   :invoke-logout-all invoke-logout-all
    :invoke-signup invoke-signup})

@@ -99,11 +99,13 @@
 
 
 (defmethod ig/init-key :tenancy/user-ops [_ _]
-  ;; User-model seam (§4.1) — `{:create-user … :login …}`. Wired onto
+  ;; User-model seam (§4.1) — `{:create-user … :login … :logout …}`. Wired onto
   ;; `:exec/context`'s `:user-ops`; the core `:invoke-create-user` /
-  ;; `:invoke-login` base-fns call into it. login! mints a session `:token`.
+  ;; `:invoke-login` / `:invoke-logout` base-fns call into it. login! mints a
+  ;; session `:token` (with a TTL); logout! deletes it.
   {:create-user users/create-user!
-   :login users/login!})
+   :login users/login!
+   :logout users/logout!})
 
 
 (defmethod ig/init-key :tenancy/storage-host-resolver [_ {:keys [storage]}]

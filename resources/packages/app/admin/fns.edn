@@ -602,4 +602,34 @@
   {:name :login-route
    :description "POST /api/login — exchange username/password for a session token. UNAUTHENTICATED (the entry point to obtaining auth)."
    :parent :post-route
-   :args {:path "/api/login" :handler :_login-handler}}]}
+   :args {:path "/api/login" :handler :_login-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; LOGOUT (§4.1) — POST /api/logout. Deletes the caller's session `:token`
+  ;; server-side (the seam reads the bearer from `:request`), so a leaked
+  ;; token can't be replayed after sign-out. Auth-required (you present the
+  ;; token to invalidate it). `:request` stays a free arg → bound to the Ring
+  ;; request at the handler call.
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-logout
+   :description "Invoke the addon's logout seam — delete the caller's session token (bearer read from :request). Returns true iff a row was deleted, or nil when the addon isn't active."
+   :args {:request {:type :ring-request-shape :description "The Ring request — its bearer identifies the session to invalidate."}}
+   :return-type [:union :null :bool]
+   :effects #{:db}}
+
+  {:name :_logout-do
+   :parent :invoke-logout}
+
+  {:name :_logout-text
+   :parent :to-str
+   :args {:value :_logout-do}}
+
+  {:name :_logout-handler
+   :description "Ring handler for POST /api/logout — invalidates the caller's session token."
+   :parent :html-ok-response
+   :args {:body :_logout-text}}
+
+  {:name :logout-route
+   :description "POST /api/logout — delete the caller's session token. Auth-required (the bearer to invalidate is the request's own)."
+   :parent :post
+   :args {:path "/api/logout" :handler :_logout-handler}}]}

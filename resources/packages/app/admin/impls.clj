@@ -106,6 +106,15 @@
     ((:login ops) ctx username password)))
 
 
+;; Logout (§4.1): delete the caller's session token server-side (the seam reads
+;; the bearer from `request`). No addon → nil. Returns true iff a row was
+;; deleted; the editor clears its local token regardless.
+(defbase invoke-logout
+  [request]
+  (when-let [ops (:user-ops ctx)]
+    ((:logout ops) ctx request)))
+
+
 (def impls
   {:list-grants list-grants
    :create-grant create-grant
@@ -116,4 +125,5 @@
    :invoke-set-org-handler invoke-set-org-handler
    :invoke-verify-domain invoke-verify-domain
    :invoke-create-user invoke-create-user
-   :invoke-login invoke-login})
+   :invoke-login invoke-login
+   :invoke-logout invoke-logout})

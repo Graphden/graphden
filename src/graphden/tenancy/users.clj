@@ -12,6 +12,7 @@
    tenant-forbidden, and minting tokens / hashing passwords is privileged."
   (:require
     [clojure.string :as str]
+    [graphden.auth.provider :as auth]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc])
@@ -32,6 +33,12 @@
 
 (def ^:private ^:const pbkdf2-iterations 100000)
 (def ^:private ^:const pbkdf2-key-bits 256)
+
+
+(def ^:const default-session-ttl-ms
+  "How long a login session token stays valid — 24h. (Configurable later;
+   operator-minted API keys via `create-token` have no expiry.)"
+  (* 24 60 60 1000))
 
 
 (defn- random-bytes
@@ -112,5 +119,27 @@
                      (let [raw (random-token)
                            org (:org user)]
                        (sp/create-entity storage :token
-                                         {:token-hash (tauth/token-hash raw) :user username :org org})
+                                         {:token-hash (tauth/token-hash raw)
+                                          :user username
+                                          :org org
+                                          :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
                        {:token raw :user username :org org}))))))
+
+
+(defn logout!
+  "Invalidate the current session — delete the `:token` row for `request`'s
+   bearer, so a leaked/observed token can't be replayed after sign-out
+   (clearing the client's localStorage alone wouldn't). Idempotent: a missing /
+   unknown bearer is a no-op. A caller can only delete the token it presents (a
+   secret it already holds), so this needs no further authz. Returns true iff a
+   row was deleted."
+  [ctx request]
+  (let [storage (:storage ctx)
+        token (auth/extract-bearer request)]
+    (boolean
+      (when-not (str/blank? token)
+        (tc/with-org tc/public-org
+                     (when-let [row (first (sp/query-entities storage :token
+                                                              {:token-hash (tauth/token-hash token)}))]
+                       (sp/delete-entity storage :token (:id row))
+                       true))))))

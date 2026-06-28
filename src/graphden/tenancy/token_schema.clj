@@ -10,6 +10,10 @@
    - `user`       — the principal's user id.
    - `org`        — the principal's org (→ `*current-org*` via the request
                     scope; this is what turns the addon into real tenancy).
+   - `expires-at` — epoch millis after which the token is dead (the provider
+                    rejects it). NULL = never expires — operator-minted API
+                    keys (`create-token`) leave it unset; login sessions set a
+                    TTL. Logout deletes the row outright (server-side).
 
    Platform-managed: `:token` is in `tenancy.storage/tenant-forbidden-entities`
    — tenants can neither read (enumerate other users' tokens) nor write (mint
@@ -35,12 +39,20 @@
   #uuid "6b3f0c97-1e54-4a82-8c6d-9f2a7b504e13")
 
 
+(def ^:private token-expires-at-field-uuid
+  #uuid "1d8e3f60-9a47-4b25-8c91-5f0a6d2b7e84")
+
+
 (defn extend-builder
-  "Add the `:token` entity — `(token-hash, user, org)` with a UNIQUE hash."
+  "Add the `:token` entity — `(token-hash, user, org, expires-at)` with a
+   UNIQUE hash."
   [builder]
   (-> builder
       (ds/add-entity :token token-entity-uuid
                      {:token-hash {:uuid token-hash-field-uuid :type :text}
                       :user {:uuid token-user-field-uuid :type :text}
-                      :org {:uuid token-org-field-uuid :type :text}})
+                      :org {:uuid token-org-field-uuid :type :text}
+                      :expires-at {:uuid token-expires-at-field-uuid
+                                   :type :int
+                                   :nullable? true}})
       (ds/add-constraint :token {:type :unique :fields [:token-hash]})))

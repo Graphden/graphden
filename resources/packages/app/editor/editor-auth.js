@@ -221,9 +221,20 @@ function renderAuthLock() {
 // Click on the lock toggles between login (when closed) and logout
 // (when open). Logout asks for confirmation since it loses the
 // in-progress edit session.
-function toggleAuthAction() {
+async function toggleAuthAction() {
   if (isAuthenticated()) {
-    if (confirm('Sign out?')) clearAuthPassword();
+    if (!confirm('Sign out?')) return;
+    // Multi-tenant: invalidate the session token server-side (POST /api/logout
+    // deletes the :token, so a leaked bearer can't be replayed) before clearing
+    // local storage, then reload to drop back to the anonymous view. Single-
+    // tenant has no server session — just clear the stored admin password.
+    if (loginIsTenant()) {
+      try { await authFetch(API.api_logout, { method: 'POST' }); } catch (_) {}
+      clearAuthPassword();
+      window.location.reload();
+    } else {
+      clearAuthPassword();
+    }
   } else {
     openAuthPopover();
   }

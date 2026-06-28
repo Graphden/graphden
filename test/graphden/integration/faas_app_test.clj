@@ -333,3 +333,46 @@
                                                  {:username "mole" :password-hash "h" :org "victim"}))
                   nil (catch clojure.lang.ExceptionInfo e e))]
       (is (= :authz/forbidden (:type (ex-data ex)))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Session TTL (§4.1) — the provider rejects expired tokens; logout deletes the
+;; row so a token can't be replayed after sign-out.
+;; ---------------------------------------------------------------------------
+(deftest session-token-ttl-expiry
+  (let [provider (tauth/storage-token-provider (:storage *ctx*))
+        now (System/currentTimeMillis)]
+    (sp/create-entity (:storage *ctx*) :token
+                      {:token-hash (tauth/token-hash "ttl-live") :user "u" :org "acme"
+                       :expires-at (+ now 100000)})
+    (sp/create-entity (:storage *ctx*) :token
+                      {:token-hash (tauth/token-hash "ttl-dead") :user "u" :org "acme"
+                       :expires-at (- now 1000)})
+    (sp/create-entity (:storage *ctx*) :token
+                      {:token-hash (tauth/token-hash "ttl-none") :user "u" :org "acme"})
+    (testing "a non-expired token authenticates"
+      (is (= {:authenticated? true :user "u" :org "acme"} (auth/authenticate provider (bearer-req "ttl-live")))))
+    (testing "an expired token fails closed (like an unknown token)"
+      (is (= {:authenticated? false} (auth/authenticate provider (bearer-req "ttl-dead")))))
+    (testing "a NULL-expiry token (operator API key) never expires"
+      (is (= {:authenticated? true :user "u" :org "acme"} (auth/authenticate provider (bearer-req "ttl-none")))))))
+
+
+(deftest login-sets-ttl-and-logout-invalidates
+  (let [login-id (fn-id-of (:storage *ctx*) "invoke-login")
+        logout-id (fn-id-of (:storage *ctx*) "invoke-logout")
+        seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user!
+                                         :login users/login!
+                                         :logout users/logout!})
+        provider (tauth/storage-token-provider (:storage *ctx*))]
+    (users/create-user! *ctx* "bob" "pw-bob" "acme")
+    (let [token (:token (cr/execute seam-ctx login-id {:username "bob" :password "pw-bob"}))]
+      (testing "login mints a token with a future TTL"
+        (let [row (first (sp/query-entities (:storage *ctx*) :token {:token-hash (tauth/token-hash token)}))]
+          (is (number? (:expires-at row)))
+          (is (> (:expires-at row) (System/currentTimeMillis)))))
+      (testing "the session authenticates before logout"
+        (is (:authenticated? (auth/authenticate provider (bearer-req token)))))
+      (testing "invoke-logout base-fn deletes the token → it no longer authenticates"
+        (is (true? (cr/execute seam-ctx logout-id {:request (bearer-req token)})))
+        (is (= {:authenticated? false} (auth/authenticate provider (bearer-req token))))))))

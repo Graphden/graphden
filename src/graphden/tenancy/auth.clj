@@ -59,15 +59,25 @@
   (sha256-hex token))
 
 
+(defn- token-live?
+  "A `:token` row is usable iff it has no expiry (operator API key) or its
+   expiry (`:expires-at`, epoch millis) is still in the future. Expired session
+   tokens fail closed exactly like an unknown token."
+  [row]
+  (let [exp (:expires-at row)]
+    (or (nil? exp) (> exp (System/currentTimeMillis)))))
+
+
 (defn storage-token-provider
   "An `AuthProvider` over the `:token` entity (PLATFORM_PLAN §3.4 #1). A
    request's bearer is hashed and matched against `:token` rows, so onboarding
    a user is creating a row (no redeploy). `storage` should be the BASE storage
    — auth runs before the request scope, in the platform context. Reads only
-   the hash; a hit yields `{:user … :org …}`."
+   the hash; a non-expired hit yields `{:user … :org …}` (§4.1 session TTL)."
   [storage]
   (->TokenAuthProvider
     (fn [token]
       (when-not (str/blank? token)
         (when-let [row (first (sp/query-entities storage :token {:token-hash (sha256-hex token)}))]
-          {:user (:user row) :org (:org row)})))))
+          (when (token-live? row)
+            {:user (:user row) :org (:org row)}))))))

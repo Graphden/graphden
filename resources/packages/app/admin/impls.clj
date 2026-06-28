@@ -114,6 +114,14 @@
     ((:login ops) ctx username password)))
 
 
+;; Self-serve signup (§4.1): create a new org + user and auto-login. No addon →
+;; nil. The seam refuses to join an existing org (new account → new org only).
+(defbase invoke-signup
+  [username password org]
+  (when-let [ops (:user-ops ctx)]
+    ((:signup ops) ctx username password org)))
+
+
 ;; Logout (§4.1): delete the caller's session token server-side (the seam reads
 ;; the bearer from `request`). No addon → nil. Returns true iff a row was
 ;; deleted; the editor clears its local token regardless.
@@ -135,4 +143,5 @@
    :invoke-verify-domain invoke-verify-domain
    :invoke-create-user invoke-create-user
    :invoke-login invoke-login
-   :invoke-logout invoke-logout})
+   :invoke-logout invoke-logout
+   :invoke-signup invoke-signup})

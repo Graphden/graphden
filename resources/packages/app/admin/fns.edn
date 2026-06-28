@@ -752,6 +752,60 @@
    :args {:path "/api/login" :handler :_login-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; SIGNUP (§4.1) — POST /api/signup {username password org}. UNAUTHENTICATED
+  ;; self-serve registration: creates a BRAND-NEW org + user and auto-logs-in
+  ;; (returns the session token). The seam refuses an existing org, so a new
+  ;; account can never join another tenant. Empty body on failure (taken /
+  ;; blank), exactly like login.
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-signup
+   :description "Self-serve signup via the user-ops seam: create a new org + user, auto-login. Returns {:token :user :org}, or nil on failure / no addon."
+   :args {:username {:type :text :description "Desired login id (must be free)."}
+          :password {:type :text :description "Raw password — only its PBKDF2 hash is stored."}
+          :org {:type :text :description "Desired org slug (must be free — signup creates it)."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_signup-form-data
+   :parent :parse-form-body}
+
+  {:name :_signup-username
+   :parent :get
+   :args {:coll :_signup-form-data :key {:value :username} :default {:value ""}}}
+
+  {:name :_signup-password
+   :parent :get
+   :args {:coll :_signup-form-data :key {:value :password} :default {:value ""}}}
+
+  {:name :_signup-org
+   :parent :get
+   :args {:coll :_signup-form-data :key {:value :org} :default {:value ""}}}
+
+  {:name :_signup-do
+   :parent :invoke-signup
+   :args {:username :_signup-username
+          :password :_signup-password
+          :org :_signup-org}}
+
+  {:name :_signup-token
+   :parent :get
+   :args {:coll :_signup-do :key {:value :token} :default {:value ""}}}
+
+  {:name :_signup-token-text
+   :parent :to-str
+   :args {:value :_signup-token}}
+
+  {:name :_signup-handler
+   :description "Ring handler for POST /api/signup — returns the new session token (empty on failure)."
+   :parent :html-ok-response
+   :args {:body :_signup-token-text}}
+
+  {:name :signup-route
+   :description "POST /api/signup — self-serve register a new org + user and get a session token. UNAUTHENTICATED."
+   :parent :post-route
+   :args {:path "/api/signup" :handler :_signup-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; LOGOUT (§4.1) — POST /api/logout. Deletes the caller's session `:token`
   ;; server-side (the seam reads the bearer from `:request`), so a leaked
   ;; token can't be replayed after sign-out. Auth-required (you present the

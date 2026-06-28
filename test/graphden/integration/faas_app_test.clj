@@ -413,3 +413,28 @@
         (is (not (present? "clean-dead2")))
         (is (present? "clean-live"))
         (is (present? "clean-apikey"))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Self-serve signup (§4.1) — a fresh account creates a NEW org (never joins an
+;; existing one) and auto-logs-in.
+;; ---------------------------------------------------------------------------
+(deftest self-serve-signup-creates-org-user-and-logs-in
+  (let [signup-id (fn-id-of (:storage *ctx*) "invoke-signup")
+        seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!
+                                         :logout users/logout! :signup users/signup!})
+        provider (tauth/storage-token-provider (:storage *ctx*))]
+    (testing "a fresh signup creates the org + user and returns a working session token"
+      (let [token (:token (cr/execute seam-ctx signup-id {:username "newbie" :password "pw-new" :org "newco"}))]
+        (is (string? token))
+        (is (some? (first (sp/query-entities (:storage *ctx*) :org {:name "newco"}))))
+        (is (some? (first (sp/query-entities (:storage *ctx*) :user {:username "newbie"}))))
+        (is (= {:authenticated? true :user "newbie" :org "newco"}
+               (auth/authenticate provider (bearer-req token))))))
+    (testing "a taken username → nil (no second account)"
+      (is (nil? (cr/execute seam-ctx signup-id {:username "newbie" :password "x" :org "other-org"})))
+      (is (nil? (first (sp/query-entities (:storage *ctx*) :org {:name "other-org"}))) "no partial org created"))
+    (testing "a taken org → nil (signup can't join an existing org)"
+      (is (nil? (cr/execute seam-ctx signup-id {:username "newbie2" :password "x" :org "newco"}))))
+    (testing "blank fields → nil"
+      (is (nil? (cr/execute seam-ctx signup-id {:username "" :password "x" :org "z"}))))))

@@ -126,6 +126,31 @@
                        {:token raw :user username :org org}))))))
 
 
+(defn signup!
+  "Self-serve registration (PLATFORM_PLAN §4.1): create a BRAND-NEW org and a
+   user who owns it, then auto-login. The org must be FREE — signup can never
+   join an existing org, so a new account can't reach another tenant's data.
+   Runs in the platform context. Returns `{:token :user :org}` on success, nil
+   on any failure (blank field, or username / org already taken) so the
+   endpoint maps nil → an empty body exactly like login. (Open signup; rate-
+   limiting / invite-gating is a follow-up.)"
+  [ctx username password org]
+  (let [storage (:storage ctx)]
+    (when (and (not (str/blank? username)) (not (str/blank? password)) (not (str/blank? org)))
+      (tc/with-org tc/public-org
+                   (when (and (empty? (sp/query-entities storage :user {:username username}))
+                              (empty? (sp/query-entities storage :org {:name org})))
+                     ;; New org + its first user. The UNIQUE constraints on
+                     ;; :org.name / :user.username are the real guard against a
+                     ;; concurrent duplicate; the checks above are for the UX.
+                     (sp/create-entity storage :org {:name org})
+                     (sp/create-entity storage :user
+                                       {:username username
+                                        :password-hash (hash-password password)
+                                        :org org})
+                     (login! ctx username password))))))
+
+
 (defn logout!
   "Invalidate the current session — delete the `:token` row for `request`'s
    bearer, so a leaked/observed token can't be replayed after sign-out

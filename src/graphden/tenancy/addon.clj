@@ -105,7 +105,8 @@
   ;; session `:token` (with a TTL); logout! deletes it.
   {:create-user users/create-user!
    :login users/login!
-   :logout users/logout!})
+   :logout users/logout!
+   :signup users/signup!})
 
 
 (defmethod ig/init-key :tenancy/session-cleanup [_ {:keys [storage period-ms]}]

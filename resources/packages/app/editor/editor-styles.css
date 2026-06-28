@@ -337,6 +337,8 @@ body.sidebar-collapsed .sidebar-expand-floating {
    typed text doesn't run under the icon. */
 /* Username field (multi-tenant login only) sits above the password wrap. */
 .auth-username-input:not(.hidden) { margin-bottom: 6px; }
+/* Login⇄signup toggle (multi-tenant). */
+.auth-mode-toggle { display: block; margin-top: 6px; font-size: 11px; color: var(--accent, #3498db); cursor: pointer; text-decoration: underline; }
 .auth-input-wrap { position: relative; }
 .auth-input-wrap input { padding-right: 28px; }
 .auth-toggle-visibility {

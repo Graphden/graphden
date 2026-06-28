@@ -45,6 +45,7 @@
                   :verify-my-domain-route
                   :create-user-route
                   :login-route
+                  :signup-route
                   :logout-route
                   :partial-row-actions
                   :demo-contact

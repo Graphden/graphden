@@ -50,6 +50,31 @@ function loginIsTenant() {
   return document.body.classList.contains('gd-tenancy');
 }
 
+// Multi-tenant popover mode: false = log in (username + password), true = sign
+// up (also an org field; POST /api/signup creates a new org + user). Reset to
+// false every time the popover opens.
+let authSignupMode = false;
+
+// Reflect tenant + signup mode in the popover fields: username (tenant), org
+// (tenant + signup), the submit-button label, and the login⇄signup toggle.
+// Does NOT clear values — toggling preserves what's typed.
+function applyAuthMode() {
+  const tenant = loginIsTenant();
+  const userInput = document.getElementById('auth-username-input');
+  const pwInput = document.getElementById('auth-password-input');
+  const orgInput = document.getElementById('auth-org-input');
+  const toggle = document.getElementById('auth-mode-toggle');
+  const saveBtn = document.getElementById('auth-save-btn');
+  if (userInput) userInput.classList.toggle('hidden', !tenant);
+  if (pwInput) pwInput.placeholder = tenant ? 'Password' : 'Admin password';
+  if (orgInput) orgInput.classList.toggle('hidden', !(tenant && authSignupMode));
+  if (toggle) {
+    toggle.classList.toggle('hidden', !tenant);
+    toggle.textContent = authSignupMode ? 'Have an account? Sign in' : 'Create account';
+  }
+  if (saveBtn) saveBtn.textContent = tenant ? (authSignupMode ? 'Sign up' : 'Sign in') : 'Save';
+}
+
 function isAuthenticated() {
   return !!getAuthPassword();
 }
@@ -152,11 +177,16 @@ function initAuthLock() {
         '<input id="auth-password-input" type="password" placeholder="Admin password" autocomplete="off">' +
         '<button id="auth-toggle-visibility-btn" type="button" class="auth-toggle-visibility" tabindex="-1" title="Show password">' + EYE_SVG + '</button>' +
       '</div>' +
+      // Org — shown only in multi-tenant SIGNUP mode (a new account creates a
+      // new org; login + single-tenant keep it hidden).
+      '<input id="auth-org-input" type="text" placeholder="New org name" autocomplete="off" class="auth-username-input hidden">' +
       '<div class="auth-popover-row">' +
         '<button id="auth-save-btn" class="auth-popover-btn">Save</button>' +
         '<button id="auth-cancel-btn" class="auth-popover-btn auth-popover-btn-secondary">Cancel</button>' +
       '</div>' +
       '<div id="auth-error" class="auth-error hidden"></div>' +
+      // Login⇄signup toggle — multi-tenant only.
+      '<a id="auth-mode-toggle" class="auth-mode-toggle hidden"></a>' +
     '</div>';
 
   document.getElementById('auth-lock-btn').addEventListener('click', toggleAuthAction);
@@ -178,6 +208,16 @@ function initAuthLock() {
   document.getElementById('auth-username-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAuth();
     if (e.key === 'Escape') closeAuthPopover();
+  });
+  document.getElementById('auth-org-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitAuth();
+    if (e.key === 'Escape') closeAuthPopover();
+  });
+  document.getElementById('auth-mode-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    authSignupMode = !authSignupMode;
+    applyAuthMode();
+    document.getElementById('auth-username-input')?.focus();
   });
 
   // Close popover on outside click.
@@ -248,19 +288,16 @@ function openAuthPopover(errorMsg) {
   // browser doesn't try to scroll the sidebar to reveal an
   // off-screen field (which would drag the popover with it).
   positionAuthPopover();
-  const tenant = loginIsTenant();
+  authSignupMode = false;
   const userInput = document.getElementById('auth-username-input');
   const pwInput = document.getElementById('auth-password-input');
-  if (userInput) {
-    userInput.value = '';
-    userInput.classList.toggle('hidden', !tenant);
-  }
-  if (pwInput) {
-    pwInput.value = '';
-    pwInput.placeholder = tenant ? 'Password' : 'Admin password';
-  }
+  const orgInput = document.getElementById('auth-org-input');
+  if (userInput) userInput.value = '';
+  if (pwInput) pwInput.value = '';
+  if (orgInput) orgInput.value = '';
+  applyAuthMode();
   // Focus the first field: username in multi-tenant, password otherwise.
-  const focusEl = tenant ? userInput : pwInput;
+  const focusEl = loginIsTenant() ? userInput : pwInput;
   if (focusEl) focusEl.focus();
   const err = document.getElementById('auth-error');
   if (err) {
@@ -318,7 +355,7 @@ function closeAuthPopover() {
 }
 
 async function submitAuth() {
-  if (loginIsTenant()) { await submitLogin(); return; }
+  if (loginIsTenant()) { await (authSignupMode ? submitSignup() : submitLogin()); return; }
   const input = document.getElementById('auth-password-input');
   const err = document.getElementById('auth-error');
   if (!input) return;
@@ -382,6 +419,40 @@ async function submitLogin() {
     } else {
       if (err) { err.textContent = 'Invalid username or password.'; err.classList.remove('hidden'); }
       if (pwInput) { pwInput.focus(); pwInput.select(); }
+    }
+  } catch (e) {
+    if (err) { err.textContent = 'Network error: ' + e.message; err.classList.remove('hidden'); }
+  }
+}
+
+// Multi-tenant self-serve signup (§4.1): POST username + password + a NEW org
+// to /api/signup, which creates the org + user and returns a session token
+// (auto-login). Empty body → username/org taken. Same store-token + reload as
+// login.
+async function submitSignup() {
+  const username = document.getElementById('auth-username-input')?.value.trim();
+  const password = document.getElementById('auth-password-input')?.value;
+  const org = document.getElementById('auth-org-input')?.value.trim();
+  const err = document.getElementById('auth-error');
+  if (!username || !password || !org) {
+    if (err) { err.textContent = 'Username, password and org are required.'; err.classList.remove('hidden'); }
+    return;
+  }
+  try {
+    const body = 'username=' + encodeURIComponent(username) +
+                 '&password=' + encodeURIComponent(password) +
+                 '&org=' + encodeURIComponent(org);
+    const response = await fetch(API.api_signup, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    const token = response.ok ? (await response.text()).trim() : '';
+    if (token) {
+      setAuthPassword(token);
+      window.location.reload();
+    } else {
+      if (err) { err.textContent = 'Signup failed — that username or org may be taken.'; err.classList.remove('hidden'); }
     }
   } catch (e) {
     if (err) { err.textContent = 'Network error: ' + e.message; err.classList.remove('hidden'); }

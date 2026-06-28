@@ -30,6 +30,8 @@
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.deploy :as deploy]
+    [graphden.tenancy.domain :as domain]
+    [graphden.tenancy.domain-schema :as domain-schema]
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.org-schema :as org-schema]
     [graphden.tenancy.storage :as ts]
@@ -55,6 +57,7 @@
       (grant-schema/extend-builder)
       (org-schema/extend-builder)
       (token-schema/extend-builder)
+      (domain-schema/extend-builder)
       (ds/build)))
 
 
@@ -225,5 +228,34 @@
     (let [ex (try (tc/with-org "evil-org"
                                (sp/create-entity (:storage *ctx*) :token
                                                  {:token-hash "deadbeef" :user "evil" :org "victim"}))
+                  nil (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :authz/forbidden (:type (ex-data ex)))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Storage-backed custom domains (§3.4 #2) — provisionable hostname → org. Only
+;; VERIFIED rows resolve; create-domain registers unverified (safe default).
+;; ---------------------------------------------------------------------------
+(deftest storage-host-resolver-only-routes-verified
+  (let [create-id (fn-id-of (:storage *ctx*) "create-domain")
+        resolver (domain/storage-host-resolver (:storage *ctx*))]
+    (cr/execute *ctx* create-id {:hostname "app.acme.com" :org "acme"})
+    (testing "create-domain registers UNVERIFIED → does NOT route yet"
+      (is (nil? (domain/org-for-host resolver "app.acme.com")))
+      (is (false? (:verified? (first (sp/query-entities (:storage *ctx*) :domain {:hostname "app.acme.com"}))))))
+    (testing "after the operator flips :verified? → resolves to the org (port/case-insensitive)"
+      (let [row (first (sp/query-entities (:storage *ctx*) :domain {:hostname "app.acme.com"}))]
+        (sp/update-entity (:storage *ctx*) :domain (:id row) (assoc row :verified? true)))
+      (is (= "acme" (domain/org-for-host resolver "app.acme.com")))
+      (is (= "acme" (domain/org-for-host resolver "APP.acme.com:8443"))))
+    (testing "an unregistered host → nil (falls through to subdomain / token)"
+      (is (nil? (domain/org-for-host resolver "evil.com"))))))
+
+
+(deftest tenant-cannot-register-domains
+  (testing "a tenant writing :domain directly is denied (no routing hijack)"
+    (let [ex (try (tc/with-org "evil-org"
+                               (sp/create-entity (:storage *ctx*) :domain
+                                                 {:hostname "victim.com" :org "victim" :verified? true}))
                   nil (catch clojure.lang.ExceptionInfo e e))]
       (is (= :authz/forbidden (:type (ex-data ex)))))))

@@ -14,7 +14,8 @@
       operation — a plain Clojure fn here, never a tenant-composable graph fn.
       This is the R10 subtlety: \"through the graph, but not by the user.\""
   (:require
-    [clojure.string :as str])
+    [clojure.string :as str]
+    [graphden.storage.protocol.core :as sp])
   (:import
     (java.util
       Hashtable)
@@ -47,6 +48,35 @@
    domains. Strips a `:port` and lower-cases before lookup."
   [host->org]
   (->StaticHostResolver host->org))
+
+
+(defn- normalize-host
+  [host]
+  (-> host (str/split #":") first str/lower-case))
+
+
+(defrecord StorageHostResolver
+  [storage]
+
+  HostResolver
+
+  (org-for-host
+    [_ host]
+    (when host
+      (let [row (first (sp/query-entities storage :domain {:hostname (normalize-host host)}))]
+        ;; ONLY verified rows resolve — an unverified host falls through to the
+        ;; subdomain / token, so a half-provisioned domain never routes.
+        (when (:verified? row)
+          (:org row))))))
+
+
+(defn storage-host-resolver
+  "A `HostResolver` over the `:domain` entity (§3.4 #2) — `hostname → org` from
+   storage, so custom domains are provisionable without a redeploy. `storage`
+   should be the BASE storage (app-routing reads in the platform context).
+   Resolves only VERIFIED rows."
+  [storage]
+  (->StorageHostResolver storage))
 
 
 (defn org-from-request

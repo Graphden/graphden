@@ -45,6 +45,16 @@
   (sp/create-entity (:storage ctx) :org {:name name}))
 
 
+;; Register a custom domain (§3.4 #2) — UNVERIFIED by default. The operator
+;; flips `:verified?` (via the generic CRUD update) after confirming the
+;; `graphden-verify=<org>` DNS-TXT record; only verified rows route. Platform-
+;; only by entity guard (`:domain` is tenant-forbidden).
+(defbase create-domain
+  [hostname org]
+  (sp/create-entity (:storage ctx) :domain
+                    {:hostname hostname :org org :verified? false}))
+
+
 ;; Point an org at its app handler (§3.4 step 4) — the one thing a deployed
 ;; tenant app needs. A focused controlled mutation: find the org row by its
 ;; (unique) name, set `:handler-fn-id`. `handler-fn-id` may arrive as a string
@@ -74,5 +84,6 @@
    :create-grant create-grant
    :create-token create-token
    :create-org create-org
+   :create-domain create-domain
    :set-org-handler set-org-handler
    :invoke-set-org-handler invoke-set-org-handler})

@@ -36,6 +36,7 @@
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.deploy :as deploy]
     [graphden.tenancy.domain :as domain]
+    [graphden.tenancy.domain-schema :as domain-schema]
     [graphden.tenancy.grant :as grant]
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.org-schema :as org-schema]
@@ -83,6 +84,18 @@
 (defmethod ig/init-key :tenancy/token-schema [_ _]
   ;; Adds the `:token` entity (§3.4 #1 — storage-backed auth tokens).
   token-schema/extend-builder)
+
+
+(defmethod ig/init-key :tenancy/domain-schema [_ _]
+  ;; Adds the `:domain` entity (§3.4 #2 — storage-backed custom domains).
+  domain-schema/extend-builder)
+
+
+(defmethod ig/init-key :tenancy/storage-host-resolver [_ {:keys [storage]}]
+  ;; A `HostResolver` over `:domain` rows (provisionable custom domains).
+  ;; Wire into `:tenancy/app-router` / `:tenancy/request-scope` `:host-resolver`.
+  ;; `:storage` = base (:db/postgres) — resolution runs in the platform context.
+  (domain/storage-host-resolver storage))
 
 
 (defmethod ig/init-key :tenancy/grant-store [_ {:keys [grants storage personal-ns-prefix]}]

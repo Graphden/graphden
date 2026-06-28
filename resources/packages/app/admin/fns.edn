@@ -333,6 +333,53 @@
    :args {:path "/api/tokens" :handler :_token-create-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; CUSTOM DOMAIN REGISTRATION (§3.4 #2) — POST /api/domains {hostname org}.
+  ;; Registers an UNVERIFIED custom domain; the operator flips :verified?
+  ;; (generic CRUD update) after the graphden-verify=<org> DNS-TXT check.
+  ;; Platform-only (`:domain` is tenant-forbidden → tenant POST denied).
+  ;; ---------------------------------------------------------------------
+  {:name :create-domain
+   :description "Register a custom domain (UNVERIFIED) → maps hostname to org once verified. Reads the tenancy addon's :domain entity; throws if absent (addon inactive)."
+   :args {:hostname {:type :text :description "Full custom host, e.g. app.acme.com."}
+          :org {:type :text :description "Org the host serves once verified."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_domain-create-form-data
+   :parent :parse-form-body}
+
+  {:name :_domain-create-hostname
+   :parent :get
+   :args {:coll :_domain-create-form-data :key {:value :hostname} :default {:value ""}}}
+
+  {:name :_domain-create-org
+   :parent :get
+   :args {:coll :_domain-create-form-data :key {:value :org} :default {:value ""}}}
+
+  {:name :_domain-create-do
+   :parent :create-domain
+   :args {:hostname :_domain-create-hostname
+          :org :_domain-create-org}}
+
+  {:name :_domain-create-id
+   :parent :get
+   :args {:coll :_domain-create-do :key {:value :id} :default {:value ""}}}
+
+  {:name :_domain-create-id-text
+   :parent :to-str
+   :args {:value :_domain-create-id}}
+
+  {:name :_domain-create-handler
+   :description "Ring handler for POST /api/domains — registers the (unverified) domain and returns its new id as text/html."
+   :parent :html-ok-response
+   :args {:body :_domain-create-id-text}}
+
+  {:name :create-domain-route
+   :description "POST /api/domains — register a custom domain from a form-encoded body (hostname/org). Auth-required; platform-only (tenant writes of :domain are denied)."
+   :parent :post
+   :args {:path "/api/domains" :handler :_domain-create-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; SET ORG HANDLER (§3.4 step 4a) — POST /api/orgs/handler {name fn-id}.
   ;; Points an org at its app handler fn (the app-router then serves that
   ;; org's subdomain via it). Platform-only (`:org` is tenant-forbidden);

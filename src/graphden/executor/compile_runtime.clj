@@ -166,7 +166,14 @@
    org-agnostic storage when wired (§4 Design B: the registry holds every org's
    fns), else the runtime storage. Runtime DATA reads stay on `(:storage ctx)`
    so org isolation holds at execute time (org-scoped reads + the `resolve-fn` /
-   execute-guard gates). In single-tenant the two are equal → a no-op."
+   execute-guard gates). In single-tenant the two are equal → a no-op.
+
+   CAVEAT (§4 Risk 2): `register-type-aliases-from-db!` (called from rebuild!)
+   now registers EVERY org's type-rows into the process-global alias registry,
+   so two orgs' same-named types collide (last-write-wins — a low-severity
+   cross-org info leak limited to a validation message; the `:fn` rows
+   themselves stay org-scoped via identity-filtering). Per-org type registries
+   is the follow-up. This merely WIDENS the pre-existing global-type registry."
   [ctx]
   (or (:compile-storage ctx) (:storage ctx)))
 

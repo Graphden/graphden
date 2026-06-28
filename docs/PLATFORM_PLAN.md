@@ -389,20 +389,33 @@ gate** (env/io/network/process), обходя весь облачный сэнд
 не org-scoped, а per-namespace write-guard пропускал не-`:fn`. То есть тенант с
 любым write-грантом мог `POST /api/entities/service` и развернуть
 несэндбокснутый веб-сервер. **Закрыто (storage-слой):**
-`tenant-forbidden-entities #{:service :grant :domain :branch}` в
+`tenant-forbidden-entities #{:service :grant :domain :org :token :user}` в
 OrgScopedStorage — тенант (org ≠ public) не может ни писать, ни читать
 привилегированные сущности (`:service` → escape, `:grant` → эскалация/
-enumeration authz, `:domain` → hijack роутинга, `:branch` → не org-scoped:
-tenant-ветка глобальна + пикер `/api/branches` перечислил бы ветки ВСЕХ org →
-тенанты заперты на `main`); платформа (public) — свободно. authz не ломается,
-т.к. grant-store читает `:grant` из БАЗОВОГО storage, не из декоратора;
-branch-резолюция читает `:branch` в public-контексте (до request-scope), так
-что гвард её не трогает. (Read `:execution` — отдельно, защищён неугадываемым
-`fn-id`, низкая severity. **Прямой stamp НЕ годится:** executions пишутся в
-background-future, где `*current-org*` (thread-local) не связан — OrgScoped
-mis-tag'нул бы строку И own-guard ЗАБЛОКИРОВАЛ бы terminal UPDATE из future,
-теряя результат тенанта. Нужен capture org в request-time + проброс в future,
-не stamp — follow-up.) Доказано (storage-test, 9 тестов).
+enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user` →
+платформенный реестр); платформа (public) — свободно. authz не ломается,
+т.к. grant-store читает `:grant` из БАЗОВОГО storage, не из декоратора.
+Доказано (storage-test).
+
+**`:branch` и `:execution` — ТЕПЕРЬ ORG-SCOPED (§4), уже НЕ forbidden:**
+
+- `:execution`: исходный deferral был устаревшим — completion-future наследует
+  `*current-org*` через binding-conveyance (`record-completion!`'s `(future …)`
+  + `run-future`'s `bound-fn*`), так что terminal UPDATE из future проходит
+  own-guard. `:fn-execution` получил `:org-id` + добавлен в
+  `default-scoped-entities`. Доказано `faas-app-test`.
+- `:branch` (**Design B**): резолюция теперь ВНУТРИ request-scope (так
+  `*current-org*` связан при чтении org-scoped `:branch`); per-branch
+  скомпилированный ctx остаётся **org-АГНОСТИЧНЫМ** — `:compile-storage` (сырой
+  PG под OrgScoped) читает СТРУКТУРУ непривилегированно (registry держит fns всех
+  org), изоляция — на runtime `:storage` + гейты `resolve-fn` / execute-guard.
+  Так нет per-org компиляции и нет shared-`main` leak. ref-cache keyed
+  `[org ref]`. Побочно чинит латентный баг app-router (его registry был
+  public-only). Доказано `faas-app-test` (27/91), branch-router+lifecycle+rls.
+- **Follow-ups:** per-org branch-names (нужен `NULLS NOT DISTINCT` на
+  `[:org-id :name]`); per-org type-alias registries (сейчас глобальный реестр
+  ВИДИТ типы всех org — low-sev info-leak на коллизии имён, `compile_runtime`
+  Risk 2).
 
 > **⛔ SUPERSEDED §3.4 (FaaS):** идея «сэндбокс для tenant-OWNED `:service`»
 > ОТМЕНЕНА. В FaaS-модели тенант не владеет сервером/`:service` — его

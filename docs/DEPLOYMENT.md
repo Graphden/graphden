@@ -118,6 +118,64 @@ docker run -d \
   apache/age:latest
 ```
 
+### Multi-tenancy: non-superuser DB role (RLS enforcement)
+
+**Only relevant when running the tenancy addon (the cloud / multi-tenant
+deployment).** Single-tenant deployments can ignore this section.
+
+The tenancy addon installs Postgres Row-Level-Security policies
+(`org_isolation`, `FORCE ROW LEVEL SECURITY` — see
+`graphden.tenancy.rls`) as a defense-in-depth layer **underneath**
+`OrgScopedStorage`: even a raw SQL query that bypasses the storage decorator
+is confined to the connection's `graphden.current_org`. The addon also wraps
+the pool (`:tenancy/datasource-wrap`) so every borrowed connection carries
+`*current-org*` into that GUC.
+
+**But a Postgres superuser — and any role with `BYPASSRLS` — ignores RLS
+entirely**, including `FORCE`. The default container roles above
+(`POSTGRES_USER=graphden`) ARE the database superuser, so with them RLS is
+inert (OrgScoped still isolates; the RLS layer simply does nothing). To make
+RLS actually enforce, **the app must connect as a non-superuser,
+non-`BYPASSRLS` role.**
+
+As a superuser (one-time, the extension also requires superuser):
+
+```sql
+-- DB + AGE extension as superuser (see above), then:
+CREATE ROLE graphden_app LOGIN PASSWORD '<secret>' NOSUPERUSER NOBYPASSRLS;
+
+-- The executor auto-initialises the schema on first boot, so the app role
+-- needs to create (and will then OWN) the tables — FORCE ROW LEVEL SECURITY
+-- (already set by enable-rls!) makes the policy apply to the owner too.
+GRANT ALL ON DATABASE graphden TO graphden_app;
+GRANT ALL ON SCHEMA public TO graphden_app;
+GRANT ALL ON SCHEMA ag_catalog TO graphden_app;   -- Apache AGE
+```
+
+Then point the app's `:db/postgres` config at `graphden_app` (not the
+superuser): set `DATABASE_USER=graphden_app` / `DATABASE_PASSWORD=<secret>`
+(or the equivalent in your config). On boot the executor creates the schema as
+`graphden_app`, `:tenancy/rls-enabler` installs the policies, and every tenant
+request is RLS-confined.
+
+**Verify** the role is actually subject to RLS (a superuser would silently
+pass this with isolation off):
+
+```sql
+-- as graphden_app, in a transaction:
+SELECT set_config('graphden.current_org', 'acme', true);
+SELECT name FROM "fn";        -- only acme's rows + public (org_id NULL)
+```
+
+The enforcement itself is covered by `graphden.tenancy.rls-test`
+(`rls-isolates-raw-queries-by-org` connects via a non-superuser `SET ROLE` and
+asserts cross-org rows are invisible) — model an environment check on it.
+
+> Without this role switch the deployment is still tenant-isolated by
+> `OrgScopedStorage` at the application layer; you only lose the database-level
+> backstop. Treat the non-superuser role as **required for production
+> multi-tenant**, optional for a trusted single-tenant install.
+
 ## Health Checks
 
 The server exposes a health endpoint:

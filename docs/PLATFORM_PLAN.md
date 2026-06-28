@@ -487,16 +487,21 @@ org-scoping применяются автоматически. Самая сло
 
 ### Критический путь к «живому облаку» (что осталось ДО запуска)
 
-FaaS-ядро + изоляция + sandbox доказаны (`faas-app-test`, 8 тестов). До прод-
-онбординга осталось (порядок = приоритет):
+FaaS-ядро + изоляция + sandbox доказаны (`faas-app-test`, 12 тестов). Критпуть
+к прод-онбордингу ЗАКРЫТ (код+тесты):
 
-1. **Real token-source** — storage-backed AuthProvider (`:token` сущность вместо
-   конфиг-мапы хэшей) → онбординг юзера без редеплоя. *Предусловие №1 онбординга.*
-2. **Storage-backed домены + provisioning-флоу** — `:domain` сущность +
-   `hostname → org` резолвер из storage + UX «добавить домен → токен →
-   `verify-domain-ownership` → запись». Сейчас резолверы конфиг-мапы.
-3. **Non-superuser DB-роль** — приложение под обычной ролью + `FORCE ROW LEVEL
-   SECURITY` (superuser обходит RLS). Деплой/инфра.
+1. ✅ **Real token-source** — `:token` сущность + `storage-token-provider`
+   (хэш-матч бирера) + `create-token` base-fn / `POST /api/tokens`. Онбординг =
+   вставка строки, без редеплоя. Round-trip тест (минт → аутентификация).
+2. ✅ **Storage-backed домены** — `:domain` сущность + `storage-host-resolver`
+   (резолвит только verified) + `create-domain` / `POST /api/domains`. App-router
+   уже принимает любой `HostResolver` — интеграция бесплатна. *Follow-up:*
+   self-serve DNS-verify endpoint (`verify-domain-ownership` готов+оттестирован,
+   осталось обвязать `:verify-domain` ctx-seam по образцу `set-org-handler`).
+3. ✅ **Non-superuser DB-роль** — код готов давно (`FORCE ROW LEVEL SECURITY` +
+   policy + `org-aware-datasource` wrap + `rls-test` под non-superuser `SET ROLE`).
+   Осталась только инфра: запустить процесс под non-superuser ролью —
+   задокументировано в `DEPLOYMENT.md § Multi-tenancy: non-superuser DB role`.
 4. *(scale, не блокер запуска)* multi-instance оркестрация — сейчас один
    web-server мультиплексирует все org через app-router; «N серверов / порт
    через функцию» — рефайнмент под нагрузку.

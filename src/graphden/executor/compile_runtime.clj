@@ -161,6 +161,16 @@
                      " — " reason)))))
 
 
+(defn- compile-storage
+  "Storage for STRUCTURAL (compile-time) reads of the fn-graph — the privileged
+   org-agnostic storage when wired (§4 Design B: the registry holds every org's
+   fns), else the runtime storage. Runtime DATA reads stay on `(:storage ctx)`
+   so org isolation holds at execute time (org-scoped reads + the `resolve-fn` /
+   execute-guard gates). In single-tenant the two are equal → a no-op."
+  [ctx]
+  (or (:compile-storage ctx) (:storage ctx)))
+
+
 (defn refresh-type-registries-from-storage!
   "Light-weight equivalent of `rebuild!` that ONLY refreshes type
    registries (aliases + rich-types snapshot of current DB type-rows)
@@ -171,7 +181,7 @@
    closures are also stale at that point but they're rebuilt
    on-demand by the next `execute` (via `registry`'s lazy fallback)."
   [ctx]
-  (let [storage (:storage ctx)
+  (let [storage (compile-storage ctx)
         graph (read-graph storage)]
     (register-type-aliases-from-db! graph)
     graph))
@@ -254,7 +264,7 @@
    relative to concurrent `invalidate-graph-cache!` callers."
   [ctx]
   (let [body (fn []
-               (let [storage (:storage ctx)
+               (let [storage (compile-storage ctx)
                      graph (read-graph storage)
                      _ (register-type-aliases-from-db! graph)
                      base-fns (:base-fns ctx)
@@ -320,7 +330,7 @@
       (rebuild! ctx)
 
       :else
-      (let [storage (:storage ctx)
+      (let [storage (compile-storage ctx)
             graph (read-graph storage)
             _ (register-type-aliases-from-db! graph)
             base-fns (:base-fns ctx)

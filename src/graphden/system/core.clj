@@ -696,7 +696,17 @@
                    user-ops (assoc :user-ops user-ops))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
-      vault-client (assoc :vault vault-client))))
+      vault-client (assoc :vault vault-client)
+      ;; Privileged structural-read storage (§4 org-agnostic compile): the raw
+      ;; PG beneath OrgScoped, re-wrapped for this branch. `rebuild!` reads the
+      ;; fn-graph STRUCTURE through it so the compiled registry contains every
+      ;; org's fns (isolation stays at runtime: org-scoped data reads via
+      ;; `:storage` + the `resolve-fn` / execute-guard gates). `:pg-storage`
+      ;; rides too so `build-branch-ctx` can build a per-branch compile storage.
+      ;; In single-tenant this equals `:storage` (no OrgScoped) → a no-op.
+      pg-storage (assoc :pg-storage pg-storage
+                        :compile-storage (vs/->VersionedStorage
+                                           pg-storage (vs/current-branch-id storage))))))
 
 
 ;; =============================================================================

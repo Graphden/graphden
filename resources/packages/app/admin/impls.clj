@@ -117,9 +117,11 @@
 ;; Self-serve signup (§4.1): create a new org + user and auto-login. No addon →
 ;; nil. The seam refuses to join an existing org (new account → new org only).
 (defbase invoke-signup
-  [username password org]
+  [username password org request]
   (when-let [ops (:user-ops ctx)]
-    ((:signup ops) ctx username password org)))
+    ;; `request` flows to the :signup seam wrapper for per-IP rate-limiting;
+    ;; the core signup! ignores it.
+    ((:signup ops) ctx username password org request)))
 
 
 ;; Logout (§4.1): delete the caller's session token server-side (the seam reads

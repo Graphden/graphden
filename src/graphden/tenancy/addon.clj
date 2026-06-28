@@ -98,16 +98,21 @@
   user-schema/extend-builder)
 
 
-(defmethod ig/init-key :tenancy/user-ops [_ _]
-  ;; User-model seam (§4.1) — `{:create-user … :login … :logout …}`. Wired onto
-  ;; `:exec/context`'s `:user-ops`; the core `:invoke-create-user` /
-  ;; `:invoke-login` / `:invoke-logout` base-fns call into it. login! mints a
-  ;; session `:token` (with a TTL); logout! deletes it.
-  {:create-user users/create-user!
-   :login users/login!
-   :logout users/logout!
-   :logout-all users/logout-all!
-   :signup users/signup!})
+(defmethod ig/init-key :tenancy/user-ops [_ {:keys [signup-max-per-min signup-window-ms]}]
+  ;; User-model seam (§4.1) — `{:create-user … :login … :logout … :signup …}`.
+  ;; Wired onto `:exec/context`'s `:user-ops`; the core `:invoke-*` base-fns call
+  ;; into it. login! mints a session `:token` (TTL); logout!/logout-all! delete.
+  ;; `:signup` wraps signup! with a PER-IP fixed-window rate limiter (default
+  ;; 20/min) to blunt mass-signup abuse — an over-quota IP gets nil (→ 401).
+  (let [signup-limiter (users/make-rate-limiter (or signup-max-per-min 20)
+                                                (or signup-window-ms 60000))]
+    {:create-user users/create-user!
+     :login users/login!
+     :logout users/logout!
+     :logout-all users/logout-all!
+     :signup (fn [ctx u p o request]
+               (when (signup-limiter (users/client-ip request))
+                 (users/signup! ctx u p o)))}))
 
 
 (defmethod ig/init-key :tenancy/session-cleanup [_ {:keys [storage period-ms]}]

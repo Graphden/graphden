@@ -776,10 +776,11 @@
   ;; blank), exactly like login.
   ;; ---------------------------------------------------------------------
   {:name :invoke-signup
-   :description "Self-serve signup via the user-ops seam: create a new org + user, auto-login. Returns {:token :user :org}, or nil on failure / no addon."
+   :description "Self-serve signup via the user-ops seam: create a new org + user, auto-login. Returns {:token :user :org}, or nil on failure / rate-limit / no addon."
    :args {:username {:type :text :description "Desired login id (must be free)."}
-          :password {:type :text :description "Raw password — only its PBKDF2 hash is stored."}
-          :org {:type :text :description "Desired org slug (must be free — signup creates it)."}}
+          :password {:type :text :description "Raw password — only its bcrypt hash is stored."}
+          :org {:type :text :description "Desired org slug (must be free — signup creates it)."}
+          :request {:type :ring-request-shape :description "The Ring request — its client IP feeds the per-IP signup rate limiter."}}
    :return-type :nullable-keyword-map
    :effects #{:db}}
 

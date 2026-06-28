@@ -72,7 +72,9 @@
 ;; storage-token-provider above resolves:
 ;;
 ;;   {:graphden/require [graphden.tenancy.addon]
-;;    :tenancy/user-ops {}
+;;    :tenancy/user-ops {}   ; self-serve signup is per-IP rate-limited
+;;                          ; (default 20/min; tune :signup-max-per-min /
+;;                          ; :signup-window-ms)
 ;;    :auth/storage-token-provider {:storage #ig/ref :db/postgres}
 ;;    :exec/context {:user-ops #ig/ref :tenancy/user-ops
 ;;                   :auth-provider #ig/ref :auth/storage-token-provider}}

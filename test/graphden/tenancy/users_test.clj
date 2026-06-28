@@ -24,6 +24,33 @@
     (is (false? (users/verify-password nil "pbkdf2$1$a$b")))))
 
 
+(deftest rate-limiter-allows-then-blocks
+  (let [limit (users/make-rate-limiter 3 60000)]
+    (testing "allows up to max per window, then blocks the same key"
+      (is (true? (limit "ip1")))
+      (is (true? (limit "ip1")))
+      (is (true? (limit "ip1")))
+      (is (false? (limit "ip1")))
+      (is (false? (limit "ip1"))))
+    (testing "a different key has its own independent window"
+      (is (true? (limit "ip2"))))))
+
+
+(deftest rate-limiter-window-resets
+  (let [limit (users/make-rate-limiter 1 50)]   ; 1 attempt per 50ms
+    (is (true? (limit "k")))
+    (is (false? (limit "k")))
+    (Thread/sleep 70)
+    (is (true? (limit "k")) "after the window elapses the key is allowed again")))
+
+
+(deftest client-ip-extraction
+  (testing "first X-Forwarded-For hop wins, else :remote-addr, else unknown"
+    (is (= "1.2.3.4" (users/client-ip {:headers {"x-forwarded-for" "1.2.3.4, 5.6.7.8"}})))
+    (is (= "9.9.9.9" (users/client-ip {:remote-addr "9.9.9.9"})))
+    (is (= "unknown" (users/client-ip {})))))
+
+
 (deftest legacy-pbkdf2-hashes-still-verify
   ;; Accounts created before the bcrypt switch must still log in — verify-password
   ;; dispatches `pbkdf2$…` to the legacy path. This is a real PBKDF2 hash of

@@ -45,6 +45,32 @@
   (* 24 60 60 1000))
 
 
+(defn client-ip
+  "Best-effort client IP for rate-limiting — the first `X-Forwarded-For` hop
+   (trusts a front proxy to set it) or the socket `:remote-addr`."
+  [request]
+  (or (some-> (get-in request [:headers "x-forwarded-for"])
+              (str/split #",") first str/trim not-empty)
+      (:remote-addr request)
+      "unknown"))
+
+
+(defn make-rate-limiter
+  "A per-key fixed-window limiter: allow at most `max-attempts` per `window-ms`.
+   Returns `(fn [key] → bool)` that prunes the key's window, records an allowed
+   attempt, and answers whether it was allowed. In-memory (per process);
+   denied attempts don't grow the window, so it's bounded by `max-attempts`."
+  [max-attempts window-ms]
+  (let [state (atom {})]
+    (fn [key]
+      (let [cutoff (- (System/currentTimeMillis) window-ms)
+            recent (filterv #(> % cutoff) (get @state key []))
+            allowed? (< (count recent) max-attempts)]
+        (when allowed?
+          (swap! state assoc key (conj recent (System/currentTimeMillis))))
+        allowed?))))
+
+
 (defn- random-bytes
   ^bytes [n]
   (let [b (byte-array n)]
@@ -160,9 +186,10 @@
    join an existing org, so a new account can't reach another tenant's data.
    Runs in the platform context. Returns `{:token :user :org}` on success, nil
    on any failure (blank field, or username / org already taken) so the
-   endpoint maps nil → an empty body exactly like login. (Open signup; rate-
-   limiting / invite-gating is a follow-up.)"
-  [ctx username password org]
+   endpoint maps nil → an empty body exactly like login. Open signup; per-IP
+   rate-limiting is applied by the `:user-ops` `:signup` wrapper (the addon),
+   which may pass the request as a trailing arg that this core fn ignores."
+  [ctx username password org & _]
   (let [storage (:storage ctx)]
     (when (and (not (str/blank? username)) (not (str/blank? password)) (not (str/blank? org)))
       (tc/with-org tc/public-org

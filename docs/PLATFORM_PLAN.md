@@ -357,18 +357,27 @@ unrestricted. Механизм гейта уже готов и проверен 
   пользователем» — тонкость, ломающая наивное «желательно через граф».
   **✅ соблюдено:** `verify-domain-ownership` — обычная Clojure-fn в аддоне
   (платформенная), НЕ граф-fn; тенант к ней не доберётся.
-- **Важно (R11):** различаем два роутинга — (а) поддомен организации → тенант
-  (editor/API) и (б) hostname развёрнутого пользователем веб-сервера → его
-  `:service`. Это **разные** отображения, нельзя схлопывать в одно.
+- **Важно (R11) — ⛔ SUPERSEDED §3.4 (FaaS):** различение «(а) поддомен → тенант
+  vs (б) hostname → user-`:service`» РАЗРЕШЕНО FaaS-моделью: у тенанта нет
+  своего `:service` — его приложение это handler-fn, и оба маршрута (app vs
+  editor) разводит ОДИН app-router по host+контексту (app-запрос на поддомене →
+  org-контекст/handler; editor/API на apex → токен-авторитет). Никакого
+  отдельного hostname→`:service` отображения нет.
 
-### 3.3. Пользовательские веб-серверы на поддомене (уже почти готово)
+### 3.3. Пользовательские веб-серверы на поддомене — ⛔ SUPERSEDED §3.4 (FaaS)
+
+> Этот раздел описывал PaaS-вариант (тенант ВЛАДЕЕТ `:service`). Он отменён
+> ADR §3.4: облачный тенант не владеет сервером — даёт handler-fn, которую
+> исполняет платформенный app-router (FaaS). Раздел сохранён для истории;
+> tenant-`:service` остаётся platform-only (write/read-deny). Per-tenant
+> runtime-config через `:branch-local?` и сервисная per-branch модель
+> по-прежнему актуальны ДЛЯ ПЛАТФОРМЕННЫХ сервисов (скрытых web-server'ов).
 
 Сервисная модель уже умеет per-branch (проверено: `:service.branch-id` +
-per-branch `ExecutionContext`, reconciler). Пользователь делает fn-def
-`:parent :http-server` со своим `:handler`, заводит `:service` со своим
-скоупом; reconciler поднимает его в нужном контексте; роутер направляет
-запросы с подходящим hostname в этот сервис. Per-tenant runtime-config
-(порт/путь) изолируется через уже существующий `:branch-local?`.
+per-branch `ExecutionContext`, reconciler). ~~Пользователь делает fn-def
+`:parent :http-server` со своим `:handler`, заводит `:service`~~ (→ §3.4: вместо
+этого тенант ставит handler-fn через `POST /api/my-app/handler` / ⌂). Per-tenant
+runtime-config (порт/путь) изолируется через уже существующий `:branch-local?`.
 
 **Конкретный баг-риск (R8):** LRU-кэш per-branch хендлеров (`max 16`) должен
 стать **per-org**, иначе ветки/хендлеры протекают между организациями.
@@ -393,10 +402,14 @@ branch-резолюция читает `:branch` в public-контексте (�
 background-future, где `*current-org*` (thread-local) не связан — OrgScoped
 mis-tag'нул бы строку И own-guard ЗАБЛОКИРОВАЛ бы terminal UPDATE из future,
 теряя результат тенанта. Нужен capture org в request-time + проброс в future,
-не stamp — §3.3 follow-up.) Доказано (storage-test, 9 тестов). *Полное
-решение §3.3 — сэндбокс для tenant-OWNED сервисов (org на `:service` +
-`:allowed-effects` в ctx реконсилера для tenant-сервиса) — обязательно ДО того,
-как деплой сервисов станет tenant-доступным.*
+не stamp — follow-up.) Доказано (storage-test, 9 тестов).
+
+> **⛔ SUPERSEDED §3.4 (FaaS):** идея «сэндбокс для tenant-OWNED `:service`»
+> ОТМЕНЕНА. В FaaS-модели тенант не владеет сервером/`:service` — его
+> «веб-сервер» это handler-fn, которую исполняет платформенный app-router
+> (org-scoped + effect-gated + timed, доказано `faas-app-test`). Поэтому
+> sandbox-для-tenant-`:service` НЕ нужен; write/read-deny `:service` для
+> тенантов остаётся (деплой сервисов — platform-only, тенанты используют FaaS).
 
 ---
 
@@ -471,6 +484,25 @@ org-scoping применяются автоматически. Самая сло
 5. ✅ R8 per-org handler-кэш: `cached-handler-fn-id` (TTL-кэш org→handler-fn-id в app-router, default 5s) — убирает `:org`-чтение на каждый app-запрос; смена handler'а пропагируется в пределах TTL. (Compiled handler уже в shared-реестре по fn-id; кэшируем только lookup.)
 6. ✅ (timeout) Resource-лимиты: `run-with-timeout` в app-router (future + deref-timeout → 504; `future-cancel` + interrupt-aware `*cancel-check*` → graph-handler кооперативно отменяется, не течёт тред). `:timeout-ms` конфигурируем (default 10s). *Остаётся:* memory-лимиты (JVM не кэпит per-thread память — нужен отдельный механизм; tight CPU-loop в impl не отменяется, но тенанты пишут только графы → каждый execute-step проверяет cancel).
 7. ✅ Кастомные домены в app-routing: `resolve-app-org` = `(or subdomain host-resolver)`, app-router принимает `host-resolver` → верифицированный кастомный домен → handler org тем же путём.
+
+### Критический путь к «живому облаку» (что осталось ДО запуска)
+
+FaaS-ядро + изоляция + sandbox доказаны (`faas-app-test`, 8 тестов). До прод-
+онбординга осталось (порядок = приоритет):
+
+1. **Real token-source** — storage-backed AuthProvider (`:token` сущность вместо
+   конфиг-мапы хэшей) → онбординг юзера без редеплоя. *Предусловие №1 онбординга.*
+2. **Storage-backed домены + provisioning-флоу** — `:domain` сущность +
+   `hostname → org` резолвер из storage + UX «добавить домен → токен →
+   `verify-domain-ownership` → запись». Сейчас резолверы конфиг-мапы.
+3. **Non-superuser DB-роль** — приложение под обычной ролью + `FORCE ROW LEVEL
+   SECURITY` (superuser обходит RLS). Деплой/инфра.
+4. *(scale, не блокер запуска)* multi-instance оркестрация — сейчас один
+   web-server мультиплексирует все org через app-router; «N серверов / порт
+   через функцию» — рефайнмент под нагрузку.
+
+Остальное (Фаза-1 пакеты R4/версии, тип-R2, модель юзера §4.x, addon-active
+e2e) — не на критическом пути запуска.
 
 ---
 

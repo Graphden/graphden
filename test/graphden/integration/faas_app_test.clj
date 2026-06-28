@@ -368,7 +368,8 @@
       (is (str/includes? body "grants-admin-table"))
       (is (str/includes? body "panel-carol")))
     (testing "the password hash is NEVER in the rendered panel (list-users strips it)"
-      (is (not (str/includes? body "pbkdf2")))
+      (is (not (str/includes? body "$2a$")))   ; no bcrypt hash
+      (is (not (str/includes? body "pbkdf2"))) ; nor a legacy one
       (is (not (str/includes? body "Tenancy addon not active"))))))
 
 

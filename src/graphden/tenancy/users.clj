@@ -28,11 +28,13 @@
       SecretKey
       SecretKeyFactory)
     (javax.crypto.spec
-      PBEKeySpec)))
+      PBEKeySpec)
+    (org.mindrot.jbcrypt
+      BCrypt)))
 
 
-(def ^:private ^:const pbkdf2-iterations 100000)
-(def ^:private ^:const pbkdf2-key-bits 256)
+(def ^:private ^:const pbkdf2-key-bits 256)   ; legacy verify only
+(def ^:private ^:const bcrypt-cost 12)
 
 
 (def ^:const default-session-ttl-ms
@@ -56,30 +58,39 @@
 
 
 (defn hash-password
-  "A self-describing PBKDF2 hash string for `password` — `pbkdf2$iters$salt$hash`
-   (salt + hash base64). Random salt per call."
+  "A bcrypt hash string for `password` (`$2a$<cost>$…`, random salt per call).
+   bcrypt is adaptive + salted; the cost (work factor) is baked into the hash."
   [password]
-  (let [enc (Base64/getEncoder)
-        salt (random-bytes 16)
-        hash (pbkdf2 password salt pbkdf2-iterations)]
-    (str "pbkdf2$" pbkdf2-iterations "$"
-         (Base64$Encoder/.encodeToString enc salt) "$"
-         (Base64$Encoder/.encodeToString enc hash))))
+  (BCrypt/hashpw password (BCrypt/gensalt bcrypt-cost)))
+
+
+(defn- pbkdf2-verify
+  "Legacy PBKDF2 verify (`pbkdf2$iters$salt$hash`) — kept so any account created
+   before the bcrypt switch still logs in. Constant-time compare; recomputes
+   with the stored salt + iteration count."
+  [password stored]
+  (let [[algo iters salt-b64 hash-b64] (str/split stored #"\$")]
+    (when (= algo "pbkdf2")
+      (let [dec (Base64/getDecoder)
+            salt (Base64$Decoder/.decode dec ^String salt-b64)
+            expected (Base64$Decoder/.decode dec ^String hash-b64)
+            actual (pbkdf2 password salt (parse-long iters))]
+        (MessageDigest/isEqual expected actual)))))
 
 
 (defn verify-password
-  "True iff `password` matches the stored `pbkdf2$…` string. Constant-time
-   compare; recomputes with the stored salt + iteration count."
+  "True iff `password` matches the stored hash. Dispatches on format: bcrypt
+   (`$2…`) for current accounts, legacy PBKDF2 (`pbkdf2$…`) for any created
+   before the switch. Never throws (a malformed/unknown hash → false)."
   [password stored]
   (boolean
     (when (and (seq password) (seq stored))
-      (let [[algo iters salt-b64 hash-b64] (str/split stored #"\$")]
-        (when (= algo "pbkdf2")
-          (let [dec (Base64/getDecoder)
-                salt (Base64$Decoder/.decode dec ^String salt-b64)
-                expected (Base64$Decoder/.decode dec ^String hash-b64)
-                actual (pbkdf2 password salt (parse-long iters))]
-            (MessageDigest/isEqual expected actual)))))))
+      (try
+        (cond
+          (str/starts-with? stored "$2")      (BCrypt/checkpw password stored)
+          (str/starts-with? stored "pbkdf2$") (pbkdf2-verify password stored)
+          :else false)
+        (catch Exception _ false)))))
 
 
 (defn- random-token

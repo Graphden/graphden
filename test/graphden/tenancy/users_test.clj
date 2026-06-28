@@ -16,9 +16,18 @@
       (is (false? (users/verify-password "" h)))))
   (testing "a fresh salt per call — same password hashes to different strings"
     (is (not= (users/hash-password "pw") (users/hash-password "pw"))))
-  (testing "the stored value is the self-describing pbkdf2 format"
-    (is (str/starts-with? (users/hash-password "pw") "pbkdf2$100000$")))
+  (testing "the stored value is a bcrypt hash ($2…)"
+    (is (str/starts-with? (users/hash-password "pw") "$2")))
   (testing "garbage / nil never throws — just false"
     (is (false? (users/verify-password "pw" "not-a-hash")))
     (is (false? (users/verify-password "pw" nil)))
     (is (false? (users/verify-password nil "pbkdf2$1$a$b")))))
+
+
+(deftest legacy-pbkdf2-hashes-still-verify
+  ;; Accounts created before the bcrypt switch must still log in — verify-password
+  ;; dispatches `pbkdf2$…` to the legacy path. This is a real PBKDF2 hash of
+  ;; "legacy-pw" (all-zero salt, so it's stable to hard-code).
+  (let [legacy "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA==$IJ7VI9MfVAgFv8PBJsAVTM9TXi+MtwfQBeYRwcjryGI="]
+    (is (true? (users/verify-password "legacy-pw" legacy)))
+    (is (false? (users/verify-password "wrong" legacy)))))

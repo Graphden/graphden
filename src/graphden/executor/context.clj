@@ -160,7 +160,7 @@
                 per top-level execute; throws `:authz/forbidden` on a denied
                 tenant execute. Absent → no execute authorization."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
-           execute-guard app-router set-org-handler verify-domain]}]
+           execute-guard app-router set-org-handler verify-domain user-ops]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -198,7 +198,11 @@
       ;; Self-serve DNS-verify seam (§3.4 #2) — `(fn [ctx hostname] …)` the
       ;; `:invoke-verify-domain` base-fn calls so a tenant can prove ownership
       ;; of its own custom domain (DNS-TXT) and flip it verified. Addon-only.
-      (cond-> verify-domain (assoc :verify-domain verify-domain))))
+      (cond-> verify-domain (assoc :verify-domain verify-domain))
+      ;; User-model seam (§4.1) — `{:create-user … :login …}` the
+      ;; `:invoke-create-user` / `:invoke-login` base-fns call. Login mints a
+      ;; session `:token`; the storage-token-provider resolves it. Addon-only.
+      (cond-> user-ops (assoc :user-ops user-ops))))
 
 
 (defn current-time-ms

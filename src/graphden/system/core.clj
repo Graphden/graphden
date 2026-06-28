@@ -652,7 +652,7 @@
 
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
-             execute-guard app-router set-org-handler verify-domain]}]
+             execute-guard app-router set-org-handler verify-domain user-ops]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -691,7 +691,9 @@
                    ;; Self-serve deploy seam (§3.4 4b) — addon-only.
                    set-org-handler (assoc :set-org-handler set-org-handler)
                    ;; Self-serve DNS-verify seam (§3.4 #2) — addon-only.
-                   verify-domain (assoc :verify-domain verify-domain))]
+                   verify-domain (assoc :verify-domain verify-domain)
+                   ;; User-model seam (§4.1) — create-user / login. Addon-only.
+                   user-ops (assoc :user-ops user-ops))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client))))

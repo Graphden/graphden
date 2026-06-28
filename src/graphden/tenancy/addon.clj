@@ -44,6 +44,8 @@
     [graphden.tenancy.storage :as ts]
     [graphden.tenancy.subdomain :as subdomain]
     [graphden.tenancy.token-schema :as token-schema]
+    [graphden.tenancy.user-schema :as user-schema]
+    [graphden.tenancy.users :as users]
     [integrant.core :as ig]))
 
 
@@ -89,6 +91,19 @@
 (defmethod ig/init-key :tenancy/domain-schema [_ _]
   ;; Adds the `:domain` entity (§3.4 #2 — storage-backed custom domains).
   domain-schema/extend-builder)
+
+
+(defmethod ig/init-key :tenancy/user-schema [_ _]
+  ;; Adds the `:user` entity (§4.1 — login identities).
+  user-schema/extend-builder)
+
+
+(defmethod ig/init-key :tenancy/user-ops [_ _]
+  ;; User-model seam (§4.1) — `{:create-user … :login …}`. Wired onto
+  ;; `:exec/context`'s `:user-ops`; the core `:invoke-create-user` /
+  ;; `:invoke-login` base-fns call into it. login! mints a session `:token`.
+  {:create-user users/create-user!
+   :login users/login!})
 
 
 (defmethod ig/init-key :tenancy/storage-host-resolver [_ {:keys [storage]}]

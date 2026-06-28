@@ -90,6 +90,22 @@
     (seam ctx hostname)))
 
 
+;; User model (§4.1): invoke the injectable `:user-ops` seam (the tenancy
+;; addon's account ops). Core stays addon-agnostic — no seam → nil.
+;; `create-user` is operator-only (the :user write-guard denies tenants);
+;; `login` verifies credentials and returns a session token + principal.
+(defbase invoke-create-user
+  [username password org]
+  (when-let [ops (:user-ops ctx)]
+    ((:create-user ops) ctx username password org)))
+
+
+(defbase invoke-login
+  [username password]
+  (when-let [ops (:user-ops ctx)]
+    ((:login ops) ctx username password)))
+
+
 (def impls
   {:list-grants list-grants
    :create-grant create-grant
@@ -98,4 +114,6 @@
    :create-domain create-domain
    :set-org-handler set-org-handler
    :invoke-set-org-handler invoke-set-org-handler
-   :invoke-verify-domain invoke-verify-domain})
+   :invoke-verify-domain invoke-verify-domain
+   :invoke-create-user invoke-create-user
+   :invoke-login invoke-login})

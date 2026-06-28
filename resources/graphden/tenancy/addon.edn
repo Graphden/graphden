@@ -65,6 +65,20 @@
 ;; create-token base-fn / POST /api/tokens; the bearer is hashed (SHA-256)
 ;; and only the hash is stored.
 ;;
+;; USER MODEL (§4.1) — real accounts instead of hand-minted tokens. Splice the
+;; :user entity (schema block below) and wire the user-ops seam; then an
+;; operator registers users (POST /api/users, platform-only) and users log in
+;; (POST /api/login, UNAUTHENTICATED) to get a session token that the
+;; storage-token-provider above resolves:
+;;
+;;   {:graphden/require [graphden.tenancy.addon]
+;;    :tenancy/user-ops {}
+;;    :auth/storage-token-provider {:storage #ig/ref :db/postgres}
+;;    :exec/context {:user-ops #ig/ref :tenancy/user-ops
+;;                   :auth-provider #ig/ref :auth/storage-token-provider}}
+;;
+;; Passwords are PBKDF2-hashed (salted, iterated); only the hash is stored.
+;;
 ;; To ALSO enforce per-user grants (§4.2 — opt-in), wire a grant store onto
 ;; the request-scope. Without this, tenant writes pass (subject only to
 ;; OrgScoped + the effect gate):
@@ -90,10 +104,12 @@
 ;;    :tenancy/org-schema {}     ; orgs registry (§3.4 FaaS app model)
 ;;    :tenancy/token-schema {}   ; storage-backed auth tokens (§3.4 #1)
 ;;    :tenancy/domain-schema {}  ; storage-backed custom domains (§3.4 #2)
+;;    :tenancy/user-schema {}    ; login identities (§4.1)
 ;;    :db/schema {:extensions [#ig/ref :tenancy/grant-schema
 ;;                             #ig/ref :tenancy/org-schema
 ;;                             #ig/ref :tenancy/token-schema
-;;                             #ig/ref :tenancy/domain-schema]}
+;;                             #ig/ref :tenancy/domain-schema
+;;                             #ig/ref :tenancy/user-schema]}
 ;;    ;; storage-backed custom-domain routing (provisionable, no redeploy);
 ;;    ;; register a domain via POST /api/domains, flip :verified? after the
 ;;    ;; graphden-verify=<org> DNS-TXT check, then it routes like a subdomain:

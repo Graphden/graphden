@@ -37,6 +37,8 @@
     [graphden.tenancy.storage :as ts]
     [graphden.tenancy.subdomain :as subdomain]
     [graphden.tenancy.token-schema :as token-schema]
+    [graphden.tenancy.user-schema :as user-schema]
+    [graphden.tenancy.users :as users]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -58,6 +60,7 @@
       (org-schema/extend-builder)
       (token-schema/extend-builder)
       (domain-schema/extend-builder)
+      (user-schema/extend-builder)
       (ds/build)))
 
 
@@ -296,3 +299,37 @@
     (testing "the core invoke-verify-domain base-fn calls the ctx seam → :domain verified"
       (tc/with-org "worg" (cr/execute seam-ctx invoke-id {:hostname "wired.worg.com"}))
       (is (true? (:verified? (first (sp/query-entities (:storage *ctx*) :domain {:hostname "wired.worg.com"}))))))))
+
+
+;; ---------------------------------------------------------------------------
+;; User model (§4.1) — operator creates users, users log in for a session token
+;; that the storage-token-provider resolves. Exercised through the base-fns +
+;; the :user-ops seam (the same wiring the addon/system installs).
+;; ---------------------------------------------------------------------------
+(deftest user-model-create-login-roundtrip
+  (let [create-id (fn-id-of (:storage *ctx*) "invoke-create-user")
+        login-id (fn-id-of (:storage *ctx*) "invoke-login")
+        seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!})
+        provider (tauth/storage-token-provider (:storage *ctx*))]
+    (testing "operator creates a user (invoke-create-user base-fn → seam)"
+      (cr/execute seam-ctx create-id {:username "alice" :password "s3cret-pw" :org "acme"})
+      (is (some? (first (sp/query-entities (:storage *ctx*) :user {:username "alice"})))))
+    (testing "login with the right password → a session token that authenticates"
+      (let [result (cr/execute seam-ctx login-id {:username "alice" :password "s3cret-pw"})
+            token (:token result)]
+        (is (string? token))
+        (is (= {:authenticated? true :user "alice" :org "acme"}
+               (auth/authenticate provider (bearer-req token))))))
+    (testing "login with the wrong password → nil (no token minted)"
+      (is (nil? (cr/execute seam-ctx login-id {:username "alice" :password "WRONG"}))))
+    (testing "login for an unknown user → nil"
+      (is (nil? (cr/execute seam-ctx login-id {:username "ghost" :password "x"}))))))
+
+
+(deftest tenant-cannot-create-users
+  (testing "a tenant writing :user directly is denied (no cross-org account mint)"
+    (let [ex (try (tc/with-org "evil-org"
+                               (sp/create-entity (:storage *ctx*) :user
+                                                 {:username "mole" :password-hash "h" :org "victim"}))
+                  nil (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :authz/forbidden (:type (ex-data ex)))))))

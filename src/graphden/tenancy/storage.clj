@@ -62,11 +62,14 @@
    - `:token`   — storage-backed auth tokens (§3.4 #1). Write: a tenant could
      mint itself a token for ANY org (full escalation); read: enumerate /
      exfiltrate every user's token hashes. Strictly platform-managed.
+   - `:user`    — the user registry (§4.1). Write: a tenant could create
+     accounts in other orgs; read: enumerate every user + their password
+     hashes. `login!` reads it in the platform context, before any session.
 
    Platform / admin (public org) is unrestricted. New privileged entity types
    MUST be added here. (Proper long-term answers — the FaaS app model §3.4 and
    org-scoped branches/executions — are follow-ups.)"
-  #{:service :grant :domain :branch :org :token})
+  #{:service :grant :domain :branch :org :token :user})
 
 
 (defn- row-org

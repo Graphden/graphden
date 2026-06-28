@@ -497,4 +497,109 @@
   {:name :verify-my-domain-route
    :description "POST /api/my-app/verify-domain — a tenant proves ownership of its OWN custom domain (hostname). Auth-required; the seam validates org-ownership + DNS."
    :parent :post
-   :args {:path "/api/my-app/verify-domain" :handler :_verify-domain-handler}}]}
+   :args {:path "/api/my-app/verify-domain" :handler :_verify-domain-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; USER REGISTRATION (§4.1) — POST /api/users {username password org}.
+  ;; Operator op: the `:invoke-create-user` base-fn calls the `:user-ops`
+  ;; seam, which PBKDF2-hashes + writes `:user`. Platform-only (`:user` is
+  ;; tenant-forbidden → a tenant POST is denied by OrgScoped).
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-create-user
+   :description "Create a user via the addon's user-ops seam (PBKDF2-hashed). Returns the row (no password), or nil when the addon isn't active."
+   :args {:username {:type :text :description "Login id (unique)."}
+          :password {:type :text :description "Raw password — only its PBKDF2 hash is stored."}
+          :org {:type :text :description "Org the user belongs to."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_user-create-form-data
+   :parent :parse-form-body}
+
+  {:name :_user-create-username
+   :parent :get
+   :args {:coll :_user-create-form-data :key {:value :username} :default {:value ""}}}
+
+  {:name :_user-create-password
+   :parent :get
+   :args {:coll :_user-create-form-data :key {:value :password} :default {:value ""}}}
+
+  {:name :_user-create-org
+   :parent :get
+   :args {:coll :_user-create-form-data :key {:value :org} :default {:value ""}}}
+
+  {:name :_user-create-do
+   :parent :invoke-create-user
+   :args {:username :_user-create-username
+          :password :_user-create-password
+          :org :_user-create-org}}
+
+  {:name :_user-create-id
+   :parent :get
+   :args {:coll :_user-create-do :key {:value :id} :default {:value ""}}}
+
+  {:name :_user-create-id-text
+   :parent :to-str
+   :args {:value :_user-create-id}}
+
+  {:name :_user-create-handler
+   :description "Ring handler for POST /api/users — registers the user and returns its new id as text/html."
+   :parent :html-ok-response
+   :args {:body :_user-create-id-text}}
+
+  {:name :create-user-route
+   :description "POST /api/users — register a user from a form-encoded body (username/password/org). Auth-required; platform-only (tenant writes of :user are denied)."
+   :parent :post
+   :args {:path "/api/users" :handler :_user-create-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; LOGIN (§4.1) — POST /api/login {username password}. UNAUTHENTICATED (you
+  ;; log in to obtain a token). The `:invoke-login` base-fn calls the
+  ;; `:user-ops` seam, which verifies credentials and mints a session `:token`
+  ;; (the storage-token-provider resolves it thereafter). Returns the raw token
+  ;; as the body (empty on bad credentials — the client treats empty as fail).
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-login
+   :description "Verify credentials via the addon's user-ops seam and mint a session token. Returns {:token :user :org} on success, nil on bad credentials / no addon."
+   :args {:username {:type :text :description "Login id."}
+          :password {:type :text :description "Raw password."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_login-form-data
+   :parent :parse-form-body}
+
+  {:name :_login-username
+   :parent :get
+   :args {:coll :_login-form-data :key {:value :username} :default {:value ""}}}
+
+  {:name :_login-password
+   :parent :get
+   :args {:coll :_login-form-data :key {:value :password} :default {:value ""}}}
+
+  {:name :_login-do
+   :parent :invoke-login
+   :args {:username :_login-username
+          :password :_login-password}}
+
+  {:name :_login-token
+   :parent :get
+   :args {:coll :_login-do :key {:value :token} :default {:value ""}}}
+
+  {:name :_login-token-text
+   :parent :to-str
+   :args {:value :_login-token}}
+
+  {:name :_login-handler
+   :description "Ring handler for POST /api/login — returns the minted session token (empty on bad credentials)."
+   :parent :html-ok-response
+   :args {:body :_login-token-text}}
+
+  ;; UNAUTHENTICATED — `:post-route` (no auth-required middleware, unlike
+  ;; `:post`): login is the entry point to obtaining auth, so it must be
+  ;; reachable without a token. The request-scope runs it as public; login!
+  ;; reads `:user` + mints the session token in the platform context.
+  {:name :login-route
+   :description "POST /api/login — exchange username/password for a session token. UNAUTHENTICATED (the entry point to obtaining auth)."
+   :parent :post-route
+   :args {:path "/api/login" :handler :_login-handler}}]}

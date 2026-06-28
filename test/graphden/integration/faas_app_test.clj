@@ -25,6 +25,7 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
+    [graphden.system.branch-router :as br]
     [graphden.system.core :as sys]
     [graphden.tenancy.app-router :as app]
     [graphden.tenancy.auth :as tauth]
@@ -86,7 +87,13 @@
                                    (mapv (fn [r] (dissoc r :kind)) (records/boot-primitive-records)))
              storage (vs/wrap-with-versioning (ts/org-scoped-storage base) "main")
              _ (sys/bootstrap-from-packages! storage ["core" "web" "app"] {:skip-type-check? true})
-             ctx (exec/create-context {:storage storage})
+             ;; Mirror prod's ctx shape (§4 Design B): the privileged
+             ;; structural-read storage so the registry compiles org-agnostically
+             ;; (every org's fns), with isolation held at runtime by `:storage`.
+             ctx (-> (exec/create-context {:storage storage})
+                     (assoc :pg-storage base
+                            :compile-storage (vs/->VersionedStorage
+                                               base (vs/current-branch-id storage))))
              _ (cr/rebuild! ctx)]
          (try
            (binding [*ctx* ctx
@@ -358,6 +365,39 @@
                                         (set (map :id (sp/query-entities (:storage *ctx*) :fn-execution {}))))]
           (is (contains? acme-visible (:id acme-exec)))
           (is (not (contains? acme-visible (:id beta-exec)))))))))
+
+
+(deftest org-scoped-branches-isolated
+  ;; §4 org-scoped :branch (Design B). A tenant creates branches stamped with
+  ;; its org and sees own + public (main). The branch-router resolves own+public
+  ;; but returns nil for another org's branch, and the org-keyed ref-cache never
+  ;; hands org-A's branch to org-B (which would run B in A's ctx).
+  (let [main-id (:id (first (tc/with-org tc/public-org
+                                         (sp/query-entities (:storage *ctx*) :branch {:name "main"}))))
+        mk (fn [org nm]
+             (tc/with-org org
+                          (sp/create-entity (:storage *ctx*) :branch
+                                            {:name nm :created-at (java.time.Instant/now)})))
+        router {:base-ctx *ctx* :default-branch-id main-id :ref-cache (atom {})}]
+    (is (some? main-id) "fixture has the public main branch")
+    (let [acme-b (mk "br-acme" "br-acme-feature")
+          _beta-b (mk "br-beta" "br-beta-feature")]
+      (testing "create stamps the creating org"
+        (is (= "br-acme" (:org-id acme-b))))
+      (testing "a tenant sees its OWN branches + public main, never another org's"
+        (let [acme-visible (tc/with-org "br-acme"
+                                        (set (map :name (sp/query-entities (:storage *ctx*) :branch {}))))]
+          (is (contains? acme-visible "br-acme-feature"))
+          (is (contains? acme-visible "main"))
+          (is (not (contains? acme-visible "br-beta-feature")))))
+      (testing "the router resolves own + public, but nil for a foreign branch"
+        (is (= (:id acme-b) (tc/with-org "br-acme" (br/resolve-branch-id router "br-acme-feature"))))
+        (is (= main-id (tc/with-org "br-beta" (br/resolve-branch-id router "main"))))
+        (is (nil? (tc/with-org "br-beta" (br/resolve-branch-id router "br-acme-feature")))))
+      (testing "the org-keyed cache never leaks org-A's branch to org-B"
+        ;; acme cached [br-acme, ref] above; beta's lookup keys [br-beta, ref] →
+        ;; miss → org-scoped resolve → still nil (no cross-org cache hit).
+        (is (nil? (tc/with-org "br-beta" (br/resolve-branch-id router "br-acme-feature"))))))))
 
 
 (deftest tenant-cannot-create-users

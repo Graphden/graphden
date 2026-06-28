@@ -65,6 +65,13 @@
   #uuid "03040506-0708-4345-0e1f-2a3b4c5d6e7f")
 
 
+(def ^:private branch-org-id-field-uuid
+  ;; Tenant owner (§4 org-scoped branches). NULL ≡ public (`main`). Stamped by
+  ;; OrgScopedStorage; the read-filter isolates a tenant's branches. Names stay
+  ;; globally UNIQUE for now (per-org names need NULLS-NOT-DISTINCT — a follow-up).
+  #uuid "04050607-0809-4456-9f0a-3b4c5d6e7f80")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :branch-merge
 ;; =============================================================================
@@ -326,7 +333,11 @@
                                        :type :ref :ref-entity :branch
                                        :nullable? true}
                       :created-at {:uuid branch-created-at-field-uuid
-                                   :type :timestamptz}})
+                                   :type :timestamptz}
+                      ;; Tenant owner (§4). NULL ≡ public (main).
+                      :org-id {:uuid branch-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
       (ds/add-constraint :branch {:type :unique :fields [:name]})
 
       ;; -----------------------------------------------------------------

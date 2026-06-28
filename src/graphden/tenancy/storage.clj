@@ -32,8 +32,15 @@
    `bound-fn*`), so the own-guard passes. Service / cron executions run with no
    request scope → public, which is correct (platform-level). The child
    `:fn-execution-arg` rows stay id-gated (reachable only via an already-scoped
-   execution-id)."
-  #{:fn :slot :fn-slot :binding :binding-list-item :fn-execution})
+   execution-id).
+
+   `:branch` IS scoped (§4): the branch-router resolves it INSIDE the request
+   scope (so `*current-org*` is bound — see `dispatch`), giving each tenant its
+   own branches + `main`. The per-branch compiled ctx stays org-AGNOSTIC (Design
+   B: `:compile-storage` reads structure unscoped); isolation is the org-scoped
+   `:storage` at runtime. Names stay globally UNIQUE for now (a tenant can't
+   reuse another org's branch name); per-org names need NULLS-NOT-DISTINCT."
+  #{:fn :slot :fn-slot :binding :binding-list-item :fn-execution :branch})
 
 
 (def tenant-forbidden-entities
@@ -47,15 +54,6 @@
    - `:grant`   — write: grant itself `:admin`; read: enumerate every org's
      grants (the grants panel's `:list-grants`).
    - `:domain`  — hijack / enumerate custom-domain → org routing.
-   - `:branch`  — branches aren't org-scoped: a tenant-created branch is a
-     global row, and the picker (`GET /api/branches`) would list every org's
-     branches. Tenants are confined to `main` until per-tenant ORG-SCOPED
-     branches exist — which needs a resolution-timing fix, since the
-     branch-router resolves the branch BEFORE the org is bound (so org-scoped
-     branch reads would see nothing at resolution time). Note: resolution
-     itself reads `:branch` with org = public (pre-request-scope), so it's
-     unaffected by this guard.
-
    - `:org`     — the orgs registry (§3.4). Platform-managed: tenants register
      and configure their org through dedicated endpoints / the editor, never
      by writing the registry row, and must not enumerate other orgs.
@@ -66,10 +64,13 @@
      accounts in other orgs; read: enumerate every user + their password
      hashes. `login!` reads it in the platform context, before any session.
 
+   `:branch` and `:fn-execution` were once here too; both are now ORG-SCOPED
+   (see `default-scoped-entities`) — a tenant gets its OWN branches/executions
+   instead of being locked out.
+
    Platform / admin (public org) is unrestricted. New privileged entity types
-   MUST be added here. (Proper long-term answers — the FaaS app model §3.4 and
-   org-scoped branches/executions — are follow-ups.)"
-  #{:service :grant :domain :branch :org :token :user})
+   MUST be added here."
+  #{:service :grant :domain :org :token :user})
 
 
 (defn- row-org

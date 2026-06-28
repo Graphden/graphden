@@ -101,6 +101,13 @@
                                  :base-fns (:base-fns base-ctx)
                                  :clock (:clock base-ctx)
                                  :allowed-effects (:allowed-effects base-ctx)})
+      ;; Privileged structural-read storage for THIS branch (§4 Design B): the
+      ;; raw PG re-wrapped at branch-id, so `rebuild!` compiles every org's fns
+      ;; org-agnostically (isolation stays on the org-scoped `:storage` above at
+      ;; runtime). Absent in single-tenant → compile reads fall back to :storage.
+      (:pg-storage base-ctx)
+      (assoc :pg-storage (:pg-storage base-ctx)
+             :compile-storage (vs/->VersionedStorage (:pg-storage base-ctx) branch-id))
       ;; Inherit the off-record auth seam so per-branch execution
       ;; authenticates through the same provider as the base context.
       (:auth-provider base-ctx) (assoc :auth-provider (:auth-provider base-ctx))
@@ -289,10 +296,22 @@
     (:ctx (or cached (build-and-cache! router effective)))))
 
 
+(defn- current-scope
+  "The tenant scope for branch resolution — the addon's `*current-org*` when the
+   tenancy ns is loaded, so a tenant's branch ref resolves + caches PER ORG and
+   never returns another org's same-named branch from the cache. nil in
+   single-tenant / core. `resolve` (not requiring-resolve) so core never loads
+   the addon. The resolution read is already org-scoped via OrgScoped; this only
+   keys the cache to match."
+  []
+  (some-> (resolve 'graphden.tenancy.context/*current-org*) deref))
+
+
 (defn- forget-ref-cache-for-branch!
   "Drop every `ref → id` entry that points at `branch-id`. Called from
    `invalidate!` so a delete-branch! followed by a re-create with the
-   same name doesn't surface a stale id."
+   same name doesn't surface a stale id. Keys are `[scope ref]`; matching is
+   by value (branch-id) so it sweeps every org's entry for the branch."
   [router branch-id]
   (when-let [ref-cache (:ref-cache router)]
     (swap! ref-cache
@@ -395,24 +414,22 @@
    when the ref doesn't resolve. Nil ref returns the default-branch-id
    (handler-for then short-circuits to the seeded entry).
 
-   Result is cached on the router's `:ref-cache` atom keyed by the
-   ref string — a non-default branch name resolves once per process
-   lifetime (per name). The cache is invalidated by `invalidate!`
-   (for a specific branch-id) and `invalidate-all!`. Misses
-   (unresolved refs) are NOT cached so a typo never sticks."
+   Result is cached on the router's `:ref-cache` atom keyed by
+   `[scope ref]` (§4) — `:branch` is org-scoped, so org-A and org-B's
+   same-named branches resolve to different ids and must not share a
+   cache slot (else one would run in the other's branch ctx). A
+   non-default branch name resolves once per process lifetime per
+   (org, name). Invalidated by `invalidate!` / `invalidate-all!`.
+   Misses (unresolved refs) are NOT cached so a typo never sticks."
   [{:keys [default-branch-id ref-cache] :as router} branch-ref]
-  (cond
-    (or (nil? branch-ref) (str/blank? branch-ref))
+  (if (or (nil? branch-ref) (str/blank? branch-ref))
     default-branch-id
-
-    ;; Cache hit.
-    (and ref-cache (contains? @ref-cache branch-ref))
-    (get @ref-cache branch-ref)
-
-    :else
-    (when-let [id (resolve-branch-id-uncached router branch-ref)]
-      (when ref-cache (swap! ref-cache assoc branch-ref id))
-      id)))
+    (let [k [(current-scope) branch-ref]]
+      (if (and ref-cache (contains? @ref-cache k))
+        (get @ref-cache k)
+        (when-let [id (resolve-branch-id-uncached router branch-ref)]
+          (when ref-cache (swap! ref-cache assoc k id))
+          id)))))
 
 
 (defn dispatch
@@ -431,23 +448,24 @@
         app-router (:app-router base-ctx)
         app-resp (when app-router (app-router base-ctx request))]
     (or app-resp
-        (let [branch-ref (extract-branch-ref request)
-              branch-id (resolve-branch-id router branch-ref)]
-          (cond
-            (and (some? branch-ref) (nil? branch-id))
-            {:status 400
-             :headers {"Content-Type" "application/json"}
-             :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
-
-            :else
-            (let [handler (handler-for router branch-id)
-                  ;; Request-scope seam (§3.0 B4): when wired (the tenancy addon),
-                  ;; it authenticates + binds `*current-org*` around the handler.
-                  ;; Absent (core / single-tenant) → call the handler directly.
-                  request-scope (:request-scope base-ctx)]
-              (if request-scope
-                (request-scope base-ctx request #(handler request))
-                (handler request))))))))
+        ;; Branch resolution runs INSIDE the request-scope (§4): `:branch` is
+        ;; org-scoped, so `*current-org*` must be bound when resolve-branch-id
+        ;; reads it — otherwise a tenant's own branch is invisible at resolution
+        ;; (→ a spurious 400) and the org cache key would be wrong. So the whole
+        ;; resolve → handler chain is the request-scope's thunk. The branch ctx
+        ;; itself stays org-agnostic (Design B) — keyed by branch-id alone.
+        (let [request-scope (:request-scope base-ctx)
+              run (fn []
+                    (let [branch-ref (extract-branch-ref request)
+                          branch-id (resolve-branch-id router branch-ref)]
+                      (if (and (some? branch-ref) (nil? branch-id))
+                        {:status 400
+                         :headers {"Content-Type" "application/json"}
+                         :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
+                        ((handler-for router branch-id) request))))]
+          (if request-scope
+            (request-scope base-ctx request run)
+            (run))))))
 
 
 ;; =============================================================================

@@ -79,6 +79,17 @@
     (seam ctx (cond-> fn-id (string? fn-id) parse-uuid))))
 
 
+;; Self-serve DNS-verify (§3.4 #2): invoke the injectable `:verify-domain` seam
+;; (the tenancy addon's controlled-privilege verification). Core stays addon-
+;; agnostic — no seam → nil. The seam validates the domain belongs to the
+;; tenant's org, runs the privileged DNS-TXT lookup, flips `:verified?`; it
+;; throws :authz/forbidden / :domain/unverified for a bad caller / failed proof.
+(defbase invoke-verify-domain
+  [hostname]
+  (when-let [seam (:verify-domain ctx)]
+    (seam ctx hostname)))
+
+
 (def impls
   {:list-grants list-grants
    :create-grant create-grant
@@ -86,4 +97,5 @@
    :create-org create-org
    :create-domain create-domain
    :set-org-handler set-org-handler
-   :invoke-set-org-handler invoke-set-org-handler})
+   :invoke-set-org-handler invoke-set-org-handler
+   :invoke-verify-domain invoke-verify-domain})

@@ -259,3 +259,40 @@
                                                  {:hostname "victim.com" :org "victim" :verified? true}))
                   nil (catch clojure.lang.ExceptionInfo e e))]
       (is (= :authz/forbidden (:type (ex-data ex)))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Self-serve DNS-verify seam (§3.4 #2) — a tenant proves DNS ownership of a
+;; domain registered to its org and flips it verified (DNS lookup injected).
+;; ---------------------------------------------------------------------------
+(deftest self-serve-verify-domain-seam
+  (sp/create-entity (:storage *ctx*) :domain {:hostname "app.vorg.com" :org "vorg" :verified? false})
+  (let [ok-dns (fn [_] ["junk=x" "graphden-verify=vorg"])
+        bad-dns (fn [_] ["graphden-verify=someone-else"])]
+    (testing "tenant proves ownership (graphden-verify=<org> TXT) → row flips verified?"
+      (tc/with-org "vorg" (deploy/verify-domain! *ctx* "app.vorg.com" ok-dns))
+      (is (true? (:verified? (first (sp/query-entities (:storage *ctx*) :domain {:hostname "app.vorg.com"}))))))
+    (testing "DNS doesn't prove ownership → :domain/unverified (row not flipped)"
+      (sp/create-entity (:storage *ctx*) :domain {:hostname "x.vorg.com" :org "vorg" :verified? false})
+      (let [ex (try (tc/with-org "vorg" (deploy/verify-domain! *ctx* "x.vorg.com" bad-dns))
+                    nil (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :domain/unverified (:type (ex-data ex))))
+        (is (false? (:verified? (first (sp/query-entities (:storage *ctx*) :domain {:hostname "x.vorg.com"})))))))
+    (testing "verifying ANOTHER org's domain → forbidden (own-org only)"
+      (let [ex (try (tc/with-org "intruder" (deploy/verify-domain! *ctx* "app.vorg.com" ok-dns))
+                    nil (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :authz/forbidden (:type (ex-data ex))))))
+    (testing "public / unauthenticated → forbidden"
+      (let [ex (try (tc/with-org tc/public-org (deploy/verify-domain! *ctx* "app.vorg.com" ok-dns))
+                    nil (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :authz/forbidden (:type (ex-data ex))))))))
+
+
+(deftest invoke-verify-domain-base-fn-drives-the-seam
+  (sp/create-entity (:storage *ctx*) :domain {:hostname "wired.worg.com" :org "worg" :verified? false})
+  (let [invoke-id (fn-id-of (:storage *ctx*) "invoke-verify-domain")
+        seam-ctx (assoc *ctx* :verify-domain
+                        (fn [c h] (deploy/verify-domain! c h (fn [_] ["graphden-verify=worg"]))))]
+    (testing "the core invoke-verify-domain base-fn calls the ctx seam → :domain verified"
+      (tc/with-org "worg" (cr/execute seam-ctx invoke-id {:hostname "wired.worg.com"}))
+      (is (true? (:verified? (first (sp/query-entities (:storage *ctx*) :domain {:hostname "wired.worg.com"}))))))))

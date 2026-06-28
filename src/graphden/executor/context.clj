@@ -160,7 +160,7 @@
                 per top-level execute; throws `:authz/forbidden` on a denied
                 tenant execute. Absent → no execute authorization."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
-           execute-guard app-router set-org-handler]}]
+           execute-guard app-router set-org-handler verify-domain]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -194,7 +194,11 @@
       ;; Self-serve deploy seam (§3.4 4b) — `(fn [ctx fn-id] …)` the
       ;; `:invoke-set-org-handler` base-fn calls so a tenant can point its
       ;; own org at its own handler fn. Addon-only.
-      (cond-> set-org-handler (assoc :set-org-handler set-org-handler))))
+      (cond-> set-org-handler (assoc :set-org-handler set-org-handler))
+      ;; Self-serve DNS-verify seam (§3.4 #2) — `(fn [ctx hostname] …)` the
+      ;; `:invoke-verify-domain` base-fn calls so a tenant can prove ownership
+      ;; of its own custom domain (DNS-TXT) and flip it verified. Addon-only.
+      (cond-> verify-domain (assoc :verify-domain verify-domain))))
 
 
 (defn current-time-ms

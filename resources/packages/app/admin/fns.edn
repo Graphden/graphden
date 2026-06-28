@@ -458,4 +458,43 @@
   {:name :set-my-app-handler-route
    :description "POST /api/my-app/handler — a tenant sets its OWN org's app handler (fn-id). Auth-required; the seam validates ownership."
    :parent :post
-   :args {:path "/api/my-app/handler" :handler :_my-app-handler-handler}}]}
+   :args {:path "/api/my-app/handler" :handler :_my-app-handler-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; SELF-SERVE DNS-VERIFY (§3.4 #2) — POST /api/my-app/verify-domain {hostname}.
+  ;; A tenant proves it owns a custom domain (graphden-verify=<org> DNS-TXT)
+  ;; registered to its org, flipping :verified? so the app-router serves it.
+  ;; The `:invoke-verify-domain` base-fn calls the injectable `:verify-domain`
+  ;; seam, which validates org-ownership + runs the privileged DNS lookup. No
+  ;; seam (single-tenant) → nil. Auth-required; the seam 403s a foreign host.
+  ;; ---------------------------------------------------------------------
+  {:name :invoke-verify-domain
+   :description "Invoke the self-serve DNS-verify seam: prove the current tenant owns hostname and mark its :domain verified. Returns the updated row, or nil when the addon isn't active."
+   :args {:hostname {:type :text :description "The tenant's custom host to verify, e.g. app.acme.com."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_verify-domain-form-data
+   :parent :parse-form-body}
+
+  {:name :_verify-domain-hostname
+   :parent :get
+   :args {:coll :_verify-domain-form-data :key {:value :hostname} :default {:value ""}}}
+
+  {:name :_verify-domain-do
+   :parent :invoke-verify-domain
+   :args {:hostname :_verify-domain-hostname}}
+
+  {:name :_verify-domain-text
+   :parent :to-str
+   :args {:value :_verify-domain-do}}
+
+  {:name :_verify-domain-handler
+   :description "Ring handler for POST /api/my-app/verify-domain — self-serve verify the tenant's custom domain."
+   :parent :html-ok-response
+   :args {:body :_verify-domain-text}}
+
+  {:name :verify-my-domain-route
+   :description "POST /api/my-app/verify-domain — a tenant proves ownership of its OWN custom domain (hostname). Auth-required; the seam validates org-ownership + DNS."
+   :parent :post
+   :args {:path "/api/my-app/verify-domain" :handler :_verify-domain-handler}}]}

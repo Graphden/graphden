@@ -11,8 +11,10 @@
    temporary public escalation — the ONLY write a tenant can cause to its org
    row, and only to `:handler-fn-id`, only for the org named by its own token."
   (:require
+    [clojure.string :as str]
     [graphden.storage.protocol.core :as sp]
-    [graphden.tenancy.context :as tc]))
+    [graphden.tenancy.context :as tc]
+    [graphden.tenancy.domain :as domain]))
 
 
 (defn set-org-handler!
@@ -39,3 +41,37 @@
     (tc/with-org tc/public-org
                  (when-let [row (first (sp/query-entities storage :org {:name org}))]
                    (sp/update-entity storage :org (:id row) {:handler-fn-id fn-id})))))
+
+
+(defn verify-domain!
+  "Self-serve DNS verification (PLATFORM_PLAN §3.4 #2 follow-up): the current
+   tenant proves it OWNS `hostname` — a `graphden-verify=<org>` DNS-TXT record —
+   and the row flips to `:verified?` (so the app-router begins serving the org
+   for that host). Throws `:authz/forbidden` when there's no tenant org or
+   `hostname` isn't registered to it, `:domain/unverified` when DNS doesn't
+   prove ownership. `lookup-txt` is injectable for tests (default real DNS).
+
+   Why a seam: `:domain` is tenant-forbidden (read + write), so the tenant can
+   neither inspect nor flip the row directly. This VALIDATES the row belongs to
+   the tenant's org, runs the privileged DNS lookup (a network call tenant
+   graphs can't make), and does the single `:verified?` update under a temporary
+   public escalation — only for a host already assigned to the tenant's org."
+  ([ctx hostname] (verify-domain! ctx hostname domain/dns-txt-records))
+  ([ctx hostname lookup-txt]
+   (let [org (tc/current-org)
+         storage (:storage ctx)
+         host (some-> hostname str/lower-case)]
+     (when (= org tc/public-org)
+       (throw (ex-info "forbidden: not a tenant request"
+                       {:type :authz/forbidden})))
+     ;; `:domain` is tenant-hidden/forbidden — read + update under a temporary
+     ;; public escalation, but ONLY the row whose org is the tenant's own.
+     (tc/with-org tc/public-org
+                  (let [row (first (sp/query-entities storage :domain {:hostname host}))]
+                    (when-not (and row (= (:org row) org))
+                      (throw (ex-info "forbidden: domain not registered to this org"
+                                      {:type :authz/forbidden :hostname hostname})))
+                    (when-not (domain/verify-domain-ownership host org lookup-txt)
+                      (throw (ex-info "domain ownership not proven by DNS"
+                                      {:type :domain/unverified :hostname hostname})))
+                    (sp/update-entity storage :domain (:id row) {:verified? true}))))))

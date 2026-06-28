@@ -41,6 +41,7 @@
                   :create-domain-route
                   :set-org-handler-route
                   :set-my-app-handler-route
+                  :verify-my-domain-route
                   :partial-row-actions
                   :demo-contact
                   :health

@@ -147,6 +147,14 @@
   deploy/set-org-handler!)
 
 
+(defmethod ig/init-key :tenancy/verify-domain [_ _]
+  ;; (§3.4 #2) Self-serve DNS-verify seam — `(fn [ctx hostname] …)`. Wired onto
+  ;; `:exec/context`'s `:verify-domain`; the core `:invoke-verify-domain` base-fn
+  ;; calls it. Validates org-ownership of the row, runs the privileged DNS-TXT
+  ;; lookup, flips `:domain.verified?` under escalation.
+  deploy/verify-domain!)
+
+
 (defmethod ig/init-key :tenancy/org-resolver [_ {:keys [subdomains]}]
   ;; (§3.2) Resolve org from the Host subdomain. Default — IDENTITY: the
   ;; subdomain label IS the org-id (`acme.<base-domain>` → org `acme`), no

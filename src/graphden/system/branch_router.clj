@@ -109,7 +109,10 @@
       (:execute-guard base-ctx) (assoc :execute-guard (:execute-guard base-ctx))
       ;; Inherit the self-serve deploy seam (§3.4 4b) — the
       ;; `:invoke-set-org-handler` base-fn runs in the per-branch handler ctx.
-      (:set-org-handler base-ctx) (assoc :set-org-handler (:set-org-handler base-ctx)))))
+      (:set-org-handler base-ctx) (assoc :set-org-handler (:set-org-handler base-ctx))
+      ;; Inherit the self-serve DNS-verify seam (§3.4 #2) — the
+      ;; `:invoke-verify-domain` base-fn runs in the per-branch handler ctx.
+      (:verify-domain base-ctx) (assoc :verify-domain (:verify-domain base-ctx)))))
 
 
 (defn- ring-callable-for-ctx

@@ -161,6 +161,17 @@
 ;;                  :app-router #ig/ref :tenancy/app-router
 ;;                  :request-scope #ig/ref :tenancy/request-scope}
 ;;
+;; SELF-SERVE DNS-VERIFY (§3.4 #2) — let a tenant prove ownership of its OWN
+;; custom domain (POST /api/my-app/verify-domain {hostname}). The seam checks
+;; the :domain row belongs to the tenant's org, runs the privileged DNS-TXT
+;; lookup (graphden-verify=<org>), and flips :verified? — after which the
+;; storage-host-resolver routes that host:
+;;   :tenancy/verify-domain {}
+;;   :exec/context {:verify-domain #ig/ref :tenancy/verify-domain
+;;                  :set-org-handler #ig/ref :tenancy/set-org-handler
+;;                  :app-router #ig/ref :tenancy/app-router
+;;                  :request-scope #ig/ref :tenancy/request-scope}
+;;
 ;; The addon ships its own fns-packages (e.g. an org-admin UI) via the
 ;; fns-channel seam — append to :app/packages without restating the core
 ;; list, so they load ONLY when the addon is active:

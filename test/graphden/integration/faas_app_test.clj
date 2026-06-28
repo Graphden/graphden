@@ -463,6 +463,20 @@
         (is (= "Invalid username or password." (:body resp)))))))
 
 
+(deftest signup-handler-429-when-rate-limited
+  ;; The :signup seam returns a {:rate-limited true} sentinel for an over-quota
+  ;; IP; the handler maps it to 429 (distinct from a 401 credential failure).
+  ;; One execute (per-fn-id closure cache, like the 401 test).
+  (let [handler-id (fn-id-of (:storage *ctx*) "_signup-handler")
+        seam-ctx (assoc *ctx* :user-ops {:signup (fn [& _] {:rate-limited true})})
+        req {:request-method :post
+             :headers {"content-type" "application/x-www-form-urlencoded"}
+             :body "username=x&password=y&org=z"}]
+    (testing "an over-quota signup → 429 (not 401)"
+      (let [resp (cr/execute seam-ctx handler-id {:request req})]
+        (is (= 429 (:status resp)))))))
+
+
 (deftest legacy-pbkdf2-rehashed-to-bcrypt-on-login
   (let [login-id (fn-id-of (:storage *ctx*) "invoke-login")
         seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!

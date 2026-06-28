@@ -58,17 +58,29 @@
 (defn make-rate-limiter
   "A per-key fixed-window limiter: allow at most `max-attempts` per `window-ms`.
    Returns `(fn [key] → bool)` that prunes the key's window, records an allowed
-   attempt, and answers whether it was allowed. In-memory (per process);
-   denied attempts don't grow the window, so it's bounded by `max-attempts`."
+   attempt, and answers whether it was allowed. In-memory (per process); denied
+   attempts don't grow the window (bounded by `max-attempts`), and fully-idle
+   keys are swept at most once per window so the map stays bounded by the count
+   of ACTIVE keys, not every IP ever seen."
   [max-attempts window-ms]
-  (let [state (atom {})]
+  (let [state (atom {})
+        last-prune (atom 0)]
     (fn [key]
-      (let [cutoff (- (System/currentTimeMillis) window-ms)
-            recent (filterv #(> % cutoff) (get @state key []))
-            allowed? (< (count recent) max-attempts)]
-        (when allowed?
-          (swap! state assoc key (conj recent (System/currentTimeMillis))))
-        allowed?))))
+      (let [now (System/currentTimeMillis)
+            cutoff (- now window-ms)]
+        (when (> now (+ @last-prune window-ms))
+          (reset! last-prune now)
+          (swap! state (fn [m]
+                         (persistent!
+                           (reduce-kv (fn [acc k ts]
+                                        (let [r (filterv #(> % cutoff) ts)]
+                                          (if (seq r) (assoc! acc k r) acc)))
+                                      (transient {}) m)))))
+        (let [recent (filterv #(> % cutoff) (get @state key []))
+              allowed? (< (count recent) max-attempts)]
+          (when allowed?
+            (swap! state assoc key (conj recent now)))
+          allowed?)))))
 
 
 (defn- random-bytes

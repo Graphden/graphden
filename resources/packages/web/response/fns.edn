@@ -49,6 +49,11 @@
    :parent :ring-response
    :args {:status 401}}
 
+  {:name :too-many-requests-response
+   :description "Status axis: 429 Too Many Requests (rate limited)."
+   :parent :ring-response
+   :args {:status 429}}
+
   ;; =============================================================================
   ;; CONTENT-TYPE axis
   ;; =============================================================================
@@ -109,6 +114,9 @@
   {:name :text-unauthorized-response
    :description "401 Unauthorized with `text/plain` content-type. Free arg: `:body`."
    :parents [:text-content-type :unauthorized-response]}
+  {:name :text-too-many-requests-response
+   :description "429 Too Many Requests with `text/plain` content-type. Free arg: `:body`."
+   :parents [:text-content-type :too-many-requests-response]}
   {:name :cached-svg-ok-response
    :description "200 OK with `image/svg+xml` content-type and a 24-hour `Cache-Control` header. Used for the favicon."
    :parents [:cached-svg-content-type :ok-response]}

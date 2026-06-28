@@ -821,10 +821,29 @@
    :parent :html-ok-response
    :args {:body :_signup-token-text}}
 
-  {:name :_signup-handler
-   :description "Ring handler for POST /api/signup — 200 + the new session token, or 401 when signup failed (taken / blank)."
+  {:name :_signup-token-result
+   :description "200 + the new session token, or 401 when signup failed (taken / blank)."
    :parent :if
    :args {:test :_signup-token-blank? :then :_auth-401 :else :_signup-200}}
+
+  ;; The rate limiter returns a {:rate-limited true} sentinel for an over-quota
+  ;; IP → 429 (distinct from a credential/taken failure → 401).
+  {:name :_signup-rate-limited?
+   :parent :get
+   :args {:coll :_signup-do :key {:value :rate-limited} :default {:value false}}}
+
+  {:name :_signup-429-body
+   :parent :const
+   :args {:value "Too many signup attempts — please try again later."}}
+
+  {:name :_signup-429
+   :parent :text-too-many-requests-response
+   :args {:body :_signup-429-body}}
+
+  {:name :_signup-handler
+   :description "Ring handler for POST /api/signup — 429 when rate-limited, else 200 + the new session token, or 401 when signup failed (taken / blank)."
+   :parent :if
+   :args {:test :_signup-rate-limited? :then :_signup-429 :else :_signup-token-result}}
 
   {:name :signup-route
    :description "POST /api/signup — self-serve register a new org + user and get a session token. UNAUTHENTICATED."

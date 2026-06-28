@@ -111,8 +111,11 @@
      :logout users/logout!
      :logout-all users/logout-all!
      :signup (fn [ctx u p o request]
-               (when (signup-limiter (users/client-ip request))
-                 (users/signup! ctx u p o)))}))
+               ;; Over-quota IP → a {:rate-limited true} sentinel the handler
+               ;; maps to 429 (distinct from a nil signup-failure → 401).
+               (if (signup-limiter (users/client-ip request))
+                 (users/signup! ctx u p o)
+                 {:rate-limited true}))}))
 
 
 (defmethod ig/init-key :tenancy/session-cleanup [_ {:keys [storage period-ms]}]

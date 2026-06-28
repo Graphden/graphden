@@ -7,6 +7,7 @@
    schema + a full package bootstrap — underpins this and future multi-tenant
    integration tests (the project's first addon-active harness)."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
@@ -25,6 +26,8 @@
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.core :as sys]
     [graphden.tenancy.app-router :as app]
+    [graphden.tenancy.context :as tc]
+    [graphden.tenancy.deploy :as deploy]
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.org-schema :as org-schema]
     [graphden.tenancy.storage :as ts]
@@ -143,3 +146,48 @@
   (set-org! "noh-org" nil)
   (testing "org exists but no app handler configured → 404"
     (is (= 404 (:status ((router) *ctx* (request "noh-org.graphden.app")))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Self-serve deploy (§3.4 4b) — the controlled-privilege seam against REAL
+;; OrgScoped storage (the unit test used a fake), + the base-fn→seam wiring.
+;; ---------------------------------------------------------------------------
+(deftest self-serve-seam-sets-own-org-handler
+  (set-org! "selfsrv-org" nil)
+  (let [fid (:list-grants *fn-id*)]
+    (testing "a tenant points its own org at a fn it can read → :org updated"
+      (tc/with-org "selfsrv-org" (deploy/set-org-handler! *ctx* fid))
+      (is (= fid (:handler-fn-id (first (sp/query-entities (:storage *ctx*) :org {:name "selfsrv-org"}))))))
+    (testing "public / unauthenticated caller → :authz/forbidden"
+      (let [ex (try (tc/with-org tc/public-org (deploy/set-org-handler! *ctx* fid))
+                    nil (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :authz/forbidden (:type (ex-data ex))))))))
+
+
+(deftest invoke-set-org-handler-base-fn-drives-the-seam
+  (set-org! "invoke-org" nil)
+  (let [invoke-id (fn-id-of (:storage *ctx*) "invoke-set-org-handler")
+        seam-ctx (assoc *ctx* :set-org-handler deploy/set-org-handler!)
+        fid (:list-grants *fn-id*)]
+    (testing "the core invoke-set-org-handler base-fn calls the ctx seam → :org updated"
+      (tc/with-org "invoke-org"
+                   (cr/execute seam-ctx invoke-id {:fn-id (str fid)}))
+      (is (= fid (:handler-fn-id (first (sp/query-entities (:storage *ctx*) :org {:name "invoke-org"}))))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Grants-admin panel happy-path — with the addon active (:grant exists), the
+;; partial renders the real grants table, not the degraded notice.
+;; ---------------------------------------------------------------------------
+(deftest grants-panel-renders-real-grants
+  (sp/create-entity (:storage *ctx*) :grant {:subject "alice" :capability "write" :namespace "acme"})
+  (sp/create-entity (:storage *ctx*) :grant {:subject "bob" :capability "read" :namespace "shared"})
+  (let [handler-id (fn-id-of (:storage *ctx*) "_partial-grants-admin-handler")
+        resp (cr/execute *ctx* handler-id {})
+        body (:body resp)]
+    (testing "200 + the grants table with the seeded rows, NOT the degraded notice"
+      (is (= 200 (:status resp)))
+      (is (str/includes? body "grants-admin-table"))
+      (is (str/includes? body "alice"))
+      (is (str/includes? body "shared"))
+      (is (not (str/includes? body "Tenancy addon not active"))))))

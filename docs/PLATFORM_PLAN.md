@@ -494,10 +494,11 @@ FaaS-ядро + изоляция + sandbox доказаны (`faas-app-test`, 12
    (хэш-матч бирера) + `create-token` base-fn / `POST /api/tokens`. Онбординг =
    вставка строки, без редеплоя. Round-trip тест (минт → аутентификация).
 2. ✅ **Storage-backed домены** — `:domain` сущность + `storage-host-resolver`
-   (резолвит только verified) + `create-domain` / `POST /api/domains`. App-router
-   уже принимает любой `HostResolver` — интеграция бесплатна. *Follow-up:*
-   self-serve DNS-verify endpoint (`verify-domain-ownership` готов+оттестирован,
-   осталось обвязать `:verify-domain` ctx-seam по образцу `set-org-handler`).
+   (резолвит только verified) + `create-domain` / `POST /api/domains` (оператор
+   регистрирует, vetted) + **self-serve DNS-verify** (`deploy/verify-domain!`
+   seam + `:verify-domain` ctx + `invoke-verify-domain` / `POST /api/my-app/
+   verify-domain` — тенант сам доказывает владение через DNS-TXT). App-router
+   принимает любой `HostResolver` — интеграция бесплатна.
 3. ✅ **Non-superuser DB-роль** — код готов давно (`FORCE ROW LEVEL SECURITY` +
    policy + `org-aware-datasource` wrap + `rls-test` под non-superuser `SET ROLE`).
    Осталась только инфра: запустить процесс под non-superuser ролью —

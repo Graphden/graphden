@@ -314,6 +314,13 @@ body.sidebar-collapsed .sidebar-expand-floating {
 }
 .auth-lock-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 .auth-lock-btn.auth-lock-open { background: var(--header-fg); color: var(--header-bg); }
+/* "Sign out everywhere" — same chrome as the lock, sits beside it. */
+.auth-logout-all-btn {
+  background: transparent; color: var(--header-fg); border: 1px solid var(--header-fg); border-radius: 3px;
+  width: 26px; height: 26px; padding: 3px; margin-left: 4px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 14px;
+}
+.auth-logout-all-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 /* Popover positioned with `position: fixed` (relative to viewport,
    set via JS in `positionAuthPopover`) so it can escape #side-menu's
    scroll context — focusing the input would otherwise cause the

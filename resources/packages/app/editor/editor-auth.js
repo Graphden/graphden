@@ -169,6 +169,8 @@ function initAuthLock() {
   if (!mount) return;
   mount.innerHTML =
     '<button id="auth-lock-btn" class="auth-lock-btn" title="Admin login"></button>' +
+    // Sign out of ALL sessions — multi-tenant + authenticated only.
+    '<button id="auth-logout-all-btn" class="auth-logout-all-btn hidden" title="Sign out everywhere">⎋</button>' +
     '<div id="auth-popover" class="auth-popover hidden">' +
       // Username — shown only in multi-tenant (body.gd-tenancy); single-tenant
       // is a bare admin password, so it stays hidden there.
@@ -190,6 +192,7 @@ function initAuthLock() {
     '</div>';
 
   document.getElementById('auth-lock-btn').addEventListener('click', toggleAuthAction);
+  document.getElementById('auth-logout-all-btn').addEventListener('click', logoutEverywhere);
   document.getElementById('auth-save-btn').addEventListener('click', submitAuth);
   document.getElementById('auth-cancel-btn').addEventListener('click', () => closeAuthPopover());
   document.getElementById('auth-toggle-visibility-btn').addEventListener('click', (e) => {
@@ -256,6 +259,18 @@ function renderAuthLock() {
   btn.innerHTML = authed ? LOCK_OPEN_SVG : LOCK_CLOSED_SVG;
   btn.classList.toggle('auth-lock-open', authed);
   btn.title = authed ? 'Sign out' : (loginIsTenant() ? 'Sign in' : 'Admin login');
+  // "Sign out everywhere" only makes sense for a real (multi-tenant) session.
+  const allBtn = document.getElementById('auth-logout-all-btn');
+  if (allBtn) allBtn.classList.toggle('hidden', !(authed && loginIsTenant()));
+}
+
+// Sign out of ALL sessions (server-side: POST /api/logout-all deletes every
+// :token for this user), then clear local + reload.
+async function logoutEverywhere() {
+  if (!confirm('Sign out of all your sessions, on every device?')) return;
+  try { await authFetch(API.api_logout_all, { method: 'POST' }); } catch (_) {}
+  clearAuthPassword();
+  window.location.reload();
 }
 
 // Click on the lock toggles between login (when closed) and logout

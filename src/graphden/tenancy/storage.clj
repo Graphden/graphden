@@ -59,11 +59,14 @@
    - `:org`     — the orgs registry (§3.4). Platform-managed: tenants register
      and configure their org through dedicated endpoints / the editor, never
      by writing the registry row, and must not enumerate other orgs.
+   - `:token`   — storage-backed auth tokens (§3.4 #1). Write: a tenant could
+     mint itself a token for ANY org (full escalation); read: enumerate /
+     exfiltrate every user's token hashes. Strictly platform-managed.
 
    Platform / admin (public org) is unrestricted. New privileged entity types
    MUST be added here. (Proper long-term answers — the FaaS app model §3.4 and
    org-scoped branches/executions — are follow-ups.)"
-  #{:service :grant :domain :branch :org})
+  #{:service :grant :domain :branch :org :token})
 
 
 (defn- row-org

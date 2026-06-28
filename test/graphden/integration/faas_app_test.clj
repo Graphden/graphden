@@ -9,6 +9,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
@@ -26,12 +27,14 @@
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.core :as sys]
     [graphden.tenancy.app-router :as app]
+    [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.deploy :as deploy]
     [graphden.tenancy.grant-schema :as grant-schema]
     [graphden.tenancy.org-schema :as org-schema]
     [graphden.tenancy.storage :as ts]
     [graphden.tenancy.subdomain :as subdomain]
+    [graphden.tenancy.token-schema :as token-schema]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -51,6 +54,7 @@
       (pkgs/extend-builder)
       (grant-schema/extend-builder)
       (org-schema/extend-builder)
+      (token-schema/extend-builder)
       (ds/build)))
 
 
@@ -191,3 +195,35 @@
       (is (str/includes? body "alice"))
       (is (str/includes? body "shared"))
       (is (not (str/includes? body "Tenancy addon not active"))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Storage-backed token-source (§3.4 #1) — onboarding is a row insert. The
+;; round-trip proves create-token's hash (core impls) == auth/token-hash (addon
+;; src), so a minted bearer authenticates.
+;; ---------------------------------------------------------------------------
+(defn- bearer-req
+  [token]
+  {:headers {"authorization" (str "Bearer " token)}})
+
+
+(deftest storage-token-provider-round-trip
+  (let [create-id (fn-id-of (:storage *ctx*) "create-token")
+        provider (tauth/storage-token-provider (:storage *ctx*))]
+    (cr/execute *ctx* create-id {:token "s3cr3t-bearer" :user "alice" :org "acme"})
+    (testing "a minted bearer authenticates to its principal (create→hash→store→provider→hash→match)"
+      (is (= {:authenticated? true :user "alice" :org "acme"}
+             (auth/authenticate provider (bearer-req "s3cr3t-bearer")))))
+    (testing "an unknown bearer fails closed"
+      (is (= {:authenticated? false} (auth/authenticate provider (bearer-req "wrong-token")))))
+    (testing "no bearer → not authenticated"
+      (is (= {:authenticated? false} (auth/authenticate provider {:headers {}}))))))
+
+
+(deftest tenant-cannot-mint-tokens
+  (testing "a tenant writing :token directly is denied (no self-escalation)"
+    (let [ex (try (tc/with-org "evil-org"
+                               (sp/create-entity (:storage *ctx*) :token
+                                                 {:token-hash "deadbeef" :user "evil" :org "victim"}))
+                  nil (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :authz/forbidden (:type (ex-data ex)))))))

@@ -37,6 +37,7 @@
                   :partial-grants-admin
                   :create-grant-route
                   :create-org-route
+                  :create-token-route
                   :set-org-handler-route
                   :set-my-app-handler-route
                   :partial-row-actions

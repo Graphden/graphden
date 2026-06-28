@@ -53,6 +53,18 @@
 ;; Then the request's bearer resolves to its :org, B4 binds *current-org*,
 ;; and OrgScopedStorage (+ RLS) isolate the tenant.
 ;;
+;; PRODUCTION variant (§3.4 #1) — resolve tokens from storage instead of a
+;; config map, so onboarding a user is a row insert (no redeploy). Splice the
+;; :token entity into the schema (see the schema block below) and wire:
+;;
+;;   {:graphden/require [graphden.tenancy.addon]
+;;    :auth/storage-token-provider {:storage #ig/ref :db/postgres}
+;;    :exec/context {:auth-provider #ig/ref :auth/storage-token-provider}}
+;;
+;; Mint a token (platform-only — :token is tenant-forbidden) via the
+;; create-token base-fn / POST /api/tokens; the bearer is hashed (SHA-256)
+;; and only the hash is stored.
+;;
 ;; To ALSO enforce per-user grants (§4.2 — opt-in), wire a grant store onto
 ;; the request-scope. Without this, tenant writes pass (subject only to
 ;; OrgScoped + the effect gate):
@@ -75,9 +87,11 @@
 ;;
 ;;   {:graphden/require [graphden.tenancy.addon]
 ;;    :tenancy/grant-schema {}
-;;    :tenancy/org-schema {}   ; orgs registry (§3.4 FaaS app model)
+;;    :tenancy/org-schema {}     ; orgs registry (§3.4 FaaS app model)
+;;    :tenancy/token-schema {}   ; storage-backed auth tokens (§3.4 #1)
 ;;    :db/schema {:extensions [#ig/ref :tenancy/grant-schema
-;;                             #ig/ref :tenancy/org-schema]}
+;;                             #ig/ref :tenancy/org-schema
+;;                             #ig/ref :tenancy/token-schema]}
 ;;    :tenancy/grant-store {:storage #ig/ref :db/postgres}
 ;;    :tenancy/request-scope {:grant-store #ig/ref :tenancy/grant-store}
 ;;    :org/scoped-storage {:base #ig/ref :app/storage

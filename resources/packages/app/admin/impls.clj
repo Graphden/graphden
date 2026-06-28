@@ -4,13 +4,34 @@
    `:org` entities; they throw when the addon isn't active (no table), so
    callers guard with `:try`."
   (:require
+    [clojure.string :as str]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.protocol.core :as sp]))
+
+
+(defn- token-sha256
+  "SHA-256 hex of a bearer token — the key derivation for `:token.token-hash`.
+   MUST match `graphden.tenancy.auth/token-hash` (the storage-token-provider
+   hashes the same way at read time; the round-trip is tested). Core can't
+   require the addon, so this standard algorithm is duplicated here."
+  [^String s]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
+    (str/join (map #(format "%02x" (bit-and % 0xff))
+                   (java.security.MessageDigest/.digest digest (String/.getBytes s "UTF-8"))))))
 
 
 (defbase list-grants
   []
   (sp/query-entities (:storage ctx) :grant {}))
+
+
+;; Mint a storage-backed auth token (§3.4 #1). Stores ONLY the hash — the raw
+;; bearer is never persisted. Platform-only by entity guard (`:token` is
+;; tenant-forbidden), so a tenant POST is denied by OrgScoped.
+(defbase create-token
+  [token user org]
+  (sp/create-entity (:storage ctx) :token
+                    {:token-hash (token-sha256 token) :user user :org org}))
 
 
 (defbase create-grant
@@ -51,6 +72,7 @@
 (def impls
   {:list-grants list-grants
    :create-grant create-grant
+   :create-token create-token
    :create-org create-org
    :set-org-handler set-org-handler
    :invoke-set-org-handler invoke-set-org-handler})

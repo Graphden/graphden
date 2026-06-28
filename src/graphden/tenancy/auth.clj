@@ -15,7 +15,8 @@
    without touching the provider."
   (:require
     [clojure.string :as str]
-    [graphden.auth.provider :as auth]))
+    [graphden.auth.provider :as auth]
+    [graphden.storage.protocol.core :as sp]))
 
 
 (defn- sha256-hex
@@ -48,3 +49,25 @@
       (fn [token]
         (when-not (str/blank? token)
           (get by-hash (sha256-hex token)))))))
+
+
+(defn token-hash
+  "SHA-256 hex of a bearer token — the value stored in `:token.token-hash`.
+   The single canonical hashing for storage-backed tokens; the `create-token`
+   base-fn computes the same value at write time (the round-trip is tested)."
+  [token]
+  (sha256-hex token))
+
+
+(defn storage-token-provider
+  "An `AuthProvider` over the `:token` entity (PLATFORM_PLAN §3.4 #1). A
+   request's bearer is hashed and matched against `:token` rows, so onboarding
+   a user is creating a row (no redeploy). `storage` should be the BASE storage
+   — auth runs before the request scope, in the platform context. Reads only
+   the hash; a hit yields `{:user … :org …}`."
+  [storage]
+  (->TokenAuthProvider
+    (fn [token]
+      (when-not (str/blank? token)
+        (when-let [row (first (sp/query-entities storage :token {:token-hash (sha256-hex token)}))]
+          {:user (:user row) :org (:org row)})))))

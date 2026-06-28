@@ -42,6 +42,7 @@
     [graphden.tenancy.rls :as rls]
     [graphden.tenancy.storage :as ts]
     [graphden.tenancy.subdomain :as subdomain]
+    [graphden.tenancy.token-schema :as token-schema]
     [integrant.core :as ig]))
 
 
@@ -79,6 +80,11 @@
   org-schema/extend-builder)
 
 
+(defmethod ig/init-key :tenancy/token-schema [_ _]
+  ;; Adds the `:token` entity (§3.4 #1 — storage-backed auth tokens).
+  token-schema/extend-builder)
+
+
 (defmethod ig/init-key :tenancy/grant-store [_ {:keys [grants storage personal-ns-prefix]}]
   ;; Authorization primitive (§4.2). `:storage` → a store reading `:grant`
   ;; rows (persistent, manageable); else `:grants` → a static-map store.
@@ -103,6 +109,14 @@
   ;; (with its own `:tokens` map / secret) — see addon.edn's note. An empty
   ;; map authenticates nothing → every request public (safe).
   (tauth/token-map-provider (or tokens {})))
+
+
+(defmethod ig/init-key :auth/storage-token-provider [_ {:keys [storage]}]
+  ;; Storage-backed alternative to `:auth/multi-tenant-provider` (§3.4 #1):
+  ;; resolves a bearer against `:token` rows, so onboarding is a row insert,
+  ;; not a config edit + redeploy. `:storage` = base (:db/postgres) — auth
+  ;; runs in the platform context, before the request scope binds an org.
+  (tauth/storage-token-provider storage))
 
 
 (defmethod ig/init-key :tenancy/app-router [_ {:keys [org-resolver base-domain host-resolver timeout-ms]}]

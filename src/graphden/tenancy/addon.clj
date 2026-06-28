@@ -108,6 +108,34 @@
    :logout users/logout!})
 
 
+(defmethod ig/init-key :tenancy/session-cleanup [_ {:keys [storage period-ms]}]
+  ;; Periodically hard-delete expired session `:token` rows (§4.1) — the
+  ;; provider already ignores them, this stops them accumulating. Mirrors
+  ;; `:exec/cleanup-scheduler`. `:storage` = base (:db/postgres); platform
+  ;; context. Default period 1h. Addon-only.
+  (let [period (or period-ms (* 60 60 1000))
+        scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+    (log/info "Starting tenancy session-cleanup scheduler — period" period "ms")
+    (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
+      scheduler
+      ^Runnable (fn []
+                  (try (users/cleanup-expired-tokens! storage)
+                       (catch Exception e
+                         (log/warn e "session-cleanup sweep failed"))))
+      period period
+      java.util.concurrent.TimeUnit/MILLISECONDS)
+    scheduler))
+
+
+(defmethod ig/halt-key! :tenancy/session-cleanup [_ ^java.util.concurrent.ScheduledExecutorService scheduler]
+  (when scheduler
+    (log/info "Stopping tenancy session-cleanup scheduler...")
+    (java.util.concurrent.ExecutorService/.shutdown scheduler)
+    (try (java.util.concurrent.ExecutorService/.awaitTermination
+           scheduler 5 java.util.concurrent.TimeUnit/SECONDS)
+         (catch InterruptedException _ nil))))
+
+
 (defmethod ig/init-key :tenancy/storage-host-resolver [_ {:keys [storage]}]
   ;; A `HostResolver` over `:domain` rows (provisionable custom domains).
   ;; Wire into `:tenancy/app-router` / `:tenancy/request-scope` `:host-resolver`.

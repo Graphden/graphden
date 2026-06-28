@@ -390,3 +390,26 @@
       (testing "invoke-logout base-fn deletes the token → it no longer authenticates"
         (is (true? (cr/execute seam-ctx logout-id {:request (bearer-req token)})))
         (is (= {:authenticated? false} (auth/authenticate provider (bearer-req token))))))))
+
+
+(deftest session-cleanup-reaps-expired-tokens
+  (let [now (System/currentTimeMillis)
+        present? (fn [t]
+                   (some? (first (sp/query-entities (:storage *ctx*) :token
+                                                    {:token-hash (tauth/token-hash t)}))))]
+    (sp/create-entity (:storage *ctx*) :token
+                      {:token-hash (tauth/token-hash "clean-live") :user "u" :org "acme" :expires-at (+ now 100000)})
+    (sp/create-entity (:storage *ctx*) :token
+                      {:token-hash (tauth/token-hash "clean-dead1") :user "u" :org "acme" :expires-at (- now 5000)})
+    (sp/create-entity (:storage *ctx*) :token
+                      {:token-hash (tauth/token-hash "clean-dead2") :user "u" :org "acme" :expires-at (dec now)})
+    (sp/create-entity (:storage *ctx*) :token
+                      {:token-hash (tauth/token-hash "clean-apikey") :user "u" :org "acme"})
+    (let [deleted (users/cleanup-expired-tokens! (:storage *ctx*))]
+      (testing "the sweep deletes the expired rows (returns a count ≥ the two seeded)"
+        (is (>= deleted 2)))
+      (testing "expired rows are gone; live + NULL-expiry (API key) survive"
+        (is (not (present? "clean-dead1")))
+        (is (not (present? "clean-dead2")))
+        (is (present? "clean-live"))
+        (is (present? "clean-apikey"))))))

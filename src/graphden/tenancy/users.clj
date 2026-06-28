@@ -143,3 +143,20 @@
                                                               {:token-hash (tauth/token-hash token)}))]
                        (sp/delete-entity storage :token (:id row))
                        true))))))
+
+
+(defn cleanup-expired-tokens!
+  "Hard-delete every `:token` whose expiry is in the past — the provider already
+   ignores them (`token-live?`), this stops the rows accumulating. Runs in the
+   platform context. NULL-expiry tokens (operator API keys) are never touched.
+   Returns the number deleted. (Equality-only `query-entities` can't express
+   `expires-at < now`, so this reads + filters in-process; a SQL
+   `DELETE … WHERE expires_at < ?` is a scale follow-up.)"
+  [storage]
+  (tc/with-org tc/public-org
+               (let [now (System/currentTimeMillis)
+                     expired (filter (fn [r] (when-let [e (:expires-at r)] (< e now)))
+                                     (sp/query-entities storage :token {}))]
+                 (doseq [row expired]
+                   (sp/delete-entity storage :token (:id row)))
+                 (count expired))))

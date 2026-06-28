@@ -285,6 +285,25 @@
             "of overriding the inherited value.")})))
 
 
+(defn terminal-rej
+  "Reject a `:binding` write whose `(fn-id, slot-id)` chain has a
+   `:terminal true` ancestor binding (§4.3). `:terminal` is the EXPLICIT
+   author seal — it generalizes `value-override-rej`'s automatic value-seal to
+   slots that carry NO value yet: a template slot the author wants locked
+   against descendant binding, or a ref / type-override frozen as final. Reuses
+   the `ancestor-binding-flag?` walker (same shape as `:list-closed`)."
+  [storage entity-type entity-data]
+  (when (and (= entity-type :binding)
+             (:fn-id entity-data)
+             (:slot-id entity-data))
+    (when (ancestor-binding-flag? storage (:fn-id entity-data)
+                                  (:slot-id entity-data) :terminal)
+      {:reason
+       (str "Binding rejected: an ancestor in the inheritance chain marked "
+            "this slot `:terminal true`, sealing it against descendant "
+            "overrides. Create a new fn-def instead of overriding it.")})))
+
+
 (defn list-closed-rej
   "Reject a sequence-slot write whose `(fn-id, slot-id)` chain has a
    `:list-closed true` ancestor binding. Triggered on either:
@@ -550,6 +569,8 @@
               (assoc :type :constraint-violation/mi-collision))
       (some-> (value-override-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/value-override))
+      (some-> (terminal-rej storage entity-type entity-data)
+              (assoc :type :constraint-violation/terminal-seal))
       (some-> (list-closed-rej storage entity-type entity-data)
               (assoc :type :constraint-violation/list-closed))
       (some-> (secret-path-rej storage entity-type entity-data)

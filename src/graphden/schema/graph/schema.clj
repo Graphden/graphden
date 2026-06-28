@@ -352,6 +352,13 @@
   #uuid "9cff0b5c-36dc-4527-8ee2-2943466a2520")
 
 
+(def ^:private binding-terminal-field-uuid
+  ;; §4.3 explicit seal: `:terminal true` on a binding locks its (fn,slot)
+  ;; against descendant overrides (enforced by `validation/terminal-rej`).
+  ;; Generalizes the automatic value-seal to not-yet-valued template slots.
+  #uuid "7e3a1c08-5d2f-4b96-9a40-8c1e6f7b0d35")
+
+
 (def ^:private binding-required-field-uuid
   #uuid "54c53941-0b30-4020-b701-530d4d043d63")
 
@@ -595,6 +602,10 @@
                       :list-closed {:uuid binding-list-closed-field-uuid
                                     :type :bool
                                     :nullable? true}
+                      ;; §4.3 explicit seal — locks (fn,slot) vs descendants.
+                      :terminal {:uuid binding-terminal-field-uuid
+                                 :type :bool
+                                 :nullable? true}
                       :required {:uuid binding-required-field-uuid
                                  :type :bool
                                  :nullable? true}

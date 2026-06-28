@@ -114,7 +114,7 @@
                                     :ref-fn-id
                                     :override-kind
                                     :type-override-fn-id :description
-                                    :list-append :list-closed}}
+                                    :list-append :list-closed :terminal}}
 
    :binding-list-item {:version-entity :binding-list-item-version
                        :version-id-field :item-id

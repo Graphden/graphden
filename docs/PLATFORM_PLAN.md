@@ -401,7 +401,7 @@ enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user
 
 - `:execution`: исходный deferral был устаревшим — completion-future наследует
   `*current-org*` через binding-conveyance (`record-completion!`'s `(future …)`
-  + `run-future`'s `bound-fn*`), так что terminal UPDATE из future проходит
+  плюс `run-future`'s `bound-fn*`), так что terminal UPDATE из future проходит
   own-guard. `:fn-execution` получил `:org-id` + добавлен в
   `default-scoped-entities`. Доказано `faas-app-test`.
 - `:branch` (**Design B**): резолюция теперь ВНУТРИ request-scope (так

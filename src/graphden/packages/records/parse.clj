@@ -361,7 +361,8 @@
 (defn- map-arg-value->binding-fields
   "Map-shaped arg-value branch of `arg-value->binding-fields`. Carries
    every recognised key (`:as`, `:ref`, `:value`, `:type`, `:append`,
-   `:closed`, `:required`) and emits the corresponding binding columns.
+   `:closed`, `:required`, `:terminal`) and emits the corresponding binding
+   columns. `:terminal true` seals the slot (§4.3 `validation/terminal-rej`).
    Falls back to `:value <whole-map>` when none of the recognised keys
    are present (literal map binding).
 
@@ -371,9 +372,10 @@
    (widening forbidden); we still pass it through here so the diagnostic
    fires on the actual binding row, not as a silent drop."
   [arg-value name->id]
-  (let [{:keys [as value append closed required]
+  (let [{:keys [as value append closed required terminal]
          ref-name :ref type-ref :type} arg-value
         has-required? (contains? arg-value :required)
+        has-terminal? (contains? arg-value :terminal)
         override-fn-id (when type-ref
                          (try (types/resolve-type-ref type-ref name->id)
                               (catch Exception e
@@ -402,8 +404,9 @@
                  (or append closed) (assoc :list-append (boolean append)
                                            :list-closed (boolean closed))
                  has-required? (assoc :required (boolean required))
+                 has-terminal? (assoc :terminal (boolean terminal))
                  (not (or ref-name (contains? arg-value :value) as type-ref
-                          append closed has-required?))
+                          append closed has-required? has-terminal?))
                  (assoc :value arg-value :value-present true))]
     {:fields fields
      :items (vec (when (vector? append) append))}))

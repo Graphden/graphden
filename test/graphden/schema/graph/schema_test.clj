@@ -85,10 +85,10 @@
       ;; slot.source-slot-id FK. Field no longer present in spec.
       (is (nil? (get fields :rename-to)))
       (is (= :ref (get-in fields [:type-override-fn-id :type])))
-      ;; `:terminal` was retired alongside the value-override-rej
-      ;; rule — any binding carrying a `:value` / `:ref-fn-id` is
-      ;; now implicitly final.
-      (is (nil? (get fields :terminal)))
+      ;; `:terminal` (§4.3) is the EXPLICIT author seal — it generalizes the
+      ;; automatic value-override-rej seal to not-yet-valued template slots
+      ;; (enforced by `validation/terminal-rej`).
+      (is (= :bool (get-in fields [:terminal :type])))
       (is (= :bool (get-in fields [:list-append :type])))
       (is (= :bool (get-in fields [:list-closed :type]))))))
 

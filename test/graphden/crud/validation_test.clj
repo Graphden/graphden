@@ -280,6 +280,36 @@
         (finally (sp/close storage))))))
 
 
+(deftest terminal-rej-test
+  (testing "a binding on a slot an ancestor sealed `:terminal true` is rejected (§4.3)"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [parent (setup/create-base-fn! storage "term-parent")
+              slot   (setup/create-slot! storage "arg" :int)
+              _      (setup/attach-slot! storage (:id parent) (:id slot) 0)
+              _      (make-binding! storage {:fn-id (:id parent) :slot-id (:id slot)
+                                             :terminal true})
+              child  (setup/create-composed-fn! storage "term-child" (:id parent))]
+          ;; A descendant trying to override the sealed slot — rejected even
+          ;; though no VALUE was set on the ancestor (the explicit seal goes
+          ;; beyond value-override-rej's automatic value-seal).
+          (let [rej (v/terminal-rej storage :binding
+                                    {:fn-id (:id child) :slot-id (:id slot)
+                                     :value 5 :value-present true})]
+            (is (some? rej))
+            (is (re-find #"terminal" (:reason rej))))
+          ;; Non-:binding entity types are never terminal-checked.
+          (is (nil? (v/terminal-rej storage :slot
+                                    {:fn-id (:id child) :slot-id (:id slot)})))
+          ;; A sibling slot with no terminal ancestor is freely bindable.
+          (let [free (setup/create-slot! storage "other" :int)]
+            (setup/attach-slot! storage (:id parent) (:id free) 1)
+            (is (nil? (v/terminal-rej storage :binding
+                                      {:fn-id (:id child) :slot-id (:id free)
+                                       :value 1 :value-present true})))))
+        (finally (sp/close storage))))))
+
+
 ;; ============================================================================
 ;; resolve-base-name
 ;; ============================================================================

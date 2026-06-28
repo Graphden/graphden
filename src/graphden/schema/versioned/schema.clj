@@ -244,6 +244,12 @@
   #uuid "5bab550c-a484-4bd9-9ce5-b1df7549bc0e")
 
 
+(def ^:private binding-version-terminal-field-uuid
+  ;; Mirror of binding.:terminal (§4.3 seal) — must exist or VersionedStorage
+  ;; strips the flag on write + reads come back without it.
+  #uuid "8f4b2d19-6e3a-4c07-ab51-9d2f7a8c1e46")
+
+
 (def ^:private binding-version-created-at-field-uuid
   #uuid "f4b5fd01-2cac-4db5-ba0b-b7c229b0b2a5")
 
@@ -442,6 +448,8 @@
                                     :type :bool :nullable? true}
                       :list-closed {:uuid binding-version-list-closed-field-uuid
                                     :type :bool :nullable? true}
+                      :terminal {:uuid binding-version-terminal-field-uuid
+                                 :type :bool :nullable? true}
                       :created-at {:uuid binding-version-created-at-field-uuid
                                    :type :timestamptz}
                       :deleted-at {:uuid binding-version-deleted-at-field-uuid

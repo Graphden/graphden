@@ -109,14 +109,18 @@
    First, the unconditional tenant invariant (independent of any grant store):
    a tenant may not write a `tenant-forbidden-entities` type — this is what
    keeps a tenant from deploying an unsandboxed `:service` or escalating via
-   `:grant`."
-  [authorize-write entity-name data]
+   `:grant`.
+
+   `id` is the entity's id on update / delete (nil on create), so the guard can
+   read the existing row to resolve its namespace when `data` doesn't carry the
+   identifying fields (a value-only binding update, or a delete)."
+  [authorize-write entity-name data id]
   (when (and (not= (tc/current-org) tc/public-org)
              (contains? tenant-forbidden-entities entity-name))
     (throw (ex-info (str "forbidden: tenants may not write privileged entity " entity-name)
                     {:type :authz/forbidden :entity entity-name})))
   (when authorize-write
-    (authorize-write entity-name data)))
+    (authorize-write entity-name data id)))
 
 
 (defn- tenant-hidden?
@@ -138,7 +142,7 @@
 
   (create-entity
     [_ entity-name data]
-    (guard-write! authorize-write entity-name data)
+    (guard-write! authorize-write entity-name data nil)
     (sp/create-entity base entity-name
                       (cond-> data (scoped? entity-name) stamp)))
 
@@ -152,7 +156,7 @@
 
   (update-entity
     [_ entity-name id data]
-    (guard-write! authorize-write entity-name data)
+    (guard-write! authorize-write entity-name data id)
     (if (scoped? entity-name)
       ;; Only own rows are writable, and a tenant can never be reassigned.
       (when (some-> (sp/read-entity base entity-name id) own?)
@@ -162,6 +166,10 @@
 
   (delete-entity
     [_ entity-name id]
+    ;; Deletes are namespaced writes too (§4.3): an `:append-list` user removing
+    ;; a list-item, a `:write` user deleting a binding. `data` is nil — the guard
+    ;; reads the row by id to resolve its namespace.
+    (guard-write! authorize-write entity-name nil id)
     (if (scoped? entity-name)
       (when (some-> (sp/read-entity base entity-name id) own?)
         (sp/delete-entity base entity-name id))
@@ -196,7 +204,7 @@
 
   (create-entities
     [_ entity-name data-seq]
-    (run! #(guard-write! authorize-write entity-name %) data-seq)
+    (run! #(guard-write! authorize-write entity-name % nil) data-seq)
     (sp/create-entities base entity-name
                         (cond->> data-seq (scoped? entity-name) (mapv stamp))))
 
@@ -219,7 +227,7 @@
 
   (upsert-entities
     [_ entity-name data-seq]
-    (run! #(guard-write! authorize-write entity-name %) data-seq)
+    (run! #(guard-write! authorize-write entity-name % nil) data-seq)
     (sp/upsert-entities base entity-name
                         (cond->> data-seq (scoped? entity-name) (mapv stamp))))
 

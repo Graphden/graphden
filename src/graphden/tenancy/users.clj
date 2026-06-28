@@ -93,6 +93,13 @@
         (catch Exception _ false)))))
 
 
+(defn- legacy-hash?
+  "True for a pre-bcrypt PBKDF2 hash — it gets transparently re-hashed to
+   bcrypt on the next successful login (`login!`)."
+  [stored]
+  (boolean (and stored (str/starts-with? stored "pbkdf2$"))))
+
+
 (defn- random-token
   "A high-entropy URL-safe session token (its SHA-256 hash is what's stored)."
   []
@@ -120,13 +127,21 @@
 (defn login!
   "Verify `username`/`password` and mint a SESSION TOKEN (a `:token` row, so the
    storage-token-provider resolves it later). Runs in the platform context
-   (login precedes any session). Returns `{:token <raw> :user :org}` on success,
-   nil on bad credentials (caller maps nil → 401)."
+   (login precedes any session). A legacy PBKDF2 hash is transparently
+   re-hashed to bcrypt here — the only place we hold the plaintext. Returns
+   `{:token <raw> :user :org}` on success, nil on bad credentials (caller maps
+   nil → 401)."
   [ctx username password]
   (let [storage (:storage ctx)]
     (tc/with-org tc/public-org
                  (let [user (first (sp/query-entities storage :user {:username username}))]
                    (when (and user (verify-password password (:password-hash user)))
+                     ;; Upgrade-on-login: a verified legacy PBKDF2 hash is
+                     ;; re-stored as bcrypt, so old accounts migrate as they're
+                     ;; used (no mass rehash, no plaintext kept).
+                     (when (legacy-hash? (:password-hash user))
+                       (sp/update-entity storage :user (:id user)
+                                         {:password-hash (hash-password password)}))
                      (let [raw (random-token)
                            org (:org user)]
                        (sp/create-entity storage :token

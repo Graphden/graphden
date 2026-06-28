@@ -420,6 +420,23 @@
 ;; Self-serve signup (§4.1) — a fresh account creates a NEW org (never joins an
 ;; existing one) and auto-logs-in.
 ;; ---------------------------------------------------------------------------
+(deftest legacy-pbkdf2-rehashed-to-bcrypt-on-login
+  (let [login-id (fn-id-of (:storage *ctx*) "invoke-login")
+        seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!
+                                         :logout users/logout! :signup users/signup!})
+        ;; a real PBKDF2 hash of "legacy-pw" (all-zero salt → stable)
+        legacy "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA==$IJ7VI9MfVAgFv8PBJsAVTM9TXi+MtwfQBeYRwcjryGI="
+        stored-hash #(:password-hash (first (sp/query-entities (:storage *ctx*) :user {:username "oldtimer"})))]
+    (sp/create-entity (:storage *ctx*) :user {:username "oldtimer" :password-hash legacy :org "acme"})
+    (testing "the stored hash is legacy PBKDF2 before login"
+      (is (= legacy (stored-hash))))
+    (testing "logging in with the right password succeeds AND upgrades the hash to bcrypt"
+      (is (string? (:token (cr/execute seam-ctx login-id {:username "oldtimer" :password "legacy-pw"}))))
+      (is (str/starts-with? (stored-hash) "$2")))
+    (testing "the subsequent (now bcrypt) login still works"
+      (is (string? (:token (cr/execute seam-ctx login-id {:username "oldtimer" :password "legacy-pw"})))))))
+
+
 (deftest self-serve-signup-creates-org-user-and-logs-in
   (let [signup-id (fn-id-of (:storage *ctx*) "invoke-signup")
         seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!

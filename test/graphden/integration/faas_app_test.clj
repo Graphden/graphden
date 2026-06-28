@@ -44,6 +44,7 @@
 
 (def ^:dynamic *ctx* nil)
 (def ^:dynamic *fn-id* nil)   ; {:env … :list-grants …}
+(def ^:dynamic *base-pool* nil)   ; base datasource for raw-SQL tests
 
 
 (defn- addon-schema
@@ -89,6 +90,7 @@
              _ (cr/rebuild! ctx)]
          (try
            (binding [*ctx* ctx
+                     *base-pool* (:pool base)
                      *fn-id* {:env (fn-id-of storage "env")
                               :list-grants (fn-id-of storage "list-grants")}]
              (t))
@@ -427,7 +429,7 @@
                       {:token-hash (tauth/token-hash "clean-dead2") :user "u" :org "acme" :expires-at (dec now)})
     (sp/create-entity (:storage *ctx*) :token
                       {:token-hash (tauth/token-hash "clean-apikey") :user "u" :org "acme"})
-    (let [deleted (users/cleanup-expired-tokens! (:storage *ctx*))]
+    (let [deleted (users/cleanup-expired-tokens! *base-pool*)]
       (testing "the sweep deletes the expired rows (returns a count ≥ the two seeded)"
         (is (>= deleted 2)))
       (testing "expired rows are gone; live + NULL-expiry (API key) survive"

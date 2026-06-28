@@ -13,9 +13,11 @@
   (:require
     [clojure.string :as str]
     [graphden.auth.provider :as auth]
+    [graphden.storage.postgres.util :as pgutil]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.auth :as tauth]
-    [graphden.tenancy.context :as tc])
+    [graphden.tenancy.context :as tc]
+    [next.jdbc :as jdbc])
   (:import
     (java.security
       MessageDigest
@@ -214,17 +216,15 @@
 
 
 (defn cleanup-expired-tokens!
-  "Hard-delete every `:token` whose expiry is in the past — the provider already
-   ignores them (`token-live?`), this stops the rows accumulating. Runs in the
-   platform context. NULL-expiry tokens (operator API keys) are never touched.
-   Returns the number deleted. (Equality-only `query-entities` can't express
-   `expires-at < now`, so this reads + filters in-process; a SQL
-   `DELETE … WHERE expires_at < ?` is a scale follow-up.)"
-  [storage]
-  (tc/with-org tc/public-org
-               (let [now (System/currentTimeMillis)
-                     expired (filter (fn [r] (when-let [e (:expires-at r)] (< e now)))
-                                     (sp/query-entities storage :token {}))]
-                 (doseq [row expired]
-                   (sp/delete-entity storage :token (:id row)))
-                 (count expired))))
+  "Hard-delete every expired session `:token` in ONE SQL statement — O(1) for
+   the reaper (the provider already ignores them via `token-live?`; this stops
+   the rows piling up). NULL-expiry operator API keys are left alone. `ds` is
+   the base datasource (`:db/postgres`'s `:pool`); `:token` carries no RLS
+   policy, so the raw delete is unrestricted. Returns the count deleted."
+  [ds]
+  (let [t (pgutil/ident->sql :token)
+        col (pgutil/ident->sql :expires-at)
+        sql (str "DELETE FROM " t " WHERE " col " IS NOT NULL AND " col " < ?")]
+    (or (:next.jdbc/update-count
+          (jdbc/execute-one! ds [sql (System/currentTimeMillis)]))
+        0)))

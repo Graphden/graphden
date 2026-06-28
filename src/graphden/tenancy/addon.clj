@@ -116,12 +116,13 @@
   ;; `:exec/cleanup-scheduler`. `:storage` = base (:db/postgres); platform
   ;; context. Default period 1h. Addon-only.
   (let [period (or period-ms (* 60 60 1000))
+        ds (:pool storage)
         scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
     (log/info "Starting tenancy session-cleanup scheduler — period" period "ms")
     (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
       scheduler
       ^Runnable (fn []
-                  (try (users/cleanup-expired-tokens! storage)
+                  (try (users/cleanup-expired-tokens! ds)
                        (catch Exception e
                          (log/warn e "session-cleanup sweep failed"))))
       period period

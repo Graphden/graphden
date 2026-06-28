@@ -358,6 +358,20 @@
       (is (= {:authenticated? true :user "u" :org "acme"} (auth/authenticate provider (bearer-req "ttl-none")))))))
 
 
+(deftest users-panel-renders-real-users-without-hashes
+  (users/create-user! *ctx* "panel-carol" "pw-carol" "acme")
+  (let [handler-id (fn-id-of (:storage *ctx*) "_partial-users-admin-handler")
+        resp (cr/execute *ctx* handler-id {})
+        body (:body resp)]
+    (testing "200 + the users table with the user, NOT the degraded notice"
+      (is (= 200 (:status resp)))
+      (is (str/includes? body "grants-admin-table"))
+      (is (str/includes? body "panel-carol")))
+    (testing "the password hash is NEVER in the rendered panel (list-users strips it)"
+      (is (not (str/includes? body "pbkdf2")))
+      (is (not (str/includes? body "Tenancy addon not active"))))))
+
+
 (deftest login-sets-ttl-and-logout-invalidates
   (let [login-id (fn-id-of (:storage *ctx*) "invoke-login")
         logout-id (fn-id-of (:storage *ctx*) "invoke-logout")

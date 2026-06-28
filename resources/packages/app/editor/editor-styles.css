@@ -3933,17 +3933,26 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 
 
 
-/* Org-admin Grants panel (PLATFORM_PLAN §6) — sidebar section rendered from
-   /partials/grants-admin. Only shown to authed users when the tenancy addon
-   is active (see editor-grants-admin.js). */
-.sidebar-grants-admin .grants-admin-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+/* Org-admin Grants (§6) + Users (§4.1) panels — sidebar sections rendered from
+   /partials/grants-admin and /partials/users-admin. Both share these styles;
+   only shown to authed users when the tenancy addon is active (see
+   editor-grants-admin.js / editor-users-admin.js). */
+.sidebar-grants-admin .grants-admin-table,
+.sidebar-users-admin .grants-admin-table { width: 100%; font-size: 11px; border-collapse: collapse; }
 .sidebar-grants-admin .grants-admin-table th,
-.sidebar-grants-admin .grants-admin-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
-.sidebar-grants-admin .grants-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
-.sidebar-grants-admin .grant-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; }
-.sidebar-grants-admin .grant-delete:hover { color: var(--danger, #c0392b); }
-.sidebar-grants-admin .grant-create-form { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
-.sidebar-grants-admin .grant-input { font-size: 11px; padding: 2px 4px; }
+.sidebar-grants-admin .grants-admin-table td,
+.sidebar-users-admin .grants-admin-table th,
+.sidebar-users-admin .grants-admin-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.sidebar-grants-admin .grants-admin-disabled,
+.sidebar-users-admin .grants-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
+.sidebar-grants-admin .grant-delete,
+.sidebar-users-admin .grant-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; }
+.sidebar-grants-admin .grant-delete:hover,
+.sidebar-users-admin .grant-delete:hover { color: var(--danger, #c0392b); }
+.sidebar-grants-admin .grant-create-form,
+.sidebar-users-admin .grant-create-form { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
+.sidebar-grants-admin .grant-input,
+.sidebar-users-admin .grant-input { font-size: 11px; padding: 2px 4px; }
 .sidebar-grants-admin .grant-create-btn { font-size: 11px; padding: 2px 6px; cursor: pointer; align-self: flex-start; }
 
 /* Set-as-app-handler (⌂) row-action — FaaS self-serve deploy (§3.4 4b).

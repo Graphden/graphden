@@ -25,6 +25,14 @@
   (sp/query-entities (:storage ctx) :grant {}))
 
 
+;; List users for the admin panel — strips `:password-hash` at the boundary so
+;; the hashes never reach the wire / the UI (the only non-bare projection here;
+;; it's a redaction, not composition).
+(defbase list-users
+  []
+  (mapv #(dissoc % :password-hash) (sp/query-entities (:storage ctx) :user {})))
+
+
 ;; Mint a storage-backed auth token (§3.4 #1). Stores ONLY the hash — the raw
 ;; bearer is never persisted. Platform-only by entity guard (`:token` is
 ;; tenant-forbidden), so a tenant POST is denied by OrgScoped.
@@ -117,6 +125,7 @@
 
 (def impls
   {:list-grants list-grants
+   :list-users list-users
    :create-grant create-grant
    :create-token create-token
    :create-org create-org

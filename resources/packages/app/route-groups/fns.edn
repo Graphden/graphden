@@ -35,6 +35,7 @@
                   :partial-service-popover
                   :partial-secrets-panel
                   :partial-grants-admin
+                  :partial-users-admin
                   :create-grant-route
                   :create-org-route
                   :create-token-route

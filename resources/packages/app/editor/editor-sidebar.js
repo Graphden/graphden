@@ -369,6 +369,11 @@ function updateEntityList(data) {
     const grantsSection = buildGrantsAdminSection();
     if (grantsSection) list.appendChild(grantsSection);
   }
+  // Users-admin section (§4.1) — same gating (authed + addon active).
+  if (!searchFilter && !onlyServicesFilter && typeof buildUsersAdminSection === 'function') {
+    const usersSection = buildUsersAdminSection();
+    if (usersSection) list.appendChild(usersSection);
+  }
 
   // Render top-level namespaces (sorted)
   const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));

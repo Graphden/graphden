@@ -42,6 +42,14 @@ function clearAuthPassword() {
   renderAuthLock();
 }
 
+// Multi-tenant deployments authenticate with username + password against
+// POST /api/login (the §4.1 user model) and store the returned session token
+// as the bearer. Single-tenant uses a bare admin password. The body carries
+// `gd-tenancy` once the first response reports tenancy capabilities.
+function loginIsTenant() {
+  return document.body.classList.contains('gd-tenancy');
+}
+
 function isAuthenticated() {
   return !!getAuthPassword();
 }
@@ -137,6 +145,9 @@ function initAuthLock() {
   mount.innerHTML =
     '<button id="auth-lock-btn" class="auth-lock-btn" title="Admin login"></button>' +
     '<div id="auth-popover" class="auth-popover hidden">' +
+      // Username — shown only in multi-tenant (body.gd-tenancy); single-tenant
+      // is a bare admin password, so it stays hidden there.
+      '<input id="auth-username-input" type="text" placeholder="Username" autocomplete="username" class="auth-username-input hidden">' +
       '<div class="auth-input-wrap">' +
         '<input id="auth-password-input" type="password" placeholder="Admin password" autocomplete="off">' +
         '<button id="auth-toggle-visibility-btn" type="button" class="auth-toggle-visibility" tabindex="-1" title="Show password">' + EYE_SVG + '</button>' +
@@ -161,6 +172,10 @@ function initAuthLock() {
     togglePasswordVisibility();
   });
   document.getElementById('auth-password-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitAuth();
+    if (e.key === 'Escape') closeAuthPopover();
+  });
+  document.getElementById('auth-username-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') submitAuth();
     if (e.key === 'Escape') closeAuthPopover();
   });
@@ -200,7 +215,7 @@ function renderAuthLock() {
   const authed = isAuthenticated();
   btn.innerHTML = authed ? LOCK_OPEN_SVG : LOCK_CLOSED_SVG;
   btn.classList.toggle('auth-lock-open', authed);
-  btn.title = authed ? 'Sign out' : 'Admin login';
+  btn.title = authed ? 'Sign out' : (loginIsTenant() ? 'Sign in' : 'Admin login');
 }
 
 // Click on the lock toggles between login (when closed) and logout
@@ -222,11 +237,20 @@ function openAuthPopover(errorMsg) {
   // browser doesn't try to scroll the sidebar to reveal an
   // off-screen field (which would drag the popover with it).
   positionAuthPopover();
-  const input = document.getElementById('auth-password-input');
-  if (input) {
-    input.value = '';
-    input.focus();
+  const tenant = loginIsTenant();
+  const userInput = document.getElementById('auth-username-input');
+  const pwInput = document.getElementById('auth-password-input');
+  if (userInput) {
+    userInput.value = '';
+    userInput.classList.toggle('hidden', !tenant);
   }
+  if (pwInput) {
+    pwInput.value = '';
+    pwInput.placeholder = tenant ? 'Password' : 'Admin password';
+  }
+  // Focus the first field: username in multi-tenant, password otherwise.
+  const focusEl = tenant ? userInput : pwInput;
+  if (focusEl) focusEl.focus();
   const err = document.getElementById('auth-error');
   if (err) {
     if (errorMsg) {
@@ -283,6 +307,7 @@ function closeAuthPopover() {
 }
 
 async function submitAuth() {
+  if (loginIsTenant()) { await submitLogin(); return; }
   const input = document.getElementById('auth-password-input');
   const err = document.getElementById('auth-error');
   if (!input) return;
@@ -314,6 +339,41 @@ async function submitAuth() {
       err.textContent = 'Network error: ' + e.message;
       err.classList.remove('hidden');
     }
+  }
+}
+
+// Multi-tenant login (§4.1): exchange username + password at POST /api/login
+// for a session token, store it as the bearer, then reload so every /api/*
+// call re-runs as the logged-in user (org context + capabilities + workspace
+// come from the request scope, so a reload is the clean way to pick them up).
+async function submitLogin() {
+  const userInput = document.getElementById('auth-username-input');
+  const pwInput = document.getElementById('auth-password-input');
+  const err = document.getElementById('auth-error');
+  const username = userInput ? userInput.value.trim() : '';
+  const password = pwInput ? pwInput.value : '';
+  if (!username || !password) {
+    if (err) { err.textContent = 'Username and password required.'; err.classList.remove('hidden'); }
+    return;
+  }
+  try {
+    const body = 'username=' + encodeURIComponent(username) +
+                 '&password=' + encodeURIComponent(password);
+    const response = await fetch(API.api_login, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    const token = response.ok ? (await response.text()).trim() : '';
+    if (token) {
+      setAuthPassword(token);
+      window.location.reload();
+    } else {
+      if (err) { err.textContent = 'Invalid username or password.'; err.classList.remove('hidden'); }
+      if (pwInput) { pwInput.focus(); pwInput.select(); }
+    }
+  } catch (e) {
+    if (err) { err.textContent = 'Network error: ' + e.message; err.classList.remove('hidden'); }
   }
 }
 

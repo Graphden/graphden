@@ -16,8 +16,24 @@
 
 
 (def capabilities
-  "The capability vocabulary. `:admin` subsumes the rest within its scope."
-  #{:read :write :execute :admin})
+  "The capability vocabulary. `:admin` subsumes the rest within its scope;
+   `:write` subsumes the narrower §4.3 edit caps (`:bind-args`, `:append-list`)
+   — a full writer can do everything they can.
+
+   - `:bind-args` — change a binding's `:value`, NOT its ref / type-override /
+     structure (restricted editing — §4.3).
+   - `:append-list` — add / remove one's own `:binding-list-item` rows, not
+     parent / inherited ones."
+  #{:read :write :execute :admin :bind-args :append-list})
+
+
+(defn- cap-implies?
+  "Does holding `held` satisfy a check for `needed`? `:admin` implies all;
+   `:write` implies the narrower edit caps; otherwise exact match."
+  [held needed]
+  (or (= held :admin)
+      (= held needed)
+      (and (= held :write) (contains? #{:bind-args :append-list} needed))))
 
 
 (defn- ns-covers?
@@ -33,10 +49,11 @@
 
 (defn grant-allows?
   "Does one grant authorize `(subj, cap, ns-path)`? Matches subject exactly,
-   capability exactly OR via `:admin`, and namespace by scope coverage."
+   capability by `cap-implies?` (`:admin`/`:write` subsumption), and namespace
+   by scope coverage."
   [{:keys [subject capability namespace]} subj cap ns-path]
   (and (= subject subj)
-       (or (= capability :admin) (= capability cap))
+       (cap-implies? capability cap)
        (ns-covers? namespace ns-path)))
 
 
@@ -121,6 +138,17 @@
                  (grants-for store subject))))
 
 
+(defn can-mutate?
+  "Coarse 'can this subject perform SOME write' gate — holds any write-family
+   capability (`:write` / `:bind-args` / `:append-list`) or `:admin` in ANY
+   namespace. Used by `request-permitted?` so a `:bind-args`-only user isn't
+   rejected at the coarse gate before the precise per-field check at storage."
+  [store subject]
+  (boolean (some (fn [{:keys [capability]}]
+                   (contains? #{:admin :write :bind-args :append-list} capability))
+                 (grants-for store subject))))
+
+
 (defn workspace
   "A user's workspace (§4.4) — the union of the (named) namespaces their
    grants cover. Each is a subtree the user can work in; with personal
@@ -153,5 +181,9 @@
    layer (`tenancy.authz`), which can see the entity's `:namespace-id`."
   [store principal request _org]
   (let [cap (request->capability request)]
-    (or (= cap :read)
-        (has-capability? store (:user principal) cap))))
+    (case cap
+      :read true
+      ;; A mutation may need only a narrow §4.3 edit cap — let the write-family
+      ;; through; the precise per-field check runs at the storage layer.
+      :write (can-mutate? store (:user principal))
+      (has-capability? store (:user principal) cap))))

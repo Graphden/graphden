@@ -39,6 +39,37 @@
     (is (not (grant/can? store "dave" :read "acme")))))
 
 
+(deftest write-implies-narrow-edit-caps
+  ;; §4.3: :write subsumes the narrower edit caps; :admin still subsumes all.
+  (testing ":write holder can :bind-args / :append-list in scope"
+    (is (grant/can? store "alice" :bind-args "acme.billing"))
+    (is (grant/can? store "alice" :append-list "acme")))
+  (testing ":admin subsumes the new caps too"
+    (is (grant/can? store "bob" :bind-args "acme.team"))
+    (is (grant/can? store "bob" :append-list "acme.team.svc")))
+  (testing "the narrow caps are one-way — they do NOT imply :write or each other"
+    (let [s (grant/static-grant-store
+              [{:subject "ed" :capability :bind-args :namespace "ns"}])]
+      (is (grant/can? s "ed" :bind-args "ns"))
+      (is (not (grant/can? s "ed" :write "ns")) ":bind-args is narrower than :write")
+      (is (not (grant/can? s "ed" :append-list "ns")) ":bind-args ≠ :append-list"))))
+
+
+(deftest can-mutate-coarse-gate
+  ;; §4.3 coarse gate: any write-family cap passes; read-only / unknown don't.
+  (testing "write-family caps pass"
+    (is (grant/can-mutate? store "alice"))
+    (is (grant/can-mutate? store "bob"))
+    (let [s (grant/static-grant-store
+              [{:subject "ed" :capability :bind-args :namespace "ns"}
+               {:subject "ann" :capability :append-list :namespace "ns"}])]
+      (is (grant/can-mutate? s "ed"))
+      (is (grant/can-mutate? s "ann"))))
+  (testing ":read-only / unknown subject does NOT pass"
+    (is (not (grant/can-mutate? store "carol")))
+    (is (not (grant/can-mutate? store "dave")))))
+
+
 (deftest authorized?-bridges-the-principal
   (testing "subject is the principal's :user"
     (is (grant/authorized? store {:user "alice" :org "acme"} :write "acme.x"))

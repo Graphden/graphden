@@ -850,10 +850,31 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        core-список; грузятся ТОЛЬКО при активном аддоне (§2.1). Доказано:
        extra грузится вместе с core, no-extra без изменений, boot ок.
        *Это разблокирует org-admin UI как `tenancy-admin` fns-пакет.*
-     *Остаётся (org-admin UI):* граф-композированная grants-admin панель
-     (query `:grant` → таблица + create/delete, route, editor-JS mount —
-     по образцу secrets-panel ~200 fn-defs); тестируется только при
-     активном аддоне (full sync + `:grant`). Крупная продуктовая фича.
+     - **route-collection seam ✅** Проблема: core `:all` не может ссылаться
+       на маршруты conditionally-loaded аддон-пакета (fn-def name-коллизия =
+       hard error; unresolved arg-ref → молчаливый literal, мусор в списке
+       маршрутов). Решение зеркалит branch-router: новый core-пакет
+       `web/reitit`-примитив `:router-or-nil` (reitit-роутер, возвращающий
+       nil на no-match для fall-through) + singleton
+       `graphden.system.tenancy-router/active-router`. Аддон-пакет
+       `tenancy-admin` компилит свои маршруты в `:tenancy-router`
+       (`:router-or-nil` над `:tenancy-routes`); init-key
+       `:tenancy/router-install` ставит его в singleton ПОСЛЕ `:exec/context`.
+       `branch-router/dispatch` консультирует singleton ВНУТРИ request-scope
+       (как app-router рядом) — control-plane панели бегут org-scoped
+       (`*current-org*` связан), иначе tenant-чтение `:grant` утекло бы по
+       всем org. Без аддона singleton nil → прозрачный pass-through,
+       single-tenant байт-в-байт без изменений. Доказано (faas_app_test):
+       seam отдаёт `/partials/grants-admin`, fall-through на `/health`,
+       org-gating (public видит грант, tenant — пустая таблица).
+     - **grants-admin ✅** Мигрирована из core `app/admin` в `tenancy-admin`
+       (panel + `:list-grants`/`:create-grant` base-fns + `POST /api/grants`),
+       убрана из core `:all`; editor JS не тронут (тот же `/partials/*` путь,
+       `/api/grants` помечен `api-url-drift-allow`).
+     *Остаётся (org-admin UI):* по тому же seam-образцу мигрировать остальные
+     панели/маршруты из core `app/admin` в `tenancy-admin` (users-admin +
+     create-org/token/domain/user + login/signup/logout + my-app) —
+     механически, отдельными срезами.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;
   смешанный режим = композиция «org-scoped storage API» + «их executor».
   Polylith — опционально, не блокер.

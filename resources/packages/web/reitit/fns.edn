@@ -211,6 +211,19 @@
           :error-response {:type :ring-response-shape
                            :description "Response served when reitit's no-per-method-handler slot fires (renamed from `:not-acceptable-response` deeper in the chain)."}}}
 
+  ;; Fall-through router. Same `:routes` free-arg surface as `:router`
+  ;; (reuses the `:_router-compiled` coercion+compile chain), but binds
+  ;; reitit's `default-handler` to nil: on no-match reitit's
+  ;; `ring-handler` (3-arity, gated on `(if default-handler …)`) returns
+  ;; nil instead of a 404 response. That nil is the signal a wrapping
+  ;; dispatcher uses to fall through to a base handler — the
+  ;; `:tenancy-routing-wrap` route-collection seam consumes exactly this.
+  {:name :router-or-nil
+   :description "Reitit router that returns nil on no-match (no default-handler), for fall-through composition over a base handler. Same `:routes` free arg as `:router`."
+   :parent :ring-handler
+   :args {:router :_router-compiled
+          :default-handler {:value nil}}}
+
   ;; =============================================================================
   ;; ROUTER TEXT-DEFAULT PRESETS
   ;; Per-slot text-default presets + their body fn-defs live in

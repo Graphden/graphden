@@ -105,7 +105,7 @@
   ;; ExecutionContext (lazy-built + cached by
   ;; `graphden.system.branch-router`). Missing branch ref → main.
   {:name :_branch-routed-handler
-   :description "`:_app-ring-response` wrapped with per-branch dispatch. Bound to `:http-server.handler` so EVERY request flows through the branch router."
+   :description "`:_app-ring-response` wrapped with per-branch dispatch. Bound to `:http-server.handler` so EVERY request flows through the branch router. The branch dispatcher (`graphden.system.branch-router/dispatch`) also consults the tenancy control-plane router INSIDE its request-scope — see that fn for the route-collection seam."
    :parent :branch-routing-wrap
    :args {:base-handler :_app-ring-response}}
 

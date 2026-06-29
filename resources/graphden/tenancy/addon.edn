@@ -37,7 +37,16 @@
 
  ;; Install the RLS policies at boot. Depends on :db/postgres (tables
  ;; already created by its init-key), so policies attach after migration.
- :tenancy/rls-enabler {:storage #ig/ref :db/postgres}}
+ :tenancy/rls-enabler {:storage #ig/ref :db/postgres}
+
+ ;; Org-admin UI fns-package (route-collection seam, §6) — loaded ONLY with
+ ;; the addon, via the fns-channel seam. Deep-merge keeps core's
+ ;; :package-names and adds these. Its routes are NOT in core's :all; they
+ ;; compile into `tenancy-router`, which :tenancy/router-install hangs on the
+ ;; tenancy-routing singleton after :exec/context builds the registry.
+ :app/packages {:extra-package-names ["tenancy-admin"]}
+
+ :tenancy/router-install {:context #ig/ref :exec/context}}
 
 
 ;; To turn the addon from a safe no-op into real multi-tenancy, a

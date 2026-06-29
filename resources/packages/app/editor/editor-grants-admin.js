@@ -53,6 +53,8 @@ function wireGrantsAdmin(wrap) {
       const namespace = namespaceEl?.value.trim();
       if (subject && capability && namespace) {
         const body = new URLSearchParams({ subject, capability, namespace }).toString();
+        // api-url-drift-allow: /api/grants is served by the tenancy-admin addon
+        // (route-collection seam), not the core router the drift check scans.
         await authFetch('/api/grants', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

@@ -27,6 +27,7 @@
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.branch-router :as br]
     [graphden.system.core :as sys]
+    [graphden.system.tenancy-router :as tr]
     [graphden.tenancy.app-router :as app]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.context :as tc]
@@ -86,7 +87,11 @@
              _ (sp/upsert-entities base :fn
                                    (mapv (fn [r] (dissoc r :kind)) (records/boot-primitive-records)))
              storage (vs/wrap-with-versioning (ts/org-scoped-storage base) "main")
-             _ (sys/bootstrap-from-packages! storage ["core" "web" "app"] {:skip-type-check? true})
+             ;; `tenancy-admin` is the addon-only fns-package (route-collection
+             ;; seam, §6) — it carries the grants panel + `:list-grants` /
+             ;; `:tenancy-router`, which moved out of core `app`. Bootstrapped
+             ;; here because this fixture IS the addon-active harness.
+             _ (sys/bootstrap-from-packages! storage ["core" "web" "app" "tenancy-admin"] {:skip-type-check? true})
              ;; Mirror prod's ctx shape (§4 Design B): the privileged
              ;; structural-read storage so the registry compiles org-agnostically
              ;; (every org's fns), with isolation held at runtime by `:storage`.
@@ -210,6 +215,49 @@
       (is (str/includes? body "alice"))
       (is (str/includes? body "shared"))
       (is (not (str/includes? body "Tenancy addon not active"))))))
+
+
+;; ---------------------------------------------------------------------------
+;; Route-collection seam (§6) — the addon's control-plane router, installed
+;; into the tenancy-routing singleton, serves its migrated routes and FALLS
+;; THROUGH (nil) for everything else, so `br/dispatch` continues to the main
+;; app router. This is what `:tenancy/router-install` wires at boot.
+;; ---------------------------------------------------------------------------
+(deftest tenancy-router-routes-control-plane-and-falls-through
+  ;; The compiled `:tenancy-router` IS what `:tenancy/router-install` hangs on
+  ;; the singleton; here we drive it directly (no global mutation, so this NS
+  ;; stays parallel-safe — the end-to-end `br/dispatch` → singleton path is
+  ;; covered by `graphden.integration.grants-admin-test`, which is `^:serial`).
+  (let [router (cr/execute-by-name *ctx* "tenancy-router" {})]
+    (testing "a migrated control-plane path is served by the router"
+      (let [resp (tr/dispatch router {:request-method :get :uri "/partials/grants-admin"})]
+        ;; Matched → a Ring response (200 if authed, 401 from the route's
+        ;; auth-required middleware otherwise — either way NON-nil, so the
+        ;; seam serves it and does NOT fall through to the main router).
+        (is (some? resp) "tenancy router matched /partials/grants-admin")
+        (is (integer? (:status resp)) "produced a Ring response")))
+    (testing "a non-control-plane path returns nil → fall through to the main router"
+      (is (nil? (tr/dispatch router {:request-method :get :uri "/health"})))
+      (is (nil? (tr/dispatch router {:request-method :get :uri "/api/graph/layout"}))))
+    (testing "a nil router (addon absent) → nil (transparent pass-through)"
+      (is (nil? (tr/dispatch nil {:request-method :get :uri "/partials/grants-admin"}))))))
+
+
+(deftest grants-panel-is-org-gated
+  ;; The panel reads `:grant` (a tenant-forbidden entity) via OrgScoped, so
+  ;; the platform (public org) sees the rows but a tenant (org ≠ public) gets
+  ;; an empty table — `:grant` is read-hidden. This is WHY the seam dispatches
+  ;; INSIDE the request-scope (`*current-org*` bound): outside it, a tenant's
+  ;; read would run as public and enumerate every org's grants.
+  (sp/create-entity (:storage *ctx*) :grant
+                    {:subject "platform-grant" :capability "admin" :namespace "ops"})
+  (let [handler-id (fn-id-of (:storage *ctx*) "_partial-grants-admin-handler")]
+    (testing "platform (public org) sees the grant"
+      (is (str/includes? (:body (tc/with-org tc/public-org (cr/execute *ctx* handler-id {})))
+                         "platform-grant")))
+    (testing "a tenant (org ≠ public) does NOT — the panel is org-gated"
+      (is (not (str/includes? (:body (tc/with-org "tenant-x" (cr/execute *ctx* handler-id {})))
+                              "platform-grant"))))))
 
 
 ;; ---------------------------------------------------------------------------

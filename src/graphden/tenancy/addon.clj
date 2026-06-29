@@ -31,6 +31,7 @@
     [graphden.auth.provider :as auth]
     [graphden.crud.type-check :as typecheck]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.system.tenancy-router :as tr]
     [graphden.tenancy.app-router :as app-router]
     [graphden.tenancy.auth :as tauth]
     [graphden.tenancy.authz :as authz]
@@ -71,6 +72,26 @@
   (log/info "Installing RLS policies on org-scoped tables")
   (rls/enable-rls! (:pool storage))
   :enabled)
+
+
+(defmethod ig/init-key :tenancy/router-install [_ {:keys [context]}]
+  ;; Route-collection seam (PLATFORM_PLAN §6): build the addon's
+  ;; control-plane router from its `:tenancy-routes` (the org-admin panels,
+  ;; loaded via `:app/packages {:extra-package-names ["tenancy-admin"]}`)
+  ;; and install it into the JVM-wide tenancy-routing singleton. Depends on
+  ;; `:exec/context`, so it runs AFTER the compiled registry is built and
+  ;; `tenancy-router` exists. `graphden.system.branch-router/dispatch`
+  ;; consults the installed router INSIDE its request-scope, so the panels
+  ;; run under `*current-org*` (org-scoped reads). Absent addon → singleton
+  ;; stays nil and the dispatch is a transparent pass-through.
+  (log/info "Installing tenancy control-plane router...")
+  (let [router (cr/execute-by-name context "tenancy-router" {})]
+    (tr/set-active-router! router)
+    :installed))
+
+
+(defmethod ig/halt-key! :tenancy/router-install [_ _]
+  (tr/clear-active-router!))
 
 
 (defmethod ig/init-key :tenancy/grant-schema [_ _]

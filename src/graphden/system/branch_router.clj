@@ -24,6 +24,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.tenancy-router :as tr]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -456,13 +457,23 @@
         ;; itself stays org-agnostic (Design B) — keyed by branch-id alone.
         (let [request-scope (:request-scope base-ctx)
               run (fn []
-                    (let [branch-ref (extract-branch-ref request)
-                          branch-id (resolve-branch-id router branch-ref)]
-                      (if (and (some? branch-ref) (nil? branch-id))
-                        {:status 400
-                         :headers {"Content-Type" "application/json"}
-                         :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
-                        ((handler-for router branch-id) request))))]
+                    ;; Route-collection seam (PLATFORM_PLAN §2.1 / §6): consult
+                    ;; the tenancy control-plane router FIRST, INSIDE the
+                    ;; request-scope so `*current-org*` is bound — the org-admin
+                    ;; panels (grants/users/…) read org-scoped entities, so they
+                    ;; need the same org binding branch resolution does. A
+                    ;; matched control-plane path returns a response; no match
+                    ;; (or no addon installed → nil router) falls through to the
+                    ;; branch-resolution chain. Branch-agnostic by design: the
+                    ;; branch ref is irrelevant to org administration.
+                    (or (tr/dispatch (tr/current-router) request)
+                        (let [branch-ref (extract-branch-ref request)
+                              branch-id (resolve-branch-id router branch-ref)]
+                          (if (and (some? branch-ref) (nil? branch-id))
+                            {:status 400
+                             :headers {"Content-Type" "application/json"}
+                             :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
+                            ((handler-for router branch-id) request)))))]
           (if request-scope
             (request-scope base-ctx request run)
             (run))))))

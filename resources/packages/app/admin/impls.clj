@@ -1,8 +1,10 @@
 (ns graphden.packages.app.admin.impls
-  "Impls for `app.admin` base-fns — the org-admin grants panel (§6) and org
-   registration (§3.4). Thin storage shims over the tenancy addon's `:grant` /
-   `:org` entities; they throw when the addon isn't active (no table), so
-   callers guard with `:try`."
+  "Impls for `app.admin` base-fns — the org-admin users panel (§4.1) and org /
+   token / domain registration (§3.4), plus the auth seams (login/signup/logout).
+   Thin storage shims over the tenancy addon's `:user` / `:org` / `:token` /
+   `:domain` entities; they throw when the addon isn't active (no table), so
+   callers guard with `:try`. The grants panel moved to the `tenancy-admin`
+   package (route-collection seam, PLATFORM_PLAN §6)."
   (:require
     [clojure.string :as str]
     [graphden.executor.defbase :refer [defbase]]
@@ -20,11 +22,6 @@
                    (java.security.MessageDigest/.digest digest (String/.getBytes s "UTF-8"))))))
 
 
-(defbase list-grants
-  []
-  (sp/query-entities (:storage ctx) :grant {}))
-
-
 ;; List users for the admin panel — strips `:password-hash` at the boundary so
 ;; the hashes never reach the wire / the UI (the only non-bare projection here;
 ;; it's a redaction, not composition).
@@ -40,12 +37,6 @@
   [token user org]
   (sp/create-entity (:storage ctx) :token
                     {:token-hash (token-sha256 token) :user user :org org}))
-
-
-(defbase create-grant
-  [subject capability namespace]
-  (sp/create-entity (:storage ctx) :grant
-                    {:subject subject :capability capability :namespace namespace}))
 
 
 (defbase create-org
@@ -142,9 +133,7 @@
 
 
 (def impls
-  {:list-grants list-grants
-   :list-users list-users
-   :create-grant create-grant
+  {:list-users list-users
    :create-token create-token
    :create-org create-org
    :create-domain create-domain

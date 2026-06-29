@@ -208,8 +208,9 @@
                           {:entity entity-name
                            :constraint constraint
                            :invalid-fields (vec non-keywords)}))))
-      ;; Reject extra attributes
-      (let [extra-keys (set/difference (set (keys constraint)) #{:type :fields})]
+      ;; Reject extra attributes (`:nulls-not-distinct?` toggles PG 15+
+      ;; NULLS-NOT-DISTINCT uniqueness — see postgres/ddl create-constraint!).
+      (let [extra-keys (set/difference (set (keys constraint)) #{:type :fields :nulls-not-distinct?})]
         (when (seq extra-keys)
           (throw (ex-info "Constraint has unsupported attributes"
                           {:entity entity-name

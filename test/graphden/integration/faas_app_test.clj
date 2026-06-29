@@ -400,6 +400,21 @@
         (is (nil? (tc/with-org "br-beta" (br/resolve-branch-id router "br-acme-feature"))))))))
 
 
+(deftest per-org-branch-names-are-isolated
+  ;; §4 follow-up: branch names are unique PER ORG (UNIQUE (org-id, name) NULLS
+  ;; NOT DISTINCT) — two orgs may reuse a name with no cross-org collision /
+  ;; existence leak, but within one org a name is still unique.
+  (let [mk (fn [org nm]
+             (tc/with-org org
+                          (sp/create-entity (:storage *ctx*) :branch
+                                            {:name nm :created-at (java.time.Instant/now)})))]
+    (testing "distinct orgs may both have a branch with the same name"
+      (is (some? (mk "pob-acme" "shared")))
+      (is (some? (mk "pob-beta" "shared"))))
+    (testing "...but the same name twice in ONE org is a unique violation"
+      (is (thrown? Exception (mk "pob-acme" "shared"))))))
+
+
 (deftest tenant-cannot-create-users
   (testing "a tenant writing :user directly is denied (no cross-org account mint)"
     (let [ex (try (tc/with-org "evil-org"

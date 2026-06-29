@@ -251,9 +251,13 @@
                                       columns-sql (str/join ", "
                                                             (map (fn [field-name]
                                                                    (constraint-column-sql field-name (get fields field-name)))
-                                                                 (:fields constraint)))]
+                                                                 (:fields constraint)))
+                                      ;; `:nulls-not-distinct?` (PG 15+) treats NULL = NULL for uniqueness —
+                                      ;; lets a composite key like `(org-id, name)` stay unique when org-id is
+                                      ;; NULL (single-tenant), while still allowing distinct orgs the same name.
+                                      nulls-sql (if (:nulls-not-distinct? constraint) " NULLS NOT DISTINCT" "")]
                                   (jdbc/execute! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
-                                                          " (" columns-sql ")")]))))
+                                                          " (" columns-sql ")" nulls-sql)]))))
 
 
 (defn create-entity-constraints!

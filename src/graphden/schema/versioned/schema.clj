@@ -67,8 +67,9 @@
 
 (def ^:private branch-org-id-field-uuid
   ;; Tenant owner (§4 org-scoped branches). NULL ≡ public (`main`). Stamped by
-  ;; OrgScopedStorage; the read-filter isolates a tenant's branches. Names stay
-  ;; globally UNIQUE for now (per-org names need NULLS-NOT-DISTINCT — a follow-up).
+  ;; OrgScopedStorage; the read-filter isolates a tenant's branches. Names are
+  ;; unique PER ORG (`UNIQUE (org-id, name) NULLS NOT DISTINCT`) — distinct orgs
+  ;; may reuse a name, with no cross-org collision / existence leak.
   #uuid "04050607-0809-4456-9f0a-3b4c5d6e7f80")
 
 
@@ -344,7 +345,8 @@
                       :org-id {:uuid branch-org-id-field-uuid
                                :type :text
                                :nullable? true}})
-      (ds/add-constraint :branch {:type :unique :fields [:name]})
+      (ds/add-constraint :branch {:type :unique :fields [:org-id :name]
+                                  :nulls-not-distinct? true})
 
       ;; -----------------------------------------------------------------
       ;; branch-merge

@@ -6,4 +6,4 @@
  ;; hiccup/collection primitives. `app` does NOT depend on this package —
  ;; the dependency is one-way, so core syncs without the addon.
  :dependencies ["core" "web" "app"]
- :modules ["grants" "users" "router"]}
+ :modules ["grants" "users" "registration" "my-app" "router"]}

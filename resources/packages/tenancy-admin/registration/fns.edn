@@ -1,0 +1,193 @@
+;; Platform provisioning routes (PLATFORM_PLAN §3.4) — operator-only org /
+;; token / domain registration + set-org-handler. Migrated out of core
+;; `app/admin` into this addon-only package (route-collection seam §6). All
+;; platform-only: the entities (:org/:token/:domain) are tenant-forbidden, so a
+;; tenant POST is denied by OrgScoped. Compiled into `:tenancy-router` (see the
+;; `router` module); NOT in core `:all`. Not referenced by editor JS.
+
+{:namespace "tenancy-admin.registration"
+ :description "Operator-only org / token / domain registration + set-org-handler routes."
+ :fns
+ [;; ---------------------------------------------------------------------
+  ;; ORG REGISTRATION (§3.4 step 2) — POST /api/orgs. Platform-only: a
+  ;; tenant POST is rejected by OrgScoped (`:org` is tenant-forbidden), so
+  ;; only the operator (public org) registers orgs. The org `name` IS the
+  ;; subdomain (identity resolver), so registration = creating the row.
+  ;; ---------------------------------------------------------------------
+  {:name :create-org
+   :description "Register an :org by name (= slug = subdomain). Reads the tenancy addon's :org entity; throws if absent (addon inactive)."
+   :args {:name {:type :text :description "Org slug — becomes the subdomain and the *current-org* value."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_org-create-form-data
+   :parent :parse-form-body}
+
+  {:name :_org-create-name
+   :parent :get
+   :args {:coll :_org-create-form-data :key {:value :name} :default {:value ""}}}
+
+  {:name :_org-create-do
+   :parent :create-org
+   :args {:name :_org-create-name}}
+
+  {:name :_org-create-id
+   :parent :get
+   :args {:coll :_org-create-do :key {:value :id} :default {:value ""}}}
+
+  {:name :_org-create-id-text
+   :parent :to-str
+   :args {:value :_org-create-id}}
+
+  {:name :_org-create-handler
+   :description "Ring handler for POST /api/orgs — registers the org and returns its new id as text/html."
+   :parent :html-ok-response
+   :args {:body :_org-create-id-text}}
+
+  {:name :create-org-route
+   :description "POST /api/orgs — register an org from a form-encoded body (name). Auth-required; platform-only (tenant writes of :org are denied)."
+   :parent :post
+   :args {:path "/api/orgs" :handler :_org-create-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; TOKEN MINTING (§3.4 #1) — POST /api/tokens {token user org}. Mints a
+  ;; storage-backed auth token: hashes the bearer (SHA-256), stores only the
+  ;; hash. Platform-only (`:token` is tenant-forbidden → a tenant POST is
+  ;; denied by OrgScoped). This is what makes onboarding a row insert.
+  ;; ---------------------------------------------------------------------
+  {:name :create-token
+   :description "Mint a storage-backed auth token — hashes the bearer (SHA-256) and stores {token-hash, user, org}. Reads the tenancy addon's :token entity; throws if absent (addon inactive)."
+   :args {:token {:type :text :description "The raw bearer token — only its SHA-256 hash is stored."}
+          :user {:type :text :description "Principal user id."}
+          :org {:type :text :description "Principal org — becomes *current-org* for that bearer."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_token-create-form-data
+   :parent :parse-form-body}
+
+  {:name :_token-create-token
+   :parent :get
+   :args {:coll :_token-create-form-data :key {:value :token} :default {:value ""}}}
+
+  {:name :_token-create-user
+   :parent :get
+   :args {:coll :_token-create-form-data :key {:value :user} :default {:value ""}}}
+
+  {:name :_token-create-org
+   :parent :get
+   :args {:coll :_token-create-form-data :key {:value :org} :default {:value ""}}}
+
+  {:name :_token-create-do
+   :parent :create-token
+   :args {:token :_token-create-token
+          :user :_token-create-user
+          :org :_token-create-org}}
+
+  {:name :_token-create-id
+   :parent :get
+   :args {:coll :_token-create-do :key {:value :id} :default {:value ""}}}
+
+  {:name :_token-create-id-text
+   :parent :to-str
+   :args {:value :_token-create-id}}
+
+  {:name :_token-create-handler
+   :description "Ring handler for POST /api/tokens — mints the token and returns its new id as text/html."
+   :parent :html-ok-response
+   :args {:body :_token-create-id-text}}
+
+  {:name :create-token-route
+   :description "POST /api/tokens — mint a storage-backed auth token from a form-encoded body (token/user/org). Auth-required; platform-only (tenant writes of :token are denied)."
+   :parent :post
+   :args {:path "/api/tokens" :handler :_token-create-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; CUSTOM DOMAIN REGISTRATION (§3.4 #2) — POST /api/domains {hostname org}.
+  ;; Registers an UNVERIFIED custom domain; the operator flips :verified?
+  ;; (generic CRUD update) after the graphden-verify=<org> DNS-TXT check.
+  ;; Platform-only (`:domain` is tenant-forbidden → tenant POST denied).
+  ;; ---------------------------------------------------------------------
+  {:name :create-domain
+   :description "Register a custom domain (UNVERIFIED) → maps hostname to org once verified. Reads the tenancy addon's :domain entity; throws if absent (addon inactive)."
+   :args {:hostname {:type :text :description "Full custom host, e.g. app.acme.com."}
+          :org {:type :text :description "Org the host serves once verified."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_domain-create-form-data
+   :parent :parse-form-body}
+
+  {:name :_domain-create-hostname
+   :parent :get
+   :args {:coll :_domain-create-form-data :key {:value :hostname} :default {:value ""}}}
+
+  {:name :_domain-create-org
+   :parent :get
+   :args {:coll :_domain-create-form-data :key {:value :org} :default {:value ""}}}
+
+  {:name :_domain-create-do
+   :parent :create-domain
+   :args {:hostname :_domain-create-hostname
+          :org :_domain-create-org}}
+
+  {:name :_domain-create-id
+   :parent :get
+   :args {:coll :_domain-create-do :key {:value :id} :default {:value ""}}}
+
+  {:name :_domain-create-id-text
+   :parent :to-str
+   :args {:value :_domain-create-id}}
+
+  {:name :_domain-create-handler
+   :description "Ring handler for POST /api/domains — registers the (unverified) domain and returns its new id as text/html."
+   :parent :html-ok-response
+   :args {:body :_domain-create-id-text}}
+
+  {:name :create-domain-route
+   :description "POST /api/domains — register a custom domain from a form-encoded body (hostname/org). Auth-required; platform-only (tenant writes of :domain are denied)."
+   :parent :post
+   :args {:path "/api/domains" :handler :_domain-create-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; SET ORG HANDLER (§3.4 step 4a) — POST /api/orgs/handler {name fn-id}.
+  ;; Points an org at its app handler fn (the app-router then serves that
+  ;; org's subdomain via it). Platform-only (`:org` is tenant-forbidden);
+  ;; self-serve (a tenant setting its OWN handler via a validated seam) is
+  ;; step 4b on top of this mutation.
+  ;; ---------------------------------------------------------------------
+  {:name :set-org-handler
+   :description "Set an :org's :handler-fn-id (the app-router executes it for that org's subdomain). Reads the tenancy addon's :org entity; throws if absent."
+   :args {:name {:type :text :description "Org slug."}
+          :handler-fn-id {:type :text :description "Fn-id (UUID) of the org's app handler."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_org-handler-form-data
+   :parent :parse-form-body}
+
+  {:name :_org-handler-name
+   :parent :get
+   :args {:coll :_org-handler-form-data :key {:value :name} :default {:value ""}}}
+
+  {:name :_org-handler-fnid
+   :parent :get
+   :args {:coll :_org-handler-form-data :key {:value :handler-fn-id} :default {:value ""}}}
+
+  {:name :_org-handler-do
+   :parent :set-org-handler
+   :args {:name :_org-handler-name :handler-fn-id :_org-handler-fnid}}
+
+  {:name :_org-handler-result-text
+   :parent :to-str
+   :args {:value :_org-handler-do}}
+
+  {:name :_org-handler-handler
+   :description "Ring handler for POST /api/orgs/handler — sets the org's app handler, returns the updated row as text/html."
+   :parent :html-ok-response
+   :args {:body :_org-handler-result-text}}
+
+  {:name :set-org-handler-route
+   :description "POST /api/orgs/handler — point an org at its app handler (name, handler-fn-id). Auth-required; platform-only."
+   :parent :post
+   :args {:path "/api/orgs/handler" :handler :_org-handler-handler}}]}

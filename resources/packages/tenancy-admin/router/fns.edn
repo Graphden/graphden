@@ -14,7 +14,10 @@
    :description "Every control-plane route the tenancy addon serves, compiled into `:tenancy-router`. Extend this list as more org-admin panels migrate into the package."
    :parent :list
    :args {:items [:partial-grants-admin :create-grant-route
-                  :partial-users-admin :create-user-route]}}
+                  :partial-users-admin :create-user-route
+                  :create-org-route :create-token-route :create-domain-route
+                  :set-org-handler-route
+                  :set-my-app-handler-route :verify-my-domain-route]}}
 
   {:name :tenancy-router
    :description "Fall-through Ring router over `:tenancy-routes` — returns nil on no-match (`:router-or-nil`) so the seam falls through to the main app router for anything that isn't a control-plane path. Installed into the active-router singleton by `:tenancy/router-install` at boot."

@@ -34,12 +34,6 @@
                   :partial-branch-popover
                   :partial-service-popover
                   :partial-secrets-panel
-                  :create-org-route
-                  :create-token-route
-                  :create-domain-route
-                  :set-org-handler-route
-                  :set-my-app-handler-route
-                  :verify-my-domain-route
                   :login-route
                   :signup-route
                   :logout-route

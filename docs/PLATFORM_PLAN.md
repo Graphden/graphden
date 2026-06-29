@@ -876,11 +876,17 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        `tenancy-admin/router`-модуль: `:tenancy-routes` агрегирует маршруты всех
        панелей, `:tenancy-router` компилит их (каждый модуль-панель просто
        объявляет свои routes). `/api/users` помечен `api-url-drift-allow`.
-     *Остаётся (org-admin UI):* по тому же seam-образцу мигрировать остальные
-     маршруты из core `app/admin` в `tenancy-admin` (create-org/token/domain +
-     set-org-handler + my-app/* + login/signup/logout) — механически,
-     отдельными срезами. Эти НЕ имеют панели (только API/auth), так что после
-     них `app/admin` пустеет и пакет можно удалить.
+     - **provisioning + my-app ✅** Мигрированы модулями `registration`
+       (create-org/token/domain + set-org-handler, platform-only) и `my-app`
+       (set-my-app-handler + verify-my-domain, self-serve). Убраны из core
+       `:all`; `/api/my-app/handler` (editor-row-actions.js, addon-gated)
+       помечен `api-url-drift-allow`; остальные не зовутся из editor JS.
+     *Остаётся (последнее):* auth-маршруты (login/signup/logout/logout-all)
+     ВСЁ ЕЩЁ в core `app/admin` — их editor-auth.js зовёт через `window.API.*`
+     (codegen из core `:_router`), а tenancy-router в `:_router` не входит, так
+     что перенос требует сначала перевести editor-auth.js на литералы +
+     `api-url-drift-allow` (как grants/users) + Playwright-проверку. Отдельный
+     срез. После него `app/admin` пустеет и пакет можно удалить.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;
   смешанный режим = композиция «org-scoped storage API» + «их executor».
   Polylith — опционально, не блокер.

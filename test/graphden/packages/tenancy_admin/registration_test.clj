@@ -1,12 +1,14 @@
-(ns graphden.packages.app.admin-test
-  "The app.admin org / handler base-fns (create-org, set-org-handler, the
-   self-serve invoke-* seams). The impls.clj is loaded by the package loader
-   (load-file), not the classpath, so we load it the same way and exercise the
-   impls over a fake storage. (The grants base-fns moved to the tenancy-admin
-   package — see `graphden.packages.tenancy-admin.grants-test`.)"
+(ns graphden.packages.tenancy-admin.registration-test
+  "The tenancy-admin registration base-fns (create-org / set-org-handler),
+   migrated out of app.admin via the route-collection seam (§6). The impls.clj
+   is loaded by the package loader (load-file), not the classpath, so we load
+   it the same way and exercise the impls over a fake storage."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as sp]))
+
+
+(def ^:private impls-path "resources/packages/tenancy-admin/registration/impls.clj")
 
 
 (defn- capturing-storage
@@ -28,30 +30,17 @@
 
 
 (deftest create-org-registers-an-org-entity
-  (load-file "resources/packages/app/admin/impls.clj")
-  (let [create-org (resolve 'graphden.packages.app.admin.impls/create-org)
+  (load-file impls-path)
+  (let [create-org (resolve 'graphden.packages.tenancy-admin.registration.impls/create-org)
         sink (atom nil)]
     (testing "the impl creates an :org from its name (= slug = subdomain)"
       (create-org {:name "acme"} {:storage (capturing-storage sink)})
       (is (= [:org {:name "acme"}] @sink)))))
 
 
-(deftest invoke-set-org-handler-calls-the-ctx-seam
-  (load-file "resources/packages/app/admin/impls.clj")
-  (let [invoke (resolve 'graphden.packages.app.admin.impls/invoke-set-org-handler)
-        fid (random-uuid)
-        called (atom nil)
-        ctx {:set-org-handler (fn [_c fnid] (reset! called fnid) :ok)}]
-    (testing "calls the injected seam with the parsed uuid"
-      (is (= :ok (invoke {:fn-id (str fid)} ctx)))
-      (is (= fid @called)))
-    (testing "no seam (single-tenant / no addon) → nil"
-      (is (nil? (invoke {:fn-id (str fid)} {}))))))
-
-
 (deftest set-org-handler-points-org-at-its-handler-fn
-  (load-file "resources/packages/app/admin/impls.clj")
-  (let [set-org-handler (resolve 'graphden.packages.app.admin.impls/set-org-handler)
+  (load-file impls-path)
+  (let [set-org-handler (resolve 'graphden.packages.tenancy-admin.registration.impls/set-org-handler)
         handler-id (random-uuid)
         updated (atom nil)
         storage (reify sp/StorageCRUD

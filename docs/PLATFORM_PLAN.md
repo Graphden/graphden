@@ -412,10 +412,17 @@ enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user
   Так нет per-org компиляции и нет shared-`main` leak. ref-cache keyed
   `[org ref]`. Побочно чинит латентный баг app-router (его registry был
   public-only). Доказано `faas-app-test` (27/91), branch-router+lifecycle+rls.
-- **Follow-ups:** per-org branch-names (нужен `NULLS NOT DISTINCT` на
-  `[:org-id :name]`); per-org type-alias registries (сейчас глобальный реестр
-  ВИДИТ типы всех org — low-sev info-leak на коллизии имён, `compile_runtime`
-  Risk 2).
+- **Follow-ups:**
+  - ✅ **per-org branch-names** — `UNIQUE (org-id, name) NULLS NOT DISTINCT`
+    (PG 15+). Разные org переиспользуют имя без cross-org коллизии/leak;
+    single-tenant (NULL org) остаётся unique by name.
+  - ⏳ **per-org type-alias registries** — ОТЛОЖЕНО (не minor). Реестр
+    type-aliases — process-global atom (`types/core`), читается по всему
+    type-checker'у; сделать его org-aware = протащить org через type-RESOLUTION
+    везде (lookup `(org, name)` + `*type-aliases-override*` plumbing) —
+    субстантивная правка тип-системы. Риск низкий: type-rows почти всегда
+    платформенные/public (тенанты КОМПОЗИЦИИ строят, не новые ТИПЫ), `:fn`-строки
+    и так org-scoped. Отдельной сессией.
 
 > **⛔ SUPERSEDED §3.4 (FaaS):** идея «сэндбокс для tenant-OWNED `:service`»
 > ОТМЕНЕНА. В FaaS-модели тенант не владеет сервером/`:service` — его

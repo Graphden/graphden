@@ -416,13 +416,19 @@ enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user
   - ✅ **per-org branch-names** — `UNIQUE (org-id, name) NULLS NOT DISTINCT`
     (PG 15+). Разные org переиспользуют имя без cross-org коллизии/leak;
     single-tenant (NULL org) остаётся unique by name.
-  - ⏳ **per-org type-alias registries** — ОТЛОЖЕНО (не minor). Реестр
-    type-aliases — process-global atom (`types/core`), читается по всему
-    type-checker'у; сделать его org-aware = протащить org через type-RESOLUTION
-    везде (lookup `(org, name)` + `*type-aliases-override*` plumbing) —
-    субстантивная правка тип-системы. Риск низкий: type-rows почти всегда
-    платформенные/public (тенанты КОМПОЗИЦИИ строят, не новые ТИПЫ), `:fn`-строки
-    и так org-scoped. Отдельной сессией.
+  - ✅ **per-org type-registries (§4 Risk 2) — ЗАКРЫТО на ВСЕХ 3 поверхностях.**
+    Design A (org-filtered view, переиспользует existing `*…-override*`, CORE
+    не трогаем):
+    - **type-alias check** — per-org slice `{org → {name → body}}` в
+      `compile_runtime`; tenant type-check биндит `*type-aliases-override*` на
+      `org-alias-snapshot` (`crud/type-check/with-org-alias-view*`).
+    - **alias read-display** — тот же view на tenant `:read`-запросах
+      (request-scope), так value-form / types-api рендерят свой `Foo`.
+    - **rich-types** — per-org slice в `registry/core`; `rich-type-of`
+      org-aware (tenant slice OR global), tenant-only — compile/public/sync
+      путь byte-for-byte без изменений. `record-rich-types-raw!` mirror'ит
+      tenant-записи. `current-tenant-org` через `resolve` (как branch).
+    Все три с parallel-isolation override'ами + тестами.
 
 > **⛔ SUPERSEDED §3.4 (FaaS):** идея «сэндбокс для tenant-OWNED `:service`»
 > ОТМЕНЕНА. В FaaS-модели тенант не владеет сервером/`:service` — его

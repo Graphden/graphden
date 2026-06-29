@@ -8,12 +8,14 @@
    - `registry` / `rebuild!` lifecycle"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.crud.type-check :as typecheck]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.compile.bindings]
     [graphden.executor.compile.lookups]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]
     [graphden.types.core :as types]))
 
 
@@ -43,6 +45,22 @@
       (testing "the untenanted / public alias is visible to every org"
         (is (= [:list :int] (:Bar view-a)))
         (is (= [:list :int] (:Bar view-b)))))))
+
+
+(deftest with-org-alias-view-filters-resolution-for-a-tenant
+  ;; The shared helper (used by the type-check guards AND the read-display paths
+  ;; via the request-scope) makes `resolve-alias` org-filtered for a tenant and
+  ;; leaves platform/public on the global registry.
+  (binding [cr/*per-org-aliases-override* (atom {"A" {:Foo [:list :int]}})
+            types/*type-aliases-override* (atom {})] ; global: no Foo
+    (testing "a tenant resolves its OWN per-org alias"
+      (tc/with-org "A"
+                   (typecheck/with-org-alias-view*
+                     (fn [] (is (= [:list :int] (types/resolve-alias :Foo)))))))
+    (testing "platform / public is NOT given the tenant's alias"
+      (tc/with-org tc/public-org
+                   (typecheck/with-org-alias-view*
+                     (fn [] (is (not= [:list :int] (types/resolve-alias :Foo)))))))))
 
 
 (use-fixtures :each exec/with-clean-registry)

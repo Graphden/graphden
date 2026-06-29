@@ -29,6 +29,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
+    [graphden.crud.type-check :as typecheck]
     [graphden.executor.compile-runtime :as cr]
     [graphden.tenancy.app-router :as app-router]
     [graphden.tenancy.auth :as tauth]
@@ -323,6 +324,14 @@
                             (not (grant/request-permitted? grant-store principal request org)))
                        forbidden-response
                        ;; Tenant — gate effects (env / io / network / process), run.
+                       ;; A READ request additionally runs under the org-filtered
+                       ;; type-alias view (§4 Risk-2) so editor display paths
+                       ;; (value-form / types) resolve a tenant's `Foo`, never
+                       ;; another org's. Writes are NOT wrapped — registration
+                       ;; (rebuild) must reach the org-agnostic global; their
+                       ;; type-checks are filtered narrowly in crud.type-check.
                        :else
                        (binding [cr/*allowed-effects* cr/default-cloud-allowed-effects]
-                         (run))))))))
+                         (if (= :read (grant/request->capability request))
+                           (typecheck/with-org-alias-view* run)
+                           (run)))))))))

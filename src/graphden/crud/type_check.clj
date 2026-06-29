@@ -27,13 +27,15 @@
     [graphden.types.core :as types]))
 
 
-(defn- with-org-alias-view*
+(defn with-org-alias-view*
   "Run `thunk` with the type-alias registry filtered to {public + current-org}
-   when a TENANT is in scope (§4 Risk-2 fix) — so a tenant's type-check never
-   resolves another org's same-named type. Platform / public (or single-tenant,
-   org = public) → the full global registry, unchanged. Binds the EXISTING
-   `types/*type-aliases-override*` (read-only here: check-fn-def! resolves, never
-   registers), so registration still writes the org-agnostic global."
+   when a TENANT is in scope (§4 Risk-2 fix) — so a tenant never resolves another
+   org's same-named type. Platform / public (or single-tenant, org = public) →
+   the full global registry, unchanged. Binds the EXISTING
+   `types/*type-aliases-override*` (READ-only callers — they resolve, never
+   register, so registration still writes the org-agnostic global). Shared by the
+   type-CHECK guards here and the alias-resolving READ paths (value-form / types-
+   api) so a tenant's editor display is org-filtered too."
   [thunk]
   (if (= (tc/current-org) tc/public-org)
     (thunk)

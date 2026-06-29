@@ -13,6 +13,7 @@
    The id is threaded in so a value-only binding update or a delete (whose
    `data` lacks `:fn-id`) still resolves its namespace by reading the row."
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
@@ -72,16 +73,33 @@
                         {:type :authz/forbidden :fn-id fn-id :namespace-id ns-id}))))))
 
 
+(def ^:private binding-structural-keys
+  "Binding fields a `:bind-args` edit may NOT touch — anything beyond the value
+   (`:value` / `:value-present`) restructures the binding and needs `:write`."
+  #{:ref-fn-id :type-override-fn-id :slot-id :fn-id})
+
+
+(defn- value-only-binding-delta?
+  "True when `data` (the changed binding keys) touches ONLY value fields, so a
+   `:bind-args` holder may apply it. A CREATE always carries `:fn-id`/`:slot-id`
+   and a DELETE has nil data — both correctly fall through to requiring `:write`."
+  [data]
+  (boolean (and (seq data)
+                (empty? (set/intersection (set (keys data)) binding-structural-keys)))))
+
+
 (defn authorize-writer
   "Build a write guard for OrgScopedStorage closing over the grant `store`
    and `storage` (to resolve namespaces). Returns `(fn [entity-name data id])`
    that throws `:authz/forbidden` for a tenant write the principal isn't
    authorized for. Platform / admin (public org) is unrestricted.
 
-   - `:fn` that sets `:namespace-id` → needs `:write` on it.
-   - `:binding` / `:binding-list-item` → needs `:write` on the owning fn's
-     namespace. (§4.3's narrower `:bind-args` / `:append-list` nuance is layered
-     on in a follow-up.)"
+   §4.3 restricted editing — the required capability narrows by the edit:
+   - `:fn` that sets `:namespace-id` → `:write` on it.
+   - `:binding` → `:bind-args` when the delta touches ONLY `:value` (a value
+     tweak); `:write` otherwise (create / restructure / delete).
+   - `:binding-list-item` → `:append-list` (add / remove / reorder a list item).
+   `:write` and `:admin` subsume the narrow caps (`grant/cap-implies?`)."
   [store storage]
   (fn [entity-name data id]
     (when (not= (tc/current-org) tc/public-org) ; platform / admin: unrestricted
@@ -90,8 +108,11 @@
               (when-not (writable? store storage tc/*current-principal* (:namespace-id data))
                 (throw (ex-info "forbidden: no :write grant on the target namespace"
                                 {:type :authz/forbidden :namespace-id (:namespace-id data)}))))
-        :binding (deny-write! store storage :write (binding-owner-fn-id storage data id))
-        :binding-list-item (deny-write! store storage :write (list-item-owner-fn-id storage data id))
+        :binding (deny-write! store storage
+                              (if (value-only-binding-delta? data) :bind-args :write)
+                              (binding-owner-fn-id storage data id))
+        :binding-list-item (deny-write! store storage :append-list
+                                        (list-item-owner-fn-id storage data id))
         nil))))
 
 

@@ -66,3 +66,42 @@
       (tc/with-org tc/public-org
                    (binding [tc/*current-principal* {:user "root"}]
                      (is (some? (sp/create-entity s :fn {:name "pns-admin" :namespace-id (:id acme-ns)}))))))))
+
+
+(deftest per-namespace-binding-edit-enforcement-against-postgres
+  ;; §4.3 end-to-end through the REAL OrgScoped storage + sp/* (Risk 1): the
+  ;; required capability narrows by the edit. A :bind-args user tweaks a value
+  ;; but can't restructure; an :append-list user writes list-items but can't
+  ;; edit a value. All resolved via the real :ns tree + binding→fn join.
+  (let [base (setup/create-test-storage)
+        acme-ns (sp/create-entity base :ns {:name "acme"})
+        team-ns (sp/create-entity base :ns {:name "team" :parent-id (:id acme-ns)})
+        int-id (get setup/primitive-fn-ids :int)
+        grants (grant/static-grant-store
+                 [{:subject "wendy" :capability :write :namespace "acme.team"}
+                  {:subject "edith" :capability :bind-args :namespace "acme.team"}
+                  {:subject "ann" :capability :append-list :namespace "acme.team"}])
+        s (ts/org-scoped-storage base ts/default-scoped-entities
+                                 (authz/authorize-writer grants base))
+        ;; wendy (:write) builds the fn + slot + binding — all stamped "acme".
+        [f b]
+        (tc/with-org "acme"
+                     (binding [tc/*current-principal* {:user "wendy"}]
+                       (let [f (sp/create-entity s :fn {:name "tf" :namespace-id (:id team-ns)})
+                             slot (sp/create-entity s :slot {:name "arg" :type-fn-id int-id})
+                             b (sp/create-entity s :binding {:fn-id (:id f) :slot-id (:id slot)
+                                                             :value 1 :value-present true})]
+                         [f b])))]
+    (tc/with-org "acme"
+                 (binding [tc/*current-principal* {:user "edith"}]
+                   (testing ":bind-args edits the binding VALUE via real sp/update-entity"
+                     (is (some? (sp/update-entity s :binding (:id b) {:value 2 :value-present true}))))
+                   (testing "...but a ref / structure change is forbidden (needs :write)"
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           (sp/update-entity s :binding (:id b) {:ref-fn-id (:id f)})))))
+                 (binding [tc/*current-principal* {:user "ann"}]
+                   (testing ":append-list writes a list-item but cannot edit a binding value"
+                     (is (some? (sp/create-entity s :binding-list-item
+                                                  {:binding-id (:id b) :position 0 :value 5})))
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           (sp/update-entity s :binding (:id b) {:value 9 :value-present true}))))))))

@@ -134,6 +134,46 @@
                      (is (nil? (guard :binding {:fn-id "f-acme"} nil))))))))
 
 
+(deftest authorize-writer-narrows-by-capability
+  ;; §4.3 R2 Step 3: the required cap narrows by the edit — :bind-args for a
+  ;; value-only binding tweak, :append-list for list-item writes, :write for
+  ;; anything structural. :write / :admin subsume the narrow caps.
+  (let [storage (bind-store
+                  {"acme" {:name "acme" :parent-id nil}
+                   "team" {:name "team" :parent-id "acme"}}
+                  {"f-team" {:namespace-id "team"}}
+                  {"b-team" {:fn-id "f-team"}})
+        guard-of (fn [caps]
+                   (authz/authorize-writer
+                     (grant/static-grant-store
+                       (for [c caps] {:subject "u" :capability c :namespace "acme.team"}))
+                     storage))]
+    (tc/with-org "acme"
+                 (binding [tc/*current-principal* {:user "u"}]
+                   (testing ":bind-args allows a value-only binding update"
+                     (is (nil? ((guard-of [:bind-args]) :binding
+                                                        {:value 7 :value-present true} "b-team"))))
+                   (testing ":bind-args denies a ref/structure change or a create (need :write)"
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           ((guard-of [:bind-args]) :binding {:ref-fn-id "g"} "b-team")))
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           ((guard-of [:bind-args]) :binding
+                                                    {:fn-id "f-team" :slot-id "s" :value 1} nil))))
+                   (testing ":bind-args does NOT grant :append-list (one-way)"
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           ((guard-of [:bind-args]) :binding-list-item {:binding-id "b-team"} nil))))
+                   (testing ":append-list allows list-item writes but not binding value-edits"
+                     (is (nil? ((guard-of [:append-list]) :binding-list-item
+                                                          {:binding-id "b-team"} nil)))
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           ((guard-of [:append-list]) :binding
+                                                      {:value 7 :value-present true} "b-team"))))
+                   (testing ":write subsumes both narrow caps"
+                     (is (nil? ((guard-of [:write]) :binding {:value 7 :value-present true} "b-team")))
+                     (is (nil? ((guard-of [:write]) :binding {:ref-fn-id "g"} "b-team")))
+                     (is (nil? ((guard-of [:write]) :binding-list-item {:binding-id "b-team"} nil))))))))
+
+
 ;; --- per-namespace execute (the :execute-guard seam) ---
 
 (defn- fn+ns-store

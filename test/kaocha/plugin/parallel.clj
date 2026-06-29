@@ -136,7 +136,11 @@
     ;; Without isolation a sibling NS-thread's rebuild overwrites it mid-run and
     ;; a tenant type-check reads another NS's per-org view. Seeded from the
     ;; global snapshot (like rich-types) so reads work before the NS's rebuild.
-    graphden.executor.compile-runtime/*per-org-aliases-override*])
+    graphden.executor.compile-runtime/*per-org-aliases-override*
+    ;; §4 Risk-2: the per-org rich-types slice — same isolation need as
+    ;; *rich-types-override* (its sibling above), seeded from the global per-org
+    ;; snapshot so reads work before the NS's first record.
+    graphden.executor.registry.core/*per-org-rich-override*])
 
 
 ;; Per-var seeders. Some isolation atoms must start non-empty — the
@@ -148,7 +152,9 @@
   '{graphden.executor.registry.core/*rich-types-override*
     graphden.executor.registry.core/snapshot-for-isolation
     graphden.executor.compile-runtime/*per-org-aliases-override*
-    graphden.executor.compile-runtime/per-org-snapshot-for-isolation})
+    graphden.executor.compile-runtime/per-org-snapshot-for-isolation
+    graphden.executor.registry.core/*per-org-rich-override*
+    graphden.executor.registry.core/per-org-rich-snapshot-for-isolation})
 
 
 (defn- seed-for

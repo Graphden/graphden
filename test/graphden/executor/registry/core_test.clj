@@ -9,7 +9,25 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.registry.core :as reg]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]))
+
+
+(deftest rich-type-of-isolates-same-named-fns-per-org
+  ;; §4 Risk-2 (rich-types): the bare-name global collapses two orgs' same-named
+  ;; composed fn (last-write-wins); the per-org slice keeps each org's own, and
+  ;; the global remains the fallback for the compile / public path.
+  (binding [reg/*per-org-rich-override* (atom {})
+            reg/*rich-types-override* (atom {})]
+    (tc/with-org "A" (reg/record-rich-types-raw! "myfilter" {:return :int :args {}}))
+    (tc/with-org "B" (reg/record-rich-types-raw! "myfilter" {:return :text :args {}}))
+    (testing "each org reads its OWN signature, not the global last-write-wins"
+      (is (= :int (:return (tc/with-org "A" (reg/rich-type-of "myfilter")))))
+      (is (= :text (:return (tc/with-org "B" (reg/rich-type-of "myfilter"))))))
+    (testing "the per-arg arity is org-aware too"
+      (is (= :int (:return (tc/with-org "A" (reg/rich-type-of "myfilter"))))))
+    (testing "public / compile falls through to the global (last write = B's)"
+      (is (= :text (:return (tc/with-org tc/public-org (reg/rich-type-of "myfilter"))))))))
 
 
 (use-fixtures :once (setup/create-container-fixture))

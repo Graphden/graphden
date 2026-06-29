@@ -234,6 +234,65 @@
   @(target-rich-types-atom))
 
 
+;; §4 Risk-2 (rich-types): the global registry is keyed by BARE fn-name, so two
+;; orgs' same-named composed fns collide (last-write-wins). This per-org slice
+;; `{org → {fn-name → info}}` keeps each org's own. Populated by
+;; `record-rich-types-raw!` (the type-checker's tenant-fn writes) under the
+;; ambient org; `rich-type-of` prefers it for a tenant and falls back to the
+;; org-agnostic global — so the compile / public path is UNCHANGED (it never has
+;; a tenant org bound), only tenant type-checks/reads gain precedence.
+(defonce ^:private per-org-rich-types (atom {}))
+
+
+(def ^:dynamic *per-org-rich-override*
+  "Parallel-test isolation, mirrors `*rich-types-override*`."
+  nil)
+
+
+(defn- target-per-org-rich-atom
+  []
+  (or *per-org-rich-override* per-org-rich-types))
+
+
+(defn per-org-rich-snapshot-for-isolation
+  "Seeder for the isolation override (so a bound override starts from the global
+   per-org state, matching `snapshot-for-isolation`)."
+  []
+  @(target-per-org-rich-atom))
+
+
+(def ^:private current-org-var (atom nil))
+
+
+(defn- current-org-scope
+  "The ambient tenant org — `tc/current-org` via `resolve` (registry/core can't
+   require the tenancy layer; same trick as branch-router's `current-scope`).
+   nil when tenancy isn't loaded (single-tenant) → `rich-type-of` falls to the
+   global. The var is cached after the first successful resolve."
+  []
+  (when-let [v (or @current-org-var
+                   (reset! current-org-var
+                           (resolve 'graphden.tenancy.context/current-org)))]
+    (v)))
+
+
+(def ^:private public-org-var (atom nil))
+
+
+(defn- current-tenant-org
+  "The ambient org IFF it's a real TENANT — not public, not single-tenant
+   (nil). Returns nil otherwise, meaning 'use the org-agnostic global'. So the
+   per-org slice holds ONLY tenant entries: the compile / public / sync path is
+   never mirrored and never reads per-org, keeping it exactly as it was."
+  []
+  (when-let [org (current-org-scope)]
+    (let [public (when-let [v (or @public-org-var
+                                  (reset! public-org-var
+                                          (resolve 'graphden.tenancy.context/public-org)))]
+                   @v)]
+      (when (not= org public) org))))
+
+
 (defn- validate-arg-type!
   [arg-name arg-type]
   ;; Accept primitives, type-vars, structural types — and any other
@@ -425,19 +484,36 @@
    raw write doesn't drop the inheritance. Only stashed when true —
    matches the absent-key default everywhere else."
   [fn-name rich-type-map]
-  (swap! (target-rich-types-atom)
-         (fn [reg]
-           (let [existing (get reg fn-name)
-                 carry-bl? (or (true? (:branch-local? rich-type-map))
-                               (true? (:branch-local? existing)))]
-             (assoc reg fn-name
-                    (cond-> (update rich-type-map :effects #(or % #{}))
-                      carry-bl? (assoc :branch-local? true)))))))
+  (let [new-reg (swap! (target-rich-types-atom)
+                       (fn [reg]
+                         (let [existing (get reg fn-name)
+                               carry-bl? (or (true? (:branch-local? rich-type-map))
+                                             (true? (:branch-local? existing)))]
+                           (assoc reg fn-name
+                                  (cond-> (update rich-type-map :effects #(or % #{}))
+                                    carry-bl? (assoc :branch-local? true))))))]
+    ;; §4 Risk-2: mirror the entry into a TENANT's slice so its same-named
+    ;; composed fn doesn't read another org's signature from the bare-name
+    ;; global. Public / sync / compile writes are NOT mirrored (they own the
+    ;; global), so the per-org slice never goes stale against record-rich-types!.
+    (when-let [org (current-tenant-org)]
+      (swap! (target-per-org-rich-atom) assoc-in [org fn-name] (get new-reg fn-name)))
+    nil))
 
 
 (defn rich-type-of
-  ([fn-name]            (get (rich-types-view) fn-name))
-  ([fn-name arg-name]   (get-in (rich-types-view) [fn-name :args arg-name])))
+  ;; §4 Risk-2: a tenant prefers its OWN per-org entry; the compile / public
+  ;; path (no tenant org bound) and single-tenant fall through to the global —
+  ;; UNCHANGED behavior, plus tenant precedence. O(1) gets, no merge.
+  ([fn-name]
+   (or (when-let [org (current-tenant-org)]
+         (get-in @(target-per-org-rich-atom) [org fn-name]))
+       (get (rich-types-view) fn-name)))
+  ([fn-name arg-name]
+   (get-in (or (when-let [org (current-tenant-org)]
+                 (get-in @(target-per-org-rich-atom) [org fn-name]))
+               (get (rich-types-view) fn-name))
+           [:args arg-name])))
 
 
 (defn rich-types-snapshot
@@ -459,7 +535,10 @@
    the global atom does. Mirror of `record-rich-types!`'s
    `target-rich-types-atom` write target."
   [fn-name]
-  (swap! (target-rich-types-atom) dissoc fn-name))
+  (swap! (target-rich-types-atom) dissoc fn-name)
+  (when-let [org (current-tenant-org)]
+    (swap! (target-per-org-rich-atom) update org dissoc fn-name))
+  nil)
 
 
 (defn restore-rich-types!

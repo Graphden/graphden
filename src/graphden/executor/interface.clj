@@ -202,6 +202,11 @@
    Wire in via `(use-fixtures :once exec/with-isolated-rich-types)`."
   [f]
   (let [override-var (requiring-resolve 'graphden.executor.registry.core/*rich-types-override*)
-        snapshot-fn (requiring-resolve 'graphden.executor.registry.core/snapshot-for-isolation)]
-    (with-bindings {override-var (atom (snapshot-fn))}
+        snapshot-fn (requiring-resolve 'graphden.executor.registry.core/snapshot-for-isolation)
+        ;; §4 Risk-2: isolate the per-org rich-types slice together with the
+        ;; global one, or a tenant test's per-org writes leak across NSes.
+        per-org-var (requiring-resolve 'graphden.executor.registry.core/*per-org-rich-override*)
+        per-org-snap (requiring-resolve 'graphden.executor.registry.core/per-org-rich-snapshot-for-isolation)]
+    (with-bindings {override-var (atom (snapshot-fn))
+                    per-org-var (atom (per-org-snap))}
       (f))))

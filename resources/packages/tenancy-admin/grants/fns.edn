@@ -93,20 +93,33 @@
    :parent :hiccup
    :args {:tag {:value "td"} :children [:_grant-namespace-val]}}
 
-  ;; per-row delete button — `:assoc` injects the row's :id as data-grant-id;
-  ;; editor-grants-admin.js reads it and DELETEs /api/entities/grant/:id.
+  ;; per-row delete button — HTMX-native: hx-delete hits the generic entity
+  ;; endpoint, hx-swap="delete" removes THIS <tr> on success (the response body
+  ;; is irrelevant — no panel refresh needed), hx-confirm prompts. No client JS;
+  ;; the bearer rides along via the htmx:configRequest bridge in editor-auth.js.
   {:name :_grant-id-val
    :parent :get
    :args {:coll {:as :item} :key {:value :id} :default {:value ""}}}
+
+  {:name :_grant-id-str
+   :parent :to-str
+   :args {:value :_grant-id-val}}
+
+  {:name :_grant-delete-url
+   :parent :str-join
+   :args {:coll [{:value "/api/entities/grant/"} :_grant-id-str]
+          :separator {:value ""}}}
 
   {:name :_grant-delete-attrs
    :parent :assoc
    :args {:map {:value {:type "button"
                         :class "grant-delete"
-                        :data-act "delete-grant"
-                        :title "Delete grant"}}
-          :key {:value :data-grant-id}
-          :value :_grant-id-val}}
+                        :title "Delete grant"
+                        :hx-target "closest tr"
+                        :hx-swap "delete"
+                        :hx-confirm "Delete this grant?"}}
+          :key {:value :hx-delete}
+          :value :_grant-delete-url}}
 
   {:name :_grant-delete-btn
    :parent :hiccup
@@ -149,32 +162,49 @@
    :args {:body :_grants-table
           :on-throw {:parent :const :args {:value :_grants-disabled}}}}
 
-  ;; --- create form (editor-grants-admin.js reads the inputs + POSTs them) ---
+  ;; --- create form — a real <form hx-post> (no client JS). HTML5 `required`
+  ;; replaces the old JS empty-check; on submit HTMX form-encodes the inputs,
+  ;; POSTs, and swaps the refreshed panel back in (see :_grant-create-handler).
   {:name :_grant-input-subject
    :parent :hiccup
    :args {:tag {:value "input"}
-          :attrs {:value {:type "text" :name "subject" :placeholder "subject" :class "grant-input"}}}}
+          :attrs {:value {:type "text" :name "subject" :placeholder "subject" :class "grant-input" :required true}}}}
 
   {:name :_grant-input-capability
    :parent :hiccup
    :args {:tag {:value "input"}
-          :attrs {:value {:type "text" :name "capability" :placeholder "read / write / execute / admin" :class "grant-input"}}}}
+          :attrs {:value {:type "text" :name "capability" :placeholder "read / write / execute / admin" :class "grant-input" :required true}}}}
 
   {:name :_grant-input-namespace
    :parent :hiccup
    :args {:tag {:value "input"}
-          :attrs {:value {:type "text" :name "namespace" :placeholder "namespace" :class "grant-input"}}}}
+          :attrs {:value {:type "text" :name "namespace" :placeholder "namespace" :class "grant-input" :required true}}}}
 
   {:name :_grant-create-btn
    :parent :hiccup
    :args {:tag {:value "button"}
-          :attrs {:value {:type "button" :data-act "create-grant" :class "grant-create-btn"}}
+          :attrs {:value {:type "submit" :class "grant-create-btn"}}
           :children [{:value "+ Add grant"}]}}
+
+  ;; Path single-sourced: BOTH `:create-grant-route` (the route) and this form's
+  ;; hx-post reference `:_grants-api-path`, so the form can't drift from the
+  ;; route it posts to.
+  {:name :_grants-api-path
+   :parent :const
+   :args {:value "/api/grants"}}
+
+  {:name :_grants-create-form-attrs
+   :parent :assoc
+   :args {:map {:value {:class "grant-create-form"
+                        :hx-target "closest [data-grants-panel]"
+                        :hx-swap "outerHTML"}}
+          :key {:value :hx-post}
+          :value :_grants-api-path}}
 
   {:name :_grants-create-form
    :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "grant-create-form"}}
+   :args {:tag {:value "form"}
+          :attrs :_grants-create-form-attrs
           :children [:_grant-input-subject :_grant-input-capability
                      :_grant-input-namespace :_grant-create-btn]}}
 
@@ -183,10 +213,12 @@
    :parent :hiccup
    :args {:tag {:value "h3"} :children [{:value "Grants"}]}}
 
+  ;; `data-grants-panel` is the stable hx-target the create form swaps into
+  ;; (and the GET partial's root), so a create re-renders the whole panel.
   {:name :_grants-admin-body
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "grants-admin"}}
+          :attrs {:value {:class "grants-admin" :data-grants-panel "1"}}
           :children [:_grants-admin-title :_grants-safe :_grants-create-form]}}
 
   {:name :_grants-admin-html
@@ -204,11 +236,10 @@
    :args {:path "/partials/grants-admin" :handler :_partial-grants-admin-handler}}
 
   ;; ---------------------------------------------------------------------
-  ;; POST /api/grants — create a grant from the form-encoded body. The
-  ;; editor re-fetches the panel on success, so the response body is just
-  ;; the new id. Only reached when the addon is active (the editor gates
-  ;; the form); a stray call without :grant 500s, which is acceptable for
-  ;; a gated admin action.
+  ;; POST /api/grants — create a grant from the form-encoded body, then return
+  ;; the REFRESHED panel HTML (HTMX swaps it back into [data-grants-panel]).
+  ;; `:do` forces create-before-render, so the panel's :list-grants sees the new
+  ;; row. Only reached when the addon is active (the section only mounts then).
   ;; ---------------------------------------------------------------------
   {:name :_grant-create-form-data
    :parent :parse-form-body}
@@ -231,20 +262,17 @@
           :capability :_grant-create-capability
           :namespace :_grant-create-namespace}}
 
-  {:name :_grant-create-id
-   :parent :get
-   :args {:coll :_grant-create-do :key {:value :id} :default {:value ""}}}
-
-  {:name :_grant-create-id-text
-   :parent :to-str
-   :args {:value :_grant-create-id}}
+  {:name :_grant-create-then-panel
+   :description "Create the grant, THEN render the refreshed panel — `:do` forces left-to-right so the panel's :list-grants includes the new row. The HTMX hx-post swaps this back into [data-grants-panel]."
+   :parent :do
+   :args {:steps [:_grant-create-do :_grants-admin-html]}}
 
   {:name :_grant-create-handler
-   :description "Ring handler for POST /api/grants — creates the grant and returns its new id as text/html."
+   :description "Ring handler for POST /api/grants — creates the grant and returns the refreshed grants panel as text/html (HTMX swap target)."
    :parent :html-ok-response
-   :args {:body :_grant-create-id-text}}
+   :args {:body :_grant-create-then-panel}}
 
   {:name :create-grant-route
-   :description "POST /api/grants — create a grant from a form-encoded body (subject/capability/namespace). Auth-required."
+   :description "POST /api/grants — create a grant from a form-encoded body (subject/capability/namespace). Auth-required. Path single-sourced via :_grants-api-path (shared with the form's hx-post)."
    :parent :post
-   :args {:path "/api/grants" :handler :_grant-create-handler}}]}
+   :args {:path :_grants-api-path :handler :_grant-create-handler}}]}

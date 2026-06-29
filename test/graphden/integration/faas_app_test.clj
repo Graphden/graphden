@@ -214,7 +214,21 @@
       (is (str/includes? body "grants-admin-table"))
       (is (str/includes? body "alice"))
       (is (str/includes? body "shared"))
-      (is (not (str/includes? body "Tenancy addon not active"))))))
+      (is (not (str/includes? body "Tenancy addon not active"))))
+    (testing "the panel is HTMX-native — no client-JS fetch; create/delete via hx-*"
+      ;; create form: a real <form hx-post=/api/grants> swapping the panel
+      (is (str/includes? body "<form"))
+      (is (str/includes? body "hx-post=\"/api/grants\"") "create form posts to the route path")
+      (is (str/includes? body "data-grants-panel") "stable hx-target for the create swap")
+      (is (str/includes? body "type=\"submit\""))
+      (is (str/includes? body "required"))
+      ;; delete button: hx-delete to the generic entity endpoint + hx-swap=delete
+      (is (str/includes? body "hx-delete=\"/api/entities/grant/"))
+      (is (str/includes? body "hx-swap=\"delete\""))
+      (is (str/includes? body "hx-confirm=\"Delete this grant?\""))
+      ;; no leftover client-JS dispatch hooks
+      (is (not (str/includes? body "data-act=\"create-grant\"")))
+      (is (not (str/includes? body "data-act=\"delete-grant\""))))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -507,7 +521,16 @@
     (testing "the password hash is NEVER in the rendered panel (list-users strips it)"
       (is (not (str/includes? body "$2a$")))   ; no bcrypt hash
       (is (not (str/includes? body "pbkdf2"))) ; nor a legacy one
-      (is (not (str/includes? body "Tenancy addon not active"))))))
+      (is (not (str/includes? body "Tenancy addon not active"))))
+    (testing "the panel is HTMX-native — create/delete via hx-*, no client-JS fetch"
+      (is (str/includes? body "<form"))
+      (is (str/includes? body "hx-post=\"/api/users\""))
+      (is (str/includes? body "data-users-panel"))
+      (is (str/includes? body "hx-delete=\"/api/entities/user/"))
+      (is (str/includes? body "hx-swap=\"delete\""))
+      (is (str/includes? body "hx-confirm=\"Delete this user?\""))
+      (is (not (str/includes? body "data-act=\"create-user\"")))
+      (is (not (str/includes? body "data-act=\"delete-user\""))))))
 
 
 (deftest login-sets-ttl-and-logout-invalidates

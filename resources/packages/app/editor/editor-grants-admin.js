@@ -2,15 +2,16 @@
 //
 // Server-rendered via GET /partials/grants-admin (a table of every grant:
 // subject | capability | namespace). Only shown to authenticated users when
-// the tenancy addon is active (a capability header has been seen) — so a
-// single-tenant editor never renders it. The partial itself degrades to a
-// "not active" notice if reached without the addon, so this is belt-and-
-// suspenders.
+// the tenancy addon is active — so a single-tenant editor never renders it.
 //
-// Globals consumed: authFetch, isAuthenticated, graphdenTenancyActive.
+// Create + delete are pure HTMX, declared in the partial's hiccup (hx-post /
+// hx-delete / hx-swap) — there is NO client JS fetch here. The bearer rides on
+// every HTMX request via the htmx:configRequest bridge in editor-auth.js. This
+// module only decides WHETHER to mount the section (a client-side gate) and
+// lazy-loads the panel via hx-get.
+//
+// Globals consumed: isAuthenticated, graphdenTenancyActive, htmx.
 
-// Synchronous wrapper: returns the section div (or null when it shouldn't
-// show) + kicks off the async fetch that swaps the table in.
 function buildGrantsAdminSection() {
   if (!isAuthenticated()) return null;
   if (typeof window.graphdenTenancyActive === 'function' && !window.graphdenTenancyActive()) {
@@ -18,63 +19,17 @@ function buildGrantsAdminSection() {
   }
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-grants-admin';
+  // The .ns-children hx-get lazy-loads the server-rendered panel on insert;
+  // the panel's own hx-post/hx-delete then handle create/delete + swap.
   wrap.innerHTML = ''
     + '<div class="ns-header ns-header-pseudo">'
     +   '<span class="ns-label">Grants</span>'
     + '</div>'
-    + '<div class="ns-children"><div class="loading">Loading…</div></div>';
-  // One delegated listener on the wrap survives the .ns-children innerHTML
-  // swaps that refreshGrantsAdmin does, so wire it once here.
-  wireGrantsAdmin(wrap);
-  refreshGrantsAdmin(wrap);
+    + '<div class="ns-children" hx-get="/partials/grants-admin" hx-trigger="load" hx-swap="innerHTML">'
+    +   '<div class="loading">Loading…</div>'
+    + '</div>';
+  // We built the markup imperatively, so tell HTMX to bind the hx-get (it only
+  // auto-binds at page load); hx-trigger="load" then fires the fetch.
+  if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(wrap);
   return wrap;
-}
-
-// Event-delegation for the [data-act] buttons the partial emits:
-//   delete-grant → DELETE /api/entities/grant/:id (generic CRUD)
-//   create-grant → POST /api/grants with the form-encoded inputs
-function wireGrantsAdmin(wrap) {
-  wrap.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-act]');
-    if (!btn || !wrap.contains(btn)) return;
-    const act = btn.dataset.act;
-    if (act === 'delete-grant') {
-      const id = btn.dataset.grantId;
-      if (id && window.confirm('Delete this grant?')) {
-        await authFetch(API.api_entities_type_id('grant', id), { method: 'DELETE' });
-        refreshGrantsAdmin(wrap);
-      }
-    } else if (act === 'create-grant') {
-      const subjectEl = wrap.querySelector('[name="subject"]');
-      const capabilityEl = wrap.querySelector('[name="capability"]');
-      const namespaceEl = wrap.querySelector('[name="namespace"]');
-      const subject = subjectEl?.value.trim();
-      const capability = capabilityEl?.value.trim();
-      const namespace = namespaceEl?.value.trim();
-      if (subject && capability && namespace) {
-        const body = new URLSearchParams({ subject, capability, namespace }).toString();
-        // Addon route — registered in window.API by the tenancy-admin addon at
-        // boot (the panel only renders when the addon is active), so address by
-        // key, never a hardcoded path.
-        await authFetch(API.api_grants, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body,
-        });
-        refreshGrantsAdmin(wrap);
-      }
-    }
-  });
-}
-
-async function refreshGrantsAdmin(wrap) {
-  try {
-    const r = await authFetch('/partials/grants-admin');
-    if (!r.ok) return; // leave the placeholder; 401 surfaces via the lock icon
-    const html = await r.text();
-    const child = wrap.querySelector('.ns-children');
-    if (child) child.innerHTML = html;
-  } catch (_) {
-    /* leave the loading state — a transient fetch error shouldn't blank the UI */
-  }
 }

@@ -901,10 +901,24 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      route-collection шов И на бэке (tenancy-router), И на фронте (window.API);
      `app/admin` больше нет; фронт авто-подхватывает tenancy-роуты из графа
      роутинга, хардкода путей нет. Single-tenant без аддона их не имеет.
-     *Дальше (правильнее):* панели grants/users — server-rendered hiccup, но
-     POST/DELETE всё ещё через client-JS fetch; целевое — HTMX-формы
-     (`hx-post` из графа), чтобы убрать и этот JS-слой. Отдельная инициатива
-     (EDITOR_HTMX_MIGRATION_PLAN).
+     - **HTMX-формы ✅ (grants/users)** Client-JS fetch-слой панелей убран:
+       create — настоящий `<form hx-post>`, delete — `hx-delete` +
+       `hx-swap="delete"` (строка `<tr>` исчезает, ответ не важен), оба прямо в
+       server-rendered hiccup. POST-handler через `:do [create render-panel]`
+       возвращает ОБНОВЛЁННУЮ панель → HTMX свопит в `[data-*-panel]` (форма
+       чистится, новая строка видна). Bearer едет через `htmx:configRequest`
+       мост. editor-grants/users-admin.js усохли до gated-mount + `hx-get`
+       lazy-load; `wire*`/`refresh*` удалены. Путь single-sourced: и роут, и
+       `hx-post` ссылаются на общий `:const` (`:_grants-api-path`/
+       `:_users-api-path`) — форма не дрейфит от роута. В JS панелей НЕТ ни
+       путей, ни `API.*` — пути живут только в графе. Покрыто integration-
+       тестами (рендер партиала содержит hx-*; нет `data-act`).
+     *Дальше:* по тому же образцу можно перевести и остальные editor-popover'ы
+     с JS-fetch на HTMX (EDITOR_HTMX_MIGRATION_PLAN). Один known-gap: реальный
+     HTMX-submit в браузере тестируется только в multi-tenant (панели видны
+     лишь при активном аддоне) — сейчас проверены hx-* атрибуты + handler-return
+     на integration-уровне, single-tenant boot/Playwright подтверждает что JS не
+     сломан и панели корректно отсутствуют.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;
   смешанный режим = композиция «org-scoped storage API» + «их executor».
   Polylith — опционально, не блокер.

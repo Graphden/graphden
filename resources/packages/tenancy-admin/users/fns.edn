@@ -56,15 +56,31 @@
    :parent :hiccup
    :args {:tag {:value "td"} :children [:_user-org-val]}}
 
+  ;; per-row delete button — HTMX: hx-delete the generic entity endpoint,
+  ;; hx-swap="delete" drops THIS <tr> on success, hx-confirm prompts. No JS.
   {:name :_user-id-val
    :parent :get
    :args {:coll {:as :item} :key {:value :id} :default {:value ""}}}
 
+  {:name :_user-id-str
+   :parent :to-str
+   :args {:value :_user-id-val}}
+
+  {:name :_user-delete-url
+   :parent :str-join
+   :args {:coll [{:value "/api/entities/user/"} :_user-id-str]
+          :separator {:value ""}}}
+
   {:name :_user-delete-attrs
    :parent :assoc
-   :args {:map {:value {:type "button" :class "grant-delete" :data-act "delete-user" :title "Delete user"}}
-          :key {:value :data-user-id}
-          :value :_user-id-val}}
+   :args {:map {:value {:type "button"
+                        :class "grant-delete"
+                        :title "Delete user"
+                        :hx-target "closest tr"
+                        :hx-swap "delete"
+                        :hx-confirm "Delete this user?"}}
+          :key {:value :hx-delete}
+          :value :_user-delete-url}}
 
   {:name :_user-delete-btn
    :parent :hiccup
@@ -104,31 +120,46 @@
    :args {:body :_users-table
           :on-throw {:parent :const :args {:value :_users-disabled}}}}
 
+  ;; --- create form — a real <form hx-post> (no client JS); HTML5 `required`
+  ;; replaces the JS empty-check; the response swaps the refreshed panel back.
   {:name :_user-input-username
    :parent :hiccup
    :args {:tag {:value "input"}
-          :attrs {:value {:type "text" :name "username" :placeholder "username" :class "grant-input"}}}}
+          :attrs {:value {:type "text" :name "username" :placeholder "username" :class "grant-input" :required true}}}}
 
   {:name :_user-input-password
    :parent :hiccup
    :args {:tag {:value "input"}
-          :attrs {:value {:type "password" :name "password" :placeholder "password" :class "grant-input"}}}}
+          :attrs {:value {:type "password" :name "password" :placeholder "password" :class "grant-input" :required true}}}}
 
   {:name :_user-input-org
    :parent :hiccup
    :args {:tag {:value "input"}
-          :attrs {:value {:type "text" :name "org" :placeholder "org" :class "grant-input"}}}}
+          :attrs {:value {:type "text" :name "org" :placeholder "org" :class "grant-input" :required true}}}}
 
   {:name :_user-create-btn
    :parent :hiccup
    :args {:tag {:value "button"}
-          :attrs {:value {:type "button" :data-act "create-user" :class "grant-create-btn"}}
+          :attrs {:value {:type "submit" :class "grant-create-btn"}}
           :children [{:value "+ Add user"}]}}
+
+  ;; Path single-sourced: the route AND this form's hx-post both reference it.
+  {:name :_users-api-path
+   :parent :const
+   :args {:value "/api/users"}}
+
+  {:name :_users-create-form-attrs
+   :parent :assoc
+   :args {:map {:value {:class "grant-create-form"
+                        :hx-target "closest [data-users-panel]"
+                        :hx-swap "outerHTML"}}
+          :key {:value :hx-post}
+          :value :_users-api-path}}
 
   {:name :_users-create-form
    :parent :hiccup
-   :args {:tag {:value "div"}
-          :attrs {:value {:class "grant-create-form"}}
+   :args {:tag {:value "form"}
+          :attrs :_users-create-form-attrs
           :children [:_user-input-username :_user-input-password :_user-input-org :_user-create-btn]}}
 
   {:name :_users-admin-title
@@ -138,7 +169,7 @@
   {:name :_users-admin-body
    :parent :hiccup
    :args {:tag {:value "div"}
-          :attrs {:value {:class "grants-admin"}}
+          :attrs {:value {:class "grants-admin" :data-users-panel "1"}}
           :children [:_users-admin-title :_users-safe :_users-create-form]}}
 
   {:name :_users-admin-html
@@ -190,20 +221,17 @@
           :password :_user-create-password
           :org :_user-create-org}}
 
-  {:name :_user-create-id
-   :parent :get
-   :args {:coll :_user-create-do :key {:value :id} :default {:value ""}}}
-
-  {:name :_user-create-id-text
-   :parent :to-str
-   :args {:value :_user-create-id}}
+  {:name :_user-create-then-panel
+   :description "Register the user, THEN render the refreshed panel — `:do` forces left-to-right so the panel's :list-users includes the new row. HTMX swaps this into [data-users-panel]."
+   :parent :do
+   :args {:steps [:_user-create-do :_users-admin-html]}}
 
   {:name :_user-create-handler
-   :description "Ring handler for POST /api/users — registers the user and returns its new id as text/html."
+   :description "Ring handler for POST /api/users — registers the user and returns the refreshed users panel as text/html (HTMX swap target)."
    :parent :html-ok-response
-   :args {:body :_user-create-id-text}}
+   :args {:body :_user-create-then-panel}}
 
   {:name :create-user-route
-   :description "POST /api/users — register a user from a form-encoded body (username/password/org). Auth-required; platform-only (tenant writes of :user are denied)."
+   :description "POST /api/users — register a user from a form-encoded body (username/password/org). Auth-required; platform-only. Path single-sourced via :_users-api-path (shared with the form's hx-post)."
    :parent :post
-   :args {:path "/api/users" :handler :_user-create-handler}}]}
+   :args {:path :_users-api-path :handler :_user-create-handler}}]}

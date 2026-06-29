@@ -39,7 +39,7 @@ function wireUsersAdmin(wrap) {
     if (act === 'delete-user') {
       const id = btn.dataset.userId;
       if (id && window.confirm('Delete this user?')) {
-        await authFetch('/api/entities/user/' + encodeURIComponent(id), { method: 'DELETE' });
+        await authFetch(API.api_entities_type_id('user', id), { method: 'DELETE' });
         refreshUsersAdmin(wrap);
       }
     } else if (act === 'create-user') {
@@ -48,9 +48,10 @@ function wireUsersAdmin(wrap) {
       const org = wrap.querySelector('[name="org"]')?.value.trim();
       if (username && password && org) {
         const body = new URLSearchParams({ username, password, org }).toString();
-        // api-url-drift-allow: /api/users is served by the tenancy-admin addon
-        // (route-collection seam), not the core router the drift check scans.
-        await authFetch('/api/users', {
+        // Addon route — registered in window.API by the tenancy-admin addon at
+        // boot (the panel only renders when the addon is active), so address by
+        // key, never a hardcoded path.
+        await authFetch(API.api_users, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body,

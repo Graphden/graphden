@@ -268,6 +268,11 @@ function renderAuthLock() {
 // :token for this user), then clear local + reload.
 async function logoutEverywhere() {
   if (!confirm('Sign out of all your sessions, on every device?')) return;
+  // Tenancy auth routes — only reached in multi-tenant mode (loginIsTenant).
+  // The tenancy-admin addon registers its routes in window.API at boot (same
+  // routing-graph codegen as core routes), so we address them by key — no
+  // hardcoded path. Single-tenant never reaches this branch, so the key being
+  // absent there is harmless.
   try { await authFetch(API.api_logout_all, { method: 'POST' }); } catch (_) {}
   clearAuthPassword();
   window.location.reload();

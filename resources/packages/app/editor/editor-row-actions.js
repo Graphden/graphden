@@ -482,9 +482,9 @@ registerActionHandler('set-app-handler', (btn, e, host) => {
   if (!fnId) return;
   if (!window.confirm("Set this function as your org's app handler?")) return;
   const body = new URLSearchParams({ 'fn-id': fnId }).toString();
-  // api-url-drift-allow: /api/my-app/handler is served by the tenancy-admin
-  // addon (route-collection seam), not the core router the drift check scans.
-  authFetch('/api/my-app/handler', {
+  // Addon route — registered in window.API by the tenancy-admin addon at boot
+  // (this action is addon-gated above), so address by key, not a hardcoded path.
+  authFetch(API.api_my_app_handler, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,

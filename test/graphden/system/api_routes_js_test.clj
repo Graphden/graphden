@@ -132,3 +132,21 @@
       (api-js/install-from-router! router)
       (is (not (str/includes? (api-js/read-cache) "stale")))
       (is (str/includes? (api-js/read-cache) "api_foo")))))
+
+
+(deftest cache-install-from-routers-unions-api-paths
+  (testing "install-from-routers! merges /api/* paths from EVERY router — the
+            addon's window.API contribution (route-collection seam, frontend
+            half): editor JS addresses tenancy routes by key, no hardcoded path"
+    (let [core (ring/router
+                 [["/api/branches" {:get (constantly {:status 200})}]
+                  ["/health" {:get (constantly {:status 200})}]])
+          addon (ring/router
+                  [["/api/login" {:post (constantly {:status 200})}]
+                   ["/api/grants" {:post (constantly {:status 200})}]])]
+      (api-js/install-from-routers! [core addon])
+      (let [js (api-js/read-cache)]
+        (is (str/includes? js "api_branches") "core route present")
+        (is (str/includes? js "api_login") "addon auth route merged in")
+        (is (str/includes? js "api_grants") "addon panel route merged in")
+        (is (not (str/includes? js "health")) "non-/api paths still filtered")))))

@@ -879,14 +879,32 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
      - **provisioning + my-app ✅** Мигрированы модулями `registration`
        (create-org/token/domain + set-org-handler, platform-only) и `my-app`
        (set-my-app-handler + verify-my-domain, self-serve). Убраны из core
-       `:all`; `/api/my-app/handler` (editor-row-actions.js, addon-gated)
-       помечен `api-url-drift-allow`; остальные не зовутся из editor JS.
-     *Остаётся (последнее):* auth-маршруты (login/signup/logout/logout-all)
-     ВСЁ ЕЩЁ в core `app/admin` — их editor-auth.js зовёт через `window.API.*`
-     (codegen из core `:_router`), а tenancy-router в `:_router` не входит, так
-     что перенос требует сначала перевести editor-auth.js на литералы +
-     `api-url-drift-allow` (как grants/users) + Playwright-проверку. Отдельный
-     срез. После него `app/admin` пустеет и пакет можно удалить.
+       `:all`; не зовутся из editor JS (кроме `/api/my-app/handler`).
+     - **auth ✅** login/signup/logout/logout-all мигрированы в
+       `tenancy-admin/auth`. После этого **`app/admin` удалён** (пакет пуст).
+       Single-tenant аутентификация (статичный bearer + GET `/api/auth/check`,
+       CORE-маршрут в `app/routes`) не тронута; editor зовёт auth-роуты только в
+       multi-tenant (`loginIsTenant()`).
+     - **window.API несёт и tenancy-маршруты (frontend-decoupling сохранён).**
+       НИКАКИХ хардкод-литералов/`api-url-drift-allow` в editor JS: editor-auth/
+       grants/users/row-actions адресуют tenancy-роуты через `window.API.api_*`
+       (как и core-роуты). Аддон контрибьютит свои пути в `window.API` — это
+       frontend-половина route-collection шва: `:tenancy/router-install` после
+       `:exec/api-routes-js-cache` (ig-зависимость) перегенерирует кэш из
+       `:_router ∪ tenancy-router` через новый `api-routes-js/install-from-
+       routers!`. Single-tenant: ключи tenancy отсутствуют в `window.API`, но и
+       не зовутся (panels рендерятся только при активном аддоне; auth — только
+       `loginIsTenant()`). Drift-чек не трогаем — `window.API.x` это
+       property-access, не `/api/*`-литерал, ему нечего ловить.
+     *Итог §6:* весь tenancy control-plane (панели + provisioning + my-app +
+     auth) живёт в addon-only пакете `tenancy-admin`, грузится через
+     route-collection шов И на бэке (tenancy-router), И на фронте (window.API);
+     `app/admin` больше нет; фронт авто-подхватывает tenancy-роуты из графа
+     роутинга, хардкода путей нет. Single-tenant без аддона их не имеет.
+     *Дальше (правильнее):* панели grants/users — server-rendered hiccup, но
+     POST/DELETE всё ещё через client-JS fetch; целевое — HTMX-формы
+     (`hx-post` из графа), чтобы убрать и этот JS-слой. Отдельная инициатива
+     (EDITOR_HTMX_MIGRATION_PLAN).
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;
   смешанный режим = композиция «org-scoped storage API» + «их executor».
   Polylith — опционально, не блокер.

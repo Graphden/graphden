@@ -142,13 +142,26 @@
   (atom nil))
 
 
+(defn install-from-routers!
+  "Compute the JS bundle from the UNION of several compiled routers'
+   `/api/*` paths and store it. Lets an addon contribute its OWN
+   router's routes to `window.API` — so editor JS addresses them via
+   `window.API.<key>` (no hardcoded literals) and the frontend
+   auto-adapts to whatever routes the addon's routing graph serves.
+   `routes->js-bundle` sorts + dedupes, so passing the core `:_router`
+   plus the tenancy router is safe even if they overlap."
+  [routers]
+  (let [paths (->> routers
+                   (mapcat router-paths)
+                   (filter #(str/starts-with? % "/api/")))]
+    (reset! !cache (routes->js-bundle paths))))
+
+
 (defn install-from-router!
   "Compute the JS bundle from `router` (filtering to `/api/*` paths)
    and store it in the cache. Idempotent."
   [router]
-  (let [paths (->> (router-paths router)
-                   (filter #(str/starts-with? % "/api/")))]
-    (reset! !cache (routes->js-bundle paths))))
+  (install-from-routers! [router]))
 
 
 (defn install!

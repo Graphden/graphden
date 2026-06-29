@@ -46,7 +46,12 @@
  ;; tenancy-routing singleton after :exec/context builds the registry.
  :app/packages {:extra-package-names ["tenancy-admin"]}
 
- :tenancy/router-install {:context #ig/ref :exec/context}}
+ ;; `:after` is a dependency edge, not a used arg — it forces
+ ;; `:tenancy/router-install` to run AFTER `:exec/api-routes-js-cache`, so the
+ ;; addon's window.API merge (core ∪ tenancy routes) isn't overwritten by the
+ ;; core-only cache build.
+ :tenancy/router-install {:context #ig/ref :exec/context
+                          :after #ig/ref :exec/api-routes-js-cache}}
 
 
 ;; To turn the addon from a safe no-op into real multi-tenancy, a

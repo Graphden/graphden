@@ -1,4 +1,14 @@
-{:namespace "app.admin"
+;; Auth routes (PLATFORM_PLAN §4.1) — login / signup / logout / logout-all.
+;; Migrated out of core `app/admin` into this addon-only package (route-
+;; collection seam §6); compiled into `:tenancy-router`, NOT in core `:all`.
+;; login/signup are UNAUTHENTICATED (`:post-route`); logout/logout-all are
+;; auth-required. Each `:invoke-*` base-fn calls the addon's `:user-ops` seam,
+;; so without the addon they no-op — a single-tenant editor authenticates with
+;; a static bearer + GET /api/auth/check (a CORE route in `app/routes`) and
+;; never calls these (editor-auth.js gates them behind `loginIsTenant()`).
+
+{:namespace "tenancy-admin.auth"
+ :description "Tenancy auth routes — login / signup / logout / logout-all, served via the route-collection seam."
  :fns
  [;; --- shared 401 body for a failed credential attempt (login + signup) ----
   {:name :_auth-401-body

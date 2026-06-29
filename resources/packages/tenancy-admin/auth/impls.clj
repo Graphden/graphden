@@ -1,5 +1,5 @@
-(ns graphden.packages.app.admin.impls
-  "Impls for `app.admin` base-fns — the auth seams (login / signup / logout /
+(ns graphden.packages.tenancy-admin.auth.impls
+  "Impls for the `tenancy-admin.auth` base-fns — the auth seams (login / signup / logout /
    logout-all). Each invokes the injectable `:user-ops` seam (the tenancy
    addon's account ops); core stays addon-agnostic, so without the addon they
    return nil (a single-tenant editor authenticates with a static bearer +

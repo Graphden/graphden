@@ -41,7 +41,7 @@ function wireGrantsAdmin(wrap) {
     if (act === 'delete-grant') {
       const id = btn.dataset.grantId;
       if (id && window.confirm('Delete this grant?')) {
-        await authFetch('/api/entities/grant/' + encodeURIComponent(id), { method: 'DELETE' });
+        await authFetch(API.api_entities_type_id('grant', id), { method: 'DELETE' });
         refreshGrantsAdmin(wrap);
       }
     } else if (act === 'create-grant') {
@@ -53,9 +53,10 @@ function wireGrantsAdmin(wrap) {
       const namespace = namespaceEl?.value.trim();
       if (subject && capability && namespace) {
         const body = new URLSearchParams({ subject, capability, namespace }).toString();
-        // api-url-drift-allow: /api/grants is served by the tenancy-admin addon
-        // (route-collection seam), not the core router the drift check scans.
-        await authFetch('/api/grants', {
+        // Addon route — registered in window.API by the tenancy-admin addon at
+        // boot (the panel only renders when the addon is active), so address by
+        // key, never a hardcoded path.
+        await authFetch(API.api_grants, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body,

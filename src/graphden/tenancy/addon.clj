@@ -31,6 +31,7 @@
     [graphden.auth.provider :as auth]
     [graphden.crud.type-check :as typecheck]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.system.api-routes-js :as api-routes-js]
     [graphden.system.tenancy-router :as tr]
     [graphden.tenancy.app-router :as app-router]
     [graphden.tenancy.auth :as tauth]
@@ -87,6 +88,14 @@
   (log/info "Installing tenancy control-plane router...")
   (let [router (cr/execute-by-name context "tenancy-router" {})]
     (tr/set-active-router! router)
+    ;; Frontend half of the route-collection seam: contribute the addon's
+    ;; `/api/*` routes to `window.API` so editor JS addresses them via
+    ;; `window.API.<key>` (no hardcoded literals — the frontend auto-adapts to
+    ;; the addon's routing graph). Regenerate from core `:_router` ∪ the
+    ;; tenancy router; runs AFTER `:exec/api-routes-js-cache` (ig dependency in
+    ;; addon.edn) so the core-only cache doesn't overwrite this.
+    (api-routes-js/install-from-routers!
+      [(cr/execute-by-name context "_router" {}) router])
     :installed))
 
 

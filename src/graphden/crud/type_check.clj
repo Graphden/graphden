@@ -18,11 +18,28 @@
     [clojure.string :as str]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.request :as request]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry.core :as registry]
     [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]
     [graphden.types.check :as types-check]
     [graphden.types.check.literals :as types-lit]
     [graphden.types.core :as types]))
+
+
+(defn- with-org-alias-view*
+  "Run `thunk` with the type-alias registry filtered to {public + current-org}
+   when a TENANT is in scope (§4 Risk-2 fix) — so a tenant's type-check never
+   resolves another org's same-named type. Platform / public (or single-tenant,
+   org = public) → the full global registry, unchanged. Binds the EXISTING
+   `types/*type-aliases-override*` (read-only here: check-fn-def! resolves, never
+   registers), so registration still writes the org-agnostic global."
+  [thunk]
+  (if (= (tc/current-org) tc/public-org)
+    (thunk)
+    (binding [types/*type-aliases-override*
+              (atom (cr/org-alias-snapshot tc/public-org (tc/current-org)))]
+      (thunk))))
 
 
 (defn resolve-type-fn-id
@@ -270,20 +287,22 @@
    reject + rollback. Composed fns only; type-rows / base-fns
    short-circuit (no parents → nothing to check)."
   [storage fn-id]
-  (try
-    (when-let [fn-def (reconstruct-fn-def storage fn-id)]
-      (types-check/check-fn-def! fn-def))
-    nil
-    (catch clojure.lang.ExceptionInfo e
-      ;; `.getMessage` is nullable; `str` keeps the response field a
-      ;; string instead of a JSON-`null` the client would render as
-      ;; "rejected, no reason".
-      {:reason (str (Throwable/.getMessage e))})
-    (catch Exception e
-      ;; Defensive: any unexpected error during reconstruction is
-      ;; surfaced (better than silent broken state, worse than
-      ;; nothing).
-      {:reason (str "type-check error: " (Throwable/.getMessage e))})))
+  (with-org-alias-view*
+    (fn []
+      (try
+        (when-let [fn-def (reconstruct-fn-def storage fn-id)]
+          (types-check/check-fn-def! fn-def))
+        nil
+        (catch clojure.lang.ExceptionInfo e
+          ;; `.getMessage` is nullable; `str` keeps the response field a
+          ;; string instead of a JSON-`null` the client would render as
+          ;; "rejected, no reason".
+          {:reason (str (Throwable/.getMessage e))})
+        (catch Exception e
+          ;; Defensive: any unexpected error during reconstruction is
+          ;; surfaced (better than silent broken state, worse than
+          ;; nothing).
+          {:reason (str "type-check error: " (Throwable/.getMessage e))})))))
 
 
 (defn type-check-binding-direct!
@@ -297,75 +316,77 @@
    uninformative escape hatch — type-check can't catch anything
    useful)."
   [storage entity-data binding-id]
-  (let [slot-id (or (:slot-id entity-data)
-                    (when binding-id
-                      (some-> (sp/read-entity storage :binding binding-id)
-                              :slot-id)))
-        slot (when slot-id (sp/read-entity storage :slot slot-id))
-        tfn (when (:type-fn-id slot)
-              (sp/read-entity storage :fn (:type-fn-id slot)))
-        expected (type-fn->rich-type storage tfn)
-        new-value (when (contains? entity-data :value) (:value entity-data))
-        new-ref-id (:ref-fn-id entity-data)]
-    (cond
-      ;; No expected type or :any escape hatch — skip.
-      (or (nil? expected) (= expected :any))
-      nil
+  (with-org-alias-view*
+    (fn []
+      (let [slot-id (or (:slot-id entity-data)
+                        (when binding-id
+                          (some-> (sp/read-entity storage :binding binding-id)
+                                  :slot-id)))
+            slot (when slot-id (sp/read-entity storage :slot slot-id))
+            tfn (when (:type-fn-id slot)
+                  (sp/read-entity storage :fn (:type-fn-id slot)))
+            expected (type-fn->rich-type storage tfn)
+            new-value (when (contains? entity-data :value) (:value entity-data))
+            new-ref-id (:ref-fn-id entity-data)]
+        (cond
+          ;; No expected type or :any escape hatch — skip.
+          (or (nil? expected) (= expected :any))
+          nil
 
-      ;; Value-binding case: literal vs expected.
-      (contains? entity-data :value)
-      (let [actual (or (types-lit/classify-literal new-value) :any)]
-        (when-not (or (nil? new-value) (= actual :any)
-                      (types/subtype? actual expected)
-                      (and (types/refine-type? expected)
-                           (types/subtype? actual (types/refine-base expected))
-                           (let [r (types-lit/literal-satisfies-refinement?
-                                     new-value (types/refine-constraint expected))]
-                             (or (true? r) (= :unknown r)))))
-          {:reason (str "Type mismatch on value: expected " (pr-str expected)
-                        ", got " (pr-str actual)
-                        " (value " (pr-str new-value) ")")}))
+          ;; Value-binding case: literal vs expected.
+          (contains? entity-data :value)
+          (let [actual (or (types-lit/classify-literal new-value) :any)]
+            (when-not (or (nil? new-value) (= actual :any)
+                          (types/subtype? actual expected)
+                          (and (types/refine-type? expected)
+                               (types/subtype? actual (types/refine-base expected))
+                               (let [r (types-lit/literal-satisfies-refinement?
+                                         new-value (types/refine-constraint expected))]
+                                 (or (true? r) (= :unknown r)))))
+              {:reason (str "Type mismatch on value: expected " (pr-str expected)
+                            ", got " (pr-str actual)
+                            " (value " (pr-str new-value) ")")}))
 
-      ;; Ref-binding case: bound fn's return type vs expected.
-      (some? new-ref-id)
-      (let [target-fn (sp/read-entity storage :fn new-ref-id)
-            target-name (some-> target-fn :name keyword)
-            target-info (when target-name (registry/rich-type-of target-name))
-            target-ret (or (some-> target-info :return) :any)
-            ;; Same `:any` escape on the target side — without rich-
-            ;; type info we can't reason about a freshly-created fn
-            ;; whose registry entry isn't populated yet.
-            ok? (or (= target-ret :any)
-                    (types/subtype? target-ret expected)
-                    ;; Refinement: target is base-typed, expected is
-                    ;; the refinement → need explicit validate, but a
-                    ;; lenient check passes when base subtype holds.
-                    (and (types/refine-type? expected)
-                         (types/subtype? target-ret
-                                         (types/refine-base expected)))
-                    ;; HOF-forwarding semantics: when the slot expects a
-                    ;; fn-VALUE ([:fn ...]), the ref-binding forwards the
-                    ;; target as the callable — `compile-eager`'s hof-wrap
-                    ;; turns it into a 0-arg (or single-arg) thunk that
-                    ;; closes over the caller's env. The CALLABLE's
-                    ;; signature is `[:fn (target's args) (target's
-                    ;; return) (target's effects)]` (`make-fn-type`),
-                    ;; which is what the slot must accept. Without this
-                    ;; clause a scalar-returning fn-ref like
-                    ;; `:current-time-ms` (return `:int`) into a `[:fn {}
-                    ;; :any]` slot gets rejected even though the runtime
-                    ;; would correctly hof-wrap it. The sync-time check
-                    ;; in `types/check.clj` is already HOF-aware via
-                    ;; variadic-ignore + closure-capture strip; this
-                    ;; clause brings the API spot-check in line.
-                    (and (types/fn-type? expected)
-                         (types/subtype?
-                           (types/make-fn-type
-                             (or (:args target-info) {})
-                             target-ret
-                             (or (:effects target-info) :any))
-                           expected)))]
-        (when-not ok?
-          {:reason (str "Type mismatch on ref binding: slot expects "
-                        (pr-str expected) ", but " (pr-str target-name)
-                        " returns " (pr-str target-ret))})))))
+          ;; Ref-binding case: bound fn's return type vs expected.
+          (some? new-ref-id)
+          (let [target-fn (sp/read-entity storage :fn new-ref-id)
+                target-name (some-> target-fn :name keyword)
+                target-info (when target-name (registry/rich-type-of target-name))
+                target-ret (or (some-> target-info :return) :any)
+                ;; Same `:any` escape on the target side — without rich-
+                ;; type info we can't reason about a freshly-created fn
+                ;; whose registry entry isn't populated yet.
+                ok? (or (= target-ret :any)
+                        (types/subtype? target-ret expected)
+                        ;; Refinement: target is base-typed, expected is
+                        ;; the refinement → need explicit validate, but a
+                        ;; lenient check passes when base subtype holds.
+                        (and (types/refine-type? expected)
+                             (types/subtype? target-ret
+                                             (types/refine-base expected)))
+                        ;; HOF-forwarding semantics: when the slot expects a
+                        ;; fn-VALUE ([:fn ...]), the ref-binding forwards the
+                        ;; target as the callable — `compile-eager`'s hof-wrap
+                        ;; turns it into a 0-arg (or single-arg) thunk that
+                        ;; closes over the caller's env. The CALLABLE's
+                        ;; signature is `[:fn (target's args) (target's
+                        ;; return) (target's effects)]` (`make-fn-type`),
+                        ;; which is what the slot must accept. Without this
+                        ;; clause a scalar-returning fn-ref like
+                        ;; `:current-time-ms` (return `:int`) into a `[:fn {}
+                        ;; :any]` slot gets rejected even though the runtime
+                        ;; would correctly hof-wrap it. The sync-time check
+                        ;; in `types/check.clj` is already HOF-aware via
+                        ;; variadic-ignore + closure-capture strip; this
+                        ;; clause brings the API spot-check in line.
+                        (and (types/fn-type? expected)
+                             (types/subtype?
+                               (types/make-fn-type
+                                 (or (:args target-info) {})
+                                 target-ret
+                                 (or (:effects target-info) :any))
+                               expected)))]
+            (when-not ok?
+              {:reason (str "Type mismatch on ref binding: slot expects "
+                            (pr-str expected) ", but " (pr-str target-name)
+                            " returns " (pr-str target-ret))})))))))

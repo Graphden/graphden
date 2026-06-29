@@ -130,7 +130,13 @@
     ;; would have forced (smoke_pass_test demonstrated the cost: a
     ;; merge-on-read view tipped bootstrap from seconds into a 20-min
     ;; GC-thrashing hang).
-    graphden.executor.registry.core/*rich-types-override*])
+    graphden.executor.registry.core/*rich-types-override*
+    ;; §4 Risk-2: the per-org type-alias slice index, rebuilt (reset!) by
+    ;; `register-type-aliases-from-db!` in lockstep with the global aliases.
+    ;; Without isolation a sibling NS-thread's rebuild overwrites it mid-run and
+    ;; a tenant type-check reads another NS's per-org view. Seeded from the
+    ;; global snapshot (like rich-types) so reads work before the NS's rebuild.
+    graphden.executor.compile-runtime/*per-org-aliases-override*])
 
 
 ;; Per-var seeders. Some isolation atoms must start non-empty — the
@@ -140,7 +146,9 @@
 ;; isolation var needs a richer initial state.
 (def ^:private isolation-var-seeders
   '{graphden.executor.registry.core/*rich-types-override*
-    graphden.executor.registry.core/snapshot-for-isolation})
+    graphden.executor.registry.core/snapshot-for-isolation
+    graphden.executor.compile-runtime/*per-org-aliases-override*
+    graphden.executor.compile-runtime/per-org-snapshot-for-isolation})
 
 
 (defn- seed-for

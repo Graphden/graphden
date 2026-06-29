@@ -72,6 +72,45 @@
     :else                          :primitive))
 
 
+(defonce ^:private per-org-aliases
+  ;; §4 Risk-2 fix: `{org-id → {alias-name → body}}`, the per-org SLICE of the
+  ;; flat global registry. Rebuilt in lockstep with the global by
+  ;; `register-type-aliases-from-db!`. The global stays org-agnostic (bootstrap /
+  ;; public / platform type-checks read it); a TENANT type-check binds
+  ;; `types/*type-aliases-override*` to `org-alias-snapshot` so it sees only
+  ;; {public + own-org} aliases, never another org's same-named type.
+  (atom {}))
+
+
+(def ^:dynamic *per-org-aliases-override*
+  "Thread-local override of `per-org-aliases` for parallel-test isolation —
+   mirrors `types.core/*type-aliases-override*` (and seeded the same way via
+   `per-org-snapshot-for-isolation`). nil = the process-global."
+  nil)
+
+
+(defn- per-org-atom
+  []
+  (or *per-org-aliases-override* per-org-aliases))
+
+
+(defn per-org-snapshot-for-isolation
+  "Snapshot the current per-org index — the isolation-var seeder (so a bound
+   override starts from the global state instead of empty, matching rich-types)."
+  []
+  @(per-org-atom))
+
+
+(defn org-alias-snapshot
+  "The `{name → body}` alias view a tenant in `org` should type-check against:
+   the public slice (under `public-org`, plus any untenanted NULL-org rows) as
+   the base, overlaid by `org`'s own. `public-org` is supplied by the caller
+   (the tenancy layer) so this core fn needs no tenancy dependency."
+  [public-org org]
+  (let [m @(per-org-atom)]
+    (merge (get m nil) (get m public-org) (get m org))))
+
+
 (defn register-type-aliases-from-db!
   "Walk type-rows in the just-loaded graph and register them as type-
    aliases — the runtime equivalent of system/core's
@@ -153,9 +192,17 @@
                            (:constraint f)
 
                            nil)]
-                (when body [nm body]))))
+                (when body {:nm nm :body body :org (:org-id f)}))))
           fns)
-        {:keys [failed]} (types/register-type-aliases-batch candidates)]
+        {:keys [failed]} (types/register-type-aliases-batch (map (juxt :nm :body) candidates))
+        failed-names (set (map :nm failed))]
+    ;; Rebuild the per-org slice from the SUCCESSFULLY-registered candidates
+    ;; (reuse the already-validated bodies; no re-check). Lockstep with the
+    ;; global write above → same freshness guarantee.
+    (reset! (per-org-atom)
+            (reduce (fn [m {:keys [nm body org]}]
+                      (if (contains? failed-names nm) m (assoc-in m [org nm] body)))
+                    {} candidates))
     (doseq [{:keys [nm reason]} failed]
       (log/warn (str "register-type-aliases-from-db!: skipped " (pr-str nm)
                      " — " reason)))))

@@ -13,10 +13,36 @@
     [graphden.executor.compile.lookups]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.types.core :as types]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
+
+
+(deftest org-alias-snapshot-isolates-same-named-types-per-org
+  ;; §4 Risk-2 fix: two orgs each define a type `Foo` differently. The global
+  ;; alias registry collapses both to one `:Foo` (last-write-wins), but the
+  ;; per-org slice keeps them apart, and `org-alias-snapshot` hands each org its
+  ;; OWN `Foo` plus the public/untenanted aliases — never the other org's.
+  (binding [cr/*per-org-aliases-override* (atom {})
+            types/*type-aliases-override* (atom {})]
+    (cr/register-type-aliases-from-db!
+      {:fns [{:id "int" :name "int"}
+             {:id "text" :name "text"}
+             {:id "fa" :name "Foo" :element-fn-id "int" :org-id "A"}
+             {:id "fb" :name "Foo" :element-fn-id "text" :org-id "B"}
+             {:id "bar" :name "Bar" :element-fn-id "int"}] ; org-id nil → public/untenanted
+       :slots []
+       :fn-slots []})
+    (let [view-a (cr/org-alias-snapshot "public" "A")
+          view-b (cr/org-alias-snapshot "public" "B")]
+      (testing "each org sees ITS OWN Foo, not the other's"
+        (is (= [:list :int] (:Foo view-a)))
+        (is (= [:list :text] (:Foo view-b))))
+      (testing "the untenanted / public alias is visible to every org"
+        (is (= [:list :int] (:Bar view-a)))
+        (is (= [:list :int] (:Bar view-b)))))))
 
 
 (use-fixtures :each exec/with-clean-registry)

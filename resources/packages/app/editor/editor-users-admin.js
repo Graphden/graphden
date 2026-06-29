@@ -48,6 +48,8 @@ function wireUsersAdmin(wrap) {
       const org = wrap.querySelector('[name="org"]')?.value.trim();
       if (username && password && org) {
         const body = new URLSearchParams({ username, password, org }).toString();
+        // api-url-drift-allow: /api/users is served by the tenancy-admin addon
+        // (route-collection seam), not the core router the drift check scans.
         await authFetch('/api/users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

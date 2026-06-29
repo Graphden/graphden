@@ -871,10 +871,16 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        (panel + `:list-grants`/`:create-grant` base-fns + `POST /api/grants`),
        убрана из core `:all`; editor JS не тронут (тот же `/partials/*` путь,
        `/api/grants` помечен `api-url-drift-allow`).
+     - **users-admin ✅** Мигрирована тем же образцом (panel + `:list-users`/
+       `:invoke-create-user` + `POST /api/users`). Заодно вынесен общий
+       `tenancy-admin/router`-модуль: `:tenancy-routes` агрегирует маршруты всех
+       панелей, `:tenancy-router` компилит их (каждый модуль-панель просто
+       объявляет свои routes). `/api/users` помечен `api-url-drift-allow`.
      *Остаётся (org-admin UI):* по тому же seam-образцу мигрировать остальные
-     панели/маршруты из core `app/admin` в `tenancy-admin` (users-admin +
-     create-org/token/domain/user + login/signup/logout + my-app) —
-     механически, отдельными срезами.
+     маршруты из core `app/admin` в `tenancy-admin` (create-org/token/domain +
+     set-org-handler + my-app/* + login/signup/logout) — механически,
+     отдельными срезами. Эти НЕ имеют панели (только API/auth), так что после
+     них `app/admin` пустеет и пакет можно удалить.
 - **Фаза 4 (распил/смешанный режим):** протоколы + deps.edn git-deps;
   смешанный режим = композиция «org-scoped storage API» + «их executor».
   Polylith — опционально, не блокер.

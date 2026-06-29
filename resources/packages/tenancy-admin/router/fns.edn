@@ -1,0 +1,22 @@
+;; Route-collection seam entry (PLATFORM_PLAN §6) — the control-plane route
+;; BUNDLE for the whole tenancy-admin package + its compiled fall-through
+;; router. Each panel module (grants, users, …) defines its own routes; this
+;; module aggregates them into `:tenancy-routes` and compiles `:tenancy-router`.
+;;
+;; `:tenancy/router-install` executes `:tenancy-router` once at boot and installs
+;; the resulting Ring callable into `graphden.system.tenancy-router/active-router`;
+;; `graphden.system.branch-router/dispatch` consults it INSIDE the request-scope.
+
+{:namespace "tenancy-admin.router"
+ :description "Aggregate tenancy control-plane route list + its compiled fall-through router."
+ :fns
+ [{:name :tenancy-routes
+   :description "Every control-plane route the tenancy addon serves, compiled into `:tenancy-router`. Extend this list as more org-admin panels migrate into the package."
+   :parent :list
+   :args {:items [:partial-grants-admin :create-grant-route
+                  :partial-users-admin :create-user-route]}}
+
+  {:name :tenancy-router
+   :description "Fall-through Ring router over `:tenancy-routes` — returns nil on no-match (`:router-or-nil`) so the seam falls through to the main app router for anything that isn't a control-plane path. Installed into the active-router singleton by `:tenancy/router-install` at boot."
+   :parent :router-or-nil
+   :args {:routes :tenancy-routes}}]}

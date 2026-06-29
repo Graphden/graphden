@@ -1,9 +1,9 @@
 (ns graphden.packages.app.admin.impls
-  "Impls for `app.admin` base-fns — the org-admin users panel (§4.1) and org /
-   token / domain registration (§3.4), plus the auth seams (login/signup/logout).
-   Thin storage shims over the tenancy addon's `:user` / `:org` / `:token` /
-   `:domain` entities; they throw when the addon isn't active (no table), so
-   callers guard with `:try`. The grants panel moved to the `tenancy-admin`
+  "Impls for `app.admin` base-fns — org / token / domain registration (§3.4),
+   the self-serve my-app seams, plus the auth seams (login/signup/logout).
+   Thin storage shims over the tenancy addon's `:org` / `:token` / `:domain`
+   entities; they throw when the addon isn't active (no table), so callers
+   guard with `:try`. The grants AND users panels moved to the `tenancy-admin`
    package (route-collection seam, PLATFORM_PLAN §6)."
   (:require
     [clojure.string :as str]
@@ -20,14 +20,6 @@
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
     (str/join (map #(format "%02x" (bit-and % 0xff))
                    (java.security.MessageDigest/.digest digest (String/.getBytes s "UTF-8"))))))
-
-
-;; List users for the admin panel — strips `:password-hash` at the boundary so
-;; the hashes never reach the wire / the UI (the only non-bare projection here;
-;; it's a redaction, not composition).
-(defbase list-users
-  []
-  (mapv #(dissoc % :password-hash) (sp/query-entities (:storage ctx) :user {})))
 
 
 ;; Mint a storage-backed auth token (§3.4 #1). Stores ONLY the hash — the raw
@@ -89,16 +81,6 @@
     (seam ctx hostname)))
 
 
-;; User model (§4.1): invoke the injectable `:user-ops` seam (the tenancy
-;; addon's account ops). Core stays addon-agnostic — no seam → nil.
-;; `create-user` is operator-only (the :user write-guard denies tenants);
-;; `login` verifies credentials and returns a session token + principal.
-(defbase invoke-create-user
-  [username password org]
-  (when-let [ops (:user-ops ctx)]
-    ((:create-user ops) ctx username password org)))
-
-
 (defbase invoke-login
   [username password]
   (when-let [ops (:user-ops ctx)]
@@ -133,14 +115,12 @@
 
 
 (def impls
-  {:list-users list-users
-   :create-token create-token
+  {:create-token create-token
    :create-org create-org
    :create-domain create-domain
    :set-org-handler set-org-handler
    :invoke-set-org-handler invoke-set-org-handler
    :invoke-verify-domain invoke-verify-domain
-   :invoke-create-user invoke-create-user
    :invoke-login invoke-login
    :invoke-logout invoke-logout
    :invoke-logout-all invoke-logout-all

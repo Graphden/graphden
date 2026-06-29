@@ -247,20 +247,4 @@
   {:name :create-grant-route
    :description "POST /api/grants — create a grant from a form-encoded body (subject/capability/namespace). Auth-required."
    :parent :post
-   :args {:path "/api/grants" :handler :_grant-create-handler}}
-
-  ;; ---------------------------------------------------------------------
-  ;; ROUTE-COLLECTION SEAM ENTRY — the control-plane route bundle + its
-  ;; compiled fall-through router. `:tenancy/router-install` executes
-  ;; `:tenancy-router` once at boot and installs the resulting Ring
-  ;; callable into `graphden.system.tenancy-router/active-router`.
-  ;; ---------------------------------------------------------------------
-  {:name :tenancy-routes
-   :description "Control-plane routes served by the tenancy addon, compiled into `:tenancy-router`. Currently the grants-admin panel (GET) + its create route (POST). Extend as more org-admin panels migrate here."
-   :parent :list
-   :args {:items [:partial-grants-admin :create-grant-route]}}
-
-  {:name :tenancy-router
-   :description "Fall-through Ring router over `:tenancy-routes` — returns nil on no-match (`:router-or-nil`) so `:tenancy-routing-wrap` falls through to the main app router for anything that isn't a control-plane path. Installed into the active-router singleton by `:tenancy/router-install` at boot."
-   :parent :router-or-nil
-   :args {:routes :tenancy-routes}}]}
+   :args {:path "/api/grants" :handler :_grant-create-handler}}]}

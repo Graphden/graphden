@@ -90,7 +90,7 @@ async function authFetch(url, opts = {}) {
   const response = await fetch(url, merged);
   if (response.status === 401 && pw) {
     clearAuthPassword();
-    openAuthPopover('Password rejected — please re-enter.');
+    void openAuthPopover('Password rejected — please re-enter.'); // fire-and-forget; fields mount async
   }
   return response;
 }
@@ -163,7 +163,10 @@ async function authMutate(method, url, fields) {
   return authFetch(url, opts);
 }
 
-// Mount the lock icon + popover skeleton into #auth-mount.
+// Mount the lock icon + (empty) popover shell into #auth-mount. The lock
+// button is built synchronously so the icon appears instantly (§6.4); the
+// popover FIELDS are a graph partial (GET /partials/auth-form) mounted lazily
+// on first open — see mountAuthPopoverFields().
 function initAuthLock() {
   const mount = document.getElementById('auth-mount');
   if (!mount) return;
@@ -171,36 +174,57 @@ function initAuthLock() {
     '<button id="auth-lock-btn" class="auth-lock-btn" title="Admin login"></button>' +
     // Sign out of ALL sessions — multi-tenant + authenticated only.
     '<button id="auth-logout-all-btn" class="auth-logout-all-btn hidden" title="Sign out everywhere">⎋</button>' +
-    '<div id="auth-popover" class="auth-popover hidden">' +
-      // Username — shown only in multi-tenant (body.gd-tenancy); single-tenant
-      // is a bare admin password, so it stays hidden there.
-      '<input id="auth-username-input" type="text" placeholder="Username" autocomplete="username" class="auth-username-input hidden">' +
-      '<div class="auth-input-wrap">' +
-        '<input id="auth-password-input" type="password" placeholder="Admin password" autocomplete="off">' +
-        '<button id="auth-toggle-visibility-btn" type="button" class="auth-toggle-visibility" tabindex="-1" title="Show password">' + EYE_SVG + '</button>' +
-      '</div>' +
-      // Org — shown only in multi-tenant SIGNUP mode (a new account creates a
-      // new org; login + single-tenant keep it hidden).
-      '<input id="auth-org-input" type="text" placeholder="New org name" autocomplete="off" class="auth-username-input hidden">' +
-      '<div class="auth-popover-row">' +
-        '<button id="auth-save-btn" class="auth-popover-btn">Save</button>' +
-        '<button id="auth-cancel-btn" class="auth-popover-btn auth-popover-btn-secondary">Cancel</button>' +
-      '</div>' +
-      '<div id="auth-error" class="auth-error hidden"></div>' +
-      // Login⇄signup toggle — multi-tenant only.
-      '<a id="auth-mode-toggle" class="auth-mode-toggle hidden"></a>' +
-    '</div>';
+    '<div id="auth-popover" class="auth-popover hidden"></div>';
 
   document.getElementById('auth-lock-btn').addEventListener('click', toggleAuthAction);
   document.getElementById('auth-logout-all-btn').addEventListener('click', logoutEverywhere);
+
+  // Close popover on outside click (works whether or not the fields are mounted).
+  document.addEventListener('click', (e) => {
+    const popover = document.getElementById('auth-popover');
+    const btn = document.getElementById('auth-lock-btn');
+    if (!popover || popover.classList.contains('hidden')) return;
+    if (popover.contains(e.target) || btn.contains(e.target)) return;
+    closeAuthPopover();
+  });
+
+  renderAuthLock();
+}
+
+// Lazily fetch the popover FIELDS (graph partial, GET /partials/auth-form) into
+// #auth-popover on first open, then wire their handlers. Idempotent. Returns
+// true when the fields are mounted + wired, false on fetch failure (the popover
+// then holds an inline error). The form is a fragment so the fields stay direct
+// flex children of `.auth-popover`.
+let _authFieldsMounted = false;
+async function mountAuthPopoverFields() {
+  if (_authFieldsMounted) return true;
+  const popover = document.getElementById('auth-popover');
+  if (!popover) return false;
+  try {
+    // Unauthenticated — this IS the login form; authFetch works with or
+    // without a bearer.
+    const r = await authFetch('/partials/auth-form');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    popover.innerHTML = await r.text();
+  } catch (_) {
+    popover.innerHTML =
+      '<div class="auth-error">Couldn\'t load the login form — reload the page.</div>';
+    return false;
+  }
+  _authFieldsMounted = true;
+
+  // The eye button ships empty from the partial — fill its (toggling) SVG here.
+  const eyeBtn = document.getElementById('auth-toggle-visibility-btn');
+  if (eyeBtn) eyeBtn.innerHTML = EYE_SVG;
+
   document.getElementById('auth-save-btn').addEventListener('click', submitAuth);
   document.getElementById('auth-cancel-btn').addEventListener('click', () => closeAuthPopover());
-  document.getElementById('auth-toggle-visibility-btn').addEventListener('click', (e) => {
-    // The toggle replaces this button's innerHTML, which detaches the
-    // SVG that was the click target. If the event bubbled to the
-    // document-level "click outside the popover" handler afterwards,
-    // its `popover.contains(e.target)` check would see the now-orphan
-    // SVG and close the popover. Keep the click local.
+  eyeBtn.addEventListener('click', (e) => {
+    // The toggle replaces this button's innerHTML, which detaches the SVG that
+    // was the click target. If the event bubbled to the document-level "click
+    // outside the popover" handler afterwards, its `popover.contains(e.target)`
+    // check would see the now-orphan SVG and close the popover. Keep it local.
     e.stopPropagation();
     togglePasswordVisibility();
   });
@@ -222,17 +246,7 @@ function initAuthLock() {
     applyAuthMode();
     document.getElementById('auth-username-input')?.focus();
   });
-
-  // Close popover on outside click.
-  document.addEventListener('click', (e) => {
-    const popover = document.getElementById('auth-popover');
-    const btn = document.getElementById('auth-lock-btn');
-    if (!popover || popover.classList.contains('hidden')) return;
-    if (popover.contains(e.target) || btn.contains(e.target)) return;
-    closeAuthPopover();
-  });
-
-  renderAuthLock();
+  return true;
 }
 
 // Eye-toggle in the password input — flip between `type="password"`
@@ -296,13 +310,20 @@ async function toggleAuthAction() {
       clearAuthPassword();
     }
   } else {
-    openAuthPopover();
+    await openAuthPopover();
   }
 }
 
-function openAuthPopover(errorMsg) {
+async function openAuthPopover(errorMsg) {
   const popover = document.getElementById('auth-popover');
   if (!popover) return;
+  // Fields are a graph partial mounted on first open; if the fetch fails, show
+  // the popover anyway so its inline error is visible.
+  if (!(await mountAuthPopoverFields())) {
+    popover.classList.remove('hidden');
+    positionAuthPopover();
+    return;
+  }
   popover.classList.remove('hidden');
   // Place at viewport coords BEFORE focusing the input so the
   // browser doesn't try to scroll the sidebar to reveal an

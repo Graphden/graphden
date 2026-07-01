@@ -569,6 +569,86 @@
    :parent :html-ok-response
    :args {:body :_partial-effect-html}}
 
+  ;; =====================================================================
+  ;; AUTH-FORM PARTIAL (graph-first §6-#2) — GET /partials/auth-form
+  ;; (UNAUTHENTICATED: it IS the login form, fetched before you have a
+  ;; session). The popover FIELDS live in the graph; editor-auth.js keeps
+  ;; the lock button (built synchronously, instant — §6.4), mounts these
+  ;; fields lazily into `#auth-popover` on first open, and owns the
+  ;; interactive lifecycle (single/multi-tenant mode-toggle = client state,
+  ;; eye-toggle, submit-dispatch, positioning, dismissal). Full form for
+  ;; BOTH modes; JS hides username/org per mode. The eye button is left
+  ;; empty — JS fills its SVG (it toggles). Rendered as a `:list` FRAGMENT
+  ;; (no wrapper) so the fields stay direct flex children of `.auth-popover`.
+  ;; =====================================================================
+  {:name :_auth-username-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:id "auth-username-input" :type "text" :placeholder "Username"
+                          :autocomplete "username" :class "auth-username-input hidden"}}}}
+
+  {:name :_auth-password-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:id "auth-password-input" :type "password" :placeholder "Admin password"
+                          :autocomplete "off"}}}}
+
+  {:name :_auth-eye-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "auth-toggle-visibility-btn" :type "button"
+                          :class "auth-toggle-visibility" :tabindex "-1" :title "Show password"}}}}
+
+  {:name :_auth-input-wrap
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "auth-input-wrap"}}
+          :children [:_auth-password-input :_auth-eye-btn]}}
+
+  {:name :_auth-org-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:id "auth-org-input" :type "text" :placeholder "New org name"
+                          :autocomplete "off" :class "auth-username-input hidden"}}}}
+
+  {:name :_auth-save-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs {:value {:id "auth-save-btn" :class "auth-popover-btn"}}
+          :children [{:value "Save"}]}}
+
+  {:name :_auth-cancel-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "auth-cancel-btn" :class "auth-popover-btn auth-popover-btn-secondary"}}
+          :children [{:value "Cancel"}]}}
+
+  {:name :_auth-popover-row
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "auth-popover-row"}}
+          :children [:_auth-save-btn :_auth-cancel-btn]}}
+
+  {:name :_auth-error
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:id "auth-error" :class "auth-error hidden"}}}}
+
+  {:name :_auth-mode-toggle
+   :parent :hiccup
+   :args {:tag {:value "a"} :attrs {:value {:id "auth-mode-toggle" :class "auth-mode-toggle hidden"}}}}
+
+  {:name :_auth-form-fields
+   :description "The auth popover fields as a fragment (rendered directly into `#auth-popover`, staying direct flex children)."
+   :parent :list
+   :args {:items [:_auth-username-input :_auth-input-wrap :_auth-org-input
+                  :_auth-popover-row :_auth-error :_auth-mode-toggle]}}
+
+  {:name :_auth-form-html
+   :parent :render-hiccup
+   :args {:hiccup :_auth-form-fields}}
+
+  {:name :_partial-auth-form-handler
+   :description "Ring handler for GET /partials/auth-form — the login/signup popover fields as text/html. Unauthenticated (it IS the login form). editor-auth.js mounts it into #auth-popover on first open."
+   :parent :html-ok-response
+   :args {:body :_auth-form-html}}
+
   ;; ---------------------------------------------------------------------
   ;; row-actions popover content. Phase A1 of the HTMX migration
   ;; (docs/EDITOR_HTMX_MIGRATION_PLAN.md) — server-renders the

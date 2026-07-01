@@ -97,6 +97,12 @@
    :args {:path "/partials/effect" :handler :_partial-effect-handler}
    :expects-effects #{}}                      ; pure lookup over a literal map
 
+  {:name :partial-auth-form
+   :description "GET /partials/auth-form — the login/signup popover fields as text/html. UNAUTHENTICATED (it IS the login form). editor-auth.js mounts it into #auth-popover on first open + owns the interactive lifecycle."
+   :parent :get-route
+   :args {:path "/partials/auth-form" :handler :_partial-auth-form-handler}
+   :expects-effects #{}}                      ; pure static form markup
+
   {:name :partial-fn-versions
    :description "GET /partials/fn-versions?fn-id=X&current-branch=Y&title=Z — popover hiccup for one fn's version history, served as `text/html`. Reads from the same `:list-fn-versions` data chain `/api/fns/:id/versions` uses; the partial is the HTML projection of that JSON."
    :parent :get-auth-required

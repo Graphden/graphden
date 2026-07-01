@@ -34,6 +34,8 @@
                   :partial-branch-popover
                   :partial-service-popover
                   :partial-secrets-panel
+                  :partial-secret-create-form
+                  :partial-secret-rotate-form
                   :partial-row-actions
                   :demo-contact
                   :health

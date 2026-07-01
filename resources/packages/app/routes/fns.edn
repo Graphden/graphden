@@ -163,6 +163,16 @@
    :parent :get-auth-required
    :args {:path "/partials/secrets-panel" :handler :_partial-secrets-panel-handler}}
 
+  {:name :partial-secret-create-form
+   :description "GET /partials/secret-create-form — the New-secret form markup (graph-first §6-#2). editor-secrets.js mounts it into the popover and owns the lifecycle. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/secret-create-form" :handler :_partial-secret-create-form-handler}}
+
+  {:name :partial-secret-rotate-form
+   :description "GET /partials/secret-rotate-form?name=&path= — the Rotate-secret form markup (title from query params; VALUE entered client-side). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/secret-rotate-form" :handler :_partial-secret-rotate-form-handler}}
+
   {:name :partial-row-actions
    :description "GET /partials/row-actions?fn-id=X&context=col-header[&show-open=false] — server-rendered per-row action buttons (ns / i / ↗ for col-header; cell / use-site-arg / root-row contexts added in subsequent migration phases). Public read-only route — write actions re-check `isAuthenticated()` client-side in the row-actions dispatcher (`editor-row-actions.js` bindRowActionsDispatch). Phase A1 of the HTMX migration plan."
    :parent :get-route

@@ -80,6 +80,44 @@
 
 
 ;; =============================================================================
+;; GET /partials/secret-create-form + /partials/secret-rotate-form
+;; (graph-first §6-#2 — the popover form markup moved to the graph; JS mounts
+;; it and owns the lifecycle. These assert the fn-defs render the fields the
+;; JS querySelectors expect.)
+;; =============================================================================
+
+(deftest partial-secret-create-form-handler-renders-the-form-test
+  (testing "GET /partials/secret-create-form returns the New-secret form markup"
+    (let [response (via :_partial-secret-create-form-handler
+                        {:uri "/partials/secret-create-form"
+                         :request-method :get
+                         :headers {}})
+          body (str (:body response))]
+      (is (= 200 (:status response)))
+      (is (str/includes? body "New secret"))
+      (is (str/includes? body "name=\"name\""))
+      (is (str/includes? body "name=\"path\""))
+      (is (str/includes? body "name=\"value\""))
+      (is (str/includes? body "data-act=\"pick-ns\""))
+      (is (str/includes? body "data-act=\"submit\"")))))
+
+
+(deftest partial-secret-rotate-form-handler-renders-title-from-params-test
+  (testing "GET /partials/secret-rotate-form?name=&path= renders the rotate form + title from the query params"
+    (let [response (via :_partial-secret-rotate-form-handler
+                        {:uri "/partials/secret-rotate-form"
+                         :request-method :get
+                         :query-string "name=db-pw&path=kv/db"
+                         :headers {}})
+          body (str (:body response))]
+      (is (= 200 (:status response)))
+      (is (str/includes? body "Rotate db-pw"))
+      (is (str/includes? body "Path: kv/db"))
+      (is (str/includes? body "name=\"value\""))
+      (is (str/includes? body "data-act=\"submit\"")))))
+
+
+;; =============================================================================
 ;; GET /api/services
 ;; =============================================================================
 ;;

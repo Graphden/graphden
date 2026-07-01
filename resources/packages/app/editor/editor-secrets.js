@@ -257,40 +257,28 @@ function closeActivePopover() {
   }
 }
 
-function openCreateSecretForm(anchor) {
+async function openCreateSecretForm(anchor) {
   closeActivePopover();
   const pop = document.createElement('div');
   pop.className = 'popover secrets-popover';
   pop.dataset.popover = 'create-secret';
-
-  pop.innerHTML = `
-    <div class="popover-title">New secret</div>
-    <label class="popover-label">Name
-      <input type="text" name="name" autocomplete="off" />
-    </label>
-    <label class="popover-label">Namespace
-      <button type="button" class="secrets-ns-chip" data-act="pick-ns">(root)</button>
-    </label>
-    <label class="popover-label">Path
-      <input type="text" name="path" autocomplete="off"
-             placeholder="e.g. user-db/password" />
-    </label>
-    <label class="popover-label">Value
-      <input type="password" name="value" autocomplete="new-password" />
-    </label>
-    <label class="popover-label">Description <span class="muted">(optional)</span>
-      <input type="text" name="description" autocomplete="off" />
-    </label>
-    <div class="popover-error" hidden></div>
-    <div class="popover-buttons">
-      <button type="button" data-act="cancel">Cancel</button>
-      <button type="button" data-act="submit" class="primary">Create</button>
-    </div>
-  `;
   document.body.appendChild(pop);
   _activePopover = pop;
-  anchorBelowClamped(pop, anchor);
   installPopoverDismiss(pop, closeActivePopover);
+
+  // Form markup lives in the graph (GET /partials/secret-create-form); the
+  // client owns only the lifecycle below — ns-picker, keystroke path auto-fill,
+  // submit + error + multi-refresh (graph-ui §6-#2 / §6.3-§6.4 exceptions).
+  try {
+    const r = await authFetch('/partials/secret-create-form');
+    if (pop !== _activePopover) return; // dismissed while loading
+    pop.innerHTML = await r.text();
+  } catch (_) {
+    pop.innerHTML = '<div class="popover-error">Failed to load form.</div>';
+    anchorBelowClamped(pop, anchor);
+    return;
+  }
+  anchorBelowClamped(pop, anchor);
 
   const nameInput = pop.querySelector('input[name="name"]');
   const pathInput = pop.querySelector('input[name="path"]');
@@ -374,28 +362,29 @@ function openCreateSecretForm(anchor) {
 // ROTATE FORM
 // ============================================================================
 
-function openRotateSecretForm(anchor, secret) {
+async function openRotateSecretForm(anchor, secret) {
   closeActivePopover();
   const pop = document.createElement('div');
   pop.className = 'popover secrets-popover';
   pop.dataset.popover = 'rotate-secret';
-
-  pop.innerHTML = `
-    <div class="popover-title">Rotate ${escapeHTML(secret.name)}</div>
-    <div class="muted">Path: ${escapeHTML(secret.path || '')}</div>
-    <label class="popover-label">New value
-      <input type="password" name="value" autocomplete="new-password" />
-    </label>
-    <div class="popover-error" hidden></div>
-    <div class="popover-buttons">
-      <button type="button" data-act="cancel">Cancel</button>
-      <button type="button" data-act="submit" class="primary">Rotate</button>
-    </div>
-  `;
   document.body.appendChild(pop);
   _activePopover = pop;
-  anchorBelowClamped(pop, anchor);
   installPopoverDismiss(pop, closeActivePopover);
+
+  // Form markup (incl. the name/path title, escaped by render-hiccup) lives in
+  // the graph; the secret VALUE is entered client-side and only submitted
+  // (§6.3). JS owns submit + refresh below.
+  const q = new URLSearchParams({ name: secret.name || '', path: secret.path || '' });
+  try {
+    const r = await authFetch('/partials/secret-rotate-form?' + q.toString());
+    if (pop !== _activePopover) return; // dismissed while loading
+    pop.innerHTML = await r.text();
+  } catch (_) {
+    pop.innerHTML = '<div class="popover-error">Failed to load form.</div>';
+    anchorBelowClamped(pop, anchor);
+    return;
+  }
+  anchorBelowClamped(pop, anchor);
 
   const valueInput = pop.querySelector('input[name="value"]');
   const errEl = pop.querySelector('.popover-error');
@@ -470,15 +459,3 @@ async function deleteSecretConfirm(secret) {
 }
 
 
-// ============================================================================
-// UTIL
-// ============================================================================
-
-function escapeHTML(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}

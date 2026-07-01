@@ -884,7 +884,11 @@ default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Ко
        `tenancy-admin/auth`. После этого **`app/admin` удалён** (пакет пуст).
        Single-tenant аутентификация (статичный bearer + GET `/api/auth/check`,
        CORE-маршрут в `app/routes`) не тронута; editor зовёт auth-роуты только в
-       multi-tenant (`loginIsTenant()`).
+       multi-tenant (`loginIsTenant()`). Auth-хендлеры потребляют платформенные
+       response-шаблоны `:text-unauthorized-response` (401) и
+       `:text-too-many-requests-response` (429) из `web.response` — они остаются
+       переиспользуемым HTTP-словарём в core, хоть сейчас их зовёт только аддон
+       (иначе core-only reachability-аудит помечает их «unreachable»).
      - **window.API несёт и tenancy-маршруты (frontend-decoupling сохранён).**
        НИКАКИХ хардкод-литералов/`api-url-drift-allow` в editor JS: editor-auth/
        grants/users/row-actions адресуют tenancy-роуты через `window.API.api_*`

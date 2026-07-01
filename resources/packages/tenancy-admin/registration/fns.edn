@@ -159,7 +159,7 @@
   {:name :set-org-handler
    :description "Set an :org's :handler-fn-id (the app-router executes it for that org's subdomain). Reads the tenancy addon's :org entity; throws if absent."
    :args {:name {:type :text :description "Org slug."}
-          :handler-fn-id {:type :text :description "Fn-id (UUID) of the org's app handler."}}
+          :handler-fn-id {:type :text :description "Fn-id of the org's app handler — arrives as a string from the form body and is parsed to a UUID at write time (already-UUID values pass through)."}}
    :return-type :nullable-keyword-map
    :effects #{:db}}
 

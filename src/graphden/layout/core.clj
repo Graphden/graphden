@@ -46,7 +46,8 @@
 
 
 (defn find-root-node
-  "Find root node (no incoming edges)."
+  "Find the root node (no incoming edges), or nil if none exists (empty graph
+   or a pure cycle) — callers must nil-check."
   [nodes edges]
   (let [has-parent (set (map #(get-in % [:data :target]) edges))]
     (first (filter #(not (contains? has-parent (get-in % [:data :id]))) nodes))))

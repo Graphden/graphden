@@ -63,6 +63,10 @@ function fnRichInfo(f) {
   };
 }
 
+// graph-first-exception: the candidate list is filtered + rendered from the
+// in-memory `graphData.fns` cache (+ type-compatibility checks) and must appear
+// instantly on click; a GET /partials/* would add a ~30ms round-trip per open
+// AND move the client-only type-filter to the server (§6.1 perf).
 function openFnPicker(opts) {
   closeFnPicker();
   if (!opts?.anchorEl) return;

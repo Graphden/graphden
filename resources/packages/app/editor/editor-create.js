@@ -50,6 +50,10 @@ async function putEntity(type, id, fields) {
 // return a Promise — while pending the row is disabled. `onCancel()`
 // is called when user hits Escape, clicks cancel, or blurs (without
 // committing). `initialValue` pre-fills the input.
+// graph-first-exception: an inline single text input that must appear the
+// instant the user clicks "+" (§6.4 speed) — a partial fetch to render one
+// field would make the create gesture feel laggy. The SUBMIT already POSTs to
+// the server (POST /api/entities); only the transient input row is client-built.
 function buildInlineInputRow({ placeholder, indent, initialValue, onSubmit, onCancel }) {
   const row = document.createElement('div');
   row.className = 'inline-input-row';

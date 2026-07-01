@@ -25,6 +25,10 @@ function closeNamespacePicker() {
   }
 }
 
+// graph-first-exception: the namespace tree is walked + rendered from the
+// in-memory `graphData.namespaces` cache and must appear instantly on click; a
+// server partial would add a round-trip per open for data the client already
+// holds (§6.1 perf).
 function openNamespacePicker(opts) {
   closeNamespacePicker();
   if (!opts?.anchorEl) return;

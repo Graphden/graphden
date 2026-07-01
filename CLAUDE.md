@@ -209,7 +209,7 @@ The editor frontend is split into modules for better maintainability:
 | File | Purpose |
 |------|---------|
 | `editor-state.js` | Global variables, constants, `BUILD_HASH` placeholder |
-| `editor-popover-base.js` | Shared singleton-popover scaffolding — `anchorBelowClamped` viewport-clamped positioner + `installPopoverDismiss` outside-pointerdown/Esc handler |
+| `web/runtime/graphden-popover.js` | Platform-shared popover primitives (NOT editor-specific) — `anchorBelowClamped` viewport-clamped positioner + `installPopoverDismiss` outside-pointerdown/Esc handler. Pure DOM (no cy/graphData/editor-state); bundled into BOTH the editor bundle and the standalone `/assets/graphden-runtime.js` (see `:_graphden-runtime-js-paths`) so user-composed pages can build info/form popovers too. Extracted from the former `editor-popover-base.js`. |
 | `editor-busy.js` | Visible feedback for multi-step user actions (reparent / extend / delete cascades) — `withBusy(opKey, label, fn)` helper + bottom-centre banner |
 | `editor-prefs.js` | Theme + sidebar-collapsed prefs (localStorage) |
 | `editor-auth.js` | `authFetch`, `isAuthenticated`, login popover |
@@ -253,7 +253,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → popover-base → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → runtime → actions-builtin → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → secrets → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → graphden-popover (web/runtime) → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → literal-types → value-form → widget-rating → tooltips → icons → runtime → actions-builtin → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → secrets → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 

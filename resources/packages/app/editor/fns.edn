@@ -23,7 +23,7 @@
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
-                  "packages/app/editor/editor-popover-base.js"
+                  "packages/web/runtime/graphden-popover.js"
                   "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"
                   "packages/app/editor/editor-auth.js"
@@ -353,11 +353,12 @@
   ;; subscriptions that crash a stripped-down page).
   {:name :_graphden-runtime-js-paths
    :parent :const
-   :args {:value ["packages/web/runtime/graphden-runtime.js"
+   :args {:value ["packages/web/runtime/graphden-popover.js"
+                  "packages/web/runtime/graphden-runtime.js"
                   "packages/web/runtime/graphden-actions-builtin.js"]}}
 
   {:name :_graphden-runtime-js-body
-   :description "Concatenated `graphden-runtime.js` + `graphden-actions-builtin.js` (in `web/runtime/`) — the platform JS primitives graph-composed pages need (action dispatch + built-in navigate / submit-form / custom handlers)."
+   :description "Concatenated `graphden-popover.js` + `graphden-runtime.js` + `graphden-actions-builtin.js` (in `web/runtime/`) — the platform JS primitives graph-composed pages need (popover positioning + dismiss, action dispatch + built-in navigate / submit-form / custom handlers)."
    :parent :concat-resources
    :return-type :text
    :args {:paths :_graphden-runtime-js-paths}}

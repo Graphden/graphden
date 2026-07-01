@@ -70,7 +70,7 @@
    :args {:path "/assets/api-routes.js" :handler :_api-routes-js-handler}}                   ; reads classpath JS bundle
 
   {:name :graphden-runtime-js-asset
-   :description "GET /assets/graphden-runtime.js — minimal runtime bundle (graphden-popover.js + graphden-runtime.js + graphden-actions-builtin.js) for user-built pages that don't host the editor canvas: popover positioning/dismiss + action dispatch + built-in handlers. Same 1-year `immutable` cache as editor.js."
+   :description "GET /assets/graphden-runtime.js — runtime bundle (graphden-popover.js + graphden-forms.js + graphden-runtime.js + graphden-actions-builtin.js) for user-built pages that don't host the editor canvas: popover positioning/dismiss + hiccup form render/collect/fill/widgets + action dispatch + built-in handlers. Same 1-year `immutable` cache as editor.js."
    :parent :get-route
    :args {:path "/assets/graphden-runtime.js" :handler :_graphden-runtime-js-handler}
    :expects-effects #{:io}}

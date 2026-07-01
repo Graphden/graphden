@@ -34,6 +34,7 @@
                   "packages/app/editor/editor-data.js"
                   "packages/app/editor/editor-layout.js"
                   "packages/app/editor/editor-literal-types.js"
+                  "packages/web/runtime/graphden-forms.js"
                   "packages/app/editor/editor-value-form.js"
                   "packages/app/editor/editor-widget-rating.js"
                   "packages/app/editor/editor-tooltips.js"
@@ -354,11 +355,12 @@
   {:name :_graphden-runtime-js-paths
    :parent :const
    :args {:value ["packages/web/runtime/graphden-popover.js"
+                  "packages/web/runtime/graphden-forms.js"
                   "packages/web/runtime/graphden-runtime.js"
                   "packages/web/runtime/graphden-actions-builtin.js"]}}
 
   {:name :_graphden-runtime-js-body
-   :description "Concatenated `graphden-popover.js` + `graphden-runtime.js` + `graphden-actions-builtin.js` (in `web/runtime/`) — the platform JS primitives graph-composed pages need (popover positioning + dismiss, action dispatch + built-in navigate / submit-form / custom handlers)."
+   :description "Concatenated `graphden-popover.js` + `graphden-forms.js` + `graphden-runtime.js` + `graphden-actions-builtin.js` (in `web/runtime/`) — the platform JS primitives graph-composed pages need (popover positioning + dismiss; hiccup form render / collect / fill / widgets; action dispatch + built-in navigate / submit-form / custom handlers)."
    :parent :concat-resources
    :return-type :text
    :args {:paths :_graphden-runtime-js-paths}}

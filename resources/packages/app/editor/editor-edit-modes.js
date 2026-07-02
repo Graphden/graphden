@@ -217,9 +217,11 @@ function enterArgValueEditMode(arg, anchorEl) {
       return saveFormValue(arg, control);
     },
     // Full refresh, not `renderGraph` — a value change alters binding/
-    // item rows, leaving `lookups` stale; `initGraph` re-fetches
-    // entities and rebuilds it.
-    onSaved() { if (typeof initGraph === 'function') initGraph(); },
+    // item rows, leaving `lookups` stale. `loadGraphData` re-fetches the
+    // index + subtree + rich-types (enough to reflect the value + any
+    // inferred-type shift) WITHOUT `initGraph`'s value-kinds/services
+    // re-fetch + cytoscape re-init.
+    onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); },
     // Delete drops the binding so the slot reverts to a free-arg
     // placeholder — the single inline path for switching a bound
     // literal to anything else.
@@ -1105,7 +1107,10 @@ async function postSequenceAppend(fnId, body) {
       body: JSON.stringify(body)
     });
     if (r?.ok) {
-      if (typeof initGraph === 'function') initGraph();
+      // Sequence edits change binding-list-item rows, not fn structure/
+      // value-kinds — the lighter `loadGraphData` (index + subtree +
+      // rich-types) reflects them without the `initGraph` cytoscape re-init.
+      if (typeof loadGraphData === 'function') loadGraphData();
       return true;
     }
   } catch (_) {}
@@ -1118,7 +1123,7 @@ async function removeSequenceItem(itemId) {
     const r = await authMutate('DELETE',
                                API.api_sequence_item_item_id(itemId));
     if (r?.ok) {
-      if (typeof initGraph === 'function') initGraph();
+      if (typeof loadGraphData === 'function') loadGraphData();
       return true;
     }
   } catch (_) {}
@@ -1162,7 +1167,9 @@ async function saveArgRef(arg, refFnId) {
   // `:ref-fn-id` directly via the slot/binding API.
   if (!arg) return false;
   if ((await writeBindingFields(arg, { 'ref-fn-id': refFnId })).ok) {
-    if (typeof initGraph === 'function') initGraph();
+    // ref-fn-id change can shift the arg's inferred type — `loadGraphData`
+    // refreshes rich-types + subtree, so the chip updates without initGraph.
+    if (typeof loadGraphData === 'function') loadGraphData();
     return true;
   }
   return false;

@@ -135,8 +135,19 @@ async function loadGraphData() {
   _subtreeRootId = null;
   _subtreeFetchPromise = null;
   let r;
+  let typeResp;
   try {
-    r = await fetch(API.api_graph_entities + '?scope=index');
+    // Refresh the rich-type registry alongside the index: a mutation can
+    // change a fn's INFERRED type (literal narrowing, type-override,
+    // structural edits), and `richTypes` feeds every type-chip. Without
+    // this a post-mutation `loadGraphData` would leave chips stale — the
+    // reason callers historically fell back to the heavier `initGraph`.
+    // value-kinds / services are NOT re-fetched (they only change on
+    // type-create / service edits, which keep using `initGraph`).
+    [r, typeResp] = await Promise.all([
+      fetch(API.api_graph_entities + '?scope=index'),
+      fetch(API.api_types).catch(() => null),
+    ]);
   } catch (err) {
     // Surface network drops in DevTools — caller (post-mutation
     // refresh) silently leaves stale state on the screen otherwise.
@@ -151,6 +162,10 @@ async function loadGraphData() {
   }
   graphData = await r.json();
   lookups = buildLookups(graphData);
+  if (typeResp?.ok) {
+    try { richTypes = await typeResp.json(); }
+    catch (_) { /* keep prior richTypes rather than blanking chips */ }
+  }
   // Re-fetch subtree for the previously-rendered fn so overlays /
   // type-chips reflect the mutation. `renderGraph` would do this
   // anyway, but a fresh prime here keeps any synchronous reads of

@@ -2163,148 +2163,143 @@
   {:name :_delete-fn-used-as-parent-count
    :parent :count :args {:coll :_delete-fn-parent-owners}}
 
-  ;; Ref-bindings via versioned :binding resolution + filter on
-  ;; `:ref-fn-id` (which lives in version-data).
-  {:name :_delete-fn-ref-bindings
-   :parent :filter
-   :args {:pred :_delete-fn-ref-binding-eq?
-          :coll :_delete-fn-ref-bindings-resolved}}
-
-  ;; Version-aware reverse-ref: find bindings whose RESOLVED :ref-fn-id is
-  ;; the delete target WITHOUT resolving the whole binding table. `:ref-fn-id`
-  ;; is version-data that can diverge from the identity row (measured 9/7272
-  ;; bindings carry a branch-only ref), so an identity-only SQL filter would
-  ;; MISS those and let a still-referenced fn be deleted. Instead: gather
-  ;; candidate binding-ids from BOTH the identity table (index on ref_fn_id)
-  ;; AND the version table (branch-level refs), then resolve ONLY those
-  ;; candidates and exact-match post-resolve.
-  {:name :_delete-ref-bind-where
+  ;; =====================================================================
+  ;; Reusable version-aware reverse-ref (free arg :target-fn-id)
+  ;; =====================================================================
+  ;; `:ref-owner-bindings` / `:ref-owner-list-items` return the RESOLVED
+  ;; :binding / :binding-list-item rows whose :ref-fn-id is :target-fn-id.
+  ;; :ref-fn-id is version-data that can diverge from the identity row
+  ;; (measured 9/7272 bindings carry a branch-only ref), so candidate ids
+  ;; are gathered from BOTH the identity table (index on ref_fn_id) AND the
+  ;; version table (branch-level refs), then ONLY those are resolved +
+  ;; exact-matched — O(refs), not O(all rows). The :where is built from
+  ;; :target-fn-id (never a free slot) so the Ring request can't leak in.
+  ;; Consumers: web/crud DELETE-fn ref-check + app/secrets find-fn-usages.
+  {:name :_ref-owner-where
    :parent :assoc-empty
-   :args {:key {:value :ref-fn-id} :value :_delete-target-id}}
+   :args {:key {:value :ref-fn-id}
+          :value {:as :target-fn-id :type [:union :null :uuid]
+                  :description "Fn-id whose referrers to find."}}}
 
-  {:name :_delete-ref-get-id
+  {:name :_ref-owner-get-id
    :parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
 
-  {:name :_delete-ref-get-binding-id
+  {:name :_ref-owner-get-binding-id
    :parent :get :args {:coll {:as :item} :key {:value :binding-id} :default nil}}
 
-  {:name :_delete-ref-bind-identity-rows
-   :parent :storage-query-identities
-   :args {:entity-type {:value "binding"} :where :_delete-ref-bind-where}}
+  {:name :_ref-owner-get-item-id
+   :parent :get :args {:coll {:as :item} :key {:value :item-id} :default nil}}
 
-  {:name :_delete-ref-bind-identity-ids
-   :parent :map :args {:func :_delete-ref-get-id :coll :_delete-ref-bind-identity-rows}}
-
-  {:name :_delete-ref-bind-version-rows
-   :parent :storage-query-identities
-   :args {:entity-type {:value "binding-version"} :where :_delete-ref-bind-where}}
-
-  {:name :_delete-ref-bind-version-ids
-   :parent :map :args {:func :_delete-ref-get-binding-id :coll :_delete-ref-bind-version-rows}}
-
-  {:name :_delete-ref-bind-candidate-ids-concat
-   :parent :concat
-   :args {:colls [:_delete-ref-bind-identity-ids :_delete-ref-bind-version-ids]}}
-
-  {:name :_delete-ref-bind-candidate-ids-distinct
-   :parent :distinct :args {:coll :_delete-ref-bind-candidate-ids-concat}}
-
-  {:name :_delete-ref-bind-candidate-ids
-   :parent :vec :args {:coll :_delete-ref-bind-candidate-ids-distinct}}
-
-  {:name :_delete-ref-bind-candidates-empty?
-   :parent :empty? :args {:coll :_delete-ref-bind-candidate-ids}}
-
-  {:name :_delete-ref-bind-cand-where
-   :parent :zipmap
-   :args {:keys [{:value :id}] :vals [:_delete-ref-bind-candidate-ids]}}
-
-  {:name :_delete-ref-bind-cand-identities
-   :parent :storage-query-identities
-   :args {:entity-type {:value "binding"} :where :_delete-ref-bind-cand-where}}
-
-  {:name :_delete-ref-bind-cand-resolved
-   :parent :resolve-binding-rows
-   :args {:identities :_delete-ref-bind-cand-identities
-          :branch-chain :current-branch-chain}}
-
-  ;; Empty-guard: `where {:id []}` is rejected by the storage validator.
-  {:name :_delete-fn-ref-bindings-resolved
-   :parent :if
-   :args {:test :_delete-ref-bind-candidates-empty?
-          :then {:value []}
-          :else :_delete-ref-bind-cand-resolved}}
-
-  {:name :_delete-fn-ref-binding-eq?
+  {:name :_ref-owner-eq?
    :parent :equal?
    :args {:a {:parent :get :args {:coll {:as :item} :key {:value :ref-fn-id} :default nil}}
-          :b :_delete-target-id}}
+          :b {:as :target-fn-id}}}
+
+  ;; --- binding variant ---
+  {:name :_ref-owner-bind-id-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"} :where :_ref-owner-where}}
+
+  {:name :_ref-owner-bind-id-ids
+   :parent :map :args {:func :_ref-owner-get-id :coll :_ref-owner-bind-id-rows}}
+
+  {:name :_ref-owner-bind-ver-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-version"} :where :_ref-owner-where}}
+
+  {:name :_ref-owner-bind-ver-ids
+   :parent :map :args {:func :_ref-owner-get-binding-id :coll :_ref-owner-bind-ver-rows}}
+
+  {:name :_ref-owner-bind-concat
+   :parent :concat :args {:colls [:_ref-owner-bind-id-ids :_ref-owner-bind-ver-ids]}}
+
+  {:name :_ref-owner-bind-distinct
+   :parent :distinct :args {:coll :_ref-owner-bind-concat}}
+
+  {:name :_ref-owner-bind-cand-ids
+   :parent :vec :args {:coll :_ref-owner-bind-distinct}}
+
+  {:name :_ref-owner-bind-empty?
+   :parent :empty? :args {:coll :_ref-owner-bind-cand-ids}}
+
+  {:name :_ref-owner-bind-cand-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [:_ref-owner-bind-cand-ids]}}}}
+
+  {:name :_ref-owner-bind-cand-resolved
+   :parent :resolve-binding-rows
+   :args {:identities :_ref-owner-bind-cand-identities :branch-chain :current-branch-chain}}
+
+  {:name :_ref-owner-bind-resolved
+   :parent :if
+   :args {:test :_ref-owner-bind-empty? :then {:value []} :else :_ref-owner-bind-cand-resolved}}
+
+  {:name :ref-owner-bindings
+   :description "RESOLVED binding rows whose :ref-fn-id is :target-fn-id (version-aware; see the section header)."
+   :parent :filter
+   :args {:pred :_ref-owner-eq? :coll :_ref-owner-bind-resolved}}
+
+  ;; --- list-item variant (FK to identity is :item-id) ---
+  {:name :_ref-owner-item-id-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-list-item"} :where :_ref-owner-where}}
+
+  {:name :_ref-owner-item-id-ids
+   :parent :map :args {:func :_ref-owner-get-id :coll :_ref-owner-item-id-rows}}
+
+  {:name :_ref-owner-item-ver-rows
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-list-item-version"} :where :_ref-owner-where}}
+
+  {:name :_ref-owner-item-ver-ids
+   :parent :map :args {:func :_ref-owner-get-item-id :coll :_ref-owner-item-ver-rows}}
+
+  {:name :_ref-owner-item-concat
+   :parent :concat :args {:colls [:_ref-owner-item-id-ids :_ref-owner-item-ver-ids]}}
+
+  {:name :_ref-owner-item-distinct
+   :parent :distinct :args {:coll :_ref-owner-item-concat}}
+
+  {:name :_ref-owner-item-cand-ids
+   :parent :vec :args {:coll :_ref-owner-item-distinct}}
+
+  {:name :_ref-owner-item-empty?
+   :parent :empty? :args {:coll :_ref-owner-item-cand-ids}}
+
+  {:name :_ref-owner-item-cand-identities
+   :parent :storage-query-identities
+   :args {:entity-type {:value "binding-list-item"}
+          :where {:parent :zipmap
+                  :args {:keys [{:value :id}] :vals [:_ref-owner-item-cand-ids]}}}}
+
+  {:name :_ref-owner-item-cand-resolved
+   :parent :resolve-binding-list-item-rows
+   :args {:identities :_ref-owner-item-cand-identities :branch-chain :current-branch-chain}}
+
+  {:name :_ref-owner-item-resolved
+   :parent :if
+   :args {:test :_ref-owner-item-empty? :then {:value []} :else :_ref-owner-item-cand-resolved}}
+
+  {:name :ref-owner-list-items
+   :description "RESOLVED binding-list-item rows whose :ref-fn-id is :target-fn-id (version-aware)."
+   :parent :filter
+   :args {:pred :_ref-owner-eq? :coll :_ref-owner-item-resolved}}
+
+  ;; Bindings referencing the delete target — the shared version-aware
+  ;; primitive, bound to this delete's target id.
+  {:name :_delete-fn-ref-bindings
+   :parent :ref-owner-bindings
+   :args {:target-fn-id :_delete-target-id}}
 
   {:name :_delete-fn-ref-bindings-count
    :parent :count :args {:coll :_delete-fn-ref-bindings}}
 
-  ;; Ref-items via versioned :binding-list-item resolution.
+  ;; List-items referencing the delete target — shared primitive.
   {:name :_delete-fn-ref-items
-   :parent :filter
-   :args {:pred :_delete-fn-ref-item-eq?
-          :coll :_delete-fn-ref-items-resolved}}
-
-  ;; Same version-aware reverse-ref as bindings, for list-items. Reuses
-  ;; `:_delete-ref-bind-where` ({:ref-fn-id target}) + `:_delete-ref-get-id`;
-  ;; the version table's FK to its identity is `:item-id`.
-  {:name :_delete-ref-item-identity-rows
-   :parent :storage-query-identities
-   :args {:entity-type {:value "binding-list-item"} :where :_delete-ref-bind-where}}
-
-  {:name :_delete-ref-item-identity-ids
-   :parent :map :args {:func :_delete-ref-get-id :coll :_delete-ref-item-identity-rows}}
-
-  {:name :_delete-ref-get-item-id
-   :parent :get :args {:coll {:as :item} :key {:value :item-id} :default nil}}
-
-  {:name :_delete-ref-item-version-rows
-   :parent :storage-query-identities
-   :args {:entity-type {:value "binding-list-item-version"} :where :_delete-ref-bind-where}}
-
-  {:name :_delete-ref-item-version-ids
-   :parent :map :args {:func :_delete-ref-get-item-id :coll :_delete-ref-item-version-rows}}
-
-  {:name :_delete-ref-item-candidate-ids-concat
-   :parent :concat
-   :args {:colls [:_delete-ref-item-identity-ids :_delete-ref-item-version-ids]}}
-
-  {:name :_delete-ref-item-candidate-ids-distinct
-   :parent :distinct :args {:coll :_delete-ref-item-candidate-ids-concat}}
-
-  {:name :_delete-ref-item-candidate-ids
-   :parent :vec :args {:coll :_delete-ref-item-candidate-ids-distinct}}
-
-  {:name :_delete-ref-item-candidates-empty?
-   :parent :empty? :args {:coll :_delete-ref-item-candidate-ids}}
-
-  {:name :_delete-ref-item-cand-where
-   :parent :zipmap
-   :args {:keys [{:value :id}] :vals [:_delete-ref-item-candidate-ids]}}
-
-  {:name :_delete-ref-item-cand-identities
-   :parent :storage-query-identities
-   :args {:entity-type {:value "binding-list-item"} :where :_delete-ref-item-cand-where}}
-
-  {:name :_delete-ref-item-cand-resolved
-   :parent :resolve-binding-list-item-rows
-   :args {:identities :_delete-ref-item-cand-identities
-          :branch-chain :current-branch-chain}}
-
-  {:name :_delete-fn-ref-items-resolved
-   :parent :if
-   :args {:test :_delete-ref-item-candidates-empty?
-          :then {:value []}
-          :else :_delete-ref-item-cand-resolved}}
-
-  {:name :_delete-fn-ref-item-eq?
-   :parent :equal?
-   :args {:a {:parent :get :args {:coll {:as :item} :key {:value :ref-fn-id} :default nil}}
-          :b :_delete-target-id}}
+   :parent :ref-owner-list-items
+   :args {:target-fn-id :_delete-target-id}}
 
   {:name :_delete-fn-ref-items-count
    :parent :count :args {:coll :_delete-fn-ref-items}}

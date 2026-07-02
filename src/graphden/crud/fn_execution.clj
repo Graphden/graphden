@@ -70,7 +70,8 @@
    already-occupied port."
   [storage fn-id]
   (when-let [svc (first (sp/query-entities storage :service
-                                           {:fn-id fn-id :enabled? true}))]
+                                           {:fn-id fn-id :enabled? true}
+                                           {:limit 1}))]
     {:source :service :service-id (:id svc)}))
 
 
@@ -393,12 +394,14 @@
   ([ctx fn-version-id limit]
    (let [storage (request/require-storage ctx)
          lim (clamp-history-limit limit)]
-     (->> (sp/query-entities storage :fn-execution
-                             {:fn-version-id fn-version-id})
-          (sort-by :started-at)
-          reverse
-          (take lim)
-          vec))))
+     ;; ORDER BY + LIMIT push into SQL (:fn-execution is non-versioned,
+     ;; so the VersionedStorage decorator delegates opts straight to
+     ;; base); :fn-version-id is a :ref (indexed), so Postgres filters
+     ;; on the index and returns only the newest `lim` rows instead of
+     ;; transferring + sorting a hot fn's whole run history.
+     (vec (sp/query-entities storage :fn-execution
+                             {:fn-version-id fn-version-id}
+                             {:order-by [[:started-at :desc]] :limit lim})))))
 
 
 (defn list-executions-for-fn

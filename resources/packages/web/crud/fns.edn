@@ -2072,9 +2072,21 @@
    :args {:identities :_delete-secret-leaf-identities
           :branch-chain :current-branch-chain}}
 
+  ;; Filter the fn identities by name in SQL — resolve ~1 row, not the
+  ;; whole fn table. An empty `:where` here scanned + version-resolved
+  ;; EVERY fn (thousands) just to find the one secret-leaf. `fn.name` is
+  ;; stable across versions (measured 0 divergence) so the identity filter
+  ;; is safe; the post-resolve `:_delete-secret-leaf-name-eq?` stays as a
+  ;; defensive exact match. The where is BUILT from the (dynamic, tag-
+  ;; derived) name value, never a free slot — so the Ring request can't
+  ;; leak into it.
+  {:name :_delete-secret-leaf-where
+   :parent :assoc-empty
+   :args {:key {:value :name} :value :_delete-secret-leaf-name}}
+
   {:name :_delete-secret-leaf-identities
    :parent :storage-query-identities
-   :args {:entity-type {:value "fn"} :where {:value {}}}}
+   :args {:entity-type {:value "fn"} :where :_delete-secret-leaf-where}}
 
   {:name :_delete-secret-leaf-filtered
    :parent :filter

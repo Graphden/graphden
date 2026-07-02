@@ -7,16 +7,16 @@ How to resume the tenancy / org-admin work in a fresh session.
 1. **Pull the branch**
 
    ```bash
-   git checkout feature/org-admin-ui   # forked from feature/auth-seam
-   git log --oneline main..HEAD | head -40   # the 32 tenancy commits
+   git checkout feature/tenancy-users
+   git log --oneline main..HEAD | head -40   # the tenancy commits
    ```
 
 2. **Prime a fresh Claude Code session** — paste this:
 
    > Read `docs/TENANCY_HANDOFF.md` and `docs/PLATFORM_PLAN.md` §3.0 + §8.
-   > We're on `feature/org-admin-ui`. The tenancy authz core (§4) is DONE
-   > and tested. Continue with the grants-admin panel per the handoff's
-   > "Next task" — start with step 1 (route-collection seam).
+   > We're on `feature/tenancy-users`. The tenancy authz core (§4) AND the
+   > grants/users admin panels (§6) are DONE and tested. Continue with the
+   > remaining follow-ups (service sandbox, org-scoped fn-execution / branch).
 
 3. **Run the tenancy tests to confirm green** (kaocha trips on >3 `--focus`,
    so batch them):
@@ -53,10 +53,9 @@ Everything is unit-tested; isolation/RLS/per-namespace also have real-Postgres
 integration tests; the editor gating was Playwright-verified 3×. Plan status
 is tracked in `PLATFORM_PLAN.md` §8 (look for ✅).
 
-## Status after the org-admin-ui branch (23 commits, full suite GREEN)
+## Admin-UI work — status (full suite GREEN)
 
-Built on top of the tenancy core, all tested, `bb test` = 1694 tests / 6706
-assertions / 0 failures:
+Built on top of the tenancy core, all tested:
 
 - **fns-channel seam** — addons append fns-packages via the manifest.
 - **Grants-admin panel** (§6) — view + create + delete (below).
@@ -85,116 +84,46 @@ assertions / 0 failures:
 - **Org-scoped `:branch`** — needs a resolution-timing fix (branch resolves
   before the org binds).
 
-## Grants-admin panel (§6) — DONE (view + create + delete)
+## Grants + users admin panels (§6) — DONE (shipped as `tenancy-admin` package)
 
-Shipped in `app/admin` (core, pragmatic — see decision below):
+Shipped as a dedicated **`tenancy-admin` fns-package**
+(`resources/packages/tenancy-admin/`, deps `["core" "web" "storage"
+"app"]`, NOT in the core list). The route-collection seam this needed —
+letting an addon contribute routes into the router without redefining
+core's `:all` — was built, so the panels' routes (grants / users / auth /
+provisioning / my-app) reach the router through it, and the tenancy routes
+are carried into `window.API`. Panels are HTMX-native (no client-JS fetch
+layer).
 
-- `:list-grants` / `:create-grant` base-fns over the addon's `:grant` entity.
-- `GET /partials/grants-admin` — hiccup table (subject | capability |
-  namespace | delete), `:try`-degraded to a notice when the addon is absent.
-- `POST /api/grants` — create from a form body; delete via the generic
-  `DELETE /api/entities/grant/:id`.
-- `editor-grants-admin.js` — a "Grants" sidebar section gated on authed +
-  `graphdenTenancyActive()`; fetches the partial, wires create/delete via
-  `[data-act]` delegation.
+- `:list-grants` / `:create-grant` base-fns over the addon's `:grant`
+  entity; the users panel over `:user`.
+- `GET /partials/grants-admin` + `/partials/users` — hiccup tables,
+  `:try`-degraded to a notice when the addon is absent.
+- create via form-body POST; delete via the generic
+  `DELETE /api/entities/{grant,user}/:id`.
+- editor sidebar sections gated on authed + `graphdenTenancyActive()`.
 
 Tested: base-fn unit tests, full bootstrap + type-check sweep, degraded-GET
-integration (`grants_admin_test`), Playwright (gating + the wired handlers
-find every control). **Remaining = the addon-active happy-path** (create →
-list → delete in a live multi-tenant editor) — the user's verification, since
-it needs the addon manifest + `:grant` + real tokens.
+integration, Playwright (gating + the wired handlers find every control).
+**Remaining = the addon-active happy-path** (create → list → delete in a
+live multi-tenant editor) — the user's verification, since it needs the
+addon manifest + `:grant` + real tokens.
 
-## (historical) Next task: grants-admin panel (§6) — IN PROGRESS
+## Gotchas (when extending the panels)
 
-**Architectural decision taken (and why):** the panel lives in CORE (`app`),
-NOT a `tenancy-admin` addon package. Reason: the panel's route must sit in
-the core `:all` list (`app/route-groups/fns.edn`), and `:all` can't reference
-a conditionally-loaded addon route without breaking sync — and there's no
-route-collection seam. So the panel is in `app/admin` and DEGRADES gracefully
-(`:try`) when the addon's `:grant` entity is absent. The clean addon-package
-home is a future refactor once a route-collection seam exists (tag-based
-collection via `:fn-names-with-tag` is the likely path).
-
-**Done:** `app/admin` module + `:list-grants` base-fn (`(sp/query-entities
-(:storage ctx) :grant {})`, registered via the `impls` map, tested).
-
-**Remaining steps (each its own commit):**
-
-1. **Grants-admin partial** in `app/admin/fns.edn`. Patterns confirmed:
-   - hiccup nodes: `{:parent :hiccup :args {:tag {:value "td"} :attrs {:value
-     {:class "x"}} :children [ref-or-{:value "text"}]}}`. Inline anon
-     `{:parent …}` is NOT allowed in `:children` — extract every cell/row to a
-     named `_`-fn-def.
-   - row cells read the mapped item: `{:parent :get :args {:coll {:as :item}
-     :key {:value :subject} :default {:value ""}}}`.
-   - rows: `{:parent :map :args {:func :_grant-row :coll :list-grants}}`;
-     `tbody`'s `:children` takes the rows-list ref (hiccup flattens lists).
-   - degradation: `{:parent :try :args {:body :_grants-table :on-throw
-     {:parent :const :args {:value :_grants-disabled}}}}` — `:on-throw` is a
-     `[:fn :any]` callable, so wrap the fallback hiccup in `:const`.
-   - handler/route: `:render-hiccup` → `:html-ok-response` →
-     `:get-auth-required {:path {:value "/partials/grants-admin"} :handler …}`.
-     Mirror `app/secrets/fns.edn` lines ~528-650 + `:_partial-secrets-panel-handler`.
-2. **Register the route** — add `:partial-grants-admin` to `:all` in
-   `app/route-groups/fns.edn`.
-3. **Sync-validate** — bootstrap (`bb test` smoke or an integration test that
-   runs the full sync); the type-checker catches hiccup/`:get`/`:try` shape
-   errors. Iterate until the sweep is clean.
-4. **Editor-JS mount** — a sidebar section like `editor-secrets.js`: fetch
-   `/partials/grants-admin`, swap into a host, gate visibility on the admin
-   capability. `bb rebuild` + Playwright (cache-bust!).
-5. **Test** — degraded path (no addon → "Tenancy not active") is unit-able;
-   happy path needs the addon active (model on `grant_schema_integration_test`).
-
-## Next task (old, superseded): grants-admin panel (§6 product layer)
-
-Grants are ordinary `:grant` entities; **create/delete already work** via the
-generic `POST /api/entities/grant` + `DELETE /api/entities/grant/:id`. What's
-missing is LIST + a route + the UI. It has two architectural gaps and some
-graph-composition work — do it in this order, each its own commit:
-
-1. **Route-collection seam** (prerequisite). `:all` in
-   `app/route-groups/fns.edn` is a fixed `:list`; an addon package can't add a
-   route (redefining `:all` collides on the unique name). Add a seam so an
-   addon's routes reach the router — mirror the `:db/schema {:extensions …}`
-   pattern (`system/core.clj`) or the `:app/packages :extra-package-names`
-   one: e.g. have the router builder concat an injectable extra-routes list.
-   Test like `config_test`'s `app-packages-extra-seam`.
-
-2. **`:list-grants` base-fn** (or reuse pg-query). Simplest: a one-line base-fn
-   wrapping `(sp/query-entities storage :grant {})` so the panel doesn't have
-   to build a HoneySQL map as a fn-def literal (the JSONB-keyword roundtrip on
-   a literal `{:from :grant}` hsql is fragile — see the JSONB memories). Put it
-   in the tenancy-admin package's impls.clj.
-
-3. **tenancy-admin fns-package** — `resources/packages/tenancy-admin/`
-   (`package.edn` deps `["core" "web" "storage" "app"]`, NOT in the core list).
-   The grants-admin partial mirrors the secrets-panel
-   (`app/secrets/fns.edn` ~lines 528-650): `:list-grants` → `:map` → hiccup
-   table (subject | capability | namespace | delete `[data-act]` button) +
-   a create form → `:render-hiccup` → `:html-ok-response` →
-   `:get-auth-required` route, registered via the step-1 seam. Wire the package
-   via the manifest: `:app/packages {:extra-package-names ["tenancy-admin"]}`
-   (already documented in `resources/graphden/tenancy/addon.edn`).
-
-4. **Editor-JS mount** — a small sidebar section like `editor-secrets.js`:
-   fetch `/partials/grants-admin`, swap into a host, bind create/delete via
-   event-delegation on `[data-act]`. Gate visibility on the admin capability.
-   `bb rebuild` + Playwright-verify (cache-bust!).
-
-5. **Test** — the happy path needs the addon active (full sync + `:grant`).
-   Model on `grant_schema_integration_test.clj` (builds a storage with the
-   `:grant` entity). Also test the degraded/empty path.
-
-### Gotchas already discovered
-
-- Don't put the panel in core packages "to avoid the seam" — it would couple
-  core to `:grant` and violate the ADR. Build the route-collection seam (step
-  1) and ship it as the tenancy-admin package.
+- Panels live in the `tenancy-admin` package, NOT core — putting them in
+  core would couple core to `:grant` / `:user` and violate the ADR. The
+  route-collection seam is how addon routes reach the router; the panels'
+  routes register through it.
 - `bb test` / kaocha: `--focus` caps at ~3 before a spec error; batch.
 - The capability/workspace headers (`X-Graphden-Capabilities` /
-  `X-Graphden-Workspace`) are set by the request-scope; the editor reads them
-  in `editor-branches.js` (`window.graphdenCanWrite/Execute/InWorkspace`).
+  `X-Graphden-Workspace`) are set by the request-scope; the editor reads
+  them in `editor-branches.js` (`window.graphdenCanWrite/Execute/InWorkspace`).
+- Hiccup composition: inline anon `{:parent …}` is NOT allowed in
+  `:children` — extract every cell/row to a named `_`-fn-def. Degrade with
+  `{:parent :try … :on-throw {:parent :const :args {:value …}}}` (`:on-throw`
+  is a `[:fn :any]` callable, so the fallback hiccup must be `:const`-wrapped).
+  Mirror `app/secrets/fns.edn`.
 
 ## After the panel
 

@@ -1,6 +1,14 @@
 ## Runtime slot-id-keyed refactor (#104)
 
-Branch: `refactor/slot-id-keyed-runtime`. Forked from `dca0e740`.
+> **STATUS: SHIPPED.** Phases 1–5 landed and merged (see §8 Definition of
+> done); the hybrid slot-id + name `fa` in §4/§7 is the FINAL runtime
+> design, not a transitional state. This doc is kept as the design
+> rationale for #104 — live code points here (`compile/renames.clj`
+> `deep-free-ext-entries`, its test, `ARCHITECTURE.md § Runtime fa`). The
+> "Problem" / "Workaround today" narrative below is HISTORICAL context for
+> how the collision was closed, not an open issue.
+
+Branch: `refactor/slot-id-keyed-runtime` (merged). Forked from `dca0e740`.
 
 ### 1. Problem
 

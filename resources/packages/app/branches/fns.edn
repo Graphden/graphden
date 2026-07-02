@@ -453,7 +453,7 @@
    :parent :select-keys
    :args {:m {:as :item}
           :ks [{:value :id} {:value :name} {:value :description}
-               {:value :impl-hash} {:value :constraint}
+               {:value :constraint}
                {:value :base-fn-id} {:value :element-fn-id}
                {:value :return-type-fn-id} {:value :anonymous-hash}
                {:value :expects-effects} {:value :created-at}

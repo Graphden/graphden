@@ -77,7 +77,6 @@
       (is (= :branch (:ref-entity (:branch-id fields))))
       (is (= :text (:type (:name fields))))
       (is (true? (:nullable? (:name fields))))
-      (is (= :text (:type (:impl-hash fields))))
       (is (= :jsonb (:type (:constraint fields))))
       (is (= :uuid (:type (:base-fn-id fields))))
       (is (= :uuid (:type (:element-fn-id fields))))

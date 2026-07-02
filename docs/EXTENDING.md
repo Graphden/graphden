@@ -10,7 +10,6 @@ This document covers:
 - [Higher-Order Functions (HOFs)](#higher-order-functions-hofs)
 - [Implementing Custom Storage](#implementing-custom-storage)
 - [Graph Data Schema](#graph-data-schema)
-- [Base-fn Version Tracking (impl-hash)](#base-fn-version-tracking-impl-hash)
 
 ---
 
@@ -155,7 +154,7 @@ inherited slot:
 ```clojure
 ;; Base fn `add` has slot `a` (type :int)
 (sp/create-entity storage :fn
-                  {:name "add" :parent-ids [] :impl-hash "<sha256>"})
+                  {:name "add" :parent-ids [] :return-type-fn-id int-fn-id})
 (let [slot-a (sp/create-entity storage :slot
                                 {:name "a" :type-fn-id int-fn-id})]
   (sp/create-entity storage :fn-slot
@@ -207,32 +206,3 @@ Two callbacks act on the flag:
 The schema validators accept `:indexed?` on any non-variant field spec.
 Use it instead of a hand-written `CREATE INDEX` migration so the index
 is declarative and travels with the schema.
-
----
-
-## Base-fn Version Tracking (impl-hash)
-
-Each base-fn gets a SHA-256 `impl-hash` stored on its `fn` entity.
-Registry sync uses it to detect impl changes between runs.
-
-### What goes into the hash
-
-- `:args` (names, types, required flags)
-- `:return-type`
-- `:impl-source` — the body forms captured by the `defbase` macro
-
-### What changes the hash
-
-| Change | Hash changes? |
-|--------|---------------|
-| Function body edits | ✓ |
-| Arg type / arity change | ✓ |
-| Return type change | ✓ |
-| Whitespace, comments, map-key order | ✗ |
-
-### Reading a fn's impl-hash
-
-```clojure
-(let [base-fn (sp/read-entity storage :fn fn-id)]
-  (:impl-hash base-fn))
-```

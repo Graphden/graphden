@@ -20,7 +20,7 @@
 
    ## Role determined by field-presence (no `kind` discriminator)
 
-   | parent-ids | impl-hash | base-fn-id | element-fn-id | constraint | fn-slot rows | Role |
+   | parent-ids | return-type-fn-id | base-fn-id | element-fn-id | constraint | fn-slot rows | Role |
    |---|---|---|---|---|---|---|
    | empty | NOT NULL | NULL | NULL | NULL | * | base-fn (Clojure impl) |
    | empty | NULL | NULL | NULL | NULL | NOT empty | record-type (auto-builder) |
@@ -169,7 +169,7 @@
 ;; Refinement-type predicate. Set ⇒ this fn-row IS a refinement-type.
 ;; At runtime — implicit impl validates the single `:value` slot binding
 ;; against this constraint, throws `:refinement/violated` on miss.
-;; Mutually exclusive with `impl-hash` and `parent-ids` (enforced loader/CRUD).
+;; Mutually exclusive with `parent-ids` (enforced loader/CRUD).
 (def ^:private fn-constraint-field-uuid
   #uuid "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e90")
 
@@ -447,9 +447,6 @@
                                    :type :ref-many
                                    :ref-entity :fn
                                    :nullable? true}
-                      :impl-hash {:uuid fn-impl-hash-field-uuid
-                                  :type :text
-                                  :nullable? true}
                       :description {:uuid fn-description-field-uuid
                                     :type :text
                                     :nullable? true}
@@ -655,7 +652,12 @@
       ;; now. The legacy text column has had no readers since Phase 6c
       ;; and no writers since Phase 6d; mark it retired so the migration
       ;; framework issues DROP COLUMN on next deploy.
-      (ds/retire-field :binding :rename-to binding-rename-to-field-uuid)))
+      (ds/retire-field :binding :rename-to binding-rename-to-field-uuid)
+      ;; `fn.impl-hash` retired — the base-fn discriminator is now the
+      ;; presence of `return-type-fn-id` (a type-row never has one). The
+      ;; column was always NULL in storage; mark it retired so the
+      ;; migration framework issues DROP COLUMN on next deploy.
+      (ds/retire-field :fn :impl-hash fn-impl-hash-field-uuid)))
 
 
 (defn build-schema

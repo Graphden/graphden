@@ -113,7 +113,7 @@
     :entity-type "fn"
     :version-table :fn-version
     :version-id-field :fn-id
-    :version-data-fields [:name :impl-hash :description :constraint
+    :version-data-fields [:name :description :constraint
                           :base-fn-id :element-fn-id :return-type-fn-id
                           :anonymous-hash :expects-effects]}
    {:public-name :test-resolve-fn-slot-rows

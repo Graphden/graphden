@@ -21,7 +21,7 @@
 (defn- fn-rec
   [id nm parent-ids]
   {:kind :fn :id id :name nm :namespace-id nil
-   :parent-ids parent-ids :impl-hash nil :base-fn-id nil
+   :parent-ids parent-ids :base-fn-id nil
    :element-fn-id nil :return-type-fn-id nil
    :anonymous-hash nil :constraint nil})
 

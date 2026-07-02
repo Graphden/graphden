@@ -716,7 +716,7 @@
   (let [c (:constraint fn-row)]
     (cond
       (seq (:parent-ids fn-row))      :composed
-      (some? (:impl-hash fn-row))     :base-fn
+      (some? (:return-type-fn-id fn-row)) :base-fn
       (some? (:base-fn-id fn-row))    :refinement
       (some? (:element-fn-id fn-row)) :list
       (and (vector? c) (= :union (first c)))   :union

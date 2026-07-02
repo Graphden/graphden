@@ -191,7 +191,7 @@
 (defn root-fn
   "Walk the inheritance chain of `fn-id` and return the first ancestor
    with empty `:parent-ids` — the root that owns the slots. In the new
-   model the root is a base-fn (impl-hash set) OR a type-row (record /
+   model the root is a base-fn (return-type-fn-id set) OR a type-row (record /
    refinement / list / primitive); both have synthesised impls registered
    under their fn-name. Two-arity form takes raw `fn-map` (used when
    the caller has no lookups in hand); three-arity form takes the

@@ -49,16 +49,13 @@
 
 
 (defn compute-fn-role
-  "Mirrors `executor.compile-runtime/type-row-role`, with one tweak:
-   `impl-hash` is currently always `nil` in storage (sync uses a
-   placeholder hash impl — see `executor.composition.core/
-   compute-impl-hash`), so a base-fn looks indistinguishable from a
-   synthesised record in storage alone. We cross-reference the
-   `rich-types-registry` snapshot: if a fn-name has a non-empty
-   `:args` map and is NOT marked `:type-row?`, it's a base-fn even
-   when `impl-hash` is nil. Roles: `:composed`, `:base-fn`,
-   `:refinement`, `:list`, `:union`, `:variant`, `:fn-type`,
-   `:record`, `:primitive`."
+  "Mirrors `executor.compile-runtime/type-row-role`. The primary
+   base-fn signal is `:return-type-fn-id` presence (a real type-row
+   has none). As a belt-and-braces fallback we also cross-reference
+   the `rich-types-registry` snapshot: if a fn-name has a non-empty
+   `:args` map and is NOT marked `:type-row?`, it's a base-fn. Roles:
+   `:composed`, `:base-fn`, `:refinement`, `:list`, `:union`,
+   `:variant`, `:fn-type`, `:record`, `:primitive`."
   [fn-row has-slots? rich-snapshot]
   (let [c (:constraint fn-row)
         rich-entry (some-> (:name fn-row) keyword rich-snapshot)
@@ -67,7 +64,7 @@
                                    (seq (:args rich-entry)))]
     (cond
       (seq (:parent-ids fn-row))                 :composed
-      (or (some? (:impl-hash fn-row))
+      (or (some? (:return-type-fn-id fn-row))
           base-fn-via-registry?)                 :base-fn
       (some? (:base-fn-id fn-row))               :refinement
       (some? (:element-fn-id fn-row))            :list
@@ -163,12 +160,12 @@
 (defn- type-row?
   "Fn rows we'll surface as type-rows in the augmented snapshot:
    - refinements / lists / unions / variants (marker-bearing), OR
-   - genuine record-types (no parent-ids, no impl-hash, has fn-slots)."
+   - genuine record-types (no parent-ids, no return-type-fn-id, has fn-slots)."
   [f slots-by-fn]
   (and (:name f)
        (or (marker-type? f)
            (and (empty? (:parent-ids f))
-                (nil? (:impl-hash f))
+                (nil? (:return-type-fn-id f))
                 (seq (get slots-by-fn (:id f)))))))
 
 

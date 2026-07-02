@@ -3,8 +3,8 @@
 
    ## New slot/binding model
 
-   Base functions get synced as fn rows with `impl-hash` set,
-   accompanied by slot/fn-slot rows produced by
+   Base functions get synced as fn rows with a return-type (the
+   base-fn marker), accompanied by slot/fn-slot rows produced by
    `graphden.packages.records/parse-fn-def`. Type-rows (record /
    refinement / list) take the same path: their role is encoded in the
    fn-row's `:base-fn-id` / `:element-fn-id` / `:constraint` /
@@ -19,37 +19,10 @@
      reads from here; storage rows degrade structural types to a single
      primitive `value-kind`."
   (:require
-    [clojure.walk :as walk]
     [graphden.executor.composition.core :as composition]
     [graphden.executor.interface :as exec]
     [graphden.packages.records :as records]
     [graphden.types.core :as types]))
-
-
-;; =============================================================================
-;; Implementation Hash
-;; =============================================================================
-
-(defn- sort-maps-recursively
-  [form]
-  (walk/postwalk
-    (fn [x]
-      (if (map? x)
-        (into (sorted-map) x)
-        x))
-    form))
-
-
-(defn compute-impl-hash
-  "SHA-256 of a base function's canonical form. Detects body / args /
-   return-type drift; ignores whitespace, comments, map-key ordering."
-  [{:keys [args return-type impl-source]}]
-  (records/digest-hex
-    "SHA-256"
-    (pr-str {:args (sort-maps-recursively args)
-             :return-type return-type
-             :impl-source (when impl-source
-                            (mapv sort-maps-recursively impl-source))})))
 
 
 ;; =============================================================================

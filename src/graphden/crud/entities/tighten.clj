@@ -52,7 +52,6 @@
                          :name nil
                          :namespace-id nil
                          :parent-ids []
-                         :impl-hash nil
                          :base-fn-id nil
                          :element-fn-id nil
                          :return-type-fn-id nil

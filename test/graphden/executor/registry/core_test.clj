@@ -1,7 +1,7 @@
 (ns graphden.executor.registry.core-test
-  "Tests for `graphden.executor.registry.core` — impl-hash computation,
-   the in-memory rich-types registry, fn-def validation, and the
-   synthesised type-row impls.
+  "Tests for `graphden.executor.registry.core` — the in-memory
+   rich-types registry, fn-def validation, and the synthesised
+   type-row impls.
 
    Most of the namespace is pure; `sync-*` need a storage, so the
    shared container fixture is present for those few tests."
@@ -31,27 +31,6 @@
 
 
 (use-fixtures :once (setup/create-container-fixture))
-
-
-;; ============================================================================
-;; compute-impl-hash
-;; ============================================================================
-
-(deftest compute-impl-hash-test
-  (testing "same canonical form → same hash, regardless of map-key order"
-    (is (= (reg/compute-impl-hash {:args {:a :int :b :int}
-                                   :return-type :int
-                                   :impl-source ['(+ a b)]})
-           (reg/compute-impl-hash {:args {:b :int :a :int}
-                                   :return-type :int
-                                   :impl-source ['(+ a b)]}))))
-
-  (testing "a changed return-type / body changes the hash"
-    (let [base {:args {:a :int} :return-type :int :impl-source ['(inc a)]}]
-      (is (not= (reg/compute-impl-hash base)
-                (reg/compute-impl-hash (assoc base :return-type :text))))
-      (is (not= (reg/compute-impl-hash base)
-                (reg/compute-impl-hash (assoc base :impl-source ['(dec a)])))))))
 
 
 ;; ============================================================================

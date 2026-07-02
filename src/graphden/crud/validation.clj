@@ -449,7 +449,6 @@
             ;; `:input-stream`.
             (and nm
                  (empty? (:parent-ids f))
-                 (nil? (:impl-hash f))
                  (nil? (:base-fn-id f))
                  (nil? (:element-fn-id f))
                  (nil? (:constraint f))

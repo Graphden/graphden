@@ -160,11 +160,11 @@ async function restoreFnVersion(fnEntity, versionId) {
     + '" on branch "' + branchName + '" to the state from '
     + (target['branch-name'] || '?') + ' @ ' + shortTimestamp(target['created-at']) + '?'
     + '\n\nThis writes a new version row with the historic fn-level fields'
-    + ' (description, impl-hash, return-type, constraint, …) on the current'
+    + ' (description, return-type, constraint, …) on the current'
     + ' branch. Bindings are NOT touched — see VERSIONING.md § Subtleties.';
   if (!confirm(msg)) return;
   const payload = {};
-  for (const k of ['description', 'impl-hash', 'constraint',
+  for (const k of ['description', 'constraint',
                    'base-fn-id', 'element-fn-id', 'return-type-fn-id',
                    'anonymous-hash', 'expects-effects']) {
     if (target[k] !== undefined) payload[k] = target[k];

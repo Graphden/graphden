@@ -606,7 +606,7 @@ Even a classic forum has this: developers write the engine, admins create sectio
 
 **Graphden should support this entire chain.** Through access levels to functions and graph operations, each role sees only what they need:
 
-- Platform developer: writes base-fn in Clojure, defines `fn` entity with `impl-hash`
+- Platform developer: writes base-fn in Clojure, defines `fn` entity with a `return-type-fn-id`
 - System integrator: composes base-fns into graphs (fn-defs + bindings), configures storage and infrastructure
 - Domain builder: creates domain-specific fns from existing compositions, configures routing
 - End user: invokes functions through UI, provides runtime arguments
@@ -826,7 +826,7 @@ each of these falls out of existing mechanisms — **no protocol
 entity is added to the schema**.
 
 **Contract shape** — a **type-row** (a `fn` entity with no
-`impl-hash` and no `parent-ids`) whose slots are typed `:fn` declares
+`return-type-fn-id` and no `parent-ids`) whose slots are typed `:fn` declares
 the contract. Each `:fn`-typed slot is one abstract method; the
 slot's effective signature is the method signature.
 

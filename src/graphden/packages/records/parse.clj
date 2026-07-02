@@ -41,7 +41,6 @@
                    :name nil
                    :namespace-id nil
                    :parent-ids []
-                   :impl-hash nil
                    :base-fn-id nil
                    :element-fn-id nil
                    :return-type-fn-id nil
@@ -123,13 +122,15 @@
   [{:keys [args return-type description]
     fn-name :name ns-id :namespace} name->id]
   (let [own-id (ids/fn-id ns-id fn-name)
-        ret-id (when return-type (types/resolve-type-ref return-type name->id))
+        ;; A base-fn ALWAYS carries a return-type-fn-id — it is THE
+        ;; structural discriminator vs a record-type (which has none).
+        ;; Default to the `:any` primitive when `:return-type` is omitted.
+        ret-id (types/resolve-type-ref (or return-type :any) name->id)
         own-fn {:kind :fn
                 :id own-id
                 :name (clojure.core/name fn-name)
                 :namespace-id ns-id          ; placeholder — sync resolves to id
                 :parent-ids []
-                :impl-hash :sentinel/impl-hash    ; computed by sync from impl-source
                 :base-fn-id nil
                 :element-fn-id nil
                 :return-type-fn-id ret-id
@@ -151,7 +152,6 @@
                 :name (clojure.core/name fn-name)
                 :namespace-id ns-id
                 :parent-ids []
-                :impl-hash nil
                 :base-fn-id nil
                 :element-fn-id nil
                 :return-type-fn-id nil
@@ -180,7 +180,6 @@
       :name (clojure.core/name fn-name)
       :namespace-id ns-id
       :parent-ids []
-      :impl-hash nil
       :base-fn-id base-id
       :element-fn-id nil
       :return-type-fn-id nil
@@ -216,7 +215,6 @@
       :name (clojure.core/name fn-name)
       :namespace-id ns-id
       :parent-ids []
-      :impl-hash nil
       :base-fn-id nil
       :element-fn-id element-id
       :return-type-fn-id nil
@@ -249,7 +247,6 @@
       :name (clojure.core/name fn-name)
       :namespace-id ns-id
       :parent-ids []
-      :impl-hash nil
       :base-fn-id nil
       :element-fn-id nil
       :return-type-fn-id nil
@@ -270,7 +267,6 @@
       :name (clojure.core/name fn-name)
       :namespace-id ns-id
       :parent-ids []
-      :impl-hash nil
       :base-fn-id nil
       :element-fn-id nil
       :return-type-fn-id nil
@@ -291,7 +287,6 @@
       :name (clojure.core/name fn-name)
       :namespace-id ns-id
       :parent-ids []
-      :impl-hash nil
       :base-fn-id nil
       :element-fn-id nil
       :return-type-fn-id nil
@@ -328,7 +323,6 @@
         :name (clojure.core/name fn-name)
         :namespace-id ns-id
         :parent-ids []
-        :impl-hash nil
         :base-fn-id nil
         :element-fn-id nil
         :return-type-fn-id nil
@@ -507,8 +501,8 @@
 
 
 (defn- composed-own-fn
-  "Top-level fn-row record for a composed fn-def — no impl-hash and no
-   type-row markers (those are owned by base-fn / type-row branches
+  "Top-level fn-row record for a composed fn-def — no type-row markers
+   (those are owned by base-fn / type-row branches
    of the parser). `return-type-fn-id` may be set when the composed
    def explicitly narrows the inherited return type (e.g.
    `:return-type :ring-response-shape` on a child of `:update-in`)."
@@ -518,7 +512,6 @@
    :name (clojure.core/name fn-name)
    :namespace-id ns-id
    :parent-ids parent-ids
-   :impl-hash nil
    :base-fn-id nil
    :element-fn-id nil
    :return-type-fn-id return-type-fn-id
@@ -755,7 +748,6 @@
              :name (clojure.core/name fn-name)
              :namespace-id ns-id
              :parent-ids []
-             :impl-hash nil
              :base-fn-id nil
              :element-fn-id nil
              :return-type-fn-id nil

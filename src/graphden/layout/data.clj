@@ -160,7 +160,6 @@
                     (some-> (:type-fn-id slot) fn-by-id))
         type-kw (or (when (and eff-tfn
                                (empty? (:parent-ids eff-tfn))
-                               (nil? (:impl-hash eff-tfn))
                                (nil? (:base-fn-id eff-tfn))
                                (nil? (:element-fn-id eff-tfn))
                                (some? (:name eff-tfn)))

@@ -23,7 +23,7 @@
 
    Enum value_kind {null, bool, int, numeric, text, uuid, timestamptz, jsonb, bytes, any, fn}
 
-   Table fn {id, name, parent-id, return-type, impl-hash}
+   Table fn {id, name, parent-id, return-type}
    Table arg {id, fn-id, name, type, source-id, value, ref-id, is-fn, required}
 
    - fn: parent-id=nil for base-fn, parent-id=ref to parent fn for composed fn
@@ -49,8 +49,7 @@
       (ds/add-entity :fn (uuid)
                      {:name {:uuid (uuid) :type :text}
                       :parent-ids {:uuid (uuid) :type :ref-many :ref-entity :fn :nullable? true}
-                      :return-type {:uuid (uuid) :type :enum :enum-name :value-kind :nullable? true}
-                      :impl-hash {:uuid (uuid) :type :text :nullable? true}})
+                      :return-type {:uuid (uuid) :type :enum :enum-name :value-kind :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
       ;; arg: argument entity with all data fields

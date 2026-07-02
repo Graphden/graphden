@@ -255,7 +255,7 @@ Adding more is one `defmethod` of
 ### `:fn-version` ≠ "functional behaviour"
 
 Only the `:fn` row itself is anchored when you make a change to its
-top-level fields (name, description, impl-hash, return-type,
+top-level fields (name, description, return-type,
 constraint, anonymous-hash, expects-effects). Edits to **bindings**
 (values, refs, type-overrides, list items, fn-slot positions)
 create separate `:binding-version` / `:binding-list-item-version` /

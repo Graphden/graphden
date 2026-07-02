@@ -78,8 +78,6 @@ description: REPL-driven workflow for Graphden via the clojure MCP server. Use w
 
 `load-packages` принимает **строки** имён пакетов, не keywords, и сам в БД ничего не пишет — синк делает Integrant init-key `:exec/base-fns`. Самый надёжный способ применить правки `fns.edn` / `defbase` к запущенной системе — `(dev/reset)`: он прогонит init-keys заново, включая синк пакетов в storage.
 
-Если поменялся `impl-hash` (тело `defbase`, args, return-type) — VersionedStorage запишет новую версию автоматически при синке. Проверь через `sp/query-entities` что `impl-hash` обновился.
-
 ## 4. Проверка гипотез без правки файлов
 
 ```clojure

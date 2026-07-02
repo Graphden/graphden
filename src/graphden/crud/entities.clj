@@ -457,7 +457,6 @@
                                :name nm
                                :namespace-id ns-id
                                :parent-ids []
-                               :impl-hash nil
                                :base-fn-id nil
                                :element-fn-id nil
                                :return-type-fn-id nil
@@ -582,7 +581,6 @@
                                :name nm
                                :namespace-id ns-id
                                :parent-ids []
-                               :impl-hash nil
                                :base-fn-id nil
                                :element-fn-id elem-id
                                :return-type-fn-id nil

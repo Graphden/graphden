@@ -50,8 +50,8 @@
    `records->fn-defs` is a pure function of records, testable with no DB.
    Stored entities ARE records (same keyword keys), modulo transforms the
    storage layer owns: the codec restores JSONB on read (constraint /
-   value / effects), `impl-hash` is a real SHA (parse uses a sentinel),
-   and `namespace-id` is a UUID (parse uses the dotted path). The
+   value / effects), and `namespace-id` is a UUID (parse uses the
+   dotted path). The
    `graph->records` adapter (below) reads the live graph — resolving the
    versioned per-branch view and reversing namespace-id — and
    `export-graph` is the convenience `records->fn-defs ∘ graph->records`.
@@ -213,8 +213,8 @@
       (and (vector? c) (= :fn (first c)))
       {:fn-type [(nth c 1 {}) (nth c 2 nil)]}
 
-      ;; base-fn: has impl-hash (sentinel or real). Args from slots.
-      (:impl-hash fnr)
+      ;; base-fn: has a return-type-fn-id (type-rows never do). Args from slots.
+      (:return-type-fn-id fnr)
       (cond-> {:args (record-shape (:id fnr) ctx)}
         (:return-type-fn-id fnr)
         (assoc :return-type (id->type-ref (:return-type-fn-id fnr) ctx)))

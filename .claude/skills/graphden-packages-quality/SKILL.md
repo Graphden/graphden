@@ -589,12 +589,12 @@ curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
   | jq '.fns | map(select(.name | startswith("_secret-")))'
 
 # (b) Композированные fn-def'ы, у которых пусто parent-ids — кандидаты
-#     на type-row OR base-fn (по impl-hash отличить):
+#     на type-row OR base-fn (по return-type-fn-id отличить):
 curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
   | jq '.fns | map(select((.parent_ids == null or (.parent_ids | length == 0))
-                          and (.impl_hash == null)
+                          and (.return_type_fn_id == null)
                           and (.name != null)))'
-# → type-rows (base-fn'ы имели бы impl_hash; composed имели бы parent_ids)
+# → type-rows (base-fn'ы имели бы return_type_fn_id; composed имели бы parent_ids)
 ```
 
 ```clojure
@@ -604,7 +604,7 @@ curl -s http://localhost:8080/api/graph/entities -H "Authorization: $AUTH" \
                       {:hsql {:select [:name]
                               :from [:fn]
                               :where [:and
-                                      [:= :impl_hash nil]
+                                      [:= :return_type_fn_id nil]
                                       [:is :parent_ids nil]
                                       [:not= :name nil]]}})
 ;; → список type-row names

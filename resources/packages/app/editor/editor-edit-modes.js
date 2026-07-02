@@ -816,7 +816,7 @@ function enterArgTypeEditMode(arg, anchorEl) {
       // picker offers PRIMITIVES (`:text`, `:int`, …) AND
       // REFINEMENTS (`:non-blank-text`, `:port`, …) — both are
       // valid override targets, the only constraint is
-      // "parent-less + no impl" (rules out composed fn-defs that
+      // "parent-less" (rules out composed fn-defs that
       // happen to share a name). The earlier "primitive only"
       // filter (`!base-fn-id && !element-fn-id`) rejected
       // refinements which the picker happily listed, leaving the
@@ -825,8 +825,7 @@ function enterArgTypeEditMode(arg, anchorEl) {
         if (!newType || !graphData) return '';
         const fn = (graphData.fns || []).find(f =>
           f.name === newType
-          && (!f['parent-ids'] || f['parent-ids'].length === 0)
-          && !f['impl-hash']);
+          && (!f['parent-ids'] || f['parent-ids'].length === 0));
         return fn ? fn.id : '';
       })();
       if (!(await writeBindingFields(arg, {

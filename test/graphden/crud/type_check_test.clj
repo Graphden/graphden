@@ -25,8 +25,8 @@
 ;; ============================================================================
 
 (deftest rich-type-from-row-test
-  (let [int-row  {:id :int-id :name "int" :parent-ids [] :impl-hash nil}
-        text-row {:id :text-id :name "text" :parent-ids [] :impl-hash nil}
+  (let [int-row  {:id :int-id :name "int" :parent-ids []}
+        text-row {:id :text-id :name "text" :parent-ids []}
         fns      {:int-id int-row :text-id text-row}]
     (testing "nil row → nil"
       (is (nil? (tc/rich-type-from-row nil fns))))
@@ -75,9 +75,10 @@
       (is (some? (tc/rich-type-from-row
                    {:constraint [:variant :ok :int :err :text]} fns))))
 
-    (testing "base-fn (impl-hash set, no type role) degrades to :jsonb"
+    (testing "base-fn (return-type-fn-id set, no type role) degrades to :jsonb"
       (is (= :jsonb
-             (tc/rich-type-from-row {:name "add" :parent-ids [] :impl-hash "h"}
+             (tc/rich-type-from-row {:name "add" :parent-ids []
+                                     :return-type-fn-id :any-id}
                                     fns))))))
 
 

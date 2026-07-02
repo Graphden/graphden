@@ -27,8 +27,8 @@ purposeful set:
 - **fn** — function or type-row. Inheritance via `parent-ids`
   (many-to-many junction). A fn has different roles depending on
   which fields are set:
-  - `parent-ids` empty + `impl-hash` set → base-fn (Clojure impl)
-  - `parent-ids` empty + `impl-hash=nil` + slots/refine/list →
+  - `parent-ids` empty + `return-type-fn-id` set → base-fn (Clojure impl)
+  - `parent-ids` empty + no `return-type-fn-id` + slots/refine/list →
     type-row (record / refinement / list)
   - `parent-ids` non-empty → composed fn
   - `name=nil` → anonymous (deduped via `anonymous-hash`)
@@ -52,7 +52,7 @@ inherited slots." No runtime arg injection.
 **Example: an `add-10` that pre-fills the first number:**
 
 ```
-fn add  (base-fn, parent-ids: [], impl-hash: <hash of `+`>)
+fn add  (base-fn, parent-ids: [], return-type-fn-id: int)
 slot s-a  (name: "a", type-fn-id: int)
 slot s-b  (name: "b", type-fn-id: int)
 fn-slot {fn-id: add, slot-id: s-a, position: 0}
@@ -217,10 +217,9 @@ Storage-layer graph resolution caps walks via
 | name                text NULL (NULL → anonymous)           |
 | namespace-id        ref<ns> NULL                           |
 | parent-ids       ref-many<fn>  -- inheritance closure   |
-| impl-hash           text NULL    -- base-fn marker         |
 | base-fn-id          ref<fn> NULL -- :refine target         |
 | element-fn-id       ref<fn> NULL -- :list element type     |
-| return-type-fn-id   ref<fn> NULL                           |
+| return-type-fn-id   ref<fn> NULL -- base-fn marker         |
 | anonymous-hash      text NULL    -- dedup key              |
 | constraint          jsonb NULL   -- :refine predicate      |
 | description         text NULL                              |
@@ -303,7 +302,7 @@ Versioned entities (per `graphden.versioning.storage.resolution/entity-config`):
 
 | Entity | Version table | Versioned fields |
 |---|---|---|
-| `fn` | `fn-version` | `name`, `impl-hash`, `description`, `constraint`, `base-fn-id`, `element-fn-id`, `return-type-fn-id`, `anonymous-hash` |
+| `fn` | `fn-version` | `name`, `description`, `constraint`, `base-fn-id`, `element-fn-id`, `return-type-fn-id`, `anonymous-hash` |
 | `fn-slot` | `fn-slot-version` | `fn-id`, `slot-id`, `position` |
 | `binding` | `binding-version` | `fn-id`, `slot-id`, `value`, `ref-fn-id`, `override-kind`, `rename-to`, `type-override-fn-id`, `description`, `terminal`, `list-append`, `list-closed` |
 | `binding-list-item` | `binding-list-item-version` | `binding-id`, `position`, `value`, `ref-fn-id`, `literal` |

@@ -60,10 +60,10 @@
   (testing "parent-ids present → :composed"
     (is (= :composed (ta/compute-fn-role {:parent-ids [(random-uuid)]} false {}))))
 
-  (testing "impl-hash → :base-fn"
-    (is (= :base-fn (ta/compute-fn-role {:parent-ids [] :impl-hash "h"} false {}))))
+  (testing "return-type-fn-id → :base-fn"
+    (is (= :base-fn (ta/compute-fn-role {:parent-ids [] :return-type-fn-id (random-uuid)} false {}))))
 
-  (testing "nil impl-hash but a registry entry with args → :base-fn"
+  (testing "no return-type-fn-id but a registry entry with args → :base-fn"
     (is (= :base-fn
            (ta/compute-fn-role {:name "regfn" :parent-ids []} false
                                {:regfn {:args {:a :int}}}))))

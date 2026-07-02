@@ -109,8 +109,7 @@
 
 (defn digest-hex
   "Lower-case hex digest of `s` under `algo` (e.g. \"SHA-1\", \"SHA-256\").
-   Shared by both shape-dedup hashing here and impl-hash computation in
-   the executor registry."
+   Shared by the shape-dedup hashing here and the executor registry."
   [algo s]
   (let [digest (MessageDigest/getInstance algo)
         utf-bytes (String/.getBytes ^String s StandardCharsets/UTF_8)
@@ -168,7 +167,6 @@
            :name (name p)
            :namespace-id nil
            :parent-ids []
-           :impl-hash nil
            :base-fn-id nil
            :element-fn-id nil
            :return-type-fn-id nil

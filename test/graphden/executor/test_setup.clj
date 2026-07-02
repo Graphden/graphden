@@ -115,17 +115,17 @@
 
 
 (defn create-base-fn!
-  "Creates a base-fn row (impl-hash set, no parent-ids). Returns the
-   created fn record."
+  "Creates a base-fn row (return-type-fn-id set — THE base-fn marker —
+   no parent-ids). Defaults the return type to the `:any` primitive
+   when none is given. Returns the created fn record."
   ([storage fn-name]
    (create-base-fn! storage fn-name nil))
   ([storage fn-name return-type-keyword]
    (sp/create-entity storage :fn
                      {:name fn-name
                       :parent-ids nil
-                      :impl-hash "test-stub-hash"
-                      :return-type-fn-id (when return-type-keyword
-                                           (get primitive-fn-ids return-type-keyword))})))
+                      :return-type-fn-id (get primitive-fn-ids
+                                              (or return-type-keyword :any))})))
 
 
 (defn create-composed-fn!
@@ -153,7 +153,6 @@
                         {:id id
                          :name nil
                          :parent-ids nil
-                         :impl-hash nil
                          :anonymous-hash h
                          :constraint shape}))
     id))

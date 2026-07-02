@@ -13,7 +13,6 @@
 | Executor (compile-at-startup) | Done | Lazy via Clojure delays; thunks compiled once at boot |
 | Base Functions | Done | Arithmetic, logic, HOF, collections, strings, system; web (http, reitit, html, crud, ring-adapter) |
 | PostgreSQL Storage | Done | Full protocol support; recursive-CTE cycle walks |
-| Base Function impl-hash | Done | SHA-256 hash for version tracking |
 | Integrant System | Done | Component lifecycle management |
 | Logging | Done | Structured logging with MDC |
 | Web Server | Done | http-kit + Reitit router |
@@ -623,32 +622,6 @@ no new entity kinds.
 
 ---
 
-### Base Function Version Tracking [DONE]
-
-**Goal**: Detect when base function implementations change to enable safe upgrades.
-
-**Implementation:**
-
-- `impl-hash` field in `fn` entity (SHA-256 hash)
-- `impl-source` stored in `defbase` macro output
-- Hash computed from: args, return-type, impl-source (body forms)
-- Canonical form normalization (sorted maps, pr-str)
-
-**What the hash detects:**
-
-- Function body changes
-- Argument type changes
-- Argument additions/removals
-- Return type changes
-
-**What the hash ignores:**
-
-- Whitespace/formatting changes
-- Comments
-- Map key ordering
-
----
-
 ### Git-like Versioning [DONE]
 
 **Goal**: Change history, rollback, branches, merge for function graphs.
@@ -668,7 +641,7 @@ no new entity kinds.
 
 | Entity | Versioned? | What changes |
 |--------|-----------|--------------|
-| `fn` | Yes | name, impl-hash, description, constraint, base-fn-id, element-fn-id, return-type-fn-id, anonymous-hash |
+| `fn` | Yes | name, description, constraint, base-fn-id, element-fn-id, return-type-fn-id, anonymous-hash |
 | `fn-slot` | Yes | fn-id, slot-id, position |
 | `binding` | Yes | value, ref-fn-id, rename-to, type-override-fn-id, description, terminal, list-{append,closed} |
 | `binding-list-item` | Yes | binding-id, position, value, ref-fn-id, literal |
@@ -705,7 +678,7 @@ no new entity kinds.
 - Users' branches don't see the change until they merge
 - Compatible changes (new optional arg): single base fn name, Clojure code supports both old and new signatures
 - Breaking changes (removed arg, changed type): register new fn name (e.g., `map-v2`), old code remains functional
-- Implementation-only changes (bug fix, same signature): all users get the new code automatically (Clojure runtime is shared), `impl_hash` updated on platform branch
+- Implementation-only changes (bug fix, same signature): all users get the new code automatically (Clojure runtime is shared)
 
 **Branch-aware request routing [DONE — `feat/versioning`]:**
 

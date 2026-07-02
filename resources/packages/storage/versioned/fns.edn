@@ -46,7 +46,6 @@
           :name :nullable-text
           :namespace-id :nullable-uuid
           :parent-ids [:list :uuid]
-          :impl-hash :nullable-text
           :description :nullable-text
           :constraint :nullable-jsonb
           :base-fn-id :nullable-uuid
@@ -68,7 +67,6 @@
           :fn-id :uuid
           :branch-id :uuid
           :name :nullable-text
-          :impl-hash :nullable-text
           :description :nullable-text
           :constraint :nullable-jsonb
           :base-fn-id :nullable-uuid
@@ -417,7 +415,7 @@
    :description "Resolve the live `:fn` row set on the current branch. Pins entity-type-specific args; exposes `:identities` + `:branch-chain` for the call site to wire."
    :parent :resolve-versioned-rows
    :args {:version-id-field {:value :fn-id}
-          :version-data-fields {:value [:name :impl-hash :description :constraint
+          :version-data-fields {:value [:name :description :constraint
                                         :base-fn-id :element-fn-id
                                         :return-type-fn-id :anonymous-hash
                                         :expects-effects]}

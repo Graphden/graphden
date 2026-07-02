@@ -316,8 +316,7 @@
                          storage :fn
                          {:id (random-uuid)
                           :name "secret-text"
-                          :parent-ids []
-                          :impl-hash nil})
+                          :parent-ids []})
         slot (sp/create-entity storage :slot
                                {:id (random-uuid)
                                 :name "cred"

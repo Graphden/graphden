@@ -38,8 +38,8 @@ Graphden is a visual functional programming environment where functions and thei
 **Core entities** (slot/binding model):
 
 - `fn` — function entity OR type-row. Inheritance via `parent-ids` (many-to-many).
-  - empty `parent-ids` + `impl-hash` set → base-fn (Clojure impl)
-  - empty `parent-ids` + `impl-hash=nil` + slots/refine/list → type-row
+  - empty `parent-ids` + `return-type-fn-id` set → base-fn (Clojure impl)
+  - empty `parent-ids` + no `return-type-fn-id` + slots/refine/list → type-row
   - non-empty `parent-ids` → composed fn
   - `name=nil` → anonymous (deduped via `anonymous-hash`)
   - `branch-local?` — identity-level monotonic-OR flag. When set on a fn
@@ -68,7 +68,7 @@ slot in that closure is exposed once at the descendant; bindings overlay closer-
 ```
 fn: add
   parent-ids: []
-  impl-hash: "sha256..."   ; links to Clojure impl
+  return-type-fn-id: number   ; base-fn marker (always set; defaults to :any)
 fn-slot: {fn-id: add, slot-id: nums, position: 0}
 slot: {id: nums, name: "nums", type-fn-id: sequence}
 ```
@@ -108,7 +108,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/LAYOUT.md](docs/LAYOUT.md) | Graph-editor layout pipeline (Stages 1–7) | When touching layout impl or editor frontend |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |
-| [docs/EXTENDING.md](docs/EXTENDING.md) | HOF semantics, custom storage, schema extensions, impl-hash | When extending below the package layer |
+| [docs/EXTENDING.md](docs/EXTENDING.md) | HOF semantics, custom storage, schema extensions | When extending below the package layer |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Implementation status, future plans | For project planning |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
@@ -445,16 +445,6 @@ A base-fn impl should ideally be **1-2 lines** of actual logic: call the library
 ```
 
 See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) "Base Functions Philosophy" for full details.
-
-### Base Function impl-hash
-
-Each base function has an `impl-hash` stored in the `fn` entity for version tracking:
-
-- SHA-256 hash of canonical form (args, return-type, impl-source)
-- Detects: body changes, arg changes, return-type changes
-- Ignores: whitespace, comments, map key ordering
-
-See [docs/EXTENDING.md](docs/EXTENDING.md) for details.
 
 ## Graph Constraints
 

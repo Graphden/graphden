@@ -106,10 +106,9 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          parent (sp/create-entity storage :fn {:name "parent" :impl-hash "test-hash"})
+          parent (sp/create-entity storage :fn {:name "parent"})
           child (sp/create-entity storage :fn {:name "child"
-                                               :parent-ids [(:id parent)]
-                                               :impl-hash "test-hash"})]
+                                               :parent-ids [(:id parent)]})]
       (try
         (is (= [(:id parent)] (:parent-ids child)))
         (let [read-back (sp/read-entity storage :fn (:id child))]
@@ -122,12 +121,11 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          p1 (sp/create-entity storage :fn {:name "parent-1" :impl-hash "test-hash"})
-          p2 (sp/create-entity storage :fn {:name "parent-2" :impl-hash "test-hash"})
-          p3 (sp/create-entity storage :fn {:name "parent-3" :impl-hash "test-hash"})
+          p1 (sp/create-entity storage :fn {:name "parent-1"})
+          p2 (sp/create-entity storage :fn {:name "parent-2"})
+          p3 (sp/create-entity storage :fn {:name "parent-3"})
           child (sp/create-entity storage :fn {:name "child"
-                                               :parent-ids [(:id p1) (:id p2) (:id p3)]
-                                               :impl-hash "test-hash"})]
+                                               :parent-ids [(:id p1) (:id p2) (:id p3)]})]
       (try
         ;; Order must be preserved
         (is (= [(:id p1) (:id p2) (:id p3)] (:parent-ids child)))
@@ -141,7 +139,7 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          base-fn (sp/create-entity storage :fn {:name "base" :impl-hash "test-hash"})]
+          base-fn (sp/create-entity storage :fn {:name "base"})]
       (try
         ;; read-back populates :parent-ids from junction (empty for base-fn)
         (let [read-back (sp/read-entity storage :fn (:id base-fn))]
@@ -154,12 +152,11 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          p1 (sp/create-entity storage :fn {:name "p1" :impl-hash "test-hash"})
-          p2 (sp/create-entity storage :fn {:name "p2" :impl-hash "test-hash"})
-          p3 (sp/create-entity storage :fn {:name "p3" :impl-hash "test-hash"})
+          p1 (sp/create-entity storage :fn {:name "p1"})
+          p2 (sp/create-entity storage :fn {:name "p2"})
+          p3 (sp/create-entity storage :fn {:name "p3"})
           child (sp/create-entity storage :fn {:name "child"
-                                               :parent-ids [(:id p1) (:id p2)]
-                                               :impl-hash "test-hash"})]
+                                               :parent-ids [(:id p1) (:id p2)]})]
       (try
         (is (= [(:id p1) (:id p2)] (:parent-ids child)))
         ;; Replace with single parent
@@ -176,10 +173,9 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          parent (sp/create-entity storage :fn {:name "parent" :impl-hash "test-hash"})
+          parent (sp/create-entity storage :fn {:name "parent"})
           child (sp/create-entity storage :fn {:name "child"
-                                               :parent-ids [(:id parent)]
-                                               :impl-hash "test-hash"})]
+                                               :parent-ids [(:id parent)]})]
       (try
         (sp/delete-entity storage :fn (:id child))
         (is (nil? (sp/read-entity storage :fn (:id child))))
@@ -193,14 +189,12 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          p1 (sp/create-entity storage :fn {:name "p1" :impl-hash "test-hash"})
-          p2 (sp/create-entity storage :fn {:name "p2" :impl-hash "test-hash"})
+          p1 (sp/create-entity storage :fn {:name "p1"})
+          p2 (sp/create-entity storage :fn {:name "p2"})
           c1 (sp/create-entity storage :fn {:name "c1"
-                                            :parent-ids [(:id p1)]
-                                            :impl-hash "test-hash"})
+                                            :parent-ids [(:id p1)]})
           c2 (sp/create-entity storage :fn {:name "c2"
-                                            :parent-ids [(:id p1) (:id p2)]
-                                            :impl-hash "test-hash"})]
+                                            :parent-ids [(:id p1) (:id p2)]})]
       (try
         (let [all-fns (sp/query-entities storage :fn {})
               by-id (into {} (map (juxt :id identity)) all-fns)]
@@ -216,11 +210,11 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          parent (sp/create-entity storage :fn {:name "parent" :impl-hash "test-hash"})
+          parent (sp/create-entity storage :fn {:name "parent"})
           children (sp/create-entities storage :fn
-                                       [{:name "c1" :parent-ids [(:id parent)] :impl-hash "test-hash"}
-                                        {:name "c2" :parent-ids [(:id parent)] :impl-hash "test-hash"}
-                                        {:name "c3" :impl-hash "test-hash"}])]
+                                       [{:name "c1" :parent-ids [(:id parent)]}
+                                        {:name "c2" :parent-ids [(:id parent)]}
+                                        {:name "c3"}])]
       (try
         (is (= 3 (count children)))
         (let [c1 (first (filter #(= "c1" (:name %)) children))
@@ -252,11 +246,11 @@
           _ (sp/initialize storage schema)
           ;; Create real fn rows so the foreign-key targets exist.
           parent1 (sp/create-entity storage :fn
-                                    {:name "j-parent-1" :impl-hash "test-hash"})
+                                    {:name "j-parent-1"})
           parent2 (sp/create-entity storage :fn
-                                    {:name "j-parent-2" :impl-hash "test-hash"})
+                                    {:name "j-parent-2"})
           owner   (sp/create-entity storage :fn
-                                    {:name "j-owner"    :impl-hash "test-hash"})
+                                    {:name "j-owner"})
           ds      (:pool storage)]
       (try
         (junction/insert-junction-rows!
@@ -283,10 +277,10 @@
     (let [storage (setup/create-test-storage)
           schema  (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          parent  (sp/create-entity storage :fn {:name "b-parent" :impl-hash "test-hash"})
-          owner1  (sp/create-entity storage :fn {:name "b-owner-1" :impl-hash "test-hash"})
-          owner2  (sp/create-entity storage :fn {:name "b-owner-2" :impl-hash "test-hash"})
-          owner3  (sp/create-entity storage :fn {:name "b-owner-3" :impl-hash "test-hash"})
+          parent  (sp/create-entity storage :fn {:name "b-parent"})
+          owner1  (sp/create-entity storage :fn {:name "b-owner-1"})
+          owner2  (sp/create-entity storage :fn {:name "b-owner-2"})
+          owner3  (sp/create-entity storage :fn {:name "b-owner-3"})
           ds      (:pool storage)]
       (try
         (junction/insert-junction-rows! ds :fn :parent-ids (:id owner1) [(:id parent)])

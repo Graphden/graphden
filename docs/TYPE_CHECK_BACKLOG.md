@@ -594,7 +594,7 @@ NOT — they're regular fn-defs whose return shape happens to look
 alias-like to the loader. The selection logic in
 `register-type-aliases-from-db!` should reject form-parsers earlier
 (e.g. require explicit `:type-alias? true` marker, or skip if the
-fn-def has `:impl-hash`).
+fn-def is a base-fn — i.e. carries a `:return-type-fn-id`).
 
 ## Scope decision
 

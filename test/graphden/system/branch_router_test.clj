@@ -376,8 +376,7 @@
         ;; look up by name. Doesn't need to actually be runnable —
         ;; we replace the cached handler with our own atom-capturer.
         noop-fn (sp/create-entity storage :fn {:name "noop-handler"
-                                               :parent-ids []
-                                               :impl-hash "h"})
+                                               :parent-ids []})
         base-ctx (ctx/create-context {:storage storage
                                       :base-fns (exec/get-default-registry)})
         feature (vs/create-branch! storage "e2e-feature")
@@ -436,8 +435,7 @@
                 ;; show up on feature but NOT on main's resolved view.
                 created (sp/create-entity (:storage feature-ctx) :fn
                                           {:name "e2e-feature-only"
-                                           :parent-ids []
-                                           :impl-hash "h"})
+                                           :parent-ids []})
                 feat-fns (set (map :id (sp/query-entities (:storage feature-ctx)
                                                           :fn {})))
                 main-fns (set (map :id (sp/query-entities (:storage main-ctx)

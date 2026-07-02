@@ -78,8 +78,7 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-ids []
-                                     :impl-hash "test-hash"})
+                                     :parent-ids []})
           slot (sp/create-entity storage :slot
                                  {:name "password"
                                   :type-fn-id (:id base-fn)})
@@ -102,8 +101,7 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-ids []
-                                     :impl-hash "test-hash"})
+                                     :parent-ids []})
           slot (sp/create-entity storage :slot
                                  {:name "x"
                                   :type-fn-id (:id base-fn)})
@@ -127,8 +125,7 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-ids []
-                                     :impl-hash "test-hash"})
+                                     :parent-ids []})
           slot (sp/create-entity storage :slot
                                  {:name "val"
                                   :type-fn-id (:id base-fn)})

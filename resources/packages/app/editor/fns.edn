@@ -2315,7 +2315,7 @@
           :attrs {:value {:class "fn-versions-ts"}}
           :children [:_partial-fnv-row-ts-short]}}
 
-  ;; Description text (e.g. "desc=hello world, impl-hash") — same
+  ;; Description text (e.g. "desc=hello world") — same
   ;; describeVersionContent logic the JS does. v1: just description
   ;; when present, otherwise empty span — keeps the row layout stable.
   {:name :_partial-fnv-row-description-text
@@ -3021,7 +3021,7 @@
 
   ;; Summary line: fn-name wrapped in `<strong>` for visual weight
   ;; (matches the legacy `fnPreview` shape the e2e selector reads).
-  ;; Rich per-type previews (description diffs, impl-hash markers,
+  ;; Rich per-type previews (description diffs, return-type markers,
   ;; binding value comparisons …) are deferred to v2.
   {:name :_partial-bd-row-name-strong
    :parent :hiccup

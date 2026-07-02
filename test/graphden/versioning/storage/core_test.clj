@@ -109,11 +109,11 @@
         v    (vs/wrap-with-versioning base)]
     (try
       (let [on-main (sp/create-entity v :fn {:name "main-fn" :parent-ids []
-                                             :impl-hash "h"})
+                                             :description "h"})
             feature (vs/create-branch! v "iso-feature")
             vf      (vs/switch-branch v (:id feature))
             on-feat (sp/create-entity vf :fn {:name "feat-fn" :parent-ids []
-                                              :impl-hash "h"})]
+                                              :description "h"})]
         (testing "a fn created on main is visible from a child branch"
           (let [feat-fns (set (map :id (:fns (vs/query-all-graph-entities vf))))]
             (is (contains? feat-fns (:id on-main)))))
@@ -192,7 +192,7 @@
       (let [main-id (vs/current-branch-id v)
             ;; seed: one fn on main, before any branch exists
             shared (sp/create-entity v :fn {:name "diff-shared" :parent-ids []
-                                            :impl-hash "h0"})
+                                            :description "h0"})
             feature (vs/create-branch! v "diff-feature")
             vf      (vs/switch-branch v (:id feature))
             ;; mutate `shared` on feature only
@@ -200,14 +200,14 @@
                                       {:description "edited-on-feature"})
             ;; create a brand-new fn on feature only
             feat-only (sp/create-entity vf :fn {:name "diff-feat-only" :parent-ids []
-                                                :impl-hash "h-feat"})
+                                                :description "h-feat"})
             ;; create another fn on main, AFTER fork. With the live-
             ;; inheritance resolver this stays identical on both sides
             ;; (feature sees it via the chain), so it must NOT appear
             ;; in the diff — guards against accidental drift in the
             ;; resolver semantics.
             main-late (sp/create-entity v :fn {:name "diff-main-late" :parent-ids []
-                                               :impl-hash "h-main"})]
+                                               :description "h-main"})]
         (testing "source=feature, target=main"
           (let [{:keys [diffs]} (mrg/diff-branches base (:id feature) main-id)
                 by-id (group-by :entity-id diffs)
@@ -244,7 +244,7 @@
             feature (vs/create-branch! v "merge-feature")
             vf      (vs/switch-branch v (:id feature))
             _       (sp/create-entity vf :fn {:name "merged-fn" :parent-ids []
-                                              :impl-hash "h"})]
+                                              :description "h"})]
         (testing "no entity touched on both sides → detect-conflicts is empty"
           (let [{:keys [conflicts]} (vs/detect-conflicts v (:id feature))]
             (is (empty? conflicts))))
@@ -280,7 +280,7 @@
     (try
       (let [;; Seed an entity on main with the original value.
             seeded  (sp/create-entity v :fn {:name "merge-overlay-fn"
-                                             :parent-ids [] :impl-hash "h"
+                                             :parent-ids []
                                              :description "from-main"})
             id      (:id seeded)
             ;; Fork a feature branch and rewrite the description there.
@@ -333,13 +333,13 @@
             sticky-parent (sp/create-entity v :fn
                                             {:name "sticky-parent"
                                              :parent-ids []
-                                             :impl-hash "h"
+                                             :description "h"
                                              :branch-local? true})
             ;; Non-local plain base-fn — control case.
             plain-parent  (sp/create-entity v :fn
                                             {:name "plain-parent"
                                              :parent-ids []
-                                             :impl-hash "h"})
+                                             :description "h"})
             feature (vs/create-branch! v "branch-local-feat")
             vf      (vs/switch-branch v (:id feature))
             ;; CHILD fn created on the feature branch, parented from
@@ -348,12 +348,12 @@
             sticky-child  (sp/create-entity vf :fn
                                             {:name "sticky-child"
                                              :parent-ids [(:id sticky-parent)]
-                                             :impl-hash "h"})
+                                             :description "h"})
             ;; CHILD fn parented from plain-parent — should merge.
             plain-child   (sp/create-entity vf :fn
                                             {:name "plain-child"
                                              :parent-ids [(:id plain-parent)]
-                                             :impl-hash "h"})]
+                                             :description "h"})]
         ;; Sanity: feat sees both children.
         (is (= "sticky-child" (:name (sp/read-entity vf :fn (:id sticky-child)))))
         (is (= "plain-child"  (:name (sp/read-entity vf :fn (:id plain-child)))))
@@ -399,12 +399,12 @@
       (let [sticky-parent (sp/create-entity v :fn
                                             {:name "bind-sticky-parent"
                                              :parent-ids []
-                                             :impl-hash "h"
+                                             :description "h"
                                              :branch-local? true})
             plain-parent  (sp/create-entity v :fn
                                             {:name "bind-plain-parent"
                                              :parent-ids []
-                                             :impl-hash "h"})
+                                             :description "h"})
             slot          (sp/create-entity v :slot
                                             {:name "x"
                                              :type-fn-id (:id sticky-parent)})
@@ -413,11 +413,11 @@
             sticky-child  (sp/create-entity vf :fn
                                             {:name "bind-sticky-child"
                                              :parent-ids [(:id sticky-parent)]
-                                             :impl-hash "h"})
+                                             :description "h"})
             plain-child   (sp/create-entity vf :fn
                                             {:name "bind-plain-child"
                                              :parent-ids [(:id plain-parent)]
-                                             :impl-hash "h"})
+                                             :description "h"})
             sticky-binding (sp/create-entity vf :binding
                                              {:fn-id (:id sticky-child)
                                               :slot-id (:id slot)
@@ -458,13 +458,13 @@
       (let [sticky-parent (sp/create-entity v :fn
                                             {:name "inh-sticky-parent"
                                              :parent-ids []
-                                             :impl-hash "h"
+                                             :description "h"
                                              :branch-local? true})
             ;; Sticky-local child created on MAIN (the root branch).
             sticky-child (sp/create-entity v :fn
                                            {:name "inh-sticky-child"
                                             :parent-ids [(:id sticky-parent)]
-                                            :impl-hash "h"})
+                                            :description "h"})
             ;; Fork a child branch FROM main. No edits on the child
             ;; branch — it inherits main's state.
             feature (vs/create-branch! v "inh-feat")
@@ -490,7 +490,7 @@
     (try
       (testing "create → read → update → delete round-trip on a versioned :fn"
         (let [created (sp/create-entity v :fn {:name "vc-fn" :parent-ids []
-                                               :impl-hash "h"})
+                                               :description "h"})
               id      (:id created)]
           (is (= "vc-fn" (:name (sp/read-entity v :fn id))))
           (sp/update-entity v :fn id {:description "updated"})
@@ -517,8 +517,8 @@
     (try
       (testing "create-entities → read-entities → update-entities → delete-entities"
         (let [created (sp/create-entities v :fn
-                                          [{:name "vb-a" :parent-ids [] :impl-hash "h"}
-                                           {:name "vb-b" :parent-ids [] :impl-hash "h"}])
+                                          [{:name "vb-a" :parent-ids [] :description "h"}
+                                           {:name "vb-b" :parent-ids [] :description "h"}])
               ids     (mapv :id created)]
           (is (= 2 (count (sp/read-entities v :fn ids))))
           (sp/update-entities v :fn (mapv #(assoc % :description "batch") created))
@@ -531,8 +531,8 @@
         ;; update-entities only wrote version records, so non-versioned
         ;; junctions like fn :parent-ids were dropped — a base-fn →
         ;; composed-fn change (same row) silently lost its parent link.
-        (let [parent (sp/create-entity v :fn {:name "vb-parent" :parent-ids [] :impl-hash "h"})
-              child  (sp/create-entity v :fn {:name "vb-child" :parent-ids [] :impl-hash "h"})]
+        (let [parent (sp/create-entity v :fn {:name "vb-parent" :parent-ids [] :description "h"})
+              child  (sp/create-entity v :fn {:name "vb-child" :parent-ids [] :description "h"})]
           (sp/update-entities v :fn [(assoc child :parent-ids [(:id parent)])])
           (is (= [(:id parent)]
                  (:parent-ids (sp/read-entity v :fn (:id child))))
@@ -570,13 +570,13 @@
 
       (testing "resolve-execution-graph on a real fn returns its graph"
         (let [f (sp/create-entity v :fn {:name "veg-fn" :parent-ids []
-                                         :impl-hash "h"})
+                                         :description "h"})
               result (sp/resolve-execution-graph v (:id f))]
           (is (contains? (:fns result) (:id f)))))
 
       (testing "validate-no-dependency-cycle! — nil ref is a no-op"
         (let [f (sp/create-entity v :fn {:name "veg-cyc" :parent-ids []
-                                         :impl-hash "h"})]
+                                         :description "h"})]
           (is (nil? (sp/validate-no-dependency-cycle! v (:id f) nil)))))
       (finally (sp/close base)))))
 
@@ -594,9 +594,9 @@
    :fn rows are versioned (live on the wrapper's current branch)."
   [v label]
   (let [type-fn (sp/create-entity v :fn {:name (str label "-list-type") :parent-ids []
-                                         :impl-hash "h"})
+                                         :description "h"})
         owner   (sp/create-entity v :fn {:name (str label "-fn") :parent-ids []
-                                         :impl-hash "h"})
+                                         :description "h"})
         slot    (sp/create-entity v :slot {:name (str label "-xs")
                                            :type-fn-id (:id type-fn)})
         _       (sp/create-entity v :fn-slot {:fn-id (:id owner)
@@ -623,7 +623,7 @@
             va (vs/switch-branch v (:id branch-a))
             ;; X exists only on A initially.
             x-fn (sp/create-entity va :fn {:name "diff-merge-x" :parent-ids []
-                                           :impl-hash "h-x"})
+                                           :description "h-x"})
             branch-b (vs/create-branch! v "diff-merge-b")
             vb (vs/switch-branch v (:id branch-b))
             _ (vs/merge-branch! vb (:id branch-a))]

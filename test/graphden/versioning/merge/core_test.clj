@@ -44,8 +44,7 @@
         versioned (vs/wrap-with-versioning base)
         f (sp/create-entity versioned :fn
                             {:name "test-fn"
-                             :parent-ids []
-                             :impl-hash "test-hash"})
+                             :parent-ids []})
         s (sp/create-entity versioned :slot
                             {:name "x"
                              :type-fn-id (:id f)})]

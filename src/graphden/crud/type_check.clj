@@ -109,7 +109,7 @@
          (#{:fn :map :tuple} (first (:constraint tfn))))
     (:constraint tfn)
     (and (empty? (:parent-ids tfn))
-         (nil? (:impl-hash tfn))
+         (nil? (:return-type-fn-id tfn))
          (some? (:name tfn)))
     (keyword (:name tfn))
     :else :jsonb))

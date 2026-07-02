@@ -373,8 +373,6 @@
                                   :type :ref :ref-entity :branch}
                       :name {:uuid fn-version-name-field-uuid
                              :type :text :nullable? true}
-                      :impl-hash {:uuid fn-version-impl-hash-field-uuid
-                                  :type :text :nullable? true}
                       :description {:uuid fn-version-description-field-uuid
                                     :type :text :nullable? true}
                       :constraint {:uuid fn-version-constraint-field-uuid
@@ -494,7 +492,11 @@
       ;; -----------------------------------------------------------------
       ;; Retired fields (Phase 6e)
       ;; -----------------------------------------------------------------
-      (ds/retire-field :binding-version :rename-to binding-version-rename-to-field-uuid)))
+      (ds/retire-field :binding-version :rename-to binding-version-rename-to-field-uuid)
+      ;; `fn-version.impl-hash` retired — mirror of the main `:fn`
+      ;; entity. The base-fn discriminator is now `return-type-fn-id`
+      ;; presence; the column was always NULL. See retire-field on `:fn`.
+      (ds/retire-field :fn-version :impl-hash fn-version-impl-hash-field-uuid)))
 
 
 (defn build-schema

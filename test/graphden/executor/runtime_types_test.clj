@@ -63,7 +63,6 @@
                           :name (name fn-name)
                           :namespace-id nil
                           :parent-ids []
-                          :impl-hash nil
                           :base-fn-id nil
                           :element-fn-id nil
                           :return-type-fn-id nil
@@ -107,7 +106,6 @@
             :name "positive-int"
             :namespace-id nil
             :parent-ids []
-            :impl-hash nil
             :base-fn-id (prim :int)
             :element-fn-id nil
             :return-type-fn-id nil
@@ -133,7 +131,6 @@
             :name "int-list"
             :namespace-id nil
             :parent-ids []
-            :impl-hash nil
             :base-fn-id nil
             :element-fn-id (prim :int)
             :return-type-fn-id nil
@@ -159,7 +156,6 @@
             :name "int-or-text"
             :namespace-id nil
             :parent-ids []
-            :impl-hash nil
             :base-fn-id nil
             :element-fn-id nil
             :return-type-fn-id nil
@@ -185,7 +181,6 @@
             :name "result-text"
             :namespace-id nil
             :parent-ids []
-            :impl-hash nil
             :base-fn-id nil
             :element-fn-id nil
             :return-type-fn-id nil
@@ -223,7 +218,6 @@
             :name "user-id"
             :namespace-id nil
             :parent-ids []
-            :impl-hash nil
             :base-fn-id (prim :int)
             :element-fn-id nil
             :return-type-fn-id nil
@@ -262,11 +256,11 @@
           (sp/upsert-entities
             storage :fn
             [{:id a-id :name "rec-a" :namespace-id nil :parent-ids []
-              :impl-hash nil :base-fn-id nil :element-fn-id nil
+              :base-fn-id nil :element-fn-id nil
               :return-type-fn-id nil :anonymous-hash nil
               :constraint nil :description nil}
              {:id b-id :name "rec-b" :namespace-id nil :parent-ids []
-              :impl-hash nil :base-fn-id nil :element-fn-id nil
+              :base-fn-id nil :element-fn-id nil
               :return-type-fn-id nil :anonymous-hash nil
               :constraint nil :description nil}])
           (sp/upsert-entities storage :slot [a-slot b-slot])

@@ -104,7 +104,6 @@
         (let [created (entities/create-entity
                         "fn" {:name "crud-update-target"
                               :parent-ids []
-                              :impl-hash nil
                               :base-fn-id nil
                               :element-fn-id nil
                               :return-type-fn-id nil
@@ -200,13 +199,13 @@
               unrelated-id (java.util.UUID/randomUUID)
               _ (sp/create-entity storage :fn
                                   {:id parent-id :name "subtree-parent"
-                                   :parent-ids [] :impl-hash "h"})
+                                   :parent-ids []})
               _ (sp/create-entity storage :fn
                                   {:id child-id :name "subtree-child"
                                    :parent-ids [parent-id]})
               _ (sp/create-entity storage :fn
                                   {:id unrelated-id :name "subtree-unrelated"
-                                   :parent-ids [] :impl-hash "u"})
+                                   :parent-ids []})
               ;; sp/create-entity bypasses the graph-cache invalidation
               ;; path that the public API uses (`apply-create` →
               ;; `invalidate!`), so the prior sub-tests' cached graph
@@ -240,8 +239,7 @@
         (let [ns-row (entities/create-entity "ns" {:name "guard-ns"} c)]
           (is (nil? (entities/ns-non-empty-reason storage (:id ns-row))))
           (sp/create-entity storage :fn
-                            {:name "child-of-ns" :parent-ids []
-                             :impl-hash "h" :namespace-id (:id ns-row)})
+                            {:name "child-of-ns" :parent-ids [] :namespace-id (:id ns-row)})
           (is (re-find #"contains"
                        (entities/ns-non-empty-reason storage (:id ns-row))))))
       (finally (sp/close storage)))))
@@ -448,7 +446,6 @@
   (:id (sp/create-entity storage :fn
                          {:name type-name
                           :parent-ids []
-                          :impl-hash nil
                           :constraint constraint})))
 
 
@@ -460,8 +457,7 @@
   (let [cb-fn-id (make-callable-type-fn! storage (str "th-cb-" suffix) constraint)
         base-fn (sp/create-entity storage :fn
                                   {:name (str "th-base-" suffix)
-                                   :parent-ids []
-                                   :impl-hash "stub"})
+                                   :parent-ids []})
         slot   (sp/create-entity storage :slot
                                  {:name "cb" :type-fn-id cb-fn-id})
         _      (sp/create-entity storage :fn-slot
@@ -590,8 +586,7 @@
             ;; A REAL ref-fn-id row registered in rich-types with :io.
             ref-fn (sp/create-entity storage :fn
                                      {:name "esc-effectful"
-                                      :parent-ids []
-                                      :impl-hash "stub"})
+                                      :parent-ids []})
             _ (sp/update-entity storage :binding bid
                                 {:ref-fn-id (:id ref-fn)})
             r (with-redefs [registry/rich-type-of

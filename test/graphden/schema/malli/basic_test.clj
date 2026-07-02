@@ -39,8 +39,7 @@
       (is (= :fn (get-in fields [:parent-ids :ref-entity])))
       (is (true? (get-in fields [:parent-ids :nullable?])))
       (is (= :enum (get-in fields [:return-type :type])))
-      (is (= :value-kind (get-in fields [:return-type :enum-name])))
-      (is (= :text (get-in fields [:impl-hash :type])))))
+      (is (= :value-kind (get-in fields [:return-type :enum-name])))))
 
   (testing "arg has expected fields for 2-entity schema"
     (let [fields (ds/entity-fields example-schema :arg)]

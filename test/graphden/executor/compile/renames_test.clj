@@ -232,7 +232,6 @@
   (:id (sp/create-entity storage :fn
                          {:name type-name
                           :parent-ids []
-                          :impl-hash nil
                           :constraint [:fn args-spec :any]})))
 
 

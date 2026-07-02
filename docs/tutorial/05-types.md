@@ -16,7 +16,8 @@ IS a `:fn` row whose role is "type" — meaning:
 
 - **Empty `:parent-ids`** — types don't inherit (they're
   primitive in the lattice sense).
-- **Empty `:impl-hash`** — types have no Clojure impl.
+- **No `:return-type-fn-id`** — types don't return anything (that
+  field is the base-fn marker; type-rows never carry it).
 - ONE of the type-distinguishing fields is set:
   - `:base-fn-id` + `:constraint` → REFINEMENT
   - `:element-fn-id` → LIST

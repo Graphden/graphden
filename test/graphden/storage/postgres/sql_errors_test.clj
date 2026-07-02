@@ -101,9 +101,9 @@
         ;; Use graph schema which has unique constraints on names
         (sp/initialize storage (setup/make-graph-schema))
         (let [fn-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
-          (sp/create-entity storage :fn {:id fn-id :name "fn1" :parent-ids nil :impl-hash "test-hash"})
+          (sp/create-entity storage :fn {:id fn-id :name "fn1" :parent-ids nil})
           (sp/create-entity storage :fn {:id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-                                         :name "fn2" :parent-ids nil :impl-hash "test-hash"})
+                                         :name "fn2" :parent-ids nil})
           ;; Try to update fn2's name to conflict with fn1
           ;; Note: This requires a unique constraint on name, which we have.
           ;; Test that update works and returns properly typed errors when they occur.
@@ -181,11 +181,13 @@
               ;; Hard-delete the referenced fn (bypass any FK cascade).
               _ (jdbc/execute! pool [(str "DELETE FROM \"fn\" WHERE id = '" (:id ref-fn) "'")])
               graph (sp/resolve-execution-graph storage (:id main-fn))]
-          ;; Resolver should report main + base (the dangling ref is
-          ;; tolerated — its row is gone but the binding's ref-fn-id
-          ;; just points at nothing).
-          (is (= 2 (count (:fns graph))))
-          (is (contains? (:fns graph) (:id main-fn))))
+          ;; Resolver reports main + base + base's return-type type-row
+          ;; (a base-fn always carries a `return-type-fn-id`, and that
+          ;; is a reachable edge). The dangling ref is tolerated — its
+          ;; row is gone, so it's simply absent from the resolved set.
+          (is (= 3 (count (:fns graph))))
+          (is (contains? (:fns graph) (:id main-fn)))
+          (is (not (contains? (:fns graph) (:id ref-fn)))))
         (finally
           (sp/close storage)))))
 

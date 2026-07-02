@@ -31,7 +31,6 @@
   (let [recs (r/boot-primitive-records)]
     (is (= 14 (count recs)))
     (is (every? #(= :fn (:kind %)) recs))
-    (is (every? #(nil? (:impl-hash %)) recs))
     (is (every? #(empty? (:parent-ids %)) recs))
     (is (every? #(nil? (:base-fn-id %)) recs))
     (is (every? #(nil? (:constraint %)) recs))))
@@ -65,7 +64,6 @@
     (is (= 2 (count fn-slots)) "two junction rows")
     (let [fn-row (first fns)]
       (is (= "user-shape" (:name fn-row)))
-      (is (nil? (:impl-hash fn-row)))
       (is (nil? (:base-fn-id fn-row)))
       (is (nil? (:constraint fn-row)))
       (is (= [] (:parent-ids fn-row))))
@@ -97,8 +95,7 @@
       (is (= 1 (count fn-slots))))
     (let [fn-row (first fns)]
       (is (= [:> 0] (:constraint fn-row)))
-      (is (= (:int (r/primitive-fn-ids)) (:base-fn-id fn-row)))
-      (is (nil? (:impl-hash fn-row))))
+      (is (= (:int (r/primitive-fn-ids)) (:base-fn-id fn-row))))
     (testing "auto-emitted slot is named :value with type pointing at base"
       (let [s (first slots)]
         (is (= "value" (:name s)))
@@ -175,8 +172,7 @@
     (is (= 1 (count fns)))
     (is (= 2 (count bindings)) "one binding per :args entry")
     (let [fn-row (first fns)]
-      (is (= [parent-id] (:parent-ids fn-row)))
-      (is (nil? (:impl-hash fn-row))))
+      (is (= [parent-id] (:parent-ids fn-row))))
     (testing "bindings are :fixed by default"
       (is (every? #(= :fixed (:override-kind %)) bindings)))
     (testing "binding values match"

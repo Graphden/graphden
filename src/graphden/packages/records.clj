@@ -42,12 +42,12 @@
 
    ## Roles (matches schema.clj table)
 
-   | parent-ids | impl-hash | base-fn-id | element-fn-id | constraint | fn-slot rows | Role |
-   | empty      | NOT NULL  | NULL       | NULL          | NULL       | *            | base-fn |
-   | empty      | NULL      | NULL       | NULL          | NULL       | NOT empty    | record-type |
-   | empty      | NULL      | NOT NULL   | NULL          | NOT NULL   | empty        | refinement-type |
-   | empty      | NULL      | NULL       | NOT NULL      | NULL       | empty        | list-type |
-   | NOT empty  | *         | *          | *             | *          | *            | composed fn-def |
+   | parent-ids | return-type-fn-id | base-fn-id | element-fn-id | constraint | fn-slot rows | Role |
+   | empty      | NOT NULL          | NULL       | NULL          | NULL       | *            | base-fn |
+   | empty      | NULL              | NULL       | NULL          | NULL       | NOT empty    | record-type |
+   | empty      | NULL              | NOT NULL   | NULL          | NOT NULL   | empty        | refinement-type |
+   | empty      | NULL              | NULL       | NOT NULL      | NULL       | empty        | list-type |
+   | NOT empty  | *                 | *          | *             | *          | *            | composed fn-def |
 
    ## Structure
 

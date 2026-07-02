@@ -48,18 +48,14 @@
    (`[:union T1 T2 …]` / `[:variant tag1 T1 tag2 T2 …]` /
    `[:fn args ret]`). The leading keyword discriminates.
 
-   `:return-type-fn-id` is the ground-truth signal for `:base-fn` —
-   `:impl-hash` is sometimes NULL in the DB for defbase-declared base
-   fns (sync-side bug, separate effort), so leaning on `impl-hash`
-   alone misclassifies a base-fn with slots (e.g. `:parse-fn-from-
-   form`, `:create-entity`) as a `:record` type-row and the alias
-   loader trips a `body not well-formed` warning for each. A real
-   type-row has no `:return-type-fn-id`."
+   `:return-type-fn-id` is the base-fn signal; a real type-row has
+   none. A base-fn with slots (e.g. `:parse-fn-from-form`,
+   `:create-entity`) is thus never misclassified as a `:record`
+   type-row."
   [fn-row has-slots?]
   (cond
     (seq (:parent-ids fn-row))     :composed
-    (or (some? (:impl-hash fn-row))
-        (some? (:return-type-fn-id fn-row))) :base-fn
+    (some? (:return-type-fn-id fn-row)) :base-fn
     (some? (:base-fn-id fn-row))   :refinement
     (some? (:element-fn-id fn-row)) :list
     (and (vector? (:constraint fn-row))

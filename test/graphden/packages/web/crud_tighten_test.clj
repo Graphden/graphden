@@ -64,7 +64,7 @@
         id (records/anonymous-fn-id hash-hex)]
     (sp/create-entity storage :fn
                       {:id id :name nil :namespace-id nil
-                       :parent-ids [] :impl-hash nil
+                       :parent-ids []
                        :base-fn-id nil :element-fn-id nil
                        :return-type-fn-id nil
                        :anonymous-hash hash-hex
@@ -92,8 +92,7 @@
         parent (setup/create-base-fn! storage (str "parent-of-" host-name))
         handler (sp/create-entity storage :fn
                                   {:name handler-name
-                                   :parent-ids nil
-                                   :impl-hash "test-stub"})
+                                   :parent-ids nil})
         host (sp/create-entity storage :fn
                                {:name host-name
                                 :parent-ids [(:id parent)]})
@@ -241,8 +240,7 @@
                                       :parent-ids [(:id parent)]})
               handler (sp/create-entity storage :fn
                                         {:name "narrow-handler"
-                                         :parent-ids nil
-                                         :impl-hash "test-stub"})
+                                         :parent-ids nil})
               slot (sp/create-entity storage :slot
                                      {:name "callback"
                                       :type-fn-id type-fn-id})
@@ -283,8 +281,7 @@
                                       :parent-ids [(:id parent)]})
               handler (sp/create-entity storage :fn
                                         {:name "widen-handler"
-                                         :parent-ids nil
-                                         :impl-hash "test-stub"})
+                                         :parent-ids nil})
               slot (sp/create-entity storage :slot
                                      {:name "callback"
                                       :type-fn-id type-fn-id})

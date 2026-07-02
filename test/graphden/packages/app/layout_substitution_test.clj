@@ -49,8 +49,8 @@
   {:fns
    [{:id F-ANY        :name "any"}
     {:id F-FN         :name "fn"}
-    {:id F-INVOKE     :name "invoke"     :impl-hash "h-invoke" :parent-ids []}
-    {:id F-MERGE-IN   :name "merge-in"   :impl-hash "h-merge"  :parent-ids []}
+    {:id F-INVOKE     :name "invoke"     :return-type-fn-id F-ANY :parent-ids []}
+    {:id F-MERGE-IN   :name "merge-in"   :return-type-fn-id F-ANY :parent-ids []}
     {:id F-ROUTER-RES :name "router-result"        :parent-ids [F-INVOKE]}
     {:id F-ROUTER-RNG :name "router-ring-response" :parent-ids [F-MERGE-IN]}
     {:id F-APP-RING   :name "_app-ring-response"   :parent-ids [F-ROUTER-RNG]}

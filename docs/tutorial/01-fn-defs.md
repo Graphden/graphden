@@ -47,8 +47,8 @@ parent to:
 
 | Kind | What it is | Example | How to spot one |
 |---|---|---|---|
-| **Base function** | A small Clojure impl wrapping one library call | `:const`, `:add`, `:render-hiccup`, `:pg-query` | Has `:impl-hash`, no `:parent-ids` |
-| **fn-def** | A pure composition — no Clojure, just bindings | `:hello-handler`, `:web-server`, `:editor-page` | No `:impl-hash`, has at least one `:parent-ids` |
+| **Base function** | A small Clojure impl wrapping one library call | `:const`, `:add`, `:render-hiccup`, `:pg-query` | Has a `:return-type-fn-id`, no `:parent-ids` |
+| **fn-def** | A pure composition — no Clojure, just bindings | `:hello-handler`, `:web-server`, `:editor-page` | Has at least one `:parent-ids` |
 
 You can parent a new fn-def to either kind. Inheritance works
 the same way for both.

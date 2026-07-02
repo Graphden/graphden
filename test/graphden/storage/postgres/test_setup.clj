@@ -87,17 +87,13 @@
 
 
 (defn create-base-fn!
-  "Creates a base fn (no parents, has impl-hash). Returns the row.
-
-   Use the 2-arity to seed `:impl-hash` from a string; the 3-arity
-   accepts an explicit hash."
-  ([storage entity-name]
-   (create-base-fn! storage entity-name (str "test-impl-hash-" entity-name)))
-  ([storage entity-name impl-hash]
-   (sp/create-entity storage :fn
-                     {:name entity-name
-                      :parent-ids []
-                      :impl-hash impl-hash})))
+  "Creates a base fn (no parents, `return-type-fn-id` set — THE base-fn
+   marker, defaulting to the `:any` primitive). Returns the row."
+  [storage entity-name]
+  (sp/create-entity storage :fn
+                    {:name entity-name
+                     :parent-ids []
+                     :return-type-fn-id (records/primitive-fn-id :any)}))
 
 
 (defn create-composed-fn!

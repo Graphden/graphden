@@ -35,21 +35,6 @@
 
 
 ;; =============================================================================
-;; impl-hash
-;; =============================================================================
-
-(defn- compute-impl-hash
-  "Placeholder. Real impl-hashing reads the Clojure source and SHA-256s
-   the canonical args+return+impl-source — see the old
-   `graphden.executor.registry.core/compute-impl-hash`. Until the
-   registry layer is rewritten to feed the records-parser, sync uses
-   `nil` for impl-hash on every fn (records' `:impl-hash` field is set
-   to a sentinel that we just clear here)."
-  [_fn-record]
-  nil)
-
-
-;; =============================================================================
 ;; Sync — single entry point for any record bundle
 ;; =============================================================================
 
@@ -95,20 +80,14 @@
    storage-shape for upsert."
   [fn-records ns-id-map]
   (mapv (fn [r]
-          (let [resolved-ns (resolve-namespace-id r ns-id-map)
-                impl-hash (when (= :sentinel/impl-hash (:impl-hash r))
-                            (compute-impl-hash r))]
-            (-> resolved-ns
-                (dissoc :kind)
-                (assoc :impl-hash (or impl-hash
-                                      (when-not (= :sentinel/impl-hash (:impl-hash r))
-                                        (:impl-hash r)))))))
+          (-> (resolve-namespace-id r ns-id-map)
+              (dissoc :kind)))
         fn-records))
 
 
 (defn- strip-kind
   "Drop the `:kind` discriminator before sending records to storage.
-   Used for every entity except `:fn`, which needs extra ns / impl-hash
+   Used for every entity except `:fn`, which needs extra ns
    massaging via `prep-fn-rows`."
   [records]
   (mapv #(dissoc % :kind) records))
@@ -245,7 +224,7 @@
 
    Two row classes go in:
 
-   - **Type-row-like** entries (no parents, has slots / impl-hash /
+   - **Type-row-like** entries (no parents, has slots /
      `:base-fn-id` / `:element-fn-id` / `:constraint`) carry an
      `:args` map of `{slot-name :any}` so `type-row-arg-names` fires
      on inheritance walks and recognises THIS fn as the slot owner.

@@ -76,10 +76,7 @@
                                    :nullable? true}
                       :return-type {:uuid #uuid "00000000-0000-0000-0000-000000000013"
                                     :type :text
-                                    :nullable? true}
-                      :impl-hash {:uuid #uuid "00000000-0000-0000-0000-000000000014"
-                                  :type :text
-                                  :nullable? true}})
+                                    :nullable? true}})
       ;; arg entity: fn-id (owner), source-id (inheritance), value/ref-id (data)
       (ds/add-entity :arg
                      #uuid "00000000-0000-0000-0000-000000000020"

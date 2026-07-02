@@ -42,8 +42,6 @@
       (is (= :ref (get-in fields [:namespace-id :type])))
       (is (= :ref-many (get-in fields [:parent-ids :type])))
       (is (= :fn (get-in fields [:parent-ids :ref-entity])))
-      (is (= :text (get-in fields [:impl-hash :type])))
-      (is (true? (get-in fields [:impl-hash :nullable?])))
       (is (= :jsonb (get-in fields [:constraint :type])))
       (is (= :ref (get-in fields [:base-fn-id :type])))
       (is (= :ref (get-in fields [:element-fn-id :type])))
@@ -104,20 +102,20 @@
 
 
 (deftest validation-test
-  (testing "valid base-fn (impl-hash set, no parent-ids, no role markers)"
+  (testing "valid base-fn (return-type-fn-id set, no parent-ids, no role markers)"
     (is (nil? (ds/validate-entity schema :fn
                                   {:id (random-uuid)
                                    :name "add"
                                    :parent-ids nil
-                                   :impl-hash "abc123"}))))
+                                   :return-type-fn-id (random-uuid)}))))
 
-  (testing "valid composed fn-def (parent-ids non-empty, no impl-hash)"
+  (testing "valid composed fn-def (parent-ids non-empty, no return-type-fn-id)"
     (is (nil? (ds/validate-entity schema :fn
                                   {:id (random-uuid)
                                    :name "my-add"
                                    :parent-ids [(random-uuid)]}))))
 
-  (testing "valid refinement-type (base-fn-id + constraint, no parent-ids, no impl-hash)"
+  (testing "valid refinement-type (base-fn-id + constraint, no parent-ids, no return-type-fn-id)"
     ;; The constraint column is jsonb — the in-memory rich-type uses
     ;; keyword-headed vectors like `[:> 0]`, but at the storage layer
     ;; those serialise via the postgres codec. The schema-level

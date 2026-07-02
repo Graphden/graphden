@@ -57,8 +57,7 @@
           (sp/initialize storage graph-schema)
           (let [base-fn (sp/create-entity storage :fn
                                           {:name "test-fn"
-                                           :parent-ids nil
-                                           :impl-hash "test-hash"})]
+                                           :parent-ids nil})]
             ;; Should allow nil ref-id (literal value, not a fn reference)
             (is (nil? (sp/validate-no-dependency-cycle! storage (:id base-fn) nil))))
           (finally
@@ -70,8 +69,7 @@
           (sp/initialize storage graph-schema)
           (let [base-fn (sp/create-entity storage :fn
                                           {:name "test-fn"
-                                           :parent-ids nil
-                                           :impl-hash "test-hash"})]
+                                           :parent-ids nil})]
             ;; Self-reference is the WHOLE point of recursion. The
             ;; storage protocol carves it out per docs/CONSTRAINTS.md
             ;; § Self-reference; executor's *max-depth* bounds the
@@ -88,12 +86,10 @@
           (sp/initialize storage graph-schema)
           (let [fn-a (sp/create-entity storage :fn
                                        {:name "fn-a"
-                                        :parent-ids nil
-                                        :impl-hash "test-hash"})
+                                        :parent-ids nil})
                 fn-b (sp/create-entity storage :fn
                                        {:name "fn-b"
-                                        :parent-ids nil
-                                        :impl-hash "test-hash"})]
+                                        :parent-ids nil})]
             ;; Should allow reference to a different fn
             (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b)))))
           (finally

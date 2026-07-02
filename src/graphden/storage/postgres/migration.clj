@@ -190,11 +190,26 @@
     (jdbc/execute! tx [(str "DROP INDEX IF EXISTS \"" idx-name "\"")])))
 
 
+(defn- ensure-field-indexes!
+  "Idempotently `CREATE INDEX IF NOT EXISTS` for every `:indexed? true` field
+   across the whole schema. `create-ref-indexes!` only fires from the
+   entity-create callback, so a flag newly added to an EXISTING table's field
+   (e.g. `:binding-version :ref-fn-id`) would never land on already-migrated
+   dev/prod DBs. Running this on every migration pass closes that gap."
+  [tx schema]
+  (doseq [entity-name (ds/entities schema)]
+    (ddl/create-field-indexes! tx entity-name (ds/entity-fields schema entity-name))))
+
+
 (defn do-migration!
   "Performs schema migration within a transaction."
   [tx schema old-metadata]
   (drop-retired-indexes! tx)
-  (gm/do-migration! (make-postgres-callbacks tx) old-metadata schema))
+  (let [changes (gm/do-migration! (make-postgres-callbacks tx) old-metadata schema)]
+    ;; Side-effect after the migration; return the migration changes, not
+    ;; the doseq's nil (callers read `:created`/`:renamed` off this).
+    (ensure-field-indexes! tx schema)
+    changes))
 
 
 ;; === Logging ===

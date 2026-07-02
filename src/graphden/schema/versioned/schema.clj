@@ -435,8 +435,13 @@
                       ;; schema/graph/schema.clj for the rationale.
                       :value-present {:uuid binding-version-value-present-field-uuid
                                       :type :bool :nullable? true}
+                      ;; :indexed? — drives the version-side of the reverse-ref
+                      ;; lookup in `:ref-owner-bindings` (find-fn-usages / delete
+                      ;; ref-check). Not a `:ref` (no FK — the target fn may be
+                      ;; deleted while a version row lingers), so it needs the
+                      ;; explicit index flag.
                       :ref-fn-id {:uuid binding-version-ref-fn-id-field-uuid
-                                  :type :uuid :nullable? true}
+                                  :type :uuid :nullable? true :indexed? true}
                       :override-kind {:uuid binding-version-override-kind-field-uuid
                                       :type :enum :enum-name :override-kind
                                       :nullable? true}
@@ -473,8 +478,10 @@
                                  :type :int}
                       :value {:uuid binding-list-item-version-value-field-uuid
                               :type :jsonb :nullable? true}
+                      ;; :indexed? — version-side reverse-ref lookup (see the
+                      ;; :binding-version :ref-fn-id note above).
                       :ref-fn-id {:uuid binding-list-item-version-ref-fn-id-field-uuid
-                                  :type :uuid :nullable? true}
+                                  :type :uuid :nullable? true :indexed? true}
                       :literal {:uuid binding-list-item-version-literal-field-uuid
                                 :type :bool :nullable? true}
                       :created-at {:uuid binding-list-item-version-created-at-field-uuid

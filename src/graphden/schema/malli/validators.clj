@@ -183,7 +183,7 @@
    (validate-field-spec entity-name field-name field-spec false))
   ([entity-name field-name field-spec in-variant?]
    (let [field-type (validate-field-type! entity-name field-name field-spec)
-         base-allowed-keys (if in-variant? #{:type} #{:type :nullable? :uuid})]
+         base-allowed-keys (if in-variant? #{:type} #{:type :nullable? :uuid :indexed?})]
      (validate-nullable! entity-name field-name field-spec in-variant?)
      (case field-type
        :ref (validate-ref-type! entity-name field-name field-spec base-allowed-keys)

@@ -212,6 +212,36 @@
         fields))
 
 
+(defn- field-index-name
+  "Generates index name for a plain `:indexed?` field."
+  [entity-name field-name]
+  (str "idx_" (util/kw->snake-case entity-name) "_" (util/kw->snake-case field-name)))
+
+
+(defn create-field-index!
+  "Creates a plain btree index for a field flagged `:indexed? true`. For
+   non-`:ref` columns that still need fast lookups — e.g. version-table
+   copies of `:ref-fn-id`, which are `:type :uuid` (not `:ref`) to avoid an
+   FK to a possibly-deleted target, yet drive the reverse-ref reverse
+   lookup in `:ref-owner-bindings`."
+  [ds entity-name field-name]
+  (util/with-sql-error-handling "DDL error" :create-index {:entity-name entity-name :field-name field-name}
+                                (let [table-name (util/ident->sql entity-name)
+                                      index-name (field-index-name entity-name field-name)
+                                      column-name (util/ident->sql field-name)]
+                                  (jdbc/execute! ds [(str "CREATE INDEX IF NOT EXISTS \"" index-name
+                                                          "\" ON " table-name " (" column-name ")")]))))
+
+
+(defn create-field-indexes!
+  "Creates indexes for all `:indexed? true` fields in an entity."
+  [ds entity-name fields]
+  (run! (fn [[field-name field-spec]]
+          (when (:indexed? field-spec)
+            (create-field-index! ds entity-name field-name)))
+        fields))
+
+
 ;; === Constraint operations ===
 
 (defn- constraint-index-name

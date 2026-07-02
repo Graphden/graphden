@@ -10,7 +10,6 @@
     [graphden.executor.defbase :refer [defbase]]))
 
 
-
 (defbase _apply-create-secret-body
   [parsed leaf-id journal]
   (cr/record-effect! :db)
@@ -37,21 +36,15 @@
   (secrets/replay-secret-rollback! journal exception ctx))
 
 
-;; --- rotate-secret ---;; Reuses `_delete-secret-fn-row` / `_delete-secret-leaf-id` /
+;; --- rotate-secret ---
+;; Reuses `_delete-secret-fn-row` / `_delete-secret-leaf-id` /
 ;; the `_delete-secret-not-found?` / `_delete-secret-not-a-secret?`
 ;; guards by re-binding the `parsed` slot at the rotate cond — same
 ;; shape (both parsed values have `:fn-id` + `:fn-id-ref`).
 
 
 
-
-
-
 ;; --- delete-secret ---
-
-
-
-
 
 
 

@@ -66,15 +66,11 @@
                      target-branch-id))
 
 
-
 ;; =============================================================================
 ;; POST /api/branches
 ;; =============================================================================
 
 ;; --- create-branch ---
-
-
-
 
 
 
@@ -91,7 +87,6 @@
                      {:base-branch-id base-branch-id}))
 
 
-
 ;; =============================================================================
 ;; DELETE /api/branches/:ref
 ;; =============================================================================
@@ -100,7 +95,6 @@
 ;; cases (main-branch / has-children) stay inside apply because they
 ;; surface as exceptions from `vs/delete-branch!` — pre-checking them
 ;; would duplicate underlying constraint logic.
-
 
 
 
@@ -140,13 +134,11 @@
     result))
 
 
-
 ;; =============================================================================
 ;; GET /api/branches/:ref/conflicts?source=<ref>
 ;; =============================================================================
 
 ;; --- preview-conflicts ---
-
 
 
 
@@ -162,13 +154,11 @@
                         target-branch-id))
 
 
-
 ;; =============================================================================
 ;; POST /api/branches/:ref/merge
 ;; =============================================================================
 
 ;; --- merge-branch ---
-
 
 
 
@@ -224,7 +214,6 @@
            :skipped {:branch-local
                      (mrg/skipped-as-branch-local
                        (branches/base-storage ctx) source-branch-id)})))
-
 
 
 (def impls

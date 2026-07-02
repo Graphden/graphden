@@ -317,10 +317,9 @@ identity, so changing either creates a new slot.
 
 ### Compile at startup
 
-Default mode (`EXECUTOR=compiled`): every fn in the graph is
-compiled to a thunk at startup. Each call to `execute-by-name`
-delegates to a precomputed callable; `/health` ~10 ms,
-`/api/graph/layout` ~130 ms on the current dev graph.
+Every fn in the graph is compiled to a thunk at startup. Each call to
+`execute-by-name` delegates to a precomputed callable; `/health`
+~10 ms, `/api/graph/layout` ~130 ms on the current dev graph.
 
 `graphden.executor.compile/compile-all` walks the graph and emits:
 

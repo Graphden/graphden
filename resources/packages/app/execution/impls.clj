@@ -47,11 +47,6 @@
 
 
 
-
-
-
-
-
 (defbase _execute-apply
   [parsed]
   (cr/record-effect! :db)
@@ -85,7 +80,6 @@
   (when (some? id) (fn-exec/cancel-execution! ctx id)))
 
 
-
 ;; --- get-execution + cancel-execution ---
 ;; Both handlers share the `:_exec-id-parsed` graph parser (URL +
 ;; UUID coerce in fns.edn) AND the dynamic 404 builder (same text
@@ -96,10 +90,7 @@
 
 
 
-
 ;; POST /api/execute/:id/cancel atoms
-
-
 
 
 
@@ -143,7 +134,6 @@
    `:port`) by composing on top — no Clojure edit."
   [service-id]
   (get @recon/running service-id))
-
 
 
 ;; --- list-services ---

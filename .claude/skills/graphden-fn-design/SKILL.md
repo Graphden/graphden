@@ -328,7 +328,7 @@ display автоматически переключится на «отдель�
 
 ## 11. Связи с другими местами
 
-- Реализация `_`-prefix UI rules: `editor-overlays.js`,
+- Реализация `_`-prefix UI rules: `editor-overlay-*.js`,
   `editor-sidebar.js`.
 - Загрузка fn-def'ов из EDN: `src/graphden/packages/loader.clj`.
 - Парсер shape-dedup для inline composite: `src/graphden/packages/records.clj`

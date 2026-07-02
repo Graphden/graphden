@@ -367,10 +367,6 @@
         (:return (registry/rich-type-of (keyword (:name fn-row))))))))
 
 
-
-
-
-
 (defbase _types-usages-apply
   "Stage 3 of types-usages — walk the graph for every reference to the
    target type-row. Returns `{:ok :type-fn-id :type-name :count :usages}`
@@ -425,8 +421,6 @@
   (entities/apply-create-rollback journal exception ctx))
 
 
-
-
 ;; Same body/rollback split for create-list-type — the rollback
 ;; defbase is shared with record-type (`:_apply-create-record-type-
 ;; rollback`) since the rollback logic is type-agnostic.
@@ -434,8 +428,6 @@
   [parsed journal]
   (cr/record-effect! :db)
   (entities/apply-create-list-type-body parsed journal ctx))
-
-
 
 
 ;; `:_update-record-type-apply` is a graph `:try` fn-def in fns.edn
@@ -458,10 +450,6 @@
 
 
 
-
-
-
-
 ;; === Action Handlers (context-aware) ===
 ;; `process-create-entity` / `process-update-entity` are graph fn-defs
 ;; (`web/crud` fns.edn) — an `:if` over `parse → validate`, branching
@@ -471,27 +459,10 @@
 
 
 
-
-
-
 ;; `:_create-write-rej` and `:_create-binding-type-rej` are now graph
 ;; fn-defs — see fns.edn. Both compose over the new `:write-rej` /
 ;; `:type-check-binding-rej` atomic primitives (the same the update
 ;; chain uses).
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -554,7 +525,6 @@
   (entities/find-seq-append-binding parsed ctx))
 
 
-
 (defbase try-apply-seq-append
   "§3.3 core of sequence-append: materialise synthetic binding,
    compute next position, run pre-write validation, write the row.
@@ -565,15 +535,10 @@
   (entities/apply-seq-append-core parsed seq-binding ctx))
 
 
-
-
 (defbase _seq-remove-load-item
   [parsed]
   (cr/record-effect! :db)
   (entities/load-seq-remove-item parsed ctx))
-
-
-
 
 
 ;; `:_seq-update-item-id-invalid?` / `:_seq-update-body-invalid?` are
@@ -584,7 +549,6 @@
   [parsed]
   (cr/record-effect! :db)
   (entities/load-seq-update-item parsed ctx))
-
 
 
 (defbase try-apply-seq-update

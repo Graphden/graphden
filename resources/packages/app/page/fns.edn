@@ -18,7 +18,7 @@
 ;;
 ;; All three expose the same four free args:
 ;;   :title     — document <title> text
-;;   :page-body — hiccup tree for <body>
+;;   :body      — hiccup tree for <body>
 ;;   :head      — extra <head> hiccup nodes (typically
 ;;                `:graphden-page-head` for the default stylesheet)
 ;;   :scripts   — end-of-body <script> hiccup nodes (typically

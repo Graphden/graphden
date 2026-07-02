@@ -30,15 +30,15 @@
 
   {:name :_create-record-type-parsed-shape
    :description "Output of `:_create-record-type-parsed` — a record type-row's name, owning namespace, description and field list. `:name`/`:ns-id` are nullable post-parse; `:description` is loosely-typed (the JSON body may carry non-string descriptions); `:fields` is the per-field record list (`:vec` of the body's `:fields` value)."
-   :type {:name :nullable-text :ns-id :nullable-uuid :description :any :fields [:list :any]}}
+   :type {:name :nullable-text :ns-id :nullable-uuid :description :jsonb :fields [:list :any]}}
 
   {:name :_create-list-type-parsed-shape
    :description "Output of `:_create-list-type-parsed` — a list type-row's name, owning namespace, description and element-type reference. Nullable shape mirrors `:_create-record-type-parsed-shape`'s tolerant parse."
-   :type {:name :nullable-text :ns-id :nullable-uuid :description :any :element-ref :any}}
+   :type {:name :nullable-text :ns-id :nullable-uuid :description :jsonb :element-ref :jsonb}}
 
   {:name :_update-record-type-parsed-shape
    :description "Output of `:_update-record-type-parsed` — the target fn-id plus the submitted name / description / field list. `:has-description?` distinguishes a submitted-nil description from an absent key. `:name` nullable text; `:description` loosely-typed; `:fields` is the per-field record list (`:vec` of the body's `:fields` value). The validation guard catches the missing-fn-id / blank-name cases downstream."
-   :type {:fn-id :nullable-uuid :name :nullable-text :has-description? :bool :description :any :fields [:list :any]}}
+   :type {:fn-id :nullable-uuid :name :nullable-text :has-description? :bool :description :jsonb :fields [:list :any]}}
 
   {:name :_create-parsed-shape
    :description "Output of `:_create-parsed` — the URI entity-type, the form-decoded body, the per-type-parsed entity field map, and a `:parse-error` string set when the per-type parser threw."
@@ -2178,7 +2178,7 @@
   {:name :_ref-owner-where
    :parent :assoc-empty
    :args {:key {:value :ref-fn-id}
-          :value {:as :target-fn-id :type [:union :null :uuid]
+          :value {:as :target-fn-id :type :nullable-uuid
                   :description "Fn-id whose referrers to find."}}}
 
   {:name :_ref-owner-get-id

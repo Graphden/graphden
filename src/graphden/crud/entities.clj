@@ -1250,8 +1250,10 @@
   (let [storage (request/require-storage ctx)
         et (:entity-type parsed)
         id (:id parsed)
-        existing (try (sp/read-entity storage et id)
-                      (catch Exception _ nil))]
+        ;; `read-entity` already returns nil for a missing row — no
+        ;; try/catch here: a genuine storage failure must propagate to a
+        ;; 500, not be swallowed into a misleading 404.
+        existing (sp/read-entity storage et id)]
     (if (nil? existing)
       (html-error-response 404 (str "Entity not found: " (name et) " " id))
       (do

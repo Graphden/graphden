@@ -167,33 +167,48 @@ async function reconcileServices() {
 // delete buttons so the handler picks PUT/POST + which row id to
 // target without a separate /api lookup.
 
+// Cache of rendered popover HTML by fn-id. Re-opening the same fn's
+// settings (common: comparing configs across fns) skips the ~30-150ms
+// server render. Invalidated wholesale on ANY service mutation
+// (`invalidateServicePopoverCache`) — a save/delete can shift sibling
+// warnings + displacement across fns, so per-fn eviction isn't enough.
+// A branch switch reloads the page, dropping this Map with it.
+const _servicePopoverCache = new Map();
+
+function invalidateServicePopoverCache() { _servicePopoverCache.clear(); }
+
 async function showServicePopover(fnEntity, anchorEl) {
   if (!fnEntity || !anchorEl) return;
   const el = ensureServicePopoverEl();
   el.textContent = '';
-  let resp;
-  try {
-    resp = await authFetch(
-      '/partials/service-popover?fn-id=' + encodeURIComponent(fnEntity.id));
-  } catch (err) {
-    el.innerHTML = '<div class="service-popover-error">'
-      + 'Failed to load service settings: ' + (err?.message || 'network error')
-      + '</div>';
-    el.classList.add('visible');
-    anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
-    servicePopoverAnchor = anchorEl;
-    return;
+  let html = _servicePopoverCache.get(fnEntity.id);
+  if (html == null) {
+    let resp;
+    try {
+      resp = await authFetch(
+        '/partials/service-popover?fn-id=' + encodeURIComponent(fnEntity.id));
+    } catch (err) {
+      el.innerHTML = '<div class="service-popover-error">'
+        + 'Failed to load service settings: ' + (err?.message || 'network error')
+        + '</div>';
+      el.classList.add('visible');
+      anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
+      servicePopoverAnchor = anchorEl;
+      return;
+    }
+    if (!resp.ok) {
+      el.innerHTML = '<div class="service-popover-error">'
+        + 'Failed to load service settings (HTTP ' + resp.status + ')'
+        + '</div>';
+      el.classList.add('visible');
+      anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
+      servicePopoverAnchor = anchorEl;
+      return;
+    }
+    html = await resp.text();
+    _servicePopoverCache.set(fnEntity.id, html);
   }
-  if (!resp.ok) {
-    el.innerHTML = '<div class="service-popover-error">'
-      + 'Failed to load service settings (HTTP ' + resp.status + ')'
-      + '</div>';
-    el.classList.add('visible');
-    anchorBelowClamped(el, anchorEl, {fallbackW: 320, fallbackH: 200});
-    servicePopoverAnchor = anchorEl;
-    return;
-  }
-  el.innerHTML = await resp.text();
+  el.innerHTML = html;
   wireServicePopoverHandlers(el, fnEntity);
 
   // Position + show
@@ -263,6 +278,7 @@ function wireServicePopoverHandlers(el, fnEntity) {
         }
       } catch (_) { /* swallow — most often AbortError from navigation */ }
       servicesCache = null;
+      invalidateServicePopoverCache();
       hideServicePopover();
     });
   }
@@ -284,6 +300,7 @@ function wireServicePopoverHandlers(el, fnEntity) {
         }
         await reconcileServices();
         servicesCache = null;
+        invalidateServicePopoverCache();
         hideServicePopover();
       } catch (err) {
         alert('Delete failed (network error): ' + (err?.message || err));

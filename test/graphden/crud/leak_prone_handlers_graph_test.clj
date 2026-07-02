@@ -48,7 +48,7 @@
 
 
 ;; =============================================================================
-;; GET /partials/secrets-panel
+;; GET /api/secrets  (:list-secrets-handler)
 ;; =============================================================================
 ;;
 ;; Exercised the original failure during 2026-06-25 `bb test-e2e`:
@@ -61,22 +61,27 @@
 ;; pin on `:_list-secrets-leaf-rows-identities` (and 10 siblings)
 ;; closed the leak. This test invokes the graph chain directly so a
 ;; future pin removal trips `bb test` immediately.
+;;
+;; Originally pinned via the `/partials/secrets-panel` handler; that
+;; server-rendered list panel was retired (the sidebar list renders
+;; client-side again — graph-ui §6.1), so this now points at the LIVE
+;; `:list-secrets-handler` (GET /api/secrets), which parents the SAME
+;; `_list-secrets-data → … → _list-secrets-leaf-rows-identities` chain
+;; carrying the load-bearing pins.
 
-(deftest partial-secrets-panel-handler-returns-html-without-leak-test
-  (testing "GET /partials/secrets-panel renders Secrets section as text/html — no `:where`-via-closure leak"
-    (let [response (via :_partial-secrets-panel-handler
-                        {:uri "/partials/secrets-panel"
+(deftest list-secrets-handler-no-where-clause-leak-test
+  (testing "GET /api/secrets runs the list-secrets graph chain without leaking the Ring request into the where clause"
+    (let [response (via :list-secrets-handler
+                        {:uri "/api/secrets"
                          :request-method :get
                          :headers {}})]
       (is (= 200 (:status response))
-          "happy path returns 200; if 500 with `Unknown field 'request-method'`,
-           the `:where {:value {}}` pin on a `:storage-query-identities`
-           consumer was removed and the Ring request map leaked into the
-           where-clause via closure capture")
-      (is (str/starts-with? (or (get-in response [:headers :Content-Type])
-                                (get-in response [:headers "Content-Type"])
-                                "")
-                            "text/html")))))
+          "happy path returns 200; a 500 with `Unknown field 'request-method'`
+           means a `:where {:value {}}` pin on a `:storage-query-identities`
+           consumer in the _list-secrets-* chain was removed and the Ring
+           request map leaked into the where-clause via closure capture")
+      (is (some? (:body response))
+          "handler produced a response body (JSON envelope), not an error stub"))))
 
 
 ;; =============================================================================

@@ -263,8 +263,17 @@
     (GenericContainer/.waitingFor
       (-> (Wait/forHttp "/health")
           (HttpWaitStrategy/.forStatusCode 200)
+          ;; Cold-boot creates ALL fn-entities from scratch against a
+          ;; fresh (empty) testcontainers Postgres — ~68s for 3313
+          ;; entities on the loaded demo host — THEN eager-compiles the
+          ;; registry before /health flips 200. That's inherently
+          ;; slower than a demo restart (which reuses persisted rows)
+          ;; and grows with the graph. 90s left almost no headroom over
+          ;; entity-creation alone; 240s covers entities + compile with
+          ;; margin for host contention (the e2e stack shares the box
+          ;; with the always-on :9002 demo + Chrome + Postgres).
           (HttpWaitStrategy/.withStartupTimeout
-            (java.time.Duration/ofSeconds 90))))
+            (java.time.Duration/ofSeconds 240))))
     (GenericContainer/.start)))
 
 

@@ -705,11 +705,9 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
 // the canvas (arg-value node disappears, ref-edge appears).
 
 // Populate `select` with every type-name T such that
-// `T ⊆ expectedSlotType(arg)` per the server's alias-aware `subtype?`.
-// Pre-fix the picker showed every primitive whether or not it matched
-// the slot — turning `:handler` (an fn-type slot) into `:int` was a
-// silent click; now the dropdown only lists types the slot can
-// legally narrow to.
+// `T ⊆ expectedSlotType(arg)` per the server's alias-aware `subtype?`,
+// so the dropdown only lists types the slot can legally narrow to —
+// an fn-type slot like `:handler` never offers `:int`.
 //
 // Candidates: the 14 primitive value-kinds plus every named type-row
 // in the rich-types snapshot (refinements, lists, unions, variants,

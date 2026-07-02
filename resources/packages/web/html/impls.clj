@@ -7,12 +7,6 @@
 
 ;; === Hiccup Helpers ===
 
-;; The hiccup-walker that used to live here (element detection, attr
-;; keywordization, script/style raw-content handling) is now a graph
-;; fn-def chain in fns.edn rooted at `:hiccup-normalize`. The single
-;; library boundary remaining is `:h-raw` (above), used inside
-;; script/style bodies to bypass HTML entity escaping.
-
 
 ;; === Implementations ===
 
@@ -28,8 +22,6 @@
   [string]
   (h/raw string))
 
-
-;; `:hiccup-normalize` is now a graph fn-def — see fns.edn.
 
 
 (defbase hiccup-element

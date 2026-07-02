@@ -42,13 +42,12 @@
   ;;     handler too).
   ;;   * `:_list-branches-data` envelope — `{:ok :count :branches}`
   ;;     shape; replace for JSON:API, pagination, etc.
-  ;; --- Block 1 Step 2 migration: row load goes through `:pg-query`
-  ;; + per-row `:decode-row` instead of the generic `:list-entities`
-  ;; wrap. `:branch` is non-versioned (per `versioning.storage.
-  ;; resolution/entity-config`), so a raw pg-query bypasses the
-  ;; version-resolution layer correctly. The HoneySQL is now
-  ;; visible at the graph level — admins can add `:where` / extra
-  ;; columns without touching the generic loader.
+  ;; Row load goes through `:pg-query` + per-row `:decode-row` rather
+  ;; than the generic `:list-entities` wrap. `:branch` is non-versioned
+  ;; (per `versioning.storage.resolution/entity-config`), so a raw
+  ;; pg-query bypasses the version-resolution layer correctly. The
+  ;; HoneySQL is visible at the graph level — admins can add `:where` /
+  ;; extra columns without touching the generic loader.
   {:name :_list-branches-rows
    :parent :map
    :args {:func :_list-branches-decode-row
@@ -239,8 +238,8 @@
   ;; GET /api/fns/:fn-id/versions — history of one fn across branches.
   ;; ---------------------------------------------------------------------
 
-  ;; `:list-fn-versions` is now a full graph decomposition — multi-
-  ;; query join over `:list-entities` + `:group-by` + `:update-vals`
+  ;; `:list-fn-versions` is a full graph decomposition — multi-query
+  ;; join over `:list-entities` + `:group-by` + `:update-vals`
   ;; + `:sort-by` + per-row HOF chain producing the JSON shape, plus
   ;; the envelope `{:ok :fn-id :count :versions}`.
   ;;
@@ -266,8 +265,8 @@
    :args {:string :_list-fn-versions-fn-id-raw}}
 
   ;; --- Query #1: versions for the fn-id.
-  ;; Block 1 Step 2 migration: direct `:pg-query` + per-row
-  ;; `:decode-row` over `:fn-version`. `:fn-version` is itself a
+  ;; Direct `:pg-query` + per-row `:decode-row` over `:fn-version`.
+  ;; `:fn-version` is itself a
   ;; non-versioned write-once log (the version-history of `:fn`),
   ;; so bypassing the version-resolution layer is correct.
   {:name :_lfv-versions-from-storage
@@ -334,9 +333,9 @@
    :args {:coll {:parent :distinct :args {:coll :_lfv-version-branch-ids-non-nil}}}}
 
   ;; --- Query #2: branches by IN(branch-ids).
-  ;; Block 1 Step 2 migration: HoneySQL emits `id IN (?, ?, ...)`
-  ;; via `[:in :id <ids-vec>]` — the same shape `:list-entities`'s
-  ;; collection-value heuristic produced internally.
+  ;; HoneySQL emits `id IN (?, ?, ...)` via `[:in :id <ids-vec>]` —
+  ;; the same shape `:list-entities`'s collection-value heuristic
+  ;; produces internally.
   {:name :_lfv-branches-from-storage
    :parent :map
    :args {:func :_lfv-branches-decode-row
@@ -399,7 +398,7 @@
    :args {:coll :_lfv-version-id-list}}
 
   ;; --- Query #3: executions by IN(version-ids).
-  ;; Block 1 Step 2 migration: same IN-clause pattern as branches.
+  ;; Same IN-clause pattern as branches.
   {:name :_lfv-execs-from-storage
    :parent :map
    :args {:func :_lfv-execs-decode-row
@@ -555,7 +554,7 @@
   ;; diff between two branches.
   ;; ---------------------------------------------------------------------
 
-  ;; --- C12 atoms: diff-branches variant-2.
+  ;; --- diff-branches ---
   {:name :_branches-target-ref
    :description "Target branch ref extracted from `/api/branches/:target/…` — shared by diff / conflicts / merge / delete parsers."
    :parent :uri-segment-after
@@ -750,7 +749,7 @@
   ;; POST /api/branches — create a new branch.
   ;; ---------------------------------------------------------------------
 
-  ;; --- C13 atoms: create-branch variant-2.
+  ;; --- create-branch ---
   ;; Body parser — `:branch-name` is `:str-trim`'d (nil-safe via `:if
   ;; :some?`), `:base-ref` is `(str v)` if non-blank else nil.
   {:name :_create-branch-body
@@ -811,9 +810,9 @@
    :parent :blank?
    :args {:string {:parent :get :args {:coll {:as :parsed} :key {:value :branch-name} :default nil}}}}
 
-  ;; --- Block 1 Step 2 migration: name-collision check goes through
-  ;; `:pg-query` + parameterised HoneySQL `:where [:= :name ...]`
-  ;; instead of the generic `:list-entities` wrap. `:branch` is
+  ;; --- Name-collision check goes through `:pg-query` + parameterised
+  ;; HoneySQL `:where [:= :name ...]` rather than the generic
+  ;; `:list-entities` wrap. `:branch` is
   ;; non-versioned (see `versioning.storage.resolution/entity-config`),
   ;; so a raw pg-query bypasses the version-resolution layer
   ;; correctly.
@@ -964,7 +963,7 @@
   ;; DELETE /api/branches/:ref — delete branch + all its version rows.
   ;; ---------------------------------------------------------------------
 
-  ;; --- C14 atoms: delete-branch variant-2.
+  ;; --- delete-branch ---
   {:name :_delete-branch-parsed
    :description "Parse DELETE /api/branches/:ref URL into `{:branch-ref}`. Shares `:_branches-target-ref` with diff / conflicts / merge."
    :parent :zipmap
@@ -1132,7 +1131,7 @@
   ;; GET /api/branches/:ref/conflicts?source=<ref> — preview merge conflicts.
   ;; ---------------------------------------------------------------------
 
-  ;; --- C15 atoms: preview-conflicts variant-2.
+  ;; --- preview-conflicts ---
   {:name :_conflicts-source-ref
    :description "Raw `source=` query-param value, or nil."
    :parent :get
@@ -1301,7 +1300,7 @@
   ;; POST /api/branches/:ref/merge — merge source into target.
   ;; ---------------------------------------------------------------------
 
-  ;; --- C16 atoms: merge-branch variant-2. The :merge-conflict
+  ;; --- merge-branch --- The :merge-conflict
   ;; rejection case stays inside apply (exception-surfaced from
   ;; `vs/merge-branch!`).
   ;;
@@ -1664,12 +1663,8 @@
   ;; full list so we can look up parents and detect children without
   ;; an N+1 storage read; `{:as :current-name}` is the active-branch
   ;; name (closure-captured) so each row knows whether it's the
-  ;; selected one.
-  ;;
-  ;; Decomposed from the previous `crud.branches/branch-row-hiccup`
-  ;; private helper that hid 4 conditionals + 3 button-visibility
-  ;; policies + symbol literals ("Δ" / "⇢" / "×") in Clojure. Each
-  ;; visual / policy decision is now an admin-tweakable graph step.
+  ;; selected one. Each visual / policy decision is an
+  ;; admin-tweakable graph step.
   ;; ---------------------------------------------------------------------
 
   {:name :_bp-row-name
@@ -2054,7 +2049,7 @@
           :children {:value []}}}
 
   {:name :_partial-branch-popover-body
-   :description "Full hiccup for the popover body — list + create form + error slot. Pure-graph composition over `:_bp-*` chain; previously delegated to the `crud.branches/render-branch-popover-hiccup` Clojure helper (now removed per §3.3 — composition belongs in the graph)."
+   :description "Full hiccup for the popover body — list + create form + error slot. Pure-graph composition over the `:_bp-*` chain."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {}}

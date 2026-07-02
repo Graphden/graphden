@@ -7,10 +7,6 @@
 ;; explicitly says "this is a value-binding, not a fn-ref", and the
 ;; loader stores the keyword as data without going through the bare-
 ;; keyword auto-resolution path.
-;;
-;; The legacy `:literal? true` flag was a defensive marker for the
-;; same purpose; it has been retired (the `{:value …}` shape is
-;; enough).
 
 
 {:namespace "examples.literal-keyword-in-sequence"

@@ -4,7 +4,7 @@
    addon's account ops); core stays addon-agnostic, so without the addon they
    return nil (a single-tenant editor authenticates with a static bearer +
    GET /api/auth/check instead). The grants / users panels and the
-   org / token / domain / my-app provisioning routes moved to the
+   org / token / domain / my-app provisioning routes live in the
    `tenancy-admin` package (route-collection seam, PLATFORM_PLAN §6)."
   (:require
     [graphden.executor.defbase :refer [defbase]]))

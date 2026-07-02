@@ -112,8 +112,8 @@
    :description "A partial Ring response from a `process-*` / `_*-apply` stage — `:status` + `:body`, optionally `:headers` (open-record). `html-action-response` wraps it into a full response, defaulting any missing field."
    :type {:status :int :body :text}}
 
-  ;; --- shared rejection envelopes — identical literal payloads that
-  ;; were previously duplicated under per-endpoint names. Documentation
+  ;; --- shared rejection envelopes — identical literal payloads,
+  ;; shared instead of duplicated per-endpoint. Documentation
   ;; of WHICH endpoint hits WHICH guard lives in the predicate name on
   ;; the cond clause line, not on a per-endpoint copy of the envelope.
 
@@ -154,7 +154,7 @@
    :args {:value {:ok false :error "Required field ':name' is missing"}}}
 
   {:name :_parsed-body
-   :description "Shared `:parse-json-body` wrap — every type-API / type-row stage1 used to declare a per-endpoint shim with the same body. ONE shared wrap; call-cache dedupes per (fn, env), so cross-endpoint requests never collide."
+   :description "Shared `:parse-json-body` wrap for every type-API / type-row stage1. call-cache dedupes per (fn, env), so cross-endpoint requests never collide."
    :parent :parse-json-body
    :args {:request {:as :request :type :ring-request-shape :description "Internal Ring request map."}}}
 
@@ -280,8 +280,8 @@
   ;; Reverse-junction lookup. Used by the in-use guard
   ;; (`:_delete-fn-in-use-reason`), the find-fn-usages chain
   ;; (`app/secrets`), and any future reverse-reference walks.
-  ;; Migrated to web/crud (Phase 4) so the web layer can reach it
-  ;; without depending on app.
+  ;; Lives in web/crud so the web layer can reach it without
+  ;; depending on app.
   {:name :query-ref-many-owners
    :description "Find all rows of `:entity-type` whose `:ref-many-field` (a vector of ids) contains `:target-id`. Returns a vector of owner ids."
    :args {:entity-type {:type :text :description "Entity name as text."}
@@ -505,7 +505,7 @@
           :then {:parent :const :args {:value {:ok false :error "Request body must include 'expected'"}}}
           :else {:value nil}}}
 
-  ;; --- _types-candidates-apply graph decomposition. Mirrors
+  ;; --- _types-candidates-apply. Mirrors
   ;; `types-api/apply-types-candidates`: snapshot registry → filter by
   ;; (not-type-row, subtype, effect-subset, name-prefix) → reshape
   ;; per-row → sort by name → envelope. Closure-captured `:parsed`
@@ -737,7 +737,7 @@
                     {:value true}                       {:value nil}]
           :parsed :_create-record-type-parsed}}
 
-  ;; Phase 4.3 decomposition: same `:try` + shared-`:atom` journal
+  ;; Same `:try` + shared-`:atom` journal
   ;; pattern as `:_update-record-type-apply` below. Body throws on
   ;; storage / type-resolve failure; on-throw replays the journal in
   ;; reverse. The `:journal` extra arg at the `:try`-call site is the
@@ -793,9 +793,9 @@
                  {:parent :get :args {:coll :_parsed-body :key {:value :element-type} :default nil}}]}
    :return-type :_create-list-type-parsed-shape}
 
-  ;; --- C20: stage 2 of create-list-type as a graph `:cond`.
-  ;; Mirrors C19's decomposition shape — `:blank?` + `:nil?` guards,
-  ;; static error consts, flat :cond. Same skill §4 rationale. ---
+  ;; --- stage 2 of create-list-type as a graph `:cond`.
+  ;; Same shape as the sibling record-type stage 2 — `:blank?` + `:nil?`
+  ;; guards, static error consts, flat :cond. Same skill §4 rationale. ---
 
   {:name :_create-list-type-parsed-name
    :description "Pull the `:name` field out of `:_create-list-type-parsed`'s output."
@@ -831,7 +831,7 @@
                     {:value true}                          {:value nil}]
           :parsed :_create-list-type-parsed}}
 
-  ;; Phase 4.3 decomposition: `:try` + shared `:atom` journal. The
+  ;; `:try` + shared `:atom` journal. The
   ;; on-throw reuses the type-row-rollback defbase since the
   ;; rollback logic is type-agnostic (replay journal in reverse).
   {:name :_apply-create-list-type-body
@@ -878,11 +878,11 @@
    :return-type :_update-record-type-parsed-shape}
 
   ;; --- C21: stage 2 of update-record-type as a graph `:cond`.
-  ;; Same shape as C19/C20 with one new wrinkle — the third guard
-  ;; reads storage (`:list-entities`) to confirm the target fn-row
-  ;; exists. Dynamic-error builder (`_update-record-type-err-not-found`)
-  ;; stays as a 1-line base-fn (same pattern as C5's
-  ;; `_delete-secret-err-in-use` etc.) so the error message can
+  ;; Same shape as the record/list-type stage-2 guards with one new
+  ;; wrinkle — the third guard reads storage (`:list-entities`) to
+  ;; confirm the target fn-row exists. Dynamic-error builder
+  ;; (`_update-record-type-err-not-found`) stays as a 1-line base-fn
+  ;; (same pattern as `_delete-secret-err-in-use` etc.) so the error message can
   ;; cite the absent fn-id without an assoc-chain of intermediate
   ;; fn-defs. ---
 
@@ -911,7 +911,7 @@
    :parent :assoc-empty
    :args {:key {:value :id} :value :_update-record-type-parsed-fn-id}}
 
-  ;; Phase 3: `:id`-only IN-clause pushes into the identity SQL.
+  ;; `:id`-only IN-clause pushes into the identity SQL.
   ;; `:resolve-fn-rows` then overlays version data on the (at most one)
   ;; identity row matching the id.
   {:name :_update-record-type-fn-rows
@@ -1007,16 +1007,14 @@
   ;; themselves are `:if` graph fn-defs below; these base-fns are the
   ;; parse / validate / apply stages. `_rejected?` + `_rejection-response`
   ;; are shared by both create and update. ---
-  ;; --- :_create-parsed (Variant-2). Was defbase delegating to a
-  ;; since-removed `parse-create-request` helper. Now graph composition
-  ;; over the new `:extract-entity-params` primitive + body→form-data
+  ;; --- :_create-parsed — graph composition over the
+  ;; `:extract-entity-params` primitive + body→form-data
   ;; parsing + per-type-dispatch through `:cond` + `:try` to capture
   ;; parse exceptions as `:parse-error`. NOTE: body slurp is implicit —
   ;; `realize-body` in `web/http/impls.clj` has already coerced the
   ;; InputStream to a String by the time any handler sees the request.
   ;;
-  ;; Per-type dispatch matches the legacy `case` in
-  ;; `parse-create-request`. Adding a new entity type means adding a
+  ;; Per-type dispatch: adding a new entity type means adding a
   ;; new clause here AND a per-type `parse-<TYPE>-from-form` fn-def —
   ;; both at the graph level, no Clojure rebuild.
 
@@ -1026,10 +1024,10 @@
 
   ;; Form-data: use the `:parse-form-body` defbase (which CHECKS
   ;; `Content-Type: application/x-www-form-urlencoded` and returns
-  ;; `{}` otherwise), then keywordise keys. The earlier inline
-  ;; `:parse-query-string` chain preserved a legacy bug — it parsed
-  ;; ANY non-nil body regardless of CT, so `Content-Type: text/plain`
-  ;; with body `name=foo` slipped through guard #2 and the entity was
+  ;; `{}` otherwise), then keywordise keys. A bare
+  ;; `:parse-query-string` chain would parse ANY non-nil body
+  ;; regardless of CT, so `Content-Type: text/plain` with body
+  ;; `name=foo` would slip through guard #2 and the entity would be
   ;; created with the parsed fields. Routing through `:parse-form-body`
   ;; closes that hole.
 
@@ -1063,7 +1061,7 @@
   ;; parser runs per request. Each clause's body captures the cond's
   ;; shared :form-data binding.
   {:name :_create-entity-data-by-type
-   :description "Dispatch to the per-type parser based on `:type-str`. Mirrors the legacy `case`-style dispatch."
+   :description "Dispatch to the per-type parser based on `:type-str`."
    :parent :cond
    :args {:clauses [{:parent :equal? :args {:a {:as :type-str} :b {:value "fn"}}}
                     {:parent :parse-fn-from-form :args {:form-data {:as :form-data}}}
@@ -1152,9 +1150,7 @@
   ;; even a guard whose result feeds both predicate and result lane
   ;; computes once). ---
 
-  ;; --- Guards 1–3 (Variant-2). Pure §3.1c removals: each was a thin
-  ;; defbase wrapping a Clojure helper that returned a `{:reason …}`
-  ;; map or nil. Now graph-composed with no new base-fns — `:if`
+  ;; --- Guards 1–3. Graph-composed with no new base-fns — `:if`
   ;; over a `:nil?` / `:some?` predicate + `:zipmap` reason envelope.
   ;; The `:_*-rej?` predicates stay as `:some?` over the graph result
   ;; for cond-readability; result-cache dedupes the underlying eval.
@@ -1210,8 +1206,8 @@
 
   ;; --- Guard 2: empty / non-form body. `:empty?` catches both
   ;; the truly missing case (form-data = nil — no body / wrong
-  ;; content-type) AND the empty-map case (form-data = `{}` —
-  ;; legacy `:nil?` guard let an empty body through and let the
+  ;; content-type) AND the empty-map case (form-data = `{}` — a bare
+  ;; `:nil?` guard would let an empty body through and let the
   ;; downstream apply create entities with zero fields).
   {:name :_create-form-data-empty?
    :parent :empty?
@@ -1255,7 +1251,7 @@
    :parent :some?
    :args {:value :_create-parse-error-rej}}
 
-  ;; --- Guard 4 (Variant-2): `:fn-slot` creates only — a composed fn
+  ;; --- Guard 4: `:fn-slot` creates only — a composed fn
   ;; can only own slots that rename an inherited one. Pure graph
   ;; composition over `:get-entity` (the existing read-by-id+type
   ;; primitive). The DB reads are gated behind a lazy `:and` so that
@@ -1335,9 +1331,9 @@
    :parent :some?
    :args {:value :_create-fn-slot-rename-rej}}
 
-  ;; --- Guard 5 (Variant-2): `:service` creates only — refuse if the
+  ;; --- Guard 5: `:service` creates only — refuse if the
   ;; target fn has any free-arg slot. Pure graph composition over the
-  ;; new `:free-arg-slot-map` primitive; admins can vary the
+  ;; `:free-arg-slot-map` primitive; admins can vary the
   ;; "permissive" / "strict" definition by composing a different free-
   ;; arg-filter at the graph layer (e.g. allow optional slots).
 
@@ -1408,7 +1404,7 @@
    :return-type :bool
    :effects #{:db}}
 
-  ;; --- Guard 6 (Variant-2): `:service` creates only — refuse if the
+  ;; --- Guard 6: `:service` creates only — refuse if the
   ;; target fn doesn't declare the `:process` effect (directly or via
   ;; an ancestor). Pure graph composition over `:chain-has-process-
   ;; effect?` + `:get-entity` for the fn-name citation.
@@ -1502,9 +1498,9 @@
                     {:value true}                    {:value nil}]
           :parsed :_create-parsed}}
 
-  ;; Phase 4.2 decomposition: success branch of POST /api/entities/:type
-  ;; is now graph composition. The §3.3 transactional unit
-  ;; (`sp/create-entity` + Phase-6c rename-slot + post-check + rollback)
+  ;; Success branch of POST /api/entities/:type as graph composition.
+  ;; The §3.3 transactional unit
+  ;; (`sp/create-entity` + rename-slot + post-check + rollback)
   ;; lives inside the `:try-apply-create` primitive — its body and
   ;; rollback share a row-id that can't be split across graph nodes
   ;; without risking a stale-id read. Everything else — error
@@ -1591,7 +1587,7 @@
    :parent :const
    :args {:value {:status 200 :body "<p>Entity created successfully</p>"}}}
 
-  ;; --- :_update-parsed (Variant-2). Mirrors :_create-parsed plus
+  ;; --- :_update-parsed. Mirrors :_create-parsed plus
   ;; (a) `:id-str` + `:id-uuid` from the URI, (b) `:pre-existing` row
   ;; pre-read (so validation can build the merged post-write view +
   ;; the response can name the affected row even when form-data omits
@@ -1607,8 +1603,7 @@
 
   ;; Pre-existing row read — guarded by entity-type + id-uuid both
   ;; present. When entity-type is nil OR id-uuid didn't parse, return
-  ;; nil without touching storage. Mirrors the legacy
-  ;; `(when (and entity-type id-uuid) (try (sp/read-entity ...)))`.
+  ;; nil without touching storage.
   {:name :_update-pre-existing-fetched
    :description "Read the pre-existing row by type + id. Only executed under the `:_update-pre-existing` `:if`-guard that asserts both are non-nil, so the `:type` overrides on the bindings strip the nullable surface from `:_create-extracted.get` / `:parse-uuid` — without them the type-checker correctly rejects nullable values flowing into `:get-entity`'s strict slots. The return-type stays the unrefined `:nullable-keyword-map` from `:get-entity` — at this site the entity-type is dynamic (parsed from form body) so we can't pin a specific entity-shape alias without lying about non-`:fn` callers."
    :parent :get-entity
@@ -1701,15 +1696,12 @@
    :return-type :_rejection-shape
    :effects #{:db}}
 
-  ;; --- Stage 2 of update (Variant-2). Was defbase delegating to a
-  ;; since-removed `validate-update` helper which ran a 4-guard `cond`
-  ;; then `or`'d `write-rej` and `type-check-binding-rej` against the
-  ;; merged post-write view. Now graph-composed as a `:cond` whose first three
+  ;; --- Stage 2 of update. A `:cond` whose first three
   ;; guards REUSE the create-side rej-builders (`_create-entity-type-
   ;; rej`/`-form-data-rej`/`-parse-error-rej`) since both `_create-
   ;; parsed-shape` and `_update-parsed-shape` carry the same
   ;; `:entity-type` / `:type-str` / `:form-data` / `:parse-error`
-  ;; fields. A new `:_update-id-str-nil?` guard handles the URI-id-
+  ;; fields. A `:_update-id-str-nil?` guard handles the URI-id-
   ;; required case unique to update.
   ;;
   ;; The `:else` branch builds the merged-data (pre-existing +
@@ -1796,9 +1788,9 @@
                     {:value true}                    :_update-validation-tail]
           :parsed :_update-parsed}}
 
-  ;; Phase 4.2 decomposition: success branch of PUT /api/entities/:type/:id
-  ;; is now graph composition. `:try-apply-update` is the atomic
-  ;; write unit (sp/update-entity + Phase-6c rename-slot). Update has
+  ;; Success branch of PUT /api/entities/:type/:id as graph composition.
+  ;; `:try-apply-update` is the atomic
+  ;; write unit (sp/update-entity + rename-slot). Update has
   ;; no post-write type-check + rollback so the primitive is §3.1
   ;; (not §3.3 like create).
   {:name :_update-apply
@@ -1862,8 +1854,7 @@
                   :_update-apply-ok-response]}}
 
   ;; Invalidate / notify payload: pre-existing row merged with entity-data
-  ;; merged with `{:id id-uuid}`. Matches legacy `(merge pre-existing
-  ;; entity-data {:id id-uuid})` so seed-derivation sees both the
+  ;; merged with `{:id id-uuid}`, so seed-derivation sees both the
   ;; pre-update FKs and any updated FKs.
   {:name :_update-apply-success-payload
    :parent :merge
@@ -1957,7 +1948,7 @@
                    :description "Human-readable failure reason — rendered inside the `<p class=\"error\">…</p>` body."}}
    :return-type {:status :int :headers :text-map :body :text}}
 
-  ;; --- delete-entity primitives (C5 decomposition). The handler
+  ;; --- delete-entity primitives. The handler
   ;; itself is the `:process-delete-entity` `:cond` graph fn-def below.
   ;; Four rejection paths with mixed static / dynamic-reason 409s, plus
   ;; the success path. The two dynamic-reason 409s share their reason
@@ -1980,12 +1971,10 @@
           :param-name {:type :text :description "Parameter name (e.g. `\"fn-id\"`)."}}
    :return-type :nullable-text}
 
-  ;; --- :_delete-parsed (Variant-2). Was defbase delegating to a
-  ;; since-removed `parse-delete-entity-request` helper. Now graph
-  ;; composition:
+  ;; --- :_delete-parsed — graph composition:
   ;; `:extract-entity-params` + `:parse-uuid` of the id-str + `:zipmap`
-  ;; envelope. `:parse-uuid` already swallows bad UUIDs to nil, so the
-  ;; legacy `try/catch` collapse is no longer needed.
+  ;; envelope. `:parse-uuid` already swallows bad UUIDs to nil, so no
+  ;; try/catch collapse is needed.
   {:name :_delete-parsed-extracted
    :parent :extract-entity-params
    :args {:request {:as :request}}}
@@ -2011,8 +2000,7 @@
    :args {:values [{:parent :nil? :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :entity-type} :default nil}}}}
                    {:parent :nil? :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :id} :default nil}}}}]}}
 
-  ;; Phase 4 decomposition: the secret-shape guard is now a graph
-  ;; composition. Three parts:
+  ;; The secret-shape guard as a graph composition. Three parts:
   ;;   1. entity-type = :fn AND id present (cheap gate)
   ;;   2. resolve the target fn row by id
   ;;   3. compare its `:parent-ids` against `[<secret-leaf-fn-id>]`
@@ -2109,13 +2097,13 @@
    :parent :vec
    :args {:coll [:_delete-secret-leaf-id]}}
 
-  ;; Phase 4 decomposition: in-use reason is now graph composition
+  ;; In-use reason as graph composition
   ;; over three storage queries. Counts:
   ;;   - parent-owners — fns whose `:parent-ids` ref the target
   ;;   - ref-bindings  — bindings whose `:ref-fn-id` is the target
   ;;   - ref-items     — binding-list-items whose `:ref-fn-id` is the target
-  ;; …then renders the same human-readable message the legacy defbase
-  ;; produced (so the UI's 409 toast text doesn't shift).
+  ;; …then renders the human-readable 409 message (kept stable so
+  ;; the UI's toast text doesn't shift).
   {:name :_delete-fn-in-use-reason
    :description "Compute the human-readable reason when a fn-def delete is rejected for being referenced; nil otherwise. Shared by the predicate + the dynamic-reason error builder."
    :parent :if
@@ -2305,7 +2293,7 @@
    :parent :count :args {:coll :_delete-fn-ref-items}}
 
   {:name :_delete-fn-refs-total
-   :description "Sum of binding-ref + list-item-ref counts; matches the legacy `(+ ref-bindings ref-items)`."
+   :description "Sum of binding-ref + list-item-ref counts."
    :parent :add
    :args {:nums [:_delete-fn-ref-bindings-count :_delete-fn-ref-items-count]}}
 
@@ -2323,7 +2311,7 @@
    :parent :gt
    :args {:nums [:_delete-fn-refs-total {:value 0}]}}
 
-  ;; Message build mirroring the legacy text:
+  ;; Message build, e.g.:
   ;;   "Graph is a parent of N other graph(s) and referenced by M binding(s) — remove the dependents first."
   {:name :_delete-fn-in-use-message
    :parent :str
@@ -2399,7 +2387,7 @@
    :args {:status {:value 409}
           :reason {:as :fn-in-use-reason}}}
 
-  ;; Phase 4 decomposition: ns-non-empty reason is now pure graph
+  ;; Ns-non-empty reason as pure graph
   ;; composition. Counts child :ns + :fn rows under the target ns-id,
   ;; builds a human-readable message with plurality, returns nil when
   ;; the ns is empty (or when target isn't a :ns at all).
@@ -2574,8 +2562,8 @@
    :args {:status {:value 409}
           :reason {:as :ns-non-empty-reason}}}
 
-  ;; Phase 4.2 decomposition: success branch of DELETE /api/entities/:type/:id
-  ;; is now pure graph composition:
+  ;; Success branch of DELETE /api/entities/:type/:id as pure graph
+  ;; composition:
   ;;   1. pre-read the existing row (404 if absent — guard against
   ;;      silently-OK on a missing row, which previously misled the UI)
   ;;   2. atomic `:delete-entity` via the existing CRUD wrap
@@ -2649,10 +2637,10 @@
    :args {:entity-type :_delete-apply-entity-type-str
           :entity-data :_delete-apply-payload}}
 
-  ;; NOTIFY uses just `{:id id}` (matching the legacy delete payload —
-  ;; service deletes carry `:id`, fn-graph deletes are full-clear via
-  ;; the empty-seed fallback because `affected-fn-ids` can't derive
-  ;; from just `:id` for fn-slot/binding/binding-list-item).
+  ;; NOTIFY uses just `{:id id}` — service deletes carry `:id`,
+  ;; fn-graph deletes are full-clear via the empty-seed fallback
+  ;; because `affected-fn-ids` can't derive from just `:id` for
+  ;; fn-slot/binding/binding-list-item.
   {:name :_delete-apply-notify-payload
    :parent :zipmap
    :args {:keys [{:value :id}]
@@ -2693,7 +2681,7 @@
   ;; Sequence operations: append/remove items of a sequence arg on any fn
   ;; that has a `:sequence`-typed anchor (e.g. :list, :pairs->map children).
 
-  ;; --- sequence-append primitives (C3 decomposition). The handler
+  ;; --- sequence-append primitives. The handler
   ;; itself is the `:process-sequence-append` `:cond` graph fn-def
   ;; below; these are its atoms.
   ;; URL = /api/sequence/append/:fn-id — :fn-id from `:path-params`
@@ -2745,7 +2733,6 @@
    :parent :nil?
    :args {:value {:as :seq-binding}}}
 
-  ;; Phase 4 follow-up — sequence-append apply decomposition.
   ;; §3.3 atomic write unit `:try-apply-seq-append` returns
   ;; `{:created :position :fn-id}` or `{:error}`. Graph dispatches on
   ;; the shape, runs delta-invalidate over the owner fn-id, and
@@ -2827,7 +2814,7 @@
           :parsed :_seq-append-parsed
           :seq-binding :_seq-append-load-binding}}
 
-  ;; --- sequence-remove primitives (C2 decomposition). The handler
+  ;; --- sequence-remove primitives. The handler
   ;; itself is the `:process-sequence-remove` `:cond` graph fn-def
   ;; below; these are its atoms.
   ;; URL = /api/sequence/item/:item-id — :item-id from `:path-params`
@@ -2869,7 +2856,6 @@
    :parent :nil?
    :args {:value {:as :item}}}
 
-  ;; Phase 4 follow-up — sequence-remove apply decomposition.
   ;; `:delete-entity` → `:invalidate-after-write` (with the pre-read
   ;; item snapshot so seed derivation walks `:binding-id` → `:fn-id`)
   ;; → 200 response. Sequenced via `:do`.
@@ -2911,7 +2897,7 @@
           :parsed :_seq-remove-parsed
           :item :_seq-remove-load-item}}
 
-  ;; --- sequence-update primitives (C4 decomposition).
+  ;; --- sequence-update primitives.
   ;; Shares `:_seq-remove-item-id-raw` (same URL shape — both routes
   ;; have :item-id at the same path position) with `:_seq-remove-parsed`.
   {:name :_seq-update-body
@@ -2945,7 +2931,6 @@
    :parent :nil?
    :args {:value {:as :item}}}
 
-  ;; Phase 4 follow-up — sequence-update apply decomposition.
   ;; Same pattern as seq-append.
   {:name :_seq-update-apply
    :description "Success branch — resolve body payload, run write-rej, update the row. Returns 200 or 400."
@@ -3000,8 +2985,7 @@
   ;; --- tighten-fn-effects primitives. The handler itself is a
   ;; `:cond` graph fn-def (`:process-tighten-binding-effects` below);
   ;; these are its parse / guard-predicate / apply primitives. ---
-  ;; --- :_tighten-parsed (Variant-2). Was defbase delegating to a
-  ;; since-removed `parse-tighten-request` helper. Now graph composition:
+  ;; --- :_tighten-parsed — graph composition:
   ;;   - binding-id-str via :get-in path-params OR :uri-segment-after,
   ;;     parsed via :parse-uuid (returns nil on bad input).
   ;;   - body via :parse-json-body (already a defbase).
@@ -3116,7 +3100,6 @@
    :parent :empty?
    :args {:coll {:parent :get :args {:coll {:as :parsed} :key {:value :delta} :default nil}}}}
 
-  ;; Phase 4 follow-up — tighten-effects apply decomposition.
   ;; §3.3 atomic write unit `:try-apply-tighten` returns `{:status
   ;; :reason :result}`. Graph dispatches on `:status`, runs delta-
   ;; invalidate over the binding's owning fn-id, and builds the
@@ -3173,11 +3156,7 @@
    :return-type :keyword-map
    :effects #{:db}}
 
-  ;; --- :parse-form-body / :parse-json-body (Variant-2). Both were
-  ;; defbase wrapping
-  ;;   `(let [body (:body request) ct (get-in request [:headers
-  ;;     "content-type"] "")]
-  ;;      (when (and body (str/includes? ct <marker>)) (<parse> body)))`
+  ;; --- :parse-form-body / :parse-json-body.
   ;; Pure graph composition over existing primitives — :get + :get-in
   ;; + :and + :some? + :str-contains? + :parse-query-string /
   ;; :parse-json. Admins extend the content-type allowlist or swap
@@ -3203,7 +3182,7 @@
                            :substring {:value "application/x-www-form-urlencoded"}}}]}}
 
   {:name :parse-form-body
-   :description "Parse an `application/x-www-form-urlencoded` request body into a `{key value}` map. Empty map when body is missing OR content-type doesn't match — matches the legacy `(when matches? (or (parse) {}))` semantics."
+   :description "Parse an `application/x-www-form-urlencoded` request body into a `{key value}` map. Empty map when body is missing OR content-type doesn't match."
    :parent :if
    :args {:test :_form-body?
           :then {:parent :coalesce
@@ -3254,18 +3233,18 @@
    :args {:raw {:type :text :description "Raw JSON-encoded constraint string from the form."}}
    :return-type :jsonb}
 
-  ;; --- :parse-fn-from-form (Variant-2). The heavy lifter: 10 fields
+  ;; --- :parse-fn-from-form. The heavy lifter: 10 fields
   ;; with the broadest coercion surface in the CRUD form set.
   ;; Simple fragments (same pattern as the other parsers):
   ;;   :name, :namespace-id (empty-as-clear), :description.
-  ;; Fragments using the new primitives:
+  ;; Fragments using the type-resolve primitives:
   ;;   :return-type → :return-type-fn-id (via :resolve-type-fn-id),
   ;;   :base-fn-id, :element-fn-id (both via :resolve-type-fn-id when
   ;;   non-blank),
   ;;   :constraint (via :parse-constraint).
   ;; Special-shape fragments:
   ;;   :parent-id — non-blank-only assoc (no `contains?` check —
-  ;;     legacy `cond->` semantics).
+  ;;     assoc-when-non-blank).
   ;;   :parent-ids — comma-separated UUID list → vec of UUIDs.
   ;;   :expects-effects — comma-separated bare effect names → vec,
   ;;     with literal "[]" / "null" handling.
@@ -3288,7 +3267,7 @@
    :args {:coll {:as :form-data} :key {:value :parent-id} :default nil}}
 
   {:name :_parse-fn-form-parent-id-fragment
-   :description "Legacy `cond->` semantics — assoc :parent-id ONLY when non-blank (no `contains?` check). Different from the ns parser; matches the legacy fn parser."
+   :description "Assoc :parent-id ONLY when non-blank (no `contains?` check). Different from the ns parser."
    :parent :if
    :args {:test {:parent :not
                  :args {:value {:parent :blank?
@@ -3524,9 +3503,7 @@
           :form-data {:type :_form-data-shape
                       :description "Parsed application/x-www-form-urlencoded form-data map (`{field-name field-value}`). Each per-field fragment looks up its key here."}}}
 
-  ;; --- :parse-ns-from-form (Variant-2). Was defbase delegating to a
-  ;; since-removed `parse-ns-from-form` helper (a 3-branch `cond->` over
-  ;; the form-data map). Now graph composition via :merge of per-field
+  ;; --- :parse-ns-from-form — graph composition via :merge of per-field
   ;; fragments — each fragment is `{:if :contains? then {field val}
   ;; else {}}`. Admins extending the form (adding a `:tags`
   ;; field, a custom `:slug`, …) edit the fragment list instead
@@ -3585,7 +3562,7 @@
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
-  ;; --- :parse-slot-from-form (Variant-2). Same per-field-fragment
+  ;; --- :parse-slot-from-form. Same per-field-fragment
   ;; pattern. 4 fields: `:name` (str), `:type-fn-id` (uuid via
   ;; `:parse-uuid`), `:description` (pass-through), `:required` (bool
   ;; via `:equal? "true"`).
@@ -3654,7 +3631,7 @@
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
-  ;; --- :parse-fn-slot-from-form (Variant-2). Same per-field-fragment
+  ;; --- :parse-fn-slot-from-form. Same per-field-fragment
   ;; pattern as `:parse-ns-from-form`. 3 fields: `:fn-id`, `:slot-id`
   ;; (UUIDs via `:parse-uuid`), `:position` (int via `:parse-int`).
 
@@ -3685,7 +3662,7 @@
           :else {:value {}}}}
 
   {:name :_parse-fn-slot-form-position-fragment
-   :description "`{:position (parse-int …)}` when form-data contains `:position`; else `{}`. `:parse-int` (Long/parseLong) throws NumberFormatException on non-numeric input — same semantics as the legacy `Integer/parseInt` call; downstream catches reach the parse-error guard."
+   :description "`{:position (parse-int …)}` when form-data contains `:position`; else `{}`. `:parse-int` (Long/parseLong) throws NumberFormatException on non-numeric input — same semantics as `Integer/parseInt`; downstream catches reach the parse-error guard."
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :position}}}
@@ -3708,7 +3685,7 @@
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
-  ;; --- :parse-binding-from-form (Variant-2). Same per-field-fragment
+  ;; --- :parse-binding-from-form. Same per-field-fragment
   ;; pattern; 11 fields. Coercions: `:parse-uuid` for *-id fields,
   ;; `:parse-json`-when-non-blank for `:value`, `:str-to-keyword`-when-
   ;; non-blank for `:override-kind`, pass-through for `:description`,
@@ -3895,7 +3872,7 @@
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
-  ;; --- :parse-binding-list-item-from-form (Variant-2). Same pattern.
+  ;; --- :parse-binding-list-item-from-form. Same pattern.
   ;; 5 fields: `:binding-id` + `:ref-fn-id` (UUIDs), `:position` (int),
   ;; `:value` (JSON-parsed, nil when blank), `:literal` (bool from
   ;; `(equal? "true" v)`).
@@ -3931,7 +3908,7 @@
    :args {:coll {:as :form-data} :key {:value :value} :default nil}}
 
   {:name :_parse-bli-form-value-parsed
-   :description "JSON-parse the raw `:value` when non-blank; nil otherwise. Matches the legacy `(when-not blank? (json/parse-string v true))` semantics."
+   :description "JSON-parse the raw `:value` when non-blank; nil otherwise."
    :parent :if
    :args {:test {:parent :not
                  :args {:value {:parent :blank?
@@ -3964,7 +3941,7 @@
           :else {:value {}}}}
 
   {:name :_parse-bli-form-literal-fragment
-   :description "`{:literal (= \"true\" raw)}` when form-data contains `:literal`; else `{}`. The `:equal?` check encodes the legacy `(= \"true\" value)` semantics — anything else (\"false\", \"1\", missing) reads as false."
+   :description "`{:literal (= \"true\" raw)}` when form-data contains `:literal`; else `{}`. The `:equal?` check encodes `(= \"true\" value)` — anything else (\"false\", \"1\", missing) reads as false."
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :literal}}}
@@ -4044,7 +4021,7 @@
           :else {:value {}}}}
 
   {:name :_parse-svc-form-branch-id-fragment
-   :description "Optional `:branch-id` form-field. When the admin picks a branch in the editor's service popover, the value lands here as a UUID string; `:parse-uuid` collapses empty / malformed input to nil so the row falls back to the legacy no-branch-id behavior in the reconciler."
+   :description "Optional `:branch-id` form-field. When the admin picks a branch in the editor's service popover, the value lands here as a UUID string; `:parse-uuid` collapses empty / malformed input to nil so the row falls back to the no-branch-id behavior in the reconciler."
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :branch-id}}}

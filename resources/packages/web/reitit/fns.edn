@@ -47,8 +47,8 @@
   ;; Takes the three slot-specific response maps directly — the impl
   ;; wraps each in `constantly` for reitit's `(handler request)`
   ;; contract. Slots are typed as response shapes so the type-checker
-  ;; sees the contract directly without going through the
-  ;; previously-needed `:make-handler`-per-slot intermediary.
+  ;; sees the contract directly without going through a
+  ;; `:make-handler`-per-slot intermediary.
   {:name :ring-create-default-handler
    :description "Build a Ring fallback handler from the three slot-specific Ring responses (404 / 405 / 406). Each response is wired into reitit's default-handler map and wrapped in `constantly` at the adapter."
    :args {:not-found-response          {:type :ring-response-shape
@@ -209,7 +209,7 @@
    :args {:router :_router-compiled
           :default-handler :_router-default-handler
           :error-response {:type :ring-response-shape
-                           :description "Response served when reitit's no-per-method-handler slot fires (renamed from `:not-acceptable-response` deeper in the chain)."}}}
+                           :description "Response served when reitit's no-per-method-handler slot fires."}}}
 
   ;; Fall-through router. Same `:routes` free-arg surface as `:router`
   ;; (reuses the `:_router-compiled` coercion+compile chain), but binds

@@ -35,12 +35,7 @@
    Takes the three slot-specific Ring RESPONSE maps directly — wraps
    each in `constantly` to satisfy reitit's `(handler request)`
    contract here at the adapter, so the fn-graph composes responses
-   (pure data) without having to thread `:make-handler` per slot.
-   Previously each handler was built as a separate `:make-handler`
-   fn-graph and stuffed into a defaults map via `pairs->map`; that
-   chain didn't propagate `:not-found-response` etc. through the ref
-   boundary, so the values landed as nil. Single base-fn taking three
-   response slots eliminates the boundary."
+   (pure data) without having to thread `:make-handler` per slot."
   [not-found-response method-not-allowed-response not-acceptable-response]
   (ring/create-default-handler
     {:not-found          (constantly not-found-response)

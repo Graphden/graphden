@@ -183,6 +183,31 @@ inherited slot:
                       :data {:type :jsonb :nullable true}})))
 ```
 
+#### Indexing a non-`:ref` column — `:indexed? true`
+
+`:ref` fields get a btree index automatically (via `create-ref-indexes!`
+on entity creation). To index a NON-`:ref` column — e.g. a plain
+`:uuid` you filter reverse-references on — declare `:indexed? true` on
+the field spec:
+
+```clojure
+:ref-fn-id {:type :uuid :indexed? true}
+```
+
+Two callbacks act on the flag:
+
+- **`create-field-indexes!`** (postgres `ddl`) — issues
+  `CREATE INDEX IF NOT EXISTS` for every `:indexed?` field when the
+  table is created.
+- **`ensure-field-indexes!`** (postgres `migration`) — runs on **every**
+  migration pass, so a flag newly added to a field on an already-created
+  table lands on existing dev/prod DBs (the entity-create callback never
+  re-fires for them). It is idempotent (`IF NOT EXISTS`).
+
+The schema validators accept `:indexed?` on any non-variant field spec.
+Use it instead of a hand-written `CREATE INDEX` migration so the index
+is declarative and travels with the schema.
+
 ---
 
 ## Base-fn Version Tracking (impl-hash)

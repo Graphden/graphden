@@ -31,10 +31,10 @@
   ;; `compile.clj` `:secret-value` build-args branch). Impl is a
   ;; pure passthrough; we still record `:network` because the
   ;; executor just made a vault HTTP call on our behalf and the
-  ;; effect-trace needs to reflect that. Pre-fix this was `:io` —
-  ;; inconsistent with sibling HTTP wrappers (`web/http-client`,
-  ;; `web/http`, `web/branch-router`) that all tag outbound HTTP
-  ;; as `:network`.
+  ;; effect-trace needs to reflect that. Tagged `:network` (not
+  ;; `:io`) for consistency with sibling HTTP wrappers
+  ;; (`web/http-client`, `web/http`, `web/branch-router`) that all
+  ;; tag outbound HTTP as `:network`.
   (cr/record-effect! :network)
   in)
 

@@ -1,7 +1,7 @@
 (ns graphden.packages.core.strings.impls
   "Implementations for core/strings base functions.
 
-   Migrated to `defbase` — arg symbols resolve at use site.
+   Arg symbols resolve at use site.
 
    String fns are CONTENT-PASSING: anything that takes a `:text`
    (or related) input and returns text / int / bool potentially

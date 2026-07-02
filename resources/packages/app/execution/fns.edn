@@ -21,13 +21,8 @@
   ;; Base-fns — stage shims
   ;; ---------------------------------------------------------------------
 
-  ;; --- Stage 1 (Variant-2 decomposition) ---
-  ;; Was `(defbase _execute-parsed [request] (parse-execute-request
-  ;; request))` delegating to a Clojure helper that read the JSON
-  ;; body, parse-uuid'd `:fn-id`, str'd `:fn-name`, `or`'d `:args` to
-  ;; `{}`, `or`'d `:timeout-ms` to 10000, and `true?`'d `:persist?`.
-  ;;
-  ;; Now expressed as graph composition over per-field atoms:
+  ;; --- Stage 1 ---
+  ;; Graph composition over per-field atoms:
   ;;   parse body → 5 field lookups → 5 per-field transforms → :zipmap
   ;;
   ;; Admins extending the request shape (`:branch-ref`, `:cron-spec`,
@@ -96,21 +91,16 @@
                  :_execute-timeout-ms
                  :_execute-persist]}}
 
-  ;; --- C23: stage 2 of execute as a graph `:cond`. Was a single
-  ;; `defbase` delegating to `fn-exec/validate-execute`; now each
-  ;; guard is its own `:_execute-*-err` rejection-builder defbase
-  ;; (the `defn`s in `graphden.crud.fn-execution`), with a thin
+  ;; --- C23: stage 2 of execute as a graph `:cond`. Each guard is
+  ;; its own `:_execute-*-err` rejection-builder, with a thin
   ;; `:_execute-*-rej?` predicate built as `:parent :some?` over
   ;; the same err. `:cond` is lazy + shares `parsed`, so each
   ;; guard's underlying `parsed` lookup runs at most once per call
   ;; even though predicate + clause-result both read it (call-cache
-  ;; dedupes the per-guard `defn` call). The Clojure-level
-  ;; composition in `validate-execute` mirrors this order. ---
-  ;; --- :_execute-no-fn-err (Variant-2). Was defbase delegating to
-  ;; `execute-no-fn-rej` which returned `(when (and (nil? fn-id) (nil?
-  ;; fn-name)) {...})`. Now an `:if` over `:and :nil? :nil?` returning
-  ;; a `:const` rejection or nil. The rejection body is admin-tunable
-  ;; via the `:const`'s `:value`.
+  ;; dedupes the per-guard call). ---
+  ;; --- :_execute-no-fn-err — an `:if` over `:and :nil? :nil?`
+  ;; returning a `:const` rejection or nil. The rejection body is
+  ;; admin-tunable via the `:const`'s `:value`.
   {:name :_execute-no-fn?
    :description "True iff parsed request has neither `:fn-id` nor `:fn-name`."
    :parent :and
@@ -153,10 +143,9 @@
    :return-type :nullable-keyword-map
    :effects #{:db}}
 
-  ;; --- :_execute-fn-not-found-err (Variant-2). Was defbase delegating
-  ;; to `execute-fn-not-found-rej`. Now graph-composed: resolve-fn +
+  ;; --- :_execute-fn-not-found-err — graph-composed: resolve-fn +
   ;; has-anchor? (request carried fn-id or fn-name) + nil-id? +
-  ;; dynamic `:str` message. Same lazy `:if` envelope.
+  ;; dynamic `:str` message. Lazy `:if` envelope.
   {:name :_execute-fn-row
    :description "Full :fn row for the parsed request, or nil when neither :fn-id nor :fn-name resolves."
    :parent :resolve-fn
@@ -214,9 +203,7 @@
           :then :_execute-fn-not-found-rej
           :else nil}}
 
-  ;; --- :_execute-timeout-bad-err (Variant-2). Was defbase delegating
-  ;; to `execute-timeout-out-of-range-rej` which returned `(when (or
-  ;; (< t 1) (> t 60000)) {...})`. Now graph-composed: parsed-timeout
+  ;; --- :_execute-timeout-bad-err — graph-composed: parsed-timeout
   ;; lookup + range predicate (`:or :lt :gt`) + `:if` over a `:zipmap`
   ;; envelope. The `:error-data` map cites the bad timeout value.
   {:name :_execute-parsed-timeout
@@ -255,12 +242,10 @@
           :then :_execute-timeout-bad-rej
           :else nil}}
 
-  ;; --- :_execute-args-too-large-err (Variant-2). Was defbase wrapping
-  ;; `(when (> (count (json/generate-string args)) 262144) {...})`.
-  ;; Now pure graph composition — no new base-fns needed because
-  ;; `:to-json-string` + `:count` already cover the size calc, and
-  ;; `:gt` + `:if` + `:zipmap` cover the rest. `max-args-bytes` lives
-  ;; in `graphden.crud.fn-execution.persist` (256 KB = 262144); change
+  ;; --- :_execute-args-too-large-err — pure graph composition:
+  ;; `:to-json-string` + `:count` cover the size calc, `:gt` + `:if` +
+  ;; `:zipmap` cover the rest. `max-args-bytes` lives in
+  ;; `graphden.crud.fn-execution.persist` (256 KB = 262144); change
   ;; both sides if you tighten / loosen the limit.
   {:name :_execute-args-bytes
    :description "Serialised byte-size of `:args` — `(count (to-json-string args))`. Pure graph composition over existing primitives, no new base-fn."
@@ -299,18 +284,15 @@
           :then :_execute-args-too-large-rej
           :else nil}}
 
-  ;; --- :_execute-running-as-svc-err (Variant-2). Was defbase wrapping
-  ;; `(when fn-id (when-let [svc (first (query :service {:fn-id fn-id
-  ;; :enabled? true}))] {...}))`. Now graph composition — reuses
+  ;; --- :_execute-running-as-svc-err — graph composition: reuses
   ;; `:_execute-fn-row-id` from `:_execute-fn-not-found-err`, builds the
   ;; query :where via `:zipmap`, takes :first, gates the rejection on
-  ;; both fn-id-present AND conflict-present.
-  ;; Block 1 Step 2 migration: enabled-services-for-fn check now reads
-  ;; :service directly via `:pg-query` + per-row `:decode-row`.
-  ;; `:service` is non-versioned, so the version-resolution bypass is
-  ;; correct. The where filter combines `:fn-id` + `:enabled?` in an
-  ;; `[:and …]` HoneySQL clause; the `fn-id` is per-request so the
-  ;; where vector is built via `:vec`.
+  ;; both fn-id-present AND conflict-present. Reads `:service` directly
+  ;; via `:pg-query` + per-row `:decode-row`. `:service` is
+  ;; non-versioned, so the version-resolution bypass is correct. The
+  ;; where filter combines `:fn-id` + `:enabled?` in an `[:and …]`
+  ;; HoneySQL clause; the `fn-id` is per-request so the where vector is
+  ;; built via `:vec`.
   {:name :_execute-svc-conflicts
    :description "Enabled `:service` rows whose `:fn-id` matches the resolved fn."
    :parent :map
@@ -377,20 +359,15 @@
           :then :_execute-running-as-svc-rej
           :else nil}}
 
-  ;; `:free-arg-slot-map` is now declared in `web/crud/fns.edn` so
-  ;; both CRUD-write-time guards and this execute-validation guard
-  ;; can reference it. Pulled transitively via the `app → web`
-  ;; package edge.
+  ;; `:free-arg-slot-map` is declared in `web/crud/fns.edn` so both
+  ;; CRUD-write-time guards and this execute-validation guard can
+  ;; reference it. Pulled transitively via the `app → web` package edge.
 
-  ;; --- :_execute-unknown-arg-err (Variant-2). Was defbase wrapping
-  ;; `(let [free-args (lookup/free-arg-slot-map ctx fn-id) unknown
-  ;; (remove (set (keys free-args)) (map keyword (keys (:args
-  ;; parsed))))] (when (seq unknown) {...}))`. Now graph composition:
-  ;; resolve fn-row → look up its free-arg slot map → set-diff against
-  ;; supplied arg names → if any leftover, build rejection citing
-  ;; both unknown + known. The `lookup/free-arg-slot-map` BFS stays
-  ;; inside the new `:free-arg-slot-map` primitive (§3.3 inside the
-  ;; atomic boundary).
+  ;; --- :_execute-unknown-arg-err — graph composition: resolve fn-row
+  ;; → look up its free-arg slot map → set-diff against supplied arg
+  ;; names → if any leftover, build rejection citing both unknown +
+  ;; known. The `lookup/free-arg-slot-map` BFS stays inside the
+  ;; `:free-arg-slot-map` primitive (§3.3 inside the atomic boundary).
   {:name :_execute-free-args
    :description "`{arg-name → slot-id}` of the resolved fn's free args. `{}` when fn-row didn't resolve."
    :parent :free-arg-slot-map
@@ -457,12 +434,10 @@
           :then :_execute-unknown-arg-rej
           :else nil}}
 
-  ;; --- :_execute-malformed-ref-err (Variant-2). Was defbase wrapping
-  ;; `(keep (fn [[k v]] (when (and (ref-arg? v) (nil? (parse-ref-fn-id
-  ;; v))) {:arg (name k) :raw-ref (:ref v)})) (:args parsed))`. Now
-  ;; pure graph composition — no new base-fns. Iterates over `:args`
-  ;; keys, filters keys whose value is a `{:ref str}` shape with a
-  ;; bad UUID, maps each kept key to the wire shape.
+  ;; --- :_execute-malformed-ref-err — pure graph composition.
+  ;; Iterates over `:args` keys, filters keys whose value is a
+  ;; `{:ref str}` shape with a bad UUID, maps each kept key to the
+  ;; wire shape.
   ;;
   ;; The `:ref-arg?` and `:parse-ref-fn-id` Clojure helpers in
   ;; `crud.fn-execution.persist` remain because `apply-execute` calls
@@ -650,7 +625,7 @@
   ;; GET /api/execute/:id — read a persisted row
   ;; ---------------------------------------------------------------------
 
-  ;; --- C18 atoms: get-execution + cancel-execution variant-2.
+  ;; --- get-execution + cancel-execution ---
   ;; Shared parse (`_exec-id-parsed`) + shared 404 builder
   ;; (`_exec-err-not-found`).
   {:name :_exec-id-from-path-params
@@ -697,16 +672,6 @@
    :args {:id {:type :nullable-uuid :description "Target execution id."}}
    :return-type :nullable-keyword-map
    :effects #{:db}}
-
-  ;; `:render-execute-result-hiccup` retired — entire result body now
-  ;; graph-composed in the `:_er-*` chain below (`:_er-body` is the
-  ;; entry; `:_partial-execute-result-fragment` /
-  ;; `:_partial-execute-result-inline-fragment` in `app/editor/fns.edn`
-  ;; both delegate here). §3.3 fix.
-
-  ;; `:render-service-popover-hiccup` retired — entire popover body now
-  ;; graph-composed in the `:_sp-*` chain below (`:_partial-service-
-  ;; popover-body` is the entry). §3.3 fix.
 
   {:name :cancel-execution!
    :description "Soft-cancel an in-flight execution by id. nil when id is nil or doesn't resolve. Side effects: `:db` (sets `:cancel-requested?` on the persisted row) + `:process` (interrupts the in-process future via `future-cancel`)."
@@ -780,14 +745,12 @@
   ;; GET /api/executions?fn-id=X — list recent runs for one fn
   ;; ---------------------------------------------------------------------
 
-  ;; --- C6 atoms: parse / no-anchor? / by-version? / two apply paths.
-  ;; --- :_list-exec-parsed (Variant-2). Was defbase delegating to
-  ;; `parse-list-executions-request`. Now graph composition:
-  ;;   - `:query-param` (new web/crud primitive) for each of the 3
+  ;; --- parse / no-anchor? / by-version? / two apply paths.
+  ;; --- :_list-exec-parsed — graph composition:
+  ;;   - `:query-param` web/crud primitive for each of the 3
   ;;     query params,
   ;;   - `:parse-uuid` for `:fn-id` and `:version-id` (returns nil on
-  ;;     blank / non-string / malformed — matches the legacy
-  ;;     `parse-uuid-or-clear` semantics),
+  ;;     blank / non-string / malformed input),
   ;;   - `:try`-wrapped `:parse-int` for `:limit` so a non-numeric
   ;;     `?limit=abc` collapses to nil instead of 500-ing.
 
@@ -840,13 +803,12 @@
    :parent :some?
    :args {:value {:parent :get :args {:coll {:as :parsed} :key {:value :version-id} :default nil}}}}
 
-  ;; Phase 4 follow-up — list-executions-by-version decomposition.
-  ;; `:fn-execution` is non-versioned (write-once log), so the SQL
-  ;; goes through `:pg-query` directly with `WHERE fn-version-id = ?`
-  ;; + `ORDER BY started-at DESC` + `LIMIT <clamped>`. Per-row
-  ;; `:decode-row` for snake_case → kebab-case + timestamp parsing.
-  ;; Limit clamp is a `:cond` graph over the same nil/non-number/
-  ;; lt-1/gt-max ladder the Clojure helper used.
+  ;; list-executions-by-version. `:fn-execution` is non-versioned
+  ;; (write-once log), so the SQL goes through `:pg-query` directly
+  ;; with `WHERE fn-version-id = ?` + `ORDER BY started-at DESC` +
+  ;; `LIMIT <clamped>`. Per-row `:decode-row` for snake_case →
+  ;; kebab-case + timestamp parsing. Limit clamp is a `:cond` graph
+  ;; over a nil/non-number/lt-1/gt-max ladder.
   {:name :_list-exec-apply-by-version
    :description "Return executions for the specific `:fn-version-id`."
    :parent :zipmap
@@ -1030,21 +992,19 @@
   ;; GET /api/services — list service rows + in-process running state
   ;; ---------------------------------------------------------------------
 
-  ;; --- C17 atoms: list-services linear ETL decomposition.
-  ;; Five named stages glued by a non-:cond graph (pure variant-1
-  ;; data composition). Each stage's purpose is visible at the
-  ;; graph level instead of buried in a 20-line `defbase` body.
+  ;; --- list-services ---
+  ;; Five named stages glued by a non-:cond graph. Each stage's
+  ;; purpose is visible at the graph level.
   ;;
-  ;; --- Block 1 Step 2 migration: Stage 1 now reads :service directly
-  ;; via `:pg-query` + `:decode-row` instead of the thin
-  ;; `:list-entities` wrap. `:service` is NON-VERSIONED (per
+  ;; Stage 1 reads :service directly via `:pg-query` + `:decode-row`.
+  ;; `:service` is NON-VERSIONED (per
   ;; `versioning.storage.resolution/entity-config`), so a raw
   ;; pg-query bypasses the version-resolution layer correctly. The
   ;; HoneySQL is visible in the graph: admins can add `:where` /
   ;; `:order-by` / joins without going through `:list-entities`'s
   ;; generic interface.
   {:name :_list-services-rows
-   :description "Stage 1 — every `:service` row decoded to graphden's canonical shape. Direct `:pg-query` + per-row `:decode-row` composition (Block 1 Step 2 migration off `:list-entities`)."
+   :description "Stage 1 — every `:service` row decoded to graphden's canonical shape. Direct `:pg-query` + per-row `:decode-row` composition."
    :parent :map
    :args {:func :_list-services-decode-row
           :coll :_list-services-rows-raw}}
@@ -1061,7 +1021,7 @@
    :args {:row {:as :item}
           :entity-type {:value "service"}}}
 
-  ;; Block 1 Step 2 Phase 3: `:fn` is a VERSIONED entity. The
+  ;; `:fn` is a VERSIONED entity. The
   ;; per-entity-type wrapper `:resolve-fn-rows` pins everything
   ;; entity-specific (version-id-field, version-data-fields, the
   ;; SQL for the version table). Per-site we only wire `:identities`
@@ -2401,7 +2361,7 @@
   ;; ---------------------------------------------------------------------
 
   {:name :_partial-service-popover-body
-   :description "Full popover body. Pure-graph composition over the `:_sp-*` chain; previously delegated to `crud.services/render-service-popover-hiccup` (Clojure helper retired per §3.3)."
+   :description "Full popover body — pure-graph composition over the `:_sp-*` chain."
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {}}

@@ -12,15 +12,6 @@
     [graphden.executor.defbase :refer [defbase]]))
 
 
-;; `:_value-form-parsed` and `:_value-form-validation` are now graph
-;; fn-defs — see fns.edn. The parsed shape is :zipmap of 4 :parse-uuid
-;; results off the JSON body; validation is :if over :or :some?/:and
-;; :some? + :const rejection envelope.
-
-
-;; `:_value-form-apply` is now a graph fn-def — see fns.edn. The
-;; §3.3 type-aware form-renderer stays atomic; the outer slot-type
-;; lookup + value pre-read + response shape are graph composition.
 (defbase resolve-slot-effective-type
   "Resolve the effective type of the slot identified by `parsed`
    (binding-id or fn-id+slot-id). Returns the type keyword/vector,

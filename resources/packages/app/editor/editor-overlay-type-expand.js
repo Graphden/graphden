@@ -37,8 +37,7 @@ let inlinePositionListenersInstalled = false;
 
 
 // === Type-narrowing helpers ===
-// Moved here from the former editor-type-explainer.js: the inline-
-// expansion picker below is their only consumer.
+// The inline-expansion picker below is their only consumer.
 
 // Effect categories — drive the effect-tightening rows in the
 // inline-expand panel.

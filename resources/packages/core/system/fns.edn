@@ -6,7 +6,7 @@
  :description "System primitives — Ring response shape, JSON, JVM info, timing, env, resources."
  :fns
  [;; ---------------------------------------------------------------------
-  ;; Record-type declarations (formerly aliases.edn). Open-record
+  ;; Record-type declarations. Open-record
   ;; subtyping (`{a:int b:text} ⊆ {a:int}`) means handlers that produce
   ;; a SUPERSET of the named fields still satisfy the type — matches
   ;; how http-kit consumes the response map.
@@ -104,7 +104,7 @@
    :return-type :int
    :effects #{:io}}
 
-  ;; :jvm-version is now a graph composition of the three primitives —
+  ;; :jvm-version is a graph composition of the three primitives —
   ;; admins can swap fields, add `:user-dir`, drop `:uptime-ms`, etc.
   ;; without writing Clojure.
   {:name :jvm-version

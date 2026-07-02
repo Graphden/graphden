@@ -1,5 +1,5 @@
 ;; Common fn-def building blocks shared between web components
-;; Route composition, health status. (The HTTP response matrix moved to
+;; Route composition, health status. (The HTTP response matrix lives in
 ;; the web.response module.)
 
 
@@ -10,18 +10,12 @@
   ;; COLLECTION BUILDING BLOCKS
   ;; =============================================================================
 
-  ;; NOTE: cascade-based vector builders (`triple`, `list-10-N`, `list-11`,
-  ;; `:pair`, `:pair-1`, `:conj-empty`) have been retired in favour of the
-  ;; `:list` base-fn (sequence-arg). Routes, request-shape entries, and
-  ;; defaults-map entries that previously used `:parent :pair` now use
-  ;; `:parent :list :args {:items [a b]}` directly.
-
   ;; =============================================================================
   ;; ROUTE BUILDING BLOCKS
   ;; Pass-Through Args Pattern: each level sets one arg, free args propagate up
   ;; =============================================================================
 
-  ;; Level 1 (`:assoc-empty`) moved to `core.collections` — it's a generic
+  ;; Level 1 (`:assoc-empty`) lives in `core.collections` — it's a generic
   ;; collection primitive that `core.system` / `web.crud` also use, so it
   ;; can't live in `app.*`. Referenced by name below; resolves globally.
 
@@ -89,9 +83,9 @@
 
   ;; The HTTP RESPONSE MATRIX (status × content-type — `:ok-response`,
   ;; `:json-content-type`, `:json-ok-response`, `:text-*-response`, …)
-  ;; moved to the `web.response` module: `web.crud` / `web.reitit-text`
+  ;; lives in the `web.response` module: `web.crud` / `web.reitit-text`
   ;; reach into it, and a web package can't depend on app. Referenced by
-  ;; name (resolves globally); app's uses are now app→web.
+  ;; name (resolves globally); app's uses are app→web.
 
   ;; =============================================================================
   ;; HEALTH STATUS COMPOSITION

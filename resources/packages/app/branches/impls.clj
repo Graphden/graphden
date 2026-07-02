@@ -26,12 +26,7 @@
   (branches/resolve-branch-ref (branches/base-storage ctx) ref))
 
 
-;; `:render-branch-popover-hiccup` retired — the entire popover body
-;; is now graph-composed in `fns.edn` via the `:_bp-*` chain. See
-;; `:_partial-branch-popover-body` and surrounding fn-defs.
-
-
-;; `:current-branch-id` migrated to `storage/branches/impls.clj` so
+;; `:current-branch-id` lives in `storage/branches/impls.clj` so
 ;; packages below `app` (e.g. `web/crud`) can reference the active
 ;; branch without taking an `app/branches` dep.
 
@@ -40,41 +35,23 @@
 ;; GET /api/branches
 ;; =============================================================================
 
-;; `:_list-branches-data` is now a graph fn-def — see fns.edn.
-
 
 ;; =============================================================================
 ;; GET /api/branches/:ref
 ;; =============================================================================
-
-;; `:_get-branch-data` is now a graph fn-def — see fns.edn.
 
 
 ;; =============================================================================
 ;; GET /api/fns/:fn-id/versions
 ;; =============================================================================
 
-;; `:list-fn-versions` is now a graph fn-def — see fns.edn. The
-;; previous defbase shim is fully replaced by a multi-query +
-;; per-row HOF chain composing `:list-entities` / `:group-by` /
-;; `:update-vals` / `:sort-by` / `:select-keys` / `:zipmap`.
-
 
 ;; =============================================================================
 ;; GET /api/branches/:ref/diff?against=<source>
 ;; =============================================================================
 
-;; --- C12 atoms: diff-branches variant-2.
+;; --- diff-branches ---
 
-;; `:_diff-parsed` is now a graph fn-def — see fns.edn.
-
-
-;; `:_diff-target-branch` / `:_diff-source-branch` are now graph
-;; fn-defs over `:resolve-branch-ref` — see fns.edn.
-
-
-;; `:_diff-target-missing?` / `:_diff-against-missing?` /
-;; `:_diff-source-missing?` are now graph fn-defs — see fns.edn.
 
 
 (defbase diff-branches
@@ -89,28 +66,16 @@
                      target-branch-id))
 
 
-;; `:_diff-apply` is now a graph fn-def — see fns.edn.
-
 
 ;; =============================================================================
 ;; POST /api/branches
 ;; =============================================================================
 
-;; --- C13 atoms: create-branch variant-2.
-
-;; `:_create-branch-parsed` is now a graph fn-def — see fns.edn.
+;; --- create-branch ---
 
 
-;; `:_create-branch-name-blank?` is now a graph fn-def — see fns.edn.
 
 
-;; `:_create-branch-name-taken?` is now a graph fn-def — see fns.edn.
-
-
-;; `:_create-branch-resolved-parent` is now a graph fn-def — see fns.edn.
-
-
-;; `:_create-branch-base-missing?` is now a graph fn-def — see fns.edn.
 
 
 (defbase create-branch!
@@ -126,25 +91,17 @@
                      {:base-branch-id base-branch-id}))
 
 
-;; `:_create-branch-apply` is now a graph fn-def — see fns.edn.
-
 
 ;; =============================================================================
 ;; DELETE /api/branches/:ref
 ;; =============================================================================
 
-;; --- C14 atoms: delete-branch variant-2. The constraint-rejection
+;; --- delete-branch --- The constraint-rejection
 ;; cases (main-branch / has-children) stay inside apply because they
 ;; surface as exceptions from `vs/delete-branch!` — pre-checking them
 ;; would duplicate underlying constraint logic.
 
-;; `:_delete-branch-parsed` is now a graph fn-def — see fns.edn.
 
-
-;; `:_delete-branch-resolved` is now a graph fn-def — see fns.edn.
-
-
-;; `:_delete-branch-missing?` is now a graph fn-def — see fns.edn.
 
 
 (defbase delete-branch!
@@ -183,24 +140,14 @@
     result))
 
 
-;; `:_delete-branch-apply` is now a graph fn-def — see fns.edn.
-
 
 ;; =============================================================================
 ;; GET /api/branches/:ref/conflicts?source=<ref>
 ;; =============================================================================
 
-;; --- C15 atoms: preview-conflicts variant-2.
-
-;; `:_conflicts-parsed` is now a graph fn-def — see fns.edn.
+;; --- preview-conflicts ---
 
 
-;; `:_conflicts-target` / `:_conflicts-source` are now graph fn-defs
-;; over `:resolve-branch-ref` — see fns.edn.
-
-
-;; `:_conflicts-target-missing?` / `:_conflicts-source-not-supplied?` /
-;; `:_conflicts-source-missing?` are now graph fn-defs — see fns.edn.
 
 
 (defbase detect-conflicts
@@ -215,25 +162,14 @@
                         target-branch-id))
 
 
-;; `:_conflicts-apply` is now a graph fn-def — see fns.edn.
-
 
 ;; =============================================================================
 ;; POST /api/branches/:ref/merge
 ;; =============================================================================
 
-;; --- C16 atoms: merge-branch variant-2.
-
-;; `:_merge-parsed` is now a graph fn-def — see fns.edn.
+;; --- merge-branch ---
 
 
-;; `:_merge-target` / `:_merge-source` are now graph fn-defs over
-;; `:resolve-branch-ref` — see fns.edn.
-
-
-;; `:_merge-target-missing?` / `:_merge-source-not-supplied?` /
-;; `:_merge-source-missing?` / `:_merge-same?` are now graph fn-defs —
-;; see fns.edn.
 
 
 (defbase merge-branch!
@@ -289,12 +225,6 @@
                      (mrg/skipped-as-branch-local
                        (branches/base-storage ctx) source-branch-id)})))
 
-
-;; `:_merge-apply` is now a graph fn-def — see fns.edn. The `:try` body
-;; calls `:merge-branch!`; the `:on-throw` handler dispatches on
-;; `(:type (ex-data e))` via `:case` to produce either a
-;; `:merge-conflict` envelope (with reshaped `:conflicts` rows) or a
-;; generic `{:ok false :error}`.
 
 
 (def impls

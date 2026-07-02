@@ -161,9 +161,9 @@
    :description "Output of `:_value-form-apply` — the resolved editor form: `:form` is the control hiccup, `:value` the binding's current value."
    :type {:ok :bool :form :jsonb :value :jsonb}}
 
-  ;; --- :_value-form-parsed (Variant-2). Was defbase wrapping
-  ;; `parse-value-form-request` (4 UUID fields off JSON body). Pure
-  ;; graph composition over :parse-json-body + 4 :parse-uuid + :zipmap.
+  ;; --- :_value-form-parsed — pure graph composition over
+  ;; :parse-json-body + 4 :parse-uuid + :zipmap (4 UUID fields off
+  ;; the JSON body).
 
   {:name :_value-form-body
    :parent :parse-json-body
@@ -178,10 +178,9 @@
                  {:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :slot-id} :default nil}}}}
                  {:parent :parse-uuid :args {:string {:parent :get :args {:coll :_value-form-body :key {:value :item-id} :default nil}}}}]}}
 
-  ;; --- :_value-form-validation (Variant-2). Was defbase wrapping
-  ;; `validate-value-form` — `(when-not (or binding-id (and fn-id
-  ;; slot-id)) {:ok false :error "…"})`. Pure graph: :if over :not
-  ;; :or :some? + :and :some? + :const envelope.
+  ;; --- :_value-form-validation — pure graph: `:if` over an `:or` of
+  ;; `:some?` / `:and :some?` guards + a `:const` envelope. The
+  ;; request must identify a slot (binding-id, or fn-id+slot-id).
 
   {:name :_value-form-binding-id
    :parent :get
@@ -215,12 +214,11 @@
           :then nil
           :else :_value-form-err-no-slot}}
 
-  ;; Phase 4 follow-up — value-form apply decomposition. The §3.3
-  ;; type-aware form-renderer (`:build-value-form`) stays atomic;
-  ;; the slot-type lookup, value pre-read, and response shape become
-  ;; graph composition. Admin who wants a different per-row attr set
-  ;; or response envelope reparents `:_value-form-root` or
-  ;; `:_value-form-apply` itself.
+  ;; value-form apply. The §3.3 type-aware form-renderer
+  ;; (`:build-value-form`) stays atomic; the slot-type lookup, value
+  ;; pre-read, and response shape are graph composition. Admin who
+  ;; wants a different per-row attr set or response envelope reparents
+  ;; `:_value-form-root` or `:_value-form-apply` itself.
   {:name :resolve-slot-effective-type
    :description "Resolve the slot's effective type from the parsed shape."
    :args {:parsed {:type :_value-form-parsed-shape}}

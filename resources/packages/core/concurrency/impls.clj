@@ -145,10 +145,10 @@
 
    Quartz returns null when the expression has no valid time after
    the given instant (e.g. a year-locked cron whose year is already
-   past). The pre-fix code did `(.getTime null)` → NPE with no `:type`
-   tag, surfacing as a generic ClassCastException down the schedule
-   loop. Convert to a clean `:cron/no-future-fire` ex-info so callers
-   can pattern-match the cause."
+   past). Calling `(.getTime null)` would NPE with no `:type` tag,
+   surfacing as a generic ClassCastException down the schedule loop,
+   so guard the null and convert to a clean `:cron/no-future-fire`
+   ex-info that callers can pattern-match on."
   [expr now-ms]
   (let [now-date (java.util.Date. (long now-ms))
         next-date (org.quartz.CronExpression/.getNextValidTimeAfter expr now-date)]

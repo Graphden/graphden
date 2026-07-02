@@ -179,8 +179,8 @@
    downstream type-checker sees Clojure keywords.
 
    Returns nil on blank input. On non-blank input that fails to parse
-   as JSON, returns the raw string unchanged (matches the legacy
-   `(try parse (catch _ raw))` swallow).
+   as JSON, returns the raw string unchanged (parse failure is
+   swallowed).
 
    Single-library boundary; the recursive re-keyword walk has shared-
    state-free recursion but isn't expressible as atomic graph
@@ -297,15 +297,6 @@
 ;; computation. These base-fns are the parse / validate / apply stages;
 ;; `_rejected?` (below) is shared with every other `:if` handler.
 
-;; `:_types-compatible-parsed` is now a graph fn-def — `:parse-json-body`
-;; + two `:get`/`:json-to-type` pairs zipped into the `:expected` /
-;; `:candidate` shape. The new atomic `:json-to-type` primitive wraps
-;; `types-api/json->type`'s single-method recursive decoder.
-
-
-;; `:_types-compatible-validation` is now a graph `:cond` fn-def
-;; (`web/crud` fns.edn) — two nil-guards each yielding their static
-;; rejection envelope.
 
 (defbase subtype?-fn
   "Atomic library boundary over `types/subtype?` — true iff
@@ -376,40 +367,9 @@
         (:return (registry/rich-type-of (keyword (:name fn-row))))))))
 
 
-;; `:_types-compatible-apply` is now a graph fn-def — see fns.edn.
-;; Pure composition over `:subtype?` + `:if`-wrapped
-;; `:describe-type-mismatch` + envelope `:zipmap` / `:assoc`.
 
 
-;; `:_types-candidates-parsed` is now a graph fn-def — `:parse-json-body`
-;; + per-field reader chains (`:get` + `:json-to-type` for `:expected`,
-;; `:get` + `:map :str-to-keyword` + `:if :some?` + `:to-set` for
-;; `:allowed-effects`, `:get` + `:if :some?` + `:to-str` for
-;; `:name-prefix`). New atomic primitive: `:to-set` (wraps
-;; `clojure.core/set`).
 
-
-;; `:_types-candidates-validation` is now a graph `:if` fn-def
-;; (`web/crud` fns.edn) — one nil-guard yielding the rejection
-;; envelope.
-
-;; `:_types-candidates-apply` is now a graph fn-def — see fns.edn.
-;; Pure composition over `:all-rich-types` snapshot + per-row
-;; predicate chain (`:and (:not :type-row?) :subtype? :_effects-ok?
-;; :_name-prefix-ok?`) + `:map → :filter :some? → :sort-by → :zipmap`.
-;; Admins can vary the per-row reshape by reparenting
-;; `:_types-candidates-row` (e.g. add `:description`, drop `:effects`).
-
-
-;; `:_types-usages-parsed` is now a graph fn-def — `:parse-json-body` +
-;; `:get :type-fn-id` + `:to-str` + `:parse-uuid`.  The shape preserves
-;; the original `(when raw (try uuid-parse (catch _ nil)))` semantics
-;; via `:to-str` of nil = "" and `:parse-uuid` of "" = nil.
-
-
-;; `:_types-usages-validation` is now a graph `:if` fn-def
-;; (`web/crud` fns.edn) — one nil-guard yielding the rejection
-;; envelope.
 
 (defbase _types-usages-apply
   "Stage 3 of types-usages — walk the graph for every reference to the
@@ -446,17 +406,6 @@
 ;; These base-fns are the parse / validate / apply stages; `_rejected?`
 ;; (below) is shared with the entity create/update handlers.
 
-;; `:_create-record-type-parsed` is now a graph fn-def — `:parse-json-body`
-;; + per-field reader chains (`:get` + `:if :some?` + `:to-str` for `:name`,
-;; `:get` + `:to-str` + `:parse-uuid` for `:ns-id`, plain `:get` for
-;; `:description`, `:vec` of `:get` for `:fields`).
-
-
-;; C19: `_create-record-type-validation` is now a `:cond` fn-def
-;; (`web/crud` fns.edn). Per-field extractors + predicates + static
-;; error consts replace the Clojure body that lived here. The apply
-;; stage stays in Clojure because it's a single multi-row transaction
-;; with rollback — skill §3 exception.
 
 
 ;; Body / rollback split for create-record-type — body and rollback
@@ -476,13 +425,6 @@
   (entities/apply-create-rollback journal exception ctx))
 
 
-;; `:_create-list-type-parsed` is now a graph fn-def — same shape as
-;; `:_create-record-type-parsed`, swapping `:fields` for the plain
-;; `:element-type` field read.
-
-
-;; C20: `_create-list-type-validation` is now a `:cond` fn-def (same
-;; shape as C19's record-type validation).
 
 
 ;; Same body/rollback split for create-list-type — the rollback
@@ -494,15 +436,6 @@
   (entities/apply-create-list-type-body parsed journal ctx))
 
 
-;; `:_update-record-type-parsed` is now a graph fn-def — adds
-;; `:fn-id` (parse-uuid of `:id`) and `:has-description?`
-;; (`:contains?` of the body) on top of the create-record-type
-;; reader chain.
-
-
-;; C21: `_update-record-type-validation` is now a `:cond` fn-def
-;; (`web/crud` fns.edn) with three guards including a storage read.
-;; The dynamic-error builder below cites the absent fn-id.
 
 
 ;; `:_update-record-type-apply` is a graph `:try` fn-def in fns.edn
@@ -523,33 +456,10 @@
 
 ;; === Form data parsing base functions ===
 
-;; `:parse-fn-from-form` is now a graph fn-def — see fns.edn. Composes
-;; per-field fragments (same pattern as the other parsers) plus two
-;; new primitives — `:resolve-type-fn-id` (UUID-or-name resolution
-;; over the `:return-type` / `:base-fn-id` / `:element-fn-id`
-;; fields) and `:parse-constraint` (JSON + recursive keyword-restore
-;; walk).
 
 
-;; `:parse-ns-from-form` is now a graph fn-def — see fns.edn.
-;; Pure composition: `:merge` of three per-field fragments
-;; (`:if :contains?` → `:zipmap`-built single-key map, else `{}`).
 
 
-;; `:parse-slot-from-form` is now a graph fn-def — see fns.edn.
-;; Same per-field-fragment pattern.
-
-
-;; `:parse-fn-slot-from-form` is now a graph fn-def — see fns.edn.
-;; Same per-field-fragment pattern as `:parse-ns-from-form`.
-
-
-;; `:parse-binding-from-form` is now a graph fn-def — see fns.edn.
-;; Per-field-fragment pattern; 11 fragments.
-
-
-;; `:parse-binding-list-item-from-form` is now a graph fn-def — see
-;; fns.edn. Same per-field-fragment pattern.
 
 
 ;; === Action Handlers (context-aware) ===
@@ -559,40 +469,9 @@
 ;; pipeline stages; `_rejected?` / `_rejection-response` are shared by
 ;; both handlers.
 
-;; `:_create-parsed` is now a graph fn-def — see fns.edn. Composes
-;; `:extract-entity-params` + body→form-data parse + per-type
-;; `:cond` dispatch wrapped in `:try` (parse-error capture). The
-;; per-type-parser fn-defs (`:parse-fn-from-form`, …) are referenced
-;; by name; adding a new entity type means adding both a parser
-;; fn-def AND a clause to the dispatch.
 
 
-;; === C22 — :_create-validation is now a graph :cond fn-def in fns.edn,
-;; composing one defbase per write-time guard. Each guard returns
-;; `{:reason …}` on rejection or nil; the :cond short-circuits on the
-;; first non-nil. Same shape as C19/C20/C21 with the parsed-arg
-;; propagation pattern.
 
-;; `:_create-entity-type-rej` / `:_create-form-data-rej` /
-;; `:_create-parse-error-rej` are now graph fn-defs — see fns.edn.
-;; Each is a pure `:if` over a `:nil?` / `:some?` predicate + `:zipmap`
-;; reason envelope; no new base-fns.
-
-
-;; `:_create-fn-slot-rename-rej` is now a graph fn-def — see fns.edn.
-;; Pure composition over `:get-entity` (lazily-gated DB reads) +
-;; `:and` predicates + `:pr-str` for the dynamic message.
-
-
-;; `:_create-service-free-args-rej` is now a graph fn-def — see fns.edn.
-;; Composes `:free-arg-slot-map` + `:keys` + `:not :empty?` + `:str`
-;; envelope; pure graph, no new base-fns beyond `:free-arg-slot-map`
-;; which lives in this file's defbase set.
-
-
-;; `:_create-service-no-process-rej` is now a graph fn-def — see fns.edn.
-;; Composes the new `:chain-has-process-effect?` primitive +
-;; `:get-entity` (for the fn-name citation) + `:pr-str` + envelope.
 
 
 ;; `:_create-write-rej` and `:_create-binding-type-rej` are now graph
@@ -601,84 +480,19 @@
 ;; chain uses).
 
 
-;; `:_create-apply` is now a graph fn-def — see fns.edn. The §3.3
-;; transactional unit (create + Phase-6c rename-slot + post-check +
-;; rollback) lives inside the `:try-apply-create` primitive defined
-;; below.
 
 
-;; `:_update-parsed` is now a graph fn-def — see fns.edn. Mirrors
-;; `:_create-parsed` structure plus id-str/id-uuid + a guarded
-;; `:get-entity` pre-read. Reuses the create-side `:try`-wrapped
-;; per-type dispatch (`:_create-entity-data-or-error`).
 
 
-;; `:_update-validation` is now a graph fn-def — see fns.edn. It's a
-;; `:cond` over 4 simple guards (3 reused from create-side rej-
-;; builders) + tail `:coalesce` of :write-rej and (lazily)
-;; :type-check-binding-rej against the merged post-write view.
 
 
-;; `:_update-apply` is now a graph fn-def — see fns.edn. Composes
-;; over `:try-apply-update` + `:invalidate-after-write` + `:notify-
-;; after-write` for the success branch.
 
 
-;; `:_rejected?` is now a graph fn-def — see fns.edn.
 
 
-;; === Delete-entity primitives (C5 decomposition) ===
-;; `:process-delete-entity` is now a `:cond` graph fn-def in fns.edn.
-;; Four distinct rejection paths + the success path:
-;;
-;; - 400 invalid request (entity-type or id parse fail)
-;; - 409 secret fn-def (admin path goes through /api/secrets/:fn-id)
-;; - 409 fn in use (other fns reference it)
-;; - 409 ns non-empty (still has sub-ns or fns)
-;; - 200 delete + invalidate
-;;
-;; The two 409-with-dynamic-reason rejections (fn-in-use, ns-non-empty)
-;; have a separate "reason-or-nil" base-fn fed into a predicate AND
-;; into the error-builder base-fn — so the reason computes once and
-;; is shared by both consumers.
-
-;; `:_delete-parsed` is now a graph fn-def — see fns.edn. Composes
-;; the new `:extract-entity-params` primitive + `:parse-uuid` +
-;; `:zipmap` envelope.
 
 
-;; `:_delete-request-invalid?` is now a graph fn-def — see fns.edn.
 
-
-;; `:_delete-fn-is-secret?` is now a graph fn-def — see fns.edn. The
-;; Clojure-side `entities/delete-fn-secret?` stays for direct callers
-;; (currently none after Phase 4 decomp) until the next sweep removes
-;; it.
-
-
-;; `:_delete-fn-in-use-reason` is now a graph fn-def — see fns.edn.
-
-
-;; `:_delete-fn-in-use?` is now a graph fn-def — see fns.edn.
-
-
-;; `:_delete-err-fn-in-use` is now a graph fn-def — see fns.edn.
-;; Reuses the new public `:html-error-response` builder.
-
-
-;; `:_delete-ns-non-empty-reason` is now a graph fn-def — see fns.edn.
-
-
-;; `:_delete-ns-non-empty?` is now a graph fn-def — see fns.edn.
-
-
-;; `:_delete-err-ns-non-empty` is now a graph fn-def — see fns.edn.
-;; Reuses the new public `:html-error-response` builder.
-
-
-;; `:_delete-apply` is now a graph fn-def — see fns.edn. Composes
-;; over `:get-entity` + `:delete-entity` + `:invalidate-after-write`
-;; + `:notify-after-write` with the side effects sequenced via `:do`.
 
 
 (defbase try-apply-create
@@ -709,11 +523,10 @@
 
 (defbase try-apply-update
   "Atomic core of the update-apply flow: `sp/update-entity` +
-   Phase-6c rename-slot side-effect (binding writes only). Returns
+   rename-slot side-effect (binding writes only). Returns
    a uniform `{:updated <id>}` on success or `{:error <msg>}` on
    write failure. Rename-slot failure is logged but never escalated
-   (matches legacy behaviour — the binding row is still useful
-   without the renamed view).
+   (the binding row is still useful without the renamed view).
 
    Unlike create, update has no post-write type-check + rollback —
    so this is §3.1 (single library boundary + one conditional side
@@ -730,25 +543,6 @@
 
 ;; === Sequence operations ===
 
-;; === Sequence-append primitives (C3 decomposition) ===
-;; `:process-sequence-append` is now a `:cond` graph fn-def in fns.edn
-;; that composes these atoms. Same shape as C2 (sequence-remove): one
-;; parse, two upfront guard predicates, one read-only loader + a
-;; not-found predicate over its result, and a single apply that runs
-;; the side-effecting body. Lazy `:cond` means the synthetic-binding
-;; materialization + the actual append only run when every guard
-;; passes.
-;;
-;; - `_seq-append-parsed`         — `{:fn-id <uuid|nil> :body <map|nil>}`.
-;; - `_seq-append-fn-id-invalid?` — guard #1, 400.
-;; - `_seq-append-body-invalid?`  — guard #2, 400.
-;; - `_seq-append-load-binding`   — read-only sequence-binding resolution.
-;; - `_seq-append-no-seq-slot?`   — guard #3, 404.
-;; - `_seq-append-apply`          — materialize-if-synthetic + write + 200
-;;                                  (or data-dependent 400 from write-rej).
-
-;; `:_seq-append-parsed` is now a graph fn-def — see fns.edn.
-
 
 ;; `:_seq-append-fn-id-invalid?` / `:_seq-append-body-invalid?` are
 ;; now graph fn-defs — see fns.edn.
@@ -760,12 +554,7 @@
   (entities/find-seq-append-binding parsed ctx))
 
 
-;; `:_seq-append-no-seq-slot?` is now a graph fn-def — see fns.edn.
 
-
-;; `:_seq-append-apply` is now a graph fn-def — see fns.edn. Composes
-;; `:try-apply-seq-append` (§3.3 atomic write unit) + dispatch on the
-;; `{:created}`/`{:error}` shape + `:invalidate-graph-cache` + 200 JSON.
 (defbase try-apply-seq-append
   "§3.3 core of sequence-append: materialise synthetic binding,
    compute next position, run pre-write validation, write the row.
@@ -776,22 +565,6 @@
   (entities/apply-seq-append-core parsed seq-binding ctx))
 
 
-;; === Sequence-remove primitives (C2 decomposition) ===
-;; `:process-sequence-remove` is now a `:cond` graph fn-def in fns.edn
-;; that composes these atoms. Each clause is `[predicate 400/404-response]`;
-;; the trailing `[:value true]` clause runs `:_seq-remove-apply`. `:cond`
-;; is lazy, so the DB delete runs only when both guards pass.
-;;
-;; - `_seq-remove-parsed` — `{:item-id <uuid|nil>}` from the URI path.
-;; - `_seq-remove-item-id-invalid?` — guard #1, 400.
-;; - `_seq-remove-load-item`        — load the binding-list-item row.
-;; - `_seq-remove-item-not-found?`  — guard #2, 404.
-;; - `_seq-remove-apply`            — delete + invalidate, 200.
-
-;; `:_seq-remove-parsed` is now a graph fn-def — see fns.edn.
-
-
-;; `:_seq-remove-item-id-invalid?` is now a graph fn-def — see fns.edn.
 
 
 (defbase _seq-remove-load-item
@@ -800,21 +573,7 @@
   (entities/load-seq-remove-item parsed ctx))
 
 
-;; `:_seq-remove-item-not-found?` is now a graph fn-def — see fns.edn.
 
-
-;; `:_seq-remove-apply` is now a graph fn-def — see fns.edn. Composes
-;; `:delete-entity` (binding-list-item) → `:invalidate-after-write` →
-;; 200 response via `:do`.
-
-
-;; === Sequence-update primitives (C4 decomposition) ===
-;; `:process-sequence-update` is now a `:cond` graph fn-def in fns.edn.
-;; Same shape as C2 + C3 — parse / two upfront guards / read-only load
-;; / not-found guard / apply (which carries the data-dependent write-rej
-;; 400 internally).
-
-;; `:_seq-update-parsed` is now a graph fn-def — see fns.edn.
 
 
 ;; `:_seq-update-item-id-invalid?` / `:_seq-update-body-invalid?` are
@@ -827,10 +586,7 @@
   (entities/load-seq-update-item parsed ctx))
 
 
-;; `:_seq-update-item-not-found?` is now a graph fn-def — see fns.edn.
 
-
-;; `:_seq-update-apply` is now a graph fn-def — see fns.edn.
 (defbase try-apply-seq-update
   "§3.3 core of sequence-update: resolve payload, run pre-write
    validation, write the row. Returns `{:updated <item-id>}` or
@@ -845,22 +601,13 @@
 ;; (`:process-tighten-binding-effects` in fns.edn). These base-fns are
 ;; its primitives: one parse, four guard predicates, one apply.
 
-;; `:_tighten-parsed` is now a graph fn-def — see fns.edn. Composes
-;; URL path-params/segment fallback + :parse-uuid + :parse-json-body
-;; + per-field fragments for the :delta + final :zipmap shape.
-
-
-;; `:_tighten-binding-id-invalid?` is now a graph fn-def — see fns.edn.
 
 
 ;; `:_tighten-effects-invalid?` / `:_tighten-args-invalid?` are now
 ;; graph fn-defs — see fns.edn.
 
 
-;; `:_tighten-delta-empty?` is now a graph fn-def — see fns.edn.
 
-
-;; `:_tighten-apply` is now a graph fn-def — see fns.edn.
 (defbase try-apply-tighten
   "§3.3 core of tighten-fn-effects: narrows the fn-typed binding's
    effective type. Returns `{:status :reason :result}` from
@@ -872,11 +619,6 @@
 
 ;; === Pure Functions ===
 ;; Genuine minimal primitives — kept inline; no heavy logic to extract.
-
-;; `:parse-form-body` and `:parse-json-body` are now graph fn-defs —
-;; see fns.edn. Pure composition over :get/:get-in + :and :some?
-;; :str-contains? + :parse-query-string / :parse-json. Admins extend
-;; the content-type allowlist by editing the predicate fragments.
 
 
 (defbase str-to-uuid

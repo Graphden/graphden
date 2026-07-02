@@ -10,12 +10,12 @@
 ;; Diamond inheritance from `:ring-response` is OK: each axis binds a
 ;; different arg, the remaining `:body` propagates to the child.
 ;;
-;; Lived in `app.common` until the package-layering audit (via the
-;; publish dependency tooling) found `web.crud` + `web.reitit-text`
-;; reaching UP into app for these — a web package can't depend on an
-;; app package. Moved to its own `web.response` module so web stays
-;; independently publishable; `app.*` consumers (`:html-ok-response`,
-;; `:cached-svg-ok-response`, …) now resolve app→web, which is valid.
+;; This lives in its own `web.response` module (not `app.common`) so a
+;; web package never depends UP into an app package: `web.crud` +
+;; `web.reitit-text` consume these responses, and a web package can't
+;; depend on app. Keeping them here leaves web independently
+;; publishable; `app.*` consumers (`:html-ok-response`,
+;; `:cached-svg-ok-response`, …) resolve app→web, which is valid.
 
 {:namespace "web.response"
  :description "HTTP response matrix — status × content-type fn-defs over core's :ring-response (200/404/405/500 × json/html/text/svg/immutable-js/css)."

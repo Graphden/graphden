@@ -36,13 +36,8 @@
 
 ;; --- POST /api/execute ---
 
-;; `:_execute-parsed` is now a graph fn-def — see fns.edn. Graph-
-;; composed over `:parse-json-body` + `:get` + per-field transforms
-;; (`:parse-uuid` for id, nil-safe `:to-str` for name, `:coalesce`
-;; for args + timeout-ms defaults, `:equal? true` for `:persist?`).
 
-
-;; --- C23 atoms: validate-execute split into one rejection-builder
+;; --- validate-execute split into one rejection-builder
 ;; defbase per guard. Each `_..._err` returns the rejection map
 ;; (`{:ok false :status :rejected :error :error-data}`) or nil.
 ;; The graph predicate `:some? :_..._err` decides the `:cond`
@@ -50,39 +45,11 @@
 ;; result — call-cache dedupes the work because both reads share
 ;; the same `parsed` (and `ctx`).
 
-;; `:_execute-no-fn-err` is now a graph fn-def — see fns.edn. `:if`
-;; over `:and :nil? :nil?` + `:const` rejection envelope.
 
 
-;; `:_execute-fn-not-found-err` is now a graph fn-def — see fns.edn.
-;; Graph-composed over `:resolve-fn` + `:get :id` + `:and :has-anchor?
-;; :nil?` + dynamic `:str` message + `:zipmap` envelope.
 
 
-;; `:_execute-timeout-bad-err` is now a graph fn-def — see fns.edn.
-;; `:if` over `:or :lt :gt` + `:zipmap` rejection envelope citing the
-;; bad `:timeout-ms`.
 
-
-;; `:_execute-args-too-large-err` is now a graph fn-def — see fns.edn.
-;; Pure composition over `:to-json-string` + `:count` + `:gt` + `:zipmap`,
-;; no new base-fns needed.
-
-
-;; `:_execute-running-as-svc-err` is now a graph fn-def — see fns.edn.
-;; Graph-composed over `:resolve-fn` + `:list-entities :service` +
-;; `:first` + lazy `:and :some? :some?` + `:zipmap` envelope.
-
-
-;; `:_execute-unknown-arg-err` is now a graph fn-def — see fns.edn.
-;; Composes new atomic `:free-arg-slot-map` primitive with `:keys` +
-;; `:filter :not :position-in` set-diff + `:zipmap` envelope.
-
-
-;; `:_execute-malformed-ref-err` is now a graph fn-def — see fns.edn.
-;; Pure composition over `:keys` + `:filter` + per-key predicate
-;; (`:and :is-a? :contains? :nil? :parse-uuid`) + `:map` reshape +
-;; `:not :empty?` guard + `:zipmap` envelope. No new base-fns.
 
 
 (defbase _execute-apply
@@ -118,64 +85,22 @@
   (when (some? id) (fn-exec/cancel-execution! ctx id)))
 
 
-;; `:_execute-rejected?` is now a graph fn-def — see fns.edn.
 
-
-;; --- C18 atoms: get-execution + cancel-execution variant-2.
+;; --- get-execution + cancel-execution ---
 ;; Both handlers share the `:_exec-id-parsed` graph parser (URL +
 ;; UUID coerce in fns.edn) AND the dynamic 404 builder (same text
 ;; either way); each has its own apply (read vs cancel-mutation).
 
-;; `:_exec-id-parsed` is now a graph fn-def — see fns.edn.
-
 
 ;; GET /api/execute/:id atoms
 
-;; `:_get-exec-loaded` is now a graph fn-def — `:get-execution` of
-;; the parsed `:id` (the primitive handles the nil-id guard).
 
-
-;; `:_get-exec-missing?` is now a graph fn-def — see fns.edn.
-
-
-;; `:_get-exec-apply` is now a graph fn-def — `:const` of `{:as :loaded}`.
 
 
 ;; POST /api/execute/:id/cancel atoms
 
-;; `:_cancel-exec-applied` is now a graph fn-def — `:cancel-execution!`
-;; of the parsed `:id` (the primitive handles the nil-id guard).
 
 
-;; `:_cancel-exec-missing?` is now a graph fn-def — see fns.edn.
-
-
-;; `:_cancel-exec-apply` is now a graph fn-def — `:const` of `{:as :applied}`.
-
-
-;; --- GET /api/executions?fn-id=X (C6 atoms) ---
-;; Two query shapes share this endpoint:
-;;   ?fn-id=X         → executions of X as it resolves on the current
-;;                      branch (drives the execute popover's history)
-;;   ?fn-version-id=Y → executions of the SPECIFIC version row Y
-;;                      (drives the `⌛` panel's per-version expand)
-;; If both are present `fn-version-id` wins. `:_list-executions-by-fn`
-;; is now a `:cond` graph fn-def in fns.edn composing these atoms.
-
-;; `:_list-exec-parsed` is now a graph fn-def — see fns.edn. Composes
-;; the new `:query-param` primitive (in web/crud) + :parse-uuid +
-;; :try-wrapped :parse-int for the optional limit.
-
-
-;; `:_list-exec-no-anchor?` / `:_list-exec-by-version?` are now graph
-;; fn-defs — see fns.edn.
-
-
-;; `:_list-exec-apply-by-version` and `:_list-exec-apply-by-fn` are now
-;; graph fn-defs — see fns.edn. They reuse the SQL/sort/take/clamp
-;; composition; `:_list-exec-apply-by-fn` adds a `:resolve-fn-version-id`
-;; pre-step that translates the logical fn-id to the current branch's
-;; version-id.
 
 
 (defbase resolve-fn-version-id
@@ -220,37 +145,12 @@
   (get @recon/running service-id))
 
 
-;; `:enrich-running` is now a graph fn-def — see fns.edn. Composes
-;; `:running-entry` + `:if (some? entry)` over a `:zipmap` reshape
-;; with 4 fields. Pre-fix this hardcoded the 4-field response shape
-;; in Clojure; admins couldn't rename `:stopper-set?` or add a
-;; `:thread-id` without a backend rebuild.
 
-
-;; --- C17 atoms: list-services linear ETL decomposition.
-;; Five named steps glued by a `:cond`-free graph fn-def — pure
-;; variant-1 data composition so each stage is visible. The
-;; previously-monolithic 20-line body splits into the conceptual
-;; pipeline: load services + fn-name-index → enrich each → maybe
-;; build legacy fallback → wrap as final response. Each atom is a
-;; 1-3-line wrap over the helpers above.
-
-;; `:_list-services-rows` is now a graph fn-def (`:list-entities`
-;; `:entity-type "service"`).
-
-
-;; `:render-execute-result-hiccup` retired — entire result body
-;; now graph-composed in `fns.edn` (`:_er-*` chain → `:_er-body`).
-;; §3.3 fix.
-
-;; `:render-service-popover-hiccup` retired — entire popover body
-;; now graph-composed in `fns.edn` (`:_sp-*` chain →
-;; `:_partial-service-popover-body`). §3.3 fix.
-
-
-;; `:_list-services-fn-names` is now a graph fn-def — `:list-entities`
-;; of `:fn` + per-row `[id name]` HOF + `:into {}` fold. The previous
-;; `fn-name-by-id` helper isn't needed anymore.
+;; --- list-services ---
+;; Five named steps glued by a graph fn-def — pure data composition
+;; so each stage is visible: load services + fn-name-index → enrich
+;; each → maybe build legacy fallback → wrap as final response. Each
+;; atom is a 1-3-line wrap over the helpers above.
 
 
 (def impls

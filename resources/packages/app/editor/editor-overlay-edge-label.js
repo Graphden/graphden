@@ -216,10 +216,10 @@ function createEdgeLabelOverlay(edge, container) {
       }
     }
 
-    // The λ/() is-fn chip retired in #15b — `type=:fn` IS the HOF
-    // marker now. Flipping HOF behaviour means flipping the type
-    // itself, which the type-chip already does. One affordance for
-    // one concept.
+    // There's no separate λ/() is-fn chip — `type=:fn` IS the HOF
+    // marker. Flipping HOF behaviour means flipping the type itself,
+    // which the type-chip already does. One affordance for one
+    // concept.
   }
 
   if (descriptionTarget) {

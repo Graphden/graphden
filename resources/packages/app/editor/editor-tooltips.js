@@ -500,7 +500,7 @@ function bindFullNameHover(hoverEl, measureEl, fullName) {
 
 
 // ============================================================================
-// INLINE EDIT POPOVERS, RE-PARENT — moved out of this file
+// RELATED MODULES — where the editing UI lives
 // ============================================================================
 //
 // Inline edit popovers (arg-value / arg-rename / fn-rename /

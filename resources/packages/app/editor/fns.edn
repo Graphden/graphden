@@ -469,11 +469,9 @@
   ;; =============================================================================
   ;; HTMX PARTIALS — server-rendered fragments swapped into editor mount-points
   ;;
-  ;; First migration: the effect-explainer popover. Previously a JS
-  ;; module (`editor-effect-explainer.js`) built the popover DOM from
-  ;; a hard-coded `EFFECT_DESCRIPTIONS` lookup table. Now the lookup
-  ;; lives in `:_effect-descriptions` below (one fn-def, editable
-  ;; through the editor itself), rendered to hiccup, and served at
+  ;; The effect-explainer popover. The lookup lives in
+  ;; `:_effect-descriptions` below (one fn-def, editable through the
+  ;; editor itself), rendered to hiccup, and served at
   ;; `GET /partials/effect?effect=db`. JS keeps only positioning +
   ;; dismissal — the content lives in the graph.
   ;;
@@ -2172,7 +2170,7 @@
    :args {:id :_partial-execute-result-id}}
 
   {:name :_partial-execute-result-fragment
-   :description "Execute-result body hiccup for a persisted exec-id. Reparents `:_er-body` (the pure-graph chain in `app/execution/fns.edn`) — previously delegated to the `:render-execute-result-hiccup` defbase + Clojure helpers; §3.3 fix made the entire walker graph-composed."
+   :description "Execute-result body hiccup for a persisted exec-id. Reparents `:_er-body` (the pure-graph walker chain in `app/execution/fns.edn`)."
    :parent :_er-body
    :args {:exec :_partial-execute-result-exec}}
 

@@ -1002,7 +1002,7 @@ function compactTypeChipText(rich, flat) {
       //    + a short return-type alias)
       //  - terse `(N)→ret-prefix` otherwise (e.g. `(request)→ring-r…`)
       // Falls through to `flat` ("fn") only when even the terse form
-      // is too wide. Pre-fix the chip always read "fn" — uninformative.
+      // is too wide.
       const argEntries = Object.entries(rich[1] || {});
       const ret = compactTypeChipText(rich[2], 'any');
       const argsFull = argEntries

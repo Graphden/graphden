@@ -19,7 +19,7 @@
  :description "Refinement / union / variant type declarations plus runtime narrowing base-fns."
  :fns
  [;; ---------------------------------------------------------------------
-  ;; Refinement-typed declarations (formerly aliases.edn).
+  ;; Refinement-typed declarations.
   ;; ---------------------------------------------------------------------
 
   {:name :positive-int
@@ -88,10 +88,6 @@
   {:name :nullable-text    :union [:null :text]}
   {:name :nullable-uuid    :union [:null :uuid]}
   {:name :nullable-jsonb   :union [:null :jsonb]}
-  ;; `:nullable-int` was retired earlier when it had zero adopters.
-  ;; Restored now: 5 inline `:nullable-int` / `:nullable-int`
-  ;; sites — most heavily used by sequence-position fields and
-  ;; nullable timeout/limit query params.
   {:name :nullable-int     :union [:null :int]}
   ;; 3 inline sites — variant tags often parse to either form.
   {:name :nullable-keyword :union [:null :keyword]}

@@ -1,7 +1,7 @@
 (ns graphden.packages.core.logic.impls
   "Implementations for core/logic base functions.
 
-   Migrated to `defbase` — arg symbols resolve at use site via the
+   Arg symbols resolve at use site via the
    runtime helper (`rt/resolve-arg`). Laziness needs no `:lazy` flag:
    scalar `:ref` args arrive as thunks, and `:seq` args as UNCHUNKED
    lazy-seqs (`compile/resolve-seq-items`). So an impl's native Clojure

@@ -447,15 +447,6 @@
    :return-type :fn-version-row-shape
    :args {:row {:as :item} :entity-type {:value "fn-version"}}}
 
-  ;; `:resolve-fn-slot-rows` (+ its 5-step `_resolve-fn-slot-versions*`
-  ;; chain) USED to be the generic versioned-read for `:fn-slot`. It
-  ;; was retired when the secrets-handler bypass landed (see
-  ;; `app.secrets/_list-secrets-leaf-fn-slots-resolved`) — every
-  ;; remaining `:fn-slot` consumer either reads through the base
-  ;; storage path or has its own targeted SQL. No live caller; per
-  ;; the reachability audit (`tools/reachability_audit.clj`) the whole
-  ;; chain was unreachable.
-
   ;; ---- :binding -------------------------------------------------------
   {:name :resolve-binding-rows
    :description "Resolve the live `:binding` row set on the current branch."

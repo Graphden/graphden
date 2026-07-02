@@ -550,9 +550,9 @@ async function renderGraph(shouldFit = true) {
     nodesToRemove.forEach(node => {
       // Registry-backed lookup: avoids constructing a CSS selector +
       // scanning the DOM per removed node. The overlay's nodeId is
-      // the cy node id, so look up directly. (Previously matched on
-      // data-original-fn-id, which returned the FIRST overlay sharing
-      // an originalFnId — buggy when multiple copies coexist.)
+      // the cy node id, so look up directly rather than matching on
+      // data-original-fn-id, which is ambiguous when multiple copies
+      // share an originalFnId (it returns the first match).
       unregisterNodeOverlay(node.id());
       if (!isPreview) {
         userMovedNodes.delete(node.id());

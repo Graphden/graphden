@@ -1,7 +1,7 @@
 ;; Route groups — the top-level entry reitit consumes via `app.server._router`.
 ;;
-;; After the nested-routes refactor, `:all` is no longer a flat list of
-;; every endpoint — it's a small list of TOP-LEVEL reitit entries:
+;; `:all` is not a flat list of every endpoint — it's a small list of
+;; TOP-LEVEL reitit entries:
 ;; standalone leaves (`:health`, `:metrics`, `:favicon`, `:editor`) and
 ;; the `:api-routes` prefix group. Reitit walks the nested vectors and
 ;; assembles full paths itself.

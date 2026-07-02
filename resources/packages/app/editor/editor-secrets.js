@@ -99,148 +99,149 @@ async function loadSecrets() {
 
 
 // ============================================================================
-// SIDEBAR SECTION — server-rendered via /partials/secrets-panel
+// SIDEBAR SECTION
 // ============================================================================
 
-// Synchronous wrapper: returns a placeholder div + kicks off an
-// async fetch of the server-rendered panel. Once the response lands,
-// the placeholder's innerHTML gets replaced and click handlers are
-// wired via event-delegation on the [data-act] attrs the partial
-// emits.
-//
-// Anonymous visitors don't fetch — they get a "Sign in to manage
-// secrets" stub rendered client-side (the partial is auth-gated).
-//
-// The `_secretsList` cache stays JS-side so:
-//   • `isSecretFn(fn)` and the secret-leaf lookup keep working
-//     from other modules without an extra round-trip,
-//   • rotate/delete handlers can read the row's `data-fn-id` and
-//     resolve back to a known `{:name :path}` via the cache for
-//     prompt prefill / confirm-dialog copy.
+// Build the "Secrets" sidebar section — a collapsible block above the
+// namespace tree. Rows are rendered SYNCHRONOUSLY from the `_secretsList`
+// cache (populated by `loadSecrets`), so a row appears the instant the
+// data is in hand — no second fetch in the render path. This list is
+// query-backed + latency-sensitive (the version-resolution scan behind
+// `GET /api/secrets` is O(fn-slots)); a server-rendered partial would
+// need a fetch on the render critical path, which is the graph-ui §6.1
+// exception. The create / rotate FORM popovers ARE graph partials
+// (static markup) — see `openCreateSecretForm` / `openRotateSecretForm`.
 function buildSecretsSection() {
   const wrap = document.createElement('div');
   wrap.className = 'sidebar-secrets';
-  const isOpen = expandedNamespaces.has(secretsExpandedKey);
-  if (!isOpen) wrap.classList.add('collapsed');
 
-  if (!isAuthenticated()) {
-    renderSignedOutPanel(wrap, isOpen);
-    return wrap;
+  const isOpen = expandedNamespaces.has(secretsExpandedKey);
+
+  const header = document.createElement('div');
+  header.className = 'ns-header ns-header-pseudo';
+  const arrow = document.createElement('span');
+  arrow.className = 'ns-arrow' + (isOpen ? '' : ' collapsed');
+  arrow.textContent = isOpen ? '▼' : '▶';
+  header.appendChild(arrow);
+  const label = document.createElement('span');
+  label.className = 'ns-label';
+  label.textContent = 'Secrets';
+  header.appendChild(label);
+  const count = document.createElement('span');
+  count.className = 'ns-count';
+  count.textContent = _secretsList.length;
+  header.appendChild(count);
+
+  if (isAuthenticated()) {
+    const actions = document.createElement('span');
+    actions.className = 'ns-row-actions';
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'sidebar-action sidebar-action-add';
+    addBtn.textContent = '+';
+    addBtn.title = 'New secret';
+    addBtn.onclick = (e) => {
+      e.stopPropagation();
+      openCreateSecretForm(addBtn);
+    };
+    actions.appendChild(addBtn);
+    header.appendChild(actions);
   }
 
-  // Fetch the partial UNCONDITIONALLY (open or collapsed). The full
-  // section — including row count and per-row actions — comes from
-  // the server; CSS hides `.sidebar-secrets.collapsed .ns-children`
-  // so the children group is invisible without two code paths.
-  //
-  // Scaffolding below is the placeholder visible until the fetch
-  // lands (~30-150 ms typical). It deliberately mirrors the
-  // partial's header structure — including the `+ New secret`
-  // button — so synchronous tests that read `.sidebar-action-add`
-  // immediately after the section appears don't race the fetch.
-  wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo" data-act="toggle">'
-    +   '<span class="ns-arrow">▼</span>'
-    +   '<span class="ns-label">Secrets</span>'
-    +   '<span class="ns-count"></span>'
-    +   '<span class="ns-row-actions">'
-    +     '<button type="button" class="sidebar-action sidebar-action-add" '
-    +              'data-act="create" title="New secret">+</button>'
-    +   '</span>'
-    + '</div>'
-    + '<div class="ns-children"><div class="loading">Loading…</div></div>';
-  wireSecretsPanel(wrap);
-  refreshSecretsPanel(wrap);
+  header.onclick = (e) => {
+    e.stopPropagation();
+    if (isOpen) expandedNamespaces.delete(secretsExpandedKey);
+    else expandedNamespaces.add(secretsExpandedKey);
+    updateEntityList(graphData);
+  };
+  wrap.appendChild(header);
+
+  if (!isOpen) return wrap;
+
+  const childGroup = document.createElement('div');
+  childGroup.className = 'ns-children';
+
+  if (!_secretsLoaded) {
+    const loading = document.createElement('div');
+    loading.className = 'loading';
+    loading.textContent = 'Loading…';
+    childGroup.appendChild(loading);
+    // Kick off the load — re-render once it lands.
+    loadSecrets().then(() => updateEntityList(graphData));
+  } else if (_secretsList.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'loading';
+    empty.textContent = isAuthenticated()
+      ? 'No secrets — click + to add one'
+      : 'Sign in to manage secrets';
+    childGroup.appendChild(empty);
+  } else {
+    const sorted = [..._secretsList].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || ''));
+    for (const s of sorted) childGroup.appendChild(buildSecretItem(s));
+  }
+
+  wrap.appendChild(childGroup);
   return wrap;
 }
 
-function renderSignedOutPanel(wrap, isOpen) {
-  wrap.innerHTML = ''
-    + '<div class="ns-header ns-header-pseudo" data-act="toggle">'
-    +   '<span class="ns-arrow">' + (isOpen ? '▼' : '▶') + '</span>'
-    +   '<span class="ns-label">Secrets</span>'
-    +   '<span class="ns-count">0</span>'
-    + '</div>'
-    + (isOpen
-       ? '<div class="ns-children">'
-         + '<div class="loading">Sign in to manage secrets</div>'
-         + '</div>'
-       : '');
-  wireSecretsPanel(wrap);
-}
+function buildSecretItem(secret) {
+  const item = document.createElement('div');
+  item.className = 'entity-item entity-secret';
+  item.dataset.fnId = secret.id;
 
-async function refreshSecretsPanel(wrap) {
-  try {
-    const r = await authFetch('/partials/secrets-panel');
-    if (!r.ok) {
-      const child = wrap.querySelector('.ns-children');
-      if (child) child.innerHTML =
-        '<div class="loading">Secrets unavailable (HTTP ' + r.status + ')</div>';
-      return;
-    }
-    const html = await r.text();
-    wrap.innerHTML = html;
-    // Re-apply collapsed state — the partial always emits the full
-    // section markup; CSS hides `.sidebar-secrets.collapsed .ns-children`.
-    const isOpen = expandedNamespaces.has(secretsExpandedKey);
-    if (!isOpen) wrap.classList.add('collapsed');
-    wireSecretsPanel(wrap);
-    // Keep the JS-side cache in sync so isSecretFn() and rotate/
-    // delete prompts can resolve fn-id → {name, path} without a
-    // second fetch. Pull from /api/secrets (cheap JSON; partial
-    // doesn't expose path back to JS).
-    loadSecrets();
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('refreshSecretsPanel fetch threw', err);
-  }
-}
+  const lock = document.createElement('span');
+  lock.className = 'secret-lock-icon';
+  lock.textContent = '🔒';
+  item.appendChild(lock);
 
-// Event delegation: a SINGLE click listener on the sidebar-secrets
-// container handles every [data-act] the partial emits. Cheaper than
-// per-button addEventListener + survives innerHTML replacement.
-function wireSecretsPanel(wrap) {
-  wrap.onclick = (e) => {
-    const target = e.target;
-    const actEl = target?.closest?.('[data-act]');
-    if (!actEl || !wrap.contains(actEl)) return;
-    const act = actEl.getAttribute('data-act');
-    if (act === 'toggle') {
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'name';
+  nameSpan.textContent = secret.name || '(unnamed)';
+  item.appendChild(nameSpan);
+
+  const pathSpan = document.createElement('span');
+  pathSpan.className = 'secret-path';
+  pathSpan.textContent = secret.path || '';
+  item.appendChild(pathSpan);
+
+  if (isAuthenticated()) {
+    const actions = document.createElement('span');
+    actions.className = 'ns-row-actions';
+
+    const rotateBtn = document.createElement('button');
+    rotateBtn.type = 'button';
+    rotateBtn.className = 'sidebar-action';
+    rotateBtn.textContent = '↻';
+    rotateBtn.title = 'Rotate value';
+    rotateBtn.onclick = (e) => {
       e.stopPropagation();
-      const isOpen = expandedNamespaces.has(secretsExpandedKey);
-      if (isOpen) expandedNamespaces.delete(secretsExpandedKey);
-      else expandedNamespaces.add(secretsExpandedKey);
-      updateEntityList(graphData);
-      return;
-    }
-    if (act === 'create') {
+      openRotateSecretForm(rotateBtn, secret);
+    };
+    actions.appendChild(rotateBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'sidebar-action sidebar-action-delete';
+    delBtn.textContent = '×';
+    delBtn.title = 'Delete secret';
+    delBtn.onclick = (e) => {
       e.stopPropagation();
-      openCreateSecretForm(actEl);
-      return;
-    }
-    if (act === 'rotate') {
-      e.stopPropagation();
-      const fnId = actEl.getAttribute('data-fn-id');
-      const secret = _secretsList.find((s) => s.id === fnId) || {id: fnId};
-      openRotateSecretForm(actEl, secret);
-      return;
-    }
-    if (act === 'delete') {
-      e.stopPropagation();
-      const fnId = actEl.getAttribute('data-fn-id');
-      const secret = _secretsList.find((s) => s.id === fnId) || {id: fnId};
       deleteSecretConfirm(secret);
-      return;
-    }
-    if (act === 'navigate') {
-      // Only navigate when the click was NOT on a button (those
-      // already had their stopPropagation; this branch covers the
-      // row body).
-      if (target.tagName === 'BUTTON' || target.closest('button')) return;
-      const fnId = actEl.getAttribute('data-fn-id');
-      if (fnId && typeof selectFn === 'function') selectFn(fnId);
-    }
+    };
+    actions.appendChild(delBtn);
+
+    item.appendChild(actions);
+  }
+
+  // Click on row → navigate to the secret's fn-def in the graph (the
+  // same fn-def appears in the namespace tree too, lock-badged by
+  // `isSecretFn`).
+  item.onclick = () => {
+    if (typeof selectFn === 'function') selectFn(secret.id);
   };
+
+  return item;
 }
 
 
@@ -262,23 +263,29 @@ async function openCreateSecretForm(anchor) {
   const pop = document.createElement('div');
   pop.className = 'popover secrets-popover';
   pop.dataset.popover = 'create-secret';
-  document.body.appendChild(pop);
+  // Claim active BEFORE the await so a rapid re-open supersedes us.
   _activePopover = pop;
-  installPopoverDismiss(pop, closeActivePopover);
 
   // Form markup lives in the graph (GET /partials/secret-create-form); the
   // client owns only the lifecycle below — ns-picker, keystroke path auto-fill,
   // submit + error + multi-refresh (graph-ui §6-#2 / §6.3-§6.4 exceptions).
+  // Fetch BEFORE mounting so the popover enters the DOM fully-formed —
+  // never an empty shell that outside observers (and tests) can read
+  // before the content lands.
+  let failed = false;
   try {
     const r = await authFetch('/partials/secret-create-form');
-    if (pop !== _activePopover) return; // dismissed while loading
+    if (pop !== _activePopover) return; // dismissed / superseded while loading
     pop.innerHTML = await r.text();
   } catch (_) {
+    if (pop !== _activePopover) return;
     pop.innerHTML = '<div class="popover-error">Failed to load form.</div>';
-    anchorBelowClamped(pop, anchor);
-    return;
+    failed = true;
   }
+  document.body.appendChild(pop);
+  installPopoverDismiss(pop, closeActivePopover);
   anchorBelowClamped(pop, anchor);
+  if (failed) return;
 
   const nameInput = pop.querySelector('input[name="name"]');
   const pathInput = pop.querySelector('input[name="path"]');
@@ -346,9 +353,9 @@ async function openCreateSecretForm(anchor) {
     // hidden form state cheshire / autocomplete might grab.
     valueInput.value = '';
     closeActivePopover();
+    // Reload the secret list + the graph so the new fn-def also
+    // appears in the namespace tree.
     await loadSecrets();
-    // Refresh sidebar + graph so the new fn-def appears in the
-    // namespace tree too.
     if (typeof loadGraphData === 'function') {
       await loadGraphData();
     } else {
@@ -367,24 +374,28 @@ async function openRotateSecretForm(anchor, secret) {
   const pop = document.createElement('div');
   pop.className = 'popover secrets-popover';
   pop.dataset.popover = 'rotate-secret';
-  document.body.appendChild(pop);
+  // Claim active BEFORE the await so a rapid re-open supersedes us.
   _activePopover = pop;
-  installPopoverDismiss(pop, closeActivePopover);
 
   // Form markup (incl. the name/path title, escaped by render-hiccup) lives in
   // the graph; the secret VALUE is entered client-side and only submitted
-  // (§6.3). JS owns submit + refresh below.
+  // (§6.3). JS owns submit + refresh below. Fetch BEFORE mounting so the
+  // popover enters the DOM fully-formed (never an empty shell).
   const q = new URLSearchParams({ name: secret.name || '', path: secret.path || '' });
+  let failed = false;
   try {
     const r = await authFetch('/partials/secret-rotate-form?' + q.toString());
-    if (pop !== _activePopover) return; // dismissed while loading
+    if (pop !== _activePopover) return; // dismissed / superseded while loading
     pop.innerHTML = await r.text();
   } catch (_) {
+    if (pop !== _activePopover) return;
     pop.innerHTML = '<div class="popover-error">Failed to load form.</div>';
-    anchorBelowClamped(pop, anchor);
-    return;
+    failed = true;
   }
+  document.body.appendChild(pop);
+  installPopoverDismiss(pop, closeActivePopover);
   anchorBelowClamped(pop, anchor);
+  if (failed) return;
 
   const valueInput = pop.querySelector('input[name="value"]');
   const errEl = pop.querySelector('.popover-error');

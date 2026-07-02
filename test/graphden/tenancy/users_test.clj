@@ -21,7 +21,7 @@
   (testing "garbage / nil never throws — just false"
     (is (false? (users/verify-password "pw" "not-a-hash")))
     (is (false? (users/verify-password "pw" nil)))
-    (is (false? (users/verify-password nil "pbkdf2$1$a$b")))))
+    (is (false? (users/verify-password nil "$2a$12$abcdefghijklmnopqrstuv")))))
 
 
 (deftest rate-limiter-allows-then-blocks
@@ -49,12 +49,3 @@
     (is (= "1.2.3.4" (users/client-ip {:headers {"x-forwarded-for" "1.2.3.4, 5.6.7.8"}})))
     (is (= "9.9.9.9" (users/client-ip {:remote-addr "9.9.9.9"})))
     (is (= "unknown" (users/client-ip {})))))
-
-
-(deftest legacy-pbkdf2-hashes-still-verify
-  ;; Accounts created before the bcrypt switch must still log in — verify-password
-  ;; dispatches `pbkdf2$…` to the legacy path. This is a real PBKDF2 hash of
-  ;; "legacy-pw" (all-zero salt, so it's stable to hard-code).
-  (let [legacy "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA==$IJ7VI9MfVAgFv8PBJsAVTM9TXi+MtwfQBeYRwcjryGI="]
-    (is (true? (users/verify-password "legacy-pw" legacy)))
-    (is (false? (users/verify-password "wrong" legacy)))))

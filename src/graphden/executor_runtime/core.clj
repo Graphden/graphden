@@ -15,9 +15,8 @@
    :exec/context     → Executor context
    :exec/compiled-registry  → Compiled-at-startup closures (hot path)
    :exec/service-reconciler → Supervises enabled :service rows
-                              (replaces standalone :http/server;
-                              legacy fallback spawns the package's
-                              :startup-fn when no :service rows exist)
+                              (a package's :services seed the initial
+                              set — e.g. app seeds :web-server)
    :exec/cleanup-scheduler  → Hourly :fn-execution TTL sweep
 
    ## Configuration

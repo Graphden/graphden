@@ -520,7 +520,6 @@
       (is (str/includes? body "panel-carol")))
     (testing "the password hash is NEVER in the rendered panel (list-users strips it)"
       (is (not (str/includes? body "$2a$")))   ; no bcrypt hash
-      (is (not (str/includes? body "pbkdf2"))) ; nor a legacy one
       (is (not (str/includes? body "Tenancy addon not active"))))
     (testing "the panel is HTMX-native — create/delete via hx-*, no client-JS fetch"
       (is (str/includes? body "<form"))
@@ -633,23 +632,6 @@
     (testing "an over-quota signup → 429 (not 401)"
       (let [resp (cr/execute seam-ctx handler-id {:request req})]
         (is (= 429 (:status resp)))))))
-
-
-(deftest legacy-pbkdf2-rehashed-to-bcrypt-on-login
-  (let [login-id (fn-id-of (:storage *ctx*) "invoke-login")
-        seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!
-                                         :logout users/logout! :signup users/signup!})
-        ;; a real PBKDF2 hash of "legacy-pw" (all-zero salt → stable)
-        legacy "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA==$IJ7VI9MfVAgFv8PBJsAVTM9TXi+MtwfQBeYRwcjryGI="
-        stored-hash #(:password-hash (first (sp/query-entities (:storage *ctx*) :user {:username "oldtimer"})))]
-    (sp/create-entity (:storage *ctx*) :user {:username "oldtimer" :password-hash legacy :org "acme"})
-    (testing "the stored hash is legacy PBKDF2 before login"
-      (is (= legacy (stored-hash))))
-    (testing "logging in with the right password succeeds AND upgrades the hash to bcrypt"
-      (is (string? (:token (cr/execute seam-ctx login-id {:username "oldtimer" :password "legacy-pw"}))))
-      (is (str/starts-with? (stored-hash) "$2")))
-    (testing "the subsequent (now bcrypt) login still works"
-      (is (string? (:token (cr/execute seam-ctx login-id {:username "oldtimer" :password "legacy-pw"})))))))
 
 
 (deftest self-serve-signup-creates-org-user-and-logs-in

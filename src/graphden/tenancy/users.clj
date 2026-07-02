@@ -5,10 +5,9 @@
    is just a `:token` row (reusing §3.4 #1), so the existing
    `tenancy.auth/storage-token-provider` resolves it on every later request.
 
-   Passwords are stored as a self-describing PBKDF2 string
-   (`pbkdf2$iters$salt$hash`, PBKDF2WithHmacSHA256) — never plaintext, salted +
-   iterated. (bcrypt/argon2 is a hardening follow-up; PBKDF2 is built-in, no
-   dep.) Both ops are controlled seams, not tenant graph fns: `:user` is
+   Passwords are stored as bcrypt hashes (`$2a$<cost>$…`, random salt per call,
+   work factor baked into the string) — never plaintext, salted + adaptive.
+   Both ops are controlled seams, not tenant graph fns: `:user` is
    tenant-forbidden, and minting tokens / hashing passwords is privileged."
   (:require
     [clojure.string :as str]
@@ -20,22 +19,14 @@
     [next.jdbc :as jdbc])
   (:import
     (java.security
-      MessageDigest
       SecureRandom)
     (java.util
       Base64
-      Base64$Decoder
       Base64$Encoder)
-    (javax.crypto
-      SecretKey
-      SecretKeyFactory)
-    (javax.crypto.spec
-      PBEKeySpec)
     (org.mindrot.jbcrypt
       BCrypt)))
 
 
-(def ^:private ^:const pbkdf2-key-bits 256)   ; legacy verify only
 (def ^:private ^:const bcrypt-cost 12)
 
 
@@ -90,13 +81,6 @@
     b))
 
 
-(defn- pbkdf2
-  ^bytes [^String password ^bytes salt iters]
-  (let [spec (PBEKeySpec. (String/.toCharArray password) salt (int iters) pbkdf2-key-bits)
-        skf (SecretKeyFactory/getInstance "PBKDF2WithHmacSHA256")]
-    (SecretKey/.getEncoded (SecretKeyFactory/.generateSecret skf spec))))
-
-
 (defn hash-password
   "A bcrypt hash string for `password` (`$2a$<cost>$…`, random salt per call).
    bcrypt is adaptive + salted; the cost (work factor) is baked into the hash."
@@ -104,40 +88,15 @@
   (BCrypt/hashpw password (BCrypt/gensalt bcrypt-cost)))
 
 
-(defn- pbkdf2-verify
-  "Legacy PBKDF2 verify (`pbkdf2$iters$salt$hash`) — kept so any account created
-   before the bcrypt switch still logs in. Constant-time compare; recomputes
-   with the stored salt + iteration count."
-  [password stored]
-  (let [[algo iters salt-b64 hash-b64] (str/split stored #"\$")]
-    (when (= algo "pbkdf2")
-      (let [dec (Base64/getDecoder)
-            salt (Base64$Decoder/.decode dec ^String salt-b64)
-            expected (Base64$Decoder/.decode dec ^String hash-b64)
-            actual (pbkdf2 password salt (parse-long iters))]
-        (MessageDigest/isEqual expected actual)))))
-
-
 (defn verify-password
-  "True iff `password` matches the stored hash. Dispatches on format: bcrypt
-   (`$2…`) for current accounts, legacy PBKDF2 (`pbkdf2$…`) for any created
-   before the switch. Never throws (a malformed/unknown hash → false)."
+  "True iff `password` matches the stored bcrypt hash (`$2…`). Never throws
+   (a malformed/unknown hash → false)."
   [password stored]
   (boolean
-    (when (and (seq password) (seq stored))
+    (when (and (seq password) (seq stored) (str/starts-with? stored "$2"))
       (try
-        (cond
-          (str/starts-with? stored "$2")      (BCrypt/checkpw password stored)
-          (str/starts-with? stored "pbkdf2$") (pbkdf2-verify password stored)
-          :else false)
+        (BCrypt/checkpw password stored)
         (catch Exception _ false)))))
-
-
-(defn- legacy-hash?
-  "True for a pre-bcrypt PBKDF2 hash — it gets transparently re-hashed to
-   bcrypt on the next successful login (`login!`)."
-  [stored]
-  (boolean (and stored (str/starts-with? stored "pbkdf2$"))))
 
 
 (defn- random-token
@@ -167,21 +126,13 @@
 (defn login!
   "Verify `username`/`password` and mint a SESSION TOKEN (a `:token` row, so the
    storage-token-provider resolves it later). Runs in the platform context
-   (login precedes any session). A legacy PBKDF2 hash is transparently
-   re-hashed to bcrypt here — the only place we hold the plaintext. Returns
-   `{:token <raw> :user :org}` on success, nil on bad credentials (caller maps
-   nil → 401)."
+   (login precedes any session). Returns `{:token <raw> :user :org}` on success,
+   nil on bad credentials (caller maps nil → 401)."
   [ctx username password]
   (let [storage (:storage ctx)]
     (tc/with-org tc/public-org
                  (let [user (first (sp/query-entities storage :user {:username username}))]
                    (when (and user (verify-password password (:password-hash user)))
-                     ;; Upgrade-on-login: a verified legacy PBKDF2 hash is
-                     ;; re-stored as bcrypt, so old accounts migrate as they're
-                     ;; used (no mass rehash, no plaintext kept).
-                     (when (legacy-hash? (:password-hash user))
-                       (sp/update-entity storage :user (:id user)
-                                         {:password-hash (hash-password password)}))
                      (let [raw (random-token)
                            org (:org user)]
                        (sp/create-entity storage :token

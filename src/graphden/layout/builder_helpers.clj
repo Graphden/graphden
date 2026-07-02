@@ -870,70 +870,64 @@
         consumer node (the leaf that actually reads the value). Nothing
         new is emitted in the lambda body to avoid double-counting.
      4. Otherwise — a visible dashed placeholder node. This IS the
-        caller's interface; the caller must fill it.
+        caller's interface; the caller must fill it."
+  [state lookups inverse-source-map arg-name arg-type arg-id source-node-id expanded-fns is-hof]
+  (let [arg-map (:arg-map lookups)
+        arg-rec (get arg-map arg-id)
+        optional? (arg-is-optional? arg-map arg-rec)
+        displayed-name (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
+                           (when arg-name (name arg-name)))]
+    (cond
+      optional?
+      (record-optional-unset! state source-node-id displayed-name (:slot-id arg-rec))
 
-   Recursive 4-arity exists for back-compat with call-sites that don't
-   know whether the slot is inside a HOF subtree (defaults to false)."
-  ([state lookups inverse-source-map arg-name arg-type arg-id source-node-id expanded-fns]
-   (add-unset-arg-node state lookups inverse-source-map
-                       arg-name arg-type arg-id source-node-id expanded-fns false))
-  ([state lookups inverse-source-map arg-name arg-type arg-id source-node-id expanded-fns is-hof]
-   (let [arg-map (:arg-map lookups)
-         arg-rec (get arg-map arg-id)
-         optional? (arg-is-optional? arg-map arg-rec)
-         displayed-name (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
-                            (when arg-name (name arg-name)))]
-     (cond
-       optional?
-       (record-optional-unset! state source-node-id displayed-name (:slot-id arg-rec))
+      is-hof
+      (if-let [bound (caller-bound-arg arg-map inverse-source-map arg-id)]
+        (swap! state update :captured-edge-migrations assoc (:id bound) source-node-id)
+        (record-hof-captured! state source-node-id displayed-name))
 
-       is-hof
-       (if-let [bound (caller-bound-arg arg-map inverse-source-map arg-id)]
-         (swap! state update :captured-edge-migrations assoc (:id bound) source-node-id)
-         (record-hof-captured! state source-node-id displayed-name))
-
-       :else
-       (let [node-id (str "unset-" source-node-id "-" arg-id)
-             edge-id (str "e-unset-" source-node-id "-" arg-id)
-             ;; Empty sequence anchor: the arg itself is :sequence-typed
-             ;; and the chain head is nil. Mark the node so the frontend
-             ;; routes the click into `appendSequenceItem` (Phase 5)
-             ;; instead of the regular free-arg binder, which would try
-             ;; to PUT `value=` on the anchor.
-             empty-seq? (and arg-rec
-                             (= :sequence (:type arg-rec))
-                             (nil? (:next-arg-id arg-rec)))]
-         (when-not (contains? (:added-node-ids @state) node-id)
-           (swap! state update :added-node-ids conj node-id)
-           (swap! state update :nodes conj
-                  {:data (cond-> (merge {:id node-id
-                                         :label (if arg-type (name arg-type) "any")
-                                         :type "fn"
-                                         :isPlaceholder true
-                                         ;; argId / argType let the frontend
-                                         ;; offer in-place binding of free-arg
-                                         ;; slots (Phase 4) without re-deriving
-                                         ;; them from the node-id string.
-                                         :argId (str arg-id)}
-                                        (when arg-rec
-                                          (arg-row->node-id-fields arg-rec)))
-                           arg-type  (assoc :argType (name arg-type))
-                           empty-seq? (assoc :isSequenceAnchor true
-                                             :sequenceFnId (str (:fn-id arg-rec))))})
-           (swap! state update :edges conj
-                  {:data (merge {:id edge-id
-                                 :source source-node-id
-                                 :target node-id
-                                 :sourceArgId arg-id
-                                 :argName displayed-name
-                                 :isUnset true}
-                                ;; Same id-bundle as a bound-arg edge so the
-                                ;; edge-label overlay can resolve the slot /
-                                ;; fn / type via `argRowFromNode` and render
-                                ;; the type-chip on this edge (the placeholder
-                                ;; no longer carries a type label of its own).
-                                (edge-source-fields lookups arg-id)
-                                (edge-narrowing-fields lookups arg-id expanded-fns))})))))))
+      :else
+      (let [node-id (str "unset-" source-node-id "-" arg-id)
+            edge-id (str "e-unset-" source-node-id "-" arg-id)
+            ;; Empty sequence anchor: the arg itself is :sequence-typed
+            ;; and the chain head is nil. Mark the node so the frontend
+            ;; routes the click into `appendSequenceItem` (Phase 5)
+            ;; instead of the regular free-arg binder, which would try
+            ;; to PUT `value=` on the anchor.
+            empty-seq? (and arg-rec
+                            (= :sequence (:type arg-rec))
+                            (nil? (:next-arg-id arg-rec)))]
+        (when-not (contains? (:added-node-ids @state) node-id)
+          (swap! state update :added-node-ids conj node-id)
+          (swap! state update :nodes conj
+                 {:data (cond-> (merge {:id node-id
+                                        :label (if arg-type (name arg-type) "any")
+                                        :type "fn"
+                                        :isPlaceholder true
+                                        ;; argId / argType let the frontend
+                                        ;; offer in-place binding of free-arg
+                                        ;; slots (Phase 4) without re-deriving
+                                        ;; them from the node-id string.
+                                        :argId (str arg-id)}
+                                       (when arg-rec
+                                         (arg-row->node-id-fields arg-rec)))
+                          arg-type  (assoc :argType (name arg-type))
+                          empty-seq? (assoc :isSequenceAnchor true
+                                            :sequenceFnId (str (:fn-id arg-rec))))})
+          (swap! state update :edges conj
+                 {:data (merge {:id edge-id
+                                :source source-node-id
+                                :target node-id
+                                :sourceArgId arg-id
+                                :argName displayed-name
+                                :isUnset true}
+                               ;; Same id-bundle as a bound-arg edge so the
+                               ;; edge-label overlay can resolve the slot /
+                               ;; fn / type via `argRowFromNode` and render
+                               ;; the type-chip on this edge (the placeholder
+                               ;; no longer carries a type label of its own).
+                               (edge-source-fields lookups arg-id)
+                               (edge-narrowing-fields lookups arg-id expanded-fns))}))))))
 
 
 (defn target-interface-names

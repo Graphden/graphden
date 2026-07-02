@@ -93,7 +93,7 @@
 ;;    :exec/context {:user-ops #ig/ref :tenancy/user-ops
 ;;                   :auth-provider #ig/ref :auth/storage-token-provider}}
 ;;
-;; Passwords are PBKDF2-hashed (salted, iterated); only the hash is stored.
+;; Passwords are bcrypt-hashed (salted, adaptive); only the hash is stored.
 ;; Login sessions carry a TTL (:token.expires-at); the provider rejects expired
 ;; tokens. To also reap the expired rows (instead of letting them pile up), add
 ;; the background cleanup scheduler (default period 1h):

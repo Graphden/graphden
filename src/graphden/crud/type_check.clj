@@ -229,11 +229,9 @@
               ;; `binding-shape-for-edn` can reconstruct
               ;; `{:as :renamed :type T}` shapes from the slot side.
               own-fn-slots (sp/query-entities storage :fn-slot {:fn-id fn-id})
-              ;; Batch the parent fn-slot fetch — pre-fix this was
-              ;; `(mapcat (fn [pid] (query-entities … {:fn-id pid})) parent-ids)`
-              ;; which fired one round-trip per parent (3 for a typical
-              ;; MI chain). The vector-valued `:fn-id` filter folds into
-              ;; a single IN-clause.
+              ;; Batch the parent fn-slot fetch: the vector-valued
+              ;; `:fn-id` filter folds into a single IN-clause instead
+              ;; of one round-trip per parent (3 for a typical MI chain).
               fn-slots (if (seq parent-ids)
                          (sp/query-entities storage :fn-slot {:fn-id (vec parent-ids)})
                          [])

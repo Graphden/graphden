@@ -1,6 +1,6 @@
 (ns graphden.packages.web.branch-router.impls
   "Base-fn primitives for branch routing. `:branch-routing-wrap` itself
-   is now a graph fn-def composing these primitives — see fns.edn."
+   is a graph fn-def composing these primitives — see fns.edn."
   (:require
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]

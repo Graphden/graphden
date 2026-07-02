@@ -291,11 +291,11 @@
 ;; DELETE /api/entities/fn/:id — delete-entity-handler (for :fn entity)
 ;; =============================================================================
 ;;
-;; The fn-delete cascade in web/crud reaches two pin sites:
-;;   - `_delete-fn-ref-bindings-identities` (web/crud/fns.edn:2168)
-;;   - `_delete-fn-ref-items-identities`     (web/crud/fns.edn:2191)
-;; via the ref-cleanup pipeline that nulls out other fns' references to
-;; the deleted target.
+;; The fn-delete cascade in web/crud reaches the version-aware reverse-ref
+;; queries (`:_delete-ref-bind-*` / `:_delete-ref-item-*`) that gather
+;; candidate ref-owners from the identity + version tables. Their `:where`
+;; is built from the delete target id (`:_delete-ref-bind-where`), not a
+;; free slot, so the Ring request can't leak into it — this asserts that.
 
 (deftest delete-entity-fn-handler-reaches-identity-queries-without-leak-test
   (testing "DELETE /api/entities/fn/:id — non-existent id; no `:where`-via-closure leak"

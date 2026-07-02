@@ -7,6 +7,7 @@
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.interface :as composition]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.export :as export]
     [graphden.packages.loader :as loader]
@@ -94,9 +95,11 @@
 ;; `X-Graphden-Branch: feature-x` writes the rows onto that branch — test
 ;; there, then merge (PLATFORM_PLAN §2.4).
 ;;
-;; Note: the rows are written but the compiled registry is not yet
-;; refreshed — the installed fns become executable on the next
-;; rebuild/restart. Hot-recompile-on-install is a follow-up.
+;; After the sync writes the fn rows, `invalidate-graph-cache!` drops
+;; the compiled registry (and refreshes type-aliases) so the installed
+;; fns are executable immediately — no pod restart. Full clear (1-arity)
+;; rather than a delta: install is a rare admin op writing a whole
+;; bundle, and we don't thread the synced fn-ids back out.
 (defbase install-package
   [pkg-name pkg-version]
   (cr/record-effect! :db)
@@ -116,6 +119,7 @@
           {:ok false :reason "missing-dependencies" :missing (mapv keyword missing)}
           (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))]
             (composition/sync-fns-to-storage! storage fns ns-id-map)
+            (exec-ctx/invalidate-graph-cache! ctx)
             {:ok true
              :name pkg-name
              :version pkg-version

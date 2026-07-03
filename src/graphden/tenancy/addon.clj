@@ -319,6 +319,13 @@
           cross-org? (and host-org
                           (not= org tc/public-org)
                           (not= host-org org))
+          ;; Per-request memo over the singleton grant-store: the header
+          ;; builders below call `grants-for` for the SAME subject 3-4×
+          ;; (capabilities runs `can?` per action cap + workspace once) —
+          ;; without this each is a fresh `:grant` query. Scoped to this
+          ;; read-only window (after the thunk, no grant mutation between),
+          ;; fresh atom per request, so it can't serve stale grants.
+          header-grant-store (when grant-store (grant/memoizing-grant-store grant-store))
           ;; Run the handler, attach the capability header, and map a
           ;; per-namespace `:authz/forbidden` thrown at the storage layer to
           ;; a clean 403 (the storage guard is where the target namespace is
@@ -327,8 +334,8 @@
                 (try
                   (with-tenancy-headers
                     (thunk)
-                    (request-capabilities grant-store principal org)
-                    (request-workspace grant-store principal org))
+                    (request-capabilities header-grant-store principal org)
+                    (request-workspace header-grant-store principal org))
                   (catch clojure.lang.ExceptionInfo e
                     (if (= :authz/forbidden (:type (ex-data e)))
                       forbidden-response

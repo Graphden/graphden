@@ -111,6 +111,32 @@
   (->PersonalNamespaceGrantStore base prefix))
 
 
+(defrecord MemoGrantStore
+  [base cache]
+
+  GrantStore
+
+  (grants-for
+    [_ subject]
+    (if-let [hit (find @cache subject)]
+      (val hit)
+      (let [g (grants-for base subject)]
+        (swap! cache assoc subject g)
+        g))))
+
+
+(defn memoizing-grant-store
+  "Wrap a `GrantStore` so `grants-for` is cached per subject. Create ONE
+   per request (fresh atom) and use it only within a read-only window —
+   a single tenant request calls `grants-for` for the SAME subject 3-4×
+   (`request-capabilities` runs `can?` for each action capability,
+   `request-workspace` runs once), each an identical `:grant` query.
+   MUST NOT outlive a request or span a grant mutation, or it serves
+   stale grants."
+  [base]
+  (->MemoGrantStore base (atom {})))
+
+
 (defn can?
   "Does `subject` hold `capability` in `ns-path`, per `store`? A subject
    with no matching grant is denied (default-deny)."

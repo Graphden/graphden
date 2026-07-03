@@ -27,9 +27,10 @@
   ;; 401 on bad credentials.
   ;; ---------------------------------------------------------------------
   {:name :invoke-login
-   :description "Verify credentials via the addon's user-ops seam and mint a session token. Returns {:token :user :org} on success, nil on bad credentials / no addon."
+   :description "Verify credentials via the addon's user-ops seam and mint a session token. Returns {:token :user :org} on success, nil on bad credentials / rate-limited / no addon."
    :args {:username {:type :text :description "Login id."}
-          :password {:type :text :description "Raw password."}}
+          :password {:type :text :description "Raw password."}
+          :request {:type :ring-request-shape :description "The Ring request — its client IP feeds the per-IP login rate limiter (brute-force defense)."}}
    :return-type :nullable-keyword-map
    :effects #{:db}}
 

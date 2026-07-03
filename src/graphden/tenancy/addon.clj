@@ -129,18 +129,27 @@
   user-schema/extend-builder)
 
 
-(defmethod ig/init-key :tenancy/user-ops [_ {:keys [signup-max-per-min signup-window-ms]}]
+(defmethod ig/init-key :tenancy/user-ops
+  [_ {:keys [signup-max-per-min signup-window-ms login-max-per-min login-window-ms]}]
   ;; User-model seam (§4.1) — `{:create-user … :login … :logout … :signup …}`.
   ;; Wired onto `:exec/context`'s `:user-ops`; the core `:invoke-*` base-fns call
   ;; into it. login! mints a session `:token` (TTL); logout!/logout-all! delete.
-  ;; `:signup` wraps signup! with a PER-IP fixed-window rate limiter (default
-  ;; 20/min) to blunt mass-signup abuse — an over-quota IP gets nil (→ 401).
+  ;; `:signup` and `:login` each wrap their op with a PER-IP fixed-window rate
+  ;; limiter — signup blunts mass-account abuse, login blunts password
+  ;; brute-force (bcrypt cost-12 slows but does not bound attempts).
   (let [signup-limiter (users/make-rate-limiter (or signup-max-per-min 20)
-                                                (or signup-window-ms 60000))]
+                                                (or signup-window-ms 60000))
+        login-limiter  (users/make-rate-limiter (or login-max-per-min 10)
+                                                (or login-window-ms 60000))]
     {:create-user users/create-user!
      :reset-password users/reset-password!
      :delete-user users/delete-user!
-     :login users/login!
+     :login (fn [ctx u p request]
+              ;; Over-quota IP → nil, i.e. the SAME result as bad credentials
+              ;; (→ 401), so the limiter's existence isn't revealed to an
+              ;; attacker probing the boundary.
+              (when (login-limiter (users/client-ip request))
+                (users/login! ctx u p)))
      :logout users/logout!
      :logout-all users/logout-all!
      :signup (fn [ctx u p o request]

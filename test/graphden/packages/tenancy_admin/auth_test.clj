@@ -16,7 +16,7 @@
   (load-file impls-path)
   (let [invoke (resolve 'graphden.packages.tenancy-admin.auth.impls/invoke-login)
         seen (atom nil)
-        ctx {:user-ops {:login (fn [_c u p] (reset! seen [u p]) {:token "T" :user u})}}]
+        ctx {:user-ops {:login (fn [_c u p _req] (reset! seen [u p]) {:token "T" :user u})}}]
     (testing "calls (:login user-ops) with username + password, returns the session map"
       (is (= {:token "T" :user "alice"} (invoke {:username "alice" :password "pw"} ctx)))
       (is (= ["alice" "pw"] @seen)))

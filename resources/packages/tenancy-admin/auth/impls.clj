@@ -11,9 +11,11 @@
 
 
 (defbase invoke-login
-  [username password]
+  [username password request]
   (when-let [ops (:user-ops ctx)]
-    ((:login ops) ctx username password)))
+    ;; `request` flows to the :login seam wrapper for per-IP rate-limiting
+    ;; (brute-force defense); the core login! ignores it.
+    ((:login ops) ctx username password request)))
 
 
 ;; Self-serve signup (§4.1): create a new org + user and auto-login. No addon →

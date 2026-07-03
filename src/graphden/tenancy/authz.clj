@@ -75,8 +75,14 @@
 
 (def ^:private binding-structural-keys
   "Binding fields a `:bind-args` edit may NOT touch — anything beyond the value
-   (`:value` / `:value-present`) restructures the binding and needs `:write`."
-  #{:ref-fn-id :type-override-fn-id :slot-id :fn-id})
+   (`:value` / `:value-present`) restructures the binding and needs `:write`.
+   Includes the identity fields AND the behaviour-changing overlays:
+   `:rename-to` (renames a free-arg), `:terminal` (caps the chain),
+   `:list-append` / `:list-closed` (grow / seal a sequence). Missing any of
+   these lets a `:bind-args`-only holder restructure a binding it may only
+   re-value — e.g. seal a slot against descendants."
+  #{:ref-fn-id :type-override-fn-id :slot-id :fn-id
+    :rename-to :terminal :list-append :list-closed})
 
 
 (defn- value-only-binding-delta?
@@ -104,10 +110,21 @@
   (fn [entity-name data id]
     (when (not= (tc/current-org) tc/public-org) ; platform / admin: unrestricted
       (case entity-name
-        :fn (when (contains? data :namespace-id)
+        :fn (cond
+              ;; create / namespace-move → `:write` on the TARGET namespace.
+              (contains? data :namespace-id)
               (when-not (writable? store storage tc/*current-principal* (:namespace-id data))
                 (throw (ex-info "forbidden: no :write grant on the target namespace"
-                                {:type :authz/forbidden :namespace-id (:namespace-id data)}))))
+                                {:type :authz/forbidden :namespace-id (:namespace-id data)})))
+              ;; delete / structural update (parent-ids, …) of an EXISTING fn —
+              ;; the delta carries no `:namespace-id`, so gate on the fn's OWN
+              ;; namespace (read by id). Without this a `:bind-args` holder,
+              ;; which passes the coarse `can-mutate?` gate, could delete or
+              ;; reparent ANY fn in the org, including namespaces it holds no
+              ;; grant on. (A create with no namespace — id nil — stays
+              ;; ungated: it lands as an org-owned rootless fn.)
+              id
+              (deny-write! store storage :write id))
         :binding (deny-write! store storage
                               (if (value-only-binding-delta? data) :bind-args :write)
                               (binding-owner-fn-id storage data id))

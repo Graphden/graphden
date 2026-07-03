@@ -67,11 +67,19 @@
                                         (let [r (filterv #(> % cutoff) ts)]
                                           (if (seq r) (assoc! acc k r) acc)))
                                       (transient {}) m)))))
-        (let [recent (filterv #(> % cutoff) (get @state key []))
-              allowed? (< (count recent) max-attempts)]
-          (when allowed?
-            (swap! state assoc key (conj recent now)))
-          allowed?)))))
+        ;; Atomic test-and-record: prune the key's window AND (if under cap)
+        ;; append THIS attempt inside ONE `swap-vals!`, then decide by whether
+        ;; the key's window grew vs its pruned prior. A separate read-then-swap
+        ;; let two concurrent attempts both read the same sub-cap window, both
+        ;; be allowed past the limit, and clobber each other's append.
+        (let [prune (fn [ts] (filterv #(> % cutoff) ts))
+              [old new] (swap-vals! state
+                                    (fn [m]
+                                      (let [recent (prune (get m key []))]
+                                        (assoc m key (if (< (count recent) max-attempts)
+                                                       (conj recent now)
+                                                       recent)))))]
+          (> (count (get new key)) (count (prune (get old key)))))))))
 
 
 (defn- random-bytes
@@ -187,8 +195,13 @@
   "Verify `username`/`password` and mint a SESSION TOKEN (a `:token` row, so the
    storage-token-provider resolves it later). Runs in the platform context
    (login precedes any session). Returns `{:token <raw> :user :org}` on success,
-   nil on bad credentials (caller maps nil → 401)."
-  [ctx username password]
+   nil on bad credentials (caller maps nil → 401).
+
+   4-arg arity: the `:login` user-ops seam is invoked with the Ring `request`
+   (its client IP feeds the addon's per-IP rate limiter); the core op ignores
+   it — this arity is just the seam adapter."
+  ([ctx username password _request] (login! ctx username password))
+  ([ctx username password]
   (let [storage (:storage ctx)]
     (tc/with-org tc/public-org
                  (let [user (first (sp/query-entities storage :user {:username username}))]
@@ -200,7 +213,7 @@
                                           :user username
                                           :org org
                                           :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
-                       {:token raw :user username :org org}))))))
+                       {:token raw :user username :org org})))))))
 
 
 (defn signup!

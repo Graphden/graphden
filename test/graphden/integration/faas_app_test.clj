@@ -380,7 +380,10 @@
 (deftest user-model-create-login-roundtrip
   (let [create-id (fn-id-of (:storage *ctx*) "invoke-create-user")
         login-id (fn-id-of (:storage *ctx*) "invoke-login")
-        seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user! :login users/login!})
+        ;; `:login` mirrors the addon seam's 4-arg shape (request feeds the
+        ;; per-IP rate limiter in prod); the test ignores it.
+        seam-ctx (assoc *ctx* :user-ops {:create-user users/create-user!
+                                         :login (fn [c u p _req] (users/login! c u p))})
         provider (tauth/storage-token-provider (:storage *ctx*))]
     (testing "operator creates a user (invoke-create-user base-fn → seam)"
       (cr/execute seam-ctx create-id {:username "alice" :password "s3cret-pw" :org "acme"})

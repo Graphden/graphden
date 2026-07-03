@@ -219,7 +219,11 @@
 
   (update-entities
     [_ entity-name data-seq]
-    ;; Strip any org reassignment; batch own-guard is left to RLS.
+    ;; Per-row write guard (mirrors create/upsert): the tenant-forbidden
+    ;; type block has NO RLS backstop — those tables carry no `:org-id` — so
+    ;; a batch update/delete on them must be guarded here, not "left to RLS".
+    (run! #(guard-write! authorize-write entity-name % (:id %)) data-seq)
+    ;; Strip any org reassignment.
     (sp/update-entities base entity-name
                         (cond->> data-seq
                           (scoped? entity-name) (mapv #(dissoc % :org-id)))))
@@ -234,6 +238,7 @@
 
   (delete-entities
     [_ entity-name ids]
+    (run! #(guard-write! authorize-write entity-name nil %) ids)
     (sp/delete-entities base entity-name ids))
 
 

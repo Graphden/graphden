@@ -158,7 +158,15 @@
                            ((guard-of [:bind-args]) :binding {:ref-fn-id "g"} "b-team")))
                      (is (thrown? clojure.lang.ExceptionInfo
                            ((guard-of [:bind-args]) :binding
-                                                    {:fn-id "f-team" :slot-id "s" :value 1} nil))))
+                                                    {:fn-id "f-team" :slot-id "s" :value 1} nil)))
+                     ;; behaviour-changing overlays are structural too — rename
+                     ;; a free-arg, cap the chain, seal a sequence → need :write.
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           ((guard-of [:bind-args]) :binding {:rename-to "x"} "b-team")))
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           ((guard-of [:bind-args]) :binding {:terminal true} "b-team")))
+                     (is (thrown? clojure.lang.ExceptionInfo
+                           ((guard-of [:bind-args]) :binding {:list-closed true} "b-team"))))
                    (testing ":bind-args does NOT grant :append-list (one-way)"
                      (is (thrown? clojure.lang.ExceptionInfo
                            ((guard-of [:bind-args]) :binding-list-item {:binding-id "b-team"} nil))))
@@ -240,3 +248,31 @@
       (is (thrown? clojure.lang.ExceptionInfo (cr/execute ctx (fn [_] :ran) {})))))
   (testing "no guard → execute runs unchanged"
     (is (= :ran (cr/execute {} (fn [_] :ran) {})))))
+
+
+(deftest authorize-writer-gates-fn-delete-and-reparent-by-existing-namespace
+  ;; Regression for the escalation where a :fn DELETE / structural update
+  ;; (delta carries no :namespace-id) skipped the per-namespace grant entirely,
+  ;; letting a :bind-args holder delete/reparent any fn in the org.
+  (let [grants (grant/static-grant-store
+                 [{:subject "bob" :capability :write :namespace "acme.team"}])
+        storage (bind-store {"acme" {:name "acme" :parent-id nil}
+                             "team" {:name "team" :parent-id "acme"}}
+                            {"f-team" {:namespace-id "team"}
+                             "f-acme" {:namespace-id "acme"}}
+                            {})
+        guard (authz/authorize-writer grants storage)]
+    (tc/with-org "acme"
+                 (binding [tc/*current-principal* {:user "bob"}]
+                   (testing "delete of a fn in a GRANTED namespace passes"
+                     (is (nil? (guard :fn nil "f-team"))))
+                   (testing "delete of a fn in an UNGRANTED namespace → :authz/forbidden"
+                     (is (thrown? clojure.lang.ExceptionInfo (guard :fn nil "f-acme")))
+                     (is (= :authz/forbidden
+                            (try (guard :fn nil "f-acme")
+                                 (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))
+                   (testing "structural update (parent-ids, no :namespace-id) is gated the same"
+                     (is (nil? (guard :fn {:parent-ids ["x"]} "f-team")))
+                     (is (thrown? clojure.lang.ExceptionInfo (guard :fn {:parent-ids ["x"]} "f-acme"))))
+                   (testing "a rootless CREATE (id nil, no namespace) stays ungated"
+                     (is (nil? (guard :fn {:name "new"} nil))))))))

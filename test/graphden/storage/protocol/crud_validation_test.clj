@@ -303,12 +303,16 @@
                 {:age {:type :int}}
                 {:age #{10 20 30}}))))
 
-  (testing "IN-clause: empty vector is rejected (not a valid IN)"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type mismatch"
-          (storage/validate-where-clause-types!
-            :user
-            {:fn-id {:type :uuid}}
-            {:fn-id []}))))
+  (testing "IN-clause: an empty collection is vacuously valid (matches nothing;
+            the SQL layer renders it as a false predicate, never `IN ()`)"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:fn-id {:type :uuid}}
+                {:fn-id []})))
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                {:name #{}}))))
 
   (testing "IN-clause: heterogeneous vector is rejected"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Type mismatch"

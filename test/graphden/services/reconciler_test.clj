@@ -761,3 +761,32 @@
       (testing "both services still tracked"
         (is (= 2 (count @running))))
       (finally (sp/close storage) (br/clear-active-router!)))))
+
+
+(deftest nil-returning-service-is-a-success-not-a-failure-test
+  (testing "a fire-and-forget service whose fn returns nil starts OK (nil is a
+            valid stopper) — it must NOT be retried or stamped start-failed"
+    (let [storage (create-full-storage)
+          base-name "test-fireforget-svc"
+          composed-name "my-test-fireforget-svc"
+          ;; returns nil — a legitimate fire-and-forget service (no stopper)
+          impl-fn (fn [_args _ctx] nil)]
+      (exec/register-base-fn! (keyword base-name) impl-fn)
+      (let [base (setup/create-base-fn! storage base-name :any)
+            composed (setup/create-composed-fn! storage composed-name (:id base))
+            svc (sp/create-entity storage :service
+                                  {:fn-id (:id composed)
+                                   :enabled? true
+                                   :restart-policy :on-failure})
+            c (test-ctx storage)
+            running (atom {})]
+        (try
+          (recon/reconcile-once! c running {:max-retries 3 :backoff-ms 0})
+          (let [entry (get @running (:id svc))]
+            (is (= 1 (count @running)) "service tracked")
+            (is (nil? (:stopper entry)) "nil stopper — the fn's fire-and-forget return")
+            (is (nil? (:start-failed-at entry)) "NOT a failure — no give-up stamp")
+            (is (= 1 (:start-attempts entry)) "succeeded on the first attempt, no retries"))
+          (finally
+            (recon/stop-all! running)
+            (sp/close storage)))))))

@@ -77,20 +77,28 @@
 ;; `schema/services/schema.clj` for the full rationale.
 ;; =============================================================================
 
+(def ^:private start-error
+  "Sentinel returned by `start-service-once!` when the start THREW. Distinct
+   from a `nil` return, which is a legitimate stopper for a fire-and-forget
+   service — treating those two the same made a nil-returning service look
+   like a failure and get pointlessly retried + stamped `:start-failed-at`."
+  ::start-error)
+
+
 (defn- start-service-once!
-  "One attempt: invoke the fn via the executor. Returns the stopper
-   (fn's return value) on success, nil on exception. The fn is called
-   synchronously — any startup throw (port-in-use, etc.) is caught
-   and surfaced as a nil stopper. Long-running fns block INSIDE the
-   impl, not at this call site (web-server returns a stopper thunk
-   immediately)."
+  "One attempt: invoke the fn via the executor. Returns the stopper (the fn's
+   return value — which MAY legitimately be nil for a fire-and-forget
+   service) on success, or the `start-error` sentinel on exception. The fn is
+   called synchronously — any startup throw (port-in-use, etc.) is caught.
+   Long-running fns block INSIDE the impl, not at this call site (web-server
+   returns a stopper thunk immediately)."
   [ctx fn-id args svc-id]
   (try
     (log/info "service start" svc-id "fn-id" fn-id)
     (cr/execute ctx fn-id args)
     (catch Exception e
       (log/error e "service start failed" svc-id "fn-id" fn-id)
-      nil)))
+      start-error)))
 
 
 ;; Supervisor retry tuning. Bounded to keep reconcile-once! responsive
@@ -136,8 +144,11 @@
      (loop [attempt 1]
        (let [stopper (start-service-once! ctx fn-id args (:id svc))]
          (cond
-           ;; Success — return entry; clear start-failed-at if it was set.
-           (some? stopper)
+           ;; Success — the fn ran without throwing. Its return is the stopper,
+           ;; which may legitimately be nil (fire-and-forget); `stop-service!`
+           ;; tolerates a nil stopper, so only a THROWN start (the sentinel)
+           ;; counts as failure.
+           (not= stopper start-error)
            {:fn-id fn-id
             :restart-policy policy
             :stopper stopper

@@ -215,10 +215,15 @@
                      (nil? encoded-v)
                      [:is col nil]
 
-                     ;; Collection = IN clause (for batch lookups)
+                     ;; Collection = IN clause (for batch lookups). An EMPTY
+                     ;; collection can't be `col IN ()` (invalid SQL in
+                     ;; PostgreSQL) — it matches nothing, so emit an
+                     ;; always-false predicate and let the query return [].
                      (and (or (vector? v) (set? v) (seq? v))
                           (not (map? v)))
-                     [:in col (vec (map #(codec/encode-value % field-spec) v))]
+                     (if (empty? v)
+                       [:= [:inline 1] [:inline 0]]
+                       [:in col (vec (map #(codec/encode-value % field-spec) v))])
 
                      :else
                      [:= col encoded-v])))

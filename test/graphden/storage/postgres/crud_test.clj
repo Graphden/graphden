@@ -1275,3 +1275,19 @@
           (is (= "ops2" (:bio r2)) "row 2 :bio updated"))
         (finally
           (sp/close storage))))))
+
+
+(deftest query-entities-empty-collection-where-returns-empty
+  (testing "an empty-collection where-value yields [] (not an invalid `IN ()`)"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)]
+      (try
+        (sp/create-entity storage :user {:id (random-uuid) :name "Alice"})
+        (is (= [] (sp/query-entities storage :user {:id []}))
+            "empty vector → [] (matches nothing)")
+        (is (= [] (sp/query-entities storage :user {:name #{}}))
+            "empty set → [] (matches nothing)")
+        (finally
+          (sp/close storage))))))

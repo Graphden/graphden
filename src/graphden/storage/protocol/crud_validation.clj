@@ -146,11 +146,12 @@
 
 
 (defn- valid-in-clause-collection?
-  "Returns true if value is a non-empty collection where all elements match field-type.
-   Used for IN-clause queries like {:fn-id [uuid1 uuid2]}."
+  "Returns true if value is a collection whose elements all match field-type.
+   Used for IN-clause queries like {:fn-id [uuid1 uuid2]}. An EMPTY collection
+   is vacuously valid — it matches nothing, and the SQL layer renders it as a
+   false predicate (never the invalid `col IN ()`)."
   [value field-type]
   (and (or (vector? value) (set? value) (seq? value))
-       (seq value)
        (contains? #{:uuid :ref :fn :int :text} field-type)
        (every? #(ft/valid-type? field-type %) value)))
 

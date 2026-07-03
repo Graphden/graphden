@@ -712,9 +712,12 @@
     ;; the cascade quietly in that case rather than throwing
     ;; `:table-not-found` on every branch delete.
     (when (contains? (sp/current-entities base) :service)
-      (doseq [svc (sp/query-entities base :service {:branch-id branch-id
-                                                    :enabled? true})]
-        (sp/update-entity base :service (:id svc) {:enabled? false})))
+      (let [svcs (sp/query-entities base :service {:branch-id branch-id
+                                                   :enabled? true})]
+        (when (seq svcs)
+          ;; One batched partial-UPDATE instead of a round-trip per service.
+          (sp/update-entities base :service
+                              (mapv (fn [s] {:id (:id s) :enabled? false}) svcs)))))
     ;; Delete all version records on this branch (batch)
     (doseq [[_ {:keys [version-entity]}] res/entity-config]
       (let [version-ids (mapv :id (sp/query-entities base version-entity {:branch-id branch-id}))]

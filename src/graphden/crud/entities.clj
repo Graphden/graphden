@@ -392,7 +392,18 @@
          namespaces (vec (sp/query-entities storage :ns {}))]
      (cond
        (= scope :index)
-       {:fns roled-fns :namespaces namespaces}
+       ;; Drop nil-valued fields from each fn row. This is a sidebar /
+       ;; picker payload fetched fresh on every editor refresh (~3900 fns),
+       ;; and most fns leave the majority of columns null (org-id,
+       ;; deleted-at, anonymous-hash, constraint, base-fn-id,
+       ;; element-fn-id, return-type-fn-id…). Serialising `"x":null` ~3900×
+       ;; per column was ~25% of the ~1.9 MB response — pure churn on every
+       ;; keep-alive-closed fetch. An absent key reads as `undefined` in
+       ;; the editor's truthy checks exactly like `null`, so no data is
+       ;; lost; the per-fn detail (with all fields) still comes from the
+       ;; `:subtree` fetch on select.
+       {:fns (mapv (fn [f] (into {} (remove (comp nil? val)) f)) roled-fns)
+        :namespaces namespaces}
 
        (and (= scope :subtree) root-id)
        (let [closure (subtree-fn-id-closure base root-id)

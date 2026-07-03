@@ -188,7 +188,11 @@
                 ":index payload is exactly {:fns :namespaces}")
             (is (seq (:fns dump)) "fns are still populated")
             (is (every? #(contains? % :role) (:fns dump))
-                ":role still computed on fns"))))
+                ":role still computed on fns")
+            (is (every? (fn [f] (not-any? nil? (vals f))) (:fns dump))
+                ":index fns carry NO nil-valued fields — they're stripped to
+                 cut ~25-40% of the sidebar payload churn (an absent key
+                 reads as null client-side, full detail comes from :subtree)"))))
       (testing "scope :full (explicit) matches the no-scope default"
         (is (= (entities/list-all-graph-entities c)
                (entities/list-all-graph-entities c :full))

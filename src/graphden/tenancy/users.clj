@@ -108,12 +108,16 @@
 
 (defn create-user!
   "Create a user (operator op — `:user` is tenant-forbidden, so a tenant caller
-   is denied by the storage guard). Throws `:user/invalid` on a blank username,
-   `:user/exists` when taken. Returns the created `:user` row (no password)."
+   is denied by the storage guard). Throws `:user/invalid` on a blank username
+   OR blank password (a blank password bcrypt-hashes to a value `verify-password`
+   can never match — an unusable account), `:user/exists` when taken. Returns
+   the created `:user` row (no password)."
   [ctx username password org]
   (let [storage (:storage ctx)]
     (when (str/blank? username)
       (throw (ex-info "username required" {:type :user/invalid})))
+    (when (str/blank? password)
+      (throw (ex-info "password required" {:type :user/invalid})))
     (when (first (sp/query-entities storage :user {:username username}))
       (throw (ex-info "username already taken" {:type :user/exists :username username})))
     (dissoc (sp/create-entity storage :user

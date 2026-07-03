@@ -111,6 +111,19 @@ window.graphdenCanExecute = graphdenCanExecute;
 window.graphdenInWorkspace = graphdenInWorkspace;
 window.graphdenTenancyActive = graphdenTenancyActive;
 
+// HTML-attribute-safe escaper for the few places branch names are
+// interpolated into a `title="…"` string (the merge-conflicts batch
+// toolbar). Escapes the five HTML-significant chars incl. both quotes —
+// `escAttr` in overlay-type-expand is CSS.escape (wrong semantics here).
+function escapeAttr(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);
   window.fetch = function branchAwareFetch(input, init) {

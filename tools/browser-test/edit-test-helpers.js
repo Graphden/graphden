@@ -88,6 +88,18 @@ async function newContext(chromium) {
     try { localStorage.setItem('graphden.auth.password', auth); } catch (_) {}
   }, AUTH);
   const page = await ctx.newPage();
+  // Generous default timeouts so a transient GC pause under the
+  // deliberately-tight e2e heap doesn't fail a test. The executor has
+  // no leak (see the `project_e2e_memory_no_leak` note) — it just
+  // occasionally stalls for a few seconds during a stop-the-world GC
+  // in the 2.25 GB box, then recovers. Waiting longer rides out the
+  // stall instead of aborting mid-test. Navigation gets the most
+  // headroom: a `page.goto` landing inside a >30s GC / host-contention
+  // window was the harshest flake. These are DEFAULTS — call-site
+  // `{timeout: …}` overrides (incl. intentional short negative-assert
+  // waits) are untouched.
+  page.setDefaultTimeout(45000);
+  page.setDefaultNavigationTimeout(90000);
   page.on('pageerror', e => console.log('  [pageerror]', e.message));
   page.on('crash', () => console.log('  [page crash] renderer crashed'));
   // Block until /health is 200 BEFORE the initial goto. Without

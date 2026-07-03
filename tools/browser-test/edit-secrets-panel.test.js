@@ -158,7 +158,7 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     const popoverClosed = await page.evaluate(
       () => !document.querySelector('.secrets-popover'));
     if (popoverClosed) {
-      await page.click('.sidebar-secrets [data-act="create"]');
+      await page.click('.sidebar-secrets .sidebar-action-add');
       await page.waitForSelector('.secrets-popover', {timeout: 5000});
       await page.fill('.secrets-popover input[name="name"]', PROBE_NAME);
       await page.fill('.secrets-popover input[name="value"]', 'secret-value');

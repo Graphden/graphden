@@ -196,11 +196,15 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     // can exceed the 15s budget; bump to 30s.
     await page.waitForSelector('#branch-chip-btn', {timeout: 30000});
     // Wait for graphData to repopulate after the reload's initGraph,
-    // so the subsequent direct fetch reads through a warm cache.
+    // so the subsequent direct fetch reads through a warm cache. This
+    // waits on the SAME post-merge rebuild as the branch-chip wait
+    // above (cache invalidated → first `/api/graph/entities` rebuilds
+    // from raw storage), so it needs the same 30s budget — 5s tripped
+    // under suite load while the rebuild was still in flight.
     await page.waitForFunction((id) => {
       const fns = (typeof graphData !== 'undefined' && graphData?.fns) || [];
       return fns.some(f => f.id === id);
-    }, fnId, {timeout: 5000, polling: 100});
+    }, fnId, {timeout: 30000, polling: 100});
 
     const finalDescription = await page.evaluate(async (id) => {
       const r = await window.authFetch('/api/graph/entities');

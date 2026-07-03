@@ -6,7 +6,7 @@ per `[parallel-test races]`).
 
 ## Scope
 
-18 test namespaces are tagged `^:serial`, which the kaocha parallel
+19 test namespaces are tagged `^:serial`, which the kaocha parallel
 plugin runs sequentially instead of distributing across the bounded
 thread pool. Each tag is forced by `with-redefs` on a non-`^:dynamic`
 symbol — `with-redefs` mutates the root binding process-globally,

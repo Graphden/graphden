@@ -15,9 +15,11 @@ what) all live as fn-defs that the editor itself can inspect,
 type-check, branch-isolate, and rewrite. JS shrinks to inherent
 client concerns (mount lifecycle, anchored positioning, dismissal).
 
-Currently migrated: `editor-effect-explainer.js`, `editor-fn-versions.js`.
-Pattern is the template for the rest (`editor-branch-diff.js`,
-`editor-provenance-popover.js`, `editor-secrets.js`, …).
+Many editor popovers/panels already fetch server partials — see the
+`:partial-*` fn-defs in `app/editor/fns.edn` (effect-explainer,
+fn-versions, branch-diff, provenance, secrets, mismatch-explainer,
+execute-history, service-popover, …). That set is the template for any
+remaining client-built popover.
 
 ---
 

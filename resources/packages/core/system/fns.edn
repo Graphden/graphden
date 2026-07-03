@@ -244,9 +244,9 @@
 
   ;; ---------------------------------------------------------------------
   ;; :parse-int — text → int via Long/parseLong. Throws
-  ;; NumberFormatException on a malformed input. Pair with `:if`/
-  ;; `:try` once a try-base-fn exists; for now a malformed string
-  ;; surfaces as an execution-error in the editor's result pane.
+  ;; NumberFormatException on a malformed input, which surfaces as an
+  ;; execution-error in the editor's result pane; wrap in `:try` to
+  ;; catch it in-graph.
   ;; ---------------------------------------------------------------------
   {:name :parse-int
    :description "Parse a base-10 integer out of `:s`. Backed by Long/parseLong — accepts an optional leading `-`, rejects whitespace / decimal points / non-digit characters with NumberFormatException."

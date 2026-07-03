@@ -8,8 +8,11 @@
    `enable-rls!` installs an own+public-read / own-write policy on each
    org-scoped table and FORCEs RLS so even the table owner is subject (a
    superuser still bypasses — connect the app as a non-superuser role in
-   production). `set-current-org!` sets the per-transaction session
-   variable from `*current-org*`.
+   production). At request time `org-aware-datasource` sets the
+   `graphden.current_org` session variable from `*current-org*` on every
+   borrowed connection (session-level, per borrow — the live path);
+   `set-current-org!` is the transaction-local variant for scoping a
+   single explicit transaction (used by the RLS test).
 
    With the variable unset (admin / single-tenant), the policy is a no-op:
    every row is visible and writable — so installing RLS is safe before the

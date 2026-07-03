@@ -11,14 +11,15 @@ rewritten.
 ## Architecture overview
 
 ```
-   POST /api/execute
+   POST /api/execute  (the :execute route — a graph fn-def)
         │
         ▼
    parse-execute-request   (json → {fn-id args timeout-ms persist?})
         │
         ▼
-   validate-execute        (fn exists, args fit free-args, caps)
-        │
+   graph validation :cond  (fn exists, args fit free-args, caps —
+        │                    `:_execute-validation` in app/execution/fns.edn;
+        │                    no Clojure mirror, the graph is the sole path)
         ▼
    apply-execute  ──► (future …)  ──► executor.compile-runtime/execute
         │                                  │

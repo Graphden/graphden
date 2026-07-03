@@ -148,14 +148,6 @@
 
 ;; === Core Resolution Algorithm ===
 
-(defn- own-latest-version
-  "Latest version record this branch wrote directly for the entity, or nil."
-  [base-storage version-entity version-id-field entity-id branch-id]
-  (latest-by-created-at
-    (sp/query-entities base-storage version-entity
-                       {version-id-field entity-id :branch-id branch-id})))
-
-
 (defn- owning-fn-id
   "Find the fn-id whose `:branch-local?` flag governs filtering for
    a given version row. The fn itself is its own owner; `:fn-slot`
@@ -183,44 +175,6 @@
     (bl/effective-branch-local? base-storage fid)))
 
 
-(defn- merge-candidates
-  "For each branch-merge that lands on `branch-id`, return a
-   `{:version :effective-ts}` candidate carrying the source branch's
-   latest version that's still ≤ source-timestamp AND landed AFTER
-   our own latest. Empty when no merges match.
-
-   Branch-local filter: when the owning fn (via
-   `branch-local-version?`) is effective-branch-local on a per-
-   candidate basis, that candidate is dropped. For `:fn` entities
-   the owner IS the entity itself; for `:fn-slot` and `:binding`
-   the version-row carries `:fn-id`, so the same flag suppresses
-   child rows owned by a sticky-local fn from leaking on merge."
-  [base-storage entity-name version-entity version-id-field entity-id own-latest merges]
-  (when (seq merges)
-    (let [source-branch-ids (mapv :source-branch-id merges)
-          ;; Single batch query for all source branches.
-          all-src-versions (sp/query-entities base-storage version-entity
-                                              {version-id-field entity-id
-                                               :branch-id source-branch-ids})
-          src-versions-by-branch (group-by :branch-id all-src-versions)]
-      (for [m merges
-            :let [branch-versions (get src-versions-by-branch
-                                       (:source-branch-id m) [])
-                  ;; Only versions created at or before source-timestamp.
-                  eligible (filter #(not (pos? (compare (:created-at %)
-                                                        (:source-timestamp m))))
-                                   branch-versions)
-                  best (latest-by-created-at eligible)]
-            :when best
-            :when (not (branch-local-version? base-storage entity-name
-                                              entity-id best))
-            ;; Only consider merge if it happened after our own latest.
-            :when (or (nil? own-latest)
-                      (pos? (compare (:target-timestamp m)
-                                     (:created-at own-latest))))]
-        {:version best :effective-ts (:target-timestamp m)}))))
-
-
 (defn- pick-latest-candidate
   "Return the `:version` whose `:effective-ts` is greatest, or nil
    when the candidate seq is empty."
@@ -235,49 +189,28 @@
                       (rest candidates)))))
 
 
-(defn- parent-branch-id
-  "The base-branch-id of `branch-id`, or nil at the root.
-
-   Backed by the same `global-chain-cache` as `collect-branch-chain`
-   — the cached `[branch-id parent-id ...]` chain encodes parent for
-   every ancestor in one walk. Avoids an `sp/read-entity` per
-   recursive `resolve-version` step (3+ PG roundtrips per chain
-   walk eliminated for a 3-deep branch hierarchy)."
-  [base-storage branch-id]
-  (let [chain (collect-branch-chain base-storage branch-id)]
-    (when (> (count chain) 1)
-      (second chain))))
-
-
 (defn resolve-version
   "Resolves the current version of an entity on a branch.
 
-   Algorithm:
-   1. Find latest own version on this branch
-   2. Find merges into this branch (branch-merge with target-branch-id = branch-id)
-   3. Batch load versions from all source branches, filter by timestamp
-   4. Pick candidate with greatest effective timestamp
-   5. If nothing found, recurse to parent branch
+   Loads the branch chain + every relevant `branch-merge` for the whole
+   chain in ONE batched pass (`load-merge-aware-cache`), then resolves
+   through `resolve-version-from-cache` — the SAME code the batch / graph
+   path already uses. This used to recurse level-by-level, re-querying
+   `:branch-merge` and the parent link at each step (~3 queries × chain
+   depth for a single-entity read on a feature branch); the batched load
+   is a fixed handful of queries regardless of depth, and it collapses
+   the two parallel resolution algorithms (this recursion vs
+   `resolve-version-from-cache`) into one tested implementation.
 
    Returns the version record or nil."
   [base-storage entity-name entity-id branch-id]
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
-        own-latest (own-latest-version base-storage version-entity
-                                       version-id-field entity-id branch-id)
-        merges (sp/query-entities base-storage :branch-merge
-                                  {:target-branch-id branch-id})
-        merge-cands (merge-candidates base-storage entity-name version-entity
-                                      version-id-field entity-id
-                                      own-latest merges)
-        all-candidates (cond-> []
-                         own-latest
-                         (conj {:version own-latest
-                                :effective-ts (:created-at own-latest)})
-                         (seq merge-cands)
-                         (into merge-cands))]
-    (or (pick-latest-candidate all-candidates)
-        (when-let [parent-id (parent-branch-id base-storage branch-id)]
-          (resolve-version base-storage entity-name entity-id parent-id)))))
+        {:keys [versions-by-id merges-by-target branch-chain]}
+        (load-merge-aware-cache base-storage version-entity version-id-field
+                                [entity-id] branch-id)]
+    (resolve-version-from-cache base-storage entity-name
+                                versions-by-id merges-by-target
+                                entity-id branch-chain)))
 
 
 ;; === High-Level Resolution Functions ===

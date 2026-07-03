@@ -123,6 +123,54 @@
             :password-hash)))
 
 
+(defn reset-password!
+  "Operator op — set a NEW password for the user with id `user-id` and
+   invalidate every existing session `:token` for that user, so an
+   old/leaked bearer can't be replayed after the reset. Runs in the
+   operator (public-org) context like `login!` / `logout-all!` — `:user`
+   and `:token` are operator-only. Throws `:user/not-found`. Returns
+   `{:sessions-invalidated n}`."
+  [ctx user-id new-password]
+  (let [storage (:storage ctx)]
+    (tc/with-org tc/public-org
+                 (let [user (sp/read-entity storage :user user-id)]
+                   (when-not user
+                     (throw (ex-info "user not found"
+                                     {:type :user/not-found :id user-id})))
+                   (sp/update-entity storage :user user-id
+                                     {:password-hash (hash-password new-password)})
+                   (let [tokens (sp/query-entities storage :token {:user (:username user)})]
+                     (doseq [row tokens]
+                       (sp/delete-entity storage :token (:id row)))
+                     {:sessions-invalidated (count tokens)})))))
+
+
+(defn delete-user!
+  "Operator op — delete the user with id `user-id` and CASCADE the rows
+   that reference it by name: session `:token`s (`:user`) and `:grant`s
+   (`:subject`), so no dangling auth / authz rows survive the account.
+   Runs in the operator (public-org) context — all three entities are
+   operator-only. Throws `:user/not-found`. Returns
+   `{:tokens-deleted n :grants-deleted m}`."
+  [ctx user-id]
+  (let [storage (:storage ctx)]
+    (tc/with-org tc/public-org
+                 (let [user (sp/read-entity storage :user user-id)]
+                   (when-not user
+                     (throw (ex-info "user not found"
+                                     {:type :user/not-found :id user-id})))
+                   (let [username (:username user)
+                         tokens (sp/query-entities storage :token {:user username})
+                         grants (sp/query-entities storage :grant {:subject username})]
+                     (doseq [row tokens]
+                       (sp/delete-entity storage :token (:id row)))
+                     (doseq [row grants]
+                       (sp/delete-entity storage :grant (:id row)))
+                     (sp/delete-entity storage :user user-id)
+                     {:tokens-deleted (count tokens)
+                      :grants-deleted (count grants)})))))
+
+
 (defn login!
   "Verify `username`/`password` and mint a SESSION TOKEN (a `:token` row, so the
    storage-token-provider resolves it later). Runs in the platform context

@@ -15,6 +15,7 @@
    :parent :list
    :args {:items [:partial-grants-admin :create-grant-route
                   :partial-users-admin :create-user-route
+                  :delete-user-route :reset-password-route
                   :create-org-route :create-token-route :create-domain-route
                   :set-org-handler-route
                   :set-my-app-handler-route :verify-my-domain-route

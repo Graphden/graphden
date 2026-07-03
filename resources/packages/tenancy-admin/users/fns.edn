@@ -66,9 +66,12 @@
    :parent :to-str
    :args {:value :_user-id-val}}
 
+  ;; Dedicated cascade route (not the generic `/api/entities/user/:id`):
+  ;; `:delete-user-route` also removes the user's `:token`s + `:grant`s so
+  ;; no dangling auth/authz rows survive.
   {:name :_user-delete-url
    :parent :str-join
-   :args {:coll [{:value "/api/entities/user/"} :_user-id-str]
+   :args {:coll [{:value "/api/users/"} :_user-id-str]
           :separator {:value ""}}}
 
   {:name :_user-delete-attrs
@@ -86,9 +89,41 @@
    :parent :hiccup
    :args {:tag {:value "button"} :attrs :_user-delete-attrs :children [{:value "×"}]}}
 
+  ;; per-row reset-password form: a password input + submit, hx-post to the
+  ;; per-user reset route (id single-sourced from the row). No client JS.
+  {:name :_user-reset-url
+   :parent :str-join
+   :args {:coll [{:value "/api/users/"} :_user-id-str {:value "/password"}]
+          :separator {:value ""}}}
+
+  {:name :_user-reset-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "password" :name "password" :placeholder "new password" :class "grant-input" :required true}}}}
+
+  {:name :_user-reset-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "submit" :class "grant-create-btn" :title "Reset password"}}
+          :children [{:value "Reset pw"}]}}
+
+  {:name :_user-reset-form-attrs
+   :parent :assoc
+   :args {:map {:value {:class "grant-create-form"
+                        :hx-target "closest [data-users-panel]"
+                        :hx-swap "outerHTML"}}
+          :key {:value :hx-post}
+          :value :_user-reset-url}}
+
+  {:name :_user-reset-form
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs :_user-reset-form-attrs
+          :children [:_user-reset-input :_user-reset-btn]}}
+
   {:name :_user-td-actions
    :parent :hiccup
-   :args {:tag {:value "td"} :children [:_user-delete-btn]}}
+   :args {:tag {:value "td"} :children [:_user-reset-form :_user-delete-btn]}}
 
   {:name :_user-row
    :parent :hiccup
@@ -234,4 +269,88 @@
   {:name :create-user-route
    :description "POST /api/users — register a user from a form-encoded body (username/password/org). Auth-required; platform-only. Path single-sourced via :_users-api-path (shared with the form's hx-post)."
    :parent :post
-   :args {:path :_users-api-path :handler :_user-create-handler}}]}
+   :args {:path :_users-api-path :handler :_user-create-handler}}
+
+  ;; =====================================================================
+  ;; ACCOUNT ADMIN (§4.1) — reset-password + cascade-delete. Operator-only
+  ;; (`:user` / `:token` / `:grant` are tenant-forbidden). The `:invoke-*`
+  ;; base-fns call the addon's `:user-ops` seam.
+  ;; =====================================================================
+  {:name :invoke-reset-password
+   :description "Reset a user's password via the addon's user-ops seam and invalidate their sessions. Returns {:sessions-invalidated n}, or nil when the addon isn't active."
+   :args {:user-id {:type :nullable-uuid :description "Target user id."}
+          :password {:type :text :description "New raw password — only its hash is stored."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :invoke-delete-user
+   :description "Delete a user and cascade their :token + :grant rows via the addon's user-ops seam. Returns {:tokens-deleted n :grants-deleted m}, or nil when the addon isn't active."
+   :args {:user-id {:type :nullable-uuid :description "Target user id."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  ;; Shared `:id` path-param parse for /api/users/:id and
+  ;; /api/users/:id/password — reitit `:path-params` first, URI fallback
+  ;; (the segment after `users` is the id for both routes).
+  {:name :_users-id-from-path-params
+   :parent :get-in
+   :args {:map {:as :request} :path [{:value :path-params} {:value :id}] :default nil}}
+
+  {:name :_users-id-from-uri
+   :parent :uri-segment-after
+   :args {:marker {:value "users"}}}
+
+  {:name :_users-id-raw
+   :parent :coalesce
+   :args {:value :_users-id-from-path-params :default :_users-id-from-uri}}
+
+  {:name :_users-id-parsed
+   :parent :parse-uuid
+   :args {:string :_users-id-raw}}
+
+  ;; --- DELETE /api/users/:id — cascade-delete then empty 200 (HTMX
+  ;; hx-swap="delete" drops the row).
+  {:name :_user-delete-do
+   :parent :invoke-delete-user
+   :args {:user-id :_users-id-parsed}}
+
+  {:name :_user-delete-empty-ok
+   :parent :html-ok-response
+   :args {:body {:value ""}}}
+
+  {:name :_user-delete-handler
+   :description "DELETE /api/users/:id — cascade-delete the user (tokens + grants), then return an empty 200 so HTMX hx-swap=delete drops the row."
+   :parent :do
+   :args {:steps [:_user-delete-do :_user-delete-empty-ok]}}
+
+  {:name :delete-user-route
+   :description "DELETE /api/users/:id — cascade-delete a user + their tokens/grants. Auth-required; operator-only."
+   :parent :delete
+   :args {:path "/api/users/:id" :handler :_user-delete-handler}}
+
+  ;; --- POST /api/users/:id/password {password} — reset + refresh panel.
+  {:name :_user-reset-form-data
+   :parent :parse-form-body}
+
+  {:name :_user-reset-password-val
+   :parent :get
+   :args {:coll :_user-reset-form-data :key {:value :password} :default {:value ""}}}
+
+  {:name :_user-reset-do
+   :parent :invoke-reset-password
+   :args {:user-id :_users-id-parsed :password :_user-reset-password-val}}
+
+  {:name :_user-reset-then-panel
+   :description "Reset the password, THEN render the refreshed panel — `:do` forces order. HTMX swaps into [data-users-panel]."
+   :parent :do
+   :args {:steps [:_user-reset-do :_users-admin-html]}}
+
+  {:name :_user-reset-handler
+   :description "Ring handler for POST /api/users/:id/password — resets the password and returns the refreshed users panel."
+   :parent :html-ok-response
+   :args {:body :_user-reset-then-panel}}
+
+  {:name :reset-password-route
+   :description "POST /api/users/:id/password — reset a user's password (form body {password}); invalidates their sessions. Auth-required; operator-only."
+   :parent :post
+   :args {:path "/api/users/:id/password" :handler :_user-reset-handler}}]}

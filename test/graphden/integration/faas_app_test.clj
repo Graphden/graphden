@@ -525,9 +525,13 @@
       (is (str/includes? body "<form"))
       (is (str/includes? body "hx-post=\"/api/users\""))
       (is (str/includes? body "data-users-panel"))
-      (is (str/includes? body "hx-delete=\"/api/entities/user/"))
+      ;; delete → dedicated cascade route (removes tokens + grants too)
+      (is (str/includes? body "hx-delete=\"/api/users/"))
       (is (str/includes? body "hx-swap=\"delete\""))
       (is (str/includes? body "hx-confirm=\"Delete this user?\""))
+      ;; per-row reset-password form → POST /api/users/:id/password
+      (is (str/includes? body "/password\""))
+      (is (str/includes? body "placeholder=\"new password\""))
       (is (not (str/includes? body "data-act=\"create-user\"")))
       (is (not (str/includes? body "data-act=\"delete-user\""))))))
 
@@ -653,3 +657,43 @@
       (is (nil? (cr/execute seam-ctx signup-id {:username "newbie2" :password "x" :org "newco"}))))
     (testing "blank fields → nil"
       (is (nil? (cr/execute seam-ctx signup-id {:username "" :password "x" :org "z"}))))))
+
+
+;; ---------------------------------------------------------------------
+;; Account admin (§4.1) — reset-password + cascade-delete. Operator ops
+;; over the addon-active stack; :user/:token/:grant are operator-only.
+;; ---------------------------------------------------------------------
+(deftest delete-user-cascades-tokens-and-grants
+  (let [storage (:storage *ctx*)
+        user (users/create-user! *ctx* "cascade-victim" "pw" "acme")
+        uid (:id user)]
+    (tc/with-org tc/public-org
+                 (sp/create-entity storage :token {:token-hash "cv-h1" :user "cascade-victim" :org "acme"})
+                 (sp/create-entity storage :token {:token-hash "cv-h2" :user "cascade-victim" :org "acme"}))
+    (sp/create-entity storage :grant {:subject "cascade-victim" :capability "write" :namespace "acme"})
+    (testing "delete-user! removes the user + all their tokens + grants"
+      (let [res (users/delete-user! *ctx* uid)]
+        (is (= 2 (:tokens-deleted res)))
+        (is (= 1 (:grants-deleted res)))
+        (is (nil? (sp/read-entity storage :user uid)))
+        (is (empty? (tc/with-org tc/public-org
+                                 (sp/query-entities storage :token {:user "cascade-victim"}))))
+        (is (empty? (sp/query-entities storage :grant {:subject "cascade-victim"})))))
+    (testing "deleting a nonexistent user throws :user/not-found"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (users/delete-user! *ctx* (random-uuid)))))))
+
+
+(deftest reset-password-updates-hash-and-kills-sessions
+  (let [storage (:storage *ctx*)
+        user (users/create-user! *ctx* "reset-me" "old-pw" "acme")
+        uid (:id user)]
+    (tc/with-org tc/public-org
+                 (sp/create-entity storage :token {:token-hash "rm-sess1" :user "reset-me" :org "acme"}))
+    (testing "reset-password! sets a new hash + invalidates every session"
+      (let [res (users/reset-password! *ctx* uid "new-pw")]
+        (is (= 1 (:sessions-invalidated res)))
+        (is (empty? (tc/with-org tc/public-org
+                                 (sp/query-entities storage :token {:user "reset-me"}))))
+        (is (some? (users/login! *ctx* "reset-me" "new-pw")) "new password logs in")
+        (is (nil? (users/login! *ctx* "reset-me" "old-pw")) "old password rejected")))))

@@ -26,6 +26,23 @@
     ((:create-user ops) ctx username password org)))
 
 
+;; Operator-only account admin (§4.1): reset another user's password
+;; (invalidates their sessions) / delete a user (cascades tokens + grants).
+;; Both go through the injectable seam; no seam → nil.
+(defbase invoke-reset-password
+  [user-id password]
+  (when-let [ops (:user-ops ctx)]
+    ((:reset-password ops) ctx user-id password)))
+
+
+(defbase invoke-delete-user
+  [user-id]
+  (when-let [ops (:user-ops ctx)]
+    ((:delete-user ops) ctx user-id)))
+
+
 (def impls
   {:list-users list-users
-   :invoke-create-user invoke-create-user})
+   :invoke-create-user invoke-create-user
+   :invoke-reset-password invoke-reset-password
+   :invoke-delete-user invoke-delete-user})

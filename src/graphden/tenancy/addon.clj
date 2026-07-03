@@ -138,6 +138,8 @@
   (let [signup-limiter (users/make-rate-limiter (or signup-max-per-min 20)
                                                 (or signup-window-ms 60000))]
     {:create-user users/create-user!
+     :reset-password users/reset-password!
+     :delete-user users/delete-user!
      :login users/login!
      :logout users/logout!
      :logout-all users/logout-all!

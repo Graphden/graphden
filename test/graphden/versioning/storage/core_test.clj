@@ -788,3 +788,26 @@
             (is (= 1 (count rows)))
             (is (= 99 (:value (first rows)))))))
       (finally (sp/close base)))))
+
+
+(deftest fork-point-parent-to-child-merge-no-spurious-conflict-test
+  ;; H: a main→feature (pull) merge computed the fork from the SOURCE (main)
+  ;; root, so a fn ONLY the feature branch changed (after it forked) was
+  ;; flagged as modified-on-both → a spurious conflict. The fork must come
+  ;; from the CHILD (feature) branch, so only genuinely-concurrent edits count.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [main-id  (vs/current-branch-id v)
+            ;; created on main BEFORE feature forks
+            e        (sp/create-entity v :fn {:name "pull-shared-fn" :parent-ids []
+                                              :description "orig"})
+            feature  (vs/create-branch! v "pull-feature")
+            vf       (vs/switch-branch v (:id feature))
+            ;; feature edits the fn AFTER forking; main never touches it again
+            _        (sp/update-entity vf :fn (:id e) {:description "feature-edit"})]
+        (testing "main→feature merge: only feature changed the fn → NO conflict"
+          (let [{:keys [conflicts]} (vs/detect-conflicts vf main-id)]
+            (is (empty? conflicts)
+                "feature's own post-fork edit must not conflict with unchanged main"))))
+      (finally (sp/close base)))))

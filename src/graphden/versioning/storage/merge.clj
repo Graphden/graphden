@@ -30,11 +30,25 @@
 (defn- fork-point
   "Determines the fork point between source and target branches.
    Fork point is the later of:
-   - source branch created-at (when it was forked)
-   - latest merge timestamp between the two branches (if any previous merges)"
+   - the CHILD branch's created-at (when it forked off its parent)
+   - latest merge timestamp between the two branches (if any previous merges)
+
+   The fork base is the created-at of whichever branch DESCENDS from the
+   other (its `:base-branch-id` points at the other) — for a feature→main
+   merge that's the source (feature), but for a main→feature (pull) merge it
+   is the TARGET (feature). Using the source unconditionally made a
+   main→feature merge fork at main's root created-at, so every already-
+   inherited main change counted as \"modified after fork\" → spurious
+   conflicts. Unrelated / multi-level branches fall back to the source
+   (unchanged behaviour) until a true common-ancestor walk is added."
   [base-storage source-branch-id target-branch-id]
   (let [source-branch (sp/read-entity base-storage :branch source-branch-id)
-        branch-created (:created-at source-branch)
+        target-branch (sp/read-entity base-storage :branch target-branch-id)
+        child-branch (cond
+                       (= (:base-branch-id source-branch) target-branch-id) source-branch
+                       (= (:base-branch-id target-branch) source-branch-id) target-branch
+                       :else source-branch)
+        branch-created (:created-at child-branch)
         ;; Previous merges between these branches in EITHER direction.
         ;; One SQL roundtrip via `WHERE source IN (a, b) AND target IN
         ;; (a, b)` covers the 4 (source,target) combos; in-memory we

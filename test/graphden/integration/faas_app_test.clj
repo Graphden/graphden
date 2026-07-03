@@ -697,3 +697,33 @@
                                  (sp/query-entities storage :token {:user "reset-me"}))))
         (is (some? (users/login! *ctx* "reset-me" "new-pw")) "new password logs in")
         (is (nil? (users/login! *ctx* "reset-me" "old-pw")) "old password rejected")))))
+
+
+(deftest user-admin-ops-are-operator-only
+  ;; Regression guard for the IDOR that forcing public-org would reopen:
+  ;; :user/:token/:grant are tenant-forbidden, so a caller whose org ≠
+  ;; public MUST NOT be able to delete or reset another account.
+  (let [storage (:storage *ctx*)
+        user (users/create-user! *ctx* "idor-victim" "pw" "acme")
+        uid (:id user)]
+    (testing "a tenant (org ≠ public) cannot delete another account"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (tc/with-org "attacker-org" (users/delete-user! *ctx* uid))))
+      (is (some? (tc/with-org tc/public-org (sp/read-entity storage :user uid)))
+          "target account still exists — the tenant's delete was denied"))
+    (testing "a tenant cannot reset another account's password"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (tc/with-org "attacker-org" (users/reset-password! *ctx* uid "hax")))))
+    (testing "the operator (public-org) CAN reset + delete"
+      (is (map? (tc/with-org tc/public-org (users/reset-password! *ctx* uid "fresh-pw"))))
+      (is (map? (tc/with-org tc/public-org (users/delete-user! *ctx* uid))))
+      (is (nil? (tc/with-org tc/public-org (sp/read-entity storage :user uid)))))))
+
+
+(deftest reset-password-rejects-blank
+  (let [user (users/create-user! *ctx* "blank-pw-user" "pw" "acme")]
+    (testing "a blank new password is rejected (would otherwise brick the account)"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"password required"
+                            (users/reset-password! *ctx* (:id user) "")))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"password required"
+                            (users/reset-password! *ctx* (:id user) "   "))))))

@@ -18,6 +18,7 @@
    to `{:status :succeeded :result <sum>}`."
   (:require
     [cheshire.core :as json]
+    [clojure.string]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
@@ -29,6 +30,9 @@
 
 
 (def ^:dynamic *router* nil)
+
+
+(def ^:dynamic *storage* nil)
 
 
 (def ^:private test-auth-token "test-token-abc123")
@@ -61,7 +65,8 @@
              _ (cr/rebuild! ctx)
              router (br/create-router ctx "_app-ring-response")]
          (try
-           (binding [*router* router]
+           (binding [*router* router
+                     *storage* storage]
              (t))
            (finally (sp/close storage)))))))
 
@@ -131,3 +136,126 @@
                " body: " (:body resp)))
       (is (= "rejected" (:status body)))
       (is (false? (:ok body))))))
+
+
+;; ============================================================================
+;; Stage-2 pre-flight rejections — the `:_execute-validation` graph `:cond`.
+;;
+;; These migrated here from `graphden.crud.fn-execution-test` when the
+;; Clojure `validate-execute` mirror was deleted: validation now lives
+;; ONLY in the graph, so the rejection logic can only be exercised
+;; against a fully bootstrapped package graph (this fixture) driven
+;; through the real POST /api/execute path (`br/dispatch`). Values in
+;; the JSON body come back as strings (keyword → name over the wire);
+;; the rejection SHAPE + `:reason` match the pre-deletion Clojure
+;; version exactly (verified guard-by-guard, no divergence).
+;; ============================================================================
+
+(defn- reject-body
+  "POST `body-map` to /api/execute and return the parsed rejection map,
+   asserting the transport succeeded (HTTP 200 + structured envelope)."
+  [body-map]
+  (let [resp (json-post "/api/execute" body-map)
+        body (parse-body resp)]
+    (is (= 200 (:status resp))
+        (str "expected 200, got " (:status resp) " body: " (:body resp)))
+    (is (false? (:ok body)))
+    (is (= "rejected" (:status body)))
+    body))
+
+
+(deftest execute-rejects-no-fn
+  (testing "request carrying neither :fn-id nor :fn-name → :no-fn"
+    (let [body (reject-body {:args {} :timeout-ms 1000})]
+      (is (= "no-fn" (get-in body [:error-data :reason]))))))
+
+
+(deftest execute-rejects-unknown-fn-id
+  ;; A well-formed UUID that resolves to no row must reject as
+  ;; :fn-not-found (symmetric with the :fn-name path), citing the id
+  ;; in the message — not slip through to a bare "Function not found: ".
+  (testing "well-formed but absent :fn-id → :fn-not-found citing the id"
+    (let [absent "00000000-0000-0000-0000-000000000000"
+          body (reject-body {:fn-id absent :args {} :timeout-ms 1000})]
+      (is (= "fn-not-found" (get-in body [:error-data :reason])))
+      (is (clojure.string/includes? (:error body) absent)
+          "error message cites the actual fn-id, not an empty tail"))))
+
+
+(deftest execute-rejects-timeout-out-of-range
+  (testing "negative timeout → :timeout-out-of-range"
+    (let [body (reject-body {:fn-name "add" :args {:nums []} :timeout-ms -1})]
+      (is (= "timeout-out-of-range" (get-in body [:error-data :reason])))))
+  (testing "timeout above the 60s cap → :timeout-out-of-range"
+    (let [body (reject-body {:fn-name "add" :args {:nums []} :timeout-ms 999999})]
+      (is (= "timeout-out-of-range" (get-in body [:error-data :reason]))))))
+
+
+(deftest execute-rejects-args-too-large
+  ;; > 256 KB serialised :args. The size check fires before the
+  ;; unknown-arg check, so the arg shape is irrelevant.
+  (testing "oversized :args payload → :args-too-large with byte count"
+    (let [big (vec (repeat (* 30 1024) "padding-string-here-zzz"))
+          body (reject-body {:fn-name "add" :args {:nums big} :timeout-ms 1000})]
+      (is (= "args-too-large" (get-in body [:error-data :reason])))
+      (is (pos? (get-in body [:error-data :bytes]))
+          "bytes count reported in error-data"))))
+
+
+(deftest execute-rejects-unknown-arg
+  (testing "arg name not matching any free slot → :unknown-arg"
+    (let [body (reject-body {:fn-name "add"
+                             :args {:not-a-real-slot 42}
+                             :timeout-ms 1000})]
+      (is (= "unknown-arg" (get-in body [:error-data :reason])))
+      (is (some #{"not-a-real-slot"} (get-in body [:error-data :unknown]))))))
+
+
+(deftest execute-rejects-malformed-ref
+  ;; Regression: an arg shaped {:ref "not-a-uuid"} parsed to nil and
+  ;; slipped through, so `add` summed an empty list to 0. Reject early
+  ;; with a clean :malformed-ref instead.
+  (testing "non-UUID inside :ref → :malformed-ref naming the arg"
+    (let [body (reject-body {:fn-name "add"
+                             :args {:nums {:ref "not-a-uuid"}}
+                             :timeout-ms 1000})]
+      (is (= "malformed-ref" (get-in body [:error-data :reason])))
+      (is (= "nums" (get-in body [:error-data :malformed 0 :arg])))
+      (is (= "not-a-uuid" (get-in body [:error-data :malformed 0 :raw-ref])))))
+  (testing "blank string inside :ref → :malformed-ref"
+    (let [body (reject-body {:fn-name "add"
+                             :args {:nums {:ref ""}}
+                             :timeout-ms 1000})]
+      (is (= "malformed-ref" (get-in body [:error-data :reason]))))))
+
+
+(deftest execute-rejects-already-running-as-service
+  ;; A fn owned by an enabled :service row can't be ad-hoc Run — the
+  ;; reconciler owns it. The guard only reads the DB row; the
+  ;; reconciler need not have actually started a future.
+  (let [add-id (-> (sp/query-entities *storage* :fn {:name "add"}) first :id)
+        svc (sp/create-entity *storage* :service
+                              {:fn-id add-id
+                               :enabled? true
+                               :restart-policy :always})]
+    (try
+      (testing "enabled :service for the fn → :already-running-as-service"
+        (let [body (reject-body {:fn-name "add"
+                                 :args {:nums [1 2]}
+                                 :timeout-ms 5000})]
+          (is (= "already-running-as-service" (get-in body [:error-data :reason])))
+          (is (= "service" (get-in body [:error-data :source])))
+          (is (some? (get-in body [:error-data :service-id]))
+              ":service-id surfaced so the UI can link to it")))
+      (testing "disabling the service unblocks Run"
+        (sp/update-entity *storage* :service (:id svc) {:enabled? false})
+        (let [resp (json-post "/api/execute"
+                              {:fn-name "add" :args {:nums [1 2]} :timeout-ms 5000})
+              body (parse-body resp)]
+          (is (= "succeeded" (:status body))
+              "validation passes once :enabled? is false")
+          (is (= 3 (:result body)))))
+      (finally
+        ;; Never leave an enabled :service for `add` behind — the
+        ;; happy-path tests in this ns run `add` too.
+        (sp/delete-entity *storage* :service (:id svc))))))

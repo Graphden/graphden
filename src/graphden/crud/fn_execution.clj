@@ -35,16 +35,6 @@
     [graphden.storage.protocol.core :as sp]))
 
 
-;; =============================================================================
-;; Configuration
-;; =============================================================================
-
-(def ^:private max-timeout-ms 60000)     ; HTTP proxies bite past ~120s
-
-(def ^:private default-timeout-ms 10000) ; matches `:_execute-timeout-ms` default
-;; in `app/execution/fns.edn`
-
-
 ;; Re-export: tests + the cancel endpoint look up futures by id.
 (def lookup-future persist/lookup-future)
 
@@ -58,161 +48,11 @@
 ;; input), so wrapping it in another try/catch was redundant.
 
 
-;; =============================================================================
-;; Validation — returns nil on success, {:ok false :error …} on rejection
-;; =============================================================================
-
-(defn- already-running-as-service?
-  "Returns `{:source :service :service-id <uuid>}` when an enabled
-   `:service` row exists for `fn-id`. Used by `validate-execute` to
-   refuse ad-hoc Run on a fn the reconciler already owns — prevents
-   the foot-gun where clicking ▶ on :web-server tries to re-bind its
-   already-occupied port."
-  [storage fn-id]
-  (when-let [svc (first (sp/query-entities storage :service
-                                           {:fn-id fn-id :enabled? true}
-                                           {:limit 1}))]
-    {:source :service :service-id (:id svc)}))
-
-
-;; === Stage-2 execute-validation guards (C23) ===
-;; Decomposed from the old 88-line cond into one defn per guard so
-;; the same chain wires as a graph `:cond` fn-def
-;; (`:_execute-validation` in app/execution/fns.edn) AND as the
-;; back-compat composition below — single source of truth either
-;; way. Each guard returns `{:ok false :status :rejected …}` on
-;; rejection or nil on pass.
-
-(defn- execute-no-fn-rej
-  "Guard 1 — request carried neither `:fn-id` nor `:fn-name`."
-  [parsed]
-  (when (and (nil? (:fn-id parsed)) (nil? (:fn-name parsed)))
-    {:ok false :status :rejected
-     :error "Request must carry :fn-id or :fn-name"
-     :error-data {:reason :no-fn}}))
-
-
-(defn- execute-fn-not-found-rej
-  "Guard 2 — `:fn-id` or `:fn-name` was supplied but didn't resolve
-   to a real `:fn` row. Without this guard, the parsed `:fn-id`
-   would slip through to apply-execute and surface as the
-   executor's bare \"Function not found: <nil>\" with an empty
-   error string."
-  [parsed ctx]
-  (let [storage (request/require-storage ctx)
-        fn-row (lookup/resolve-fn storage parsed)]
-    ;; Skip if the no-fn guard already matched.
-    (when (and (or (:fn-id parsed) (:fn-name parsed))
-               (nil? (:id fn-row)))
-      {:ok false :status :rejected
-       :error (str "Function not found: "
-                   (or (:fn-name parsed) (:fn-id parsed)))
-       :error-data {:reason :fn-not-found}})))
-
-
-(defn- execute-timeout-out-of-range-rej
-  "Guard 3 — `:timeout-ms` must land in `[1, max-timeout-ms]`. nil
-   timeouts are treated as missing → use the default (mirrors the
-   graph path's `:_execute-timeout-ms :coalesce :default 10000`).
-   The prior version called `(< nil 1)` which NPE'd on direct
-   Clojure callers that omitted `:timeout-ms` — the test suite + the
-   HTTP graph path both supplied it, masking the contract gap."
-  [parsed]
-  (let [t (or (:timeout-ms parsed) default-timeout-ms)]
-    (when (or (< t 1) (> t max-timeout-ms))
-      {:ok false :status :rejected
-       :error (str ":timeout-ms must be in [1, " max-timeout-ms "]")
-       :error-data {:reason :timeout-out-of-range :timeout-ms t}})))
-
-
-(defn- execute-args-too-large-rej
-  "Guard 4 — serialised `:args` payload exceeds `max-args-bytes`."
-  [parsed]
-  (let [n (persist/args-bytes (:args parsed))]
-    (when (> n persist/max-args-bytes)
-      {:ok false :status :rejected
-       :error (str ":args size exceeds " persist/max-args-bytes " bytes")
-       :error-data {:reason :args-too-large :bytes n}})))
-
-
-(defn- execute-already-running-rej
-  "Guard 5 — the target fn is already alive as a managed `:service`
-   row, so a fresh Run would conflict (the reconciler owns it).
-   Returns nil when no enabled service references the fn."
-  [parsed ctx]
-  (let [storage (request/require-storage ctx)
-        fn-row (lookup/resolve-fn storage parsed)
-        fn-id (:id fn-row)]
-    (when fn-id
-      (when-let [conflict (already-running-as-service? storage fn-id)]
-        {:ok false :status :rejected
-         :error "Function is already running as a managed service. Disable the service in /api/entities/service or restart it via /api/services/reconcile."
-         :error-data {:reason :already-running-as-service
-                      :source (:source conflict)
-                      :service-id (:service-id conflict)}}))))
-
-
-(defn- execute-unknown-arg-rej
-  "Guard 6 — every arg name in `:args` must match one of the fn's
-   free-arg slots; an unknown name is a typo that would silently
-   ride through apply-execute (the executor ignores unknown keys
-   in the args map). Reach requires fn-id to be resolved."
-  [parsed ctx]
-  (let [storage (request/require-storage ctx)
-        fn-row (lookup/resolve-fn storage parsed)
-        fn-id (:id fn-row)]
-    (when fn-id
-      (let [free-args (lookup/free-arg-slot-map ctx fn-id)
-            unknown (remove (set (keys free-args))
-                            (map keyword (keys (:args parsed))))]
-        (when (seq unknown)
-          {:ok false :status :rejected
-           :error (str "Unknown arg(s): " (vec unknown))
-           :error-data {:reason :unknown-arg
-                        :unknown unknown
-                        :known (vec (keys free-args))}})))))
-
-
-(defn- execute-malformed-ref-rej
-  "Guard 7 — a `{:ref <str>}` arg-shape whose `:ref` isn't a
-   well-formed UUID used to slip through validation, land in
-   apply-execute as nil, and silently produce nonsense results
-   (`{:args {:nums {:ref \"not-a-uuid\"}}}` against `:add`
-   returned 0 — sum of an empty list — because `:nums` resolved
-   to nil). Reject early with a clean reason."
-  [parsed]
-  (let [malformed (keep (fn [[k v]]
-                          (when (and (persist/ref-arg? v)
-                                     (nil? (persist/parse-ref-fn-id v)))
-                            {:arg (name k) :raw-ref (:ref v)}))
-                        (:args parsed))]
-    (when (seq malformed)
-      {:ok false :status :rejected
-       :error (str "Malformed ref(s) in args: "
-                   (vec (map :arg malformed)))
-       :error-data {:reason :malformed-ref
-                    :malformed (vec malformed)}})))
-
-
-(defn validate-execute
-  "Stage 2 — pre-flight checks. Returns nil when valid, or the first
-   matching `{:ok false :status :rejected :error :error-data}`
-   rejection. Composes the per-guard helpers above in the same
-   order as the `:_execute-validation` graph `:cond` so the Clojure
-   path (used by direct callers + tests) stays observationally
-   equivalent to the graph path.
-
-   Reasons we reject (see per-guard defns for details):
-     :no-fn / :fn-not-found / :timeout-out-of-range / :args-too-large
-     / :already-running-as-service / :unknown-arg / :malformed-ref."
-  [ctx parsed]
-  (or (execute-no-fn-rej parsed)
-      (execute-fn-not-found-rej parsed ctx)
-      (execute-timeout-out-of-range-rej parsed)
-      (execute-args-too-large-rej parsed)
-      (execute-already-running-rej parsed ctx)
-      (execute-unknown-arg-rej parsed ctx)
-      (execute-malformed-ref-rej parsed)))
+;; Validation (Stage 2) runs entirely in the graph — `:_execute-validation`
+;; in `app/execution/fns.edn`, a `:cond` over per-guard rejection-builders
+;; (`:_execute-no-fn-err`, `:_execute-fn-not-found-err`, …). There is no
+;; Clojure mirror; the former `validate-execute` composition was removed
+;; once the graph became the sole caller (POST /api/execute → `:execute`).
 
 
 ;; =============================================================================

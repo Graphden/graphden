@@ -24,9 +24,10 @@
    service config visible in the graph (versioned, type-checked,
    composable) and avoids duplicating the binding mechanism.
 
-   `validate-execute` enforces 'no free args' at service-create time
-   — see `crud.fn-execution/validate-service-row` (callsite TBD; for
-   now enforced inside the apply-create path).
+   The 'no free args' rule is enforced at service-create time by the
+   graph guard `:_create-service-free-args-rej` (in `web/crud/fns.edn`),
+   which rejects the create when `:free-arg-slot-map` reports the target
+   fn still has any unbound slot.
 
    NOT versioned. Services mutate in place — when the admin toggles
    `:enabled?` or changes `:restart-policy`, the new value is the

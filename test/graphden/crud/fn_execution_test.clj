@@ -56,8 +56,9 @@
       (vts/extend-builder)
       (vds/extend-builder)
       (es/extend-builder)
-      ;; :service rows needed by validate-execute's already-running
-      ;; check — fixture mirrors the system/core.clj chain.
+      ;; :service rows needed by the already-running rejection path
+      ;; (exercised through the graph in the integration suite) —
+      ;; fixture mirrors the system/core.clj chain.
       (svcs/extend-builder)
       (ds/build)))
 
@@ -202,169 +203,14 @@
        :slot-b slot-b})))
 
 
-;; ============================================================================
-;; validate-execute — pre-flight rejections
-;; ============================================================================
-
-(deftest validate-rejects-no-fn-test
-  (let [storage (create-full-storage)
-        c (test-ctx storage)]
-    (try
-      (let [rej (fn-exec/validate-execute
-                  c {:args {} :timeout-ms 1000 :persist? false})]
-        (is (false? (:ok rej)))
-        (is (= :no-fn (-> rej :error-data :reason))))
-      (finally nil))))
-
-
-(deftest validate-rejects-unknown-fn-name-test
-  (let [storage (create-full-storage)
-        c (test-ctx storage)]
-    (try
-      (let [rej (fn-exec/validate-execute
-                  c {:fn-name "definitely-not-a-fn"
-                     :args {} :timeout-ms 1000 :persist? false})]
-        (is (false? (:ok rej)))
-        (is (= :fn-not-found (-> rej :error-data :reason))))
-      (finally nil))))
-
-
-(deftest validate-rejects-malformed-ref-arg-test
-  ;; Regression: pre-fix, an arg shaped `{:ref "not-a-uuid"}` parsed
-  ;; to nil (via the now-lenient `parse-uuid-or-clear`) but slipped
-  ;; through validation. `apply-execute` then handed nil to the
-  ;; executor in place of the intended ref, and a fn like `:add`
-  ;; happily returned `(apply + nil)` = 0. Silent succeed with
-  ;; garbage was worse than the pre-leniency raw-exception leak;
-  ;; fix is to reject malformed refs at validate-execute time with a
-  ;; clean `:malformed-ref` reason.
-  (let [storage (create-full-storage)
-        {composed :composed} (make-pure-add-fn! storage "malformed-ref-target")
-        c (test-ctx storage)]
-    (try
-      (testing "non-UUID inside `:ref`"
-        (let [rej (fn-exec/validate-execute
-                    c {:fn-id (:id composed)
-                       :args {:a {:ref "not-a-uuid"}}
-                       :timeout-ms 1000 :persist? false})]
-          (is (false? (:ok rej)))
-          (is (= :malformed-ref (-> rej :error-data :reason)))
-          (is (= "a" (-> rej :error-data :malformed first :arg)))
-          (is (= "not-a-uuid" (-> rej :error-data :malformed first :raw-ref)))))
-
-      (testing "blank string inside `:ref`"
-        (let [rej (fn-exec/validate-execute
-                    c {:fn-id (:id composed)
-                       :args {:a {:ref ""}}
-                       :timeout-ms 1000 :persist? false})]
-          (is (false? (:ok rej)))
-          (is (= :malformed-ref (-> rej :error-data :reason)))))
-      (finally nil))))
-
-
-(deftest validate-rejects-unknown-fn-id-test
-  ;; Regression: pre-fix, `validate-execute` called `lookup/resolve-fn-id`
-  ;; which for the `:fn-id` branch returns the parsed UUID without a
-  ;; storage check. Validation passed for any well-formed UUID — then
-  ;; `apply-execute` called `lookup/resolve-fn` (which DOES check),
-  ;; got nil, ran `cr/execute` with `fn-id nil`, and the executor's
-  ;; bare "Function not found: " bubbled up with `:fn-id null` in the
-  ;; error data. Fix: switch validate-execute to `lookup/resolve-fn`
-  ;; so both stages agree on existence.
-  (let [storage (create-full-storage)
-        c (test-ctx storage)
-        ;; Well-formed UUID that won't match any row.
-        absent-id #uuid "00000000-0000-0000-0000-000000000000"]
-    (try
-      (let [rej (fn-exec/validate-execute
-                  c {:fn-id absent-id
-                     :args {} :timeout-ms 1000 :persist? false})]
-        (is (false? (:ok rej)))
-        (is (= :fn-not-found (-> rej :error-data :reason))
-            "the symmetric :fn-name path already rejected this way")
-        (is (clojure.string/includes? (:error rej) (str absent-id))
-            "error message cites the actual fn-id, not an empty tail"))
-      (finally nil))))
-
-
-(deftest validate-rejects-timeout-out-of-range-test
-  (let [storage (create-full-storage)
-        {composed :composed} (make-pure-add-fn! storage "tmout")
-        c (test-ctx storage)]
-    (try
-      (testing "negative timeout"
-        (let [rej (fn-exec/validate-execute
-                    c {:fn-id (:id composed)
-                       :args {} :timeout-ms -1 :persist? false})]
-          (is (false? (:ok rej)))
-          (is (= :timeout-out-of-range (-> rej :error-data :reason)))))
-      (testing "above cap (60s)"
-        (let [rej (fn-exec/validate-execute
-                    c {:fn-id (:id composed)
-                       :args {} :timeout-ms 999999 :persist? false})]
-          (is (false? (:ok rej)))
-          (is (= :timeout-out-of-range (-> rej :error-data :reason)))))
-      (finally nil))))
-
-
-(deftest validate-rejects-unknown-arg-test
-  (let [storage (create-full-storage)
-        {composed :composed} (make-pure-add-fn! storage "uarg")
-        c (test-ctx storage)]
-    (try
-      (let [rej (fn-exec/validate-execute
-                  c {:fn-id (:id composed)
-                     :args {:not-a-real-slot 42}
-                     :timeout-ms 1000 :persist? false})]
-        (is (false? (:ok rej)))
-        (is (= :unknown-arg (-> rej :error-data :reason)))
-        (is (some #{:not-a-real-slot} (-> rej :error-data :unknown))))
-      (finally nil))))
-
-
-(deftest validate-rejects-already-running-as-service-test
-  (let [storage (create-full-storage)
-        {composed :composed} (make-pure-add-fn! storage "running-svc")
-        ;; Declare an enabled :service for this fn — the rejection path
-        ;; doesn't care whether the reconciler has actually started the
-        ;; future, only that the DB row says "this fn is owned by a
-        ;; managed service".
-        _ (sp/create-entity storage :service
-                            {:fn-id (:id composed)
-                             :enabled? true
-                             :restart-policy :always})
-        c (test-ctx storage)]
-    (try
-      (testing "validate rejects with :already-running-as-service from :service row"
-        (let [rej (fn-exec/validate-execute
-                    c {:fn-id (:id composed)
-                       :args {:a 1 :b 2} :timeout-ms 5000 :persist? false})]
-          (is (false? (:ok rej)))
-          (is (= :already-running-as-service (-> rej :error-data :reason)))
-          (is (= :service (-> rej :error-data :source)))
-          (is (some? (-> rej :error-data :service-id))
-              ":service-id surfaced so the UI can link to it")))
-      (testing "disabling the service unblocks Run"
-        (let [svc (->> (sp/query-entities storage :service {:fn-id (:id composed)})
-                       first)]
-          (sp/update-entity storage :service (:id svc) {:enabled? false})
-          (is (nil? (fn-exec/validate-execute
-                      c {:fn-id (:id composed)
-                         :args {:a 1 :b 2} :timeout-ms 5000 :persist? false}))
-              "validation passes once :enabled? is false")))
-      (finally nil))))
-
-
-(deftest validate-passes-well-formed-test
-  (let [storage (create-full-storage)
-        {composed :composed} (make-pure-add-fn! storage "ok")
-        c (test-ctx storage)]
-    (try
-      (is (nil? (fn-exec/validate-execute
-                  c {:fn-id (:id composed)
-                     :args {:a 1 :b 2}
-                     :timeout-ms 5000 :persist? false})))
-      (finally nil))))
+;; Stage-2 pre-flight rejection coverage (no-fn / fn-not-found /
+;; timeout-out-of-range / args-too-large / already-running-as-service
+;; / unknown-arg / malformed-ref) lives in
+;; `graphden.integration.execute-http-test`. Validation is a graph
+;; `:cond` (`:_execute-validation`) with no Clojure mirror, so it can
+;; only be exercised against a fully bootstrapped package graph —
+;; which the integration fixture provides and this fast, schema-only
+;; unit fixture does not.
 
 
 ;; ============================================================================
@@ -1059,29 +905,9 @@
       (finally nil))))
 
 
-;; ============================================================================
-;; Final-C — args size cap: validate-execute rejects > 256 KB serialised.
-;; ============================================================================
-
-(deftest validate-rejects-args-too-large-test
-  (let [storage (create-full-storage)
-        {composed :composed} (make-pure-add-fn! storage "args-cap")
-        c (test-ctx storage)
-        ;; Build a fictional arg payload > 256 KB. Even though `:a` is
-        ;; not a real free-arg shape (slot accepts :int, not list of
-        ;; strings), the size check fires BEFORE the unknown-arg check
-        ;; — that's the ordering we test here.
-        big-arg (vec (repeat (* 30 1024) "padding-string-here-zzz"))]
-    (try
-      (let [rej (fn-exec/validate-execute
-                  c {:fn-id (:id composed)
-                     :args {:a big-arg}
-                     :timeout-ms 1000 :persist? false})]
-        (is (false? (:ok rej)))
-        (is (= :args-too-large (-> rej :error-data :reason)))
-        (is (pos? (-> rej :error-data :bytes))
-            "bytes count reported in error-data"))
-      (finally nil))))
+;; The args-size-cap rejection (> 256 KB serialised → `:args-too-large`)
+;; is covered in `graphden.integration.execute-http-test` alongside the
+;; other Stage-2 guards — see the note above the apply-execute section.
 
 
 ;; ============================================================================

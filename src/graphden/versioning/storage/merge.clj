@@ -73,7 +73,7 @@
 
 (defn- modified-entities-after
   "Returns set of entity ids that have been modified on a branch after the fork point.
-   Checks all versioned entity types (fn and arg)."
+   Checks all versioned entity types (fn, slot, fn-slot, binding, list-item)."
   [base-storage branch-id after-ts]
   (reduce-kv
     (fn [acc entity-name {:keys [version-entity version-id-field]}]

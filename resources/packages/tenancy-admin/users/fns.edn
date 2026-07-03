@@ -5,7 +5,7 @@
 ;; in core `:all`. Mirrors the grants panel — reuses its CSS classes.
 ;;
 ;; `:list-users` strips `:password-hash` at the boundary so hashes never reach
-;; the wire. `:invoke-create-user` calls the addon's `:user-ops` seam (PBKDF2);
+;; the wire. `:invoke-create-user` calls the addon's `:user-ops` seam (bcrypt);
 ;; both read the addon's `:user` entity, so they throw when the addon is
 ;; inactive — but this package only loads WITH the addon, so the `:try` below
 ;; is belt-and-suspenders. `:user` is tenant-forbidden, so a tenant POST is
@@ -224,13 +224,13 @@
   ;; ---------------------------------------------------------------------
   ;; USER REGISTRATION (§4.1) — POST /api/users {username password org}.
   ;; Operator op: the `:invoke-create-user` base-fn calls the `:user-ops`
-  ;; seam, which PBKDF2-hashes + writes `:user`. Platform-only (`:user` is
+  ;; seam, which bcrypt-hashes + writes `:user`. Platform-only (`:user` is
   ;; tenant-forbidden → a tenant POST is denied by OrgScoped).
   ;; ---------------------------------------------------------------------
   {:name :invoke-create-user
-   :description "Create a user via the addon's user-ops seam (PBKDF2-hashed). Returns the row (no password), or nil when the addon isn't active."
+   :description "Create a user via the addon's user-ops seam (bcrypt-hashed). Returns the row (no password), or nil when the addon isn't active."
    :args {:username {:type :text :description "Login id (unique)."}
-          :password {:type :text :description "Raw password — only its PBKDF2 hash is stored."}
+          :password {:type :text :description "Raw password — only its bcrypt hash is stored."}
           :org {:type :text :description "Org the user belongs to."}}
    :return-type :nullable-keyword-map
    :effects #{:db}}

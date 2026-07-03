@@ -31,7 +31,7 @@
    cleanly; the store keywordizes on read."
   [builder]
   (ds/add-entity builder :grant grant-entity-uuid
-                 {:subject {:uuid grant-subject-field-uuid :type :text}
+                 {:subject {:uuid grant-subject-field-uuid :type :text :indexed? true}
                   :capability {:uuid grant-capability-field-uuid :type :text}
                   :namespace {:uuid grant-namespace-field-uuid
                               :type :text

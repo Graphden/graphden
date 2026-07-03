@@ -43,16 +43,10 @@
 ;; Parse — JSON body → in-memory parsed map
 ;; =============================================================================
 
-;; `safe-uuid` removed — `request/parse-uuid-or-clear` is now
-;; lenient itself (returns nil for non-string / blank / malformed
-;; input), so wrapping it in another try/catch was redundant.
-
-
 ;; Validation (Stage 2) runs entirely in the graph — `:_execute-validation`
 ;; in `app/execution/fns.edn`, a `:cond` over per-guard rejection-builders
-;; (`:_execute-no-fn-err`, `:_execute-fn-not-found-err`, …). There is no
-;; Clojure mirror; the former `validate-execute` composition was removed
-;; once the graph became the sole caller (POST /api/execute → `:execute`).
+;; (`:_execute-no-fn-err`, `:_execute-fn-not-found-err`, …). No Clojure
+;; mirror: the sole caller is POST /api/execute → `:execute`.
 
 
 ;; =============================================================================
@@ -295,22 +289,6 @@
                (re-find (re-pattern (str "(?:^|&)" param-name "=([^&]+)")))
                second
                (#(java.net.URLDecoder/decode ^String % "UTF-8")))))
-
-
-(defn apply-list-executions-by-version
-  "Success branch — `?fn-version-id` was supplied (and won the cond
-   dispatch over `?fn-id`)."
-  [parsed ctx]
-  {:ok true
-   :executions (list-executions-for-fn-version ctx (:version-id parsed)
-                                               (:limit parsed))})
-
-
-(defn apply-list-executions-by-fn
-  "Success branch — `?fn-id` was supplied (no `?fn-version-id`)."
-  [parsed ctx]
-  {:ok true
-   :executions (list-executions-for-fn ctx (:fn-id parsed) (:limit parsed))})
 
 
 ;; =============================================================================

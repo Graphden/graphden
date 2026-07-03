@@ -15,9 +15,12 @@
 
    The endpoint returns `{:ok true :form <hiccup> :value <current>}`;
    the editor renders the hiccup and fills `:value` into the
-   controls. Composite (record / list / union) recursion is added
-   in a later stage — until then a composite slot falls back to the
-   JSON form.
+   controls. Composite types recurse: `resolve-form` classifies a
+   slot as `:leaf` / `:record` / `:list` / `:union` and the renderer
+   builds nested sub-forms (per-field, per-element, per-branch). Two
+   bounded fallbacks to a raw JSON editor remain by design: a
+   composite (record / list) branch nested inside a union, and any
+   type past the depth-12 recursion guard.
 
    Sits alongside `graphden.crud.type-check` in the crud.* layer."
   (:require

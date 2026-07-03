@@ -50,7 +50,7 @@
   (-> builder
       (ds/add-entity :token token-entity-uuid
                      {:token-hash {:uuid token-hash-field-uuid :type :text}
-                      :user {:uuid token-user-field-uuid :type :text}
+                      :user {:uuid token-user-field-uuid :type :text :indexed? true}
                       :org {:uuid token-org-field-uuid :type :text}
                       :expires-at {:uuid token-expires-at-field-uuid
                                    :type :int

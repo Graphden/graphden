@@ -232,36 +232,6 @@
 
 
 ;; ============================================================================
-;; Delete-guard reasons
-;; ============================================================================
-
-(deftest ns-non-empty-reason-test
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      (testing "empty namespace → nil; namespace with a fn inside → reason"
-        (let [ns-row (entities/create-entity "ns" {:name "guard-ns"} c)]
-          (is (nil? (entities/ns-non-empty-reason storage (:id ns-row))))
-          (sp/create-entity storage :fn
-                            {:name "child-of-ns" :parent-ids [] :namespace-id (:id ns-row)})
-          (is (re-find #"contains"
-                       (entities/ns-non-empty-reason storage (:id ns-row))))))
-      (finally (sp/close storage)))))
-
-
-(deftest fn-in-use-reason-test
-  (let [storage (setup/create-test-storage)]
-    (try
-      (testing "unreferenced fn → nil; fn used as a parent → reason"
-        (let [parent (setup/create-base-fn! storage "fiu-parent")
-              child  (setup/create-composed-fn! storage "fiu-child" (:id parent))]
-          (is (nil? (entities/fn-in-use-reason storage (:id child))))
-          (is (re-find #"parent of"
-                       (entities/fn-in-use-reason storage (:id parent))))))
-      (finally (sp/close storage)))))
-
-
-;; ============================================================================
 ;; resolve-sequence-payload
 ;; ============================================================================
 

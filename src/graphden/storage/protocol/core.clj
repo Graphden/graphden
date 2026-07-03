@@ -200,8 +200,9 @@
      (`idx_<jt>_target`) so it's O(log n) on the target column instead
      of an O(N) entity-table scan.
 
-     Used by reverse-dependency checks (`fn-in-use-reason`) and
-     anywhere else that needs to walk a ref-many edge upstream."))
+     Used by reverse-dependency checks (the delete-guard
+     `find-fn-usages` chain) and anywhere else that needs to walk a
+     ref-many edge upstream."))
 
 
 (defprotocol GraphConstraints
@@ -475,8 +476,7 @@
 
 ;; === Graph re-exports ===
 ;; `default-query-timeout-ms` is the only constant external callers
-;; (tests, in particular) reach via this namespace; everything else
-;; that used to be re-exported here had no consumers and was dropped.
+;; (tests, in particular) reach via this namespace.
 (def default-query-timeout-ms config/default-query-timeout-ms)
 
 

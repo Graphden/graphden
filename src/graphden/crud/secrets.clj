@@ -170,12 +170,9 @@
         {:ok true :secrets secrets}))))
 
 
-;; Private `parse-uuid-loose` removed — the `(uuid? v)` passthrough
-;; case was dead in practice. Every callsite read `body`-extracted
-;; JSON fields or URL segments, both of which arrive as strings (or
-;; nil). For those `request/parse-uuid-or-clear` already returns the
-;; right value (UUID on parse success, nil on blank / malformed /
-;; non-string). Callers below thread directly through that helper.
+;; UUID fields (`body`-extracted JSON or URL segments — always string
+;; or nil) thread through `request/parse-uuid-or-clear`: a UUID on
+;; parse success, nil on blank / malformed / non-string.
 
 
 (defn parse-create-secret-request

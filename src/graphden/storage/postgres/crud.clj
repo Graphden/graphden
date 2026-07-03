@@ -393,6 +393,15 @@
                              {:quoted true})]
        (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
                                      (let [rows (jdbc/execute! ds query (util/query-opts))
+                                           ;; Decode WITHOUT field-specs on purpose: the
+                                           ;; versioned-resolution + compile paths that call
+                                           ;; `read-entities` (versioning/storage/*) rely on the
+                                           ;; raw-shape base row, then overlay version data /
+                                           ;; re-decode themselves. Passing `fields` here (as
+                                           ;; `query-entities` does) double-processes jsonb and
+                                           ;; corrupts the compiled graph — 27 executor tests
+                                           ;; (record/list-type, :fix recursion, versioned-rows)
+                                           ;; break. `fields` is still used for ref-many below.
                                            records (mapv codec/row->entity rows)
                                            populated (if (and fields (junction/has-ref-many? fields))
                                                        (junction/populate-ref-many-fields ds entity-name records fields)

@@ -328,7 +328,7 @@
              (p/shell "bb" "test-e2e"))}
 
   test-unit-coverage
-  {:doc "Unit tests with cloverage instrumentation. ~1.5 min. Same as `bb coverage`. Use this for the coverage report; `bb test-unit` for fast feedback without instrumentation."
+  {:doc "Unit tests with cloverage instrumentation. ~15-19 min on a dev host — the full-graph tests (packages.registry / packages.export / executor.effect-gating) recompile the whole graph under instrumentation (~50× amplification); that's also where their real coverage of the loader/compiler comes from. Same as `bb coverage`. Use this for the coverage report; `bb test-unit` for fast feedback without instrumentation."
    :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
 
   test-all-coverage
@@ -427,7 +427,7 @@
              (System/exit 1)))}
 
   coverage
-  {:doc "Unit-only coverage (~1:26 wall, baseline 2026-06-23: 69.06% form / 78.82% line). Same as `bb test-unit-coverage` — kept for back-compat with scripts that already reference this name.
+  {:doc "Unit-only coverage (~15-19 min wall on a dev host; 2026-07-03: 72.26% form / 81.91% line — the run is dominated by the full-graph tests that recompile the whole graph under instrumentation, not by test count). Same as `bb test-unit-coverage` — kept for back-compat with scripts that already reference this name.
 
    Why unit-only: the integration suite (cron / services / secrets / storage / executor-runtime / branch-router / per-handler graph tests) doesn't add useful per-NS attribution under cloverage. Empirical 2026-06-23 finding: every CRUD NS that integration would exercise (`crud.entities`, `crud.fn-execution.*`, `crud.branches`, etc.) reports 0% form/line anyway — `cr/execute`'s pre-compiled closure cache (built by `cr/rebuild!`) holds already-resolved fn objects and never re-derefs through the instrumented vars. Confirmed identical under BOTH kaocha-cloverage AND a 2h32m sequential direct `clj -M:cloverage` audit (per-NS 0% identical). So adding integration to the cloverage pass costs ~30 min wall for ~0% useful per-NS signal; it ran via `bb test` / `bb test-integration` un-instrumented anyway. See `[[feedback_coverage_measurement]]` for the full reasoning.
 

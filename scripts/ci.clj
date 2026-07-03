@@ -68,14 +68,25 @@
    "biome"      60000
    "stylelint" 120000
    ;; The single test check runs `bb test-unit-coverage` (unit suite +
-   ;; cloverage instrumentation). Combined wall measured ~1:30; sized
-   ;; to 5 min so cold-cache + cloverage first-time JIT warmup + CI
-   ;; parallel load have headroom while still surfacing a real hang
-   ;; (test deadlock, testcontainer stuck on Docker daemon).
-   ;; Integration + e2e suites live at `bb test-integration` /
+   ;; cloverage instrumentation). The wall is dominated NOT by test
+   ;; count but by a handful of full-graph tests — `packages.registry`
+   ;; (install-package syncs + recompiles the whole 2485-fn graph),
+   ;; `packages.export` (corpus fixpoint), `executor.effect-gating`
+   ;; (golden bootstrap fixture). Cloverage instruments every
+   ;; `graphden.*` form, so each full recompile fires the instrumented
+   ;; loader/compiler path and amplifies ~50×. These tests earn their
+   ;; keep — they give the real coverage of `packages.loader` (86%),
+   ;; `packages.export` (93%), `executor.compile.*` (77-100%), which
+   ;; is exactly why they're unit not integration — so they can't be
+   ;; dropped to speed the run up. Measured wall on a dev host: ~19 min
+   ;; (the old "~1:30" comment was a stale / faster-host figure and is
+   ;; what mis-sized this to 5 min). Ceiling set to 25 min: headroom
+   ;; over the observed ~19 min + CI parallel load, while still
+   ;; surfacing a true hang (test deadlock, testcontainer stuck on the
+   ;; Docker daemon). Integration + e2e live at `bb test-integration` /
    ;; `bb test-e2e` and run outside CI on demand — their wall budgets
    ;; (~10-12 min / ~15-25 min) are documented in `bb.edn`.
-   "tests-unit-coverage" 300000
+   "tests-unit-coverage" 1500000
    "outdated"  120000
    "security"  180000
    ;; Docker-based linters get extra headroom for first-run image

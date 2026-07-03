@@ -245,16 +245,14 @@
                             bindings)]
           (if valued?
             true
-            (let [next-seen (into seen frontier)
-                  next-frontier
-                  (->> frontier
-                       (mapcat (fn [fid]
-                                 (when-let [row (sp/read-entity storage :fn fid)]
-                                   (:parent-ids row))))
-                       (remove nil?)
-                       (remove next-seen)
-                       distinct
-                       vec)]
+            (let [fn-rows (sp/query-entities storage :fn {:id frontier})
+                  next-seen (into seen frontier)
+                  next-frontier (->> fn-rows
+                                     (mapcat :parent-ids)
+                                     (remove nil?)
+                                     (remove next-seen)
+                                     distinct
+                                     vec)]
               (recur next-frontier next-seen))))))))
 
 

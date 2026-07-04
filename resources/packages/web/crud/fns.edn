@@ -2608,49 +2608,20 @@
                                   " "
                                   :_delete-target-id]}}}}
 
-  ;; The invalidate / notify primitives need a payload carrying the
-  ;; row's FKs (so seed derivation works for `:binding-list-item` etc.).
-  ;; Existing row data + the id ensures the same `:id`-anchored shape
-  ;; the Clojure version used (`(or existing {:id id})`).
-  {:name :_delete-apply-payload
-   :parent :assoc
-   :args {:map {:as :existing}
-          :key {:value :id}
-          :value :_delete-target-id}}
-
-  ;; Sequence: delete → invalidate → notify → 200. `:do :steps`
-  ;; guarantees left-to-right firing of side effects.
+  ;; delete → 200. The `:delete-entity` base-fn already deletes the row,
+  ;; invalidates the compiled registry (delta seed derived from the row's
+  ;; FKs), emits the cross-pod NOTIFY, and drops the rich-types entry for
+  ;; `:fn` — all in `crud.entities/delete-entity`. So the graph doesn't
+  ;; repeat invalidate / notify; it just delegates and returns 200.
   {:name :_delete-apply-success
    :parent :do
    :args {:steps [:_delete-apply-do-delete
-                  :_delete-apply-do-invalidate
-                  :_delete-apply-do-notify
                   :_delete-apply-ok-response]}}
 
   {:name :_delete-apply-do-delete
    :parent :delete-entity
    :args {:entity-type :_delete-apply-entity-type-str
           :id :_delete-target-id}}
-
-  {:name :_delete-apply-do-invalidate
-   :parent :invalidate-after-write
-   :args {:entity-type :_delete-apply-entity-type-str
-          :entity-data :_delete-apply-payload}}
-
-  ;; NOTIFY carries the SAME pre-read row the local invalidate used
-  ;; (`:_delete-apply-payload` = existing row + id), NOT a bare
-  ;; `{:id id}`. `affected-fn-ids` needs the row's FKs (`:binding-id`
-  ;; / `:fn-id`) to derive the delta seed for fn-slot / binding /
-  ;; binding-list-item deletes. With a bare id it fell through to the
-  ;; empty-seed (full-clear) NOTIFY — and since a pod also receives its
-  ;; OWN NOTIFY, that made every fn-graph delete trigger a full
-  ;; compiled-registry rebuild on the emitting pod. Service deletes
-  ;; still work: the row carries `:id`.
-  {:name :_delete-apply-do-notify
-   :parent :notify-after-write
-   :args {:entity-type :_delete-apply-entity-type-str
-          :op {:value "delete"}
-          :entity-data :_delete-apply-payload}}
 
   {:name :_delete-apply-ok-response
    :parent :const
@@ -2856,14 +2827,14 @@
    :parent :nil?
    :args {:value {:as :item}}}
 
-  ;; `:delete-entity` → `:invalidate-after-write` (with the pre-read
-  ;; item snapshot so seed derivation walks `:binding-id` → `:fn-id`)
-  ;; → 200 response. Sequenced via `:do`.
+  ;; delete → 200. The `:delete-entity` base-fn invalidates the compiled
+  ;; registry itself — its own pre-read snapshot carries `:binding-id`, so
+  ;; seed derivation walks `:binding-id` → `:fn-id` for a delta — and emits
+  ;; the NOTIFY. So the graph just delegates and returns 200.
   {:name :_seq-remove-apply
-   :description "Success branch — delete the row, invalidate caches, return 200."
+   :description "Success branch — delete the row (base-fn invalidates + NOTIFYs), return 200."
    :parent :do
    :args {:steps [:_seq-remove-apply-do-delete
-                  :_seq-remove-apply-do-invalidate
                   :_seq-remove-apply-ok-response]}}
 
   {:name :_seq-remove-apply-do-delete
@@ -2878,11 +2849,6 @@
           ;; one in the upstream `:nil?` guard.)
           :id {:parent :get :type :uuid
                :args {:coll {:as :parsed} :key {:value :item-id} :default nil}}}}
-
-  {:name :_seq-remove-apply-do-invalidate
-   :parent :invalidate-after-write
-   :args {:entity-type {:value "binding-list-item"}
-          :entity-data {:as :item}}}
 
   {:name :_seq-remove-apply-ok-response
    :parent :const

@@ -2637,20 +2637,20 @@
    :args {:entity-type :_delete-apply-entity-type-str
           :entity-data :_delete-apply-payload}}
 
-  ;; NOTIFY uses just `{:id id}` — service deletes carry `:id`,
-  ;; fn-graph deletes are full-clear via the empty-seed fallback
-  ;; because `affected-fn-ids` can't derive from just `:id` for
-  ;; fn-slot/binding/binding-list-item.
-  {:name :_delete-apply-notify-payload
-   :parent :zipmap
-   :args {:keys [{:value :id}]
-          :vals [:_delete-target-id]}}
-
+  ;; NOTIFY carries the SAME pre-read row the local invalidate used
+  ;; (`:_delete-apply-payload` = existing row + id), NOT a bare
+  ;; `{:id id}`. `affected-fn-ids` needs the row's FKs (`:binding-id`
+  ;; / `:fn-id`) to derive the delta seed for fn-slot / binding /
+  ;; binding-list-item deletes. With a bare id it fell through to the
+  ;; empty-seed (full-clear) NOTIFY — and since a pod also receives its
+  ;; OWN NOTIFY, that made every fn-graph delete trigger a full
+  ;; compiled-registry rebuild on the emitting pod. Service deletes
+  ;; still work: the row carries `:id`.
   {:name :_delete-apply-do-notify
    :parent :notify-after-write
    :args {:entity-type :_delete-apply-entity-type-str
           :op {:value "delete"}
-          :entity-data :_delete-apply-notify-payload}}
+          :entity-data :_delete-apply-payload}}
 
   {:name :_delete-apply-ok-response
    :parent :const

@@ -303,6 +303,26 @@
     (ce/set-always-fresh-fn-ids! fresh-ids)))
 
 
+(defn call-with-invalidation-lock
+  "Run thunk `f` holding the ctx's `:invalidation-lock`, or plain when
+   no lock is wired (stripped test ctx). The lock is a
+   `java.util.concurrent.locks.ReentrantLock`, NOT `locking` /
+   `synchronized`, on purpose: the body under this lock runs a full or
+   delta recompile that can take multiple seconds, and a virtual thread
+   that blocks on a `synchronized` monitor PINS its carrier for the
+   whole wait (JDK 21). Under concurrent invalidations (CRUD writes +
+   the PG NOTIFY listener) that pins enough ForkJoinPool carriers to
+   starve the request pool — unrelated reads (`/api/types`, graph
+   entities) then stall for the recompile's duration. A ReentrantLock
+   lets a blocked waiter UNMOUNT from its carrier instead. Reentrant,
+   so `invalidate-graph-cache!` → `rebuild!` re-entry is fine."
+  [ctx f]
+  (if-let [lock (:invalidation-lock ctx)]
+    (do (java.util.concurrent.locks.ReentrantLock/.lock lock)
+        (try (f) (finally (java.util.concurrent.locks.ReentrantLock/.unlock lock))))
+    (f)))
+
+
 (defn rebuild!
   "Rebuild the compiled registry in `ctx` from whatever the slot/
    binding tables currently hold. Also primes `:graph-cache` and
@@ -313,22 +333,21 @@
    read-graph → compute → prime-multi-atom sequence stays atomic
    relative to concurrent `invalidate-graph-cache!` callers."
   [ctx]
-  (let [body (fn []
-               (let [storage (compile-storage ctx)
-                     graph (read-graph storage)
-                     _ (register-type-aliases-from-db! graph)
-                     base-fns (:base-fns ctx)
-                     lookups (assoc (l/cached-build-lookups graph)
-                                    :base-fns base-fns)
-                     _ (prime-always-fresh! (:fns graph))
-                     compiled (ce/compile-all lookups)]
-                 (reset! (:compiled-registry ctx) compiled)
-                 (prime-graph-cache! ctx graph)
-                 (prime-compile-deps! ctx graph)
-                 compiled))]
-    (if-let [lock (:invalidation-lock ctx)]
-      (locking lock (body))
-      (body))))
+  (call-with-invalidation-lock
+    ctx
+    (fn []
+      (let [storage (compile-storage ctx)
+            graph (read-graph storage)
+            _ (register-type-aliases-from-db! graph)
+            base-fns (:base-fns ctx)
+            lookups (assoc (l/cached-build-lookups graph)
+                           :base-fns base-fns)
+            _ (prime-always-fresh! (:fns graph))
+            compiled (ce/compile-all lookups)]
+        (reset! (:compiled-registry ctx) compiled)
+        (prime-graph-cache! ctx graph)
+        (prime-compile-deps! ctx graph)
+        compiled))))
 
 
 (defn instantiate-from-templates!
@@ -414,10 +433,19 @@
   "Return the current compiled registry from `ctx`, rebuilding on-demand
    when missing. Tests that skip the `:exec/compiled-registry` init-key
    still get a working executor via this fallback — the cost is a single
-   compile pass on first execution."
+   compile pass on first execution.
+
+   Double-checked under the invalidation lock: a full `rebuild!` takes
+   seconds, and without coalescing every concurrent reader that hit an
+   empty holder fired its OWN rebuild (observed: 20+ full recompiles
+   stacked on one editor mutation). Re-checking `@holder` after taking
+   the lock means the first arrival rebuilds and everyone else reuses
+   its result. Reentrant lock, so the inner `rebuild!` re-acquires
+   cheaply."
   [ctx]
   (when-let [holder (:compiled-registry ctx)]
-    (or @holder (rebuild! ctx))))
+    (or @holder
+        (call-with-invalidation-lock ctx (fn [] (or @holder (rebuild! ctx)))))))
 
 
 ;; =============================================================================

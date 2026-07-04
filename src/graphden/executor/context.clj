@@ -90,9 +90,7 @@
                   (do
                     (reset! (:compiled-registry ctx) nil)
                     (cr/refresh-type-registries-from-storage! ctx))))]
-     (if-let [lock (:invalidation-lock ctx)]
-       (locking lock (body))
-       (body)))))
+     (cr/call-with-invalidation-lock ctx body))))
 
 
 (defn cached-graph
@@ -174,7 +172,11 @@
       ;; requests can prime `:graph-cache` / `:compile-deps` from
       ;; out-of-order storage snapshots and leave the caches
       ;; reflecting an older view than what storage already holds.
-      (assoc :invalidation-lock (Object.))
+      ;; A ReentrantLock (not `locking`/`synchronized`): the body under
+      ;; it recompiles for seconds, and a virtual thread blocked on a
+      ;; monitor pins its carrier (JDK 21) — see
+      ;; `compile-runtime/call-with-invalidation-lock`.
+      (assoc :invalidation-lock (java.util.concurrent.locks.ReentrantLock.))
       ;; Effect sandbox — nil = unrestricted. Read on the hot path by
       ;; `compile-runtime/execute`, which binds `*allowed-effects*` for
       ;; the execution so `record-effect!` can gate.

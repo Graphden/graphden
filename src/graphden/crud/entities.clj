@@ -278,7 +278,13 @@
     (when (and (= et :fn) (:name snapshot))
       (registry/unregister-rich-type! (keyword (:name snapshot))))
     (invalidate! ctx storage et snapshot)
-    (notify-after-write! ctx storage et :delete {:id id})
+    ;; NOTIFY the full pre-read `snapshot` (not a bare `{:id id}`): sibling
+    ;; pods' `affected-fn-ids` needs the row's FKs (`:binding-id` / `:fn-id`)
+    ;; to derive the delta seed. A bare id fell through to the empty-seed
+    ;; (full-clear) NOTIFY — and since a pod receives its OWN NOTIFY, every
+    ;; fn-graph delete (incl. a single sequence-item remove) then forced a
+    ;; full compiled-registry rebuild (tens of seconds) on the emitting pod.
+    (notify-after-write! ctx storage et :delete (assoc (or snapshot {}) :id id))
     true))
 
 

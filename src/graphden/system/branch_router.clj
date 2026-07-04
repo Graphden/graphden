@@ -182,19 +182,24 @@
 
 
 (defn- branch-monitor
-  "Per-branch reentrant monitor used to dedupe concurrent build-and-
+  "Per-branch reentrant lock used to dedupe concurrent build-and-
    cache! callers for the same cold branch. Stored on the router as a
    ConcurrentHashMap so distinct branch-ids never block each other —
    only same-branch contenders serialize. The first arrival builds,
    the rest acquire the lock, double-check, and find the entry the
-   first arrival wrote."
+   first arrival wrote.
+
+   A `ReentrantLock`, NOT `locking`/`synchronized`: the guarded body
+   runs `cr/rebuild!` (a full compile, seconds) on a cold-branch miss,
+   and a virtual thread blocked on a monitor pins its carrier (JDK 21)
+   — same reason as `compile-runtime/call-with-invalidation-lock`."
   [router branch-id]
   (when-let [monitors (:build-monitors router)]
     (java.util.concurrent.ConcurrentHashMap/.computeIfAbsent
       monitors
       branch-id
       (reify java.util.function.Function
-        (apply [_ _] (Object.))))))
+        (apply [_ _] (java.util.concurrent.locks.ReentrantLock.))))))
 
 
 (defn- branch-has-own-content?
@@ -252,15 +257,18 @@
   [{:keys [handlers default-branch-id] :as router} branch-id]
   (let [max-size (or (:max-size router) default-max-cached-branches)]
     (if-let [monitor (branch-monitor router branch-id)]
-      (locking monitor
-        (or (get @handlers branch-id)
-            (let [entry (build-actual-entry! router branch-id)]
-              (swap! handlers
-                     (fn [m]
-                       (-> m
-                           (evict-lru-if-full max-size default-branch-id branch-id)
-                           (assoc branch-id entry))))
-              entry)))
+      (do
+        (java.util.concurrent.locks.ReentrantLock/.lock monitor)
+        (try
+          (or (get @handlers branch-id)
+              (let [entry (build-actual-entry! router branch-id)]
+                (swap! handlers
+                       (fn [m]
+                         (-> m
+                             (evict-lru-if-full max-size default-branch-id branch-id)
+                             (assoc branch-id entry))))
+                entry))
+          (finally (java.util.concurrent.locks.ReentrantLock/.unlock monitor))))
       ;; No monitor map → test path with a hand-constructed router.
       ;; Best-effort: just swap, accepting the rare duplicate build.
       (let [entry (build-actual-entry! router branch-id)]

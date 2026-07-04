@@ -343,6 +343,42 @@
      :diffs (vec diffs)}))
 
 
+(defn merge-affected-fn-ids
+  "The set of `:fn` ids whose resolved definition (and therefore
+   compiled closure) changes on the target when `source-branch-id` is
+   merged in — every fn that owns a version row on the source branch.
+
+   Used to seed a DELTA cache invalidation after a merge instead of a
+   full registry clear: a merge only shifts the fns touched on the
+   source, so recompiling those (+ their reverse-deps, which
+   `delta-recompile!` expands) is far cheaper than recompiling the
+   whole ~thousands-of-fns registry (the recompile the next request
+   would otherwise pay is the post-merge stall).
+
+   Mapping to the owner fn: `fn-version` / `fn-slot-version` /
+   `binding-version` all denormalise `:fn-id`; `binding-list-item-
+   version` carries only `:binding-id`, so we read those bindings to
+   recover their `:fn-id`. `:slot` is not versioned (absent from
+   `entity-config`), so there is no shared-slot fan-out to worry
+   about."
+  [base-storage source-branch-id]
+  (let [own-fn-ids (fn [version-entity]
+                     (into #{} (keep :fn-id)
+                           (sp/query-entities base-storage version-entity
+                                              {:branch-id source-branch-id})))
+        item-binding-ids (into #{} (keep :binding-id)
+                               (sp/query-entities base-storage :binding-list-item-version
+                                                  {:branch-id source-branch-id}))
+        item-fn-ids (when (seq item-binding-ids)
+                      (into #{} (keep :fn-id)
+                            (vals (sp/read-entities base-storage :binding
+                                                    (vec item-binding-ids)))))]
+    (set/union (own-fn-ids :fn-version)
+               (own-fn-ids :fn-slot-version)
+               (own-fn-ids :binding-version)
+               (or item-fn-ids #{}))))
+
+
 (defn merge-branch!
   "Merges source branch into the current (target) branch.
 

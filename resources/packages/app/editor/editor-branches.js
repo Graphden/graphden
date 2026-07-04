@@ -456,6 +456,12 @@ function closeConflictsModal() {
   if (_conflictsModal) _conflictsModal.classList.add('hidden');
 }
 
+// graph-first-exception: renders from `body.conflicts` — data the failed
+// merge ALREADY returned to the client — so a `/partials/*` round-trip
+// would fetch nothing the client lacks (unlike branch-diff / execute-result,
+// which pull server-only data) and would only add latency to a modal that
+// can render instantly from data in hand. XSS-safe: escapeText / escapeAttr
+// on every interpolated value.
 function showMergeConflictsModal(body, sourceName, targetName) {
   const modal = ensureConflictsModal();
   modal.classList.remove('hidden');

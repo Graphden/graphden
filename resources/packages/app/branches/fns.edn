@@ -1528,21 +1528,10 @@
    :args {:keys [{:value :ok} {:value :merge} {:value :skipped}]
           :vals [{:value true} :_merge-apply-record-shaped :_merge-apply-skipped]}}
 
-  ;; Merge writes a `:branch-merge` row that changes how target's
-  ;; versioned resolver views ancestry — every fn/slot/binding row
-  ;; visible to target is potentially affected. `:_merge-apply-do-
-  ;; invalidate` clears the per-ctx `cached-or-load-graph` snapshot
-  ;; so the next `/api/graph/entities` read sees the merged-in
-  ;; rows. Empty `:seeds` triggers a full clear (cheapest correct
-  ;; option; the merge surfaces a wide set of fns at once).
-  {:name :_merge-apply-do-invalidate
-   :parent :invalidate-graph-cache
-   :args {:seeds {:value []}}}
-
   {:name :_merge-apply-success
-   :description "Success path — invalidate the graph cache first (so subsequent reads see the merge), then build the JSON envelope. `:do` runs steps in order and returns the last."
+   :description "Success path — `:do` forces `:_merge-apply-record` (which performs the merge and THROWS on `:merge-conflict`, so the outer `:try` catches it and nothing below runs), then returns `:_merge-apply-success-envelope`. Cache invalidation is deliberately NOT a graph step here: the `:merge-branch!` base-fn does it in Clojure, as a DELTA on the merge's TARGET ctx seeded by the touched fns (`mrg/merge-affected-fn-ids`). That placement is what lets it (a) run only on success — a rejected merge invalidates nothing, (b) target the merge's target branch rather than the request's current ctx (correct for a cross-branch merge), and (c) be a delta rather than a full registry clear. The old graph `:invalidate-graph-cache` step used empty `:seeds` → full clear → the next request recompiled every fn (the ~tens-of-seconds post-merge stall). `:do` returns the last step."
    :parent :do
-   :args {:steps [:_merge-apply-do-invalidate
+   :args {:steps [:_merge-apply-record
                   :_merge-apply-success-envelope]}}
 
   ;; --- Error path: on-throw handler dispatching by ex-data :type.

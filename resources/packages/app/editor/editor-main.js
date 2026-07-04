@@ -179,12 +179,15 @@ async function loadGraphData() {
     }
   }
   updateEntityList(graphData);
-  if (typeof renderGraph === 'function') renderGraph(true);
 
+  // Exactly one render: `selectFnByName` → `selectFn` → `renderGraph`
+  // when a hash is present, else `renderGraph` directly. An earlier
+  // unconditional `renderGraph` here fired a second, redundant layout +
+  // subtree re-fetch on every mutation.
   const hash = window.location.hash.slice(1);
-  if (hash) {
+  if (hash && typeof selectFnByName === 'function') {
     selectFnByName(decodeURIComponent(hash), false);
-  } else {
+  } else if (typeof renderGraph === 'function') {
     renderGraph(true);
   }
 }

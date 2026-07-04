@@ -1091,8 +1091,12 @@ function promptLiteralForAppend(fnId, anchorEl, expectedType) {
         catch (_) { value = control.value; }
       }
       return postSequenceAppend(fnId, { value: value });
-    },
-    onSaved() { if (typeof initGraph === 'function') initGraph(); }
+    }
+    // No `onSaved` refresh — `postSequenceAppend` already fires the
+    // lighter `loadGraphData` (index + subtree + rich-types) on success.
+    // A second `initGraph` here double-pulled the full index + types +
+    // value-kinds + services and re-inited cytoscape for nothing (the
+    // ref-append path has never done it). See `postSequenceAppend`.
   });
 }
 

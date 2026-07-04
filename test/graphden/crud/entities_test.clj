@@ -134,36 +134,6 @@
       (finally (sp/close storage)))))
 
 
-(deftest apply-create-record-type-rollback-test
-  ;; Pins the cleanup path at lines 208-210, 251-256 — a mid-create
-  ;; failure (unknown type-ref on field 2) must roll back the :fn row
-  ;; created on line 212. Without the cleanup, the orphan :fn would
-  ;; persist and the response code would still report :ok false.
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      (testing "unknown field type triggers rollback of every prior write"
-        (let [;; Snapshot the :fn count before the attempt so we can prove
-              ;; the rollback put us back exactly.
-              before (count (sp/query-entities storage :fn {}))
-              resp (entities/apply-create-record-type
-                     {:name "rollback-record"
-                      :ns-id nil
-                      :description "first field is :int (ok), second references an unknown type → rollback"
-                      :fields [{:name "ok-field" :type "int"}
-                               {:name "bad-field" :type "no-such-type-row"}]}
-                     c)
-              after (count (sp/query-entities storage :fn {}))]
-          (is (false? (:ok resp))
-              "compound-create returns {:ok false …} when any field fails")
-          (is (string? (:error resp)))
-          (is (= before after)
-              "rollback restored the :fn count — no orphan rows")
-          (is (empty? (sp/query-entities storage :fn {:name "rollback-record"}))
-              "the named row is gone after rollback")))
-      (finally (sp/close storage)))))
-
-
 ;; ============================================================================
 ;; list-all-graph-entities
 ;; ============================================================================

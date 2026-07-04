@@ -4,10 +4,9 @@
 
    Why this test exists: without it the `:body InputStream` →
    `String` slurp can be silently removed and the symptom is
-   downstream — `apply-create-record-type` stops persisting `:name`,
-   `:fields` becomes empty, response body says `\"name\":null`. The
-   regression hunt that surfaced this bug took ~30 minutes to trace
-   live; this test catches it in <50 ms.
+   downstream — record-type create stops persisting `:name`,
+   `:fields` becomes empty, response body says `\"name\":null`. This
+   test catches it in <50 ms instead of a live regression hunt.
 
    Loads the impls.clj dynamically (same pattern as
    `reitit_test.clj`) so private helpers stay private to production

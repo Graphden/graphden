@@ -463,12 +463,23 @@
         (is (some? (sp/read-entity storage :fn fn-id)))
         (is (= 2 (count (sp/query-entities storage :fn-slot {:fn-id fn-id})))))))
 
-  (testing "an unresolvable field type fails the whole create"
-    (let [res (via-create-record (json-req "/api/types/record"
-                                           {:name (uniq "BadRecord")
-                                            :fields [{:name "x" :type "no-such-type"}]}))]
+  (testing "an unresolvable field type fails the whole create AND rolls back every prior write"
+    (let [storage (:storage *graph*)
+          bad-name (uniq "BadRecord")
+          ;; Snapshot before so we can prove rollback put us back exactly.
+          before (count (sp/query-entities storage :fn {}))
+          ;; First field is valid (:int) → gets written; second references
+          ;; an unknown type → the whole create must roll back the first.
+          res (via-create-record (json-req "/api/types/record"
+                                           {:name bad-name
+                                            :fields [{:name "ok-field" :type "int"}
+                                                     {:name "x" :type "no-such-type"}]}))]
       (is (false? (:ok res)))
-      (is (string? (:error res))))))
+      (is (string? (:error res)))
+      (is (= before (count (sp/query-entities storage :fn {})))
+          "rollback restored the :fn count — no orphan rows")
+      (is (empty? (sp/query-entities storage :fn {:name bad-name}))
+          "the named row is gone after rollback"))))
 
 
 (deftest process-create-list-type-test

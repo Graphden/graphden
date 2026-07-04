@@ -551,25 +551,10 @@
                        et id "— manual cleanup may be required")))))
   ;; `Throwable/.getMessage` can return null (Java API contract); wrap
   ;; both branches in `str` so the `:error` field is always a string.
-  ;; Earlier the ExceptionInfo arm returned raw `.getMessage` and the
-  ;; fallback arm wrapped in `str` — a serialised response would
-  ;; carry a JSON-`null` only on the ExceptionInfo arm.
   (let [msg (str (Throwable/.getMessage ^Throwable exception))]
     (cond-> {:ok false :error msg}
       (instance? clojure.lang.ExceptionInfo exception)
       (assoc :data (ex-data exception)))))
-
-
-(defn apply-create-record-type
-  "Stage 3 of create-record-type — wraps the `apply-create-record-type-body`
-   (atomic write unit) in a try-catch + rollback that mirrors what the
-   graph `:try` would do. Survives for non-graph callers; new paths
-   go through the graph fn-def `:_create-record-type-apply`."
-  [parsed ctx]
-  (let [journal (atom [])]
-    (try (apply-create-record-type-body parsed journal ctx)
-         (catch Exception e
-           (apply-create-rollback journal e ctx)))))
 
 
 ;; create-list-type's parse + validation stages are graph fn-defs

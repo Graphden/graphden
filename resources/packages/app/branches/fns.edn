@@ -1228,8 +1228,7 @@
           :else {:value nil}}}
 
   ;; --- Per-conflict-row reshape: stringify the entity-id + the two
-  ;; version maps. Same shape as `prepare-conflict-entry` in
-  ;; `crud/branches.clj` (now removed).
+  ;; version maps.
   {:name :_conflict-entry-entity-id
    :parent :get
    :args {:coll {:as :item} :key {:value :entity-id} :default nil}}

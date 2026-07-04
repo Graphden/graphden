@@ -68,7 +68,7 @@
                   :description "Cache key tuple."}
           :value {:type :ring-response-shape
                   :description "Fully-processed response to cache."}
-          :when? {:type [:union :null :bool]
+          :when? {:type :nullable-bool
                   :description "Truthy → store; nil/false → no-op."}}
    :return-type :ring-response-shape
    :effects #{:state}}
@@ -77,7 +77,7 @@
    :description "Predicate — does the response carry `Cache-Control: ... immutable ...`? Trigger for the response cache to remember the URL."
    :args {:response {:type :ring-response-shape
                      :description "Response to inspect."}}
-   :return-type [:union :null :bool]}
+   :return-type :nullable-bool}
 
   ;; =============================================================================
   ;; HANDLER-WRAP CHAIN — fn-def composition over :call + :if

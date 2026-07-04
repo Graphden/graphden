@@ -145,12 +145,12 @@
    :args {:path "/partials/provenance" :handler :_partial-provenance-handler}}
 
   {:name :partial-fn-picker-incompat
-   :description "GET /partials/fn-picker-incompat?expected={json}&candidate-fn-id={uuid} — incompat-explainer popover for the fn-picker's `explainAndOfferAnyway` flow. Replaces the legacy JS `renderMismatchExplainer` path with a server-rendered fragment."
+   :description "GET /partials/fn-picker-incompat?expected={json}&candidate-fn-id={uuid} — server-rendered incompat-explainer popover fragment for the fn-picker's `explainAndOfferAnyway` flow."
    :parent :get-auth-required
    :args {:path "/partials/fn-picker-incompat" :handler :_partial-fn-picker-incompat-handler}}
 
   {:name :partial-execute-result
-   :description "GET /partials/execute-result?id={uuid} — execution body hiccup (scalar / list / record / tainted / large-JSON / 5MB-truncated / error). Replaces the JS `renderResultBody` chain in `editor-execute-result.js`. Consumed by `editor-execute-history.js` row-expand + `editor-execute.js` orchestrator after Run."
+   :description "GET /partials/execute-result?id={uuid} — execution body hiccup (scalar / list / record / tainted / large-JSON / 5MB-truncated / error). Consumed by `editor-execute-history.js` row-expand + `editor-execute.js` orchestrator after Run."
    :parent :get-auth-required
    :args {:path "/partials/execute-result" :handler :_partial-execute-result-handler}}
 

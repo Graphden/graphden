@@ -210,7 +210,7 @@
                                   {:id unrelated-id :name "subtree-unrelated"
                                    :parent-ids []})
               ;; sp/create-entity bypasses the graph-cache invalidation
-              ;; path that the public API uses (`apply-create` →
+              ;; the real write path runs (`:try-apply-create` →
               ;; `invalidate!`), so the prior sub-tests' cached graph
               ;; doesn't include these new fns. Drop the cache so the
               ;; next loader picks up the writes.

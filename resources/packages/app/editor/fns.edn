@@ -1245,14 +1245,11 @@
    :args {:body :_partial-row-actions-html}}
 
   ;; ---------------------------------------------------------------------
-  ;; mismatch-explainer popover. JS used to compute expected /
-  ;; actual / reason locally (validateLiteralAgainstType +
-  ;; formatTypeHint + slotTypeProvenance), duplicating server-side
-  ;; logic that already exists. This partial reads the binding row
-  ;; from DB (single source of truth), reuses `:resolve-slot-
-  ;; effective-type` + `:current-slot-value` (both from `app.forms`)
-  ;; + `:classify-literal` + `:subtype?` + `:describe-type-mismatch`,
-  ;; and emits the same hiccup the JS used to build.
+  ;; mismatch-explainer popover. Reads the binding row from DB (single
+  ;; source of truth) and reuses `:resolve-slot-effective-type` +
+  ;; `:current-slot-value` (both from `app.forms`) + `:classify-literal`
+  ;; + `:subtype?` + `:describe-type-mismatch` to render the expected /
+  ;; actual / reason hiccup.
   ;;
   ;; URL: `GET /partials/mismatch-explainer?binding-id=X[&item-id=Y]`.
   ;; STEP 1 — header + Expected / Got / Reason rows only; provenance
@@ -2012,11 +2009,9 @@
   ;; fn-picker incompat-explainer. The fn-picker popover surfaces
   ;; functions whose return type doesn't satisfy the slot's expected
   ;; type under a separate "Other" section; clicking such a candidate
-  ;; opens this explainer with a "Pick anyway" affordance. JS used to
-  ;; call the legacy `renderMismatchExplainer` with a synthetic info
-  ;; map (the popover predated `/partials/mismatch-explainer`); this
-  ;; partial replaces that path so all mismatch-rendering goes through
-  ;; the server.
+  ;; opens this explainer with a "Pick anyway" affordance, rendering the
+  ;; incompat info server-side through the shared mismatch-rendering
+  ;; chain.
   ;;
   ;; URL: `GET /partials/fn-picker-incompat?expected={url-encoded-json}
   ;;       &candidate-fn-id={uuid}`. `expected` is the slot's type

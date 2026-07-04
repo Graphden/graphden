@@ -81,15 +81,16 @@
   ;; the threshold is approximate but the goal is to keep the alias
   ;; set tight and only name the genuine high-frequency shapes.
   ;; Current call-site counts (`grep -c '[:union :null :T]' …/*.edn`):
-  ;; text=37 · uuid=24 · jsonb=6 · int=3 · bool=0 · keyword=2 · numeric=0
-  ;; — so text, uuid, and jsonb cross the threshold; the rest stay
-  ;; inline.
+  ;; Inline-site counts when each alias was extracted:
+  ;; text=37 · uuid=24 · bool=19 · jsonb=6 · int=3 · keyword=2 — each is
+  ;; aliased below so the shape carries one name.
 
   {:name :nullable-text    :union [:null :text]}
   {:name :nullable-uuid    :union [:null :uuid]}
   {:name :nullable-jsonb   :union [:null :jsonb]}
   {:name :nullable-int     :union [:null :int]}
-  ;; 3 inline sites — variant tags often parse to either form.
+  {:name :nullable-bool    :union [:null :bool]}
+  ;; variant tags often parse to either form.
   {:name :nullable-keyword :union [:null :keyword]}
   ;; `:keyword-or-text` — keyword OR string, the post-JSONB-roundtrip
   ;; ambiguity for identifiers. 4 inline sites.

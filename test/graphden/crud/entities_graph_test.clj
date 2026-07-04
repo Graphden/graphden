@@ -1,10 +1,8 @@
 (ns ^:integration graphden.crud.entities-graph-test
   "Graph-path tests for the entity CRUD HTTP handlers
    (`:process-create-entity` / `:process-update-entity` /
-   `:process-delete-entity`). Replaces the test-side reproductions in
-   `entities-test.clj` that called `entities/parse-create-request +
-   validate-create + apply-create` directly — i.e. tested CLOJURE
-   helpers production never runs.
+   `:process-delete-entity`) — exercising the graph path production
+   actually reaches, not the Clojure helpers.
 
    These tests bootstrap the full `[core web app]` package set once
    per JVM (via `setup/bootstrap-crud-graph!`) and invoke

@@ -53,7 +53,7 @@
           :return-type-fn-id :nullable-uuid
           :anonymous-hash :nullable-text
           :expects-effects :nullable-jsonb
-          :branch-local? [:union :null :bool]}}
+          :branch-local? :nullable-bool}}
 
   {:name :branch-row-shape
    :description "Decoded `:branch` storage row — identity + parent ref. `:created-at` is a `java.sql.Timestamp` on the JVM side (no matching graphden scalar tag); callers that need it as text wrap via `:to-str` before serializing. Open record admits that field plus any forward-compatible additions."
@@ -81,14 +81,14 @@
           :fn-version-id :uuid
           :status :keyword
           :result :nullable-jsonb
-          :result-truncated? [:union :null :bool]
+          :result-truncated? :nullable-bool
           :error :nullable-text
           :error-data :nullable-jsonb
           :declared-effects :nullable-jsonb
           :runtime-effects :nullable-jsonb
           :user-id :nullable-uuid
-          :cancel-requested? [:union :null :bool]
-          :touched-secret? [:union :null :bool]}}
+          :cancel-requested? :nullable-bool
+          :touched-secret? :nullable-bool}}
 
   {:name :service-row-shape
    :description "Decoded `:service` storage row — the per-branch desired-state registry entry. Not versioned."
@@ -103,7 +103,7 @@
    :type {:id :uuid
           :name :text
           :type-fn-id :uuid
-          :required [:union :null :bool]
+          :required :nullable-bool
           :description :nullable-text
           :source-slot-id :nullable-uuid}}
 
@@ -120,14 +120,14 @@
           :fn-id :uuid
           :slot-id :uuid
           :value :nullable-jsonb
-          :value-present [:union :null :bool]
+          :value-present :nullable-bool
           :ref-fn-id :nullable-uuid
           :override-kind :nullable-keyword
           :type-override-fn-id :nullable-uuid
           :description :nullable-text
-          :list-append [:union :null :bool]
-          :list-closed [:union :null :bool]
-          :required [:union :null :bool]}}
+          :list-append :nullable-bool
+          :list-closed :nullable-bool
+          :required :nullable-bool}}
 
   {:name :binding-list-item-row-shape
    :description "Decoded `:binding-list-item` storage row — ordered sequence content under a list-typed binding. XOR rule on (value, ref-fn-id)."
@@ -136,7 +136,7 @@
           :position :int
           :value :nullable-jsonb
           :ref-fn-id :nullable-uuid
-          :literal [:union :null :bool]}}
+          :literal :nullable-bool}}
 
   {:name :fn-slot-version-row-shape
    :description "Decoded `:fn-slot-version` storage row — the per-branch overlay of an `:fn-slot` junction. `:created-at` / `:deleted-at` are `java.sql.Timestamp` on the JVM side; omitted from the alias for the same reason `:branch-row-shape` omits `:created-at`."
@@ -155,13 +155,13 @@
           :fn-id :uuid
           :slot-id :uuid
           :value :nullable-jsonb
-          :value-present [:union :null :bool]
+          :value-present :nullable-bool
           :ref-fn-id :nullable-uuid
           :override-kind :nullable-keyword
           :type-override-fn-id :nullable-uuid
           :description :nullable-text
-          :list-append [:union :null :bool]
-          :list-closed [:union :null :bool]}}
+          :list-append :nullable-bool
+          :list-closed :nullable-bool}}
 
   {:name :binding-list-item-version-row-shape
    :description "Decoded `:binding-list-item-version` storage row — the per-branch overlay of a `:binding-list-item`. Mirrors `:binding-list-item-row-shape` plus the version-identity columns (`:branch-id`)."
@@ -172,7 +172,7 @@
           :position :int
           :value :nullable-jsonb
           :ref-fn-id :nullable-uuid
-          :literal [:union :null :bool]}}
+          :literal :nullable-bool}}
 
   {:name :running-info-shape
    :description "In-memory service-runtime info from the service reconciler — `:started-at`, `:start-attempts`, `:start-failed-at`. `:stopper` is a Clojure callable (typed `:any` because no executor-callable contract exists for arbitrary runtime fns)."
@@ -186,12 +186,12 @@
    :type {:custom_metadata :nullable-jsonb
           :current_version [:union :null :int]
           :max_versions [:union :null :int]
-          :destroyed [:union :null :bool]
+          :destroyed :nullable-bool
           :deletion_time :nullable-text
           :created_time :nullable-text
           :updated_time :nullable-text
           :oldest_version [:union :null :int]
-          :cas_required [:union :null :bool]}}
+          :cas_required :nullable-bool}}
 
   ;; =====================================================================
   ;; Entry point.

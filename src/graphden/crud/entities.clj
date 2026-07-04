@@ -566,11 +566,10 @@
            (apply-create-rollback journal e ctx)))))
 
 
-;; `parse-create-list-type` removed — the parse stage is now a graph
-;; fn-def (`:_create-list-type-parsed`) composing `:parse-json-body`
-;; + per-field getters. C20: `validate-create-list-type` similarly
-;; replaced by the `:_create-list-type-validation` `:cond`. Only the
-;; rollback-bearing apply stage remains in Clojure (`apply-create-list-type`).
+;; create-list-type's parse + validation stages are graph fn-defs
+;; (`:_create-list-type-parsed` / `:_create-list-type-validation`); the
+;; rollback-bearing apply stage is `apply-create-list-type-body` +
+;; `apply-create-rollback`, composed by the graph `:try`.
 
 
 (defn apply-create-list-type-body
@@ -615,24 +614,11 @@
     {:ok true :id (str own-id) :name nm}))
 
 
-(defn apply-create-list-type
-  "Stage 3 of create-list-type — wraps `apply-create-list-type-body`
-   in the same try/catch + journal-replay rollback the graph
-   `:try` would do. Survives for non-graph callers; new paths go
-   through `:_create-list-type-apply`."
-  [parsed ctx]
-  (let [journal (atom [])]
-    (try (apply-create-list-type-body parsed journal ctx)
-         (catch Exception e
-           (apply-create-rollback journal e ctx)))))
-
-
-;; `parse-update-record-type` removed — the parse stage is now a graph
-;; fn-def composing `:parse-json-body` + per-field getters + `:contains?`
-;; on `:description` for the `:has-description?` distinction.
-;; C21: `validate-update-record-type` similarly replaced by the
-;; `:_update-record-type-validation` `:cond`. Only the rollback-bearing
-;; apply stage remains in Clojure (`apply-update-record-type`).
+;; update-record-type's parse stage is a graph fn-def composing
+;; `:parse-json-body` + per-field getters + `:contains?` on
+;; `:description` for the `:has-description?` distinction; validation is
+;; the `:_update-record-type-validation` `:cond`. The rollback-bearing
+;; apply stage is `apply-update-record-type-body` + `-rollback` below.
 
 
 ;; === Stage-3 update-record-type apply: journalled txn split for graph ===
@@ -847,23 +833,6 @@
     (cond-> {:ok false :error (str (Throwable/.getMessage exception))}
       (instance? clojure.lang.ExceptionInfo exception)
       (assoc :data (ex-data exception)))))
-
-
-(defn apply-update-record-type
-  "Test / back-compat wrapper that re-assembles the `:try` + atom-journal
-   shape in Clojure. The live runtime path runs through
-   `:_update-record-type-apply` — a `:try` graph fn-def composing `-body`
-   + `-rollback` over a shared `:_apply-update-record-type-journal`
-   atom; this fn replays the same shape so direct Clojure callers
-   (parse → validate → apply test harness in entities_test) keep working.
-   Use the graph path for production; this exists for tests + Clojure-
-   side composability."
-  [parsed ctx]
-  (let [journal (atom [])]
-    (try
-      (apply-update-record-type-body parsed journal ctx)
-      (catch Exception e
-        (apply-update-record-type-rollback journal e ctx)))))
 
 
 ;; === Form Parsing ===
@@ -1085,32 +1054,6 @@
                     (str "Failed to create " type-str))}))))
 
 
-(defn apply-create
-  "Stage 3 of create — wraps `apply-create-core` (the §3.3 transactional
-   unit) with the response envelope. Returns the same partial Ring
-   response shape the legacy single-fn implementation did:
-     `{:status 200 :body \"<p>Entity created successfully</p>\"}` on success
-     `{:status 400 :body \"<p class=\"error\">…</p>\"}` on any error.
-
-   This wrapper survives so non-graph callers (legacy tests, internal
-   helpers) keep working. New paths go through the graph fn-def
-   `:_create-apply` in fns.edn which calls `:try-apply-create` then
-   builds the response from the returned shape."
-  [parsed ctx]
-  (let [{:keys [entity-type entity-data]} parsed
-        result (apply-create-core parsed ctx)
-        storage (request/require-storage ctx)]
-    (cond
-      (:created result)
-      (do (invalidate! ctx storage entity-type
-                       (assoc entity-data :id (:created result)))
-          (notify-after-write! ctx storage entity-type :write
-                               (assoc entity-data :id (:created result)))
-          {:status 200
-           :body "<p>Entity created successfully</p>"})
-      :else (html-error-response 400 (:error result)))))
-
-
 (defn apply-update-core
   "§3.1 atomic core of the update-apply flow: `sp/update-entity` +
    Phase-6c rename-slot side-effect (binding writes only). Returns
@@ -1141,26 +1084,6 @@
     (if updated
       {:updated id-uuid}
       {:error "Failed to update entity"})))
-
-
-(defn apply-update
-  "Stage 3 of update — wraps `apply-update-core` (the atomic write
-   unit) with the response envelope. Returns the same partial Ring
-   response shape the legacy single-fn implementation did. The graph
-   path goes through `:try-apply-update` + `:_update-apply` in
-   `fns.edn`; this wrapper survives for non-graph callers."
-  [parsed ctx]
-  (let [{:keys [entity-type id-uuid entity-data pre-existing]} parsed
-        result (apply-update-core parsed ctx)
-        storage (request/require-storage ctx)]
-    (if (:updated result)
-      (do (invalidate! ctx storage entity-type
-                       (merge pre-existing entity-data {:id id-uuid}))
-          (notify-after-write! ctx storage entity-type :write
-                               (merge pre-existing entity-data {:id id-uuid}))
-          {:status 200
-           :body "<p>Entity updated successfully</p>"})
-      (html-error-response 400 (:error result)))))
 
 
 ;; === Re-exports from sub-namespaces ==========================================

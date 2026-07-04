@@ -172,7 +172,7 @@
   {:name :invoke-logout
    :description "Invoke the addon's logout seam — delete the caller's session token (bearer read from :request). Returns true iff a row was deleted, or nil when the addon isn't active."
    :args {:request {:type :ring-request-shape :description "The Ring request — its bearer identifies the session to invalidate."}}
-   :return-type [:union :null :bool]
+   :return-type :nullable-bool
    :effects #{:db}}
 
   {:name :_logout-do

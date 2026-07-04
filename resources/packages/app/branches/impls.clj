@@ -195,25 +195,26 @@
   (let [storage (vs/switch-branch (request/require-storage ctx) target-branch-id)
         result (vs/merge-branch! storage source-branch-id
                                  {:conflict-resolutions resolutions})]
-    ;; DELTA-invalidate the TARGET branch's compiled registry — only the
-    ;; fns the merge touched (source's version owners), NOT a full clear.
-    ;; A full clear reset the whole registry so the next request
-    ;; recompiled every fn (the tens-of-seconds post-merge stall); the
-    ;; delta keeps the rest warm (`invalidate-graph-cache!` runs
-    ;; `delta-recompile!`, which expands the seeds to their reverse-
-    ;; deps). It skips the type-alias refresh, so do that explicitly in
-    ;; case the merge surfaced a new type-row. Targeting the merge's
-    ;; TARGET ctx (not the request's current ctx) also keeps a
-    ;; cross-branch merge correct. Only reached on SUCCESS — a
-    ;; `:merge-conflict` throws out of `vs/merge-branch!` above, so a
-    ;; rejected merge no longer invalidates anything.
-    (when-let [router (br/current-router)]
-      (let [affected (mrg/merge-affected-fn-ids (branches/base-storage ctx)
-                                                source-branch-id)]
-        (when (seq affected)
-          (let [target-ctx (br/ctx-for router target-branch-id)]
-            (exec-ctx/invalidate-graph-cache! target-ctx affected)
-            (cr/refresh-type-registries-from-storage! target-ctx)))))
+    ;; Invalidate only the fns the merge touched (source's version
+    ;; owners) — a DELTA, so the next request recompiles just those +
+    ;; their reverse-deps, not the whole registry. `invalidate-graph-
+    ;; cache!` runs `delta-recompile!`, which expands the seeds to their
+    ;; reverse-deps AND re-registers type-aliases (so a merged-in
+    ;; type-row resolves). With the branch-router, invalidate the
+    ;; merge's TARGET ctx — not the request's current ctx — which keeps
+    ;; a cross-branch merge correct. Without a router (single-branch /
+    ;; test harness), the request's own ctx IS the only view, so
+    ;; invalidate that. Only reached on SUCCESS: a `:merge-conflict`
+    ;; throws out of `vs/merge-branch!` above, so a rejected merge
+    ;; invalidates nothing.
+    (let [affected (mrg/merge-affected-fn-ids (branches/base-storage ctx)
+                                              source-branch-id)]
+      (when (seq affected)
+        (exec-ctx/invalidate-graph-cache!
+          (if-let [router (br/current-router)]
+            (br/ctx-for router target-branch-id)
+            ctx)
+          affected)))
     (try
       (recon/restart-services-on-branch! ctx recon/running target-branch-id)
       (catch Exception e

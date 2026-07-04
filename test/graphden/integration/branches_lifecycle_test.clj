@@ -191,13 +191,13 @@
         (is (some? (fn-by-name feat-name fn-name))
             "after merge, probe fn still visible on feat (declarative-merge invariant)")
         ;; --- Phase 7: fn NOW visible on main after merge ------
-        ;; The merge endpoint chains `:invalidate-graph-cache` ahead
-        ;; of the response envelope (`:_merge-apply-do-invalidate`
-        ;; in `app/branches/fns.edn`), so the next
-        ;; `/api/graph/entities` read on target sees the merged-in
-        ;; rows immediately. Regression if that chain ever drops:
-        ;; this assertion fires before any cache-warming side-effect
-        ;; bails out the editor's view.
+        ;; The `:merge-branch!` base-fn invalidates the target ctx's
+        ;; graph cache (a delta seeded by the touched fns), so the next
+        ;; `/api/graph/entities` read on target sees the merged-in rows
+        ;; immediately. Regression if that invalidation ever drops (or
+        ;; skips the no-router path this harness runs in): this
+        ;; assertion fires before any cache-warming side-effect bails
+        ;; out the editor's view.
         (is (some? (fn-by-name nil fn-name))
             "after merge, probe fn visible on main (cache invalidated by merge)")))))
 

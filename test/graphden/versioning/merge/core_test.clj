@@ -16,7 +16,8 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.versioning.merge.core :as mp]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.merge :as mrg]))
 
 
 (def ^:dynamic *container* nil)
@@ -247,3 +248,25 @@
           (is (= :merge-conflict (:type (ex-data e))))
           (is (seq (:unresolved (ex-data e))))))
       (sp/close storage))))
+
+
+;; === merge-affected-fn-ids (delta-invalidation seed) ===
+
+(deftest merge-affected-fn-ids-test
+  ;; The seed set a merge uses to DELTA-invalidate the target ctx —
+  ;; every fn owning a version row on the source branch. A regression
+  ;; that drops a version table from the query (→ stale post-merge
+  ;; closures) trips here.
+  (let [{:keys [storage base fn-id slot-id]} (create-test-storage)
+        b (create-binding-on-current! storage fn-id slot-id 10)
+        source (vs/create-branch! storage "feature")
+        feature (vs/switch-branch storage (:id source))]
+    (testing "a source-branch binding-version surfaces its owner fn-id"
+      ;; Edit the binding on the feature branch → binding-version{feature}
+      ;; whose denormalised :fn-id is the owner.
+      (sp/update-entity feature :binding (:id b) {:value 20})
+      (is (= #{fn-id} (mrg/merge-affected-fn-ids base (:id source)))))
+    (testing "empty for a source branch with no own version rows"
+      (let [empty-source (vs/create-branch! storage "empty-feature")]
+        (is (empty? (mrg/merge-affected-fn-ids base (:id empty-source))))))
+    (sp/close storage)))

@@ -46,7 +46,7 @@
   [query-string]
   (when (and query-string (not (str/blank? query-string)))
     (some (fn [pair]
-            (let [[k v] (str/split pair #"=" 2)]
+            (let [[^String k ^String v] (str/split pair #"=" 2)]
               (when (= query-param (java.net.URLDecoder/decode k "UTF-8"))
                 (some-> v (java.net.URLDecoder/decode "UTF-8")))))
           (str/split query-string #"&"))))

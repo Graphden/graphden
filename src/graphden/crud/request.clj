@@ -19,10 +19,11 @@
   ;; ':enabled?' is missing".
   (when (and s (not (str/blank? s)))
     (into {} (for [pair (str/split s #"&")
-                   :let [[k v] (str/split pair #"=" 2)]
+                   :let [[k v] (str/split pair #"=" 2)
+                         ^String vv (or v "")]
                    :when k]
-               [(java.net.URLDecoder/decode k "UTF-8")
-                (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
+               [(java.net.URLDecoder/decode ^String k "UTF-8")
+                (java.net.URLDecoder/decode vv "UTF-8")]))))
 
 
 (defn require-storage
@@ -107,7 +108,7 @@
       (map? raw)                            raw
       (instance? java.io.InputStream raw)
       (json/parse-stream
-        (java.io.InputStreamReader. raw "UTF-8") true)
+        (java.io.InputStreamReader. ^java.io.InputStream raw "UTF-8") true)
       (and (string? raw) (not (str/blank? raw)))
       (json/parse-string raw true)
       :else                                 nil)))

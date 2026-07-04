@@ -158,8 +158,8 @@
     (sp/update-entity storage :user user-id
                       {:password-hash (hash-password new-password)})
     (let [tokens (sp/query-entities storage :token {:user (:username user)})]
-      (doseq [row tokens]
-        (sp/delete-entity storage :token (:id row)))
+      (when (seq tokens)
+        (sp/delete-entities storage :token (mapv :id tokens)))
       {:sessions-invalidated (count tokens)})))
 
 
@@ -182,10 +182,10 @@
     (let [username (:username user)
           tokens (sp/query-entities storage :token {:user username})
           grants (sp/query-entities storage :grant {:subject username})]
-      (doseq [row tokens]
-        (sp/delete-entity storage :token (:id row)))
-      (doseq [row grants]
-        (sp/delete-entity storage :grant (:id row)))
+      (when (seq tokens)
+        (sp/delete-entities storage :token (mapv :id tokens)))
+      (when (seq grants)
+        (sp/delete-entities storage :grant (mapv :id grants)))
       (sp/delete-entity storage :user user-id)
       {:tokens-deleted (count tokens)
        :grants-deleted (count grants)})))

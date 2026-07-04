@@ -438,7 +438,14 @@
       (ds/add-entity :fn fn-entity-uuid
                      {:name {:uuid fn-name-field-uuid
                              :type :text
-                             :nullable? true}
+                             :nullable? true
+                             ;; Indexed: name lookups (`query-fn-by-name`,
+                             ;; ref-by-name, constraint-type resolution) hit
+                             ;; the largest table. The composite unique
+                             ;; `(namespace-id, name)` can't serve a bare
+                             ;; `WHERE name = ?` (leading column unconstrained),
+                             ;; so a standalone index keeps those O(log n).
+                             :indexed? true}
                       :namespace-id {:uuid fn-namespace-id-field-uuid
                                      :type :ref
                                      :ref-entity :ns

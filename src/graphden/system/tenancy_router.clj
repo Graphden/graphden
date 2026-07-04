@@ -20,29 +20,53 @@
 
 (defonce ^{:doc "Active tenancy control-plane router for this JVM — a
                  compiled Ring callable that returns a response on a
-                 matched control-plane path and `nil` otherwise. Set by
-                 the addon's `:tenancy/router-install` init-key on
-                 startup, cleared on halt. `nil` outside a running
-                 addon: dispatch short-circuits to `nil` so the
-                 `:tenancy-routing-wrap` falls through to the main app
-                 router (single-tenant default)."}
-  active-router
+                 matched control-plane path and `nil` otherwise. The
+                 process-global. Set by the addon's
+                 `:tenancy/router-install` init-key on startup, cleared on
+                 halt. `nil` outside a running addon: dispatch
+                 short-circuits so the `:tenancy-routing-wrap` falls
+                 through to the main app router (single-tenant default).
+
+                 Reached only through `active-router-atom` so the kaocha
+                 parallel plugin can isolate it per NS-thread via
+                 `*active-router-override*` (integration tests like
+                 `grants-admin-test` install a router mid-run)."}
+  active-router-global
   (atom nil))
+
+
+(def ^:dynamic *active-router-override*
+  "Per-NS-thread override atom for parallel-test isolation. `nil` = use
+   the process-global `active-router-global`. Bound to a fresh `(atom nil)`
+   per NS-thread by `kaocha.plugin.parallel`, mirroring branch-router."
+  nil)
+
+
+(defn- active-router-atom
+  []
+  (or *active-router-override* active-router-global))
+
+
+(defn active-router-isolation-seed
+  "Parallel-plugin seeder: each isolated NS-thread starts with NO active
+   router — the bound atom holds `nil`, not the plugin's default `{}`."
+  []
+  nil)
 
 
 (defn set-active-router!
   [router]
-  (reset! active-router router))
+  (reset! (active-router-atom) router))
 
 
 (defn clear-active-router!
   []
-  (reset! active-router nil))
+  (reset! (active-router-atom) nil))
 
 
 (defn current-router
   []
-  @active-router)
+  @(active-router-atom))
 
 
 (defn dispatch

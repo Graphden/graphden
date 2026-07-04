@@ -91,10 +91,16 @@
 ;;   - `schema.fields.types/custom-types-registry` — used by exactly
 ;;     one test ns (`schema.fields.types-test`) which both registers
 ;;     and unregisters in symmetric pairs.
-;;   - `clients.vault/active-client` and
-;;     `system.branch-router/active-router` — production JVM-wide
-;;     singletons. Tests don't touch them.
+;;   - `clients.vault/active-client` — production JVM-wide singleton;
+;;     tests don't touch it.
 ;;   - `executor_runtime.core/system` — production singleton.
+;;
+;;   (`system.branch-router/active-router` +
+;;   `system.tenancy-router/active-router` were ALSO listed here as
+;;   "tests don't touch them" — false: `smoke-pass-test` /
+;;   `grants-admin-test` `set-active-router!` mid-run, so a sibling
+;;   NS-thread's merge read the wrong router and flaked. Now isolated
+;;   via their `*active-router-override*` vars below, seeded to `nil`.)
 ;;
 ;; When a NEW global-mutable surface is added, default it to this list
 ;; unless one of the above by-construction reasons applies. Symptom
@@ -140,7 +146,17 @@
     ;; §4 Risk-2: the per-org rich-types slice — same isolation need as
     ;; *rich-types-override* (its sibling above), seeded from the global per-org
     ;; snapshot so reads work before the NS's first record.
-    graphden.executor.registry.core/*per-org-rich-override*])
+    graphden.executor.registry.core/*per-org-rich-override*
+    ;; The branch/tenancy active-router singletons. `smoke-pass-test` +
+    ;; `grants-admin-test` install a router mid-run via
+    ;; `set-active-router!`; without per-thread isolation a sibling
+    ;; NS-thread's merge handler reads the wrong router off the shared
+    ;; global, calls `ctx-for` on it, and invalidates the wrong ctx —
+    ;; leaving its own graph-cache stale (branches-lifecycle-test's
+    ;; post-merge `fn-by-name` then returns nil). Seeded to `nil` so each
+    ;; thread starts router-less and falls back to its own request ctx.
+    graphden.system.branch-router/*active-router-override*
+    graphden.system.tenancy-router/*active-router-override*])
 
 
 ;; Per-var seeders. Some isolation atoms must start non-empty — the
@@ -154,7 +170,13 @@
     graphden.executor.compile-runtime/*per-org-aliases-override*
     graphden.executor.compile-runtime/per-org-snapshot-for-isolation
     graphden.executor.registry.core/*per-org-rich-override*
-    graphden.executor.registry.core/per-org-rich-snapshot-for-isolation})
+    graphden.executor.registry.core/per-org-rich-snapshot-for-isolation
+    ;; active-router overrides seed to `nil` (not the default `{}`) so
+    ;; `current-router` returns nil until the NS's own fixture sets it.
+    graphden.system.branch-router/*active-router-override*
+    graphden.system.branch-router/active-router-isolation-seed
+    graphden.system.tenancy-router/*active-router-override*
+    graphden.system.tenancy-router/active-router-isolation-seed})
 
 
 (defn- seed-for

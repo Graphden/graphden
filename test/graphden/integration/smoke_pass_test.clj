@@ -1,4 +1,4 @@
-(ns ^:integration graphden.integration.smoke-pass-test
+(ns ^:integration ^:serial graphden.integration.smoke-pass-test
   "End-to-end smoke pass — drives all the manual browser scenarios
    through the Ring handler chain so the same flow regresses
    automatically.

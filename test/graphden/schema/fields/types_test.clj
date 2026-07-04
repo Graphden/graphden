@@ -81,13 +81,20 @@
     (is (ft/types-equivalent? :uuid :ref))
     (is (ft/types-equivalent? :ref :uuid)))
 
-  (testing "jsonb and union are equivalent"
+  (testing "jsonb, union and sequence are equivalent (all JSONB)"
     (is (ft/types-equivalent? :jsonb :union))
-    (is (ft/types-equivalent? :union :jsonb)))
+    (is (ft/types-equivalent? :union :jsonb))
+    (is (ft/types-equivalent? :jsonb :sequence))
+    (is (ft/types-equivalent? :sequence :union)))
+
+  (testing "text and keyword are equivalent (both TEXT)"
+    (is (ft/types-equivalent? :text :keyword))
+    (is (ft/types-equivalent? :keyword :text)))
 
   (testing "non-equivalent types return nil"
     (is (nil? (ft/types-equivalent? :text :int)))
-    (is (nil? (ft/types-equivalent? :uuid :text)))))
+    (is (nil? (ft/types-equivalent? :uuid :text)))
+    (is (nil? (ft/types-equivalent? :keyword :jsonb)))))
 
 
 (deftest valid-type?-test

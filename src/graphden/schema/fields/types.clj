@@ -118,9 +118,13 @@
 
 (def type-equivalents
   "Types that are equivalent (stored the same way in storage).
-   Used for comparison to avoid false 'incompatible type' errors."
-  #{#{:uuid :ref}    ; :ref is stored as UUID
-    #{:jsonb :union}})  ; :union is stored as JSONB
+   Used for comparison to avoid false 'incompatible type' errors — a
+   migration that only flips a field between two members of the same group
+   is a storage no-op (no column rewrite). Groups follow `type-mappings`'
+   `:postgres` column type."
+  #{#{:uuid :ref}              ; :ref stored as UUID
+    #{:jsonb :union :sequence} ; :union / :sequence stored as JSONB
+    #{:text :keyword}})        ; :keyword stored as TEXT (via `(str kw)`)
 
 
 (defn types-equivalent?

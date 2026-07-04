@@ -58,7 +58,7 @@
    :description "Invoke the self-serve DNS-verify seam: prove the current tenant owns hostname and mark its :domain verified. Returns the updated row, or nil when the addon isn't active."
    :args {:hostname {:type :text :description "The tenant's custom host to verify, e.g. app.acme.com."}}
    :return-type :nullable-keyword-map
-   :effects #{:db}}
+   :effects #{:db :network}}
 
   {:name :_verify-domain-form-data
    :parent :parse-form-body}

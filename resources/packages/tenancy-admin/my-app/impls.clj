@@ -4,6 +4,7 @@
    an injectable controlled-privilege seam (`:set-org-handler` / `:verify-domain`)
    that validates ownership before mutating; no seam (single-tenant) → nil."
   (:require
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]))
 
 
@@ -24,6 +25,11 @@
 ;; :domain/unverified for a bad caller / failed proof.
 (defbase invoke-verify-domain
   [hostname]
+  ;; The seam runs a DNS-TXT lookup — a real outbound network effect that the
+  ;; declared `:db` hid. Record it so the effect contract is honest (this runs
+  ;; in the privileged operator context, which is unrestricted, so declaring
+  ;; it doesn't block the legitimate verification).
+  (cr/record-effect! :network)
   (when-let [seam (:verify-domain ctx)]
     (seam ctx hostname)))
 

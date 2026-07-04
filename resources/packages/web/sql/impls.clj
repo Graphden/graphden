@@ -18,6 +18,10 @@
 (defbase sql-exec
   [url user password sql params]
   (cr/record-effect! :db)
+  ;; External JDBC connection to a caller-supplied host — a real outbound
+  ;; network effect, so the cloud sandbox can gate it (`:db` alone is
+  ;; cloud-allowed and would let a restricted graph open arbitrary sockets).
+  (cr/record-effect! :network)
   (let [ds (datasource url user password)
         ;; `params` arrives from the fn-graph as a Clojure vector
         ;; (or seq) — JDBC wants a `[sql & params]` vector for the
@@ -33,6 +37,8 @@
 (defbase sql-query
   [url user password sql params]
   (cr/record-effect! :db)
+  ;; External JDBC connection — outbound network (see `sql-exec`).
+  (cr/record-effect! :network)
   (let [ds (datasource url user password)
         stmt (into [sql] (or params []))]
     ;; `as-unqualified-maps` gives `{:column value}` rather than

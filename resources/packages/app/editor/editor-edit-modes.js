@@ -1,10 +1,8 @@
 // Editor Edit Modes — inline edit popovers for the graph editor.
 //
-// All inline edit flows used to live in editor-tooltips.js until the
-// inline-editing work bloated the file past 1400 LOC. They share one
-// singleton popover skeleton (`openInlineEditPopover`) and a small
-// set of state-patching helpers (`patchFnFieldInState`) that don't
-// escape this file.
+// Inline edit flows share one singleton popover skeleton
+// (`openInlineEditPopover`) and a small set of state-patching helpers
+// (`patchFnFieldInState`) that don't escape this file.
 //
 // Globals consumed: lookups, graphData, authFetch, openFnPicker,
 // openNamespacePicker, initGraph, renderGraph, buildLookups,

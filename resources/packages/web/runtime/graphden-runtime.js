@@ -69,9 +69,7 @@ function clearActionHandlers() {
 // `data-action` button inside. The runtime's contract:
 //   - aria-disabled="true" → surface btn.title via
 //     showIconReasonPopover (if loaded), stop propagation, no
-//     handler invoked. Mirrors the legacy
-//     applyIconDisabledReason behaviour from when the editor's
-//     in-card icons were JS-built.
+//     handler invoked.
 //   - otherwise → look up dataset.action in the registry; if
 //     found, invoke handler(btn, event, host).
 //

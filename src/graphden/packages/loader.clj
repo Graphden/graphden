@@ -264,9 +264,8 @@
              :return-type (:return-type fn-def)
              :impl impl}
       (:description fn-def) (assoc :description (:description fn-def))
-      ;; Forward `:effects` (set of category tags). The legacy
-      ;; `:effectful? true` shim has been retired — every effectful
-      ;; base-fn now names its specific category
+      ;; Forward `:effects` (set of category tags). Every effectful
+      ;; base-fn names its specific category
       ;; (`:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
       ;; `:process`). `:process` = spawns supervised background work
       ;; (service-eligibility marker).

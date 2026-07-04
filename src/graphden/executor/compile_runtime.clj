@@ -5,10 +5,10 @@
    `graphden.executor.compile-eager/compile-all`) and the executor's
    public API (`execute`, `make-*-arg-callable`).
 
-   Since the legacy queue was retired, this namespace IS the executor —
-   `exec/` public API delegates here. The registry is rebuilt on demand
-   when missing (test paths that create contexts directly without going
-   through the system-level `:exec/compiled-registry` init-key)."
+   This namespace IS the executor — `exec/` public API delegates here.
+   The registry is rebuilt on demand when missing (test paths that create
+   contexts directly without going through the system-level
+   `:exec/compiled-registry` init-key)."
   (:require
     [clojure.set :as set]
     [clojure.tools.logging :as log]

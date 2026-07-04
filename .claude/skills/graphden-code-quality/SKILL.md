@@ -772,8 +772,8 @@ clojure -M:dev:test -m kaocha.runner --focus ...   # kaocha profiling plugin п�
 
 ## 15. Integration tests — `test/graphden/integration/`
 
-Integration suite сидит в `test/graphden/integration/` (6 NSes на
-момент 2026-06-17). Каждый — `^:integration` meta, идёт через
+Integration suite сидит в `test/graphden/integration/` (11 NSes на
+момент 2026-07-05). Каждый — `^:integration` meta, идёт через
 shared PG testcontainer + golden-bootstrap. Это самое дорогое
 тестирование (`bb test` integration занимает ~70% wall-time), поэтому
 качество тут критично.

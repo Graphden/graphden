@@ -495,10 +495,17 @@ docs/                                  # Documentation
 src/graphden/
 ├── packages/           # Package loader for resources/packages/
 │   └── loader.clj      # load-packages, load-module-fns, load-module-impls
-├── executor/           # Executor, registry, composition
+├── executor/           # Executor, registry, compile pipeline, composition
 │   ├── interface.clj
 │   ├── registry/
+│   ├── compile/        # deps, lookups, renames, bindings
 │   └── composition/
+├── crud/               # Entity/branch/secret CRUD, type-check, request parsing
+│   ├── entities/       # apply-*-body/-core/-rollback write units
+│   └── fn_execution/   # /api/execute* lookup + persist
+├── types/              # Type system — core (subtype/unify/narrow), check
+│   ├── core/
+│   └── check/
 ├── schema/             # Protocol, malli, graph, versioned, traits, fields
 │   ├── protocol/
 │   ├── malli/
@@ -512,8 +519,11 @@ src/graphden/
 ├── versioning/         # Storage decorator, merge protection
 │   ├── storage/
 │   └── merge/
-├── logging/            # Structured logging with MDC
-│   └── interface.clj
+├── layout/             # Graph-editor layout pipeline (Stages 1–7)
+├── services/           # Service registry — reconciler + supervisor
+├── tenancy/            # Multi-tenant router, users, grants, RLS
+├── auth/               # Pluggable auth-provider seam
+├── clients/            # External clients (vault / OpenBao)
 ├── system/             # Integrant lifecycle management
 │   ├── interface.clj   # start!, stop!, read-config
 │   ├── config.clj      # Aero config loading

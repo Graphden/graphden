@@ -272,8 +272,8 @@ The only remaining concern is `:throw` — see Known limits.
 4. **`:secret-leaf` is gated at the create path.** A user can't
    `parent :secret-leaf` directly through `/api/entities/fn` or any
    other generic create path — the gate in `crud.entities/create-
-   entity` + `apply-create` refuses any `:fn` create whose
-   `:parent-ids` contains the `:secret-leaf` row UNLESS the data
+   entity` (via `secret-leaf-capability-rej`) refuses any `:fn`
+   create whose `:parent-ids` contains the `:secret-leaf` row UNLESS the data
    carries the `:_admin-secret-create` marker, which only
    `crud.secrets/create-secret` sets (and strips before the row
    reaches storage). The Secrets-panel admin path continues to

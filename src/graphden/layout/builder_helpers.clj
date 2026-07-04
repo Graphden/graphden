@@ -82,9 +82,8 @@
    (no explicit `:required false` → caller must supply it)."
   [_arg-map arg]
   ;; Anchors carry the slot row's `:required` directly (see
-  ;; derive-fn-slot-views) so the legacy walk-to-root step is
-  ;; redundant — every anchor on the chain represents the same slot
-  ;; and therefore the same value.
+  ;; derive-fn-slot-views) — every anchor on the chain represents the
+  ;; same slot and therefore the same value.
   (false? (:required arg)))
 
 
@@ -494,7 +493,7 @@
                            s))))
         ;; Slot-id-keyed dedup: once a slot has been emitted at the
         ;; closest active fn, deeper ancestors' views of that same
-        ;; slot are skipped. Replaces the per-step source-chain walk.
+        ;; slot are skipped.
         covered-slots (atom #{})
         result (atom [])
         chain-level (atom 0)
@@ -636,8 +635,7 @@
 (defn arg-marks-hof?
   "Does `arg-entity` propagate a fn-typed marker anywhere in its
    source-id chain? Used to decide whether a ref-binding to another
-   fn crosses a HOF boundary. After #15b, the HOF marker is `:type
-   :fn` (the legacy `:is-fn` flag was retired)."
+   fn crosses a HOF boundary. The HOF marker is `:type :fn`."
   [_arg-map arg-entity]
   ;; Anchor rows carry the slot's effective type directly (slot's
   ;; `:type-fn-id` overlaid by the binding's `:type-override-fn-id`),
@@ -923,7 +921,7 @@
                                ;; edge-label overlay can resolve the slot /
                                ;; fn / type via `argRowFromNode` and render
                                ;; the type-chip on this edge (the placeholder
-                               ;; no longer carries a type label of its own).
+                               ;; carries no type label of its own).
                                (edge-source-fields lookups arg-id)
                                (edge-narrowing-fields lookups arg-id expanded-fns))}))))))
 

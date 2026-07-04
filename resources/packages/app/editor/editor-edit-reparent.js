@@ -299,10 +299,8 @@ function setInitialParentInline(fn, anchorEl) {
   });
 }
 
-// Backwards compatibility — the depth-1 row's existing `Change
-// parent` ✎ pencil and the (now removed) bottom popover used to
-// call `enterReparentEditMode`. Keep the symbol exported as a
-// convenience so any lingering callsite jumps into the right path.
+// Entered from the parents-strip `Change parent` affordance
+// (editor-overlay-strips.js).
 function enterReparentEditMode(fn, anchorEl) {
   const pids = fn?.['parent-ids'] || [];
   if (pids.length === 0) setInitialParentInline(fn, anchorEl);

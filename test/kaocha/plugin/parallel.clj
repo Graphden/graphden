@@ -95,12 +95,10 @@
 ;;     tests don't touch it.
 ;;   - `executor_runtime.core/system` — production singleton.
 ;;
-;;   (`system.branch-router/active-router` +
-;;   `system.tenancy-router/active-router` were ALSO listed here as
-;;   "tests don't touch them" — false: `smoke-pass-test` /
-;;   `grants-admin-test` `set-active-router!` mid-run, so a sibling
-;;   NS-thread's merge read the wrong router and flaked. Now isolated
-;;   via their `*active-router-override*` vars below, seeded to `nil`.)
+;;   (`branch-router` + `tenancy-router` active-router are NOT in this
+;;   "tests don't touch" set — `smoke-pass-test` / `grants-admin-test`
+;;   set them mid-run — so they're isolated below via
+;;   `*active-router-override*`.)
 ;;
 ;; When a NEW global-mutable surface is added, default it to this list
 ;; unless one of the above by-construction reasons applies. Symptom

@@ -148,12 +148,11 @@
                                            slot-by-fn-source-slot]}]
   (let [slot (get slot-by-id slot-id)
         b (get binding-by [fn-id slot-id])
-        ;; Phase 6c — renamed-view slot owned by `fn-id` whose
-        ;; source-slot-id points back at slot-id. Replaces the legacy
-        ;; `(:rename-to b)` text lookup. Same scope as before — only
-        ;; the binding-owner's own renames affect the displayed name
-        ;; here; ancestor-owned renames flow through different
-        ;; build-anchor-row calls keyed on those ancestors.
+        ;; Renamed-view slot owned by `fn-id` whose source-slot-id
+        ;; points back at slot-id. Only the binding-owner's own renames
+        ;; affect the displayed name here; ancestor-owned renames flow
+        ;; through different build-anchor-row calls keyed on those
+        ;; ancestors.
         renamed-view (when slot-by-fn-source-slot
                        (get slot-by-fn-source-slot [fn-id slot-id]))
         eff-tfn (or (some-> b :type-override-fn-id fn-by-id)

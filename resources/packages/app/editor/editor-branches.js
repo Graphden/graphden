@@ -515,8 +515,7 @@ async function showMergeConflictsModal(body, sourceName, targetName) {
 
 // Read each rendered row's `data-entity-*` + checked radio into the
 // `:conflict-resolutions` payload. The server owns the row markup, so the
-// contract is the two data-attrs + the radio `value`, not a positional
-// `mc-<idx>` name.
+// JS↔partial contract is the two data-attrs + the radio `value`.
 async function submitConflictResolutions(sourceName, targetName) {
   const rows = Array.from(document.querySelectorAll(
     '.merge-conflicts-modal .merge-conflict-row'));

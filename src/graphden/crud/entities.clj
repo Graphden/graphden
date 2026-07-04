@@ -1204,22 +1204,10 @@
    parsed seq-binding ctx))
 
 
-(defn apply-seq-append
-  [parsed seq-binding ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-append)
-   parsed seq-binding ctx))
-
-
 (defn load-seq-remove-item
   [parsed ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/load-seq-remove-item)
    parsed ctx))
-
-
-(defn apply-seq-remove
-  [parsed item ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-remove)
-   parsed item ctx))
 
 
 (defn load-seq-update-item
@@ -1231,12 +1219,6 @@
 (defn apply-seq-update-core
   [parsed item ctx]
   ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-update-core)
-   parsed item ctx))
-
-
-(defn apply-seq-update
-  [parsed item ctx]
-  ((requiring-resolve 'graphden.crud.entities.seq/apply-seq-update)
    parsed item ctx))
 
 
@@ -1261,10 +1243,4 @@
 (defn apply-tighten-core
   [parsed ctx]
   ((requiring-resolve 'graphden.crud.entities.tighten/apply-tighten-core)
-   parsed ctx))
-
-
-(defn apply-tighten
-  [parsed ctx]
-  ((requiring-resolve 'graphden.crud.entities.tighten/apply-tighten)
    parsed ctx))

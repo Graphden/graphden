@@ -3,9 +3,9 @@
    `[:fn args ret #{eff-set}]` by writing a new anonymous fn-row whose
    `:constraint` carries the narrower shape, then pointing the
    binding's `:type-override-fn-id` at it. Extracted from
-   `crud/entities` so the parent ns stays focused on generic CRUD.
-   Re-exported through `crud.entities` for backward compat (web/crud/
-   impls.clj calls `apply-tighten-core` via the `entities/` alias).
+   `crud/entities` so the parent ns stays focused on generic CRUD;
+   `apply-tighten-core` is re-exported through `crud.entities` so
+   `web/crud/impls.clj` can call it via the `entities/` alias.
 
    Phase 8 carved out a 4-arity `[:fn args ret #{eff-set}]` form so a
    slot whose callable should stay pure (or only do certain effects)
@@ -23,9 +23,7 @@
    eff-set ⊆ old. `subtype?` enforces this and we surface the
    rejection as a 400."
   (:require
-    [cheshire.core :as json]
     [clojure.set]
-    [graphden.crud.entities :as entities]
     [graphden.crud.request :as request]
     [graphden.crud.type-check :as tc]
     [graphden.crud.types-api :as types-api]
@@ -172,17 +170,3 @@
   [parsed ctx]
   (tighten-fn-type-impl! (request/require-storage ctx)
                          (:binding-id parsed) (:delta parsed)))
-
-
-(defn apply-tighten
-  "Wrapper for non-graph callers — builds the Ring envelope around
-   `apply-tighten-core`. New paths go through `:_tighten-apply`."
-  [parsed ctx]
-  (let [storage (request/require-storage ctx)
-        {:keys [status reason result]} (apply-tighten-core parsed ctx)]
-    (if (= 200 status)
-      (do (entities/invalidate! ctx storage :binding {:fn-id (:fn-id result)})
-          {:status 200
-           :headers {"Content-Type" "application/json"}
-           :body (json/generate-string result)})
-      (entities/html-error-response status reason))))

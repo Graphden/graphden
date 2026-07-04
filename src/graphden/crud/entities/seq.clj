@@ -2,25 +2,21 @@
   "Sequence-binding CRUD — the append / remove / update flows for
    `binding-list-item` rows. Extracted from `crud/entities` so the
    parent ns stays focused on generic CRUD + record/list-type creation
-   + update + delete. Re-exported through `crud.entities` for
-   backward compat (web/crud/impls.clj calls these via the
-   `entities/` alias).
+   + update + delete. The `apply-*-core` / `load-*` / `find-*` helpers
+   are re-exported through `crud.entities` so `web/crud/impls.clj` can
+   call them via the `entities/` alias.
 
    Each `apply-*-core` is a §3.3 atomic write unit — the synthetic-
    binding materialise + position-compute + pre-rej triplet (in
    append) shares a binding-id that can't be split across graph
    nodes without race risk. The graph composition around each
    primitive dispatches on the returned shape and runs invalidate +
-   response. The `apply-*` (non-core) wrappers exist for non-graph
-   callers (tests, the legacy form-driven path)."
+   response."
   (:require
-    [cheshire.core :as json]
     [clojure.string :as str]
-    [graphden.crud.entities :as entities]
     [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
-    [graphden.executor.context :as exec-ctx]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -109,8 +105,9 @@
 (defn find-seq-append-binding
   "Read-only sequence-binding resolution for the C3 graph. Returns
    `find-sequence-binding`'s result (existing binding | synthetic
-   placeholder | nil) — does NOT materialize a synthetic binding;
-   `apply-seq-append` runs that write only after every guard passes."
+   placeholder | nil) — does NOT materialize a synthetic binding; the
+   `:_seq-append-apply` graph path runs that write only after every
+   guard passes."
   [parsed ctx]
   (when-let [fn-id (:fn-id parsed)]
     (find-sequence-binding ctx fn-id)))
@@ -157,20 +154,6 @@
            :fn-id fn-id}))))
 
 
-(defn apply-seq-append
-  "Wrapper for non-graph callers — builds the Ring envelope around
-   `apply-seq-append-core`. New paths go through `:_seq-append-apply`."
-  [parsed seq-binding ctx]
-  (let [result (apply-seq-append-core parsed seq-binding ctx)]
-    (if (:created result)
-      (do (exec-ctx/invalidate-graph-cache! ctx #{(:fn-id result)})
-          {:status 200
-           :headers {"Content-Type" "application/json"}
-           :body (json/generate-string {:item-id (:created result)
-                                        :position (:position result)})})
-      (entities/html-error-response 400 (:error result)))))
-
-
 (defn load-seq-remove-item
   "Resolve the binding-list-item row for a parsed sequence-remove
    request. Returns nil when the item-id is invalid OR when no row
@@ -180,18 +163,6 @@
   [parsed ctx]
   (when-let [item-id (:item-id parsed)]
     (sp/read-entity (request/require-storage ctx) :binding-list-item item-id)))
-
-
-(defn apply-seq-remove
-  "Success branch of sequence-remove — reached only after the `:cond`
-   validation clauses pass. Deletes the item row, invalidates caches
-   via the snapshot (so `affected-fn-ids` walks `:binding-id` → `:fn-id`),
-   returns the 200 partial Ring response."
-  [parsed item ctx]
-  (let [storage (request/require-storage ctx)]
-    (sp/delete-entity storage :binding-list-item (:item-id parsed))
-    (entities/invalidate! ctx storage :binding-list-item item)
-    {:status 200 :body ""}))
 
 
 (defn load-seq-update-item
@@ -220,15 +191,3 @@
       {:error (:reason pre-rej)}
       (do (sp/update-entity storage :binding-list-item item-id changes)
           {:updated item-id}))))
-
-
-(defn apply-seq-update
-  "Wrapper for non-graph callers — builds the Ring envelope around
-   `apply-seq-update-core`. New paths go through `:_seq-update-apply`."
-  [parsed item ctx]
-  (let [storage (request/require-storage ctx)
-        result (apply-seq-update-core parsed item ctx)]
-    (if (:updated result)
-      (do (entities/invalidate! ctx storage :binding-list-item item)
-          {:status 200 :body ""})
-      (entities/html-error-response 400 (:error result)))))

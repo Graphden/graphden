@@ -613,17 +613,15 @@
 
 (def default-cloud-allowed-effects
   "The `:allowed-effects` value a restricted (cloud / user-graph)
-   ExecutionContext should carry — the full vocabulary minus the
+   ExecutionContext carries — the full vocabulary minus the
    security-sensitive set, i.e. `#{:db :state :time :random}`.
 
-   WIRING (deferred to Phase 2 by design): the gate is ctx-based, so the
-   correct place to apply this is the per-tenant ExecutionContext that
-   Phase 2 (organizations) introduces — a USER-graph execution runs in an
-   org-ctx carrying this set, while the PLATFORM ctx stays unrestricted
-   (the platform's own web-server / vault / config NEED :network / :env /
-   :io / :process, so the default ctx can't be globally restricted). When
-   the org-ctx exists, wiring is one line:
-   `(create-context {:storage … :allowed-effects default-cloud-allowed-effects})`."
+   The gate is ctx-based, so it's applied per-tenant: a USER-graph
+   execution runs in an org-ctx carrying this set (the tenancy addon
+   binds it — `tenancy.addon` / `tenancy.app-router`), while the PLATFORM
+   ctx stays unrestricted (the platform's own web-server / vault / config
+   NEED :network / :env / :io / :process, so the default ctx can't be
+   globally restricted)."
   (set/difference known-effects cloud-forbidden-effects))
 
 

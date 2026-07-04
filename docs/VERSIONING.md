@@ -247,7 +247,8 @@ Adding more is one `defmethod` of
 | `src/graphden/crud/branches.clj` | List / get / create / delete / merge / diff / history orchestration |
 | `resources/packages/app/branches/` | HTTP fn-defs + impls bridging the API endpoints to `crud.branches` |
 | `src/graphden/system/demo_branches.clj` | Idempotent demo seeder + `:apply-mutation!` multimethod |
-| `resources/packages/app/editor/editor-branches.js` | Branch chip + popover + fetch wrap + conflict modal |
+| `resources/packages/app/editor/editor-branches.js` | Branch chip + popover + fetch wrap + conflict-modal overlay chrome & radio/apply lifecycle |
+| `resources/packages/app/editor/fns.edn` (`:_partial-mc-*`) | `POST /partials/merge-conflicts` — the conflict-modal card rendered as hiccup (route `:partial-merge-conflicts`) |
 | `resources/packages/app/editor/editor-fn-versions.js` | `⌛` history popover for fn-card |
 
 ## Subtleties worth knowing

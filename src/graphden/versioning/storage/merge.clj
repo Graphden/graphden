@@ -36,11 +36,11 @@
    The fork base is the created-at of whichever branch DESCENDS from the
    other (its `:base-branch-id` points at the other) — for a feature→main
    merge that's the source (feature), but for a main→feature (pull) merge it
-   is the TARGET (feature). Using the source unconditionally made a
-   main→feature merge fork at main's root created-at, so every already-
-   inherited main change counted as \"modified after fork\" → spurious
-   conflicts. Unrelated / multi-level branches fall back to the source
-   (unchanged behaviour) until a true common-ancestor walk is added."
+   is the TARGET (feature). Picking the source unconditionally would fork a
+   main→feature merge at main's root created-at, counting every already-
+   inherited main change as \"modified after fork\" → spurious conflicts, so
+   don't simplify this to always-source. Unrelated / multi-level branches
+   fall back to the source until a true common-ancestor walk is added."
   [base-storage source-branch-id target-branch-id]
   (let [source-branch (sp/read-entity base-storage :branch source-branch-id)
         target-branch (sp/read-entity base-storage :branch target-branch-id)
@@ -249,8 +249,7 @@
 (defn- touched-entities-by-side
   "Combined source+target visibility scan. ONE query per entity-type
    (4 total) against `WHERE :branch-id IN (source-vis ∪ target-vis)`,
-   then partitions client-side. Pre-fix the diff did 4 + 4 = 8
-   queries (one per side). Rows on branches present in BOTH chains
+   then partitions client-side. Rows on branches present in BOTH chains
    (e.g. the shared `main` ancestor) contribute to both sides
    correctly. Returns `{entity-name {:source #{eid} :target #{eid}}}`."
   [base-storage source-vis target-vis]

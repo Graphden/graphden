@@ -314,10 +314,9 @@
                            (some? (:ref-id source-arg))))
         defines-own-ref (and has-ref (not source-has-ref))
         binding-key (or (:id arg) (:source-id arg))
-        ;; bindings is slot-id-keyed; one direct lookup replaces the
-        ;; source-id chain walk and the per-step `binding-applies?`
-        ;; check is just the closure-membership test (slot equality
-        ;; is implicit).
+        ;; bindings is slot-id-keyed, so this is one direct lookup; the
+        ;; per-step `binding-applies?` check is just the closure-
+        ;; membership test (slot equality is implicit).
         raw-binding (let [b (get bindings (:slot-id arg))]
                       (when (binding-applies? b) b))
         bnd (when (and raw-binding
@@ -388,8 +387,7 @@
         ;; A binding "applies" when its owning fn is in `fn-id`'s
         ;; inheritance closure AND it targets the same slot the arg
         ;; under inspection lives on. With slots as terminal identity
-        ;; the old "walk source-id chain to see if it reaches target"
-        ;; collapses to a slot-id equality check.
+        ;; that reaches-target test is just a slot-id equality check.
         ;; Bindings is keyed by slot-id; the entry already carries the
         ;; binding's owner :fn-id. "Applies" reduces to: owner-fn is in
         ;; fn-id's inheritance closure (slot-id match is implicit since

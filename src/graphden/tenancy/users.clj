@@ -200,20 +200,20 @@
    4-arg arity: the `:login` user-ops seam is invoked with the Ring `request`
    (its client IP feeds the addon's per-IP rate limiter); the core op ignores
    it — this arity is just the seam adapter."
-  ([ctx username password _request] (login! ctx username password))
   ([ctx username password]
-  (let [storage (:storage ctx)]
-    (tc/with-org tc/public-org
-                 (let [user (first (sp/query-entities storage :user {:username username}))]
-                   (when (and user (verify-password password (:password-hash user)))
-                     (let [raw (random-token)
-                           org (:org user)]
-                       (sp/create-entity storage :token
-                                         {:token-hash (tauth/token-hash raw)
-                                          :user username
-                                          :org org
-                                          :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
-                       {:token raw :user username :org org})))))))
+   (let [storage (:storage ctx)]
+     (tc/with-org tc/public-org
+                  (let [user (first (sp/query-entities storage :user {:username username}))]
+                    (when (and user (verify-password password (:password-hash user)))
+                      (let [raw (random-token)
+                            org (:org user)]
+                        (sp/create-entity storage :token
+                                          {:token-hash (tauth/token-hash raw)
+                                           :user username
+                                           :org org
+                                           :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
+                        {:token raw :user username :org org}))))))
+  ([ctx username password _request] (login! ctx username password)))
 
 
 (defn signup!

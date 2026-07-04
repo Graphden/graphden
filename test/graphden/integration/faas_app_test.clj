@@ -684,7 +684,7 @@
         (is (empty? (sp/query-entities storage :grant {:subject "cascade-victim"})))))
     (testing "deleting a nonexistent user throws :user/not-found"
       (is (thrown? clojure.lang.ExceptionInfo
-                   (users/delete-user! *ctx* (random-uuid)))))))
+            (users/delete-user! *ctx* (random-uuid)))))))
 
 
 (deftest reset-password-updates-hash-and-kills-sessions
@@ -711,12 +711,12 @@
         uid (:id user)]
     (testing "a tenant (org ≠ public) cannot delete another account"
       (is (thrown? clojure.lang.ExceptionInfo
-                   (tc/with-org "attacker-org" (users/delete-user! *ctx* uid))))
+            (tc/with-org "attacker-org" (users/delete-user! *ctx* uid))))
       (is (some? (tc/with-org tc/public-org (sp/read-entity storage :user uid)))
           "target account still exists — the tenant's delete was denied"))
     (testing "a tenant cannot reset another account's password"
       (is (thrown? clojure.lang.ExceptionInfo
-                   (tc/with-org "attacker-org" (users/reset-password! *ctx* uid "hax")))))
+            (tc/with-org "attacker-org" (users/reset-password! *ctx* uid "attacker-pw")))))
     (testing "the operator (public-org) CAN reset + delete"
       (is (map? (tc/with-org tc/public-org (users/reset-password! *ctx* uid "fresh-pw"))))
       (is (map? (tc/with-org tc/public-org (users/delete-user! *ctx* uid))))
@@ -727,6 +727,6 @@
   (let [user (users/create-user! *ctx* "blank-pw-user" "pw" "acme")]
     (testing "a blank new password is rejected (would otherwise brick the account)"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"password required"
-                            (users/reset-password! *ctx* (:id user) "")))
+            (users/reset-password! *ctx* (:id user) "")))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"password required"
-                            (users/reset-password! *ctx* (:id user) "   "))))))
+            (users/reset-password! *ctx* (:id user) "   "))))))

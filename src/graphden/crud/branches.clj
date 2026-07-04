@@ -5,9 +5,9 @@
    `:detect-conflicts` base-fns to drop the version wrapper) and
    `resolve-branch-ref` (used by the `:resolve-branch-ref` base-fn).
 
-   Every `apply-*` defn that used to live here was decomposed into
-   graph fn-defs over atomic primitives (`:create-branch!` /
-   `:delete-branch!` / `:diff-branches` / `:detect-conflicts` /
+   The branch API's create / delete / diff / detect-conflicts / merge
+   logic lives in graph fn-defs over atomic primitives (`:create-branch!`
+   / `:delete-branch!` / `:diff-branches` / `:detect-conflicts` /
    `:merge-branch!`) + `:zipmap` / `:as-json-branch` / `:stringify-uuids`
    composition + graph-level `:try` for exception → structured-envelope
    dispatch. See `branches_graph_test.clj` for the equivalence-tested

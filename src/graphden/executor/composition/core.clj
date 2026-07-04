@@ -312,10 +312,9 @@
 
 (defn- discover-existing-state
   "One-shot fetch of the bits both convenience arities of
-   `sync-fns-to-storage!` need from storage. Two adjacent helpers
-   used to query `:fn {}` independently — this collapses to a single
-   shared read, which matters on cold-start packages with hundreds
-   of fns."
+   `sync-fns-to-storage!` need from storage — a single shared `:fn {}`
+   read rather than one per caller, which matters on cold-start packages
+   with hundreds of fns."
   [storage]
   (let [fns (sp/query-entities storage :fn {})
         slots (sp/query-entities storage :slot {})

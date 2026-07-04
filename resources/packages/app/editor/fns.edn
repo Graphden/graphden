@@ -3532,7 +3532,7 @@
           :children [:_partial-mc-row-entity-span :_partial-mc-row-id-span]}}
 
   {:name :_partial-mc-row-attrs
-   :description "Row div attrs — class + the two `data-entity-*` attrs the JS submit reads to build `:conflict-resolutions` (replaces the old positional `mc-<idx>` coupling)."
+   :description "Row div attrs — class + the two `data-entity-*` attrs the JS submit reads to build `:conflict-resolutions`."
    :parent :zipmap
    :args {:keys [{:value :class} {:value :data-entity-name} {:value :data-entity-id}]
           :vals [{:value "merge-conflict-row"} :_partial-mc-row-entity-name :_partial-mc-row-entity-id]}}

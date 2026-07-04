@@ -18,7 +18,6 @@
    sibling test's `rich-type-of` lookups arbitrarily. Forcing
    this NS into the sequential bucket scopes the redef cleanly."
   (:require
-    [cheshire.core :as cheshire]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
     [graphden.crud.type-check :as tc]
@@ -519,13 +518,12 @@
 
 
 ;; ============================================================================
-;; tighten — extended coverage: rollback, bound-callable escape, apply-tighten
+;; tighten — extended coverage: rollback, bound-callable escape
 ;;
 ;; The basic happy/reject branches of `tighten-fn-type-impl!` were
 ;; covered above; these tests close the remaining branches:
 ;;   - commit-tighten! rollback path (post-write type-check fails)
 ;;   - bound-callable effect escape (ref-fn effects exceed new constraint)
-;;   - apply-tighten end-to-end (json envelope + invalidate! call)
 ;; ============================================================================
 
 (deftest commit-tighten-rollback-on-post-write-type-check-fail-test
@@ -575,43 +573,4 @@
             "the reject message names the escaping effect")
         ;; Use comp-fn-id so the let-binding isn't dead code.
         (is (some? comp-fn-id)))
-      (finally (sp/close storage)))))
-
-
-(deftest apply-tighten-end-to-end-success-test
-  ;; Wire apply-tighten (the Ring-shaped wrapper) end-to-end and
-  ;; assert the JSON envelope + invalidate! call. invalidate! is
-  ;; exercised against a real ExecutionContext so the cache-poke
-  ;; path doesn't crash.
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      (let [[bid comp-fn-id] (make-binding-on-fn-typed-slot!
-                               storage "app" [:fn {} :any #{:io :db}])
-            resp (entities/apply-tighten
-                   {:binding-id bid :delta {:effects ["io"]}}
-                   c)]
-        (is (= 200 (:status resp)))
-        (is (= "application/json" (get-in resp [:headers "Content-Type"])))
-        (let [body (cheshire/parse-string (:body resp) true)]
-          (is (= (str comp-fn-id) (:fn-id body)))
-          (is (some? (:type-override-fn-id body)))
-          (is (= ["fn" {} "any" ["io"]] (:constraint body))
-              "constraint round-trips as JSON arrays of stringified keywords")))
-      (finally (sp/close storage)))))
-
-
-(deftest apply-tighten-propagates-reject-as-error-body-test
-  ;; When tighten-fn-type-impl! returns a non-200, apply-tighten
-  ;; wraps the reason in an HTML error fragment + propagates the
-  ;; status. Covers the `else` branch of apply-tighten's `if`.
-  (let [storage (setup/create-test-storage)
-        c (test-ctx storage)]
-    (try
-      (let [resp (entities/apply-tighten
-                   {:binding-id (random-uuid) :delta {:effects ["io"]}}
-                   c)]
-        (is (= 404 (:status resp)))
-        (is (re-find #"error" (:body resp)))
-        (is (re-find #"not found" (:body resp))))
       (finally (sp/close storage)))))

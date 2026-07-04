@@ -3299,6 +3299,397 @@
    :args {:body :_partial-bd-html}}
 
   ;; ---------------------------------------------------------------------
+  ;; MERGE-CONFLICTS PARTIAL (graph-first §6) — POST /partials/merge-conflicts
+  ;; with the JSON body `{conflicts, source, target}` the failed merge
+  ;; already returned to JS. The server RENDERS those conflicts as the
+  ;; resolution CARD hiccup (header + help + (>1) batch toolbar +
+  ;; per-conflict rows with source/target radios + version previews +
+  ;; error slot + Cancel/Apply). It does NOT re-detect — the conflicts are
+  ;; already in hand, so this mirrors `:_partial-execute-result-inline-*`
+  ;; (POST the already-computed data, server owns only the markup) rather
+  ;; than duplicating `detect-conflicts`. Client data is trusted for
+  ;; DISPLAY only — the re-submitted merge re-validates every resolution
+  ;; server-side. JS in editor-branches.js owns the modal chrome (the
+  ;; full-viewport overlay div — a flex sibling of the card, so it can't
+  ;; live under this single-root fragment) + the radio/apply lifecycle (it
+  ;; reads each row's `data-entity-*` + checked radio on submit).
+  ;; ---------------------------------------------------------------------
+
+  {:name :_partial-mc-body
+   :description "JSON request body — `{:conflicts [...] :source <name> :target <name>}`, the shape the failed merge returned to JS. `:parse-json-body` types its return `:nullable-jsonb`; the modal only POSTs a keyword-keyed map, so narrow to `:nullable-keyword-map` for the downstream `:get` reads."
+   :parent :parse-json-body
+   :return-type :nullable-keyword-map
+   :args {:request {:as :request}}}
+
+  {:name :_partial-mc-conflicts
+   :description "The conflict list straight from the POST body — `[{:entity-name :entity-id :source-version :target-version}]`, exactly as the merge's `:merge-conflict` response carried it."
+   :parent :get
+   :args {:coll :_partial-mc-body :key {:value :conflicts} :default {:value []}}}
+
+  {:name :_partial-mc-count
+   :parent :count
+   :args {:coll :_partial-mc-conflicts}}
+
+  {:name :_partial-mc-count-text
+   :parent :to-str
+   :args {:value :_partial-mc-count}}
+
+  {:name :_partial-mc-source-name
+   :parent :get
+   :args {:coll :_partial-mc-body :key {:value :source} :default {:value "(source)"}}}
+
+  {:name :_partial-mc-target-name
+   :parent :get
+   :args {:coll :_partial-mc-body :key {:value :target} :default {:value "(target)"}}}
+
+  ;; --- Version preview (server mirror of `previewVersion`): "(deleted)"
+  ;; for a nil version map, else the space-joined present fields
+  ;; (name / "desc" / pos=N / value=…), long fields ellipsised at 32.
+
+  {:name :_partial-mc-trunc-long?
+   :parent :gt
+   :args {:nums [{:parent :str-len :args {:string {:as :string}}} {:value 32}]}}
+
+  {:name :_partial-mc-trunc-cut
+   :parent :str
+   :args {:parts [{:parent :subs :args {:string {:as :string} :start {:value 0} :end {:value 31}}}
+                  {:value "…"}]}}
+
+  {:name :_partial-mc-truncate
+   :description "Truncate a string to 32 chars + ellipsis (mirrors JS `truncate(s, 32)`). `:string` is a free arg so the description and value previews reuse the same chain."
+   :parent :if
+   :args {:test :_partial-mc-trunc-long?
+          :then :_partial-mc-trunc-cut
+          :else {:as :string}}}
+
+  {:name :_partial-mc-part-present?
+   :description "Filter pred — keep non-empty preview parts (drops the `\"\"` an absent field contributes so `:str-join` doesn't emit stray separators)."
+   :parent :not
+   :args {:value {:parent :empty? :args {:coll {:as :item}}}}}
+
+  {:name :_partial-mc-pv-name
+   :parent :coalesce
+   :args {:value {:parent :get :args {:coll {:as :version} :key {:value :name} :default nil}}
+          :default {:value ""}}}
+
+  {:name :_partial-mc-pv-desc-raw
+   :parent :get
+   :args {:coll {:as :version} :key {:value :description} :default nil}}
+
+  {:name :_partial-mc-pv-desc-part
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_partial-mc-pv-desc-raw}}
+          :then {:parent :str
+                 :args {:parts [{:value "\""}
+                                {:parent :_partial-mc-truncate :args {:string :_partial-mc-pv-desc-raw}}
+                                {:value "\""}]}}
+          :else {:value ""}}}
+
+  {:name :_partial-mc-pv-pos-raw
+   :parent :get
+   :args {:coll {:as :version} :key {:value :position} :default nil}}
+
+  {:name :_partial-mc-pv-pos-part
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_partial-mc-pv-pos-raw}}
+          :then {:parent :str :args {:parts [{:value "pos="} :_partial-mc-pv-pos-raw]}}
+          :else {:value ""}}}
+
+  {:name :_partial-mc-pv-value-raw
+   :parent :get
+   :args {:coll {:as :version} :key {:value :value} :default nil}}
+
+  {:name :_partial-mc-pv-value-part
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_partial-mc-pv-value-raw}}
+          :then {:parent :str
+                 :args {:parts [{:value "value="}
+                                {:parent :_partial-mc-truncate
+                                 :args {:string {:parent :to-str :args {:value :_partial-mc-pv-value-raw}}}}]}}
+          :else {:value ""}}}
+
+  {:name :_partial-mc-pv-parts
+   :parent :filter
+   :args {:pred :_partial-mc-part-present?
+          :coll [:_partial-mc-pv-name :_partial-mc-pv-desc-part
+                 :_partial-mc-pv-pos-part :_partial-mc-pv-value-part]}}
+
+  {:name :_partial-mc-pv-joined
+   :parent :str-join
+   :args {:coll :_partial-mc-pv-parts :separator {:value " "}}}
+
+  {:name :_partial-mc-pv-nonempty
+   :parent :if
+   :args {:test {:parent :empty? :args {:coll :_partial-mc-pv-joined}}
+          :then {:value "(empty)"}
+          :else :_partial-mc-pv-joined}}
+
+  {:name :_partial-mc-preview
+   :description "Server mirror of `previewVersion` — `(deleted)` when the version map is nil (side removed the entity), else the space-joined present fields. `:version` is a free arg so the row renderer feeds source-version and target-version through the same chain."
+   :parent :if
+   :args {:test {:parent :nil? :args {:value {:as :version}}}
+          :then {:value "(deleted)"}
+          :else :_partial-mc-pv-nonempty}}
+
+  ;; --- Per-conflict HOF callback (`{:as :item}` = one conflict row) ---
+
+  {:name :_partial-mc-row-entity-name-raw
+   :parent :get
+   :args {:coll {:as :item} :key {:value :entity-name} :default {:value ""}}}
+
+  {:name :_partial-mc-row-entity-name
+   :description "Entity-type as bare text (`fn`, not `:fn`) — the e2e asserts `.merge-conflict-entity` textContent `=== 'fn'`, and it also becomes the `data-entity-name` the JS submit reads."
+   :parent :name
+   :args {:value :_partial-mc-row-entity-name-raw}}
+
+  {:name :_partial-mc-row-entity-id
+   :parent :get
+   :args {:coll {:as :item} :key {:value :entity-id} :default {:value ""}}}
+
+  {:name :_partial-mc-row-source-version
+   :parent :get
+   :args {:coll {:as :item} :key {:value :source-version} :default nil}}
+
+  {:name :_partial-mc-row-target-version
+   :parent :get
+   :args {:coll {:as :item} :key {:value :target-version} :default nil}}
+
+  {:name :_partial-mc-row-source-preview
+   :parent :_partial-mc-preview
+   :args {:version :_partial-mc-row-source-version}}
+
+  {:name :_partial-mc-row-target-preview
+   :parent :_partial-mc-preview
+   :args {:version :_partial-mc-row-target-version}}
+
+  {:name :_partial-mc-row-radio-name
+   :description "Per-row radio-group name — unique via the entity-id so the two radios in a row are mutually exclusive but independent of other rows."
+   :parent :str
+   :args {:parts [{:value "mc-"} :_partial-mc-row-entity-id]}}
+
+  {:name :_partial-mc-row-source-radio
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :type} {:value :name} {:value :value} {:value :checked}]
+                         :vals [{:value "radio"} :_partial-mc-row-radio-name {:value "source"} {:value true}]}}
+          :children {:value []}}}
+
+  {:name :_partial-mc-row-target-radio
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :type} {:value :name} {:value :value}]
+                         :vals [{:value "radio"} :_partial-mc-row-radio-name {:value "target"}]}}
+          :children {:value []}}}
+
+  {:name :_partial-mc-strong-source
+   :parent :hiccup
+   :args {:tag {:value "strong"} :attrs {:value {}} :children ["source"]}}
+
+  {:name :_partial-mc-strong-target
+   :parent :hiccup
+   :args {:tag {:value "strong"} :attrs {:value {}} :children ["target"]}}
+
+  {:name :_partial-mc-row-source-code
+   :parent :hiccup
+   :args {:tag {:value "code"} :attrs {:value {}} :children [:_partial-mc-row-source-preview]}}
+
+  {:name :_partial-mc-row-target-code
+   :parent :hiccup
+   :args {:tag {:value "code"} :attrs {:value {}} :children [:_partial-mc-row-target-preview]}}
+
+  {:name :_partial-mc-row-source-label
+   :parent :hiccup
+   :args {:tag {:value "label"} :attrs {:value {}}
+          :children [:_partial-mc-row-source-radio {:value " "} :_partial-mc-strong-source
+                     {:value " "} :_partial-mc-row-source-code]}}
+
+  {:name :_partial-mc-row-target-label
+   :parent :hiccup
+   :args {:tag {:value "label"} :attrs {:value {}}
+          :children [:_partial-mc-row-target-radio {:value " "} :_partial-mc-strong-target
+                     {:value " "} :_partial-mc-row-target-code]}}
+
+  {:name :_partial-mc-row-choice
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "merge-conflict-choice"}}
+          :children [:_partial-mc-row-source-label :_partial-mc-row-target-label]}}
+
+  {:name :_partial-mc-row-entity-span
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:class "merge-conflict-entity"}}
+          :children [:_partial-mc-row-entity-name]}}
+
+  {:name :_partial-mc-row-id-span
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:class "merge-conflict-id"}}
+          :children [:_partial-mc-row-entity-id]}}
+
+  {:name :_partial-mc-row-head
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "merge-conflict-row-head"}}
+          :children [:_partial-mc-row-entity-span :_partial-mc-row-id-span]}}
+
+  {:name :_partial-mc-row-attrs
+   :description "Row div attrs — class + the two `data-entity-*` attrs the JS submit reads to build `:conflict-resolutions` (replaces the old positional `mc-<idx>` coupling)."
+   :parent :zipmap
+   :args {:keys [{:value :class} {:value :data-entity-name} {:value :data-entity-id}]
+          :vals [{:value "merge-conflict-row"} :_partial-mc-row-entity-name :_partial-mc-row-entity-id]}}
+
+  {:name :_partial-mc-row
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs :_partial-mc-row-attrs
+          :children [:_partial-mc-row-head :_partial-mc-row-choice]}}
+
+  {:name :_partial-mc-rendered
+   :parent :map
+   :args {:func :_partial-mc-row :coll :_partial-mc-conflicts}}
+
+  {:name :_partial-mc-rows-div
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "merge-conflicts-rows"}}
+          :children :_partial-mc-rendered}}
+
+  ;; --- Card chrome: header / help / batch toolbar / error / actions ---
+
+  {:name :_partial-mc-plural
+   :description "\"\" for exactly 1 conflict, \"s\" otherwise (mirrors JS `length === 1 ? '' : 's'`)."
+   :parent :if
+   :args {:test {:parent :equal? :args {:a :_partial-mc-count :b {:value 1}}}
+          :then {:value ""}
+          :else {:value "s"}}}
+
+  {:name :_partial-mc-header-prefix
+   :parent :str
+   :args {:parts [{:value "Resolve "} :_partial-mc-count-text {:value " conflict"}
+                  :_partial-mc-plural {:value " merging "}]}}
+
+  {:name :_partial-mc-header-strong-src
+   :parent :hiccup
+   :args {:tag {:value "strong"} :attrs {:value {}} :children [:_partial-mc-source-name]}}
+
+  {:name :_partial-mc-header-strong-tgt
+   :parent :hiccup
+   :args {:tag {:value "strong"} :attrs {:value {}} :children [:_partial-mc-target-name]}}
+
+  {:name :_partial-mc-header
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "merge-conflicts-header"}}
+          :children [:_partial-mc-header-prefix :_partial-mc-header-strong-src
+                     {:value " → "} :_partial-mc-header-strong-tgt]}}
+
+  {:name :_partial-mc-help-em-src
+   :parent :hiccup
+   :args {:tag {:value "em"} :attrs {:value {}} :children ["source"]}}
+
+  {:name :_partial-mc-help-em-tgt
+   :parent :hiccup
+   :args {:tag {:value "em"} :attrs {:value {}} :children ["target"]}}
+
+  {:name :_partial-mc-help
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "merge-conflicts-help"}}
+          :children [{:value "For each entity, pick which side wins. "}
+                     :_partial-mc-help-em-src {:value " = "} :_partial-mc-source-name
+                     {:value ", "} :_partial-mc-help-em-tgt {:value " = "} :_partial-mc-target-name
+                     {:value "."}]}}
+
+  {:name :_partial-mc-batch-multi?
+   :parent :gt
+   :args {:nums [:_partial-mc-count {:value 1}]}}
+
+  {:name :_partial-mc-batch-src-title
+   :parent :str
+   :args {:parts [{:value "Set every row to source — "} :_partial-mc-source-name]}}
+
+  {:name :_partial-mc-batch-tgt-title
+   :parent :str
+   :args {:parts [{:value "Set every row to target — "} :_partial-mc-target-name]}}
+
+  {:name :_partial-mc-batch-src-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :id} {:value :class} {:value :title}]
+                         :vals [{:value "merge-conflicts-pick-all-source"}
+                                {:value "branch-popover-btn merge-conflicts-batch-btn"}
+                                :_partial-mc-batch-src-title]}}
+          :children ["source"]}}
+
+  {:name :_partial-mc-batch-tgt-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:parent :zipmap
+                  :args {:keys [{:value :id} {:value :class} {:value :title}]
+                         :vals [{:value "merge-conflicts-pick-all-target"}
+                                {:value "branch-popover-btn merge-conflicts-batch-btn"}
+                                :_partial-mc-batch-tgt-title]}}
+          :children ["target"]}}
+
+  {:name :_partial-mc-batch-label
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:class "merge-conflicts-batch-label"}}
+          :children ["Pick all:"]}}
+
+  {:name :_partial-mc-batch-shown
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "merge-conflicts-batch"}}
+          :children [:_partial-mc-batch-label :_partial-mc-batch-src-btn :_partial-mc-batch-tgt-btn]}}
+
+  {:name :_partial-mc-batch-hidden
+   :description "Empty (hidden) span when the modal has a single conflict — a batch toolbar would just be noise. Keeps the card children-vector shape uniform."
+   :parent :hiccup
+   :args {:tag {:value "span"} :attrs {:value {:hidden "1"}} :children {:value []}}}
+
+  {:name :_partial-mc-batch
+   :parent :if
+   :args {:test :_partial-mc-batch-multi?
+          :then :_partial-mc-batch-shown
+          :else :_partial-mc-batch-hidden}}
+
+  {:name :_partial-mc-error
+   :description "Error slot — starts hidden; JS un-hides it + fills textContent when the re-submitted merge fails."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "merge-conflicts-error hidden" :id "merge-conflicts-error"}}
+          :children {:value []}}}
+
+  {:name :_partial-mc-cancel-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "merge-conflicts-cancel"
+                          :class "branch-popover-btn merge-conflicts-cancel"}}
+          :children ["Cancel"]}}
+
+  {:name :_partial-mc-apply-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:id "merge-conflicts-submit" :class "branch-popover-btn"}}
+          :children ["Apply merge"]}}
+
+  {:name :_partial-mc-actions
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "merge-conflicts-actions"}}
+          :children [:_partial-mc-cancel-btn :_partial-mc-apply-btn]}}
+
+  {:name :_partial-mc-card
+   :description "Full resolution card (single hiccup root). JS mounts it as a flex sibling of the overlay div it creates; the overlay CAN'T live here because `.merge-conflicts-modal` centres its two direct children and an extra wrapper would break that."
+   :parent :hiccup
+   :args {:tag {:value "div"} :attrs {:value {:class "merge-conflicts-card"}}
+          :children [:_partial-mc-header :_partial-mc-help :_partial-mc-batch
+                     :_partial-mc-rows-div :_partial-mc-error :_partial-mc-actions]}}
+
+  {:name :_partial-mc-html
+   :parent :render-hiccup
+   :args {:hiccup :_partial-mc-card}}
+
+  {:name :_partial-merge-conflicts-handler
+   :description "Ring handler for `POST /partials/merge-conflicts` — body is the `{conflicts, source, target}` JSON the failed merge returned to JS; returns the resolution card hiccup as `text/html`. Renders the POSTed conflicts (no re-detection). JS in editor-branches.js owns the overlay chrome + radio/apply lifecycle."
+   :parent :html-ok-response
+   :args {:body :_partial-mc-html}}
+
+  ;; ---------------------------------------------------------------------
   ;; Runtime-effects strip — chips for {runtime, declared} effect sets
   ;; with drift detection. Slimmed out of editor-execute-result.js
   ;; (rendered per-execution-result, was the most isolated of that

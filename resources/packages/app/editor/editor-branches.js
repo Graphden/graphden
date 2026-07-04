@@ -111,19 +111,6 @@ window.graphdenCanExecute = graphdenCanExecute;
 window.graphdenInWorkspace = graphdenInWorkspace;
 window.graphdenTenancyActive = graphdenTenancyActive;
 
-// HTML-attribute-safe escaper for the few places branch names are
-// interpolated into a `title="…"` string (the merge-conflicts batch
-// toolbar). Escapes the five HTML-significant chars incl. both quotes —
-// `escAttr` in overlay-type-expand is CSS.escape (wrong semantics here).
-function escapeAttr(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 (function wrapFetchWithBranch() {
   const origFetch = window.fetch.bind(window);
   window.fetch = function branchAwareFetch(input, init) {
@@ -456,123 +443,88 @@ function closeConflictsModal() {
   if (_conflictsModal) _conflictsModal.classList.add('hidden');
 }
 
-// graph-first-exception: renders from `body.conflicts` — data the failed
-// merge ALREADY returned to the client — so a `/partials/*` round-trip
-// would fetch nothing the client lacks (unlike branch-diff / execute-result,
-// which pull server-only data) and would only add latency to a modal that
-// can render instantly from data in hand. XSS-safe: escapeText / escapeAttr
-// on every interpolated value.
-function showMergeConflictsModal(body, sourceName, targetName) {
+// The resolution card (header + help + batch toolbar + per-conflict
+// rows + previews + actions) is server-rendered hiccup at
+// `POST /partials/merge-conflicts` — we POST the `{conflicts, source,
+// target}` the failed merge just returned and the server renders it (it
+// owns all markup + escaping, mirroring the other editor partials). JS
+// here owns only the modal chrome (the full-viewport overlay div, which
+// must be a flex sibling of the card so it can't come from the
+// single-root partial) and the radio/apply lifecycle. `body` is the
+// merge response — its `conflicts` array is what we render.
+async function showMergeConflictsModal(body, sourceName, targetName) {
   const modal = ensureConflictsModal();
+  // Build fully, THEN reveal. The modal is read the instant it becomes
+  // visible (a user tabbing in — and the e2e — expect the rows to be
+  // there), so `.hidden` stays on until the server-rendered card is
+  // mounted; dropping it before the `await` below would expose an empty
+  // shell during the fetch.
+  modal.innerHTML = '';
+  const overlay = document.createElement('div');
+  overlay.className = 'merge-conflicts-overlay';
+  overlay.addEventListener('click', closeConflictsModal);
+  modal.appendChild(overlay);
+
+  let cardHtml;
+  try {
+    const resp = await window.authFetch('/partials/merge-conflicts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conflicts: body?.conflicts || [],
+        source: sourceName,
+        target: targetName,
+      }),
+    });
+    cardHtml = resp.ok
+      ? await resp.text()
+      : '<div class="merge-conflicts-card"><div class="merge-conflicts-header">'
+        + 'Failed to load conflicts (HTTP ' + resp.status + ')</div></div>';
+  } catch (_err) {
+    cardHtml = '<div class="merge-conflicts-card"><div class="merge-conflicts-header">'
+      + 'Failed to load conflicts</div></div>';
+  }
+  const wrap = document.createElement('div');
+  wrap.innerHTML = cardHtml;
+  const card = wrap.firstElementChild;
+  if (card) modal.appendChild(card);
+
+  const cancel = modal.querySelector('#merge-conflicts-cancel');
+  if (cancel) cancel.addEventListener('click', closeConflictsModal);
+  const submit = modal.querySelector('#merge-conflicts-submit');
+  if (submit) {
+    submit.addEventListener('click',
+      () => submitConflictResolutions(sourceName, targetName));
+  }
+  const pickAll = (choice) => {
+    modal.querySelectorAll('.merge-conflict-row input[type="radio"]')
+      .forEach((r) => {
+        if (r.value === choice) {
+          r.checked = true;
+          r.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+      });
+  };
+  const pickSrc = modal.querySelector('#merge-conflicts-pick-all-source');
+  if (pickSrc) pickSrc.addEventListener('click', () => pickAll('source'));
+  const pickTgt = modal.querySelector('#merge-conflicts-pick-all-target');
+  if (pickTgt) pickTgt.addEventListener('click', () => pickAll('target'));
+
   modal.classList.remove('hidden');
-  const conflicts = body.conflicts || [];
-  const rows = conflicts.map((c, i) => conflictRowHtml(c, i)).join('');
-  // Batch-pick toolbar — for diffs with > 1 conflict, two buttons that
-  // flip every row's radio in one click. For a 1-conflict modal it'd
-  // just be noise; hide it.
-  const batchToolbar = conflicts.length > 1
-    ? '<div class="merge-conflicts-batch">'
-      +   '<span class="merge-conflicts-batch-label">Pick all:</span>'
-      +   '<button id="merge-conflicts-pick-all-source" '
-      +          'class="branch-popover-btn merge-conflicts-batch-btn"'
-      +          ' title="Set every row to source — ' + escapeAttr(sourceName) + '">'
-      +     'source</button>'
-      +   '<button id="merge-conflicts-pick-all-target" '
-      +          'class="branch-popover-btn merge-conflicts-batch-btn"'
-      +          ' title="Set every row to target — ' + escapeAttr(targetName) + '">'
-      +     'target</button>'
-      + '</div>'
-    : '';
-  modal.innerHTML =
-    '<div class="merge-conflicts-overlay"></div>'
-    + '<div class="merge-conflicts-card">'
-    +   '<div class="merge-conflicts-header">'
-    +     'Resolve ' + conflicts.length + ' conflict' + (conflicts.length === 1 ? '' : 's')
-    +     ' merging <strong>' + escapeText(sourceName)
-    +     '</strong> → <strong>' + escapeText(targetName) + '</strong>'
-    +   '</div>'
-    +   '<div class="merge-conflicts-help">'
-    +     'For each entity, pick which side wins. '
-    +     '<em>source</em> = ' + escapeText(sourceName)
-    +     ', <em>target</em> = ' + escapeText(targetName) + '.'
-    +   '</div>'
-    +   batchToolbar
-    +   '<div class="merge-conflicts-rows">' + rows + '</div>'
-    +   '<div class="merge-conflicts-error hidden" id="merge-conflicts-error"></div>'
-    +   '<div class="merge-conflicts-actions">'
-    +     '<button id="merge-conflicts-cancel" class="branch-popover-btn merge-conflicts-cancel">Cancel</button>'
-    +     '<button id="merge-conflicts-submit" class="branch-popover-btn">Apply merge</button>'
-    +   '</div>'
-    + '</div>';
-
-  modal.querySelector('.merge-conflicts-overlay')
-    .addEventListener('click', closeConflictsModal);
-  modal.querySelector('#merge-conflicts-cancel')
-    .addEventListener('click', closeConflictsModal);
-  modal.querySelector('#merge-conflicts-submit')
-    .addEventListener('click', () => submitConflictResolutions(conflicts, sourceName, targetName));
-  if (conflicts.length > 1) {
-    const pickAll = (choice) => {
-      modal.querySelectorAll('.merge-conflict-row input[type="radio"]')
-        .forEach((r) => {
-          if (r.value === choice) {
-            r.checked = true;
-            r.dispatchEvent(new Event('change', {bubbles: true}));
-          }
-        });
-    };
-    modal.querySelector('#merge-conflicts-pick-all-source')
-      .addEventListener('click', () => pickAll('source'));
-    modal.querySelector('#merge-conflicts-pick-all-target')
-      .addEventListener('click', () => pickAll('target'));
-  }
 }
 
-function conflictRowHtml(c, i) {
-  const labelId = 'mc-' + i;
-  const sourcePreview = previewVersion(c['source-version']);
-  const targetPreview = previewVersion(c['target-version']);
-  return ''
-    + '<div class="merge-conflict-row" data-conflict-idx="' + i + '">'
-    +   '<div class="merge-conflict-row-head">'
-    +     '<span class="merge-conflict-entity">' + escapeText(c['entity-name']) + '</span>'
-    +     '<span class="merge-conflict-id">' + escapeText(c['entity-id']) + '</span>'
-    +   '</div>'
-    +   '<div class="merge-conflict-choice">'
-    +     '<label><input type="radio" name="' + labelId + '" value="source" checked>'
-    +     ' <strong>source</strong> <code>' + escapeText(sourcePreview) + '</code></label>'
-    +     '<label><input type="radio" name="' + labelId + '" value="target">'
-    +     ' <strong>target</strong> <code>' + escapeText(targetPreview) + '</code></label>'
-    +   '</div>'
-    + '</div>';
-}
-
-function previewVersion(v) {
-  if (!v) return '(deleted)';
-  // Pick the most user-facing fields. Mirrors the version-data-fields
-  // set in graphden.versioning.storage.resolution/entity-config.
-  const parts = [];
-  if (v.name) parts.push(v.name);
-  if (v.description) parts.push('"' + truncate(v.description, 32) + '"');
-  if (v.position !== undefined) parts.push('pos=' + v.position);
-  if (v.value !== undefined && v.value !== null) {
-    const s = typeof v.value === 'string' ? v.value : JSON.stringify(v.value);
-    parts.push('value=' + truncate(s, 32));
-  }
-  return parts.join(' ') || '(empty)';
-}
-
-function truncate(s, n) {
-  s = String(s);
-  return s.length > n ? s.slice(0, n - 1) + '…' : s;
-}
-
-async function submitConflictResolutions(conflicts, sourceName, targetName) {
-  const resolutions = conflicts.map((c, i) => {
-    const chosen = document.querySelector('input[name="mc-' + i + '"]:checked');
+// Read each rendered row's `data-entity-*` + checked radio into the
+// `:conflict-resolutions` payload. The server owns the row markup, so the
+// contract is the two data-attrs + the radio `value`, not a positional
+// `mc-<idx>` name.
+async function submitConflictResolutions(sourceName, targetName) {
+  const rows = Array.from(document.querySelectorAll(
+    '.merge-conflicts-modal .merge-conflict-row'));
+  const resolutions = rows.map((row) => {
+    const chosen = row.querySelector('input[type="radio"]:checked');
     return {
-      'entity-name': c['entity-name'],
-      'entity-id': c['entity-id'],
+      'entity-name': row.getAttribute('data-entity-name'),
+      'entity-id': row.getAttribute('data-entity-id'),
       choice: chosen?.value || 'source',
     };
   });

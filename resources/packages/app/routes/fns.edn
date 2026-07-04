@@ -123,6 +123,11 @@
    :parent :get-auth-required
    :args {:path "/partials/branch-diff" :handler :_partial-branch-diff-handler}}
 
+  {:name :partial-merge-conflicts
+   :description "POST /partials/merge-conflicts — body is the `{conflicts, source, target}` JSON the failed merge returned; renders the resolution card hiccup (header + help + batch toolbar + per-conflict source/target radios + version previews + Cancel/Apply). Renders the POSTed conflicts (no re-detection — mirrors `:partial-execute-result-inline`). JS in `editor-branches.js` owns the overlay chrome + radio/apply lifecycle."
+   :parent :post
+   :args {:path "/partials/merge-conflicts" :handler :_partial-merge-conflicts-handler}}
+
   {:name :partial-execute-result-effects
    :description "GET /partials/execute-result-effects?runtime=db,io&declared=db — runtime-effects chip strip below an execute-popover result. Both params are comma-separated effect names; empty lists render an empty (hidden) span. JS in `editor-execute.js` swaps the response into the result host."
    :parent :get-route

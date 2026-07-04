@@ -26,6 +26,7 @@
                   :partial-fn-version-executions
                   :partial-execute-history
                   :partial-branch-diff
+                  :partial-merge-conflicts
                   :partial-execute-result-effects
                   :partial-mismatch-explainer
                   :partial-provenance

@@ -77,6 +77,7 @@ refuses to drop it.
 | `core/arithmetic` | All 13 fns propagate. `(eq secret 42)` leaks; `:lt` / `:gt` / `:eq` / `:neq` included. |
 | `core/system` | 12 fns propagate. Bare environment readers (`:jvm-version`, `:env`, etc.) take no user input so taint can't enter — left bare. |
 | `core/refinements` | All 7 `:ensure-*` narrowers propagate. |
+| `web/html` | `:render-hiccup` / `:hiccup` propagate — they serialize/assemble a tree whose `[:list :any]` arm (and `:hiccup`'s `:any` attr values) can carry a secret. `:h-raw` is bare — its `:string` input can't accept a `[:secret :text]`. |
 | `web/vault` | `:secret-leaf` declares `[:secret :text]` return directly. |
 
 `web/http-*` and `web/sql` SQL impls are sinks — they don't return

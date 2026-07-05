@@ -790,12 +790,15 @@ shared PG testcontainer + golden-bootstrap. Это самое дорогое
 | Cron `:schedule` → service registration → reconciler-driven fire | `cron-schedule-service-test` | cron breakage обнаруживается только в prod |
 | `find-fn-usages` через граф | `find-fn-usages-graph-test` | usage graph regression hides |
 | Storage protocol contract (any backend) | `storage-protocol-poc-test` | future backends не проверены |
-| **Branches** (create, switch, diff, merge) | **❌ gap** | branch CRUD только в `crud/branches-graph-test` (unit-уровень) |
-| **Services** (full reconciler lifecycle for HTTP server) | **❌ gap** | только cron purpose-covered |
-| **Auth middleware** (real bearer-token request → 200 / 401) | **❌ gap** | unit-level `execution_routes_test` только проверяет routing |
+| **Branches** (create, switch, diff, merge) | `branches-lifecycle-test` | — |
+| **Services** (full reconciler lifecycle for HTTP server) | `http-server-service-lifecycle-test` | — |
+| **Auth middleware** (real bearer-token request → 200 / 401) | `auth-middleware-test` | — |
+| Tenancy (FaaS addon-active harness) | `faas-app-test` | — |
+| Admin grants (per-request-scope router) | `grants-admin-test` | — |
 
-Перед альфа-релизом GAP-флоу должны получить integration test (sentinel
-для regression) ИЛИ явное обоснование почему unit-level достаточен.
+Все критические флоу сейчас покрыты. Для НОВОГО критического флоу: заведи
+integration test (sentinel для regression) ИЛИ явно обоснуй, почему
+unit-level достаточен.
 
 ### 15.2 Duplication audit — что integration НЕ ДОЛЖЕН делать
 
@@ -845,7 +848,7 @@ grep -L 'bootstrap-crud-graph-from-golden' test/graphden/integration/*_test.clj 
 
 ## 16. Browser tests — `tools/browser-test/*.test.js`
 
-Browser suite — 52 Playwright e2e-test'а в `tools/browser-test/`
+Browser suite — 56 Playwright e2e-test'а в `tools/browser-test/`
 
 - visual-snapshot suite в `tools/visual-tests/`. ~9000 LOC JS,
 покрывают UI flow редактора.

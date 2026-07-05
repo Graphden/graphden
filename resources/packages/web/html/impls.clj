@@ -2,6 +2,7 @@
   "Implementations for web/html base functions using Hiccup."
   (:require
     [graphden.executor.defbase :refer [defbase]]
+    [graphden.types.core :as types]
     [hiccup2.core :as h]))
 
 
@@ -32,6 +33,13 @@
 ;; === Registry ===
 
 (def impls
-  {:render-hiccup render-hiccup
+  ;; `:render-hiccup` and `:hiccup` serialize / assemble a hiccup tree
+  ;; whose scalar leaves + `:any`-typed attrs can carry a `:secret`
+  ;; value (via the `[:list :any]` arm of `:hiccup-node`). Like the
+  ;; other value-deriving serializers (`:to-json-string`, `:parse-json`)
+  ;; they must propagate the taint so the executor redacts a rendered
+  ;; secret at `/api/execute`. `:h-raw` needs no rule — its `:string`
+  ;; input can't accept a `[:secret :text]` (taint can't be stripped).
+  {:render-hiccup {:impl render-hiccup :return-type-rule (types/wrap-with-taint nil)}
    :h-raw h-raw
-   :hiccup hiccup-element})
+   :hiccup {:impl hiccup-element :return-type-rule (types/wrap-with-taint nil)}})

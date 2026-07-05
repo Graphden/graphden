@@ -763,6 +763,37 @@
       (finally (sp/close base)))))
 
 
+(deftest list-item-batch-multi-binding-collision-test
+  ;; The batch collision check queries EVERY touched binding's versions in
+  ;; one round-trip, then scopes each item back to its OWN binding. An
+  ;; existing item at position 0 in binding A must NOT falsely collide with
+  ;; a batch item at position 0 in binding B (a naive all-versions-together
+  ;; check would); a batch item at the taken position in binding A must.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [ba (make-list-binding! v "mba")
+            bb (make-list-binding! v "mbb")
+            _existing (sp/create-entity v :binding-list-item
+                                        {:binding-id (:id ba) :position 0 :value 1})]
+        (testing "batch item at position 0 in a DIFFERENT binding does not collide"
+          (sp/create-entities v :binding-list-item
+                              [{:binding-id (:id bb) :position 0 :value 2}])
+          (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id bb)})))))
+        (testing "multi-binding batch: the item at the taken (A,0) collides, and nothing lands"
+          (let [ex (try (sp/create-entities v :binding-list-item
+                                            [{:binding-id (:id bb) :position 9 :value 3}
+                                             {:binding-id (:id ba) :position 0 :value 4}])
+                        (catch clojure.lang.ExceptionInfo e e))]
+            (is (= :constraint-violation/position-collision (:type (ex-data ex))))
+            (is (= (:id ba) (:binding-id (ex-data ex)))
+                "collision is attributed to binding A, not the free B item")
+            (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id bb)})))
+                "the free B item did not land — batch is all-or-nothing")
+            (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id ba)})))))))
+      (finally (sp/close base)))))
+
+
 (deftest list-item-delete-then-recreate-test
   (let [base (base-storage)
         v    (vs/wrap-with-versioning base)]

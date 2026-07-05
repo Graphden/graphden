@@ -72,61 +72,67 @@
     (sp/create-entity base-storage (:version-entity config) version-data)))
 
 
-(defn- check-list-item-position-collision!
-  "Per-branch resolved-view check: throw if another item-id resolves
-   to the SAME `(binding-id, position)` on this branch. Replaces the
-   pre-versioning base-table `UNIQUE (binding_id, position)` index
-   (retired so cross-branch divergence isn't blocked) — the
-   identity-row constraint mis-modelled the invariant; uniqueness is
-   a per-branch resolved-view property, not a cross-branch one.
+(defn- check-list-item-position-collisions!
+  "Per-branch resolved-view check for a WHOLE batch: throw if any item in
+   `check-seq` resolves to a `(binding-id, position)` already taken by
+   ANOTHER item on this branch. Enforces the per-branch resolved-view
+   `UNIQUE (binding-id, position)` invariant — uniqueness is a per-branch
+   resolved-view property, not a cross-branch one (a cross-branch
+   base-table index would wrongly block divergence).
 
-   Skips when `entity-name` isn't `:binding-list-item`. Cheap: one
-   query against the version table on the branch chain, then in-memory
-   resolve of just the items that COULD collide."
-  [base-storage branch-id entity-name new-data]
+   Skips when `entity-name` isn't `:binding-list-item`. One version query
+   for ALL touched bindings + one resolve pass, regardless of batch size —
+   the singular `check-list-item-position-collision!` delegates here with a
+   one-element seq."
+  [base-storage branch-id entity-name check-seq]
   (when (= :binding-list-item entity-name)
-    (let [{:keys [binding-id position id]} new-data]
-      (when (and binding-id (some? position))
+    (let [candidates (filter #(and (:binding-id %) (some? (:position %))) check-seq)]
+      (when (seq candidates)
         (let [chain (#'res/collect-branch-chain base-storage branch-id)
-              ;; Every item-version on the binding's chain. The
-              ;; SQL WHERE narrows to the binding so we don't scan
-              ;; the whole version table.
+              ;; Every item-version on the touched bindings' chains. The SQL
+              ;; WHERE narrows to those bindings so we don't scan the whole
+              ;; version table.
               versions (sp/query-entities base-storage :binding-list-item-version
-                                          {:binding-id binding-id
+                                          {:binding-id (vec (distinct (map :binding-id candidates)))
                                            :branch-id (vec chain)})
-              touched-ids (into #{} (map :item-id) versions)
-              ;; Resolve each touched item on this branch — collision
-              ;; rule applies to the LIVE view, not raw version rows.
-              identity-records (vals (sp/read-entities base-storage
-                                                       :binding-list-item
-                                                       (vec touched-ids)))
-              resolved (res/resolve-entities-batch base-storage
-                                                   :binding-list-item
-                                                   identity-records branch-id)
-              touched-on-chain? (fn [eid]
-                                  ;; resolve-entities-batch returns the bare
-                                  ;; identity row for entities WITHOUT a
-                                  ;; version on the chain (parity with the
-                                  ;; executor's base-fn reads); filter those
-                                  ;; out — only items that actually live on
-                                  ;; this branch can collide.
-                                  (contains? touched-ids eid))
-              collisions (for [[item-id row] resolved
-                               :when (and (some? row)
-                                          (not= item-id id)
-                                          (touched-on-chain? item-id)
-                                          (= position (:position row)))]
-                           item-id)]
-          (when (seq collisions)
-            (throw (ex-info (str "Position " position
-                                 " is already taken in this binding on branch "
-                                 branch-id)
-                            {:type :constraint-violation/position-collision
-                             :entity-name :binding-list-item
-                             :binding-id binding-id
-                             :position position
-                             :branch-id branch-id
-                             :colliding-item-ids (vec collisions)}))))))))
+              versions-by-binding (group-by :binding-id versions)
+              ;; Resolve every touched item ONCE — the collision rule
+              ;; applies to the LIVE branch view, not raw version rows.
+              ;; Items WITHOUT a version on the chain resolve to nil / a bare
+              ;; off-branch row and can't collide; only touched item-ids
+              ;; (those carrying a chain version) are considered.
+              all-touched-ids (into #{} (map :item-id) versions)
+              resolved-map (if (seq all-touched-ids)
+                             (into {} (res/resolve-entities-batch
+                                        base-storage :binding-list-item
+                                        (vals (sp/read-entities base-storage :binding-list-item
+                                                                (vec all-touched-ids)))
+                                        branch-id))
+                             {})]
+          (doseq [{:keys [binding-id position id]} candidates]
+            (let [touched-ids (map :item-id (get versions-by-binding binding-id))
+                  collisions (for [eid touched-ids
+                                   :let [row (get resolved-map eid)]
+                                   :when (and (some? row)
+                                              (not= eid id)
+                                              (= position (:position row)))]
+                               eid)]
+              (when (seq collisions)
+                (throw (ex-info (str "Position " position
+                                     " is already taken in this binding on branch "
+                                     branch-id)
+                                {:type :constraint-violation/position-collision
+                                 :entity-name :binding-list-item
+                                 :binding-id binding-id
+                                 :position position
+                                 :branch-id branch-id
+                                 :colliding-item-ids (vec collisions)}))))))))))
+
+
+(defn- check-list-item-position-collision!
+  "Singular form — delegates to `check-list-item-position-collisions!`."
+  [base-storage branch-id entity-name new-data]
+  (check-list-item-position-collisions! base-storage branch-id entity-name [new-data]))
 
 
 ;; === VersionedStorage Record ===
@@ -333,17 +339,14 @@
       (let [data-with-ids (mapv (fn [data]
                                   (if (:id data) data (assoc data :id (random-uuid))))
                                 data-seq)
-            ;; Per-item position-collision check, mirroring the singular
-            ;; create-entity. The check also catches INTRA-batch
-            ;; duplicates implicitly: two items in the same batch
-            ;; sharing `(binding-id, position)` will both pass the
-            ;; against-storage check (neither is committed yet), but
-            ;; the duplicate-position-within-data-seq check below
-            ;; rejects upfront so batch import doesn't silently land
-            ;; in a broken state.
-            _ (doseq [d data-with-ids]
-                (check-list-item-position-collision! base-storage branch-id
-                                                     entity-name d))
+            ;; Position-collision check against storage, mirroring the
+            ;; singular create-entity. INTRA-batch duplicates (two items in
+            ;; the same batch sharing `(binding-id, position)`) both pass
+            ;; this against-storage check — neither is committed yet — so
+            ;; the duplicate-position-within-data-seq check below rejects
+            ;; them upfront, keeping batch import from a broken landing.
+            _ (check-list-item-position-collisions! base-storage branch-id
+                                                    entity-name data-with-ids)
             _ (when (= :binding-list-item entity-name)
                 (let [by-key (group-by (juxt :binding-id :position) data-with-ids)
                       dupe (some (fn [[k items]]
@@ -403,18 +406,17 @@
                           {:type :not-found
                            :entity-name entity-name
                            :missing-ids (vec missing-ids)})))
-        ;; Per-item position-collision check, mirroring the singular
-        ;; update-entity. Uses the merged shape (current + incoming
-        ;; partial update) so a position-only update is checked against
-        ;; the rest of the binding's items on the chain.
-        (doseq [data data-seq
-                :let [id (:id data)
-                      current (get current-by-id id)
-                      merged (merge current data)]
-                :when current]
-          (check-list-item-position-collision! base-storage branch-id
-                                               entity-name
-                                               (assoc merged :id id)))
+        ;; Position-collision check against storage, mirroring the singular
+        ;; update-entity. Uses the merged shape (current + incoming partial
+        ;; update) so a position-only update is checked against the rest of
+        ;; the binding's items on the chain.
+        (check-list-item-position-collisions!
+          base-storage branch-id entity-name
+          (vec (keep (fn [data]
+                       (let [id (:id data)
+                             current (get current-by-id id)]
+                         (when current (assoc (merge current data) :id id))))
+                     data-seq)))
         ;; Compute merged versions and filter to only changed ones
         (let [{:keys [version-entity version-data-fields] :as config}
               (get res/entity-config entity-name)

@@ -106,7 +106,7 @@ If any of these fail, **fix before reporting**. Don't ship "the build is green" 
 
 Add a new file when the new responsibility is genuinely orthogonal (a new overlay type, a new picker, a new edit mode). Extend an existing file when it's a feature of an existing concern. The file map in `CLAUDE.md` "Frontend Module Structure" is the source of truth — keep it updated.
 
-Hard cap: a file > 800 lines is a code smell. `editor-overlays.js` is the worst offender (1150 lines); split before piling on more.
+Hard cap: a file > 800 lines is a code smell. The largest editor modules today (`editor-literal-types.js` ~1327 lines, `editor-edit-modes.js` ~1184, `editor-overlay-type-expand.js` ~1164) are the split candidates; avoid piling onto them.
 
 ---
 

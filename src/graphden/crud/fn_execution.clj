@@ -77,7 +77,7 @@
 
 (defn apply-execute
   "Stage 3 — submit the future, deref with timeout. Returns one of:
-     {:status :succeeded :result … :execution-id?}
+     {:status :succeeded :result … :execution-id? :declared-effects …}
      {:status :pending :execution-id …}
      {:status :failed :error … :error-data … :execution-id?}
 

@@ -144,7 +144,8 @@
         ;; The loop hits the dead conn, classifies it as a connection
         ;; error, and reconnects (first backoff is 1s) — give it headroom.
         (Thread/sleep 2000)
-        ;; Emit AFTER the reconnect: only a fresh, re-LISTENed connection
+        ;; Emit AFTER the reconnect: only a connection that has re-run
+        ;; LISTEN on a fresh session
         ;; will observe this notification.
         (let [writer-conn (java.sql.DriverManager/getConnection
                             ^String (:jdbc-url pg-opts)

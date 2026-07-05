@@ -34,14 +34,9 @@
         parents-map (reduce (fn [m e]
                               (update m (get-in e [:data :target]) (fnil conj []) (get-in e [:data :source])))
                             {} edges)
-        shared-nodes (->> parents-map
-                          (filter (fn [[_ ps]] (> (count ps) 1)))
-                          (map first)
-                          (into #{}))
         node-data-map (into {} (map (fn [n] [(get-in n [:data :id]) (:data n)]) nodes))]
     {:children children
      :parents parents-map
-     :shared-nodes shared-nodes
      :node-data-map node-data-map}))
 
 

@@ -243,6 +243,26 @@
       (finally (sp/close storage)))))
 
 
+(deftest rollback-strips-vault-body-from-error-data-test
+  ;; A vault error's ex-data carries `:body` (the raw OpenBao HTTP
+  ;; response), which a mangling proxy could theoretically echo the
+  ;; value into. The rollback's returned `:data` must NOT include it,
+  ;; while keeping the non-sensitive fields.
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        journal (atom [])                    ; empty → no rollback steps run
+        ex (ex-info "vault put failed"
+                    {:body "raw openbao response text" :status 500 :path "p"})
+        {:keys [ok error data]} (secrets/replay-secret-rollback! journal ex c)]
+    (try
+      (is (false? ok))
+      (is (= "vault put failed" error))
+      (is (not (contains? data :body))
+          ":body (raw vault HTTP response) stripped from API error data")
+      (is (= 500 (:status data)) "non-sensitive fields kept")
+      (finally (sp/close storage)))))
+
+
 (deftest create-secret-rejections-test
   (let [storage (setup/create-test-storage)
         c (test-ctx storage)]

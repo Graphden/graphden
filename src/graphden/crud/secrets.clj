@@ -244,7 +244,10 @@
     (if (instance? clojure.lang.ExceptionInfo exception)
       {:ok false
        :error (or (ex-message exception) (str exception))
-       :data (ex-data exception)}
+       ;; Drop `:body` — a vault error's ex-data carries the raw OpenBao
+       ;; HTTP response text, which is internal noise for the API caller
+       ;; and a theoretical secret-echo vector if a proxy mangles it.
+       :data (dissoc (ex-data exception) :body)}
       {:ok false
        :error (or (ex-message exception) (str exception))})))
 

@@ -115,9 +115,12 @@
   [headers]
   (let [h (header-ci headers "Accept-Encoding")]
     (cond
-      (and h (re-find #"\bbr\b" h))   :br
-      (and h (re-find #"\bgzip\b" h)) :gzip
-      :else                           :identity)))
+      ;; `(?i)` — Accept-Encoding tokens are case-insensitive per
+      ;; RFC 7231 §5.3.4; a client sending `BR` / `GZIP` must still get
+      ;; compression rather than silently falling back to identity.
+      (and h (re-find #"(?i)\bbr\b" h))   :br
+      (and h (re-find #"(?i)\bgzip\b" h)) :gzip
+      :else                               :identity)))
 
 
 (def ^:private compressible-pattern

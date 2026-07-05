@@ -30,6 +30,25 @@
   (when http-impls-ns @(ns-resolve http-impls-ns 'realize-body)))
 
 
+(def ^:private pick-encoding
+  (when http-impls-ns @(ns-resolve http-impls-ns 'pick-encoding)))
+
+
+(deftest pick-encoding-is-case-insensitive-test
+  ;; Accept-Encoding tokens are case-insensitive (RFC 7231 §5.3.4) — an
+  ;; uppercase `BR`/`GZIP` from a non-standard client must still compress,
+  ;; not silently fall back to identity.
+  (testing "uppercase / mixed-case tokens match"
+    (is (= :br   (pick-encoding {"accept-encoding" "BR"})))
+    (is (= :br   (pick-encoding {"accept-encoding" "Br; q=1.0"})))
+    (is (= :gzip (pick-encoding {"accept-encoding" "GZIP, deflate"}))))
+  (testing "lowercase still matches; absent / identity → :identity"
+    (is (= :br       (pick-encoding {"accept-encoding" "br"})))
+    (is (= :gzip     (pick-encoding {"accept-encoding" "gzip"})))
+    (is (= :identity (pick-encoding {"accept-encoding" "identity"})))
+    (is (= :identity (pick-encoding {})))))
+
+
 (defn- stream-of
   "Wrap a UTF-8 byte stream around `s` so the helper sees an actual
    `InputStream` like http-kit hands the handler."

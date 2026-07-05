@@ -182,32 +182,41 @@
 ;; =============================================================================
 
 (defn- inheritance-chain-info
-  "BFS the `:parent-ids` closure starting at `fn-id`, leaf-first
-   (closer-wins order). Returns `{:ids [fn-ids] :fn-map {id row}}`
-   where `:ids` lists every ancestor including `fn-id` itself at
-   position 0 and `:fn-map` carries the row for each id (populated
-   during the BFS, so downstream helpers can read `:name` etc. without
-   a second pass of `sp/read-entity` calls).
+  "BFS the `:parent-ids` closure starting at `fn-id`, level-order
+   (closer-wins: a fn always precedes its ancestors). Returns
+   `{:ids [fn-ids] :fn-map {id row}}` where `:ids` lists every
+   ancestor including `fn-id` itself at position 0 and `:fn-map`
+   carries the row for each id (populated during the walk, so
+   downstream helpers read `:name` etc. without a second
+   `sp/read-entity` pass).
+
+   Reads one frontier level per batched `query-entities` (`:id` IN
+   ancestor-ids) rather than one `read-entity` per ancestor. The
+   level-order (rather than DFS) walk also mirrors the editor's JS
+   parent-ids traversal the downstream helpers replicate.
 
    Cycles can't form (sync-time topological-sort rejects them), so no
    cycle guard is needed."
   [storage fn-id]
-  (loop [queue   [fn-id]
-         seen    #{}
-         ids     []
-         fn-map  {}]
-    (if (empty? queue)
+  (loop [frontier [fn-id]
+         seen     #{}
+         ids      []
+         fn-map   {}]
+    (if (empty? frontier)
       {:ids ids :fn-map fn-map}
-      (let [fid (peek queue)
-            rest-q (pop queue)]
-        (if (contains? seen fid)
-          (recur rest-q seen ids fn-map)
-          (let [fn-row  (sp/read-entity storage :fn fid)
-                parents (vec (:parent-ids fn-row))]
-            (recur (into rest-q parents)
-                   (conj seen fid)
-                   (conj ids fid)
-                   (assoc fn-map fid fn-row))))))))
+      (let [fresh     (vec (remove seen (distinct frontier)))
+            rows      (if (seq fresh)
+                        (sp/query-entities storage :fn {:id fresh})
+                        [])
+            row-by-id (into {} (map (juxt :id identity)) rows)
+            ;; `query-entities` may reorder — re-key on the frontier order
+            ;; so `:ids` stays closer-wins; drop ids with no row (a broken
+            ;; FK-less ancestor can't declare slots or bindings anyway).
+            ordered   (keep row-by-id fresh)]
+        (recur (vec (mapcat :parent-ids ordered))
+               (into seen fresh)
+               (into ids (map :id) ordered)
+               (merge fn-map row-by-id))))))
 
 
 (defn- find-slot-declaring-fn

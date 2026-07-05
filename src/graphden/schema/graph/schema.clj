@@ -29,12 +29,11 @@
    | empty | NULL | NULL | NULL | NULL | empty | primitive (boot data) |
    | NOT empty | * | * | * | * | * | composed fn-def |
 
-   ## Old `arg` model — REMOVED
+   ## Inheritance is computed, not materialized
 
-   The previous `arg` entity with `source-id` / `prev-arg-id` /
-   `next-arg-id` chain is gone. Inheritance no longer materializes
-   per-slot rows on each child fn — free args are computed by walking
-   parent-ids chain and subtracting bound slots. Sequences live as
+   A child fn does NOT carry per-slot rows for the slots it inherits —
+   its free args are computed on demand by walking the `parent-ids`
+   chain and subtracting the slots it binds. Sequences live as
    list-typed slots with `binding-list-item` rows."
   (:require
     [graphden.schema.fields.types :as ft]

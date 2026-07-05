@@ -37,6 +37,37 @@
 (def ^:private registry-pairs     #'vf/registry-pairs)
 (def ^:private build-leaf-form    #'vf/build-leaf-form)
 (def ^:private build-form         #'vf/build-form)
+(def ^:private inheritance-chain-info #'vf/inheritance-chain-info)
+
+
+;; ============================================================================
+;; inheritance-chain-info — level-order BFS over the parent-ids closure
+;; ============================================================================
+
+(deftest inheritance-chain-info-mi-diamond-test
+  (testing "an MI diamond dedups the shared root + keeps closer-wins endpoints"
+    (let [storage (setup/create-test-storage)]
+      (try
+        ;; leaf ─┬─ a ─┐
+        ;;       └─ b ─┴─ c (shared base-fn root)
+        (let [c    (setup/create-base-fn! storage (str "vf-chain-c-" (random-uuid)))
+              a    (sp/create-entity storage :fn {:name (str "vf-chain-a-" (random-uuid))
+                                                  :parent-ids [(:id c)]})
+              b    (sp/create-entity storage :fn {:name (str "vf-chain-b-" (random-uuid))
+                                                  :parent-ids [(:id c)]})
+              leaf (sp/create-entity storage :fn {:name (str "vf-chain-leaf-" (random-uuid))
+                                                  :parent-ids [(:id a) (:id b)]})
+              {:keys [ids fn-map]} (inheritance-chain-info storage (:id leaf))]
+          (is (= (:id leaf) (first ids)) "selected fn at position 0")
+          (is (= (:id c) (last ids)) "shared root is deepest → last")
+          (is (= 4 (count ids)) "root appears once — diamond deduped, not twice")
+          (is (= #{(:id leaf) (:id a) (:id b) (:id c)} (set ids))
+              "every ancestor reachable through the closure")
+          (is (= #{(:id leaf) (:id a) (:id b) (:id c)} (set (keys fn-map)))
+              "each ancestor row cached for downstream :name reads")
+          (is (= (:name c) (:name (get fn-map (:id c))))
+              "cached row carries the real fields (batched read populated it)"))
+        (finally (sp/close storage))))))
 
 
 ;; ============================================================================

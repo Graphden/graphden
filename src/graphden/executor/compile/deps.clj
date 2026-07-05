@@ -8,10 +8,7 @@
    `build-reverse-deps` inverts the forward graph so
    `delta-recompile!` can ask 'who needs recompile when X changes?'
    in O(degree). `transitive-blast` is the closure walk over those
-   reverse-deps.
-
-   Lifted out of the retired `graphden.executor.compile` namespace
-   so the rest of that file can go.")
+   reverse-deps.")
 
 
 (defn- index-bindings-by-fn

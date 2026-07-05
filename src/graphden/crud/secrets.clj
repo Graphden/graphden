@@ -130,10 +130,11 @@
    round-trip per secret. Failures to read metadata downgrade
    gracefully — the row still appears, just without provenance.
 
-   `shape` is `\"secret-leaf\"` — the only admin secret shape."
-  [storage vault-client fn-row path-slot-id shape]
+   `shape` is `\"secret-leaf\"` — the only admin secret shape. `path` is
+   the secret's vault path, pre-resolved by the caller (batched across
+   all secrets rather than one binding query per secret)."
+  [vault-client fn-row path shape]
   (let [fn-id (:id fn-row)
-        path (secret-binding-path storage fn-id path-slot-id)
         metadata (when path
                    (try (vault/get-metadata vault-client path)
                         (catch Exception _ nil)))]
@@ -162,11 +163,19 @@
             owner-ids (sp/query-ref-many-owners storage :fn :parent-ids secret-leaf-id)
             candidates (when (seq owner-ids)
                          (sp/query-entities storage :fn {:id (vec owner-ids)}))
-            secrets (->> candidates
-                         (filter #(shape/secret-fn? % secret-leaf-id))
-                         (mapv (fn [fn-row]
-                                 (shape-secret storage vault-client fn-row
-                                               path-slot-id "secret-leaf"))))]
+            secret-rows (filter #(shape/secret-fn? % secret-leaf-id) candidates)
+            ;; One IN-query resolves every secret's path binding, instead
+            ;; of a `secret-binding-path` DB round-trip per secret inside
+            ;; `shape-secret`.
+            path-bindings (when (seq secret-rows)
+                            (sp/query-entities storage :binding
+                                               {:fn-id (mapv :id secret-rows)
+                                                :slot-id path-slot-id}))
+            path-by-fn (into {} (map (juxt :fn-id :value)) path-bindings)
+            secrets (mapv (fn [fn-row]
+                            (shape-secret vault-client fn-row
+                                          (path-by-fn (:id fn-row)) "secret-leaf"))
+                          secret-rows)]
         {:ok true :secrets secrets}))))
 
 

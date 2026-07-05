@@ -70,6 +70,63 @@
 
 
 ;; ============================================================================
+;; notify-after-write! — cross-pod NOTIFY delta-seed emission
+;;
+;; Regression guard: a fn-graph DELETE must emit a DELTA seed event
+;; (`:id <owner-fn-id>`), NOT the empty-id full-clear. A bare `{:id id}`
+;; snapshot fell through to `affected-fn-ids` → nil → `:id ""`, and since
+;; a pod receives its OWN notify, every delete then forced a full
+;; compiled-registry rebuild (tens of seconds) on the emitting pod.
+;; ============================================================================
+
+(deftest notify-after-write-delta-seed-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (let [events (atom [])
+            emit-ctx {:notify-emitter (fn [ev] (swap! events conj ev))}
+            clear! (fn [] (reset! events []))]
+
+        (testing ":binding delete with a snapshot carrying :fn-id emits ONE delta seed"
+          (clear!)
+          (let [fid (random-uuid)]
+            (entities/notify-after-write! emit-ctx storage :binding :delete
+                                          {:fn-id fid :id (random-uuid)})
+            (is (= [{:kind :fn :op :invalidate :id (str fid)}] @events)
+                "delta seed = owner fn-id, not empty full-clear")))
+
+        (testing ":binding-list-item delete resolves the owner fn through its binding"
+          (clear!)
+          (let [f    (setup/create-base-fn! storage "naw-fn")
+                slot (setup/create-slot! storage "s" :int)
+                b    (sp/create-entity storage :binding
+                                       {:fn-id (:id f) :slot-id (:id slot)
+                                        :value 1 :override-kind :fixed})]
+            (entities/notify-after-write! emit-ctx storage :binding-list-item :delete
+                                          {:binding-id (:id b) :id (random-uuid)})
+            (is (= [{:kind :fn :op :invalidate :id (str (:id f))}] @events)
+                "owner fn-id derived from the pre-read binding")))
+
+        (testing "a cross-cutting :slot write falls through to the empty-id full-clear"
+          (clear!)
+          (entities/notify-after-write! emit-ctx storage :slot :delete {:id (random-uuid)})
+          (is (= [{:kind :fn :op :invalidate :id ""}] @events)
+              "nil seeds ⇒ full-clear signal"))
+
+        (testing ":service writes emit a distinct :service event, not a fn-invalidate"
+          (clear!)
+          (let [sid (random-uuid)]
+            (entities/notify-after-write! emit-ctx storage :service :start {:id sid})
+            (is (= [{:kind :service :op :start :id (str sid)}] @events))))
+
+        (testing "no :notify-emitter on the ctx → no-op (tests / single-pod)"
+          (clear!)
+          (entities/notify-after-write! {} storage :binding :delete
+                                        {:fn-id (random-uuid) :id (random-uuid)})
+          (is (empty? @events))))
+      (finally (sp/close storage)))))
+
+
+;; ============================================================================
 ;; Generic CRUD round-trip
 ;; ============================================================================
 

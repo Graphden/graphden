@@ -1,10 +1,9 @@
 {:name "app"
  :version "1.0.0"
  :description "Application server: common building blocks, editor UI, and server fn-defs"
- ;; `storage` is required because Block 1 Step 2 migrated consumer
- ;; fn-defs (`:_list-services-rows`, …) off `:list-entities` and onto
- ;; direct `:pg-query` + `:decode-row` chains — both primitives live
- ;; in the `storage/pg` module.
+ ;; `storage` is required because consumer fn-defs
+ ;; (`:_list-services-rows`, …) query the DB via the direct
+ ;; `:pg-query` + `:decode-row` primitives from the `storage/pg` module.
  :dependencies ["core" "web" "storage"]
  :modules ["common" "lookups" "routes-method" "editor" "layout" "forms" "execution" "branches" "secrets" "page" "contact-demo" "registry" "routes" "routes-auth" "route-groups" "server"]
  :services [{:name :default

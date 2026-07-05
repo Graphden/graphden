@@ -39,6 +39,11 @@
                  'graphden.packages.web.http.impls))
 
 
+(def ^:private registry-ns
+  (load-impls-ns "packages/app/registry/impls.clj"
+                 'graphden.packages.app.registry.impls))
+
+
 (defn- unwrap
   [ns-obj sym]
   (when ns-obj
@@ -100,6 +105,29 @@
 (deftest delete-entity-records-db-effect-test
   (assert-records-db 'delete-entity
                      {:entity-type :branch :id (java.util.UUID/randomUUID)}))
+
+
+;; =============================================================================
+;; app/registry — :publish-package records BOTH :db and :time
+;;
+;; The fns.edn declaration is `:effects #{:db :time}`. The impl records
+;; both at the top of the body (before `require-storage`), so a nil ctx
+;; explodes on storage AFTER both effects have fired. Guards against the
+;; declaration and the runtime instrumentation drifting apart — the
+;; :time effect exists because the impl stamps `Instant/now` on the row.
+;; =============================================================================
+
+(deftest publish-package-records-db-and-time-effects-test
+  (let [impl (unwrap registry-ns 'publish-package)
+        trace (atom #{})]
+    (is (some? impl) "publish-package impl loaded")
+    (binding [cr/*effect-trace* trace]
+      (try (impl {:pkg-name "x" :pkg-version "1.0.0" :bundle {}} nil)
+           (catch Exception _)))
+    (is (contains? @trace :db)
+        ":db recorded on publish-package call")
+    (is (contains? @trace :time)
+        ":time recorded on publish-package call (matches fns.edn :effects)")))
 
 
 (deftest pure-impls-do-not-record-effects-test

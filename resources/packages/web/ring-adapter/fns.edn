@@ -265,7 +265,7 @@
    :parent :authenticate-request}
 
   {:name :request-authenticated?
-   :description "True iff the current request authenticated, provider-agnostic. The single seam both the auth middleware and `app.lookups/:request-authed?` read — replaces the old bearer-specific `:token-valid?`."
+   :description "True iff the current request authenticated, provider-agnostic. The single seam both the auth middleware and `app.lookups/:request-authed?` read."
    :parent :get
    :return-type :bool
    :args {:coll :_request-principal :key {:value :authenticated?} :default false}}

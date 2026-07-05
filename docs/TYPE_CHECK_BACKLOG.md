@@ -1,9 +1,15 @@
-# Type-check / type-aliases backlog
+# Type-check / type-aliases backlog — historical ledger (CLOSED)
 
-Audit captured during followups B8 + B9 (2026-05-29). Both surfaces
-warn at startup; runtime is unaffected, the editor's effect/return
-strips just may be missing for the named fn-defs. Listed here so a
-future type-system pass can pick them up.
+> **STATUS: CLOSED.** Every item below is DONE; the sweep is at zero
+> (`allowed-type-check-failures` is `#{}`, Phase E hard-gate armed).
+> This file is the per-failure-closure trail from the 2026-05-29 → 2026-06-16
+> sweep, kept for tracing the history of a specific fix — not a live TODO.
+> Current-state summary lives in
+> [TYPE_SYSTEM_DECISIONS.md](TYPE_SYSTEM_DECISIONS.md).
+
+Audit originally captured during followups B8 + B9 (2026-05-29): both
+surfaces warned at startup (runtime unaffected — only the editor's
+effect/return strips could be missing for the named fn-defs).
 
 ## Status (2026-05-29 follow-up pass)
 

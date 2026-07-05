@@ -68,6 +68,25 @@
         (finally (sp/close storage))))))
 
 
+(deftest resolve-execution-graph-enforces-iteration-limit-test
+  (testing "a closure larger than *max-graph-iterations* throws graph-too-large"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [root   (setup/create-base-fn! storage "cap-root")
+              middle (setup/create-composed-fn! storage "cap-middle" (:id root))
+              leaf   (setup/create-composed-fn! storage "cap-leaf" (:id middle))
+              ;; leaf's closure = {leaf, middle, root} = 3 reachable fns;
+              ;; cap at 2 so it trips — matches the generic BFS guard.
+              ex (sp/with-max-graph-iterations 2
+                                               (fn []
+                                                 (try (sp/resolve-execution-graph storage (:id leaf))
+                                                      (catch clojure.lang.ExceptionInfo e e))))]
+          (is (instance? clojure.lang.ExceptionInfo ex))
+          (is (= :execution-error/graph-too-large (:type (ex-data ex))))
+          (is (= 2 (:max-iterations (ex-data ex)))))
+        (finally (sp/close storage))))))
+
+
 (deftest ref-binding-edge-test
   (testing "binding.ref_fn_id pulls the ref target into the closure"
     (let [storage (setup/create-test-storage)]

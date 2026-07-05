@@ -125,6 +125,18 @@
                     {:type :not-found
                      :fn-id fn-id})))
   (let [fn-ids (reachable-fn-ids ds fn-id)]
+    ;; Same guard the generic BFS enforces (`check-graph-iteration-limit!`)
+    ;; — bound the closure size so a runaway / data-corruption graph throws
+    ;; a clean `:execution-error/graph-too-large` instead of silently
+    ;; bulk-loading an unbounded set into memory. The CTE dedups via UNION
+    ;; so a cycle can't spin forever, but a pathologically wide closure can
+    ;; still be huge; cap it at `*max-graph-iterations*` reachable fns.
+    (when (> (count fn-ids) sp/*max-graph-iterations*)
+      (throw (ex-info "Execution graph resolution exceeded maximum iterations"
+                      {:type :execution-error/graph-too-large
+                       :fn-id fn-id
+                       :max-iterations sp/*max-graph-iterations*
+                       :iteration-count (count fn-ids)})))
     (if (empty? fn-ids)
       ;; Defensive — the CTE always emits at least the seed; an
       ;; empty result implies the seed row vanished between the

@@ -87,17 +87,26 @@
     ;; Tagged-keyword unwrap. The single-key `:_kw`/`\"_kw\"` shape is
     ;; the only place this convention applies for keyword values; any
     ;; other map flows through the normal recursion.
+    ;; Only unwrap when the value is a STRING — the carrier
+    ;; `preserve-keywords` emits is always `{:_kw "<name>"}`. Without
+    ;; this guard, USER data that is a 1-key `:_kw` map with a
+    ;; non-string value (e.g. `{:_kw {:a 1}}`) was mis-read as
+    ;; `(keyword <map>)` → nil, a silent data loss. (A user
+    ;; `{:_kw "<string>"}` stays indistinguishable from an encoded
+    ;; keyword — a residual, far rarer, ambiguity of the tag scheme.)
     (and (map? x)
          (= 1 (count x))
-         (let [k (first (keys x))]
-           (or (= k :_kw) (= k "_kw"))))
+         (let [[k v] (first x)]
+           (and (or (= k :_kw) (= k "_kw")) (string? v))))
     (keyword (val (first x)))
 
-    ;; Tagged-set unwrap. Same convention as `:_kw` but for sets.
+    ;; Tagged-set unwrap. Same convention as `:_kw` but for sets — the
+    ;; carrier is always `{:_set [<items>]}`, so only unwrap a
+    ;; sequential value; a non-seq value is user data, kept as a map.
     (and (map? x)
          (= 1 (count x))
-         (let [k (first (keys x))]
-           (or (= k :_set) (= k "_set"))))
+         (let [[k v] (first x)]
+           (and (or (= k :_set) (= k "_set")) (sequential? v))))
     (into #{} (map normalize-parsed-json) (val (first x)))
 
     (map? x)

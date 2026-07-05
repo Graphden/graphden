@@ -239,6 +239,22 @@
            (jsonb-roundtrip {:effects #{:db :io}})))))
 
 
+(deftest jsonb-tag-key-collision-roundtrip-test
+  ;; Regression: user data that is a 1-key `:_kw` / `:_set` map whose
+  ;; value is NOT the shape the carrier emits (a string for `:_kw`, a
+  ;; sequence for `:_set`) used to collide with the tagged-carrier
+  ;; convention and decode to nil (silent data loss) or the wrong type.
+  ;; The value-type guard keeps such user maps intact.
+  (testing "`:_kw` map with a non-string value stays a map (was nil)"
+    (is (= {:_kw {:a 1}}  (jsonb-roundtrip {:_kw {:a 1}})))
+    (is (= {:_kw :nested} (jsonb-roundtrip {:_kw :nested})))
+    (is (= {:_kw [1 2]}   (jsonb-roundtrip {:_kw [1 2]}))))
+
+  (testing "`:_set` map with a non-sequential value stays a map"
+    (is (= {:_set "not-a-seq"} (jsonb-roundtrip {:_set "not-a-seq"})))
+    (is (= {:_set 42}          (jsonb-roundtrip {:_set 42})))))
+
+
 (deftest jsonb-string-with-colon-prefix-roundtrip-test
   ;; Regression: under the previous codec scheme, a string literal
   ;; starting with `:` (length ≥ 2) was misread as a keyword and lost

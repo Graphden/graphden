@@ -8,7 +8,7 @@
    The system is composed of these components (managed by Integrant):
 
    :db/schema        → Schema builder (pure)
-   :db/age           → Apache AGE storage
+   :db/postgres      → PostgreSQL storage (recursive-CTE graph traversal)
    :db/versioned     → Versioned storage decorator
    :exec/base-fns    → Base function registry
    :exec/fn-entities → Fn definitions (web server routes)

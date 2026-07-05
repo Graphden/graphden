@@ -14,28 +14,51 @@ Configuration files are located in `resources/`:
 
 ## System Components
 
-The system consists of interconnected components:
+The storage backend is **plain PostgreSQL** — graph traversal is done
+with recursive CTEs, not a graph-database extension. The components
+below start in dependency order:
 
 ```
-:db/schema        → Schema builder (pure, no deps)
+:db/schema             → Schema builder (pure, no deps)
        ↓
-:db/age           → Apache AGE storage
+:db/postgres           → PostgreSQL storage (jdbc-url / pool / schema)
        ↓
-:db/versioned     → Versioned storage wrapper
+:app/storage           → Tenancy storage seam (identity passthrough by default)
        ↓
-:exec/base-fns    → Base function registry
-:exec/fn-entities → Function definitions
-:exec/context     → Executor context
+:db/versioned          → Versioned storage decorator (immutable history)
        ↓
-:http/server      → HTTP server
+:db/notify-listener    → Dedicated PG conn LISTENing on `graphden_events`
+:db/service-locks      → Dedicated PG conn for advisory locks
+:app/packages          → Loads resources/packages/ (core / storage / web / app)
+       ↓
+:exec/base-fns         → Base-function registry (Clojure impls)
+:exec/fn-entities      → Syncs fn-defs into storage
+:vault/client          → OpenBao / Vault KV v2 client
+:auth/provider         → Authentication seam (single-token by default)
+       ↓
+:exec/context          → Executor context
+       ↓
+:exec/compiled-registry   → Compile fn graphs into closures at startup
+       ↓
+:exec/branch-router       → Per-branch ExecutionContext + Ring dispatcher
+:exec/api-url-drift-check  → Boot-time backend↔frontend URL drift guard
+:exec/api-routes-js-cache  → Boot-cached `window.API` JS module
+:exec/service-reconciler   → Seeds + supervises `:service` rows (runs the web server)
+:exec/cleanup-scheduler    → Hourly :fn-execution TTL sweep
 ```
+
+There is **no separate `:http/server` component**. The HTTP server is
+a `:service` row (the `app` package seeds a `:web-server` service),
+seeded and supervised by `:exec/service-reconciler`. The listen port
+is fixed at the Docker layer (container `8080`), not via an integrant
+`:port` key.
 
 ### Component Dependencies
 
 Dependencies are expressed using Integrant references:
 
 ```clojure
-:db/age
+:db/postgres
 {:schema #ig/ref :db/schema   ; Reference to :db/schema component
  :jdbc-url "..."
  ...}
@@ -43,8 +66,8 @@ Dependencies are expressed using Integrant references:
 
 Available reference types:
 
-- `#ig/ref :key` - Reference to a single component
-- `#ig/refset :key` - Reference to all components matching a key
+- `#ig/ref :key` — Reference to a single component
+- `#ig/refset :key` — Reference to all components matching a key
 
 ## Aero Reader Tags
 
@@ -55,8 +78,8 @@ Configuration files support these reader tags:
 Read value from environment variable:
 
 ```clojure
-:jdbc-url #env JDBC_URL           ; Required
-:port #or [#env PORT "8080"]      ; With default
+:jdbc-url #env JDBC_URL              ; Required
+:pool-size #or [#env DB_POOL_SIZE "10"]   ; With default
 ```
 
 ### `#or` - Default Values
@@ -72,7 +95,7 @@ Provide fallback if value is nil:
 Convert string to long integer:
 
 ```clojure
-:port #long #or [#env PORT "8080"]
+:pool-size #long #or [#env DB_POOL_SIZE "10"]
 ```
 
 ### `#ig/ref` - Integrant Reference
@@ -85,11 +108,15 @@ Reference another component:
 
 ### Package Names
 
-Packages are loaded from `resources/packages/` directory. Configure which packages to load:
+Packages are loaded from `resources/packages/`. Configure which
+packages to load:
 
 ```clojure
-:app/packages {:package-names ["core" "web" "app"]}
+:app/packages {:package-names ["core" "storage" "web" "app"]}
 ```
+
+Production loads `["core" "storage" "web" "app"]`. Dev/test also load
+`"examples"` (pedagogical fn-defs that must never ship to prod).
 
 ## Component Configuration
 
@@ -101,9 +128,10 @@ Schema builder component (stateless).
 :db/schema {}
 ```
 
-### `:db/age`
+### `:db/postgres`
 
-Apache AGE storage backend.
+PostgreSQL storage backend (HikariCP pool). Graph traversal uses
+recursive CTEs. The executor auto-migrates its schema on startup.
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -114,7 +142,7 @@ Apache AGE storage backend.
 | `:schema` | ref | Reference to `:db/schema` |
 
 ```clojure
-:db/age
+:db/postgres
 {:jdbc-url #or [#env JDBC_URL "jdbc:postgresql://localhost:5432/graphden"]
  :username #or [#env DB_USERNAME "graphden"]
  :password #or [#env DB_PASSWORD "graphden"]
@@ -122,45 +150,130 @@ Apache AGE storage backend.
  :schema #ig/ref :db/schema}
 ```
 
-### `:db/versioned`
+### `:app/storage`
 
-Versioned storage wrapper providing immutable history.
+Tenancy storage seam. Identity passthrough by default; the tenancy
+addon overrides this key with an org-scoped decorator. Sits *beneath*
+versioning so the branch-router's `vs/unwrap` keeps the tenant filter.
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `:base-storage` | ref | Reference to `:db/age` |
+| `:base` | ref | Reference to `:db/postgres` |
+
+```clojure
+:app/storage
+{:base #ig/ref :db/postgres}
+```
+
+### `:db/versioned`
+
+Versioned storage decorator providing immutable history.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `:base-storage` | ref | Reference to `:app/storage` |
 
 ```clojure
 :db/versioned
-{:base-storage #ig/ref :db/age}
+{:base-storage #ig/ref :app/storage}
+```
+
+### `:db/notify-listener`
+
+Owns a dedicated PostgreSQL connection that `LISTEN`s on the
+`graphden_events` channel. A mutation on one pod is observed by all
+sibling pods within ~1s (cross-pod cache invalidation). A pool-bound
+connection can't be used because the LISTEN session must stay alive
+forever.
+
+```clojure
+:db/notify-listener
+{:pg-opts
+ {:jdbc-url #or [#env JDBC_URL "jdbc:postgresql://localhost:5432/graphden"]
+  :username #or [#env DB_USERNAME "graphden"]
+  :password #or [#env DB_PASSWORD "graphden"]}}
+```
+
+### `:db/service-locks`
+
+Owns a dedicated PostgreSQL connection for session-scoped advisory
+locks. The service reconciler acquires a per-service lock before
+starting each service; only the pod that wins runs it. Advisory locks
+are session-scoped, so a pool connection can't back them.
+
+```clojure
+:db/service-locks
+{:pg-opts
+ {:jdbc-url #or [#env JDBC_URL "jdbc:postgresql://localhost:5432/graphden"]
+  :username #or [#env DB_USERNAME "graphden"]
+  :password #or [#env DB_PASSWORD "graphden"]}}
+```
+
+### `:app/packages`
+
+Loads base-fns and fn-defs from `resources/packages/`. fn-defs are NOT
+a separate integrant component — they come from the packages listed
+here.
+
+```clojure
+:app/packages
+{:package-names ["core" "storage" "web" "app"]}
 ```
 
 ### `:exec/base-fns`
 
-Registers base functions from Clojure implementations.
+Registers base functions from the loaded packages' Clojure impls.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `:storage` | ref | Reference to `:db/versioned` |
+| `:packages` | ref | Reference to `:app/packages` |
 
 ```clojure
 :exec/base-fns
-{:storage #ig/ref :db/versioned}
+{:storage #ig/ref :db/versioned
+ :packages #ig/ref :app/packages}
 ```
 
 ### `:exec/fn-entities`
 
-Syncs function definitions to storage.
+Syncs the packages' fn-def declarations into storage.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | `:storage` | ref | Reference to `:db/versioned` |
-| `:fn-defs` | refset | Reference to function definition components |
+| `:packages` | ref | Reference to `:app/packages` |
+| `:base-fns` | ref | Reference to `:exec/base-fns` |
 
 ```clojure
 :exec/fn-entities
 {:storage #ig/ref :db/versioned
- :fn-defs #ig/refset :app/fn-defs}
+ :packages #ig/ref :app/packages
+ :base-fns #ig/ref :exec/base-fns}
+```
+
+### `:vault/client`
+
+OpenBao / Vault KV v2 client. Address + token are infrastructure-level
+— the user fn-graph never sees them; it calls `:vault-get`, which
+pulls the client off the executor context. When `VAULT_ADDR` is unset
+the client returns nil and `:vault-get` errors on use.
+
+```clojure
+:vault/client
+{:address #or [#env VAULT_ADDR ""]
+ :token #or [#env VAULT_TOKEN ""]}
+```
+
+### `:auth/provider`
+
+Authentication seam. Default single-token provider (the token comes
+from `AUTH_TOKEN`); the tenancy addon overrides this key with
+session/JWT auth.
+
+```clojure
+:auth/provider
+{:token #or [#env AUTH_TOKEN ""]}
 ```
 
 ### `:exec/context`
@@ -170,61 +283,150 @@ Executor context for running functions.
 | Key | Type | Description |
 |-----|------|-------------|
 | `:storage` | ref | Reference to `:db/versioned` |
-| `:max-depth` | long | Maximum call depth (prevents infinite recursion) |
-| `:timeout-ms` | long | Execution timeout in milliseconds |
+| `:vault-client` | ref | Reference to `:vault/client` |
+| `:pg-storage` | ref | Raw PG storage for `NOTIFY` emission (`:db/postgres`) |
+| `:base-fns` | ref | Ctx-scoped base-fns map (`:exec/base-fns`) |
+| `:auth-provider` | ref | Reference to `:auth/provider` |
 
 ```clojure
 :exec/context
 {:storage #ig/ref :db/versioned
- :max-depth #long #or [#env EXEC_MAX_DEPTH "1000"]
- :timeout-ms #long #or [#env EXEC_TIMEOUT_MS "30000"]}
+ :vault-client #ig/ref :vault/client
+ :pg-storage #ig/ref :db/postgres
+ :base-fns #ig/ref :exec/base-fns
+ :auth-provider #ig/ref :auth/provider}
 ```
 
-### `:http/server`
+### `:exec/compiled-registry`
 
-HTTP server component.
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `:context` | ref | Reference to `:exec/context` |
-| `:startup-fn-name` | keyword | Name of startup function to execute |
-| `:port` | long | HTTP port |
+Compiles fn graphs into Clojure closures at startup. Depends on
+`:exec/fn-entities` so every composed fn is already in storage before
+traversal.
 
 ```clojure
-:http/server
+:exec/compiled-registry
 {:context #ig/ref :exec/context
- :startup-fn-name :web-server-fn
- :port #long #or [#env PORT "8080"]}
+ :_fn-entities #ig/ref :exec/fn-entities}
 ```
 
-### `:app/fn-defs`
+### `:exec/branch-router`
 
-Application-specific function definitions (referenced by `:exec/fn-entities`).
+Per-branch `ExecutionContext` registry + Ring dispatcher, seeded with
+the default branch (`main`) after the compiled registry is built. The
+`:branch-routing-wrap` base-fn reads this router on each request to
+pick which branch's compiled view serves the call.
 
 ```clojure
-:app/fn-defs #var graphden.web.server.interface/fn-defs
+:exec/branch-router
+{:context #ig/ref :exec/context
+ :_compiled-registry #ig/ref :exec/compiled-registry}
 ```
+
+### `:exec/api-url-drift-check`
+
+Boot-time backend↔frontend URL drift guard. Walks the live router's
+`/api/*` paths and scans editor JS for `/api/*` literals; throws on
+drift so a route rename that forgets the JS fails boot rather than
+404ing at runtime. Toggle off via `GRAPHDEN_SKIP_URL_DRIFT_CHECK=1`.
+
+```clojure
+:exec/api-url-drift-check
+{:context #ig/ref :exec/context
+ :_compiled-registry #ig/ref :exec/compiled-registry
+ :skip? #or [#env GRAPHDEN_SKIP_URL_DRIFT_CHECK ""]}
+```
+
+### `:exec/api-routes-js-cache`
+
+Boot-time-cached `window.API = {…}` JS module, computed once after the
+router compiles. The editor addresses routes by name
+(`API.api_branches`) instead of duplicating path literals.
+
+```clojure
+:exec/api-routes-js-cache
+{:context #ig/ref :exec/context
+ :_compiled-registry #ig/ref :exec/compiled-registry}
+```
+
+### `:exec/service-reconciler`
+
+Seeds the packages' `:services` declarations into the `:service` table
+(idempotent, deterministic ids), then starts the enabled rows under
+the supervisor. **This is how the HTTP server runs** — the `app`
+package declares a `:web-server` service. Uses the notify-listener and
+service-locks for cross-pod coordination.
+
+```clojure
+:exec/service-reconciler
+{:context #ig/ref :exec/context
+ :packages #ig/ref :app/packages
+ :notify-listener #ig/ref :db/notify-listener
+ :service-locks #ig/ref :db/service-locks
+ :_compiled-registry #ig/ref :exec/compiled-registry
+ :_branch-router #ig/ref :exec/branch-router}
+```
+
+### `:exec/cleanup-scheduler`
+
+Hourly sweep of `:fn-execution` rows past their per-status TTL.
+Independent of HTTP — runs even when nobody hits `/api`. The period is
+overridable via `CLEANUP_PERIOD_MS`.
+
+```clojure
+:exec/cleanup-scheduler
+{:context #ig/ref :exec/context
+ :period-ms #long #or [#env CLEANUP_PERIOD_MS "3600000"]}
+```
+
+### `:exec/demo-branches` (opt-in)
+
+Seeds demo branches for the versioning UI. Only seeds when
+`GRAPHDEN_DEMO_BRANCHES_ENABLED` is truthy (`1`, `true`, `yes`, `on`).
+Idempotent — a branch whose `:name` already exists is left untouched.
+Real prod ships with this off; dev/docker enables it so the branch
+picker has content out of the box.
+
+## Environment Variables
+
+These are the only environment variables the production config reads:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JDBC_URL` | `jdbc:postgresql://localhost:5432/graphden` | PostgreSQL connection URL |
+| `DB_USERNAME` | `graphden` | Database username |
+| `DB_PASSWORD` | `graphden` | Database password |
+| `DB_POOL_SIZE` | `10` | HikariCP pool size |
+| `VAULT_ADDR` | *(empty)* | OpenBao / Vault address (unset → `:vault-get` errors) |
+| `VAULT_TOKEN` | *(empty)* | OpenBao / Vault token |
+| `AUTH_TOKEN` | *(empty)* | Single-token auth secret |
+| `GRAPHDEN_SKIP_URL_DRIFT_CHECK` | *(empty)* | `1` to skip the boot URL-drift check |
+| `CLEANUP_PERIOD_MS` | `3600000` | `:fn-execution` TTL sweep period (ms) |
+| `GRAPHDEN_DEMO_BRANCHES_ENABLED` | *(empty)* | Truthy to seed demo branches |
+
+There is no env-configurable execution max-depth or timeout. The dev
+config (`system-dev.edn`) reads DB settings from the `GRAPHDEN_`-prefixed
+variants (`GRAPHDEN_JDBC_URL`, `GRAPHDEN_DB_USER`,
+`GRAPHDEN_DB_PASSWORD`) and defaults to port `5434`.
 
 ## Profile-Specific Settings
 
 ### Development (`:dev`)
 
 - Smaller connection pool (5)
-- Local database URL
-- No environment variable overrides
+- Local database URL (`GRAPHDEN_JDBC_URL`, default port `5434`)
+- Loads the `examples` package
+- Demo branches enabled by default
 
 ### Test (`:test`)
 
-- Minimal pool size (2)
-- Lower timeouts for faster test feedback
-- `jdbc-url` is `nil` (injected by test fixtures)
-- No HTTP server or fn-entities components
+- Minimal pool
+- `jdbc-url` injected by test fixtures / overrides
 
 ### Production (`:prod`)
 
-- All settings from environment variables
+- DB, auth, and vault settings from environment variables
 - Larger default pool size (10)
-- Full component stack including HTTP server
+- Full component stack; `examples` package excluded
 
 ## Programmatic Configuration
 
@@ -236,9 +438,12 @@ Application-specific function definitions (referenced by `:exec/fn-entities`).
 ;; Start with profile
 (def system (sys/start! :prod))
 
-;; Start with overrides
+;; Start with overrides (merged per top-level key)
 (def system (sys/start-with-overrides! :test
-              {:db/age {:jdbc-url "jdbc:postgresql://localhost:5432/test"}}))
+              {:db/postgres {:jdbc-url "jdbc:postgresql://localhost:5432/test"}}))
+
+;; Start only a subset of components (and their deps)
+(def system (sys/start! :prod [:db/postgres :db/versioned]))
 
 ;; Stop
 (sys/stop! system)
@@ -251,17 +456,6 @@ Application-specific function definitions (referenced by `:exec/fn-entities`).
 
 (def config (sys/read-config :prod))
 ;; Returns raw Integrant config map
-```
-
-### REPL Development
-
-```clojure
-(require '[integrant.repl :refer [go halt reset]])
-(require '[integrant.repl.state :refer [system]])
-
-(go)      ; Start system
-(halt)    ; Stop system
-(reset)   ; Stop, reload, restart
 ```
 
 ## Adding Custom Components
@@ -278,7 +472,7 @@ Application-specific function definitions (referenced by `:exec/fn-entities`).
   )
 ```
 
-1. Add to configuration files:
+1. Add to the configuration files:
 
 ```clojure
 :my/component
@@ -288,9 +482,10 @@ Application-specific function definitions (referenced by `:exec/fn-entities`).
 
 ## Logging Configuration
 
-Logging is configured via `resources/logback.xml`. See the file for pattern and level configuration.
+Logging is configured via `resources/logback.xml`. See the file for
+pattern and level configuration.
 
 Key MDC fields:
 
-- `correlation-id` - Request tracing ID
+- `correlation-id` — Request tracing ID
 - Custom fields via `graphden.logging.interface/with-context`

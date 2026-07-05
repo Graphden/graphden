@@ -1,6 +1,6 @@
 # Error Codes Reference
 
-This document lists all error types used in the graphden system. Errors are thrown as `ExceptionInfo` with a `:type` key in the ex-data map.
+This document is a reference for the commonly-handled error families in the graphden system — not an exhaustive list (many modules carry their own `:category/specific` types). Errors are thrown as `ExceptionInfo` with a `:type` key in the ex-data map.
 
 ## Error Type Naming Convention
 
@@ -140,9 +140,9 @@ the context's `:allowed-effects` should include the category.
 **Description:** Execution context is invalid (e.g., missing storage).
 **Solution:** Ensure context is created with `create-context` and has a valid storage.
 
-### `:execution-error/type-mismatch`
+### `:validation-error/type-mismatch`
 
-**Component:** executor
+**Component:** executor (arg-value validation)
 **Description:** Provided argument value doesn't match the expected type.
 **Ex-data keys:**
 
@@ -151,18 +151,13 @@ the context's `:allowed-effects` should include the category.
 - `:provided-value` - The value that was provided
 - `:provided-type` - Actual Java type of the value
 
-### `:execution-error/invalid-arg`
+### `:execution-error/invalid-args`
 
 **Component:** executor
 **Description:** Arg is missing the `:type` field.
 **Ex-data keys:**
 
 - `:arg` - The invalid arg
-
-### `:execution-error/nil-value`
-
-**Component:** executor
-**Description:** Arg value cannot be nil (defensive check).
 
 ### `:execution-error/fn-not-found`
 
@@ -172,25 +167,7 @@ the context's `:allowed-effects` should include the category.
 
 - `:fn-id` - The missing function's UUID
 
-### `:execution-error/parent-not-found`
-
-**Component:** executor
-**Description:** Parent function (base-fn) not found in the execution graph.
-**Ex-data keys:**
-
-- `:fn-id` - The function ID
-- `:parent-id` - The missing parent's UUID
-
-### `:execution-error/missing-required-arg`
-
-**Component:** executor
-**Description:** A required argument was not provided and has no default value.
-**Ex-data keys:**
-
-- `:arg-id` - The arg ID
-- `:arg-name` - Name of the missing argument
-
-### `:execution-error/max-depth-exceeded`
+### `:recursion-error/max-depth-exceeded`
 
 **Component:** executor
 **Description:** Maximum recursion depth exceeded (protection against infinite recursion).
@@ -198,24 +175,6 @@ the context's `:allowed-effects` should include the category.
 
 - `:depth` - Current depth
 - `:max-depth` - Maximum allowed depth (default: 1000)
-
-### `:execution-error/timeout`
-
-**Component:** executor
-**Description:** Execution timeout exceeded.
-**Ex-data keys:**
-
-- `:elapsed-ms` - Time elapsed
-- `:timeout-ms` - Maximum allowed time (default: 30000ms)
-
-### `:execution-error/base-fn-not-found`
-
-**Component:** executor
-**Description:** Base function not registered in the registry.
-**Ex-data keys:**
-
-- `:fn-name` - Name of the missing function
-- `:available-fns` - List of registered function names
 
 ### `:execution-error/graph-too-large`
 

@@ -297,7 +297,7 @@ all loaded packages.
 |------|------|
 | Done | `:service` schema, reconciler, integrant, generic CRUD via /api/entities/service, supervisor for startup failures, packages-based seeding, already-running rejection, validation that target fn has zero free args |
 | Next | Periodic reconcile poll (picks up out-of-band DB edits); `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
-| Then | Multi-pod: `:owner-pod-id`, PG advisory-lock leader election for cron, cross-pod cancel routing |
+| Then | Multi-pod: `:owner-pod-id`, PG advisory-lock leader election for cron, cross-pod cancel routing, advisory-lock connection-drop reconnect + re-acquire (a dropped lock conn silently session-releases the pod's advisory locks — single-pod-latent, but two pods could then double-run one service until the next reconcile stops the loser) |
 | Future | Healthcheck-based runtime crash detection (lets `:always` honor "restart on clean exit"); pluggable supervisor strategies |
 
 ## Code locations

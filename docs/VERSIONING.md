@@ -379,6 +379,15 @@ keeps its inline 📍 badge on the same rows.
 
 - Per-branch ctx cache has no eviction — fine for the dev workflow
   (handful of branches), needs LRU for multi-tenant prod.
+- `resolve-branch-id`'s ref-cache has a narrow TOCTOU: a branch deleted
+  concurrently with the FIRST (uncached) resolution of its name can
+  leave the just-deleted id cached (the resolve's DB read raced ahead
+  of the delete's `forget-ref-cache-for-branch!`). A later request for
+  that name then builds a ctx for a dead branch (chain resolves to
+  `[dead-id]`, falling back to main's versions / entity-not-found).
+  Admin-triggered + recoverable (cache invalidate / restart); an
+  airtight fix needs resolve↔delete coordination — deferred with the
+  LRU work above.
 - The `:exec/branch-router` is unit-tested at the dispatcher level
   (`branch-router-test`: header / query parsing, default fallback,
   unknown-ref rejection, invalidate) but there's no end-to-end

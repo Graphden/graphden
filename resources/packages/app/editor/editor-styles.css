@@ -74,6 +74,7 @@
      "green = ok / red = problem" is unambiguous. */
   --success-fg: #4ade80;
   --error-fg: #ff6b6b;
+  --warning-fg: #c47b00;
   /* Effect-chip categorical palette — encodes effect KIND (db / network
      / time / …) so the chip background must be the same colour in both
      themes. Chip text is fixed dark since every bg here is bright. */
@@ -126,6 +127,7 @@ body.theme-dark {
      so they don't vibrate. Hue still maps green=ok / red=error. */
   --success-fg: #5be08a;
   --error-fg: #ff7777;
+  --warning-fg: #e0a94a;
   /* Effect-chip palette stays identical in dark theme — colour encodes
      category, not surface. Chip fg flips to white since dark-theme chips
      could otherwise look washed out against page bg in screenshots. */
@@ -3333,8 +3335,8 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   padding: 4px 8px;
   font-size: 11px;
   color: var(--fg);
-  background: color-mix(in srgb, var(--warning-fg, #c47b00) 12%, var(--card-bg));
-  border: 1px dashed var(--warning-fg, #c47b00);
+  background: color-mix(in srgb, var(--warning-fg) 12%, var(--card-bg));
+  border: 1px dashed var(--warning-fg);
   border-radius: 3px;
   cursor: help;
 }
@@ -3957,7 +3959,7 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-grants-admin .grant-delete,
 .sidebar-users-admin .grant-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; }
 .sidebar-grants-admin .grant-delete:hover,
-.sidebar-users-admin .grant-delete:hover { color: var(--danger, #c0392b); }
+.sidebar-users-admin .grant-delete:hover { color: var(--error-fg); }
 .sidebar-grants-admin .grant-create-form,
 .sidebar-users-admin .grant-create-form { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; }
 .sidebar-grants-admin .grant-input,

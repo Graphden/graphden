@@ -41,10 +41,15 @@
   [storage binding-id b new-c _effects-vec]
   (let [hash-hex (records/digest-hex "SHA-1" (pr-str new-c))
         new-id (records/anonymous-fn-id hash-hex)
-        pre-override (:type-override-fn-id b)]
+        pre-override (:type-override-fn-id b)
+        ;; Track whether WE materialised the anon fn-row this call. A
+        ;; pre-existing row is a shared dedup target (some other binding
+        ;; may already point at it), so it must survive a rejection here;
+        ;; a freshly-created one must be rolled back with the binding.
+        created? (nil? (sp/read-entity storage :fn new-id))]
     ;; Find or create. Storage upsert is the natural fit — same
     ;; id ⇒ same row, no orphan duplicates.
-    (when-not (sp/read-entity storage :fn new-id)
+    (when created?
       (sp/create-entity storage :fn
                         {:id new-id
                          :name nil
@@ -66,6 +71,11 @@
     (if-let [post-rej (tc/type-check-fn-after-mutation! storage (:fn-id b))]
       (do (sp/update-entity storage :binding binding-id
                             {:type-override-fn-id pre-override})
+          ;; Roll back the anon fn-row too — but only the one we just
+          ;; created. Skipping this left an orphan constraint-row behind
+          ;; on every rejected tighten.
+          (when created?
+            (sp/delete-entity storage :fn new-id))
           {:status 400
            :reason (str "Tightening rejected by post-write "
                         "type-check: " (:reason post-rej))})

@@ -69,8 +69,12 @@
                      (persist/redact-outcome fn-name))]
     (persist/log-effect-drift! (some-> row :id) declared-effects runtime-effects)
     (when row
-      (persist/write-finished! storage (:id row) outcome)
-      (persist/unregister-future! (:id row)))
+      ;; Unregister even if the terminal write throws (DB error) — else
+      ;; the futures-registry entry leaks until the pod restarts.
+      (try
+        (persist/write-finished! storage (:id row) outcome)
+        (finally
+          (persist/unregister-future! (:id row)))))
     (cond-> outcome
       row (assoc :execution-id (str (:id row))))))
 

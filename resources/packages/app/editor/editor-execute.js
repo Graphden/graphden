@@ -209,6 +209,10 @@ async function pollOnce(execId, resultHostEl) {
       return;
     }
     const row = await r.json();
+    // The popover may have been dismissed (stopPolling nulls pollState)
+    // while this fetch was in flight — bail before touching pollState /
+    // the detached result host.
+    if (!pollState) return;
     const status = String(row.status || '').replace(/^:/, '');
     if (status === 'succeeded' || status === 'failed' || status === 'cancelled') {
       // Body hiccup comes from `/partials/execute-result?id=…` — the

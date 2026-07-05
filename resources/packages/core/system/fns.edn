@@ -192,7 +192,7 @@
   {:name :read-resource-or-nil
    :description "Read a classpath resource as a string, or return nil if the path doesn't resolve. Building block for `:read-resource` (which throws on miss)."
    :args {:path {:type :text :description "Resource path relative to the classpath root."}}
-   :return-type :text
+   :return-type :nullable-text
    :effects #{:io}}
 
   ;; Read file from classpath resources, or throw with a clear message
@@ -260,7 +260,7 @@
   ;; instead (single source of truth across front- and back-end).
   {:name :sha256-hex
    :description "Lower-case 64-char hex SHA-256 digest of a UTF-8 string. Use `:subs` to take a shorter prefix when a concise build identifier is needed."
-   :args {:s {:type :text :description "Input string. Returns nil for nil input."}}
+   :args {:s {:type :text :description "Input string."}}
    :return-type :text}
 
   ;; ============================================================================
@@ -361,9 +361,9 @@
 
   ;; Read an InputStream/Reader to string
   {:name :slurp
-   :description "Read an InputStream/Reader to a string (Clojure's `slurp`). Used to materialise Ring request bodies."
-   :args {:input {:type :any :description "InputStream, Reader, or any source `clojure.core/slurp` accepts."}}
-   :return-type :text
+   :description "Read an InputStream to a string (Clojure's `slurp`). Used to materialise Ring request bodies. Returns nil for a non-InputStream input, hence `:nullable-text`."
+   :args {:input {:type :any :description "InputStream (or any `:any` value — non-streams read back as nil)."}}
+   :return-type :nullable-text
    :effects #{:io}}
 
   ;; Exception accessors — let `:on-throw` handlers dispatch on class

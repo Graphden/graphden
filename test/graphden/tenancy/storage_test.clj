@@ -5,6 +5,7 @@
    tenants can't be reassigned, non-scoped entities pass through."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.crud.fn-execution.persist :as persist]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.storage :as ts]))
@@ -60,6 +61,25 @@
     (tc/with-org "acme" (sp/create-entity s :fn {:id 1 :name "a"}))
     (is (= "acme" (:org-id (tc/with-org "acme" (sp/read-entity s :fn 1))))
         "create stamps :org-id with the current org")))
+
+
+(deftest completion-future-conveys-org-so-terminal-update-lands
+  ;; `record-completion!` writes the terminal status in a `future`.
+  ;; `:fn-execution` is org-scoped, so that UPDATE runs through the
+  ;; own-guard and must carry the tenant's `*current-org*`. Clojure's
+  ;; `future` conveys dynamic bindings, so the bare future is correct —
+  ;; this locks that contract: a completion started under org "acme"
+  ;; must land on acme's row (regression guard against ever moving the
+  ;; reaper onto a non-conveying executor / raw thread).
+  (let [s (ts/org-scoped-storage (fake))]
+    (tc/with-org "acme" (sp/create-entity s :fn-execution {:id 1 :status :pending}))
+    ;; `record-completion!` is invoked UNDER org "acme" so its future
+    ;; captures that binding; the reaper then runs on a pool thread.
+    @(tc/with-org "acme"
+                  (persist/record-completion! s 1 nil (future 42) (atom #{}) #{}))
+    (is (= :succeeded
+           (:status (tc/with-org "acme" (sp/read-entity s :fn-execution 1))))
+        "terminal status landed on the tenant's own row")))
 
 
 (deftest reads-see-own-and-public-only

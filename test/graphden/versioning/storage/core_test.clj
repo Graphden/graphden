@@ -772,25 +772,25 @@
   (let [base (base-storage)
         v    (vs/wrap-with-versioning base)]
     (try
-      (let [ba (make-list-binding! v "mba")
-            bb (make-list-binding! v "mbb")
+      (let [bind-a (make-list-binding! v "mba")
+            bind-b (make-list-binding! v "mbb")
             _existing (sp/create-entity v :binding-list-item
-                                        {:binding-id (:id ba) :position 0 :value 1})]
+                                        {:binding-id (:id bind-a) :position 0 :value 1})]
         (testing "batch item at position 0 in a DIFFERENT binding does not collide"
           (sp/create-entities v :binding-list-item
-                              [{:binding-id (:id bb) :position 0 :value 2}])
-          (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id bb)})))))
+                              [{:binding-id (:id bind-b) :position 0 :value 2}])
+          (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id bind-b)})))))
         (testing "multi-binding batch: the item at the taken (A,0) collides, and nothing lands"
           (let [ex (try (sp/create-entities v :binding-list-item
-                                            [{:binding-id (:id bb) :position 9 :value 3}
-                                             {:binding-id (:id ba) :position 0 :value 4}])
+                                            [{:binding-id (:id bind-b) :position 9 :value 3}
+                                             {:binding-id (:id bind-a) :position 0 :value 4}])
                         (catch clojure.lang.ExceptionInfo e e))]
             (is (= :constraint-violation/position-collision (:type (ex-data ex))))
-            (is (= (:id ba) (:binding-id (ex-data ex)))
+            (is (= (:id bind-a) (:binding-id (ex-data ex)))
                 "collision is attributed to binding A, not the free B item")
-            (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id bb)})))
+            (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id bind-b)})))
                 "the free B item did not land — batch is all-or-nothing")
-            (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id ba)})))))))
+            (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id bind-a)})))))))
       (finally (sp/close base)))))
 
 

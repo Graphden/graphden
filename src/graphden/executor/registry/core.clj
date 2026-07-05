@@ -331,11 +331,9 @@
    declares 'spawns supervised background work'; required by the
    `:_create-service-no-process-rej` graph guard when admins make a
    fn into a `:service`.
-   The legacy generic `:effectful? true` boolean / `:effect` tag have
-   been retired — every base-fn that produces side effects names a
-   specific category. `:description` is propagated so the editor's
-   inline-expand panel can surface a human-readable hint without a
-   separate API call.
+   Every base-fn that produces side effects names a specific category.
+   `:description` is propagated so the editor's inline-expand panel can
+   surface a human-readable hint without a separate API call.
 
    `:return-type-rule` / `:slot-types-rule` / `:nav-types-rule` —
    per-base-fn type-rules declared at the base-fn's `impls.clj`

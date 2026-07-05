@@ -64,11 +64,6 @@
     (reg/record-rich-types! :rtc-eff {:args {} :return-type :int :effects [:db :io]})
     (is (= #{:db :io} (:effects (reg/rich-type-of :rtc-eff)))))
 
-  (testing "legacy :effectful? boolean is ignored (the generic :effect tag was retired)"
-    (reg/record-rich-types! :rtc-legacy {:args {} :return-type :int :effectful? true})
-    (is (= #{} (:effects (reg/rich-type-of :rtc-legacy)))
-        "Pure rich-type entry — :effectful? doesn't add an effect tag; the empty set is the computed-pure marker."))
-
   (testing "rich-types-snapshot includes every recorded entry"
     (is (contains? (reg/rich-types-snapshot) :rtc-plain))))
 

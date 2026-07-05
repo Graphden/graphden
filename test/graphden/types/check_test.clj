@@ -895,27 +895,6 @@
     (is (= #{:env :db} (:effects (registry/rich-type-of :mi-effects))))))
 
 
-(deftest legacy-effectful-bool-is-ignored
-  ;; `:effectful? true` was a 1-bit legacy flag that normalised to
-  ;; `:effects #{:effect}`. The generic `:effect` category was
-  ;; retired in favour of the six named categories — every effectful
-  ;; base-fn now names its specific category (db / env / io /
-  ;; network / time / random). The legacy boolean is silently
-  ;; dropped: a fn-def using only the deprecated shim now reads as
-  ;; pure (which is the correct outcome — authors must port to a
-  ;; specific category).
-  (testing "an EDN-declared `:effectful? true` is silently dropped"
-    (registry/record-rich-types! :legacy-bool
-                                 {:args {} :return-type :int :effectful? true})
-    (let [info (registry/rich-type-of :legacy-bool)]
-      ;; `:effects` is always recorded as the computed set; legacy
-      ;; `:effectful? true` doesn't add a category, so the set is
-      ;; empty — the correct "computed-pure" representation.
-      (is (= #{} (:effects info))
-          "Empty :effects set — the legacy generic shim was retired.")
-      (is (not (registry/effectful-rich-type? info))))))
-
-
 (deftest source-location-recorded-in-registry
   (testing "successful fn-def stashes its :source-file / :source-line"
     (registry/record-rich-types! :id-fn

@@ -28,7 +28,7 @@
           :pkg-version {:type :text :description "Semver version string, e.g. \"1.2.0\"."}
           :bundle {:type :package-bundle-shape :description "Bundle from :export-namespace."}}
    :return-type :jsonb
-   :effects #{:db}}
+   :effects #{:db :time}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/packages/publish — graph-composed handler.

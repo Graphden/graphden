@@ -111,19 +111,18 @@ is uniform across storages.
 
 ## Part 3: Recursion and Cycles
 
-### The state of graph-level recursion (honest assessment)
+### Graph-level cycles are forbidden; recursion is via `:fix`
 
-Two enforcement layers reject recursive fn-defs at write/sync time;
-together they make graph-level recursion **structurally
-impossible** in the current architecture:
+Two enforcement layers reject dependency **cycles** in the fn-def
+graph at write/sync time, keeping the graph a DAG:
 
 1. **Lower-level — `validate-no-dependency-cycle-impl`**
    (`storage/protocol/constraints.clj`). Per-binding write-time
    check. Walks `ref-fn-id` + `parent-ids` + `type-override-fn-id`
    - `binding-list-item.ref-fn-id` edges from the bound ref. Rejects
    when the chain closes back on the owner. Carves out
-   `owner == ref` (the bare self-reference) as allowed — but see
-   below: the higher-level check catches this anyway.
+   `owner == ref` (the bare self-reference) as allowed — but the
+   higher-level check catches this anyway.
 
 2. **Higher-level — `topological-sort`**
    (`executor/composition/deps.clj`). Sync-time check across the
@@ -132,76 +131,68 @@ impossible** in the current architecture:
    order and a cycle has no valid order.
 
 ```edn
-;; Pattern A: bare self-ref — rejected by topological-sort even
-;; though the per-binding check carves it out.
+;; Bare self-ref — rejected by topological-sort even though the
+;; per-binding check carves it out.
 {:name :fact :parent :if :args {:test :_zero? :then 1 :else :fact}}
 ;; → :fn-composition/circular-dependency on sync
-
-;; Pattern B: wrapper that decrements :n — rejected by the per-binding
-;; cycle check via parent+ref edges (parent :fact → ref :_mul-recurse
-;; → ref :_fact-tail → parent :fact closes the loop).
-{:name :_fact-tail :parent :fact :args {:n :_n-minus-1}}
-;; → :constraint-violation/dependency-cycle on storage write
 ```
 
-Empirically verified: both patterns are rejected. There is no
-combination of graph-only composition that expresses productive
-recursion today.
+So a fn-def can't refer back to itself through the graph. Recursion
+instead goes through **`:fix`** (`core/recursion`), which introduces
+NO graph cycle: the recursive call is a runtime `:self` callable the
+step fn receives, synthesized by `:fix`'s impl at wrap time (a
+Y-combinator over closure-capture — see
+[docs/CLOSURE_CAPTURE.md](CLOSURE_CAPTURE.md)). The graph stays a DAG;
+recursion lives at runtime, bounded by `*max-recursion-depth*`
+(default 1000).
 
-### Current working pattern: runtime re-entry from a base-fn impl
+```edn
+;; Factorial as a graph composition — no cycle, Code = Graph holds.
+{:name :factorial
+ :parent :fix
+ :args {:step :_fact-step        ; (fn [{:input n :self recur}] …)
+        :input {:as :n}}}
+```
 
-The only path that works today is escaping into Clojure inside a
-base-fn impl and calling back through the executor:
+`:fix` is tested (`recursion_test` runs a real factorial + the depth
+bound) and used in production: `storage/branches` `:branch-chain`
+walks a branch's parent chain as a `:fix` composition over the
+`:pg-query` / `:decode-row` primitives. Mutual recursion is expressed
+by tag-dispatching inside one `:fix` step (the `:self` handles every
+mutual arm).
+
+### Anti-pattern: runtime re-entry from a base-fn impl
+
+Before `:fix`, the only path was escaping into Clojure inside a
+base-fn impl and calling back through `exec/execute-by-name`:
 
 ```clojure
-(defbase fact-step [n ctx]
-  (if (<= n 1)
-    1
-    (* n (exec/execute-by-name ctx :fact-step {:n (dec n)}))))
+(defbase fact-step [n ctx]        ; ANTI-PATTERN — use :fix instead
+  (if (<= n 1) 1 (* n (exec/execute-by-name ctx :fact-step {:n (dec n)}))))
 ```
 
-The graph stores `fact-step` as a normal base-fn — no cycle to
-detect. Recursion happens entirely in the impl code; the executor's
-depth limit bounds runaway.
+This **violates Code = Graph** — the recursive structure lives in
+Clojure, invisible to the editor / type-checker / graph traversals.
+`:fix` supersedes it; prefer a `:fix` composition for any new
+recursion.
 
-**This pattern violates the Code = Graph principle** — the
-recursive structure lives in Clojure, invisible to the editor /
-type-checker / graph traversals. Acceptable as a short-term escape
-hatch for one-off recursive base-fns, but it's not a substitute for
-graph-level recursion.
+### The road not taken: Approach B (lazy ref resolution)
 
-### Mutual recursion
-
-Forbidden by the same two checks. Two fns calling each other form a
-cycle of length 2, rejected at topological-sort. The same runtime
-re-entry escape-hatch is the only option.
-
-### Roadmap
-
-Two viable approaches are fully specified in
-[RECURSION.md](RECURSION.md):
-
-- **Approach A — `:fix` (Y-combinator + closure-capture)**:
-  one new base-fn, leverages closure-capture (`:self` is a captured
-  arg synthesized at wrap time by `:fix`'s impl). Cycle invariant
-  preserved. Mutual recursion via tag-dispatch convention. ~3
-  hours estimated effort.
-- **Approach B — Lazy ref resolution**: relax the cycle check
-  (optionally gated by a `:recursive?` flag on fn-row), compiler
-  generates lazy thunks at every ref site. Natural mutual
-  recursion. ~1-2 days estimated effort — touches compile
-  pipeline + `delta-recompile!` + type-checker.
-
-**Recommended order**: ship A first; revisit B only if A's
-mutual-recursion ergonomics prove insufficient in practice. When A
-lands, `exec/execute-by-name` from inside an impl moves from
-"escape hatch" to explicit anti-pattern.
+[RECURSION.md](RECURSION.md) also specifies Approach B — relax the
+cycle check (gated by a `:recursive?` flag) so refs cycle freely and
+the compiler emits lazy thunks at every ref site, giving natural
+mutual recursion at the cost of touching the compile pipeline +
+`delta-recompile!` + type-checker. It was NOT built; `:fix` (Approach
+A) covers the practical cases without weakening the DAG invariant.
+Revisit B only if `:fix`'s tag-dispatch mutual-recursion ergonomics
+prove insufficient in practice.
 
 ### Runtime safety
 
 The executor caps recursion through `:max-depth` and `:timeout-ms`
 on the execution context (defaults 1000 and 30 s) — applies to BOTH
-the runtime re-entry pattern AND the future `:fix`-based pattern.
+the legacy runtime re-entry pattern AND the `:fix`-based pattern
+(`:fix` additionally enforces `*max-recursion-depth*` per call).
 Storage-layer graph resolution caps walks via
 `*max-graph-iterations*` (default 10000) when building closures.
 

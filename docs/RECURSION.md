@@ -1,21 +1,26 @@
-# Recursion in graphden — Design space and roadmap
+# Recursion in graphden — Design space and the shipped approach
 
-> **Status**: design doc / roadmap. Neither approach below is
-> implemented yet. The current state of recursion is documented in
-> [ARCHITECTURE.md § Part 3 — Recursion and Cycles](ARCHITECTURE.md#part-3-recursion-and-cycles):
-> graph-level recursion is structurally impossible (cycle-check
-> layers reject all self-/mutual-ref patterns); the only working
-> escape hatch is runtime re-entry via `exec/execute-by-name` from
-> inside a base-fn impl, which **violates Code = Graph**.
+> **Status**: Approach A (`:fix`) is **shipped**. The `:fix`
+> Y-combinator base-fn lives in `resources/packages/core/recursion/`,
+> is depth-guarded (`*max-recursion-depth*`, default 1000), tested
+> (`recursion_test` runs a real factorial + exercises the depth bound),
+> and used in production — `storage/branches` `:branch-chain` walks a
+> branch's parent chain as a `:fix` graph composition. Approach B
+> (relax the cycle check) is the road not taken; it's kept below as the
+> design alternative. Graph-level cycles (bare self- / mutual-ref)
+> remain structurally forbidden by the two cycle-check layers — `:fix`
+> expresses recursion through a runtime `:self` callable, NOT a graph
+> cycle, so Code = Graph holds without weakening the DAG invariant.
 
-## Why this needs solving
+## Why this needed solving
 
 Recursion isn't optional for an expressive functional language —
 tree-walk (JSON / hiccup / AST visitor) is the bread-and-butter
-practical case. Today admins/users **cannot** express recursion in
-the graph; they must escape to Clojure inside a base-fn impl, which
-hides the recursive structure from every other consumer (editor,
-type-checker, layout, layout substitution, delta-recompile).
+practical case. Before `:fix`, admins/users could not express
+recursion in the graph; they had to escape to Clojure inside a base-fn
+impl, which hid the recursive structure from every other consumer
+(editor, type-checker, layout, layout substitution, delta-recompile).
+`:fix` closes that gap.
 
 ## Two viable approaches
 

@@ -302,9 +302,9 @@ Versioned entities (per `graphden.versioning.storage.resolution/entity-config`):
 
 | Entity | Version table | Versioned fields |
 |---|---|---|
-| `fn` | `fn-version` | `name`, `description`, `constraint`, `base-fn-id`, `element-fn-id`, `return-type-fn-id`, `anonymous-hash` |
+| `fn` | `fn-version` | `name`, `description`, `constraint`, `base-fn-id`, `element-fn-id`, `return-type-fn-id`, `anonymous-hash`, `expects-effects` |
 | `fn-slot` | `fn-slot-version` | `fn-id`, `slot-id`, `position` |
-| `binding` | `binding-version` | `fn-id`, `slot-id`, `value`, `ref-fn-id`, `override-kind`, `rename-to`, `type-override-fn-id`, `description`, `terminal`, `list-append`, `list-closed` |
+| `binding` | `binding-version` | `fn-id`, `slot-id`, `value`, `value-present`, `ref-fn-id`, `override-kind`, `type-override-fn-id`, `description`, `terminal`, `list-append`, `list-closed` |
 | `binding-list-item` | `binding-list-item-version` | `binding-id`, `position`, `value`, `ref-fn-id`, `literal` |
 
 `slot` is intentionally not versioned — name+type is the slot's

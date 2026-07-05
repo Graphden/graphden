@@ -370,6 +370,16 @@
          ref-name :ref type-ref :type} arg-value
         has-required? (contains? arg-value :required)
         has-terminal? (contains? arg-value :terminal)
+        ;; A `:ref` key names a fn; `name->id` is complete for every
+        ;; legitimately-referenceable fn at parse time (own module +
+        ;; dependency-loaded ancestors), so an unresolved one is an
+        ;; author typo. Fail loud instead of dropping to an empty
+        ;; binding — mirrors the orphan-slot validator + the
+        ;; `item->record` list-item path.
+        _ (when (and ref-name (not (contains? name->id ref-name)))
+            (throw (ex-info (str "Unresolved binding ref: " ref-name)
+                            {:type :packages/unresolved-ref
+                             :ref ref-name})))
         override-fn-id (when type-ref
                          (try (types/resolve-type-ref type-ref name->id)
                               (catch Exception e
@@ -477,6 +487,16 @@
         (cond
           (and ref-name (contains? name->id ref-name))
           (assoc base :ref-fn-id (get name->id ref-name))
+
+          ;; A `:ref` key names a fn — an unresolved one is an author
+          ;; typo, not literal data. Fail loud (mirrors the main-binding
+          ;; path) instead of silently storing `{:ref :typo}` as a
+          ;; scalar list element that only trips a confusing downstream
+          ;; type error.
+          ref-name
+          (throw (ex-info (str "Unresolved list-item ref: " ref-name)
+                          {:type :packages/unresolved-ref
+                           :ref ref-name}))
 
           (contains? item :value)
           (assoc base :value value)

@@ -336,6 +336,36 @@
 
 
 ;; -----------------------------------------------------------------------------
+;; Unresolved `{:ref …}` — an author typo in a ref name must fail loud at
+;; parse time, not silently drop to an empty binding (main path) or store
+;; a literal `{:ref …}` scalar element (list-item path). `name->id` is
+;; complete for every legitimately-referenceable fn by parse time, so an
+;; unknown name is unambiguously a typo.
+
+(deftest unresolved-binding-ref-throws
+  (testing "a `{:ref :typo}` binding whose target fn is unknown throws"
+    (let [defs [{:name :base :namespace "test"
+                 :args {:x {:type :any :required true}}}
+                {:name :caller :namespace "test"
+                 :parent :base
+                 :args {:x {:ref :does-not-exist}}}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unresolved binding ref"
+            (r/parse-module defs))))))
+
+
+(deftest unresolved-list-item-ref-throws
+  (testing "a `{:ref :typo}` list item whose target fn is unknown throws"
+    (let [defs [{:name :any-list :namespace "test" :list :any}
+                {:name :caller :namespace "test"
+                 :parent :any-list
+                 :args {:items [{:ref :also-missing}]}}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unresolved list-item ref"
+            (r/parse-module defs))))))
+
+
+;; -----------------------------------------------------------------------------
 ;; :required narrowing — descendant binding flips inherited optional → required
 
 (deftest binding-required-narrowing-emits-required-true

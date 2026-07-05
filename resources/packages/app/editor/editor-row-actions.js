@@ -74,6 +74,11 @@ function ensureRowActionsPopover() {
   el.addEventListener('mouseleave', () => {
     if (!rowActionsPopoverSticky) hideRowActionsPopover();
   });
+  // Description-badge hover is DELEGATED (matches `[data-action=
+  // "description"]` off e.target), so it survives every content swap
+  // and is bound ONCE here — binding it per-swap would leak a fresh
+  // listener pair onto this singleton element on every popover open.
+  _bindDescriptionBadgeHover(el);
   document.body.appendChild(el);
   rowActionsPopoverEl = el;
   return el;
@@ -382,7 +387,6 @@ async function loadRowActionsContent(host, fnId, context, opts) {
     loadingClass: 'row-actions-loading',
     errorClass: 'row-actions-error',
     onSwap: (h) => {
-      _bindDescriptionBadgeHover(h);
       _applyAddMICompatibilityState(h);
     }
   });

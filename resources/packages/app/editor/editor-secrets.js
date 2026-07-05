@@ -258,6 +258,17 @@ function closeActivePopover() {
   }
 }
 
+// One document-level dismiss handler for whichever secrets popover is
+// currently active — installed ONCE at module load (the handlers are
+// inert while `_activePopover` is null). The popover element is
+// recreated per open, so `getEl` reads the live `_activePopover`
+// rather than closing over a single element.
+installPopoverDismiss({
+  getEl: () => _activePopover,
+  isVisible: () => _activePopover != null,
+  onDismiss: closeActivePopover
+});
+
 async function openCreateSecretForm(anchor) {
   closeActivePopover();
   const pop = document.createElement('div');
@@ -283,7 +294,6 @@ async function openCreateSecretForm(anchor) {
     failed = true;
   }
   document.body.appendChild(pop);
-  installPopoverDismiss(pop, closeActivePopover);
   anchorBelowClamped(pop, anchor);
   if (failed) return;
 
@@ -393,7 +403,6 @@ async function openRotateSecretForm(anchor, secret) {
     failed = true;
   }
   document.body.appendChild(pop);
-  installPopoverDismiss(pop, closeActivePopover);
   anchorBelowClamped(pop, anchor);
   if (failed) return;
 

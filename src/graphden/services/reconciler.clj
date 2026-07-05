@@ -45,6 +45,16 @@
   (atom {}))
 
 
+;; Serialises `reconcile-once!` — it's called from BOTH the HTTP
+;; `/api/services/reconcile` handler thread AND the NOTIFY listener
+;; thread, and it mutates `running` + acquires advisory locks on the
+;; (non-thread-safe) lock connection. Concurrent passes could compute
+;; the same `to-start` diff and start a service twice, orphaning one
+;; future. The monitor is re-entrant, so restart-* helpers that call
+;; `reconcile-once!` while holding it don't deadlock.
+(defonce ^:private reconcile-monitor (Object.))
+
+
 ;; =============================================================================
 ;; Pure: compute the start/stop set from desired (DB rows) vs running.
 ;; =============================================================================
@@ -268,48 +278,49 @@
   ([ctx running-atom]
    (reconcile-once! ctx running-atom {}))
   ([ctx running-atom start-opts]
-   (let [storage (:storage ctx)
-         lock-conn (lock-conn-from-ctx ctx)
-         enabled-services (vec (sp/query-entities storage :service {:enabled? true}))
-         enabled-by-id    (into {} (map (juxt :id identity)) enabled-services)
-         {:keys [to-start to-stop]} (diff-desired (keys enabled-by-id)
-                                                  (keys @running-atom))
-         not-our-lock (atom [])]
-     (doseq [sid to-stop]
-       (let [entry (get @running-atom sid)]
-         (when (and entry (not= ::not-our-lock entry)) (stop-service! sid entry))
-         (when (and lock-conn entry (not= ::not-our-lock entry))
-           (try (pg-lock/release-lock! lock-conn sid)
-                (catch Exception e
-                  (log/warn e "advisory lock release failed — continuing"
-                            {:service-id sid}))))
-         (swap! running-atom dissoc sid)))
-     (doseq [sid to-start]
-       (let [svc (get enabled-by-id sid)
-             svc-ctx (ctx-for-service ctx svc)
-             acquired? (if lock-conn
-                         (try (pg-lock/try-lock! lock-conn sid)
-                              (catch Exception e
-                                (log/warn e "advisory try-lock failed — treating as not-owned"
-                                          {:service-id sid})
-                                false))
-                         true)]
-         (cond
-           acquired?
-           (let [entry (start-service! svc-ctx svc start-opts)
-                 ;; Record :branch-id on the entry so stop time can
-                 ;; tell which branch this run belonged to (for
-                 ;; observability + future per-branch reconcile).
-                 entry' (cond-> entry
-                          (:branch-id svc) (assoc :branch-id (:branch-id svc)))]
-             (swap! running-atom assoc sid entry'))
+   (locking reconcile-monitor
+     (let [storage (:storage ctx)
+           lock-conn (lock-conn-from-ctx ctx)
+           enabled-services (vec (sp/query-entities storage :service {:enabled? true}))
+           enabled-by-id    (into {} (map (juxt :id identity)) enabled-services)
+           {:keys [to-start to-stop]} (diff-desired (keys enabled-by-id)
+                                                    (keys @running-atom))
+           not-our-lock (atom [])]
+       (doseq [sid to-stop]
+         (let [entry (get @running-atom sid)]
+           (when (and entry (not= ::not-our-lock entry)) (stop-service! sid entry))
+           (when (and lock-conn entry (not= ::not-our-lock entry))
+             (try (pg-lock/release-lock! lock-conn sid)
+                  (catch Exception e
+                    (log/warn e "advisory lock release failed — continuing"
+                              {:service-id sid}))))
+           (swap! running-atom dissoc sid)))
+       (doseq [sid to-start]
+         (let [svc (get enabled-by-id sid)
+               svc-ctx (ctx-for-service ctx svc)
+               acquired? (if lock-conn
+                           (try (pg-lock/try-lock! lock-conn sid)
+                                (catch Exception e
+                                  (log/warn e "advisory try-lock failed — treating as not-owned"
+                                            {:service-id sid})
+                                  false))
+                           true)]
+           (cond
+             acquired?
+             (let [entry (start-service! svc-ctx svc start-opts)
+                   ;; Record :branch-id on the entry so stop time can
+                   ;; tell which branch this run belonged to (for
+                   ;; observability + future per-branch reconcile).
+                   entry' (cond-> entry
+                            (:branch-id svc) (assoc :branch-id (:branch-id svc)))]
+               (swap! running-atom assoc sid entry'))
 
-           :else
-           (do (swap! not-our-lock conj sid)
-               (swap! running-atom assoc sid ::not-our-lock)))))
-     {:started (vec (remove (set @not-our-lock) to-start))
-      :stopped to-stop
-      :not-our-lock @not-our-lock})))
+             :else
+             (do (swap! not-our-lock conj sid)
+                 (swap! running-atom assoc sid ::not-our-lock)))))
+       {:started (vec (remove (set @not-our-lock) to-start))
+        :stopped to-stop
+        :not-our-lock @not-our-lock}))))
 
 
 (defn restart-services-on-branch!

@@ -251,6 +251,13 @@
   #uuid "8f4b2d19-6e3a-4c07-ab51-9d2f7a8c1e46")
 
 
+(def ^:private binding-version-required-field-uuid
+  ;; Mirror of binding.:required (per-binding optional→required narrowing).
+  ;; Without it VersionedStorage would leave `:required` on the shared
+  ;; identity row, so a branch-only narrowing would leak across branches.
+  #uuid "f5fac73f-48b8-4671-b07c-e2e2080659e7")
+
+
 (def ^:private binding-version-created-at-field-uuid
   #uuid "f4b5fd01-2cac-4db5-ba0b-b7c229b0b2a5")
 
@@ -454,6 +461,8 @@
                       :list-closed {:uuid binding-version-list-closed-field-uuid
                                     :type :bool :nullable? true}
                       :terminal {:uuid binding-version-terminal-field-uuid
+                                 :type :bool :nullable? true}
+                      :required {:uuid binding-version-required-field-uuid
                                  :type :bool :nullable? true}
                       :created-at {:uuid binding-version-created-at-field-uuid
                                    :type :timestamptz}

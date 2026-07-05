@@ -125,6 +125,34 @@
       (finally (sp/close base)))))
 
 
+(deftest binding-required-is-branch-isolated-test
+  ;; Regression: `binding.required` (per-binding optional→required
+  ;; narrowing, honoured by the executor's `effective-required?`) was
+  ;; absent from the binding `version-data-fields`, so a branch-only
+  ;; change wrote through to the SHARED identity row and leaked the
+  ;; narrowing onto every other branch. Now versioned like its sibling
+  ;; binding flags (`:terminal`, `:list-append`, …).
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [owner (sp/create-entity v :fn {:name "req-iso-fn" :parent-ids []
+                                           :description "h"})
+            slot  (sp/create-entity v :slot {:name "x" :type-fn-id (:id owner)})
+            bnd   (sp/create-entity v :binding {:fn-id (:id owner)
+                                                :slot-id (:id slot)
+                                                :value "v"})
+            id    (:id bnd)
+            feature (vs/create-branch! v "req-iso-feature")
+            vf      (vs/switch-branch v (:id feature))
+            _       (sp/update-entity vf :binding id {:required true})]
+        (testing "a branch-only :required change does NOT leak to main"
+          (is (not (true? (:required (sp/read-entity v :binding id))))
+              "main keeps the binding non-required")
+          (is (true? (:required (sp/read-entity vf :binding id)))
+              "feature branch sees the narrowed :required true")))
+      (finally (sp/close base)))))
+
+
 ;; ============================================================================
 ;; query-all-graph-entities
 ;; ============================================================================

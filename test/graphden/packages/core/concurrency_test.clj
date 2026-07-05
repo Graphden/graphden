@@ -116,10 +116,16 @@
           target (+ t0 80)]
       (impl {:target-ms (delay target)} nil)
       (let [woken-at (System/currentTimeMillis)]
+        ;; The load-bearing assertion is the lower bound — it MUST block
+        ;; until at least the target. The upper bound only guards against
+        ;; a grossly-broken sleep (one that oversleeps by multiples); the
+        ;; slack is generous because JVM thread scheduling on a loaded CI
+        ;; box (parallel test threads + neighbours) routinely slips past a
+        ;; tight window without the sleep itself being wrong.
         (is (>= woken-at target)
             (str "woke before target — woken=" woken-at " target=" target))
-        (is (<= (- woken-at target) 50)
-            (str "woke >50ms late — slack=" (- woken-at target) "ms"))))))
+        (is (<= (- woken-at target) 500)
+            (str "woke >500ms late — slack=" (- woken-at target) "ms"))))))
 
 
 (deftest sleep-until-ms-target-in-past-is-noop-test

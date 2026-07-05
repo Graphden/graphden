@@ -27,7 +27,7 @@
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
           :pkg-version {:type :text :description "Semver version string, e.g. \"1.2.0\"."}
           :bundle {:type :package-bundle-shape :description "Bundle from :export-namespace."}}
-   :return-type :jsonb
+   :return-type :keyword-map
    :effects #{:db :time}}
 
   ;; ---------------------------------------------------------------------
@@ -84,7 +84,7 @@
 
   {:name :list-package-versions
    :description "All published package versions as a registry index — metadata only (name, version, ns-root, content-hash, published-at, fn-count, dependencies); omits the heavy :fns bundle."
-   :return-type :jsonb
+   :return-type [:list :keyword-map]
    :effects #{:db}}
 
   {:name :_list-packages-result
@@ -108,7 +108,7 @@
    :description "The full published bundle for `(:pkg-name, :pkg-version)`, or nil if not found."
    :args {:pkg-name {:type :text :description "Package name."}
           :pkg-version {:type :text :description "Semver version string."}}
-   :return-type :jsonb
+   :return-type [:union :null :keyword-map]
    :effects #{:db}}
 
   {:name :_fetch-pkg-name
@@ -144,7 +144,7 @@
    :description "Install published `(:pkg-name, :pkg-version)` into the target graph: reject if not found or if any declared dependency is absent, else sync the bundle's namespaces + fn-defs. Returns a tagged `{:ok …}` result. Writes to the request's branch (staging)."
    :args {:pkg-name {:type :text :description "Package name to install."}
           :pkg-version {:type :text :description "Semver version to install."}}
-   :return-type :jsonb
+   :return-type :keyword-map
    :effects #{:db}}
 
   {:name :_install-body

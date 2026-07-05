@@ -250,7 +250,10 @@ function updateOverlayPositions() {
     if (!edge.length) continue;
     const target = edge.target();
     const source = edge.source();
-    if (!target.length) return;
+    // Skip THIS edge only (a target can be missing mid edge-removal /
+    // sync race); `return` here aborted the whole loop, freezing every
+    // later edge-label on pan/zoom.
+    if (!target.length) continue;
 
     const tPos = target.position();
     const tWidth = target.width();
@@ -282,10 +285,12 @@ function updateOverlayPositions() {
       const colRight = source.data('colRightX');
       // Matches the `taxi-turn` formula in editor-cytoscape.js:
       // bend = colRight + 20 (graph units) when colRightX is known;
-      // otherwise fall back to source.right + 20.
+      // otherwise taxi-turn returns a fixed 40, so the bend sits at
+      // source.right + 40 — the label must use the SAME 40 or it lands
+      // 20 units short of the actual bend.
       const bendXpx = (colRight !== undefined)
                       ? (colRight + 20) * zoom + pan.x
-                      : sourceRightPx + 20 * zoom;
+                      : sourceRightPx + 40 * zoom;
       // Post-bend gap scales with zoom so the visible stretch stays
       // proportional to the edge thickness at any zoom level.
       const postBendGap = 18 * zoom;

@@ -197,7 +197,9 @@
           :else {:parent :throw :args {:exception :_refinement-violation-ex}}}}
 
   ;; ---------------------------------------------------------------------
-  ;; The seven shipped narrowers, written via the template.
+  ;; The shipped narrowers, written via the template. Admins declare
+  ;; more for any refinement on demand by `:parent`-ing
+  ;; `:_refinement-narrow`.
   ;; ---------------------------------------------------------------------
 
   {:name :ensure-positive-int

@@ -181,7 +181,7 @@
    :return-type :nullable-text}
 
   {:name :re-find?
-   :description "True iff `:pattern` (a regex) matches somewhere inside `:string`. Returns false for nil / non-string input. Building block for refinement narrowers like `:ensure-url` and `:ensure-non-blank-text`."
+   :description "True iff `:pattern` (a regex) matches somewhere inside `:string`. Returns false for nil / non-string input. General regex-match primitive — compose it into a `:_refinement-narrow` `:test` to build an `:ensure-*` narrower for a `:matches`-constrained refinement."
    :args {:string {:type :any :required false :description "String to search. Non-string / nil → false."}
           :pattern {:type :text :description "Regex pattern (Java syntax)."}}
    :return-type :bool}]}

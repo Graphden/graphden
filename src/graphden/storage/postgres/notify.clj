@@ -1,28 +1,30 @@
 (ns graphden.storage.postgres.notify
   "Postgres LISTEN/NOTIFY transport for cross-process events.
 
-   Used today by `services.reconciler` to react to `:service` row
-   writes from other pods; the same mechanism will carry fn-def
-   invalidation events in Block 7 sub-block B. Every executor pod
-   keeps ONE dedicated `Connection` LISTENing on the
+   Carries `:service` row writes (→ `services.reconciler`) and fn-graph
+   invalidation events (→ `:exec/compiled-registry`) between pods. Every
+   executor pod keeps ONE dedicated `Connection` LISTENing on the
    `graphden_events` channel; a background thread polls
-   `getNotifications` and dispatches to a registered callback set.
+   `getNotifications` and dispatches to a registered callback set. On a
+   connection drop (DB restart / network blip) the loop reconnects with
+   backoff + re-LISTENs, so the pod doesn't go permanently deaf.
 
    Wire format on the channel is a minimal `<kind>:<op>:<payload>`
    string — keeps the 8KB NOTIFY payload limit comfortable and
-   avoids JSON parsing in the hot loop. Today's kinds:
+   avoids JSON parsing in the hot loop. Kinds:
 
-   - `service:write:<service-uuid>`  — `:service` row inserted or
-                                       updated
+   - `service:write:<service-uuid>`  — `:service` row inserted / updated
    - `service:delete:<service-uuid>` — row deleted
+   - `fn:invalidate:<fn-uuid>`       — delta invalidation of one fn's
+                                       compiled closure (empty id ⇒
+                                       full-clear)
 
-   Future kinds (Block 7 sub-block B) will likely include
-   `fn:invalidate:<fn-uuid>` and similar; callbacks pattern-match
-   on `:kind` to opt in."
+   Callbacks pattern-match on `:kind` to opt in."
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.connection :as pg-conn]
+    [graphden.storage.postgres.errors :as pg-errors]
     [next.jdbc :as jdbc])
   (:import
     (java.sql
@@ -109,21 +111,54 @@
   1000)
 
 
+(defn- reconnect!
+  "Replace the dead LISTEN connection in `conn-atom` with a fresh one +
+   re-`LISTEN`. Best-effort closes the old conn first."
+  [conn-atom pg-opts]
+  (try (pg-conn/close-dedicated! @conn-atom "notify-listener")
+       (catch Exception _))
+  (let [c (pg-conn/open-dedicated! pg-opts "notify-listener")]
+    (run-listen! c)
+    (reset! conn-atom c)))
+
+
+(defn- reconnect-with-backoff!
+  "Loop until reconnect succeeds or `running?` flips false. Exponential
+   backoff 1s → 30s cap so a prolonged DB outage doesn't hammer it."
+  [conn-atom pg-opts running? cause]
+  (log/warn cause "NOTIFY connection lost — reconnecting")
+  (loop [backoff-ms 1000]
+    (when @running?
+      (Thread/sleep (long backoff-ms))
+      (when-not (try (reconnect! conn-atom pg-opts)
+                     (log/info "NOTIFY listener reconnected")
+                     true
+                     (catch Exception re
+                       (log/warn re "NOTIFY reconnect attempt failed — retrying")
+                       false))
+        (recur (min 30000 (* 2 backoff-ms)))))))
+
+
 (defn- listen-loop
-  "Blocking loop — `poll-once!` then dispatch, while `running?` is
-   true. Runs on a dedicated thread spawned by `create-listener`."
-  [^Connection conn callbacks running? poll-timeout-ms]
+  "Blocking loop — `poll-once!` on the current connection, then
+   dispatch, while `running?` is true. Runs on a dedicated thread
+   spawned by `create-listener`. On a connection-class failure it
+   reconnects (fresh conn + re-LISTEN, with backoff) rather than
+   spinning forever on a dead connection."
+  [conn-atom pg-opts callbacks running? poll-timeout-ms]
   (try
     (while @running?
       (try
-        (doseq [event (poll-once! conn poll-timeout-ms)]
+        (doseq [event (poll-once! @conn-atom poll-timeout-ms)]
           (dispatch! callbacks event))
         (catch InterruptedException _
           (Thread/.interrupt (Thread/currentThread)))
         (catch Exception e
           (when @running?
-            (log/error e "NOTIFY listen loop iteration failed — continuing"))
-          (Thread/sleep (long poll-timeout-ms)))))
+            (if (pg-errors/connection-error? e)
+              (reconnect-with-backoff! conn-atom pg-opts running? e)
+              (do (log/error e "NOTIFY listen loop iteration failed — continuing")
+                  (Thread/sleep (long poll-timeout-ms))))))))
     (finally
       (log/info "NOTIFY listen loop exiting"))))
 
@@ -144,15 +179,17 @@
   ([pg-opts {:keys [poll-timeout-ms]
              :or {poll-timeout-ms default-poll-timeout-ms}}]
    (let [conn (pg-conn/open-dedicated! pg-opts "notify-listener")
+         conn-atom (atom conn)
          callbacks (atom #{})
          running? (atom true)]
      (run-listen! conn)
      (let [thread (doto (Thread. ^Runnable
-                         #(listen-loop conn callbacks running? poll-timeout-ms)
+                         #(listen-loop conn-atom pg-opts callbacks running? poll-timeout-ms)
                                  "graphden-notify-listener")
                     (Thread/.setDaemon true)
                     Thread/.start)]
-       {:connection conn
+       {:conn-atom conn-atom
+        :pg-opts pg-opts
         :callbacks callbacks
         :running? running?
         :thread thread}))))
@@ -176,13 +213,14 @@
 (defn close-listener!
   "Stop the dispatch thread + close the connection. Idempotent —
    calling twice is harmless."
-  [{:keys [^Connection connection ^Thread thread running?]}]
+  [{:keys [conn-atom ^Thread thread running?]}]
   (when running? (reset! running? false))
   (when thread
     (try
       (Thread/.join thread 2000)
       (catch InterruptedException _ nil)))
-  (pg-conn/close-dedicated! connection "notify-listener"))
+  (when conn-atom
+    (pg-conn/close-dedicated! @conn-atom "notify-listener")))
 
 
 ;; =============================================================================

@@ -130,6 +130,39 @@
           (pg-notify/close-listener! listener))))))
 
 
+(deftest ^:integration reconnects-after-connection-drop-test
+  (testing "a dropped LISTEN connection reconnects + keeps delivering events"
+    (let [pg-opts (pg-opts-from-fixture)
+          listener (pg-notify/create-listener pg-opts {:poll-timeout-ms 250})
+          received (atom [])
+          cb (pg-notify/register! listener (fn [e] (swap! received conj e)))]
+      (try
+        ;; Simulate a DB restart / network blip — close the listener's
+        ;; dedicated connection out from under the poll loop. Pre-fix the
+        ;; loop would spin on the dead conn forever (permanently deaf).
+        (Connection/.close @(:conn-atom listener))
+        ;; The loop hits the dead conn, classifies it as a connection
+        ;; error, and reconnects (first backoff is 1s) — give it headroom.
+        (Thread/sleep 2000)
+        ;; Emit AFTER the reconnect: only a fresh, re-LISTENed connection
+        ;; will observe this notification.
+        (let [writer-conn (java.sql.DriverManager/getConnection
+                            ^String (:jdbc-url pg-opts)
+                            (:username pg-opts)
+                            (:password pg-opts))]
+          (try
+            (jdbc/execute! writer-conn
+                           ["SELECT pg_notify('graphden_events', ?)"
+                            "fn:invalidate:after-reconnect"])
+            (finally (Connection/.close writer-conn))))
+        (Thread/sleep 500)
+        (is (= [{:kind :fn :op :invalidate :id "after-reconnect"}] @received)
+            "event delivered on the reconnected connection")
+        (finally
+          (pg-notify/unregister! listener cb)
+          (pg-notify/close-listener! listener))))))
+
+
 (deftest ^:integration unregister-stops-dispatching-test
   (testing "after `unregister!` the callback no longer fires"
     (let [pg-opts (pg-opts-from-fixture)

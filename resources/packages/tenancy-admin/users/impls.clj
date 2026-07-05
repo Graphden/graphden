@@ -5,6 +5,7 @@
    calls the injectable `:user-ops` seam. Both throw / no-op without the addon,
    but this package only loads WITH it."
   (:require
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.protocol.core :as sp]))
 
@@ -14,6 +15,7 @@
 ;; it's a redaction, not composition).
 (defbase list-users
   []
+  (cr/record-effect! :db)
   (mapv #(dissoc % :password-hash) (sp/query-entities (:storage ctx) :user {})))
 
 
@@ -23,6 +25,7 @@
 (defbase invoke-create-user
   [username password org]
   (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
     ((:create-user ops) ctx username password org)))
 
 
@@ -32,12 +35,14 @@
 (defbase invoke-reset-password
   [user-id password]
   (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
     ((:reset-password ops) ctx user-id password)))
 
 
 (defbase invoke-delete-user
   [user-id]
   (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
     ((:delete-user ops) ctx user-id)))
 
 

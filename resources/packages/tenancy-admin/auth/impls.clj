@@ -7,12 +7,14 @@
    org / token / domain / my-app provisioning routes live in the
    `tenancy-admin` package (route-collection seam, PLATFORM_PLAN §6)."
   (:require
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]))
 
 
 (defbase invoke-login
   [username password request]
   (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
     ;; `request` flows to the :login seam wrapper for per-IP rate-limiting
     ;; (brute-force defense); the core login! ignores it.
     ((:login ops) ctx username password request)))
@@ -23,6 +25,7 @@
 (defbase invoke-signup
   [username password org request]
   (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
     ;; `request` flows to the :signup seam wrapper for per-IP rate-limiting;
     ;; the core signup! ignores it.
     ((:signup ops) ctx username password org request)))
@@ -34,6 +37,7 @@
 (defbase invoke-logout
   [request]
   (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
     ((:logout ops) ctx request)))
 
 
@@ -42,6 +46,7 @@
 (defbase invoke-logout-all
   []
   (when-let [ops (:user-ops ctx)]
+    (cr/record-effect! :db)
     ((:logout-all ops) ctx)))
 
 

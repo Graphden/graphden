@@ -247,6 +247,33 @@
           :func     {:type [:fn {:arg :ring-request-shape} :ring-response-shape]
                      :description "Concrete router callable invoked per request. Bound by the consumer (typically a `:router` descendant)."}}}
 
+  ;; Same header-merge as :router-ring-response, but as a HANDLER WRAP
+  ;; around an arbitrary :base-handler rather than around the main router.
+  ;; :router-ring-response only covers responses produced by the main
+  ;; :_router; the branch/tenancy dispatch layer
+  ;; (`graphden.system.branch-router/dispatch`) also emits responses —
+  ;; control-plane admin HTML, unknown-branch 400, tenant app-router —
+  ;; that never touch :_router and so would ship WITHOUT security headers
+  ;; (latent clickjacking on admin panels). Mounting this wrap OUTSIDE the
+  ;; dispatch layer stamps every one of those too. Idempotent: :merge-in
+  ;; fills only MISSING keys, so a response already carrying the headers
+  ;; (the normal :router-ring-response path) is untouched.
+  {:name :_secure-headers-handler-result
+   :description "Runs :base-handler on the :request — the response the wrap will stamp headers onto. Named (not inline) so the HOF :call type-checks like :router-result does."
+   :parent :call
+   :args {:func {:as :base-handler
+                 :type [:fn {:request :ring-request-shape} :ring-response-shape]}
+          :arg {:as :request}}
+   :return-type :ring-response-shape}
+
+  {:name :secure-headers-wrap
+   :description "Handler wrap — runs :base-handler on the :request and merges :default-security-headers into the response's :headers (missing keys only; a handler's explicit header wins). Mount OUTSIDE branch/tenancy dispatch so responses that bypass :router-ring-response still carry the headers. Free args: :base-handler, :request."
+   :parent :merge-in
+   :return-type :ring-response-shape
+   :args {:m        :_secure-headers-handler-result
+          :path     [{:value :headers}]
+          :defaults :default-security-headers}}
+
   ;; =============================================================================
   ;; AUTH SEAM (PLATFORM_PLAN §3.0) — the authentication DECISION delegates
   ;; to the context's pluggable `:auth-provider`. Core wires the default

@@ -110,7 +110,7 @@
    :args {:base-handler :_app-ring-response}}
 
   ;; Per-request handler wrap chain (outer → inner):
-  ;;   :_app-cached → :_app-encoded → :_app-realized → :_branch-routed-handler
+  ;;   :_app-cached → :_app-encoded → :_app-realized → :_app-secured → :_branch-routed-handler
   ;;
   ;; - cache wrap is OUTERMOST so it can short-circuit the entire
   ;;   chain on hit (no executor work, no encoding, no body slurp)
@@ -118,11 +118,21 @@
   ;;   cache stores fully-processed responses
   ;; - realize-body wraps just the handler — body realisation only
   ;;   needs to happen when we'll actually run the handler
+  ;; - secure-headers is INSIDE realize/encode (so its merged keyword
+  ;;   header keys get stringified) but OUTSIDE branch/tenancy dispatch,
+  ;;   so control-plane admin HTML / unknown-branch 400 / tenant
+  ;;   app-router responses — which bypass :router-ring-response — still
+  ;;   ship the security headers. Idempotent for the normal path.
+
+  {:name :_app-secured
+   :description "Branch-routed handler with default security headers stamped onto every response (incl. the dispatch-layer responses that bypass :router-ring-response)."
+   :parent :secure-headers-wrap
+   :args {:base-handler :_branch-routed-handler}}
 
   {:name :_app-realized
-   :description "Branch-routed handler with request-body realisation (`:body InputStream` → String)."
+   :description "Secured + branch-routed handler with request-body realisation (`:body InputStream` → String)."
    :parent :realize-body-wrap
-   :args {:base-handler :_branch-routed-handler}}
+   :args {:base-handler :_app-secured}}
 
   {:name :_app-encoded
    :description "Realized + branch-routed handler with response post-processing: keyword header keys → strings, body encoded (`br` > `gzip` > identity) when compressible."

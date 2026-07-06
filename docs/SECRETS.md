@@ -319,9 +319,10 @@ Three pieces:
 
 - **Executor**: `compile/bindings.clj/classify-slot` recognises
     `:override-kind :secret-path` and emits a `:kind :secret-value`
-    shape. `compile.clj/build-args-and-aug` handles `:secret-value`
-    by calling `clients.vault/get-secret` on `(:vault ctx)` with
-    the binding's `:value` field as the path. The dereferenced
+    shape. The eager arg-builder (`compile_eager.clj`, via the
+    `vault-get-secret` delay) handles `:secret-value` by calling
+    `clients.vault/get-secret` on `(:vault ctx)` with the binding's
+    `:value` field as the path. The dereferenced
     secret flows into BOTH `:args` (what the impl receives) and
     `:aug` (so inner ref-chains that reference the slot by ext-name
     receive the same value).

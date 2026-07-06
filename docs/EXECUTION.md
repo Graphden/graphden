@@ -241,7 +241,8 @@ to do; the reaper snapshots the set onto the row's
 `:runtime-effects` field at terminal status.
 
 Categories: same vocabulary as rich-type-of `:effects` —
-`:db`, `:env`, `:io`, `:network`, `:time`, `:random`.
+`:db`, `:env`, `:io`, `:network`, `:time`, `:random`, `:process`,
+`:state`, `:raw-sql`.
 
 Currently instrumented (in `resources/packages/core/system/impls.clj`):
 

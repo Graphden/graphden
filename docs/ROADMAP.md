@@ -53,7 +53,9 @@
 - `UNIQUE(fn.name)` (NULL allowed for anonymous fns)
 - `UNIQUE(fn-slot(fn-id, slot-id))`
 - `UNIQUE(binding(fn-id, slot-id))`
-- `UNIQUE(binding-list-item(binding-id, position))`
+- (the `binding-list-item(binding-id, position)` UNIQUE was retired — the
+  base identity row is cross-branch, so position uniqueness is enforced
+  per-branch by `VersionedStorage/check-list-item-position-collision!`)
 
 **1.4 Contract tests** — `graphden.storage.protocol.contract-tests`
 covers cycle detection + concurrent CRUD against any storage backend.
@@ -463,11 +465,13 @@ than text-diffs.
 > Now scheduled in **Block 5**. The design details below remain
 > authoritative; the block schedule sets the order.
 
-**Status**: design / roadmap — no implementation. The current
-constraint layers (per-binding cycle check + sync-time
-topological-sort) reject all self/mutual ref patterns;
-`exec/execute-by-name` from inside a base-fn impl is the only
-escape hatch, and it violates Code = Graph.
+**Status**: Approach A (`:fix` Y-combinator) is SHIPPED — `:fix` base-fn
+in `core/recursion` (`resources/packages/core/recursion/`), depth-guarded,
+used by `storage/branches` `:branch-chain`. See [RECURSION.md](RECURSION.md).
+The per-binding cycle check + sync-time topological-sort still reject bare
+self/mutual `ref-fn-id` patterns; `:fix` is the graph-native way to express
+recursion without that escape hatch. Approach B (lazy ref resolution) is the
+road not taken.
 
 **Goal**: make recursion expressible in the fn-graph itself —
 tree-walk (JSON / hiccup / AST visitor) is the bread-and-butter

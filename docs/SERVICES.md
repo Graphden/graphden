@@ -305,9 +305,9 @@ all loaded packages.
 - Schema: `src/graphden/schema/services/schema.clj`
 - Reconciler: `src/graphden/services/reconciler.clj`
 - Integrant: `src/graphden/system/core.clj` → `:exec/service-reconciler`
-- Form parser: `src/graphden/crud/entities.clj` → `parse-service-from-form`
-- Free-args rejection: `src/graphden/crud/entities.clj` → `validate-create` (service branch)
-- Already-running check: `src/graphden/crud/fn_execution.clj` → `already-running-as-service?`
+- Form parser: graph-native — `resources/packages/app/execution/fns.edn`
+- Free-args rejection (`:service` needs the `:process` effect): `resources/packages/web/crud/fns.edn` → `:_create-service-no-process-rej`
+- Already-running / displacement check: graph-native — `resources/packages/app/execution/fns.edn`
 - HTTP endpoint: `resources/packages/app/execution/{fns.edn,impls.clj}` → `:_reconcile-services`
 - Route: `resources/packages/app/routes/fns.edn` → `:api-services-reconcile`
 - Tests: `test/graphden/services/reconciler_test.clj`,

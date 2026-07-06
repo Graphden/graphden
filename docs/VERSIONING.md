@@ -21,7 +21,7 @@ The bare `VersionedStorage` decorator already knew how to:
 What was missing was anyone HOLDING a `VersionedStorage` pointed at the
 right branch when an HTTP request came in. The executor's compiled
 closures close `ctx` in at compile time (`(impl args ctx)` —
-`compile.clj` line ~471), and that `ctx` carries one specific
+`executor/compile_eager.clj`), and that `ctx` carries one specific
 `VersionedStorage`. So serving a request on branch X requires its
 OWN compiled registry, bound to a `VersionedStorage` whose `branch-id`
 is X's.
@@ -99,13 +99,13 @@ branch pays a rebuild on the next read.
 
 ### Why singleton atom, not on ctx
 
-`graphden.system.branch-router/active-router` is a process-wide
-`defonce` atom set by the init-key. The wrap base-fn impl
-(`web.branch-router/branch-routing-wrap`) runs inside a compiled
-closure that already closed over a fixed ctx — the wrap CAN'T reach
-into the running router via ctx, because the router didn't exist
-when the closure was built. Same pattern as
-`graphden.services.reconciler/legacy-handle` for the same reason.
+`graphden.system.branch-router/active-router-global` is a process-wide
+atom set by the init-key (read through `active-router-atom`, which prefers
+the per-thread `*active-router-override*` when a test binds one for
+isolation). The wrap base-fn impl (`web.branch-router/branch-routing-wrap`)
+runs inside a compiled closure that already closed over a fixed ctx — the
+wrap CAN'T reach into the running router via ctx, because the router didn't
+exist when the closure was built.
 
 ## Branch selection
 

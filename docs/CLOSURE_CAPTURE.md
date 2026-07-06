@@ -3,7 +3,7 @@
 ## Why
 
 graphden's existing HOF wrapping (`hof-callable` in
-`graphden.executor.compile-runtime`) treats every free-arg of a
+`graphden.executor.runtime`) treats every free-arg of a
 wrapped fn-graph as a **call-site arg** — the executor passes the
 arg's value when invoking the callable. That works perfectly for
 data-flow HOFs like `:map`, `:filter`, `:reduce`: the callable
@@ -139,7 +139,7 @@ Two cooperating type-system changes ship with this extension:
 
 ### Runtime
 
-`hof-wrap` (`executor/compile.clj`) is the captured-vs-call-site merge
+`hof-wrap` (`executor/compile_eager.clj`) is the captured-vs-call-site merge
 point — `outer-free-args` snapshots the binding chain at wrap time,
 lambda-params overlay per call. ALREADY structurally correct pre-
 extension (verified in commit 3).

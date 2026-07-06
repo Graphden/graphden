@@ -331,8 +331,8 @@ display автоматически переключится на «отдель�
 - Реализация `_`-prefix UI rules: `editor-overlay-*.js`,
   `editor-sidebar.js`.
 - Загрузка fn-def'ов из EDN: `src/graphden/packages/loader.clj`.
-- Парсер shape-dedup для inline composite: `src/graphden/packages/records.clj`
-  (`shape-hash`, `anonymous-fn-id`).
+- Парсер shape-dedup для inline composite: `src/graphden/packages/records/ids.clj`
+  (`shape-hash`, `anonymous-fn-id`; `records.clj` лишь ре-экспортит `anonymous-fn-id`).
 - Validate-no-duplicate-names + правила naming: `composition.validation`.
 - Live-проверка fn-def'а в REPL: см. `graphden-repl` skill.
 

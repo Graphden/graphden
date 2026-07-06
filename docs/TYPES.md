@@ -425,23 +425,21 @@ A refinement type is a named subtype with constraints, expressed as a regular fn
 
 ### Explicit validation at boundaries
 
-```edn
-{:name :ensure-positive
- :parent :validate-refinement
- :args {:type :positive-int}}
-;; Accepts :int, returns :positive-int
-;; At runtime: if value <= 0 → error
-;; For type system: narrows :int → :positive-int
+The shipped refinement-narrowers live in `core/refinements` (parent
+`:_refinement-narrow`), e.g. `:ensure-positive-int`. It accepts `:int` and
+returns `:positive-int`: at runtime it throws `:refinement/violated` when
+the value is `<= 0`; for the type system it narrows `:int → :positive-int`.
 
+```edn
 {:name :sqrt-safe
  :parent :sqrt
  :args {:n :ensured-value}}
 
 {:name :ensured-value
- :parent :ensure-positive
+ :parent :ensure-positive-int
  :args {:value :some-int-value}}
 ;; some-int-value → :int
-;; ensure-positive accepts :int, returns :positive-int
+;; :ensure-positive-int accepts :int, returns :positive-int
 ;; sqrt accepts :positive-int ✓
 ```
 
@@ -656,6 +654,9 @@ registry entry).
 | `:network` | HTTP socket lifecycle                         | yes (server handle is singleton) |
 | `:time`    | wall-clock                                    | **no — always fresh**            |
 | `:random`  | non-determinism                               | **no — always fresh**            |
+| `:process` | spawns supervised background work (`:service` marker) | no                       |
+| `:state`   | mutable in-process state (atoms / journals)   | no                               |
+| `:raw-sql` | raw SQL bypassing the org-scoped storage protocol (cloud/tenant-blocked) | yes (one txn) |
 
 ### Caching policy
 
@@ -842,7 +843,7 @@ Untyped world                    Typed world
                      to-jsonb              back to jsonb
 ```
 
-Converter functions (`to-int`, `to-text`, `ensure-positive`) are **bridges**. They may fail at runtime (if the value is not of the expected format), but after them, type guarantees hold. The user chooses where to draw the boundary.
+Converter functions (e.g. `:parse-int`, the `:ensure-*` refinement narrowers) are **bridges**. They may fail at runtime (if the value is not of the expected format), but after them, type guarantees hold. The user chooses where to draw the boundary.
 
 ---
 
@@ -1117,7 +1118,7 @@ blocking on the more lenient sync-time WARN.
 
 - `refine` base-fn for defining named subtypes
 - Subtype checking: `:positive-int` ⊂ `:int`
-- `validate-refinement` base-fn as explicit conversion point
+- `:_refinement-narrow`-based narrowers (e.g. `:ensure-positive-int`) as explicit conversion point
 - `type-refinement` field on arg for narrowing in inheritance
 - Narrowing validation (only subtype allowed, not supertype)
 

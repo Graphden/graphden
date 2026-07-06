@@ -697,8 +697,8 @@ clojure -M:dev:test -m kaocha.runner --focus ...   # kaocha profiling plugin п�
 
 ## 12. Тестовое покрытие — не ради процента
 
-**Наш baseline уже alpha-grade** (93.91% line / 84.54% form в
-`bb coverage-full`). Дальше тесты добавлять только когда:
+**Наш baseline уже alpha-grade** (см. `bb coverage` — unit с
+cloverage-инструментацией). Дальше тесты добавлять только когда:
 
 1. **Регрессионный sentinel** на критичный invariant (security,
    versioned-storage merge, executor compile). Пример (этой
@@ -766,7 +766,7 @@ clojure -M:dev:test -m kaocha.runner --focus ...   # kaocha profiling plugin п�
   комментарии — комментарий устареет.
 - **Premature optimization** — добавление кэша / batching без
   baseline-замера. Кода больше, выигрыша нет.
-- **`bb coverage-full` после каждой правки.** ~35 минут — это
+- **`bb coverage` после каждой правки.** ~15-19 минут — это
   периодический audit, не CI-gate. Day-to-day — `bb check` +
   focused-тесты.
 

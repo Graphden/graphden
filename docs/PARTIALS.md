@@ -200,24 +200,22 @@ the graph at the cost of stringy hyperscript.
 These are the friction points hit during the first three migrations.
 Each one cost a `bb rebuild` cycle to surface.
 
-### 1. `:parse-uuid`'s slot is `:s`, not `:string`
+### 1. `:parse-uuid`'s slot is `:string`
 
 ```edn
-;; WRONG — type-checker rejects "non-existent slot"
 {:parent :parse-uuid :args {:string :foo}}
-
-;; RIGHT
-{:parent :parse-uuid :args {:s :foo}}
 ```
 
-### 2. No `:zero?` primitive — use `:empty?` over the collection
+### 2. `:zero?` is for a number, `:empty?` for a collection
+
+`:zero?` exists (`core/logic`). To test whether a COUNT is zero, prefer
+checking emptiness of the collection directly over counting-then-comparing:
 
 ```edn
-;; WRONG — :zero? doesn't exist
-{:parent :zero? :args {:number :_count}}
-
-;; RIGHT — check emptiness directly
+;; a collection is empty
 {:parent :empty? :args {:coll :_partial-X-rows}}
+;; a number is zero
+{:parent :zero? :args {:number :_count}}
 ```
 
 ### 3. Inline anonymous `{:parent ...}` fn-defs are NOT supported

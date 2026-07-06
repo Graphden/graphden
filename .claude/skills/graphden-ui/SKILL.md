@@ -142,11 +142,11 @@ to client-side JS only when graph+htmx would HURT one of:
 **Concrete priority order when adding or refactoring a UI feature:**
 
 1. **fn-def returning hiccup at `GET /partials/X`** + htmx swap.
-   Reference: `:branch-popover`, `:service-popover`,
-   `:execute-result-pane`, `:mismatch-explainer-popover`,
-   `:fn-picker-incompat-explainer`, the entire `:partials/*` family
-   in `resources/packages/app/editor/fns.edn` /
-   `app/server/fns.edn`. See `docs/PARTIALS.md` for the recipe.
+   Reference: `:partial-branch-popover`, `:partial-service-popover`,
+   `:partial-execute-result`, `:partial-mismatch-explainer`,
+   `:partial-fn-picker-incompat`, the entire `:partial-*` family in
+   `resources/packages/app/routes/fns.edn` /
+   `app/route-groups/fns.edn`. See `docs/PARTIALS.md` for the recipe.
 2. **JS that mounts a server-fetched partial via `htmx.process` /
    `authFetch(...).then(html => el.innerHTML = html)`** — JS owns
    anchored positioning / dismissal lifecycle only, server owns the

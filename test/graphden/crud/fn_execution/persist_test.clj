@@ -291,3 +291,37 @@
         (is (fn? (persist/acquire-execution-slot! "orgA"))
             "after a release org A can acquire again"))))
   (reset! @#'persist/live-executions {:total 0 :by-org {}}))
+
+
+(deftest execution-deadline-flips-cancel-and-interrupts
+  ;; The wall-clock watchdog hard-kills a runaway: after the deadline it
+  ;; flips the cancel-flag (graph transitions observe *cancel-check*) AND
+  ;; interrupts the future (interruptible IO / sleep responds).
+  (let [cancel-flag (atom false)
+        fut (future (Thread/sleep 5000) :never)
+        wd (#'persist/arm-deadline! 40 cancel-flag fut)]
+    (try
+      (Thread/sleep 300) ; well past the 40ms deadline
+      (is (true? @cancel-flag) "deadline flipped the cancel-flag")
+      (is (future-cancelled? fut) "deadline interrupted the future")
+      (finally (some-> wd (java.util.concurrent.ScheduledFuture/.cancel false))
+               (future-cancel fut)))))
+
+
+(deftest execution-deadline-cancelled-watchdog-does-not-fire
+  ;; The normal path — the execution finishes first and the future's finally
+  ;; cancels the watchdog, so it never touches the cancel-flag.
+  (let [cancel-flag (atom false)
+        fut (future :fast)
+        wd (#'persist/arm-deadline! 80 cancel-flag fut)]
+    (java.util.concurrent.ScheduledFuture/.cancel wd false)
+    (Thread/sleep 250) ; past the 80ms deadline
+    (is (false? @cancel-flag) "a cancelled watchdog never flips the flag")))
+
+
+(deftest execution-deadline-disabled-when-nil-or-zero
+  (let [cancel-flag (atom false)
+        fut (future :x)]
+    (is (nil? (#'persist/arm-deadline! nil cancel-flag fut)) "nil deadline → no watchdog")
+    (is (nil? (#'persist/arm-deadline! 0 cancel-flag fut)) "zero deadline → no watchdog")
+    (future-cancel fut)))

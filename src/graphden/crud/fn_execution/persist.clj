@@ -396,6 +396,41 @@
                      (update-in [:by-org org] (fnil dec 0)))))))))
 
 
+(def ^:dynamic *max-execution-wall-ms*
+  "Hard wall-clock deadline for a SINGLE execution. After it, a watchdog
+   flips the cancel-flag AND interrupts the future — best-effort: graph
+   caller→callee transitions observe `*cancel-check*` and interruptible
+   IO (JDBC, sleep) responds to the thread interrupt, but a pure CPU loop
+   inside one base-fn cannot be force-killed by the JVM (that residual is
+   bounded by the concurrency cap + `*max-graph-iterations*` + `range`
+   size limits). nil / 0 disables the watchdog. Only the /api/execute
+   path calls `run-future`; services run via the reconciler, unaffected."
+  (or (some-> (System/getenv "GRAPHDEN_MAX_EXECUTION_WALL_MS") parse-long) 300000))
+
+
+(defonce ^:private deadline-scheduler
+  (doto (java.util.concurrent.ScheduledThreadPoolExecutor. 1)
+    ;; cancelled watchdogs (the common, execution-finished-first case) leave
+    ;; the queue promptly instead of lingering until their delay elapses.
+    (java.util.concurrent.ScheduledThreadPoolExecutor/.setRemoveOnCancelPolicy true)))
+
+
+(defn- arm-deadline!
+  "Schedule a watchdog that, after `ms`, flips `cancel-flag` + interrupts
+   `fut` unless it already finished. Returns the `ScheduledFuture` (so the
+   caller cancels it when the execution completes first), or nil when no
+   positive deadline is set."
+  [ms cancel-flag fut]
+  (when (and ms (pos? ms))
+    (java.util.concurrent.ScheduledThreadPoolExecutor/.schedule
+      deadline-scheduler
+      ^Runnable (fn []
+                  (when-not (future-done? fut)
+                    (reset! cancel-flag true)
+                    (future-cancel fut)))
+      (long ms) java.util.concurrent.TimeUnit/MILLISECONDS)))
+
+
 (defn run-future
   "Submit `(executor/execute …)` to a future bound to a cancel-flag
    AND a fresh effect-trace atom. The executor's `*cancel-check*`
@@ -406,20 +441,32 @@
    `release` (nil-able) is the concurrency-slot releaser from
    `acquire-execution-slot!`; it fires in the future's `finally` so the slot
    frees when the COMPUTATION ends (which may be long after the HTTP deref
-   times out), never leaking a permit.
+   times out), never leaking a permit. A wall-clock watchdog
+   (`*max-execution-wall-ms*`) hard-kills a runaway; the finally cancels it
+   on normal completion.
 
    Returns `[future trace-atom]` — the reaper needs the trace atom to
    read the captured effect set after the future resolves."
   [ctx fn-id args cancel-flag release]
   (let [trace (atom #{})
+        watchdog (promise)
         bf (bound-fn* ; capture clojure.tools.logging MDC etc.
             (fn []
               (binding [cr/*cancel-check*
                         #(when @cancel-flag
                            (throw (InterruptedException. "execution cancelled")))
                         cr/*effect-trace* trace]
-                (cr/execute ctx fn-id args))))]
-    [(future (try (bf) (finally (when release (release))))) trace]))
+                (cr/execute ctx fn-id args))))
+        fut (future
+              (try
+                (bf)
+                (finally
+                  ;; @watchdog blocks only until the request thread delivers
+                  ;; it (microseconds after this future was created).
+                  (some-> @watchdog (java.util.concurrent.ScheduledFuture/.cancel false))
+                  (when release (release)))))]
+    (deliver watchdog (arm-deadline! *max-execution-wall-ms* cancel-flag fut))
+    [fut trace]))
 
 
 (defn log-effect-drift!

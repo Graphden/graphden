@@ -831,13 +831,19 @@
         ;; refinement) without false positives.
         (and (= ak :matches) (= bk :matches))
         (= av bv)
-        ;; `[:matches P]` ⊆ `[:not= ""]` when P is non-empty — any
-        ;; string matching a non-empty pattern is itself non-empty.
-        ;; This is the load-bearing case: `:url` (`[:matches "^https?://"]`)
-        ;; subtypes `:non-empty-text` (`[:not= ""]`) so a `:url`
-        ;; argument is accepted where `:non-empty-text` is expected.
+        ;; `[:matches P]` ⊆ `[:not= ""]` iff P cannot match the EMPTY
+        ;; string — then every string matching P is non-empty. Testing
+        ;; `(re-find P "")` is decidable and cheap; the previous heuristic
+        ;; only checked the PATTERN string was non-empty (`(seq av)`),
+        ;; which is unsound — `".*"` / `"\\s*"` / `"a?"` are non-empty
+        ;; patterns that match `""`, so they would have been wrongly
+        ;; accepted as `:non-empty-text`. Load-bearing case still holds:
+        ;; `:url` (`^https?://`) doesn't match `""` → subtype stands. An
+        ;; un-compilable pattern conservatively fails the subtype.
         (and (= ak :matches) (= bk :not=)
-             (string? av) (seq av) (= bv ""))
+             (string? av) (= bv "")
+             (try (nil? (re-find (re-pattern av) ""))
+                  (catch Exception _ false)))
         true
 
         ;; [:in S]  ⊆ [:not= y]  iff  y ∉ S
@@ -887,6 +893,30 @@
         false)))
 
 
+(def ^:dynamic *type-compare-depth*
+  "Recursion-depth guard shared by `subtype?` / `unify`. Neither has a
+   structural fixpoint, so two DISTINCT mutually-recursive aliases with
+   the same outer constructor — e.g. `:tree-a = {:kids [:list :tree-a]}`
+   vs `:tree-b = {:kids [:list :tree-b]}` — recurse forever: `normalise`
+   unfolds one alias level per call and the `(= sub sup)` short-circuit
+   never fires because the names differ at every level. The cap turns
+   that StackOverflow (which would crash a `bb rebuild` sync or 500 an
+   `/api/types/compatible` call) into a clean fail-closed error. Real
+   types nest a handful of levels; the cap is far above any legit depth."
+  0)
+
+
+(def ^:private max-type-compare-depth 512)
+
+
+(defn- check-type-compare-depth!
+  [op a b]
+  (when (> (long *type-compare-depth*) max-type-compare-depth)
+    (throw (ex-info (str op " recursion limit exceeded — cyclic or non-fixpoint "
+                         "mutually-recursive type aliases")
+                    {:type :types/recursion-limit :op op :a a :b b}))))
+
+
 (defn subtype?
   "Is `sub` a subtype of `sup`? Reflexive, transitive, anti-symmetric.
    Type variables compare by identity for now — unification handles
@@ -905,145 +935,147 @@
    - `[:union T1 T2 …] ⊆ S` iff every Tᵢ ⊆ S          (disjunction)
    - `T ⊆ [:union T1 T2 …]` iff T ⊆ Tᵢ for some i      (membership)"
   [sub sup]
-  (let [sub (normalise sub)
-        sup (normalise sup)]
-    (cond
-      (or (= sub sup) (= sup :any))            true
-      (= sub :any)                             false
-
-      ;; Universal yes-arms:
-      ;; - `typevar SUB ⊆ :jsonb` — at any binding site the var
-      ;;   resolves to SOME type, and most concrete types subtype
-      ;;   `:jsonb`. Without it, every fn-ref whose computed return
-      ;;   is polymorphic (`[:union 'a <record>]` etc.) rejects
-      ;;   against a `:jsonb`-typed slot.
-      ;; - `:never ⊆ T` — `:never` is the bottom type, a subtype of
-      ;;   every type; nothing but itself is a subtype of it.
-      (or (and (type-var? sub) (= sup :jsonb))
-          (= sub :never))                      true
-      (= sup :never)                           false
-
-      ;; `:empty-map` — sentinel from `classify-literal` for `{}`.
-      ;; Vacuous-truth subtype of every map-shaped target: it carries
-      ;; no entries to violate any structural constraint. Without it
-      ;; an `:_storage-where-map`-typed slot bound to `{:value {}}`
-      ;; fails the `:jsonb ⊄ [:map :keyword :any]` rule below.
-      ;;
-      ;; Unions: an `:empty-map` is a subtype of `[:union :null [:map K V]]`
-      ;; because it's a subtype of the map-shape member. Descend so the
-      ;; nullable-map shapes (common boundary type for read-or-nil sites
-      ;; like `:resolve-branch-ref`) accept empty-map literals too.
-      (= sub :empty-map)
-      (boolean (or (= sup :empty-map) (= sup :jsonb)
-                   (map-type? sup) (record-type? sup)
-                   (and (union-type? sup)
-                        (some #(subtype? :empty-map %) (union-members sup)))))
-      (= sup :empty-map)                       false
-
-      ;; Union LHS: every member must subtype.
-      (union-type? sub)
-      (every? #(subtype? % sup) (union-members sub))
-
-      ;; Union RHS: at least one member accepts.
-      (union-type? sup)
-      (boolean (some #(subtype? sub %) (union-members sup)))
-
-      (or (and (primitive? sub) (primitive? sup)
-               (primitive-subtype? sub sup))
-          (and (= sup :jsonb)
-               ;; A compound carrying a nested `:secret` must NOT flow
-               ;; into a jsonb content sink — that would strip the
-               ;; information-flow marker. The top-level `[:secret T]`
-               ;; case is already refused by the secret arm below; this
-               ;; makes the type core self-defend against the nested
-               ;; case (a record/list/tuple field) instead of relying on
-               ;; every propagator keeping secrets top-level-typed.
-               (not (contains-secret? sub))
-               (or (primitive? sub)
-                   (record-type? sub)
-                   (list-type? sub)
-                   (map-type? sub)
-                   (tuple-type? sub)
-                   (refine-type? sub)))) true
-      (= sub :jsonb)                           false
-
-      ;; Refinement: SUB carries a refinement, SUP is its base or any —
-      ;; pass; SUP carries a refinement → constraint inclusion.
-      ;;
-      ;; Constraint inclusion (`constraint-implies?`) covers the
-      ;; common numeric-comparison shapes plus `:and` / `:or`
-      ;; combinators, so e.g. `:positive-int ⊆ :non-negative-int`
-      ;; (`[:> 0] ⊆ [:>= 0]`) and `:user-port ⊆ :port` (one nested
-      ;; `:and` inside another) hold. Falls back to structural
-      ;; equality for shapes outside the supported set, preserving
-      ;; the prior behaviour for refinements with custom constraints.
-      (refine-type? sub)
+  (check-type-compare-depth! "subtype?" sub sup)
+  (binding [*type-compare-depth* (inc (long *type-compare-depth*))]
+    (let [sub (normalise sub)
+          sup (normalise sup)]
       (cond
+        (or (= sub sup) (= sup :any))            true
+        (= sub :any)                             false
+
+        ;; Universal yes-arms:
+        ;; - `typevar SUB ⊆ :jsonb` — at any binding site the var
+        ;;   resolves to SOME type, and most concrete types subtype
+        ;;   `:jsonb`. Without it, every fn-ref whose computed return
+        ;;   is polymorphic (`[:union 'a <record>]` etc.) rejects
+        ;;   against a `:jsonb`-typed slot.
+        ;; - `:never ⊆ T` — `:never` is the bottom type, a subtype of
+        ;;   every type; nothing but itself is a subtype of it.
+        (or (and (type-var? sub) (= sup :jsonb))
+            (= sub :never))                      true
+        (= sup :never)                           false
+
+        ;; `:empty-map` — sentinel from `classify-literal` for `{}`.
+        ;; Vacuous-truth subtype of every map-shaped target: it carries
+        ;; no entries to violate any structural constraint. Without it
+        ;; an `:_storage-where-map`-typed slot bound to `{:value {}}`
+        ;; fails the `:jsonb ⊄ [:map :keyword :any]` rule below.
+        ;;
+        ;; Unions: an `:empty-map` is a subtype of `[:union :null [:map K V]]`
+        ;; because it's a subtype of the map-shape member. Descend so the
+        ;; nullable-map shapes (common boundary type for read-or-nil sites
+        ;; like `:resolve-branch-ref`) accept empty-map literals too.
+        (= sub :empty-map)
+        (boolean (or (= sup :empty-map) (= sup :jsonb)
+                     (map-type? sup) (record-type? sup)
+                     (and (union-type? sup)
+                          (some #(subtype? :empty-map %) (union-members sup)))))
+        (= sup :empty-map)                       false
+
+        ;; Union LHS: every member must subtype.
+        (union-type? sub)
+        (every? #(subtype? % sup) (union-members sub))
+
+        ;; Union RHS: at least one member accepts.
+        (union-type? sup)
+        (boolean (some #(subtype? sub %) (union-members sup)))
+
+        (or (and (primitive? sub) (primitive? sup)
+                 (primitive-subtype? sub sup))
+            (and (= sup :jsonb)
+                 ;; A compound carrying a nested `:secret` must NOT flow
+                 ;; into a jsonb content sink — that would strip the
+                 ;; information-flow marker. The top-level `[:secret T]`
+                 ;; case is already refused by the secret arm below; this
+                 ;; makes the type core self-defend against the nested
+                 ;; case (a record/list/tuple field) instead of relying on
+                 ;; every propagator keeping secrets top-level-typed.
+                 (not (contains-secret? sub))
+                 (or (primitive? sub)
+                     (record-type? sub)
+                     (list-type? sub)
+                     (map-type? sub)
+                     (tuple-type? sub)
+                     (refine-type? sub)))) true
+        (= sub :jsonb)                           false
+
+        ;; Refinement: SUB carries a refinement, SUP is its base or any —
+        ;; pass; SUP carries a refinement → constraint inclusion.
+        ;;
+        ;; Constraint inclusion (`constraint-implies?`) covers the
+        ;; common numeric-comparison shapes plus `:and` / `:or`
+        ;; combinators, so e.g. `:positive-int ⊆ :non-negative-int`
+        ;; (`[:> 0] ⊆ [:>= 0]`) and `:user-port ⊆ :port` (one nested
+        ;; `:and` inside another) hold. Falls back to structural
+        ;; equality for shapes outside the supported set, preserving
+        ;; the prior behaviour for refinements with custom constraints.
+        (refine-type? sub)
+        (cond
+          (refine-type? sup)
+          (and (constraint-implies? (refine-constraint sub)
+                                    (refine-constraint sup))
+               (subtype? (refine-base sub) (refine-base sup)))
+          :else
+          (subtype? (refine-base sub) sup))
+
         (refine-type? sup)
-        (and (constraint-implies? (refine-constraint sub)
-                                  (refine-constraint sup))
-             (subtype? (refine-base sub) (refine-base sup)))
-        :else
-        (subtype? (refine-base sub) sup))
+        ;; SUB is not a refinement, SUP is — must NOT widen.
+        false
 
-      (refine-type? sup)
-      ;; SUB is not a refinement, SUP is — must NOT widen.
-      false
+        ;; Secret: information-flow marker — asymmetric subtyping.
+        ;;
+        ;; `[:secret T] ⊆ [:secret T']` iff `T ⊆ T'` (covariant inside)
+        ;; `[:secret T] ⊆ T'`           NEVER       (can't STRIP the taint)
+        ;; `T ⊆ [:secret T']`           iff `T ⊆ T'` (auto-PROMOTE on entry
+        ;;                                            — monotone direction;
+        ;;                                            plain values can flow
+        ;;                                            into secret slots and
+        ;;                                            become tainted)
+        ;;
+        ;; Same shape rationale as `refine` above — the marker is opaque
+        ;; to the base type, but unlike `refine` the asymmetry is on
+        ;; LEAVING the marker: refine narrows (sub ⊆ base; strip allowed),
+        ;; secret labels (sub ⊄ base; strip forbidden). That's why we
+        ;; don't reuse `refine` — the subtype direction is the whole point
+        ;; of the abstraction.
+        (secret-type? sub)
+        (cond
+          (secret-type? sup) (subtype? (secret-inner sub) (secret-inner sup))
+          :else              false)
 
-      ;; Secret: information-flow marker — asymmetric subtyping.
-      ;;
-      ;; `[:secret T] ⊆ [:secret T']` iff `T ⊆ T'` (covariant inside)
-      ;; `[:secret T] ⊆ T'`           NEVER       (can't STRIP the taint)
-      ;; `T ⊆ [:secret T']`           iff `T ⊆ T'` (auto-PROMOTE on entry
-      ;;                                            — monotone direction;
-      ;;                                            plain values can flow
-      ;;                                            into secret slots and
-      ;;                                            become tainted)
-      ;;
-      ;; Same shape rationale as `refine` above — the marker is opaque
-      ;; to the base type, but unlike `refine` the asymmetry is on
-      ;; LEAVING the marker: refine narrows (sub ⊆ base; strip allowed),
-      ;; secret labels (sub ⊄ base; strip forbidden). That's why we
-      ;; don't reuse `refine` — the subtype direction is the whole point
-      ;; of the abstraction.
-      (secret-type? sub)
-      (cond
-        (secret-type? sup) (subtype? (secret-inner sub) (secret-inner sup))
-        :else              false)
+        (secret-type? sup)
+        ;; Promotion: plain value into secret slot is fine; the value gets
+        ;; tainted on entry. This is what lets ordinary string fns declare
+        ;; `[:secret :text]` slots and still accept both kinds of input.
+        (subtype? sub (secret-inner sup))
 
-      (secret-type? sup)
-      ;; Promotion: plain value into secret slot is fine; the value gets
-      ;; tainted on entry. This is what lets ordinary string fns declare
-      ;; `[:secret :text]` slots and still accept both kinds of input.
-      (subtype? sub (secret-inner sup))
-
-      (and (record-type? sub) (record-type? sup))
-      (record-subtype? sub sup)
-      (and (list-type? sub) (list-type? sup))  (list-subtype? sub sup)
-      (and (map-type? sub) (map-type? sup))    (map-subtype? sub sup)
-      (and (tuple-type? sub) (tuple-type? sup)) (tuple-subtype? sub sup)
-      ;; A concrete keyword-keyed record IS a valid homogeneous-map
-      ;; value when the map's key type admits keywords and every field
-      ;; value fits the map's value type — lets a literal map (which
-      ;; classifies as a record) bind into a `[:map …]`-typed slot.
-      ;;
-      ;; Typevar slots in `(map-key sup)` / `(map-val sup)` accept
-      ;; unconditionally: a fresh typevar at a parametric slot like
-      ;; `:merge`'s `:maps [:list [:map a :any]]` represents
-      ;; "anything the call-site picks for `a`"; the record's
-      ;; concrete `:keyword` key (or each concrete field type) is a
-      ;; satisfying assignment. Without this, every record-bound-to-
-      ;; HOF-typed-map-slot site rejected during the sweep — e.g.
-      ;; `_value-form-root-attrs`'s `{:data-binding-id :text}`
-      ;; against `:merge :maps` declared `[:list [:map a :any]]`.
-      (and (record-type? sub) (map-type? sup))
-      (let [k-ok? (or (type-var? (map-key sup))
-                      (subtype? :keyword (map-key sup)))
-            v-ok? (or (type-var? (map-val sup))
-                      (every? #(subtype? % (map-val sup)) (vals sub)))]
-        (and k-ok? v-ok?))
-      (and (fn-type? sub) (fn-type? sup))      (fn-subtype? sub sup)
-      :else                                    false)))
+        (and (record-type? sub) (record-type? sup))
+        (record-subtype? sub sup)
+        (and (list-type? sub) (list-type? sup))  (list-subtype? sub sup)
+        (and (map-type? sub) (map-type? sup))    (map-subtype? sub sup)
+        (and (tuple-type? sub) (tuple-type? sup)) (tuple-subtype? sub sup)
+        ;; A concrete keyword-keyed record IS a valid homogeneous-map
+        ;; value when the map's key type admits keywords and every field
+        ;; value fits the map's value type — lets a literal map (which
+        ;; classifies as a record) bind into a `[:map …]`-typed slot.
+        ;;
+        ;; Typevar slots in `(map-key sup)` / `(map-val sup)` accept
+        ;; unconditionally: a fresh typevar at a parametric slot like
+        ;; `:merge`'s `:maps [:list [:map a :any]]` represents
+        ;; "anything the call-site picks for `a`"; the record's
+        ;; concrete `:keyword` key (or each concrete field type) is a
+        ;; satisfying assignment. Without this, every record-bound-to-
+        ;; HOF-typed-map-slot site rejected during the sweep — e.g.
+        ;; `_value-form-root-attrs`'s `{:data-binding-id :text}`
+        ;; against `:merge :maps` declared `[:list [:map a :any]]`.
+        (and (record-type? sub) (map-type? sup))
+        (let [k-ok? (or (type-var? (map-key sup))
+                        (subtype? :keyword (map-key sup)))
+              v-ok? (or (type-var? (map-val sup))
+                        (every? #(subtype? % (map-val sup)) (vals sub)))]
+          (and k-ok? v-ok?))
+        (and (fn-type? sub) (fn-type? sup))      (fn-subtype? sub sup)
+        :else                                    false))))
 
 
 ;; -----------------------------------------------------------------------------
@@ -1253,104 +1285,106 @@
    declared a slot as `:any` (the doc's escape hatch)."
   ([t1 t2] (unify t1 t2 {}))
   ([t1 t2 subst]
-   (let [a (normalise (resolve subst t1))
-         b (normalise (resolve subst t2))]
-     (cond
-       ;; Equality OR universal `:any` accept on the OTHER side when
-       ;; neither is a type-var. With a type-var on the other side we
-       ;; deliberately fall through to the typevar arms below so the
-       ;; var BINDS to `:any` rather than silently passing without a
-       ;; binding. Without the binding the var leaks downstream
-       ;; (e.g. `:try`'s declared `[:union a b]` retains free `a`/`b`
-       ;; when the body returns the type-checker's `:any` fallback,
-       ;; which then fails every consumer expecting a concrete
-       ;; member shape).
-       (or (= a b)
-           (and (or (= a :any) (= b :any))
-                (not (or (type-var? a) (type-var? b))))) subst
-       ;; A type variable binds to whatever the other side is — a
-       ;; primitive, a union, a fn-type, anything (subject to the
-       ;; occurs-check in `bind-var`). This MUST precede the union
-       ;; branch below: `unify('a, [:union …])` would otherwise be
-       ;; captured by the union case, which only runs a subtype probe
-       ;; — and a free type-var is a subtype of nothing — so it would
-       ;; fail instead of binding the var to the union.
-       (type-var? a)        (bind-var a b subst)
-       (type-var? b)        (bind-var b a subst)
-       ;; `:never` (bottom) unifies with anything — it is a subtype of
-       ;; every type, so a divergent `:throw` branch fits any context.
-       ;; Placed AFTER the type-var arms so a var still BINDS to
-       ;; `:never` (letting `make-union` later absorb it) rather than
-       ;; merely succeeding without a binding.
-       (or (= a :never) (= b :never)) subst
-       ;; Unions: HM unifier doesn't naturally pick a branch (multiple
-       ;; valid choices), so `try-unify-unions` runs the documented
-       ;; fallback chain (subtype-direction success, common-member
-       ;; strip, single-typevar arm-pick, single-typevar absorption).
-       ;; Reduces this `cond` arm to the dispatch only — the chain
-       ;; itself reads as a small list of helpers.
-       (or (union-type? a) (union-type? b))
-       (try-unify-unions a b subst)
-       ;; Subtype-aware unification — succeeds without further binding
-       ;; when one of the relations holds:
-       ;;
-       ;; - Primitive subtype within the numeric hierarchy
-       ;;   (`:int ↔ :numeric` is fine because `:int ⊆ :numeric`).
-       ;; - Records / lists / refinements ↔ `:jsonb`. They ARE
-       ;;   jsonb-shaped on the wire (matches the subtype rule
-       ;;   `record ⊆ :jsonb`). A slot whose declared type narrowed
-       ;;   from a type-var to `:jsonb` (because earlier in the chain
-       ;;   it bound to a jsonb-typed value) needs to unify against
-       ;;   a more-precisely-typed record at a later call site.
-       ;;
-       ;; The pinned type-var keeps its first binding; subsequent
-       ;; compatible refinements flow through unchanged.
-       (or (and (primitive? a) (primitive? b)
-                (or (primitive-subtype? a b) (primitive-subtype? b a)))
-           (and (= a :jsonb)
-                (or (record-type? b) (list-type? b) (map-type? b)
-                    (tuple-type? b) (refine-type? b)))
-           (and (= b :jsonb)
-                (or (record-type? a) (list-type? a) (map-type? a)
-                    (tuple-type? a) (refine-type? a)))
-           ;; Refinement ↔ (primitive OR refinement) — defer to
-           ;; `subtype?`, which already understands
-           ;; `[:refine B c] ⊆ B` and constraint-implies between
-           ;; refinement constraints. Without this, unifying a
-           ;; record field declared `:int` against a record field
-           ;; computed as `:non-negative-int` (or vice-versa) falls
-           ;; into the `::fail` arm, even though the relation holds.
-           (and (or (refine-type? a) (refine-type? b))
-                (or (subtype? a b) (subtype? b a)))
-           ;; `:empty-map` is the bottom of map shapes — vacuous-truth
-           ;; subtype of every map-shaped target (the same rule
-           ;; `subtype?` already grants). Without this branch a
-           ;; `{:value {}}` binding to `:coalesce :default a` after
-           ;; `:value` resolved `a := :jsonb` falls into the `:else
-           ;; ::fail` arm — the subtype-aware leniency for `:jsonb`
-           ;; above only fires for record/list/map/tuple/refine
-           ;; literal classifications, not the `:empty-map` sentinel.
-           (and (= a :empty-map) (or (= b :jsonb) (map-type? b) (record-type? b)))
-           (and (= b :empty-map) (or (= a :jsonb) (map-type? a) (record-type? a))))
-       subst
-       (and (fn-type? a) (fn-type? b))         (unify-fn a b subst)
-       (and (list-type? a) (list-type? b))     (unify (list-elem a) (list-elem b) subst)
-       (and (map-type? a) (map-type? b))
-       (let [s (unify (map-key a) (map-key b) subst)]
-         (if (= s ::fail) ::fail (unify (map-val a) (map-val b) s)))
-       (and (tuple-type? a) (tuple-type? b))
-       (let [ea (tuple-elems a) eb (tuple-elems b)]
-         (if (= (count ea) (count eb))
-           (reduce (fn [s [x y]]
-                     (if (= s ::fail) ::fail (unify x y s)))
-                   subst (map vector ea eb))
-           ::fail))
-       (and (record-type? a) (record-type? b)) (unify-record a b subst)
-       ;; A keyword-keyed record unifies with `[:map K V]` — same
-       ;; relation `subtype?` already grants (`record ⊆ [:map …]`).
-       (and (map-type? a) (record-type? b))    (unify-map-record a b subst)
-       (and (record-type? a) (map-type? b))    (unify-map-record b a subst)
-       :else                ::fail))))
+   (check-type-compare-depth! "unify" t1 t2)
+   (binding [*type-compare-depth* (inc (long *type-compare-depth*))]
+     (let [a (normalise (resolve subst t1))
+           b (normalise (resolve subst t2))]
+       (cond
+         ;; Equality OR universal `:any` accept on the OTHER side when
+         ;; neither is a type-var. With a type-var on the other side we
+         ;; deliberately fall through to the typevar arms below so the
+         ;; var BINDS to `:any` rather than silently passing without a
+         ;; binding. Without the binding the var leaks downstream
+         ;; (e.g. `:try`'s declared `[:union a b]` retains free `a`/`b`
+         ;; when the body returns the type-checker's `:any` fallback,
+         ;; which then fails every consumer expecting a concrete
+         ;; member shape).
+         (or (= a b)
+             (and (or (= a :any) (= b :any))
+                  (not (or (type-var? a) (type-var? b))))) subst
+         ;; A type variable binds to whatever the other side is — a
+         ;; primitive, a union, a fn-type, anything (subject to the
+         ;; occurs-check in `bind-var`). This MUST precede the union
+         ;; branch below: `unify('a, [:union …])` would otherwise be
+         ;; captured by the union case, which only runs a subtype probe
+         ;; — and a free type-var is a subtype of nothing — so it would
+         ;; fail instead of binding the var to the union.
+         (type-var? a)        (bind-var a b subst)
+         (type-var? b)        (bind-var b a subst)
+         ;; `:never` (bottom) unifies with anything — it is a subtype of
+         ;; every type, so a divergent `:throw` branch fits any context.
+         ;; Placed AFTER the type-var arms so a var still BINDS to
+         ;; `:never` (letting `make-union` later absorb it) rather than
+         ;; merely succeeding without a binding.
+         (or (= a :never) (= b :never)) subst
+         ;; Unions: HM unifier doesn't naturally pick a branch (multiple
+         ;; valid choices), so `try-unify-unions` runs the documented
+         ;; fallback chain (subtype-direction success, common-member
+         ;; strip, single-typevar arm-pick, single-typevar absorption).
+         ;; Reduces this `cond` arm to the dispatch only — the chain
+         ;; itself reads as a small list of helpers.
+         (or (union-type? a) (union-type? b))
+         (try-unify-unions a b subst)
+         ;; Subtype-aware unification — succeeds without further binding
+         ;; when one of the relations holds:
+         ;;
+         ;; - Primitive subtype within the numeric hierarchy
+         ;;   (`:int ↔ :numeric` is fine because `:int ⊆ :numeric`).
+         ;; - Records / lists / refinements ↔ `:jsonb`. They ARE
+         ;;   jsonb-shaped on the wire (matches the subtype rule
+         ;;   `record ⊆ :jsonb`). A slot whose declared type narrowed
+         ;;   from a type-var to `:jsonb` (because earlier in the chain
+         ;;   it bound to a jsonb-typed value) needs to unify against
+         ;;   a more-precisely-typed record at a later call site.
+         ;;
+         ;; The pinned type-var keeps its first binding; subsequent
+         ;; compatible refinements flow through unchanged.
+         (or (and (primitive? a) (primitive? b)
+                  (or (primitive-subtype? a b) (primitive-subtype? b a)))
+             (and (= a :jsonb)
+                  (or (record-type? b) (list-type? b) (map-type? b)
+                      (tuple-type? b) (refine-type? b)))
+             (and (= b :jsonb)
+                  (or (record-type? a) (list-type? a) (map-type? a)
+                      (tuple-type? a) (refine-type? a)))
+             ;; Refinement ↔ (primitive OR refinement) — defer to
+             ;; `subtype?`, which already understands
+             ;; `[:refine B c] ⊆ B` and constraint-implies between
+             ;; refinement constraints. Without this, unifying a
+             ;; record field declared `:int` against a record field
+             ;; computed as `:non-negative-int` (or vice-versa) falls
+             ;; into the `::fail` arm, even though the relation holds.
+             (and (or (refine-type? a) (refine-type? b))
+                  (or (subtype? a b) (subtype? b a)))
+             ;; `:empty-map` is the bottom of map shapes — vacuous-truth
+             ;; subtype of every map-shaped target (the same rule
+             ;; `subtype?` already grants). Without this branch a
+             ;; `{:value {}}` binding to `:coalesce :default a` after
+             ;; `:value` resolved `a := :jsonb` falls into the `:else
+             ;; ::fail` arm — the subtype-aware leniency for `:jsonb`
+             ;; above only fires for record/list/map/tuple/refine
+             ;; literal classifications, not the `:empty-map` sentinel.
+             (and (= a :empty-map) (or (= b :jsonb) (map-type? b) (record-type? b)))
+             (and (= b :empty-map) (or (= a :jsonb) (map-type? a) (record-type? a))))
+         subst
+         (and (fn-type? a) (fn-type? b))         (unify-fn a b subst)
+         (and (list-type? a) (list-type? b))     (unify (list-elem a) (list-elem b) subst)
+         (and (map-type? a) (map-type? b))
+         (let [s (unify (map-key a) (map-key b) subst)]
+           (if (= s ::fail) ::fail (unify (map-val a) (map-val b) s)))
+         (and (tuple-type? a) (tuple-type? b))
+         (let [ea (tuple-elems a) eb (tuple-elems b)]
+           (if (= (count ea) (count eb))
+             (reduce (fn [s [x y]]
+                       (if (= s ::fail) ::fail (unify x y s)))
+                     subst (map vector ea eb))
+             ::fail))
+         (and (record-type? a) (record-type? b)) (unify-record a b subst)
+         ;; A keyword-keyed record unifies with `[:map K V]` — same
+         ;; relation `subtype?` already grants (`record ⊆ [:map …]`).
+         (and (map-type? a) (record-type? b))    (unify-map-record a b subst)
+         (and (record-type? a) (map-type? b))    (unify-map-record b a subst)
+         :else                ::fail)))))
 
 
 (defn unified?

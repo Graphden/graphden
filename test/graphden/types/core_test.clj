@@ -196,6 +196,27 @@
     ;; Empty pattern doesn't imply non-emptiness — degenerate case.
     (is (not (t/subtype? [:refine :text [:matches ""]]
                          [:refine :text [:not= ""]])))
+    ;; SOUNDNESS: a NON-empty pattern that STILL matches "" (`.*`, `\s*`,
+    ;; `a?`) must NOT be accepted as :non-empty-text. The old heuristic
+    ;; only checked the pattern STRING was non-empty (`(seq pattern)`) and
+    ;; wrongly accepted these; the fix tests whether the pattern matches "".
+    (is (not (t/subtype? [:refine :text [:matches ".*"]]
+                         [:refine :text [:not= ""]]))
+        "'.*' matches the empty string — NOT a subtype of non-empty-text")
+    (is (not (t/subtype? [:refine :text [:matches "\\s*"]]
+                         [:refine :text [:not= ""]]))
+        "'\\s*' matches the empty string")
+    (is (not (t/subtype? [:refine :text [:matches "a?"]]
+                         [:refine :text [:not= ""]]))
+        "'a?' matches the empty string")
+    ;; An anchored pattern that cannot match "" IS accepted.
+    (is (t/subtype? [:refine :text [:matches "^a+$"]]
+                    [:refine :text [:not= ""]])
+        "'^a+$' requires at least one char → subtype of non-empty-text")
+    ;; An un-compilable pattern conservatively fails the subtype (no throw).
+    (is (not (t/subtype? [:refine :text [:matches "["]]
+                         [:refine :text [:not= ""]]))
+        "invalid regex fails closed, does not throw")
     ;; Pin the "conservative by design" contract: even when one regex
     ;; obviously implies the other (every match of `^x+` is also a
     ;; match of `^x*`), constraint-implies? doesn't try to prove it.
@@ -219,6 +240,27 @@
     (is (t/subtype? [:refine :text [:matches "^a"]]
                     [:refine :text [:matches "^a"]])
         "regex equality holds for the same source pattern")))
+
+
+(deftest type-compare-recursion-guard-test
+  (testing "subtype? / unify fail closed on runaway recursion instead of StackOverflow"
+    ;; Two DISTINCT mutually-recursive aliases with the same outer
+    ;; constructor recurse forever (normalise unfolds one alias level per
+    ;; call, `(= sub sup)` never fires because the names differ). The
+    ;; depth guard turns that into a clean :types/recursion-limit error.
+    (binding [t/*type-compare-depth* (inc @#'t/max-type-compare-depth)]
+      (let [ex (try (t/subtype? :int :text)
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :types/recursion-limit (:type (ex-data ex)))
+            "subtype? throws a typed recursion-limit error, not a raw StackOverflow"))
+      (let [ex (try (t/unify :int :text)
+                    (catch clojure.lang.ExceptionInfo e e))]
+        (is (= :types/recursion-limit (:type (ex-data ex)))
+            "unify throws a typed recursion-limit error"))))
+  (testing "normal (finite-depth) comparisons are unaffected"
+    (is (t/subtype? [:list [:list :int]] [:list [:list :int]]))
+    (is (t/subtype? {:a :int :b [:list :text]} {:a :int :b [:list :text]}))
+    (is (not= ::t/fail (t/unify [:list :int] [:list 'a])))))
 
 
 ;; -----------------------------------------------------------------------------

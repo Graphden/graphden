@@ -45,6 +45,37 @@
       (is (nil? (tc/with-org "acme" (sp/read-entity s :fn acme-id)))))))
 
 
+(deftest ns-scoped-crud-roundtrips-against-postgres
+  ;; Regression for the cross-tenant :ns isolation gap: namespaces used to be a
+  ;; GLOBAL tree (any tenant could enumerate/delete/tamper another org's). :ns
+  ;; is now org-scoped like :fn — a tenant sees only its own + public (core)
+  ;; namespaces, and cannot read or delete another org's.
+  (let [base (setup/create-test-storage)
+        s (ts/org-scoped-storage base)
+        acme-ns (tc/with-org "acme" (sp/create-entity s :ns {:name "acme-proj"}))
+        acme-id (:id acme-ns)
+        ;; A core / package namespace — created on BASE storage → NULL org.
+        core-ns (sp/create-entity base :ns {:name "core-shared"})]
+    (testing "create stamps the org-id"
+      (is (= "acme" (:org-id (tc/with-org "acme" (sp/read-entity s :ns acme-id))))))
+    (testing "another org cannot read a tenant's namespace"
+      (is (nil? (tc/with-org "beta" (sp/read-entity s :ns acme-id)))))
+    (testing "query isolates by org"
+      (is (some #(= "acme-proj" (:name %))
+                (tc/with-org "acme" (sp/query-entities s :ns {}))))
+      (is (not-any? #(= "acme-proj" (:name %))
+                    (tc/with-org "beta" (sp/query-entities s :ns {})))
+          "beta must NOT enumerate acme's namespaces"))
+    (testing "a public (NULL-org) core namespace is visible inside any org"
+      (is (some? (tc/with-org "gamma" (sp/read-entity s :ns (:id core-ns))))))
+    (testing "another org's delete is a no-op; the owner's delete works"
+      (tc/with-org "beta" (sp/delete-entity s :ns acme-id))
+      (is (some? (tc/with-org "acme" (sp/read-entity s :ns acme-id)))
+          "cross-tenant namespace delete is a no-op")
+      (tc/with-org "acme" (sp/delete-entity s :ns acme-id))
+      (is (nil? (tc/with-org "acme" (sp/read-entity s :ns acme-id)))))))
+
+
 (deftest per-namespace-write-enforcement-against-postgres
   ;; Per-target-namespace write gate (§4.2): the storage guard resolves the
   ;; fn's namespace path from the real :ns tree and checks the grant.

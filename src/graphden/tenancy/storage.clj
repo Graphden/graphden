@@ -39,8 +39,16 @@
    own branches + `main`. The per-branch compiled ctx stays org-AGNOSTIC (Design
    B: `:compile-storage` reads structure unscoped); isolation is the org-scoped
    `:storage` at runtime. Names stay globally UNIQUE for now (a tenant can't
-   reuse another org's branch name); per-org names need NULLS-NOT-DISTINCT."
-  #{:fn :slot :fn-slot :binding :binding-list-item :fn-execution :branch})
+   reuse another org's branch name); per-org names need NULLS-NOT-DISTINCT.
+
+   `:ns` IS scoped: core / package namespaces are created by sync on the base
+   (unwrapped) storage → NULL org ≡ public / shared; a tenant's namespaces are
+   stamped + isolated. Without this, namespaces were a GLOBAL tree — any tenant
+   could enumerate every org's namespace layout, delete another org's namespace
+   (its org-scoped fns are invisible → looks empty → delete proceeds), or
+   rename/reparent to tamper with grant path coverage. `(parent-id, name)` stays
+   globally unique (same limitation as the other scoped entities)."
+  #{:fn :slot :fn-slot :binding :binding-list-item :fn-execution :branch :ns})
 
 
 (def tenant-forbidden-entities

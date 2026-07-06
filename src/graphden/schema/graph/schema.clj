@@ -141,6 +141,10 @@
   #uuid "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
 
 
+(def ^:private ns-org-id-field-uuid
+  #uuid "7d369002-d60e-4d67-bd23-c6dabe28bfc8")
+
+
 ;; =============================================================================
 ;; Field UUIDs — :fn
 ;; =============================================================================
@@ -428,7 +432,14 @@
                                   :nullable? true}
                       :description {:uuid ns-description-field-uuid
                                     :type :text
-                                    :nullable? true}})
+                                    :nullable? true}
+                      ;; Tenant owner (§3.0 B2). NULL ≡ public — core /
+                      ;; package namespaces are shared; a tenant's namespaces
+                      ;; are stamped with their org and isolated (read-filter
+                      ;; + own?-write-guard + RLS), same model as :fn.
+                      :org-id {:uuid ns-org-id-field-uuid
+                               :type :text
+                               :nullable? true}})
       (ds/add-constraint :ns {:type :unique :fields [:parent-id :name]})
 
       ;; -----------------------------------------------------------------

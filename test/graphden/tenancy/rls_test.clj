@@ -72,7 +72,7 @@
 (deftest rls-enabler-init-key-installs-policies-on-every-scoped-table
   (let [storage (setup/create-test-storage)
         ds (:pool storage)
-        tables ["fn" "slot" "fn_slot" "binding" "binding_list_item"]]
+        tables ["fn" "slot" "fn_slot" "binding" "binding_list_item" "ns"]]
     (is (= :enabled (ig/init-key :tenancy/rls-enabler {:storage storage}))
         "the addon component runs enable-rls! at boot")
     (let [installed (->> (jdbc/execute! ds ["SELECT tablename FROM pg_policies WHERE policyname = 'org_isolation'"])

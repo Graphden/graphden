@@ -113,13 +113,22 @@
                              :returning [:*]}
                             {:quoted true})]
       (util/with-sql-error-handling "Database error" :create-entity {:entity-name entity-name :id id}
-                                    (let [created (-> (jdbc/execute-one! ds query (util/query-opts))
-                                                      (codec/row->entity fields))]
-                                      (when (seq ref-many-data)
-                                        (junction/write-ref-many-fields! ds entity-name (:id created) ref-many-data))
-                                      ;; Merge back the ref-many fields so the returned record
-                                      ;; reflects what was written.
-                                      (merge created ref-many-data))))))
+                                    (letfn [(do-create
+                                              [conn]
+                                              (let [created (-> (jdbc/execute-one! conn query (util/query-opts))
+                                                                (codec/row->entity fields))]
+                                                (when (seq ref-many-data)
+                                                  (junction/write-ref-many-fields! conn entity-name (:id created) ref-many-data))
+                                                ;; Merge back the ref-many fields so the returned record
+                                                ;; reflects what was written.
+                                                (merge created ref-many-data)))]
+                                      ;; Columnar row + junction rows must land atomically — a
+                                      ;; failed junction insert after the row commits would leave
+                                      ;; an orphan row (or, on update, wiped relations). Only pay
+                                      ;; the transaction when there ARE ref-many fields to write.
+                                      (if (seq ref-many-data)
+                                        (jdbc/with-transaction [tx ds] (do-create tx))
+                                        (do-create ds)))))))
 
 
 (defn read-entity
@@ -175,14 +184,24 @@
                                  :returning [:*]}
                                 {:quoted true}))]
         (util/with-sql-error-handling "Database error" :update-entity {:entity-name entity-name :id id}
-                                      (let [updated-row (if do-column-update?
-                                                          (-> (jdbc/execute-one! ds query (util/query-opts))
-                                                              (codec/row->entity fields))
-                                                          (dissoc columnar-data nil))]
-                                        ;; Replace junction rows for any ref-many fields actually present in the update
-                                        (when (and (seq ref-many-data) fields)
-                                          (junction/replace-ref-many-fields! ds entity-name id ref-many-data fields))
-                                        (merge updated-row ref-many-data)))))))
+                                      (letfn [(do-update
+                                                [conn]
+                                                (let [updated-row (if do-column-update?
+                                                                    (-> (jdbc/execute-one! conn query (util/query-opts))
+                                                                        (codec/row->entity fields))
+                                                                    (dissoc columnar-data nil))]
+                                                  ;; Replace junction rows for any ref-many fields actually present in the update
+                                                  (when (and (seq ref-many-data) fields)
+                                                    (junction/replace-ref-many-fields! conn entity-name id ref-many-data fields))
+                                                  (merge updated-row ref-many-data)))]
+                                        ;; `replace-ref-many-fields!` deletes then re-inserts; on
+                                        ;; separate autocommit connections a failed insert would
+                                        ;; leave the relation WIPED (e.g. a re-parent that throws
+                                        ;; mid-insert clears parent-ids). Wrap the row + junction
+                                        ;; writes in one transaction so a failure rolls back.
+                                        (if (and (seq ref-many-data) fields)
+                                          (jdbc/with-transaction [tx ds] (do-update tx))
+                                          (do-update ds))))))))
 
 
 (defn delete-entity
@@ -414,31 +433,53 @@
                                        (into {} (map (fn [e] [(:id e) e])) populated)))))))
 
 
+(defn- field-type->cast
+  "PG cast string for a column from its declared field-spec — the
+   fallback when a batch has no non-nil sample to infer from (every row
+   is nil for this column). Text / numeric need no cast (PG infers)."
+  [spec]
+  (case (:type spec)
+    (:uuid :ref)    "uuid"
+    :bool           "boolean"
+    :int            "bigint"
+    :timestamptz    "timestamptz"
+    (:jsonb :union) "jsonb"
+    :enum           (some-> (:enum-name spec) util/kw->snake-case)
+    nil))
+
+
 (defn- column-type-cast
   "PostgreSQL type cast for one VALUES column. `:id` is always `uuid`;
-   other columns inferred from the first non-nil sample value. Returns
-   the cast string (`\"uuid\"` / `\"boolean\"` / `\"bigint\"` /
-   `\"timestamptz\"`) or nil when no cast is needed (text / numeric).
+   other columns inferred from the first non-nil sample value, falling
+   back to the declared field type when EVERY row is nil for the column.
+   Returns the cast string (`\"uuid\"` / `\"boolean\"` / `\"bigint\"` /
+   `\"timestamptz\"` / `\"jsonb\"` / an enum type) or nil when no cast is
+   needed (text / numeric).
+
+   The all-nil fallback matters because a batch UPDATE that clears a
+   non-text column (a `:ref` uuid, `:bool`, `:int`, `:jsonb`, …) to nil
+   for EVERY row has no sample to infer from; without an explicit cast
+   PG types the VALUES NULL as `text` and the UPDATE fails with
+   `column is of type uuid but expression is of type text`.
 
    Note: codec's `encode-row` runs BEFORE this fn, so timestamptz values
    arrive as `java.sql.Timestamp` (post `Instant/from`), not raw
    `java.time.Instant`. Both classes get matched here — `Instant` for
    defensive coverage on the off-chance a row bypasses encode, and
-   `Timestamp` for the normal post-encode case. Without the
-   `Timestamp` arm a batch UPDATE on a `:timestamptz` column fails
-   with `expression is of type text` because PG can't infer the
-   parameter type without an explicit cast in the VALUES clause."
-  [col rows]
+   `Timestamp` for the normal post-encode case."
+  [col rows fields]
   (if (= col :id)
     "uuid"
-    (let [sample (some #(get % col) rows)]
+    (if-let [sample (some #(get % col) rows)]
       (cond
         (uuid? sample) "uuid"
         (boolean? sample) "boolean"
         (int? sample) "bigint"
         (or (instance? java.time.Instant sample)
             (instance? java.sql.Timestamp sample)) "timestamptz"
-        :else nil))))
+        :else nil)
+      ;; Every row nil for this column — infer from the declared type.
+      (field-type->cast (get fields col)))))
 
 
 (defn- build-batch-update-sql
@@ -456,12 +497,13 @@
      (`collect-batch-columns` output; superset includes `:id`).
    - `update-columns` — `columns` minus `:id`; only these appear in
      the `SET` clause."
-  [table-name-str rows columns update-columns]
+  [table-name-str rows columns update-columns fields]
   (let [values (batch-row-values rows columns)
         ;; PostgreSQL needs explicit type casts for UUID + non-string
         ;; scalars in the VALUES clause; nil cast = pass through (text
-        ;; / numeric columns infer correctly without help).
-        column-types (mapv #(column-type-cast % rows) columns)
+        ;; / numeric columns infer correctly without help). `fields`
+        ;; supplies the cast for a column that is nil in every row.
+        column-types (mapv #(column-type-cast % rows fields) columns)
         apply-cast (fn [v cast-type]
                      (if cast-type [:cast v (keyword cast-type)] v))
         value-rows (mapv (fn [row]
@@ -522,7 +564,7 @@
                                  :missing-ids missing})))
               (map #(get existing (:id %)) records))
             ;; Normal case: have columns to update
-            (let [query (build-batch-update-sql table-name-str rows columns update-columns)
+            (let [query (build-batch-update-sql table-name-str rows columns update-columns fields)
                   result-rows (batch-execute! ds query :update-entities
                                               entity-name batch-ids batch-size)
                   actual-count (count result-rows)]

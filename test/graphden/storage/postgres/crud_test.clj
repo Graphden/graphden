@@ -478,6 +478,31 @@
           (sp/close storage))))))
 
 
+(deftest batch-update-clears-non-text-column-for-all-rows-test
+  ;; A batch UPDATE that clears a NON-text column (here `:int`) to nil for
+  ;; EVERY row in the batch has no non-nil sample to infer the VALUES cast
+  ;; from. Pre-fix the NULL params typed as `text` → PG raised "column is
+  ;; of type bigint but expression is of type text". The declared-type
+  ;; fallback in `column-type-cast` supplies the right cast.
+  (testing "clearing an :int column to nil across a whole batch succeeds"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema
+                   :fields {:name  {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}
+                            :score {:uuid #uuid "00000000-0000-0000-0000-000000000003" :type :int :nullable? true}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "aaaaaaaa-0000-0000-0000-000000000001"
+          id2 #uuid "aaaaaaaa-0000-0000-0000-000000000002"
+          _ (sp/create-entity storage :user {:id id1 :name "A" :score 10})
+          _ (sp/create-entity storage :user {:id id2 :name "B" :score 20})]
+      (try
+        (sp/update-entities storage :user [{:id id1 :score nil}
+                                           {:id id2 :score nil}])
+        (is (nil? (:score (sp/read-entity storage :user id1))))
+        (is (nil? (:score (sp/read-entity storage :user id2))))
+        (finally
+          (sp/close storage))))))
+
+
 ;; === upsert-entities batch tests ===
 
 (deftest batch-upsert-entities-test

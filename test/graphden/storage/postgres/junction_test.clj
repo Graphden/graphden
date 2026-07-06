@@ -168,6 +168,30 @@
         (finally (sp/close storage))))))
 
 
+(deftest update-junction-atomic-on-insert-failure-test
+  (testing "a failed ref-many insert rolls back — existing relations are NOT wiped"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)
+          p1 (sp/create-entity storage :fn {:name "p1"})
+          p2 (sp/create-entity storage :fn {:name "p2"})
+          child (sp/create-entity storage :fn {:name "child"
+                                               :parent-ids [(:id p1) (:id p2)]})]
+      (try
+        (is (= [(:id p1) (:id p2)] (:parent-ids child)))
+        ;; A bad target makes `insert-junction-rows!` throw AFTER
+        ;; `delete-junction-rows!` has run. Pre-fix the delete committed on
+        ;; its own autocommit connection → parent-ids wiped; now the delete
+        ;; + insert share one transaction and the failure rolls back.
+        (is (thrown? Exception
+              (sp/update-entity storage :fn (:id child)
+                                {:parent-ids [(:id p1) "not-a-uuid"]})))
+        (is (= [(:id p1) (:id p2)]
+               (:parent-ids (sp/read-entity storage :fn (:id child))))
+            "parent-ids survive the failed update — no partial wipe")
+        (finally (sp/close storage))))))
+
+
 (deftest delete-cascades-junction-rows-test
   (testing "deleting fn cascades junction rows"
     (let [storage (setup/create-test-storage)

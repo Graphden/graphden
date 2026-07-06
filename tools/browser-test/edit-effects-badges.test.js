@@ -12,13 +12,13 @@ const {assert, newContext} = require('./edit-test-helpers');
   const {browser, page} = await newContext(chromium);
   console.log('effects-badges — chips render per :effects category');
   try {
-    // web-server transitively depends on http-server (network, process),
-    // env-required (env), read-resource (io), CRUD handlers (db),
-    // current-time-ms (time). All six categories should land on the
-    // web-server card. (:process was added to :http-server when the
-    // Phase 1 service registry landed — it marks fns that spawn
-    // supervised background work, the service-eligibility flag the
-    // /api/entities/service create-guard reads.)
+    // web-server transitively depends on http-server (network, process,
+    // state), env-required (env), read-resource (io), CRUD handlers (db)
+    // + the raw-SQL storage primitives (raw-sql), current-time-ms (time).
+    // All eight categories should land on the web-server card. (:process
+    // marks fns that spawn supervised background work — the
+    // service-eligibility flag; :raw-sql marks the raw-SQL escape hatches
+    // blocked for cloud/tenant graphs.)
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#web-server');
     await page.waitForFunction(
       () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
@@ -49,8 +49,8 @@ const {assert, newContext} = require('./edit-test-helpers');
     });
     assert(!probe.error, probe.error || 'probe ok');
     const tags = probe.chips.map(c => c.text).sort();
-    assert(JSON.stringify(tags) === JSON.stringify(['db', 'env', 'io', 'network', 'process', 'state', 'time']),
-           'web-server chips show all seven categories (incl. :state from http-server wrap): ' + JSON.stringify(tags));
+    assert(JSON.stringify(tags) === JSON.stringify(['db', 'env', 'io', 'network', 'process', 'raw-sql', 'state', 'time']),
+           'web-server chips show all eight categories (incl. :state from http-server wrap + :raw-sql from the storage layer): ' + JSON.stringify(tags));
     for (const c of probe.chips) {
       assert(c.cls.includes('effects-chip-' + c.text),
              'chip "' + c.text + '" has matching colour class');

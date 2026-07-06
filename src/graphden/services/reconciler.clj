@@ -360,28 +360,36 @@
    Returns the `reconcile-once!` result map (`:started :stopped
    :not-our-lock`) so the caller can log / observe."
   [ctx running-atom target-branch-id]
-  (let [lock-conn (lock-conn-from-ctx ctx)
-        to-restart (->> @running-atom
-                        (filter (fn [[_ entry]]
-                                  (and (map? entry)
-                                       (= target-branch-id (:branch-id entry)))))
-                        (mapv first))]
-    (doseq [sid to-restart]
-      (let [entry (get @running-atom sid)]
-        (when entry (stop-service! sid entry))
-        (when lock-conn
-          (try (pg-lock/release-lock! lock-conn sid)
-               (catch Exception e
-                 (log/warn e "advisory lock release failed during branch restart"
-                           {:service-id sid :branch-id target-branch-id}))))
-        (swap! running-atom dissoc sid)))
-    (when (seq to-restart)
-      (log/info "Stopping" (count to-restart) "services on branch for restart"
-                {:branch-id target-branch-id :service-ids to-restart}))
-    ;; reconcile-once! sees the just-stopped rows as to-start (still
-    ;; enabled in DB) and restarts them with `ctx-for-service` →
-    ;; fresh per-branch ctx from `branch-router/ctx-for`.
-    (reconcile-once! ctx running-atom)))
+  ;; The stop→release-lock→dissoc phase mutates `running` and touches the
+  ;; NON-thread-safe advisory-lock connection, so it MUST hold
+  ;; `reconcile-monitor` — otherwise a concurrent `reconcile-once!` (fired
+  ;; from the NOTIFY-listener thread on a `:service` event) interleaves and
+  ;; two threads use the lock connection at once. The monitor is reentrant,
+  ;; so the trailing `reconcile-once!` (which self-locks) doesn't deadlock —
+  ;; exactly what the `reconcile-monitor` docstring anticipates.
+  (locking reconcile-monitor
+    (let [lock-conn (lock-conn-from-ctx ctx)
+          to-restart (->> @running-atom
+                          (filter (fn [[_ entry]]
+                                    (and (map? entry)
+                                         (= target-branch-id (:branch-id entry)))))
+                          (mapv first))]
+      (doseq [sid to-restart]
+        (let [entry (get @running-atom sid)]
+          (when entry (stop-service! sid entry))
+          (when lock-conn
+            (try (pg-lock/release-lock! lock-conn sid)
+                 (catch Exception e
+                   (log/warn e "advisory lock release failed during branch restart"
+                             {:service-id sid :branch-id target-branch-id}))))
+          (swap! running-atom dissoc sid)))
+      (when (seq to-restart)
+        (log/info "Stopping" (count to-restart) "services on branch for restart"
+                  {:branch-id target-branch-id :service-ids to-restart}))
+      ;; reconcile-once! sees the just-stopped rows as to-start (still
+      ;; enabled in DB) and restarts them with `ctx-for-service` →
+      ;; fresh per-branch ctx from `branch-router/ctx-for`.
+      (reconcile-once! ctx running-atom))))
 
 
 (defn restart-services-depending-on!
@@ -410,28 +418,34 @@
   (let [reverse-deps (some-> (:compile-deps ctx) deref :reverse-deps)]
     (if (or (nil? reverse-deps) (empty? changed-fn-ids))
       {:started [] :stopped [] :not-our-lock []}
-      (let [blast (compile-deps/transitive-blast reverse-deps changed-fn-ids)
-            lock-conn (lock-conn-from-ctx ctx)
-            to-restart (->> @running-atom
-                            (filter (fn [[_ entry]]
-                                      (and (map? entry)
-                                           (contains? blast (:fn-id entry)))))
-                            (mapv first))]
-        (doseq [sid to-restart]
-          (let [entry (get @running-atom sid)]
-            (when entry (stop-service! sid entry))
-            (when lock-conn
-              (try (pg-lock/release-lock! lock-conn sid)
-                   (catch Exception e
-                     (log/warn e "advisory lock release failed during fn-edit restart"
-                               {:service-id sid}))))
-            (swap! running-atom dissoc sid)))
-        (when (seq to-restart)
-          (log/info "Stopping" (count to-restart)
-                    "services whose closure depends on edited fn"
-                    {:changed-fn-ids changed-fn-ids
-                     :service-ids to-restart}))
-        (reconcile-once! ctx running-atom)))))
+      ;; Hold `reconcile-monitor` across the stop→release→dissoc phase +
+      ;; the trailing reconcile: it mutates `running` and the non-thread-safe
+      ;; advisory-lock connection, which a concurrent NOTIFY-driven
+      ;; `reconcile-once!` must not race. Reentrant, so the inner
+      ;; reconcile-once! self-lock doesn't deadlock.
+      (locking reconcile-monitor
+        (let [blast (compile-deps/transitive-blast reverse-deps changed-fn-ids)
+              lock-conn (lock-conn-from-ctx ctx)
+              to-restart (->> @running-atom
+                              (filter (fn [[_ entry]]
+                                        (and (map? entry)
+                                             (contains? blast (:fn-id entry)))))
+                              (mapv first))]
+          (doseq [sid to-restart]
+            (let [entry (get @running-atom sid)]
+              (when entry (stop-service! sid entry))
+              (when lock-conn
+                (try (pg-lock/release-lock! lock-conn sid)
+                     (catch Exception e
+                       (log/warn e "advisory lock release failed during fn-edit restart"
+                                 {:service-id sid}))))
+              (swap! running-atom dissoc sid)))
+          (when (seq to-restart)
+            (log/info "Stopping" (count to-restart)
+                      "services whose closure depends on edited fn"
+                      {:changed-fn-ids changed-fn-ids
+                       :service-ids to-restart}))
+          (reconcile-once! ctx running-atom))))))
 
 
 (defn stop-all!

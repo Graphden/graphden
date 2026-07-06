@@ -48,7 +48,23 @@
   (query-entities [_ en where _opts] (filterv #(match? where %) (vals (get @rows en))))
 
 
-  (query-latest-per-group [_ en where _gc] (filterv #(match? where %) (vals (get @rows en)))))
+  (query-latest-per-group [_ en where _gc] (filterv #(match? where %) (vals (get @rows en))))
+
+
+  ;; Only the two batch reads OrgScopedStorage's query-ref-many-owners needs;
+  ;; the write-side batch methods aren't exercised by these isolation tests.
+  #_{:clj-kondo/ignore [:missing-protocol-method]}
+  sp/StorageBatchCRUD
+
+  (read-entities
+    [_ en ids]
+    (into {} (keep (fn [id] (when-let [row (get-in @rows [en id])] [id row]))) ids))
+
+
+  (query-ref-many-owners
+    [_ en field target-id]
+    (into [] (keep (fn [[id row]] (when (some #{target-id} (get row field)) id)))
+          (get @rows en))))
 
 
 (defn- fake
@@ -95,6 +111,29 @@
       (let [names (tc/with-org "acme"
                                (set (map :name (sp/query-entities s :fn {}))))]
         (is (= #{"acme-fn" "platform-fn"} names))))))
+
+
+(deftest query-ref-many-owners-filters-to-visible-owners
+  ;; The reverse-ref read is the one that used to delegate to base
+  ;; UNFILTERED — a tenant could reverse-ref a shared/public row and learn
+  ;; owner-ids (and their count) across every org. It must filter to
+  ;; {own, public} like every other read.
+  (let [s (ts/org-scoped-storage (fake))]
+    ;; A shared public base-fn, inherited by fns in three orgs.
+    (tc/with-org tc/public-org (sp/create-entity s :fn {:id "base" :name "const"}))
+    (tc/with-org "acme"        (sp/create-entity s :fn {:id "a1" :parent-ids ["base"]}))
+    (tc/with-org "beta"        (sp/create-entity s :fn {:id "b1" :parent-ids ["base"]}))
+    (tc/with-org tc/public-org (sp/create-entity s :fn {:id "p1" :parent-ids ["base"]}))
+    (testing "acme sees only its own + public owners, never beta's"
+      (let [owners (set (tc/with-org "acme"
+                                     (sp/query-ref-many-owners s :fn :parent-ids "base")))]
+        (is (contains? owners "a1") "own owner visible")
+        (is (contains? owners "p1") "public owner visible")
+        (is (not (contains? owners "b1")) "another org's owner is NOT leaked")))
+    (testing "beta symmetrically sees only its own + public"
+      (let [owners (set (tc/with-org "beta"
+                                     (sp/query-ref-many-owners s :fn :parent-ids "base")))]
+        (is (= #{"b1" "p1"} owners))))))
 
 
 (deftest writes-only-touch-own-rows

@@ -252,7 +252,24 @@
 
   (query-ref-many-owners
     [_ entity-name field-name target-id]
-    (sp/query-ref-many-owners base entity-name field-name target-id))
+    (if (tenant-hidden? entity-name)
+      []
+      (let [owner-ids (sp/query-ref-many-owners base entity-name field-name target-id)]
+        (if (and (scoped? entity-name) (seq owner-ids))
+          ;; This was the ONLY read delegating to base UNFILTERED, and the
+          ;; junction table it reads (e.g. `fn_parent_ids`) has no RLS
+          ;; backstop — so a tenant could reverse-ref a shared/public row
+          ;; and learn owner-ids (and their count) across EVERY org (e.g. the
+          ;; "parent of N graphs" message on deleting a public base-fn).
+          ;; Post-filter owner-ids to rows the current org may SEE (own +
+          ;; public), matching every other read method.
+          (let [id->row (sp/read-entities base entity-name (vec owner-ids))]
+            (into []
+                  (keep (fn [id]
+                          (when-let [row (get id->row id)]
+                            (when (visible? row) id))))
+                  owner-ids))
+          owner-ids))))
 
 
   sp/Storage

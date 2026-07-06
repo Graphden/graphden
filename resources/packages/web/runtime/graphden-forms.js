@@ -127,7 +127,13 @@ function readFieldValue(el, kind) {
 // Write a value back into a control for its `data-field-kind`.
 function writeFieldValue(el, kind, v) {
   if (kind === 'bool') { el.checked = !!v; return; }
-  if (v === null || v === undefined) { el.value = ''; return; }
+  if (v === null || v === undefined) {
+    // A <select> (enum) has no blank option, so `value = ''` sets
+    // selectedIndex -1 → a blank dropdown that then fails validation.
+    // Leave its natural default (the first, valid, member) instead.
+    if (el.tagName !== 'SELECT') el.value = '';
+    return;
+  }
   if (kind === 'json') {
     el.value = (typeof v === 'string') ? v : JSON.stringify(v, null, 2);
   } else if (kind === 'keyword') {

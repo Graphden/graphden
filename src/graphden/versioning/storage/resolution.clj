@@ -151,18 +151,24 @@
 
 (defn- owning-fn-id
   "Find the fn-id whose `:branch-local?` flag governs filtering for
-   a given version row. The fn itself is its own owner; `:fn-slot`
-   + `:binding` version rows carry `:fn-id` in their data fields;
-   `:binding-list-item` would need a chained lookup through binding
-   identity (skipped — items of a filtered binding never reach a
-   reader anyway, because the binding identity has no resolvable
-   version on the target branch). Returns nil when the entity
-   doesn't expose an owning fn."
-  [entity-name entity-id version-row]
+   a given version row. The fn itself is its own owner; `:fn-slot` +
+   `:binding` version rows carry `:fn-id` in their data fields.
+   `:binding-list-item` carries only `:binding-id`, so we read the
+   binding IDENTITY row (its `:fn-id` is immutable) to chain up —
+   otherwise an ITEM-ONLY edit on a branch-local fn's list arg
+   (`:schedule` cron / `:env` multi-value) would leak across a merge:
+   the binding itself resolves via ancestor inheritance (not filtered),
+   but the source branch's new item slipped through unfiltered. That PK
+   read only fires during MERGE-aware resolution of a list-item that
+   has a merge candidate — a narrow, infrequent path, NOT a per-read
+   hot loop. Returns nil when the entity exposes no owning fn."
+  [base-storage entity-name entity-id version-row]
   (case entity-name
     :fn entity-id
-    :fn-slot (:fn-id version-row)
-    :binding (:fn-id version-row)
+    (:fn-slot :binding) (:fn-id version-row)
+    :binding-list-item (some->> (:binding-id version-row)
+                                (sp/read-entity base-storage :binding)
+                                :fn-id)
     nil))
 
 
@@ -170,9 +176,10 @@
   "True iff `version-row` belongs to an effective-branch-local
    owning fn. Wraps `bl/effective-branch-local?` with the
    entity-aware owner-lookup so child-row version rows
-   (`:binding`, `:fn-slot`) are filtered alongside `:fn` itself."
+   (`:binding`, `:fn-slot`, `:binding-list-item`) are filtered
+   alongside `:fn` itself."
   [base-storage entity-name entity-id version-row]
-  (when-let [fid (owning-fn-id entity-name entity-id version-row)]
+  (when-let [fid (owning-fn-id base-storage entity-name entity-id version-row)]
     (bl/effective-branch-local? base-storage fid)))
 
 

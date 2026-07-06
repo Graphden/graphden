@@ -6,6 +6,7 @@
    so they're independently verified at unit speed."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.resolution :as res]))
 
 
@@ -97,24 +98,37 @@
 (deftest owning-fn-id-test
   (let [owning-fn-id @#'res/owning-fn-id
         fn-id     #uuid "00000000-0000-0000-0000-000000000010"
-        other-fn  #uuid "00000000-0000-0000-0000-000000000011"]
+        other-fn  #uuid "00000000-0000-0000-0000-000000000011"
+        bind-id   #uuid "00000000-0000-0000-0000-000000000012"
+        ;; Stub storage — only `:binding-list-item` reaches into it, to
+        ;; chain through the binding IDENTITY row to its owning fn-id.
+        ;; Intentional partial impl: `owning-fn-id` only calls read-entity.
+        stub #_{:clj-kondo/ignore [:missing-protocol-method]}
+        (reify sp/StorageCRUD
+          (read-entity
+            [_ entity-name id]
+            (when (and (= entity-name :binding) (= id bind-id))
+              {:id bind-id :fn-id other-fn})))]
 
-    (testing ":fn → entity-id itself"
-      (is (= fn-id (owning-fn-id :fn fn-id nil)))
-      (is (= fn-id (owning-fn-id :fn fn-id {:irrelevant true}))
+    (testing ":fn → entity-id itself (storage unused)"
+      (is (= fn-id (owning-fn-id nil :fn fn-id nil)))
+      (is (= fn-id (owning-fn-id nil :fn fn-id {:irrelevant true}))
           "version-row content doesn't matter for :fn"))
 
     (testing ":fn-slot → version-row's :fn-id"
       (is (= other-fn
-             (owning-fn-id :fn-slot fn-id {:fn-id other-fn}))
+             (owning-fn-id nil :fn-slot fn-id {:fn-id other-fn}))
           "owner is the fn-id carried on the version row, NOT entity-id"))
 
     (testing ":binding → version-row's :fn-id"
       (is (= other-fn
-             (owning-fn-id :binding fn-id {:fn-id other-fn}))))
+             (owning-fn-id nil :binding fn-id {:fn-id other-fn}))))
 
-    (testing ":binding-list-item / unknown → nil (no owner-resolution)"
-      (is (nil? (owning-fn-id :binding-list-item fn-id {:fn-id other-fn}))
-          "items of a filtered binding never reach a reader anyway")
-      (is (nil? (owning-fn-id :branch fn-id {:fn-id other-fn}))
+    (testing ":binding-list-item → chains through the binding's :fn-id"
+      (is (= other-fn
+             (owning-fn-id stub :binding-list-item fn-id {:binding-id bind-id}))
+          "reads the binding identity row to recover its owning fn"))
+
+    (testing "unknown entity → nil"
+      (is (nil? (owning-fn-id nil :branch fn-id {:fn-id other-fn}))
           ":branch isn't versioned — case dispatch falls through"))))

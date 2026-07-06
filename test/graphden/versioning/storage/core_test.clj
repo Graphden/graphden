@@ -469,6 +469,48 @@
       (finally (sp/close base)))))
 
 
+(deftest branch-local-list-item-does-not-propagate-on-merge-test
+  ;; Finding-2 regression. The binding EXISTS on main (so it resolves
+  ;; via inheritance and is NEVER filtered as a source-only row), but an
+  ;; ITEM-ONLY edit on a branch-local fn's list arg (`:schedule` cron /
+  ;; `:env` multi-value) was leaking across the merge: a
+  ;; binding-list-item version row carries only `:binding-id`, and the
+  ;; resolver's owner lookup used to return nil for it, so the
+  ;; branch-local filter never fired.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [type-fn (sp/create-entity v :fn {:name "li-type" :parent-ids []
+                                             :description "h"})
+            sticky  (sp/create-entity v :fn {:name "li-sticky" :parent-ids []
+                                             :description "h" :branch-local? true})
+            plain   (sp/create-entity v :fn {:name "li-plain" :parent-ids []
+                                             :description "h"})
+            s-slot  (sp/create-entity v :slot {:name "s-xs" :type-fn-id (:id type-fn)})
+            p-slot  (sp/create-entity v :slot {:name "p-xs" :type-fn-id (:id type-fn)})
+            _       (sp/create-entity v :fn-slot {:fn-id (:id sticky) :slot-id (:id s-slot) :position 0})
+            _       (sp/create-entity v :fn-slot {:fn-id (:id plain) :slot-id (:id p-slot) :position 0})
+            ;; Bindings live on MAIN — they inherit onto the feature
+            ;; branch, so they are not source-only rows.
+            s-bind  (sp/create-entity v :binding {:fn-id (:id sticky) :slot-id (:id s-slot) :list-append true})
+            p-bind  (sp/create-entity v :binding {:fn-id (:id plain) :slot-id (:id p-slot) :list-append true})
+            feature (vs/create-branch! v "li-feat")
+            vf      (vs/switch-branch v (:id feature))]
+        ;; ITEM-ONLY edit on the feature branch: touch neither binding
+        ;; nor fn row, just add one item to each list.
+        (sp/create-entity vf :binding-list-item
+                          {:binding-id (:id s-bind) :position 0 :value "sticky-item"})
+        (sp/create-entity vf :binding-list-item
+                          {:binding-id (:id p-bind) :position 0 :value "plain-item"})
+        (vs/merge-branch! v (:id feature))
+        (testing "after merge: plain fn's item propagates, sticky fn's item does NOT"
+          (is (= 1 (count (sp/query-entities v :binding-list-item {:binding-id (:id p-bind)})))
+              "item under a non-branch-local fn surfaces on main")
+          (is (empty? (sp/query-entities v :binding-list-item {:binding-id (:id s-bind)}))
+              "item under a sticky-local fn is filtered — no cross-branch leak")))
+      (finally (sp/close base)))))
+
+
 (deftest branch-local-fn-inherits-via-parent-branch-recursion-test
   ;; Intentional asymmetry between merge (filtered) and inheritance
   ;; (NOT filtered). A branch B forked from A picks up A's sticky-

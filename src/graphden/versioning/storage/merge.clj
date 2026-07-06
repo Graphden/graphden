@@ -109,6 +109,23 @@
     entity-name->ids))
 
 
+(defn- conflict-owning-fn-id
+  "The fn-id whose `:branch-local?` flag governs a conflicting entity.
+   `:fn` is its own owner; `:binding`/`:fn-slot` resolved rows carry
+   `:fn-id`; `:binding-list-item` chains through its owning binding.
+   `:slot` is a global identity shared across fns (no single owner),
+   so nil — never filtered as branch-local. Returns nil when no owner
+   can be determined."
+  [base-storage entity-name entity-id resolved]
+  (case entity-name
+    :fn entity-id
+    (:fn-slot :binding) (:fn-id resolved)
+    :binding-list-item (some->> (:binding-id resolved)
+                                (sp/read-entity base-storage :binding)
+                                :fn-id)
+    nil))
+
+
 (defn detect-conflicts
   "Finds entities modified in both source and target branches after fork point.
 
@@ -135,10 +152,23 @@
         source-resolved (batch-resolve base-storage conflict-ids source-branch-id)
         target-resolved (batch-resolve base-storage conflict-ids target-branch-id)
         conflicts (for [[entity-name ids] conflict-ids
-                        entity-id ids]
+                        entity-id ids
+                        :let [src-v (get source-resolved [entity-name entity-id])
+                              owner (conflict-owning-fn-id base-storage entity-name
+                                                           entity-id src-v)]
+                        ;; A branch-local fn's config is intentionally
+                        ;; per-branch — it must NEVER surface as a merge
+                        ;; conflict. The resolver already drops its
+                        ;; cross-branch version rows on read; without
+                        ;; this the user is forced to resolve a phantom
+                        ;; conflict and, by picking `:source`, would
+                        ;; leak the source branch's value onto the
+                        ;; target (exactly what branch-local forbids).
+                        :when (not (and owner
+                                        (bl/effective-branch-local? base-storage owner)))]
                     {:entity-name entity-name
                      :entity-id entity-id
-                     :source-version (get source-resolved [entity-name entity-id])
+                     :source-version src-v
                      :target-version (get target-resolved [entity-name entity-id])})]
     {:conflicts (vec conflicts)
      :fork-point fp}))

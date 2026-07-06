@@ -15,6 +15,7 @@
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
+    [graphden.versioning.branch-local :as bl]
     [graphden.versioning.merge.core :as mp]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.merge :as mrg]))
@@ -230,6 +231,33 @@
       (let [resolved (sp/read-entity storage :binding (:id b))]
         (is (= 20 (:value resolved))
             "main now sees feature's value after :source resolution"))
+      (sp/close storage))))
+
+
+(deftest detect-conflicts-skips-branch-local-fn-test
+  (testing "a binding on a branch-local fn modified on BOTH branches is not a conflict"
+    ;; Canonical branch-local case: per-branch runtime config (dev port
+    ;; vs prod port). The same binding is edited after fork on both
+    ;; sides — pre-fix that surfaced as a phantom `:merge-conflict` that
+    ;; blocked the merge (and, if resolved `:source`, leaked the value).
+    (let [{:keys [storage base]} (create-test-storage)
+          local-fn (sp/create-entity storage :fn
+                                     {:name "runtime-cfg"
+                                      :parent-ids []
+                                      :branch-local? true})
+          slot (sp/create-entity storage :slot
+                                 {:name "port" :type-fn-id (:id local-fn)})
+          b (create-binding-on-current! storage (:id local-fn) (:id slot) 3000)
+          source (vs/create-branch! storage "prod")
+          feature (vs/switch-branch storage (:id source))]
+      (bl/invalidate! base)
+      (sp/update-entity feature :binding (:id b) {:value 8080})
+      (sp/update-entity storage :binding (:id b) {:value 5000})
+      (let [{:keys [conflicts]} (vs/detect-conflicts storage (:id source))]
+        (is (empty? (filter #(= (:id b) (:entity-id %)) conflicts))
+            "branch-local fn's binding must be skipped, not a conflict"))
+      ;; And the whole merge goes through without a thrown :merge-conflict.
+      (is (vs/merge-branch! storage (:id source)))
       (sp/close storage))))
 
 

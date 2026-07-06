@@ -350,6 +350,52 @@
 ;; Future submission + completion reaping
 ;; =============================================================================
 
+;; =============================================================================
+;; Concurrency governance — a plain `(future …)` runs on Clojure's UNBOUNDED
+;; soloExecutor, so without a cap a client POSTing many expensive fns piles
+;; unbounded threads onto the shared JVM (compute-DoS, cross-tenant on
+;; feature/tenancy-users). A global cap prevents thread exhaustion; a per-org
+;; cap keeps one tenant from monopolising the pool. Slots are atom-counted (so
+;; the limits stay dynamically rebindable for tests) and RELEASED when the
+;; computation finishes — not when the HTTP response returns (the future
+;; outlives the deref-timeout).
+;; =============================================================================
+
+(def ^:dynamic *max-concurrent-executions*
+  "Global cap on concurrently-running fn-execution futures."
+  (or (some-> (System/getenv "GRAPHDEN_MAX_CONCURRENT_EXECUTIONS") parse-long) 128))
+
+
+(def ^:dynamic *max-concurrent-executions-per-org*
+  "Per-org cap — fairness, so one tenant can't fill the whole global pool."
+  (or (some-> (System/getenv "GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG") parse-long) 32))
+
+
+(defonce ^:private live-executions (atom {:total 0 :by-org {}}))
+
+
+(defn acquire-execution-slot!
+  "Try to reserve a concurrency slot for `org`. Returns a 0-arg RELEASE fn on
+   success, or nil when either the global or the org cap is already hit (the
+   caller must reject the execution). Atomic via `swap-vals!`."
+  [org]
+  (let [[old new] (swap-vals!
+                    live-executions
+                    (fn [{:keys [total by-org] :as st}]
+                      (if (and (< total *max-concurrent-executions*)
+                               (< (get by-org org 0) *max-concurrent-executions-per-org*))
+                        (-> st (update :total inc) (update-in [:by-org org] (fnil inc 0)))
+                        st)))]
+    (when (not= old new)
+      (fn release
+        []
+        (swap! live-executions
+               (fn [st]
+                 (-> st
+                     (update :total dec)
+                     (update-in [:by-org org] (fnil dec 0)))))))))
+
+
 (defn run-future
   "Submit `(executor/execute …)` to a future bound to a cancel-flag
    AND a fresh effect-trace atom. The executor's `*cancel-check*`
@@ -357,9 +403,14 @@
    caller→callee transition throws); `*effect-trace*` is bound to an
    atom-set that effectful base-fn impls conj into via `record-effect!`.
 
+   `release` (nil-able) is the concurrency-slot releaser from
+   `acquire-execution-slot!`; it fires in the future's `finally` so the slot
+   frees when the COMPUTATION ends (which may be long after the HTTP deref
+   times out), never leaking a permit.
+
    Returns `[future trace-atom]` — the reaper needs the trace atom to
    read the captured effect set after the future resolves."
-  [ctx fn-id args cancel-flag]
+  [ctx fn-id args cancel-flag release]
   (let [trace (atom #{})
         bf (bound-fn* ; capture clojure.tools.logging MDC etc.
             (fn []
@@ -368,7 +419,7 @@
                            (throw (InterruptedException. "execution cancelled")))
                         cr/*effect-trace* trace]
                 (cr/execute ctx fn-id args))))]
-    [(future (bf)) trace]))
+    [(future (try (bf) (finally (when release (release))))) trace]))
 
 
 (defn log-effect-drift!

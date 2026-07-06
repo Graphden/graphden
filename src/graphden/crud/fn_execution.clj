@@ -32,7 +32,8 @@
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]))
 
 
 ;; Re-export: tests + the cancel endpoint look up futures by id.
@@ -113,63 +114,71 @@
                                          v)])))
                             (:args parsed))
         cancel-flag (atom false)
-        pre-persisted? need-persist?
-        row (when pre-persisted?
-              (persist/create-pending-with-args!
-                storage fn-version-id declared-eff
-                (:user-id parsed) (:args parsed) free-slots))
-        [fut trace] (persist/run-future ctx fn-id executor-args cancel-flag)
-        _   (when row (persist/register-future! (:id row) fut cancel-flag))
-        result (try (deref fut (:timeout-ms parsed) ::pending)
-                    (catch java.util.concurrent.ExecutionException ee
-                      {::ex (java.util.concurrent.ExecutionException/.getCause ee)}))
-        ;; Closure (not eager) — only the inline-success/failure
-        ;; branches snapshot the trace; timeout branches hand the atom
-        ;; off to `record-completion!` which snapshots when the future
-        ;; resolves.
-        runtime-eff (fn [] (persist/snapshot-runtime-effects trace))]
-    (cond
-      ;; Timeout AND we haven't pre-persisted — persist lazily so the
-      ;; client gets an id to poll. record-completion! tails the future
-      ;; to update the row when it finally resolves.
-      (and (= ::pending result) (not pre-persisted?))
-      (let [r (persist/create-pending-with-args!
-                storage fn-version-id declared-eff
-                (:user-id parsed) (:args parsed) free-slots)]
-        (persist/register-future! (:id r) fut cancel-flag)
-        (persist/record-completion! storage (:id r) fn-name fut trace declared-eff)
-        {:status :pending :execution-id (str (:id r))})
+        release (persist/acquire-execution-slot! (tc/current-org))]
+    (if (nil? release)
+      ;; Global or per-org concurrency cap hit — reject WITHOUT creating a
+      ;; row or a future, so a client can't pile unbounded compute onto the
+      ;; shared JVM. Reuses the standard rejection envelope.
+      {:ok false :status :rejected
+       :error "Execution capacity exceeded — retry shortly"
+       :error-data {:reason :over-capacity}}
+      (let [pre-persisted? need-persist?
+            row (when pre-persisted?
+                  (persist/create-pending-with-args!
+                    storage fn-version-id declared-eff
+                    (:user-id parsed) (:args parsed) free-slots))
+            [fut trace] (persist/run-future ctx fn-id executor-args cancel-flag release)
+            _   (when row (persist/register-future! (:id row) fut cancel-flag))
+            result (try (deref fut (:timeout-ms parsed) ::pending)
+                        (catch java.util.concurrent.ExecutionException ee
+                          {::ex (java.util.concurrent.ExecutionException/.getCause ee)}))
+            ;; Closure (not eager) — only the inline-success/failure
+            ;; branches snapshot the trace; timeout branches hand the atom
+            ;; off to `record-completion!` which snapshots when the future
+            ;; resolves.
+            runtime-eff (fn [] (persist/snapshot-runtime-effects trace))]
+        (cond
+          ;; Timeout AND we haven't pre-persisted — persist lazily so the
+          ;; client gets an id to poll. record-completion! tails the future
+          ;; to update the row when it finally resolves.
+          (and (= ::pending result) (not pre-persisted?))
+          (let [r (persist/create-pending-with-args!
+                    storage fn-version-id declared-eff
+                    (:user-id parsed) (:args parsed) free-slots)]
+            (persist/register-future! (:id r) fut cancel-flag)
+            (persist/record-completion! storage (:id r) fn-name fut trace declared-eff)
+            {:status :pending :execution-id (str (:id r))})
 
-      ;; Timeout AND we pre-persisted — record-completion's tail-future
-      ;; fills in :result; client polls our row.
-      (= ::pending result)
-      (do (persist/record-completion! storage (:id row) fn-name fut trace declared-eff)
-          {:status :pending :execution-id (str (:id row))})
+          ;; Timeout AND we pre-persisted — record-completion's tail-future
+          ;; fills in :result; client polls our row.
+          (= ::pending result)
+          (do (persist/record-completion! storage (:id row) fn-name fut trace declared-eff)
+              {:status :pending :execution-id (str (:id row))})
 
-      ;; Inline failure — write outcome to the row synchronously (if
-      ;; persisted) so the polling-by-id case is consistent. Redaction
-      ;; lifts a tainted fn-def's :error/:error-data into a generic
-      ;; hidden form so the secret doesn't leak via the exception
-      ;; message (a string that may have wrapped the value).
-      (and (map? result) (::ex result))
-      (let [cause (::ex result)]
-        (finalize-inline-outcome
-          {:status :failed
-           :error (or (ex-message cause) (str cause))
-           :error-data (ex-data cause)}
-          {:storage storage :row row :fn-name fn-name
-           :declared-effects declared-eff :runtime-effects (runtime-eff)}))
+          ;; Inline failure — write outcome to the row synchronously (if
+          ;; persisted) so the polling-by-id case is consistent. Redaction
+          ;; lifts a tainted fn-def's :error/:error-data into a generic
+          ;; hidden form so the secret doesn't leak via the exception
+          ;; message (a string that may have wrapped the value).
+          (and (map? result) (::ex result))
+          (let [cause (::ex result)]
+            (finalize-inline-outcome
+              {:status :failed
+               :error (or (ex-message cause) (str cause))
+               :error-data (ex-data cause)}
+              {:storage storage :row row :fn-name fn-name
+               :declared-effects declared-eff :runtime-effects (runtime-eff)}))
 
-      ;; Inline success — same: write synchronously so the GET endpoint
-      ;; immediately returns :succeeded, no race window. Redaction
-      ;; lifts a tainted fn-def's :result into nil + `:tainted? true`
-      ;; so the JSON response carries metadata only.
-      :else
-      (-> (finalize-inline-outcome
-            {:status :succeeded :result result}
-            {:storage storage :row row :fn-name fn-name
-             :declared-effects declared-eff :runtime-effects (runtime-eff)})
-          (assoc :declared-effects declared-eff)))))
+          ;; Inline success — same: write synchronously so the GET endpoint
+          ;; immediately returns :succeeded, no race window. Redaction
+          ;; lifts a tainted fn-def's :result into nil + `:tainted? true`
+          ;; so the JSON response carries metadata only.
+          :else
+          (-> (finalize-inline-outcome
+                {:status :succeeded :result result}
+                {:storage storage :row row :fn-name fn-name
+                 :declared-effects declared-eff :runtime-effects (runtime-eff)})
+              (assoc :declared-effects declared-eff)))))))
 
 
 ;; =============================================================================

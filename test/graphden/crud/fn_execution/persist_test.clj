@@ -265,3 +265,29 @@
     (is (<= persist/max-error-chars persist/max-error-data-bytes))
     (is (<= persist/max-error-data-bytes persist/max-args-bytes))
     (is (<= persist/max-args-bytes persist/max-result-bytes))))
+
+
+(deftest acquire-execution-slot-caps-concurrency
+  ;; The global + per-org concurrency caps gate execution futures so one
+  ;; client can't pile unbounded compute onto the shared JVM (compute-DoS).
+  (reset! @#'persist/live-executions {:total 0 :by-org {}})
+  (binding [persist/*max-concurrent-executions* 3
+            persist/*max-concurrent-executions-per-org* 2]
+    (let [a1 (persist/acquire-execution-slot! "orgA")
+          a2 (persist/acquire-execution-slot! "orgA")
+          a3 (persist/acquire-execution-slot! "orgA")]
+      (testing "per-org cap: org A gets 2, the 3rd is rejected"
+        (is (fn? a1))
+        (is (fn? a2))
+        (is (nil? a3) "org A's per-org cap of 2 blocks a 3rd slot"))
+      (testing "a different org takes the last global slot, then all reject"
+        (let [b1 (persist/acquire-execution-slot! "orgB")]
+          (is (fn? b1) "org B takes the 3rd (global) slot")
+          (is (nil? (persist/acquire-execution-slot! "orgB"))
+              "global cap of 3 now blocks everyone")
+          (b1)))
+      (testing "release frees a slot for the capped org"
+        (a1)
+        (is (fn? (persist/acquire-execution-slot! "orgA"))
+            "after a release org A can acquire again"))))
+  (reset! @#'persist/live-executions {:total 0 :by-org {}}))

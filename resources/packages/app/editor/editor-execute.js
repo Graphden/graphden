@@ -41,6 +41,20 @@ function ensureExecutePopoverEl() {
   el.className = 'execute-popover';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-label', 'Run function');
+  // Keyboard: Enter (outside a textarea, where it inserts a newline)
+  // triggers Run when the button is enabled. Bound ONCE here — the popover
+  // is a singleton reused across opens, so binding this in showExecutePopover
+  // stacked a fresh keydown listener per open, each closing over a stale
+  // (detached) run button → Enter re-ran previously-opened fns. Read the
+  // CURRENT run button off the DOM at keypress time instead.
+  el.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    if (e.target?.tagName === 'TEXTAREA') return;
+    const runBtn = el.querySelector('.execute-run-btn');
+    if (!runBtn || runBtn.disabled) return;
+    e.preventDefault();
+    runBtn.click();
+  });
   document.body.appendChild(el);
   executePopoverEl = el;
   return el;
@@ -584,17 +598,8 @@ async function showExecutePopover(fnEntity, anchorEl) {
     if (id) await submitCancel(id, resultHost);
   });
 
-  // Keyboard: Enter inside the popover (but NOT inside a textarea,
-  // where Enter inserts a newline) triggers Run when the button is
-  // enabled. Esc is already handled by installPopoverDismiss below.
-  el.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
-    const tag = e.target?.tagName;
-    if (tag === 'TEXTAREA') return;  // preserve newline insertion
-    if (runBtn.disabled) return;
-    e.preventDefault();
-    runBtn.click();
-  });
+  // (Enter-to-Run keydown is bound once in ensureExecutePopoverEl —
+  // binding it here would leak a listener per open onto the singleton.)
 
   // Show + position
   if (executePopoverAnchor && executePopoverAnchor !== anchorEl) {

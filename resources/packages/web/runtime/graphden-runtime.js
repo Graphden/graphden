@@ -79,6 +79,17 @@ function clearActionHandlers() {
 
 function bindActionDispatch(host) {
   if (!host) return;
+  // Bind ONCE per host. `loadPartial` calls this after every swap, and
+  // many hosts (the row-actions / execute popovers) are process-lifetime
+  // SINGLETONS reused across opens — without this guard each open stacks
+  // another delegated listener, so one click on a `data-action` button
+  // fires the handler N times (N = opens). Destructive actions
+  // (delete-fn / extend-fn / namespace-move) would execute repeatedly.
+  // Binding once is safe: the dispatcher reads the CURRENT button off the
+  // event and looks the handler up dynamically in `_actionHandlers`, so a
+  // single listener serves all future swapped content.
+  if (host.dataset.gdDispatchBound) return;
+  host.dataset.gdDispatchBound = '1';
   host.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-action]');
     if (!btn || !host.contains(btn)) return;

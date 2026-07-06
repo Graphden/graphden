@@ -170,6 +170,22 @@ test('bindActionDispatch routes click to registered handler', () => {
   assert(receivedBtn === btn, 'handler received the button as first arg');
 });
 
+test('bindActionDispatch binds only once per host (idempotent — no per-open leak)', () => {
+  const ctx = loadRuntime();
+  const host = makeElement('div');
+  ctx.bindActionDispatch(host);
+  ctx.bindActionDispatch(host);
+  ctx.bindActionDispatch(host);
+  // The row-actions / execute popovers are process-lifetime singletons
+  // re-swapped per open (loadPartial calls bindActionDispatch each time).
+  // Without the guard, each open stacked another delegated listener, so one
+  // click on a data-action button fired the handler N times → destructive
+  // actions (delete-fn / extend-fn / namespace-move) executed repeatedly.
+  assert((host.listeners.click || []).length === 1,
+         'exactly one click listener after three binds');
+  assert(host.dataset.gdDispatchBound === '1', 'idempotency flag set once');
+});
+
 test('bindActionDispatch skips when no action matches', () => {
   const ctx = loadRuntime();
   let called = false;

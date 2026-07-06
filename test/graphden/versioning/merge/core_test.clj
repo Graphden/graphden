@@ -13,6 +13,7 @@
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
+    [graphden.storage.postgres.crud :as pg-crud]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.versioning.branch-local :as bl]
@@ -231,6 +232,39 @@
       (let [resolved (sp/read-entity storage :binding (:id b))]
         (is (= 20 (:value resolved))
             "main now sees feature's value after :source resolution"))
+      (sp/close storage))))
+
+
+(deftest merge-resolution-write-failure-rolls-back-merge-record-test
+  (testing "if apply-resolutions! fails, the branch-merge record is rolled back atomically"
+    ;; Without the transaction, create-merge-record! commits first (surfacing
+    ;; every source version on target) and a failed resolution write leaves
+    ;; the user's :target choices missing → source values silently win. The
+    ;; transaction must undo the merge record too.
+    (let [{:keys [storage base fn-id slot-id]} (create-test-storage)
+          b (create-binding-on-current! storage fn-id slot-id 10)
+          source (vs/create-branch! storage "feature")
+          feature (vs/switch-branch storage (:id source))]
+      (sp/update-entity feature :binding (:id b) {:value 20})
+      (sp/update-entity storage :binding (:id b) {:value 11})
+      (is (seq (:conflicts (vs/detect-conflicts storage (:id source))))
+          "expected a conflict on the binding")
+      ;; Inject a failure into the resolution write only. `create-merge-record!`
+      ;; uses `create-entity` (singular) and runs FIRST inside the tx;
+      ;; `apply-resolutions!` uses `create-entities` (plural, batched) — redef
+      ;; the postgres impl of that to throw, so the merge record is written
+      ;; then rolled back. (Redef the concrete `pg-crud/create-entities` defn,
+      ;; which the protocol method delegates to, rather than the protocol var.)
+      (let [threw? (atom false)]
+        (with-redefs [pg-crud/create-entities (fn [& _] (throw (ex-info "boom" {:injected true})))]
+          (try (vs/merge-branch! storage (:id source)
+                                 {:conflict-resolutions {[:binding (:id b)] :source}})
+               (catch clojure.lang.ExceptionInfo _ (reset! threw? true))))
+        (is @threw? "merge propagates the injected resolution-write failure"))
+      (is (empty? (sp/query-entities base :branch-merge {:source-branch-id (:id source)}))
+          "branch-merge record rolled back with the failed resolution write")
+      (is (= 11 (:value (sp/read-entity storage :binding (:id b))))
+          "main unchanged — the merge did not partially apply")
       (sp/close storage))))
 
 

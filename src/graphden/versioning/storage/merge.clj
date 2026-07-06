@@ -16,7 +16,8 @@
     [clojure.set :as set]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.branch-local :as bl]
-    [graphden.versioning.storage.resolution :as res])
+    [graphden.versioning.storage.resolution :as res]
+    [next.jdbc :as jdbc])
   (:import
     (java.time
       Instant)))
@@ -221,11 +222,15 @@
   "For each conflict whose resolution is `:source` or `:target`, create
    a fresh version record on target branch with the chosen data.
    `nil` resolutions silently skip. Records are grouped by version
-   entity and inserted in one batch per type. Single timestamp shared
-   so per-type ordering is deterministic; the merge record's timestamp
-   is strictly earlier so resolutions win."
-  [base-storage conflicts conflict-resolutions target-branch-id]
-  (let [ts (now)
+   entity and inserted in one batch per type. Stamped at `merge-ts` + 1ms
+   so resolutions are DETERMINISTICALLY strictly-later than the merge
+   record (target-timestamp = `merge-ts`) → `pick-latest-candidate`
+   prefers the resolution over the merge-surfaced source. (Previously a
+   second `(now)` read, which made 'resolution wins' depend on wall-clock
+   monotonicity between the two writes.) The +1ms epsilon survives
+   Postgres timestamptz microsecond truncation."
+  [base-storage conflicts conflict-resolutions target-branch-id merge-ts]
+  (let [ts (Instant/.plusMillis merge-ts 1)
         by-version-entity
         (reduce
           (fn [acc {:keys [entity-name entity-id source-version target-version]}]
@@ -435,11 +440,28 @@
          {:keys [conflicts]} (detect-conflicts base-storage source-branch-id
                                                target-branch-id)]
      (assert-resolutions-cover-conflicts! conflicts conflict-resolutions)
-     (let [merge-record (create-merge-record! base-storage source-branch-id
-                                              target-branch-id (now))]
-       (apply-resolutions! base-storage conflicts conflict-resolutions
-                           target-branch-id)
-       merge-record))))
+     ;; ATOMIC: the merge record (which surfaces every source version on
+     ;; target) and the conflict-resolution overrides (which beat that
+     ;; surfacing for entities the user resolved as `:target`) must land
+     ;; together. Committing the merge record but losing the resolutions
+     ;; would silently discard the user's decisions — the source value
+     ;; would surface where they chose to keep target. `PostgresStorage`
+     ;; exposes its `:pool` as the Connectable `sp/create-entity` runs on,
+     ;; so binding the storage to a `with-transaction` connection makes
+     ;; both writes share one commit. Non-PG storages (no `:pool`) fall
+     ;; back to the prior sequential behaviour. Single `merge-ts` so the
+     ;; resolution-wins ordering is structural, not clock-dependent.
+     (let [merge-ts (now)
+           write! (fn [storage]
+                    (let [merge-record (create-merge-record! storage source-branch-id
+                                                             target-branch-id merge-ts)]
+                      (apply-resolutions! storage conflicts conflict-resolutions
+                                          target-branch-id merge-ts)
+                      merge-record))]
+       (if-let [pool (:pool base-storage)]
+         (jdbc/with-transaction [tx pool]
+                                (write! (assoc base-storage :pool tx)))
+         (write! base-storage))))))
 
 
 (defn skipped-as-branch-local

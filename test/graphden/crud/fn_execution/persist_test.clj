@@ -63,6 +63,21 @@
     (is (nil? v))))
 
 
+(deftest json-bytes-within-uses-utf8-not-chars
+  ;; The result-size gate is a BYTE budget. "é" serialises to the JSON
+  ;; token `"é"` = quote + 2-byte é + quote = 4 UTF-8 bytes, but only 3
+  ;; UTF-16 code units — so a char-count gate would wrongly pass at 3.
+  (is (persist/json-bytes-within? "é" 4))
+  (is (not (persist/json-bytes-within? "é" 3))
+      "must reject on the 4th byte — proves UTF-8 semantics + early abort"))
+
+
+(deftest json-bytes-within-unserializable-is-refused
+  ;; A value cheshire can't encode is treated as oversize (false), not a
+  ;; thrown exception that would crash the persist path.
+  (is (not (persist/json-bytes-within? (Object.) persist/max-result-bytes))))
+
+
 ;; =============================================================================
 ;; jsonize-error-data — keep ed when small; fall back to {:type :truncated}
 ;; =============================================================================
@@ -83,15 +98,24 @@
 ;; =============================================================================
 
 (deftest args-bytes-empty
-  (is (= (count (json/generate-string {})) (persist/args-bytes {}))))
+  (is (= 2 (persist/args-bytes {}))))          ; "{}" — 2 UTF-8 bytes
 
 
 (deftest args-bytes-scalar-map
-  ;; sanity: the helper just delegates to cheshire's length so we
-  ;; mirror the same expectation rather than hard-coding bytes.
+  ;; ASCII: UTF-8 bytes == char count.
   (let [args {:a 1 :b "two"}]
     (is (= (count (json/generate-string args))
            (persist/args-bytes args)))))
+
+
+(deftest args-bytes-counts-utf8-not-chars
+  ;; Non-ASCII: the cap is a BYTE budget, so a multi-byte char must
+  ;; count as its UTF-8 width, NOT one UTF-16 code unit. "café" JSON is
+  ;; `{"x":"café"}` — 'é' is 2 UTF-8 bytes, so bytes = chars + 1.
+  (let [args {:x "café"}
+        json (json/generate-string args)]
+    (is (= (inc (count json)) (persist/args-bytes args))
+        "byte count must exceed the char count by the multi-byte width")))
 
 
 ;; =============================================================================

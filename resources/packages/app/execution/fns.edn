@@ -243,18 +243,18 @@
           :else nil}}
 
   ;; --- :_execute-args-too-large-err — pure graph composition:
-  ;; `:to-json-string` + `:count` cover the size calc, `:gt` + `:if` +
+  ;; `:to-json-string` + `:byte-len` cover the size calc, `:gt` + `:if` +
   ;; `:zipmap` cover the rest. `max-args-bytes` lives in
   ;; `graphden.crud.fn-execution.persist` (256 KB = 262144); change
   ;; both sides if you tighten / loosen the limit.
   {:name :_execute-args-bytes
-   :description "Serialised byte-size of `:args` — `(count (to-json-string args))`. Pure graph composition over existing primitives, no new base-fn."
-   :parent :count
-   :args {:coll {:parent :to-json-string
-                 :args {:data {:parent :get
-                               :args {:coll {:as :parsed}
-                                      :key {:value :args}
-                                      :default nil}}}}}}
+   :description "Serialised byte-size of `:args` — `(byte-len (to-json-string args))`. UTF-8 byte length (matches Postgres jsonb storage + the `max-args-bytes` byte budget); `:str-len`/`:count` would UNDER-count non-ASCII args. Pure graph composition."
+   :parent :byte-len
+   :args {:string {:parent :to-json-string
+                   :args {:data {:parent :get
+                                 :args {:coll {:as :parsed}
+                                        :key {:value :args}
+                                        :default nil}}}}}}
 
   {:name :_execute-args-too-large?
    :description "True iff serialised `:args` exceeds the 256 KB limit."

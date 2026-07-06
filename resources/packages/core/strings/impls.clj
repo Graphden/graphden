@@ -111,6 +111,12 @@
   (count string))
 
 
+(defbase byte-len-fn [string]
+  ;; UTF-8 byte length — distinct from :str-len (UTF-16 code units) for
+  ;; enforcing byte-sized budgets (jsonb payload caps).
+  (alength (String/.getBytes ^String string "UTF-8")))
+
+
 (defbase str-upper-fn [string]
   (str/upper-case string))
 
@@ -279,6 +285,7 @@
   {:str                {:impl str-fn                :return-type-rule taint}
    :subs               {:impl subs-fn               :return-type-rule taint}
    :str-len            {:impl str-len-fn            :return-type-rule taint}
+   :byte-len           {:impl byte-len-fn           :return-type-rule taint}
    :str-upper          {:impl str-upper-fn          :return-type-rule taint}
    :str-lower          {:impl str-lower-fn          :return-type-rule taint}
    :str-trim           {:impl str-trim-fn           :return-type-rule taint}

@@ -23,6 +23,11 @@
    :args {:string {:type :text :description "String to measure."}}
    :return-type :non-negative-int}
 
+  {:name :byte-len
+   :description "UTF-8 byte length of a string (`String.getBytes(\"UTF-8\").length`). Distinct from :str-len — use for byte-sized budgets (e.g. jsonb payload caps), which :str-len (UTF-16 code units) under-counts for non-ASCII text."
+   :args {:string {:type :text :description "String to measure."}}
+   :return-type :non-negative-int}
+
   {:name :str-upper
    :description "Upper-case a string (Java `String.toUpperCase`)."
    :args {:string {:type :text :description "String to upper-case."}}

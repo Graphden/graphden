@@ -16,7 +16,6 @@
   (:require
     [cheshire.core :as json]
     [clojure.set]
-    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.request :as request]
@@ -70,25 +69,64 @@
 (defn truncate-error
   [s]
   (let [s (str s)]
+    ;; `max-error-chars` is a CHARACTER budget by design (a human-readable
+    ;; message truncated for display), so `count` / `subs` on chars is right
+    ;; here — unlike the byte-named caps below.
     (if (<= (count s) max-error-chars)
       s
       (str (subs s 0 max-error-chars) "…"))))
 
 
+(defn utf8-byte-count
+  "UTF-8 byte length of `s`. The size caps are byte budgets (Postgres
+   jsonb stores UTF-8), so `(count s)` — which is the UTF-16 CODE-UNIT
+   count — under-enforces them by up to ~3× on non-ASCII text."
+  ^long [^String s]
+  (alength (String/.getBytes s java.nio.charset.StandardCharsets/UTF_8)))
+
+
+(defn json-bytes-within?
+  "Serialize `value` to UTF-8 JSON through a streaming writer that counts
+   bytes and ABORTS the moment the count exceeds `limit` — so an oversize
+   (or unserializable) value is refused WITHOUT materialising the whole
+   JSON string in memory. Returns true iff `value` serialises to ≤ `limit`
+   UTF-8 bytes. (`json/generate-string` + `count` would fully realise a
+   500 MB result string before a 5 MB cap could reject it.)"
+  [value ^long limit]
+  (let [counter (java.util.concurrent.atomic.AtomicLong.)
+        os (proxy [java.io.OutputStream] []
+             (write
+               ([b]
+                (when (> (java.util.concurrent.atomic.AtomicLong/.incrementAndGet counter) limit)
+                  (throw (ex-info "oversize" {::oversize true}))))
+               ([_b _off len]
+                (when (> (java.util.concurrent.atomic.AtomicLong/.addAndGet counter (long len)) limit)
+                  (throw (ex-info "oversize" {::oversize true}))))))
+        w (java.io.OutputStreamWriter. os java.nio.charset.StandardCharsets/UTF_8)]
+    (try
+      (json/generate-stream value w)
+      (java.io.Writer/.flush w)
+      true
+      (catch clojure.lang.ExceptionInfo e
+        (when-not (::oversize (ex-data e))
+          (log/warn e "Result JSON-encode failed — treating as oversize"))
+        false)
+      (catch Exception e
+        (log/warn e "Result JSON-encode failed — treating as oversize")
+        false))))
+
+
 (defn jsonize-result
-  "Serialize result to test size cap. Returns `[ok? value-or-nil]` —
+  "Test the result against the size cap. Returns `[ok? value-or-nil]` —
    `[true result]` when within cap, `[false nil]` when oversize OR
-   when the value can't be JSON-encoded at all (treating unsersializable
+   when the value can't be JSON-encoded at all (treating unserializable
    results the same as oversize: storage layer would fail downstream
-   anyway, better to refuse here with a clean signal)."
+   anyway, better to refuse here with a clean signal). Streams the
+   serialization so an oversize result never materialises fully."
   [result]
-  (let [json-str (try (json/generate-string result)
-                      (catch Exception e
-                        (log/warn e "Result JSON-encode failed — treating as oversize")
-                        nil))]
-    (if (and json-str (<= (count json-str) max-result-bytes))
-      [true result]
-      [false nil])))
+  (if (json-bytes-within? result max-result-bytes)
+    [true result]
+    [false nil]))
 
 
 (defn jsonize-error-data
@@ -96,10 +134,8 @@
   (let [json-str (try (json/generate-string data)
                       (catch Exception e
                         (log/warn e "Error-data JSON-encode failed — truncating to :type")
-                        ;; Fall through to the truncated path below by
-                        ;; returning a string longer than the cap.
-                        (str/join (repeat (inc max-error-data-bytes) \X))))]
-    (if (<= (count json-str) max-error-data-bytes)
+                        nil))]
+    (if (and json-str (<= (utf8-byte-count json-str) max-error-data-bytes))
       data
       ;; Best-effort: try to keep just the :type key (canonical
       ;; error-code), drop the rest.
@@ -108,7 +144,7 @@
 
 (defn args-bytes
   [args]
-  (count (json/generate-string args)))
+  (utf8-byte-count (json/generate-string args)))
 
 
 (defn ref-arg?

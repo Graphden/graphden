@@ -265,6 +265,13 @@ function closeActivePopover() {
 // rather than closing over a single element.
 installPopoverDismiss({
   getEl: () => _activePopover,
+  // The create-secret form's ns-chip opens the namespace picker, which
+  // appends its element (class `fn-picker-popover`) to document.body — a
+  // SIBLING of `_activePopover`, not a child. Without this allowance a
+  // pointerdown on a namespace row counts as "outside" and dismisses the
+  // whole form (so a secret could only ever be created at root). Treat the
+  // open picker as part of the popover for dismissal.
+  getAnchor: () => document.querySelector('.fn-picker-popover'),
   isVisible: () => _activePopover != null,
   onDismiss: closeActivePopover
 });

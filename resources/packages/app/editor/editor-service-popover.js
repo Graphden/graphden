@@ -277,9 +277,16 @@ function wireServicePopoverHandlers(el, fnEntity) {
                 + 'POST /api/services/reconcile manually.');
         }
       } catch (_) { /* swallow — most often AbortError from navigation */ }
-      servicesCache = null;
+      // RE-PRIME the cache (don't just null it). `getServiceForFnId` is a
+      // synchronous badge reader that returns null — and never fetches —
+      // when the cache is null, so leaving it null made every service
+      // badge (including the one just created) render empty until a reload
+      // or filter toggle. Re-fetch, then rebuild overlays so the badge
+      // appears immediately.
+      try { await refreshServicesCache(); } catch (_) { servicesCache = null; }
       invalidateServicePopoverCache();
       hideServicePopover();
+      if (typeof createNodeOverlays === 'function') createNodeOverlays();
     });
   }
 
@@ -299,9 +306,13 @@ function wireServicePopoverHandlers(el, fnEntity) {
           return;
         }
         await reconcileServices();
-        servicesCache = null;
+        // Re-prime the cache + rebuild overlays (see the save handler) so
+        // the removed badge disappears immediately instead of every badge
+        // going blank until reload.
+        try { await refreshServicesCache(); } catch (_) { servicesCache = null; }
         invalidateServicePopoverCache();
         hideServicePopover();
+        if (typeof createNodeOverlays === 'function') createNodeOverlays();
       } catch (err) {
         alert('Delete failed (network error): ' + (err?.message || err));
         delBtn.disabled = false;

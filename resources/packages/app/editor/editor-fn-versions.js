@@ -91,15 +91,16 @@ async function showFnVersionsPopover(fnEntity, anchorEl) {
         + resp.status + '</div>';
       return;
     }
-    swapAndProcess(popover, await resp.text());
+    const html = await resp.text();
+    // Supersession check BEFORE the swap: opening another fn's history
+    // while this fetch was in flight must NOT clobber the newer popover
+    // content. (Previously the guard ran AFTER swapAndProcess, so a slow
+    // response overwrote the fast one with wrong rows + dead buttons.)
+    if (_fnVersionsFnId !== fnEntity.id) return;
+    swapAndProcess(popover, html);
   } catch (err) {
     popover.innerHTML = '<div class="fn-versions-error">'
       + 'Failed: ' + (err?.message || 'network error') + '</div>';
-    return;
-  }
-
-  if (_fnVersionsFnId !== fnEntity.id) {
-    // User opened another fn's history while this fetch was in flight.
     return;
   }
 

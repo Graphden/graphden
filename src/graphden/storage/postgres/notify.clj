@@ -118,8 +118,16 @@
   (try (pg-conn/close-dedicated! @conn-atom "notify-listener")
        (catch Exception _))
   (let [c (pg-conn/open-dedicated! pg-opts "notify-listener")]
-    (run-listen! c)
-    (reset! conn-atom c)))
+    ;; If the LISTEN statement throws (the fresh conn dropping in the window
+    ;; between open and LISTEN), close `c` — otherwise `reconnect-with-backoff!`
+    ;; catches, retries, and opens another, leaking one dedicated connection
+    ;; per failed attempt during a flapping DB.
+    (try
+      (run-listen! c)
+      (reset! conn-atom c)
+      (catch Exception t
+        (try (pg-conn/close-dedicated! c "notify-listener") (catch Exception _))
+        (throw t)))))
 
 
 (defn- reconnect-with-backoff!

@@ -317,6 +317,24 @@
   (reset! @#'persist/live-executions {:total 0 :by-org {}}))
 
 
+(deftest acquire-execution-slot-release-is-idempotent
+  ;; apply-execute may release a slot on its error path AND the future's
+  ;; `finally` may release the same slot — release MUST decrement exactly
+  ;; once, or the counter under-counts and the cap drifts (eventually
+  ;; rejecting real executions or never rejecting a DoS).
+  (reset! @#'persist/live-executions {:total 0 :by-org {}})
+  (let [release (persist/acquire-execution-slot! "orgA")]
+    (is (= 1 (:total @@#'persist/live-executions)) "one slot held after acquire")
+    (release)
+    (release)
+    (release)
+    (is (zero? (:total @@#'persist/live-executions))
+        "three release calls decrement the total exactly once")
+    (is (zero? (get-in @@#'persist/live-executions [:by-org "orgA"]))
+        "the per-org counter is also decremented exactly once"))
+  (reset! @#'persist/live-executions {:total 0 :by-org {}}))
+
+
 (deftest execution-deadline-flips-cancel-and-interrupts
   ;; The wall-clock watchdog hard-kills a runaway: after the deadline it
   ;; flips the cancel-flag (graph transitions observe *cancel-check*) AND

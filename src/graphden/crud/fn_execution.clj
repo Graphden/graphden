@@ -123,11 +123,25 @@
        :error "Execution capacity exceeded — retry shortly"
        :error-data {:reason :over-capacity}}
       (let [pre-persisted? need-persist?
-            row (when pre-persisted?
-                  (persist/create-pending-with-args!
-                    storage fn-version-id declared-eff
-                    (:user-id parsed) (:args parsed) free-slots))
-            [fut trace] (persist/run-future ctx fn-id executor-args cancel-flag release)
+            ;; Between `acquire-execution-slot!` and `run-future` (whose
+            ;; future's `finally` takes ownership of `release`), the pending-
+            ;; row write can throw (DB blip / unique / RLS reject). Release
+            ;; the slot on any such throw or the permit leaks permanently —
+            ;; the org (then the JVM) would eventually hit the cap and reject
+            ;; every execution with `:over-capacity` while nothing runs.
+            ;; `release` is idempotent, so the future's finally re-calling it
+            ;; is a no-op.
+            [row fut trace]
+            (try
+              (let [row (when pre-persisted?
+                          (persist/create-pending-with-args!
+                            storage fn-version-id declared-eff
+                            (:user-id parsed) (:args parsed) free-slots))
+                    [fut trace] (persist/run-future ctx fn-id executor-args cancel-flag release)]
+                [row fut trace])
+              (catch Exception t
+                (release)
+                (throw t)))
             _   (when row (persist/register-future! (:id row) fut cancel-flag))
             result (try (deref fut (:timeout-ms parsed) ::pending)
                         (catch java.util.concurrent.ExecutionException ee

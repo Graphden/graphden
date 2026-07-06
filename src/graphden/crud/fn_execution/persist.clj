@@ -423,13 +423,17 @@
                         (-> st (update :total inc) (update-in [:by-org org] (fnil inc 0)))
                         st)))]
     (when (not= old new)
-      (fn release
-        []
-        (swap! live-executions
-               (fn [st]
-                 (-> st
-                     (update :total dec)
-                     (update-in [:by-org org] (fnil dec 0)))))))))
+      ;; Idempotent: the slot must be released EXACTLY once even if both the
+      ;; future's `finally` AND a caller's error-path defensively call it.
+      (let [released? (atom false)]
+        (fn release
+          []
+          (when (compare-and-set! released? false true)
+            (swap! live-executions
+                   (fn [st]
+                     (-> st
+                         (update :total dec)
+                         (update-in [:by-org org] (fnil dec 0)))))))))))
 
 
 (def ^:dynamic *max-execution-wall-ms*

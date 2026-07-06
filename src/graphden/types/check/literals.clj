@@ -287,7 +287,12 @@
         :<=    (and (number? v) (number? rhs) (<= v rhs))
         :=     (= v rhs)
         :not=  (not= v rhs)
-        :in    (and (set? rhs) (contains? rhs v))
+        ;; `:in` operands are authored as either a set or a vector
+        ;; (`[:in [:get :post …]]` in app/forms + app/branches). Coerce
+        ;; to a set so a valid member isn't spuriously rejected —
+        ;; `contains?` on a vector tests INDEX, not membership. Mirrors
+        ;; `atom-implies?`/`closed-enum-of`, which already accept `coll?`.
+        :in    (and (coll? rhs) (contains? (set rhs) v))
         :unknown))
     :else                                  :unknown))
 

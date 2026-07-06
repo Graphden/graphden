@@ -946,6 +946,11 @@
   (testing ":in membership decides on a set"
     (is (true?  (lit/literal-satisfies-refinement? :ok  [:in #{:ok :err}])))
     (is (false? (lit/literal-satisfies-refinement? :nope [:in #{:ok :err}]))))
+  (testing ":in membership decides on a VECTOR operand too (app/forms + app/branches author it as `[:in [:get :post …]]`)"
+    (is (true?  (lit/literal-satisfies-refinement? :get  [:in [:get :post :put :delete]])))
+    (is (false? (lit/literal-satisfies-refinement? :head [:in [:get :post :put :delete]])))
+    (is (true?  (lit/literal-satisfies-refinement? 2 [:in [1 2 3]])))
+    (is (false? (lit/literal-satisfies-refinement? 9 [:in [1 2 3]]))))
   (testing ":matches regex defers (non-statically-decidable)"
     (is (= :unknown (lit/literal-satisfies-refinement? "abc" [:matches #"."]))))
   (testing "non-vector / unknown-shape / bad-arity constraints defer"

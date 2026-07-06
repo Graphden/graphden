@@ -87,6 +87,7 @@
   --effect-chip-misc: #ccc;
   --effect-chip-random: #f0abfc;
   --effect-chip-process: #94a3b8;
+  --effect-chip-raw-sql: #f87171;
 }
 body.theme-dark {
   --bg: #1a1a1a;
@@ -1047,6 +1048,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
 .effects-chip-time    { background: var(--effect-chip-time); }     /* wall-clock */
 .effects-chip-random  { background: var(--effect-chip-random); }   /* non-determinism */
 .effects-chip-process { background: var(--effect-chip-process); }  /* spawns supervised background work */
+.effects-chip-raw-sql { background: var(--effect-chip-raw-sql); }  /* raw SQL — bypasses org-scoped storage */
 
 /* Drift = computed effect that the author DIDN'T declare in
    `:expects-effects`. Ring it red so it stands out without changing

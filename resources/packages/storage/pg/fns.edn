@@ -23,7 +23,7 @@
    :args {:hsql {:type :keyword-map
                  :description "HoneySQL map, e.g. `{:select [:id :name] :from :users :where [:= :id ?]}`. See honeysql docs for the full vocabulary."}}
    :return-type [:list :text-keyed-map]
-   :effects #{:db}}
+   :effects #{:db :raw-sql}}
 
   ;; ---------------------------------------------------------------------
   ;; :pg-execute — mutation HoneySQL → affected row count (long).
@@ -38,7 +38,7 @@
    :args {:hsql {:type :keyword-map
                  :description "HoneySQL map describing the mutation."}}
    :return-type :int
-   :effects #{:db}}
+   :effects #{:db :raw-sql}}
 
   ;; ---------------------------------------------------------------------
   ;; :pg-tx — run a body callable inside a JDBC transaction.
@@ -56,7 +56,7 @@
    :args {:body {:type [:fn {} :any]
                  :description "0-arg fn-graph executed inside the transaction. Its return value is returned by :pg-tx."}}
    :return-type :any
-   :effects #{:db}}
+   :effects #{:db :raw-sql}}
 
   ;; ---------------------------------------------------------------------
   ;; :decode-row — raw JDBC row → graphden's canonical entity shape.

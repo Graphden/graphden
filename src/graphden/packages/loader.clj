@@ -267,8 +267,9 @@
       ;; Forward `:effects` (set of category tags). Every effectful
       ;; base-fn names its specific category
       ;; (`:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
-      ;; `:process`). `:process` = spawns supervised background work
-      ;; (service-eligibility marker).
+      ;; `:process` / `:raw-sql`). `:process` = spawns supervised
+      ;; background work (service-eligibility marker); `:raw-sql` = raw
+      ;; SQL escape hatch, blocked for cloud/tenant graphs.
       (:effects fn-def)     (assoc :effects (set (:effects fn-def)))
       ;; Per-base-fn type-rules — only present when the impls.clj
       ;; declared them on the entry map.

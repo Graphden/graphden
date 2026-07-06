@@ -491,7 +491,8 @@
                   "network" "Makes outbound HTTP / network calls."
                   "time"    "Uses wall-clock time — call returns a different value over time."
                   "random"  "Generates random or otherwise non-deterministic values."
-                  "process" "Spawns supervised background work (thread / loop / listener) that lives past the call and needs explicit stopping. Required for a fn to become a :service."}}}
+                  "process" "Spawns supervised background work (thread / loop / listener) that lives past the call and needs explicit stopping. Required for a fn to become a :service."
+                  "raw-sql" "Runs arbitrary SQL that bypasses the org-scoped, access-checked storage layer (raw `:pg-query` / `:pg-execute` / `:pg-tx`, or `:sql-query` / `:sql-exec` against an external datasource). Blocked for cloud / tenant graphs — use the org-scoped `:query-entities` family instead."}}}
 
   {:name :_partial-effect-name
    :description "Read the `effect` query-string parameter from the inbound request. Empty string when absent so downstream lookups fall to the default."

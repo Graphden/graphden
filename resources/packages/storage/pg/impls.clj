@@ -18,19 +18,27 @@
 
 (defbase pg-query
   [hsql]
+  ;; `:raw-sql` (on top of `:db`) marks this as the raw escape hatch a
+  ;; cloud/tenant graph must NOT reach — it runs arbitrary HoneySQL
+  ;; against the platform pool, bypassing the org-scoped + RLS storage
+  ;; protocol. `cloud-forbidden-effects` blocks `:raw-sql`; the safe
+  ;; `:query-entities` path records only `:db`.
   (cr/record-effect! :db)
+  (cr/record-effect! :raw-sql)
   (pg/pg-query ctx hsql))
 
 
 (defbase pg-execute
   [hsql]
   (cr/record-effect! :db)
+  (cr/record-effect! :raw-sql)
   (pg/pg-execute ctx hsql))
 
 
 (defbase pg-tx
   [body]
   (cr/record-effect! :db)
+  (cr/record-effect! :raw-sql)
   (pg/pg-tx ctx body))
 
 

@@ -641,20 +641,23 @@ app достаточно гейта эффектов + egress-allowlist.
   → **0 дыр в sandbox**. `:process` = thread/server/cancel (контроль), shell/RCE
   примитива нет. Один `:db`-gap (layout cache) починен.
 - **Артефакты:** `compile-runtime/cloud-forbidden-effects` `#{:env :io :network
-  :process}` + `default-cloud-allowed-effects` `#{:db :time :state :random}`
-  (вычисляется как `known-effects − forbidden`).
+  :process :raw-sql}` + `default-cloud-allowed-effects` `#{:db :time :state :random}`
+  (вычисляется как `known-effects − forbidden`). `:raw-sql` добавлен, потому что
+  `:db` разрешён (org-scoped storage тенанту нужен), а сырые `:pg-query` /
+  `:pg-execute` / `:pg-tx` (произвольный HoneySQL по платформенному пулу) едут
+  на `:db` в обход org-scope + RLS — тег `:raw-sql` их отдельно блокирует, не
+  трогая безопасный `:query-entities`-путь.
 
-**Wiring — ОТЛОЖЕН В PHASE 2 (осознанное архитектурное решение).** Глобальный
-флаг на default-ctx НЕ работает: дефолтный ctx исполняет САМУ платформу
-(web-server `:network`/`:process`, vault `:network`, config `:env`, asset-reads
-`:io`) — рестрикт дефолтного ctx ломает платформу. Граница «platform vs user
-execution» — это и есть граница тенантности. Гейт **ctx-based по дизайну**,
-поэтому правильная точка установки — **per-org ExecutionContext** (фаза 2,
-§3.1): user-граф исполняется в org-ctx с `:allowed-effects
-default-cloud-allowed-effects`, platform-ctx остаётся unrestricted. Когда org-ctx
-появится, wiring — одна строка через существующий механизм. Частичный wiring
-(гейт только `/api/execute` через биндинг в `run-future`) был отвергнут как
-параллельный механизм, не композирующийся с ctx-дизайном (стал бы долгом).
+**Wiring — СДЕЛАН (tenancy-addon, per-request org-ctx).** Ранее план
+откладывал wiring в Phase 2, потому что глобальный флаг на default-ctx ломает
+платформу (дефолтный ctx исполняет САМУ платформу: web-server `:network`/`:process`,
+vault `:network`, config `:env`, asset-reads `:io`). Граница «platform vs user
+execution» = граница тенантности, и гейт **ctx-based по дизайну**. Эта точка
+установки теперь реализована: `tenancy.addon` биндит `cr/*allowed-effects*
+cr/default-cloud-allowed-effects` вокруг tenant-запроса (app-router path), а
+platform-ctx (`public-org`) остаётся unrestricted. Частичный wiring (гейт только
+`/api/execute` через биндинг в `run-future`) был отвергнут как параллельный
+механизм, не композирующийся с ctx-дизайном.
 
 ---
 

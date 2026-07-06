@@ -22,6 +22,10 @@
   ;; network effect, so the cloud sandbox can gate it (`:db` alone is
   ;; cloud-allowed and would let a restricted graph open arbitrary sockets).
   (cr/record-effect! :network)
+  ;; Arbitrary SQL string against a caller-supplied datasource — the raw
+  ;; escape hatch category `cloud-forbidden-effects` blocks (redundant
+  ;; with `:network` today, but honest: this IS raw SQL).
+  (cr/record-effect! :raw-sql)
   (let [ds (datasource url user password)
         ;; `params` arrives from the fn-graph as a Clojure vector
         ;; (or seq) — JDBC wants a `[sql & params]` vector for the
@@ -39,6 +43,8 @@
   (cr/record-effect! :db)
   ;; External JDBC connection — outbound network (see `sql-exec`).
   (cr/record-effect! :network)
+  ;; Arbitrary SQL string — raw escape hatch (see `sql-exec`).
+  (cr/record-effect! :raw-sql)
   (let [ds (datasource url user password)
         stmt (into [sql] (or params []))]
     ;; `as-unqualified-maps` gives `{:column value}` rather than

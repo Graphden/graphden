@@ -10,7 +10,7 @@ leaking into non-secret sinks.
 marker, `taint propagation`, `return-type-rule`, `executor hide
 on :secret`.
 
-## The seven effect categories
+## The eight effect categories
 
 ```
 :db        Reads or writes graphden's storage
@@ -20,6 +20,7 @@ on :secret`.
 :time      Reads wall-clock time
 :random    Non-deterministic input
 :process   Spawns supervised background work (service-eligibility marker)
+:raw-sql   Arbitrary SQL bypassing org-scoped storage (cloud-blocked)
 ```
 
 Each category is a single keyword. Effects are EXPLICIT — there's

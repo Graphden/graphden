@@ -327,7 +327,7 @@
 
    `:effects` is recorded straight from the fn-def as a set of keyword
    tags (`:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
-   `:process`). `:process` is the service-eligibility marker —
+   `:process` / `:raw-sql`). `:process` is the service-eligibility marker —
    declares 'spawns supervised background work'; required by the
    `:_create-service-no-process-rej` graph guard when admins make a
    fn into a `:service`.

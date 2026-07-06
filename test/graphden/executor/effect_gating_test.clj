@@ -6,6 +6,7 @@
    unrestricted (nil) for self-hosted."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]))
 
@@ -39,3 +40,28 @@
         (is (= #{:db} (:allowed e)))))
     (testing "restricted ctx that DOES allow :env — runs"
       (is (nil? (run (assoc ctx :allowed-effects #{:env})))))))
+
+
+(deftest raw-sql-effect-gate
+  ;; The cloud-sandbox hole this closes: raw `:pg-query` rides `:db`
+  ;; (cloud-ALLOWED) to the platform pool, bypassing org-scope + RLS.
+  ;; `:pg-query` records `:db` THEN `:raw-sql`; under a cloud ctx `:db`
+  ;; passes the gate and `:raw-sql` trips it, so a tenant graph can't
+  ;; read/mutate the platform DB (incl. RLS-less token/user/grant).
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        pg-query-id (get all-name->id :pg-query)
+        run (fn [c]
+              (exec/execute-with-named-args c pg-query-id
+                                            {:hsql {:select [1]}}))]
+    (testing ":raw-sql is a recognised, cloud-forbidden effect"
+      (is (contains? cr/known-effects :raw-sql))
+      (is (contains? cr/cloud-forbidden-effects :raw-sql)))
+    (testing "the safe org-scoped path stays allowed — :db is NOT forbidden"
+      (is (contains? cr/default-cloud-allowed-effects :db))
+      (is (not (contains? cr/default-cloud-allowed-effects :raw-sql))))
+    (testing "cloud ctx allows :db yet gates raw :pg-query on :raw-sql"
+      (let [e (try (run (assoc ctx :allowed-effects cr/default-cloud-allowed-effects))
+                   (catch clojure.lang.ExceptionInfo ex (ex-data ex)))]
+        (is (= :execution/forbidden-effect (:type e)))
+        (is (= :raw-sql (:effect e))
+            "gate must trip on :raw-sql, not :db — proving :db-alone wouldn't block it")))))

@@ -622,12 +622,22 @@
    - `:io`      — file / classpath reads
    - `:network` — outbound HTTP / sockets
    - `:process` — thread / server / execution lifecycle control
+   - `:raw-sql` — arbitrary SQL / HoneySQL against a datasource,
+                  BYPASSING the org-scoped + RLS-checked storage
+                  protocol. The org-scoped path (`:query-entities` and
+                  friends) records only `:db` and stays allowed; the
+                  raw escape hatches (`:pg-query` / `:pg-execute` /
+                  `:pg-tx` on the platform pool, `:sql-query` /
+                  `:sql-exec` on an arbitrary datasource) additionally
+                  record `:raw-sql` so a cloud/tenant graph can't read
+                  or mutate the platform DB (incl. RLS-less token /
+                  user / grant tables) or an out-of-band datasource.
 
    The safe remainder — `:db`, `:time`, `:state`, `:random` — stays
    allowed (internal infrastructure depends on it). New base-fns must
    keep this contract: any security-sensitive primitive MUST
    `record-effect!`, or it becomes a sandbox hole."
-  #{:env :io :network :process})
+  #{:env :io :network :process :raw-sql})
 
 
 (def known-effects
@@ -636,7 +646,7 @@
    in `cloud-forbidden-effects`; this is the full set so the safe
    complement can be derived. Register a new SAFE category here; a new
    SENSITIVE one goes in BOTH this set AND `cloud-forbidden-effects`."
-  #{:db :env :io :network :process :state :time :random})
+  #{:db :env :io :network :process :state :time :random :raw-sql})
 
 
 (def default-cloud-allowed-effects
@@ -656,7 +666,8 @@
 (defn record-effect!
   "Record that the calling impl is about to perform an effect of
    `category`. The vocabulary in use across the package layer is
-   `:db`, `:env`, `:io`, `:network`, `:process`, `:state`, `:time`
+   `:db`, `:env`, `:io`, `:network`, `:process`, `:state`, `:time`,
+   `:random`, `:raw-sql`
    (same vocabulary as rich-type-of `:effects`); `cloud-forbidden-effects`
    marks the security-sensitive subset.
 

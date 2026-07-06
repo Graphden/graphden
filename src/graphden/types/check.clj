@@ -793,8 +793,11 @@
 
    Mirrors the docstring of `compile-runtime/record-effect!` plus
    `:process` from the service registry (services declare
-   `:expects-effects #{:process}` to opt into supervisor reconciliation)."
-  #{:db :env :io :network :time :random :process})
+   `:expects-effects #{:process}` to opt into supervisor reconciliation)
+   and `:raw-sql` for the raw SQL escape hatches (`:pg-query` /
+   `:pg-execute` / `:pg-tx` / `:sql-query` / `:sql-exec`) that bypass
+   the org-scoped storage protocol."
+  #{:db :env :io :network :time :random :process :raw-sql})
 
 
 (defn- check-effect-categories!
@@ -2092,7 +2095,7 @@
    contract should use that field instead.
 
    `:db` / `:env` / `:io` / `:network` / `:time` / `:random` /
-   `:process` — same set the runtime accepts.
+   `:process` / `:raw-sql` — same set the runtime accepts.
 
    `:expects-effects` is skipped here (that path has its own drift
    check)."

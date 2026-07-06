@@ -113,9 +113,17 @@
         :fn (cond
               ;; create / namespace-move → `:write` on the TARGET namespace.
               (contains? data :namespace-id)
-              (when-not (writable? store storage tc/*current-principal* (:namespace-id data))
-                (throw (ex-info "forbidden: no :write grant on the target namespace"
-                                {:type :authz/forbidden :namespace-id (:namespace-id data)})))
+              (do
+                (when-not (writable? store storage tc/*current-principal* (:namespace-id data))
+                  (throw (ex-info "forbidden: no :write grant on the target namespace"
+                                  {:type :authz/forbidden :namespace-id (:namespace-id data)})))
+                ;; A MOVE of an EXISTING fn (id present) also needs `:write`
+                ;; on the fn's CURRENT namespace — otherwise a holder of the
+                ;; target namespace alone could pull a fn out of a namespace
+                ;; they were deliberately not granted. A create (id nil) has
+                ;; no source namespace to check.
+                (when id
+                  (deny-write! store storage :write id)))
               ;; delete / structural update (parent-ids, …) of an EXISTING fn —
               ;; the delta carries no `:namespace-id`, so gate on the fn's OWN
               ;; namespace (read by id). Without this a `:bind-args` holder,

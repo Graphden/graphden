@@ -134,6 +134,40 @@
                      (is (nil? (guard :binding {:fn-id "f-acme"} nil))))))))
 
 
+(deftest authorize-writer-gates-namespace-move-by-both-source-and-target
+  ;; A namespace MOVE of an existing fn must carry :write on BOTH the fn's
+  ;; current (source) namespace AND the target — otherwise a holder of the
+  ;; target namespace alone could pull a fn out of a namespace they were
+  ;; deliberately not granted. A CREATE (id nil) has no source to check.
+  (let [storage (bind-store
+                  {"acme" {:name "acme" :parent-id nil}
+                   "nx"   {:name "x" :parent-id "acme"}
+                   "ny"   {:name "y" :parent-id "acme"}}
+                  {"f-y" {:namespace-id "ny"}}
+                  {})
+        ;; alice: :write on acme.x only (NOT acme.y).
+        alice-grants (grant/static-grant-store
+                       [{:subject "alice" :capability :write :namespace "acme.x"}])
+        ;; root: :write on all of acme (covers both x and y).
+        both-grants  (grant/static-grant-store
+                       [{:subject "root" :capability :write :namespace "acme"}])]
+    (tc/with-org "acme"
+                 (binding [tc/*current-principal* {:user "alice"}]
+                   (let [guard (authz/authorize-writer alice-grants storage)]
+                     (testing "CREATE into a granted target (no source) passes"
+                       (is (nil? (guard :fn {:namespace-id "nx"} nil))))
+                     (testing "MOVE into a granted target but OUT of an ungranted source is denied"
+                       (is (thrown? clojure.lang.ExceptionInfo
+                             (guard :fn {:namespace-id "nx"} "f-y")))
+                       (is (= :authz/forbidden
+                              (try (guard :fn {:namespace-id "nx"} "f-y")
+                                   (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))))
+                 (binding [tc/*current-principal* {:user "root"}]
+                   (let [guard (authz/authorize-writer both-grants storage)]
+                     (testing "MOVE passes when :write is held on both source and target"
+                       (is (nil? (guard :fn {:namespace-id "nx"} "f-y")))))))))
+
+
 (deftest authorize-writer-narrows-by-capability
   ;; §4.3 R2 Step 3: the required cap narrows by the edit — :bind-args for a
   ;; value-only binding tweak, :append-list for list-item writes, :write for

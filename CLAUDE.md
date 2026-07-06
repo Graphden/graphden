@@ -460,8 +460,12 @@ Enforced at write time:
    (`docs/ARCHITECTURE.md § Part 3` for the empirical demo + planned
    `:fix`-based path forward).
 2. **Schema-level uniqueness** — `UNIQUE` keys on `fn.name` (NULL allowed),
-   `fn-slot(fn-id, slot-id)`, `binding(fn-id, slot-id)`, and
-   `binding-list-item(binding-id, position)`.
+   `fn-slot(fn-id, slot-id)`, and `binding(fn-id, slot-id)`. The
+   `binding-list-item(binding-id, position)` UNIQUE was retired — the base
+   identity row is cross-branch, so different branches may legitimately
+   hold different items at the same `(binding-id, position)`; per-branch
+   position uniqueness is enforced by `VersionedStorage`
+   (`check-list-item-position-collision!`).
 
 These constraints are implemented in `storage-protocol` and enforced by storage implementations.
 

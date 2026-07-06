@@ -283,8 +283,27 @@
            lock-conn (lock-conn-from-ctx ctx)
            enabled-services (vec (sp/query-entities storage :service {:enabled? true}))
            enabled-by-id    (into {} (map (juxt :id identity)) enabled-services)
+           running          @running-atom
            {:keys [to-start to-stop]} (diff-desired (keys enabled-by-id)
-                                                    (keys @running-atom))
+                                                    (keys running))
+           ;; Config drift: a service that is enabled AND already running
+           ;; but whose running entry no longer matches the desired row —
+           ;; its :fn-id / :branch-id / :restart-policy was edited via a
+           ;; `:service` PUT. The membership diff misses these (the id is in
+           ;; both sets), so the edit was silently ignored until a pod
+           ;; restart. Stop+restart them to pick it up. `map?` skips the
+           ;; ::not-our-lock placeholder.
+           drifted (filterv (fn [sid]
+                              (let [entry (get running sid)
+                                    svc (get enabled-by-id sid)]
+                                (and (map? entry)
+                                     (or (not= (:fn-id entry) (:fn-id svc))
+                                         (not= (:branch-id entry) (:branch-id svc))
+                                         (not= (:restart-policy entry)
+                                               (:restart-policy svc))))))
+                            (keys enabled-by-id))
+           to-stop  (vec (concat to-stop drifted))
+           to-start (vec (concat to-start drifted))
            not-our-lock (atom [])]
        (doseq [sid to-stop]
          (let [entry (get @running-atom sid)]

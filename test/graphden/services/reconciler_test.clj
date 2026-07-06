@@ -206,6 +206,37 @@
         (finally (sp/close storage))))))
 
 
+(deftest reconcile-restarts-on-fn-id-drift-test
+  ;; Editing a RUNNING service's :fn-id must restart it. The membership
+  ;; diff alone treats the row as unchanged (still enabled + running) and
+  ;; would silently ignore the edit until a pod restart.
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {a :composed} (make-trackable-fn! storage "drift-a" calls stops)
+        {b :composed} (make-trackable-fn! storage "drift-b" calls stops)
+        svc (make-service-row! storage (:id a) true)
+        c (test-ctx storage)
+        running (atom {})]
+    (try
+      (recon/reconcile-once! c running)
+      (is (= [{:suffix "drift-a"}] @calls) "started on fn A")
+      (is (= (:id a) (-> @running vals first :fn-id)))
+      ;; Repoint the running service at fn B.
+      (sp/update-entity storage :service (:id svc) {:fn-id (:id b)})
+      (let [r (recon/reconcile-once! c running)]
+        (testing "the drifted service is stopped AND restarted"
+          (is (= [(:id svc)] (:stopped r)))
+          (is (= [(:id svc)] (:started r))))
+        (testing "fn A's stopper ran; fn B's impl now runs"
+          (is (= [{:suffix "drift-a"}] @stops) "old instance stopped")
+          (is (= [{:suffix "drift-a"} {:suffix "drift-b"}] @calls)
+              "new instance started on B"))
+        (testing "running entry now points at fn B"
+          (is (= (:id b) (-> @running vals first :fn-id)))))
+      (finally (sp/close storage)))))
+
+
 (deftest stop-all-drains-running-test
   (let [storage (create-full-storage)
         calls (atom [])

@@ -53,6 +53,42 @@
     (jdbc/execute! ds ["ALTER TABLE \"fn\" DISABLE ROW LEVEL SECURITY"])))
 
 
+(deftest rls-blocks-tenant-write-to-public-rows
+  ;; A single FOR ALL policy's own+public `USING` let a tenant DELETE — or
+  ;; UPDATE-and-claim — a public (NULL-org) row through a RAW SQL path that
+  ;; bypasses OrgScopedStorage. The split write policies are OWN-only.
+  (let [storage (setup/create-test-storage)
+        ds (:pool storage)]
+    (sp/create-entity storage :fn {:name "rls-pub-target"}) ; NULL org ≡ public
+    (jdbc/execute! ds ["DROP ROLE IF EXISTS graphden_tenant"])
+    (jdbc/execute! ds ["CREATE ROLE graphden_tenant"])
+    (jdbc/execute! ds ["GRANT SELECT, INSERT, UPDATE, DELETE ON \"fn\" TO graphden_tenant"])
+    (rls/enable-rls! ds [:fn])
+    (letfn [(as-tenant
+              [org f]
+              (jdbc/with-transaction [tx ds]
+                                     (jdbc/execute! tx ["SET ROLE graphden_tenant"])
+                                     (rls/set-current-org! tx org)
+                                     (f tx)
+                                     (jdbc/execute! tx ["RESET ROLE"])))
+            (public-row-survives?
+              []
+              (boolean
+                (seq (jdbc/execute!
+                       ds ["SELECT 1 FROM \"fn\" WHERE name = 'rls-pub-target' AND org_id IS NULL"]))))]
+      (testing "a tenant's raw DELETE of a public row affects 0 rows"
+        (as-tenant "acme" (fn [tx] (jdbc/execute! tx ["DELETE FROM \"fn\" WHERE name = 'rls-pub-target'"])))
+        (is (public-row-survives?) "the public row survives a tenant's raw DELETE"))
+      (testing "a tenant's raw UPDATE-and-claim of a public row affects 0 rows"
+        (as-tenant "acme" (fn [tx] (jdbc/execute! tx ["UPDATE \"fn\" SET org_id = 'acme' WHERE name = 'rls-pub-target'"])))
+        (is (public-row-survives?) "the public row is not stolen into the tenant's org"))
+      (testing "admin (unset org) is unrestricted — policy is a no-op"
+        (as-tenant "" (fn [tx] (jdbc/execute! tx ["DELETE FROM \"fn\" WHERE name = 'rls-pub-target'"])))
+        (is (not (public-row-survives?)) "admin deletes the public row freely")))
+    (jdbc/execute! ds ["ALTER TABLE \"fn\" NO FORCE ROW LEVEL SECURITY"])
+    (jdbc/execute! ds ["ALTER TABLE \"fn\" DISABLE ROW LEVEL SECURITY"])))
+
+
 (deftest org-aware-datasource-sets-session-var-from-current-org
   ;; The ops wiring (B5): the wrapped pool carries *current-org* onto every
   ;; borrowed connection as graphden.current_org, which is what RLS reads.
@@ -75,7 +111,7 @@
         tables ["fn" "slot" "fn_slot" "binding" "binding_list_item" "ns"]]
     (is (= :enabled (ig/init-key :tenancy/rls-enabler {:storage storage}))
         "the addon component runs enable-rls! at boot")
-    (let [installed (->> (jdbc/execute! ds ["SELECT tablename FROM pg_policies WHERE policyname = 'org_isolation'"])
+    (let [installed (->> (jdbc/execute! ds ["SELECT tablename FROM pg_policies WHERE policyname = 'org_isolation_select'"])
                          (map :pg_policies/tablename)
                          set)]
       (is (= (set tables) installed)

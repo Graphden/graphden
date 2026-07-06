@@ -39,20 +39,39 @@
 
 (defn- policy-statements
   "DDL for one org-scoped table: enable+force RLS and (re)create the
-   own+public-read / own-write policy. `current_setting(…, true)` is
-   missing-ok → NULL when unset, which the `unset` clause treats as full
-   access."
+   org-isolation policy set. `current_setting(…, true)` is missing-ok →
+   NULL when unset, which the `unset` clause treats as full access
+   (admin / single-tenant / public-org).
+
+   Split by command so READ and WRITE differ:
+   - SELECT sees own + public (NULL-org) rows — a tenant must see the
+     shared platform graph.
+   - INSERT / UPDATE / DELETE are OWN-only. A single `FOR ALL` policy's
+     `USING` clause governs both SELECT and the DELETE/UPDATE target
+     check, so a combined own+public `USING` let a tenant DELETE a
+     public (NULL-org) row — or UPDATE-and-claim it — through a RAW SQL
+     path that bypasses OrgScopedStorage's own?-guard. Own-only write
+     policies close that."
   [entity]
   (let [t (util/ident->sql entity)
         org-col (util/ident->sql :org-id)
         cur (str "current_setting('" org-setting "', true)")
-        unset (str cur " IS NULL OR " cur " = ''")]
+        unset (str cur " IS NULL OR " cur " = ''")
+        own (str "(" unset " OR " org-col " = " cur ")")
+        own-or-public (str "(" unset " OR " org-col " IS NULL OR " org-col " = " cur ")")]
     [(str "ALTER TABLE " t " ENABLE ROW LEVEL SECURITY")
      (str "ALTER TABLE " t " FORCE ROW LEVEL SECURITY")
+     ;; Drop the legacy combined policy + any prior split policies so
+     ;; re-running is idempotent across the naming change.
      (str "DROP POLICY IF EXISTS org_isolation ON " t)
-     (str "CREATE POLICY org_isolation ON " t
-          " USING (" unset " OR " org-col " IS NULL OR " org-col " = " cur ")"
-          " WITH CHECK (" unset " OR " org-col " = " cur ")")]))
+     (str "DROP POLICY IF EXISTS org_isolation_select ON " t)
+     (str "DROP POLICY IF EXISTS org_isolation_insert ON " t)
+     (str "DROP POLICY IF EXISTS org_isolation_update ON " t)
+     (str "DROP POLICY IF EXISTS org_isolation_delete ON " t)
+     (str "CREATE POLICY org_isolation_select ON " t " FOR SELECT USING " own-or-public)
+     (str "CREATE POLICY org_isolation_insert ON " t " FOR INSERT WITH CHECK " own)
+     (str "CREATE POLICY org_isolation_update ON " t " FOR UPDATE USING " own " WITH CHECK " own)
+     (str "CREATE POLICY org_isolation_delete ON " t " FOR DELETE USING " own)]))
 
 
 (defn- table-exists?

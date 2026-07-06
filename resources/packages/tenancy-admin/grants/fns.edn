@@ -30,7 +30,7 @@
   {:name :create-grant
    :description "Create a :grant entity from subject/capability/namespace text. Reads the tenancy addon's :grant entity; throws if absent (addon inactive)."
    :args {:subject {:type :text :description "Principal the grant is for."}
-          :capability {:type :text :description "read / write / execute / admin."}
+          :capability {:type :text :description "One of the closed capability vocabulary: read / write / execute / admin / bind-args / append-list (graphden.tenancy.grant/capabilities). Rejected at write if out-of-set."}
           :namespace {:type :text :description "Dot-path namespace the capability applies to."}}
    :return-type :keyword-map
    :effects #{:db}}
@@ -170,10 +170,18 @@
    :args {:tag {:value "input"}
           :attrs {:value {:type "text" :name "subject" :placeholder "subject" :class "grant-input" :required true}}}}
 
+  ;; Capability is a fixed closed vocabulary (graphden.tenancy.grant/capabilities),
+  ;; so a <select> — not a free text box — makes an invalid / typo'd capability
+  ;; (which would store a silently-dead grant) impossible to submit from the form.
   {:name :_grant-input-capability
-   :parent :hiccup
-   :args {:tag {:value "input"}
-          :attrs {:value {:type "text" :name "capability" :placeholder "read / write / execute / admin" :class "grant-input" :required true}}}}
+   :parent :const
+   :args {:value [:select {:name "capability" :class "grant-input" :required true}
+                  [:option {:value "read"} "read"]
+                  [:option {:value "write"} "write"]
+                  [:option {:value "execute"} "execute"]
+                  [:option {:value "admin"} "admin"]
+                  [:option {:value "bind-args"} "bind-args"]
+                  [:option {:value "append-list"} "append-list"]]}}
 
   {:name :_grant-input-namespace
    :parent :hiccup

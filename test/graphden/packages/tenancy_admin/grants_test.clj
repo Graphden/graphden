@@ -68,3 +68,19 @@
       (create-grant {:subject "carol" :capability "admin" :namespace "ops"}
                     {:storage (capturing-storage sink)})
       (is (= [:grant {:subject "carol" :capability "admin" :namespace "ops"}] @sink)))))
+
+
+(deftest create-grant-rejects-unknown-capability
+  (load-file impls-path)
+  (let [create-grant (resolve 'graphden.packages.tenancy-admin.grants.impls/create-grant)
+        sink (atom nil)]
+    (testing "an out-of-vocabulary capability is rejected at write — no silently-dead grant"
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Unknown capability"
+            (create-grant {:subject "eve" :capability "notacap" :namespace "acme"}
+                          {:storage (capturing-storage sink)})))
+      (is (nil? @sink) "nothing was written for the invalid capability"))
+    (testing "a valid (previously-undocumented) capability still writes"
+      (create-grant {:subject "carol" :capability "bind-args" :namespace "ops"}
+                    {:storage (capturing-storage sink)})
+      (is (= [:grant {:subject "carol" :capability "bind-args" :namespace "ops"}] @sink)))))

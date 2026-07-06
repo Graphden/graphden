@@ -242,7 +242,14 @@
 
 
 (defbase url-decode-fn [string]
-  (java.net.URLDecoder/decode string "UTF-8"))
+  ;; `URLDecoder/decode` throws IllegalArgumentException on malformed
+  ;; percent-encoding (a lone `%`, `%zz`, …). This runs on UNTRUSTED input
+  ;; — `:parse-query-string` / `:parse-form-body` decode public form field
+  ;; values (login / registration / contact) — so an uncaught throw would
+  ;; 500 those endpoints. Fail soft to the raw string, matching the
+  ;; defensive-boundary convention of `parse-uuid` / `str-to-uuid`.
+  (try (java.net.URLDecoder/decode string "UTF-8")
+       (catch IllegalArgumentException _ string)))
 
 
 (defbase str-contains?-fn [string substring]

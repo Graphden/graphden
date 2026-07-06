@@ -111,16 +111,32 @@
       (get headers header-name)))
 
 
+(defn- encoding-acceptable?
+  "True iff `coding` (\"br\" / \"gzip\") is offered in the Accept-Encoding
+   header with a NON-zero q-value. `br;q=0` explicitly forbids brotli
+   (RFC 7231 §5.3.1) — a bare substring match would wrongly send an
+   encoding the client declared unacceptable and cannot decode. Tokens
+   are case-insensitive (§5.3.4)."
+  [^String h ^String coding]
+  (boolean
+    (when h
+      (some (fn [^String part]
+              (let [segs (String/.split (String/.trim part) ";")
+                    tok (String/.toLowerCase (String/.trim ^String (aget segs 0)))
+                    q0? (some (fn [^String s]
+                                (re-find #"(?i)^\s*q=0(?:\.0+)?\s*$" (String/.trim s)))
+                              (rest (seq segs)))]
+                (and (= tok coding) (not q0?))))
+            (seq (String/.split h ","))))))
+
+
 (defn- pick-encoding
   [headers]
   (let [h (header-ci headers "Accept-Encoding")]
     (cond
-      ;; `(?i)` — Accept-Encoding tokens are case-insensitive per
-      ;; RFC 7231 §5.3.4; a client sending `BR` / `GZIP` must still get
-      ;; compression rather than silently falling back to identity.
-      (and h (re-find #"(?i)\bbr\b" h))   :br
-      (and h (re-find #"(?i)\bgzip\b" h)) :gzip
-      :else                               :identity)))
+      (encoding-acceptable? h "br")   :br
+      (encoding-acceptable? h "gzip") :gzip
+      :else                           :identity)))
 
 
 (def ^:private compressible-pattern

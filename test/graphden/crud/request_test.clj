@@ -36,7 +36,17 @@
     (is (= {"q" "a+b"} (req/parse-query-string "q=a%2Bb"))))
 
   (testing "repeated key — last occurrence wins (into map)"
-    (is (= {"a" "2"} (req/parse-query-string "a=1&a=2")))))
+    (is (= {"a" "2"} (req/parse-query-string "a=1&a=2"))))
+
+  (testing "malformed percent-encoding fails soft to the raw string (no throw)"
+    ;; This parses UNTRUSTED public form / query input — a lone `%` or bad
+    ;; hex must NOT throw (which would 500 login / registration endpoints).
+    (is (= {"email" "a%"} (req/parse-query-string "email=a%")))
+    (is (= {"x" "%zz"} (req/parse-query-string "x=%zz")))
+    (is (= {"a%" "1"} (req/parse-query-string "a%=1"))
+        "malformed KEY also fails soft")
+    (is (= {"ok" "1" "bad" "%"} (req/parse-query-string "ok=1&bad=%"))
+        "a good pair alongside a malformed one still parses")))
 
 
 ;; ============================================================================

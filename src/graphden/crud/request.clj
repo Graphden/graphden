@@ -10,6 +10,16 @@
     [clojure.string :as str]))
 
 
+(defn- safe-url-decode
+  "URL-decode `s`, failing soft to the raw string on malformed
+   percent-encoding. `URLDecoder/decode` throws IllegalArgumentException
+   on a lone `%` / `%zz`; this runs on UNTRUSTED query-string + form-body
+   input, so an uncaught throw would 500 the endpoint."
+  ^String [^String s]
+  (try (java.net.URLDecoder/decode s "UTF-8")
+       (catch IllegalArgumentException _ s)))
+
+
 (defn parse-query-string
   [s]
   ;; URL-decode BOTH keys and values. Without key-decoding, fields
@@ -22,8 +32,8 @@
                    :let [[k v] (str/split pair #"=" 2)
                          ^String vv (or v "")]
                    :when k]
-               [(java.net.URLDecoder/decode ^String k "UTF-8")
-                (java.net.URLDecoder/decode vv "UTF-8")]))))
+               [(safe-url-decode k)
+                (safe-url-decode vv)]))))
 
 
 (defn require-storage

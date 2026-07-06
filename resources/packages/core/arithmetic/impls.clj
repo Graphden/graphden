@@ -31,10 +31,27 @@
   result)
 
 
+(defn- safe-arith
+  "Apply `f` to `nums`, normalising BOTH overflow modes to a typed
+   `:execution-error/numeric-overflow`. Long overflow surfaces as a raw
+   `ArithmeticException` from `+`/`-`/`*` BEFORE `check-numeric-result!`'s
+   double infinity/NaN check ever runs, so catch it here and re-wrap with
+   the same `:operation` / `:num-count` context the double path provides."
+  [f nums operation]
+  (let [result (try (apply f nums)
+                    (catch ArithmeticException e
+                      (throw (ex-info (str "Arithmetic overflow (" (name operation) "): "
+                                           (ex-message e))
+                                      {:type :execution-error/numeric-overflow
+                                       :operation operation
+                                       :num-count (count nums)}))))]
+    (check-numeric-result! result operation nums)))
+
+
 ;; === Arithmetic ===
 
 (defbase add [nums]
-  (check-numeric-result! (apply + nums) :add nums))
+  (safe-arith + nums :add))
 
 
 (defbase sub [nums]
@@ -42,11 +59,11 @@
     (throw (ex-info "Subtraction requires at least one number"
                     {:type :execution-error/invalid-args
                      :nums nums})))
-  (check-numeric-result! (apply - nums) :sub nums))
+  (safe-arith - nums :sub))
 
 
 (defbase mul [nums]
-  (check-numeric-result! (apply * nums) :mul nums))
+  (safe-arith * nums :mul))
 
 
 (defbase div [nums]

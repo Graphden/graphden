@@ -329,10 +329,8 @@
 ;; These are grouped by category and documented with rationale.
 
 ;; === Limits — canonical sources elsewhere ===
-;; Identifier / fn-name / batch / cache / dependency-chain limits used
-;; to be re-exported (or duplicated) here for "backwards compat" but
-;; had no callers — the live constants live next to their use sites:
+;; Identifier / fn-name / batch / cache / dependency-chain limits live
+;; next to their use sites; reach for those namespaces directly:
 ;;   - `max-identifier-length`    → `schema.fields.types`
 ;;   - credential-length limits   → `storage.protocol.credential-validation`
 ;;   - `default-max-dependency-chain-depth` → `storage.protocol.constraints`
-;; Reach for those namespaces directly.

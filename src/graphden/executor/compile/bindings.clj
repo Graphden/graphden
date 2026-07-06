@@ -11,8 +11,7 @@
    - A renamed-view slot (own slot row whose `:source-slot-id` FK
      points at an inherited slot) exposes the source slot under a
      new external name without consuming it; the slot stays free
-     under the new name. Phase 6c switched from the legacy
-     `binding.rename-to` text encoding to this FK link."
+     under the new name."
   (:require
     [graphden.executor.compile.lookups :as l]
     [graphden.types.core :as types]))

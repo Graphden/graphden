@@ -47,10 +47,8 @@
 ;; Graph traversal — process-* family.
 ;;
 ;; The four functions below cooperatively walk a fn-graph rooted at one fn
-;; and emit cytoscape nodes/edges into a shared `state` atom. They used to
-;; live as a single ~500-line `letfn` block inside `build-graph-elements`;
-;; the captured closure (10 values) is now passed explicitly through a
-;; `ctx` map. Roles:
+;; and emit cytoscape nodes/edges into a shared `state` atom, sharing the
+;; ~10 walk values through an explicit `ctx` map. Roles:
 ;;
 ;;   process-any-fn            — dispatch: leaf vs in-place vs expanded
 ;;   process-fn                — non-expanded path (no `letfn` rename

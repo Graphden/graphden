@@ -659,8 +659,7 @@
         ;; underlying base-fn / rename slot — `chain-source-slot-ids`
         ;; reaches the deep slot through this FK, so downstream HOF
         ;; callbacks with `{:as :item}` renames keep their full
-        ;; rename-chain working after PC's binding-routing change
-        ;; (real-PC commit 66d8f754 routes consumer bindings to PB'
+        ;; rename-chain working (consumer bindings route to PB'
         ;; own-slots; without this bridge the rename mechanism would
         ;; shortcircuit). The walk seeds `resolve-slot-owner-strict`
         ;; from each ref-target so the OWN PB' decl on `fn-def`

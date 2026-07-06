@@ -209,10 +209,12 @@ async function pollOnce(execId, resultHostEl) {
       return;
     }
     const row = await r.json();
-    // The popover may have been dismissed (stopPolling nulls pollState)
-    // while this fetch was in flight — bail before touching pollState /
-    // the detached result host.
-    if (!pollState) return;
+    // The popover may have been dismissed (stopPolling nulls pollState),
+    // OR a newer Run replaced pollState with a different execId, while
+    // this fetch was in flight. Bail unless we're still the current poll —
+    // otherwise a stale poll would either reschedule onto the wrong execId
+    // or call stopPolling() and silently kill the newer run.
+    if (!pollState || pollState.execId !== execId) return;
     const status = String(row.status || '').replace(/^:/, '');
     if (status === 'succeeded' || status === 'failed' || status === 'cancelled') {
       // Body hiccup comes from `/partials/execute-result?id=…` — the

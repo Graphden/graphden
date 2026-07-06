@@ -18,6 +18,7 @@
    callable re-reads the registry on every call so the next request
    picks up a fresh rebuild)."
   (:require
+    [cheshire.core :as json]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
@@ -480,7 +481,13 @@
                           (if (and (some? branch-ref) (nil? branch-id))
                             {:status 400
                              :headers {"Content-Type" "application/json"}
-                             :body (str "{\"ok\":false,\"error\":\"Unknown branch: " branch-ref "\"}")}
+                             ;; JSON-encode — `branch-ref` is user-controlled
+                             ;; (X-Graphden-Branch header / ?branch=), so a raw
+                             ;; string-concat let a `"` inject arbitrary keys
+                             ;; into the response envelope.
+                             :body (json/generate-string
+                                     {:ok false
+                                      :error (str "Unknown branch: " branch-ref)})}
                             ((handler-for router branch-id) request)))))]
           (if request-scope
             (request-scope base-ctx request run)

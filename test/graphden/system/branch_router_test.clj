@@ -16,6 +16,7 @@
      PG-backed storage with a compilable test fn, asserting the
      per-branch ctx ends up bound to the right branch."
   (:require
+    [cheshire.core :as json]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
@@ -166,6 +167,25 @@
         (is (re-find #"Unknown branch: no-such-branch" (:body resp)))
         (is (empty? @calls)
             "the dispatcher must short-circuit before any handler fires")))))
+
+
+(deftest dispatch-unknown-branch-body-is-valid-json
+  ;; The unknown-branch 400 reflects the user-controlled branch-ref; a raw
+  ;; string-concat let a `"` inject arbitrary keys into the response
+  ;; envelope. It must now be a properly JSON-encoded string.
+  (testing "a branch-ref containing quotes stays contained in the :error string"
+    (with-redefs [br/resolve-branch-id (fn [_ _] nil)]
+      (let [router (br/->BranchRouter nil default-id (atom {}) :stub-fn-id)
+            evil "\",\"admin\":true,\"x\":\""
+            resp (br/dispatch router {:headers {"x-graphden-branch" evil}
+                                      :query-string nil})
+            parsed (json/parse-string (:body resp) true)]
+        (is (= 400 (:status resp)))
+        (is (false? (:ok parsed)))
+        (is (nil? (:admin parsed))
+            "the injected key must NOT surface at the top level")
+        (is (re-find #"Unknown branch:" (:error parsed))
+            "the raw ref stays inside the escaped :error string")))))
 
 
 (deftest dispatch-prefers-header-over-query

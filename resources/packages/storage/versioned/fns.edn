@@ -292,8 +292,25 @@
           :else {:value nil}}}
 
   {:name :_rv-version-found?
+   :description "Present AND not a tombstone. A tombstone-winner (`:deleted-at` set) resolves the entity ABSENT — mirrors the Clojure `resolution/tombstone?` filter so the graph list handlers (`:list-entities`, secrets) hide user-deleted entities exactly as the CRUD resolver does."
+   :parent :and
+   :args {:values [:_rv-version-present? :_rv-version-live?]}}
+
+  {:name :_rv-version-present?
    :parent :some?
    :args {:value :_rv-resolved-version-for-eid}}
+
+  {:name :_rv-version-live?
+   :description "True when the winning version is NOT a tombstone."
+   :parent :nil?
+   :args {:value :_rv-resolved-version-deleted-at}}
+
+  {:name :_rv-resolved-version-deleted-at
+   :description "`:deleted-at` of the winning version — nil for live, a timestamp for a tombstone. SELECT * carries the column; `:decode-row` surfaces it."
+   :parent :get
+   :args {:coll :_rv-resolved-version-for-eid
+          :key {:value :deleted-at}
+          :default nil}}
 
   ;; ---------------------------------------------------------------------
   ;; Walk the branch chain, picking the first non-nil per-branch

@@ -511,6 +511,74 @@
       (finally (sp/close base)))))
 
 
+(deftest tombstone-delete-hides-inherited-entity-test
+  ;; A user-facing delete on a feature branch of an entity that lives on the
+  ;; PARENT branch must HIDE it on the feature branch (+ descendants) while
+  ;; leaving the parent untouched. The old hard-delete-current-branch-only
+  ;; path was a silent no-op for inherited entities.
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "td-fn" :parent-ids [] :description "orig"})
+            feature (vs/create-branch! v "td-feat")
+            vf (vs/switch-branch v (:id feature))]
+        (testing "before delete: the feature branch inherits the fn"
+          (is (some? (sp/read-entity vf :fn (:id f)))))
+        ;; User-facing delete on the feature branch → tombstone.
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity vf :fn (:id f)))
+        (testing "after delete: feature hides it, main still has it"
+          (is (nil? (sp/read-entity vf :fn (:id f)))
+              "the tombstone hides the inherited fn on the feature branch")
+          (is (not-any? #(= (:id f) (:id %)) (sp/query-entities vf :fn {}))
+              "and it's gone from the feature-branch listing")
+          (is (some? (sp/read-entity v :fn (:id f)))
+              "main still sees it — the delete did not touch the parent branch")))
+      (finally (sp/close base)))))
+
+
+(deftest tombstone-delete-own-branch-entity-test
+  ;; Deleting an entity that has its OWN version on this branch hides it too
+  ;; (the tombstone is the new latest), and a hard-delete (default binding)
+  ;; still removes rows outright — so sync / rollback are unaffected.
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "td-own" :parent-ids [] :description "d"})]
+        (testing "tombstone delete on the creating branch hides it"
+          (binding [vs/*tombstone-delete?* true]
+            (sp/delete-entity v :fn (:id f)))
+          (is (nil? (sp/read-entity v :fn (:id f)))))
+        (let [g (sp/create-entity v :fn {:name "td-hard" :parent-ids [] :description "d"})]
+          (testing "default (hard) delete removes the row outright"
+            (sp/delete-entity v :fn (:id g))
+            (is (nil? (sp/read-entity v :fn (:id g)))))))
+      (finally (sp/close base)))))
+
+
+(deftest tombstone-delete-propagates-on-merge-test
+  ;; Deleting an entity on a source branch then merging that branch into a
+  ;; target must delete it on the target too — the tombstone version travels
+  ;; as a merge candidate and wins the latest-by-effective-ts race.
+  (let [base (base-storage)
+        v (vs/wrap-with-versioning base)]
+    (try
+      (let [f (sp/create-entity v :fn {:name "tdm-fn" :parent-ids [] :description "d"})
+            feature (vs/create-branch! v "tdm-feat")
+            vf (vs/switch-branch v (:id feature))]
+        ;; Delete on the feature branch (tombstone), main unaffected yet.
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity vf :fn (:id f)))
+        (is (nil? (sp/read-entity vf :fn (:id f))) "gone on feature")
+        (is (some? (sp/read-entity v :fn (:id f))) "still on main before merge")
+        ;; Merge feature → main; the delete propagates.
+        (vs/merge-branch! v (:id feature))
+        (testing "after merge the delete is visible on main"
+          (is (nil? (sp/read-entity v :fn (:id f)))
+              "main sees the fn as deleted after merging the feature branch")))
+      (finally (sp/close base)))))
+
+
 (deftest branch-local-fn-inherits-via-parent-branch-recursion-test
   ;; Intentional asymmetry between merge (filtered) and inheritance
   ;; (NOT filtered). A branch B forked from A picks up A's sticky-

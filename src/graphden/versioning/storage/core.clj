@@ -72,6 +72,36 @@
     (sp/create-entity base-storage (:version-entity config) version-data)))
 
 
+(def ^:dynamic *tombstone-delete?*
+  "When true, `delete-entity`/`delete-entities` write a TOMBSTONE version
+   (`:deleted-at` set) instead of hard-deleting this branch's version rows.
+   The user-facing CRUD delete (`crud.entities/delete-entity`) binds this so
+   deleting an entity inherited from a PARENT branch actually hides it (the
+   hard-delete-current-branch-only path is a silent no-op for inherited
+   entities). Default false → hard delete, which is what DECLARATIVE SYNC
+   (`composition/core.clj` stale-row cleanup, which also runs through
+   VersionedStorage) and rollback paths need — those must truly remove rows,
+   not accumulate tombstones on every rebuild."
+  false)
+
+
+(defn- tombstone-version!
+  "Write a tombstone version (current resolved data + `:deleted-at`) on
+   `branch-id`, so the entity resolves ABSENT here and on descendants while
+   the ancestor/identity rows survive. Non-nullable version columns are
+   satisfied by the current version data. Returns true when a tombstone was
+   written (the entity was live), false when there was nothing live to delete."
+  [base-storage entity-name id branch-id]
+  (let [config (get res/entity-config entity-name)
+        current (res/resolve-version base-storage entity-name id branch-id)]
+    (when current
+      (let [ts (now)
+            version-data (-> (prepare-version-record config id branch-id ts current)
+                             (assoc :deleted-at ts))]
+        (sp/create-entity base-storage (:version-entity config) version-data)))
+    (some? current)))
+
+
 (defn- check-list-item-position-collisions!
   "Per-branch resolved-view check for a WHOLE batch: throw if any item in
    `check-seq` resolves to a `(binding-id, position)` already taken by
@@ -274,9 +304,16 @@
 
   (delete-entity
     [_ entity-name id]
-    (if-not (res/versioned-entity? entity-name)
+    (cond
+      (not (res/versioned-entity? entity-name))
       (sp/delete-entity base-storage entity-name id)
-      ;; Delete all version records for this entity on this branch only
+
+      ;; User-facing delete: tombstone so an inherited entity is hidden too.
+      *tombstone-delete?*
+      (tombstone-version! base-storage entity-name id branch-id)
+
+      ;; Hard delete (sync / rollback): drop this branch's own version rows.
+      :else
       (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
             versions (sp/query-entities base-storage version-entity
                                         {version-id-field id :branch-id branch-id})
@@ -487,8 +524,14 @@
 
   (delete-entities
     [_ entity-name ids]
-    (if-not (res/versioned-entity? entity-name)
+    (cond
+      (not (res/versioned-entity? entity-name))
       (sp/delete-entities base-storage entity-name ids)
+
+      *tombstone-delete?*
+      (count (filterv #(tombstone-version! base-storage entity-name % branch-id) ids))
+
+      :else
       ;; Batch delete: single query to find all versions, single batch delete
       (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
             ;; Single WHERE IN query for all entity versions on this branch

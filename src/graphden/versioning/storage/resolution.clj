@@ -183,6 +183,17 @@
     (bl/effective-branch-local? base-storage fid)))
 
 
+(defn tombstone?
+  "A version row is a tombstone when its `:deleted-at` is set — it marks
+   the entity DELETED at that chain level (written by a user-facing
+   `delete-entity` under `*tombstone-delete?*`). A tombstone that wins the
+   latest-on-chain race resolves the entity ABSENT and, crucially, shadows
+   any inherited ancestor version (so a delete of an inherited entity is
+   not a silent no-op)."
+  [version-row]
+  (some? (:deleted-at version-row)))
+
+
 (defn- pick-latest-candidate
   "Return the `:version` whose `:effective-ts` is greatest, or nil
    when the candidate seq is empty."
@@ -215,10 +226,13 @@
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
         {:keys [versions-by-id merges-by-target branch-chain]}
         (load-merge-aware-cache base-storage version-entity version-id-field
-                                [entity-id] branch-id)]
-    (resolve-version-from-cache base-storage entity-name
-                                versions-by-id merges-by-target
-                                entity-id branch-chain)))
+                                [entity-id] branch-id)
+        version (resolve-version-from-cache base-storage entity-name
+                                            versions-by-id merges-by-target
+                                            entity-id branch-chain)]
+    ;; A tombstone-winner means the entity is deleted on this branch — the
+    ;; public API treats it as absent (nil), same as no version at all.
+    (when-not (tombstone? version) version)))
 
 
 ;; === High-Level Resolution Functions ===
@@ -261,7 +275,8 @@
                                        base-storage entity-name
                                        versions-by-id merges-by-target
                                        eid branch-chain)]
-                       :when version]
+                       ;; A tombstone-winner ⇒ deleted on this branch ⇒ omit.
+                       :when (and version (not (tombstone? version)))]
                    (merge identity-rec (extract-version-data version version-id-field)))]
     (if (empty? where)
       resolved
@@ -461,18 +476,24 @@
                                   entity-ids branch-id)
           identity-by-id (into {} (map (juxt :id identity)) identity-records)]
       (into {}
-            (map (fn [eid]
-                   (let [identity-rec (get identity-by-id eid)]
-                     (if-let [version (resolve-version-from-cache
-                                        base-storage entity-name
-                                        versions-by-id merges-by-target
-                                        eid branch-chain)]
-                       ;; Has version - merge identity + version data
-                       [eid (merge identity-rec
-                                   (extract-version-data version version-id-field))]
-                       ;; No version - return identity as-is
-                       [eid identity-rec])))
-                 entity-ids)))))
+            (keep (fn [eid]
+                    (let [identity-rec (get identity-by-id eid)
+                          version (resolve-version-from-cache
+                                    base-storage entity-name
+                                    versions-by-id merges-by-target
+                                    eid branch-chain)]
+                      (cond
+                        ;; No version on the chain — a base-fn (or a fn whose
+                        ;; only version lives off this branch): identity as-is.
+                        (nil? version) [eid identity-rec]
+                        ;; Tombstone-winner ⇒ deleted ⇒ OMIT. Without this a
+                        ;; deleted COMPOSED entity (identity row survives) would
+                        ;; leak back through the identity-as-is fallback.
+                        (tombstone? version) nil
+                        ;; Live version — merge identity + version data.
+                        :else [eid (merge identity-rec
+                                          (extract-version-data version version-id-field))])))
+                  entity-ids)))))
 
 
 ;; === Batch Execution Graph Resolution ===
@@ -493,15 +514,19 @@
         (load-merge-aware-cache base-storage version-entity version-id-field
                                 nil branch-id)]
     (into {}
-          (map (fn [identity-rec]
-                 (let [eid (:id identity-rec)]
-                   (if-let [version (resolve-version-from-cache
-                                      base-storage entity-name
-                                      versions-by-id merges-by-target
-                                      eid branch-chain)]
-                     [eid (merge identity-rec
-                                 (extract-version-data version version-id-field))]
-                     [eid identity-rec]))))
+          (keep (fn [identity-rec]
+                  (let [eid (:id identity-rec)
+                        version (resolve-version-from-cache
+                                  base-storage entity-name
+                                  versions-by-id merges-by-target
+                                  eid branch-chain)]
+                    (cond
+                      (nil? version) [eid identity-rec]
+                      ;; Tombstone ⇒ omit from the compiled executor graph +
+                      ;; `/api/graph/entities` (both ride this loader).
+                      (tombstone? version) nil
+                      :else [eid (merge identity-rec
+                                        (extract-version-data version version-id-field))]))))
           all-identities)))
 
 

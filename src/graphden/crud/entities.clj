@@ -23,7 +23,8 @@
     [graphden.packages.records :as records]
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
-    [graphden.versioning.branch-local :as branch-local]))
+    [graphden.versioning.branch-local :as branch-local]
+    [graphden.versioning.storage.core :as vcore]))
 
 
 ;; === Affected-fn-id derivation for delta invalidation =======================
@@ -269,7 +270,11 @@
         snapshot (if (= et :fn)
                    (or (sp/read-entity storage et id) {:id id})
                    (sp/read-entity storage et id))]
-    (sp/delete-entity storage et id)
+    ;; User-facing delete → tombstone (so deleting an inherited entity on a
+    ;; branch actually hides it, not a silent no-op). Sync / rollback deletes
+    ;; keep the default hard-delete.
+    (binding [vcore/*tombstone-delete?* true]
+      (sp/delete-entity storage et id))
     ;; rich-types-registry entry survives the storage delete unless
     ;; we explicitly drop it. Without this the registry grows
     ;; monotonically as fn-defs are created and deleted across an

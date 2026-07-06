@@ -1037,15 +1037,21 @@
   [{:keys [entity-type type-str form-data entity-data]} ctx]
   (let [storage (request/require-storage ctx)
         create-result (try-create-or-error storage entity-type entity-data type-str)]
-    (when (and (:created create-result)
-               (= type-str "binding")
-               (contains? form-data :rename-to))
-      (forward-rename-slot! storage form-data entity-data))
     (if-let [post-rej (verify-post-create-or-rollback!
                         storage create-result type-str entity-data entity-type)]
       {:error (:reason post-rej)}
       (if (:created create-result)
-        create-result
+        (do
+          ;; Rename-slot side-effect runs ONLY after the post-create check
+          ;; passes. Running it earlier meant a binding the aggregate check
+          ;; then REJECTED (and rolled back) still left the renamed-view
+          ;; slot + fn-slot behind — an orphan the fn permanently exposed
+          ;; with no backing binding. The rename is a type-preserving name
+          ;; alias, so the check's outcome is unaffected by ordering.
+          (when (and (= type-str "binding")
+                     (contains? form-data :rename-to))
+            (forward-rename-slot! storage form-data entity-data))
+          create-result)
         {:error (or (:error create-result)
                     (str "Failed to create " type-str))}))))
 

@@ -14,6 +14,7 @@
    response."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.crud.request :as request]
     [graphden.crud.types-api :as types-api]
     [graphden.crud.validation :as validation]
@@ -129,29 +130,47 @@
   (let [storage (request/require-storage ctx)
         fn-id (:fn-id parsed)
         body  (:body parsed)
-        seq-binding (if (:synthetic seq-binding)
-                      (sp/create-entity storage :binding
-                                        {:fn-id (:fn-id seq-binding)
-                                         :slot-id (:slot-id seq-binding)
-                                         :list-append true})
-                      seq-binding)
-        binding-id (:id seq-binding)
-        used-pos (map :position
-                      (sp/query-entities storage :binding-list-item
-                                         {:binding-id binding-id}))
-        new-pos (inc (apply max -1 used-pos))
-        payload (resolve-sequence-payload storage body)
-        new-item (merge {:id (random-uuid)
-                         :binding-id binding-id
-                         :position new-pos}
-                        payload)
-        pre-rej (validation/write-rej storage :binding-list-item new-item)]
-    (if pre-rej
-      {:error (:reason pre-rej)}
-      (do (sp/create-entity storage :binding-list-item new-item)
-          {:created (:id new-item)
-           :position new-pos
-           :fn-id fn-id}))))
+        synthetic? (:synthetic seq-binding)
+        synth-data (when synthetic?
+                     {:fn-id (:fn-id seq-binding)
+                      :slot-id (:slot-id seq-binding)
+                      :list-append true})
+        ;; The synthetic `:list-append` binding used to be created with a
+        ;; DIRECT `sp/create-entity`, bypassing `write-rej` (list-closed /
+        ;; terminal guards). Validate it FIRST so an append onto a sealed
+        ;; slot is rejected before anything is written.
+        synth-rej (when synthetic? (validation/write-rej storage :binding synth-data))]
+    (if synth-rej
+      {:error (:reason synth-rej)}
+      (let [seq-binding (if synthetic?
+                          (sp/create-entity storage :binding synth-data)
+                          seq-binding)
+            binding-id (:id seq-binding)
+            used-pos (map :position
+                          (sp/query-entities storage :binding-list-item
+                                             {:binding-id binding-id}))
+            new-pos (inc (apply max -1 used-pos))
+            payload (resolve-sequence-payload storage body)
+            new-item (merge {:id (random-uuid)
+                             :binding-id binding-id
+                             :position new-pos}
+                            payload)
+            pre-rej (validation/write-rej storage :binding-list-item new-item)]
+        (if pre-rej
+          (do
+            ;; Roll back the synthetic binding created just to host the item
+            ;; — otherwise a rejected append leaves an orphan `:list-append`
+            ;; binding on the slot.
+            (when synthetic?
+              (try (sp/delete-entity storage :binding binding-id)
+                   (catch Exception e
+                     (log/warn e "seq-append: synthetic-binding rollback failed"
+                               {:binding-id binding-id}))))
+            {:error (:reason pre-rej)})
+          (do (sp/create-entity storage :binding-list-item new-item)
+              {:created (:id new-item)
+               :position new-pos
+               :fn-id fn-id}))))))
 
 
 (defn load-seq-remove-item

@@ -15,7 +15,8 @@
    image upstream changes)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.clients.vault :as vault])
+    [graphden.clients.vault :as vault]
+    [org.httpkit.client :as httpkit])
   (:import
     (org.testcontainers.containers
       GenericContainer)
@@ -120,6 +121,24 @@
 
     (testing "deleting an already-deleted path is idempotent"
       (is (nil? (vault/delete-secret *client* p))))))
+
+
+(deftest get-secret-missing-value-does-not-leak-test
+  ;; When the vault value isn't the expected string, the thrown ex-data must
+  ;; NOT embed the raw parsed payload — for a KV v2 read that payload IS the
+  ;; secret material, and this ex-data is persisted verbatim into an
+  ;; API-readable execution `:error-data`.
+  (with-redefs [httpkit/get
+                (fn [_url _opts]
+                  (atom {:status 200
+                         :body "{\"data\":{\"data\":{\"value\":{\"leaked\":\"TOP-SECRET\"}}}}"}))]
+    (let [ex (try (vault/get-secret {:address "http://x" :token "t"} "some/path")
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (= :vault/lookup-failed (:type (ex-data ex))))
+      (is (not (contains? (ex-data ex) :raw))
+          "raw parsed payload must not be in ex-data")
+      (is (not (re-find #"TOP-SECRET" (pr-str (ex-data ex))))
+          "the secret value must not appear anywhere in the ex-data"))))
 
 
 ;; ============================================================================

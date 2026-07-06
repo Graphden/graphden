@@ -107,9 +107,15 @@
         parsed (json/parse-string (:body resp) true)
         value (get-in parsed [:data :data :value])]
     (when-not (string? value)
+      ;; Do NOT put `parsed` in ex-data — for a KV v2 read it embeds the
+      ;; secret material itself, and this ex-data is persisted verbatim into
+      ;; a fn-execution's API-readable `:error-data` (redaction only fires
+      ;; for `:secret`-typed RETURNS, so a fn that merely reads a secret
+      ;; would leak it). The path + a class hint are enough to debug.
       (throw (ex-info (str "Vault secret at " path
                            " is missing `data.value` (expected a string)")
-                      {:type :vault/lookup-failed :path path :raw parsed})))
+                      {:type :vault/lookup-failed :path path
+                       :value-class (some-> value class .getName)})))
     value))
 
 

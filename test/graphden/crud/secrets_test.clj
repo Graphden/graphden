@@ -20,7 +20,8 @@
     [graphden.executor.context :as ctx]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tctx]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -400,6 +401,28 @@
             (let [bindings (sp/query-entities storage :binding
                                               {:fn-id (parse-uuid (:id secret))})]
               (is (= "rot/key" (:value (first bindings))))))))
+      (finally (sp/close storage)))))
+
+
+(deftest rotate-secret-rejects-non-owner-tenant-test
+  ;; A tenant may only rotate a secret its OWN org owns. A public / shared
+  ;; secret (org-id nil → public) is read-visible to every tenant but must
+  ;; be rotate-forbidden — rotate writes vault directly, skipping the
+  ;; storage write-guard + RLS that `:delete` goes through.
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        vault-state (fresh-vault)]
+    (try
+      (seed-secret-leaf! storage)
+      (with-fake-vault vault-state
+        (let [{:keys [secret]} (secrets/create-secret
+                                 c {:name "_shared" :path "shared/key" :value "v1"})
+              {:keys [ok reason]} (tctx/with-org "tenant-x"
+                                                 (secrets/rotate-secret c (:id secret) {:value "v2"}))]
+          (is (not ok))
+          (is (= :forbidden reason))
+          (testing "the vault value is untouched by the forbidden rotate"
+            (is (= "v1" (get-in @vault-state [:values "shared/key"]))))))
       (finally (sp/close storage)))))
 
 

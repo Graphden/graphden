@@ -42,6 +42,14 @@
 ;; guards by re-binding the `parsed` slot at the rotate cond — same
 ;; shape (both parsed values have `:fn-id` + `:fn-id-ref`).
 
+(defbase _rotate-secret-not-owned?
+  "Ownership guard for the rotate cond. Rotate writes vault DIRECTLY
+   (no storage write), so it bypasses the tenant write-guard + RLS that
+   `:delete` goes through — a tenant could otherwise rewrite a PUBLIC /
+   shared secret's value (read-visible, own+public). Delegates to the
+   single-sourced `crud.secrets/rotate-secret-not-owned?` predicate."
+  [fn-row]
+  (secrets/rotate-secret-not-owned? fn-row))
 
 
 ;; --- delete-secret ---
@@ -70,4 +78,5 @@
    :_delete-secret-vault-cleanup  _delete-secret-vault-cleanup
    :_delete-secret-storage-cleanup _delete-secret-storage-cleanup
    :_apply-inline-bind-body       _apply-inline-bind-body
-   :_apply-secret-rollback        _apply-secret-rollback})
+   :_apply-secret-rollback        _apply-secret-rollback
+   :_rotate-secret-not-owned?     _rotate-secret-not-owned?})

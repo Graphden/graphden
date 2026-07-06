@@ -26,7 +26,8 @@
     [graphden.crud.request :as request]
     [graphden.crud.secret-shape :as shape]
     [graphden.crud.type-check :as tc]
-    [graphden.storage.protocol.core :as sp])
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tctx])
   (:import
     (java.util
       UUID)))
@@ -533,8 +534,14 @@
         secret-leaf-id (shape/find-secret-leaf-fn-id storage)
         path-slot-id (find-path-slot-id storage secret-leaf-id)
         path (secret-binding-path storage fn-id path-slot-id)]
-    (delete-secret-vault-cleanup! path ctx)
+    ;; Storage FIRST, vault (best-effort) AFTER: vault-delete hard-removes
+    ;; every KV version irrecoverably, so doing it first meant a storage
+    ;; failure left a live secret row pointing at a now-empty path (value
+    ;; gone for good). Storage-first inverts the failure mode to a benign
+    ;; orphaned vault path (value survives, operator can purge) — and the
+    ;; storage delete is the one the tenant write-guard + RLS gate anyway.
     (delete-secret-storage-cleanup! parsed ctx)
+    (delete-secret-vault-cleanup! path ctx)
     {:ok true :id (str fn-id) :name (:name fn-row) :path path}))
 
 
@@ -599,6 +606,22 @@
         (secret-binding-path storage (:fn-id parsed) path-slot-id)))))
 
 
+(defn rotate-secret-not-owned?
+  "C9 guard — a tenant may only rotate a secret its OWN org owns. The
+   fn-row is read through the org-scoped storage, so another org's
+   secret is already invisible (→ not-found); but a PUBLIC / shared
+   secret is read-visible to every tenant, and rotate mutates vault
+   directly — skipping the storage write-guard + RLS that `:delete`
+   goes through. Without this guard a tenant could rewrite a shared
+   secret's value. Platform ctx (`public-org`, unbound) is unrestricted,
+   mirroring `tenancy.storage/own?` + `guard-write!`."
+  [fn-row]
+  (boolean
+    (and fn-row
+         (not= (tctx/current-org) tctx/public-org)
+         (not= (tctx/current-org) (or (:org-id fn-row) tctx/public-org)))))
+
+
 (defn apply-rotate-secret
   "C9 success branch — vault-put writes a new value at the existing
    path. graphden state is unchanged."
@@ -636,6 +659,11 @@
       (not (shape/secret-fn? fn-row secret-leaf-id))
       {:ok false :error (str "fn is not a secret: " fn-id-ref)
        :reason :not-a-secret}
+
+      (rotate-secret-not-owned? fn-row)
+      {:ok false
+       :error (str "Secret is not owned by your org — rotation forbidden: " fn-id-ref)
+       :reason :forbidden}
 
       (not (string? (:value parsed)))
       {:ok false :error "Required field ':value' (string) is missing"}

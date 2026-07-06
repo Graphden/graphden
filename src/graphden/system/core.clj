@@ -337,6 +337,32 @@
           :else (recur next-pending (inc iter)))))))
 
 
+(defn- validate-no-name-collisions!
+  "Every named fn must own a globally-unique name across BOTH base-fns AND
+   composed fn-defs. Reference resolution keys on bare names
+   (`compute-all-fn-name-ids`), and a base-fn + fn-def sharing a name in the
+   same namespace collapse to one `(records/fn-id namespace name)` — so the
+   fn-def row SILENTLY upserts over the base-fn row at sync (parent-ids
+   replacing the base-fn's return-type marker while the impl registry still
+   holds the impl), with NO error. The composed-only `validate-all-defs!`
+   never sees the base-fns, so this is the sole cross-set guard. Anonymous
+   defs (name = nil) are content-hash-deduped and excluded."
+  [packages]
+  (let [base-names (keep first (:base-fn-defs packages))
+        def-names  (keep :name (:fn-defs packages))
+        dups (->> (concat base-names def-names)
+                  frequencies
+                  (keep (fn [[n c]] (when (> c 1) n)))
+                  vec)]
+    (when (seq dups)
+      (throw (ex-info (str "Colliding fn names across base-fns + fn-defs: "
+                           (pr-str dups)
+                           " — the same name is defined more than once "
+                           "(a base-fn ↔ fn-def clobber silently overwrites a row at sync).")
+                      {:type :packages/fn-name-collision
+                       :colliding-names dups})))))
+
+
 (defn register-base-fns-from-packages!
   "Pure side-effects: sync namespaces, register type-aliases, register
    base-fn impls in the global registry, sync base-fn rows to storage.
@@ -351,6 +377,8 @@
   ([storage packages]
    (register-base-fns-from-packages! storage packages nil))
   ([storage packages extra-base-fns]
+   ;; Fail loud BEFORE any DB write if a base-fn and a fn-def share a name.
+   (validate-no-name-collisions! packages)
    (let [base-fn-defs (:base-fn-defs packages)
          ;; Sync namespace entities first (creates ns hierarchy in DB)
          ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)

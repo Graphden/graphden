@@ -222,3 +222,18 @@
   (testing "empty input → empty map"
     (is (= {} (graphden.system.core/compute-all-fn-name-ids
                 {:base-fn-defs {} :fn-defs []})))))
+
+
+(deftest validate-no-name-collisions-test
+  (let [check @#'graphden.system.core/validate-no-name-collisions!]
+    (testing "distinct base-fn + fn-def names pass"
+      (is (nil? (check {:base-fn-defs {:foo {}} :fn-defs [{:name :bar} {:name :baz}]}))))
+    (testing "a base-fn ↔ fn-def name collision fails loud"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Colliding fn names"
+            (check {:base-fn-defs {:foo {}} :fn-defs [{:name :foo}]}))))
+    (testing "two fn-defs sharing a name fail too"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Colliding fn names"
+            (check {:base-fn-defs {} :fn-defs [{:name :dup} {:name :dup}]}))))
+    (testing "anonymous (name nil) fn-defs are excluded from the check"
+      (is (nil? (check {:base-fn-defs {:foo {}}
+                        :fn-defs [{:name nil} {:name nil} {:name :bar}]}))))))

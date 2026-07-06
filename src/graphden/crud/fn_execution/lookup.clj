@@ -116,8 +116,19 @@
       (let [slot-ids (into #{} (map :slot-id) fn-slots)
             slot-rows (if (empty? slot-ids)
                         {}
-                        (sp/read-entities storage :slot (vec slot-ids)))]
-        {:fns-by-id (into {} (map (juxt :id identity)) fn-rows)
+                        (sp/read-entities storage :slot (vec slot-ids)))
+            ;; Slot type-fn rows carry the `[:fn {ARGS} RET]` constraint
+            ;; that `hof-slot-call-site-names` reads to subtract a HOF
+            ;; slot's call-site args. The parent/ref BFS never reaches
+            ;; them (a slot's type is not a graph edge it follows), so
+            ;; pull them in the same final batch. Primitives come back
+            ;; with a nil constraint → inert.
+            type-fn-ids (into #{} (keep :type-fn-id) (vals slot-rows))
+            type-fn-rows (if (empty? type-fn-ids)
+                           {}
+                           (sp/read-entities storage :fn (vec type-fn-ids)))]
+        {:fns-by-id (merge (into {} (map (juxt :id identity)) fn-rows)
+                           type-fn-rows)
          :slots-by-id (into {} (map (juxt :id identity)) (vals slot-rows))
          :all-bindings bindings
          :all-list-items list-items
@@ -188,6 +199,18 @@
         sid))))
 
 
+(defn- hof-slot-call-site-names
+  "Call-site arg names of a slot whose type-fn is a structural HOF type
+   `[:fn {ARGS} RET …]` — the keys of ARGS, supplied per invocation by
+   the parent's impl (not captured). nil for a bare `:fn` primitive
+   (no structural shape → every free arg is captured) or a non-fn slot.
+   Mirrors the type-checker's `hof-call-site-arg-names`."
+  [slot-id slots-by-id fns-by-id]
+  (let [c (some-> (get slots-by-id slot-id) :type-fn-id fns-by-id :constraint)]
+    (when (and (sequential? c) (= :fn (first c)) (map? (second c)))
+      (set (keys (second c))))))
+
+
 (defn- free-args-via
   "Internal: `{arg-name → slot-id}` for `fn-id`'s free args, walking
    ref-fn-id bindings transitively. `visited` guards against cycles
@@ -229,16 +252,36 @@
                                    [(keyword (:name s)) slot-id]))))
                        chain-fn-slots)
           ;; Recurse into every ref-fn-id reachable from chain bindings
-          ;; — slot-bound refs + list-item refs. Each one is a captured
+          ;; — slot-bound refs + list-item refs. Each is a captured
           ;; sub-graph whose still-unbound free-args propagate up as
           ;; free-args of the outer fn-def.
-          ref-fids (distinct
-                     (concat (keep :ref-fn-id chain-bindings)
-                             (keep :ref-fn-id chain-list-items)))
-          transitive (reduce (fn [acc rfid]
-                               (merge acc (free-args-via rfid visited' db)))
-                             {}
-                             ref-fids)
+          ;;
+          ;; A ref bound to a HOF slot is the exception: its lifted set
+          ;; is MINUS the slot's structural call-site arg names — those
+          ;; are supplied per invocation by the parent impl, not by the
+          ;; caller. Mirrors the type-checker's `ref-free-args`; without
+          ;; it a HOF-composed fn's callback leaks e.g. `:item` as a
+          ;; phantom free arg (→ spurious service-create rejection).
+          ;; List-item refs are list elements, not callbacks — no
+          ;; call-site notion, so they recurse unmodified.
+          binding-ref-frees
+          (reduce (fn [acc {:keys [ref-fn-id slot-id]}]
+                    (if ref-fn-id
+                      (let [lifted (free-args-via ref-fn-id visited' db)
+                            call-site (hof-slot-call-site-names
+                                        slot-id slots-by-id fns-by-id)]
+                        (merge acc (if (seq call-site)
+                                     (into {} (remove (comp call-site key)) lifted)
+                                     lifted)))
+                      acc))
+                  {}
+                  chain-bindings)
+          list-item-ref-frees
+          (reduce (fn [acc rfid]
+                    (merge acc (free-args-via rfid visited' db)))
+                  {}
+                  (distinct (keep :ref-fn-id chain-list-items)))
+          transitive (merge list-item-ref-frees binding-ref-frees)
           ;; A slot bound at THIS level removes that slot from the
           ;; combined free-arg map — both direct and transitive. Lets
           ;; a derived fn-def bind a captured arg (e.g.

@@ -135,6 +135,45 @@
       (finally (sp/close storage)))))
 
 
+(deftest hof-callback-call-site-arg-not-a-free-arg-test
+  ;; `free-arg-slot-map` must agree with the type-checker's
+  ;; `ref-free-args`: a HOF slot's structural call-site arg names
+  ;; (`[:fn {:item …} …]` → `:item`) are supplied per invocation by the
+  ;; parent's impl, so they are NOT captured free args. Without the
+  ;; subtraction a HOF-composed fn leaks `:item` as a phantom free arg
+  ;; and `:_create-service-free-args-rej` would falsely reject the
+  ;; fully-specified fn.
+  ;;
+  ;; Synthetic graph:
+  ;;   :cb-base  — base-fn with slots :item (HOF call-site) + :captured
+  ;;   :hof-base — base-fn with one HOF slot :func typed [:fn {:item :any} :any]
+  ;;   :callback — fn-def parent=:cb-base (leaves :item + :captured free)
+  ;;   :outer    — fn-def parent=:hof-base, binds :func to :callback
+  (let [storage (create-full-storage)
+        _ (exec/register-base-fn! :test-cb-base (fn [_ _] :ok))
+        _ (exec/register-base-fn! :test-hof-base (fn [_ _] :ok))
+        cb-base (setup/create-base-fn! storage "test-cb-base" :any)
+        hof-base (setup/create-base-fn! storage "test-hof-base" :any)
+        item-slot (setup/create-slot! storage "item" :any)
+        captured-slot (setup/create-slot! storage "captured" :int)
+        func-slot (setup/create-slot! storage "func" [:fn {:item :any} :any])
+        _ (setup/attach-slot! storage (:id cb-base) (:id item-slot) 0)
+        _ (setup/attach-slot! storage (:id cb-base) (:id captured-slot) 1)
+        _ (setup/attach-slot! storage (:id hof-base) (:id func-slot) 0)
+        callback (setup/create-composed-fn! storage "test-hof-callback" (:id cb-base))
+        outer (setup/create-composed-fn! storage "test-hof-outer" (:id hof-base))
+        _ (setup/bind-ref! storage (:id outer) (:id func-slot) (:id callback))
+        c (test-ctx storage)]
+    (try
+      (testing "HOF call-site :item is NOT free; genuinely-captured :captured IS"
+        (let [free (lookup/free-arg-slot-map c (:id outer))]
+          (is (contains? free :captured)
+              ":captured comes from the outer binding-chain — a real free arg")
+          (is (not (contains? free :item))
+              ":item is the HOF slot's call-site arg, supplied per invocation")))
+      (finally (sp/close storage)))))
+
+
 (deftest binding-on-rename-slot-marks-source-slot-bound-test
   ;; Regression for #51. The real-world reproduction: derive a fn from
   ;; `:schedule` and bind `:fn` (which is the `{:as :fn}` rename of

@@ -85,12 +85,10 @@ function appendFnMetadataStrips(overlay, originalFnId, isNavRoot) {
   // whose `:return-type` column is null, this is the only place the
   // computed shape lives client-side.
   let displayRich = null;
-  let richReturn = null;
   if (cardFnEntity.name && typeof richTypes === 'object' && richTypes
       && typeof formatTypeHint === 'function') {
     const re = richTypes[cardFnEntity.name];
     if (re && re.return != null) {
-      richReturn = re.return;
       displayRich = formatTypeHint(re.return);
     }
   }

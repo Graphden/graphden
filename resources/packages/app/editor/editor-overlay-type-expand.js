@@ -1063,7 +1063,13 @@ function positionInlineHost(host, anchorEl) {
 function repositionAllInlineHosts() {
   for (const [path, host] of inlineHostsByPath) {
     if (!expandedTypePaths.has(path)) {
-      host.style.display = 'none';
+      // Collapsed — REAP the host (DOM node + Map entry) rather than
+      // leaving a hidden node behind for every path ever expanded this
+      // session. Runs on pan/zoom/resize, so cleanup is prompt. Deleting
+      // the current key mid-iteration is safe for a Map. Re-expanding the
+      // path rebuilds the host on demand (see ensureInlineHost).
+      host.remove();
+      inlineHostsByPath.delete(path);
       continue;
     }
     const anchor = document.querySelector(

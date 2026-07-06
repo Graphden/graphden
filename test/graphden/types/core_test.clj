@@ -823,7 +823,20 @@
     (is (t/subtype? [:secret :text] :any)))
 
   (testing "secret(T) ⊄ :jsonb — jsonb wildcard doesn't auto-launder"
-    (is (not (t/subtype? [:secret :text] :jsonb)))))
+    (is (not (t/subtype? [:secret :text] :jsonb))))
+
+  (testing "a NESTED secret can't be laundered into a jsonb content sink either"
+    ;; The jsonb-sink arm accepts record/list/tuple sub-shapes; without
+    ;; the `contains-secret?` guard a compound carrying a nested secret
+    ;; slipped through and dropped the marker.
+    (is (not (t/subtype? {:leak [:secret :text]} :jsonb)))
+    (is (not (t/subtype? [:list [:secret :text]] :jsonb)))
+    (is (not (t/subtype? [:list [:secret :text]] [:list :jsonb])))
+    (is (not (t/subtype? [:tuple :int [:secret :text]] :jsonb)))
+    (testing "a secret-free compound still flows into jsonb (unchanged)"
+      (is (t/subtype? {:a :text :b :int} :jsonb))
+      (is (t/subtype? [:list :text] :jsonb))
+      (is (t/subtype? [:tuple :int :text] :jsonb)))))
 
 
 (deftest secret-resolve-alias-recurses-test

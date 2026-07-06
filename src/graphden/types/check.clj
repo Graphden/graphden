@@ -2003,13 +2003,15 @@
                          (and declared
                               (not (types/primitive? declared))
                               (types/subtype? declared computed-return)))
-        ;; When declared is plain `T` but computed is `[:secret T]`,
-        ;; record the tainted form — that's what downstream consumers
-        ;; need to see to refuse to drop the marker. Otherwise the
-        ;; declared form wins (downstream sees the author's contract,
-        ;; not a possibly-tighter computed shape).
+        ;; When declared is plain `T` but computed carries a `:secret`
+        ;; anywhere (top-level OR nested in a list/record/tuple), record
+        ;; the tainted form — that's what downstream consumers need to
+        ;; see to refuse to drop the marker. `contains-secret?` (not the
+        ;; top-level `secret-type?`) is the honest test: a computed
+        ;; `[:list [:secret :text]]` against a declared `[:list :text]`
+        ;; would otherwise record the declared form and lose the marker.
         recorded (if (or (nil? declared)
-                         (types/secret-type? computed-return))
+                         (types/contains-secret? computed-return))
                    computed-return
                    declared)]
     (when (and declared (not computed-ok?))

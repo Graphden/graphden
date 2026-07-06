@@ -951,6 +951,14 @@
       (or (and (primitive? sub) (primitive? sup)
                (primitive-subtype? sub sup))
           (and (= sup :jsonb)
+               ;; A compound carrying a nested `:secret` must NOT flow
+               ;; into a jsonb content sink — that would strip the
+               ;; information-flow marker. The top-level `[:secret T]`
+               ;; case is already refused by the secret arm below; this
+               ;; makes the type core self-defend against the nested
+               ;; case (a record/list/tuple field) instead of relying on
+               ;; every propagator keeping secrets top-level-typed.
+               (not (contains-secret? sub))
                (or (primitive? sub)
                    (record-type? sub)
                    (list-type? sub)

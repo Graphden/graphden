@@ -249,3 +249,29 @@
           (is (contains? (sp/current-enums storage) :status)))
         (finally
           (sp/close storage))))))
+
+
+;; === Type widening ===
+
+(deftest widen-scalar-to-jsonb-test
+  (testing "widening a scalar column to :jsonb succeeds + preserves data"
+    (let [storage (setup/create-test-storage)
+          cuuid #uuid "00000000-0000-0000-0000-0000000000c0"
+          nuuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (th/make-schema :fields {:name {:uuid nuuid :type :text}
+                                           :count {:uuid cuuid :type :int}})
+          _ (sp/initialize storage schema1)
+          _ (sp/create-entity storage :user {:name "alice" :count 7})
+          ;; Widen :count :int -> :jsonb (blessed as a safe widening).
+          schema2 (th/make-schema :fields {:name {:uuid nuuid :type :text}
+                                           :count {:uuid cuuid :type :jsonb}})]
+      (try
+        ;; Before the fix this emitted `ALTER ... USING count::jsonb`, which
+        ;; PostgreSQL cannot cast from bigint -> the whole migration aborts.
+        ;; `to_jsonb(count)` makes the widening actually work.
+        (sp/initialize storage schema2)
+        (let [rows (sp/query-entities storage :user {})]
+          (is (= 1 (count rows)) "row survived the widening")
+          (is (= 7 (:count (first rows))) "int value preserved through the jsonb widening"))
+        (finally
+          (sp/close storage))))))

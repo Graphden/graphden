@@ -150,8 +150,15 @@
            old-fields (get-cached-columns tx table-name ctx)
            old-type (:type (get old-fields field-name))
            new-type (:type field-spec)]
+       ;; EQUIVALENT types (`:uuid`↔`:ref`, `:jsonb`↔`:union`) share one PG
+       ;; type, so introspection reports `:uuid`/`:jsonb` while the schema
+       ;; says `:ref`/`:union` — `not=` is true but there's nothing to
+       ;; rewrite. Without this guard every ref/union column fired an
+       ;; ACCESS-EXCLUSIVE-locking no-op ALTER on EVERY startup migration.
+       ;; Only a genuine (non-equivalent) safe widening should rewrite.
        (when (and old-type
                   (not= old-type new-type)
+                  (not (sp/types-equivalent? old-type new-type))
                   (sp/safe-type-change? old-type new-type))
          (ddl/alter-column-type! tx entity-name field-name
                                  (util/field-type->pg field-spec)))))

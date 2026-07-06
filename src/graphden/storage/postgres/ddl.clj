@@ -176,12 +176,20 @@
   "Changes column type (for safe widening)."
   [ds table-name col-name new-type-sql]
   (util/validate-pg-type! new-type-sql {:table table-name :column col-name})
-  (util/with-sql-error-handling "DDL error" :alter-column-type {:table-name table-name :col-name col-name :new-type new-type-sql}
-                                ;; ALTER COLUMN with USING clause needs raw SQL for complex expressions
-                                (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
-                                                        " ALTER COLUMN " (util/ident->sql col-name)
-                                                        " TYPE " new-type-sql " USING " (util/ident->sql col-name)
-                                                        "::" new-type-sql)])))
+  (let [col (util/ident->sql col-name)
+        ;; PostgreSQL has NO `::jsonb` cast from a scalar type (bigint /
+        ;; boolean / numeric), yet the widening table blesses scalar→:jsonb
+        ;; as safe. `to_jsonb(col)` accepts any source type (and, for text,
+        ;; wraps it as a JSON string), so use it for a JSONB target instead
+        ;; of the invalid `col::jsonb` that would abort the whole migration.
+        using (if (= "JSONB" (str/upper-case (str/trim new-type-sql)))
+                (str "to_jsonb(" col ")")
+                (str col "::" new-type-sql))]
+    (util/with-sql-error-handling "DDL error" :alter-column-type {:table-name table-name :col-name col-name :new-type new-type-sql}
+                                  ;; ALTER COLUMN with USING clause needs raw SQL for complex expressions
+                                  (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
+                                                          " ALTER COLUMN " col
+                                                          " TYPE " new-type-sql " USING " using)]))))
 
 
 ;; === Index operations ===

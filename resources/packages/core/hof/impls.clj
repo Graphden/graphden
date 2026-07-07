@@ -10,16 +10,23 @@
 
 
 (defbase map-fn [func coll]
-  ;; Eager. nil coll → Clojure's `(map f nil) → ()`. The
-  ;; transducer-form lives in `:map-xf` — separating the two removes
-  ;; the silent "nil coll → transducer" footgun that bit several
-  ;; decomposition call sites.
-  (map func coll))
+  ;; EAGER (`doall`) — a bare `(map …)` returns an UNREALIZED lazy seq that
+  ;; escapes the future's `*effect-trace*` / `*allowed-effects*` /
+  ;; `*cancel-check*` bindings and gets realized later during result
+  ;; JSON-encoding: a throwing callback is then caught by the size-cap
+  ;; encoder and mislabeled `:succeeded nil`, and effects run ungated +
+  ;; untraced. `doall` realizes every per-element callback inside the bound
+  ;; execution scope. It must stay a SEQ (not `mapv` → vector): hiccup
+  ;; splices a seq of children but treats a vector as a single `[tag attrs]`
+  ;; element, so `[:div (:map …)]` would try the first child as the tag.
+  ;; Streaming stays on `:map-xf`. nil coll → `(map f nil)` → `()`.
+  (doall (map func coll)))
 
 
 (defbase filter-fn [pred coll]
-  ;; Eager. See `map-fn`; transducer-form is `:filter-xf`.
-  (filter pred coll))
+  ;; EAGER (`doall`), SEQ-returning — same reasoning as `map-fn` (effect
+  ;; scope + hiccup splicing); streaming is `:filter-xf`.
+  (doall (filter pred coll)))
 
 
 (defbase map-xf-fn [func]
@@ -46,7 +53,11 @@
 
 
 (defbase find-first [pred coll]
-  (some #(when (pred %) %) coll))
+  ;; `(some #(when (pred %) %) …)` skips PAST a matching element that is
+  ;; itself falsy (nil/false) — `some` reads its falsy return as "keep
+  ;; going" — and returns a later element or nil. `reduced` returns the
+  ;; actual first match, falsy or not.
+  (reduce (fn [acc x] (if (pred x) (reduced x) acc)) nil coll))
 
 
 (defbase group-by-fn [key-fn coll]

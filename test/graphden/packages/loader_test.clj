@@ -210,15 +210,13 @@
 
 (deftest resolve-dependencies-test
   (testing "resolves dependencies in topological order"
-    ;; Load actual packages to test real dependency resolution
-    (try
-      (let [result (loader/load-packages ["core" "web" "app"])]
-        ;; Check that packages are loaded in dependency order
-        (is (vector? (:packages result)))
-        (is (<= 1 (count (:packages result)))))
-      (catch clojure.lang.ExceptionInfo _
-        ;; Skip if packages not available
-        nil))))
+    ;; `core`/`web`/`app` ARE the product and always load in this env, so a
+    ;; thrown `load-packages` (broken dep graph, unparseable package) is a
+    ;; genuine regression — let it fail, don't swallow it into a green pass.
+    (let [result (loader/load-packages ["core" "web" "app"])]
+      ;; Check that packages are loaded in dependency order
+      (is (vector? (:packages result)))
+      (is (<= 1 (count (:packages result)))))))
 
 
 ;; =============================================================================
@@ -242,34 +240,30 @@
 
 (deftest load-packages-collects-seeded-services
   (testing "the :app package declares its default web-server service"
-    (try
-      (let [result (loader/load-packages ["core" "web" "app"])
-            svcs (:seeded-services result)
-            default (first (filter #(= "app" (:package-name %)) svcs))]
-        (is (some? default) "the app package contributes a seed entry")
-        (is (= :web-server (:fn-name default))))
-      (catch clojure.lang.ExceptionInfo _ nil))))
+    (let [result (loader/load-packages ["core" "web" "app"])
+          svcs (:seeded-services result)
+          default (first (filter #(= "app" (:package-name %)) svcs))]
+      (is (some? default) "the app package contributes a seed entry")
+      (is (= :web-server (:fn-name default))))))
 
 
 (deftest load-packages-collects-namespaces
   (testing "loaded packages expose a set of declared namespace paths"
-    (try
-      (let [result (loader/load-packages ["core" "web" "app"])
-            nss (:namespaces result)]
-        (is (set? nss))
-        (is (contains? nss "core") "parent ns implicit")
-        (is (contains? nss "core.arithmetic") "leaf ns present"))
-      (catch clojure.lang.ExceptionInfo _ nil))))
+    (let [result (loader/load-packages ["core" "web" "app"])
+          nss (:namespaces result)]
+      (is (set? nss))
+      (is (contains? nss "core") "parent ns implicit")
+      (is (contains? nss "core.arithmetic") "leaf ns present"))))
 
 
 (deftest load-packages-fn-defs-have-namespace-metadata
   (testing "every fn-def from a namespaced module carries :namespace"
-    (try
-      (let [result (loader/load-packages ["core" "web" "app"])]
-        (when (seq (:fn-defs result))
-          (is (every? :namespace (:fn-defs result))
-              "all fn-defs from namespaced fns.edn get :namespace")))
-      (catch clojure.lang.ExceptionInfo _ nil))))
+    (let [result (loader/load-packages ["core" "web" "app"])]
+      ;; Not gated behind `(when (seq …))` — an empty result is itself a
+      ;; regression, so assert presence explicitly.
+      (is (seq (:fn-defs result)) "packages produce fn-defs")
+      (is (every? :namespace (:fn-defs result))
+          "all fn-defs from namespaced fns.edn get :namespace"))))
 
 
 ;; =============================================================================

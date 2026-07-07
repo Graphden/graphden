@@ -53,7 +53,15 @@
 
 
 ;; ============================================================================
-;; :constant-time-equal? — string-only equality with no per-byte short-circuit
+;; :constant-time-equal? — string equality for bearer-token compares.
+;;
+;; These tests assert boolean CORRECTNESS only. The constant-time property
+;; (the actual security value — no early-out on first mismatched byte) is a
+;; timing invariant a result-only test cannot observe: swapping the impl for a
+;; short-circuiting `Arrays/equals` keeps every boolean below identical. That
+;; invariant is guaranteed by the impl delegating to
+;; `java.security.MessageDigest/isEqual` (see `core/logic/impls.clj`) and is a
+;; code-review boundary, not something asserted here.
 ;; ============================================================================
 
 (deftest constant-time-equal?-matches-equal?-on-strings

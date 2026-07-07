@@ -103,10 +103,16 @@
                                            ;; Reader should only start after writer is done
                                            @writer-done)))]
       @writer
-      @reader
       (is @writer-started)
       (is @writer-done)
-      (is @reader-started))))
+      (is @reader-started)
+      ;; The reader future returns `@writer-done` as sampled INSIDE the
+      ;; read lock. If the write lock actually blocked it, the writer had
+      ;; released (and set `writer-done`) by then → true. If mutual
+      ;; exclusion were broken, the reader would enter during the writer's
+      ;; 50ms hold, sample `writer-done=false`, and this would fail — the
+      ;; only assertion that actually proves blocking.
+      (is (true? @reader) "reader must not acquire until the writer releases"))))
 
 
 (deftest with-double-check-locking-test

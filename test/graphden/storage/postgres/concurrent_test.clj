@@ -36,10 +36,14 @@
                                 (sp/current-fields storage :user)
                                 (sp/schema-metadata storage))
                               (catch Exception e
-                                (swap! errors conj e))))))]
-          ;; Wait for all threads to complete
-          (doseq [f futures]
-            (deref f 5000 :timeout)))
+                                (swap! errors conj e))))))
+              ;; Wait for all threads to complete. A deadlock/hang — exactly
+              ;; the thread-safety failure this guards — makes `deref` return
+              ;; the `:timeout` sentinel WITHOUT throwing, so it would never
+              ;; land in `errors`. Collect the results and assert none timed out.
+              results (mapv #(deref % 5000 :timeout) futures)]
+          (is (not-any? #{:timeout} results)
+              "a worker hung — concurrent reads are NOT thread-safe"))
         ;; No errors should have occurred
         (is (empty? @errors) (str "Errors during concurrent access: " @errors))
         (finally

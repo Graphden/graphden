@@ -440,6 +440,9 @@
                                              (= (r/fn-id "test" :child-just-renames)
                                                 (:fn-id %)))
                                        recs))]
-      (when (some? child-binding)
-        (is (not (true? (:value-present child-binding)))
-            "pure rename must not flip the value-present flag")))))
+      ;; A pure `{:as …}` rename emits a `:rename-to` binding — assert it's
+      ;; present rather than skipping silently when it isn't (that absence
+      ;; would itself be a parser regression).
+      (is (some? child-binding) "pure rename emits a binding row")
+      (is (not (true? (:value-present child-binding)))
+          "pure rename must not flip the value-present flag"))))

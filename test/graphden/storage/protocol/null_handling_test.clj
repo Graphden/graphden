@@ -20,19 +20,18 @@
 ;;
 ;; 3. Query behavior: Queries with where {:field nil} should match NULL values
 
-(deftest null-handling-contract-uniqueness-test
-  (testing "NULL semantics contract: multiple NULLs allowed in unique field"
-    ;; This documents the contract that storage implementations must follow.
-    ;; The actual enforcement happens at the storage level.
-    ;; Memory storage: must explicitly skip NULL values in uniqueness checks
-    ;; Postgres: native SQL NULL semantics
-    ;; Datomic: doesn't store nil values, so uniqueness on absent field is automatic
+(deftest null-handling-required-field-validation-test
+  (testing "a nullable field may be nil on any number of records"
+    ;; Scope: `validate-required-fields!` only. The SQL "multiple NULLs
+    ;; allowed in a UNIQUE column" contract is native Postgres semantics and
+    ;; is exercised by the PG-backed CRUD tests — not here (no unique index,
+    ;; no second insert). This asserts the validation layer lets nil through
+    ;; for a nullable field.
     (let [field-specs {:email {:type :text :nullable? true}
                        :name {:type :text :nullable? false}}
-          ;; Two records with nil email - should both be valid
+          ;; Two records with nil email - both valid (email is nullable)
           record1 {:name "Alice" :email nil}
           record2 {:name "Bob" :email nil}]
-      ;; Both pass required field validation (email is nullable)
       (is (nil? (storage/validate-required-fields! :user field-specs record1)))
       (is (nil? (storage/validate-required-fields! :user field-specs record2)))))
 

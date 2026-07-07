@@ -191,7 +191,13 @@
                                                       :partial-fns #{}}})]
           (is (seq (:nodes collapsed)))
           (is (seq (:nodes expanded)))
-          ;; Expanding never drops the root.
+          ;; Expanding never drops the root. NOTE: this single-slot fixture
+          ;; is too trivial to observe expansion adding structure — the
+          ;; parent's name is stacked into the root label and its one slot is
+          ;; a placeholder in BOTH collapsed and expanded, so node/label
+          ;; sets are identical here. Meaningful multi-level expansion (base
+          ;; node emitted only when expanded) is asserted by the type-row
+          ;; internal tests below.
           (is (some #(= (str (:id c)) (:originalFnId (:data %)))
                     (fn-nodes expanded))))
         (finally (sp/close storage))))))

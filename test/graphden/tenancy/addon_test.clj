@@ -184,6 +184,35 @@
       (is (= "alice" (post (fn [_req] (:user tc/*current-principal*))))))))
 
 
+(deftest domain-error-throws-map-to-4xx
+  ;; The tenancy-admin seam impls throw domain :types on bad / duplicate /
+  ;; missing input. The request-scope maps each to its HTTP status so the
+  ;; control-plane routes return a 4xx, not a 500. Without the mapping these
+  ;; uncaught throws became 500s (and HTMX won't swap on a 500).
+  (let [grant-store (ig/init-key :tenancy/grant-store
+                                 {:grants [{:subject "alice" :capability :write :namespace "acme"}]})
+        scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})
+        base-ctx {:auth-provider provider :request-scope scope}
+        respond (fn [err-type]
+                  (br/dispatch
+                    (router-with base-ctx (fn [_req] (throw (ex-info "x" {:type err-type}))))
+                    {:request-method :post :uri "/api/entities/fn"
+                     :headers {"authorization" "Bearer alice-tok"} :query-string nil}))
+        status (comp :status respond)]
+    (testing "validation domain errors → 400"
+      (is (= 400 (status :grant/invalid-capability)))
+      (is (= 400 (status :user/invalid)))
+      (is (= 400 (status :domain/unverified))))
+    (testing "not-found → 404, conflict → 409"
+      (is (= 404 (status :user/not-found)))
+      (is (= 409 (status :user/exists))))
+    (testing "internal error types are NOT masked as 4xx (still surface / 500)"
+      (is (thrown? clojure.lang.ExceptionInfo (status :org/scoped-storage))))
+    (testing "the 4xx body carries the machine-readable error type (no leading colon)"
+      (is (re-find #"\"error\":\"user/exists\"" (:body (respond :user/exists)))))))
+
+
 (deftest workspace-header-lists-the-users-namespaces
   (let [grant-store (ig/init-key :tenancy/grant-store
                                  {:grants [{:subject "alice" :capability :write :namespace "acme.team"}]

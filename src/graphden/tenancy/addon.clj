@@ -270,6 +270,28 @@
    :body "{\"ok\":false,\"error\":\"forbidden\"}"})
 
 
+(def ^:private domain-error-status
+  "The tenancy-admin seam impls throw these domain `:type`s on
+   bad / duplicate / missing input. Map each to its HTTP status so the
+   control-plane routes return a 4xx instead of a 500 — same shape as the
+   `:authz/forbidden → 403` mapping below. Types NOT listed
+   (`:org/scoped-storage`, `:app/*`) are internal and correctly stay 500."
+  {:grant/invalid-capability 400
+   :user/invalid 400
+   :domain/unverified 400
+   :user/not-found 404
+   :user/exists 409})
+
+
+(defn- domain-error-response
+  "4xx response carrying the machine-readable error `:type` (a keyword,
+   so no JSON-escaping is needed) — mirrors `forbidden-response`."
+  [err-type status]
+  {:status status
+   :headers {"Content-Type" "application/json"}
+   :body (str "{\"ok\":false,\"error\":\"" (subs (str err-type) 1) "\"}")})
+
+
 (defn- request-capabilities
   "The capabilities the editor uses to show/hide affordances for this
    request. Platform / admin (public org) and a deployment with no grant
@@ -348,9 +370,11 @@
                     (request-capabilities header-grant-store principal org)
                     (request-workspace header-grant-store principal org))
                   (catch clojure.lang.ExceptionInfo e
-                    (if (= :authz/forbidden (:type (ex-data e)))
-                      forbidden-response
-                      (throw e)))))]
+                    (let [t (:type (ex-data e))]
+                      (cond
+                        (= :authz/forbidden t) forbidden-response
+                        (domain-error-status t) (domain-error-response t (domain-error-status t))
+                        :else (throw e))))))]
       ;; `*current-principal*` is read by the storage-layer per-namespace
       ;; guard; `*current-org*` scopes storage + RLS.
       (binding [tc/*current-principal* principal]

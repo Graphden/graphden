@@ -81,37 +81,39 @@
 
 (deftest writer-blocks-readers-test
   (testing "write lock blocks read lock acquisition"
+    ;; Latch handshake instead of `Thread/sleep` timing so this is
+    ;; deterministic under a contended parallel pool: the reader waits until
+    ;; the writer DEFINITELY holds the lock, and the writer holds until the
+    ;; reader is DEFINITELY going for it. `writer-done` is always set before
+    ;; the write lock releases, so the reader — which can only enter after
+    ;; release (exclusive write lock) — must observe it true. `false` there
+    ;; means mutual exclusion was broken. Timeouts are generous (30s): they
+    ;; only guard against a genuinely hung run, never trip under load.
     (let [lock (locks/create-rw-lock)
-          writer-started (atom false)
+          writer-holding (CountDownLatch. 1)
+          reader-going (CountDownLatch. 1)
           writer-done (atom false)
           reader-started (atom false)
-          writer-latch (CountDownLatch. 1)
           writer (future
                    (locks/with-write-lock lock
                                           (fn []
-                                            (reset! writer-started true)
-                                            (CountDownLatch/.countDown writer-latch)
+                                            (CountDownLatch/.countDown writer-holding)
+                                            (CountDownLatch/.await reader-going 30 TimeUnit/SECONDS)
+                                            ;; Keep holding briefly after the reader commits to
+                                            ;; acquiring, so its read lock genuinely contends and
+                                            ;; blocks until this write lock releases.
                                             (Thread/sleep 50)
                                             (reset! writer-done true))))
           reader (future
-                   ;; Wait for writer to start
-                   (CountDownLatch/.await writer-latch 1 TimeUnit/SECONDS)
-                   (Thread/sleep 10)
+                   (CountDownLatch/.await writer-holding 30 TimeUnit/SECONDS)
+                   (CountDownLatch/.countDown reader-going)
                    (locks/with-read-lock lock
                                          (fn []
                                            (reset! reader-started true)
-                                           ;; Reader should only start after writer is done
                                            @writer-done)))]
       @writer
-      (is @writer-started)
       (is @writer-done)
       (is @reader-started)
-      ;; The reader future returns `@writer-done` as sampled INSIDE the
-      ;; read lock. If the write lock actually blocked it, the writer had
-      ;; released (and set `writer-done`) by then → true. If mutual
-      ;; exclusion were broken, the reader would enter during the writer's
-      ;; 50ms hold, sample `writer-done=false`, and this would fail — the
-      ;; only assertion that actually proves blocking.
       (is (true? @reader) "reader must not acquire until the writer releases"))))
 
 

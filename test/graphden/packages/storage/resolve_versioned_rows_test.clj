@@ -1,9 +1,20 @@
-(ns ^:integration graphden.packages.storage.resolve-versioned-rows-test
+(ns ^:integration ^:serial graphden.packages.storage.resolve-versioned-rows-test
   "End-to-end tests for `:resolve-versioned-rows` — pure graph
    composition equivalent of `versioning.storage.resolution/
    resolve-all-entities`. Verifies the graph output matches the
    Clojure source-of-truth for each versioned entity type, then
-   shows a per-site call shape."
+   shows a per-site call shape.
+
+   `^:serial`: this NS compares a graph-execute against a direct
+   Clojure resolve of the SAME data — an exact-equivalence check that
+   is intolerant of any transient hiccup. Under the parallel
+   integration pool on a resource-constrained host it intermittently
+   dropped one row (a partial read while the shared Testcontainers PG
+   was under connection/memory pressure — the same pressure that
+   surfaces as `57P01 terminating connection` elsewhere). The logic is
+   isolation-clean (proven across many focused runs, sw29–sw32), so
+   running it in the sequential pre-pass — off the contention window —
+   makes it deterministic without masking a real bug."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.composition.interface :as fn-composition]

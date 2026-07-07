@@ -1,8 +1,7 @@
 ## Runtime slot-id-keyed refactor (#104)
 
-> **STATUS: SHIPPED.** Phases 1–5 landed and merged (see §8 Definition of
-> done); the hybrid slot-id + name `fa` in §4/§7 is the FINAL runtime
-> design, not a transitional state. This doc is kept as the design
+> **Design record.** The hybrid slot-id + name `fa` in §4/§7 is the FINAL
+> runtime design, not a transitional state. This doc is kept as the design
 > rationale for #104 — live code points here (`compile/renames.clj`
 > `deep-free-ext-entries`, its test, `ARCHITECTURE.md § Runtime fa`). The
 > "Problem" / "Workaround today" narrative below is HISTORICAL context for
@@ -210,17 +209,7 @@ The hybrid runtime fa described in § 4 + Phase 4 / 5 is the FINAL design, not a
 
 An alternative was considered (env-builder slot-id-only + cross-fn rename slot-id translation + readers drop name fallback) and dropped. Two attempts failed at runtime; the marginal benefit (closing 2 remaining `:on-throw :const` workaround sites) didn't justify the multi-day risk.
 
-### 8. Definition of done
-
-- [x] Phases 1–5 landed (commits `21b02a65` walker → `d08c2f68` translator → `ff5b02b3` Phase 3 outcome (no helper) → `b446f3c7` rename-aware readers → `38c3fc6e` parser disambiguation → `ac390c32` HOF wrap-time translation → `dcc11101` thunk-skip + const-wrap revert)
-- [x] `bb test` green (adds the new `types-api-graph-test`)
-- [x] page_test passes with `:body` (no `:as :page-body`)
-- [x] `feedback_104_*` memory archived as closed
-- [x] `docs/ARCHITECTURE.md` § Runtime fa documents the hybrid surface
-- [x] `bb ci` green (17/17 — initial run had cider-nrepl outdated, bumped to 0.60.0)
-- [x] `bb test-e2e` green (edit suite: 51 pass / 0 fail / 51 total; 4 retry-flakes recovered; 0 `Unknown field 'request-method'` leaks confirms the pin restore)
-
-### 9. Out of scope
+### 8. Out of scope
 
 - Editor UI shows names only (no slot-id columns / chips)
 - fns.edn syntax unchanged

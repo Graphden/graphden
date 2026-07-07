@@ -3,197 +3,22 @@
 > This document tracks implementation status and future plans.
 > For technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Implementation Status
+## Implemented
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Slot/binding schema | Done | fn / slot / fn-slot / binding / binding-list-item |
-| GraphConstraints Protocol | Done | Dependency-cycle validation |
-| StorageCRUD Protocol | Done | + Batch operations |
-| Executor (compile-at-startup) | Done | Lazy via Clojure delays; thunks compiled once at boot |
-| Base Functions | Done | Arithmetic, logic, HOF, collections, strings, system; web (http, reitit, html, crud, ring-adapter) |
-| PostgreSQL Storage | Done | Full protocol support; recursive-CTE cycle walks |
-| Integrant System | Done | Component lifecycle management |
-| Logging | Done | Structured logging with MDC |
-| Web Server | Done | http-kit + Reitit router |
-| Versioning | Done | VersionedStorage + HTTP API + editor UI + per-branch executor routing (see [VERSIONING.md](VERSIONING.md)) |
-| Type System (refinements / records / lists / unions / variants) | Done | Save-time check; rich-type registry |
-| Editor UI | Done | Cytoscape-based with server-computed layout, inline edit popovers |
-| REST API | Done | `/api/graph/entities`, `/api/graph/layout`, `/api/entities/<entity>/*`, `/api/sequence/append/:fn-id`, `/api/sequence/item/:item-id` |
-| Permissions | Done | Per-namespace grants + `can?`/`authz`, RLS org-isolation, effect-gate — see [PLATFORM_PLAN.md](PLATFORM_PLAN.md) |
-| Multi-tenancy (orgs / users / grants / RLS / FaaS) | Done | Addon, inert by default — see [PLATFORM_PLAN.md](PLATFORM_PLAN.md) |
-| Package registry | Done | Publish/install namespace bundles (no auto dep-resolution) — `app/registry` |
-| Recursion (`:fix` Y-combinator) | Done | Approach A, depth-guarded — see [RECURSION.md](RECURSION.md) |
-| Distributed execution | Planned | See [Distributed Execution](#distributed-execution) below |
+The implemented substrate lives in the code — read it there rather than
+tracking per-item status in this doc. It covers: the slot/binding schema +
+GraphConstraints, StorageCRUD + PostgreSQL (recursive-CTE) + VersionedStorage,
+the compile-at-startup executor, the full base-fn set (arithmetic / logic / HOF
+/ collections / strings / system / web: http, reitit, html, crud, ring-adapter,
+http-client), the type system (refinements / records / lists / unions /
+variants + rich-type registry), the Cytoscape editor, the REST API
+(`/api/graph/*`, `/api/entities/*`, `/api/sequence/*`, `/api/execute*`), branch
+versioning, the tenancy addon (orgs / users / grants / RLS / effect-gate / FaaS
+— see [PLATFORM_PLAN.md](PLATFORM_PLAN.md)), the package registry
+(`app/registry`), and `:fix` recursion ([RECURSION.md](RECURSION.md)).
 
----
-
-## Phase 0: Documentation [DONE]
-
-- Main README.md
-- ARCHITECTURE.md document
-- CONSTRAINTS.md, ERROR_CODES.md, EXTENDING.md
-- This ROADMAP.md document
-
----
-
-## Phase 1: Data Schema and Constraints [DONE]
-
-**1.1 graph-data-schema** — slot/binding model:
-
-- `fn` — function or type-row; M:N inheritance via `parent-ids`
-- `slot` — atomic `(name, type-fn-id)`; immutable post-create
-- `fn-slot` — junction `(fn-id, slot-id, position)`
-- `binding` — per-`(fn, slot)` overlay (value, ref, rename, type-override, terminal, list flags)
-- `binding-list-item` — sequence content under a list-typed binding
-
-**1.2 GraphConstraints protocol** — runtime validator:
-
-- No dependency cycles via `binding.ref-fn-id` / `binding-list-item.ref-fn-id`
-
-**1.3 Schema-level uniqueness:**
-
-- `UNIQUE(fn.name)` (NULL allowed for anonymous fns)
-- `UNIQUE(fn-slot(fn-id, slot-id))`
-- `UNIQUE(binding(fn-id, slot-id))`
-- (the `binding-list-item(binding-id, position)` UNIQUE was retired — the
-  base identity row is cross-branch, so position uniqueness is enforced
-  per-branch by `VersionedStorage/check-list-item-position-collision!`)
-
-**1.4 Contract tests** — `graphden.storage.protocol.contract-tests`
-covers cycle detection + concurrent CRUD against any storage backend.
-
-**1.5 Storage implementations** — PostgreSQL.
-
----
-
-## Phase 2: CRUD Operations [DONE]
-
-**2.1 StorageCRUD protocol:**
-
-```clojure
-(defprotocol StorageCRUD
-  (create-entity [this entity-name data])
-  (read-entity [this entity-name id])
-  (update-entity [this entity-name id data])
-  (delete-entity [this entity-name id])
-  (query-entities [this entity-name where]))
-```
-
-**2.2 StorageBatchCRUD protocol (enhancement):**
-
-```clojure
-(defprotocol StorageBatchCRUD
-  (create-entities [this entity-name data-seq])
-  (read-entities [this entity-name ids])
-  (delete-entities [this entity-name ids]))
-```
-
----
-
-## Phase 3: Executor [DONE]
-
-**3.1 ExecutionGraph protocol:**
-
-```clojure
-(defprotocol ExecutionGraph
-  (resolve-execution-graph [this root-fn-id]))
-```
-
-**3.2 Lazy Evaluation:**
-Ref bindings are wrapped as thunks (`rt/thunk`); impls deref them via
-`rt/resolve-arg` (handled transparently by the `defbase` macro so
-bodies use bare symbols). `:fn`-typed refs bypass the thunk and go
-through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
-
-**3.3 Result Caching:**
-
-- Per-invocation `*call-cache*` memoises `[ref-id, free-args]` pairs
-- Shared subgraphs (e.g. `:router-result` pulled from multiple slots)
-  run once per top-level invocation
-
-**3.4 Executor:**
-
-- `execute` — execute a fn by id with named free args
-- `execute-by-name` — execute a fn looked up by name
-- `make-single-arg-callable` — public HOF-wrap entry for raw fn-ids
-- Inheritance resolution via parent-id chain
-- Compile-at-startup: registry built once, closures cached in
-  `ctx :compiled-registry` atom
-
-**3.5 fn-registry + package loader:**
-
-- `register-base-fn!` — register a single impl
-- `register-base-fns!` — bulk registration
-- `sync-defs-to-storage!` — sync fn-defs from `fns.edn` to storage
-- Deterministic UUID generation for idempotent operations
-- Orphan fn-def reaping: entries removed from `fns.edn` are deleted
-  from storage on next sync
-
----
-
-## Phase 4: Base Functions [PARTIAL]
-
-**4.1 Arithmetic and Strings [DONE]**
-
-- Arithmetic: `add`, `sub`, `mul`, `div`, `mod`, `neg`, `abs`
-- Comparison: `eq`, `neq`, `lt`, `lte`, `gt`, `gte`
-- Strings: `str`, `subs`, `str-len`, `str-upper`, `str-lower`, `str-trim`, `str-split`, `str-join`
-
-**4.2 Collections [DONE]**
-
-- Basic: `first`, `rest`, `cons`, `conj`, `get`, `assoc`, `dissoc`
-- Advanced: `count`, `empty?`, `contains?`, `keys`, `vals`, `merge`, `into`
-- Sequences: `range`, `repeat`, `take`, `drop`, `reverse`, `sort`, `concat`, `flatten`, `distinct`
-
-**4.3 Conditionals and HOF [DONE]**
-
-- Logic: `and`, `or`, `not` (with short-circuit for `and`/`or`)
-- Conditionals: `if`, `cond`
-- HOF: `map`, `filter`, `reduce`, `some`, `every?`, `find-first`, `group-by`, `sort-by`, `apply`
-- Utilities: `identity`, `constantly`
-
-**4.4 I/O (Client) [PLANNED]**
-
-- `http-request` — HTTP client (http-kit)
-- File operations
-
-**4.5 I/O (Server) [DONE]**
-
-- `http-server` — http-kit server wrapper (`web/http`)
-- Reitit-based routing (`web/reitit`): `ring-router`,
-  `ring-create-default-handler`, `ring-handler`, `middleware`
-- Ring-adapter: request-field extractors, response envelope,
-  bearer-token auth middleware (`web/ring-adapter`)
-
----
-
-## Phase 5: UI/API [PARTIAL]
-
-**5.1 REST API [PARTIAL]**
-
-- CRUD endpoints for fn / namespace / slot / fn-slot / binding /
-  binding-list-item [DONE — `web/crud`]
-- GET `/api/graph/entities` [DONE] — with `?scope=index` (sidebar only, 1.6 MB) and `?scope=subtree&root-id=X` (BFS closure, 1.5 KB - 50 KB typical) variants for per-fn bandwidth savings
-- POST `/api/graph/layout` [DONE — `app/layout`]
-- POST `/api/sequence/append/:fn-id` + DELETE
-  `/api/sequence/item/:item-id` [DONE]
-- Bearer-token auth middleware on mutating routes [DONE]
-- POST `/api/execute` — run fn from UI [DONE — `docs/EXECUTION.md`,
-  `crud.fn_execution` + sibling `/cancel`, `/api/executions`,
-  `/api/execute/:id`]
-- WebSocket for live updates [PLANNED]
-
-**5.2 Web Interface [PARTIAL]**
-
-- Namespace-grouped entity list in sidebar [DONE]
-- Graph editor (Cytoscape-based, server-computed layout) [DONE]
-- Entity create/edit/delete modals [DONE]
-- Execute button with result display [DONE — `editor-execute.js`
-  orchestrator, free-arg value-form, polling state machine, runtime
-  effects strip, Repeat-from-history]
-
----
+Unbuilt primitives that never made it into a block below: a **file-I/O**
+base-fn set and **WebSocket** live-updates.
 
 ## Roadmap by Blocks (current plan)
 
@@ -204,13 +29,9 @@ context. The plan supersedes the per-item entries in § Future Work
 below; those entries remain for historical context and as
 deeper-design references.
 
-**Path to MVP launch with external users**: Blocks 1 → 2 → 4 → 9-Launch
-on the critical path, with Blocks 3 / 5 / 6 parallelizable. **Block 2
-(multi-user) and Block 5 (`:fix` recursion) have SHIPPED**, so the
-remaining critical path is Blocks 1 → 4 → 9-Launch. Estimated total was
-**~18-19 weeks**, calibrated against velocity in Jan-May 2026 (~150
-commits/month sustained, e.g. full type-system overhaul in ~3 weeks,
-versioning + branches in ~3-4 weeks).
+**Path to MVP launch with external users**: the remaining critical path is
+Blocks 1 → 4 → 9-Launch, with Blocks 3 / 6 parallelizable. (Blocks 2 and 5 are
+done — see § Implemented; they're dropped from the list below.)
 
 The AI-launch piece (Block 9.1–9.3) is on the critical path because
 "co-edit your graph with the AI of your choice, review proposals as
@@ -238,23 +59,7 @@ Implements PHILOSOPHY § Self-Describing System "storage swap path"
 
 Block total: **~4 weeks**
 
-### Block 2 — Multi-user readiness [SHIPPED]
-
-Enables external alpha users on either self-hosted or cloud-shared.
-Landed as the tenancy addon (`graphden.tenancy.*`, inert by default);
-see [PLATFORM_PLAN.md](PLATFORM_PLAN.md) §8 for the as-shipped map.
-
-1. **Organizations + Users** entity + UI — done (`tenancy/{users,org-schema,user-schema}`, tenancy-admin panels)
-2. **Postgres RLS** + policy-based isolation — done (`tenancy/rls`, SELECT own+public / IUD own-only split)
-3. **Permissions** (per-fn, per-namespace, per-branch) — done (`tenancy/{grant,authz}`, per-namespace grants + effect-gate)
-4. **Package registry** (server + reference client, MVP — without
-   full dep resolution) — done (`app/registry`, `POST /api/packages/publish` + install/export)
-
-Remaining follow-ups (service sandbox, org-scoped `:fn-execution`/`:branch`,
-per-org secrets, non-superuser DB role for RLS to bite) are tracked in
-[TENANCY_HANDOFF.md](TENANCY_HANDOFF.md) — not launch blockers.
-
-### Block 3 — Personal QoL (parallel to Block 2)
+### Block 3 — Personal QoL
 
 1. **Tests via `tests/` namespace** convention + UI filter in the
    sidebar — ~3-4 days
@@ -266,13 +71,8 @@ per-org secrets, non-superuser DB role for RLS to bite) are tracked in
    size/TTL limits) — ~1.5 weeks
 5. **Free-arg aliases** — see § Future Work entry; status check,
    finish if not already shipped
-6. **Routes API for frontend + static-lint against drift** — DONE.
-   Shipped as boot-cached `window.API` (codegen'd from the routing
-   graph, exposed on `window` via an atom), a sync-time drift
-   validator, and all editor JS addressing routes through
-   `window.API.<key>` instead of hardcoded `/api/*` literals
-   (deliberate exceptions carry `// api-url-drift-allow:`). Closes the
-   declarative-route ↔ JS drift gap.
+(The routes-API + static-lint-against-drift item shipped as `window.API` +
+a sync-time drift validator — done, see § Implemented.)
 
 Block total (remaining items 1–5): **~3-4 weeks**
 
@@ -287,13 +87,6 @@ Implements the MVP launch bar from [DISTRIBUTION § MVP Launch Bar](DISTRIBUTION
    ~1 week each
 
 Block total: **~4-5 weeks**
-
-### Block 5 — Recursion [SHIPPED]
-
-- **`:fix` base-fn** (Approach A from
-  [RECURSION.md](RECURSION.md)) — done. `core/recursion` (`:fix`
-  Y-combinator, depth-guarded by `*max-recursion-depth*`), example in
-  `examples/recursion`, used by `storage/branches` `:branch-chain`.
 
 ### Block 6 — UI Step 1 (any window)
 
@@ -459,20 +252,8 @@ than text-diffs.
 
 ### Graph-level Recursion
 
-> Now scheduled in **Block 5**. The design details below remain
-> authoritative; the block schedule sets the order.
-
-**Status**: Approach A (`:fix` Y-combinator) is SHIPPED — `:fix` base-fn
-in `core/recursion` (`resources/packages/core/recursion/`), depth-guarded,
-used by `storage/branches` `:branch-chain`. See [RECURSION.md](RECURSION.md).
-The per-binding cycle check + sync-time topological-sort still reject bare
-self/mutual `ref-fn-id` patterns; `:fix` is the graph-native way to express
-recursion without that escape hatch. Approach B (lazy ref resolution) is the
-road not taken.
-
-**Goal**: make recursion expressible in the fn-graph itself —
-tree-walk (JSON / hiccup / AST visitor) is the bread-and-butter
-practical case currently blocked.
+Shipped (`:fix`, Approach A). Design + the rejected Approach B (lazy ref
+resolution) live in [RECURSION.md](RECURSION.md).
 
 **Two viable approaches**, both fully specified in
 [RECURSION.md](RECURSION.md):
@@ -623,157 +404,14 @@ no new entity kinds.
 
 ---
 
-### Git-like Versioning [DONE]
+### Git-like Versioning
 
-**Goal**: Change history, rollback, branches, merge for function graphs.
-
-**Design decisions:**
-
-| Decision | Choice | Reasoning |
-|----------|--------|-----------|
-| Versioning pattern | Two-table: stable identity (id only) + version table (data + branch_id + created_at) | Clean separation of identity from mutable state |
-| History model | Append-only version records | No data loss; current version = latest by created_at |
-| Unique constraint | Non-unique (entity_id, branch_id) — multiple records per entity per branch | Enables full history without separate history tables |
-| Branch model | Branch table with base_branch_id for inheritance chain | Resolution walks up the chain until version found |
-| Merge mechanism | `branch_merge` table (no record duplication) | Single merge record makes source versions visible in target |
-| Conflict detection | Git-style: entity modified in both branches after fork point | User resolves: take source / take target / custom |
-
-**What is versioned (graph structure changes):**
-
-| Entity | Versioned? | What changes |
-|--------|-----------|--------------|
-| `fn` | Yes | name, description, constraint, base-fn-id, element-fn-id, return-type-fn-id, anonymous-hash |
-| `fn-slot` | Yes | fn-id, slot-id, position |
-| `binding` | Yes | value, ref-fn-id, rename-to, type-override-fn-id, description, terminal, list-{append,closed} |
-| `binding-list-item` | Yes | binding-id, position, value, ref-fn-id, literal |
-| `slot` | No | immutable post-create — name + type are the slot's identity |
-| `parent-ids` | Junction (not versioned) | adding/removing parents creates new junction rows |
-
-**Branch operations:**
-
-| Operation | Mechanism |
-|-----------|-----------|
-| Create branch | Insert into `branch` with `base_branch_id` |
-| Edit on branch | Append new version record with branch_id |
-| Read on branch | Walk branch chain upward; check branch_merge records for merged versions |
-| Merge B into A | Insert `branch_merge(source=B, source_timestamp=now, target=A, target_timestamp=now)`. No records copied. Detect conflicts: entity modified in both B and A after fork point |
-| Conflict resolution | User chooses: take source version / take target version / create custom version |
-| Delete branch | Forbid if child branches exist; delete all version records and branch_merge records, then branch |
-
-**Branch resolution at execution time:**
-
-- Executor context carries `branch_id`
-- `resolve-execution-graph` resolves each versioned entity by walking branch chain + branch_merge records
-- No branch specified = default branch (base_branch_id = NULL)
-- Branch is transparent to functions — they don't know which branch they're on
-
-**Component architecture:**
-
-- `versioned-storage` — independent component (storage decorator)
-- Any combination works: base only, versioned only
-- Executor works with any storage through unified `ExecutionGraph` protocol — no executor changes needed
-
-**Base function update strategy:**
-
-- Platform migrations update base-fns on a platform branch
-- Users' branches don't see the change until they merge
-- Compatible changes (new optional arg): single base fn name, Clojure code supports both old and new signatures
-- Breaking changes (removed arg, changed type): register new fn name (e.g., `map-v2`), old code remains functional
-- Implementation-only changes (bug fix, same signature): all users get the new code automatically (Clojure runtime is shared)
-
-**Branch-aware request routing [DONE — `feat/versioning`]:**
-
-- `:exec/branch-router` init-key holds an atom of
-  `{branch-id → ExecutionContext}` — each non-default branch gets
-  its OWN compiled registry because `(impl args ctx)` closes ctx in
-  at compile time and branch bindings can diverge.
-- Per-request branch selection via `X-Graphden-Branch` header or
-  `?branch=<name>` query. Default = main.
-- Lazy-build on first request, cached afterwards; invalidation
-  piggybacks on the existing `invalidate-graph-cache!` (writes on
-  branch X clear X's registry without touching main).
-- Ring callable re-reads the registry atom on every invocation so
-  the cached handler picks up post-write rebuilds without explicit
-  reattach.
-- Front of the wire: `:branch-routing-wrap` base-fn (in
-  `web.branch-router`) wraps the compiled `:_app-ring-response` and
-  delegates to the router. No active router (test paths / startup
-  race) → call the wrapped base-handler directly.
-
-**HTTP surface [DONE — see `docs/VERSIONING.md`]:**
-
-| Verb   | Path                                     | Notes |
-|--------|------------------------------------------|-------|
-| GET    | `/api/branches`                          | List |
-| GET    | `/api/branches/:ref`                     | One (UUID or name) |
-| POST   | `/api/branches`                          | Create (forks from current) |
-| DELETE | `/api/branches/:ref`                     | Rejects `main` and branches with children |
-| GET    | `/api/branches/:ref/diff?against=…`      | Resolved-view diff |
-| GET    | `/api/branches/:ref/conflicts?source=…`  | Preview conflicts before merge |
-| POST   | `/api/branches/:ref/merge`               | Body `{source, conflict-resolutions?}` |
-| GET    | `/api/fns/:fn-id/versions`               | History per fn |
-
-**Editor UI [DONE]:** branch chip + popover in the menu-header
-(`editor-branches.js`), `⌛` history popover on each fn-card
-(`editor-fn-versions.js`), inline merge button + conflict-resolution
-modal. `window.fetch` is wrapped at load so every `/api/*` call
-picks up the current branch automatically.
-
-**Demo seeder [DONE]:** `:exec/demo-branches` init-key ensures a
-small set of pre-baked branches exists on every startup so the UI
-has something to demo (diff, merge, switching). Idempotent — already-
-existing branches are left untouched. Opt-in via
-`GRAPHDEN_DEMO_BRANCHES_ENABLED=1`; off by default in prod.
-
-**Known issue — base-table `(binding_id, position)` unique constraint [FIXED]:**
-
-The pre-versioning `UNIQUE (binding_id, position)` index on
-`binding_list_item` (the identity table) was retired in
-`feat/versioning` — position is a resolved-view property, not a
-cross-branch identity property. The invariant now lives at the
-per-branch resolved view in
-`VersionedStorage/check-list-item-position-collision!`. Existing
-DBs get the legacy index dropped by `migration/drop-retired-indexes!`
-on the next migration pass.
-
----
+Shipped — VersionedStorage + branches + HTTP API + editor UI + per-branch
+executor routing. Design and known gaps live in [VERSIONING.md](VERSIONING.md).
 
 ### User and Permission System
 
-> **SHIPPED** via the tenancy addon (Block 2). The actual design is
-> **capability GRANTS** — `(subject, capability, namespace)` with
-> `:admin`/`:write`/`:execute`/`:bind-args`/`:append-list` caps and
-> namespace-prefix coverage — a deliberately minimal primitive, NOT
-> the role-based sketch below (no roles, no deny rules). See
-> [PLATFORM_PLAN.md](PLATFORM_PLAN.md) and `graphden.tenancy.grant` /
-> `authz`. The sketch is retained for historical context only.
-
-**Goal**: Access control.
-
-**Permission Model:**
-
-```
-User:
-  id, name, email
-
-Role:
-  id, name
-
-Permission:
-  - view(fn-id)      - see function
-  - edit(fn-id)      - edit
-  - execute(fn-id)   - execute
-  - admin(fn-id)     - manage permissions
-
-UserRole:
-  user-id, role-id
-
-RolePermission:
-  role-id, permission
-```
-
-**Application:**
-
-- On CRUD operations - permission check
-- On execution - execute permission check
-- In UI - filter visible functions
+Shipped as capability **grants** — `(subject, capability, namespace)` with
+`:admin`/`:write`/`:execute`/`:bind-args`/`:append-list` caps and
+namespace-prefix coverage (deliberately minimal — no roles, no deny rules).
+See [PLATFORM_PLAN.md](PLATFORM_PLAN.md) and `graphden.tenancy.grant` / `authz`.

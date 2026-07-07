@@ -324,7 +324,7 @@ unrestricted. Механизм гейта уже готов и проверен 
   организации. Расширяем извлечение контекста: парсим поддомен из `Host` →
   резолвим в `org-id` (таблица `subdomain → org`). Маршрут создаётся
   автоматически при создании организации.
-  - **resolution ✅** `tenancy.subdomain` — `extract-subdomain` (Host →
+  - **resolution** `tenancy.subdomain` — `extract-subdomain` (Host →
     label; strips port, rejects apex/multi-level) + `OrgResolver` протокол.
     **Дефолт — `identity-org-resolver`: label поддомена И ЕСТЬ org-id, НИКАКОЙ
     таблицы** (org — строка-слаг; неизвестный slug → пустой tenant-view через
@@ -341,7 +341,7 @@ unrestricted. Механизм гейта уже готов и проверен 
     `hostname → org`, не выводится из org) + DNS-TXT.
 - **Кастомные домены**: таблица `hostname → org`. Пользователь добавляет домен;
   **подтверждение владения** — DNS TXT-запись, которую мы один раз проверяем.
-  - **✅ построено** `tenancy.domain`: `HostResolver` + `static-host-resolver`
+  - **построено** `tenancy.domain`: `HostResolver` + `static-host-resolver`
     (`{hostname org}` верифицированных доменов) → `org-from-request`; wired в
     request-scope ПОСЛЕ поддомена, **та же guard-семантика** (токен — авторитет,
     host только запрещает). `verify-domain-ownership` (DNS-TXT
@@ -353,7 +353,7 @@ unrestricted. Механизм гейта уже готов и проверен 
   пользователям запрещён. Значит fn проверки домена — **привилегированная
   платформенная fn**, а не пользовательская композиция. «Через граф, но не
   пользователем» — тонкость, ломающая наивное «желательно через граф».
-  **✅ соблюдено:** `verify-domain-ownership` — обычная Clojure-fn в аддоне
+  **соблюдено:** `verify-domain-ownership` — обычная Clojure-fn в аддоне
   (платформенная), НЕ граф-fn; тенант к ней не доберётся.
 - **Важно (R11) — ⛔ SUPERSEDED §3.4 (FaaS):** различение «(а) поддомен → тенант
   vs (б) hostname → user-`:service`» РАЗРЕШЕНО FaaS-моделью: у тенанта нет
@@ -411,10 +411,10 @@ enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user
   `[org ref]`. Побочно чинит латентный баг app-router (его registry был
   public-only). Доказано `faas-app-test` (27/91), branch-router+lifecycle+rls.
 - **Follow-ups:**
-  - ✅ **per-org branch-names** — `UNIQUE (org-id, name) NULLS NOT DISTINCT`
+  - **per-org branch-names** — `UNIQUE (org-id, name) NULLS NOT DISTINCT`
     (PG 15+). Разные org переиспользуют имя без cross-org коллизии/leak;
     single-tenant (NULL org) остаётся unique by name.
-  - ✅ **per-org type-registries (§4 Risk 2) — ЗАКРЫТО на ВСЕХ 3 поверхностях.**
+  - **per-org type-registries (§4 Risk 2) — ЗАКРЫТО на ВСЕХ 3 поверхностях.**
     Design A (org-filtered view, переиспользует existing `*…-override*`, CORE
     не трогаем):
     - **type-alias check** — per-org slice `{org → {name → body}}` в
@@ -496,34 +496,34 @@ org-scoping применяются автоматически. Самая сло
 
 **Bounded-шаги (план реализации):**
 
-1. ✅ `:org`-сущность + схема (`tenancy/org_schema`), tenant-forbidden, addon-wiring.
-2. ✅ Endpoint регистрации org (`POST /api/orgs`, platform-only).
-3. ✅ App-routing шов (`tenancy/app-router` + `:app-router` на ctx + dispatch): поддомен→org→исполнить `:org.handler-fn-id`; apex → editor/API.
-4. ✅ Исполнение handler org-scoped + effect-gated (в app-router: `with-org` + `:allowed-effects` + `:execute-guard nil`).
-4a. ✅ Set-handler механизм: `set-org-handler` base-fn (update `:org.handler-fn-id` by name, str→uuid) + `POST /api/orgs/handler` (platform-only). Теперь app-router отдаёт реальный handler, когда он установлен.
+1. `:org`-сущность + схема (`tenancy/org_schema`), tenant-forbidden, addon-wiring.
+2. Endpoint регистрации org (`POST /api/orgs`, platform-only).
+3. App-routing шов (`tenancy/app-router` + `:app-router` на ctx + dispatch): поддомен→org→исполнить `:org.handler-fn-id`; apex → editor/API.
+4. Исполнение handler org-scoped + effect-gated (в app-router: `with-org` + `:allowed-effects` + `:execute-guard nil`).
+4a. Set-handler механизм: `set-org-handler` base-fn (update `:org.handler-fn-id` by name, str→uuid) + `POST /api/orgs/handler` (platform-only). Теперь app-router отдаёт реальный handler, когда он установлен.
 4b. self-serve — тенант ставит СВОЙ handler.
-    - **seam ✅** `tenancy.deploy/set-org-handler!`: валидирует (org = токен; fn читаем тенантом через OrgScoped = свой/public), затем единственный controlled-write `:org.handler-fn-id` под временной public-эскалацией (только своя org row по name = токен). Доказано (forbidden для public + чужой fn; update для своего). Security-критичное ядро.
-    - **backend ✅** `:set-org-handler` seam на ctx (create-context + system/core + build-branch-ctx inherit + `:tenancy/set-org-handler` init-key) + core base-fn `invoke-set-org-handler` (зовёт seam, str→uuid) + route `POST /api/my-app/handler`. sync+type-check+boot зелёные (13 тестов).
-    - **editor-JS ✅** ⌂ «set as app handler» в row-actions popover (root-row): `data-action="set-app-handler"` → `registerActionHandler` POSTит `/api/my-app/handler`. CSS-gated `body.gd-tenancy` (ставится при первом capability-header) → в single-tenant скрыта. Playwright: partial эмитит кнопку, hidden без tenancy / shown с tenancy. **§3.4 ПОЛНОСТЬЮ ЗАКРЫТ.**
-5. ✅ R8 per-org handler-кэш: `cached-handler-fn-id` (TTL-кэш org→handler-fn-id в app-router, default 5s) — убирает `:org`-чтение на каждый app-запрос; смена handler'а пропагируется в пределах TTL. (Compiled handler уже в shared-реестре по fn-id; кэшируем только lookup.)
-6. ✅ (timeout) Resource-лимиты: `run-with-timeout` в app-router (future + deref-timeout → 504; `future-cancel` + interrupt-aware `*cancel-check*` → graph-handler кооперативно отменяется, не течёт тред). `:timeout-ms` конфигурируем (default 10s). *Остаётся:* memory-лимиты (JVM не кэпит per-thread память — нужен отдельный механизм; tight CPU-loop в impl не отменяется, но тенанты пишут только графы → каждый execute-step проверяет cancel).
-7. ✅ Кастомные домены в app-routing: `resolve-app-org` = `(or subdomain host-resolver)`, app-router принимает `host-resolver` → верифицированный кастомный домен → handler org тем же путём.
+    - **seam** `tenancy.deploy/set-org-handler!`: валидирует (org = токен; fn читаем тенантом через OrgScoped = свой/public), затем единственный controlled-write `:org.handler-fn-id` под временной public-эскалацией (только своя org row по name = токен). Доказано (forbidden для public + чужой fn; update для своего). Security-критичное ядро.
+    - **backend** `:set-org-handler` seam на ctx (create-context + system/core + build-branch-ctx inherit + `:tenancy/set-org-handler` init-key) + core base-fn `invoke-set-org-handler` (зовёт seam, str→uuid) + route `POST /api/my-app/handler`. sync+type-check+boot зелёные (13 тестов).
+    - **editor-JS** ⌂ «set as app handler» в row-actions popover (root-row): `data-action="set-app-handler"` → `registerActionHandler` POSTит `/api/my-app/handler`. CSS-gated `body.gd-tenancy` (ставится при первом capability-header) → в single-tenant скрыта. Playwright: partial эмитит кнопку, hidden без tenancy / shown с tenancy. **§3.4 ПОЛНОСТЬЮ ЗАКРЫТ.**
+5. R8 per-org handler-lookup: app-router читает `:org.handler-fn-id` свежим на каждый app-запрос — один indexed unique-name lookup, ничтожный на фоне последующего graph-handler `execute`, зато смена handler'а видна сразу. (Ранее был 5s TTL-кэш — убран как жертвующий корректностью ради ничтожной экономии; compiled handler и так в shared-реестре по fn-id.)
+6. (timeout) Resource-лимиты: `run-with-timeout` в app-router (future + deref-timeout → 504; `future-cancel` + interrupt-aware `*cancel-check*` → graph-handler кооперативно отменяется, не течёт тред). `:timeout-ms` конфигурируем (default 10s). *Остаётся:* memory-лимиты (JVM не кэпит per-thread память — нужен отдельный механизм; tight CPU-loop в impl не отменяется, но тенанты пишут только графы → каждый execute-step проверяет cancel).
+7. Кастомные домены в app-routing: `resolve-app-org` = `(or subdomain host-resolver)`, app-router принимает `host-resolver` → верифицированный кастомный домен → handler org тем же путём.
 
 ### Критический путь к «живому облаку» (что осталось ДО запуска)
 
 FaaS-ядро + изоляция + sandbox доказаны (`faas-app-test`, 12 тестов). Критпуть
 к прод-онбордингу ЗАКРЫТ (код+тесты):
 
-1. ✅ **Real token-source** — `:token` сущность + `storage-token-provider`
+1. **Real token-source** — `:token` сущность + `storage-token-provider`
    (хэш-матч бирера) + `create-token` base-fn / `POST /api/tokens`. Онбординг =
    вставка строки, без редеплоя. Round-trip тест (минт → аутентификация).
-2. ✅ **Storage-backed домены** — `:domain` сущность + `storage-host-resolver`
+2. **Storage-backed домены** — `:domain` сущность + `storage-host-resolver`
    (резолвит только verified) + `create-domain` / `POST /api/domains` (оператор
    регистрирует, vetted) + **self-serve DNS-verify** (`deploy/verify-domain!`
    seam + `:verify-domain` ctx + `invoke-verify-domain` / `POST /api/my-app/
    verify-domain` — тенант сам доказывает владение через DNS-TXT). App-router
    принимает любой `HostResolver` — интеграция бесплатна.
-3. ✅ **Non-superuser DB-роль** — код готов давно (`FORCE ROW LEVEL SECURITY` +
+3. **Non-superuser DB-роль** — код готов давно (`FORCE ROW LEVEL SECURITY` +
    policy + `org-aware-datasource` wrap + `rls-test` под non-superuser `SET ROLE`).
    Осталась только инфра: запустить процесс под non-superuser ролью —
    задокументировано в `DEPLOYMENT.md § Multi-tenancy: non-superuser DB role`.
@@ -683,7 +683,7 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
 | #      | Риск / нестыковка                                                                                                                              |
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | **R1** | **Гейтинга эффектов нет.** «Пакеты без impl» ≠ безопасность. Облачный юзер композит существующих эффектных base-fn. Надо строить рантайм-гейт. Без него вся облачная модель безопасности — фикция. |
-| **R2** | ✅ ЗАКРЫТО. `:list-append`/`:list-closed` + персональные NS уже были построены; добавлены `:terminal` seal + `:bind-args`/`:append-list` caps + расширение write-authz шва на `:binding`/`:binding-list-item`/deletes. §4.3 готово. |
+| **R2** | ЗАКРЫТО. `:list-append`/`:list-closed` + персональные NS уже были построены; добавлены `:terminal` seal + `:bind-args`/`:append-list` caps + расширение write-authz шва на `:binding`/`:binding-list-item`/deletes. §4.3 готово. |
 | **R3** | **Нет round-trip экспортёра** граф→EDN. И publish, и export его требуют. |
 | **R4** | Автоматической детекции breaking-change между версиями пакета нет — полагаемся на семвер/git-координаты пакета. |
 | **R5** | `org-id` на каждой таблице — **в напряжении с принципом #2** (минимум полей). Нужен ADR. |
@@ -708,31 +708,31 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
 - **Фаза 0 (подготовка):** ADR по `org-id` vs #2 (R5) — **зафиксирован §3.0**;
   модель неймспейсов (R-NS) — подтверждена single-membership; гейт эффектов
   (R1) — самостоятелен, сделан параллельно.
-- **Фаза 1 (пакеты) — ✅ СДЕЛАНО:** round-trip экспортёр (R3) → scoped
+- **Фаза 1 (пакеты) — сделано:** round-trip экспортёр (R3) → scoped
   `export-namespace` + извлечение зависимостей → реестр `:package-version` +
   **publish/list/fetch/install** (граф-композировано) → 6 layering-фиксов
   (core/web публикуются независимо). **Осталось:** версионные констрейнты (R4),
   расщепление каналов impl/fns, `executor-packages.edn`
   манифест (он же — механизм инъекции аддонов, см. §3.0 нюанс 3), вынос
   доменных пакетов (§2.9), hot-recompile при install.
-- **Фаза 1.5 (гейт эффектов, R1) — ✅ МЕХАНИЗМ СДЕЛАН:** `:allowed-effects` в
+- **Фаза 1.5 (гейт эффектов, R1) — МЕХАНИЗМ СДЕЛАН:** `:allowed-effects` в
   ctx + проверка в `record-effect!` + coverage-аудит (0 дыр) +
   `cloud-forbidden-effects`/`default-cloud-allowed-effects`. **Проводка
   отложена в аддон** (§3.0, §5): глобальный флаг на default-ctx ломает
   платформу. Билд-тайм фильтрация реестра — второй слой, follow-up.
 - **Фаза 2–3 (tenancy-аддон, по §3.0):** строго в порядке предусловий —
-  1. **auth-шов** (R13) — ✅ **СДЕЛАНО** (ветка `feature/auth-seam`):
+  1. **auth-шов** (R13) — сделано (ветка `feature/auth-seam`):
      `graphden.auth.provider/AuthProvider` протокол + дефолтный
      `SingleTokenAuthProvider`; Integrant-ключ `:auth/provider`; ctx-опт
      `:auth-provider`; graph-шов `:authenticate-request` →
      `:request-authenticated?`. Аддон переопределяет `:auth/provider`.
-  2. **манифест аддонов** — ✅ **СДЕЛАНО**: `config/read-config` deep-мержит
+  2. **манифест аддонов** — сделано: `config/read-config` deep-мержит
      Aero-фрагменты аддонов из `GRAPHDEN_ADDON_CONFIGS` (env, comma-sep
      classpath-ресурсы) поверх core-конфига; фрагмент аддона переопределяет
      indirection-ключи (напр. `:auth/provider`) + добавляет свои; директива
      `:graphden/require` грузит init-key-неймспейсы аддона. Без аддонов —
      no-op (single-tenant). (Заменяет набросок `executor-packages.edn`.)
-  3. **`OrgScopedStorage` + RLS** (R6, оба слоя) — ✅ **ПОСТРОЕНО И
+  3. **`OrgScopedStorage` + RLS** (R6, оба слоя) — **ПОСТРОЕНО И
      ПРОТЕСТИРОВАНО** (B1–B5, ветка `feature/auth-seam`):
      - *storage-seam* `:app/storage` (Integrant identity-passthrough) ПОД
        versioning, чтобы `vs/unwrap` сохранял tenant-фильтр (нюанс 1);
@@ -749,18 +749,18 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
      - **provider** `tenancy.auth/TokenAuthProvider` резолвит bearer →
        `{:user :org}` (hashed-token lookup); цепочка `token → org →
        *current-org* → OrgScoped + RLS` доказана end-to-end.
-     - **ops: datasource-wrap ✅** `rls/org-aware-datasource` оборачивает
+     - **ops: datasource-wrap** `rls/org-aware-datasource` оборачивает
        пул `:db/postgres` (seam `:datasource-wrap`), ставит
        `graphden.current_org` из `*current-org*` на каждом borrow (tenant →
        org, public/admin/unbound → '' = видит всё); доказано тестом.
-     - **ops: enable-rls! автозапуск ✅** `:tenancy/rls-enabler` Integrant-
+     - **ops: enable-rls! автозапуск** `:tenancy/rls-enabler` Integrant-
        компонент (зависит от `:db/postgres` → таблицы уже созданы) ставит
        политики на boot; доказано (policy на всех 5 scoped-таблицах).
      *Остаётся чистый деплой/инфра:* приложение под non-superuser ролью
      (superuser обходит RLS); реальный token-source (storage/secret вместо
      static-map). Дальше по плану: per-org LRU (R8) → org-скоуп секретов
      (R9) → поддомены (R10, R11);
-  4. **проводка effect-gate** — ✅ **СДЕЛАНО**: request-scope wrap для
+  4. **проводка effect-gate** — сделано: request-scope wrap для
      реального тенанта (org ≠ public) биндит `cr/*allowed-effects*
      default-cloud-allowed-effects` вокруг хендлера → cloud-граф не может
      env/io/network/process. `execute` re-биндит `*allowed-effects*` только
@@ -770,30 +770,30 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
      unrestricted; binding восстанавливается (no leak). *(Реализация через
      dynamic var per-request, а не «:allowed-effects на ctx» — ctx общий
      per-branch, org — per-request.)*
-  5. **`grant`-примитив** (§4.2) — ✅ **ПРИМИТИВ ГОТОВ**:
+  5. **`grant`-примитив** (§4.2) — **ПРИМИТИВ ГОТОВ**:
      `tenancy.grant` — `(subject, capability, namespace)`, `can?`
      (default-deny; `:admin` ⇒ остальные capabilities; ns-grant покрывает
      потомков по dot-path; root = blank ns), `GrantStore` протокол +
      static-map impl + `:tenancy/grant-store` init-key + `authorized?`
      мост от auth-principal (`:user`). Доказано (5 тестов / 17 ассертов).
-     - **enforcement ✅ (opt-in)** request-scope wrap при наличии
+     - **enforcement (opt-in)** request-scope wrap при наличии
        `:grant-store` гейтит write/execute тенанта: `request->capability`
        (POST/PUT/PATCH/DELETE→write, `/execute`→execute, else read) +
        `request-permitted?` → 403 если нет права на org; reads открыты
        (OrgScoped рулит видимостью); platform не гейтится. Доказано.
-     - **UI-сигнал ✅** request-scope вешает `X-Graphden-Capabilities`
+     - **UI-сигнал** request-scope вешает `X-Graphden-Capabilities`
        (comma-list: `write,execute` / подмножество / пусто) на каждый
        non-403 ответ — контракт, который редактор читает, чтобы прятать
        affordances. Доказано (tenant с `:write` → "write", без грантов →
        "", platform → "write,execute").
-     - **editor-JS gating ✅** fetch-wrap читает `X-Graphden-Capabilities`
+     - **editor-JS gating** fetch-wrap читает `X-Graphden-Capabilities`
        с каждого /api-ответа → `graphdenCapabilities` + body-классы
        `gd-no-write`/`gd-no-execute`; CSS прячет `.more-actions-trigger`
        (вход в ✎/+/✕/▶) при `gd-no-write`. Без аддона header отсутствует →
        классы не ставятся → редактор без изменений. **Проверено Playwright
        на localhost:9002:** редактор грузится чисто (fetch-wrap безопасен),
        `graphdenCanWrite()` = true без header, CSS-гейт прячет affordance.
-     - **per-target-namespace ✅** request-scope теперь coarse-гейт
+     - **per-target-namespace** request-scope теперь coarse-гейт
        (`has-capability?` — «писатель/исполнитель вообще?»), а ТОЧНУЮ
        проверку делает storage-слой (`tenancy.authz/authorize-writer`):
        резолвит ns-path из дерева `:ns` (name+parent-id), проверяет грант
@@ -803,7 +803,7 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
        Postgres** (alice с грантом на acme.team пишет туда, но не в acme;
        admin/public не гейтится). Скоуп: `:fn`-записи с `:namespace-id`;
        прочие сущности/update без ns-id — coarse-гейт + RLS (follow-up).
-     - **storage-backed store ✅** новый seam `:db/schema {:extensions […]}`
+     - **storage-backed store** новый seam `:db/schema {:extensions […]}`
        (addon добавляет сущности без правки ядра) → `:grant`-entity
        (`graphden.tenancy.grant-schema`) + `StorageBackedGrantStore` читает
        `:grant`-строки (capability text→keyword), `:tenancy/grant-store`
@@ -811,13 +811,13 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
        Доказано: unit (extend-builder, seam, store) + **real-Postgres**
        (`:grant`-таблица, roundtrip, `can?`); boot backward-compat. Гранты
        теперь обычные entity → CRUD через `/api/entities/grant`.
-     - **per-action gating ✅** CSS по `data-action` в popover: `gd-no-write`
+     - **per-action gating** CSS по `data-action` в popover: `gd-no-write`
        прячет write-экшены (rename/extend/delete/mi-parent/ns-move/use-site/
        service-settings), `gd-no-execute` — `run-fn`; read-экшены
        (i/↗/⌛) всегда видны; full read-only (нет write И execute) прячет
        сам `⋯`-вход. **Проверено Playwright:** execute-only прячет write +
        показывает run; write-only прячет run; read-only прячет вход.
-     - **per-namespace execute ✅** инъектируемый `:execute-guard` на ctx;
+     - **per-namespace execute** инъектируемый `:execute-guard` на ctx;
        `cr/execute` консультирует его ОДИН раз на top-level (recursion-flag
        `*execute-authorized*` держит его вне hot sub-fn пути), throw
        `:authz/forbidden` → 403-bridge. `authz/authorize-executor` резолвит
@@ -825,19 +825,19 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
        `:execute`; skip для public/admin + system (нет principal). Доказано:
        unit (guard по namespace, fires-once, denial/skip) + execute_http
        (реальный /api/execute через dispatch) + boot backward-compat.
-     - **личные неймспейсы ✅** `grant/with-personal-namespaces` —
+     - **личные неймспейсы** `grant/with-personal-namespaces` —
        GrantStore-декоратор: каждый юзер неявно держит `:admin` на
        `<prefix>.<user>` (напр. `users.alice`), без grant-строки;
        композируется со static/storage-backed store; `:personal-ns-prefix`
        в `:tenancy/grant-store`. Доказано: юзер владеет своим ns +
        потомками (все capabilities), не владеет чужим, base-гранты
        сохраняются. *(Provisioning самой `:ns`-сущности — follow-up.)*
-     - **workspaces ✅ (backend)** `grant/workspace` — union именованных
+     - **workspaces (backend)** `grant/workspace` — union именованных
        namespace'ов из грантов юзера (+ personal через декоратор; root/blank
        и public исключены); сортированный set. Surface через
        `X-Graphden-Workspace` header в request-scope (tenant → его
        namespace'ы, platform → пусто). Доказано: pure + header через
-       dispatch. **editor-frontend ✅** fetch-wrap читает header →
+       dispatch. **editor-frontend** fetch-wrap читает header →
        `graphdenWorkspace` + `window.graphdenInWorkspace(path)`; sidebar
        вешает `.ns-in-workspace` на ns-header в workspace → CSS left-accent.
        Без аддона — no-op. **Проверено Playwright:** helper есть, no-op без
@@ -846,12 +846,12 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
      *Остаётся:* `:terminal`/`:list-append` (R2);
   6. **продуктовый fns-пакет** «org-admin» (UI организаций/юзеров/грантов),
      зависит от сущностей аддона.
-     - **fns-channel seam ✅** `:app/packages {:extra-package-names […]}` —
+     - **fns-channel seam** `:app/packages {:extra-package-names […]}` —
        аддон добавляет свои fns-пакеты через манифест, не переписывая
        core-список; грузятся ТОЛЬКО при активном аддоне (§2.1). Доказано:
        extra грузится вместе с core, no-extra без изменений, boot ок.
        *Это разблокирует org-admin UI как `tenancy-admin` fns-пакет.*
-     - **route-collection seam ✅** Проблема: core `:all` не может ссылаться
+     - **route-collection seam** Проблема: core `:all` не может ссылаться
        на маршруты conditionally-loaded аддон-пакета (fn-def name-коллизия =
        hard error; unresolved arg-ref → молчаливый literal, мусор в списке
        маршрутов). Решение зеркалит branch-router: новый core-пакет
@@ -868,20 +868,20 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
        single-tenant байт-в-байт без изменений. Доказано (faas_app_test):
        seam отдаёт `/partials/grants-admin`, fall-through на `/health`,
        org-gating (public видит грант, tenant — пустая таблица).
-     - **grants-admin ✅** Мигрирована из core `app/admin` в `tenancy-admin`
+     - **grants-admin** Мигрирована из core `app/admin` в `tenancy-admin`
        (panel + `:list-grants`/`:create-grant` base-fns + `POST /api/grants`),
        убрана из core `:all`; editor JS не тронут (тот же `/partials/*` путь,
        `/api/grants` помечен `api-url-drift-allow`).
-     - **users-admin ✅** Мигрирована тем же образцом (panel + `:list-users`/
+     - **users-admin** Мигрирована тем же образцом (panel + `:list-users`/
        `:invoke-create-user` + `POST /api/users`). Заодно вынесен общий
        `tenancy-admin/router`-модуль: `:tenancy-routes` агрегирует маршруты всех
        панелей, `:tenancy-router` компилит их (каждый модуль-панель просто
        объявляет свои routes). `/api/users` помечен `api-url-drift-allow`.
-     - **provisioning + my-app ✅** Мигрированы модулями `registration`
+     - **provisioning + my-app** Мигрированы модулями `registration`
        (create-org/token/domain + set-org-handler, platform-only) и `my-app`
        (set-my-app-handler + verify-my-domain, self-serve). Убраны из core
        `:all`; не зовутся из editor JS (кроме `/api/my-app/handler`).
-     - **auth ✅** login/signup/logout/logout-all мигрированы в
+     - **auth** login/signup/logout/logout-all мигрированы в
        `tenancy-admin/auth`. После этого **`app/admin` удалён** (пакет пуст).
        Single-tenant аутентификация (статичный bearer + GET `/api/auth/check`,
        CORE-маршрут в `app/routes`) не тронута; editor зовёт auth-роуты только в
@@ -906,7 +906,7 @@ platform-ctx (`public-org`) остаётся unrestricted. Частичный wi
      route-collection шов И на бэке (tenancy-router), И на фронте (window.API);
      `app/admin` больше нет; фронт авто-подхватывает tenancy-роуты из графа
      роутинга, хардкода путей нет. Single-tenant без аддона их не имеет.
-     - **HTMX-формы ✅ (grants/users)** Client-JS fetch-слой панелей убран:
+     - **HTMX-формы (grants/users)** Client-JS fetch-слой панелей убран:
        create — настоящий `<form hx-post>`, delete — `hx-delete` +
        `hx-swap="delete"` (строка `<tr>` исчезает, ответ не важен), оба прямо в
        server-rendered hiccup. POST-handler через `:do [create render-panel]`

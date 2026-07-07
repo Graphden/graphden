@@ -36,9 +36,9 @@ or-equivalent recursion concern got sidestepped — see 0b.
 
 | Primitive | Status | Shape | Purpose |
 |---|---|---|---|
-| `:fn-row-by-id` | ✅ shipped (commit `08c77e7a`) | Pure fn-def: `:storage-query-call` → `:first` → `:decode-row` | Read one fn entity by id. Used by every row-actions partial to look up name / description / namespace-id. |
-| `:request-authed?` | ✅ shipped (commit `08c77e7a`) | Thin alias of `:_bearer-equals-env?` | Conditional rendering of edit affordances. |
-| `:fn-ns-path` | ✅ shipped (commit `fa990ca9`) | `defbase` with depth-capped loop (no `:fix` needed — base-fn iteration carve-out) | Produce `"core.refinements"` string from a `:namespace-id`. |
+| `:fn-row-by-id` | commit `08c77e7a` | Pure fn-def: `:storage-query-call` → `:first` → `:decode-row` | Read one fn entity by id. Used by every row-actions partial to look up name / description / namespace-id. |
+| `:request-authed?` | commit `08c77e7a` | Thin alias of `:_bearer-equals-env?` | Conditional rendering of edit affordances. |
+| `:fn-ns-path` | commit `fa990ca9` | `defbase` with depth-capped loop (no `:fix` needed — base-fn iteration carve-out) | Produce `"core.refinements"` string from a `:namespace-id`. |
 | `:fn-usage-count` | ⏳ deferred to Phase A4 | Multi-table count: `binding.ref-fn-id` + `binding-list-item.ref-fn-id` + `fn.parent-ids` membership | Only the root-row buttons need editability gating (✎ rename, ✕ delete). Col-header / MI-cell / use-site contexts gate editability CLIENT-SIDE in the dispatcher — server emits the button always, client re-checks `isFnEditable(fnId)` from `lookups` at click time. This keeps Phase A1-A3 unblocked. |
 | `:fn-is-editable?` | ⏳ with 0c | `(zero? :fn-usage-count)` | Same as above. |
 
@@ -49,7 +49,7 @@ for the delete-flow. When 0c lands, write a parallel chain over
 OR refactor the delete-flow chain to take an `:fn-id` free arg
 and reuse it.
 
-## Phase A — Row-actions popover migration ✅ DONE
+## Phase A — Row-actions popover migration
 
 Single partial `:partial-row-actions` handles 4 server-rendered
 contexts via `?context=…`. Two more JS dispatch paths reuse the
@@ -59,8 +59,8 @@ same contexts (parent-edit row → `cell`; read-only fall-through
 | Stage | Commit | Context | Buttons |
 |---|---|---|---|
 | A1 | `79865f17` | `col-header` | ns / i / ↗ |
-| A2 | `7b251ebe` | `cell` (MI cell + Phase-A4.5 parent-edit) | ns / i / ↗ / × Remove-MI / + Add-MI (last two when `editable=true`) |
-| A3 | `179f8bc5` | `use-site-arg` | ns / i / ↗ / × Remove-binding / ✎ Change-value (last two when `editable=true`) |
+| A2 | `7b251ebe` | `cell` (MI cell + Phase-A4.5 parent-edit) | ns / i / ↗ / × Remove-MI / + Add-MI (last two when `editable=true` |
+| A3 | `179f8bc5` | `use-site-arg` | ns / i / ↗ / × Remove-binding / ✎ Change-value (last two when `editable=true` |
 | A4 | `6076f1d2` | `root-row` | ns / i / ↗ / ▶ Run / ⌛ History / ⚙ Service / ✎ Rename / + Extend / ✕ Delete (with `edit-block-reason` + `service-blocked-reason` disabled-with-reason variants) |
 | A4.5 | `6afddd33` | (reuses cell + col-header) | parent-edit row → cell; read-only fallthrough → col-header |
 | A5 | `e3f737b1` | (cleanup) | Deleted `createNamespaceBadge` / `createPinnedIconButton` / `createEditPencilButton` / `applyIconDisabledReason` / `makeAddMIParentButton` / `rowWantsNamespaceBadge` — `-261 LOC` editor JS |
@@ -191,13 +191,13 @@ multi-button assembly with per-action data). Remaining JS is
 graphData) or **canvas-bound** (cytoscape overlays). Both fall
 under skill §6's `keep JS` criteria.
 
-## Phase D — Cleanup ✅ DONE
+## Phase D — Cleanup
 
 | Stage | Status | What |
 |---|---|---|
-| D1 | ✅ | Audited `graphData` usage — still needed by sidebar tree + cytoscape overlays + pickers, all of which are JS by skill §6.2. No safe trimming opportunity. |
-| D2 | ✅ | Removed dead CSS: `.edit-pencil` / `.pinned-icon-btn*` / `.action-disabled` (no JS adds these classes after A5). Consolidated `.row-actions-popover` selector list to use `.action-icon` instead of the dropped per-factory classes. |
-| D3 | ✅ | `bb check` + `bb rebuild` smoke + full `bb test` all clean. Phase 0c (`:fn-usage-count` + `:fn-is-editable?`) STAYS deferred — not needed at any current callsite. |
+| D1 | done | Audited `graphData` usage — still needed by sidebar tree + cytoscape overlays + pickers, all of which are JS by skill §6.2. No safe trimming opportunity. |
+| D2 | done | Removed dead CSS: `.edit-pencil` / `.pinned-icon-btn*` / `.action-disabled` (no JS adds these classes after A5). Consolidated `.row-actions-popover` selector list to use `.action-icon` instead of the dropped per-factory classes. |
+| D3 | done | `bb check` + `bb rebuild` smoke + full `bb test` all clean. Phase 0c (`:fn-usage-count` + `:fn-is-editable?`) STAYS deferred — not needed at any current callsite. |
 
 ## Estimated net effect
 

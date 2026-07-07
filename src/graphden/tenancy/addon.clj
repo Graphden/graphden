@@ -280,7 +280,11 @@
    :user/invalid 400
    :domain/unverified 400
    :user/not-found 404
-   :user/exists 409})
+   :user/exists 409
+   ;; A concurrent duplicate on a UNIQUE column (`:org.name`,
+   ;; `:domain.hostname`, `:token.token-hash`) — `create-org` / `create-domain`
+   ;; / `create-token` write those directly, so the storage layer throws this.
+   :constraint-violation/unique 409})
 
 
 (defn- domain-error-response

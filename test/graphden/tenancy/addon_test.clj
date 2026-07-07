@@ -206,7 +206,10 @@
       (is (= 400 (status :domain/unverified))))
     (testing "not-found → 404, conflict → 409"
       (is (= 404 (status :user/not-found)))
-      (is (= 409 (status :user/exists))))
+      (is (= 409 (status :user/exists)))
+      ;; A UNIQUE-column duplicate (org name / domain host / token hash) from a
+      ;; direct create-org/domain/token — must be 409, not a bare 500.
+      (is (= 409 (status :constraint-violation/unique))))
     (testing "internal error types are NOT masked as 4xx (still surface / 500)"
       (is (thrown? clojure.lang.ExceptionInfo (status :org/scoped-storage))))
     (testing "the 4xx body carries the machine-readable error type (no leading colon)"

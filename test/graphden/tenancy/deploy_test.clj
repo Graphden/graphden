@@ -50,3 +50,23 @@
                     nil (catch clojure.lang.ExceptionInfo e e))]
         (is (= :authz/forbidden (:type (ex-data ex))))
         (is (nil? @up))))))
+
+
+(deftest set-org-handler-missing-org-row-throws
+  ;; A valid tenant token whose `:org` row is gone (deleted post-token) must
+  ;; throw :authz/forbidden — NOT return nil, which the handler would render as
+  ;; a 200 `"nil"` body.
+  (let [fid (random-uuid)
+        up (atom nil)
+        storage (reify sp/StorageCRUD
+                  (read-entity [_ en id] (when (and (= en :fn) (= id fid)) {:id id}))
+                  (query-entities [_ en _] (when (= en :org) [])) ; org row missing
+                  (query-entities [_ _ _ _] nil)
+                  (create-entity [_ _ _] nil)
+                  (update-entity [_ en id data] (reset! up [en id data]) data)
+                  (delete-entity [_ _ _] nil)
+                  (query-latest-per-group [_ _ _ _] nil))
+        ex (try (tc/with-org "acme" (deploy/set-org-handler! {:storage storage} fid))
+                nil (catch clojure.lang.ExceptionInfo e e))]
+    (is (= :authz/forbidden (:type (ex-data ex))))
+    (is (nil? @up) "no :org write when the row is missing")))

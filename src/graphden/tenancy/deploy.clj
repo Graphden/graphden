@@ -19,9 +19,11 @@
 
 (defn set-org-handler!
   "Point the current tenant's org at `fn-id` as its app handler. Throws
-   `:authz/forbidden` when there is no tenant org (public/unauthenticated) or
-   `fn-id` isn't readable by the tenant (not its own / public). Returns the
-   updated `:org` row on success, or nil when the org row is missing."
+   `:authz/forbidden` when there is no tenant org (public/unauthenticated),
+   when `fn-id` isn't readable by the tenant (not its own / public), or when
+   the tenant's `:org` row is missing (a token for a deleted org). Returns the
+   updated `:org` row on success — never a nil the handler would render as a
+   200 `\"nil\"` body."
   [ctx fn-id]
   (let [org (tc/current-org)
         storage (:storage ctx)]
@@ -39,8 +41,10 @@
     ;; forbidden). Scoped to `name = org`, the org from the authenticated
     ;; token, so it can never touch another org's row.
     (tc/with-org tc/public-org
-                 (when-let [row (first (sp/query-entities storage :org {:name org}))]
-                   (sp/update-entity storage :org (:id row) {:handler-fn-id fn-id})))))
+                 (if-let [row (first (sp/query-entities storage :org {:name org}))]
+                   (sp/update-entity storage :org (:id row) {:handler-fn-id fn-id})
+                   (throw (ex-info "forbidden: no :org row for this tenant"
+                                   {:type :authz/forbidden :org org}))))))
 
 
 (defn verify-domain!

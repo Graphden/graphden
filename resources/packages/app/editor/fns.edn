@@ -2541,9 +2541,16 @@
    :parent :get
    :args {:coll {:as :item} :key {:value :started-at} :default {:value ""}}}
 
+  ;; `:started-at` is a `java.sql.Timestamp` off the decoded row — must
+  ;; stringify before `:subs`, or `count`-on-Timestamp 500s the handler.
+  ;; Mirror of `:_partial-eh-row-started-at-text`.
+  {:name :_partial-fnv-exec-started-at-text
+   :parent :to-str
+   :args {:value :_partial-fnv-exec-started-at}}
+
   {:name :_partial-fnv-exec-ts-short
    :parent :subs
-   :args {:string :_partial-fnv-exec-started-at
+   :args {:string :_partial-fnv-exec-started-at-text
           :start {:value 0}
           :end {:value 16}}}
 

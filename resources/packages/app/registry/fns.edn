@@ -108,7 +108,7 @@
    :description "The full published bundle for `(:pkg-name, :pkg-version)`, or nil if not found."
    :args {:pkg-name {:type :text :description "Package name."}
           :pkg-version {:type :text :description "Semver version string."}}
-   :return-type [:union :null :keyword-map]
+   :return-type :nullable-keyword-map
    :effects #{:db}}
 
   {:name :_fetch-pkg-name

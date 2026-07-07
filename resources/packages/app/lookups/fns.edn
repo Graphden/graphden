@@ -80,7 +80,7 @@
 
   {:name :fn-ns-path
    :description "Walk the `:ns` parent-id chain from `ns-id` to root, joining each name with `.`. `:_<core.refinements ns-id>` → `\"core.refinements\"`. Empty string when `ns-id` is nil. Depth-capped at 20."
-   :args {:ns-id {:type [:union :null :uuid]
+   :args {:ns-id {:type :nullable-uuid
                   :description "Starting namespace id. `nil` (or unknown) → empty string return."}}
    :return-type :text
    :effects #{:db}}]}

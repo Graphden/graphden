@@ -200,7 +200,7 @@
   {:name :invoke-logout-all
    :description "Invoke the addon's logout-all seam — delete every session token for the current user. Returns the count deleted, or nil when the addon isn't active."
    :args {}
-   :return-type [:union :null :int]
+   :return-type :nullable-int
    :effects #{:db}}
 
   {:name :_logout-all-do

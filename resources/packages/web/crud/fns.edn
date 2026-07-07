@@ -1254,7 +1254,7 @@
   {:name :_create-fn-slot-fn-row
    :description "Owner fn row (the fn being given a slot). Read lazily — `:_create-fn-slot-rename-fires?`'s outer `:and` short-circuits non-fn-slot creates before this evaluates."
    :parent :get-entity
-   :return-type [:union :null :fn-row-shape]
+   :return-type :nullable-fn-row-shape
    :args {:entity-type {:value "fn"} :id :_create-fn-slot-fn-id}}
 
   {:name :_create-fn-slot-slot-row
@@ -1409,7 +1409,7 @@
   {:name :_create-svc-fn-row
    :description "Used solely for `(pr-str (:name fn-row))` in the rejection message; lazy via the outer `:if`'s short-circuit."
    :parent :get-entity
-   :return-type [:union :null :fn-row-shape]
+   :return-type :nullable-fn-row-shape
    :args {:entity-type {:value "fn"} :id :_create-svc-fn-id}}
 
   {:name :_create-svc-fn-row-name
@@ -2019,7 +2019,7 @@
 
   {:name :_delete-target-fn-row
    :parent :get-entity
-   :return-type [:union :null :fn-row-shape]
+   :return-type :nullable-fn-row-shape
    :args {:entity-type {:value "fn"} :id :_delete-target-id}}
 
   {:name :_delete-target-parent-ids

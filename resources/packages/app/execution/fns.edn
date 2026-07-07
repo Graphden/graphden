@@ -149,7 +149,7 @@
   {:name :_execute-fn-row
    :description "Full :fn row for the parsed request, or nil when neither :fn-id nor :fn-name resolves."
    :parent :resolve-fn
-   :return-type [:union :null :fn-row-shape]
+   :return-type :nullable-fn-row-shape
    :args {:parsed {:as :parsed}}}
 
   {:name :_execute-fn-row-id
@@ -1710,7 +1710,7 @@
                     :_er-status-succeeded?   :_er-succeeded-body
                     :_er-status-failed?      :_er-error-pane
                     {:value true}            :_er-neutral-pane]
-          :exec {:type [:union :null :keyword-map]
+          :exec {:type :nullable-keyword-map
                  :description "Decoded execution row from `:get-execution` OR the inline-Run JSON body. Both call sites bind via `:_partial-execute-result-fragment` / `:_partial-execute-result-inline-fragment` wrappers in `app/editor/fns.edn`."}}}
 
   ;; =====================================================================

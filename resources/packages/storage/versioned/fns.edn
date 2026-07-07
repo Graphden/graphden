@@ -55,6 +55,10 @@
           :expects-effects :nullable-jsonb
           :branch-local? :nullable-bool}}
 
+  {:name :nullable-fn-row-shape
+   :description "`:fn-row-shape` or nil — the return type of a read-one-fn lookup that may miss. Named because the union appears at 6+ read sites (web/crud, app/secrets, app/execution)."
+   :union [:null :fn-row-shape]}
+
   {:name :branch-row-shape
    :description "Decoded `:branch` storage row — identity + parent ref. `:created-at` is a `java.sql.Timestamp` on the JVM side (no matching graphden scalar tag); callers that need it as text wrap via `:to-str` before serializing. Open record admits that field plus any forward-compatible additions."
    :type {:id :uuid
@@ -184,13 +188,13 @@
   {:name :vault-metadata-shape
    :description "Decoded vault metadata response from OpenBao KV v2 `/metadata/<path>` — the inner `:data` map. Keys carry OpenBao's wire-form (snake_case keywords) since vault is an external API, NOT graphden's `:decode-row` boundary. `:custom_metadata` is a user-defined free-form map; everything else carries OpenBao's audit-trail fields. All admit-nil at the boundary because OpenBao may omit fields under various error / not-found paths."
    :type {:custom_metadata :nullable-jsonb
-          :current_version [:union :null :int]
-          :max_versions [:union :null :int]
+          :current_version :nullable-int
+          :max_versions :nullable-int
           :destroyed :nullable-bool
           :deletion_time :nullable-text
           :created_time :nullable-text
           :updated_time :nullable-text
-          :oldest_version [:union :null :int]
+          :oldest_version :nullable-int
           :cas_required :nullable-bool}}
 
   ;; =====================================================================

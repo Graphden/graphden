@@ -109,36 +109,39 @@
   [store storage]
   (fn [entity-name data id]
     (when (not= (tc/current-org) tc/public-org) ; platform / admin: unrestricted
-      (case entity-name
-        :fn (cond
-              ;; create / namespace-move → `:write` on the TARGET namespace.
-              (contains? data :namespace-id)
-              (do
-                (when-not (writable? store storage tc/*current-principal* (:namespace-id data))
-                  (throw (ex-info "forbidden: no :write grant on the target namespace"
-                                  {:type :authz/forbidden :namespace-id (:namespace-id data)})))
-                ;; A MOVE of an EXISTING fn (id present) also needs `:write`
-                ;; on the fn's CURRENT namespace — otherwise a holder of the
-                ;; target namespace alone could pull a fn out of a namespace
-                ;; they were deliberately not granted. A create (id nil) has
-                ;; no source namespace to check.
-                (when id
-                  (deny-write! store storage :write id)))
-              ;; delete / structural update (parent-ids, …) of an EXISTING fn —
-              ;; the delta carries no `:namespace-id`, so gate on the fn's OWN
-              ;; namespace (read by id). Without this a `:bind-args` holder,
-              ;; which passes the coarse `can-mutate?` gate, could delete or
-              ;; reparent ANY fn in the org, including namespaces it holds no
-              ;; grant on. (A create with no namespace — id nil — stays
-              ;; ungated: it lands as an org-owned rootless fn.)
-              id
-              (deny-write! store storage :write id))
-        :binding (deny-write! store storage
-                              (if (value-only-binding-delta? data) :bind-args :write)
-                              (binding-owner-fn-id storage data id))
-        :binding-list-item (deny-write! store storage :append-list
-                                        (list-item-owner-fn-id storage data id))
-        nil))))
+      ;; Pick up the request-scope memo so a batch write shares ONE `:grant`
+      ;; query across all its rows instead of one per row.
+      (let [store (grant/request-store store)]
+        (case entity-name
+          :fn (cond
+                ;; create / namespace-move → `:write` on the TARGET namespace.
+                (contains? data :namespace-id)
+                (do
+                  (when-not (writable? store storage tc/*current-principal* (:namespace-id data))
+                    (throw (ex-info "forbidden: no :write grant on the target namespace"
+                                    {:type :authz/forbidden :namespace-id (:namespace-id data)})))
+                  ;; A MOVE of an EXISTING fn (id present) also needs `:write`
+                  ;; on the fn's CURRENT namespace — otherwise a holder of the
+                  ;; target namespace alone could pull a fn out of a namespace
+                  ;; they were deliberately not granted. A create (id nil) has
+                  ;; no source namespace to check.
+                  (when id
+                    (deny-write! store storage :write id)))
+                ;; delete / structural update (parent-ids, …) of an EXISTING fn —
+                ;; the delta carries no `:namespace-id`, so gate on the fn's OWN
+                ;; namespace (read by id). Without this a `:bind-args` holder,
+                ;; which passes the coarse `can-mutate?` gate, could delete or
+                ;; reparent ANY fn in the org, including namespaces it holds no
+                ;; grant on. (A create with no namespace — id nil — stays
+                ;; ungated: it lands as an org-owned rootless fn.)
+                id
+                (deny-write! store storage :write id))
+          :binding (deny-write! store storage
+                                (if (value-only-binding-delta? data) :bind-args :write)
+                                (binding-owner-fn-id storage data id))
+          :binding-list-item (deny-write! store storage :append-list
+                                          (list-item-owner-fn-id storage data id))
+          nil)))))
 
 
 (defn executable?
@@ -158,7 +161,8 @@
   (fn [ctx fn-id]
     (when (and (not= (tc/current-org) tc/public-org)
                tc/*current-principal*)
-      (let [storage (:storage ctx)
+      (let [store (grant/request-store store)
+            storage (:storage ctx)
             ns-id (:namespace-id (sp/read-entity storage :fn fn-id))]
         (when-not (executable? store storage tc/*current-principal* ns-id)
           (throw (ex-info "forbidden: no :execute grant on the fn's namespace"

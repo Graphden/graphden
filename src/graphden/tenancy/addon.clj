@@ -352,12 +352,14 @@
           cross-org? (and host-org
                           (not= org tc/public-org)
                           (not= host-org org))
-          ;; Per-request memo over the singleton grant-store: the header
-          ;; builders below call `grants-for` for the SAME subject 3-4×
-          ;; (capabilities runs `can?` per action cap + workspace once) —
-          ;; without this each is a fresh `:grant` query. Scoped to this
-          ;; read-only window (after the thunk, no grant mutation between),
-          ;; fresh atom per request, so it can't serve stale grants.
+          ;; Per-request memo over the singleton grant-store, shared by every
+          ;; `grants-for` consumer this request: the coarse gate, the header
+          ;; builders (capabilities runs `can?` per action cap + workspace
+          ;; once), and the storage write guard (fires per row on a batch
+          ;; write). Without it each is a fresh `:grant` query. Bound onto
+          ;; `*request-grant-store*` below so the init-time guard closure picks
+          ;; it up. Fresh atom per request, read-only window (no grant mutation
+          ;; between), so it can't serve stale grants.
           header-grant-store (when grant-store (grant/memoizing-grant-store grant-store))
           ;; Run the handler, attach the capability header, and map a
           ;; per-namespace `:authz/forbidden` thrown at the storage layer to
@@ -376,8 +378,12 @@
                         (domain-error-status t) (domain-error-response t (domain-error-status t))
                         :else (throw e))))))]
       ;; `*current-principal*` is read by the storage-layer per-namespace
-      ;; guard; `*current-org*` scopes storage + RLS.
-      (binding [tc/*current-principal* principal]
+      ;; guard; `*current-org*` scopes storage + RLS;
+      ;; `*request-grant-store*` shares the per-request grant memo with the
+      ;; storage guard (which fires per row on a batch write) + the coarse
+      ;; gate below, collapsing all of them to ONE `:grant` query per subject.
+      (binding [tc/*current-principal* principal
+                grant/*request-grant-store* header-grant-store]
         (tc/with-org org
                      (cond
                        ;; Cross-org (§3.2): an authenticated tenant whose org
@@ -393,7 +399,7 @@
                        ;; 403 (the precise per-namespace check runs in `run` via the
                        ;; storage guard).
                        (and grant-store
-                            (not (grant/request-permitted? grant-store principal request org)))
+                            (not (grant/request-permitted? header-grant-store principal request org)))
                        forbidden-response
                        ;; Tenant — gate effects (env / io / network / process), run.
                        ;; A READ request additionally runs under the org-filtered

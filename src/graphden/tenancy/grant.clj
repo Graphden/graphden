@@ -137,6 +137,24 @@
   (->MemoGrantStore base (atom {})))
 
 
+(def ^:dynamic *request-grant-store*
+  "Per-request memoizing grant store, bound by the request-scope for the
+   duration of one tenant request. The storage-layer write guard and the
+   coarse `request-permitted?` gate read it via `request-store` so all
+   consumers of `grants-for` for the same subject share ONE `:grant` query —
+   including a batch write, where the guard fires per row. nil outside a
+   request (system / test callers pass their store explicitly)."
+  nil)
+
+
+(defn request-store
+  "The per-request grant store when a request-scope has bound one, else
+   `fallback` (the process singleton). Lets init-time closures pick up the
+   per-request memo without threading it through their signatures."
+  [fallback]
+  (or *request-grant-store* fallback))
+
+
 (defn can?
   "Does `subject` hold `capability` in `ns-path`, per `store`? A subject
    with no matching grant is denied (default-deny)."

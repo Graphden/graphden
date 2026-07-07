@@ -216,6 +216,34 @@
                      (is (nil? ((guard-of [:write]) :binding-list-item {:binding-id "b-team"} nil))))))))
 
 
+(deftest authorize-writer-shares-the-request-grant-memo
+  ;; A batch write fires the guard per row; under a bound per-request memo all
+  ;; rows share ONE `:grant` query for the same subject (vs one per row without).
+  (let [calls (atom 0)
+        base (grant/static-grant-store
+               [{:subject "alice" :capability :write :namespace "acme"}])
+        counting (reify grant/GrantStore
+                   (grants-for
+                     [_ subject]
+                     (swap! calls inc)
+                     (grant/grants-for base subject)))
+        guard (authz/authorize-writer counting store)]
+    (tc/with-org "acme"
+                 (binding [tc/*current-principal* {:user "alice"}]
+                   (testing "no request memo → one :grant query per guarded row"
+                     (reset! calls 0)
+                     (guard :fn {:namespace-id "acme"} nil)
+                     (guard :fn {:namespace-id "acme"} nil)
+                     (is (= 2 @calls)))
+                   (testing "bound per-request memo → one query shared across rows"
+                     (reset! calls 0)
+                     (binding [grant/*request-grant-store*
+                               (grant/memoizing-grant-store counting)]
+                       (guard :fn {:namespace-id "acme"} nil)
+                       (guard :fn {:namespace-id "acme"} nil))
+                     (is (= 1 @calls)))))))
+
+
 ;; --- per-namespace execute (the :execute-guard seam) ---
 
 (defn- fn+ns-store

@@ -32,7 +32,7 @@
    :expects-effects #{:io :env}}              ; reads JVM state (heap / threads / os) + env (hostname / user)
 
   {:name :version
-   :description "GET /version — `{\"build-hash\": \"<hex>\"}`. Hash is SHA-256 of every source file at build time; compare with `bb verify` to confirm a deploy actually shipped your changes."
+   :description "GET /version — `{\"frontend\": \"<hex>\", \"packages\": \"<hex>\", \"backend\": \"<hex>\"}`. Each is a SHA-256 over that section's source files at build time; compare with `bb verify` to confirm which section a deploy actually shipped."
    :parent :get-route
    :args {:path "/version" :handler :_version-handler}
    :expects-effects #{:io}}                   ; reads classpath resource only

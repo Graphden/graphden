@@ -981,10 +981,12 @@
    :args {:value {:as :resolved}}}
 
   {:name :_delete-branch-err-missing
-   :description "Dynamic error — cites the raw branch-ref."
+   :description "Dynamic error — cites the raw branch-ref. Parse-time flavour of `_delete-branch-err-not-found`; same envelope (incl. `:reason :not-found`)."
    :parent :zipmap
-   :args {:keys [:ok :error]
-          :vals [false
+   :return-type :_error-result-with-reason-shape
+   :args {:keys [{:value :ok} {:value :reason} {:value :error}]
+          :vals [{:value false}
+                 {:value :not-found}
                  {:parent :str
                   :args {:parts ["Branch not found: "
                                  {:parent :get

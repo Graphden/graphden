@@ -884,6 +884,40 @@
       (finally (sp/close base)))))
 
 
+(deftest list-item-concurrent-same-position-serialized-test
+  ;; The per-binding advisory lock serializes concurrent appends to the SAME
+  ;; binding, so racing inserts that computed the same position can't both land
+  ;; (which would corrupt the sequence order). Without the lock this races and
+  ;; 2+ can land; with it, exactly one lands and the rest hit the (now
+  ;; committed-visible) collision check.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [b (make-list-binding! v "cc")
+            n 8
+            results (->> (repeatedly n
+                                     (fn []
+                                       (future
+                                         (try
+                                           (sp/create-entity v :binding-list-item
+                                                             {:binding-id (:id b)
+                                                              :position 0
+                                                              :value 1})
+                                           :ok
+                                           (catch clojure.lang.ExceptionInfo e
+                                             (:type (ex-data e)))))))
+                         doall
+                         (mapv deref))
+            landed (sp/query-entities v :binding-list-item {:binding-id (:id b)})]
+        (testing "exactly one concurrent insert at position 0 lands"
+          (is (= 1 (count landed)))
+          (is (= 1 (count (filter #{:ok} results)))))
+        (testing "every loser hit the position-collision check (no silent double-insert)"
+          (is (every? #{:constraint-violation/position-collision}
+                      (remove #{:ok} results)))))
+      (finally (sp/close base)))))
+
+
 (deftest list-item-batch-duplicate-position-test
   (let [base (base-storage)
         v    (vs/wrap-with-versioning base)]

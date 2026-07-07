@@ -37,7 +37,8 @@
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.graph :as graph]
     [graphden.versioning.storage.merge :as mrg]
-    [graphden.versioning.storage.resolution :as res])
+    [graphden.versioning.storage.resolution :as res]
+    [next.jdbc :as jdbc])
   (:import
     (java.time
       Instant)))
@@ -236,25 +237,43 @@
       (let [id (or (:id data) (random-uuid))
             normalized (sp/standard-crud-normalize-data entity-name
                                                         (assoc data :id id))
-            _ (check-list-item-position-collision! base-storage branch-id
-                                                   entity-name normalized)
-            existing (sp/read-entity base-storage entity-name id)]
-        (when-not existing
-          (sp/create-entity base-storage entity-name normalized))
-        (let [{:keys [version-id-field version-data-fields]}
-              (get res/entity-config entity-name)
-              current-version (when existing
-                                (res/resolve-version base-storage entity-name id branch-id))
-              current-data (when current-version
-                             (select-keys (merge existing
-                                                 (dissoc current-version
-                                                         :id :branch-id :created-at
-                                                         version-id-field))
-                                          version-data-fields))
-              new-data (select-keys normalized version-data-fields)]
-          (when (or (nil? current-version) (not= current-data new-data))
-            (create-version-record! base-storage entity-name id branch-id normalized)))
-        normalized)))
+            do-create!
+            (fn [st]
+              (check-list-item-position-collision! st branch-id entity-name normalized)
+              (let [existing (sp/read-entity st entity-name id)]
+                (when-not existing
+                  (sp/create-entity st entity-name normalized))
+                (let [{:keys [version-id-field version-data-fields]}
+                      (get res/entity-config entity-name)
+                      current-version (when existing
+                                        (res/resolve-version st entity-name id branch-id))
+                      current-data (when current-version
+                                     (select-keys (merge existing
+                                                         (dissoc current-version
+                                                                 :id :branch-id :created-at
+                                                                 version-id-field))
+                                                  version-data-fields))
+                      new-data (select-keys normalized version-data-fields)]
+                  (when (or (nil? current-version) (not= current-data new-data))
+                    (create-version-record! st entity-name id branch-id normalized))))
+              normalized)]
+        ;; A `:binding-list-item` append's collision check + version insert must
+        ;; be atomic w.r.t. concurrent appends to the SAME binding — otherwise
+        ;; two appends read the same used-positions, compute the same next
+        ;; position, and both insert there, corrupting the per-branch sequence
+        ;; order. (The `(binding,position)` UNIQUE index was dropped because
+        ;; uniqueness is a per-branch RESOLVED-VIEW property, not a base-table
+        ;; one.) Serialize on a per-binding `pg_advisory_xact_lock` (auto-released
+        ;; at commit/rollback): the loser then sees the committed position and
+        ;; its collision check fires loudly instead of silently double-inserting.
+        (if (and (= entity-name :binding-list-item)
+                 (:binding-id normalized)
+                 (:pool base-storage))
+          (jdbc/with-transaction [tx (:pool base-storage)]
+                                 (jdbc/execute! tx ["SELECT pg_advisory_xact_lock(hashtext(?)::bigint)"
+                                                    (str (:binding-id normalized))])
+                                 (do-create! (assoc base-storage :pool tx)))
+          (do-create! base-storage)))))
 
 
   (read-entity

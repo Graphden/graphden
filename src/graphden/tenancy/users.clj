@@ -227,10 +227,22 @@
    which may pass the request as a trailing arg that this core fn ignores."
   [ctx username password org & _]
   (let [storage (:storage ctx)]
-    (when (and (not (str/blank? username)) (not (str/blank? password)) (not (str/blank? org)))
+    ;; `org` must NOT be the platform/public org: every tenancy gate treats
+    ;; `= current-org public-org` as the trusted operator and turns itself off
+    ;; (effect gate, RLS, per-namespace write guard), so a self-serve
+    ;; `org="public"` account would be a full platform-admin — sandbox escape +
+    ;; cross-tenant breach. Reject it up front.
+    (when (and (not (str/blank? username)) (not (str/blank? password))
+               (not (str/blank? org)) (not= org tc/public-org))
       (tc/with-org tc/public-org
                    (when (and (empty? (sp/query-entities storage :user {:username username}))
-                              (empty? (sp/query-entities storage :org {:name org})))
+                              (empty? (sp/query-entities storage :org {:name org}))
+                              ;; The `:org` table isn't the only trace of an org:
+                              ;; an operator may have minted `:user`/`:token` rows
+                              ;; for an org without a registry row. Signup must
+                              ;; never JOIN such an org, so treat any existing
+                              ;; user in `org` as "taken" too.
+                              (empty? (sp/query-entities storage :user {:org org})))
                      ;; New org + its first user. The UNIQUE constraints on
                      ;; :org.name / :user.username are the real guard against a
                      ;; concurrent duplicate; the checks above are for the UX.

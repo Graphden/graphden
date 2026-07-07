@@ -659,7 +659,15 @@
     (testing "a taken org → nil (signup can't join an existing org)"
       (is (nil? (cr/execute seam-ctx signup-id {:username "newbie2" :password "x" :org "newco"}))))
     (testing "blank fields → nil"
-      (is (nil? (cr/execute seam-ctx signup-id {:username "" :password "x" :org "z"}))))))
+      (is (nil? (cr/execute seam-ctx signup-id {:username "" :password "x" :org "z"}))))
+    (testing "the reserved platform org is rejected — no self-serve platform-admin"
+      ;; `org="public"` would mint a principal every tenancy gate treats as the
+      ;; trusted operator (effect gate off, RLS unset, write guard skipped) —
+      ;; a full sandbox escape. Signup must refuse it and create nothing.
+      (is (nil? (cr/execute seam-ctx signup-id
+                            {:username "attacker" :password "x" :org tc/public-org})))
+      (is (nil? (first (sp/query-entities (:storage *ctx*) :user {:username "attacker"})))
+          "no user created for the reserved org"))))
 
 
 ;; ---------------------------------------------------------------------

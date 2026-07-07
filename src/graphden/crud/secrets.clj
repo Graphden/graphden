@@ -265,17 +265,13 @@
         vault-client (require-vault! ctx)
         {:keys [nm ns-id path value description custom-metadata]} parsed
         path-slot-id (find-path-slot-id storage leaf-id)
-        ;; OpenBao first — easy to roll back via vault-delete.
-        _ (vault/put-secret vault-client path value)
-        _ (swap! journal conj [:vault-delete path])
-        metadata-ok? (try (vault/put-metadata vault-client path custom-metadata)
-                          true
-                          (catch Exception e
-                            (log/warn e "Vault metadata stamp failed"
-                                      {:path path})
-                            false))
         fn-id (UUID/randomUUID)
         binding-id (UUID/randomUUID)]
+    ;; Storage FIRST, vault AFTER (mirrors the delete path). The `:fn` create
+    ;; carries the `UNIQUE(name, namespace-id)` constraint, so a concurrent
+    ;; duplicate-name create loses HERE — before touching vault. Were vault
+    ;; put first, the loser's rollback would `vault-delete` the shared path
+    ;; that the WINNER's row points at, silently breaking the winner's secret.
     (crud-entities/create-entity
       :fn
       (cond-> {:id fn-id
@@ -295,14 +291,23 @@
        :override-kind :secret-path}
       ctx)
     (swap! journal conj [:storage-delete :binding binding-id])
-    (tc/type-check-fn-after-mutation! storage fn-id)
-    {:ok true
-     :secret {:id (str fn-id)
-              :name nm
-              :namespace-id (some-> ns-id str)
-              :path path
-              :description description
-              :metadata-stamped? metadata-ok?}}))
+    ;; Vault only after the row exists (loser never reaches here).
+    (vault/put-secret vault-client path value)
+    (swap! journal conj [:vault-delete path])
+    (let [metadata-ok? (try (vault/put-metadata vault-client path custom-metadata)
+                            true
+                            (catch Exception e
+                              (log/warn e "Vault metadata stamp failed"
+                                        {:path path})
+                              false))]
+      (tc/type-check-fn-after-mutation! storage fn-id)
+      {:ok true
+       :secret {:id (str fn-id)
+                :name nm
+                :namespace-id (some-> ns-id str)
+                :path path
+                :description description
+                :metadata-stamped? metadata-ok?}})))
 
 
 (defn apply-create-secret

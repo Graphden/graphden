@@ -137,6 +137,12 @@ function buildTypeNameDatalist() {
   return id;
 }
 
+// graph-first-exception: the per-kind form is built client-side because (a)
+// the type-name field autocompletes from the in-memory `richTypes` cache as
+// the user types (same instant-datalist argument as the fn-picker /
+// namespace-picker), and (b) switching kind tabs carries the in-progress
+// name+description across without a round-trip. A GET /partials/* form would
+// lose both. The submit itself POSTs to the graph (/api/entities/fn etc.).
 function showTypeCreateForm(kind) {
   const el = typeCreatePopoverEl;
   if (!el) return;

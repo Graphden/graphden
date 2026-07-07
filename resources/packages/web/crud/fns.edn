@@ -1457,7 +1457,7 @@
                    {:parent :equal? :args {:a :_create-parsed-type-str :b {:value "binding"}}}]}}
 
   {:name :_create-binding-type-rej
-   :description "Guard 8 (binding creates only) — save-time type-check for the binding's `:value`/`:ref`. The underlying `:type-check-binding-rej` primitive THROWS `ExceptionInfo` with structured `:data` on mismatch (executor surfaces it); returns nil otherwise. `:id` is nil on CREATE."
+   :description "Guard 8 (binding creates only) — save-time type-check for the binding's `:value`/`:ref`. The underlying `:type-check-binding-rej` primitive returns `{:reason <message>}` on mismatch (surfaced as a 400 by the Stage-2 `:cond`), nil otherwise. `:id` is nil on CREATE."
    :parent :if
    :args {:test :_create-is-binding-create?
           :then {:parent :type-check-binding-rej
@@ -1466,7 +1466,7 @@
           :else nil}}
 
   {:name :_create-binding-type-rej?
-   :description "True when guard 8 fired (almost never — guard 8 prefers to throw)."
+   :description "True when guard 8 produced a `{:reason}` — a binding-value type mismatch (rare; most binding values type-check clean)."
    :parent :some?
    :args {:value :_create-binding-type-rej}}
 
@@ -1676,7 +1676,7 @@
    :effects #{:db}}
 
   {:name :type-check-binding-rej
-   :description "Stage-2 type-check for `:binding` flows. nil on success. Throws structured ExceptionInfo on mismatch (the executor surfaces the throw with `:data` intact)."
+   :description "Stage-2 type-check for `:binding` flows. nil on success, `{:reason <message>}` on a type mismatch (never throws for a mismatch — the caller's `:cond` surfaces it as a 400)."
    :args {:entity-data {:type :nullable-keyword-map :description "Binding row to type-check. Nullable at type level."}
           :id {:type :nullable-uuid :description "Existing binding id (UPDATE) or nil (CREATE)."}}
    :return-type :_rejection-shape
@@ -1759,7 +1759,7 @@
           :else nil}}
 
   {:name :_update-validation-tail
-   :description "Combine write-rej and binding-type-rej: write-rej (cycle / MI / list-closed) wins over a type mismatch, mirroring the create-side `:cond` order. Must short-circuit via `:if` — `:coalesce` is eager and would force `:_update-binding-type-rej-result`, which THROWS on mismatch, surfacing the type error even when a higher-priority write-rej is present."
+   :description "Combine write-rej and binding-type-rej: write-rej (cycle / MI / list-closed) wins over a type mismatch, mirroring the create-side `:cond` order. `:if` short-circuits — when write-rej is present it skips `:_update-binding-type-rej-result` (a `:db`-effecting type-check query), which the eager `:coalesce` would run needlessly."
    :parent :if
    :args {:test {:parent :some? :args {:value :_update-write-rej-result}}
           :then :_update-write-rej-result

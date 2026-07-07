@@ -107,14 +107,9 @@
   "Stage-2 type-checker for `:binding` create/update flows. Wraps
    `type-check/type-check-binding-direct!` which runs the full graphden
    type system against the binding's `:value` / `:ref-fn-id` against
-   the slot's declared type. Returns nil on success.
-
-   Throws `clojure.lang.ExceptionInfo` with structured `:data` on
-   mismatch — the executor surfaces the throw with the data intact so
-   downstream consumers (editor red-ring rendering, MCP error
-   handling) key off the canonical `:type` keyword. The throw is
-   preserved rather than reshaped because that's the contract the
-   create/update apply paths already depend on.
+   the slot's declared type. Returns nil on success or `{:reason
+   <message>}` on a type mismatch (it never throws for a mismatch) —
+   the create/update Stage-2 `:cond` surfaces that `:reason` as a 400.
 
    `id` is the existing binding row's id on UPDATE (so the check sees
    the merged post-write state); pass nil on CREATE."

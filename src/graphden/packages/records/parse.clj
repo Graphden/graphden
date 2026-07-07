@@ -950,10 +950,9 @@
          module-fn-defs (expand-inline-anons-in-module module-fn-defs)
          ;; Every named fn-def — including `:fn-type` declarations —
          ;; gets a deterministic fn-id by `(:namespace, :name)`.
-         ;; `:fn-type` rows now carry their structural shape in
+         ;; `:fn-type` rows carry their structural shape in
          ;; `:constraint` (see parse-fn-def), so they take the
-         ;; standard name→id path; the previous primitive-:fn
-         ;; aliasing is no longer needed.
+         ;; standard name→id path.
          own-name->id (into {}
                             (keep (fn [fd]
                                     (when (:name fd)

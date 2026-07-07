@@ -182,9 +182,8 @@
    as JSON, returns the raw string unchanged (parse failure is
    swallowed).
 
-   Single-library boundary; the recursive re-keyword walk has shared-
-   state-free recursion but isn't expressible as atomic graph
-   primitives without graphden's `:fix` (not implemented yet). The
+   Single-library boundary; the recursive re-keyword walk is a
+   string-level parse detail, not a meaningful graph unit. The
    walk's keyword-detection regex is the editor-side contract and
    shouldn't vary per user."
   [raw]

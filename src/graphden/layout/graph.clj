@@ -839,8 +839,8 @@
     (let [expansion-bindings (atom {})
           ;; The four `process-*` walkers (process-fn / process-expanded-fn /
           ;; process-expanded-fn-impl / process-any-fn) live as top-level
-          ;; defns above this fn — extracted from a ~500-line letfn block.
-          ;; All four take `ctx` as first arg and recurse through each other.
+          ;; defns above this fn. All four take `ctx` as first arg and
+          ;; recurse through each other.
           ctx {:state state
                :lookups lookups
                :fn-map fn-map

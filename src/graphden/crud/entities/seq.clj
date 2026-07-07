@@ -78,8 +78,7 @@
    `:literal true`, matching how `records.clj` stores a fn-def's
    `{:value :kw}` item. Without the flag a read would re-emit the
    keyword colon-stripped and the editor would mis-type it as plain
-   text. (The legacy `:literal? true` EDN flag was retired; the
-   storage `:literal` column is still used to disambiguate keyword
+   text. (The storage `:literal` column disambiguates keyword
    literals from string text on read-back.)"
   [storage body]
   (cond

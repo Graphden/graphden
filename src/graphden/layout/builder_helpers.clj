@@ -133,13 +133,11 @@
    real binding row through /api/entities/binding/:id without going
    through a `synth-arg-id` reverse-lookup."
   [arg]
-  ;; `:arg-type` carries the slot's resolved type-kw on every shape
-  ;; (anchor rows AND binding-classifier kind-marker maps). `:type` on
-  ;; anchor rows still IS that same type-kw; it's read here as a
-  ;; back-compat fallback for callers that build anchor-shaped maps
-  ;; inline without the explicit `:arg-type` field. Classifier maps
-  ;; (`:kind :value/:ref/:unset`) always carry `:arg-type` directly,
-  ;; so the fallback never sees a kind discriminator.
+  ;; The slot's type-kw reaches us two ways: binding-classifier maps
+  ;; carry it as `:arg-type`, raw arg rows (sequence anchors) carry it
+  ;; as `:type`. Prefer `:arg-type`; fall back to `:type` only when
+  ;; there's no `:arg-type`. Classifier maps (`:kind :value/:ref/:unset`)
+  ;; always set `:arg-type`, so the fallback never fires on a `:kind` map.
   (cond-> {}
     (:slot-id arg)    (assoc :slotId    (str (:slot-id arg)))
     (:binding-id arg) (assoc :bindingId (str (:binding-id arg)))

@@ -21,10 +21,8 @@
      per-clause accumulation. Built as `{fn-name → {target-fn-name →
      narrowed-type}}`; bound via `*ref-return-overrides*`.
 
-   This namespace was extracted from `graphden.types.check` (was
-   ~390 LOC at the tail) to give the narrowing concept its own
-   home. The main `check.clj` keeps the dynamic vars + `check-fn-def!`
-   that this namespace `binding`s around — one-way dep, no cycle.
+   `check.clj` owns the dynamic vars + `check-fn-def!` that this
+   namespace `binding`s around — one-way dep, no cycle.
 
    See `docs/TYPE_SYSTEM_DECISIONS.md` for why broader path-
    sensitive analysis (composed guards / row polymorphism) is

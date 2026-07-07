@@ -275,3 +275,26 @@
           (is (= 7 (:count (first rows))) "int value preserved through the jsonb widening"))
         (finally
           (sp/close storage))))))
+
+
+(deftest drop-not-null-on-nullable-flip-test
+  (testing "flipping a field NOT NULL → nullable drops the DB NOT NULL constraint"
+    (let [storage (setup/create-test-storage)
+          nuuid #uuid "00000000-0000-0000-0000-000000000002"
+          euuid #uuid "00000000-0000-0000-0000-0000000000e0"
+          ;; email starts NOT NULL (no :nullable? key → defaults to false).
+          schema1 (th/make-schema :fields {:name  {:uuid nuuid :type :text}
+                                           :email {:uuid euuid :type :text}})
+          _ (sp/initialize storage schema1)
+          ;; Flip email to nullable.
+          schema2 (th/make-schema :fields {:name  {:uuid nuuid :type :text}
+                                           :email {:uuid euuid :type :text :nullable? true}})]
+      (try
+        (sp/initialize storage schema2)
+        ;; Before the fix the column stayed NOT NULL, so this nil write — which
+        ;; the migrated schema now permits — failed at the DB. `DROP NOT NULL`
+        ;; reconciles the column to the schema.
+        (is (some? (sp/create-entity storage :user {:name "alice" :email nil}))
+            "a nil write the schema now permits succeeds")
+        (finally
+          (sp/close storage))))))

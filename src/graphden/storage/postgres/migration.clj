@@ -148,8 +148,17 @@
      ;; Type widening - use cached columns
      (let [table-name (util/kw->snake-case entity-name)
            old-fields (get-cached-columns tx table-name ctx)
-           old-type (:type (get old-fields field-name))
+           old-field (get old-fields field-name)
+           old-type (:type old-field)
            new-type (:type field-spec)]
+       ;; Nullability: a schema flip false→true leaves the DB column NOT NULL,
+       ;; so a nil write the schema now permits would fail at PG. Drop it.
+       ;; (true→false is rejected upstream as destructive, so only this
+       ;; direction reaches here.)
+       (when (and old-field
+                  (not (:nullable? old-field))
+                  (:nullable? field-spec))
+         (ddl/alter-column-drop-not-null! tx entity-name field-name))
        ;; EQUIVALENT types (`:uuid`↔`:ref`, `:jsonb`↔`:union`) share one PG
        ;; type, so introspection reports `:uuid`/`:jsonb` while the schema
        ;; says `:ref`/`:union` — `not=` is true but there's nothing to

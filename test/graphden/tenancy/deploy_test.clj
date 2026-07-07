@@ -60,11 +60,16 @@
         up (atom nil)
         storage (reify sp/StorageCRUD
                   (read-entity [_ en id] (when (and (= en :fn) (= id fid)) {:id id}))
+
                   (query-entities [_ en _] (when (= en :org) [])) ; org row missing
                   (query-entities [_ _ _ _] nil)
+
                   (create-entity [_ _ _] nil)
+
                   (update-entity [_ en id data] (reset! up [en id data]) data)
+
                   (delete-entity [_ _ _] nil)
+
                   (query-latest-per-group [_ _ _ _] nil))
         ex (try (tc/with-org "acme" (deploy/set-org-handler! {:storage storage} fid))
                 nil (catch clojure.lang.ExceptionInfo e e))]

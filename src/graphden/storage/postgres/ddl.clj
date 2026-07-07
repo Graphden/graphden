@@ -172,6 +172,16 @@
                                                         (util/ident->sql col-name))])))
 
 
+(defn alter-column-drop-not-null!
+  "Drop a column's NOT NULL constraint — the schema flipped the field to
+   nullable, so the DB must allow nil where it previously didn't."
+  [ds table-name col-name]
+  (util/with-sql-error-handling "DDL error" :alter-column-nullable {:table-name table-name :col-name col-name}
+                                (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
+                                                        " ALTER COLUMN " (util/ident->sql col-name)
+                                                        " DROP NOT NULL")])))
+
+
 (defn alter-column-type!
   "Changes column type (for safe widening)."
   [ds table-name col-name new-type-sql]

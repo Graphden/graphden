@@ -20,7 +20,10 @@
 | Type System (refinements / records / lists / unions / variants) | Done | Save-time check; rich-type registry |
 | Editor UI | Done | Cytoscape-based with server-computed layout, inline edit popovers |
 | REST API | Done | `/api/graph/entities`, `/api/graph/layout`, `/api/entities/<entity>/*`, `/api/sequence/append/:fn-id`, `/api/sequence/item/:item-id` |
-| Permissions | Planned | Future work |
+| Permissions | Done | Per-namespace grants + `can?`/`authz`, RLS org-isolation, effect-gate — see [PLATFORM_PLAN.md](PLATFORM_PLAN.md) |
+| Multi-tenancy (orgs / users / grants / RLS / FaaS) | Done | Addon, inert by default — see [PLATFORM_PLAN.md](PLATFORM_PLAN.md) |
+| Package registry | Done | Publish/install namespace bundles (no auto dep-resolution) — `app/registry` |
+| Recursion (`:fix` Y-combinator) | Done | Approach A, depth-guarded — see [RECURSION.md](RECURSION.md) |
 | Distributed execution | Planned | See [Distributed Execution](#distributed-execution) below |
 
 ---
@@ -202,10 +205,12 @@ below; those entries remain for historical context and as
 deeper-design references.
 
 **Path to MVP launch with external users**: Blocks 1 → 2 → 4 → 9-Launch
-on the critical path, with Blocks 3 / 5 / 6 parallelizable. Estimated
-total **~18-19 weeks**, calibrated against velocity in Jan-May 2026
-(~150 commits/month sustained, e.g. full type-system overhaul in
-~3 weeks, versioning + branches in ~3-4 weeks).
+on the critical path, with Blocks 3 / 5 / 6 parallelizable. **Block 2
+(multi-user) and Block 5 (`:fix` recursion) have SHIPPED**, so the
+remaining critical path is Blocks 1 → 4 → 9-Launch. Estimated total was
+**~18-19 weeks**, calibrated against velocity in Jan-May 2026 (~150
+commits/month sustained, e.g. full type-system overhaul in ~3 weeks,
+versioning + branches in ~3-4 weeks).
 
 The AI-launch piece (Block 9.1–9.3) is on the critical path because
 "co-edit your graph with the AI of your choice, review proposals as
@@ -233,17 +238,21 @@ Implements PHILOSOPHY § Self-Describing System "storage swap path"
 
 Block total: **~4 weeks**
 
-### Block 2 — Multi-user readiness
+### Block 2 — Multi-user readiness [SHIPPED]
 
 Enables external alpha users on either self-hosted or cloud-shared.
+Landed as the tenancy addon (`graphden.tenancy.*`, inert by default);
+see [PLATFORM_PLAN.md](PLATFORM_PLAN.md) §8 for the as-shipped map.
 
-1. **Organizations + Users** entity + UI — ~1-1.5 weeks
-2. **Postgres RLS** + policy-based isolation — ~1.5 weeks
-3. **Permissions** (per-fn, per-namespace, per-branch) — ~2 weeks
+1. **Organizations + Users** entity + UI — done (`tenancy/{users,org-schema,user-schema}`, tenancy-admin panels)
+2. **Postgres RLS** + policy-based isolation — done (`tenancy/rls`, SELECT own+public / IUD own-only split)
+3. **Permissions** (per-fn, per-namespace, per-branch) — done (`tenancy/{grant,authz}`, per-namespace grants + effect-gate)
 4. **Package registry** (server + reference client, MVP — without
-   full dep resolution) — ~2 weeks
+   full dep resolution) — done (`app/registry`, `POST /api/packages/publish` + install/export)
 
-Block total: **~6-7 weeks**
+Remaining follow-ups (service sandbox, org-scoped `:fn-execution`/`:branch`,
+per-org secrets, non-superuser DB role for RLS to bite) are tracked in
+[TENANCY_HANDOFF.md](TENANCY_HANDOFF.md) — not launch blockers.
 
 ### Block 3 — Personal QoL (parallel to Block 2)
 
@@ -257,29 +266,15 @@ Block total: **~6-7 weeks**
    size/TTL limits) — ~1.5 weeks
 5. **Free-arg aliases** — see § Future Work entry; status check,
    finish if not already shipped
-6. **Routes API for frontend + static-lint against drift** — close
-   the gap between declarative HTTP routes (`app/routes/fns.edn`
-   `:get-route` / `:post-route` / `:delete` / `:put` fn-defs) and
-   the editor JS which today hardcodes URL strings (`fetch('/api/
-   secrets/' + id, …)`). When admin renames a path in `fns.edn`,
-   JS continues hitting the old URL — bug surfaces only when a user
-   clicks the button. ~3-4 days. Has 3 pieces:
-   - **`GET /api/routes` endpoint** — graph fn-def chain over a new
-     atomic `:list-routes` base-fn; returns `{action-name →
-     {:path :method}}`. Single source of truth = the same fns.edn
-     declarations that wire the actual handlers.
-   - **`routeFor(action, params)` helper in `editor-state.js`** —
-     reads `window.ROUTES` (loaded on bootstrap), substitutes `:param`
-     placeholders. Replaces ~30 hardcoded `'/api/…'` literals
-     across the editor JS modules.
-   - **`bb check` lint** — sweeps editor JS for `routeFor('…')`
-     calls, asserts every action-name appears in the routes-map
-     computed from `fns.edn` at lint time. Catches typos and
-     forgotten renames at CI instead of runtime. Closes the same
-     drift gap that the `:tags` refactor closed for the
-     admin-only-vault gate (declarative co-location of contract).
+6. **Routes API for frontend + static-lint against drift** — DONE.
+   Shipped as boot-cached `window.API` (codegen'd from the routing
+   graph, exposed on `window` via an atom), a sync-time drift
+   validator, and all editor JS addressing routes through
+   `window.API.<key>` instead of hardcoded `/api/*` literals
+   (deliberate exceptions carry `// api-url-drift-allow:`). Closes the
+   declarative-route ↔ JS drift gap.
 
-Block total: **~4-5 weeks**
+Block total (remaining items 1–5): **~3-4 weeks**
 
 ### Block 4 — Ecosystem (after Block 1)
 
@@ -293,10 +288,12 @@ Implements the MVP launch bar from [DISTRIBUTION § MVP Launch Bar](DISTRIBUTION
 
 Block total: **~4-5 weeks**
 
-### Block 5 — Recursion (any window after Block 1)
+### Block 5 — Recursion [SHIPPED]
 
 - **`:fix` base-fn** (Approach A from
-  [RECURSION.md](RECURSION.md)) — ~1 week
+  [RECURSION.md](RECURSION.md)) — done. `core/recursion` (`:fix`
+  Y-combinator, depth-guarded by `*max-recursion-depth*`), example in
+  `examples/recursion`, used by `storage/branches` `:branch-chain`.
 
 ### Block 6 — UI Step 1 (any window)
 
@@ -743,10 +740,13 @@ on the next migration pass.
 
 ### User and Permission System
 
-> Now scheduled in **Block 2** (Organizations + Users + RLS +
-> per-fn / per-namespace / per-branch permissions). The
-> permission-model sketch below is a starting point; details will
-> be settled when implementing.
+> **SHIPPED** via the tenancy addon (Block 2). The actual design is
+> **capability GRANTS** — `(subject, capability, namespace)` with
+> `:admin`/`:write`/`:execute`/`:bind-args`/`:append-list` caps and
+> namespace-prefix coverage — a deliberately minimal primitive, NOT
+> the role-based sketch below (no roles, no deny rules). See
+> [PLATFORM_PLAN.md](PLATFORM_PLAN.md) and `graphden.tenancy.grant` /
+> `authz`. The sketch is retained for historical context only.
 
 **Goal**: Access control.
 

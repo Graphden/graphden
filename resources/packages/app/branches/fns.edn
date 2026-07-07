@@ -216,10 +216,12 @@
           :vals [{:value true} :_get-branch-as-json]}}
 
   {:name :_get-branch-err
-   :description "404 shape — `{:ok false :error \"Branch not found: <ref>\"}`."
+   :description "Not-found shape — `{:ok false :reason :not-found :error \"Branch not found: <ref>\"}`. Same envelope as the delete-branch not-found sibling."
    :parent :zipmap
-   :args {:keys [{:value :ok} {:value :error}]
+   :return-type :_error-result-with-reason-shape
+   :args {:keys [{:value :ok} {:value :reason} {:value :error}]
           :vals [{:value false}
+                 {:value :not-found}
                  {:parent :str :args {:parts ["Branch not found: " :_get-branch-ref]}}]}}
 
   {:name :_get-branch-data

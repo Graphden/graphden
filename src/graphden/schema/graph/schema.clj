@@ -190,9 +190,8 @@
   #uuid "2b872fc4-951b-445e-ae82-571bf7057ad0")
 
 
-;; Declared return type. Replaces the old `return-type` enum column.
-;; FK → fn (which represents the type). NULL for fn-defs whose return
-;; is purely computed from parent chain / impl.
+;; Declared return type. FK → fn (which represents the type). NULL for
+;; fn-defs whose return is purely computed from parent chain / impl.
 (def ^:private fn-return-type-fn-id-field-uuid
   #uuid "a9fbce25-cde0-4f8f-855d-65799ca5a747")
 

@@ -97,23 +97,28 @@ Each module is a directory containing:
 
 ### fns.edn — Function Definitions
 
-Contains a vector of function definitions. Each definition is either:
-
-**Base Function** (has Clojure implementation):
-
-```edn
-{:name :add
- :args {:nums :jsonb}
- :return-type :numeric}
-```
-
-**Fn-def** (composition, no implementation):
+A namespace map: `:namespace` + `:description` metadata wrapping a
+`:fns` vector of definitions. Each entry in `:fns` is either a base
+function or a fn-def.
 
 ```edn
-{:name :add-10
- :parent :add
- :args {:nums [10]}}
+{:namespace "core.arithmetic"
+ :description "Arithmetic and comparison primitives over numbers."
+ :fns
+ [;; Base Function (has a Clojure impl in impls.clj)
+  {:name :add
+   :args {:nums {:type [:list :numeric]}}
+   :return-type :numeric}
+
+  ;; Fn-def (composition, no impl)
+  {:name :add-10
+   :parent :add
+   :args {:nums [10]}}]}
 ```
+
+An arg spec may be the type keyword directly (`:nums :jsonb`) or the
+expanded `{:type … :required … :description …}` map — the loader
+normalizes the shorthand to the map form.
 
 #### Base Function Fields
 

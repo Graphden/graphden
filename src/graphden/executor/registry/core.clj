@@ -1,14 +1,14 @@
 (ns graphden.executor.registry.core
   "Core infrastructure for base function registration + storage sync.
 
-   ## New slot/binding model
+   ## Slot/binding model
 
    Base functions get synced as fn rows with a return-type (the
    base-fn marker), accompanied by slot/fn-slot rows produced by
    `graphden.packages.records/parse-fn-def`. Type-rows (record /
    refinement / list) take the same path: their role is encoded in the
    fn-row's `:base-fn-id` / `:element-fn-id` / `:constraint` /
-   non-empty `:fn-slot` rows. The old `:arg` table is gone.
+   non-empty `:fn-slot` rows.
 
    This namespace owns:
    - register-base-fns! — Clojure impl registration (executor's atom).

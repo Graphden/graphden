@@ -35,7 +35,7 @@
    :effects #{:db}}
 
   {:name :_login-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_login-username
    :parent :get
@@ -63,7 +63,7 @@
    :args {:string :_login-token-text}}
 
   {:name :_login-200
-   :parent :html-ok-response
+   :parent :text-ok-response
    :args {:body :_login-token-text}}
 
   {:name :_login-handler
@@ -97,7 +97,7 @@
    :effects #{:db}}
 
   {:name :_signup-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_signup-username
    :parent :get
@@ -130,7 +130,7 @@
    :args {:string :_signup-token-text}}
 
   {:name :_signup-200
-   :parent :html-ok-response
+   :parent :text-ok-response
    :args {:body :_signup-token-text}}
 
   {:name :_signup-token-result
@@ -184,7 +184,7 @@
 
   {:name :_logout-handler
    :description "Ring handler for POST /api/logout — invalidates the caller's session token."
-   :parent :html-ok-response
+   :parent :text-ok-response
    :args {:body :_logout-text}}
 
   {:name :logout-route
@@ -212,7 +212,7 @@
 
   {:name :_logout-all-handler
    :description "Ring handler for POST /api/logout-all — invalidates every session of the current user."
-   :parent :html-ok-response
+   :parent :text-ok-response
    :args {:body :_logout-all-text}}
 
   {:name :logout-all-route

@@ -21,7 +21,7 @@
    :effects #{:db}}
 
   {:name :_org-create-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_org-create-name
    :parent :get
@@ -64,7 +64,7 @@
    :effects #{:db}}
 
   {:name :_token-create-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_token-create-token
    :parent :get
@@ -116,7 +116,7 @@
    :effects #{:db}}
 
   {:name :_domain-create-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_domain-create-hostname
    :parent :get
@@ -164,7 +164,7 @@
    :effects #{:db}}
 
   {:name :_org-handler-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_org-handler-name
    :parent :get

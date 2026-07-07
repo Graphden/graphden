@@ -250,7 +250,7 @@
   ;; row. Only reached when the addon is active (the section only mounts then).
   ;; ---------------------------------------------------------------------
   {:name :_grant-create-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_grant-create-subject
    :parent :get

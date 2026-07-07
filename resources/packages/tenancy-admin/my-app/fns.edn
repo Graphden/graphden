@@ -22,7 +22,7 @@
    :effects #{:db}}
 
   {:name :_my-app-handler-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_my-app-handler-fnid
    :parent :get
@@ -61,7 +61,7 @@
    :effects #{:db :network}}
 
   {:name :_verify-domain-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_verify-domain-hostname
    :parent :get

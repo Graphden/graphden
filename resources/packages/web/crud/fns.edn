@@ -1022,30 +1022,16 @@
    :parent :extract-entity-params
    :args {:request {:as :request}}}
 
-  ;; Form-data: use the `:parse-form-body` defbase (which CHECKS
-  ;; `Content-Type: application/x-www-form-urlencoded` and returns
-  ;; `{}` otherwise), then keywordise keys. A bare
-  ;; `:parse-query-string` chain would parse ANY non-nil body
-  ;; regardless of CT, so `Content-Type: text/plain` with body
-  ;; `name=foo` would slip through guard #2 and the entity would be
-  ;; created with the parsed fields. Routing through `:parse-form-body`
-  ;; closes that hole.
-
-  {:name :_create-form-data-stringly
-   :description "Form-data with string keys, parsed only when content-type matches `application/x-www-form-urlencoded`; `{}` otherwise. Reuses `:parse-form-body`."
-   :parent :parse-form-body
-   :args {:request {:as :request}}}
-
-  {:name :_create-str-to-kw-callback
-   :description "HOF callback — `:str-to-keyword` of the `:value` HOF-iteration argument."
-   :parent :str-to-keyword
-   :args {:string {:as :value}}}
+  ;; Form-data: `:parse-form-body-kw` CHECKS
+  ;; `Content-Type: application/x-www-form-urlencoded` (returns `{}`
+  ;; otherwise) and keywordises keys. A bare `:parse-query-string`
+  ;; chain would parse ANY non-nil body regardless of CT, so
+  ;; `Content-Type: text/plain` with body `name=foo` would slip
+  ;; through guard #2 and create the entity with the parsed fields.
 
   {:name :_create-form-data
    :description "Form-data with keyword keys. `{}` when no body OR wrong content-type — guard #2 (`:_create-form-data-empty?`) catches both via `:empty?`."
-   :parent :update-keys
-   :args {:m :_create-form-data-stringly
-          :f :_create-str-to-kw-callback}}
+   :parent :parse-form-body-kw}
 
   {:name :_create-base
    :description "Static fields of the parsed shape — `:entity-type :type-str :form-data`. `:entity-data` / `:parse-error` get merged onto this if the per-type parser runs."
@@ -1773,10 +1759,11 @@
           :else nil}}
 
   {:name :_update-validation-tail
-   :description "Combine write-rej and binding-type-rej: first non-nil wins (mirrors Clojure's `(or write-rej binding-type-rej)`). `:coalesce` is eager but the binding-type-rej path is itself `:if`-gated so non-binding updates collapse to nil cheaply."
-   :parent :coalesce
-   :args {:value :_update-write-rej-result
-          :default :_update-binding-type-rej-result}}
+   :description "Combine write-rej and binding-type-rej: write-rej (cycle / MI / list-closed) wins over a type mismatch, mirroring the create-side `:cond` order. Must short-circuit via `:if` — `:coalesce` is eager and would force `:_update-binding-type-rej-result`, which THROWS on mismatch, surfacing the type error even when a higher-priority write-rej is present."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_update-write-rej-result}}
+          :then :_update-write-rej-result
+          :else :_update-binding-type-rej-result}}
 
   {:name :_update-validation
    :description "Stage 2 of update — `:cond` over the 4 simple guards (3 of which reuse the create-side rej-builders) then a tail `:coalesce` of write-rej and (when applicable) binding-type-rej. Returns the first rejection `{:reason …}` or nil."
@@ -3156,6 +3143,24 @@
                                 :args {:string :_request-body}}
                         :default {:value {}}}}
           :else {:value {}}}}
+
+  ;; --- :parse-form-body-kw — same, but KEYWORD-keyed. Handlers that
+  ;; read fields with keyword keys (`:get {:key {:value :field}}`) MUST
+  ;; use this: the raw `:parse-form-body` yields STRING keys, so a
+  ;; keyword-key read silently falls to its `:default` and every field
+  ;; collapses. Decoded entity rows are keyword-keyed, so this keeps the
+  ;; form seam consistent with the read seam.
+
+  {:name :_form-body-kw-callback
+   :description "HOF callback — `:str-to-keyword` of the `:value` HOF-iteration key."
+   :parent :str-to-keyword
+   :args {:string {:as :value}}}
+
+  {:name :parse-form-body-kw
+   :description "Parse an `application/x-www-form-urlencoded` request body into a `{keyword value}` map. Empty map when body missing or content-type doesn't match. Keyword-keyed variant of `:parse-form-body`."
+   :parent :update-keys
+   :args {:m :parse-form-body
+          :f :_form-body-kw-callback}}
 
   ;; --- :parse-json-body — `application/json`. nil when missing or
   ;; content-type doesn't match.

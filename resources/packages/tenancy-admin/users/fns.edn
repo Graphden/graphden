@@ -236,7 +236,7 @@
    :effects #{:db}}
 
   {:name :_user-create-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_user-create-username
    :parent :get
@@ -330,7 +330,7 @@
 
   ;; --- POST /api/users/:id/password {password} — reset + refresh panel.
   {:name :_user-reset-form-data
-   :parent :parse-form-body}
+   :parent :parse-form-body-kw}
 
   {:name :_user-reset-password-val
    :parent :get

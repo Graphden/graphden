@@ -173,4 +173,44 @@
   {:name :api-packages-install
    :description "POST /api/packages/install — install a published version into the (branch-scoped) graph. Auth-required."
    :parent :post
-   :args {:path "/packages/install" :handler :install-package-handler}}]}
+   :args {:path "/packages/install" :handler :install-package-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Package pins — per-branch desired-state "this branch uses P at V".
+  ;; Base-fns backing reference-install + the editor's installed list.
+  ;; ---------------------------------------------------------------------
+
+  {:name :set-package-pin
+   :description "Upsert the pin for `(current-branch, :pkg-name)` to `:pkg-version` — one pin per (branch, package). Returns a tagged `{:ok true …}`. Writes to the request's branch (staging)."
+   :args {:pkg-name {:type :text :description "Package name to pin."}
+          :pkg-version {:type :text :description "Version to pin the package at."}}
+   :return-type :keyword-map
+   :effects #{:db :time}}
+
+  {:name :list-installed-packages
+   :description "Every package pinned on the current branch — `[{:package-name :version :branch-id :installed-at} …]`. Powers GET /api/packages/installed and the editor's installed list."
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :remove-package-pin
+   :description "Drop the pin for `(current-branch, :pkg-name)` — uninstall. Idempotent; `:removed false` when nothing was pinned."
+   :args {:pkg-name {:type :text :description "Package name to unpin."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/packages/installed — this branch's pins.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_installed-packages-result
+   :parent :list-installed-packages}
+
+  {:name :list-installed-handler
+   :description "Ring handler for GET /api/packages/installed (auth-required) — JSON array of this branch's pins."
+   :parent :json-handler
+   :args {:data :_installed-packages-result}}
+
+  {:name :api-packages-installed
+   :description "GET /api/packages/installed — the packages pinned on the current branch. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/packages/installed" :handler :list-installed-handler}}]}

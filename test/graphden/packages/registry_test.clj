@@ -76,6 +76,34 @@
         (is (= ["0.1.0"] (map :version rows)))))))
 
 
+(deftest package-pin-lifecycle-through-executor
+  (testing "set → list → update → remove pins drive through the base-fns"
+    (let [{:keys [ctx all-name->id]} *bootstrap*
+          set-id    (get all-name->id :set-package-pin)
+          list-id   (get all-name->id :list-installed-packages)
+          remove-id (get all-name->id :remove-package-pin)
+          installed #(->> (exec/execute-with-named-args ctx list-id {})
+                          (filter (fn [p] (= "acme.pinned" (:package-name p)))))]
+      (testing "set creates a pin visible in the installed list"
+        (let [r (exec/execute-with-named-args ctx set-id
+                                              {:pkg-name "acme.pinned" :pkg-version "1.0.0"})]
+          (is (true? (:ok r)))
+          (is (= "1.0.0" (:version r))))
+        (is (= ["1.0.0"] (map :version (installed)))))
+      (testing "set again UPDATES in place — one pin per (branch, package)"
+        (exec/execute-with-named-args ctx set-id
+                                      {:pkg-name "acme.pinned" :pkg-version "1.1.0"})
+        (is (= ["1.1.0"] (map :version (installed)))
+            "still a single pin, at the new version"))
+      (testing "remove drops the pin (idempotent)"
+        (let [r (exec/execute-with-named-args ctx remove-id {:pkg-name "acme.pinned"})]
+          (is (true? (:ok r)))
+          (is (true? (:removed r))))
+        (is (empty? (installed)))
+        (let [r2 (exec/execute-with-named-args ctx remove-id {:pkg-name "acme.pinned"})]
+          (is (false? (:removed r2)) "second remove is a no-op"))))))
+
+
 (deftest export-namespace-base-fn-executes
   (testing ":export-namespace runs through the executor against the live graph"
     (let [{:keys [ctx all-name->id]} *bootstrap*

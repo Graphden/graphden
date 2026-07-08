@@ -12,7 +12,8 @@
     [graphden.packages.export :as export]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (defbase export-namespace
@@ -126,9 +127,77 @@
              :installed (count fns)}))))))
 
 
+;; ---------------------------------------------------------------------------
+;; Package pins — per-branch desired-state "this branch uses package P at V".
+;; The pin drives update/rollback (repoint the row) and the editor's installed
+;; list. Reference-install (PACKAGE_DISTRIBUTION §4.3) writes a pin instead of
+;; copying package rows; these are the pin-lifecycle primitives it builds on.
+;; ---------------------------------------------------------------------------
+
+;; Upsert the single pin for `(current-branch, pkg-name)`: query-then-
+;; update-or-insert. One-pin-per-(branch,package) is the invariant (mirrors
+;; app-side uniqueness of :package-version), so the check+write is one atomic
+;; base-fn (packages-quality §3), not spread across graph nodes. Branch comes
+;; from the request-scoped VersionedStorage, so pinning through
+;; `X-Graphden-Branch: feature-x` records the pin on that branch (staging).
+(defbase set-package-pin
+  [pkg-name pkg-version]
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (let [storage (request/require-storage ctx)
+        branch-id (vs/current-branch-id storage)
+        existing (first (sp/query-entities storage :package-install
+                                           {:branch-id branch-id :package-name pkg-name}))
+        installed-at (java.time.Instant/now)]
+    (if existing
+      (sp/update-entity storage :package-install (:id existing)
+                        {:version pkg-version :installed-at installed-at})
+      (sp/create-entity storage :package-install
+                        {:branch-id branch-id
+                         :package-name pkg-name
+                         :version pkg-version
+                         :installed-at installed-at}))
+    {:ok true
+     :package-name pkg-name
+     :version pkg-version
+     :branch-id (str branch-id)}))
+
+
+;; The current branch's pins — what's installed here. `sp/query-entities`
+;; decodes the row; ids/timestamps stringified for clean JSON.
+(defbase list-installed-packages
+  []
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)
+        branch-id (vs/current-branch-id storage)]
+    (->> (sp/query-entities storage :package-install {:branch-id branch-id})
+         (mapv (fn [r]
+                 {:package-name (:package-name r)
+                  :version (:version r)
+                  :branch-id (str (:branch-id r))
+                  :installed-at (str (:installed-at r))})))))
+
+
+;; Drop the pin for `(current-branch, pkg-name)` — uninstall. Returns a tagged
+;; result; `:removed false` when nothing was pinned (idempotent).
+(defbase remove-package-pin
+  [pkg-name]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)
+        branch-id (vs/current-branch-id storage)
+        existing (first (sp/query-entities storage :package-install
+                                           {:branch-id branch-id :package-name pkg-name}))]
+    (when existing
+      (sp/delete-entity storage :package-install (:id existing)))
+    {:ok true :package-name pkg-name :removed (some? existing)}))
+
+
 (def impls
   {:export-namespace export-namespace
    :publish-package publish-package
    :list-package-versions list-package-versions
    :fetch-package-version fetch-package-version
-   :install-package install-package})
+   :install-package install-package
+   :set-package-pin set-package-pin
+   :list-installed-packages list-installed-packages
+   :remove-package-pin remove-package-pin})

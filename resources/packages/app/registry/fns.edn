@@ -296,4 +296,64 @@
   {:name :api-packages-installed
    :description "GET /api/packages/installed — the packages pinned on the current branch. Auth-required."
    :parent :get-auth-required
-   :args {:path "/packages/installed" :handler :list-installed-handler}}]}
+   :args {:path "/packages/installed" :handler :list-installed-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /partials/packages-panel — the editor's Packages sidebar section,
+  ;; server-rendered hiccup (graph-first). Read-only table: Package | Version
+  ;; over the current branch's pins. Mounted by editor-packages.js via hx-get.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_pkg-panel-th-name
+   :parent :hiccup :args {:tag {:value "th"} :children [{:value "Package"}]}}
+  {:name :_pkg-panel-th-version
+   :parent :hiccup :args {:tag {:value "th"} :children [{:value "Version"}]}}
+  {:name :_pkg-panel-thead-row
+   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-th-name :_pkg-panel-th-version]}}
+  {:name :_pkg-panel-thead
+   :parent :hiccup :args {:tag {:value "thead"} :children [:_pkg-panel-thead-row]}}
+
+  ;; body row — HOF over :item (each pin `{:package-name :version …}`)
+  {:name :_pkg-panel-name-val
+   :parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
+  {:name :_pkg-panel-version-val
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-panel-td-name
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-name-val]}}
+  {:name :_pkg-panel-td-version
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-version-val]}}
+  {:name :_pkg-panel-row
+   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-td-name :_pkg-panel-td-version]}}
+
+  {:name :_pkg-panel-rows
+   :parent :map :args {:func :_pkg-panel-row :coll :list-installed-packages}}
+  {:name :_pkg-panel-tbody
+   :parent :hiccup :args {:tag {:value "tbody"} :children :_pkg-panel-rows}}
+  {:name :_pkg-panel-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table"}}
+          :children [:_pkg-panel-thead :_pkg-panel-tbody]}}
+
+  ;; empty-state — a notice when nothing is pinned on this branch (the common
+  ;; single-tenant dev case), instead of a header-only table.
+  {:name :_pkg-panel-empty-notice
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-panel-empty"}}
+          :children [{:value "No packages installed on this branch."}]}}
+  {:name :_pkg-panel-is-empty
+   :parent :empty? :args {:coll :list-installed-packages}}
+  {:name :_pkg-panel-body
+   :parent :if
+   :args {:test :_pkg-panel-is-empty :then :_pkg-panel-empty-notice :else :_pkg-panel-table}}
+
+  {:name :_pkg-panel-html
+   :parent :render-hiccup :args {:hiccup :_pkg-panel-body}}
+  {:name :_partial-packages-panel-handler
+   :description "Ring handler for GET /partials/packages-panel — installed packages as text/html."
+   :parent :html-ok-response :args {:body :_pkg-panel-html}}
+  {:name :partial-packages-panel
+   :description "GET /partials/packages-panel — server-rendered list of packages pinned on the current branch (read-only). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/packages-panel" :handler :_partial-packages-panel-handler}}]}

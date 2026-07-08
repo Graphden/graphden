@@ -3959,6 +3959,13 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-users-admin .grants-admin-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
 .sidebar-grants-admin .grants-admin-disabled,
 .sidebar-users-admin .grants-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
+
+/* Packages sidebar section (3e) — read-only installed-packages table. */
+.sidebar-packages .packages-panel-table { width: 100%; font-size: 11px; border-collapse: collapse; }
+.sidebar-packages .packages-panel-table th,
+.sidebar-packages .packages-panel-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
+.sidebar-packages .packages-panel-empty { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
+
 .sidebar-grants-admin .grant-delete,
 .sidebar-users-admin .grant-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; }
 .sidebar-grants-admin .grant-delete:hover,

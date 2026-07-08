@@ -111,10 +111,17 @@
                                          (fn []
                                            (reset! reader-started true)
                                            @writer-done)))]
+      ;; Await BOTH futures before asserting. `reader-started` / the reader's
+      ;; return are produced by the READER thread — gating only on `@writer`
+      ;; let `(is @reader-started)` read the atom before the reader thread had
+      ;; been scheduled to set it, which flaked under parallel CPU load (the
+      ;; lock itself is correct — this was a test-synchronisation bug, not a
+      ;; lock or prod bug).
       @writer
-      (is @writer-done)
-      (is @reader-started)
-      (is (true? @reader) "reader must not acquire until the writer releases"))))
+      (let [reader-result @reader]
+        (is @writer-done)
+        (is @reader-started "the reader ran its body inside the read lock")
+        (is (true? reader-result) "reader must not acquire until the writer releases")))))
 
 
 (deftest with-double-check-locking-test

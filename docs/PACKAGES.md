@@ -77,9 +77,26 @@ resources/packages/
 | `:name` | Yes | Package identifier (matches directory name) |
 | `:version` | Yes | Semantic version string |
 | `:description` | No | Human-readable description |
-| `:dependencies` | Yes | List of package names to load first |
+| `:dependencies` | Yes | Packages to load first (see version constraints below) |
 | `:modules` | Yes | List of module directory names |
 | `:startup-fn` | No | Function to execute when system starts |
+
+**Dependency version constraints.** `:dependencies` accepts either a bare
+name list (any version) or a map of `name → constraint`:
+
+```edn
+:dependencies ["core" "web"]                 ; any version (legacy, still valid)
+:dependencies {"core" ">=1.5.0" "web" "~>2.1"}  ; version constraints
+```
+
+Constraint syntax (`graphden.packages.semver`): exact (`"1.2.0"` / `"=1.2.0"`),
+comparison (`">=1.2.0"` `">1.2.0"` `"<=1.2.0"` `"<1.2.0"`), pessimistic
+(`"~>1.2.3"` → `>=1.2.3 <1.3.0`; `"~>1.2"` → `>=1.2.0 <2.0.0`), caret
+(`"^1.2.3"` → `>=1.2.3 <2.0.0`), or any (`"*"` / omitted). The loader validates
+the version present on the classpath against every constraint at boot and
+throws `:packages/version-conflict` on a mismatch. (Registry-driven version
+*selection* is an install-time concern — see
+[PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md) § 4.4.)
 
 ### Module Directory
 

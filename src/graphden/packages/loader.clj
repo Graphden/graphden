@@ -49,6 +49,7 @@
     [clojure.tools.logging :as log]
     [clojure.tools.reader :as treader]
     [clojure.tools.reader.reader-types :as treader-types]
+    [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -392,6 +393,56 @@
       modules)))
 
 
+(defn- normalize-deps
+  "Normalise `package.edn` `:dependencies` into a seq of
+   `{:name \"core\" :constraint \">=1.5.0\"|nil}`.
+
+   Accepted shapes (backward-compatible):
+   - bare name list      `[\"core\" \"web\"]`         → no constraints
+   - map name→constraint `{\"core\" \">=1.5.0\"}`     → constraints (canonical)
+   - mixed list entry    `[\"core\" [\"web\" \">=2.0\"]]` → per-entry pair ok
+
+   A flat two-string vector `[\"a\" \"b\"]` is TWO bare names, never a
+   name+constraint pair — constraints must use the map form (or a nested
+   `[name constraint]` vector) to stay unambiguous."
+  [deps]
+  (cond
+    (nil? deps) []
+    (map? deps) (mapv (fn [[n c]] {:name (name n) :constraint c}) deps)
+    (sequential? deps)
+    (mapv (fn [d]
+            (cond
+              (string? d)     {:name d :constraint nil}
+              (keyword? d)    {:name (name d) :constraint nil}
+              (sequential? d) {:name (name (first d)) :constraint (second d)}
+              :else (throw (ex-info "Bad :dependencies entry"
+                                    {:type :packages/bad-dependencies :entry d}))))
+          deps)
+    :else (throw (ex-info "Bad :dependencies"
+                          {:type :packages/bad-dependencies :dependencies deps}))))
+
+
+(defn- validate-dep-constraints!
+  "Given `{package-name -> package.edn-meta}` for every loaded package,
+   throw `:packages/version-conflict` if a declared version constraint is
+   not satisfied by the version PRESENT on the classpath. Constraint-free
+   deps (legacy bare names) are skipped. Pure over its argument so it is
+   unit-testable without classpath fixtures."
+  [metas]
+  (doseq [[pkg meta] metas
+          dep (normalize-deps (:dependencies meta))
+          :when (:constraint dep)
+          :let [present (get-in metas [(:name dep) :version])]]
+    (when-not (semver/satisfies-constraint? present (:constraint dep))
+      (throw (ex-info (format "Package %s requires %s %s, but version %s is present"
+                              pkg (:name dep) (:constraint dep) (or present "?"))
+                      {:type :packages/version-conflict
+                       :package pkg
+                       :dependency (:name dep)
+                       :required (:constraint dep)
+                       :present present})))))
+
+
 (defn- resolve-dependencies
   "Returns packages in dependency order (topological sort).
 
@@ -400,6 +451,10 @@
    three are loaded ahead of `app`. Silently dropping a transitive dep
    was a real bug: the missing primitive surfaced as `Unknown parent`
    at sync time, far from the misconfiguration.
+
+   Validates version constraints (`{\"core\" \">=1.5.0\"}` form) against
+   the classpath versions once the graph is resolved — a mismatch throws
+   `:packages/version-conflict` at boot, not `Unknown parent` at sync.
 
    Simple DFS topological sort, no cycle detection (a cycle in the
    dep graph would loop here; package.edn dep graphs are tiny and
@@ -417,11 +472,12 @@
                 [pkg]
                 (when-not (@visited pkg)
                   (swap! visited conj pkg)
-                  (doseq [dep (get (load-meta! pkg) :dependencies [])]
-                    (visit dep))
+                  (doseq [dep (normalize-deps (get (load-meta! pkg) :dependencies []))]
+                    (visit (:name dep)))
                   (swap! sorted conj pkg)))]
     (doseq [pkg package-names]
       (visit pkg))
+    (validate-dep-constraints! @metas)
     @sorted))
 
 

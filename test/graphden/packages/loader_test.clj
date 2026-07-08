@@ -327,3 +327,51 @@
 ;; register-aliases! tests removed — function dropped during full
 ;; rewrite (commit f549820). Type-declaration tests live in
 ;; graphden.packages.records-test.
+
+
+;; =============================================================================
+;; Package dependency version constraints
+;; =============================================================================
+
+(def ^:private normalize-deps #'loader/normalize-deps)
+(def ^:private validate-dep-constraints! #'loader/validate-dep-constraints!)
+
+
+(deftest normalize-deps-test
+  (testing "legacy bare-name vector — no constraints"
+    (is (= [{:name "core" :constraint nil}
+            {:name "web" :constraint nil}]
+           (normalize-deps ["core" "web"]))))
+  (testing "keyword names normalise to strings"
+    (is (= [{:name "core" :constraint nil}] (normalize-deps [:core]))))
+  (testing "map form carries constraints"
+    (is (= #{{:name "core" :constraint ">=1.5.0"}
+             {:name "web" :constraint "*"}}
+           (set (normalize-deps {"core" ">=1.5.0" "web" "*"})))))
+  (testing "nested pair entries"
+    (is (= [{:name "core" :constraint nil}
+            {:name "web" :constraint ">=2.0"}]
+           (normalize-deps ["core" ["web" ">=2.0"]]))))
+  (testing "nil / empty"
+    (is (= [] (normalize-deps nil)))
+    (is (= [] (normalize-deps [])))))
+
+
+(deftest validate-dep-constraints-test
+  (testing "satisfied constraint passes"
+    (is (nil? (validate-dep-constraints!
+                {"app"  {:name "app" :version "1.0.0" :dependencies {"core" ">=1.5.0"}}
+                 "core" {:name "core" :version "1.6.0"}}))))
+  (testing "legacy bare deps (no constraint) always pass"
+    (is (nil? (validate-dep-constraints!
+                {"app"  {:name "app" :version "1.0.0" :dependencies ["core"]}
+                 "core" {:name "core" :version "0.1.0"}}))))
+  (testing "unsatisfied constraint throws :packages/version-conflict"
+    (let [ex (try (validate-dep-constraints!
+                    {"app"  {:name "app" :version "1.0.0" :dependencies {"core" ">=2.0.0"}}
+                     "core" {:name "core" :version "1.6.0"}})
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (some? ex))
+      (is (= :packages/version-conflict (:type (ex-data ex))))
+      (is (= "core" (:dependency (ex-data ex))))
+      (is (= "1.6.0" (:present (ex-data ex)))))))

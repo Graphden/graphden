@@ -1,0 +1,10 @@
+;; External impl-packages (Type-2) — the operator's single list. See
+;; docs/PACKAGE_DISTRIBUTION.md § 5 and graphden.packages.manifest.
+;;
+;; Each entry: {:name "<package>" :lib <group/artifact> :coord {…deps.edn coord…}}
+;;   git-dep : :coord {:git/url "…" :git/sha "…"}
+;;   Maven   : :coord {:mvn/version "…"}
+;;
+;; build.clj bundles the coordinates into the uberjar; :app/packages loads the
+;; names. For dev, also add the coordinate to deps.edn / a :local/root override.
+{:packages []}

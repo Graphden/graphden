@@ -300,14 +300,23 @@ the forker's own org — a deliberate act, not the default.
 
 ## 5. Type 2 — impl+fns packages
 
-### 5.1 Storage + distribution (Task 5)
+### 5.1 Storage + distribution (shipped)
 
 - The package is a git repo / Maven artifact carrying `packages/<name>/`
   resources on the classpath. No registry row — distribution is the Clojure
   dependency graph, versioned by git tag / Maven version.
-- `executor-packages.edn` manifest (`{:coord {:git/url … :sha …} :package "name"}`
-  entries) → `build.clj` splices coordinates into `deps.edn :extra-deps` and
-  names into the loader list. One data file for the operator.
+- **`resources/executor-packages.edn` manifest** — the operator's single data
+  file. Each entry `{:name "telegram" :lib com.acme/graphden-telegram :coord {…}}`
+  (`:coord` is a `deps.edn` git-dep or `:mvn/version`). Read by
+  `graphden.packages.manifest`; two consumers so the operator edits ONE file:
+  - `build.clj` merges `extra-deps` into the uberjar basis → the external
+    package's resources are bundled;
+  - `:app/packages` appends `package-names` to the loaded list → the loader
+    picks them up at runtime.
+- **Dev classpath** is Clojure-native and separate: while developing an external
+  package, add its coordinate (or a `:local/root` override, § 15) to `deps.edn`
+  / a gitignored `deps.local.edn`. The manifest drives the *build* + *load*;
+  the dev CLI classpath is driven by `deps.edn` as usual.
 
 ### 5.2 Install / update
 

@@ -5,6 +5,8 @@
      clojure -T:build clean
      clojure -T:build uber"
   (:require
+    [clojure.edn :as edn]
+    [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.tools.build.api :as b])
   (:import
@@ -24,7 +26,23 @@
 (def build-hashes-file "graphden-build-hashes.json")
 
 
-(def basis (b/create-basis {:project "deps.edn"}))
+(defn- manifest-extra-deps
+  "External impl-package coordinates from resources/executor-packages.edn
+   (PACKAGE_DISTRIBUTION § 5) as an `{lib coord}` map for the basis, so their
+   `packages/<name>/` resources are bundled into the uberjar. `{}` when the
+   manifest is absent or lists no packages. Read inline (build alias needn't
+   have src on its classpath)."
+  []
+  (let [f (io/file "resources/executor-packages.edn")]
+    (if (.exists f)
+      (into {}
+            (keep (fn [e] (when (and (:lib e) (:coord e)) [(:lib e) (:coord e)])))
+            (:packages (edn/read-string (slurp f))))
+      {})))
+
+
+(def basis (b/create-basis {:project "deps.edn"
+                            :extra {:deps (manifest-extra-deps)}}))
 
 
 (defn clean

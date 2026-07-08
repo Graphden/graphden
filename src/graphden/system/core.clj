@@ -26,6 +26,7 @@
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
     [graphden.packages.loader :as pkg]
+    [graphden.packages.manifest :as manifest]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
     [graphden.packages.records.parse :as records-parse]
@@ -206,7 +207,8 @@
   ;; §2.1 / §3.0): the tenancy addon appends its own fns-package(s) — e.g.
   ;; the org-admin UI — via the manifest WITHOUT restating the core list,
   ;; so they load only when the addon is active.
-  (let [names (vec (concat package-names extra-package-names))]
+  (let [names (vec (concat package-names extra-package-names
+                           (manifest/package-names (manifest/read-manifest))))]
     (log/info "Loading packages:" names)
     (let [packages (pkg/load-packages names)]
       (log/info "Packages loaded:" (count (:packages packages)) "packages,"

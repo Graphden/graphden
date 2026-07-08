@@ -523,30 +523,35 @@ assembled (§ 16). Both are supported; they differ in *who owns the build*.
 Customising here means editing the checkout / building a custom image — a mild
 fork with a rebase burden. Fine for a one-off; for a product, use Track B.
 
-### Track B — "graphden as a dependency in your own project" (target — Task 7)
+### Track B — "graphden as a dependency in your own project" (works via git-deps today)
 
-The developer creates a thin project that depends on the published
-`graphden-core` artifact plus whatever they swap in. No fork.
+The developer creates a thin project that depends on graphden as a **git-dep**
+plus whatever they swap in. No fork, and — for git-deps — **no published
+artifact needed**: the Clojure CLI clones the repo at a sha and puts its
+`:paths` (`src` + `resources`) on the classpath. The dependency key is an
+arbitrary local identifier (it need not match any published coordinate).
 
 1. `mkdir my-graphden && cd my-graphden`
-2. `deps.edn` — graphden core + your addon(s):
+2. `deps.edn` — graphden (git-dep) + your addon(s):
 
    ```clojure
    {:paths ["src" "resources"]
-    :deps {com.graphden/graphden-core {:mvn/version "1.0.0"}          ; Task 7
-           acme/graphden-sqlite       {:git/url "…" :git/sha "…"}}}   ; your backend
+    :deps {com.graphden/graphden {:git/url "https://github.com/you/graphden"
+                                  :git/sha "<sha>"}                    ; graphden itself
+           acme/graphden-sqlite  {:git/url "…" :git/sha "…"}}}         ; your backend
    ```
 
    During active dev of the addon, override to `{:local/root "../graphden-sqlite"}`
    in a gitignored `deps.local.edn` (§ 15) — edit-in-place, no push/pull loop.
 3. `resources/my-config.edn` — an Aero fragment overriding the seam + choosing
-   packages (the editor is opt-in):
+   packages. **Omit `"app"` to run headless** (no editor / default web-server —
+   its resources ride the classpath but are not loaded):
 
    ```clojure
    {:app/storage    {:base #ig/ref :sqlite/backend}
     :sqlite/backend {:db-path "/data/graphden.db" :schema #ig/ref :db/schema}
     :graphden/require [acme.graphden.sqlite]
-    :app/packages   {:package-names ["core" "web" "app"]}}   ; drop "app" for headless
+    :app/packages   {:package-names ["core" "storage" "web"]}}   ; drop "app" for headless
    ```
 
 4. Run — reuse graphden's `-main`:
@@ -558,9 +563,16 @@ The developer creates a thin project that depends on the published
    (or your own three-line `-main` calling `graphden.system/start!` for full control.)
 5. A graphden engine running on **your** storage, no Postgres, no fork.
 
-Track B needs Task 7 (a published `graphden-core` coordinate with the editor as
-an optional package). Until then Track B works only via `:git/url` of the whole
-repo (pulls the editor too).
+Headless boot (`["core" "storage" "web"]`, no `app`) is verified end-to-end by
+`test/graphden/system/headless_boot_test.clj` — the packages load + sync and the
+executor evaluates a fn with the editor absent.
+
+**Caveat (git-deps pulls the whole repo).** A `:git/url` on this repo brings the
+editor's `resources/packages/app/` along; omitting `"app"` from `:package-names`
+leaves them present-but-unloaded. A cleaner core-only dep (`:deps/root` on a
+`core/` subdir) or a Clojars **library-jar** (a `com.graphden/graphden-core`
+Maven coordinate via `b/jar` + `deps-deploy`) is a later polish — needed only
+for a versioned public artifact, not to consume graphden today.
 
 ---
 

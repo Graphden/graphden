@@ -32,7 +32,7 @@
 13. [Self-hosted install by package type](#13-self-hosted-install-by-package-type)
 14. [Swap recipes: storage, core-impls](#14-swap-recipes)
 15. [Repository strategy & dev workflow](#15-repository-strategy--dev-workflow)
-16. [Cloud assembly = self-hosted core + private addons](#16-cloud-assembly)
+16. [Cloud assembly = self-hosted core + private addons](#16-cloud-assembly--self-hosted-core--private-addons)
 
 ---
 
@@ -408,7 +408,7 @@ Deferred to a checkpoint after the backend is proven.
 - **Cloud → self-hosted export** (the potential paid feature): `export-namespace`
   already produces the bundle; the feature is a "download my project as a
   package bundle for migration" flow (whole-graph export, not just one subtree)
-  + the paywall gate. The gate is a cloud-control-plane concern (closed source,
+  - the paywall gate. The gate is a cloud-control-plane concern (closed source,
   per DISTRIBUTION.md), so the open-core piece is just whole-graph export; the
   billing lives in the control plane. Later checkpoint.
 
@@ -492,25 +492,31 @@ The developer creates a thin project that depends on the published
 
 1. `mkdir my-graphden && cd my-graphden`
 2. `deps.edn` — graphden core + your addon(s):
+
    ```clojure
    {:paths ["src" "resources"]
     :deps {com.graphden/graphden-core {:mvn/version "1.0.0"}          ; Task 7
            acme/graphden-sqlite       {:git/url "…" :git/sha "…"}}}   ; your backend
    ```
+
    During active dev of the addon, override to `{:local/root "../graphden-sqlite"}`
    in a gitignored `deps.local.edn` (§ 15) — edit-in-place, no push/pull loop.
 3. `resources/my-config.edn` — an Aero fragment overriding the seam + choosing
    packages (the editor is opt-in):
+
    ```clojure
    {:app/storage    {:base #ig/ref :sqlite/backend}
     :sqlite/backend {:db-path "/data/graphden.db" :schema #ig/ref :db/schema}
     :graphden/require [acme.graphden.sqlite]
     :app/packages   {:package-names ["core" "web" "app"]}}   ; drop "app" for headless
    ```
+
 4. Run — reuse graphden's `-main`:
+
    ```bash
    GRAPHDEN_ADDON_CONFIGS=my-config.edn clojure -M -m graphden.executor-runtime.core
    ```
+
    (or your own three-line `-main` calling `graphden.system/start!` for full control.)
 5. A graphden engine running on **your** storage, no Postgres, no fork.
 

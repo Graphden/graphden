@@ -73,6 +73,14 @@ tenancy-аддона, фиксируется этим документом.
 
 ## 2. ФАЗА 1 — Пакеты
 
+> **Реализация распространяемых пакетов** (три вида модулей: fns-only /
+> impl+fns / core-swap) — конкретный, зафиксированный по решениям план-of-record
+> в [PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md), ветка
+> `feature/distributable-packages`. Он развивает §2 ниже: reference-install
+> (материализация в public-org + `:package-install` pin), rewrite-on-pin-change
+> вместо compiler-late-binding, version-констрейнты, манифест impl-пакетов,
+> seam'ы core-swap.
+
 ### 2.1. Два канала распространения (ключевое разделение)
 
 | Канал                       | Что распространяет                                  | Механизм                              | Кто может ставить в облаке |

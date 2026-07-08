@@ -308,8 +308,11 @@
    :parent :hiccup :args {:tag {:value "th"} :children [{:value "Package"}]}}
   {:name :_pkg-panel-th-version
    :parent :hiccup :args {:tag {:value "th"} :children [{:value "Version"}]}}
+  ;; empty header over the per-row uninstall (×) column
+  {:name :_pkg-panel-th-actions
+   :parent :hiccup :args {:tag {:value "th"} :children [{:value ""}]}}
   {:name :_pkg-panel-thead-row
-   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-th-name :_pkg-panel-th-version]}}
+   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-th-name :_pkg-panel-th-version :_pkg-panel-th-actions]}}
   {:name :_pkg-panel-thead
    :parent :hiccup :args {:tag {:value "thead"} :children [:_pkg-panel-thead-row]}}
 
@@ -322,8 +325,33 @@
    :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-name-val]}}
   {:name :_pkg-panel-td-version
    :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-version-val]}}
+
+  ;; per-row uninstall — hx-delete DELETE /api/packages/uninstall/:name, then
+  ;; swap the REFRESHED panel back into [data-packages-panel] (outerHTML) so the
+  ;; empty-state notice appears when the last pin goes. No client JS; the bearer
+  ;; rides the htmx:configRequest bridge. Path built from the per-row name.
+  {:name :_pkg-panel-uninstall-url
+   :parent :str-join
+   :args {:coll [{:value "/api/packages/uninstall?name="} :_pkg-panel-name-val]
+          :separator {:value ""}}}
+  {:name :_pkg-panel-uninstall-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "packages-uninstall"
+                        :title "Uninstall package"
+                        :hx-target "closest [data-packages-panel]"
+                        :hx-swap "outerHTML"
+                        :hx-confirm "Uninstall this package from this branch?"}}
+          :key {:value :hx-delete}
+          :value :_pkg-panel-uninstall-url}}
+  {:name :_pkg-panel-uninstall-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pkg-panel-uninstall-attrs :children [{:value "×"}]}}
+  {:name :_pkg-panel-td-actions
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-uninstall-btn]}}
+
   {:name :_pkg-panel-row
-   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-td-name :_pkg-panel-td-version]}}
+   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-td-name :_pkg-panel-td-version :_pkg-panel-td-actions]}}
 
   {:name :_pkg-panel-rows
    :parent :map :args {:func :_pkg-panel-row :coll :list-installed-packages}}
@@ -348,12 +376,50 @@
    :parent :if
    :args {:test :_pkg-panel-is-empty :then :_pkg-panel-empty-notice :else :_pkg-panel-table}}
 
+  ;; Stable [data-packages-panel] root — the hx-target every panel mutation
+  ;; (uninstall now; install/update/fork later) swaps with hx-swap="outerHTML",
+  ;; so the whole panel re-renders from fresh desired-state each time.
+  {:name :_pkg-panel-root
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-packages-panel "1"}}
+          :children [:_pkg-panel-body]}}
+
   {:name :_pkg-panel-html
-   :parent :render-hiccup :args {:hiccup :_pkg-panel-body}}
+   :parent :render-hiccup :args {:hiccup :_pkg-panel-root}}
   {:name :_partial-packages-panel-handler
    :description "Ring handler for GET /partials/packages-panel — installed packages as text/html."
    :parent :html-ok-response :args {:body :_pkg-panel-html}}
   {:name :partial-packages-panel
-   :description "GET /partials/packages-panel — server-rendered list of packages pinned on the current branch (read-only). Auth-required."
+   :description "GET /partials/packages-panel — server-rendered list of packages pinned on the current branch. Per-row × uninstalls. Auth-required."
    :parent :get-auth-required
-   :args {:path "/partials/packages-panel" :handler :_partial-packages-panel-handler}}]}
+   :args {:path "/partials/packages-panel" :handler :_partial-packages-panel-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; DELETE /api/packages/uninstall?name=<pkg> — drop the current branch's pin
+  ;; for the named package, then return the REFRESHED panel HTML (HTMX swaps it
+  ;; into [data-packages-panel]). `:do` forces remove-before-render so the
+  ;; panel's :list-installed-packages reflects the removal. Auth-required.
+  ;; The name rides as a query param (not a path segment) because a
+  ;; `/packages/:pkg` path would collide with GET /packages/:name/:version in
+  ;; reitit's conflict check (both are two-segment /packages/*/* patterns).
+  ;; ---------------------------------------------------------------------
+  {:name :_uninstall-pkg-name-raw
+   :description "The `name` query-string param from DELETE /api/packages/uninstall (nullable-text)."
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "name"}}}
+  {:name :_uninstall-pkg-name
+   :description "Nil-safe `(str name)` — narrows :query-param's :nullable-text to :text for :remove-package-pin (empty string → idempotent :removed false)."
+   :parent :to-str :args {:value :_uninstall-pkg-name-raw}}
+  {:name :_uninstall-do
+   :parent :remove-package-pin :args {:pkg-name :_uninstall-pkg-name}}
+  {:name :_uninstall-then-panel
+   :description "Remove the pin, THEN render the refreshed panel — `:do` forces order so :list-installed-packages excludes the removed pin."
+   :parent :do :args {:steps [:_uninstall-do :_pkg-panel-html]}}
+  {:name :_uninstall-handler
+   :description "Ring handler for DELETE /api/packages/uninstall — removes the pin and returns the refreshed Packages panel as text/html."
+   :parent :html-ok-response :args {:body :_uninstall-then-panel}}
+  {:name :api-packages-uninstall
+   :description "DELETE /api/packages/uninstall?name=<pkg> — uninstall (unpin) a package from the current branch. Auth-required."
+   :parent :delete
+   :args {:path "/packages/uninstall" :handler :_uninstall-handler}}]}

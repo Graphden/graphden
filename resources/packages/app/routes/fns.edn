@@ -561,6 +561,7 @@
                   :api-packages-update
                   :api-packages-fork
                   :api-packages-installed
+                  :api-packages-uninstall
                   :api-secrets-root
                   :api-secret-inline-binding
                   :api-secret-delete

@@ -136,6 +136,30 @@
           (is (false? (:removed r2)) "second remove is a no-op"))))))
 
 
+(deftest uninstall-handler-drops-pin-and-refreshes-panel
+  (testing "DELETE /api/packages/uninstall?name=… unpins + returns the refreshed panel HTML"
+    (let [{:keys [ctx all-name->id]} *bootstrap*
+          set-id (get all-name->id :set-package-pin)
+          list-id (get all-name->id :list-installed-packages)
+          installed #(->> (exec/execute-with-named-args ctx list-id {})
+                          (filter (fn [p] (= "acme.uninstall" (:package-name p)))))]
+      (exec/execute-with-named-args ctx set-id
+                                    {:pkg-name "acme.uninstall" :pkg-version "1.0.0"})
+      (is (seq (installed)) "pin present before uninstall")
+      (let [resp (setup/via-graph *bootstrap* :_uninstall-handler
+                                  {:request-method :delete
+                                   :query-params {"name" "acme.uninstall"}
+                                   :headers {}})]
+        (is (= 200 (:status resp)))
+        (is (re-find #"data-packages-panel" (:body resp))
+            "response is the panel root, ready for the HTMX outerHTML swap")
+        (is (re-find #"No packages installed" (:body resp))
+            "the sole pin is gone → refreshed panel shows the empty-state")
+        (is (not (re-find #"acme\.uninstall" (:body resp)))
+            "the uninstalled package no longer appears in the table"))
+      (is (empty? (installed)) "pin removed from the branch"))))
+
+
 (deftest export-namespace-base-fn-executes
   (testing ":export-namespace runs through the executor against the live graph"
     (let [{:keys [ctx all-name->id]} *bootstrap*

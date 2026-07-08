@@ -141,11 +141,11 @@
   ;; ---------------------------------------------------------------------
 
   {:name :install-package
-   :description "Install published `(:pkg-name, :pkg-version)` into the target graph: reject if not found or if any declared dependency is absent, else sync the bundle's namespaces + fn-defs. Returns a tagged `{:ok …}` result. Writes to the request's branch (staging)."
+   :description "Install published `(:pkg-name, :pkg-version)` by REFERENCE: ensure it is materialized under `<ns-root>@<version>` (idempotent, skipped when already visible), then pin (current-branch, package) → version. Does NOT copy rows into the caller's project. Rejects on not-found / missing-dependencies. Writes to the request's branch (staging)."
    :args {:pkg-name {:type :text :description "Package name to install."}
           :pkg-version {:type :text :description "Semver version to install."}}
    :return-type :keyword-map
-   :effects #{:db}}
+   :effects #{:db :time}}
 
   {:name :_install-body
    :description "Parsed JSON body of POST /api/packages/install — `{:name :version}`."
@@ -174,6 +174,47 @@
    :description "POST /api/packages/install — install a published version into the (branch-scoped) graph. Auth-required."
    :parent :post
    :args {:path "/packages/install" :handler :install-package-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/fork — copy-on-write: sync a version's fns into the
+  ;; graph at their ORIGINAL namespace so they can be modified. Body
+  ;; `{:name :version}`.
+  ;; ---------------------------------------------------------------------
+
+  {:name :fork-package
+   :description "Fork published `(:pkg-name, :pkg-version)`: sync its fns into the graph at their ORIGINAL namespace, DUPLICATING rows so the caller can modify them (copy-on-write). Unlike reference install, this copies. Rejects on not-found / missing-dependencies."
+   :args {:pkg-name {:type :text :description "Package name to fork."}
+          :pkg-version {:type :text :description "Semver version to fork."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_fork-body
+   :description "Parsed JSON body of POST /api/packages/fork — `{:name :version}`."
+   :parent :parse-json-body}
+
+  {:name :_fork-name-raw
+   :parent :get :args {:coll :_fork-body :key {:value :name} :default nil}}
+  {:name :_fork-name
+   :parent :to-str :args {:value :_fork-name-raw}}
+
+  {:name :_fork-version-raw
+   :parent :get :args {:coll :_fork-body :key {:value :version} :default nil}}
+  {:name :_fork-version
+   :parent :to-str :args {:value :_fork-version-raw}}
+
+  {:name :_fork-result
+   :parent :fork-package
+   :args {:pkg-name :_fork-name :pkg-version :_fork-version}}
+
+  {:name :fork-package-handler
+   :description "Ring handler for POST /api/packages/fork (auth-required) — JSON `{ok, …}`."
+   :parent :json-handler
+   :args {:data :_fork-result}}
+
+  {:name :api-packages-fork
+   :description "POST /api/packages/fork — copy a published version's fns into the graph for modification. Auth-required."
+   :parent :post
+   :args {:path "/packages/fork" :handler :fork-package-handler}}
 
   {:name :materialize-package-version
    :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Rejects on `:reason \"not-found\"` / `\"missing-dependencies\"`."

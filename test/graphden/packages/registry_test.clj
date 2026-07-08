@@ -214,7 +214,7 @@
 
 
 (deftest install-package-syncs-or-rejects
-  (testing "installing a version writes its fns + namespace into the graph"
+  (testing "installing a version materializes it under a versioned ns + writes a pin (reference model)"
     (sp/create-entity (storage) :package-version
                       {:name "inst.demo" :version "1.0.0" :ns-root "installed.demo"
                        :fns [{:name :installed-greeting :namespace "installed.demo"
@@ -225,11 +225,12 @@
           body (json/parse-string (:body resp) true)]
       (is (= 200 (:status resp)))
       (is (true? (:ok body)))
-      (is (= 1 (:installed body)))
+      (is (= "installed.demo@1-0-0" (:namespace body))
+          "materialized under the version-qualified namespace")
       (is (seq (sp/query-entities (storage) :fn {:name "installed-greeting"}))
-          "the novel fn is now in the graph")
-      (is (seq (sp/query-entities (storage) :ns {:name "installed"}))
-          "the installed namespace subtree was created")))
+          "the fn is materialized (found by name under the versioned ns)")
+      (is (seq (sp/query-entities (storage) :package-install {:package-name "inst.demo"}))
+          "a :package-install pin was written — the fn rows are referenced, not copied")))
   (testing "install rejects when a declared dependency is absent"
     (sp/create-entity (storage) :package-version
                       {:name "inst.bad" :version "1.0.0" :ns-root "installed.bad"
@@ -246,6 +247,27 @@
           body (json/parse-string (:body resp) true)]
       (is (false? (:ok body)))
       (is (= "not-found" (:reason body))))))
+
+
+(deftest fork-package-copies-into-original-ns
+  (testing "forking a version copies its fns at their ORIGINAL ns and does NOT pin (copy-on-write)"
+    (sp/create-entity (storage) :package-version
+                      {:name "fork.demo" :version "1.0.0" :ns-root "forked.demo"
+                       :fns [{:name :forked-greeting :namespace "forked.demo"
+                              :parent :const :args {:value "hello from fork"}}]
+                       :dependencies [:const] :content-hash "fh"})
+    (let [resp (setup/via-graph *bootstrap* :fork-package-handler
+                                (publish-req {:name "fork.demo" :version "1.0.0"}))
+          body (json/parse-string (:body resp) true)]
+      (is (= 200 (:status resp)))
+      (is (true? (:ok body)))
+      (is (= 1 (:forked body)))
+      (is (seq (sp/query-entities (storage) :fn {:name "forked-greeting"}))
+          "the fn is copied into the graph")
+      (is (seq (sp/query-entities (storage) :ns {:name "forked"}))
+          "copied at its ORIGINAL namespace (not a versioned one)")
+      (is (empty? (sp/query-entities (storage) :package-install {:package-name "fork.demo"}))
+          "fork does NOT write a pin — it is a copy, not a reference install"))))
 
 
 (deftest install-resolves-ref-based-free-arg-slot-on-external-fn

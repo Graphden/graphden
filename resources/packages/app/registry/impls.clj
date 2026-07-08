@@ -86,8 +86,15 @@
     (assoc r :id (str (:id r)) :published-at (str (:published-at r)))))
 
 
+;; ---------------------------------------------------------------------------
+;; Shared Clojure helpers for install / fork / materialize / pin. These are
+;; private `defn-`, NOT base-fns: a base-fn must never call another base-fn
+;; (that would hide a graph edge — philosophy), but sharing implementation
+;; detail across a few base-fns is ordinary Clojure reuse.
+;; ---------------------------------------------------------------------------
+
 ;; The declared dependency names (from a :package-version row's :dependencies)
-;; NOT present as fns in `storage` — the shared install/materialize
+;; NOT present as fns in `storage` — the shared install/fork/materialize
 ;; precondition. Returns a vector of keyword names (empty = all satisfied).
 ;; One storage read + a set diff; no graph composition.
 (defn- missing-dependencies
@@ -100,23 +107,78 @@
     (mapv keyword (distinct (remove present dep-names)))))
 
 
-;; Install a published version into the target graph. Transactional with
-;; an install precondition (packages-quality §3): the bundle's declared
-;; dependencies must ALL already exist, else reject without writing. The
-;; sync itself (namespaces + fn-defs) is a Clojure operation not
-;; expressible as graph composition, so the whole flow is one base-fn.
-;;
-;; Branch staging is FREE: `ctx`'s storage is already scoped to the
-;; request's branch (the branch-router), so installing through
-;; `X-Graphden-Branch: feature-x` writes the rows onto that branch — test
-;; there, then merge (PLATFORM_PLAN §2.4).
-;;
-;; After the sync writes the fn rows, `invalidate-graph-cache!` drops
-;; the compiled registry (and refreshes type-aliases) so the installed
-;; fns are executable immediately — no pod restart. Full clear (1-arity)
-;; rather than a delta: install is a rare admin op writing a whole
-;; bundle, and we don't thread the synced fn-ids back out.
-(defbase install-package
+;; Rewrite one bundle fn's namespace so version V of the package rooted at
+;; NS-ROOT lives at `<ns-root>@<sanitized-version>`. The version's dots are
+;; sanitized to dashes (a dot is the ns-path separator), so "1.3.0" → "1-3-0"
+;; and `web.components.foo` → `web.components@1-3-0.foo`. Pure boundary
+;; string-shaping. A ns not under NS-ROOT is left as-is.
+(defn- version-qualified-ns
+  [ns-root version fn-ns]
+  (if (and fn-ns (str/starts-with? fn-ns ns-root))
+    (str ns-root "@" (str/replace (str version) "." "-") (subs fn-ns (count ns-root)))
+    fn-ns))
+
+
+;; Sync a bundle's fns ONCE under `<ns-root>@<version>` (idempotent —
+;; deterministic ids + upsert). Returns the count synced. The sync resolves
+;; the bundle's external references (parents, HOF refs, renamed/free-arg slots)
+;; through the same faithful fn-def path the boot sync uses. Shared by
+;; :materialize-package-version and reference :install-package.
+(defn- materialize-fns!
+  [ctx storage ns-root version fns]
+  (let [materialized (mapv (fn [fd]
+                             (update fd :namespace #(version-qualified-ns ns-root version %)))
+                           fns)
+        ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) materialized))]
+    (composition/sync-fns-to-storage! storage materialized ns-id-map)
+    (exec-ctx/invalidate-graph-cache! ctx)
+    (count materialized)))
+
+
+;; True if the version's first fn already exists under its version-qualified
+;; namespace — idempotency guard + cloud public-org skip: OrgScoped read
+;; returns own+public, so a tenant sees a platform-materialized version and
+;; does NOT re-materialize it into its own org.
+(defn- already-materialized?
+  [storage ns-root version fns]
+  (boolean
+    (when-let [f (first fns)]
+      (sp/read-entity storage :fn
+                      (ids/fn-id (version-qualified-ns ns-root version (:namespace f))
+                                 (:name f))))))
+
+
+;; Upsert the single pin for `(current-branch, pkg-name)` → version. One pin
+;; per (branch, package). Returns the branch-id. Branch comes from the
+;; request-scoped VersionedStorage, so it records on the request's branch
+;; (staging). Shared by :set-package-pin and reference :install-package.
+(defn- upsert-pin!
+  [storage pkg-name version]
+  (let [branch-id (vs/current-branch-id storage)
+        existing (first (sp/query-entities storage :package-install
+                                           {:branch-id branch-id :package-name pkg-name}))
+        installed-at (java.time.Instant/now)]
+    (if existing
+      (sp/update-entity storage :package-install (:id existing)
+                        {:version version :installed-at installed-at})
+      (sp/create-entity storage :package-install
+                        {:branch-id branch-id
+                         :package-name pkg-name
+                         :version version
+                         :installed-at installed-at}))
+    branch-id))
+
+
+;; ---------------------------------------------------------------------------
+;; Install (reference), fork (copy-on-write), materialize.
+;; ---------------------------------------------------------------------------
+
+;; Fork a published version: sync its fns into the graph AT THEIR ORIGINAL
+;; namespace, DUPLICATING the rows into the caller's project so they can be
+;; modified (a deliberate fork — PACKAGE_DISTRIBUTION §4.5). This is the
+;; copy-on-write path; reference :install (below) does NOT copy. Rejects on
+;; absent deps / unknown version. Branch-staged via the request storage.
+(defbase fork-package
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
@@ -131,35 +193,14 @@
           (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))]
             (composition/sync-fns-to-storage! storage fns ns-id-map)
             (exec-ctx/invalidate-graph-cache! ctx)
-            {:ok true
-             :name pkg-name
-             :version pkg-version
-             :installed (count fns)}))))))
-
-
-;; Rewrite one bundle fn's namespace so version V of the package rooted at
-;; NS-ROOT lives at `<ns-root>@<sanitized-version>`. The version's dots are
-;; sanitized to dashes (a dot is the ns-path separator), so "1.3.0" → "1-3-0"
-;; and `web.components.foo` → `web.components@1-3-0.foo`. Pure boundary
-;; string-shaping (no graph composition). A ns not under NS-ROOT is left as-is.
-(defn- version-qualified-ns
-  [ns-root version fn-ns]
-  (if (and fn-ns (str/starts-with? fn-ns ns-root))
-    (str ns-root "@" (str/replace (str version) "." "-") (subs fn-ns (count ns-root)))
-    fn-ns))
+            {:ok true :name pkg-name :version pkg-version :forked (count fns)}))))))
 
 
 ;; Materialize a published version's fns ONCE under a version-qualified
-;; namespace, so multiple versions coexist (distinct deterministic fn-ids via
-;; the rewritten ns) and callers REFERENCE them rather than copy rows
-;; (PACKAGE_DISTRIBUTION §4.2). Org-neutral: syncs into ctx's current scope
-;; (self-hosted → the one graph; cloud → public-org when a platform admin runs
-;; it in public scope, as publish already does). Idempotent (deterministic ids
-;; + upsert). Rejects if the bundle's declared deps are absent — same guard as
-;; install. The sync resolves the bundle's external references (parents, HOF
-;; refs, renamed/free-arg slots) through the same faithful fn-def path the boot
-;; sync uses, so a bundle binding e.g. `:extras` on `:submit-button` resolves.
-;; A graph sync is not expressible as composition, so this is one base-fn.
+;; namespace so multiple versions coexist and callers REFERENCE them rather
+;; than copy rows (PACKAGE_DISTRIBUTION §4.2). Org-neutral: syncs into ctx's
+;; current scope (self-hosted → the one graph; cloud → public-org when a
+;; platform admin runs it in public scope). Rejects on absent deps.
 (defbase materialize-package-version
   [pkg-name pkg-version]
   (cr/record-effect! :db)
@@ -172,50 +213,58 @@
             missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
           {:ok false :reason "missing-dependencies" :missing missing}
-          (let [materialized (mapv (fn [fd]
-                                     (update fd :namespace
-                                             #(version-qualified-ns ns-root pkg-version %)))
-                                   (:fns row))
-                ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) materialized))]
-            (composition/sync-fns-to-storage! storage materialized ns-id-map)
-            (exec-ctx/invalidate-graph-cache! ctx)
+          {:ok true
+           :name pkg-name
+           :version pkg-version
+           :namespace (version-qualified-ns ns-root pkg-version ns-root)
+           :materialized (materialize-fns! ctx storage ns-root pkg-version (:fns row))})))))
+
+
+;; Install a published version by REFERENCE: ensure it is materialized under
+;; `<ns-root>@<version>` (idempotent; skipped when already visible — incl. a
+;; platform-materialized public-org version), then pin (current-branch,
+;; package) → version. Does NOT copy rows into the caller's project — the pin
+;; plus the visible materialized rows ARE the install; the caller references
+;; them. Update = install a newer version (repins). Rejects on absent deps /
+;; unknown version. Workspace-visibility grant is a tenancy-layer concern,
+;; added by the org-admin package when the addon is present.
+(defbase install-package
+  [pkg-name pkg-version]
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (let [storage (request/require-storage ctx)
+        row (first (sp/query-entities storage :package-version
+                                      {:name pkg-name :version pkg-version}))]
+    (if (nil? row)
+      {:ok false :reason "not-found" :name pkg-name :version pkg-version}
+      (let [ns-root (:ns-root row)
+            fns (:fns row)
+            missing (missing-dependencies storage (:dependencies row))]
+        (if (seq missing)
+          {:ok false :reason "missing-dependencies" :missing missing}
+          (do
+            (when-not (already-materialized? storage ns-root pkg-version fns)
+              (materialize-fns! ctx storage ns-root pkg-version fns))
+            (upsert-pin! storage pkg-name pkg-version)
             {:ok true
              :name pkg-name
              :version pkg-version
-             :namespace (version-qualified-ns ns-root pkg-version ns-root)
-             :materialized (count materialized)}))))))
+             :namespace (version-qualified-ns ns-root pkg-version ns-root)}))))))
 
 
 ;; ---------------------------------------------------------------------------
 ;; Package pins — per-branch desired-state "this branch uses package P at V".
 ;; The pin drives update/rollback (repoint the row) and the editor's installed
-;; list. Reference-install (PACKAGE_DISTRIBUTION §4.3) writes a pin instead of
-;; copying package rows; these are the pin-lifecycle primitives it builds on.
+;; list. Reference-install writes a pin instead of copying rows.
 ;; ---------------------------------------------------------------------------
 
-;; Upsert the single pin for `(current-branch, pkg-name)`: query-then-
-;; update-or-insert. One-pin-per-(branch,package) is the invariant (mirrors
-;; app-side uniqueness of :package-version), so the check+write is one atomic
-;; base-fn (packages-quality §3), not spread across graph nodes. Branch comes
-;; from the request-scoped VersionedStorage, so pinning through
-;; `X-Graphden-Branch: feature-x` records the pin on that branch (staging).
+;; Directly set a pin (current-branch, pkg-name) → version, without touching
+;; materialization — the manual counterpart to :install-package.
 (defbase set-package-pin
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
-  (let [storage (request/require-storage ctx)
-        branch-id (vs/current-branch-id storage)
-        existing (first (sp/query-entities storage :package-install
-                                           {:branch-id branch-id :package-name pkg-name}))
-        installed-at (java.time.Instant/now)]
-    (if existing
-      (sp/update-entity storage :package-install (:id existing)
-                        {:version pkg-version :installed-at installed-at})
-      (sp/create-entity storage :package-install
-                        {:branch-id branch-id
-                         :package-name pkg-name
-                         :version pkg-version
-                         :installed-at installed-at}))
+  (let [branch-id (upsert-pin! (request/require-storage ctx) pkg-name pkg-version)]
     {:ok true
      :package-name pkg-name
      :version pkg-version
@@ -256,8 +305,9 @@
    :publish-package publish-package
    :list-package-versions list-package-versions
    :fetch-package-version fetch-package-version
-   :install-package install-package
+   :fork-package fork-package
    :materialize-package-version materialize-package-version
+   :install-package install-package
    :set-package-pin set-package-pin
    :list-installed-packages list-installed-packages
    :remove-package-pin remove-package-pin})

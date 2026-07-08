@@ -186,6 +186,46 @@
     (last (sort-by semver/parse-version matching))))
 
 
+;; Repoint a project's OWN references from version OLD to version NEW of the
+;; package rooted at NS-ROOT (variant B — update/rollback rewrites the caller's
+;; refs rather than late-binding through the pin). Deterministic remap: for
+;; each fn in the NEW bundle, its old-version fn-id → new-version fn-id (both
+;; via `fn-id` over the version-qualified ns). A binding / list-item is
+;; rewritten IFF its `:ref-fn-id` is an OLD-version fn AND its OWNER fn is NOT —
+;; so package-INTERNAL refs (owner inside the package) and new-version refs
+;; (don't point at old fns) are left untouched, mixing versions is impossible.
+;; Writes create branch-version rows, so the rewrite is staging-safe/revertable.
+;; Returns the count rewritten.
+(defn- rewrite-refs-to-version!
+  [storage ns-root old-version new-version new-fns]
+  (let [remap (into {}
+                    (map (fn [fd]
+                           (let [ns (:namespace fd) nm (:name fd)]
+                             [(ids/fn-id (version-qualified-ns ns-root old-version ns) nm)
+                              (ids/fn-id (version-qualified-ns ns-root new-version ns) nm)])))
+                    new-fns)
+        old-fids (set (keys remap))
+        bindings (sp/query-entities storage :binding {})
+        items (sp/query-entities storage :binding-list-item {})
+        binding-owner (into {} (map (juxt :id :fn-id)) bindings)
+        user-ref? (fn [ref owner]
+                    (and ref (contains? remap ref) (not (contains? old-fids owner))))]
+    (+ (reduce (fn [n b]
+                 (if (user-ref? (:ref-fn-id b) (:fn-id b))
+                   (do (sp/update-entity storage :binding (:id b)
+                                         {:ref-fn-id (remap (:ref-fn-id b))})
+                       (inc n))
+                   n))
+               0 bindings)
+       (reduce (fn [n it]
+                 (if (user-ref? (:ref-fn-id it) (binding-owner (:binding-id it)))
+                   (do (sp/update-entity storage :binding-list-item (:id it)
+                                         {:ref-fn-id (remap (:ref-fn-id it))})
+                       (inc n))
+                   n))
+               0 items))))
+
+
 ;; ---------------------------------------------------------------------------
 ;; Install (reference), fork (copy-on-write), materialize.
 ;; ---------------------------------------------------------------------------
@@ -275,6 +315,50 @@
              :namespace (version-qualified-ns ns-root resolved ns-root)}))))))
 
 
+;; Update (or roll back) an installed package to a different version:
+;; materialize the target version (if needed), REWRITE the project's own refs
+;; from the currently-pinned version to the target (variant B — package-
+;; internal refs untouched), then repoint the pin. Symmetric — passing an
+;; OLDER version is a rollback. Rejects if the package isn't installed, the
+;; target version is unknown, or its deps are absent. Same-version is a no-op.
+(defbase update-package-version
+  [pkg-name pkg-version]
+  (cr/record-effect! :db)
+  (cr/record-effect! :time)
+  (let [storage (request/require-storage ctx)
+        branch-id (vs/current-branch-id storage)
+        pin (first (sp/query-entities storage :package-install
+                                      {:branch-id branch-id :package-name pkg-name}))]
+    (if (nil? pin)
+      {:ok false :reason "not-installed" :name pkg-name}
+      (let [old-version (:version pin)
+            resolved (resolve-version storage pkg-name pkg-version)
+            row (when resolved
+                  (first (sp/query-entities storage :package-version
+                                            {:name pkg-name :version resolved})))]
+        (cond
+          (nil? row)
+          {:ok false :reason "not-found" :name pkg-name :requested pkg-version}
+
+          (= resolved old-version)
+          {:ok true :name pkg-name :from old-version :to resolved :rewritten-refs 0}
+
+          :else
+          (let [ns-root (:ns-root row)
+                fns (:fns row)
+                missing (missing-dependencies storage (:dependencies row))]
+            (if (seq missing)
+              {:ok false :reason "missing-dependencies" :missing missing}
+              (do
+                (when-not (already-materialized? storage ns-root resolved fns)
+                  (materialize-fns! ctx storage ns-root resolved fns))
+                (let [rewritten (rewrite-refs-to-version! storage ns-root old-version resolved fns)]
+                  (upsert-pin! storage pkg-name resolved)
+                  (exec-ctx/invalidate-graph-cache! ctx)
+                  {:ok true :name pkg-name :from old-version :to resolved
+                   :rewritten-refs rewritten})))))))))
+
+
 ;; ---------------------------------------------------------------------------
 ;; Package pins — per-branch desired-state "this branch uses package P at V".
 ;; The pin drives update/rollback (repoint the row) and the editor's installed
@@ -331,6 +415,7 @@
    :fork-package fork-package
    :materialize-package-version materialize-package-version
    :install-package install-package
+   :update-package-version update-package-version
    :set-package-pin set-package-pin
    :list-installed-packages list-installed-packages
    :remove-package-pin remove-package-pin})

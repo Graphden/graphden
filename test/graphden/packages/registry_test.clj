@@ -6,6 +6,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.packages.records.ids :as ids]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -273,6 +274,45 @@
         (let [b (install ">=9.0.0")]
           (is (false? (:ok b)))
           (is (= "not-found" (:reason b))))))))
+
+
+(deftest update-package-version-rewrites-project-refs-not-package-internal
+  (testing "update repoints the project's OWN refs old→new, leaving package-internal refs alone"
+    (let [{:keys [ctx storage all-name->id]} *bootstrap*
+          install-id (get all-name->id :install-package)
+          update-id  (get all-name->id :update-package-version)
+          fns [{:name :ubase :namespace "updemo" :parent :const :args {:value "b"}}
+               {:name :uwrap :namespace "updemo" :parent :map
+                :args {:func :ubase :coll {:value []}}}]]
+      (doseq [v ["1.0.0" "2.0.0"]]
+        (sp/create-entity storage :package-version
+                          {:name "updemo" :version v :ns-root "updemo"
+                           :fns fns :dependencies [:const :map] :content-hash (str "uh-" v)}))
+      (exec/execute-with-named-args ctx install-id {:pkg-name "updemo" :pkg-version "1.0.0"})
+      (let [old-ubase (ids/fn-id "updemo@1-0-0" :ubase)
+            new-ubase (ids/fn-id "updemo@2-0-0" :ubase)
+            ;; the package-INTERNAL ref uwrap@1 → ubase@1, created by materialize
+            internal (first (sp/query-entities storage :binding {:ref-fn-id old-ubase}))
+            ;; a USER fn (owner OUTSIDE the package) referencing ubase@1
+            user-ns (sp/create-entity storage :ns {:name "userland"})
+            consumer (sp/create-entity storage :fn {:name "up-consumer" :namespace-id (:id user-ns)})
+            user-binding (sp/create-entity storage :binding
+                                           {:fn-id (:id consumer) :slot-id (:slot-id internal)
+                                            :ref-fn-id old-ubase})]
+        (is (some? internal) "materialize created the package-internal uwrap→ubase ref")
+        (testing "update to v2 rewrites exactly the one user ref"
+          (let [r (exec/execute-with-named-args ctx update-id {:pkg-name "updemo" :pkg-version "2.0.0"})]
+            (is (true? (:ok r)))
+            (is (= "1.0.0" (:from r)))
+            (is (= "2.0.0" (:to r)))
+            (is (= 1 (:rewritten-refs r)) "the user ref only — NOT the package-internal one")))
+        (testing "the user's ref now points at v2"
+          (is (= new-ubase (:ref-fn-id (sp/read-entity storage :binding (:id user-binding))))))
+        (testing "the package-internal ref still points at v1 (versions never mixed)"
+          (is (= old-ubase (:ref-fn-id (sp/read-entity storage :binding (:id internal))))))
+        (testing "the pin now records v2"
+          (is (= "2.0.0" (:version (first (sp/query-entities storage :package-install
+                                                             {:package-name "updemo"}))))))))))
 
 
 (deftest fork-package-copies-into-original-ns

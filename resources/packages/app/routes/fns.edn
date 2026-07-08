@@ -558,6 +558,7 @@
                   :api-packages-list
                   :api-packages-fetch
                   :api-packages-install
+                  :api-packages-update
                   :api-packages-fork
                   :api-packages-installed
                   :api-secrets-root

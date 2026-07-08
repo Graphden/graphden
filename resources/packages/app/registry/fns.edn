@@ -175,6 +175,41 @@
    :parent :post
    :args {:path "/packages/install" :handler :install-package-handler}}
 
+  {:name :update-package-version
+   :description "Update (or roll back) an installed package to a different version: materialize the target, REWRITE the project's own refs from the pinned version to the target (package-internal refs untouched), repoint the pin. Symmetric (older version = rollback). Rejects on not-installed / not-found / missing-dependencies; same-version is a no-op."
+   :args {:pkg-name {:type :text :description "Installed package name to update."}
+          :pkg-version {:type :text :description "Target version — exact, a semver constraint, or `latest`."}}
+   :return-type :keyword-map
+   :effects #{:db :time}}
+
+  {:name :_update-body
+   :description "Parsed JSON body of POST /api/packages/update — `{:name :version}`."
+   :parent :parse-json-body}
+
+  {:name :_update-name-raw
+   :parent :get :args {:coll :_update-body :key {:value :name} :default nil}}
+  {:name :_update-name
+   :parent :to-str :args {:value :_update-name-raw}}
+
+  {:name :_update-version-raw
+   :parent :get :args {:coll :_update-body :key {:value :version} :default nil}}
+  {:name :_update-version
+   :parent :to-str :args {:value :_update-version-raw}}
+
+  {:name :_update-result
+   :parent :update-package-version
+   :args {:pkg-name :_update-name :pkg-version :_update-version}}
+
+  {:name :update-package-handler
+   :description "Ring handler for POST /api/packages/update (auth-required) — JSON `{ok, …}`."
+   :parent :json-handler
+   :args {:data :_update-result}}
+
+  {:name :api-packages-update
+   :description "POST /api/packages/update — update/rollback an installed package to another version (rewrites the project's refs). Auth-required."
+   :parent :post
+   :args {:path "/packages/update" :handler :update-package-handler}}
+
   ;; ---------------------------------------------------------------------
   ;; POST /api/packages/fork — copy-on-write: sync a version's fns into the
   ;; graph at their ORIGINAL namespace so they can be modified. Body

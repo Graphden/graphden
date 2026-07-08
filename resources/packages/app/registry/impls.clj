@@ -13,6 +13,7 @@
     [graphden.packages.export :as export]
     [graphden.packages.loader :as loader]
     [graphden.packages.records.ids :as ids]
+    [graphden.packages.semver :as semver]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]))
 
@@ -169,6 +170,22 @@
     branch-id))
 
 
+;; Pick the highest published version of `pkg-name` satisfying `spec` — a
+;; semver constraint (exact `"1.2.0"`, `">=1.1"`, `"~>1.2"`, …); nil / "" /
+;; "latest" mean "any" (the newest). Returns the concrete version string, or
+;; nil when nothing matches. Lets install / fork / materialize accept a
+;; constraint or "latest", not just an exact pin. Versions sort by parsed
+;; `[major minor patch]`.
+(defn- resolve-version
+  [storage pkg-name spec]
+  (let [constraint (if (contains? #{nil "" "latest"} spec) "*" spec)
+        matching (into []
+                       (comp (map :version)
+                             (filter #(semver/satisfies-constraint? % constraint)))
+                       (sp/query-entities storage :package-version {:name pkg-name}))]
+    (last (sort-by semver/parse-version matching))))
+
+
 ;; ---------------------------------------------------------------------------
 ;; Install (reference), fork (copy-on-write), materialize.
 ;; ---------------------------------------------------------------------------
@@ -182,10 +199,12 @@
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
-        row (first (sp/query-entities storage :package-version
-                                      {:name pkg-name :version pkg-version}))]
+        resolved (resolve-version storage pkg-name pkg-version)
+        row (when resolved
+              (first (sp/query-entities storage :package-version
+                                        {:name pkg-name :version resolved})))]
     (if (nil? row)
-      {:ok false :reason "not-found" :name pkg-name :version pkg-version}
+      {:ok false :reason "not-found" :name pkg-name :requested pkg-version}
       (let [fns (:fns row)
             missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
@@ -193,7 +212,7 @@
           (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))]
             (composition/sync-fns-to-storage! storage fns ns-id-map)
             (exec-ctx/invalidate-graph-cache! ctx)
-            {:ok true :name pkg-name :version pkg-version :forked (count fns)}))))))
+            {:ok true :name pkg-name :version resolved :forked (count fns)}))))))
 
 
 ;; Materialize a published version's fns ONCE under a version-qualified
@@ -205,19 +224,21 @@
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (let [storage (request/require-storage ctx)
-        row (first (sp/query-entities storage :package-version
-                                      {:name pkg-name :version pkg-version}))]
+        resolved (resolve-version storage pkg-name pkg-version)
+        row (when resolved
+              (first (sp/query-entities storage :package-version
+                                        {:name pkg-name :version resolved})))]
     (if (nil? row)
-      {:ok false :reason "not-found" :name pkg-name :version pkg-version}
+      {:ok false :reason "not-found" :name pkg-name :requested pkg-version}
       (let [ns-root (:ns-root row)
             missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
           {:ok false :reason "missing-dependencies" :missing missing}
           {:ok true
            :name pkg-name
-           :version pkg-version
-           :namespace (version-qualified-ns ns-root pkg-version ns-root)
-           :materialized (materialize-fns! ctx storage ns-root pkg-version (:fns row))})))))
+           :version resolved
+           :namespace (version-qualified-ns ns-root resolved ns-root)
+           :materialized (materialize-fns! ctx storage ns-root resolved (:fns row))})))))
 
 
 ;; Install a published version by REFERENCE: ensure it is materialized under
@@ -233,23 +254,25 @@
   (cr/record-effect! :db)
   (cr/record-effect! :time)
   (let [storage (request/require-storage ctx)
-        row (first (sp/query-entities storage :package-version
-                                      {:name pkg-name :version pkg-version}))]
+        resolved (resolve-version storage pkg-name pkg-version)
+        row (when resolved
+              (first (sp/query-entities storage :package-version
+                                        {:name pkg-name :version resolved})))]
     (if (nil? row)
-      {:ok false :reason "not-found" :name pkg-name :version pkg-version}
+      {:ok false :reason "not-found" :name pkg-name :requested pkg-version}
       (let [ns-root (:ns-root row)
             fns (:fns row)
             missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
           {:ok false :reason "missing-dependencies" :missing missing}
           (do
-            (when-not (already-materialized? storage ns-root pkg-version fns)
-              (materialize-fns! ctx storage ns-root pkg-version fns))
-            (upsert-pin! storage pkg-name pkg-version)
+            (when-not (already-materialized? storage ns-root resolved fns)
+              (materialize-fns! ctx storage ns-root resolved fns))
+            (upsert-pin! storage pkg-name resolved)
             {:ok true
              :name pkg-name
-             :version pkg-version
-             :namespace (version-qualified-ns ns-root pkg-version ns-root)}))))))
+             :version resolved
+             :namespace (version-qualified-ns ns-root resolved ns-root)}))))))
 
 
 ;; ---------------------------------------------------------------------------

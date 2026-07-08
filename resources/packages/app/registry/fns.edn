@@ -143,7 +143,7 @@
   {:name :install-package
    :description "Install published `(:pkg-name, :pkg-version)` by REFERENCE: ensure it is materialized under `<ns-root>@<version>` (idempotent, skipped when already visible), then pin (current-branch, package) → version. Does NOT copy rows into the caller's project. Rejects on not-found / missing-dependencies. Writes to the request's branch (staging)."
    :args {:pkg-name {:type :text :description "Package name to install."}
-          :pkg-version {:type :text :description "Semver version to install."}}
+          :pkg-version {:type :text :description "Exact version, a semver constraint (`>=1.1`, `~>1.2`, `*`), or `latest` — the highest published match is resolved and pinned."}}
    :return-type :keyword-map
    :effects #{:db :time}}
 
@@ -184,7 +184,7 @@
   {:name :fork-package
    :description "Fork published `(:pkg-name, :pkg-version)`: sync its fns into the graph at their ORIGINAL namespace, DUPLICATING rows so the caller can modify them (copy-on-write). Unlike reference install, this copies. Rejects on not-found / missing-dependencies."
    :args {:pkg-name {:type :text :description "Package name to fork."}
-          :pkg-version {:type :text :description "Semver version to fork."}}
+          :pkg-version {:type :text :description "Exact version, a semver constraint, or `latest` — highest published match is resolved."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -219,7 +219,7 @@
   {:name :materialize-package-version
    :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Rejects on `:reason \"not-found\"` / `\"missing-dependencies\"`."
    :args {:pkg-name {:type :text :description "Package name to materialize."}
-          :pkg-version {:type :text :description "Version to materialize."}}
+          :pkg-version {:type :text :description "Exact version, a semver constraint, or `latest` — highest published match is resolved."}}
    :return-type :keyword-map
    :effects #{:db}}
 

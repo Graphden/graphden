@@ -249,6 +249,32 @@
       (is (= "not-found" (:reason body))))))
 
 
+(deftest install-resolves-version-constraints
+  (testing "install picks the highest published version matching a constraint / latest / exact"
+    (doseq [[v nm] [["1.0.0" :vg-a] ["1.2.0" :vg-b] ["2.0.0" :vg-c]]]
+      (sp/create-entity (storage) :package-version
+                        {:name "ver.demo" :version v :ns-root "verdemo"
+                         :fns [{:name nm :namespace "verdemo" :parent :const :args {:value v}}]
+                         :dependencies [:const] :content-hash (str "h-" v)}))
+    (letfn [(install
+              [spec]
+              (-> (setup/via-graph *bootstrap* :install-package-handler
+                                   (publish-req {:name "ver.demo" :version spec}))
+                  :body (json/parse-string true)))]
+      (testing ">= constraint resolves to the highest match"
+        (is (= "2.0.0" (:version (install ">=1.0.0")))))
+      (testing "~> pessimistic constraint stays within the minor family"
+        (is (= "1.2.0" (:version (install "~>1.0")))))
+      (testing "latest resolves to the highest overall"
+        (is (= "2.0.0" (:version (install "latest")))))
+      (testing "an exact version resolves to itself"
+        (is (= "1.0.0" (:version (install "1.0.0")))))
+      (testing "an unsatisfiable constraint is not-found"
+        (let [b (install ">=9.0.0")]
+          (is (false? (:ok b)))
+          (is (= "not-found" (:reason b))))))))
+
+
 (deftest fork-package-copies-into-original-ns
   (testing "forking a version copies its fns at their ORIGINAL ns and does NOT pin (copy-on-write)"
     (sp/create-entity (storage) :package-version

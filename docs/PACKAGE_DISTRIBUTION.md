@@ -267,17 +267,27 @@ as `:namespace` on each fn-def, reconstructed on install).
 - **Notifications**: registry stores latest; a periodic check compares each
   pin's version against registry-latest per org (later checkpoint).
 
-### 4.4 Dependencies + versions (Task 2)
+### 4.4 Dependencies + versions
 
-- `package.edn :dependencies` accepts version constraints:
-  `{"core" ">=1.5.0", "web" "~>2.1"}` alongside legacy bare names (bare name ≡
-  "any version").
-- `resolve-dependencies` (loader) parses constraints, selects satisfying
-  versions from the registry, topo-sorts, and — on install — recursively pulls
-  and installs missing dependency packages before the dependent.
-- Install precondition (already enforced in `install-package`): every declared
-  dependency's fns must be present (now: present *at a satisfying version*)
-  before any write.
+- **Loader-side constraints (shipped, Task 2):** `package.edn :dependencies`
+  accepts version constraints — `{"core" ">=1.5.0", "web" "~>2.1"}` alongside
+  legacy bare names (bare ≡ any). The loader validates the classpath version
+  against every constraint at boot (`graphden.packages.semver` +
+  `validate-dep-constraints!`), throwing `:packages/version-conflict` early.
+- **Install-time version selection (shipped, 3d-4):** `install` / `fork` /
+  `materialize` accept an exact version, a semver constraint (`>=1.1`, `~>1.2`,
+  `*`), or `latest`; `resolve-version` picks the highest published match and
+  pins/materialises that concrete version. Unsatisfiable → `not-found`.
+- **Install precondition (shipped):** every declared FN dependency of a bundle
+  must already be present, else `missing-dependencies` before any write.
+- **Recursive PACKAGE pull (deferred — needs a package-dep model):** §4.4's
+  "auto-install missing dependency *packages*" is NOT yet built. A published
+  bundle's `:dependencies` are external **fn-names** (what the fns reference),
+  not versioned *package* refs, so the registry can't yet map a missing fn →
+  the package that provides it. Closing this needs publish to record package
+  dependencies (map external fns → their home package + version) — a distinct
+  follow-up. Today install requires deps present (manual ordering: install the
+  provider package first).
 
 ### 4.5 Fork (copy-on-write)
 

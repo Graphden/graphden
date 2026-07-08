@@ -172,6 +172,12 @@ the textarea fills.
 | Code re-use | packages | 11 |
 | User-facing UI | components, dispatch, page routes | 12 |
 | Escape hatch | `:custom-script` / `:dispatch-custom` | 13 |
+| Distribution | publish, install, update, fork | 14 |
+
+Lesson 14 continues from packages (Lesson 11): once you've
+authored a namespace, it shows how to publish it as a versioned
+artifact and install / update / fork it across branches from the
+editor's Packages panel.
 
 Multi-tenancy (multiple users hosting their own sites on one
 graphden instance, each with their own deploys / secrets /

@@ -62,11 +62,18 @@
   (pth/create-clean-db-fixture #'*container*))
 
 
+(declare full-schema)
+
+
 (defn create-test-storage
   []
   (pth/clean-database-fast! *container*)
   (let [storage (pg/create-storage (pth/get-container-config *container*))
-        schema (gds/build-schema (mds/create-builder))]
+        ;; The FULL prod schema (graph + versioned + executions + services +
+        ;; packages), not graph-only — so every entity's table exists and
+        ;; tenancy scoping tests can exercise any scoped entity
+        ;; (`:branch` / `:service` / `:package-install`), not just `:fn`/`:ns`.
+        schema (full-schema)]
     (sp/initialize storage schema)
     ;; Pre-seed the 14 primitive fn-rows so slot.type-fn-id refs resolve.
     ;; `boot-primitive-records` returns tagged records (`:kind :fn`); strip

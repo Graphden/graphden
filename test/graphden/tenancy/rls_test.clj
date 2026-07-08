@@ -3,12 +3,14 @@
    OrgScopedStorage (PLATFORM_PLAN §3.0 B5). The test connects as a
    non-superuser role (via SET ROLE) because a superuser bypasses RLS."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.addon]
     [graphden.tenancy.context :as tc]
     [graphden.tenancy.rls :as rls]
+    [graphden.tenancy.storage :as ts]
     [integrant.core :as ig]
     [next.jdbc :as jdbc])
   (:import
@@ -108,7 +110,11 @@
 (deftest rls-enabler-init-key-installs-policies-on-every-scoped-table
   (let [storage (setup/create-test-storage)
         ds (:pool storage)
-        tables ["fn" "slot" "fn_slot" "binding" "binding_list_item" "ns"]]
+        ;; Derived from the source of truth so the test tracks the scoped-set
+        ;; automatically (create-test-storage now builds the full schema, so
+        ;; every scoped entity's table exists — incl. branch / fn_execution /
+        ;; package_install, not just the graph tables).
+        tables (mapv #(str/replace (name %) "-" "_") ts/default-scoped-entities)]
     (is (= :enabled (ig/init-key :tenancy/rls-enabler {:storage storage}))
         "the addon component runs enable-rls! at boot")
     (let [installed (->> (jdbc/execute! ds ["SELECT tablename FROM pg_policies WHERE policyname = 'org_isolation_select'"])

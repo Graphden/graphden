@@ -563,6 +563,7 @@
                   :api-packages-installed
                   :api-packages-uninstall
                   :api-packages-panel-install
+                  :api-packages-panel-update
                   :api-secrets-root
                   :api-secret-inline-binding
                   :api-secret-delete

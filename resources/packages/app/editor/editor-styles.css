@@ -3973,6 +3973,11 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-packages .packages-available > summary:hover { color: var(--fg); }
 .sidebar-packages .packages-install-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 10px; padding: 1px 6px; }
 .sidebar-packages .packages-install-btn:hover { background: var(--hover-bg); }
+/* per-row update/rollback form — version input + ↑ submit, inline with ×. */
+.sidebar-packages .packages-update-form { display: inline-flex; gap: 2px; align-items: center; }
+.sidebar-packages .packages-version-input { width: 44px; font-size: 10px; padding: 0 2px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
+.sidebar-packages .packages-update-btn { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 2px; line-height: 1; }
+.sidebar-packages .packages-update-btn:hover { color: var(--accent); }
 
 .sidebar-grants-admin .grant-delete,
 .sidebar-users-admin .grant-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; }

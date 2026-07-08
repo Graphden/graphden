@@ -296,6 +296,40 @@
           "a :package-install pin was written on the branch"))))
 
 
+(deftest panel-update-handler-updates-and-refreshes-panel
+  (testing "POST /api/packages/panel-update form-encoded {name, version} repins + refreshes the panel"
+    (doseq [v ["1.0.0" "2.0.0"]]
+      (sp/create-entity (storage) :package-version
+                        {:name "panel.upd" :version v :ns-root "panelupd.demo"
+                         :fns [{:name (keyword (str "panelupd-" (subs v 0 1)))
+                                :namespace "panelupd.demo" :parent :const :args {:value v}}]
+                         :dependencies [:const] :content-hash (str "puh-" v)}))
+    ;; install 1.0.0 first — update rejects a package that isn't installed
+    (exec/execute-with-named-args (:ctx *bootstrap*)
+                                  (get (:all-name->id *bootstrap*) :set-package-pin)
+                                  {:pkg-name "panel.upd" :pkg-version "1.0.0"})
+    (let [resp (setup/via-graph *bootstrap* :_pkg-update-panel-handler
+                                {:request-method :post
+                                 :body "name=panel.upd&version=2.0.0"
+                                 :headers {"content-type" "application/x-www-form-urlencoded"}})]
+      (is (= 200 (:status resp)))
+      (is (re-find #"data-packages-panel" (:body resp)))
+      (is (re-find #"panel\.upd" (:body resp)) "installed table still lists the package")
+      (is (re-find #"2\.0\.0" (:body resp)) "at the updated version")
+      (is (= "2.0.0" (:version (first (sp/query-entities (storage) :package-install
+                                                         {:package-name "panel.upd"}))))
+          "the pin was repointed to the target version")))
+  (testing "rollback — the same handler accepts an OLDER version symmetrically"
+    (let [resp (setup/via-graph *bootstrap* :_pkg-update-panel-handler
+                                {:request-method :post
+                                 :body "name=panel.upd&version=1.0.0"
+                                 :headers {"content-type" "application/x-www-form-urlencoded"}})]
+      (is (= 200 (:status resp)))
+      (is (= "1.0.0" (:version (first (sp/query-entities (storage) :package-install
+                                                         {:package-name "panel.upd"}))))
+          "rolled back to the older version"))))
+
+
 (deftest install-resolves-version-constraints
   (testing "install picks the highest published version matching a constraint / latest / exact"
     (doseq [[v nm] [["1.0.0" :vg-a] ["1.2.0" :vg-b] ["2.0.0" :vg-c]]]

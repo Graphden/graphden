@@ -347,8 +347,42 @@
   {:name :_pkg-panel-uninstall-btn
    :parent :hiccup
    :args {:tag {:value "button"} :attrs :_pkg-panel-uninstall-attrs :children [{:value "×"}]}}
+
+  ;; per-row update/rollback — a tiny <form hx-post="/api/packages/panel-update">
+  ;; with a hidden name + a version text input (prefilled with the current
+  ;; version). Submitting form-encodes {name, version} → update-package-version
+  ;; (variant-B ref-rewrite; symmetric so an OLDER version = rollback; accepts
+  ;; exact / `latest` / a semver constraint), then swaps the refreshed panel.
+  ;; A free-text version (not a <select>) avoids a per-row registry filter;
+  ;; a version dropdown is a possible follow-up.
+  {:name :_pkg-panel-update-name-attrs
+   :parent :assoc
+   :args {:map {:value {:type "hidden" :name "name"}}
+          :key {:value :value} :value :_pkg-panel-name-val}}
+  {:name :_pkg-panel-update-name-input
+   :parent :hiccup :args {:tag {:value "input"} :attrs :_pkg-panel-update-name-attrs}}
+  {:name :_pkg-panel-update-version-attrs
+   :parent :assoc
+   :args {:map {:value {:type "text" :name "version" :class "packages-version-input"
+                        :size "6" :title "Target version — exact, latest, or a constraint"}}
+          :key {:value :value} :value :_pkg-panel-version-val}}
+  {:name :_pkg-panel-update-version-input
+   :parent :hiccup :args {:tag {:value "input"} :attrs :_pkg-panel-update-version-attrs}}
+  {:name :_pkg-panel-update-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "submit" :class "packages-update-btn" :title "Update / roll back to this version"}}
+          :children [{:value "↑"}]}}
+  {:name :_pkg-panel-update-form
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "packages-update-form"
+                          :hx-post "/api/packages/panel-update"
+                          :hx-target "closest [data-packages-panel]"
+                          :hx-swap "outerHTML"}}
+          :children [:_pkg-panel-update-name-input :_pkg-panel-update-version-input :_pkg-panel-update-btn]}}
   {:name :_pkg-panel-td-actions
-   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-uninstall-btn]}}
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-update-form :_pkg-panel-uninstall-btn]}}
 
   {:name :_pkg-panel-row
    :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-td-name :_pkg-panel-td-version :_pkg-panel-td-actions]}}
@@ -512,4 +546,31 @@
   {:name :api-packages-panel-install
    :description "POST /api/packages/panel-install?name=<pkg>&version=<v> — install a published version from the editor panel; returns the refreshed panel HTML. Auth-required."
    :parent :post
-   :args {:path "/packages/panel-install" :handler :_pkg-install-panel-handler}}]}
+   :args {:path "/packages/panel-install" :handler :_pkg-install-panel-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/panel-update — the panel's HTML-returning counterpart
+  ;; to the JSON /packages/update. Form-encoded {name, version} (from the
+  ;; per-row update form's hidden name + version input), so it reads the body,
+  ;; not query params. update-package-version rewrites the project's refs from
+  ;; the pinned version to the target (symmetric — older = rollback), then
+  ;; `:do` renders the refreshed panel. Auth-required.
+  ;; ---------------------------------------------------------------------
+  {:name :_pkg-update-form
+   :parent :parse-form-body-kw}
+  {:name :_pkg-update-name
+   :parent :get :args {:coll :_pkg-update-form :key {:value :name} :default {:value ""}}}
+  {:name :_pkg-update-version
+   :parent :get :args {:coll :_pkg-update-form :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-update-do
+   :parent :update-package-version :args {:pkg-name :_pkg-update-name :pkg-version :_pkg-update-version}}
+  {:name :_pkg-update-then-panel
+   :description "Update/rollback, THEN render the refreshed panel — `:do` forces order so the installed table shows the new version."
+   :parent :do :args {:steps [:_pkg-update-do :_pkg-panel-html]}}
+  {:name :_pkg-update-panel-handler
+   :description "Ring handler for POST /api/packages/panel-update — updates and returns the refreshed Packages panel as text/html."
+   :parent :html-ok-response :args {:body :_pkg-update-then-panel}}
+  {:name :api-packages-panel-update
+   :description "POST /api/packages/panel-update — update/rollback an installed package to the form-supplied version from the editor panel; returns the refreshed panel HTML. Auth-required."
+   :parent :post
+   :args {:path "/packages/panel-update" :handler :_pkg-update-panel-handler}}]}

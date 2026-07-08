@@ -175,6 +175,13 @@
    :parent :post
    :args {:path "/packages/install" :handler :install-package-handler}}
 
+  {:name :materialize-package-version
+   :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Rejects on `:reason \"not-found\"` / `\"missing-dependencies\"`."
+   :args {:pkg-name {:type :text :description "Package name to materialize."}
+          :pkg-version {:type :text :description "Version to materialize."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
   ;; ---------------------------------------------------------------------
   ;; Package pins — per-branch desired-state "this branch uses P at V".
   ;; Base-fns backing reference-install + the editor's installed list.

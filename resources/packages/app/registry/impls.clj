@@ -4,6 +4,7 @@
    graph composition (fn-defs) over this + the CRUD base-fns."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [graphden.crud.request :as request]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.interface :as composition]
@@ -127,6 +128,60 @@
              :installed (count fns)}))))))
 
 
+;; Rewrite one bundle fn's namespace so version V of the package rooted at
+;; NS-ROOT lives at `<ns-root>@<sanitized-version>`. The version's dots are
+;; sanitized to dashes (a dot is the ns-path separator), so "1.3.0" → "1-3-0"
+;; and `web.components.foo` → `web.components@1-3-0.foo`. Pure boundary
+;; string-shaping (no graph composition). A ns not under NS-ROOT is left as-is.
+(defn- version-qualified-ns
+  [ns-root version fn-ns]
+  (if (and fn-ns (str/starts-with? fn-ns ns-root))
+    (str ns-root "@" (str/replace (str version) "." "-") (subs fn-ns (count ns-root)))
+    fn-ns))
+
+
+;; Materialize a published version's fns ONCE under a version-qualified
+;; namespace, so multiple versions coexist (distinct deterministic fn-ids via
+;; the rewritten ns) and callers REFERENCE them rather than copy rows
+;; (PACKAGE_DISTRIBUTION §4.2). Org-neutral: syncs into ctx's current scope
+;; (self-hosted → the one graph; cloud → public-org when a platform admin runs
+;; it in public scope, as publish already does). Idempotent (deterministic ids
+;; + upsert). Rejects if the bundle's declared deps are absent — same guard as
+;; install. The sync resolves the bundle's external references (parents, HOF
+;; refs, renamed/free-arg slots) through the same faithful fn-def path the boot
+;; sync uses, so a bundle binding e.g. `:extras` on `:submit-button` resolves.
+;; A graph sync is not expressible as composition, so this is one base-fn.
+(defbase materialize-package-version
+  [pkg-name pkg-version]
+  (cr/record-effect! :db)
+  (let [storage (request/require-storage ctx)
+        row (first (sp/query-entities storage :package-version
+                                      {:name pkg-name :version pkg-version}))]
+    (if (nil? row)
+      {:ok false :reason "not-found" :name pkg-name :version pkg-version}
+      (let [ns-root (:ns-root row)
+            dep-names (mapv name (:dependencies row))
+            present (into #{}
+                          (map :name)
+                          (when (seq dep-names)
+                            (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))
+            missing (vec (distinct (remove present dep-names)))]
+        (if (seq missing)
+          {:ok false :reason "missing-dependencies" :missing (mapv keyword missing)}
+          (let [materialized (mapv (fn [fd]
+                                     (update fd :namespace
+                                             #(version-qualified-ns ns-root pkg-version %)))
+                                   (:fns row))
+                ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) materialized))]
+            (composition/sync-fns-to-storage! storage materialized ns-id-map)
+            (exec-ctx/invalidate-graph-cache! ctx)
+            {:ok true
+             :name pkg-name
+             :version pkg-version
+             :namespace (version-qualified-ns ns-root pkg-version ns-root)
+             :materialized (count materialized)}))))))
+
+
 ;; ---------------------------------------------------------------------------
 ;; Package pins — per-branch desired-state "this branch uses package P at V".
 ;; The pin drives update/rollback (repoint the row) and the editor's installed
@@ -198,6 +253,7 @@
    :list-package-versions list-package-versions
    :fetch-package-version fetch-package-version
    :install-package install-package
+   :materialize-package-version materialize-package-version
    :set-package-pin set-package-pin
    :list-installed-packages list-installed-packages
    :remove-package-pin remove-package-pin})

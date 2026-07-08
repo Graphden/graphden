@@ -54,6 +54,37 @@
       (is (= #{"0.1.0" "0.2.0"} (set (map :version rows)))))))
 
 
+(deftest materialize-package-version-into-versioned-ns
+  (testing "materialize syncs a published bundle under <ns-root>@<sanitized-version>"
+    (let [{:keys [ctx storage all-name->id]} *bootstrap*
+          export-id (get all-name->id :export-namespace)
+          publish-id (get all-name->id :publish-package)
+          materialize-id (get all-name->id :materialize-package-version)
+          bundle (exec/execute-with-named-args ctx export-id {:root "app.contact-demo"})]
+      (exec/execute-with-named-args ctx publish-id
+                                    {:pkg-name "app.contact-demo" :pkg-version "2.0.0" :bundle bundle})
+      (testing "materialize succeeds under the version-qualified ns (resolves :extras/:label on external :submit-button)"
+        (let [r (exec/execute-with-named-args ctx materialize-id
+                                              {:pkg-name "app.contact-demo" :pkg-version "2.0.0"})]
+          (is (true? (:ok r)))
+          (is (= "app.contact-demo@2-0-0" (:namespace r)))
+          (is (pos? (:materialized r)))))
+      (testing "the bundle's fns exist under the versioned namespace"
+        (let [vns (first (sp/query-entities storage :ns {:name "contact-demo@2-0-0"}))]
+          (is (some? vns) "leaf versioned ns created")
+          (is (seq (sp/query-entities storage :fn {:namespace-id (:id vns)}))
+              "bundle fns materialized under it")))
+      (testing "materialize is idempotent (re-run stays ok)"
+        (let [r (exec/execute-with-named-args ctx materialize-id
+                                              {:pkg-name "app.contact-demo" :pkg-version "2.0.0"})]
+          (is (true? (:ok r)))))
+      (testing "an unknown version rejects"
+        (let [r (exec/execute-with-named-args ctx materialize-id
+                                              {:pkg-name "app.contact-demo" :pkg-version "9.9.9"})]
+          (is (false? (:ok r)))
+          (is (= "not-found" (:reason r))))))))
+
+
 (deftest package-install-entity-roundtrips
   (testing "a :package-install pin stores + restores its fields"
     (let [branch-id (random-uuid)

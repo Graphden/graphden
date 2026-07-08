@@ -1,5 +1,6 @@
 (ns graphden.schema.packages.schema
-  "Package-registry schema — the `:package-version` entity.
+  "Package-registry schema — the `:package-version` (published snapshot)
+   and `:package-install` (per-branch version pin) entities.
 
    A `:package-version` is an IMMUTABLE, named, versioned snapshot of a
    namespace subtree's `fns.edn` (produced by
@@ -79,28 +80,81 @@
 
 
 ;; =============================================================================
+;; Entity UUID — :package-install (per-branch version pin)
+;; =============================================================================
+
+(def ^:private package-install-entity-uuid
+  #uuid "3ba7efc6-3758-47fc-88db-2461ebd546b0")
+
+
+(def ^:private pi-branch-id-field-uuid
+  #uuid "320de48d-745e-4eb9-a7dd-53c8de5905d0")
+
+
+(def ^:private pi-package-name-field-uuid
+  #uuid "e312c026-1b07-4a37-82ae-8bbe5e837f83")
+
+
+(def ^:private pi-version-field-uuid
+  #uuid "015b9b12-e737-4ccf-999c-3a526f8a2d9f")
+
+
+(def ^:private pi-org-id-field-uuid
+  #uuid "a8a280ac-a37b-4421-b01f-e7c6cc7302f1")
+
+
+(def ^:private pi-installed-at-field-uuid
+  #uuid "16d256b7-d711-4888-ac48-38dfc8739dd4")
+
+
+;; =============================================================================
 ;; Schema
 ;; =============================================================================
 
 (defn extend-builder
-  "Extend a schema builder with the `:package-version` entity. Chain
-   after `services.schema/extend-builder`. Non-versioned (immutable
-   snapshot) so the versioned-storage decorator passes writes straight
-   through, same as `:service` / `:fn-execution`."
+  "Extend a schema builder with the package-registry entities. Chain
+   after `services.schema/extend-builder`.
+
+   - `:package-version` — immutable published snapshot (content-addressed).
+     Platform-global (no `:org-id`): a published package is shared, not
+     tenant-owned.
+   - `:package-install` — a per-branch version PIN (desired-state: \"branch B
+     uses package P at version V\"). Carries `:org-id` because pins ARE
+     tenant-owned — each org installs/updates packages in its own project.
+     One pin per `(branch-id, package-name)`, enforced app-side (mirrors the
+     app-side uniqueness of `:package-version`).
+
+   Both are non-versioned (a published snapshot is immutable by contract; a
+   pin is runtime desired-state, same class as `:service`), so the
+   versioned-storage decorator passes writes straight through."
   [builder]
-  (ds/add-entity builder :package-version package-version-entity-uuid
-                 {:name {:uuid pv-name-field-uuid
-                         :type :text}
-                  :version {:uuid pv-version-field-uuid
-                            :type :text}
-                  :ns-root {:uuid pv-ns-root-field-uuid
-                            :type :text}
-                  :fns {:uuid pv-fns-field-uuid
-                        :type :jsonb}
-                  :dependencies {:uuid pv-dependencies-field-uuid
-                                 :type :jsonb}
-                  :content-hash {:uuid pv-content-hash-field-uuid
-                                 :type :text}
-                  :published-at {:uuid pv-published-at-field-uuid
-                                 :type :timestamptz
-                                 :nullable? true}}))
+  (-> builder
+      (ds/add-entity :package-version package-version-entity-uuid
+                     {:name {:uuid pv-name-field-uuid
+                             :type :text}
+                      :version {:uuid pv-version-field-uuid
+                                :type :text}
+                      :ns-root {:uuid pv-ns-root-field-uuid
+                                :type :text}
+                      :fns {:uuid pv-fns-field-uuid
+                            :type :jsonb}
+                      :dependencies {:uuid pv-dependencies-field-uuid
+                                     :type :jsonb}
+                      :content-hash {:uuid pv-content-hash-field-uuid
+                                     :type :text}
+                      :published-at {:uuid pv-published-at-field-uuid
+                                     :type :timestamptz
+                                     :nullable? true}})
+      (ds/add-entity :package-install package-install-entity-uuid
+                     {:branch-id {:uuid pi-branch-id-field-uuid
+                                  :type :uuid}
+                      :package-name {:uuid pi-package-name-field-uuid
+                                     :type :text}
+                      :version {:uuid pi-version-field-uuid
+                                :type :text}
+                      :org-id {:uuid pi-org-id-field-uuid
+                               :type :text
+                               :nullable? true}
+                      :installed-at {:uuid pi-installed-at-field-uuid
+                                     :type :timestamptz
+                                     :nullable? true}})))

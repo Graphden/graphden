@@ -54,6 +54,28 @@
       (is (= #{"0.1.0" "0.2.0"} (set (map :version rows)))))))
 
 
+(deftest package-install-entity-roundtrips
+  (testing "a :package-install pin stores + restores its fields"
+    (let [branch-id (random-uuid)
+          row (sp/create-entity (storage) :package-install
+                                {:branch-id branch-id
+                                 :package-name "acme.demo"
+                                 :version "1.2.0"
+                                 :org-id "public"})
+          back (sp/read-entity (storage) :package-install (:id row))]
+      (is (= branch-id (:branch-id back)))
+      (is (= "acme.demo" (:package-name back)))
+      (is (= "1.2.0" (:version back)))
+      (is (= "public" (:org-id back)))))
+  (testing "query-entities finds pins by branch + package"
+    (let [branch-id (random-uuid)]
+      (sp/create-entity (storage) :package-install
+                        {:branch-id branch-id :package-name "acme.p" :version "0.1.0"})
+      (let [rows (sp/query-entities (storage) :package-install
+                                    {:branch-id branch-id :package-name "acme.p"})]
+        (is (= ["0.1.0"] (map :version rows)))))))
+
+
 (deftest export-namespace-base-fn-executes
   (testing ":export-namespace runs through the executor against the live graph"
     (let [{:keys [ctx all-name->id]} *bootstrap*

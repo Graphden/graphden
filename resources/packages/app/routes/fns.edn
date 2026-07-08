@@ -564,6 +564,7 @@
                   :api-packages-uninstall
                   :api-packages-panel-install
                   :api-packages-panel-update
+                  :api-packages-panel-fork
                   :api-secrets-root
                   :api-secret-inline-binding
                   :api-secret-delete

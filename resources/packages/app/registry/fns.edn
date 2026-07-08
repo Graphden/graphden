@@ -434,12 +434,35 @@
   {:name :_pkg-avail-install-btn
    :parent :hiccup
    :args {:tag {:value "button"} :attrs :_pkg-avail-install-attrs :children [{:value "Install"}]}}
+
+  ;; Fork button per browse row — COPY (copy-on-write) the version's fns into the
+  ;; graph at their original namespace so they can be edited, vs Install's
+  ;; by-reference pin. hx-post the pair as query params; the refreshed panel
+  ;; carries a transient fork notice (fork writes no pin, so the installed table
+  ;; is otherwise unchanged).
+  {:name :_pkg-avail-fork-url
+   :parent :str-join
+   :args {:coll [{:value "/api/packages/panel-fork?name="} :_pkg-avail-name-val
+                 {:value "&version="} :_pkg-avail-version-val]
+          :separator {:value ""}}}
+  {:name :_pkg-avail-fork-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "packages-fork-btn"
+                        :title "Fork — copy this version's fns into the graph to edit"
+                        :hx-target "closest [data-packages-panel]"
+                        :hx-swap "outerHTML"}}
+          :key {:value :hx-post}
+          :value :_pkg-avail-fork-url}}
+  {:name :_pkg-avail-fork-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pkg-avail-fork-attrs :children [{:value "Fork"}]}}
   {:name :_pkg-avail-td-name
    :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-name-val]}}
   {:name :_pkg-avail-td-version
    :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-version-val]}}
   {:name :_pkg-avail-td-action
-   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-install-btn]}}
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-install-btn :_pkg-avail-fork-btn]}}
   {:name :_pkg-avail-row
    :parent :hiccup
    :args {:tag {:value "tr"} :children [:_pkg-avail-td-name :_pkg-avail-td-version :_pkg-avail-td-action]}}
@@ -573,4 +596,59 @@
   {:name :api-packages-panel-update
    :description "POST /api/packages/panel-update — update/rollback an installed package to the form-supplied version from the editor panel; returns the refreshed panel HTML. Auth-required."
    :parent :post
-   :args {:path "/packages/panel-update" :handler :_pkg-update-panel-handler}}]}
+   :args {:path "/packages/panel-update" :handler :_pkg-update-panel-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/panel-fork?name=<pkg>&version=<v> — copy the version's
+  ;; fns into the graph (copy-on-write), then return the refreshed panel with a
+  ;; transient notice. Fork writes NO pin, so the installed table is otherwise
+  ;; unchanged; the notice (built from the fork result) is the only visible
+  ;; feedback. The notice referencing :_pkg-fork-result is what forces the fork
+  ;; to execute — no :do needed, since fork touches the graph tree, not the pins
+  ;; the rest of the panel reads. Auth-required.
+  ;; ---------------------------------------------------------------------
+  {:name :_pkg-fork-name-raw
+   :parent :query-param :args {:request {:as :request} :param-name {:value "name"}}}
+  {:name :_pkg-fork-name
+   :parent :to-str :args {:value :_pkg-fork-name-raw}}
+  {:name :_pkg-fork-version-raw
+   :parent :query-param :args {:request {:as :request} :param-name {:value "version"}}}
+  {:name :_pkg-fork-version
+   :parent :to-str :args {:value :_pkg-fork-version-raw}}
+  {:name :_pkg-fork-result
+   :parent :fork-package :args {:pkg-name :_pkg-fork-name :pkg-version :_pkg-fork-version}}
+  {:name :_pkg-fork-ok?
+   :parent :get :args {:coll :_pkg-fork-result :key {:value :ok} :default {:value false}}}
+  {:name :_pkg-fork-reason
+   :parent :get :args {:coll :_pkg-fork-result :key {:value :reason} :default {:value "unknown"}}}
+  {:name :_pkg-fork-err-text
+   :parent :str-join
+   :args {:coll [{:value "Fork failed: "} :_pkg-fork-reason] :separator {:value ""}}}
+  {:name :_pkg-fork-notice-ok
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-fork-note packages-fork-ok"}}
+          :children [{:value "Forked into the graph — reload to edit the copied fns."}]}}
+  {:name :_pkg-fork-notice-err
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-fork-note packages-fork-err"}}
+          :children [:_pkg-fork-err-text]}}
+  {:name :_pkg-fork-notice
+   :parent :if
+   :args {:test :_pkg-fork-ok? :then :_pkg-fork-notice-ok :else :_pkg-fork-notice-err}}
+  {:name :_pkg-fork-panel-root
+   :description "Panel root for a fork response — the transient fork notice above the normal installed body + browse details."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-packages-panel "1"}}
+          :children [:_pkg-fork-notice :_pkg-panel-body :_pkg-avail-details]}}
+  {:name :_pkg-fork-panel-html
+   :parent :render-hiccup :args {:hiccup :_pkg-fork-panel-root}}
+  {:name :_pkg-fork-panel-handler
+   :description "Ring handler for POST /api/packages/panel-fork — forks and returns the refreshed panel (with a transient fork notice) as text/html."
+   :parent :html-ok-response :args {:body :_pkg-fork-panel-html}}
+  {:name :api-packages-panel-fork
+   :description "POST /api/packages/panel-fork?name=<pkg>&version=<v> — fork (copy) a published version's fns into the graph from the editor panel; returns the refreshed panel HTML with a fork notice. Auth-required."
+   :parent :post
+   :args {:path "/packages/panel-fork" :handler :_pkg-fork-panel-handler}}]}

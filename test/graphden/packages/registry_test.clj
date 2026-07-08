@@ -330,6 +330,34 @@
           "rolled back to the older version"))))
 
 
+(deftest panel-fork-handler-copies-fns-and-notes-result
+  (testing "POST /api/packages/panel-fork?name=&version= copies the fns + returns a success notice"
+    (sp/create-entity (storage) :package-version
+                      {:name "fork.demo" :version "1.0.0" :ns-root "forkdemo.pkg"
+                       :fns [{:name :forked-greeting :namespace "forkdemo.pkg"
+                              :parent :const :args {:value "forked!"}}]
+                       :dependencies [:const] :content-hash "fh"})
+    (let [resp (setup/via-graph *bootstrap* :_pkg-fork-panel-handler
+                                {:request-method :post
+                                 :query-params {"name" "fork.demo" "version" "1.0.0"}
+                                 :headers {}})]
+      (is (= 200 (:status resp)))
+      (is (re-find #"packages-fork-ok" (:body resp)) "the success notice is rendered")
+      (is (re-find #"data-packages-panel" (:body resp)) "wrapped in the panel root for the swap")
+      (is (seq (sp/query-entities (storage) :fn {:name "forked-greeting"}))
+          "the fn was COPIED into the graph at its original namespace (no pin)")
+      (is (empty? (sp/query-entities (storage) :package-install {:package-name "fork.demo"}))
+          "fork writes no pin — it is a copy, not a reference install")))
+  (testing "forking an unknown version renders the error notice"
+    (let [resp (setup/via-graph *bootstrap* :_pkg-fork-panel-handler
+                                {:request-method :post
+                                 :query-params {"name" "fork.demo" "version" "9.9.9"}
+                                 :headers {}})]
+      (is (= 200 (:status resp)))
+      (is (re-find #"packages-fork-err" (:body resp)) "error notice class")
+      (is (re-find #"not-found" (:body resp)) "surfaces the fork failure reason"))))
+
+
 (deftest install-resolves-version-constraints
   (testing "install picks the highest published version matching a constraint / latest / exact"
     (doseq [[v nm] [["1.0.0" :vg-a] ["1.2.0" :vg-b] ["2.0.0" :vg-c]]]

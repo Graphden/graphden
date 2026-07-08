@@ -367,13 +367,32 @@ hard rule. Revisit only if a concrete problem appears.
   storage-shaped data. `extend-builder` keeps *storage* swap-clean despite this;
   the editor coupling is accepted, not abstracted (principle #6).
 
-### 6.3 Deliverable for this branch
+### 6.3 Swap-seam matrix (status + how)
 
-Document the seams (§ 6.1) in one place with worked "how to swap X" notes, and
-**prove one** end-to-end as a credibility demo — candidate: an optional
-"versioning off" toggle (run the executor directly on `OrgScoped(Postgres)`
-with no `VersionedStorage`) or a minimal alternate-storage stub that satisfies
-the protocol + builder. We do not attempt to make every component swap-clean.
+The honest answer to the original design question ("can we replace storage /
+executor / types / versioning / permissions?"). "Proven" = shipped code + a
+test exercises the seam.
+
+| Component | Seam | Injected via | Status | Proof |
+|---|---|---|---|---|
+| Storage **decorator** | wrap the `:app/storage` chain | Integrant key + addon config | **proven** | `VersionedStorage`, `OrgScopedStorage` (tenancy addon tests) |
+| Storage **backend** | `StorageCRUD` + `ExecutionGraph` + `Constraints` | override the backend init-key | **partial** | protocol exists; only Postgres implements the recursive-CTE `ExecutionGraph`. Swapping to a non-Postgres store = real work (see § 14) |
+| **Schema extension** | `data-schema-protocol` `extend-builder` | chain an `extend-builder` fn | **proven** | `extension-seam-test` (arbitrary third-party entity accepted) + `:package-install` storage round-trip (registry-test) |
+| **Auth** | `AuthProvider` protocol | `:auth/provider` Integrant key | **proven** | `SingleTokenAuthProvider` default; tenancy `TokenAuthProvider` override |
+| **Tenancy / org isolation** | optional addon | `GRAPHDEN_ADDON_CONFIGS` | **proven** | the whole tenancy addon (orgs / RLS / effect-gate) |
+| **Executor core** | `ExecutionGraph` result contract | — | **documented, unproven** | protocol-bounded; nobody has replaced it |
+| **Type system** | — | — | **coupled** | reaches into the editor (rich-types, overlays) — a documented coupling, not a clean seam |
+| **Versioning decorator** | it's a storage decorator | omit `VersionedStorage` from the chain | **documented, unproven** | mechanically a decorator, but the branch-router assumes it — untested to remove |
+
+**"Prove one" (fresh):** `test/graphden/schema/extension_seam_test.clj` — a
+deliberately third-party `extend-builder` adds a novel `:widget` entity chained
+after the core graph schema; the built schema carries it with its declared
+fields AND still carries the core `:fn`. Combined with the `:package-install`
+storage round-trip (a builder-added entity that a real Postgres backend
+materialises + CRUDs), this proves the "a new module adds its own tables
+without touching the storage backend" claim end-to-end. We deliberately do NOT
+attempt to make every core component swap-clean (principle #6) — the matrix
+above says exactly which are proven vs documented vs coupled.
 
 ---
 

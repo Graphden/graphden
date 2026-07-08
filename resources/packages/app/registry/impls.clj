@@ -86,6 +86,20 @@
     (assoc r :id (str (:id r)) :published-at (str (:published-at r)))))
 
 
+;; The declared dependency names (from a :package-version row's :dependencies)
+;; NOT present as fns in `storage` — the shared install/materialize
+;; precondition. Returns a vector of keyword names (empty = all satisfied).
+;; One storage read + a set diff; no graph composition.
+(defn- missing-dependencies
+  [storage dependencies]
+  (let [dep-names (mapv name dependencies)
+        present (into #{}
+                      (map :name)
+                      (when (seq dep-names)
+                        (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))]
+    (mapv keyword (distinct (remove present dep-names)))))
+
+
 ;; Install a published version into the target graph. Transactional with
 ;; an install precondition (packages-quality §3): the bundle's declared
 ;; dependencies must ALL already exist, else reject without writing. The
@@ -111,14 +125,9 @@
     (if (nil? row)
       {:ok false :reason "not-found" :name pkg-name :version pkg-version}
       (let [fns (:fns row)
-            dep-names (mapv name (:dependencies row))
-            present (into #{}
-                          (map :name)
-                          (when (seq dep-names)
-                            (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))
-            missing (vec (distinct (remove present dep-names)))]
+            missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
-          {:ok false :reason "missing-dependencies" :missing (mapv keyword missing)}
+          {:ok false :reason "missing-dependencies" :missing missing}
           (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))]
             (composition/sync-fns-to-storage! storage fns ns-id-map)
             (exec-ctx/invalidate-graph-cache! ctx)
@@ -160,14 +169,9 @@
     (if (nil? row)
       {:ok false :reason "not-found" :name pkg-name :version pkg-version}
       (let [ns-root (:ns-root row)
-            dep-names (mapv name (:dependencies row))
-            present (into #{}
-                          (map :name)
-                          (when (seq dep-names)
-                            (sp/query-entities storage :fn {:name (vec (distinct dep-names))})))
-            missing (vec (distinct (remove present dep-names)))]
+            missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
-          {:ok false :reason "missing-dependencies" :missing (mapv keyword missing)}
+          {:ok false :reason "missing-dependencies" :missing missing}
           (let [materialized (mapv (fn [fd]
                                      (update fd :namespace
                                              #(version-qualified-ns ns-root pkg-version %)))

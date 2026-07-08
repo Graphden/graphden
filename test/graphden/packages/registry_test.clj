@@ -246,3 +246,27 @@
           body (json/parse-string (:body resp) true)]
       (is (false? (:ok body)))
       (is (= "not-found" (:reason body))))))
+
+
+(deftest install-resolves-ref-based-free-arg-slot-on-external-fn
+  ;; Regression for the faithful-reconstruction fix (b32c0be8): a bundle that
+  ;; binds :extras — a ref-based free-arg slot owned by an anon fn referenced
+  ;; deep inside the EXTERNAL composed :submit-button — used to throw
+  ;; :packages/orphan-slot-binding on install, because the incremental sync's
+  ;; storage reconstruction dropped composed fns' :args. It now resolves via
+  ;; the exporter, the same fn-def path boot uses.
+  (testing "install of a bundle binding :extras/:label on external :submit-button"
+    (sp/create-entity (storage) :package-version
+                      {:name "btn.demo" :version "1.0.0" :ns-root "btndemo"
+                       :fns [{:name :my-submit :namespace "btndemo"
+                              :parent :submit-button
+                              :args {:label {:value "Send"}
+                                     :extras {:value {:class "cta"}}}}]
+                       :dependencies [:submit-button] :content-hash "bh"})
+    (let [resp (setup/via-graph *bootstrap* :install-package-handler
+                                (publish-req {:name "btn.demo" :version "1.0.0"}))
+          body (json/parse-string (:body resp) true)]
+      (is (= 200 (:status resp)))
+      (is (true? (:ok body)))
+      (is (seq (sp/query-entities (storage) :fn {:name "my-submit"}))
+          "the fn binding the ref-based free-arg slot synced (would throw orphan pre-fix)"))))

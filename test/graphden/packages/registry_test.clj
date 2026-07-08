@@ -141,8 +141,15 @@
     (let [{:keys [ctx all-name->id]} *bootstrap*
           set-id (get all-name->id :set-package-pin)
           list-id (get all-name->id :list-installed-packages)
+          remove-id (get all-name->id :remove-package-pin)
           installed #(->> (exec/execute-with-named-args ctx list-id {})
                           (filter (fn [p] (= "acme.uninstall" (:package-name p)))))]
+      ;; Clean ALL pins first — this suite shares one `:once` DB, so sibling
+      ;; tests (panel-install, install-package, …) leave pins that would keep the
+      ;; panel non-empty. Removing them makes the empty-state assertion below
+      ;; deterministic regardless of test order.
+      (doseq [p (exec/execute-with-named-args ctx list-id {})]
+        (exec/execute-with-named-args ctx remove-id {:pkg-name (:package-name p)}))
       (exec/execute-with-named-args ctx set-id
                                     {:pkg-name "acme.uninstall" :pkg-version "1.0.0"})
       (is (seq (installed)) "pin present before uninstall")
@@ -331,27 +338,30 @@
 
 
 (deftest panel-fork-handler-copies-fns-and-notes-result
+  ;; Distinct package/fn/ns names from fork-package-copies-into-original-ns —
+  ;; both share the one `:once` bootstrap DB, so a reused (name, version) would
+  ;; make resolve-version pick the other test's row and fork the wrong ns-root.
   (testing "POST /api/packages/panel-fork?name=&version= copies the fns + returns a success notice"
     (sp/create-entity (storage) :package-version
-                      {:name "fork.demo" :version "1.0.0" :ns-root "forkdemo.pkg"
-                       :fns [{:name :forked-greeting :namespace "forkdemo.pkg"
+                      {:name "pfork.demo" :version "1.0.0" :ns-root "pforkdemo.pkg"
+                       :fns [{:name :pfork-greeting :namespace "pforkdemo.pkg"
                               :parent :const :args {:value "forked!"}}]
-                       :dependencies [:const] :content-hash "fh"})
+                       :dependencies [:const] :content-hash "pfh"})
     (let [resp (setup/via-graph *bootstrap* :_pkg-fork-panel-handler
                                 {:request-method :post
-                                 :query-params {"name" "fork.demo" "version" "1.0.0"}
+                                 :query-params {"name" "pfork.demo" "version" "1.0.0"}
                                  :headers {}})]
       (is (= 200 (:status resp)))
       (is (re-find #"packages-fork-ok" (:body resp)) "the success notice is rendered")
       (is (re-find #"data-packages-panel" (:body resp)) "wrapped in the panel root for the swap")
-      (is (seq (sp/query-entities (storage) :fn {:name "forked-greeting"}))
+      (is (seq (sp/query-entities (storage) :fn {:name "pfork-greeting"}))
           "the fn was COPIED into the graph at its original namespace (no pin)")
-      (is (empty? (sp/query-entities (storage) :package-install {:package-name "fork.demo"}))
+      (is (empty? (sp/query-entities (storage) :package-install {:package-name "pfork.demo"}))
           "fork writes no pin — it is a copy, not a reference install")))
   (testing "forking an unknown version renders the error notice"
     (let [resp (setup/via-graph *bootstrap* :_pkg-fork-panel-handler
                                 {:request-method :post
-                                 :query-params {"name" "fork.demo" "version" "9.9.9"}
+                                 :query-params {"name" "pfork.demo" "version" "9.9.9"}
                                  :headers {}})]
       (is (= 200 (:status resp)))
       (is (re-find #"packages-fork-err" (:body resp)) "error notice class")

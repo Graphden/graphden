@@ -376,14 +376,75 @@
    :parent :if
    :args {:test :_pkg-panel-is-empty :then :_pkg-panel-empty-notice :else :_pkg-panel-table}}
 
+  ;; --- Browse + Install: the registry index inside a native <details> ----
+  ;; Each published (name, version) is an Install button; hx-post carries the
+  ;; pair as query params (same query-not-path reason as uninstall) and swaps
+  ;; the REFRESHED panel back into [data-packages-panel]. HOF over :item.
+  {:name :_pkg-avail-name-val
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+  {:name :_pkg-avail-version-val
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-avail-install-url
+   :parent :str-join
+   :args {:coll [{:value "/api/packages/panel-install?name="} :_pkg-avail-name-val
+                 {:value "&version="} :_pkg-avail-version-val]
+          :separator {:value ""}}}
+  {:name :_pkg-avail-install-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "packages-install-btn"
+                        :hx-target "closest [data-packages-panel]"
+                        :hx-swap "outerHTML"}}
+          :key {:value :hx-post}
+          :value :_pkg-avail-install-url}}
+  {:name :_pkg-avail-install-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pkg-avail-install-attrs :children [{:value "Install"}]}}
+  {:name :_pkg-avail-td-name
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-name-val]}}
+  {:name :_pkg-avail-td-version
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-version-val]}}
+  {:name :_pkg-avail-td-action
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-install-btn]}}
+  {:name :_pkg-avail-row
+   :parent :hiccup
+   :args {:tag {:value "tr"} :children [:_pkg-avail-td-name :_pkg-avail-td-version :_pkg-avail-td-action]}}
+  {:name :_pkg-avail-rows
+   :parent :map :args {:func :_pkg-avail-row :coll :list-package-versions}}
+  {:name :_pkg-avail-tbody
+   :parent :hiccup :args {:tag {:value "tbody"} :children :_pkg-avail-rows}}
+  {:name :_pkg-avail-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table"}}
+          :children [:_pkg-avail-tbody]}}
+  {:name :_pkg-avail-is-empty
+   :parent :empty? :args {:coll :list-package-versions}}
+  {:name :_pkg-avail-empty-notice
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-panel-empty"}}
+          :children [{:value "No packages published in the registry yet."}]}}
+  {:name :_pkg-avail-body
+   :parent :if
+   :args {:test :_pkg-avail-is-empty :then :_pkg-avail-empty-notice :else :_pkg-avail-table}}
+  {:name :_pkg-avail-summary
+   :parent :hiccup :args {:tag {:value "summary"} :children [{:value "+ Install a package"}]}}
+  {:name :_pkg-avail-details
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "packages-available"}}
+          :children [:_pkg-avail-summary :_pkg-avail-body]}}
+
   ;; Stable [data-packages-panel] root — the hx-target every panel mutation
-  ;; (uninstall now; install/update/fork later) swaps with hx-swap="outerHTML",
-  ;; so the whole panel re-renders from fresh desired-state each time.
+  ;; (uninstall / install / update / fork) swaps with hx-swap="outerHTML", so
+  ;; the whole panel (installed pins + the browse <details>) re-renders from
+  ;; fresh desired-state each time.
   {:name :_pkg-panel-root
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:data-packages-panel "1"}}
-          :children [:_pkg-panel-body]}}
+          :children [:_pkg-panel-body :_pkg-avail-details]}}
 
   {:name :_pkg-panel-html
    :parent :render-hiccup :args {:hiccup :_pkg-panel-root}}
@@ -422,4 +483,33 @@
   {:name :api-packages-uninstall
    :description "DELETE /api/packages/uninstall?name=<pkg> — uninstall (unpin) a package from the current branch. Auth-required."
    :parent :delete
-   :args {:path "/packages/uninstall" :handler :_uninstall-handler}}]}
+   :args {:path "/packages/uninstall" :handler :_uninstall-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/panel-install?name=<pkg>&version=<v> — the panel's
+  ;; HTML-returning counterpart to the JSON /packages/install: install by
+  ;; reference, then return the REFRESHED panel (HTMX swaps [data-packages-panel]
+  ;; via hx-swap="outerHTML"). `:do` forces install-before-render so the pin
+  ;; shows in the installed table. Name+version ride as query params.
+  ;; Auth-required.
+  ;; ---------------------------------------------------------------------
+  {:name :_pkg-install-name-raw
+   :parent :query-param :args {:request {:as :request} :param-name {:value "name"}}}
+  {:name :_pkg-install-name
+   :parent :to-str :args {:value :_pkg-install-name-raw}}
+  {:name :_pkg-install-version-raw
+   :parent :query-param :args {:request {:as :request} :param-name {:value "version"}}}
+  {:name :_pkg-install-version
+   :parent :to-str :args {:value :_pkg-install-version-raw}}
+  {:name :_pkg-install-do
+   :parent :install-package :args {:pkg-name :_pkg-install-name :pkg-version :_pkg-install-version}}
+  {:name :_pkg-install-then-panel
+   :description "Install, THEN render the refreshed panel — `:do` forces order so :list-installed-packages includes the new pin."
+   :parent :do :args {:steps [:_pkg-install-do :_pkg-panel-html]}}
+  {:name :_pkg-install-panel-handler
+   :description "Ring handler for POST /api/packages/panel-install — installs and returns the refreshed Packages panel as text/html."
+   :parent :html-ok-response :args {:body :_pkg-install-then-panel}}
+  {:name :api-packages-panel-install
+   :description "POST /api/packages/panel-install?name=<pkg>&version=<v> — install a published version from the editor panel; returns the refreshed panel HTML. Auth-required."
+   :parent :post
+   :args {:path "/packages/panel-install" :handler :_pkg-install-panel-handler}}]}

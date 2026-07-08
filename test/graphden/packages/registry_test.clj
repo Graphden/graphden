@@ -274,6 +274,28 @@
       (is (= "not-found" (:reason body))))))
 
 
+(deftest panel-install-handler-installs-and-refreshes-panel
+  (testing "POST /api/packages/panel-install?name=&version= installs + returns the refreshed panel HTML"
+    (sp/create-entity (storage) :package-version
+                      {:name "panel.inst" :version "2.0.0" :ns-root "panelinst.demo"
+                       :fns [{:name :panelinst-greeting :namespace "panelinst.demo"
+                              :parent :const :args {:value "hi from panel install"}}]
+                       :dependencies [:const] :content-hash "pih"})
+    (let [resp (setup/via-graph *bootstrap* :_pkg-install-panel-handler
+                                {:request-method :post
+                                 :query-params {"name" "panel.inst" "version" "2.0.0"}
+                                 :headers {}})]
+      (is (= 200 (:status resp)))
+      (is (re-find #"data-packages-panel" (:body resp))
+          "response is the panel root for the HTMX outerHTML swap")
+      (is (re-find #"panel\.inst" (:body resp))
+          "the installed table now lists the just-installed package")
+      (is (re-find #"packages-uninstall" (:body resp))
+          "installed row carries the × uninstall control")
+      (is (seq (sp/query-entities (storage) :package-install {:package-name "panel.inst"}))
+          "a :package-install pin was written on the branch"))))
+
+
 (deftest install-resolves-version-constraints
   (testing "install picks the highest published version matching a constraint / latest / exact"
     (doseq [[v nm] [["1.0.0" :vg-a] ["1.2.0" :vg-b] ["2.0.0" :vg-c]]]

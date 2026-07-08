@@ -3960,13 +3960,19 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-grants-admin .grants-admin-disabled,
 .sidebar-users-admin .grants-admin-disabled { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
 
-/* Packages sidebar section (3e) — read-only installed-packages table. */
+/* Packages sidebar section (3e) — installed pins + browse/install registry. */
 .sidebar-packages .packages-panel-table { width: 100%; font-size: 11px; border-collapse: collapse; }
 .sidebar-packages .packages-panel-table th,
 .sidebar-packages .packages-panel-table td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--border); }
 .sidebar-packages .packages-panel-empty { padding: 6px 8px; color: var(--muted-fg); font-style: italic; }
 .sidebar-packages .packages-uninstall { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; line-height: 1; }
 .sidebar-packages .packages-uninstall:hover { color: var(--error-fg); }
+/* Browse/install registry — native <details> disclosure below the pins. */
+.sidebar-packages .packages-available { margin-top: 6px; border-top: 1px solid var(--border); }
+.sidebar-packages .packages-available > summary { padding: 4px; font-size: 11px; color: var(--muted-fg); cursor: pointer; }
+.sidebar-packages .packages-available > summary:hover { color: var(--fg); }
+.sidebar-packages .packages-install-btn { background: none; border: 1px solid var(--input-border); border-radius: 3px; color: var(--accent); cursor: pointer; font-size: 10px; padding: 1px 6px; }
+.sidebar-packages .packages-install-btn:hover { background: var(--hover-bg); }
 
 .sidebar-grants-admin .grant-delete,
 .sidebar-users-admin .grant-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; }

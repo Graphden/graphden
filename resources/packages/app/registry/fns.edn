@@ -23,6 +23,19 @@
    :return-type :package-bundle-shape
    :effects #{:db}}
 
+  ;; The shape `:export-graph` returns — the whole-graph migration bundle.
+  ;; Distinct from `:package-bundle-shape`: no single root, no `:dependencies`
+  ;; (nothing is external to the whole graph).
+  {:name :full-graph-export-shape
+   :description "A whole-graph migration bundle: every named fn-def in the graph (each a keyword-keyed fn-def map) plus the namespaces they span."
+   :type {:fns [:list :keyword-map]
+          :namespaces [:list :text]}}
+
+  {:name :export-graph
+   :description "Serialise the ENTIRE stored graph (the current branch/scope) into a migration bundle by reading the live graph — every named fn-def plus the namespaces they span. The core of GET /api/export/graph (cloud→self-hosted \"download my whole project\")."
+   :return-type :full-graph-export-shape
+   :effects #{:db}}
+
   {:name :publish-package
    :description "Atomically publish a bundle as a :package-version row — reject if `(:pkg-name, :pkg-version)` already exists (immutable), else hash + insert. Returns a tagged `{:ok …}` result (success or `:reason \"version-exists\"`)."
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
@@ -135,6 +148,26 @@
    :description "GET /api/packages/:name/:version — the full published bundle. Auth-required."
    :parent :get-auth-required
    :args {:path "/packages/:name/:version" :handler :fetch-package-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/export/graph — whole-graph export as an EDN bundle: the
+  ;; cloud→self-hosted "download my whole project" migration artifact. EDN
+  ;; (not JSON) so fn-def keywords round-trip faithfully; read straight from
+  ;; the handler ctx (like the JSON publish handler), so the full-graph read
+  ;; is NOT forced lazily inside a render. Auth-required (whole project).
+  ;; ---------------------------------------------------------------------
+  {:name :_export-graph-result
+   :parent :export-graph}
+  {:name :_export-graph-edn
+   :description "The whole-graph bundle as an EDN string (`:pr-str`) — keywords preserved for faithful re-load."
+   :parent :pr-str :args {:value :_export-graph-result}}
+  {:name :_export-graph-handler
+   :description "Ring handler for GET /api/export/graph (auth-required) — `application/edn` bundle."
+   :parent :edn-ok-response :args {:body :_export-graph-edn}}
+  {:name :api-export-graph
+   :description "GET /api/export/graph — export the entire graph as an EDN migration bundle. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/export/graph" :handler :_export-graph-handler}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/packages/install — install a published version into the

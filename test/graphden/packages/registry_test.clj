@@ -3,6 +3,7 @@
    stores immutable published bundles."
   (:require
     [cheshire.core :as json]
+    [clojure.edn :as edn]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
@@ -177,6 +178,29 @@
       (is (every? #(= "app.contact-demo" (:namespace %)) (:fns bundle)))
       (is (some #{:html-page-handler} (:dependencies bundle))
           "the bundle declares its external dependency"))))
+
+
+(deftest export-graph-base-fn-and-handler
+  (testing ":export-graph runs through the executor against the whole live graph"
+    (let [{:keys [ctx all-name->id]} *bootstrap*
+          bundle (exec/execute-with-named-args ctx (get all-name->id :export-graph) {})]
+      (is (= #{:fns :namespaces} (set (keys bundle))))
+      (is (> (count (:fns bundle)) 2000) "whole graph = thousands of fn-defs")
+      (is (contains? (set (:namespaces bundle)) "app.page"))))
+  (testing "GET /api/export/graph returns the bundle as an application/edn body"
+    (let [resp (setup/via-graph *bootstrap* :_export-graph-handler
+                                {:request-method :get})
+          bundle (edn/read-string (:body resp))]
+      (is (= 200 (:status resp)))
+      ;; The header map keys come back keyword-ised from the fns.edn literal
+      ;; (JSONB roundtrip); the production http adapter stringifies them before
+      ;; the wire, but via-graph returns the raw handler output — so assert on
+      ;; the value, key-form-independent.
+      (is (contains? (set (vals (:headers resp))) "application/edn"))
+      (is (= #{:fns :namespaces} (set (keys bundle)))
+          "the EDN body round-trips to the same bundle shape (keywords preserved)")
+      (is (some #(= :html-page-handler (:name %)) (:fns bundle))
+          "a known fn-def survives the EDN round-trip with keyword keys/values"))))
 
 
 (defn- publish-req

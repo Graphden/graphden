@@ -130,7 +130,9 @@ implementation tasks.
 3. `:package-install` **pin** entity + update/rollback flow. → Tasks 3, 4.
 4. Type-2 external-package **manifest** convenience + docs. → Task 5.
 5. Type-3 swap **seams**: documented + one proven swap. → Task 6.
-6. Moderation queue + cloud→self-hosted export flow. → § 9 (later checkpoint).
+6. Cloud→self-hosted export — **shipped** (`GET /api/export/graph`, § 9).
+   Moderation queue is **deferred** (a cloud-control-plane / public-registry
+   concern; self-hosted↔self-hosted needs none — § 9).
 
 ---
 
@@ -477,12 +479,22 @@ Deferred to a checkpoint after the backend is proven.
   `:package-version` (or a small `:package-moderation` row) — decide at that
   checkpoint. Self-hosted → self-hosted sharing needs no moderation (direct
   git/EDN exchange).
-- **Cloud → self-hosted export** (the potential paid feature): `export-namespace`
-  already produces the bundle; the feature is a "download my project as a
-  package bundle for migration" flow (whole-graph export, not just one subtree)
-  - the paywall gate. The gate is a cloud-control-plane concern (closed source,
-  per DISTRIBUTION.md), so the open-core piece is just whole-graph export; the
-  billing lives in the control plane. Later checkpoint.
+- **Cloud → self-hosted export** — the open-core piece **shipped**:
+  `GET /api/export/graph` (auth-required) returns the WHOLE graph (current
+  branch/scope) as an EDN migration bundle `{:fns [fn-def …] :namespaces
+  [dotted …]}` — the "download my whole project" artifact. It reuses
+  `export/export-graph` (the same records→fn-defs machinery as
+  `export-namespace`, just unscoped) via the `:export-graph` base-fn +
+  `:edn-ok-response`. **EDN, not JSON**, so fn-def keywords (`:parent :add`,
+  refinement chips, …) round-trip faithfully. **Import is idempotent-additive:**
+  because fn-ids are deterministic from `(namespace, name)`, syncing the bundle
+  onto a booted self-hosted install re-writes the platform fn-defs as no-ops and
+  only adds the caller's own fns — so no platform-namespace filtering is needed.
+  Tests: `export-test/export-graph-bundle-shape`,
+  `registry-test/export-graph-base-fn-and-handler`.
+  - The paywall/billing **gate** stays a cloud-control-plane concern (closed
+    source, per DISTRIBUTION.md) — the open-core executor just exposes the
+    capability; the control plane decides who may call it.
 
 ---
 
@@ -510,7 +522,9 @@ Tracked in the session task list. Order chosen for
    (§ 12) and our own cloud build (§ 16). Does **not** require splitting the
    monorepo — the monorepo publishes the artifact; `app`/editor stays in it as
    an optional package.
-8. **(later)** editor Packages panel; moderation; cloud→self-hosted export.
+8. **Shipped:** editor Packages panel (§ 8) + cloud→self-hosted **export**
+   (`GET /api/export/graph`, § 9). **Deferred:** moderation queue (a
+   cloud-control-plane / public-registry concern — § 9).
 
 Each backend checkpoint: `bb rebuild` → `bb verify` all-match → smoke all-✓,
 and `bb ci` green before it is called done. Roll back the branch if the whole

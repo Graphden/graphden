@@ -531,6 +531,24 @@
   (records->fn-defs (graph->records storage)))
 
 
+(defn export-graph-bundle
+  "Export the ENTIRE stored graph as a migration bundle:
+
+     {:fns        [fn-def …]   ; every named fn-def in the graph
+      :namespaces [dotted …]}  ; every namespace those fns span
+
+   Unlike `export-namespace` there is no single root and no `:dependencies`
+   — nothing is external to the whole graph. Because fn-ids are deterministic
+   from (namespace, name), re-syncing this bundle onto a *booted* install is
+   idempotent on any fn-def already present (the platform packages) and purely
+   additive for the caller's own fns — so it is a faithful \"download my whole
+   project\" migration artifact. Powers GET /api/export/graph."
+  [storage]
+  (let [fns (export-graph storage)]
+    {:fns fns
+     :namespaces (vec (sort (distinct (keep :namespace fns))))}))
+
+
 ;; =============================================================================
 ;; Scoped export — a namespace subtree as a publishable bundle
 ;; =============================================================================

@@ -56,6 +56,7 @@
                                    :ns-root (:namespace bundle)
                                    :fns fns
                                    :dependencies (:dependencies bundle)
+                                   :package-dependencies (:package-dependencies bundle)
                                    :content-hash content-hash
                                    :published-at (java.time.Instant/now)})]
         {:ok true
@@ -299,42 +300,75 @@
              :materialized (count mat-ids)}))))))
 
 
-;; Install a published version by REFERENCE: ensure it is materialized under
-;; `<ns-root>@<version>` (idempotent; skipped when already visible — incl. a
-;; platform-materialized public-org version), then pin (current-branch,
-;; package) → version. Does NOT copy rows into the caller's project — the pin
-;; plus the visible materialized rows ARE the install; the caller references
-;; them. Update = install a newer version (repins). Rejects on absent deps /
-;; unknown version. Workspace-visibility grant is a tenancy-layer concern,
-;; added by the org-admin package when the addon is present.
+;; Reference-install a SINGLE resolved version: materialize its fns under
+;; `<ns-root>@<version>` (idempotent) + pin. `visited` guards recursion cycles.
+;; Assumes any package dependencies are already installed by the caller.
+(defn- install-one!
+  [ctx storage pkg-name resolved row]
+  (let [ns-root (:ns-root row)
+        fns (:fns row)
+        missing (missing-dependencies storage (:dependencies row))]
+    (if (seq missing)
+      {:ok false :reason "missing-dependencies" :name pkg-name :missing missing}
+      (let [mat-ids (when-not (already-materialized? storage ns-root resolved fns)
+                      (materialize-fns! storage ns-root resolved fns))]
+        (upsert-pin! storage pkg-name resolved)
+        ;; Delta-invalidate only the newly materialized fns. Nil when the
+        ;; version was already visible (idempotent re-install) — nothing to
+        ;; recompile, so skip invalidation entirely.
+        (when (seq mat-ids)
+          (exec-ctx/invalidate-graph-cache! ctx mat-ids))
+        {:ok true :name pkg-name :version resolved
+         :namespace (version-qualified-ns ns-root resolved ns-root)}))))
+
+
+;; Install `pkg-name`@`spec`, pulling its `:package-dependencies` FIRST
+;; (depth-first, post-order) so the target's cross-package refs resolve. Each
+;; dep is a `{:name :version}` recorded at publish (see export/package-deps).
+;; `visited` (a set of `[name version]`) guards cycles. Short-circuits to the
+;; first failing dep result.
+(defn- install-recursive!
+  [ctx storage pkg-name spec visited]
+  (let [resolved (resolve-version storage pkg-name spec)
+        row (when resolved
+              (first (sp/query-entities storage :package-version
+                                        {:name pkg-name :version resolved})))]
+    (cond
+      (nil? row)
+      {:ok false :reason "not-found" :name pkg-name :requested spec}
+
+      ;; already being installed higher in the stack — a cycle; the pin/
+      ;; materialise from the outer frame covers it, so treat as satisfied.
+      (contains? visited [pkg-name resolved])
+      {:ok true :name pkg-name :version resolved :already-visiting true}
+
+      :else
+      (let [visited' (conj visited [pkg-name resolved])
+            dep-fail (reduce (fn [_ dep]
+                               (let [r (install-recursive! ctx storage
+                                                           (:name dep) (:version dep)
+                                                           visited')]
+                                 (when-not (:ok r) (reduced r))))
+                             nil
+                             (:package-dependencies row))]
+        (if dep-fail
+          {:ok false :reason "dependency-install-failed"
+           :name pkg-name :dependency dep-fail}
+          (install-one! ctx storage pkg-name resolved row))))))
+
+
+;; Install a published version by REFERENCE: recursively install its package
+;; dependencies (depth-first), then ensure it is materialized under
+;; `<ns-root>@<version>` (idempotent; skipped when already visible) + pin
+;; (current-branch, package) → version. Does NOT copy rows into the caller's
+;; project — the pin plus the visible materialized rows ARE the install.
+;; Update = install a newer version (repins). Rejects on absent fn-deps /
+;; unknown version / a dependency package that won't install.
 (defbase install-package
   [pkg-name pkg-version]
   (cr/record-effect! :db)
   (cr/record-effect! :time)
-  (let [storage (request/require-storage ctx)
-        resolved (resolve-version storage pkg-name pkg-version)
-        row (when resolved
-              (first (sp/query-entities storage :package-version
-                                        {:name pkg-name :version resolved})))]
-    (if (nil? row)
-      {:ok false :reason "not-found" :name pkg-name :requested pkg-version}
-      (let [ns-root (:ns-root row)
-            fns (:fns row)
-            missing (missing-dependencies storage (:dependencies row))]
-        (if (seq missing)
-          {:ok false :reason "missing-dependencies" :missing missing}
-          (let [mat-ids (when-not (already-materialized? storage ns-root resolved fns)
-                          (materialize-fns! storage ns-root resolved fns))]
-            (upsert-pin! storage pkg-name resolved)
-            ;; Delta-invalidate only the newly materialized fns. Nil when the
-            ;; version was already visible (idempotent re-install) — nothing to
-            ;; recompile, so skip invalidation entirely.
-            (when (seq mat-ids)
-              (exec-ctx/invalidate-graph-cache! ctx mat-ids))
-            {:ok true
-             :name pkg-name
-             :version resolved
-             :namespace (version-qualified-ns ns-root resolved ns-root)}))))))
+  (install-recursive! ctx (request/require-storage ctx) pkg-name pkg-version #{}))
 
 
 ;; Update (or roll back) an installed package to a different version:

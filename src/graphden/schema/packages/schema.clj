@@ -71,6 +71,14 @@
   #uuid "95a28858-0a9a-408c-a244-c6462167901b")
 
 
+;; Package-level deps: which OTHER published packages this version's fns
+;; reference (each `{:name :version}`), so install can pull them recursively.
+;; Distinct from `:dependencies` (external fn NAMES). Nullable — pre-existing
+;; rows + platform-only packages have none.
+(def ^:private pv-package-dependencies-field-uuid
+  #uuid "7c9e2a41-3b6d-4f80-9a1c-5e8b0d2f4a63")
+
+
 (def ^:private pv-content-hash-field-uuid
   #uuid "c559dbeb-742a-444b-8c26-848ae3c462c8")
 
@@ -140,6 +148,9 @@
                             :type :jsonb}
                       :dependencies {:uuid pv-dependencies-field-uuid
                                      :type :jsonb}
+                      :package-dependencies {:uuid pv-package-dependencies-field-uuid
+                                             :type :jsonb
+                                             :nullable? true}
                       :content-hash {:uuid pv-content-hash-field-uuid
                                      :type :text}
                       :published-at {:uuid pv-published-at-field-uuid

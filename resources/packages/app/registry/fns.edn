@@ -10,11 +10,12 @@
  [;; The shape `:export-namespace` returns — a fixed-schema artifact, so
   ;; it gets a named record type-row rather than a wide `:jsonb`.
   {:name :package-bundle-shape
-   :description "A publishable package bundle: the subtree root, the namespaces it spans, its fn-defs (each a keyword-keyed fn-def map), and the external fn-names it depends on."
+   :description "A publishable package bundle: the subtree root, the namespaces it spans, its fn-defs (each a keyword-keyed fn-def map), the external fn-names it depends on, and the PACKAGES (name+version) those external fns come from (for recursive install)."
    :type {:namespace :text
           :namespaces [:list :text]
           :fns [:list :keyword-map]
-          :dependencies [:list :keyword]}}
+          :dependencies [:list :keyword]
+          :package-dependencies [:list :keyword-map]}}
 
   {:name :export-namespace
    :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract."

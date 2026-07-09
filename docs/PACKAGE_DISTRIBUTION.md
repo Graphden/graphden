@@ -280,14 +280,20 @@ as `:namespace` on each fn-def, reconstructed on install).
   pins/materialises that concrete version. Unsatisfiable → `not-found`.
 - **Install precondition (shipped):** every declared FN dependency of a bundle
   must already be present, else `missing-dependencies` before any write.
-- **Recursive PACKAGE pull (deferred — needs a package-dep model):** §4.4's
-  "auto-install missing dependency *packages*" is NOT yet built. A published
-  bundle's `:dependencies` are external **fn-names** (what the fns reference),
-  not versioned *package* refs, so the registry can't yet map a missing fn →
-  the package that provides it. Closing this needs publish to record package
-  dependencies (map external fns → their home package + version) — a distinct
-  follow-up. Today install requires deps present (manual ordering: install the
-  provider package first).
+- **Recursive PACKAGE pull (shipped):** `install` auto-resolves a package's
+  *package* dependencies. Publish now records them: `export-namespace` reverse-
+  maps each external dep fn's namespace — the versioned ones (`<ns-root>@<v>`,
+  materialised by another installed package) → the published
+  `:package-version` (name+version) that owns them — into a new
+  `:package-dependencies` field on the row (`{:name :version}` list;
+  platform-only packages get `[]`). `install-package` then pulls those
+  packages FIRST, depth-first with a `[name version]` cycle guard
+  (`install-recursive!` → `install-one!`), so a package's cross-package refs
+  resolve without manual ordering. Best-effort on ns-root sharing: if several
+  packages publish the same `(ns-root, version)`, the first registry match is
+  recorded (they materialise the same rows). The name-based
+  `missing-dependencies` precondition still guards genuinely-absent platform
+  fns after the package pull.
 
 ### 4.5 Fork (copy-on-write)
 

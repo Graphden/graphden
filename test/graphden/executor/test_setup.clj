@@ -10,6 +10,7 @@
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.runtime :as rt]
+    [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
     [graphden.schema.executions.schema :as es]
@@ -419,7 +420,12 @@
    mechanism the editor CRUD path uses). Drop-in for the common test pattern
    `(sync-fns-to-storage! storage defs)` + `(invalidate-graph-cache! ctx)`."
   [ctx storage fn-defs]
-  (fn-composition/sync-fns-to-storage! storage fn-defs)
+  ;; Sync any NEW namespaces the fn-defs declare first (mirrors
+  ;; `materialize-fns!`) — without this, a fn-def carrying a `:namespace` the
+  ;; graph hasn't seen lands with a nil namespace-id. Fns without `:namespace`
+  ;; contribute nothing, so this is a no-op for the common case.
+  (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))]
+    (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map))
   (let [synced-ids (keep #(:id (first (sp/query-entities storage :fn
                                                          {:name (name (:name %))})))
                          fn-defs)]

@@ -395,6 +395,51 @@
             "the published bundle carries the exported fns (export ran in the :do step, not empty)")))))
 
 
+(deftest recursive-install-pulls-package-dependencies
+  ;; The whole Approach-A loop: publish records which PACKAGE a bundle's
+  ;; cross-package refs come from, and install pulls those packages first.
+  (let [{:keys [ctx all-name->id]} *bootstrap*
+        install-id (get all-name->id :install-package)
+        remove-id  (get all-name->id :remove-package-pin)
+        list-id    (get all-name->id :list-installed-packages)
+        install! (fn [n v] (exec/execute-with-named-args ctx install-id {:pkg-name n :pkg-version v}))
+        pinned?  (fn [n]
+                   (boolean (some #(= n (:package-name %))
+                                  (exec/execute-with-named-args ctx list-id {}))))]
+    ;; --- B: publish + install → materialises `bdep-greeting` at bdeppkg@1-0-0
+    (sp/create-entity (storage) :package-version
+                      {:name "bdep.pkg" :version "1.0.0" :ns-root "bdeppkg"
+                       :fns [{:name :bdep-greeting :namespace "bdeppkg"
+                              :parent :const :args {:value "hi from B"}}]
+                       :dependencies [:const] :package-dependencies []
+                       :content-hash "bdh"})
+    (is (true? (:ok (install! "bdep.pkg" "1.0.0"))) "B installs")
+    (is (seq (sp/query-entities (storage) :fn {:name "bdep-greeting"})) "B materialised")
+
+    ;; --- A: a fn parented to B's MATERIALISED fn, then publish A's namespace
+    (setup/sync-and-invalidate! ctx (storage)
+                                [{:name :adep-uses-b :namespace "adeppkg" :parent :bdep-greeting}])
+    (let [resp (setup/via-graph *bootstrap* :publish-package-handler
+                                (publish-req {:name "adep.pkg" :version "1.0.0"
+                                              :ns-root "adeppkg"}))
+          body (json/parse-string (:body resp) true)]
+      (is (true? (:ok body)) "A publishes")
+      (testing "A's :package-dependencies were recorded at publish, pointing at B"
+        (let [pdeps (:package-dependencies
+                      (first (sp/query-entities (storage) :package-version {:name "adep.pkg"})))]
+          (is (= 1 (count pdeps)) "exactly one package dependency")
+          (is (= "bdep.pkg" (:name (first pdeps))) "→ package B")
+          (is (= "1.0.0" (:version (first pdeps))) "→ B's version"))))
+
+    ;; --- uninstall B (pin gone; materialised fns stay), then install A ---
+    (exec/execute-with-named-args ctx remove-id {:pkg-name "bdep.pkg"})
+    (is (not (pinned? "bdep.pkg")) "B unpinned before installing A")
+    (is (true? (:ok (install! "adep.pkg" "1.0.0"))) "A installs")
+    (is (pinned? "adep.pkg") "A is pinned")
+    (is (pinned? "bdep.pkg")
+        "B was recursively pulled + re-pinned as a side effect of installing A")))
+
+
 (deftest install-resolves-version-constraints
   (testing "install picks the highest published version matching a constraint / latest / exact"
     (doseq [[v nm] [["1.0.0" :vg-a] ["1.2.0" :vg-b] ["2.0.0" :vg-c]]]

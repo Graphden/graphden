@@ -501,7 +501,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:data-packages-panel "1"}}
-          :children [:_pkg-panel-body :_pkg-avail-details]}}
+          :children [:_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
 
   {:name :_pkg-panel-html
    :parent :render-hiccup :args {:hiccup :_pkg-panel-root}}
@@ -642,7 +642,7 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:data-packages-panel "1"}}
-          :children [:_pkg-fork-notice :_pkg-panel-body :_pkg-avail-details]}}
+          :children [:_pkg-fork-notice :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
   {:name :_pkg-fork-panel-html
    :parent :render-hiccup :args {:hiccup :_pkg-fork-panel-root}}
   {:name :_pkg-fork-panel-handler
@@ -651,4 +651,104 @@
   {:name :api-packages-panel-fork
    :description "POST /api/packages/panel-fork?name=<pkg>&version=<v> — fork (copy) a published version's fns into the graph from the editor panel; returns the refreshed panel HTML with a fork notice. Auth-required."
    :parent :post
-   :args {:path "/packages/panel-fork" :handler :_pkg-fork-panel-handler}}]}
+   :args {:path "/packages/panel-fork" :handler :_pkg-fork-panel-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Publish a namespace FROM the panel — the author half of the lifecycle
+  ;; (author → publish → browse → install → …). A native <details> form
+  ;; (name / version / ns-root) form-POSTs to /api/packages/panel-publish,
+  ;; which exports the namespace subtree + writes an immutable
+  ;; :package-version, then swaps the refreshed panel (the new version now
+  ;; shows in the browse list) with a transient notice.
+  ;; ---------------------------------------------------------------------
+  {:name :_pkg-publish-input-name
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "name" :placeholder "package name"
+                          :class "packages-publish-input" :required true}}}}
+  {:name :_pkg-publish-input-version
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "version" :placeholder "1.0.0"
+                          :class "packages-publish-input" :size "6" :required true}}}}
+  {:name :_pkg-publish-input-ns
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "ns-root" :placeholder "namespace to publish"
+                          :class "packages-publish-input" :required true}}}}
+  {:name :_pkg-publish-submit
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "submit" :class "packages-install-btn"}}
+          :children [{:value "Publish"}]}}
+  {:name :_pkg-publish-form-el
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "packages-publish-form"
+                          :hx-post "/api/packages/panel-publish"
+                          :hx-target "closest [data-packages-panel]"
+                          :hx-swap "outerHTML"}}
+          :children [:_pkg-publish-input-name :_pkg-publish-input-version
+                     :_pkg-publish-input-ns :_pkg-publish-submit]}}
+  {:name :_pkg-publish-summary
+   :parent :hiccup :args {:tag {:value "summary"} :children [{:value "Publish a namespace"}]}}
+  {:name :_pkg-publish-details
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "packages-available"}}
+          :children [:_pkg-publish-summary :_pkg-publish-form-el]}}
+
+  ;; --- handler: form {name, version, ns-root} → export → publish → panel ---
+  {:name :_pkg-publish-form-data
+   :parent :parse-form-body-kw}
+  {:name :_pkg-publish-name
+   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :name} :default {:value ""}}}
+  {:name :_pkg-publish-version
+   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-publish-ns-root-raw
+   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :ns-root} :default {:value ""}}}
+  {:name :_pkg-publish-ns-root
+   :description "Nil-safe `(str ns-root)` — mirrors the JSON publish handler's raw→to-str step so `:root` is always a plain String."
+   :parent :to-str :args {:value :_pkg-publish-ns-root-raw}}
+  {:name :_pkg-publish-bundle
+   :parent :export-namespace :args {:root :_pkg-publish-ns-root}}
+  {:name :_pkg-publish-result
+   :parent :publish-package
+   :args {:pkg-name :_pkg-publish-name :pkg-version :_pkg-publish-version
+          :bundle :_pkg-publish-bundle}}
+  ;; The notice reads the FORM's name+version, NOT the effectful publish
+  ;; result: publish-package has :db/:time effects so it is NOT memoised —
+  ;; referencing its result from the notice too would run the publish a SECOND
+  ;; time and report `version-exists` against its own first write. So `:do`
+  ;; runs the publish exactly once; the notice + the browse list (now showing
+  ;; the new version) are the confirmation.
+  {:name :_pkg-publish-notice-text
+   :parent :str-join
+   :args {:coll [{:value "Published "} :_pkg-publish-name {:value "@"} :_pkg-publish-version
+                 {:value " — the new version is in the browse list below."}]
+          :separator {:value ""}}}
+  {:name :_pkg-publish-notice
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-fork-note packages-fork-ok"}}
+          :children [:_pkg-publish-notice-text]}}
+  {:name :_pkg-publish-panel-root
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-packages-panel "1"}}
+          :children [:_pkg-publish-notice :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
+  {:name :_pkg-publish-panel-html
+   :parent :render-hiccup :args {:hiccup :_pkg-publish-panel-root}}
+  ;; Force export+publish as an explicit FIRST `:do` step, THEN render — the
+  ;; full-graph read in export-namespace returns empty when forced lazily from
+  ;; INSIDE the hiccup render, but works from the direct handler ctx (same
+  ;; shape as install/update's `:do [mutate, render]`).
+  {:name :_pkg-publish-then-panel
+   :parent :do :args {:steps [:_pkg-publish-result :_pkg-publish-panel-html]}}
+  {:name :_pkg-publish-panel-handler
+   :description "Ring handler for POST /api/packages/panel-publish — exports + publishes the named namespace, returns the refreshed Packages panel (new version now in browse) as text/html."
+   :parent :html-ok-response :args {:body :_pkg-publish-then-panel}}
+  {:name :api-packages-panel-publish
+   :description "POST /api/packages/panel-publish — form {name, version, ns-root}: export the namespace subtree + publish an immutable :package-version from the editor panel; returns the refreshed panel HTML. Auth-required."
+   :parent :post
+   :args {:path "/packages/panel-publish" :handler :_pkg-publish-panel-handler}}]}

@@ -3984,6 +3984,9 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 .sidebar-packages .packages-fork-note { font-size: 10px; padding: 3px 6px; margin-bottom: 4px; border-radius: 3px; }
 .sidebar-packages .packages-fork-ok { color: var(--success-fg); }
 .sidebar-packages .packages-fork-err { color: var(--error-fg); }
+/* Publish-a-namespace form — stacked inputs + Publish submit. */
+.sidebar-packages .packages-publish-form { display: flex; flex-direction: column; gap: 3px; padding: 4px; }
+.sidebar-packages .packages-publish-input { font-size: 10px; padding: 1px 3px; border: 1px solid var(--input-border); border-radius: 3px; background: var(--card-bg); color: var(--fg); }
 
 .sidebar-grants-admin .grant-delete,
 .sidebar-users-admin .grant-delete { background: none; border: none; color: var(--muted-fg); cursor: pointer; padding: 0 4px; }

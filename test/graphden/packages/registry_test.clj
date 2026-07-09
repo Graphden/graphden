@@ -368,6 +368,24 @@
       (is (re-find #"not-found" (:body resp)) "surfaces the fork failure reason"))))
 
 
+(deftest panel-publish-handler-exports-and-publishes
+  (testing "POST /api/packages/panel-publish form {name, version, ns-root} publishes + refreshes the panel"
+    (let [resp (setup/via-graph *bootstrap* :_pkg-publish-panel-handler
+                                {:request-method :post
+                                 :body "name=paneltest.pub&version=1.0.0&ns-root=app.contact-demo"
+                                 :headers {"content-type" "application/x-www-form-urlencoded"}})]
+      (is (= 200 (:status resp)))
+      (is (re-find #"data-packages-panel" (:body resp)) "wrapped in the panel root for the swap")
+      (is (re-find #"Published paneltest\.pub@1\.0\.0" (:body resp)) "confirmation notice")
+      (let [rows (sp/query-entities (storage) :package-version {:name "paneltest.pub"})]
+        (is (= 1 (count rows)) "exactly one :package-version row written")
+        ;; The non-empty :fns is the real assertion: export-namespace's
+        ;; full-graph read must run in the handler ctx (via :do), NOT lazily
+        ;; inside the hiccup render — the latter exports 0 fns.
+        (is (seq (:fns (first rows)))
+            "the published bundle carries the exported fns (export ran in the :do step, not empty)")))))
+
+
 (deftest install-resolves-version-constraints
   (testing "install picks the highest published version matching a constraint / latest / exact"
     (doseq [[v nm] [["1.0.0" :vg-a] ["1.2.0" :vg-b] ["2.0.0" :vg-c]]]

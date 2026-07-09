@@ -46,9 +46,12 @@ how the registry indexes it. Bump a fn in `mycorp.hello`,
 `bb rebuild`, and publish again as `1.1.0` — now the registry
 holds **both** versions. `GET /api/packages` lists the index.
 
-Publishing is the only step that isn't in the editor yet — it's a
-deliberate "author decides to release" action. Everything after
-this happens in the panel.
+You can also publish **from the editor**: the Packages panel has a
+"Publish a namespace" form (name / version / ns-root) — the same
+export-and-freeze step, no `curl` needed. The `curl` above is the
+programmatic equivalent for scripts / CI. Either way, publishing is
+a deliberate "author decides to release" action; everything after
+happens in the panel.
 
 ## The Packages panel
 

@@ -126,14 +126,18 @@
 ;; through the same faithful fn-def path the boot sync uses. Shared by
 ;; :materialize-package-version and reference :install-package.
 (defn- materialize-fns!
-  [ctx storage ns-root version fns]
+  "Sync a bundle's fns under `<ns-root>@<version>` (idempotent). Returns the
+   materialized fn-ids (deterministic `fn-id` over each version-qualified ns +
+   name) so the CALLER can delta-invalidate — recompile only the new fns + their
+   dependents rather than clear + rebuild the whole registry. Does NOT
+   invalidate itself (update combines these ids with rewritten-ref owners)."
+  [storage ns-root version fns]
   (let [materialized (mapv (fn [fd]
                              (update fd :namespace #(version-qualified-ns ns-root version %)))
                            fns)
         ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) materialized))]
     (composition/sync-fns-to-storage! storage materialized ns-id-map)
-    (exec-ctx/invalidate-graph-cache! ctx)
-    (count materialized)))
+    (mapv #(ids/fn-id (:namespace %) (:name %)) materialized)))
 
 
 ;; True if the version's first fn already exists under its version-qualified
@@ -195,7 +199,8 @@
 ;; so package-INTERNAL refs (owner inside the package) and new-version refs
 ;; (don't point at old fns) are left untouched, mixing versions is impossible.
 ;; Writes create branch-version rows, so the rewrite is staging-safe/revertable.
-;; Returns the count rewritten.
+;; Returns `{:count n :owners #{fn-ids}}` — the number of refs rewritten plus
+;; the owner fns whose compiled form changed, so the caller can delta-invalidate.
 (defn- rewrite-refs-to-version!
   [storage ns-root old-version new-version new-fns]
   (let [remap (into {}
@@ -209,21 +214,21 @@
         items (sp/query-entities storage :binding-list-item {})
         binding-owner (into {} (map (juxt :id :fn-id)) bindings)
         user-ref? (fn [ref owner]
-                    (and ref (contains? remap ref) (not (contains? old-fids owner))))]
-    (+ (reduce (fn [n b]
-                 (if (user-ref? (:ref-fn-id b) (:fn-id b))
-                   (do (sp/update-entity storage :binding (:id b)
-                                         {:ref-fn-id (remap (:ref-fn-id b))})
-                       (inc n))
-                   n))
-               0 bindings)
-       (reduce (fn [n it]
-                 (if (user-ref? (:ref-fn-id it) (binding-owner (:binding-id it)))
-                   (do (sp/update-entity storage :binding-list-item (:id it)
-                                         {:ref-fn-id (remap (:ref-fn-id it))})
-                       (inc n))
-                   n))
-               0 items))))
+                    (and ref (contains? remap ref) (not (contains? old-fids owner))))
+        ;; Rewrite one row IFF it's a user-ref, tracking BOTH the count and the
+        ;; owner fn-id — the owners are exactly the fns whose compiled form
+        ;; changed, so the caller delta-invalidates just those (+ dependents)
+        ;; instead of a full graph recompile.
+        rewrite (fn [acc entity-type ent owner]
+                  (if (user-ref? (:ref-fn-id ent) owner)
+                    (do (sp/update-entity storage entity-type (:id ent)
+                                          {:ref-fn-id (remap (:ref-fn-id ent))})
+                        (-> acc (update :count inc) (update :owners conj owner)))
+                    acc))
+        acc0 {:count 0 :owners #{}}
+        after-bindings (reduce (fn [acc b] (rewrite acc :binding b (:fn-id b))) acc0 bindings)]
+    (reduce (fn [acc it] (rewrite acc :binding-list-item it (binding-owner (:binding-id it))))
+            after-bindings items)))
 
 
 ;; ---------------------------------------------------------------------------
@@ -249,9 +254,12 @@
             missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
           {:ok false :reason "missing-dependencies" :missing missing}
-          (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))]
+          (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fns))
+                forked-ids (mapv #(ids/fn-id (:namespace %) (:name %)) fns)]
             (composition/sync-fns-to-storage! storage fns ns-id-map)
-            (exec-ctx/invalidate-graph-cache! ctx)
+            ;; Delta-invalidate: the forked fns (+ dependents) recompile, not the
+            ;; whole registry — a full clear here froze constrained instances.
+            (exec-ctx/invalidate-graph-cache! ctx forked-ids)
             {:ok true :name pkg-name :version resolved :forked (count fns)}))))))
 
 
@@ -274,11 +282,13 @@
             missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
           {:ok false :reason "missing-dependencies" :missing missing}
-          {:ok true
-           :name pkg-name
-           :version resolved
-           :namespace (version-qualified-ns ns-root resolved ns-root)
-           :materialized (materialize-fns! ctx storage ns-root resolved (:fns row))})))))
+          (let [mat-ids (materialize-fns! storage ns-root resolved (:fns row))]
+            (exec-ctx/invalidate-graph-cache! ctx mat-ids)
+            {:ok true
+             :name pkg-name
+             :version resolved
+             :namespace (version-qualified-ns ns-root resolved ns-root)
+             :materialized (count mat-ids)}))))))
 
 
 ;; Install a published version by REFERENCE: ensure it is materialized under
@@ -305,10 +315,14 @@
             missing (missing-dependencies storage (:dependencies row))]
         (if (seq missing)
           {:ok false :reason "missing-dependencies" :missing missing}
-          (do
-            (when-not (already-materialized? storage ns-root resolved fns)
-              (materialize-fns! ctx storage ns-root resolved fns))
+          (let [mat-ids (when-not (already-materialized? storage ns-root resolved fns)
+                          (materialize-fns! storage ns-root resolved fns))]
             (upsert-pin! storage pkg-name resolved)
+            ;; Delta-invalidate only the newly materialized fns. Nil when the
+            ;; version was already visible (idempotent re-install) — nothing to
+            ;; recompile, so skip invalidation entirely.
+            (when (seq mat-ids)
+              (exec-ctx/invalidate-graph-cache! ctx mat-ids))
             {:ok true
              :name pkg-name
              :version resolved
@@ -349,14 +363,17 @@
                 missing (missing-dependencies storage (:dependencies row))]
             (if (seq missing)
               {:ok false :reason "missing-dependencies" :missing missing}
-              (do
-                (when-not (already-materialized? storage ns-root resolved fns)
-                  (materialize-fns! ctx storage ns-root resolved fns))
-                (let [rewritten (rewrite-refs-to-version! storage ns-root old-version resolved fns)]
-                  (upsert-pin! storage pkg-name resolved)
-                  (exec-ctx/invalidate-graph-cache! ctx)
-                  {:ok true :name pkg-name :from old-version :to resolved
-                   :rewritten-refs rewritten})))))))))
+              (let [mat-ids (when-not (already-materialized? storage ns-root resolved fns)
+                              (materialize-fns! storage ns-root resolved fns))
+                    {rewritten :count :keys [owners]}
+                    (rewrite-refs-to-version! storage ns-root old-version resolved fns)]
+                (upsert-pin! storage pkg-name resolved)
+                ;; Delta-invalidate the newly materialized fns + the project fns
+                ;; whose refs were rewritten (owners) — not the whole registry.
+                ;; A full clear here recompiled ~3600 fns and froze the server.
+                (exec-ctx/invalidate-graph-cache! ctx (into (set mat-ids) owners))
+                {:ok true :name pkg-name :from old-version :to resolved
+                 :rewritten-refs rewritten}))))))))
 
 
 ;; ---------------------------------------------------------------------------

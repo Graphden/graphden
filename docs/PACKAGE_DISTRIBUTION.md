@@ -323,19 +323,34 @@ the forker's own org — a deliberate act, not the default.
   package, add its coordinate (or a `:local/root` override, § 15) to `deps.edn`
   / a gitignored `deps.local.edn`. The manifest drives the *build* + *load*;
   the dev CLI classpath is driven by `deps.edn` as usual.
-- **Proven end-to-end (`mathx`):** `external-packages/mathx/` is a real
-  out-of-tree Type-2 package — a `:gcd` base-fn (`ops/impls.clj` `defbase` +
-  the `impls` var linking it) plus a `:gcd-with-12` composed fn-def
-  (`ops/fns.edn`). It is listed in `executor-packages.edn` (+ a `:local/root`
-  in `deps.edn` so dev/test/uberjar share the classpath). `bb rebuild` bundles
-  it; the running instance loads it (base-fn count 249 → 250, `mathx.ops`
-  synced) and `POST /api/execute` of `:gcd-with-12 {b 18}` returns `6`. Tests:
-  `manifest-test/external-mathx-package-loads-impl-and-fn-def`. A real deploy
-  would swap the `:local/root` for a `:git/url` + `:git/sha` coord (§ 12
-  Track B). **`defbase` gotcha proven here:** the macro rewrites every
-  occurrence of an arg symbol into a `resolve-arg` call, so an impl must not
-  shadow its arg names in a `loop`/`let` (mathx's gcd loops on `x`/`y`, not
-  `a`/`b`).
+- **Proven end-to-end via a real git coord (`mathx`, Track B):** the standalone
+  repo [`BonsaiFlow/graphden-mathx`](https://github.com/BonsaiFlow/graphden-mathx)
+  (`@a99354d1`) is a real out-of-tree Type-2 package — a `:gcd` base-fn
+  (`ops/impls.clj` `defbase` + the `impls` var linking it) plus a
+  `:gcd-with-12` composed fn-def (`ops/fns.edn`). It is pulled in by a **git
+  coord**, not a local path:
+  - `executor-packages.edn` + `deps.edn` root `:deps` list
+    `{:git/url "git@github.com:BonsaiFlow/graphden-mathx.git" :git/sha "a99354d1…"}`.
+    `bb rebuild` **clones the package straight from GitHub** into the uberjar
+    (build.clj merges the manifest coord into the basis). The running instance
+    loads it (base-fn count 249 → 250, `mathx.ops` synced) and
+    `POST /api/execute` of `:gcd-with-12 {b 18}` returns `6`.
+  - **Hermetic dev/test:** the `:test` + `:dev` aliases carry
+    `:override-deps {mathx/mathx {:local/root "external-packages/mathx"}}`, so
+    `bb test` / `bb dev` resolve the identical in-tree copy — **no repo access,
+    no ssh-agent, offline**. `external-packages/mathx/` is kept in-tree as the
+    override source (and matches the pushed repo at `@a99354d1`).
+  - **Access requirement:** because the repo is **private**, resolving the git
+    coord (i.e. `bb rebuild`, `bb check`, any non-`:test`/`:dev` invocation)
+    needs read access to it. On the deploy host that means an **ssh-agent
+    holding the host key** — `ssh-agent` + `ssh-add ~/.ssh/id_rsa` once per
+    session (see `docs/DEPLOYMENT.md`). Make the repo public, or add the host
+    key as a read-only deploy key, if you want unattended builds.
+  - Tests: `manifest-test/external-mathx-package-loads-impl-and-fn-def` (loader
+    layer, offline via override).
+  - **`defbase` gotcha proven here:** the macro rewrites every occurrence of an
+    arg symbol into a `resolve-arg` call, so an impl must not shadow its arg
+    names in a `loop`/`let` (mathx's gcd loops on `x`/`y`, not `a`/`b`).
 
 ### 5.2 Install / update
 
@@ -592,6 +607,14 @@ leaves them present-but-unloaded. A cleaner core-only dep (`:deps/root` on a
 `core/` subdir) or a Clojars **library-jar** (a `com.graphden/graphden-core`
 Maven coordinate via `b/jar` + `deps-deploy`) is a later polish — needed only
 for a versioned public artifact, not to consume graphden today.
+
+**Live example of the reverse direction (an external package pulled INTO a
+graphden build).** [`BonsaiFlow/graphden-mathx`](https://github.com/BonsaiFlow/graphden-mathx)
+is exactly a Track-B-style thin repo, consumed the other way round: this repo
+lists it by git coord in `deps.edn` + `executor-packages.edn`, and `bb rebuild`
+clones it into the uberjar. See § 5.1 "Proven end-to-end via a real git coord"
+for the full wiring (git coord for build/prod, `:override-deps` local for
+hermetic `bb test`/`bb dev`, and the private-repo ssh-agent access note).
 
 ---
 

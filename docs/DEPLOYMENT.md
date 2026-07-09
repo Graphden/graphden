@@ -21,6 +21,28 @@ clojure -T:build uber
 
 This produces `target/executor-server.jar` containing all dependencies.
 
+#### Private external packages need repo access at build time
+
+The build resolves every dependency in `deps.edn` **and** every external
+Type-2 package listed in `resources/executor-packages.edn` (see
+[PACKAGE_DISTRIBUTION § 5.1](PACKAGE_DISTRIBUTION.md)). When such a package is
+pulled by a **git coord onto a private repo** — as `mathx`
+(`BonsaiFlow/graphden-mathx`) is — the build host must be able to read that
+repo, or `clojure -T:build uber` / `bb rebuild` / `bb check` fail to resolve it.
+
+On a host whose SSH key is passphrase-protected, unlock it once per session
+into an agent so the build can clone non-interactively:
+
+```bash
+eval "$(ssh-agent -s)"        # or point -a at a fixed socket you reuse
+ssh-add ~/.ssh/id_rsa         # enter the passphrase once
+```
+
+`bb test` and `bb dev` do **not** need this — their aliases carry an
+`:override-deps` back onto the in-tree copy, so lint/test stay offline. For
+unattended CI, either make the package repo public or register the build host's
+public key as a **read-only deploy key** on it.
+
 ### Build Docker Image
 
 The Dockerfile copies a **pre-built** uberjar, so build the jar first:

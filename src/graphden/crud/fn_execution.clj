@@ -32,6 +32,7 @@
     [graphden.crud.fn-execution.lookup :as lookup]
     [graphden.crud.fn-execution.persist :as persist]
     [graphden.crud.request :as request]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.context :as tc]))
 
@@ -95,6 +96,17 @@
      writing a row."
   [ctx parsed]
   (let [storage (request/require-storage ctx)
+        ;; A tenant's SUBMITTED fn is untrusted graph code, so it runs
+        ;; effect-restricted: carry the cloud allow-list on the ctx and the
+        ;; executor gates it via `record-effect!` (compile-runtime honours
+        ;; `:allowed-effects`). Only the user-fn execution (`run-future`) uses
+        ;; this ctx — the platform lookups above and the request handler around
+        ;; us stay UNRESTRICTED, because that trusted machinery reads storage
+        ;; through `:pg-query` (a `:raw-sql`-recording base-fn) which must not
+        ;; be gated. Public org ≡ platform / single-tenant → no restriction.
+        exec-ctx (cond-> ctx
+                   (not= (tc/current-org) tc/public-org)
+                   (assoc :allowed-effects cr/default-cloud-allowed-effects))
         ;; Single round-trip for both `:id` and `:name`; the older
         ;; flow did `resolve-fn-id` + a separate `read-entity` to pull
         ;; the name.
@@ -137,7 +149,7 @@
                           (persist/create-pending-with-args!
                             storage fn-version-id declared-eff
                             (:user-id parsed) (:args parsed) free-slots))
-                    [fut trace] (persist/run-future ctx fn-id executor-args cancel-flag release)]
+                    [fut trace] (persist/run-future exec-ctx fn-id executor-args cancel-flag release)]
                 [row fut trace])
               (catch Exception t
                 (release)

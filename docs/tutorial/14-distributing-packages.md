@@ -8,7 +8,8 @@ editor's **Packages** panel — all without leaving the graph.
 **Concepts introduced**: `registry`, `:package-version`,
 `publish`, `pin` (`:package-install`), `reference-install` vs
 `fork` (copy-on-write), `version constraint` / `latest` /
-`rollback`, the **Packages panel**.
+`rollback`, the **Packages panel**, and — beyond the registry —
+an **external package pulled by git coord** (`executor-packages.edn`).
 
 ## Authoring vs distributing
 
@@ -144,6 +145,60 @@ empty-state notice.
    are now editable copies.
 6. Click `×` — the pin's gone.
 
+## Beyond the registry — an external package from its own git repo
+
+Everything above lives **inside one graphden install**: the registry
+is a table in your database, and publish / install / fork move fn-defs
+around within it. There's a second, complementary axis of distribution
+— an **external package that lives in its own git repository** and is
+pulled onto the classpath as a Clojure dependency. This is how a
+**Type-2** package (one that ships its own base-fn *impls*, not just
+fn-defs — Lesson 11) reaches a graphden it wasn't authored in.
+
+The moving parts, with the worked example `mathx` (a tiny package whose
+whole job is one `:gcd` base-fn plus a `:gcd-with-12` fn-def):
+
+1. **The package is its own repo.** `BonsaiFlow/graphden-mathx` is a
+   normal Clojure project — a `deps.edn` and a `packages/mathx/`
+   resource tree (`package.edn` + `ops/fns.edn` + `ops/impls.clj`),
+   exactly the on-disk shape from Lesson 11, just outside the main tree.
+
+2. **The consuming graphden lists it by git coord** — in `deps.edn`
+   (so it's on the classpath) and in `resources/executor-packages.edn`,
+   the operator's one-file manifest of external packages:
+
+   ```clojure
+   {:packages
+    [{:name "mathx"
+      :lib mathx/mathx
+      :coord {:git/url "git@github.com:BonsaiFlow/graphden-mathx.git"
+              :git/sha "a99354d1…"}}]}
+   ```
+
+3. **`bb rebuild` pulls it in.** The build clones the repo at that sha,
+   bundles its `packages/mathx/` resources into the uberjar, and the
+   loader syncs it at boot alongside `core` / `web` / `app` — you'll see
+   `Loading package: mathx` in the logs. Its base-fn (`:gcd`) and fn-def
+   (`:gcd-with-12`) are then first-class: `POST /api/execute` of
+   `:gcd-with-12 {b 18}` returns `6`.
+
+Unlike a registry install, this is a **rebuild-time, operator** action,
+not an in-editor click — the package is *code*, so it enters through the
+build, not the graph. Two practical notes:
+
+- **Dev stays offline.** While developing the package you don't want
+  every `bb test` reaching for git. The `:test` / `:dev` aliases carry
+  an `:override-deps` that points `mathx` at a local checkout
+  (`external-packages/mathx`), so lint/test resolve the in-tree copy and
+  never touch the network. Only the *build* (`bb rebuild`) uses the git
+  coord.
+- **A private package repo needs build-time access.** If the repo is
+  private, the build host must be able to read it (an `ssh-agent`
+  holding your key, or a read-only deploy key). `bb test` / `bb dev`
+  don't — they use the local override. See
+  [docs/DEPLOYMENT.md](../DEPLOYMENT.md) and
+  [docs/PACKAGE_DISTRIBUTION.md § 5](../PACKAGE_DISTRIBUTION.md).
+
 ## What we glossed over
 
 - **The programmatic API** — every panel action has a JSON
@@ -155,12 +210,12 @@ empty-state notice.
 - **Dependencies** — a published bundle records the external
   fn-names it depends on; install/fork reject if a dependency is
   absent from the target graph.
-- **Cross-install distribution** — pulling a package published on
-  one graphden install into a *different* one (download as EDN,
-  the cloud reference-install with capability grants, Type-2
-  impl-packages) is the rest of
-  [docs/PACKAGE_DISTRIBUTION.md](../PACKAGE_DISTRIBUTION.md); this
-  lesson stays within one install.
+- **The other cross-install routes** — beyond the external git
+  package above, pulling a *registry* package from one graphden
+  install into a different one (download as EDN, the cloud
+  reference-install with capability grants) is the rest of
+  [docs/PACKAGE_DISTRIBUTION.md](../PACKAGE_DISTRIBUTION.md); the
+  registry half of this lesson stays within one install.
 
 ## Next
 

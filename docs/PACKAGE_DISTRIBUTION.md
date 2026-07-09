@@ -721,6 +721,24 @@ build artifact (Task 7 publishes it; the monorepo can emit multiple artifacts).
   the manifest solve the multi-repo-pain the design question raised. Revisit
   only if internal component sprawl becomes a real problem. (PLATFORM_PLAN § 2.2.)
 
+### 15.1 As-built repo map
+
+The rule above, made concrete. A separate repo is paid ONLY where independence
+is real; modularity itself comes from packages + protocols/Integrant, in-tree.
+
+| Repo | Kind | How it relates to the monorepo | Access |
+|------|------|--------------------------------|--------|
+| `BonsaiFlow/graphden` (this) | monorepo | core / web / storage / app-editor / **tenancy-admin** — all co-evolving first-party. Emits the uberjar; can emit a `graphden-core` artifact (Task 7). | private |
+| `BonsaiFlow/graphden-mathx` | external Type-2 pkg | pulled IN by git coord (`deps.edn` + `executor-packages.edn`); in-tree copy at `external-packages/mathx` for offline test (§ 5.1). | private |
+| `BonsaiFlow/graphden-examples` | extracted dev pkg | the pedagogical `examples` package moved OUT; in-tree at `external-packages/examples`, on the classpath only via the `:dev`/`:test` `:extra-paths` (never prod). | private |
+| `BonsaiFlow/graphden-cloud` | thin consumer | depends on graphden as a **git-dep**, turns the tenancy addon on, adds cloud modules (`usage-metering` …). NOT a fork (§ 16). | private |
+| *future* private cloud modules | closed addons | attach to `graphden-cloud` via `GRAPHDEN_ADDON_CONFIGS` (billing / metering sinks / at-scale routing). | proprietary |
+
+What's NOT extracted, on purpose: the Postgres storage impl (a swap *seam*
+exists — § 6.3 — but the default first-party backend co-evolves with schema /
+versioning / executor, so it stays in-tree); a non-Postgres backend is external
+work in the *consumer's* addon, not a monorepo split.
+
 ---
 
 ## 16. Cloud assembly = self-hosted core + private addons

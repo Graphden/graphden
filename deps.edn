@@ -53,10 +53,14 @@
 
  :aliases
  {:test
-  {:extra-paths ["test"]
-   ;; Keep lint/test hermetic: resolve the external `mathx` package from the
-   ;; in-tree copy, NOT the (private) git coord — so `bb test` needs no repo
-   ;; access or ssh-agent. Production build/run uses the git coord (root :deps).
+  {:extra-paths ["test" "external-packages/examples/resources"]
+   ;; `examples` is an EXTERNAL, dev/test-only package (BonsaiFlow/graphden-examples),
+   ;; kept in-tree under external-packages/ so lint/test stay offline. It rides
+   ;; the classpath here (NOT under the prod `resources` path), so a production
+   ;; build never carries it.
+   ;; Keep lint/test hermetic for `mathx` too: resolve it from the in-tree copy,
+   ;; NOT the (private) git coord — so `bb test` needs no repo access or
+   ;; ssh-agent. Production build/run uses the git coord (root :deps).
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :extra-deps
    {lambdaisland/kaocha {:mvn/version "1.91.1392"}
@@ -68,8 +72,9 @@
     org.testcontainers/postgresql {:mvn/version "1.21.4"}}}
 
   :dev
-  {:extra-paths ["test" "development/src"]
-   ;; Same hermetic override as :test — REPL / dev runs use the in-tree mathx.
+  {:extra-paths ["test" "development/src" "external-packages/examples/resources"]
+   ;; Same hermetic override as :test — REPL / dev runs use the in-tree mathx +
+   ;; the in-tree `examples` package (dev/test-only, off the prod resources path).
    :override-deps {mathx/mathx {:local/root "external-packages/mathx"}}
    :extra-deps
    {org.testcontainers/testcontainers {:mvn/version "1.21.4"}

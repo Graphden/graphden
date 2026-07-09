@@ -120,17 +120,23 @@ implementation tasks.
   a new package version on a branch, merge to main, revert to roll back. We
   reuse it wholesale (§ 4.3) rather than inventing package-version staging.
 
-### 2.5 The gaps this branch closes
+### 2.5 The gaps this branch closed
 
-1. Version **constraints** in `:dependencies` (today bare names; `:version` is
-   pure metadata). → Task 2.
-2. Reference-install (§ 4.2) — today `install-package` **copies** fn rows into
-   the target graph; the PLATFORM_PLAN § 2.8 "install = grant of visibility,
-   no row copy" model is not built. → Tasks 3, 4.
-3. `:package-install` **pin** entity + update/rollback flow. → Tasks 3, 4.
-4. Type-2 external-package **manifest** convenience + docs. → Task 5.
-5. Type-3 swap **seams**: documented + one proven swap. → Task 6.
-6. Cloud→self-hosted export — **shipped** (`GET /api/export/graph`, § 9).
+All shipped except moderation (below). Kept as a record of what the branch set
+out to close.
+
+1. ✓ Version **constraints** in `:dependencies` (Task 2) — package.edn accepts
+   constraints; the loader resolves them (§ 4.4).
+2. ✓ Reference-install (§ 4.2, Tasks 3+4) — `install-package` now installs by
+   REFERENCE (materialize-once under `<ns>@<version>` + a `:package-install`
+   pin), NOT by copying rows — the PLATFORM_PLAN § 2.8 "install = grant of
+   visibility" model.
+3. ✓ `:package-install` **pin** entity + update/rollback ref-rewrite (Tasks 3+4).
+4. ✓ Type-2 external-package **manifest** + docs (Task 5) — proven by `mathx`
+   via git coord (§ 5.1).
+5. ✓ Type-3 swap **seams**: documented + one proven (Task 6, § 6.3 —
+   `extension_seam_test`).
+6. ✓ Cloud→self-hosted export (`GET /api/export/graph`, § 9).
    Moderation queue is **deferred** (a cloud-control-plane / public-registry
    concern; self-hosted↔self-hosted needs none — § 9).
 
@@ -463,11 +469,14 @@ UUIDs (AD-2). No symbolic-ref column.
 - `GET /api/packages/installed` — this branch's pins (for the editor).
 - `GET /api/packages/:name/:version` — full bundle (export / self-hosted pull) — shipped.
 
-**Editor:** a "Packages" sidebar section (parallels the shipped Secrets /
-Grants admin sections) listing installed packages with their pinned version,
-an "update available" affordance, and a browse-registry / install popover. All
-server-rendered via a partial (per the HTMX migration pattern) where possible.
-Deferred to a checkpoint after the backend is proven.
+**Editor (shipped):** a "Packages" sidebar section (parallels the Secrets /
+Grants admin sections) lists the current branch's installed pins with their
+version, a per-row update/rollback version input (`↑`) + uninstall (`×`), the
+registry as a nested `<details>` browse (Install / Fork per version), and a
+"Publish a namespace" form. Server-rendered via `GET /partials/packages-panel`;
+`editor-packages.js` owns the collapsible-section lifecycle only. (The only
+piece NOT built is a proactive "update available" indicator — the manual
+version input covers update/rollback.)
 
 ---
 

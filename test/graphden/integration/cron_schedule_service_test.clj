@@ -73,11 +73,17 @@
                                             [:jdbc-url :username :password])
                   :exec/base-fns {:extra-base-fns
                                   {:_cron-service-tick tick-impl}}
-                  ;; See cron-runtime-test: drop the `examples` package
-                  ;; — none of its 171 fn-defs are exercised here, but
-                  ;; sync + compile + type-check sweep still walk them.
+                  ;; Minimise the package set: everything this test
+                  ;; touches — `:schedule` / `:cron-parse` — lives in
+                  ;; `core`, and the service target is synthesised in-test.
+                  ;; `web` + `app` (the editor's ~2000 fn-defs) are never
+                  ;; referenced, yet syncing + compiling + type-check-
+                  ;; sweeping them dominated the runtime (~5 min → the
+                  ;; whole full-graph bootstrap for nothing). Loading only
+                  ;; `core` + `storage` is a large speedup with no coverage
+                  ;; loss.
                   :app/packages {:package-names
-                                 ["core" "storage" "web" "app"]}})]
+                                 ["core" "storage"]}})]
     (try
       (let [storage (:db/versioned system)
             context (:exec/context system)

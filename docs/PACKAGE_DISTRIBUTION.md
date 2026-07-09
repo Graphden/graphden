@@ -515,13 +515,16 @@ Tracked in the session task list. Order chosen for
 5. **Type-2 external loading + manifest** (Task 5) — `executor-packages.edn` +
    `build.clj` splice + docs.
 6. **Type-3 swap seams: document + prove one** (Task 6).
-7. **Publish graphden as a consumable artifact** (Task 7) — a `graphden-core`
-   coordinate (group/artifact + published jar) that a self-hoster's own
-   `deps.edn` can depend on, with the editor/`app` an *opt-in* package chosen
-   via `:package-names` rather than baked into the runtime. Unblocks Track B
-   (§ 12) and our own cloud build (§ 16). Does **not** require splitting the
-   monorepo — the monorepo publishes the artifact; `app`/editor stays in it as
-   an optional package.
+7. **Publish graphden as a consumable artifact** (Task 7) — **git-dep flavour
+   shipped:** the first semantic release tag `v0.1.0` is the consumable
+   coordinate a downstream `deps.edn` pins (`:git/tag "v0.1.0" :git/sha …`) —
+   `graphden-cloud` does exactly this. The editor/`app` is already an *opt-in*
+   package chosen via `:package-names` (drop `"app"` for headless — proven by
+   `headless_boot_test`). Does **not** split the monorepo — it emits the
+   artifact; app/editor stays as an optional package. **Remaining polish
+   (credential-gated):** a Clojars `com.graphden/graphden-core` jar via
+   `b/jar` + `deps-deploy` — a versioned Maven coordinate that ships built
+   classes (not the whole repo). Not needed to consume graphden today.
 8. **Shipped:** editor Packages panel (§ 8) + cloud→self-hosted **export**
    (`GET /api/export/graph`, § 9). **Deferred:** moderation queue (a
    cloud-control-plane / public-registry concern — § 9).

@@ -17,14 +17,13 @@
 // runtime action, not part of package loading), so the two versions
 // this test publishes are the only browse rows — no cross-test noise.
 //
-// PERF: install / update materialize fns + invalidate the whole graph
-// cache (a full ~3600-fn recompile), and update additionally full-scans
-// the binding + binding-list-item tables to rewrite refs. On the
-// memory-constrained e2e stack (2.25 GB) that can freeze the server for
-// tens of seconds — the per-phase timeouts below are sized for it. This
-// is a known runtime-perf issue (the operations KNOW which fn-ids they
-// touched, so they could delta-invalidate instead of full-recompile);
-// tracked for the perf pass, not a bug in the panel UI itself.
+// PERF: install / update used to invalidate the WHOLE graph cache (a full
+// ~3600-fn recompile) after writing, which froze the server for tens of
+// seconds on the constrained e2e stack (2.25 GB) — the update phase tripped
+// its /health idle-timeout. Fixed in perf(packages) e3f52592: these ops now
+// delta-invalidate only the fn-ids they touched. The per-phase timeouts below
+// are now just GC-stall tolerance (same as the other e2e tests), not freeze
+// headroom.
 //
 // Run from this directory:  node edit-packages-panel.test.js
 // Exit code 0 = PASS, 1 = FAIL.
@@ -137,16 +136,15 @@ async function panelState(page) {
         });
       btn && btn.click();
     }, PKG);
-    // install materializes the version's fns + refreshes the registry;
-    // on the memory-constrained e2e stack that recompile can stall the
-    // server for tens of seconds (see PERF note at the top of this file),
-    // so give it generous headroom rather than flaking at 15s.
+    // install materializes the version's fns + delta-recompiles them (see
+    // PERF note at the top of this file — no longer a full-graph freeze);
+    // 30s is GC-stall tolerance for the constrained stack, not freeze headroom.
     await page.waitForFunction((pkg) => {
       const root = document.querySelector('.sidebar-packages [data-packages-panel]');
       const t = root && root.querySelector(':scope > .packages-panel-table');
       return t && [...t.querySelectorAll('tbody tr td:first-child')]
         .some((td) => td.textContent === pkg);
-    }, PKG, {timeout: 60000, polling: 250});
+    }, PKG, {timeout: 30000, polling: 250});
     const c = await panelState(page);
     const cRow = c.installedRows.find((r) => r.name === PKG);
     assert(cRow && cRow.version === '1.0.0',
@@ -162,10 +160,10 @@ async function panelState(page) {
       tr.querySelector('.packages-version-input').value = '1.1.0';
       tr.querySelector('.packages-update-btn').click();
     }, PKG);
-    // update materializes the target version AND rewrites the project's
-    // refs (a full binding/binding-list-item scan) THEN recompiles — the
-    // heaviest panel op; on the constrained stack it can freeze the server
-    // for the better part of a minute, so wait up to 90s.
+    // update materializes the target version, rewrites the project's refs,
+    // then delta-recompiles only the touched fns (see PERF note) — the
+    // heaviest panel op, but no longer a full-graph freeze. 30s covers a GC
+    // stall on the constrained stack.
     await page.waitForFunction((pkg) => {
       const root = document.querySelector('.sidebar-packages [data-packages-panel]');
       const t = root && root.querySelector(':scope > .packages-panel-table');
@@ -173,7 +171,7 @@ async function panelState(page) {
         const td = [...tr.querySelectorAll('td')];
         return td[0]?.textContent === pkg && td[1]?.textContent === '1.1.0';
       });
-    }, PKG, {timeout: 90000, polling: 250});
+    }, PKG, {timeout: 30000, polling: 250});
     const d = await panelState(page);
     const dRow = d.installedRows.find((r) => r.name === PKG);
     assert(dRow && dRow.version === '1.1.0',
@@ -189,9 +187,8 @@ async function panelState(page) {
     // the child-combinator selector is unambiguous.
     await page.click(
       '.sidebar-packages [data-packages-panel] > .packages-panel-table .packages-uninstall');
-    // uninstall only drops the pin (no materialize/recompile), so it's
-    // cheap — but the server may still be recovering from the update
-    // recompile above, so keep a comfortable margin.
+    // uninstall only drops the pin (no materialize/recompile) — the cheapest
+    // op; 30s is plenty of GC-stall margin.
     await page.waitForFunction((pkg) => {
       const root = document.querySelector('.sidebar-packages [data-packages-panel]');
       if (!root) return false;
@@ -199,7 +196,7 @@ async function panelState(page) {
       const stillThere = t && [...t.querySelectorAll('tbody tr td:first-child')]
         .some((td) => td.textContent === pkg);
       return !stillThere;
-    }, PKG, {timeout: 45000, polling: 250});
+    }, PKG, {timeout: 30000, polling: 250});
     const e = await panelState(page);
     assert(!e.installedRows.some((r) => r.name === PKG),
       'installed table no longer lists ' + PKG + ' after uninstall');

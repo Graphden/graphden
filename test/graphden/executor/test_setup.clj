@@ -6,6 +6,8 @@
    `setup-add-function!` synthesise a small example graph end-to-end."
   (:require
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.composition.interface :as fn-composition]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.runtime :as rt]
     [graphden.packages.records :as records]
@@ -406,6 +408,22 @@
          ctx (exec/create-context {:storage versioned})]
      (cr/rebuild! ctx)
      (assoc bootstrap :storage versioned :ctx ctx))))
+
+
+(defn sync-and-invalidate!
+  "Sync `fn-defs` to `storage`, then DELTA-invalidate `ctx` on JUST those fns
+   (ids looked up by name) rather than a full 1-arity
+   `invalidate-graph-cache!`. A full clear drops the whole compiled registry,
+   so the next `execute` recompiles all ~2600 golden [core web app] fns (~30 s);
+   the delta path recompiles only the synced fns + their dependents (the same
+   mechanism the editor CRUD path uses). Drop-in for the common test pattern
+   `(sync-fns-to-storage! storage defs)` + `(invalidate-graph-cache! ctx)`."
+  [ctx storage fn-defs]
+  (fn-composition/sync-fns-to-storage! storage fn-defs)
+  (let [synced-ids (keep #(:id (first (sp/query-entities storage :fn
+                                                         {:name (name (:name %))})))
+                         fn-defs)]
+    (exec-ctx/invalidate-graph-cache! ctx synced-ids)))
 
 
 (defn inject-storage-query

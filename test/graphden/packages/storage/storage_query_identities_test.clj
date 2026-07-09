@@ -13,8 +13,6 @@
    pure-graph `:resolve-versioned-rows` does the version merge."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.composition.interface :as fn-composition]
-    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
@@ -44,13 +42,12 @@
 
 (deftest storage-query-identities-returns-fn-rows-with-parent-ids
   (testing ":storage-query-identities :fn returns identity rows with :parent-ids populated"
-    (fn-composition/sync-fns-to-storage!
-      *storage*
+    (setup/sync-and-invalidate!
+      *context* *storage*
       [{:name :sqi-test-rows
         :parent :storage-query-identities
         :args {:entity-type {:value "fn"}
                :where {:value {}}}}])
-    (exec-ctx/invalidate-graph-cache! *context*)
 
     (let [via-graph (exec/execute *context* (fn-id "sqi-test-rows") {})
           via-base  (sp/query-entities (vs/unwrap *storage*) :fn {})
@@ -77,13 +74,12 @@
 
 (deftest storage-query-identities-respects-where-clause
   (testing ":storage-query-identities :fn {:name X} returns matching rows only"
-    (fn-composition/sync-fns-to-storage!
-      *storage*
+    (setup/sync-and-invalidate!
+      *context* *storage*
       [{:name :sqi-where-rows
         :parent :storage-query-identities
         :args {:entity-type {:value "fn"}
                :where {:value {:name "add"}}}}])
-    (exec-ctx/invalidate-graph-cache! *context*)
 
     (let [rows (exec/execute *context* (fn-id "sqi-where-rows") {})]
       (testing "exactly one row returned for the base-fn `:add`"

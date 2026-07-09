@@ -4,8 +4,6 @@
    is delivered unchanged."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.composition.interface :as fn-composition]
-    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
@@ -43,8 +41,8 @@
                              [event]
                              (swap! captured conj event)
                              nil))]
-      (fn-composition/sync-fns-to-storage!
-        *storage*
+      (setup/sync-and-invalidate!
+        *context* *storage*
         [{:name :_notify-test-event
           :parent :const
           :args {:value {:value {:kind :fn :op :invalidate :id "abc-123"}}}}
@@ -52,7 +50,6 @@
          {:name :notify-test-emit
           :parent :pg-notify
           :args {:event :_notify-test-event}}])
-      (exec-ctx/invalidate-graph-cache! *context*)
 
       (let [r (exec/execute probe-ctx (fn-id "notify-test-emit") {})]
         (testing ":pg-notify returns nil"
@@ -66,8 +63,8 @@
 (deftest pg-notify-noop-when-no-emitter
   (testing ":pg-notify silently no-ops when ctx has no emitter wired"
     (let [probe-ctx (dissoc *context* :notify-emitter)]
-      (fn-composition/sync-fns-to-storage!
-        *storage*
+      (setup/sync-and-invalidate!
+        *context* *storage*
         [{:name :_notify-test-event-2
           :parent :const
           :args {:value {:value {:kind :service :op :write :id "xyz-789"}}}}
@@ -75,7 +72,6 @@
          {:name :notify-test-emit-2
           :parent :pg-notify
           :args {:event :_notify-test-event-2}}])
-      (exec-ctx/invalidate-graph-cache! *context*)
 
       (testing "doesn't throw — falls through to nil"
         (is (nil? (exec/execute probe-ctx (fn-id "notify-test-emit-2") {})))))))

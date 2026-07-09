@@ -323,6 +323,19 @@ the forker's own org — a deliberate act, not the default.
   package, add its coordinate (or a `:local/root` override, § 15) to `deps.edn`
   / a gitignored `deps.local.edn`. The manifest drives the *build* + *load*;
   the dev CLI classpath is driven by `deps.edn` as usual.
+- **Proven end-to-end (`mathx`):** `external-packages/mathx/` is a real
+  out-of-tree Type-2 package — a `:gcd` base-fn (`ops/impls.clj` `defbase` +
+  the `impls` var linking it) plus a `:gcd-with-12` composed fn-def
+  (`ops/fns.edn`). It is listed in `executor-packages.edn` (+ a `:local/root`
+  in `deps.edn` so dev/test/uberjar share the classpath). `bb rebuild` bundles
+  it; the running instance loads it (base-fn count 249 → 250, `mathx.ops`
+  synced) and `POST /api/execute` of `:gcd-with-12 {b 18}` returns `6`. Tests:
+  `manifest-test/external-mathx-package-loads-impl-and-fn-def`. A real deploy
+  would swap the `:local/root` for a `:git/url` + `:git/sha` coord (§ 12
+  Track B). **`defbase` gotcha proven here:** the macro rewrites every
+  occurrence of an arg symbol into a `resolve-arg` call, so an impl must not
+  shadow its arg names in a `loop`/`let` (mathx's gcd loops on `x`/`y`, not
+  `a`/`b`).
 
 ### 5.2 Install / update
 

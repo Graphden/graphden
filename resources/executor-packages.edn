@@ -7,4 +7,10 @@
 ;;
 ;; build.clj bundles the coordinates into the uberjar; :app/packages loads the
 ;; names. For dev, also add the coordinate to deps.edn / a :local/root override.
-{:packages []}
+{:packages
+ [;; Demonstration external Type-2 package (impl+fns). Its :local/root coord is
+  ;; ALSO in deps.edn's base :deps so dev + test share the same classpath; a
+  ;; real deploy would list only this manifest entry with a :git coord.
+  {:name "mathx"
+   :lib mathx/mathx
+   :coord {:local/root "external-packages/mathx"}}]}

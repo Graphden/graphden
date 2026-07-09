@@ -45,6 +45,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.core :as sys]
+    [graphden.tenancy.context :as tc]
     [graphden.versioning.storage.core :as vs]
     [next.jdbc :as jdbc]))
 
@@ -291,6 +292,41 @@
     (testing "non-secret fn-defs don't trip the audit flag"
       (is (nil? (:touched-secret? r)))
       (is (nil? (:touched-secret? row))))))
+
+
+(deftest tenant-execute-gates-submitted-fn-effects-test
+  ;; Regression for the tenancy fix: a tenant's SUBMITTED fn runs
+  ;; effect-restricted — `apply-execute` puts `default-cloud-allowed-effects`
+  ;; on the exec ctx for a non-public org — so it can't reach the `:raw-sql`
+  ;; escape hatch; a platform/public execution is unrestricted. (The blanket
+  ;; request-wrap gate that used to do this 403'd the platform handler's own
+  ;; storage reads — hence the two-layer gate in tenancy.addon.)
+  (let [storage (create-full-storage)
+        nm "rawsql-sink"
+        composed-name "rawsql-composed"
+        _ (exec/register-base-fn! (keyword nm)
+                                  (fn [_args _ctx]
+                                    (cr/record-effect! :raw-sql)
+                                    :did-sql))
+        _ (registry/record-rich-types! (keyword nm)
+                                       {:args {} :return-type :any :effects #{:raw-sql}})
+        base (setup/create-base-fn! storage nm :any)
+        composed (setup/create-composed-fn! storage composed-name (:id base))
+        _ (registry/record-rich-types! (keyword composed-name)
+                                       {:args {} :return-type :any :effects #{:raw-sql}})
+        c (test-ctx storage)
+        run #(apply-and-await! c {:fn-id (:id composed) :args {}
+                                  :timeout-ms 5000 :persist? true})]
+    (testing "platform / public execution is unrestricted — the :raw-sql fn runs"
+      (let [r (tc/with-org tc/public-org (run))]
+        (is (= :succeeded (:status r)))))
+    (testing "a tenant's submitted fn is effect-gated — :raw-sql refused"
+      (let [r (tc/with-org "acme" (run))]
+        (is (not= :succeeded (:status r))
+            "the :raw-sql escape hatch must not run for a tenant")
+        (is (re-find #"(?i)raw-sql|forbidden"
+                     (str (:error r) " " (pr-str (:error-data r))))
+            "the failure names the forbidden effect")))))
 
 
 (deftest apply-hides-result-for-tainted-fn-test

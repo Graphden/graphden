@@ -36,12 +36,20 @@
   (cr/record-effect! :db)
   (cr/record-effect! :time)
   (let [storage (request/require-storage ctx)
-        existing (sp/query-entities storage :package-version
-                                    {:name pkg-name :version pkg-version})]
-    (if (seq existing)
+        fns (:fns bundle)]
+    (cond
+      ;; Reject an empty bundle up front — a typo'd / non-existent `:ns-root`
+      ;; exports zero fns, and without this the panel's publish form would
+      ;; write a 0-fn garbage row into the registry.
+      (empty? fns)
+      {:ok false :reason "empty-bundle" :name pkg-name :version pkg-version}
+
+      (seq (sp/query-entities storage :package-version
+                              {:name pkg-name :version pkg-version}))
       {:ok false :reason "version-exists" :name pkg-name :version pkg-version}
-      (let [fns (:fns bundle)
-            content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
+
+      :else
+      (let [content-hash (ids/digest-hex "SHA-256" (json/generate-string fns))
             row (sp/create-entity storage :package-version
                                   {:name pkg-name
                                    :version pkg-version

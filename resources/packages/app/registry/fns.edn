@@ -724,8 +724,8 @@
   ;; the new version) are the confirmation.
   {:name :_pkg-publish-notice-text
    :parent :str-join
-   :args {:coll [{:value "Published "} :_pkg-publish-name {:value "@"} :_pkg-publish-version
-                 {:value " — the new version is in the browse list below."}]
+   :args {:coll [{:value "Publishing "} :_pkg-publish-name {:value "@"} :_pkg-publish-version
+                 {:value " — if the namespace has fns, the new version appears in the browse list below."}]
           :separator {:value ""}}}
   {:name :_pkg-publish-notice
    :parent :hiccup

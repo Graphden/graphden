@@ -211,7 +211,16 @@
       (is (false? (:ok body)))
       (is (= "version-exists" (:reason body)))
       (is (= 1 (count (sp/query-entities (storage) :package-version {:name "demo.pkg"})))
-          "no duplicate row written"))))
+          "no duplicate row written")))
+  (testing "publishing a non-existent namespace exports 0 fns → rejected, no garbage row"
+    (let [resp (setup/via-graph *bootstrap* :publish-package-handler
+                                (publish-req {:name "empty.pkg" :version "1.0.0"
+                                              :ns-root "no.such.namespace.xyz"}))
+          body (json/parse-string (:body resp) true)]
+      (is (false? (:ok body)))
+      (is (= "empty-bundle" (:reason body)))
+      (is (empty? (sp/query-entities (storage) :package-version {:name "empty.pkg"}))
+          "no 0-fn garbage row written to the registry"))))
 
 
 (deftest list-and-fetch-package-versions
@@ -376,7 +385,7 @@
                                  :headers {"content-type" "application/x-www-form-urlencoded"}})]
       (is (= 200 (:status resp)))
       (is (re-find #"data-packages-panel" (:body resp)) "wrapped in the panel root for the swap")
-      (is (re-find #"Published paneltest\.pub@1\.0\.0" (:body resp)) "confirmation notice")
+      (is (re-find #"Publishing paneltest\.pub@1\.0\.0" (:body resp)) "confirmation notice")
       (let [rows (sp/query-entities (storage) :package-version {:name "paneltest.pub"})]
         (is (= 1 (count rows)) "exactly one :package-version row written")
         ;; The non-empty :fns is the real assertion: export-namespace's

@@ -9,13 +9,21 @@
  :fns
  [;; The shape `:export-namespace` returns — a fixed-schema artifact, so
   ;; it gets a named record type-row rather than a wide `:jsonb`.
+  ;; One entry of `:package-dependencies` — the (name, version) of a package a
+  ;; bundle's external fns come from (registry-resolved at publish; drives
+  ;; recursive install).
+  {:name :package-dependency-shape
+   :description "A published package coordinate a bundle depends on: `{:name … :version …}`."
+   :type {:name :text
+          :version :text}}
+
   {:name :package-bundle-shape
    :description "A publishable package bundle: the subtree root, the namespaces it spans, its fn-defs (each a keyword-keyed fn-def map), the external fn-names it depends on, and the PACKAGES (name+version) those external fns come from (for recursive install)."
    :type {:namespace :text
           :namespaces [:list :text]
           :fns [:list :keyword-map]
           :dependencies [:list :keyword]
-          :package-dependencies [:list :keyword-map]}}
+          :package-dependencies [:list :package-dependency-shape]}}
 
   {:name :export-namespace
    :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract."

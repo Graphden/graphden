@@ -93,6 +93,10 @@ async function initGraph() {
       console.error(API.api_types + ' JSON parse failed — type tooltips will be empty', err);
       richTypes = {};
     }
+    // The type registry just (re)loaded, so any cached
+    // `/api/types/compatible` verdicts may now be stale. `initGraph` is
+    // also the fn-rename refresh path, where a retype changes the answers.
+    if (typeof clearTypesCompatibleCache === 'function') clearTypesCompatibleCache();
   }
   if (vkResp?.ok) {
     try { VALUE_KINDS = await vkResp.json(); } catch (err) {
@@ -165,6 +169,11 @@ async function loadGraphData() {
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); }
     catch (_) { /* keep prior richTypes rather than blanking chips */ }
+    // A mutation may have added / renamed / retyped a fn-def, changing the
+    // type registry — drop the cached `/api/types/compatible` verdicts so the
+    // next type-picker / mismatch check re-asks the server. This is the
+    // invalidation the (never-defined) `applyGraphDataRefresh` was meant to do.
+    if (typeof clearTypesCompatibleCache === 'function') clearTypesCompatibleCache();
   }
   // Re-fetch subtree for the previously-rendered fn so overlays /
   // type-chips reflect the mutation. `renderGraph` would do this

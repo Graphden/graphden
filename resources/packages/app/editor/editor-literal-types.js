@@ -18,12 +18,10 @@
 // open in the same session. The cache stores the bare boolean — the
 // network savings are 5–15 ms per cached pair (median).
 //
-// Invalidate via `clearTypesCompatibleCache()` after edits that could
-// change types. NOTE: nothing currently calls it — the type-registry
-// refresh path that used to (`applyGraphDataRefresh`) is no longer
-// wired, so the cache lives for the whole session. Harmless while the
-// registry is session-stable; re-wire the call if a mid-session retype
-// starts showing stale compatibility.
+// Invalidated via `clearTypesCompatibleCache()` whenever the type registry
+// (re)loads — `editor-main.js` calls it after re-fetching `/api/types` in both
+// `initGraph` (fn-rename path) and `loadGraphData` (post-mutation refresh), so
+// a create / rename / retype drops the stale `(expected, candidate)` verdicts.
 const _typesCompatibleCache = new Map();
 
 function _typesCompatibleKey(expected, candidate) {

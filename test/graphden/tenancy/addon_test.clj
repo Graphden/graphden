@@ -5,6 +5,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
+    [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
     [graphden.system.config :as config]
     [graphden.tenancy.addon]
@@ -308,4 +309,53 @@
                             {:request-scope scope
                              :executor-orgs #{"acme"}})))))
 
+    (is (= "public" (tc/current-org)) "org binding restored after dispatch")))
+
+
+;; --- BYO refusal: a hosted pod 421s a :byo org's API requests ---
+
+(defn- org-mode-storage
+  "Storage stub answering `:org {:name n}` with an execution-mode row."
+  [name->mode]
+  (reify sp/StorageCRUD
+    (query-entities
+      [_ en where]
+      (when (= en :org)
+        (when-let [m (get name->mode (:name where))]
+          [{:name (:name where) :execution-mode m}])))
+
+    (query-entities [_ _ _ _] nil)
+
+    (create-entity [_ _ _] nil)
+
+    (read-entity [_ _ _] nil)
+
+    (update-entity [_ _ _ _] nil)
+
+    (delete-entity [_ _ _] nil)
+
+    (query-latest-per-group [_ _ _ _] nil)))
+
+
+(deftest request-scope-421s-a-byo-org-on-a-hosted-pod
+  (tc/invalidate-byo-cache!)
+  (let [scope (ig/init-key :tenancy/request-scope {})
+        storage (org-mode-storage {"byoTenant" "byo" "hostedTenant" "hosted"})]
+    (testing "hosted pod → 421 for a :byo org (runs on the customer's executor)"
+      (is (= 421 (:status (dispatch-status
+                            {:auth-provider (org-provider "byoTenant")
+                             :storage storage
+                             :request-scope scope})))))
+    (testing "hosted pod serves a :hosted tenant"
+      (is (= 200 (:status (dispatch-status
+                            {:auth-provider (org-provider "hostedTenant")
+                             :storage storage
+                             :request-scope scope})))))
+    (testing "a BYO executor pod serves its :byo org"
+      (is (= 200 (:status (dispatch-status
+                            {:auth-provider (org-provider "byoTenant")
+                             :storage storage
+                             :byo-executor? true
+                             :request-scope scope})))))
+    (tc/invalidate-byo-cache!)
     (is (= "public" (tc/current-org)) "org binding restored after dispatch")))

@@ -7,6 +7,16 @@
    - `handler-fn-id` — the org's app-handler fn the platform's web-server
                        invokes for that subdomain / custom domain (the one
                        thing a tenant configures). Nullable until provisioned.
+   - `execution-mode`— `\"hosted\"` (default; nil reads as hosted) or `\"byo\"`.
+                       A `\"byo\"` org runs its graph on the customer's OWN
+                       executor; the platform stores the graph but hosted pods
+                       REFUSE to run it (a hosted pod that served it would leak
+                       compute the tenant is supposed to bring). See
+                       `tenancy.context/byo-org?` and the 421 refusals in
+                       `app_router` / `addon`. Text, not an enum — `:org` is
+                       platform-managed (tenant-forbidden), so provisioning
+                       code sets it, and staying text avoids enum registration
+                       through the addon schema seam.
 
    Platform-managed: `:org` is in `tenancy.storage/tenant-forbidden-entities`,
    so tenants never read or write the registry directly — they reach their org
@@ -29,13 +39,21 @@
   #uuid "7a4d2e90-6c18-4b53-9f8a-2d1e0c6b9354")
 
 
+(def ^:private org-execution-mode-field-uuid
+  #uuid "71d581e2-cd84-4676-a320-b052e3f25187")
+
+
 (defn extend-builder
-  "Add the `:org` entity — `(name, handler-fn-id)` with a UNIQUE name."
+  "Add the `:org` entity — `(name, handler-fn-id, execution-mode)` with a
+   UNIQUE name."
   [builder]
   (-> builder
       (ds/add-entity :org org-entity-uuid
                      {:name {:uuid org-name-field-uuid :type :text}
                       :handler-fn-id {:uuid org-handler-fn-id-field-uuid
                                       :type :uuid
-                                      :nullable? true}})
+                                      :nullable? true}
+                      :execution-mode {:uuid org-execution-mode-field-uuid
+                                       :type :text
+                                       :nullable? true}})
       (ds/add-constraint :org {:type :unique :fields [:name]})))

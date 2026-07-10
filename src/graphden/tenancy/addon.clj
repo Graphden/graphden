@@ -384,6 +384,13 @@
           cross-org? (and host-org
                           (not= org tc/public-org)
                           (not= host-org org))
+          ;; BYO refusal: a `:byo` org runs on the customer's own executor, so
+          ;; a HOSTED pod must not serve it. Read `:org` HERE (public context,
+          ;; before `with-org` binds the tenant org — `:org` is tenant-hidden
+          ;; once scoped). A BYO executor pod (`:byo-executor?`) skips the
+          ;; refusal for the orgs in its shard.
+          byo-refused? (and (not (:byo-executor? ctx))
+                            (tc/byo-org? (:storage ctx) org))
           ;; Per-request memo over the singleton grant-store, shared by every
           ;; `grants-for` consumer this request: the coarse gate, the header
           ;; builders (capabilities runs `can?` per action cap + workspace
@@ -432,7 +439,12 @@
                        ;; misconfigured shard (one that omits the public org,
                        ;; where the platform packages live) fails loudly at the
                        ;; first request instead of 404'ing every fn.
-                       (not (cr/org-in-shard? (:executor-orgs ctx) org))
+                       ;; Wrong executor → 421, for either reason: the org
+                       ;; isn't in this pod's shard, OR it's a `:byo` org on a
+                       ;; hosted pod (its graph lives here but running it is
+                       ;; the customer's executor's job — `byo-refused?`).
+                       (or (not (cr/org-in-shard? (:executor-orgs ctx) org))
+                           byo-refused?)
                        misdirected-response
                        ;; Platform / admin — no restriction.
                        (= org tc/public-org)

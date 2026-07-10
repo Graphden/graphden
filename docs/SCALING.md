@@ -159,19 +159,34 @@ path we don't add a query to. So single-tenant self-hosted is unchanged.
 
 ## What is NOT built
 
-**Semi-self-hosted / external executor.** The design is the org shard plus
-two missing pieces:
+**Semi-self-hosted / external executor.** A customer runs the executor on
+their OWN hardware, but the graph stays in our Postgres. Built in pieces:
 
-1. A `StorageCRUD` / `ExecutionGraph` implementation over HTTP, so an
-   executor outside our network can read the graph without Postgres
-   credentials. The protocol seam already exists (see
-   [EXTENDING.md](EXTENDING.md)); `GET /api/export/graph` is most of the
-   bulk read.
-2. An invalidation stream to replace LISTEN/NOTIFY across the network
-   (SSE on the storage API).
+- **Pod role + BYO refusal — DONE.** An org carries `:org.execution-mode`
+  (`"hosted"` default, `"byo"`). A `"byo"` org runs on the customer's own
+  executor, so a HOSTED pod refuses to run it: both request boundaries (the
+  editor/API request-scope and the FaaS app-router) answer `421` when
+  `tenancy.context/byo-org?` is true and the pod isn't a BYO executor
+  (`:byo-executor?`, from `GRAPHDEN_BYO_EXECUTOR`). A BYO executor sets
+  `GRAPHDEN_EXECUTOR_ORGS` to its own org and `GRAPHDEN_BYO_EXECUTOR=true`, so
+  it serves that org and 421s everything else. `byo-org?` reads `:org` in the
+  public context (before the tenant org is bound — `:org` is tenant-hidden
+  once scoped) with a ~5s memo.
+- **Storage-over-HTTP — NOT built.** The BYO executor still needs a read path
+  to the graph without Postgres credentials: a `RemoteStorage` leaf
+  implementing the minimal read surface (`query-entities`, `read-entity(s)`,
+  and an `ExecutionGraph` satisfy-gate; see [EXTENDING.md](EXTENDING.md)),
+  bootstrapping the whole graph from a raw-rows export and holding it in
+  memory. `GET /api/export/graph` is most of the bulk read but emits fn-def
+  maps, not the raw slot/binding rows the compiler wants.
+- **SSE invalidation — NOT built.** The BYO executor has no PG connection, so
+  it can't `LISTEN`. It needs an SSE source that parses the same
+  `graphden_events` wire format and calls the existing transport-agnostic
+  `on-notify`, fed by a hub-side relay of `pg_notify` events.
 
-Plus an `:org` field saying where that org runs, so shared pods refuse to
-serve it and it isn't scheduled onto them.
+Provisioning an org to `"byo"` is a direct `:org` write today
+(`tenancy.context/invalidate-byo-cache!` drops the memo after the flip); a
+provisioning endpoint lands with the BYO executor end.
 
 **Advisory-lock reconnect** — DONE. The lock connection lives behind a
 reconnecting holder; each reconcile pass calls `advisory-lock/ensure-live!`,

@@ -3,6 +3,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.app-router :as app]
+    [graphden.tenancy.context :as tc]
     [graphden.tenancy.subdomain :as subdomain]))
 
 
@@ -106,3 +107,50 @@
       (let [s (org-storage {"beta" nil})
             ctx {:storage s :executor-orgs #{"beta"}}]
         (is (= 404 (:status (ar ctx (req "beta.graphden.app")))))))))
+
+
+;; ============================================================================
+;; BYO refusal — a hosted pod 421s a :byo org (it runs on the customer's own
+;; executor); a BYO executor pod serves it.
+;; ============================================================================
+
+(defn- org-storage-with-mode
+  "Fake storage whose `:org` rows carry `:execution-mode`. `name->mode` maps
+   org → \"hosted\"/\"byo\" (all orgs also get a dummy handler so the app path
+   reaches the byo check, not the not-configured branch)."
+  [name->mode]
+  (reify sp/StorageCRUD
+    (query-entities
+      [_ en where]
+      (when (= en :org)
+        (let [n (:name where)]
+          (when (contains? name->mode n)
+            [{:name n :handler-fn-id (random-uuid) :execution-mode (get name->mode n)}]))))
+
+    (query-entities [_ _ _ _] nil)
+
+    (create-entity [_ _ _] nil)
+
+    (read-entity [_ _ _] nil)
+
+    (update-entity [_ _ _ _] nil)
+
+    (delete-entity [_ _ _] nil)
+
+    (query-latest-per-group [_ _ _ _] nil)))
+
+
+(deftest make-app-router-421s-byo-org-on-a-hosted-pod
+  (tc/invalidate-byo-cache!)
+  (let [storage (org-storage-with-mode {"acmebyo" "byo" "acmehosted" "hosted"})
+        ar (app/make-app-router (subdomain/identity-org-resolver) "graphden.app" nil)]
+    (testing "hosted pod (no :byo-executor?) → 421 for a :byo org"
+      (let [ctx {:storage storage}]
+        (is (= 421 (:status (ar ctx (req "acmebyo.graphden.app")))))))
+    (testing "hosted pod serves a :hosted org normally (not 421)"
+      (let [ctx {:storage storage}]
+        (is (not= 421 (:status (ar ctx (req "acmehosted.graphden.app")))))))
+    (testing "a BYO executor pod serves its :byo org"
+      (let [ctx {:storage storage :byo-executor? true}]
+        (is (not= 421 (:status (ar ctx (req "acmebyo.graphden.app")))))))
+    (tc/invalidate-byo-cache!)))

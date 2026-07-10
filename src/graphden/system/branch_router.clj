@@ -108,7 +108,10 @@
                                  ;; ctx must compile the same slice of the graph
                                  ;; as its base, or the pod would pull every
                                  ;; tenant's fns back in through the side door.
-                                 :executor-orgs (:executor-orgs base-ctx)})
+                                 :executor-orgs (:executor-orgs base-ctx)
+                                 ;; Inherit the pod role so per-branch requests
+                                 ;; apply the same hosted/BYO refusal.
+                                 :byo-executor? (:byo-executor? base-ctx)})
       ;; Privileged structural-read storage for THIS branch (§4 Design B): the
       ;; raw PG re-wrapped at branch-id, so `rebuild!` compiles every org's fns
       ;; in this executor's shard (isolation stays on the org-scoped `:storage`

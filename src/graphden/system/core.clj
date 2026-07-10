@@ -699,7 +699,7 @@
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
              execute-guard app-router set-org-handler verify-domain user-ops
-             executor-orgs]}]
+             executor-orgs byo-executor?]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -748,7 +748,14 @@
                    executor-orgs
                    (assoc :executor-orgs (if (string? executor-orgs)
                                            (parse-executor-orgs executor-orgs)
-                                           executor-orgs)))]
+                                           executor-orgs))
+                   ;; Pod role — a BYO executor serves the `:byo` orgs in its
+                   ;; shard; a hosted pod 421s them. From `GRAPHDEN_BYO_EXECUTOR`
+                   ;; (parsed to bool) or an addon override.
+                   byo-executor?
+                   (assoc :byo-executor? (if (string? byo-executor?)
+                                           (contains? #{"true" "1" "yes"} byo-executor?)
+                                           (boolean byo-executor?))))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client)

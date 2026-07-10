@@ -103,10 +103,16 @@
        ;; and always current (a `set-org-handler!` deploy takes effect at once).
        (let [handler-fn-id (read-handler-fn-id (:storage ctx) org)]
          (cond
-           ;; Wrong pod: the org isn't in this executor's shard, so nothing of
-           ;; theirs is in the compiled registry. Checked BEFORE the handler
-           ;; lookup's verdict so a sharded miss never reads as "not deployed".
-           (not (cr/org-in-shard? (:executor-orgs ctx) org))
+           ;; Wrong executor → 421, for either reason (checked BEFORE the
+           ;; handler verdict so it never reads as "not deployed"):
+           ;;   - the org isn't in this pod's shard (nothing of theirs is
+           ;;     compiled here);
+           ;;   - it's a `:byo` org on a hosted pod — the graph is stored here
+           ;;     but running it is the customer's executor's job. A BYO
+           ;;     executor pod (`:byo-executor?`) serves it. `:org` is read in
+           ;;     the platform context, same as `read-handler-fn-id` above.
+           (or (not (cr/org-in-shard? (:executor-orgs ctx) org))
+               (and (not (:byo-executor? ctx)) (tc/byo-org? (:storage ctx) org)))
            app-misdirected
 
            (not handler-fn-id)

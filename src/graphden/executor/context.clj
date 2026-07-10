@@ -170,10 +170,14 @@
                 orgs' fns plus the un-owned platform rows, instead of every
                 tenant's. nil (the default, and the only value single-tenant
                 ever uses) compiles the whole graph. Admit the public org
-                explicitly — core doesn't know its name."
+                explicitly — core doesn't know its name.
+   - :byo-executor?  When true, this pod is a customer's OWN executor — it may
+                serve the `:byo` orgs in its shard. A HOSTED pod (default,
+                false) refuses any `:byo` org with a 421. See
+                `tenancy.context/byo-org?`."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
            execute-guard app-router set-org-handler verify-domain user-ops
-           executor-orgs]}]
+           executor-orgs byo-executor?]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -227,7 +231,10 @@
       (cond-> executor-orgs
         (assoc :executor-orgs (if (fn? executor-orgs)
                                 executor-orgs
-                                (set executor-orgs))))))
+                                (set executor-orgs))))
+      ;; Pod role — a BYO executor may serve the `:byo` orgs in its shard;
+      ;; a hosted pod (default) 421s them.
+      (cond-> byo-executor? (assoc :byo-executor? true))))
 
 
 (defn current-time-ms

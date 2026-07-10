@@ -143,7 +143,8 @@
                   "-v" (str (System/getenv "PWD") ":/repo")
                   "-w" "/repo"
                   "zricethezav/gitleaks:latest"
-                  "detect" "--no-banner" "--no-git")}
+                  "detect" "--no-banner" "--no-git"
+                  "--config" "/repo/.gitleaks.toml")}
 
   typos
   {:doc "Spelling check over docs + src via crate-ci/typos. Downloads the binary to .tools/typos on first run (Linux x86_64). Config: _typos.toml at repo root."
@@ -458,7 +459,8 @@
                                    " .claude/hooks/remind-packages-quality-on-impls-edit.sh")
                gitleaks-cmd (str "docker run --rm -v " (System/getenv "PWD")
                                  ":/repo -w /repo zricethezav/gitleaks:latest"
-                                 " detect --no-banner --no-git")
+                                 " detect --no-banner --no-git"
+                                 " --config /repo/.gitleaks.toml")
                markdownlint-cmd "npx markdownlint-cli2"
                actionlint-cmd (str "docker run --rm -v " (System/getenv "PWD")
                                    ":/repo -w /repo"

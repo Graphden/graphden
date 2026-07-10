@@ -24,7 +24,8 @@ test.beforeEach(async ({ page }) => {
 //  - Cytoscape canvas exists (means /api/graph/layout returned)
 //  - One additional rAF so its first frame has been committed
 async function waitForGraphRendered(page) {
-  await page.waitForSelector('#cy canvas', { state: 'attached', timeout: 20_000 });
+  // Edges are SVG now; a rendered path means /api/graph/layout returned and drew.
+  await page.waitForSelector('#edge-lines path', { state: 'attached', timeout: 20_000 });
   await page.evaluate(() => new Promise(requestAnimationFrame));
   await page.evaluate(() => new Promise(requestAnimationFrame));
 }

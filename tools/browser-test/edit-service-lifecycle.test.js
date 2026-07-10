@@ -63,20 +63,20 @@ async function openServicePopover(page) {
   await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + PROBE_FN);
   // Wait for cytoscape to mount the fn-card with its `⋯` trigger and
   // for the post-mount fit animation to drain — without the
-  // cy.animated() gate, dispatchEvent below races autowait stability.
+  // graph.animating gate, dispatchEvent below races autowait stability.
   await page.waitForFunction(
-    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+    () => graphReady()
           && !!document.querySelector('button.more-actions-trigger')
-          && !cy.animated(),
+          && !graph.animating,
     null,
     {timeout: 20000, polling: 100});
   await page.evaluate(() => initGraph());
   // initGraph re-renders overlays; wait again for the post-rebuild
   // settle before dispatching.
   await page.waitForFunction(
-    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+    () => graphReady()
           && !!document.querySelector('button.more-actions-trigger')
-          && !cy.animated(),
+          && !graph.animating,
     null,
     {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');

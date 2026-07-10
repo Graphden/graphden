@@ -36,7 +36,7 @@ const DRAG_DX = 600;
     await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0 && !cy.animated(),
+      () => graphReady() && !graph.animating,
       null, {timeout: 20000, polling: 100});
 
     // ===================================================================
@@ -80,14 +80,14 @@ const DRAG_DX = 600;
       // Pick the first labelled edge whose source still has a live position
       // and a stamped column (an un-laid-out source can't exercise the clamp).
       for (const [edgeId, overlay] of _edgeOverlaysByEdgeId) {
-        const edge = cy.getElementById(edgeId);
-        if (!edge.length) continue;
+        const edge = gv.edge(edgeId);
+        if (!edge) continue;
         const src = edge.source();
-        if (!src.length || src.data('colRightX') === undefined) continue;
+        if (!src || src.data('colRightX') === undefined) continue;
 
         // Reproduce exactly the state a drag leaves behind: the node's
         // position moves, `colRightX` stays stale. (editor-drag.js mutates
-        // cyNode.position() and re-runs updateOverlayPositions.)
+        // the node position and re-runs updateOverlayPositions.)
         const startX = src.position().x;
         const startY = src.position().y;
         src.position({x: startX + dx, y: startY});
@@ -140,8 +140,8 @@ const DRAG_DX = 600;
       updateOverlayPositions();
 
       // The bend the EDGE draws is unaffected by the label's formula — the
-      // cytoscape style calls the (restored) shared function.
-      const edge = cy.getElementById(edgeId);
+      // SVG path calls the (restored) shared function.
+      const edge = gv.edge(edgeId);
       return {labelLeftGraph, bendGraph: taxiBendX(edge.source())};
     }, rendered.edgeId);
 
@@ -151,7 +151,7 @@ const DRAG_DX = 600;
     // And the restore actually took, so we leave the page consistent.
     const restored = await page.evaluate((edgeId) => {
       const overlay = _edgeOverlaysByEdgeId.get(edgeId);
-      const edge = cy.getElementById(edgeId);
+      const edge = gv.edge(edgeId);
       return {
         labelLeftGraph: parseFloat(overlay.style.left),
         bendGraph: taxiBendX(edge.source()),

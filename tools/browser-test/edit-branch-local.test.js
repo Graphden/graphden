@@ -74,9 +74,9 @@ async function openServicePopover(page, fnHash) {
   // to drain. Without this, dispatchEvent below races the post-mount
   // fit animation and the popover never settles.
   await page.waitForFunction(
-    () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+    () => graphReady()
           && !!document.querySelector('button.more-actions-trigger')
-          && !cy.animated(),
+          && !graph.animating,
     null,
     {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');

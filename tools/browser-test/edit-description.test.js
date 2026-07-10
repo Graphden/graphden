@@ -72,9 +72,9 @@ async function cleanup(page) {
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#app.' + FN_NAME);
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+      () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());

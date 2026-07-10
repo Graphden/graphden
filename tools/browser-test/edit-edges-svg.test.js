@@ -12,7 +12,7 @@
 //   3. Stroke widths track zoom on the GROUPS, not per path: the line never
 //      renders thinner than 0.75 screen px, and the grab target is a constant
 //      12 screen px.
-//   4. Cytoscape paints no edge of its own.
+//   4. The model holds one edge per drawn path.
 //
 // Read-only — no DB writes, no seeding, no cleanup.
 //
@@ -35,7 +35,7 @@ const PROBE_FN = 'web-server';
     await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0 && !cy.animated()
+      () => graphReady() && !graph.animating
             && document.querySelector('#edge-lines path'),
       null, {timeout: 20000, polling: 100});
 
@@ -56,8 +56,7 @@ const PROBE_FN = 'web-server';
         widthPx: parseFloat(cs.width),
         heightPx: parseFloat(cs.height),
         overflow: cs.overflow,
-        cyEdgeOpacity: cy.edges().style('opacity'),
-        cyEdgeCount: cy.edges().length,
+        modelEdgeCount: graphView.edgeList().length,
         markerStart: line.getAttribute('marker-start'),
         markerEnd: line.getAttribute('marker-end'),
       };
@@ -72,9 +71,8 @@ const PROBE_FN = 'web-server';
     assert(structure.overflow === 'visible', 'paths may spill outside the 1px box');
     assert(structure.markerStart && structure.markerEnd,
            'edge carries both direction markers');
-    assert(structure.cyEdgeCount === structure.lines,
-           'cytoscape still holds the topology: ' + structure.cyEdgeCount + ' edges');
-    assert(structure.cyEdgeOpacity === '0', 'cytoscape paints no edge of its own');
+    assert(structure.modelEdgeCount === structure.lines,
+           'the model holds one edge per drawn path: ' + structure.modelEdgeCount);
 
     // Actually painted. Every geometry assertion above still passes when the
     // root <svg> is zero-sized and paints nothing, so the only honest check is

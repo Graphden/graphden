@@ -34,8 +34,8 @@ const TEST_NAME = 'test-edit-phase5';
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + TEST_NAME);
     // Wait for cytoscape + cards rendered and fit-animation drained.
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
-            && !cy.animated(),
+      () => graphReady()
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
     // Force a refresh so the just-POSTed fn is in lookups.fnMap.
@@ -43,8 +43,8 @@ const TEST_NAME = 'test-edit-phase5';
     // Same gate after initGraph rebuild — also wait for the empty-
     // sequence placeholder which is what step 2 immediately checks.
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
-            && !cy.animated()
+      () => graphReady()
+            && !graph.animating
             && !!document.querySelector('.placeholder-binder.is-seq-anchor'),
       null,
       {timeout: 20000, polling: 100});

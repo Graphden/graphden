@@ -8,10 +8,11 @@
 // out once in graph units, and pan/zoom is a single style write.
 //
 // The test pins both halves of that claim:
-//   1. Correctness — an overlay's on-screen box still coincides with the box
-//      Cytoscape reports for its node (`renderedPosition`/`renderedWidth`),
-//      at the initial zoom and after zooming.
+//   1. Correctness — the SVG edge leaving a node starts on that node's HTML
+//      overlay, mapped to screen by the browser's own getScreenCTM, at the
+//      initial zoom and after zooming.
 //   2. The O(1) property — zooming must NOT touch any overlay's own styles.
+//   3. Every card's declared box is the box it renders (measured-height reflow).
 //
 // Read-only — no DB writes, no seeding, no cleanup.
 //
@@ -21,7 +22,7 @@ const {chromium} = require('playwright');
 const {assert, newContext, waitForServerHealthy, BASE} = require('./edit-test-helpers');
 
 const PROBE_FN = 'web-server';
-// Cytoscape rounds rendered geometry; allow a sub-pixel slack.
+// Sub-pixel slack for rounding in the transform stack.
 const TOL = 1.5;
 
 (async () => {
@@ -33,7 +34,7 @@ const TOL = 1.5;
     await page.goto('about:blank');
     await page.goto(BASE + '/#' + PROBE_FN);
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0 && !cy.animated()
+      () => graphReady() && !graph.animating
             && !!document.getElementById('graph-layer'),
       null, {timeout: 20000, polling: 100});
 
@@ -45,7 +46,7 @@ const TOL = 1.5;
       const nodeOverlays = document.querySelectorAll('.node-overlay');
       const inLayer = Array.from(nodeOverlays).filter((el) => layer.contains(el));
       return {
-        parentIsCy: layer.parentElement?.id === 'cy',
+        parentIsSurface: layer.parentElement?.id === 'graph-surface',
         total: nodeOverlays.length,
         inLayer: inLayer.length,
         // Zero-sized + pointer-transparent, so it never eats clicks itself.
@@ -53,7 +54,7 @@ const TOL = 1.5;
         transformOrigin: getComputedStyle(layer).transformOrigin,
       };
     });
-    assert(structure.parentIsCy, '#graph-layer is a child of #cy');
+    assert(structure.parentIsSurface, '#graph-layer is a child of #graph-surface');
     assert(structure.total > 0, 'node overlays rendered: ' + structure.total);
     assert(structure.inLayer === structure.total,
            'every node overlay lives inside the layer: '
@@ -116,7 +117,7 @@ const TOL = 1.5;
     // Zoom about the container centre. This is the path that used to rewrite
     // every overlay's styles; now it rewrites one transform.
     await page.evaluate(() => {
-      const c = document.getElementById('cy');
+      const c = document.getElementById('graph-surface');
       gv.setZoom(gv.zoom() * 1.7, {x: c.clientWidth / 2, y: c.clientHeight / 2});
     });
     const after = await probe();
@@ -148,8 +149,8 @@ const TOL = 1.5;
       const strays = overlays.filter((el) => !layer.contains(el));
       let afterBend = 0;
       for (const [edgeId, overlay] of _edgeOverlaysByEdgeId) {
-        const edge = cy.getElementById(edgeId);
-        if (!edge.length || !edge.source().length) continue;
+        const edge = gv.edge(edgeId);
+        if (!edge || !edge.source()) continue;
         if (parseFloat(overlay.style.left) >= taxiBendX(edge.source())) afterBend++;
       }
       return {count: overlays.length, strays: strays.length, afterBend,

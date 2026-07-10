@@ -31,18 +31,18 @@ const {chromium} = require('playwright');
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#ex-regression-str-via-ref');
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+      () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
 
     const snapshot = await page.evaluate(() => {
-      if (typeof cy === 'undefined') return {error: 'cy not initialised'};
+      if (!graphReady()) return {error: 'graph not initialised'};
       return {
-        fnNodeCount: cy.nodes('[originalFnId]').length,
-        fnNodeLabels: cy.nodes('[originalFnId]').map(n => (n.data('label') || '').trim()),
-        edgeArgNames: cy.edges().map(e => e.data('argName')).filter(Boolean),
+        fnNodeCount: graphView.nodeList().filter(n => n.data.originalFnId).length,
+        fnNodeLabels: graphView.nodeList().filter(n => n.data.originalFnId).map(n => (n.data.label || '').trim()),
+        edgeArgNames: graphView.edgeList().map(e => e.data.argName).filter(Boolean),
       };
     });
 

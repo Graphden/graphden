@@ -184,7 +184,9 @@ const PROBE_FN = 'web-server';
     // Phase D — hover lights the bundle, and clears.
     // ===================================================================
     const hover = await page.evaluate(() => {
-      const rootId = gv.nodes('[type="fn"][!isPlaceholder]')[0].id();
+      // `gv.nodes()` takes no selector — use the dedicated fn-node filter so
+      // this doesn't silently grab whatever node is first in insertion order.
+      const rootId = gv.fnNodes()[0].id();
       gv.highlightEdgesFrom(rootId);
       const lit = document.querySelectorAll('#edge-lines path.edge-hovered').length;
       gv.clearEdgeHighlight();

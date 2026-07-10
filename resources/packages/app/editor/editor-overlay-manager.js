@@ -292,6 +292,12 @@ function syncOverlayGeometry() {
   //
   // `offsetWidth`/`offsetHeight` ignore transforms, so inside the scaled layer
   // they already report graph units — the whole projection collapses away.
+  // Two passes so we never interleave a layout READ (offsetWidth/Height) with
+  // a layout WRITE (style.left/top). Interleaved, each write dirties layout and
+  // the next iteration's read forces a synchronous reflow — O(edges) reflows
+  // per frame on drag/animate. Pass 1 reads every overlay's measured size and
+  // resolves its geometry; pass 2 only writes.
+  const edgeLabelWrites = [];
   for (const [edgeId, overlay] of _edgeOverlaysByEdgeId) {
     const edge = gv.edge(edgeId);
     if (!edge) continue;
@@ -335,8 +341,12 @@ function syncOverlayGeometry() {
       left = targetLeft - EDGE_LABEL_TARGET_GAP - w;
     }
 
+    edgeLabelWrites.push({overlay, left, top: tPos.y - h / 2});
+  }
+
+  for (const {overlay, left, top} of edgeLabelWrites) {
     overlay.style.left = left + 'px';
-    overlay.style.top = (tPos.y - h / 2) + 'px';
+    overlay.style.top = top + 'px';
   }
 }
 

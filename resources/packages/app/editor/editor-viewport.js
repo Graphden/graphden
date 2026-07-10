@@ -12,8 +12,11 @@
 const VIEWPORT_MIN_ZOOM = 0.1;
 const VIEWPORT_MAX_ZOOM = 3;
 // Wheel delta → zoom factor. One notch (~100px on a mouse) is ~10%, which is
-// the same feel cytoscape's default `wheelSensitivity` gave.
+// the same feel cytoscape's default `wheelSensitivity` gave. The rate assumes
+// PIXEL deltas; `_wheelDeltaPixels` normalizes line/page modes up front so
+// Firefox mouse wheels (which report ~3 LINES per notch) aren't ~30× too slow.
 const WHEEL_ZOOM_RATE = 0.001;
+const WHEEL_LINE_HEIGHT = 16; // px per line, the usual approximation
 
 const viewport = {
   pan: {x: 0, y: 0},
@@ -105,6 +108,19 @@ function _localPoint(clientX, clientY) {
   return {x: clientX - r.left, y: clientY - r.top};
 }
 
+/**
+ * Wheel `deltaY` in PIXELS, whatever the event's `deltaMode`. Chrome/Safari
+ * and trackpad pinch report pixels (mode 0); Firefox mouse wheels report
+ * lines (mode 1, ~3/notch); page mode (2) is rare. Without this, WHEEL_ZOOM_RATE
+ * (tuned for pixels) makes a Firefox mouse-wheel notch move zoom ~0.3% instead
+ * of ~10% — wheel-zoom looks dead.
+ */
+function _wheelDeltaPixels(e, container) {
+  if (e.deltaMode === 1) return e.deltaY * WHEEL_LINE_HEIGHT;
+  if (e.deltaMode === 2) return e.deltaY * (container ? container.clientHeight : 800);
+  return e.deltaY;
+}
+
 function _touchMidpoint(touches) {
   return _localPoint((touches[0].clientX + touches[1].clientX) / 2,
                      (touches[0].clientY + touches[1].clientY) / 2);
@@ -131,7 +147,7 @@ function installViewportInput() {
   container.addEventListener('wheel', (e) => {
     e.preventDefault();
     const p = _localPoint(e.clientX, e.clientY);
-    setViewportZoom(viewport.zoom * Math.exp(-e.deltaY * WHEEL_ZOOM_RATE), p);
+    setViewportZoom(viewport.zoom * Math.exp(-_wheelDeltaPixels(e, container) * WHEEL_ZOOM_RATE), p);
   }, {passive: false});
 
   // ── Mouse: drag the background to pan ────────────────────────────────────

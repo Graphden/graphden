@@ -117,6 +117,79 @@
   (assoc data :org-id (tc/current-org)))
 
 
+(def ^:private ref-fields
+  "Graph edges that point at another row, by owning entity. Each entry is
+   `field → target-entity`. `:parent-ids` is the one vector-valued edge.
+
+   These are exactly the edges `executor.compile-runtime/read-graph`
+   has to be able to follow after it filters the graph down to one
+   executor's org shard."
+  {:fn                {:parent-ids :fn
+                       :return-type-fn-id :fn
+                       :base-fn-id :fn
+                       :element-fn-id :fn}
+   :slot              {:type-fn-id :fn}
+   :fn-slot           {:slot-id :slot}
+   :binding           {:ref-fn-id :fn
+                       :type-override-fn-id :fn}
+   :binding-list-item {:ref-fn-id :fn}})
+
+
+(defn- reject-cross-org-refs!
+  "Refuse a write whose graph edges leave `{own-org, public}`.
+
+   Until now this held only EMERGENTLY: a tenant's reads are filtered to
+   `{own-org, public}`, so the editor could never offer another org's fn
+   as a ref target. Nothing enforced it. That is fine while every pod
+   compiles every org, and unsound the moment a pod compiles only its
+   own shard — a binding pointing into an org this pod doesn't hold
+   would compile to a dangling ref.
+
+   So the property the shard depends on is now checked where the edge is
+   written, not merely implied by what the writer could see.
+
+   `base` is the UNSCOPED storage: we need the target's true `:org-id`,
+   which the org filter would hide precisely in the case we want to
+   catch.
+
+   Skipped for the public org — not for lack of rigour. A public write
+   cannot form a cross-org edge in the first place: `visible?` hides
+   every tenant row from the public org, so there is no foreign
+   target-id to name. Meanwhile the platform writes its entire package
+   graph through this decorator at boot (thousands of rows, most with
+   `:parent-ids`), and the check costs one `read-entity` per edge.
+   Paying that on every cloud startup to re-prove what the read filter
+   already guarantees is not a trade worth making.
+
+   A privileged path that deliberately wrote a public→tenant edge would
+   go through the BASE storage and never reach this guard anyway."
+  [base entity-name data]
+  (when-let [fields (and data
+                         (not= (tc/current-org) tc/public-org)
+                         (get ref-fields entity-name))]
+    (let [org (tc/current-org)
+          ;; `row-org` normalises a NULL `:org-id` to the public org, so
+          ;; un-owned platform rows are covered by the public branch.
+          allowed? (fn [target-org]
+                     (or (= tc/public-org target-org)
+                         (= org target-org)))]
+      (doseq [[field target-entity] fields
+              :let [v (get data field)]
+              :when (some? v)
+              target-id (if (sequential? v) v [v])
+              :when (some? target-id)]
+        (let [target (sp/read-entity base target-entity target-id)
+              target-org (some-> target row-org)]
+          (when (and target (not (allowed? target-org)))
+            (throw (ex-info (str "forbidden: " entity-name "." field
+                                 " points at a row owned by another org")
+                            {:type :authz/forbidden
+                             :entity entity-name
+                             :field field
+                             :org org
+                             :target-org target-org}))))))))
+
+
 (defn- guard-write!
   "Enforce tenant write policy, then run the per-namespace write guard when
    one is configured. Both throw `:authz/forbidden` on a denied write (caught
@@ -127,14 +200,18 @@
    keeps a tenant from deploying an unsandboxed `:service` or escalating via
    `:grant`.
 
+   Then the cross-org edge check (see `reject-cross-org-refs!`), which is
+   what lets an executor compile a single org's shard of the graph.
+
    `id` is the entity's id on update / delete (nil on create), so the guard can
    read the existing row to resolve its namespace when `data` doesn't carry the
    identifying fields (a value-only binding update, or a delete)."
-  [authorize-write entity-name data id]
+  [base authorize-write entity-name data id]
   (when (and (not= (tc/current-org) tc/public-org)
              (contains? tenant-forbidden-entities entity-name))
     (throw (ex-info (str "forbidden: tenants may not write privileged entity " entity-name)
                     {:type :authz/forbidden :entity entity-name})))
+  (reject-cross-org-refs! base entity-name data)
   (when authorize-write
     (authorize-write entity-name data id)))
 
@@ -158,7 +235,7 @@
 
   (create-entity
     [_ entity-name data]
-    (guard-write! authorize-write entity-name data nil)
+    (guard-write! base authorize-write entity-name data nil)
     (sp/create-entity base entity-name
                       (cond-> data (scoped? entity-name) stamp)))
 
@@ -172,7 +249,7 @@
 
   (update-entity
     [_ entity-name id data]
-    (guard-write! authorize-write entity-name data id)
+    (guard-write! base authorize-write entity-name data id)
     (if (scoped? entity-name)
       ;; Only own rows are writable, and a tenant can never be reassigned.
       (when (some-> (sp/read-entity base entity-name id) own?)
@@ -185,7 +262,7 @@
     ;; Deletes are namespaced writes too (§4.3): an `:append-list` user removing
     ;; a list-item, a `:write` user deleting a binding. `data` is nil — the guard
     ;; reads the row by id to resolve its namespace.
-    (guard-write! authorize-write entity-name nil id)
+    (guard-write! base authorize-write entity-name nil id)
     (if (scoped? entity-name)
       (when (some-> (sp/read-entity base entity-name id) own?)
         (sp/delete-entity base entity-name id))
@@ -220,7 +297,7 @@
 
   (create-entities
     [_ entity-name data-seq]
-    (run! #(guard-write! authorize-write entity-name % nil) data-seq)
+    (run! #(guard-write! base authorize-write entity-name % nil) data-seq)
     (sp/create-entities base entity-name
                         (cond->> data-seq (scoped? entity-name) (mapv stamp))))
 
@@ -238,7 +315,7 @@
     ;; Per-row write guard (mirrors create/upsert): the tenant-forbidden
     ;; type block has NO RLS backstop — those tables carry no `:org-id` — so
     ;; a batch update/delete on them must be guarded here, not "left to RLS".
-    (run! #(guard-write! authorize-write entity-name % (:id %)) data-seq)
+    (run! #(guard-write! base authorize-write entity-name % (:id %)) data-seq)
     ;; Strip any org reassignment.
     (sp/update-entities base entity-name
                         (cond->> data-seq
@@ -247,14 +324,14 @@
 
   (upsert-entities
     [_ entity-name data-seq]
-    (run! #(guard-write! authorize-write entity-name % nil) data-seq)
+    (run! #(guard-write! base authorize-write entity-name % nil) data-seq)
     (sp/upsert-entities base entity-name
                         (cond->> data-seq (scoped? entity-name) (mapv stamp))))
 
 
   (delete-entities
     [_ entity-name ids]
-    (run! #(guard-write! authorize-write entity-name nil %) ids)
+    (run! #(guard-write! base authorize-write entity-name nil %) ids)
     (sp/delete-entities base entity-name ids))
 
 

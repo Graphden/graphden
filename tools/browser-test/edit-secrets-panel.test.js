@@ -227,9 +227,11 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     // future GET /api/secrets calls (handler calls Vault for the
     // missing path, blocks the request thread, eventually kills
     // /health, restart loop). Force-delete by name.
+    // The probe carries a per-run suffix; deleting the bare prefix matched
+    // nothing, so every run leaked its secret into the target DB.
     try {
       const {deleteFnByName} = require('./edit-test-helpers');
-      await deleteFnByName(page, 'auto-fill-probe-name');
+      await deleteFnByName(page, PROBE_NAME);
     } catch (_) {}
     await browser.close();
   }

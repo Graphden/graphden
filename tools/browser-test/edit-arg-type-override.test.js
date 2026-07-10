@@ -109,7 +109,14 @@ async function cleanup(page) {
            '<select> pre-fills with "any": '
            + JSON.stringify(popoverState.currentValue));
 
-    // Wait for compatible types to populate (async fetch).
+    // Wait for compatible types to populate. This is a `POST
+    // /api/types/candidates` round-trip, and the endpoint scores every fn in
+    // the registry. Under the e2e stack's 3 GB heap cap the JVM spends whole
+    // seconds in GC — the health heartbeat logs `/health FAIL after 5005ms`
+    // during the sweep — and a 10 s budget was the only test in the suite that
+    // could not absorb it. Give the server the same 30 s other cross-request
+    // waits in this suite allow; the assertion is about the response, not its
+    // latency.
     await page.waitForFunction(
       () => {
         const sel = document.querySelector(
@@ -118,7 +125,7 @@ async function cleanup(page) {
         return opts.some((o) => o.value === 'int');
       },
       null,
-      {timeout: 10000});
+      {timeout: 30000});
 
     // ===================================================================
     // Phase C: pick "int" → save → binding gets :type-override-fn-id.

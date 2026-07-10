@@ -456,29 +456,65 @@ async function deleteFnByName(_page, name) {
   // post-test call.
   const ents = await nodeApiJson('GET', '/api/graph/entities');
   const matches = ents.fns.filter(f => f.name === name);
+  const secretLeaf = ents.fns.find(f => f.name === 'secret-leaf');
   for (const fn of matches) {
+    // A secret fn-def can ONLY be removed through the secrets endpoint, which
+    // also cleans up its OpenBao entry. The generic CRUD route answers 409 and
+    // says so. This helper used to ignore the status, so cleanup "succeeded"
+    // silently — but only AFTER it had already deleted the `:in` binding that
+    // holds the vault path, leaving a half-deleted secret behind. That is how
+    // the demo DB accumulated probe secrets with `path: null`.
+    if (isSecretFnRow(fn, secretLeaf)) {
+      await deleteOrThrow('/api/secrets/' + fn.id, name);
+      continue;
+    }
+
     const bindings = (ents.bindings || []).filter(b => b['fn-id'] === fn.id);
     const bindingIds = new Set(bindings.map(b => b.id));
     const items = (ents['list-items'] || []).filter(i => bindingIds.has(i['binding-id']));
     for (const it of items) {
-      await nodeApi('DELETE', '/api/entities/binding-list-item/' + it.id);
+      await deleteOrThrow('/api/entities/binding-list-item/' + it.id, name);
     }
     for (const b of bindings) {
-      await nodeApi('DELETE', '/api/entities/binding/' + b.id);
+      await deleteOrThrow('/api/entities/binding/' + b.id, name);
     }
     const ownFnSlots = (ents['fn-slots'] || []).filter(fs => fs['fn-id'] === fn.id);
     for (const fs of ownFnSlots) {
       // fn-slot rows have a composite PK; the API treats them as
       // entities keyed by `id` (set on creation); fall through if
       // the row predates id-bearing rows.
-      if (fs.id) await nodeApi('DELETE', '/api/entities/fn-slot/' + fs.id);
+      if (fs.id) await deleteOrThrow('/api/entities/fn-slot/' + fs.id, name);
     }
     const ownSlotIds = ownFnSlots.map(fs => fs['slot-id']);
     for (const sid of ownSlotIds) {
-      await nodeApi('DELETE', '/api/entities/slot/' + sid);
+      await deleteOrThrow('/api/entities/slot/' + sid, name);
     }
-    await nodeApi('DELETE', '/api/entities/fn/' + fn.id);
+    await deleteOrThrow('/api/entities/fn/' + fn.id, name);
   }
+}
+
+
+// A secret is a fn-def whose parents are exactly `[secret-leaf]` — the same
+// "pure secret" test the secrets panel uses (`isSecretFn` in editor-secrets.js).
+function isSecretFnRow(fn, secretLeaf) {
+  if (!secretLeaf) return false;
+  const parents = fn['parent-ids'] || [];
+  return parents.length === 1 && parents[0] === secretLeaf.id;
+}
+
+
+// DELETE that refuses to fail silently. 404 is fine — cleanup runs before the
+// test too, when there is nothing to remove. Anything else means the entity
+// survived, and a test that leaks entities poisons every later run against the
+// same DB, so make it loud.
+async function deleteOrThrow(path, name) {
+  const r = await nodeApi('DELETE', path);
+  if (r.ok || r.status === 404) return;
+  const body = (await r.text()).slice(0, 200);
+  const msg = 'cleanup of "' + name + '" failed: DELETE ' + path
+              + ' → HTTP ' + r.status + ' ' + body;
+  process.stderr.write('  ! ' + msg + '\n');
+  throw new Error(msg);
 }
 
 

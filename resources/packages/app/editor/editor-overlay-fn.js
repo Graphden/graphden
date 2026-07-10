@@ -24,11 +24,11 @@ function attachPreviewHandlers(el, triggerPreview, onPreviewLeave, restoreStyles
 // per-binding actions (× delete / ✎ change) — multi-incoming and
 // uneditable cards skip the affordance to keep the row clean.
 function _singleEditableIncomingArg(nodeId) {
-  if (!cy || typeof argRowFromNode !== 'function') return null;
-  const cyNode = cy.getElementById(nodeId);
-  if (!cyNode?.length) return null;
+  if (!gv.ready() || typeof argRowFromNode !== 'function') return null;
+  const graphNode = gv.node(nodeId);
+  if (!graphNode) return null;
   const editable = [];
-  cyNode.incomers('edge').forEach((edge) => {
+  graphNode.incomingEdges().forEach((edge) => {
     const arg = argRowFromNode(edge.data());
     if (!arg) return;
     const inImpl = implementationFnIds?.has(arg['fn-id']);
@@ -727,14 +727,10 @@ function renderSingleFnRow(line, levelInfo, ctx) {
 //     is dragging (isGrabbing), or the overlay was already detached.
 function attachFnOverlayHoverHandlers(overlay, nodeId) {
   overlay.addEventListener('mouseenter', () => {
-    if (!cy) return;
-    const cyNode = cy.getElementById(nodeId);
-    if (cyNode?.length) {
-      cyNode.outgoers('edge').addClass('edge-hovered');
-    }
+    if (gv.ready()) gv.highlightEdgesFrom(nodeId);
   });
   overlay.addEventListener('mouseleave', () => {
-    if (cy) cy.edges('.edge-hovered').removeClass('edge-hovered');
+    if (gv.ready()) gv.clearEdgeHighlight();
   });
   overlay.addEventListener('mouseleave', () => {
     if (!rebuildingOverlays && !isGrabbing && overlay.isConnected) {

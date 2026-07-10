@@ -205,31 +205,31 @@ function createNodeOverlays() {
   // a full-DOM querySelectorAll scan).
   _removeAllNodeOverlays(preservedOverlayId);
 
-  if (!cy) return;
+  if (!gv.ready()) return;
 
   const container = getGraphLayer();
   if (!container) return;
 
   // Fn nodes (with ancestor list)
-  cy.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
+  gv.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
     // Skip if overlay already exists (preserved)
     if (node.id() === preservedOverlayId && getNodeOverlay(node.id())) return;
     createFnOverlay(node, container);
   });
 
   // Arg value nodes
-  cy.nodes('[type="arg"]').forEach(node => {
+  gv.nodes('[type="arg"]').forEach(node => {
     createArgOverlay(node, container);
   });
 
   // Placeholder nodes (unset args)
-  cy.nodes('[?isPlaceholder]').forEach(node => {
+  gv.nodes('[?isPlaceholder]').forEach(node => {
     createPlaceholderOverlay(node, container);
   });
 
   // Remove any stale edge label overlays then create fresh ones.
   _removeAllEdgeOverlays();
-  cy.edges().forEach(edge => {
+  gv.edges().forEach(edge => {
     if (edge.data('argName')) createEdgeLabelOverlay(edge, container);
   });
 
@@ -249,15 +249,13 @@ const EDGE_LABEL_TARGET_GAP = 6;
  * individual overlays.
  */
 function applyViewportTransform() {
-  if (!cy) return;
+  if (!gv.ready()) return;
   const layer = getGraphLayer();
   if (!layer) return;
-  // cy.pan() hands back a live reference — read the primitives out now.
-  const panX = cy.pan().x;
-  const panY = cy.pan().y;
-  const zoom = cy.zoom();
+  const pan = gv.pan();
+  const zoom = gv.zoom();
   layer.style.transform =
-    'translate(' + panX + 'px,' + panY + 'px) scale(' + zoom + ')';
+    'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')';
 }
 
 /**
@@ -266,11 +264,11 @@ function applyViewportTransform() {
  * frame, a drag. Pan and zoom do NOT call this.
  */
 function syncOverlayGeometry() {
-  if (!cy) return;
+  if (!gv.ready()) return;
 
   for (const [nodeId, overlay] of _overlaysByNodeId) {
-    const node = cy.getElementById(nodeId);
-    if (!node.length) continue;
+    const node = gv.node(nodeId);
+    if (!node) continue;
 
     const pos = node.position();
     // Use width()/height() (content size, no padding) to match calculateNodeSize
@@ -289,14 +287,14 @@ function syncOverlayGeometry() {
   // `offsetWidth`/`offsetHeight` ignore transforms, so inside the scaled layer
   // they already report graph units — the whole projection collapses away.
   for (const [edgeId, overlay] of _edgeOverlaysByEdgeId) {
-    const edge = cy.getElementById(edgeId);
-    if (!edge.length) continue;
+    const edge = gv.edge(edgeId);
+    if (!edge) continue;
     const target = edge.target();
     const source = edge.source();
     // Skip THIS edge only (a target can be missing mid edge-removal /
     // sync race); `return` here aborted the whole loop, freezing every
     // later edge-label.
-    if (!target.length) continue;
+    if (!target) continue;
 
     const tPos = target.position();
     const targetLeft = tPos.x - target.width() / 2;
@@ -311,7 +309,7 @@ function syncOverlayGeometry() {
     // to that bend, plus the vertical descent — so we want the overlay
     // to sit AFTER the bend, not on top of the shared part.
     let left;
-    if (source.length) {
+    if (source) {
       // `taxiBendX` (editor-layout.js) is the SAME function the cytoscape
       // `taxi-turn` style and the edge-hover hit-test call, so the label can
       // never anchor on the wrong side of the line that actually gets drawn.

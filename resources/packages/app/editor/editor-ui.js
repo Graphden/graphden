@@ -79,32 +79,37 @@ const ZOOM_STEP = 0.15;
 
 /** Zoom in (dir=1) or out (dir=-1) relative to viewport center. */
 function navZoom(dir) {
-  if (!cy) return;
-  const newZoom = Math.max(0.1, Math.min(3, cy.zoom() + dir * ZOOM_STEP));
-  cy.zoom({ level: newZoom, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+  if (!gv.ready()) return;
+  const newZoom = Math.max(0.1, Math.min(3, gv.zoom() + dir * ZOOM_STEP));
+  gv.setZoom(newZoom, viewportCentre());
   applyViewportTransform();
   updateZoomSlider();
 }
 
 /** Zoom to an absolute level (from the slider). */
 function navZoomTo(level) {
-  if (!cy) return;
+  if (!gv.ready()) return;
   const clamped = Math.max(0.1, Math.min(3, level));
-  cy.zoom({ level: clamped, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+  gv.setZoom(clamped, viewportCentre());
   // Slider `oninput` fires per pixel of thumb travel — the overlays' graph
   // coordinates haven't changed, only the viewport, so this stays O(1).
   applyViewportTransform();
 }
 
+/** The point the zoom controls hold fixed: the middle of the drawing surface. */
+function viewportCentre() {
+  return { x: gv.width() / 2, y: gv.height() / 2 };
+}
+
 /** Sync the slider thumb with the current zoom level. */
 function updateZoomSlider() {
   const slider = document.getElementById('zoom-slider');
-  if (slider && cy) slider.value = Math.round(cy.zoom() * 100);
+  if (slider && gv.ready()) slider.value = Math.round(gv.zoom() * 100);
 }
 
 /** Reset zoom to fit all nodes in viewport. */
 function navResetZoom() {
-  if (!cy || cy.nodes().length === 0) return;
+  if (!gv.ready() || gv.nodes().length === 0) return;
   fitInVisibleArea(50);
   applyViewportTransform();
   updateZoomSlider();
@@ -112,22 +117,18 @@ function navResetZoom() {
 
 /** Pan to center the root node in the viewport. */
 function navGoToRoot() {
-  if (!cy) return;
+  if (!gv.ready()) return;
+  const nodes = gv.nodes();
+  if (nodes.length === 0) return;
   // Root = node with selectedFnId as originalFnId
-  let rootNode = null;
-  cy.nodes().forEach(n => {
-    if (n.data('isRoot')) rootNode = n;
-  });
-  if (!rootNode) rootNode = cy.nodes().first();
-  if (rootNode?.length) {
-    cy.animate({ center: { eles: rootNode }, duration: 200 });
-    setTimeout(() => { applyViewportTransform(); updateZoomSlider(); }, 250);
-  }
+  const rootNode = nodes.find(n => n.data('isRoot')) || nodes[0];
+  gv.centerOn(rootNode, 200);
+  setTimeout(() => { applyViewportTransform(); updateZoomSlider(); }, 250);
 }
 
 /** Reset all user-moved nodes to their layout positions. */
 function navResetPositions() {
-  if (!cy) return;
+  if (!gv.ready()) return;
   userMovedNodes.clear();
   savedUserPositions.clear();
   renderGraph(false);

@@ -23,6 +23,10 @@
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
+                  ;; `gv` — the graph-view seam. Reads `cy` lazily, so it can
+                  ;; load before the instance exists; every module downstream
+                  ;; talks to the graph through it rather than to cytoscape.
+                  "packages/app/editor/editor-graph-view.js"
                   "packages/web/runtime/graphden-popover.js"
                   "packages/app/editor/editor-busy.js"
                   "packages/app/editor/editor-prefs.js"

@@ -122,8 +122,7 @@ function positionRowActionsPopover(el, anchor) {
     fadeOutPopover();
     return;
   }
-  const zoom = (typeof cy !== 'undefined' && cy && typeof cy.zoom === 'function')
-               ? cy.zoom() : 1;
+  const zoom = (typeof gv !== 'undefined' && gv.ready()) ? gv.zoom() : 1;
   // Reset transform so offsetWidth measures the un-scaled size.
   el.style.transform = '';
   el.style.transformOrigin = 'top left';
@@ -630,12 +629,12 @@ registerActionHandler('delete-fn', (btn, e, host) => {
 let rowActionsCyHandlersBound = false;
 function ensureRowActionsCyHandlers() {
   if (rowActionsCyHandlersBound) return;
-  if (typeof cy === 'undefined' || !cy || typeof cy.on !== 'function') return;
-  rowActionsCyHandlersBound = true;
   const reposition = () => {
     if (!rowActionsPopoverEl || rowActionsPopoverEl.style.display === 'none') return;
     if (!rowActionsPopoverAnchor || !document.contains(rowActionsPopoverAnchor)) return;
     positionRowActionsPopover(rowActionsPopoverEl, rowActionsPopoverAnchor);
   };
-  cy.on('zoom pan', reposition);
+  // The popover is anchored to the document, not the graph layer, so it has to
+  // re-anchor itself whenever the viewport moves under it.
+  rowActionsCyHandlersBound = gv.onViewportChange(reposition);
 }

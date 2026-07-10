@@ -1033,8 +1033,7 @@ function positionInlineHost(host, anchorEl) {
   // Without this, the host stayed at native size while the chip
   // grew / shrunk with zoom, breaking the "this card describes
   // this chip" association at non-default zooms.
-  const zoom = (typeof cy !== 'undefined' && cy && typeof cy.zoom === 'function')
-               ? cy.zoom() : 1;
+  const zoom = (typeof gv !== 'undefined' && gv.ready()) ? gv.zoom() : 1;
   host.style.display = 'block';
   host.style.position = 'fixed';
   host.style.transformOrigin = 'top left';
@@ -1081,9 +1080,7 @@ function repositionAllInlineHosts() {
 
 function installInlinePositionListeners() {
   if (inlinePositionListenersInstalled) return;
-  if (typeof cy !== 'undefined' && cy && typeof cy.on === 'function') {
-    cy.on('pan zoom', repositionAllInlineHosts);
-  }
+  gv.onViewportChange(repositionAllInlineHosts);
   window.addEventListener('resize', repositionAllInlineHosts);
   // The overlay positioner runs on the same events but we trigger
   // ours separately so the host follows even when the overlay

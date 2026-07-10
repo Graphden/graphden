@@ -136,6 +136,37 @@ nothing wrong; the balancer sent it there. Routing by subdomain at the LB
 avoids the round trip; the 421 is the backstop that keeps a misrouted
 request honest.
 
+### Routing by subdomain at the load balancer
+
+To keep the 421 a backstop rather than a hot path, route each tenant's
+subdomain to the pool of pods that hold its shard. Since an org's slug IS
+its subdomain (`<org>.<base-domain>`), the map is direct. An nginx sketch,
+one upstream per shard:
+
+```nginx
+# pods serving orgs acme + beta (GRAPHDEN_EXECUTOR_ORGS=public,acme,beta)
+upstream shard_a { server pod-a1:8080; server pod-a2:8080; }
+# pods serving the rest (GRAPHDEN_EXECUTOR_ORGS=public,gamma,delta)
+upstream shard_b { server pod-b1:8080; }
+
+map $host $shard {
+    ~^(acme|beta)\.        shard_a;
+    ~^(gamma|delta)\.      shard_b;
+    default                shard_a;   # apex / editor → any hosted pod
+}
+
+server {
+    server_name ~^.+\.example\.com$;
+    location / { proxy_pass http://$shard; }
+}
+```
+
+A **BYO** org points its subdomain (or custom domain) straight at the
+customer's own executor instead — that pod runs with
+`GRAPHDEN_EXECUTOR_ORGS=<their-org>` + `GRAPHDEN_BYO_EXECUTOR=true`, and
+hosted pods 421 it anyway if the LB ever misroutes. The `map` is the only
+thing that changes as shards are rebalanced; the pods need no LB awareness.
+
 ## Fleet-wide per-org quota
 
 `*max-concurrent-executions-per-org*` (default 32,
@@ -202,11 +233,13 @@ their OWN hardware, but the graph stays in our Postgres. Built in pieces:
     frame with the shared `notify/parse-payload`, and calls `on-event` — the
     same parsed `{:kind :op :id :branch-id}` map a local pod gets. Reconnects
     with backoff.
-  - v1 relays EVERY event to EVERY subscriber (the wire payload has no
-    org-id), and the remote's `on-event` refetches its own org-scoped bundle
-    (`remote/refresh!`) + recompiles. Over-refetch on unrelated writes, but
-    BYO orgs have small graphs and writes are rare; org-tagging the payload
-    for precise fan-out is a future optimization.
+  - Fan-out is per-org: `crud.entities/notify-after-write!` tags each
+    `fn:invalidate` with the writing org (`:org-id`, read straight off the
+    stamped row — no tenancy dependency in that core code), the relay
+    registers each subscriber under its authenticated org, and an event goes
+    only to that org's subscribers. A nil-org event (a public / platform /
+    single-tenant write — shared rows every bundle holds) goes to everyone. So
+    a BYO executor is woken only by changes it actually holds.
 
 A BYO executor is a deployment ASSEMBLY of these pieces (a graphden-cloud /
 byo integrant profile, not the base system, which has Postgres): use a
@@ -225,9 +258,11 @@ refreshes it and rebuilds the compiled registry —
                    (cr/rebuild! ctx)))}))
 ```
 
-Provisioning an org to `"byo"` is a direct `:org` write today
-(`tenancy.context/invalidate-byo-cache!` drops the memo after the flip); a
-provisioning endpoint lands with the BYO executor end.
+Provisioning a BYO customer, operator-side (platform-only, `:org` is
+tenant-forbidden): create the org, mint its executor token, then flip it with
+`POST /api/orgs/execution-mode {name, execution-mode=byo}`
+(`tenancy-admin/registration`), which drops the byo memo so hosted pods start
+421'ing it at once.
 
 **Advisory-lock reconnect** — DONE. The lock connection lives behind a
 reconnecting holder; each reconcile pass calls `advisory-lock/ensure-live!`,

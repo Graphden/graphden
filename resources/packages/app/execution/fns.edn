@@ -1146,9 +1146,9 @@
           :coll {:as :rows}}}
 
   {:name :_list-services-row-shape
-   :description "Single-row reshape — `(fn [s] {:id (:id s) :fn-id (:fn-id s) :fn-name (get names (:fn-id s)) :enabled? (:enabled? s) :restart-policy (:restart-policy s) :branch-id (:branch-id s) :running (enrich-running (:id s))})`. The HOF callback of `:_list-services-enriched`; `:names` is captured from the outer fn-def's free args. `:branch-id` is nullable (legacy rows pre-date the field); the editor service popover uses it to pre-fill the branch picker."
+   :description "Single-row reshape — `(fn [s] {:id (:id s) :fn-id (:fn-id s) :fn-name (get names (:fn-id s)) :enabled? (:enabled? s) :restart-policy (:restart-policy s) :cardinality (:cardinality s) :branch-id (:branch-id s) :running (enrich-running (:id s))})`. The HOF callback of `:_list-services-enriched`; `:names` is captured from the outer fn-def's free args. `:branch-id` and `:cardinality` are both nullable (legacy rows pre-date each field); the editor service popover uses `:branch-id` to pre-fill the branch picker. A nil `:cardinality` reads as `:singleton` — see `schema/services/schema.clj`."
    :parent :zipmap
-   :args {:keys [:id :fn-id :fn-name :enabled? :restart-policy :branch-id :running]
+   :args {:keys [:id :fn-id :fn-name :enabled? :restart-policy :cardinality :branch-id :running]
           :vals [{:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
                  {:parent :get
@@ -1157,6 +1157,7 @@
                          :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :enabled?} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :restart-policy} :default nil}}
+                 {:parent :get :args {:coll {:as :item} :key {:value :cardinality} :default nil}}
                  {:parent :get :args {:coll {:as :item} :key {:value :branch-id} :default nil}}
                  {:parent :enrich-running
                   :args {:service-id {:parent :get :args {:coll {:as :item} :key {:value :id} :default nil}}}}]}}
@@ -1184,8 +1185,8 @@
   ;; ---------------------------------------------------------------------
   ;; GET /partials/service-popover?fn-id=X — service settings popover
   ;; body. Reuses `:_list-services-enriched` (provides the per-row
-  ;; `{:id :fn-id :fn-name :enabled? :restart-policy :branch-id
-  ;; :running}` shape the popover renderer expects). The fn-name for
+  ;; `{:id :fn-id :fn-name :enabled? :restart-policy :cardinality
+  ;; :branch-id :running}` shape the popover renderer expects). The fn-name for
   ;; the popover title comes from the SAME `:_list-services-fn-names`
   ;; index that drives `:fn-name` on enriched services — covers ANY
   ;; fn (not just service-owners) because the index is built over the

@@ -3939,11 +3939,17 @@
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
   ;; --- :parse-service-from-form. Same fragment-merge shape as the
-  ;; other parsers. 3 fields:
+  ;; other parsers. 5 fields:
   ;;   :fn-id          UUID  — required (the fn this service runs)
   ;;   :enabled?       bool  — "true"/"false" → bool via `:equal? "true"`
   ;;   :restart-policy enum  — :always / :on-failure / :never via
   ;;                           `:str-to-keyword` on the raw form value
+  ;;   :cardinality    enum  — :singleton / :per-pod, same coercion
+  ;;   :branch-id      UUID  — optional, scopes the run to a branch
+  ;;
+  ;; The fragment list is CLOSED: a field absent from it is silently
+  ;; dropped by the merge, so every new `:service` column needs its
+  ;; fragment here or the entity API can't write it.
   ;;
   ;; Wired into `:_create-entity-data-by-type` so `POST /api/entities/
   ;; service` reaches the regular validation chain (free-args guard,
@@ -3991,6 +3997,20 @@
                                                        :default nil}}}}]}}
           :else {:value {}}}}
 
+  {:name :_parse-svc-form-cardinality-fragment
+   :description "Optional `:cardinality` form-field — `:singleton` (advisory-lock-gated, one pod cluster-wide) or `:per-pod` (every pod runs its own copy; what an `:http-server` listener needs). Absent ⇒ the column stays nil, which the reconciler reads as `:singleton`. Same `:str-to-keyword` coercion as `:restart-policy`."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :cardinality}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :cardinality}]
+                        :vals [{:parent :str-to-keyword
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :cardinality}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
   {:name :_parse-svc-form-branch-id-fragment
    :description "Optional `:branch-id` form-field. When the admin picks a branch in the editor's service popover, the value lands here as a UUID string; `:parse-uuid` collapses empty / malformed input to nil so the row falls back to the no-branch-id behavior in the reconciler."
    :parent :if
@@ -4006,12 +4026,13 @@
           :else {:value {}}}}
 
   {:name :parse-service-from-form
-   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
+   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:cardinality` (`:singleton` / `:per-pod`, optional) says how many pods run it at once; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
    :parent :merge
    :args {:maps [{:value {}}
                  :_parse-svc-form-fn-id-fragment
                  :_parse-svc-form-enabled-fragment
                  :_parse-svc-form-restart-policy-fragment
+                 :_parse-svc-form-cardinality-fragment
                  :_parse-svc-form-branch-id-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}

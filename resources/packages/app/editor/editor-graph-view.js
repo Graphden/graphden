@@ -57,48 +57,49 @@ const gv = {
   },
 
   // ── Viewport ──────────────────────────────────────────────────────────────
+  //
+  // Owned by editor-viewport.js. Cytoscape's viewport is inert: it paints
+  // nothing, so its pan and zoom are never read.
 
   /** Pan offset in screen pixels. A snapshot, never a live reference. */
   pan() {
-    const p = cy.pan();
-    return {x: p.x, y: p.y};
+    return {x: viewport.pan.x, y: viewport.pan.y};
   },
 
   zoom() {
-    return cy.zoom();
+    return viewport.zoom;
   },
 
   /** Zoom to `level`, holding the container-relative `screenPoint` fixed. */
   setZoom(level, screenPoint) {
-    cy.zoom({level, renderedPosition: screenPoint});
+    setViewportZoom(level, screenPoint);
   },
 
   /** Size of the drawing surface, in screen pixels. */
   width() {
-    return cy.width();
+    return viewportWidth();
   },
 
   height() {
-    return cy.height();
+    return viewportHeight();
   },
 
   /** Fires whenever pan or zoom changes. Handlers must stay O(1). */
   onViewportChange(cb) {
-    if (!gv.ready() || typeof cy.on !== 'function') return false;
-    cy.on('pan zoom', cb);
+    onViewportChanged(cb);
     return true;
   },
 
   /** Suspend background panning while another gesture owns the pointer. */
   userPanningEnabled(enabled) {
-    if (enabled === undefined) return cy.userPanningEnabled();
-    cy.userPanningEnabled(enabled);
+    if (enabled === undefined) return viewport.userPanningEnabled;
+    viewport.userPanningEnabled = enabled;
     return enabled;
   },
 
   /** Smoothly bring a node to the centre of the surface. */
   centerOn(node, durationMs) {
-    cy.animate({center: {eles: cy.getElementById(node.id())}, duration: durationMs});
+    animateViewportTo(node.position(), durationMs);
   },
 
   // ── Graph ─────────────────────────────────────────────────────────────────

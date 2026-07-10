@@ -63,24 +63,35 @@ const TOL = 1.5;
            'layer transform-origin is the top-left: ' + structure.transformOrigin);
 
     // ===================================================================
-    // Phase B — the layer transform reproduces Cytoscape's projection.
-    // An overlay's screen box must coincide with the box cytoscape renders
-    // for its node. Checked at the initial zoom, then again after zooming.
+    // Phase B — the layer transform really does project graph coordinates.
+    //
+    // Cross-check two things drawn by different machinery: the HTML overlay of
+    // a source node, and the start of the SVG edge that leaves it. The path
+    // starts exactly on the node's right border, so the path's start point —
+    // mapped to the screen by the browser's own `getScreenCTM`, not by our
+    // arithmetic — must land on the overlay's right edge, at its vertical
+    // centre. Checked at the initial zoom, then again after zooming.
     // ===================================================================
     const probe = () => page.evaluate(() => {
-      const node = cy.nodes('[type="fn"][!isPlaceholder]').first();
-      const overlay = getNodeOverlay(node.id());
-      const contRect = document.getElementById('cy').getBoundingClientRect();
-      const ovRect = overlay.getBoundingClientRect();
-      const rp = node.renderedPosition();
+      const line = document.querySelector('#edge-lines path');
+      const source = gv.edge(line.dataset.edgeId).source();
+      const overlay = getNodeOverlay(source.id());
+
+      // Path start, in screen coordinates, via the browser's transform stack.
+      const p = line.getPointAtLength(0);
+      const m = line.getScreenCTM();
+      const start = {x: p.x * m.a + p.y * m.c + m.e, y: p.x * m.b + p.y * m.d + m.f};
+
+      // The overlay's DECLARED box — `width` / `min-height` in graph units,
+      // which is the footprint the edge is drawn against. Its rendered box can
+      // be taller when the card's content overflows (effect chips, the
+      // signed-out CTA), so `getBoundingClientRect().height` is the wrong ruler.
+      const r = overlay.getBoundingClientRect();
+      const declaredH = parseFloat(overlay.style.minHeight) * gv.zoom();
       return {
-        zoom: cy.zoom(),
-        // Cytoscape's own idea of where the node is drawn, container-relative.
-        expected: {left: rp.x - node.renderedWidth() / 2,
-                   top: rp.y - node.renderedHeight() / 2},
-        // Where the overlay actually landed, container-relative.
-        actual: {left: ovRect.left - contRect.left,
-                 top: ovRect.top - contRect.top},
+        zoom: gv.zoom(),
+        edgeStart: start,
+        overlayRightMid: {x: r.right, y: r.top + declaredH / 2},
         // Graph-coordinate layout, which must survive zooming untouched.
         styleLeft: overlay.style.left,
         styleTop: overlay.style.top,
@@ -90,30 +101,30 @@ const TOL = 1.5;
       };
     });
 
+    const agree = (p) => Math.abs(p.edgeStart.x - p.overlayRightMid.x) < TOL
+                      && Math.abs(p.edgeStart.y - p.overlayRightMid.y) < TOL;
+
     const before = await probe();
-    assert(Math.abs(before.actual.left - before.expected.left) < TOL
-           && Math.abs(before.actual.top - before.expected.top) < TOL,
-           'overlay box matches cytoscape\'s rendered node box at zoom '
+    assert(agree(before),
+           'the SVG edge starts on the HTML overlay\'s right edge at zoom '
            + before.zoom.toFixed(3));
     assert(before.styleTransform === '',
            'overlay carries no per-node transform of its own');
     assert(/^translate\(.+\) scale\(.+\)$/.test(before.layerTransform),
            'layer carries translate+scale: ' + before.layerTransform);
 
-    // Zoom about the container centre. This fires cy's `zoom` event, which is
-    // the path that used to rewrite every overlay.
+    // Zoom about the container centre. This is the path that used to rewrite
+    // every overlay's styles; now it rewrites one transform.
     await page.evaluate(() => {
       const c = document.getElementById('cy');
-      cy.zoom({level: cy.zoom() * 1.7,
-               renderedPosition: {x: c.clientWidth / 2, y: c.clientHeight / 2}});
+      gv.setZoom(gv.zoom() * 1.7, {x: c.clientWidth / 2, y: c.clientHeight / 2});
     });
     const after = await probe();
 
     assert(after.zoom > before.zoom * 1.5, 'zoom actually changed: '
            + before.zoom.toFixed(3) + ' → ' + after.zoom.toFixed(3));
-    assert(Math.abs(after.actual.left - after.expected.left) < TOL
-           && Math.abs(after.actual.top - after.expected.top) < TOL,
-           'overlay box still matches cytoscape\'s rendered node box after zoom');
+    assert(agree(after),
+           'the SVG edge still starts on the overlay\'s right edge after zoom');
 
     // ===================================================================
     // Phase C — the O(1) property. Zooming rewrote the layer's transform and

@@ -23,6 +23,9 @@
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
+                  ;; Viewport (pan / zoom / gestures) — owns the two numbers the
+                  ;; graph layer's transform is built from. `gv` reads it.
+                  "packages/app/editor/editor-viewport.js"
                   ;; `gv` — the graph-view seam. Reads `cy` lazily, so it can
                   ;; load before the instance exists; every module downstream
                   ;; talks to the graph through it rather than to cytoscape.

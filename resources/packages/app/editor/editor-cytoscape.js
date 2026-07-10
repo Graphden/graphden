@@ -117,7 +117,7 @@ window.applyThemeToCytoscape = applyThemeToCytoscape;
 function fitInVisibleArea(padding) {
   if (!cy || cy.nodes().length === 0) return;
   const cyContainer = document.getElementById('cy');
-  if (!cyContainer) { cy.fit(padding); return; }
+  if (!cyContainer) return;
   const canvasW = cyContainer.clientWidth;
   const canvasH = cyContainer.clientHeight;
   const sidebar = document.getElementById('side-menu');
@@ -127,25 +127,25 @@ function fitInVisibleArea(padding) {
   const visibleH = canvasH;
 
   const bb = cy.elements().boundingBox();
-  if (bb.w <= 0 || bb.h <= 0) { cy.fit(padding); return; }
+  if (bb.w <= 0 || bb.h <= 0) return;
 
-  const targetZoom = Math.min(
+  const zoom = Math.min(
     (visibleW - 2 * padding) / bb.w,
     (visibleH - 2 * padding) / bb.h
   );
-  const minZ = (typeof cy.minZoom === 'function') ? cy.minZoom() : 0.1;
-  const maxZ = (typeof cy.maxZoom === 'function') ? cy.maxZoom() : 3;
-  const zoom = Math.min(Math.max(targetZoom, minZ), maxZ);
   const visibleCenterX = sidebarW + visibleW / 2;
   const visibleCenterY = canvasH / 2;
   const bbCx = (bb.x1 + bb.x2) / 2;
   const bbCy = (bb.y1 + bb.y2) / 2;
-  cy.zoom(zoom);
-  cy.pan({
-    x: visibleCenterX - bbCx * zoom,
-    y: visibleCenterY - bbCy * zoom
-  });
+  // `setViewportTransform` clamps the zoom to the viewport's own bounds.
+  const z = clampZoom(zoom);
+  setViewportTransform(z, visibleCenterX - bbCx * z, visibleCenterY - bbCy * z);
 }
+
+// The viewport's gesture handlers and change listeners are installed once, on
+// the first graph. `createCytoscape` only runs when `cy` is null, but the guard
+// keeps that an implementation detail rather than a precondition.
+let _viewportBound = false;
 
 /**
  * Create Cytoscape instance with initial elements and layout
@@ -175,26 +175,31 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     elements: { nodes: nodesWithPos, edges: edges },
     style: buildCytoscapeStyles(),
     layout: { name: 'preset' },
-    minZoom: 0.1,
-    maxZoom: 3,
-    autoungrabify: true,    // Disable direct node dragging - only drag via overlay handle
-    autounselectify: true,  // Disable selection — clicks are handled via overlays only
+    // Cytoscape is now a topology and position store. It draws nothing, and it
+    // handles no gestures: the wheel, the background drag and the pinch are
+    // editor-viewport.js's, and node dragging was always the overlay handle's.
+    userPanningEnabled: false,
+    userZoomingEnabled: false,
+    autoungrabify: true,
+    autounselectify: true,
     boxSelectionEnabled: false
   });
   // Expose for browser-test debugging; harmless in production (single-graph page).
   window.cy = cy;
 
+  // Pan/zoom fires on every wheel tick and every drag delta, so these must stay
+  // O(1). The overlays and the edge paths both ride the layer's transform; only
+  // the stroke widths need a nudge, and those are two attribute writes.
+  if (!_viewportBound) {
+    _viewportBound = true;
+    installViewportInput();
+    onViewportChanged(applyViewportTransform);
+    onViewportChanged(updateZoomSlider);
+  }
+
   if (shouldFit && cy.nodes().length > 0) {
     fitInVisibleArea(50);
   }
-
-  // Pan/zoom fires on every wheel tick and every drag delta, so it must stay
-  // O(1). The overlays and the edge paths both ride the layer's transform;
-  // only the stroke widths need a nudge, and those are two attribute writes.
-  cy.on('pan zoom', function() {
-    applyViewportTransform();
-    updateZoomSlider();
-  });
 
   // Edge hover lives in editor-edges-svg.js now. An SVG path is its own
   // hit-zone, and `elementsFromPoint` returns every edge under the cursor —
@@ -205,7 +210,9 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   // Create overlays
   createNodeOverlays();
 
-  // Sync slider with actual zoom after initial fit
+  // The initial fit fired before the overlays existed, so paint the transform
+  // and the slider now that there is something to place.
+  applyViewportTransform();
   updateZoomSlider();
 }
 

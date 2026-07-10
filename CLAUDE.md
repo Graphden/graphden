@@ -120,6 +120,8 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/SECRETS.md](docs/SECRETS.md) | `:secret` information-flow type-marker — asymmetric subtyping (`T ⊆ [:secret T]` but NOT `[:secret T] ⊆ T`), per-base-fn `:return-type-rule` propagation (`taint-with-secret-if-tainted` / `wrap-with-taint`), executor-side `/api/execute` hide on `:secret`-marked return, editor "Result hidden" pane + history badge, current Secrets-panel admin UX (creating fn-defs with `parent :vault-get`), audit of which base-fns propagate vs not | When touching `types/core` secret-type code, adding a new base-fn that handles user data, marking a sink's slot as `[:secret …]`, or wiring secret-flow protection in a new place |
 | [docs/PARTIALS.md](docs/PARTIALS.md) | Graph-native HTML partials: how editor popovers / panels get content from fn-defs returning hiccup at `GET /partials/*`; HTMX 2.x wiring (auth bridge + post-swap process); recipe for adding a new partial; list of common gotchas (`:parse-uuid` slot, JSONB keyword roundtrip, inline-anon limits, `fn-ref` in `:value` literal) | When migrating an editor JS module to server-rendered hiccup, OR when wiring a new popover from scratch |
 | [docs/EDITOR_HTMX_MIGRATION_PLAN.md](docs/EDITOR_HTMX_MIGRATION_PLAN.md) | As-shipped reference for the row-actions partial: per-context (`col-header` / `cell` / `use-site-arg` / `root-row`) query-param matrix + JS dispatcher contract. Documents what shipped in Phase A (8 commits) and why Phase B/C/edge-label were deferred (server has no data the client doesn't). | When extending the row-actions partial OR considering another graphData-backed popover for migration |
+| [docs/PACKAGE_DISTRIBUTION.md](docs/PACKAGE_DISTRIBUTION.md) | Distributing packages: the three module kinds (Type-1 fns-only / Type-2 impl+fns / Type-3 core-swap), the in-graph registry (publish / reference-install + pin / update-rollback ref-rewrite / fork), external Type-2 packages via `resources/executor-packages.edn` + a git coord, whole-graph export (`GET /api/export/graph`), the swap-seam matrix, and § 15.1 **as-built repo map** (what stays in the monorepo vs `graphden-{mathx,examples,cloud}`) | When touching `app/registry`, `packages/{loader,export}`, `executor-packages.edn`, `external-packages/`, or deciding whether something belongs in its own repo |
+| [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) | Multi-tenant platform ADR — orgs / RLS / grants, the **two-layer tenant effect gate** (§5: `cloud-request-allowed-effects` at the request, `default-cloud-allowed-effects` on the exec ctx), the `:execute-guard` admission seam, monetisation via packages | When touching `tenancy/`, the effect gate, or an admission/quota policy |
 
 ## Common Commands
 
@@ -538,7 +540,7 @@ src/graphden/
 └── executor_runtime/   # Main entry point
     └── core.clj        # -main, shutdown hooks
 
-resources/packages/     # Package definitions (EDN + Clojure impls)
+resources/packages/     # First-party package definitions (EDN + Clojure impls)
 ├── core/               # Core primitives (arithmetic, logic, HOF, etc.)
 │   ├── package.edn     # Package metadata + dependencies
 │   ├── arithmetic/     # {fns.edn, impls.clj}
@@ -547,6 +549,7 @@ resources/packages/     # Package definitions (EDN + Clojure impls)
 │   ├── collections/
 │   ├── strings/
 │   └── system/
+├── storage/            # Storage primitives (pg, protocol, versioned, branches)
 ├── web/                # Web primitives (http, routing, html)
 │   ├── package.edn
 │   ├── http/
@@ -554,11 +557,25 @@ resources/packages/     # Package definitions (EDN + Clojure impls)
 │   ├── html/
 │   ├── crud/
 │   └── graph/
+├── tenancy-admin/      # Org-admin fn-defs (auth, grants, users, registration)
+│                       #   — loaded only when the tenancy addon is wired
 └── app/                # Application server (editor, routes)
     ├── package.edn     # Has startup-fn: :web-server
     ├── common/         # Shared fn-defs (routes, responses)
     ├── editor/         # Editor UI fn-defs + impls
+    ├── registry/       # Package registry: publish / install / fork / export
     └── server/         # Server composition fn-defs
+
+external-packages/      # Packages kept OUT of the prod `resources` tree
+├── mathx/              # External Type-2 (impl+fns) — also its own repo,
+│                       #   pulled in by the git coord in the manifest below
+└── examples/           # Pedagogical fn-defs — dev/test only (an :extra-paths
+                        #   entry in the :dev/:test aliases), never in prod
+
+resources/executor-packages.edn   # The operator's manifest of EXTERNAL Type-2
+                                  # packages: {:name :lib :coord}. build.clj
+                                  # bundles them; :app/packages loads them.
+                                  # See docs/PACKAGE_DISTRIBUTION.md § 5.
 ```
 
 ## Packages System

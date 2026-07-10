@@ -531,6 +531,24 @@
   (records->fn-defs (graph->records storage)))
 
 
+(defn export-graph-bundle
+  "Export the ENTIRE stored graph as a migration bundle:
+
+     {:fns        [fn-def …]   ; every named fn-def in the graph
+      :namespaces [dotted …]}  ; every namespace those fns span
+
+   Unlike `export-namespace` there is no single root and no `:dependencies`
+   — nothing is external to the whole graph. Because fn-ids are deterministic
+   from (namespace, name), re-syncing this bundle onto a *booted* install is
+   idempotent on any fn-def already present (the platform packages) and purely
+   additive for the caller's own fns — so it is a faithful \"download my whole
+   project\" migration artifact. Powers GET /api/export/graph."
+  [storage]
+  (let [fns (export-graph storage)]
+    {:fns fns
+     :namespaces (vec (sort (distinct (keep :namespace fns))))}))
+
+
 ;; =============================================================================
 ;; Scoped export — a namespace subtree as a publishable bundle
 ;; =============================================================================
@@ -573,6 +591,42 @@
     (filter keyword? (tree-seq coll? seq (rest constraint)))))
 
 
+(defn- versioned-ns->root+version
+  "Reverse a materialised package namespace `<ns-root>@<sanitised-version>`
+   (optionally `.<sub>`) back into `{:ns-root :version}`; nil for a plain
+   (non-versioned) namespace. The version's dashes become dots again
+   (`1-2-0` → `1.2.0`), inverting `version-qualified-ns`."
+  [ns-path]
+  (when-let [at (and ns-path (str/index-of ns-path "@"))]
+    (let [ns-root (subs ns-path 0 at)
+          after (subs ns-path (inc at))
+          dot (str/index-of after ".")
+          version (str/replace (subs after 0 (or dot (count after))) "-" ".")]
+      {:ns-root ns-root :version version})))
+
+
+(defn- package-deps-from-namespaces
+  "Given the set of external dep-fn namespaces referenced by the subtree,
+   map the versioned ones (`X@V`) to the published package (name+version)
+   that materialises under them, via the registry. Plain platform namespaces
+   (no `@`) yield nothing — those fns are always present, not a package dep.
+   Best-effort on ns-root sharing: if several packages publish the same
+   (ns-root, version), the first registry match is used (they materialise the
+   same rows). Returned sorted + de-duped."
+  [storage namespaces]
+  (vec
+    (sort-by (juxt :name :version)
+             (into #{}
+                   (comp (keep versioned-ns->root+version)
+                         (distinct)
+                         (keep (fn [{:keys [ns-root version]}]
+                                 (when-let [pv (first (sp/query-entities
+                                                        storage :package-version
+                                                        {:ns-root ns-root :version version}))]
+                                   {:name (:name pv) :version (:version pv)}))))
+                   namespaces))))
+
+
 (defn export-namespace
   "Serialise the namespace subtree rooted at `root` (a dotted path) into
    a publishable bundle:
@@ -602,16 +656,25 @@
                                (when (:name f)
                                  [(keyword (:name f)) (:namespace-id f)])))
                        (vals (:fns ctx)))
-        ;; structural fn-id refs reachable from every owned fn.
+        ;; External structural fn-id refs reachable from every owned fn —
+        ;; named, defined OUTSIDE the subtree, not a primitive. Collected once
+        ;; so we can derive both the fn-NAME deps and the package deps.
+        external-ref-fn-ids (into #{}
+                                  (comp (mapcat #(fn-ref-fn-ids % ctx))
+                                        (filter (fn [id]
+                                                  (let [f (get-in ctx [:fns id])]
+                                                    (and (:name f)
+                                                         (not (under-ns? (:namespace-id f) root))
+                                                         (not (contains? prim-id->kw id)))))))
+                                  owned-fn-ids)
         ref-deps (into #{}
-                       (comp (mapcat #(fn-ref-fn-ids % ctx))
-                             (keep (fn [id]
-                                     (let [f (get-in ctx [:fns id])]
-                                       (when (and (:name f)
-                                                  (not (under-ns? (:namespace-id f) root))
-                                                  (not (contains? prim-id->kw id)))
-                                         (keyword (:name f)))))))
-                       owned-fn-ids)
+                       (map #(keyword (:name (get-in ctx [:fns %]))))
+                       external-ref-fn-ids)
+        ;; The namespaces those external fns live in — the versioned ones
+        ;; (`X@V`) reverse-map to the packages this bundle depends on.
+        dep-namespaces (into #{}
+                             (keep #(:namespace-id (get-in ctx [:fns %])))
+                             external-ref-fn-ids)
         ;; constraint type-name keywords (union / variant / map / tuple /
         ;; fn-type) on owned fn rows whose target is defined outside.
         constraint-deps (into #{}
@@ -624,4 +687,5 @@
     {:namespace root
      :namespaces (vec (sort (distinct (map :namespace owned-defs))))
      :fns owned-defs
-     :dependencies (vec (sort (into ref-deps constraint-deps)))}))
+     :dependencies (vec (sort (into ref-deps constraint-deps)))
+     :package-dependencies (package-deps-from-namespaces storage dep-namespaces)}))

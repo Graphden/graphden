@@ -9,17 +9,39 @@
  :fns
  [;; The shape `:export-namespace` returns — a fixed-schema artifact, so
   ;; it gets a named record type-row rather than a wide `:jsonb`.
+  ;; One entry of `:package-dependencies` — the (name, version) of a package a
+  ;; bundle's external fns come from (registry-resolved at publish; drives
+  ;; recursive install).
+  {:name :package-dependency-shape
+   :description "A published package coordinate a bundle depends on: `{:name … :version …}`."
+   :type {:name :text
+          :version :text}}
+
   {:name :package-bundle-shape
-   :description "A publishable package bundle: the subtree root, the namespaces it spans, its fn-defs (each a keyword-keyed fn-def map), and the external fn-names it depends on."
+   :description "A publishable package bundle: the subtree root, the namespaces it spans, its fn-defs (each a keyword-keyed fn-def map), the external fn-names it depends on, and the PACKAGES (name+version) those external fns come from (for recursive install)."
    :type {:namespace :text
           :namespaces [:list :text]
           :fns [:list :keyword-map]
-          :dependencies [:list :keyword]}}
+          :dependencies [:list :keyword]
+          :package-dependencies [:list :package-dependency-shape]}}
 
   {:name :export-namespace
    :description "Serialise the namespace subtree rooted at `:root` into a publishable bundle by reading the live graph. The core of POST /api/packages/publish and self-hosted extract."
    :args {:root {:type :text :description "Dotted root namespace path, e.g. \"web.components\"."}}
    :return-type :package-bundle-shape
+   :effects #{:db}}
+
+  ;; The shape `:export-graph` returns — the whole-graph migration bundle.
+  ;; Distinct from `:package-bundle-shape`: no single root, no `:dependencies`
+  ;; (nothing is external to the whole graph).
+  {:name :full-graph-export-shape
+   :description "A whole-graph migration bundle: every named fn-def in the graph (each a keyword-keyed fn-def map) plus the namespaces they span."
+   :type {:fns [:list :keyword-map]
+          :namespaces [:list :text]}}
+
+  {:name :export-graph
+   :description "Serialise the ENTIRE stored graph (the current branch/scope) into a migration bundle by reading the live graph — every named fn-def plus the namespaces they span. The core of GET /api/export/graph (cloud→self-hosted \"download my whole project\")."
+   :return-type :full-graph-export-shape
    :effects #{:db}}
 
   {:name :publish-package
@@ -136,16 +158,36 @@
    :args {:path "/packages/:name/:version" :handler :fetch-package-handler}}
 
   ;; ---------------------------------------------------------------------
+  ;; GET /api/export/graph — whole-graph export as an EDN bundle: the
+  ;; cloud→self-hosted "download my whole project" migration artifact. EDN
+  ;; (not JSON) so fn-def keywords round-trip faithfully; read straight from
+  ;; the handler ctx (like the JSON publish handler), so the full-graph read
+  ;; is NOT forced lazily inside a render. Auth-required (whole project).
+  ;; ---------------------------------------------------------------------
+  {:name :_export-graph-result
+   :parent :export-graph}
+  {:name :_export-graph-edn
+   :description "The whole-graph bundle as an EDN string (`:pr-str`) — keywords preserved for faithful re-load."
+   :parent :pr-str :args {:value :_export-graph-result}}
+  {:name :_export-graph-handler
+   :description "Ring handler for GET /api/export/graph (auth-required) — `application/edn` bundle."
+   :parent :edn-ok-response :args {:body :_export-graph-edn}}
+  {:name :api-export-graph
+   :description "GET /api/export/graph — export the entire graph as an EDN migration bundle. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/export/graph" :handler :_export-graph-handler}}
+
+  ;; ---------------------------------------------------------------------
   ;; POST /api/packages/install — install a published version into the
   ;; (branch-scoped) target graph. Body `{:name :version}`.
   ;; ---------------------------------------------------------------------
 
   {:name :install-package
-   :description "Install published `(:pkg-name, :pkg-version)` into the target graph: reject if not found or if any declared dependency is absent, else sync the bundle's namespaces + fn-defs. Returns a tagged `{:ok …}` result. Writes to the request's branch (staging)."
+   :description "Install published `(:pkg-name, :pkg-version)` by REFERENCE: ensure it is materialized under `<ns-root>@<version>` (idempotent, skipped when already visible), then pin (current-branch, package) → version. Does NOT copy rows into the caller's project. Rejects on not-found / missing-dependencies. Writes to the request's branch (staging)."
    :args {:pkg-name {:type :text :description "Package name to install."}
-          :pkg-version {:type :text :description "Semver version to install."}}
+          :pkg-version {:type :text :description "Exact version, a semver constraint (`>=1.1`, `~>1.2`, `*`), or `latest` — the highest published match is resolved and pinned."}}
    :return-type :keyword-map
-   :effects #{:db}}
+   :effects #{:db :time}}
 
   {:name :_install-body
    :description "Parsed JSON body of POST /api/packages/install — `{:name :version}`."
@@ -173,4 +215,582 @@
   {:name :api-packages-install
    :description "POST /api/packages/install — install a published version into the (branch-scoped) graph. Auth-required."
    :parent :post
-   :args {:path "/packages/install" :handler :install-package-handler}}]}
+   :args {:path "/packages/install" :handler :install-package-handler}}
+
+  {:name :update-package-version
+   :description "Update (or roll back) an installed package to a different version: materialize the target, REWRITE the project's own refs from the pinned version to the target (package-internal refs untouched), repoint the pin. Symmetric (older version = rollback). Rejects on not-installed / not-found / missing-dependencies; same-version is a no-op."
+   :args {:pkg-name {:type :text :description "Installed package name to update."}
+          :pkg-version {:type :text :description "Target version — exact, a semver constraint, or `latest`."}}
+   :return-type :keyword-map
+   :effects #{:db :time}}
+
+  {:name :_update-body
+   :description "Parsed JSON body of POST /api/packages/update — `{:name :version}`."
+   :parent :parse-json-body}
+
+  {:name :_update-name-raw
+   :parent :get :args {:coll :_update-body :key {:value :name} :default nil}}
+  {:name :_update-name
+   :parent :to-str :args {:value :_update-name-raw}}
+
+  {:name :_update-version-raw
+   :parent :get :args {:coll :_update-body :key {:value :version} :default nil}}
+  {:name :_update-version
+   :parent :to-str :args {:value :_update-version-raw}}
+
+  {:name :_update-result
+   :parent :update-package-version
+   :args {:pkg-name :_update-name :pkg-version :_update-version}}
+
+  {:name :update-package-handler
+   :description "Ring handler for POST /api/packages/update (auth-required) — JSON `{ok, …}`."
+   :parent :json-handler
+   :args {:data :_update-result}}
+
+  {:name :api-packages-update
+   :description "POST /api/packages/update — update/rollback an installed package to another version (rewrites the project's refs). Auth-required."
+   :parent :post
+   :args {:path "/packages/update" :handler :update-package-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/fork — copy-on-write: sync a version's fns into the
+  ;; graph at their ORIGINAL namespace so they can be modified. Body
+  ;; `{:name :version}`.
+  ;; ---------------------------------------------------------------------
+
+  {:name :fork-package
+   :description "Fork published `(:pkg-name, :pkg-version)`: sync its fns into the graph at their ORIGINAL namespace, DUPLICATING rows so the caller can modify them (copy-on-write). Unlike reference install, this copies. Rejects on not-found / missing-dependencies."
+   :args {:pkg-name {:type :text :description "Package name to fork."}
+          :pkg-version {:type :text :description "Exact version, a semver constraint, or `latest` — highest published match is resolved."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  {:name :_fork-body
+   :description "Parsed JSON body of POST /api/packages/fork — `{:name :version}`."
+   :parent :parse-json-body}
+
+  {:name :_fork-name-raw
+   :parent :get :args {:coll :_fork-body :key {:value :name} :default nil}}
+  {:name :_fork-name
+   :parent :to-str :args {:value :_fork-name-raw}}
+
+  {:name :_fork-version-raw
+   :parent :get :args {:coll :_fork-body :key {:value :version} :default nil}}
+  {:name :_fork-version
+   :parent :to-str :args {:value :_fork-version-raw}}
+
+  {:name :_fork-result
+   :parent :fork-package
+   :args {:pkg-name :_fork-name :pkg-version :_fork-version}}
+
+  {:name :fork-package-handler
+   :description "Ring handler for POST /api/packages/fork (auth-required) — JSON `{ok, …}`."
+   :parent :json-handler
+   :args {:data :_fork-result}}
+
+  {:name :api-packages-fork
+   :description "POST /api/packages/fork — copy a published version's fns into the graph for modification. Auth-required."
+   :parent :post
+   :args {:path "/packages/fork" :handler :fork-package-handler}}
+
+  {:name :materialize-package-version
+   :description "Sync a published version's fns ONCE under a version-qualified namespace (`<ns-root>@<sanitized-version>`) so versions coexist and callers reference them instead of copying rows. Org-neutral (current scope). Idempotent. Rejects on `:reason \"not-found\"` / `\"missing-dependencies\"`."
+   :args {:pkg-name {:type :text :description "Package name to materialize."}
+          :pkg-version {:type :text :description "Exact version, a semver constraint, or `latest` — highest published match is resolved."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Package pins — per-branch desired-state "this branch uses P at V".
+  ;; Base-fns backing reference-install + the editor's installed list.
+  ;; ---------------------------------------------------------------------
+
+  {:name :set-package-pin
+   :description "Upsert the pin for `(current-branch, :pkg-name)` to `:pkg-version` — one pin per (branch, package). Returns a tagged `{:ok true …}`. Writes to the request's branch (staging)."
+   :args {:pkg-name {:type :text :description "Package name to pin."}
+          :pkg-version {:type :text :description "Version to pin the package at."}}
+   :return-type :keyword-map
+   :effects #{:db :time}}
+
+  {:name :list-installed-packages
+   :description "Every package pinned on the current branch — `[{:package-name :version :branch-id :installed-at} …]`. Powers GET /api/packages/installed and the editor's installed list."
+   :return-type [:list :keyword-map]
+   :effects #{:db}}
+
+  {:name :remove-package-pin
+   :description "Drop the pin for `(current-branch, :pkg-name)` — uninstall. Idempotent; `:removed false` when nothing was pinned."
+   :args {:pkg-name {:type :text :description "Package name to unpin."}}
+   :return-type :keyword-map
+   :effects #{:db}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /api/packages/installed — this branch's pins.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_installed-packages-result
+   :parent :list-installed-packages}
+
+  {:name :list-installed-handler
+   :description "Ring handler for GET /api/packages/installed (auth-required) — JSON array of this branch's pins."
+   :parent :json-handler
+   :args {:data :_installed-packages-result}}
+
+  {:name :api-packages-installed
+   :description "GET /api/packages/installed — the packages pinned on the current branch. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/packages/installed" :handler :list-installed-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; GET /partials/packages-panel — the editor's Packages sidebar section,
+  ;; server-rendered hiccup (graph-first). Read-only table: Package | Version
+  ;; over the current branch's pins. Mounted by editor-packages.js via hx-get.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_pkg-panel-th-name
+   :parent :hiccup :args {:tag {:value "th"} :children [{:value "Package"}]}}
+  {:name :_pkg-panel-th-version
+   :parent :hiccup :args {:tag {:value "th"} :children [{:value "Version"}]}}
+  ;; empty header over the per-row uninstall (×) column
+  {:name :_pkg-panel-th-actions
+   :parent :hiccup :args {:tag {:value "th"} :children [{:value ""}]}}
+  {:name :_pkg-panel-thead-row
+   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-th-name :_pkg-panel-th-version :_pkg-panel-th-actions]}}
+  {:name :_pkg-panel-thead
+   :parent :hiccup :args {:tag {:value "thead"} :children [:_pkg-panel-thead-row]}}
+
+  ;; body row — HOF over :item (each pin `{:package-name :version …}`)
+  {:name :_pkg-panel-name-val
+   :parent :get :args {:coll {:as :item} :key {:value :package-name} :default {:value ""}}}
+  {:name :_pkg-panel-version-val
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-panel-td-name
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-name-val]}}
+  {:name :_pkg-panel-td-version
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-version-val]}}
+
+  ;; per-row uninstall — hx-delete DELETE /api/packages/uninstall/:name, then
+  ;; swap the REFRESHED panel back into [data-packages-panel] (outerHTML) so the
+  ;; empty-state notice appears when the last pin goes. No client JS; the bearer
+  ;; rides the htmx:configRequest bridge. Path built from the per-row name.
+  {:name :_pkg-panel-uninstall-url
+   :parent :str-join
+   :args {:coll [{:value "/api/packages/uninstall?name="} :_pkg-panel-name-val]
+          :separator {:value ""}}}
+  {:name :_pkg-panel-uninstall-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "packages-uninstall"
+                        :title "Uninstall package"
+                        :hx-target "closest [data-packages-panel]"
+                        :hx-swap "outerHTML"
+                        :hx-confirm "Uninstall this package from this branch?"}}
+          :key {:value :hx-delete}
+          :value :_pkg-panel-uninstall-url}}
+  {:name :_pkg-panel-uninstall-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pkg-panel-uninstall-attrs :children [{:value "×"}]}}
+
+  ;; per-row update/rollback — a tiny <form hx-post="/api/packages/panel-update">
+  ;; with a hidden name + a version text input (prefilled with the current
+  ;; version). Submitting form-encodes {name, version} → update-package-version
+  ;; (variant-B ref-rewrite; symmetric so an OLDER version = rollback; accepts
+  ;; exact / `latest` / a semver constraint), then swaps the refreshed panel.
+  ;; A free-text version (not a <select>) avoids a per-row registry filter;
+  ;; a version dropdown is a possible follow-up.
+  {:name :_pkg-panel-update-name-attrs
+   :parent :assoc
+   :args {:map {:value {:type "hidden" :name "name"}}
+          :key {:value :value} :value :_pkg-panel-name-val}}
+  {:name :_pkg-panel-update-name-input
+   :parent :hiccup :args {:tag {:value "input"} :attrs :_pkg-panel-update-name-attrs}}
+  {:name :_pkg-panel-update-version-attrs
+   :parent :assoc
+   :args {:map {:value {:type "text" :name "version" :class "packages-version-input"
+                        :size "6" :title "Target version — exact, latest, or a constraint"}}
+          :key {:value :value} :value :_pkg-panel-version-val}}
+  {:name :_pkg-panel-update-version-input
+   :parent :hiccup :args {:tag {:value "input"} :attrs :_pkg-panel-update-version-attrs}}
+  {:name :_pkg-panel-update-btn
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "submit" :class "packages-update-btn" :title "Update / roll back to this version"}}
+          :children [{:value "↑"}]}}
+  {:name :_pkg-panel-update-form
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "packages-update-form"
+                          :hx-post "/api/packages/panel-update"
+                          :hx-target "closest [data-packages-panel]"
+                          :hx-swap "outerHTML"}}
+          :children [:_pkg-panel-update-name-input :_pkg-panel-update-version-input :_pkg-panel-update-btn]}}
+  {:name :_pkg-panel-td-actions
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-panel-update-form :_pkg-panel-uninstall-btn]}}
+
+  {:name :_pkg-panel-row
+   :parent :hiccup :args {:tag {:value "tr"} :children [:_pkg-panel-td-name :_pkg-panel-td-version :_pkg-panel-td-actions]}}
+
+  {:name :_pkg-panel-rows
+   :parent :map :args {:func :_pkg-panel-row :coll :list-installed-packages}}
+  {:name :_pkg-panel-tbody
+   :parent :hiccup :args {:tag {:value "tbody"} :children :_pkg-panel-rows}}
+  {:name :_pkg-panel-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table"}}
+          :children [:_pkg-panel-thead :_pkg-panel-tbody]}}
+
+  ;; empty-state — a notice when nothing is pinned on this branch (the common
+  ;; single-tenant dev case), instead of a header-only table.
+  {:name :_pkg-panel-empty-notice
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-panel-empty"}}
+          :children [{:value "No packages installed on this branch."}]}}
+  {:name :_pkg-panel-is-empty
+   :parent :empty? :args {:coll :list-installed-packages}}
+  {:name :_pkg-panel-body
+   :parent :if
+   :args {:test :_pkg-panel-is-empty :then :_pkg-panel-empty-notice :else :_pkg-panel-table}}
+
+  ;; --- Browse + Install: the registry index inside a native <details> ----
+  ;; Each published (name, version) is an Install button; hx-post carries the
+  ;; pair as query params (same query-not-path reason as uninstall) and swaps
+  ;; the REFRESHED panel back into [data-packages-panel]. HOF over :item.
+  {:name :_pkg-avail-name-val
+   :parent :get :args {:coll {:as :item} :key {:value :name} :default {:value ""}}}
+  {:name :_pkg-avail-version-val
+   :parent :get :args {:coll {:as :item} :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-avail-install-url
+   :parent :str-join
+   :args {:coll [{:value "/api/packages/panel-install?name="} :_pkg-avail-name-val
+                 {:value "&version="} :_pkg-avail-version-val]
+          :separator {:value ""}}}
+  {:name :_pkg-avail-install-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "packages-install-btn"
+                        :hx-target "closest [data-packages-panel]"
+                        :hx-swap "outerHTML"}}
+          :key {:value :hx-post}
+          :value :_pkg-avail-install-url}}
+  {:name :_pkg-avail-install-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pkg-avail-install-attrs :children [{:value "Install"}]}}
+
+  ;; Fork button per browse row — COPY (copy-on-write) the version's fns into the
+  ;; graph at their original namespace so they can be edited, vs Install's
+  ;; by-reference pin. hx-post the pair as query params; the refreshed panel
+  ;; carries a transient fork notice (fork writes no pin, so the installed table
+  ;; is otherwise unchanged).
+  {:name :_pkg-avail-fork-url
+   :parent :str-join
+   :args {:coll [{:value "/api/packages/panel-fork?name="} :_pkg-avail-name-val
+                 {:value "&version="} :_pkg-avail-version-val]
+          :separator {:value ""}}}
+  {:name :_pkg-avail-fork-attrs
+   :parent :assoc
+   :args {:map {:value {:type "button"
+                        :class "packages-fork-btn"
+                        :title "Fork — copy this version's fns into the graph to edit"
+                        :hx-target "closest [data-packages-panel]"
+                        :hx-swap "outerHTML"}}
+          :key {:value :hx-post}
+          :value :_pkg-avail-fork-url}}
+  {:name :_pkg-avail-fork-btn
+   :parent :hiccup
+   :args {:tag {:value "button"} :attrs :_pkg-avail-fork-attrs :children [{:value "Fork"}]}}
+  {:name :_pkg-avail-td-name
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-name-val]}}
+  {:name :_pkg-avail-td-version
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-version-val]}}
+  {:name :_pkg-avail-td-action
+   :parent :hiccup :args {:tag {:value "td"} :children [:_pkg-avail-install-btn :_pkg-avail-fork-btn]}}
+  {:name :_pkg-avail-row
+   :parent :hiccup
+   :args {:tag {:value "tr"} :children [:_pkg-avail-td-name :_pkg-avail-td-version :_pkg-avail-td-action]}}
+  {:name :_pkg-avail-rows
+   :parent :map :args {:func :_pkg-avail-row :coll :list-package-versions}}
+  {:name :_pkg-avail-tbody
+   :parent :hiccup :args {:tag {:value "tbody"} :children :_pkg-avail-rows}}
+  {:name :_pkg-avail-table
+   :parent :hiccup
+   :args {:tag {:value "table"}
+          :attrs {:value {:class "packages-panel-table"}}
+          :children [:_pkg-avail-tbody]}}
+  {:name :_pkg-avail-is-empty
+   :parent :empty? :args {:coll :list-package-versions}}
+  {:name :_pkg-avail-empty-notice
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-panel-empty"}}
+          :children [{:value "No packages published in the registry yet."}]}}
+  {:name :_pkg-avail-body
+   :parent :if
+   :args {:test :_pkg-avail-is-empty :then :_pkg-avail-empty-notice :else :_pkg-avail-table}}
+  {:name :_pkg-avail-summary
+   :parent :hiccup :args {:tag {:value "summary"} :children [{:value "+ Install a package"}]}}
+  {:name :_pkg-avail-details
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "packages-available"}}
+          :children [:_pkg-avail-summary :_pkg-avail-body]}}
+
+  ;; Stable [data-packages-panel] root — the hx-target every panel mutation
+  ;; (uninstall / install / update / fork) swaps with hx-swap="outerHTML", so
+  ;; the whole panel (installed pins + the browse <details>) re-renders from
+  ;; fresh desired-state each time.
+  {:name :_pkg-panel-root
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-packages-panel "1"}}
+          :children [:_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
+
+  {:name :_pkg-panel-html
+   :parent :render-hiccup :args {:hiccup :_pkg-panel-root}}
+  {:name :_partial-packages-panel-handler
+   :description "Ring handler for GET /partials/packages-panel — installed packages as text/html."
+   :parent :html-ok-response :args {:body :_pkg-panel-html}}
+  {:name :partial-packages-panel
+   :description "GET /partials/packages-panel — server-rendered list of packages pinned on the current branch. Per-row × uninstalls. Auth-required."
+   :parent :get-auth-required
+   :args {:path "/partials/packages-panel" :handler :_partial-packages-panel-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; DELETE /api/packages/uninstall?name=<pkg> — drop the current branch's pin
+  ;; for the named package, then return the REFRESHED panel HTML (HTMX swaps it
+  ;; into [data-packages-panel]). `:do` forces remove-before-render so the
+  ;; panel's :list-installed-packages reflects the removal. Auth-required.
+  ;; The name rides as a query param (not a path segment) because a
+  ;; `/packages/:pkg` path would collide with GET /packages/:name/:version in
+  ;; reitit's conflict check (both are two-segment /packages/*/* patterns).
+  ;; ---------------------------------------------------------------------
+  {:name :_uninstall-pkg-name-raw
+   :description "The `name` query-string param from DELETE /api/packages/uninstall (nullable-text)."
+   :parent :query-param
+   :args {:request {:as :request} :param-name {:value "name"}}}
+  {:name :_uninstall-pkg-name
+   :description "Nil-safe `(str name)` — narrows :query-param's :nullable-text to :text for :remove-package-pin (empty string → idempotent :removed false)."
+   :parent :to-str :args {:value :_uninstall-pkg-name-raw}}
+  {:name :_uninstall-do
+   :parent :remove-package-pin :args {:pkg-name :_uninstall-pkg-name}}
+  {:name :_uninstall-then-panel
+   :description "Remove the pin, THEN render the refreshed panel — `:do` forces order so :list-installed-packages excludes the removed pin."
+   :parent :do :args {:steps [:_uninstall-do :_pkg-panel-html]}}
+  {:name :_uninstall-handler
+   :description "Ring handler for DELETE /api/packages/uninstall — removes the pin and returns the refreshed Packages panel as text/html."
+   :parent :html-ok-response :args {:body :_uninstall-then-panel}}
+  {:name :api-packages-uninstall
+   :description "DELETE /api/packages/uninstall?name=<pkg> — uninstall (unpin) a package from the current branch. Auth-required."
+   :parent :delete
+   :args {:path "/packages/uninstall" :handler :_uninstall-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/panel-install?name=<pkg>&version=<v> — the panel's
+  ;; HTML-returning counterpart to the JSON /packages/install: install by
+  ;; reference, then return the REFRESHED panel (HTMX swaps [data-packages-panel]
+  ;; via hx-swap="outerHTML"). `:do` forces install-before-render so the pin
+  ;; shows in the installed table. Name+version ride as query params.
+  ;; Auth-required.
+  ;; ---------------------------------------------------------------------
+  {:name :_pkg-install-name-raw
+   :parent :query-param :args {:request {:as :request} :param-name {:value "name"}}}
+  {:name :_pkg-install-name
+   :parent :to-str :args {:value :_pkg-install-name-raw}}
+  {:name :_pkg-install-version-raw
+   :parent :query-param :args {:request {:as :request} :param-name {:value "version"}}}
+  {:name :_pkg-install-version
+   :parent :to-str :args {:value :_pkg-install-version-raw}}
+  {:name :_pkg-install-do
+   :parent :install-package :args {:pkg-name :_pkg-install-name :pkg-version :_pkg-install-version}}
+  {:name :_pkg-install-then-panel
+   :description "Install, THEN render the refreshed panel — `:do` forces order so :list-installed-packages includes the new pin."
+   :parent :do :args {:steps [:_pkg-install-do :_pkg-panel-html]}}
+  {:name :_pkg-install-panel-handler
+   :description "Ring handler for POST /api/packages/panel-install — installs and returns the refreshed Packages panel as text/html."
+   :parent :html-ok-response :args {:body :_pkg-install-then-panel}}
+  {:name :api-packages-panel-install
+   :description "POST /api/packages/panel-install?name=<pkg>&version=<v> — install a published version from the editor panel; returns the refreshed panel HTML. Auth-required."
+   :parent :post
+   :args {:path "/packages/panel-install" :handler :_pkg-install-panel-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/panel-update — the panel's HTML-returning counterpart
+  ;; to the JSON /packages/update. Form-encoded {name, version} (from the
+  ;; per-row update form's hidden name + version input), so it reads the body,
+  ;; not query params. update-package-version rewrites the project's refs from
+  ;; the pinned version to the target (symmetric — older = rollback), then
+  ;; `:do` renders the refreshed panel. Auth-required.
+  ;; ---------------------------------------------------------------------
+  {:name :_pkg-update-form
+   :parent :parse-form-body-kw}
+  {:name :_pkg-update-name
+   :parent :get :args {:coll :_pkg-update-form :key {:value :name} :default {:value ""}}}
+  {:name :_pkg-update-version
+   :parent :get :args {:coll :_pkg-update-form :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-update-do
+   :parent :update-package-version :args {:pkg-name :_pkg-update-name :pkg-version :_pkg-update-version}}
+  {:name :_pkg-update-then-panel
+   :description "Update/rollback, THEN render the refreshed panel — `:do` forces order so the installed table shows the new version."
+   :parent :do :args {:steps [:_pkg-update-do :_pkg-panel-html]}}
+  {:name :_pkg-update-panel-handler
+   :description "Ring handler for POST /api/packages/panel-update — updates and returns the refreshed Packages panel as text/html."
+   :parent :html-ok-response :args {:body :_pkg-update-then-panel}}
+  {:name :api-packages-panel-update
+   :description "POST /api/packages/panel-update — update/rollback an installed package to the form-supplied version from the editor panel; returns the refreshed panel HTML. Auth-required."
+   :parent :post
+   :args {:path "/packages/panel-update" :handler :_pkg-update-panel-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; POST /api/packages/panel-fork?name=<pkg>&version=<v> — copy the version's
+  ;; fns into the graph (copy-on-write), then return the refreshed panel with a
+  ;; transient notice. Fork writes NO pin, so the installed table is otherwise
+  ;; unchanged; the notice (built from the fork result) is the only visible
+  ;; feedback. The notice referencing :_pkg-fork-result is what forces the fork
+  ;; to execute — no :do needed, since fork touches the graph tree, not the pins
+  ;; the rest of the panel reads. Auth-required.
+  ;; ---------------------------------------------------------------------
+  {:name :_pkg-fork-name-raw
+   :parent :query-param :args {:request {:as :request} :param-name {:value "name"}}}
+  {:name :_pkg-fork-name
+   :parent :to-str :args {:value :_pkg-fork-name-raw}}
+  {:name :_pkg-fork-version-raw
+   :parent :query-param :args {:request {:as :request} :param-name {:value "version"}}}
+  {:name :_pkg-fork-version
+   :parent :to-str :args {:value :_pkg-fork-version-raw}}
+  {:name :_pkg-fork-result
+   :parent :fork-package :args {:pkg-name :_pkg-fork-name :pkg-version :_pkg-fork-version}}
+  {:name :_pkg-fork-ok?
+   :parent :get :args {:coll :_pkg-fork-result :key {:value :ok} :default {:value false}}}
+  {:name :_pkg-fork-reason
+   :parent :get :args {:coll :_pkg-fork-result :key {:value :reason} :default {:value "unknown"}}}
+  {:name :_pkg-fork-err-text
+   :parent :str-join
+   :args {:coll [{:value "Fork failed: "} :_pkg-fork-reason] :separator {:value ""}}}
+  {:name :_pkg-fork-notice-ok
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-fork-note packages-fork-ok"}}
+          :children [{:value "Forked into the graph — reload to edit the copied fns."}]}}
+  {:name :_pkg-fork-notice-err
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-fork-note packages-fork-err"}}
+          :children [:_pkg-fork-err-text]}}
+  {:name :_pkg-fork-notice
+   :parent :if
+   :args {:test :_pkg-fork-ok? :then :_pkg-fork-notice-ok :else :_pkg-fork-notice-err}}
+  {:name :_pkg-fork-panel-root
+   :description "Panel root for a fork response — the transient fork notice above the normal installed body + browse details."
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-packages-panel "1"}}
+          :children [:_pkg-fork-notice :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
+  {:name :_pkg-fork-panel-html
+   :parent :render-hiccup :args {:hiccup :_pkg-fork-panel-root}}
+  {:name :_pkg-fork-panel-handler
+   :description "Ring handler for POST /api/packages/panel-fork — forks and returns the refreshed panel (with a transient fork notice) as text/html."
+   :parent :html-ok-response :args {:body :_pkg-fork-panel-html}}
+  {:name :api-packages-panel-fork
+   :description "POST /api/packages/panel-fork?name=<pkg>&version=<v> — fork (copy) a published version's fns into the graph from the editor panel; returns the refreshed panel HTML with a fork notice. Auth-required."
+   :parent :post
+   :args {:path "/packages/panel-fork" :handler :_pkg-fork-panel-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; Publish a namespace FROM the panel — the author half of the lifecycle
+  ;; (author → publish → browse → install → …). A native <details> form
+  ;; (name / version / ns-root) form-POSTs to /api/packages/panel-publish,
+  ;; which exports the namespace subtree + writes an immutable
+  ;; :package-version, then swaps the refreshed panel (the new version now
+  ;; shows in the browse list) with a transient notice.
+  ;; ---------------------------------------------------------------------
+  {:name :_pkg-publish-input-name
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "name" :placeholder "package name"
+                          :class "packages-publish-input" :required true}}}}
+  {:name :_pkg-publish-input-version
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "version" :placeholder "1.0.0"
+                          :class "packages-publish-input" :size "6" :required true}}}}
+  {:name :_pkg-publish-input-ns
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:value {:type "text" :name "ns-root" :placeholder "namespace to publish"
+                          :class "packages-publish-input" :required true}}}}
+  {:name :_pkg-publish-submit
+   :parent :hiccup
+   :args {:tag {:value "button"}
+          :attrs {:value {:type "submit" :class "packages-install-btn"}}
+          :children [{:value "Publish"}]}}
+  {:name :_pkg-publish-form-el
+   :parent :hiccup
+   :args {:tag {:value "form"}
+          :attrs {:value {:class "packages-publish-form"
+                          :hx-post "/api/packages/panel-publish"
+                          :hx-target "closest [data-packages-panel]"
+                          :hx-swap "outerHTML"}}
+          :children [:_pkg-publish-input-name :_pkg-publish-input-version
+                     :_pkg-publish-input-ns :_pkg-publish-submit]}}
+  {:name :_pkg-publish-summary
+   :parent :hiccup :args {:tag {:value "summary"} :children [{:value "Publish a namespace"}]}}
+  {:name :_pkg-publish-details
+   :parent :hiccup
+   :args {:tag {:value "details"}
+          :attrs {:value {:class "packages-available"}}
+          :children [:_pkg-publish-summary :_pkg-publish-form-el]}}
+
+  ;; --- handler: form {name, version, ns-root} → export → publish → panel ---
+  {:name :_pkg-publish-form-data
+   :parent :parse-form-body-kw}
+  {:name :_pkg-publish-name
+   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :name} :default {:value ""}}}
+  {:name :_pkg-publish-version
+   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :version} :default {:value ""}}}
+  {:name :_pkg-publish-ns-root-raw
+   :parent :get :args {:coll :_pkg-publish-form-data :key {:value :ns-root} :default {:value ""}}}
+  {:name :_pkg-publish-ns-root
+   :description "Nil-safe `(str ns-root)` — mirrors the JSON publish handler's raw→to-str step so `:root` is always a plain String."
+   :parent :to-str :args {:value :_pkg-publish-ns-root-raw}}
+  {:name :_pkg-publish-bundle
+   :parent :export-namespace :args {:root :_pkg-publish-ns-root}}
+  {:name :_pkg-publish-result
+   :parent :publish-package
+   :args {:pkg-name :_pkg-publish-name :pkg-version :_pkg-publish-version
+          :bundle :_pkg-publish-bundle}}
+  ;; The notice reads the FORM's name+version, NOT the effectful publish
+  ;; result: publish-package has :db/:time effects so it is NOT memoised —
+  ;; referencing its result from the notice too would run the publish a SECOND
+  ;; time and report `version-exists` against its own first write. So `:do`
+  ;; runs the publish exactly once; the notice + the browse list (now showing
+  ;; the new version) are the confirmation.
+  {:name :_pkg-publish-notice-text
+   :parent :str-join
+   :args {:coll [{:value "Publishing "} :_pkg-publish-name {:value "@"} :_pkg-publish-version
+                 {:value " — if the namespace has fns, the new version appears in the browse list below."}]
+          :separator {:value ""}}}
+  {:name :_pkg-publish-notice
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "packages-fork-note packages-fork-ok"}}
+          :children [:_pkg-publish-notice-text]}}
+  {:name :_pkg-publish-panel-root
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:data-packages-panel "1"}}
+          :children [:_pkg-publish-notice :_pkg-panel-body :_pkg-avail-details :_pkg-publish-details]}}
+  {:name :_pkg-publish-panel-html
+   :parent :render-hiccup :args {:hiccup :_pkg-publish-panel-root}}
+  ;; Force export+publish as an explicit FIRST `:do` step, THEN render — the
+  ;; full-graph read in export-namespace returns empty when forced lazily from
+  ;; INSIDE the hiccup render, but works from the direct handler ctx (same
+  ;; shape as install/update's `:do [mutate, render]`).
+  {:name :_pkg-publish-then-panel
+   :parent :do :args {:steps [:_pkg-publish-result :_pkg-publish-panel-html]}}
+  {:name :_pkg-publish-panel-handler
+   :description "Ring handler for POST /api/packages/panel-publish — exports + publishes the named namespace, returns the refreshed Packages panel (new version now in browse) as text/html."
+   :parent :html-ok-response :args {:body :_pkg-publish-then-panel}}
+  {:name :api-packages-panel-publish
+   :description "POST /api/packages/panel-publish — form {name, version, ns-root}: export the namespace subtree + publish an immutable :package-version from the editor panel; returns the refreshed panel HTML. Auth-required."
+   :parent :post
+   :args {:path "/packages/panel-publish" :handler :_pkg-publish-panel-handler}}]}

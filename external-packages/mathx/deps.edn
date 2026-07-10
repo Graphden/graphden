@@ -1,0 +1,6 @@
+;; mathx — a minimal EXTERNAL Type-2 (impl+fns) graphden package, used to
+;; prove the executor-packages.edn manifest + deps.edn :local/root loading
+;; path end-to-end (docs/PACKAGE_DISTRIBUTION.md § 5). Its `resources/` dir
+;; contributes `packages/mathx/…` to the graphden classpath; `graphden-core`
+;; (the host runtime) provides `defbase` + `core`.
+{:paths ["resources"]}

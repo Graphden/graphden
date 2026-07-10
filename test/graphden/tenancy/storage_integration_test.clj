@@ -45,6 +45,23 @@
       (is (nil? (tc/with-org "acme" (sp/read-entity s :fn acme-id)))))))
 
 
+(deftest package-install-pin-is-org-scoped
+  (let [s (ts/org-scoped-storage (setup/create-test-storage))
+        branch-id (random-uuid)
+        pin-id (:id (tc/with-org "acme"
+                                 (sp/create-entity s :package-install
+                                                   {:branch-id branch-id
+                                                    :package-name "some.pkg"
+                                                    :version "1.0.0"})))]
+    (testing "a pin is stamped with the owner org"
+      (is (= "acme" (:org-id (tc/with-org "acme" (sp/read-entity s :package-install pin-id))))))
+    (testing "another org can neither read nor enumerate it"
+      (is (nil? (tc/with-org "beta" (sp/read-entity s :package-install pin-id))))
+      (is (not-any? #(= "some.pkg" (:package-name %))
+                    (tc/with-org "beta" (sp/query-entities s :package-install {})))
+          "beta does not see acme's pin"))))
+
+
 (deftest ns-scoped-crud-roundtrips-against-postgres
   ;; Regression for the cross-tenant :ns isolation gap: namespaces used to be a
   ;; GLOBAL tree (any tenant could enumerate/delete/tamper another org's). :ns

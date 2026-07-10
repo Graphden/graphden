@@ -47,8 +47,16 @@
    could enumerate every org's namespace layout, delete another org's namespace
    (its org-scoped fns are invisible → looks empty → delete proceeds), or
    rename/reparent to tamper with grant path coverage. `(parent-id, name)` stays
-   globally unique (same limitation as the other scoped entities)."
-  #{:fn :slot :fn-slot :binding :binding-list-item :fn-execution :branch :ns})
+   globally unique (same limitation as the other scoped entities).
+
+   `:package-install` IS scoped: a pin (\"this branch uses package P at V\") is
+   tenant desired-state, written in the request scope by `:install-package` /
+   `:set-package-pin`. Scoping stamps `:org-id` on the pin + RLS-filters reads,
+   so one org can neither see nor repoint another org's pins. (The pin's
+   `:branch-id` already rides the org-scoped `:branch`; this is the
+   defence-in-depth second layer.)"
+  #{:fn :slot :fn-slot :binding :binding-list-item :fn-execution :branch :ns
+    :package-install})
 
 
 (def tenant-forbidden-entities

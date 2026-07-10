@@ -23,6 +23,30 @@
 
 
 ;; =============================================================================
+;; pg-target — decorator-chain unwrap to the pool (regression)
+;; =============================================================================
+;; pg-target keyword-walks the storage stack, so plain maps mirroring the
+;; decorator shapes exercise the exact logic without a DB. Under tenancy the
+;; stack is VersionedStorage(:base-storage) → OrgScopedStorage(:base) →
+;; Postgres(:pool); a single unwrap stopped at OrgScoped → "storage has no :pool".
+
+(deftest pg-target-unwraps-nested-decorators
+  (let [pool       (Object.)                   ; sentinel; pg-target returns it as-is
+        pg         {:pool pool}                ; Postgres backend shape
+        org-scoped {:base pg}                  ; OrgScopedStorage shape (:base)
+        versioned  {:base-storage org-scoped}] ; VersionedStorage shape (:base-storage)
+    (testing "a pool-bearing storage returns its pool directly"
+      (is (identical? pool (#'pg/pg-target {:storage pg}))))
+    (testing "one level: Versioned -> Postgres"
+      (is (identical? pool (#'pg/pg-target {:storage {:base-storage pg}}))))
+    (testing "two levels: Versioned -> OrgScoped -> Postgres (the tenancy stack)"
+      (is (identical? pool (#'pg/pg-target {:storage versioned}))))
+    (testing "no pool anywhere -> actionable throw, not an NPE"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no :pool"
+            (#'pg/pg-target {:storage {:base {:base {}}}}))))))
+
+
+;; =============================================================================
 ;; Round-trip: DDL → INSERT → SELECT → DELETE
 ;; =============================================================================
 

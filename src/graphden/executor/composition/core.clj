@@ -16,6 +16,7 @@
   (:require
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.validation :as validation]
+    [graphden.packages.export :as export]
     [graphden.packages.records :as records]
     [graphden.storage.protocol.core :as sp]))
 
@@ -218,109 +219,41 @@
         fns))
 
 
-(defn- defs-by-name-from-rows
-  "Pure: given pre-fetched fn / slot / fn-slot rows, reconstruct the
-   minimal fn-def shapes the records-parser's slot resolver needs.
+(defn- faithful-defs-by-name
+  "Authoritative `{fn-name → fn-def}` for every already-synced fn, from
+   the pre-tagged records via the graph→fn-def EXPORTER — the SAME
+   fn-def representation the boot sync resolves against.
 
-   Two row classes go in:
-
-   - **Type-row-like** entries (no parents, has slots /
-     `:base-fn-id` / `:element-fn-id` / `:constraint`) carry an
-     `:args` map of `{slot-name :any}` so `type-row-arg-names` fires
-     on inheritance walks and recognises THIS fn as the slot owner.
-
-   - **Composed-fn-def** entries (one or more parents) carry just
-     enough — `:parent` / `:parents` — for `chain-of` to walk through
-     them up to whichever type-row actually declares the slot. Before
-     this addition, incremental syncs (single fn-def synced at a
-     time) emitted dangling slot ids whenever an inherited slot
-     lived two or more inheritance hops away, because the composed
-     intermediate didn't appear in `defs-by-name` and the walk
-     dead-ended at it. `:args` is intentionally NOT reconstructed
-     for composed fn-defs — `type-row-arg-names` returns `{}` for
-     anything with a `:parent`, so the args wouldn't matter for slot
-     ownership; and reconstructing them from binding/list-item rows
-     would mean another two queries per sync."
-  [fns slots fn-slots]
-  (let [slot-by-id (into {} (map (juxt :id identity)) slots)
-        id->name (into {}
-                       (keep (fn [f]
-                               (when-let [n (some-> (:name f) keyword)]
-                                 [(:id f) n])))
-                       fns)
-        ;; Map each `(fn-id, slot-name)` to the slot's declared type
-        ;; keyword (resolved through `id->name`). Sequence-typed slots
-        ;; (`:sequence`, `[:list T]` aliases) are what the parser
-        ;; needs to recognise — emitting `:any` here would make the
-        ;; sequence-slot? check miss and the bare-vector binding
-        ;; would be stored as a literal jsonb instead of being
-        ;; expanded into list-item rows. Primitives resolve directly;
-        ;; opaque/complex types fall back to `:any` (good enough —
-        ;; `sequence-slot?` only fires on the primitive `:sequence`
-        ;; alias or a `[:list T]` literal).
-        slot-type-of (fn [slot-row]
-                       (or (get id->name (:type-fn-id slot-row))
-                           :any))
-        slots-by-fn (reduce (fn [acc fs]
-                              (if-let [s (get slot-by-id (:slot-id fs))]
-                                (update acc (:fn-id fs) (fnil assoc {})
-                                        (keyword (:name s))
-                                        (slot-type-of s))
-                                acc))
-                            {}
-                            fn-slots)
-        parents-of (fn [f]
-                     (->> (:parent-ids f)
-                          (keep id->name)
-                          vec))]
-    (into {}
-          (keep (fn [f]
-                  (let [n (some-> (:name f) keyword)
-                        own-args (not-empty (get slots-by-fn (:id f) {}))
-                        is-type-row? (and (empty? (:parent-ids f))
-                                          (or own-args (:base-fn-id f)
-                                              (:element-fn-id f) (:constraint f)))
-                        parent-names (parents-of f)]
-                    (cond
-                      ;; Type-row / base-fn / refinement / list-type:
-                      ;; carry :args so type-row-arg-names recognises it.
-                      (and n is-type-row? own-args)
-                      [n {:name n :args own-args :namespace nil}]
-
-                      ;; Composed fn-def: carry just the parent chain
-                      ;; so `chain-of` walks THROUGH this node to whichever
-                      ;; ancestor actually declares the slot.
-                      (and n (seq parent-names))
-                      [n (cond-> {:name n :namespace nil}
-                           (= 1 (count parent-names))
-                           (assoc :parent (first parent-names))
-
-                           (> (count parent-names) 1)
-                           (assoc :parents parent-names))]))))
-          fns)))
-
-
-(defn- existing-defs-by-name
-  "Reconstruct minimal fn-def shapes for every fn-row already in
-   storage so the records-parser's slot resolver can reach base-fn
-   args."
-  [storage]
-  (defs-by-name-from-rows (sp/query-entities storage :fn {})
-    (sp/query-entities storage :slot {})
-    (sp/query-entities storage :fn-slot {})))
+   This replaces the former lossy row-reconstruction, which dropped
+   composed fns' `:args` (so it could not recover renamed or ref-based
+   free-arg slots — e.g. `:extras`, owned by an anonymous fn referenced
+   deep inside `:submit-button`'s binding). An incremental sync binding
+   such a slot on an external composed fn is now resolved exactly as at
+   boot, because there is ONE resolution path over one fn-def shape, not
+   a second lossy reconstruction. `records->fn-defs` skips primitives +
+   anonymous rows, matching what `parse-module` expects as extra-defs."
+  [records]
+  (into {}
+        (map (juxt :name identity))
+        (export/records->fn-defs records)))
 
 
 (defn- discover-existing-state
-  "One-shot fetch of the bits both convenience arities of
-   `sync-fns-to-storage!` need from storage — a single shared `:fn {}`
-   read rather than one per caller, which matters on cold-start packages
-   with hundreds of fns."
+  "One-shot read of what the convenience arities of `sync-fns-to-storage!`
+   need — a single `graph->records` pass reused for both the name→id map
+   and the faithful (exporter-derived) `defs-by-name`."
   [storage]
-  (let [fns (sp/query-entities storage :fn {})
-        slots (sp/query-entities storage :slot {})
-        fn-slots (sp/query-entities storage :fn-slot {})]
-    {:name->id (name->id-from-fns fns)
-     :defs-by-name (defs-by-name-from-rows fns slots fn-slots)}))
+  (let [records (export/graph->records storage)]
+    {:name->id (name->id-from-fns (filter #(= :fn (:kind %)) records))
+     :defs-by-name (faithful-defs-by-name records)}))
+
+
+(defn- existing-defs-by-name
+  "Faithful `{fn-name → fn-def}` for every fn already in storage, so the
+   records-parser's slot resolver reaches ANY ancestor's slots (base-fn
+   args, renames, ref-based free-args) exactly as the boot sync does."
+  [storage]
+  (faithful-defs-by-name (export/graph->records storage)))
 
 
 (defn sync-fns-to-storage!

@@ -514,8 +514,8 @@ Fix candidates:
 | `:ex-only-some` | `:filter` | `:coll {:value nil}` | `:null` ⊄ `a` |
 | `:ex-status-label-by-kw` | `:case` | `:default {:value "Unknown"}` | `:text` ⊄ `a` |
 
-Both are in `packages/examples/*` so impact is documentation-only,
-not runtime. Fix candidates:
+Both are in the `examples` package (now `external-packages/examples/resources/packages/examples/*`,
+dev/test-only) so impact is documentation-only, not runtime. Fix candidates:
 
 - (a) Update the example to declare `:type :text` on the binding
   to bind the typevar.

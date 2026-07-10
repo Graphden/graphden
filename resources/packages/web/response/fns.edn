@@ -73,6 +73,11 @@
    :parent :ring-response
    :args {:headers {"Content-Type" "text/plain"}}}
 
+  {:name :edn-content-type
+   :description "Content-type axis: `application/edn`. For responses whose body is an EDN string (e.g. a graph-export bundle) — EDN round-trips keywords faithfully where JSON would flatten them."
+   :parent :ring-response
+   :args {:headers {"Content-Type" "application/edn"}}}
+
   ;; Cached SVG content-type — its own fn because the :headers map can't be
   ;; merged via MI (it's a single arg, so the whole map is set in one place).
   {:name :cached-svg-content-type
@@ -105,6 +110,9 @@
   {:name :json-ok-response
    :description "200 OK with `application/json` content-type. Free arg: `:body` (already a JSON string)."
    :parents [:json-content-type :ok-response]}
+  {:name :edn-ok-response
+   :description "200 OK with `application/edn` content-type. Free arg: `:body` (already an EDN string, e.g. from `:pr-str`)."
+   :parents [:edn-content-type :ok-response]}
   {:name :html-ok-response
    :description "200 OK with `text/html` content-type. Free arg: `:body` (already an HTML string)."
    :parents [:html-content-type :ok-response]}

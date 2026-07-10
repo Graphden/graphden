@@ -35,8 +35,14 @@
    - the current transaction's `Connection` if `pg-tx` set one,
    - otherwise the `HikariDataSource` pulled from the executor ctx.
 
-   ctx → :storage → (optional VersionedStorage unwrap to :base-storage)
-       → :pool
+   ctx → :storage → unwrap the decorator chain to the backend holding the
+       pool: `VersionedStorage` via `:base-storage`, `OrgScopedStorage` via
+       `:base`, and any further decorator the same way → `:pool`.
+
+   Raw SQL runs against the pool directly; under tenancy the pool carries RLS
+   (`graphden.current_org`, wired by the addon's datasource-wrap), so org
+   scoping is still enforced at the DB level even though we bypass the
+   app-level `OrgScopedStorage` filter here.
 
    Throws if no storage / no pool is wired so the caller gets an
    actionable error instead of NPE deep inside next.jdbc."
@@ -45,8 +51,15 @@
       (let [storage (or (:storage ctx)
                         (throw (ex-info "storage.pg: no storage on executor context"
                                         {:type :storage-pg/no-storage})))
-            base    (or (:base-storage storage) storage)
-            pool    (:pool base)]
+            ;; Walk :base-storage (VersionedStorage) / :base (OrgScopedStorage)
+            ;; until a backend with a :pool is found — handles arbitrary
+            ;; decorator nesting (e.g. Versioned over OrgScoped over Postgres).
+            pool    (loop [s storage]
+                      (cond
+                        (:pool s)         (:pool s)
+                        (:base-storage s) (recur (:base-storage s))
+                        (:base s)         (recur (:base s))
+                        :else             nil))]
         (when-not pool
           (throw (ex-info "storage.pg: storage has no :pool (datasource)"
                           {:type :storage-pg/no-datasource

@@ -107,12 +107,34 @@
     (testing "a tenant CAN perform an allowed effect (db / time)"
       (is (= :ran (run :db "Bearer acme-tok")))
       (is (= :ran (run :time "Bearer acme-tok"))))
+    (testing "a tenant request CAN record :raw-sql — the trusted platform
+              handler reads storage via :pg-query on the tenant's behalf; gating
+              it here 403'd essentially every tenant request. (The tenant's own
+              submitted graph is gated WITHOUT :raw-sql at the execute boundary.)"
+      (is (= :ran (run :raw-sql "Bearer acme-tok"))))
     (testing "platform (public / unauthenticated) is unrestricted"
       (is (= :ran (run :env nil)))
       (is (= :ran (run :network nil))))
     (testing "*allowed-effects* is restored after dispatch (no leak)"
       (run :db "Bearer acme-tok")
       (is (nil? cr/*allowed-effects*)))))
+
+
+(deftest two-layer-effect-contract
+  ;; The tenant effect gate has two layers with different allow-lists:
+  ;; the request layer (trusted platform handler) allows storage incl.
+  ;; :raw-sql; the execute layer (untrusted submitted graph) does not.
+  (testing "request layer allows :raw-sql (platform storage read) …"
+    (is (contains? cr/cloud-request-allowed-effects :raw-sql)))
+  (testing "… but the submitted-graph layer forbids it"
+    (is (not (contains? cr/default-cloud-allowed-effects :raw-sql))))
+  (testing "both layers block the external-world effects"
+    (doseq [e [:env :io :network :process]]
+      (is (not (contains? cr/cloud-request-allowed-effects e)) (str e " at request layer"))
+      (is (not (contains? cr/default-cloud-allowed-effects e)) (str e " at execute layer"))))
+  (testing "the request layer is exactly the execute layer plus :raw-sql"
+    (is (= cr/cloud-request-allowed-effects
+           (conj cr/default-cloud-allowed-effects :raw-sql)))))
 
 
 ;; --- grant enforcement on the request-scope gate (§4.2) ---

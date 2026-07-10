@@ -28,8 +28,9 @@ function buildUsersAdminSection() {
     + '<div class="ns-children" hx-get="/partials/users-admin" hx-trigger="load" hx-swap="innerHTML">'
     +   '<div class="loading">Loading…</div>'
     + '</div>';
-  // Built imperatively, so tell HTMX to bind the hx-get; hx-trigger="load"
-  // then fires the fetch.
-  if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(wrap);
+  // Markup is built imperatively; the CALLER runs htmx.process after appending
+  // to the connected DOM. hx-trigger="load" only fires when process() runs on a
+  // CONNECTED node — processing while detached marks it processed but never
+  // fires load, so we must NOT process here (see mountAdminSection in sidebar).
   return wrap;
 }

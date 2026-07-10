@@ -19,6 +19,18 @@ const expandedNamespaces = new Set();
 // Current search/filter text (lowercase)
 let searchFilter = '';
 
+// Append a lazy-loading admin section (Grants / Users / Packages) and process
+// it with HTMX. The section's `.ns-children` carries hx-get + hx-trigger="load";
+// that trigger ONLY fires when htmx.process runs on a node already CONNECTED to
+// the document — processing a detached node marks it processed but never fires
+// load. So the section builders return an unprocessed node and we process here,
+// after appendChild. `section` may be null (builder gated it out) → no-op.
+function mountAdminSection(list, section) {
+  if (!section) return;
+  list.appendChild(section);
+  if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
+}
+
 // "Only services" filter — when true, sidebar tree is pruned to
 // only fns that are :service targets. The fn-id Set is lazy-loaded
 // the first time the user flips the checkbox on (and refreshed on
@@ -366,13 +378,16 @@ function updateEntityList(data) {
   }
   // Org-admin Grants section (§6) — returns null unless authed + addon active.
   if (!searchFilter && !onlyServicesFilter && typeof buildGrantsAdminSection === 'function') {
-    const grantsSection = buildGrantsAdminSection();
-    if (grantsSection) list.appendChild(grantsSection);
+    mountAdminSection(list, buildGrantsAdminSection());
   }
   // Users-admin section (§4.1) — same gating (authed + addon active).
   if (!searchFilter && !onlyServicesFilter && typeof buildUsersAdminSection === 'function') {
-    const usersSection = buildUsersAdminSection();
-    if (usersSection) list.appendChild(usersSection);
+    mountAdminSection(list, buildUsersAdminSection());
+  }
+  // Packages section (3e) — installed packages on the current branch. Authed
+  // only; NOT tenancy-gated (packages exist single-tenant too).
+  if (!searchFilter && !onlyServicesFilter && typeof buildPackagesSection === 'function') {
+    mountAdminSection(list, buildPackagesSection());
   }
 
   // Render top-level namespaces (sorted)

@@ -405,7 +405,18 @@
                        (and grant-store
                             (not (grant/request-permitted? header-grant-store principal request org)))
                        forbidden-response
-                       ;; Tenant — gate effects (env / io / network / process), run.
+                       ;; Tenant — gate the request's effects, run. The
+                       ;; handler-level allow-list blocks the external-world
+                       ;; effects (env / io / network / process) so a tenant
+                       ;; can't drive them through a platform endpoint, but it
+                       ;; ALLOWS `:raw-sql`: the trusted handler reads storage
+                       ;; via `:pg-query` (a `:raw-sql`-recording base-fn) on
+                       ;; the tenant's behalf — gating it here 403'd essentially
+                       ;; every tenant request. The tenant's OWN submitted graph
+                       ;; is gated more strictly (WITHOUT `:raw-sql`) at the
+                       ;; execute boundary (`crud.fn-execution/apply-execute`
+                       ;; sets `:allowed-effects` on the exec ctx).
+                       ;;
                        ;; A READ request additionally runs under the org-filtered
                        ;; type-alias view (§4 Risk-2) so editor display paths
                        ;; (value-form / types) resolve a tenant's `Foo`, never
@@ -413,7 +424,7 @@
                        ;; (rebuild) must reach the org-agnostic global; their
                        ;; type-checks are filtered narrowly in crud.type-check.
                        :else
-                       (binding [cr/*allowed-effects* cr/default-cloud-allowed-effects]
+                       (binding [cr/*allowed-effects* cr/cloud-request-allowed-effects]
                          (if (= :read (grant/request->capability request))
                            (typecheck/with-org-alias-view* run)
                            (run)))))))))

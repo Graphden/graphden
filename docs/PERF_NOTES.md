@@ -33,6 +33,32 @@ executor pipeline — the 2026-05 flame-graph predates the
 eager-compile refactor and may show a different hot-frame
 profile now.
 
+### 2026-07-09 re-profile — executor is already well-optimized
+
+Re-benched the current pipeline with the harness now committed at
+`development/bench/graphden/exec_profile.clj` (bootstrap `[core]`,
+map a 2-node composed callback over `(range 2000)` ≈ 4–6k
+node-executes, criterium). Result: **~3.8 ms → ~1 µs/node** — the
+executor is now near the sketch's `<500 ns/node` target; the
+eager-compile refactor already captured the big win.
+
+Sketch status: **#3 (HashMap call-cache, not Atom) is DONE** —
+`::call-cache` is a `java.util.HashMap` today. **#1 (transients)
+is PARTLY DONE** — the arg-map builder loop already uses
+`transient`/`persistent!`. Landed a variant of **#4**: skip the
+per-call `fa-ref` volatile when a fn has no env-bindings (commit
+`9d79b29d`). That point-fix measured **~5% — inside the run's
+std-dev, i.e. noise**, re-confirming the 2026-05 lesson: single-site
+fixes don't move a smeared profile. Kept only because it's
+provably-equivalent + cleaner, not for the number.
+
+**Do NOT expect executor micro-opts to speed up `bb test`** — the
+slow tests (`entities-graph`, `branches-lifecycle`,
+`compile-packages`) are CRUD / compile / HTTP-bound, not
+execute-bound. The banked test-suite wins (2026-07-09, ~36 min →
+~23 min) came from delta-invalidation + minimal package sets, not
+execute-path tuning.
+
 ## Diagnosis (2026-05) — "no single hot frame, GC pressure smear"
 
 Leaf-time top frames (collapsed) from a 63-second
@@ -93,11 +119,11 @@ the whole executor, not optimise individual helpers.
 The executor pipeline needs to drop allocations on the hot
 path. Candidate work, roughly in order:
 
-1. **Transient maps in `build-closure`** — `final-fa` and the
-   `aug` builder use persistent maps via `reduce-kv` /
-   `assoc`. For fns with N bindings, that's N intermediate
-   persistent versions per call. Switch to `transient` +
-   final `persistent!` when bindings count > some threshold.
+1. **[PARTLY DONE 2026-07-09]** Transient maps in `build-closure`
+   — the arg-map builder loop in `compile-fn`'s closure already uses
+   `transient`/`assoc!`/`persistent!`. The env-binding merge loop
+   still uses persistent `assoc`, but it only runs when `env-n > 0`
+   (uncommon).
 2. **Skip thunk allocation for eager refs** —
    `make-ref-entry` wraps every `:ref` binding in a
    `rt/thunk` so `resolve-arg` can decide at call time
@@ -105,19 +131,16 @@ path. Candidate work, roughly in order:
    args (the common case), the thunk wrap is pure overhead.
    Compile-time classification of "this impl forces arg X"
    lets us bind the resolved value directly.
-3. **Call-cache: per-execution `HashMap` not an `Atom`** —
-   every `:get` / `:assoc` / `:vec` invocation does
-   `swap! *call-cache* assoc k v`. The cache is read/written
-   from a single thread per execution; the `Atom`'s CAS is
-   wasted. Replace with a per-execution `java.util.HashMap`
-   threaded through dynamic var. Saves the CAS + 2-version
-   persistent map per cache write.
-4. **Pool the per-call `volatile!` in `build-closure`** —
-   the `volatile! free-args` allocates one volatile per
-   closure invocation. The volatile only exists so
-   thunks/HOF wraps created inside `build-args-and-aug` see
-   the post-merge map. Once #2 lands and we skip thunks for
-   eager refs, the volatile can go too in those cases.
+3. **[DONE]** Call-cache: per-execution `HashMap` not an `Atom`
+   — `::call-cache` in `ctx` is a `java.util.HashMap` installed once
+   per top-level execute; nested siblings inherit it through `ctx`.
+   No per-write CAS or persistent-map churn.
+4. **[PARTLY DONE 2026-07-09, commit `9d79b29d`]** Pool/skip the
+   per-call `volatile!` — now skipped entirely for fns with no
+   env-bindings (the common case; the volatile is only read by
+   env-binding delays). Measured noise-level, kept for cleanliness.
+   Fully pooling it for the `env-n > 0` case is still open but
+   below the noise floor.
 
 Expected total: bring per-graph-node overhead from ~10 µs
 down to <500 ns. Target ~50× speedup on the resolve-versioned-

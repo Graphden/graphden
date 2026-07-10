@@ -1,0 +1,20 @@
+;; External impl-packages (Type-2) — the operator's single list. See
+;; docs/PACKAGE_DISTRIBUTION.md § 5 and graphden.packages.manifest.
+;;
+;; Each entry: {:name "<package>" :lib <group/artifact> :coord {…deps.edn coord…}}
+;;   git-dep : :coord {:git/url "…" :git/sha "…"}
+;;   Maven   : :coord {:mvn/version "…"}
+;;
+;; build.clj bundles the coordinates into the uberjar; :app/packages loads the
+;; names. For dev, also add the coordinate to deps.edn / a :local/root override.
+{:packages
+ [;; External Type-2 package (impl+fns), distributed as the standalone
+  ;; BonsaiFlow/graphden-mathx repo and pulled in by git coord — the real
+  ;; distribution form (Track B). build.clj merges this coord into the uberjar
+  ;; basis, so `bb rebuild` clones the package straight from GitHub. Resolving
+  ;; it needs read access to that (private) repo; `bb test`/`bb dev` sidestep
+  ;; that via the :override-deps in deps.edn (see § 12 / DEPLOYMENT).
+  {:name "mathx"
+   :lib mathx/mathx
+   :coord {:git/url "git@github.com:BonsaiFlow/graphden-mathx.git"
+           :git/sha "a99354d1d2cae3b36bedca07523bf133921c595d"}}]}

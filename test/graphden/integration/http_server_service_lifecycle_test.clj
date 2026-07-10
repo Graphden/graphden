@@ -84,8 +84,15 @@
                                             [:jdbc-url :username :password])
                   :exec/base-fns {:extra-base-fns
                                   {:_http-svc-stub-start stub-start}}
+                  ;; This test drives a STUB service (`:_http-svc-stub-start`,
+                  ;; injected above) that only mirrors `:http-server`'s
+                  ;; 0-arg-stopper contract — the real `:http-server` (web)
+                  ;; and the whole `app` package are never referenced. Loading
+                  ;; only `core` + `storage` skips syncing + compiling +
+                  ;; type-check-sweeping ~3000 unused fn-defs (~5 min → a
+                  ;; fraction) with no coverage loss.
                   :app/packages {:package-names
-                                 ["core" "storage" "web" "app"]}})]
+                                 ["core" "storage"]}})]
     (try
       (let [storage (:db/versioned system)
             context (:exec/context system)

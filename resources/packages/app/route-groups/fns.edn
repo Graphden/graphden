@@ -35,6 +35,7 @@
                   :partial-execute-result-inline
                   :partial-branch-popover
                   :partial-service-popover
+                  :partial-packages-panel
                   :partial-secret-create-form
                   :partial-secret-rotate-form
                   :partial-row-actions

@@ -1,0 +1,5 @@
+{:name "mathx"
+ :version "1.0.0"
+ :description "Extra maths base-fns not in core — a demonstration EXTERNAL Type-2 (impl+fns) package loaded via the executor-packages.edn manifest."
+ :dependencies ["core"]
+ :modules ["ops"]}

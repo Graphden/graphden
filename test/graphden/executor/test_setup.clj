@@ -6,8 +6,11 @@
    `setup-add-function!` synthesise a small example graph end-to-end."
   (:require
     [graphden.executor.compile-runtime :as cr]
+    [graphden.executor.composition.interface :as fn-composition]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.runtime :as rt]
+    [graphden.packages.loader :as loader]
     [graphden.packages.records :as records]
     [graphden.packages.records.ids :as ids]
     [graphden.schema.executions.schema :as es]
@@ -62,11 +65,18 @@
   (pth/create-clean-db-fixture #'*container*))
 
 
+(declare full-schema)
+
+
 (defn create-test-storage
   []
   (pth/clean-database-fast! *container*)
   (let [storage (pg/create-storage (pth/get-container-config *container*))
-        schema (gds/build-schema (mds/create-builder))]
+        ;; The FULL prod schema (graph + versioned + executions + services +
+        ;; packages), not graph-only — so every entity's table exists and
+        ;; tenancy scoping tests can exercise any scoped entity
+        ;; (`:branch` / `:service` / `:package-install`), not just `:fn`/`:ns`.
+        schema (full-schema)]
     (sp/initialize storage schema)
     ;; Pre-seed the 14 primitive fn-rows so slot.type-fn-id refs resolve.
     ;; `boot-primitive-records` returns tagged records (`:kind :fn`); strip
@@ -399,6 +409,27 @@
          ctx (exec/create-context {:storage versioned})]
      (cr/rebuild! ctx)
      (assoc bootstrap :storage versioned :ctx ctx))))
+
+
+(defn sync-and-invalidate!
+  "Sync `fn-defs` to `storage`, then DELTA-invalidate `ctx` on JUST those fns
+   (ids looked up by name) rather than a full 1-arity
+   `invalidate-graph-cache!`. A full clear drops the whole compiled registry,
+   so the next `execute` recompiles all ~2600 golden [core web app] fns (~30 s);
+   the delta path recompiles only the synced fns + their dependents (the same
+   mechanism the editor CRUD path uses). Drop-in for the common test pattern
+   `(sync-fns-to-storage! storage defs)` + `(invalidate-graph-cache! ctx)`."
+  [ctx storage fn-defs]
+  ;; Sync any NEW namespaces the fn-defs declare first (mirrors
+  ;; `materialize-fns!`) — without this, a fn-def carrying a `:namespace` the
+  ;; graph hasn't seen lands with a nil namespace-id. Fns without `:namespace`
+  ;; contribute nothing, so this is a no-op for the common case.
+  (let [ns-id-map (loader/sync-namespaces! storage (into #{} (keep :namespace) fn-defs))]
+    (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map))
+  (let [synced-ids (keep #(:id (first (sp/query-entities storage :fn
+                                                         {:name (name (:name %))})))
+                         fn-defs)]
+    (exec-ctx/invalidate-graph-cache! ctx synced-ids)))
 
 
 (defn inject-storage-query

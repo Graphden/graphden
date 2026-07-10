@@ -73,6 +73,14 @@ tenancy-аддона, фиксируется этим документом.
 
 ## 2. ФАЗА 1 — Пакеты
 
+> **Реализация распространяемых пакетов** (три вида модулей: fns-only /
+> impl+fns / core-swap) — конкретный, зафиксированный по решениям план-of-record
+> в [PACKAGE_DISTRIBUTION.md](PACKAGE_DISTRIBUTION.md), ветка
+> `feature/distributable-packages`. Он развивает §2 ниже: reference-install
+> (материализация в public-org + `:package-install` pin), rewrite-on-pin-change
+> вместо compiler-late-binding, version-констрейнты, манифест impl-пакетов,
+> seam'ы core-swap.
+
 ### 2.1. Два канала распространения (ключевое разделение)
 
 | Канал                       | Что распространяет                                  | Механизм                              | Кто может ставить в облаке |
@@ -652,12 +660,26 @@ app достаточно гейта эффектов + egress-allowlist.
 откладывал wiring в Phase 2, потому что глобальный флаг на default-ctx ломает
 платформу (дефолтный ctx исполняет САМУ платформу: web-server `:network`/`:process`,
 vault `:network`, config `:env`, asset-reads `:io`). Граница «platform vs user
-execution» = граница тенантности, и гейт **ctx-based по дизайну**. Эта точка
-установки теперь реализована: `tenancy.addon` биндит `cr/*allowed-effects*
-cr/default-cloud-allowed-effects` вокруг tenant-запроса (app-router path), а
-platform-ctx (`public-org`) остаётся unrestricted. Частичный wiring (гейт только
-`/api/execute` через биндинг в `run-future`) был отвергнут как параллельный
-механизм, не композирующийся с ctx-дизайном.
+execution» = граница тенантности, и гейт **ctx-based по дизайну**.
+
+Реализовано ДВУХСЛОЙНО. Наивный единый blanket-биндинг вокруг всего
+handler'а ломал сам платформенный handler — он читает storage через `:pg-query`
+(a тот пишет `:raw-sql`), из-за чего 403'ился почти любой tenant-запрос,
+читающий storage. Поэтому:
+
+1. **Уровень запроса** — `tenancy.addon` биндит `cr/*allowed-effects*
+   cr/cloud-request-allowed-effects` (= безопасный набор ПЛЮС `:raw-sql`, чтобы
+   доверенный handler мог читать storage на благо тенанта); внешние
+   `:env/:io/:network/:process` по-прежнему заблокированы (defense-in-depth).
+2. **Собственный граф тенанта** гейтится строже — БЕЗ `:raw-sql`:
+   `crud.fn-execution/apply-execute` кладёт `:allowed-effects
+   cr/default-cloud-allowed-effects` на exec-ctx (только для non-public org),
+   что executor применяет в `cr/execute`. Так тенант не может звать raw-SQL
+   escape-hatch в СВОЁМ графе, но handler, обслуживающий его, — может.
+
+Platform-ctx (`public-org`) остаётся unrestricted. Ограничение — свойство
+ИСПОЛНЕНИЯ пользовательского графа (`default-cloud-allowed-effects` — значение
+*ctx*), а не обёртка вокруг платформенного handler'а.
 
 ---
 

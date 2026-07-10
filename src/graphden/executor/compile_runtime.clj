@@ -663,6 +663,24 @@
   (set/difference known-effects cloud-forbidden-effects))
 
 
+(def cloud-request-allowed-effects
+  "The `*allowed-effects*` a TENANT HTTP REQUEST runs under at the handler
+   level (bound by `tenancy.addon`). Broader than
+   `default-cloud-allowed-effects` by exactly `:raw-sql`: the trusted platform
+   handler reads storage through `:pg-query` (a `:raw-sql`-recording base-fn)
+   ON THE TENANT'S BEHALF, so gating `:raw-sql` here would 403 essentially
+   every tenant request. It STILL blocks the external-world effects
+   `#{:env :io :network :process}`, so a tenant can't drive those through a
+   platform endpoint (defense in depth).
+
+   The tenant's OWN submitted graph is gated more strictly — WITHOUT
+   `:raw-sql` — at the execute boundary, where `crud.fn-execution/apply-execute`
+   puts `default-cloud-allowed-effects` on the exec ctx. So a tenant can't run
+   the raw-SQL escape hatch in their own fn, but the handler serving them can
+   read storage."
+  (conj default-cloud-allowed-effects :raw-sql))
+
+
 (defn record-effect!
   "Record that the calling impl is about to perform an effect of
    `category`. The vocabulary in use across the package layer is

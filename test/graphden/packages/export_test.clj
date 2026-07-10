@@ -191,6 +191,24 @@
             "re-parsing the storage export must be a fixpoint")))))
 
 
+(deftest export-graph-bundle-shape
+  (let [bundle (export/export-graph-bundle *storage*)]
+    (testing "the migration bundle is exactly {:fns :namespaces}"
+      (is (= #{:fns :namespaces} (set (keys bundle)))))
+    (testing ":fns is the whole-graph export (thousands of fn-defs, known one present)"
+      (is (> (count (:fns bundle)) 2000))
+      (is (some #(= :html-page-handler (:name %)) (:fns bundle))))
+    (testing ":namespaces are the sorted, distinct, string namespaces the fns span"
+      (let [nss (:namespaces bundle)]
+        (is (= nss (vec (sort nss))) "sorted")
+        (is (= (count nss) (count (distinct nss))) "distinct")
+        (is (every? string? nss))
+        (is (contains? (set nss) "app.page"))))
+    (testing "every fn's namespace is covered by :namespaces"
+      (is (every? (set (:namespaces bundle))
+                  (keep :namespace (:fns bundle)))))))
+
+
 ;; =============================================================================
 ;; Scoped publish bundle — namespace subtree export
 ;; =============================================================================

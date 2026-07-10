@@ -11,8 +11,6 @@
    `:decode-row` compositions."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.composition.interface :as fn-composition]
-    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
@@ -60,8 +58,11 @@
     ;; against the `:list-entities` CRUD path as a control, but that
     ;; base-fn was retired once consumers migrated onto direct
     ;; `:pg-query` + `:decode-row` compositions.
-    (fn-composition/sync-fns-to-storage!
-      *storage*
+    ;; Sync + DELTA-invalidate on just the synced consumer chain (the setup
+    ;; helper) so the next execute reloads them without recompiling the whole
+    ;; golden registry.
+    (setup/sync-and-invalidate!
+      *context* *storage*
       [{:name :_decode-test-raw
         :parent :pg-query
         :args {:hsql {:value {:select [:*]
@@ -76,10 +77,6 @@
         :parent :decode-row
         :args {:row :_decode-test-first
                :entity-type {:value "service"}}}])
-    ;; The integrant init triggered a single `cr/rebuild!` BEFORE
-    ;; this sync. Drop the compiled registry so the next execute
-    ;; rebuilds from storage (now including the just-synced consumer).
-    (exec-ctx/invalidate-graph-cache! *context*)
 
     (let [via-graph (exec/execute *context* (fn-id "decode-test-via-graph") {})]
       (testing "key shape is kebab-case kw (not raw snake_case)"

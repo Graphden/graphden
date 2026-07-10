@@ -120,6 +120,8 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/SECRETS.md](docs/SECRETS.md) | `:secret` information-flow type-marker — asymmetric subtyping (`T ⊆ [:secret T]` but NOT `[:secret T] ⊆ T`), per-base-fn `:return-type-rule` propagation (`taint-with-secret-if-tainted` / `wrap-with-taint`), executor-side `/api/execute` hide on `:secret`-marked return, editor "Result hidden" pane + history badge, current Secrets-panel admin UX (creating fn-defs with `parent :vault-get`), audit of which base-fns propagate vs not | When touching `types/core` secret-type code, adding a new base-fn that handles user data, marking a sink's slot as `[:secret …]`, or wiring secret-flow protection in a new place |
 | [docs/PARTIALS.md](docs/PARTIALS.md) | Graph-native HTML partials: how editor popovers / panels get content from fn-defs returning hiccup at `GET /partials/*`; HTMX 2.x wiring (auth bridge + post-swap process); recipe for adding a new partial; list of common gotchas (`:parse-uuid` slot, JSONB keyword roundtrip, inline-anon limits, `fn-ref` in `:value` literal) | When migrating an editor JS module to server-rendered hiccup, OR when wiring a new popover from scratch |
 | [docs/EDITOR_HTMX_MIGRATION_PLAN.md](docs/EDITOR_HTMX_MIGRATION_PLAN.md) | As-shipped reference for the row-actions partial: per-context (`col-header` / `cell` / `use-site-arg` / `root-row`) query-param matrix + JS dispatcher contract. Documents what shipped in Phase A (8 commits) and why Phase B/C/edge-label were deferred (server has no data the client doesn't). | When extending the row-actions partial OR considering another graphData-backed popover for migration |
+| [docs/PACKAGE_DISTRIBUTION.md](docs/PACKAGE_DISTRIBUTION.md) | Distributing packages: the three module kinds (Type-1 fns-only / Type-2 impl+fns / Type-3 core-swap), the in-graph registry (publish / reference-install + pin / update-rollback ref-rewrite / fork), external Type-2 packages via `resources/executor-packages.edn` + a git coord, whole-graph export (`GET /api/export/graph`), the swap-seam matrix, and § 15.1 **as-built repo map** (what stays in the monorepo vs `graphden-{mathx,examples,cloud}`) | When touching `app/registry`, `packages/{loader,export}`, `executor-packages.edn`, `external-packages/`, or deciding whether something belongs in its own repo |
+| [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) | Multi-tenant platform ADR — orgs / RLS / grants, the **two-layer tenant effect gate** (§5: `cloud-request-allowed-effects` at the request, `default-cloud-allowed-effects` on the exec ctx), the `:execute-guard` admission seam, monetisation via packages | When touching `tenancy/`, the effect gate, or an admission/quota policy |
 
 ## Common Commands
 
@@ -242,6 +244,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-secrets.js` | Admin Secrets-panel CRUD — collapsible section at the top of the sidebar listing every fn-def whose parents are exactly `[:secret-leaf]`. Per-row rotate (↻) + delete (×) actions, header `+` opens the New-secret form (name + path + value + description, value is write-only). Exposes `isSecretFn(fn)` so `editor-sidebar.js` can put a 🔒 badge on the SAME fn when it appears in the namespace tree. Backed by `/api/secrets/*`. |
 | `editor-grants-admin.js` | Org-admin Grants sidebar section (PLATFORM_PLAN §6). Server-rendered via `GET /partials/grants-admin` (table of subject \| capability \| namespace); JS mounts the partial + owns the collapsible section lifecycle. Backed by `/api/grants`. |
 | `editor-users-admin.js` | Users-admin sidebar section (PLATFORM_PLAN §4.1). Server-rendered via `GET /partials/users-admin` (table of username \| org; password hashes stripped server-side); JS mounts the partial + section lifecycle. Backed by `/api/users`. |
+| `editor-packages.js` | Packages sidebar section (PACKAGE_DISTRIBUTION 3e). Server-rendered via `GET /partials/packages-panel`: the current branch's `:package-install` pins (per-row `×` uninstall + a `↑` update/rollback form: a version text input prefilled with the current version, submitting form-encoded `{name, version}` — accepts exact / `latest` / a semver constraint, symmetric so an older version rolls back with ref-rewrite) PLUS a native `<details>` "browse" of the registry index (each published version an Install button + a Fork button — Fork copies the fns into the graph copy-on-write and shows a transient notice, since fork writes no pin) PLUS a native `<details>` "Publish a namespace" form (name / version / ns-root → export the subtree + write an immutable `:package-version`; the handler `:do`s export+publish FIRST then renders — export-namespace's full-graph read returns empty if forced lazily inside the hiccup render). All mutations swap the refreshed `[data-packages-panel]` root (`hx-swap="outerHTML"`) — install/uninstall transition the installed table ↔ empty-state. JS mounts the partial + owns the collapsible section lifecycle only. NOT tenancy-gated (packages exist single-tenant). Backed by `/api/packages/{installed,uninstall,panel-install,panel-update,panel-fork,panel-publish}` (the panel's HTML-returning variants; the JSON `/api/packages/{install,update,fork,publish}` remain the programmatic API). |
 | `editor-mismatch-explainer.js` | Singleton popover shown on click of an arg-overlay-mismatch indicator (expected/actual/reason + Edit-value action) |
 | `editor-effect-explainer.js` | Singleton popover shown on click of an effect-chip — plain-English description of a tracked side-effect (db / env / io / network / time / random / process / raw-sql) + the canonical effect tag |
 | `editor-overlay-type-expand.js` | Inline `▸/▾` expansion of a type-chip — body-level floating panel with constituent mini-chips (refine→base+constraint, list→element, union→branches, record→fields, fn→args+ret), recursive; persistent in `expandedTypePaths`, re-anchored on cy pan/zoom. Fn-type panels include a read-only `eff: pure / <chips>` row (`makeEffectsReadOnly`) showing the slot-level effect constraint — separate from the editable tightening widgets below. Exports `appendResolutionSection(host, prov, opts?)` — the shared 4-tier + inheritance-chain renderer; `opts.onNavigate(fnId)` makes ancestor / source-fn labels clickable links |
@@ -257,7 +260,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → graphden-popover (web/runtime) → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → literal-types → graphden-forms (web/runtime) → value-form → widget-rating → tooltips → icons → runtime → actions-builtin → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → secrets → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → graphden-popover (web/runtime) → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → literal-types → graphden-forms (web/runtime) → value-form → widget-rating → tooltips → icons → runtime → actions-builtin → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → secrets → grants-admin → users-admin → packages → sidebar → expansion → ui → cytoscape → main
 
 ### Browser Test Tool
 
@@ -537,7 +540,7 @@ src/graphden/
 └── executor_runtime/   # Main entry point
     └── core.clj        # -main, shutdown hooks
 
-resources/packages/     # Package definitions (EDN + Clojure impls)
+resources/packages/     # First-party package definitions (EDN + Clojure impls)
 ├── core/               # Core primitives (arithmetic, logic, HOF, etc.)
 │   ├── package.edn     # Package metadata + dependencies
 │   ├── arithmetic/     # {fns.edn, impls.clj}
@@ -546,6 +549,7 @@ resources/packages/     # Package definitions (EDN + Clojure impls)
 │   ├── collections/
 │   ├── strings/
 │   └── system/
+├── storage/            # Storage primitives (pg, protocol, versioned, branches)
 ├── web/                # Web primitives (http, routing, html)
 │   ├── package.edn
 │   ├── http/
@@ -553,11 +557,25 @@ resources/packages/     # Package definitions (EDN + Clojure impls)
 │   ├── html/
 │   ├── crud/
 │   └── graph/
+├── tenancy-admin/      # Org-admin fn-defs (auth, grants, users, registration)
+│                       #   — loaded only when the tenancy addon is wired
 └── app/                # Application server (editor, routes)
     ├── package.edn     # Has startup-fn: :web-server
     ├── common/         # Shared fn-defs (routes, responses)
     ├── editor/         # Editor UI fn-defs + impls
+    ├── registry/       # Package registry: publish / install / fork / export
     └── server/         # Server composition fn-defs
+
+external-packages/      # Packages kept OUT of the prod `resources` tree
+├── mathx/              # External Type-2 (impl+fns) — also its own repo,
+│                       #   pulled in by the git coord in the manifest below
+└── examples/           # Pedagogical fn-defs — dev/test only (an :extra-paths
+                        #   entry in the :dev/:test aliases), never in prod
+
+resources/executor-packages.edn   # The operator's manifest of EXTERNAL Type-2
+                                  # packages: {:name :lib :coord}. build.clj
+                                  # bundles them; :app/packages loads them.
+                                  # See docs/PACKAGE_DISTRIBUTION.md § 5.
 ```
 
 ## Packages System

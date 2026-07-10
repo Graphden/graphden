@@ -1,0 +1,20 @@
+;; mathx.ops — the external package's fns. Declares the `:gcd` base-fn
+;; (impl in ops/impls.clj) and one composed fn-def over it, to prove BOTH
+;; halves (impl + fn-def) of an external Type-2 package load + run.
+
+{:namespace "mathx.ops"
+ :description "Extra maths operations (external Type-2 demo package)."
+ :fns
+ [{:name :gcd
+   :description "Greatest common divisor of two integers (Euclid)."
+   :args {:a {:type :int :description "First integer."}
+          :b {:type :int :description "Second integer."}}
+   :return-type :int
+   :effects #{}}
+
+  ;; A pure composition over the base-fn — `gcd` with 12, leaving `:b` free.
+  ;; Proves the external package's fn-defs compose like any built-in.
+  {:name :gcd-with-12
+   :description "gcd(12, n) — the external base-fn seeded with 12."
+   :parent :gcd
+   :args {:a {:value 12}}}]}

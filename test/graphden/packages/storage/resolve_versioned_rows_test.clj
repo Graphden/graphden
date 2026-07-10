@@ -17,8 +17,6 @@
    makes it deterministic without masking a real bug."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.composition.interface :as fn-composition]
-    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
@@ -157,8 +155,7 @@
   ;; the first `exec/execute` pays the registry rebuild once for
   ;; the entire batch instead of once per entity type.
   (let [all-fns (vec (mapcat resolve-call-shape-fns call-shapes))]
-    (fn-composition/sync-fns-to-storage! *storage* all-fns)
-    (exec-ctx/invalidate-graph-cache! *context*)
+    (setup/sync-and-invalidate! *context* *storage* all-fns)
     (doseq [{:keys [public-name entity-name]} call-shapes]
       (testing (str (name entity-name)
                     " — graph output matches Clojure resolve-all-entities")

@@ -16,8 +16,6 @@
    rows)."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.composition.interface :as fn-composition]
-    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.config :as config]
@@ -47,10 +45,10 @@
 
 (defn- sync!
   [fn-defs]
-  (fn-composition/sync-fns-to-storage! *storage* fn-defs)
-  ;; sync-fns-to-storage! writes rows but doesn't touch the compiled
-  ;; registry — invalidate so the next execute reloads from storage.
-  (exec-ctx/invalidate-graph-cache! *context*))
+  ;; Delta-invalidate on just the synced fns (setup helper) rather than a full
+  ;; 1-arity clear — a full clear recompiled the whole golden [core web app]
+  ;; registry (~30s) on the next execute and dominated this test's runtime.
+  (setup/sync-and-invalidate! *context* *storage* fn-defs))
 
 
 (defn- sync-factorial!

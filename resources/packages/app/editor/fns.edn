@@ -37,6 +37,8 @@
                   "packages/app/editor/editor-create-type.js"
                   "packages/app/editor/editor-data.js"
                   "packages/app/editor/editor-layout.js"
+                  ;; SVG edge layer — needs `taxiBendX` from editor-layout.js.
+                  "packages/app/editor/editor-edges-svg.js"
                   "packages/app/editor/editor-literal-types.js"
                   "packages/web/runtime/graphden-forms.js"
                   "packages/app/editor/editor-value-form.js"

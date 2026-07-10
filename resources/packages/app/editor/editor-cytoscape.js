@@ -20,8 +20,6 @@ function buildCytoscapeStyles() {
   const cardBg = cssVar('--card-bg');
   const cardBorder = cssVar('--card-border');
   const cardFg = cssVar('--card-fg');
-  const edgeColor = cssVar('--fg');
-  const accent = cssVar('--accent');
   return [
   // fn node (base dimensions, used for calculating size).
   // Width/height come from precomputed layoutWidth/layoutHeight on node.data
@@ -78,58 +76,13 @@ function buildCytoscapeStyles() {
       return node.data('layoutHeight') || 36;
     }
   }},
-  // Edge - taxi style
+  // Edges are drawn as SVG paths in `#edge-layer` (editor-edges-svg.js), where
+  // the path and its hit-zone are the same geometry and the theme is plain CSS.
+  // Cytoscape still holds the edge topology — it is what `gv.edges()` walks —
+  // but it must not paint anything, nor intercept a pointer over one.
   { selector: 'edge', style: {
-    'width': 2,
-    'line-color': edgeColor,
-    'line-style': 'solid',
-    'curve-style': 'taxi',
-    'taxi-direction': 'rightward',
-    // Direction markers — one at each end, different shapes so the edge
-    // visually reads "arg-slot of source fn ◯──▸ value fn":
-    //   source: filled circle = socket/pin on the owning fn's arg
-    //   target: triangle arrow = points at the referenced (value-producing) fn
-    // Subtle at default scale; scales with line width via `arrow-scale`.
-    'source-arrow-shape': 'circle',
-    'source-arrow-color': edgeColor,
-    'source-arrow-fill': 'filled',
-    'target-arrow-shape': 'triangle',
-    'target-arrow-color': edgeColor,
-    'target-arrow-fill': 'filled',
-    'arrow-scale': 0.9,
-    // Bend AFTER the source node's column ends, so the vertical segment lands
-    // in the inter-column gap. Without this, edges from a narrow node bend
-    // INSIDE the column at source.right + 40px, which can collide with a
-    // wider sibling node sharing the same column (different row).
-    //
-    // `taxi-turn` wants the DISTANCE from the source's right edge; taxiBendX
-    // (editor-layout.js) is the absolute bend X shared with the hit-test and
-    // the edge-label anchor.
-    'taxi-turn': function(edge) {
-      var src = edge.source();
-      return taxiBendX(src) - (src.position().x + src.width() / 2);
-    },
-    'taxi-turn-min-distance': '10px',
-    'source-endpoint': 'outside-to-node',
-    'target-endpoint': 'outside-to-node'
-  }},
-  // Edge labels are rendered as HTML overlays (see createEdgeLabelOverlay)
-  // — Cytoscape's target-label doesn't render multi-line text reliably with
-  // taxi edges, so we render them as positioned divs instead.
-  //
-  // Unset edges keep the same solid line — the absence of a value at the
-  // edge's endpoint (only a small `+` binder, not a fn card) is sufficient
-  // signal that the slot is unbound. Type expectations read off the
-  // type-chip on the edge label, not from a separate placeholder card.
-  // Hover highlight: edges fan out from a single fn's right edge and converge
-  // onto single target nodes, so any hover lights up the whole visual bundle
-  // (all edges that share the hovered edge's source OR target). Accent blue
-  // reads as "interactive" without fighting the monochrome node aesthetic.
-  { selector: 'edge.edge-hovered', style: {
-    'line-color': accent,
-    'source-arrow-color': accent,
-    'target-arrow-color': accent,
-    'z-index': 999
+    'opacity': 0,
+    'events': 'no'
   }}
   ];
 }
@@ -145,33 +98,12 @@ function applyThemeToCytoscape() {
   const c = window.cy;
   if (!c || typeof c.style !== 'function') return;
   c.style().fromJson(buildCytoscapeStyles()).update();
-  if (typeof updateEdgeWidthForZoom === 'function') updateEdgeWidthForZoom();
 }
 window.applyThemeToCytoscape = applyThemeToCytoscape;
 
 // ============================================================================
 // CYTOSCAPE INITIALIZATION
 // ============================================================================
-
-// Floor for the rendered edge thickness in CSS pixels — just high enough that
-// sub-pixel anti-aliasing still produces a visible line. Kept deliberately low
-// so edges don't look disproportionately thick when the rest of the graph is
-// small: they scale naturally down to this threshold and then hold.
-const MIN_EDGE_PIXELS = 0.75;
-// Edge thickness in graph units at zoom=1 (matches the static stylesheet).
-const BASE_EDGE_WIDTH = 2;
-
-/**
- * Let edge thickness scale with zoom, but don't let the rendered pixel width
- * fall below MIN_EDGE_PIXELS — below that sub-pixel rendering makes the line
- * disappear entirely.
- */
-function updateEdgeWidthForZoom() {
-  if (!cy) return;
-  const z = cy.zoom();
-  const w = Math.max(BASE_EDGE_WIDTH, MIN_EDGE_PIXELS / z);
-  cy.edges().style('width', w);
-}
 
 /**
  * `cy.fit` thinks of the canvas as the full container, but with the
@@ -256,134 +188,19 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     fitInVisibleArea(50);
   }
 
-  // Event handlers for pan/zoom. These fire on every wheel tick and every
-  // drag delta, so they must stay O(1): the overlays ride the layer's
-  // transform and need no per-node work here.
+  // Pan/zoom fires on every wheel tick and every drag delta, so it must stay
+  // O(1). The overlays and the edge paths both ride the layer's transform;
+  // only the stroke widths need a nudge, and those are two attribute writes.
   cy.on('pan zoom', function() {
     applyViewportTransform();
     updateZoomSlider();
-    updateEdgeWidthForZoom();
   });
-  // Seed the zoom-aware edge width once on init so edges don't vanish when
-  // the initial `cy.fit` picks a small zoom (big graphs) before any user pan/zoom.
-  updateEdgeWidthForZoom();
 
-  // Edge-hover highlight. Two regimes based on pointer position on the edge:
-  //   - Near the SOURCE endpoint (the circle at the fn side) → light up the
-  //     whole outgoing bundle, same as hovering the fn itself. The circle
-  //     visually represents the "pin on the fn" so hovering it should act
-  //     at the fn level.
-  //   - Anywhere else along the edge → light up every sibling edge whose
-  //     taxi path actually passes under the cursor. Sibling verticals
-  //     overlap when several children stack on the same side of the source;
-  //     Cytoscape's hit-test only picks one of them, so without this we'd
-  //     light up just one of the two-or-more lines drawn at that pixel —
-  //     looking random to the user. Edges whose vertical run lies on the
-  //     opposite side of the cursor (i.e. children above when cursor is
-  //     below source) are correctly excluded by the segment-containment
-  //     check.
-  // SOURCE_CIRCLE_RADIUS is in graph units (matches arrow-scale 0.9 × default
-  // triangle half-length plus a small slack) so the hit-zone feels consistent
-  // across zoom levels — Cytoscape reports `evt.position` in graph coords.
-  const SOURCE_CIRCLE_RADIUS = 14;
-  // Cursor-to-segment tolerance (graph units). Mouse: tight, since the
-  // cursor lands on a single pixel. Touch: looser to compensate for
-  // finger imprecision (a tap on the overlap zone may register a few
-  // graph units off the line) but still small enough to not catch
-  // unrelated rows above or below.
-  const SEGMENT_TOL_MOUSE = 4;
-  const SEGMENT_TOL_TOUCH = 14;
-
-  function edgeSourceHit(evt) {
-    const p = evt.position;
-    const src = evt.target.sourceEndpoint();
-    if (!p || !src) return false;
-    const dx = p.x - src.x;
-    const dy = p.y - src.y;
-    return (dx * dx + dy * dy) <= SOURCE_CIRCLE_RADIUS * SOURCE_CIRCLE_RADIUS;
-  }
-
-  // Returns the collection of sibling edges whose taxi path (any of the three
-  // segments) passes within `tol` of the cursor. The bend X comes from the
-  // shared `taxiBendX` (editor-layout.js), so the hit-zone can never drift
-  // away from the line cytoscape actually draws.
-  function siblingEdgesUnderCursor(sourceNode, cursor, tol) {
-    const srcRight = sourceNode.position().x + sourceNode.width() / 2;
-    const srcY = sourceNode.position().y;
-    const bendX = taxiBendX(sourceNode);
-    return sourceNode.outgoers('edge').filter(e => {
-      const tgt = e.target();
-      const tgtLeft = tgt.position().x - tgt.width() / 2;
-      const tgtY = tgt.position().y;
-      const yLo = Math.min(srcY, tgtY);
-      const yHi = Math.max(srcY, tgtY);
-      // Segment 1: first horizontal (src.right → bendX) — shared by all
-      // sibling edges from this source, so any hit here lights the bundle.
-      if (cursor.x >= srcRight - tol && cursor.x <= bendX + tol
-          && Math.abs(cursor.y - srcY) <= tol) return true;
-      // Segment 2: vertical at bendX from src.y to tgt.y — overlaps with
-      // siblings on the same side of source.y. The bounds-check naturally
-      // excludes edges that turn the OTHER way before reaching cursor.y.
-      if (Math.abs(cursor.x - bendX) <= tol
-          && cursor.y >= yLo - tol && cursor.y <= yHi + tol) return true;
-      // Segment 3: second horizontal (bendX → tgt.left) — unique per edge.
-      if (cursor.x >= bendX - tol && cursor.x <= tgtLeft + tol
-          && Math.abs(cursor.y - tgtY) <= tol) return true;
-      return false;
-    });
-  }
-
-  function setHovered(desired) {
-    const desiredIds = new Set(desired.map(e => e.id()));
-    cy.edges('.edge-hovered').forEach(e => {
-      if (!desiredIds.has(e.id())) e.removeClass('edge-hovered');
-    });
-    desired.forEach(e => {
-      if (!e.hasClass('edge-hovered')) e.addClass('edge-hovered');
-    });
-  }
-
-  function clearHover() {
-    cy.edges('.edge-hovered').removeClass('edge-hovered');
-  }
-
-  function hoveredFor(edge, evt, tol) {
-    if (edgeSourceHit(evt)) return edge.source().outgoers('edge');
-    const matched = siblingEdgesUnderCursor(edge.source(), evt.position, tol);
-    // Fallback to just the hovered edge if our segment model doesn't catch it
-    // (shouldn't happen for taxi edges but defensive).
-    return matched.length > 0 ? matched : edge;
-  }
-
-  cy.on('mouseover', 'edge', function (evt) {
-    setHovered(hoveredFor(evt.target, evt, SEGMENT_TOL_MOUSE));
-  });
-  cy.on('mousemove', 'edge', function (evt) {
-    setHovered(hoveredFor(evt.target, evt, SEGMENT_TOL_MOUSE));
-  });
-  cy.on('mouseout', 'edge', function () {
-    clearHover();
-  });
-  // Touch (iPad/iPhone): a finger doesn't "hover", so we wire tapstart +
-  // tapdrag to mirror mouseover with a wider tolerance — finger taps
-  // register a few graph units off the pixel-precise line, and SEGMENT_TOL
-  // for mouse would miss the overlap. Lifting the finger clears.
-  function isTouchEvent(evt) {
-    const oe = evt?.originalEvent;
-    return !!(oe && (oe.touches !== undefined || oe.pointerType === 'touch'));
-  }
-  cy.on('tapstart', 'edge', function (evt) {
-    if (!isTouchEvent(evt)) return;
-    setHovered(hoveredFor(evt.target, evt, SEGMENT_TOL_TOUCH));
-  });
-  cy.on('tapdrag', 'edge', function (evt) {
-    if (!isTouchEvent(evt)) return;
-    setHovered(hoveredFor(evt.target, evt, SEGMENT_TOL_TOUCH));
-  });
-  cy.on('tapend', function (evt) {
-    if (!isTouchEvent(evt)) return;
-    clearHover();
-  });
+  // Edge hover lives in editor-edges-svg.js now. An SVG path is its own
+  // hit-zone, and `elementsFromPoint` returns every edge under the cursor —
+  // so the three-segment geometry that used to re-derive the taxi bend just to
+  // find the overlapping vertical runs cytoscape's hit-test missed is gone,
+  // along with the separate mouse/touch tolerances it needed.
 
   // Create overlays
   createNodeOverlays();
@@ -573,12 +390,11 @@ async function renderGraph(shouldFit = true) {
       cy.add(nodesToAdd);
     }
 
-    // Add edges after nodes are positioned
+    // Add edges after nodes are positioned. Their paths are (re)built from the
+    // topology by `renderEdges()`, further down in `createNodeOverlays`; stroke
+    // width is inherited from the group, so new edges need no per-edge refresh.
     if (edgesToAdd.length > 0) {
       cy.add(edgesToAdd);
-      // Re-apply the zoom-clamped width — the style() in updateEdgeWidthForZoom
-      // targets the edge set at call time, so newly-added edges need a refresh.
-      updateEdgeWidthForZoom();
     }
 
     // Apply layout positions with animation

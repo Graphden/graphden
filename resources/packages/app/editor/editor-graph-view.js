@@ -123,15 +123,15 @@ const gv = {
 
   // ── Edge hover ────────────────────────────────────────────────────────────
   //
-  // Hovering a fn card lights the whole bundle of edges leaving it. Which class
-  // does that is the drawing layer's business, so callers name the intent.
+  // Hovering a fn card lights the whole bundle of edges leaving it. How that is
+  // painted is the drawing layer's business (editor-edges-svg.js), so callers
+  // name the intent and never touch a class.
 
   highlightEdgesFrom(nodeId) {
-    const el = cy.getElementById(nodeId);
-    if (el?.length) el.outgoers('edge').addClass('edge-hovered');
+    highlightEdgesFromNode(nodeId);
   },
 
   clearEdgeHighlight() {
-    cy.edges('.edge-hovered').removeClass('edge-hovered');
+    clearEdgeHighlightSvg();
   },
 };

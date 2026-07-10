@@ -207,6 +207,46 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
   pointer-events: none;
 }
 
+/* Edge layer — inside #graph-layer, so it rides the same viewport transform and
+   its paths are emitted in graph coordinates. `overflow: visible` because graph
+   coordinates run negative in both axes and the paths spill far outside this
+   box. It carries no z-index, so it paints under the overlays (which do).
+
+   The 1px size is load-bearing: per SVG, a zero width or height on the root
+   `<svg>` disables rendering of the element entirely — the paths keep their
+   geometry (getBoundingClientRect still reports the right box) but nothing is
+   ever painted. It cannot be `0` like its parent. */
+#edge-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+}
+
+/* Stroke widths are set on #edge-lines / #edge-hits per zoom, in graph units,
+   and inherited by the paths. */
+.edge-line {
+  fill: none;
+  stroke: var(--fg);
+}
+
+/* Hovering an edge lights the whole visual bundle it belongs to. Markers use
+   `fill: context-stroke`, so the arrowheads follow without a rule of their own. */
+.edge-line.edge-hovered {
+  stroke: var(--accent);
+}
+
+/* The grab target: same path, fat transparent stroke. `pointer-events: stroke`
+   hit-tests the stroke area, which is what lets `elementsFromPoint` return
+   every edge whose vertical run passes under the cursor. */
+.edge-hit {
+  fill: none;
+  stroke: transparent;
+  pointer-events: stroke;
+}
+
 /* Floating expand button — visible only when sidebar is collapsed. Sits
    in viewport top-left, fades in once the shrink animation has cleared
    space for it so the icon doesn't appear over a still-shrinking

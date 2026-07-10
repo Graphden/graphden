@@ -210,6 +210,9 @@ function createNodeOverlays() {
   const container = getGraphLayer();
   if (!container) return;
 
+  // Edges first: they live in the same layer and must paint under the cards.
+  renderEdges();
+
   // Fn nodes (with ancestor list)
   gv.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
     // Skip if overlay already exists (preserved)
@@ -256,6 +259,9 @@ function applyViewportTransform() {
   const zoom = gv.zoom();
   layer.style.transform =
     'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')';
+  // Two attribute writes, so the edges stay legible and grabbable at any zoom
+  // without re-emitting a single path.
+  applyEdgeStrokeWidths();
 }
 
 /**
@@ -265,6 +271,9 @@ function applyViewportTransform() {
  */
 function syncOverlayGeometry() {
   if (!gv.ready()) return;
+
+  // Edge paths are graph-coordinate geometry too, so they move with the nodes.
+  syncEdgeGeometry();
 
   for (const [nodeId, overlay] of _overlaysByNodeId) {
     const node = gv.node(nodeId);

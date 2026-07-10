@@ -103,11 +103,17 @@
     (cond-> (ctx/create-context {:storage branch-storage
                                  :base-fns (:base-fns base-ctx)
                                  :clock (:clock base-ctx)
-                                 :allowed-effects (:allowed-effects base-ctx)})
+                                 :allowed-effects (:allowed-effects base-ctx)
+                                 ;; Inherit the executor's org shard — a branch
+                                 ;; ctx must compile the same slice of the graph
+                                 ;; as its base, or the pod would pull every
+                                 ;; tenant's fns back in through the side door.
+                                 :executor-orgs (:executor-orgs base-ctx)})
       ;; Privileged structural-read storage for THIS branch (§4 Design B): the
       ;; raw PG re-wrapped at branch-id, so `rebuild!` compiles every org's fns
-      ;; org-agnostically (isolation stays on the org-scoped `:storage` above at
-      ;; runtime). Absent in single-tenant → compile reads fall back to :storage.
+      ;; in this executor's shard (isolation stays on the org-scoped `:storage`
+      ;; above at runtime). Absent in single-tenant → compile reads fall back to
+      ;; :storage.
       (:pg-storage base-ctx)
       (assoc :pg-storage (:pg-storage base-ctx)
              :compile-storage (vs/->VersionedStorage (:pg-storage base-ctx) branch-id))

@@ -61,6 +61,15 @@
    :body "Application timed out."})
 
 
+(def ^:private app-misdirected
+  "421 — this pod's `:executor-orgs` shard doesn't hold this org, so its
+   handler fn was never compiled here. Say so instead of 404'ing the fn
+   and letting the tenant think their app is undeployed."
+  {:status 421
+   :headers {"Content-Type" "text/plain"}
+   :body "This app is served by a different executor."})
+
+
 (def default-app-timeout-ms
   "Wall-clock budget for a tenant handler (§3.4 step 7). Untrusted tenant code
    must be time-bounded — without it a single hanging/spinning handler blocks a
@@ -93,8 +102,17 @@
        ;; `:org` lookup, negligible next to the graph-handler `execute` below,
        ;; and always current (a `set-org-handler!` deploy takes effect at once).
        (let [handler-fn-id (read-handler-fn-id (:storage ctx) org)]
-         (if-not handler-fn-id
+         (cond
+           ;; Wrong pod: the org isn't in this executor's shard, so nothing of
+           ;; theirs is in the compiled registry. Checked BEFORE the handler
+           ;; lookup's verdict so a sharded miss never reads as "not deployed".
+           (not (cr/org-in-shard? (:executor-orgs ctx) org))
+           app-misdirected
+
+           (not handler-fn-id)
            app-not-configured
+
+           :else
            (let [result
                  (run-with-timeout
                    timeout-ms

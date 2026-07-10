@@ -25,16 +25,55 @@
 ;; Registry lifecycle
 ;; =============================================================================
 
+(defn org-in-shard?
+  "Is `org` part of the slice of the graph THIS executor is responsible
+   for? The single membership question, asked in two places: the compile
+   filter below (per row) and the request router (per request), which
+   must agree or a pod would serve requests for fns it never compiled.
+
+   `orgs` nil ⇒ this executor serves everything (single-tenant /
+   self-hosted). Otherwise it is a membership predicate over org-ids: a
+   SET is the usual value and is already a predicate; a hash-sharded
+   fleet passes a fn instead, so it never has to enumerate its tenants.
+
+   A nil `org` means an un-owned row — the shared platform graph (core /
+   web / app packages) that every executor needs. The public org, if the
+   deployment has one, is just another member: core deliberately doesn't
+   know its name (`tenancy.context/public-org`), so whoever builds the
+   ctx makes sure the predicate admits it."
+  [orgs org]
+  (or (nil? orgs) (nil? org) (boolean (orgs org))))
+
+
 (defn- read-graph
   "Read the slot/fn-slot/binding model entities from storage. Bundled
    so `rebuild!` and the on-demand free-arg resolver share the same
-   query shape."
-  [storage]
-  {:fns        (sp/query-entities storage :fn {})
-   :slots      (sp/query-entities storage :slot {})
-   :fn-slots   (sp/query-entities storage :fn-slot {})
-   :bindings   (sp/query-entities storage :binding {})
-   :list-items (sp/query-entities storage :binding-list-item {})})
+   query shape.
+
+   `orgs` (nil ⇒ no filtering, the single-tenant / self-hosted default)
+   restricts the graph to one executor's shard, so a pod compiles only
+   the orgs it serves instead of every tenant's fns. Filtering happens
+   after the read rather than in the where-clause because
+   `query-entities` only expresses equality while membership is a set or
+   a predicate — and the read is transient anyway; the compiled registry
+   is the thing we keep and the thing that was growing with tenant count.
+
+   Sharding is sound because a fn's ref closure never leaves its own
+   org ∪ the un-owned platform rows: a tenant can only bind refs to fns
+   its org-scoped storage let it see. `crud.entities/reject-cross-org-refs!`
+   turns that from an emergent property into an enforced one."
+  ([storage] (read-graph storage nil))
+  ([storage orgs]
+   (let [q (fn [entity]
+             (let [rows (sp/query-entities storage entity {})]
+               (if orgs
+                 (filterv #(org-in-shard? orgs (:org-id %)) rows)
+                 rows)))]
+     {:fns        (q :fn)
+      :slots      (q :slot)
+      :fn-slots   (q :fn-slot)
+      :bindings   (q :binding)
+      :list-items (q :binding-list-item)})))
 
 
 (defn- type-row-role
@@ -232,7 +271,7 @@
    on-demand by the next `execute` (via `registry`'s lazy fallback)."
   [ctx]
   (let [storage (compile-storage ctx)
-        graph (read-graph storage)]
+        graph (read-graph storage (:executor-orgs ctx))]
     (register-type-aliases-from-db! graph)
     graph))
 
@@ -337,7 +376,7 @@
     ctx
     (fn []
       (let [storage (compile-storage ctx)
-            graph (read-graph storage)
+            graph (read-graph storage (:executor-orgs ctx))
             _ (register-type-aliases-from-db! graph)
             base-fns (:base-fns ctx)
             lookups (assoc (l/cached-build-lookups graph)
@@ -400,7 +439,7 @@
 
       :else
       (let [storage (compile-storage ctx)
-            graph (read-graph storage)
+            graph (read-graph storage (:executor-orgs ctx))
             _ (register-type-aliases-from-db! graph)
             base-fns (:base-fns ctx)
             fns-map (if (map? (:fns graph))
@@ -460,7 +499,7 @@
    public-API translator."
   [ctx]
   (let [graph (or (some-> (:graph-cache ctx) deref)
-                  (read-graph (:storage ctx)))]
+                  (read-graph (:storage ctx) (:executor-orgs ctx)))]
     (assoc (l/cached-build-lookups graph)
            :base-fns (:base-fns ctx))))
 

@@ -418,6 +418,15 @@ enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user
   Так нет per-org компиляции и нет shared-`main` leak. ref-cache keyed
   `[org ref]`. Побочно чинит латентный баг app-router (его registry был
   public-only). Доказано `faas-app-test` (27/91), branch-router+lifecycle+rls.
+  **Уточнение (2026-07):** «registry держит fns всех org» — это дефолт, а не
+  инвариант. `:executor-orgs` на ctx сужает компиляцию до шарда пода
+  (`org-id ∈ predicate ∪ NULL`), чем и закрывается рост реестра по числу
+  тенантов, dedicated-под для платного тарифа и внешний executor. Изоляция
+  по-прежнему на runtime `:storage` + гейтах — шард это про РЕСУРСЫ, не про
+  безопасность. Корректность шарда держится на `reject-cross-org-refs!`
+  (`tenancy/storage.clj`): раньше «нет cross-org ref» было эмерджентным
+  следствием read-фильтра, теперь это проверка на записи. См.
+  [SCALING.md](SCALING.md).
 - **Follow-ups:**
   - **per-org branch-names** — `UNIQUE (org-id, name) NULLS NOT DISTINCT`
     (PG 15+). Разные org переиспользуют имя без cross-org коллизии/leak;

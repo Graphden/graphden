@@ -681,9 +681,26 @@
   (auth/single-token-provider token))
 
 
+(defn- parse-executor-orgs
+  "`\"public,acme,beta\"` → `#{\"public\" \"acme\" \"beta\"}`; blank / nil → nil
+   (compile the whole graph — the self-hosted default).
+
+   The operator must list the PUBLIC org explicitly if the deployment has
+   one: the platform packages live there once they are written through the
+   tenancy decorator, and a pod without them compiles nothing. Rows with a
+   NULL `:org-id` are un-owned and always in every shard, so a
+   non-tenancy deployment that sets this by accident still works."
+  [s]
+  (when (string? s)
+    (let [orgs (into #{} (comp (map str/trim) (remove str/blank?))
+                     (str/split s #","))]
+      (when (seq orgs) orgs))))
+
+
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
-             execute-guard app-router set-org-handler verify-domain user-ops]}]
+             execute-guard app-router set-org-handler verify-domain user-ops
+             executor-orgs]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -724,7 +741,15 @@
                    ;; Self-serve DNS-verify seam (§3.4 #2) — addon-only.
                    verify-domain (assoc :verify-domain verify-domain)
                    ;; User-model seam (§4.1) — create-user / login. Addon-only.
-                   user-ops (assoc :user-ops user-ops))]
+                   user-ops (assoc :user-ops user-ops)
+                   ;; Executor shard — the orgs whose fns THIS pod compiles.
+                   ;; Absent ⇒ the whole graph (self-hosted / single-tenant).
+                   ;; A collection or predicate from an addon passes through;
+                   ;; a comma-separated env string is parsed here.
+                   executor-orgs
+                   (assoc :executor-orgs (if (string? executor-orgs)
+                                           (parse-executor-orgs executor-orgs)
+                                           executor-orgs)))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client)

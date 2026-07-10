@@ -73,3 +73,36 @@
       (is (nil? (ar ctx (req "graphden.app")))))
     (testing "org with no handler → 404 (it's an app request, don't fall through)"
       (is (= 404 (:status (ar ctx (req "beta.graphden.app"))))))))
+
+
+;; ============================================================================
+;; Shard routing. A pod compiles only `:executor-orgs` (see
+;; `compile-runtime/org-in-shard?`), so a request for an org it doesn't hold
+;; must say "wrong pod" rather than pretend the app isn't deployed.
+;; ============================================================================
+
+(deftest make-app-router-misdirected-when-org-not-in-shard
+  (let [handler-id (random-uuid)
+        storage (org-storage {"acme" handler-id "beta" handler-id})
+        ar (app/make-app-router (subdomain/identity-org-resolver) "graphden.app" nil)]
+    (testing "no shard configured → every org is ours (self-hosted default)"
+      (let [ctx {:storage storage}]
+        (is (not= 421 (:status (ar ctx (req "acme.graphden.app")))))))
+
+    (testing "org outside this pod's shard → 421, not 404"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}}]
+        (is (= 421 (:status (ar ctx (req "beta.graphden.app")))))))
+
+    (testing "an org we DO hold is not misdirected"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}}]
+        (is (not= 421 (:status (ar ctx (req "acme.graphden.app")))))))
+
+    (testing "a shard predicate works the same as a set"
+      (let [ctx {:storage storage :executor-orgs (fn [o] (= "acme" o))}]
+        (is (= 421 (:status (ar ctx (req "beta.graphden.app")))))
+        (is (not= 421 (:status (ar ctx (req "acme.graphden.app")))))))
+
+    (testing "an unconfigured org in our shard still reads as 404, not 421"
+      (let [s (org-storage {"beta" nil})
+            ctx {:storage s :executor-orgs #{"beta"}}]
+        (is (= 404 (:status (ar ctx (req "beta.graphden.app")))))))))

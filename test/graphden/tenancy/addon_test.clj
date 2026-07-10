@@ -266,3 +266,46 @@
                                      :headers {"authorization" "Bearer alice-tok"}
                                      :query-string nil}))
         "without a grant-store wired, tenant writes pass (subject only to OrgScoped + effects)")))
+
+
+;; --- Shard routing: 421 when this pod doesn't hold the request's org ---
+
+(defn- dispatch-status
+  "Run a GET through the request-scope and return the response. The handler
+   returns 200 when it actually runs, so a 421 can't be confused with it."
+  [base-ctx]
+  (br/dispatch (router-with base-ctx (fn [_req] {:status 200}))
+               {:request-method :get :uri "/x" :headers {} :query-string nil}))
+
+
+(deftest request-scope-421s-an-org-outside-this-pods-shard
+  (let [scope (ig/init-key :tenancy/request-scope {})]
+    (testing "no shard configured → serve everything (self-hosted default)"
+      (is (= 200 (:status (dispatch-status
+                            {:auth-provider (org-provider "acme")
+                             :request-scope scope})))))
+
+    (testing "org outside the shard → 421 Misdirected Request"
+      (is (= 421 (:status (dispatch-status
+                            {:auth-provider (org-provider "beta")
+                             :request-scope scope
+                             :executor-orgs #{"public" "acme"}})))))
+
+    (testing "org inside the shard → served"
+      (is (= 200 (:status (dispatch-status
+                            {:auth-provider (org-provider "acme")
+                             :request-scope scope
+                             :executor-orgs #{"public" "acme"}})))))
+
+    (testing "anonymous/public is served by a pod whose shard admits public"
+      (is (= 200 (:status (dispatch-status
+                            {:request-scope scope
+                             :executor-orgs #{"public" "acme"}})))))
+
+    (testing "a shard that omits the public org fails loudly on the first request
+              rather than 404'ing every platform fn"
+      (is (= 421 (:status (dispatch-status
+                            {:request-scope scope
+                             :executor-orgs #{"acme"}})))))
+
+    (is (= "public" (tc/current-org)) "org binding restored after dispatch")))

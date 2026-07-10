@@ -82,7 +82,12 @@
   :pg-storage #ig/ref :db/postgres
   ;; ctx-scoped base-fns map (sidesteps the process-global registry).
   :base-fns #ig/ref :exec/base-fns
-  :auth-provider #ig/ref :auth/provider}
+  :auth-provider #ig/ref :auth/provider
+  ;; Executor shard: comma-separated org-ids this pod compiles, e.g.
+  ;; "public,acme". Unset ⇒ the whole graph (self-hosted default, and
+  ;; what every single-tenant deployment wants). List "public"
+  ;; explicitly — the platform packages live there.
+  :executor-orgs #or [#env GRAPHDEN_EXECUTOR_ORGS nil]}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on
  ;; fn-entities so every composed fn is already in storage before we

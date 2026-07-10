@@ -278,6 +278,25 @@
    :body "{\"ok\":false,\"error\":\"forbidden\"}"})
 
 
+(def ^:private misdirected-response
+  "421 Misdirected Request — the semantically exact status: the request
+   reached a server that cannot produce an authoritative response for
+   this authority, and the client should retry on another connection.
+
+   Emitted when this pod's `:executor-orgs` shard doesn't include the
+   request's org (see `compile-runtime/org-in-shard?`). The pod compiled
+   only its own shard, so it doesn't hold that org's fns; serving the
+   request would 404 every fn rather than fail honestly.
+
+   NOT a security response. A tenant that reaches the wrong pod is not
+   doing anything wrong — the load balancer sent it there. Cross-org
+   Host-spoofing is a different thing and still gets a 403, which is why
+   that check runs first."
+  {:status 421
+   :headers {"Content-Type" "application/json"}
+   :body "{\"ok\":false,\"error\":\"misdirected-request\"}"})
+
+
 (def ^:private domain-error-status
   "The tenancy-admin seam impls throw these domain `:type`s on
    bad / duplicate / missing input. Map each to its HTTP status so the
@@ -405,6 +424,16 @@
                        ;; org; the subdomain can only deny, never widen.
                        cross-org?
                        forbidden-response
+                       ;; Wrong pod: this executor's shard doesn't include the
+                       ;; request's org, so its fns were never compiled here.
+                       ;; Runs AFTER the cross-org check so a Host-spoofing
+                       ;; attempt still gets 403 rather than a routing hint,
+                       ;; and BEFORE the public-org short-circuit so a
+                       ;; misconfigured shard (one that omits the public org,
+                       ;; where the platform packages live) fails loudly at the
+                       ;; first request instead of 404'ing every fn.
+                       (not (cr/org-in-shard? (:executor-orgs ctx) org))
+                       misdirected-response
                        ;; Platform / admin — no restriction.
                        (= org tc/public-org)
                        (run)

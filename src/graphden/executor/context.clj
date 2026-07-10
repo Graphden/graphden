@@ -163,9 +163,17 @@
    - :execute-guard  Optional per-namespace execute guard (§4.2) — a fn
                 `(fn [ctx fn-id] …)` `compile-runtime/execute` consults once
                 per top-level execute; throws `:authz/forbidden` on a denied
-                tenant execute. Absent → no execute authorization."
+                tenant execute. Absent → no execute authorization.
+   - :executor-orgs  Optional membership predicate over org-ids — usually a
+                set, or a fn for a hash-sharded fleet that doesn't enumerate
+                its tenants. The compiled registry then holds only those
+                orgs' fns plus the un-owned platform rows, instead of every
+                tenant's. nil (the default, and the only value single-tenant
+                ever uses) compiles the whole graph. Admit the public org
+                explicitly — core doesn't know its name."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
-           execute-guard app-router set-org-handler verify-domain user-ops]}]
+           execute-guard app-router set-org-handler verify-domain user-ops
+           executor-orgs]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -211,7 +219,15 @@
       ;; User-model seam (§4.1) — `{:create-user … :login …}` the
       ;; `:invoke-create-user` / `:invoke-login` base-fns call. Login mints a
       ;; session `:token`; the storage-token-provider resolves it. Addon-only.
-      (cond-> user-ops (assoc :user-ops user-ops))))
+      (cond-> user-ops (assoc :user-ops user-ops))
+      ;; Executor shard — which orgs' fns this pod compiles. Read by
+      ;; `compile-runtime/read-graph`. nil ⇒ the whole graph. A collection
+      ;; becomes a set (which is itself the membership predicate); a fn is
+      ;; taken as the predicate directly.
+      (cond-> executor-orgs
+        (assoc :executor-orgs (if (fn? executor-orgs)
+                                executor-orgs
+                                (set executor-orgs))))))
 
 
 (defn current-time-ms

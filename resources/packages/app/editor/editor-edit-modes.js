@@ -218,7 +218,7 @@ function enterArgValueEditMode(arg, anchorEl) {
     // item rows, leaving `lookups` stale. `loadGraphData` re-fetches the
     // index + subtree + rich-types (enough to reflect the value + any
     // inferred-type shift) WITHOUT `initGraph`'s value-kinds/services
-    // re-fetch + cytoscape re-init.
+    // re-fetch + graph re-render.
     onSaved() { if (typeof loadGraphData === 'function') loadGraphData(); },
     // Delete drops the binding so the slot reverts to a free-arg
     // placeholder — the single inline path for switching a bound
@@ -1093,7 +1093,7 @@ function promptLiteralForAppend(fnId, anchorEl, expectedType) {
     // No `onSaved` refresh — `postSequenceAppend` already fires the
     // lighter `loadGraphData` (index + subtree + rich-types) on success.
     // A second `initGraph` here double-pulled the full index + types +
-    // value-kinds + services and re-inited cytoscape for nothing (the
+    // value-kinds + services and re-rendered the graph for nothing (the
     // ref-append path has never done it). See `postSequenceAppend`.
   });
 }
@@ -1108,7 +1108,7 @@ async function postSequenceAppend(fnId, body) {
     if (r?.ok) {
       // Sequence edits change binding-list-item rows, not fn structure/
       // value-kinds — the lighter `loadGraphData` (index + subtree +
-      // rich-types) reflects them without the `initGraph` cytoscape re-init.
+      // rich-types) reflects them without the `initGraph` graph re-render.
       if (typeof loadGraphData === 'function') loadGraphData();
       return true;
     }

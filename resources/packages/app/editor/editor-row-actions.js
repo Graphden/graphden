@@ -93,7 +93,7 @@ function ensureRowActionsPopover() {
 //
 // If there's not enough room on the right, fall back to LEFT-of-card.
 //
-// The popover scales with the cytoscape zoom so it matches the
+// The popover scales with the viewport zoom so it matches the
 // scaled-up card chrome — the in-card icons all live inside an
 // overlay that gets `transform: scale(zoom)` applied (see
 // editor-overlays.js positionOverlays). Without this match the
@@ -619,7 +619,7 @@ registerActionHandler('delete-fn', (btn, e, host) => {
 });
 
 
-// Cytoscape zoom/pan re-position — when the canvas zooms or pans
+// Viewport zoom/pan re-position — when the graph zooms or pans
 // while a popover is open, the anchor's bounding rect moves AND
 // changes scale, so the popover would otherwise stick to its old
 // (now-wrong) position and size. Re-run positionRowActionsPopover

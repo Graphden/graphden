@@ -11,7 +11,7 @@ GraphConstraints, StorageCRUD + PostgreSQL (recursive-CTE) + VersionedStorage,
 the compile-at-startup executor, the full base-fn set (arithmetic / logic / HOF
 / collections / strings / system / web: http, reitit, html, crud, ring-adapter,
 http-client), the type system (refinements / records / lists / unions /
-variants + rich-type registry), the Cytoscape editor, the REST API
+variants + rich-type registry), the visual graph editor, the REST API
 (`/api/graph/*`, `/api/entities/*`, `/api/sequence/*`, `/api/execute*`), branch
 versioning, the tenancy addon (orgs / users / grants / RLS / effect-gate / FaaS
 — see [PLATFORM_PLAN.md](PLATFORM_PLAN.md)), the package registry

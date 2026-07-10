@@ -160,9 +160,9 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
  * lockstep with the CSS transition.
  *
  * Trade-off: when the sidebar is open it covers the leftmost slice of
- * the graph. We compensate at fit time (editor-cytoscape.js) by
- * panning the freshly-fitted graph half the sidebar width to the
- * right so the visible portion stays centered. */
+ * the graph. We compensate at fit time (fitInVisibleArea in
+ * editor-render.js) by panning the freshly-fitted graph half the
+ * sidebar width to the right so the visible portion stays centered. */
 #app { height: 100vh; }
 #main-container { position: relative; height: 100%; }
 #side-menu {

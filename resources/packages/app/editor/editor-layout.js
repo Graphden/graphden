@@ -53,9 +53,9 @@ function computeRowCenters(gridPos, heightOf) {
 // horizontally into its target. `taxiBendX` is the single source of truth for
 // where that turn happens, in GRAPH coordinates.
 //
-// Three callers depend on it and MUST agree, or the edge and its label drift
-// apart: the cytoscape `taxi-turn` style (which wants a distance, not an
-// absolute X), the edge-hover hit-test, and the edge-label anchor.
+// Two callers depend on it and MUST agree, or the edge and its label drift
+// apart: the SVG edge path (editor-edges-svg.js), which draws the bend and is
+// its own hit-zone, and the edge-label anchor (editor-overlay-manager.js).
 //
 // The bend clears the source's whole column, so it never lands inside a wider
 // sibling sharing that column. `colRightX` is stamped once per layout
@@ -429,7 +429,7 @@ async function fetchBackendLayout() {
     // Augment node data with colRightX (right edge of node's column).
     // Used by edge taxi-turn so the bend lands in the inter-column gap,
     // never inside a wider sibling node sharing the same column.
-    // Also store computed layoutWidth/layoutHeight so CY node sizing matches
+    // Also store computed layoutWidth/layoutHeight so graph node sizing matches
     // the actual overlay rendering (avoids overlay overflow into next row).
     nodes.forEach(n => {
       const pos = gridPos[n.data.id];

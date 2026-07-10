@@ -153,7 +153,7 @@ function installResizeHandle() {
 
 // Toggles the sidebar collapsed state. With overlay layout the sidebar
 // slides via CSS `transform: translateX(...)` over a graph-container
-// that never reflows — cytoscape stays completely idle, edges don't
+// that never reflows — the graph stays completely idle, edges don't
 // recompute, and no pan compensation is needed. The whole animation
 // is GPU-composited.
 function toggleCollapsed(targetCollapsed) {

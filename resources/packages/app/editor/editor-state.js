@@ -15,7 +15,7 @@ window.BUILD_HASH = BUILD_HASH;
 //
 // `let` (not `const`) on every binding below — these are MUTABLE
 // globals reassigned from OTHER files in the bundle (editor-main,
-// editor-cytoscape, editor-edit-modes, …). The editor ships as a
+// editor-render, editor-edit-modes, …). The editor ships as a
 // single concatenated <script> rather than ES modules, so plain
 // top-level `let` IS the cross-file mutable storage.
 //
@@ -83,7 +83,7 @@ function rebuildImplementationFnIds() {
 //   L > fullDepth + 1       → cascade: fullDepth = L - 1, partial = {fn}
 let expansionState = new Map();  // nodeId -> {fullDepth, partialFns}
 let previewState = new Map();    // nodeId -> {fullDepth, partialFns}
-let anchorNodeId = null;          // cytoscape node id (full, incl. expansion prefix) that should stay stationary during layout
+let anchorNodeId = null;          // graph node id (full, incl. expansion prefix) that should stay stationary during layout
 
 // UI state flags
 let rebuildingOverlays = false;   // Prevents mouseleave during overlay rebuild

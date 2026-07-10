@@ -244,7 +244,7 @@ const EDGE_LABEL_POST_BEND_GAP = 18;
 const EDGE_LABEL_TARGET_GAP = 6;
 
 /**
- * Move the whole overlay layer to match Cytoscape's viewport. O(1) — this is
+ * Move the whole overlay layer to match the viewport. O(1) — this is
  * the hot path (every wheel tick, every pan delta), so it must not touch
  * individual overlays.
  */

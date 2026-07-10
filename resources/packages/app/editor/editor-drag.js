@@ -36,7 +36,7 @@ function createDragHandle(overlay, graphNode) {
 
     const onMove = (moveE) => {
       // Touch: prevent browser scroll/zoom AND stop the move from reaching
-      // Cytoscape's own touch handlers in case they listen on document.
+      // the viewport's own touch handlers, so a node drag doesn't also pan.
       if (isTouch) {
         if (moveE.cancelable) moveE.preventDefault();
         moveE.stopPropagation();

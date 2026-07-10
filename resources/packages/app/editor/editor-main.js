@@ -1,5 +1,5 @@
 // Editor Main - Entry point and initialization
-// Depends on: editor-state.js, editor-data.js, editor-ui.js, editor-cytoscape.js
+// Depends on: editor-state.js, editor-data.js, editor-ui.js, editor-render.js
 
 // ============================================================================
 // SUBTREE-AWARE GRAPH LOADER
@@ -118,7 +118,7 @@ async function initGraph() {
 
 // Re-fetch the graph state after a mutation (e.g. crud.secrets/create
 // → new fn-def + binding appear in `/api/graph/entities`). Callable
-// from editor-secrets.js etc. so the ns-tree / cytoscape pick up
+// from editor-secrets.js etc. so the ns-tree / graph pick up
 // the new entries without a full page reload. Kept as a separate
 // fn from `init()` so it doesn't also re-fire the auth / hash
 // navigation work.

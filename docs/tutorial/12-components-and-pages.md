@@ -233,8 +233,8 @@ were built with `:dispatch-action` / `:dispatch-custom` /
 `submit-form` will work — no extra wiring.
 
 > **Why not `/assets/editor.js`?** That bundle is ~700 KB
-> and initialises Cytoscape + WebSocket subscriptions that
-> crash a non-editor page. `/assets/graphden-runtime.js`
+> and initialises the graph renderer + WebSocket subscriptions
+> that crash a non-editor page. `/assets/graphden-runtime.js`
 > is the minimal subset (~9 KB) — just the dispatcher +
 > built-in handlers.
 

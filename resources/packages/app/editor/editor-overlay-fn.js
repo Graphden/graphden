@@ -16,7 +16,7 @@ function attachPreviewHandlers(el, triggerPreview, onPreviewLeave, restoreStyles
   el.addEventListener('mouseleave', () => { onPreviewLeave(); restoreStyles(); });
 }
 
-// Walk a fn-card's incoming cytoscape edges and return the SINGLE
+// Walk a fn-card's incoming graph edges and return the SINGLE
 // editable arg if (a) there's exactly one such arg and (b) the
 // owning fn is in the immediate implementation closure of the
 // nav-root + the user is signed in. Returns null otherwise. Used to

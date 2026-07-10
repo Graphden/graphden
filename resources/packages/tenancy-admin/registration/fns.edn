@@ -190,4 +190,46 @@
   {:name :set-org-handler-route
    :description "POST /api/orgs/handler — point an org at its app handler (name, handler-fn-id). Auth-required; platform-only."
    :parent :post
-   :args {:path "/api/orgs/handler" :handler :_org-handler-handler}}]}
+   :args {:path "/api/orgs/handler" :handler :_org-handler-handler}}
+
+  ;; ---------------------------------------------------------------------
+  ;; SET ORG EXECUTION MODE — POST /api/orgs/execution-mode {name mode}.
+  ;; Flips an org between "hosted" and "byo" (docs/SCALING.md § external
+  ;; executor). Platform-only (`:org` is tenant-forbidden). Provisioning a
+  ;; BYO customer is: create the org, mint its executor token, flip it byo.
+  ;; ---------------------------------------------------------------------
+  {:name :set-org-execution-mode
+   :description "Set an :org's :execution-mode (\"hosted\" / \"byo\"). Drops the byo memo so the flip is effective immediately. Reads the tenancy addon's :org entity; throws if absent."
+   :args {:name {:type :text :description "Org slug."}
+          :execution-mode {:type :text :description "\"hosted\" or \"byo\"."}}
+   :return-type :nullable-keyword-map
+   :effects #{:db}}
+
+  {:name :_org-mode-form-data
+   :parent :parse-form-body-kw}
+
+  {:name :_org-mode-name
+   :parent :get
+   :args {:coll :_org-mode-form-data :key {:value :name} :default {:value ""}}}
+
+  {:name :_org-mode-value
+   :parent :get
+   :args {:coll :_org-mode-form-data :key {:value :execution-mode} :default {:value ""}}}
+
+  {:name :_org-mode-do
+   :parent :set-org-execution-mode
+   :args {:name :_org-mode-name :execution-mode :_org-mode-value}}
+
+  {:name :_org-mode-result-text
+   :parent :to-str
+   :args {:value :_org-mode-do}}
+
+  {:name :_org-mode-handler
+   :description "Ring handler for POST /api/orgs/execution-mode — flips the org's execution mode, returns the updated row as text/html."
+   :parent :html-ok-response
+   :args {:body :_org-mode-result-text}}
+
+  {:name :set-org-execution-mode-route
+   :description "POST /api/orgs/execution-mode — flip an org between hosted and byo (name, execution-mode). Auth-required; platform-only."
+   :parent :post
+   :args {:path "/api/orgs/execution-mode" :handler :_org-mode-handler}}]}

@@ -7,7 +7,8 @@
   (:require
     [clojure.string :as str]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.tenancy.context :as tc]))
 
 
 (defn- token-sha256
@@ -63,8 +64,24 @@
                                         (string? handler-fn-id) parse-uuid)})))
 
 
+;; Flip an org between "hosted" and "byo" (docs/SCALING.md § external
+;; executor). A "byo" org runs its graph on the customer's own executor;
+;; hosted pods 421 it. Find the org row by (unique) name, set
+;; `:execution-mode`, and drop the byo memo so the flip takes effect at once
+;; instead of within the ~5s TTL. Platform-only by entity guard (`:org` is
+;; tenant-forbidden).
+(defbase set-org-execution-mode
+  [name execution-mode]
+  (when-let [row (first (sp/query-entities (:storage ctx) :org {:name name}))]
+    (let [result (sp/update-entity (:storage ctx) :org (:id row)
+                                   {:execution-mode execution-mode})]
+      (tc/invalidate-byo-cache! name)
+      result)))
+
+
 (def impls
   {:create-token create-token
    :create-org create-org
    :create-domain create-domain
-   :set-org-handler set-org-handler})
+   :set-org-handler set-org-handler
+   :set-org-execution-mode set-org-execution-mode})

@@ -567,6 +567,7 @@
                   :api-packages-panel-fork
                   :api-packages-panel-publish
                   :api-export-graph
+                  :api-export-graph-rows
                   :api-secrets-root
                   :api-secret-inline-binding
                   :api-secret-delete

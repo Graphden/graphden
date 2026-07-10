@@ -172,13 +172,19 @@ their OWN hardware, but the graph stays in our Postgres. Built in pieces:
   it serves that org and 421s everything else. `byo-org?` reads `:org` in the
   public context (before the tenant org is bound — `:org` is tenant-hidden
   once scoped) with a ~5s memo.
-- **Storage-over-HTTP — NOT built.** The BYO executor still needs a read path
-  to the graph without Postgres credentials: a `RemoteStorage` leaf
-  implementing the minimal read surface (`query-entities`, `read-entity(s)`,
-  and an `ExecutionGraph` satisfy-gate; see [EXTENDING.md](EXTENDING.md)),
-  bootstrapping the whole graph from a raw-rows export and holding it in
-  memory. `GET /api/export/graph` is most of the bulk read but emits fn-def
-  maps, not the raw slot/binding rows the compiler wants.
+- **Storage-over-HTTP — DONE.** `graphden.storage.remote.core/RemoteStorage`
+  is a read-only leaf implementing the minimal read surface (`query-entities`,
+  `read-entity(s)`, and an `ExecutionGraph` satisfy-gate; see
+  [EXTENDING.md](EXTENDING.md)). It bootstraps the whole graph over HTTP from
+  the new `GET /api/export/graph-rows` (the RAW five-table rows the compiler
+  wants — `/api/export/graph` emits fn-def maps, the migration shape), which
+  is org-scoped so a BYO executor authenticated as its org gets exactly its
+  org + public rows. The rows live in an in-memory index, so compile + execute
+  read from memory with no per-read round-trip (the compiled-registry model).
+  Writes throw `:remote-storage/read-only` — this executor serves the graph,
+  it doesn't author it; the FaaS app path is read-only and works, the
+  `/api/execute` persistence path stays on the hosted editor. `refresh!`
+  re-fetches (called by the SSE source below).
 - **SSE invalidation — NOT built.** The BYO executor has no PG connection, so
   it can't `LISTEN`. It needs an SSE source that parses the same
   `graphden_events` wire format and calls the existing transport-agnostic

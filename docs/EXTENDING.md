@@ -131,6 +131,32 @@ create a new backend:
 (contract/run-storage-tests create-my-storage)
 ```
 
+### Read-only / remote backends (the minimal surface)
+
+A backend that only needs to SERVE a graph — compile fn-defs and execute
+them, without authoring — implements far less than a full read/write
+backend. The executor's compile + execute path calls only:
+
+- `StorageCRUD/query-entities` — with `{}`, `{:name v}`, `{:id [ids]}`,
+  `{:fn-id [ids]}` shapes (equality on scalars, membership on vectors);
+- `StorageCRUD/read-entity` and `StorageBatchCRUD/read-entities`;
+- and it must *declare* `ExecutionGraph` to pass
+  `executor.context/create-context`'s `satisfies?` gate — the method is
+  never called (the compiled registry reads the tables and does the BFS
+  in-process), so it can throw.
+
+Everything else (writes, `GraphConstraints`, `StorageIntrospection`,
+`StorageValueCodec`) is only reached by the authoring / schema paths.
+
+`graphden.storage.remote.core/RemoteStorage` is exactly this: a read-only
+leaf that bootstraps the whole graph over HTTP
+(`GET /api/export/graph-rows`, org-scoped) into an in-memory index and
+answers the reads from there. It backs the external / BYO executor — see
+[SCALING.md § external executor](SCALING.md). Its writes throw
+`:remote-storage/read-only`; the FaaS app path (`app_router` → `cr/execute`)
+is read-only and works, while the `/api/execute` persistence path is a
+hosted-editor concern.
+
 ---
 
 ## Graph Data Schema

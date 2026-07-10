@@ -493,9 +493,15 @@
     (into {} (map (fn [r] [(:id r) (path (:id r))])) rows)))
 
 
-(defn- read-graph
-  "Fetch the five graph tables. VersionedStorage resolves the current
-   per-branch view; a plain storage reads the rows directly."
+(defn read-graph
+  "Fetch the five graph tables as raw rows, keyed
+   `{:fns :slots :fn-slots :bindings :list-items}`. VersionedStorage resolves
+   the current per-branch view; a plain storage reads the rows directly.
+
+   Public because it IS the raw-rows bundle a remote / BYO executor bootstraps
+   its in-memory storage from (`GET /api/export/graph-rows`). When called
+   through the org-scoped request storage it returns exactly the caller's org
+   + public rows — the shard a BYO executor serves."
   [storage]
   (if (instance? VersionedStorage storage)
     (vs/query-all-graph-entities storage)

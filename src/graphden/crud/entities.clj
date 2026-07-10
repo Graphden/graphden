@@ -160,13 +160,21 @@
       (contains? fn-graph-entity-types entity-type)
       (let [seeds (affected-fn-ids storage entity-type data)
             branch-id (some-> (vcore/current-branch-id storage) str)
+            ;; The writing org, straight off the written row — OrgScopedStorage
+            ;; stamps `:org-id` on scoped entities, so `data` (the returned
+            ;; row) carries it without this core-layer code depending on
+            ;; tenancy. nil in single-tenant / un-scoped writes → omitted. Used
+            ;; only by the SSE relay to fan an event out to the right org's
+            ;; remote executors (the local invalidate path ignores it).
+            org-id (:org-id data)
             ;; `cond->`, not a bare assoc: an un-versioned storage has no
             ;; branch, and a nil-valued key is a different map from an
             ;; absent one — `parse-payload` omits it on the way back for
             ;; the same reason.
             event (fn [id]
                     (cond-> {:kind :fn :op :invalidate :id id}
-                      branch-id (assoc :branch-id branch-id)))]
+                      branch-id (assoc :branch-id branch-id)
+                      org-id (assoc :org-id org-id)))]
         (if (seq seeds)
           (doseq [seed seeds]
             (emit (event (str seed))))

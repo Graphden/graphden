@@ -63,6 +63,20 @@
     (is (= {:kind :fn :op :invalidate :id "fn-1"}
            (pg-notify/parse-payload "fn:invalidate:fn-1"))))
 
+  (testing "org-id rides in the third slot; branch + org round-trip"
+    (let [event {:kind :fn :op :invalidate :id "fn-1" :branch-id "br-9" :org-id "acme"}]
+      (is (= "fn:invalidate:fn-1|br-9|acme" (pg-notify/format-payload event)))
+      (is (= event (pg-notify/parse-payload (pg-notify/format-payload event))))))
+
+  (testing "org with NO branch forces an empty branch slot so positions align"
+    (let [event {:kind :fn :op :invalidate :id "fn-1" :org-id "acme"}]
+      (is (= "fn:invalidate:fn-1||acme" (pg-notify/format-payload event)))
+      (is (= event (pg-notify/parse-payload "fn:invalidate:fn-1||acme")))))
+
+  (testing "an older payload without the org slot omits :org-id"
+    (is (= {:kind :fn :op :invalidate :id "fn-1" :branch-id "br-9"}
+           (pg-notify/parse-payload "fn:invalidate:fn-1|br-9"))))
+
   (testing "parse on a malformed payload → nil"
     (is (nil? (pg-notify/parse-payload "")))
     (is (nil? (pg-notify/parse-payload "no-colons")))

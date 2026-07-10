@@ -73,3 +73,47 @@
       (is (= 401 (:status (handler {:headers {}}))))
       (is (= 401 (:status (handler {:headers {"authorization" "Bearer bad"}}))))
       (is (empty? @subscribers)))))
+
+
+(deftest sse-relay-fans-out-per-org
+  ;; Each subscriber registers under its authenticated org; an org-tagged
+  ;; event reaches only that org's subscribers, a nil-org (public) event
+  ;; reaches everyone.
+  (let [provider (reify auth/AuthProvider
+                   (authenticate
+                     [_ req]
+                     (let [tok (get-in req [:headers "authorization"])]
+                       (condp = tok
+                         "Bearer acme" {:authenticated? true :org "acme"}
+                         "Bearer beta" {:authenticated? true :org "beta"}
+                         {:authenticated? false}))))
+        listener {:callbacks (atom #{})}
+        relay (sse/start-relay! {:port 0 :notify-listener listener :auth-provider provider})
+        acme-got (atom []) beta-got (atom [])
+        mk (fn [token sink]
+             (remote-sse/start-source!
+               {:hub-url (str "http://localhost:" (relay-port relay))
+                :token token
+                :on-event (fn [e] (swap! sink conj e))}))
+        acme-src (mk "acme" acme-got)
+        beta-src (mk "beta" beta-got)]
+    (try
+      (is (wait-for 3000 #(= 2 (count @(:subscribers relay)))) "both subscribers connected")
+      (let [fire (fn [event] (doseq [cb @(:callbacks listener)] (cb event)))]
+        (testing "an acme-tagged event reaches only acme"
+          (fire {:kind :fn :op :invalidate :id "f1" :org-id "acme"})
+          (is (wait-for 2000 #(seq @acme-got)))
+          (is (= "acme" (:org-id (first @acme-got))))
+          (Thread/sleep 200)
+          (is (empty? @beta-got) "beta did NOT get acme's event"))
+        (testing "a nil-org (public) event reaches everyone"
+          (reset! acme-got []) (reset! beta-got [])
+          (fire {:kind :fn :op :invalidate :id "pub"})
+          (is (wait-for 2000 #(seq @acme-got)))
+          (is (wait-for 2000 #(seq @beta-got)))
+          (is (= "pub" (:id (first @acme-got))))
+          (is (= "pub" (:id (first @beta-got))))))
+      (finally
+        (remote-sse/stop-source! acme-src)
+        (remote-sse/stop-source! beta-src)
+        (sse/stop-relay! relay)))))

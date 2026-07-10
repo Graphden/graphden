@@ -15,11 +15,12 @@
    That keeps the async SSE channel out of the graph dispatch + tenancy
    request-scope, which expect ordinary response maps.
 
-   v1 relays EVERY fn-invalidate event to EVERY subscriber (the wire payload
-   carries no org-id, so the relay can't org-filter). A remote executor's
-   RemoteStorage refetches its OWN org-scoped bundle on any event — an over-
-   refetch, but BYO orgs have small graphs and writes are infrequent.
-   Org-tagging the payload for precise fan-out is a future optimization."
+   Fan-out is per-org: each subscriber registers under its authenticated org,
+   and an event tagged with the writing org (`:org-id`, added by
+   `crud.entities/notify-after-write!`) goes only to that org's subscribers. A
+   nil-org event (a public / platform / single-tenant write — shared rows that
+   live in every bundle) goes to everyone. So a BYO executor is woken only by
+   changes it actually holds."
   (:require
     [clojure.tools.logging :as log]
     [graphden.auth.provider :as auth]
@@ -37,53 +38,69 @@
   (str "data: " (pg-notify/format-payload event) "\n\n"))
 
 
-(defn- authorized?
-  "Bearer-token check against `auth-provider`. The relay carries only
-   invalidation signals (fn-ids, no graph content), but it's still gated so a
-   stranger can't hold open connections. nil provider ⇒ open (single-tenant /
-   tests)."
+(defn- authenticate
+  "Authenticate the request; return `{:ok? bool :org <string-or-nil>}`. The
+   org (`(:org principal)`, read directly to avoid a tenancy dependency) keys
+   which events this subscriber receives. nil provider ⇒ open, nil org (single-
+   tenant / tests)."
   [auth-provider request]
-  (or (nil? auth-provider)
-      (boolean (:authenticated? (auth/authenticate auth-provider request)))))
+  (if (nil? auth-provider)
+    {:ok? true :org nil}
+    (let [principal (auth/authenticate auth-provider request)]
+      {:ok? (boolean (:authenticated? principal)) :org (:org principal)})))
+
+
+(defn- deliver?
+  "Does an event tagged for `event-org` go to a subscriber whose org is
+   `sub-org`? A nil `event-org` (a public / platform / single-tenant write,
+   which touches the shared rows in every bundle) goes to everyone; an
+   org-tagged event goes only to that org's subscribers."
+  [event-org sub-org]
+  (or (nil? event-org) (= event-org sub-org)))
 
 
 (defn make-handler
   "Ring handler for `GET /events/stream`. Authenticates, opens an SSE channel,
-   registers it in `subscribers`, and de-registers on close. `subscribers` is
-   an atom of a set of `AsyncChannel`s the relay callback sends to."
+   and registers it in `subscribers` (an atom of `{AsyncChannel → sub-org}`)
+   keyed by the subscriber's authenticated org, so `broadcast!` can fan an
+   event out only to the orgs it concerns. De-registers on close."
   [subscribers auth-provider]
   (fn [request]
-    (if-not (authorized? auth-provider request)
-      {:status 401
-       :headers {"Content-Type" "application/json" "WWW-Authenticate" "Bearer"}
-       :body "{\"ok\":false,\"error\":\"unauthorized\"}"}
-      (hk/as-channel
-        request
-        {:on-open (fn [ch]
-                    ;; Register first, then send the SSE response HEAD (status +
-                    ;; headers, no body — httpkit makes it a chunked stream) so
-                    ;; the client's `@(http/get)` resolves and subsequent
-                    ;; `data:` frames flow.
-                    (swap! subscribers conj ch)
-                    (hk/send! ch {:status 200
-                                  :headers {"Content-Type" "text/event-stream"
-                                            "Cache-Control" "no-cache"}}
-                              false)
-                    (hk/send! ch ": connected\n\n" false))
-         :on-close (fn [ch _status] (swap! subscribers disj ch))}))))
+    (let [{:keys [ok? org]} (authenticate auth-provider request)]
+      (if-not ok?
+        {:status 401
+         :headers {"Content-Type" "application/json" "WWW-Authenticate" "Bearer"}
+         :body "{\"ok\":false,\"error\":\"unauthorized\"}"}
+        (hk/as-channel
+          request
+          {:on-open (fn [ch]
+                      ;; Register first, then send the SSE response HEAD (status
+                      ;; + headers, no body — httpkit makes it a chunked stream)
+                      ;; so the client's request resolves and `data:` frames
+                      ;; flow.
+                      (swap! subscribers assoc ch org)
+                      (hk/send! ch {:status 200
+                                    :headers {"Content-Type" "text/event-stream"
+                                              "Cache-Control" "no-cache"}}
+                                false)
+                      (hk/send! ch ": connected\n\n" false))
+           :on-close (fn [ch _status] (swap! subscribers dissoc ch))})))))
 
 
 (defn broadcast!
-  "Send one parsed event to every open subscriber; drop any that fail to
-   accept (closed underneath us). Returns the number delivered."
+  "Send one parsed event to every subscriber the event concerns (`deliver?`);
+   drop any that fail to accept (closed underneath us). Returns the number
+   delivered."
   [subscribers event]
-  (let [frame (sse-frame event)]
-    (reduce (fn [n ^AsyncChannel ch]
-              (if (try (hk/send! ch frame false) (catch Exception _ false))
-                (inc n)
-                (do (swap! subscribers disj ch) n)))
-            0
-            @subscribers)))
+  (let [frame (sse-frame event)
+        event-org (:org-id event)]
+    (reduce-kv (fn [n ^AsyncChannel ch sub-org]
+                 (cond
+                   (not (deliver? event-org sub-org)) n
+                   (try (hk/send! ch frame false) (catch Exception _ false)) (inc n)
+                   :else (do (swap! subscribers dissoc ch) n)))
+               0
+               @subscribers)))
 
 
 (defn start-relay!
@@ -96,7 +113,7 @@
    side ignores what it doesn't handle, so we forward everything and let
    `on-notify` filter — keeping the relay dumb."
   [{:keys [port notify-listener auth-provider]}]
-  (let [subscribers (atom #{})
+  (let [subscribers (atom {})
         handler (fn [request]
                   (if (= "/events/stream" (:uri request))
                     ((make-handler subscribers auth-provider) request)

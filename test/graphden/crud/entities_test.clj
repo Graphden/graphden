@@ -123,7 +123,17 @@
           (clear!)
           (entities/notify-after-write! emit-ctx storage :binding :delete
                                         {:fn-id (random-uuid) :id (random-uuid)})
-          (is (not (contains? (first @events) :branch-id))))
+          (is (not (contains? (first @events) :branch-id)))
+          (is (not (contains? (first @events) :org-id))
+              "no :org-id on the row → the key is omitted (single-tenant)"))
+
+        (testing "a scoped row's :org-id rides along for SSE fan-out"
+          (clear!)
+          (let [fid (random-uuid)]
+            (entities/notify-after-write! emit-ctx storage :binding :delete
+                                          {:fn-id fid :id (random-uuid) :org-id "acme"})
+            (is (= "acme" (:org-id (first @events)))
+                "the writing org is read straight off the (stamped) row")))
 
         (testing "a versioned storage stamps the branch the write landed on"
           ;; The receiving pod needs it: an edit on `dev` must not recompile

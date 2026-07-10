@@ -54,31 +54,38 @@
 
 (defn parse-payload
   "Wire-format → `{:kind <keyword> :op <keyword> :id <string>
-                   :branch-id <string-or-nil>}`. nil when the payload
-   doesn't match the expected shape — used for defensive parsing so a
-   malformed NOTIFY from a future graphden version doesn't crash the
-   loop.
+                   :branch-id <string> :org-id <string>}`. nil when the
+   payload doesn't match the expected shape — defensive parsing so a
+   malformed NOTIFY from a future graphden version doesn't crash the loop.
 
-   The trailing `|<branch-uuid>` is optional. When absent the `:branch-id`
-   key is OMITTED rather than set to nil — an event map is compared by
-   exact shape in several tests and by `service`-kind consumers that
-   never carry a branch, so a nil-valued key would be noise."
+   The payload tail is positional, `<id>|<branch>|<org>`, and blank trailing
+   segments are dropped: `id`, `id|branch`, or `id|branch-or-empty|org`. A
+   segment that is absent OR blank OMITS its key (not nil) — event maps are
+   compared by exact shape in tests, and `service`-kind consumers never carry
+   a branch/org, so a nil-valued key would be noise. `:org-id` (added for
+   precise SSE fan-out) rides in the third slot; older payloads without it
+   just omit the key."
   [payload]
   (when (string? payload)
     (let [parts (str/split payload #":" 3)]
       (when (= 3 (count parts))
-        (let [[id branch-id] (str/split (nth parts 2) #"\|" 2)]
+        (let [[id branch-id org-id] (str/split (nth parts 2) #"\|" 3)]
           (cond-> {:kind (keyword (nth parts 0))
                    :op (keyword (nth parts 1))
                    :id (or id "")}
-            (not (str/blank? branch-id)) (assoc :branch-id branch-id)))))))
+            (not (str/blank? branch-id)) (assoc :branch-id branch-id)
+            (not (str/blank? org-id)) (assoc :org-id org-id)))))))
 
 
 (defn format-payload
-  "Inverse of `parse-payload`. Used by emitters."
-  [{:keys [kind op id branch-id]}]
+  "Inverse of `parse-payload`. The org slot forces the (possibly empty)
+   branch slot to be present so the positions line up."
+  [{:keys [kind op id branch-id org-id]}]
   (str (name kind) ":" (name op) ":" (or id "")
-       (when branch-id (str "|" branch-id))))
+       (cond
+         org-id (str "|" (or branch-id "") "|" org-id)
+         branch-id (str "|" branch-id)
+         :else "")))
 
 
 ;; =============================================================================

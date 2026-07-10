@@ -24,6 +24,7 @@
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
     [graphden.services.reconciler :as recon]
+    [graphden.storage.postgres.advisory-lock :as pg-lock]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]
@@ -821,3 +822,159 @@
           (finally
             (recon/stop-all! running)
             (sp/close storage)))))))
+
+
+;; ============================================================================
+;; Cardinality — how many pods run a service at once
+;; ============================================================================
+
+(deftest service-cardinality-defaults-to-singleton-test
+  (testing "a row written before the field existed keeps lock-gated behaviour"
+    (is (= :singleton (svcs/service-cardinality {})))
+    (is (= :singleton (svcs/service-cardinality {:cardinality nil})))
+    (is (svcs/singleton? {})))
+  (testing "an explicit value wins"
+    (is (= :per-pod (svcs/service-cardinality {:cardinality :per-pod})))
+    (is (not (svcs/singleton? {:cardinality :per-pod})))))
+
+
+(defn- fake-lock-table
+  "Model the cluster-wide advisory-lock table: `try-lock!` succeeds for
+   whoever asks first, `release-lock!` frees the key. Returns
+   `[held-atom try-lock-fn release-fn]`."
+  []
+  (let [held (atom #{})]
+    [held
+     (fn [_conn sid] (not (contains? (first (swap-vals! held conj sid)) sid)))
+     (fn [_conn sid] (swap! held disj sid) true)]))
+
+
+(defn- pod-ctx
+  "A ctx that looks like it has a lock connection, so the reconciler
+   takes the multi-pod code path instead of the nil-conn fallback."
+  [storage]
+  (assoc (test-ctx storage) :service-locks-connection ::fake-conn))
+
+
+(deftest singleton-service-runs-on-exactly-one-pod-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "singleton" calls stops)
+        svc (sp/create-entity storage :service
+                              {:fn-id (:id composed)
+                               :enabled? true
+                               :restart-policy :always
+                               :cardinality :singleton})
+        [_held try-lock release] (fake-lock-table)
+        pod-a (atom {})
+        pod-b (atom {})]
+    (try
+      (with-redefs [pg-lock/try-lock! try-lock
+                    pg-lock/release-lock! release]
+        (let [ra (recon/reconcile-once! (pod-ctx storage) pod-a)
+              rb (recon/reconcile-once! (pod-ctx storage) pod-b)]
+          (testing "pod A wins the lock and starts it"
+            (is (= [(:id svc)] (:started ra)))
+            (is (= [] (:not-our-lock ra)))
+            (is (true? (:locked? (get @pod-a (:id svc))))))
+          (testing "pod B loses and idles"
+            (is (= [] (:started rb)))
+            (is (= [(:id svc)] (:not-our-lock rb)))
+            (is (= ::recon/not-our-lock (get @pod-b (:id svc)))))
+          (testing "the fn ran exactly once across the cluster"
+            (is (= 1 (count @calls))))))
+      (finally
+        (recon/stop-all! pod-a)
+        (sp/close storage)))))
+
+
+(deftest per-pod-service-runs-on-every-pod-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "per-pod" calls stops)
+        svc (sp/create-entity storage :service
+                              {:fn-id (:id composed)
+                               :enabled? true
+                               :restart-policy :always
+                               :cardinality :per-pod})
+        [held try-lock release] (fake-lock-table)
+        pod-a (atom {})
+        pod-b (atom {})]
+    (try
+      (with-redefs [pg-lock/try-lock! try-lock
+                    pg-lock/release-lock! release]
+        (let [ra (recon/reconcile-once! (pod-ctx storage) pod-a)
+              rb (recon/reconcile-once! (pod-ctx storage) pod-b)]
+          (testing "both pods start their own copy — a listener must bind on each"
+            (is (= [(:id svc)] (:started ra)))
+            (is (= [(:id svc)] (:started rb)))
+            (is (= [] (:not-our-lock rb))))
+          (testing "the fn ran once per pod"
+            (is (= 2 (count @calls))))
+          (testing "no advisory lock was taken"
+            (is (= #{} @held))
+            (is (false? (:locked? (get @pod-a (:id svc))))))))
+      (finally
+        (recon/stop-all! pod-a)
+        (recon/stop-all! pod-b)
+        (sp/close storage)))))
+
+
+(deftest stop-releases-only-locks-this-pod-holds-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "release" calls stops)
+        svc (sp/create-entity storage :service
+                              {:fn-id (:id composed)
+                               :enabled? true
+                               :restart-policy :always
+                               :cardinality :per-pod})
+        [_held try-lock] (fake-lock-table)
+        released (atom [])
+        pod (atom {})]
+    (try
+      (with-redefs [pg-lock/try-lock! try-lock
+                    pg-lock/release-lock!
+                    (fn [_conn sid] (swap! released conj sid) true)]
+        (recon/reconcile-once! (pod-ctx storage) pod)
+        (sp/update-entity storage :service (:id svc) {:enabled? false})
+        (recon/reconcile-once! (pod-ctx storage) pod)
+        (testing "a :per-pod service never locked, so stop must not unlock"
+          (is (= [] @released))
+          (is (= {} @pod))))
+      (finally (sp/close storage)))))
+
+
+(deftest cardinality-flip-restarts-the-service-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "flip" calls stops)
+        svc (sp/create-entity storage :service
+                              {:fn-id (:id composed)
+                               :enabled? true
+                               :restart-policy :always
+                               :cardinality :singleton})
+        [_held try-lock release] (fake-lock-table)
+        pod (atom {})]
+    (try
+      (with-redefs [pg-lock/try-lock! try-lock
+                    pg-lock/release-lock! release]
+        (recon/reconcile-once! (pod-ctx storage) pod)
+        (is (true? (:locked? (get @pod (:id svc)))))
+        (sp/update-entity storage :service (:id svc) {:cardinality :per-pod})
+        (let [r (recon/reconcile-once! (pod-ctx storage) pod)]
+          (testing "drift detection sees the flip and restarts"
+            (is (= [(:id svc)] (:stopped r)))
+            (is (= [(:id svc)] (:started r))))
+          (testing "the lock is dropped on the way to :per-pod"
+            (is (false? (:locked? (get @pod (:id svc))))))
+          (testing "it stopped once and started twice overall"
+            (is (= 1 (count @stops)))
+            (is (= 2 (count @calls))))))
+      (finally
+        (recon/stop-all! pod)
+        (sp/close storage)))))

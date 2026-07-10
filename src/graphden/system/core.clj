@@ -921,24 +921,37 @@
    the fn for some reason), the entry is logged and skipped — the
    admin can re-create the fn and the next boot will pick it up.
 
+   `:cardinality` is BACKFILLED onto an existing row when that row's
+   value is nil — i.e. it was written before the field existed. Without
+   this, upgrading a live deployment would leave the seeded
+   `:web-server` row at nil ≡ `:singleton`, and only one pod would ever
+   bind a port. Backfill only touches nil, so an admin who deliberately
+   set a cardinality keeps it, same as `:enabled?`.
+
    Returns a vector of `{:id :seeded? :fn-name :package-name}` maps
    for logging."
   [storage packages]
   (vec
     (keep
-      (fn [{:keys [package-name name fn-name enabled? restart-policy]}]
+      (fn [{:keys [package-name name fn-name enabled? restart-policy cardinality]}]
         (let [svc-id (ids/seeded-service-id package-name name)
-              fn-id (resolve-fn-id-by-name storage (clojure.core/name fn-name))]
+              fn-id (resolve-fn-id-by-name storage (clojure.core/name fn-name))
+              existing (first (sp/query-entities storage :service {:id svc-id}))]
           (cond
             (nil? fn-id)
             (do (log/warn "seeded service skipped — fn-name didn't resolve"
                           {:package package-name :service name :fn-name fn-name})
                 nil)
 
-            (seq (sp/query-entities storage :service {:id svc-id}))
+            existing
             ;; Idempotent: existing row may have a different
             ;; :enabled? (admin toggled it) — don't overwrite.
-            {:id svc-id :seeded? false :fn-name fn-name :package-name package-name}
+            (do
+              (when (and cardinality (nil? (:cardinality existing)))
+                (log/info "backfilling :cardinality on pre-existing service row"
+                          {:service-id svc-id :cardinality cardinality})
+                (sp/update-entity storage :service svc-id {:cardinality cardinality}))
+              {:id svc-id :seeded? false :fn-name fn-name :package-name package-name})
 
             :else
             (try
@@ -946,7 +959,8 @@
                                 {:id svc-id
                                  :fn-id fn-id
                                  :enabled? (if (false? enabled?) false true)
-                                 :restart-policy (or restart-policy :always)})
+                                 :restart-policy (or restart-policy :always)
+                                 :cardinality (or cardinality :singleton)})
               {:id svc-id :seeded? true :fn-name fn-name :package-name package-name}
               (catch Exception e
                 ;; Race window: two pods may seed concurrently with

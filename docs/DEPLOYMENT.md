@@ -300,5 +300,19 @@ For horizontal scaling:
 Each executor maintains its own compiled fn-registry. Cross-pod cache
 invalidation is automatic: every pod's `:db/notify-listener` LISTENs on
 the `graphden_events` channel, so a mutation on one pod propagates to
-siblings within ~1s. Service ownership (e.g. which pod runs a given
-`:service`) is coordinated via Postgres advisory locks.
+siblings within ~1s.
+
+Service ownership depends on the service's `:cardinality`
+(see [SERVICES.md](SERVICES.md#cardinality-enum)):
+
+- `:per-pod` — every pod runs it. The seeded `:web-server` is `:per-pod`,
+  which is what lets each container bind its own port and answer the load
+  balancer's healthcheck.
+- `:singleton` — exactly one pod runs it, elected by a Postgres advisory
+  lock. Use for cron / `:schedule` loops.
+
+Upgrading a deployment that pre-dates the `:cardinality` field: the
+seeder backfills it from `package.edn` on boot, so the `:default`
+service becomes `:per-pod` on first start of the new image. Roll pods one
+at a time — an old pod holds the `:web-server` advisory lock until it
+exits, and a new pod ignores that lock entirely.

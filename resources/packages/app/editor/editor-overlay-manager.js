@@ -1,7 +1,8 @@
 // Editor Overlay (manager) - base `createOverlay` factory, the
 // placeholder-overlay binder, and the `createNodeOverlays` /
 // `updateOverlayPositions` lifecycle.
-// Depends on: editor-state.js, editor-data.js, editor-drag.js.
+// Depends on: editor-state.js, editor-data.js, editor-drag.js,
+// editor-layout.js (taxiBendX).
 
 // ============================================================================
 // OVERLAY REGISTRY
@@ -279,18 +280,10 @@ function updateOverlayPositions() {
     // the target than smear it across the bend.
     let leftPx;
     if (source.length) {
-      const sPos = source.position();
-      const sWidth = source.width();
-      const sourceRightPx = (sPos.x + sWidth / 2) * zoom + pan.x;
-      const colRight = source.data('colRightX');
-      // Matches the `taxi-turn` formula in editor-cytoscape.js:
-      // bend = colRight + 20 (graph units) when colRightX is known;
-      // otherwise taxi-turn returns a fixed 40, so the bend sits at
-      // source.right + 40 — the label must use the SAME 40 or it lands
-      // 20 units short of the actual bend.
-      const bendXpx = (colRight !== undefined)
-                      ? (colRight + 20) * zoom + pan.x
-                      : sourceRightPx + 40 * zoom;
+      // `taxiBendX` (editor-layout.js) is the SAME function the cytoscape
+      // `taxi-turn` style and the edge-hover hit-test call, so the label can
+      // never anchor on the wrong side of the line that actually gets drawn.
+      const bendXpx = taxiBendX(source) * zoom + pan.x;
       // Post-bend gap scales with zoom so the visible stretch stays
       // proportional to the edge thickness at any zoom level.
       const postBendGap = 18 * zoom;

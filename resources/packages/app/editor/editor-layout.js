@@ -13,6 +13,34 @@
 // 3. Calculating node sizes for rendering
 
 // ============================================================================
+// TAXI EDGE GEOMETRY
+// ============================================================================
+
+// A taxi edge leaves its source horizontally, turns once, descends, and runs
+// horizontally into its target. `taxiBendX` is the single source of truth for
+// where that turn happens, in GRAPH coordinates.
+//
+// Three callers depend on it and MUST agree, or the edge and its label drift
+// apart: the cytoscape `taxi-turn` style (which wants a distance, not an
+// absolute X), the edge-hover hit-test, and the edge-label anchor.
+//
+// The bend clears the source's whole column, so it never lands inside a wider
+// sibling sharing that column. `colRightX` is stamped once per layout
+// (see below) and does NOT follow a user-dragged node — hence the
+// `srcRight + TAXI_MIN_TURN` floor, which keeps the bend ahead of the source
+// even after the user drags it past its column's right edge.
+const TAXI_MIN_TURN = 20;       // bend never closer than this to source's right
+const TAXI_COL_CLEARANCE = 20;  // ...nor closer than this to the column's right
+const TAXI_FALLBACK_TURN = 40;  // pre-layout nodes carry no colRightX
+
+function taxiBendX(sourceNode) {
+  const srcRight = sourceNode.position().x + sourceNode.width() / 2;
+  const colRight = sourceNode.data('colRightX');
+  if (colRight === undefined) return srcRight + TAXI_FALLBACK_TURN;
+  return Math.max(srcRight + TAXI_MIN_TURN, colRight + TAXI_COL_CLEARANCE);
+}
+
+// ============================================================================
 // NODE SIZE CALCULATION
 // ============================================================================
 
@@ -411,6 +439,7 @@ async function fetchBackendLayout() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     calculateNodeSize,
-    fetchBackendLayout
+    fetchBackendLayout,
+    taxiBendX
   };
 }

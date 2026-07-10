@@ -101,14 +101,13 @@ function buildCytoscapeStyles() {
     // in the inter-column gap. Without this, edges from a narrow node bend
     // INSIDE the column at source.right + 40px, which can collide with a
     // wider sibling node sharing the same column (different row).
+    //
+    // `taxi-turn` wants the DISTANCE from the source's right edge; taxiBendX
+    // (editor-layout.js) is the absolute bend X shared with the hit-test and
+    // the edge-label anchor.
     'taxi-turn': function(edge) {
       var src = edge.source();
-      var colRight = src.data('colRightX');
-      if (colRight === undefined) return 40;
-      var srcRight = src.position().x + src.width() / 2;
-      // 20px past the column boundary — clears any node in the source's
-      // column and lands the vertical segment safely in the gap.
-      return Math.max(20, colRight - srcRight + 20);
+      return taxiBendX(src) - (src.position().x + src.width() / 2);
     },
     'taxi-turn-min-distance': '10px',
     'source-endpoint': 'outside-to-node',
@@ -302,21 +301,14 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     return (dx * dx + dy * dy) <= SOURCE_CIRCLE_RADIUS * SOURCE_CIRCLE_RADIUS;
   }
 
-  // The taxi-turn formula here mirrors the stylesheet's. Same source = same
-  // bend X, so we can compute it once per source-node.
-  function bendXFor(sourceNode) {
-    const srcRight = sourceNode.position().x + sourceNode.width() / 2;
-    const colRight = sourceNode.data('colRightX');
-    const turn = colRight === undefined ? 40 : Math.max(20, colRight - srcRight + 20);
-    return srcRight + turn;
-  }
-
   // Returns the collection of sibling edges whose taxi path (any of the three
-  // segments) passes within `tol` of the cursor.
+  // segments) passes within `tol` of the cursor. The bend X comes from the
+  // shared `taxiBendX` (editor-layout.js), so the hit-zone can never drift
+  // away from the line cytoscape actually draws.
   function siblingEdgesUnderCursor(sourceNode, cursor, tol) {
     const srcRight = sourceNode.position().x + sourceNode.width() / 2;
     const srcY = sourceNode.position().y;
-    const bendX = bendXFor(sourceNode);
+    const bendX = taxiBendX(sourceNode);
     return sourceNode.outgoers('edge').filter(e => {
       const tgt = e.target();
       const tgtLeft = tgt.position().x - tgt.width() / 2;

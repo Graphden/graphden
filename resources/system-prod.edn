@@ -43,6 +43,15 @@
    :username #or [#env DB_USERNAME "graphden"]
    :password #or [#env DB_PASSWORD "graphden"]}}
 
+ ;; SSE invalidation relay — forwards graphden_events to remote / BYO
+ ;; executors over SSE. Opt-in: set GRAPHDEN_SSE_PORT to enable (unset ⇒
+ ;; the component starts but the relay is a no-op). Its own port, separate
+ ;; from the app HTTP server.
+ :sse/relay
+ {:port #or [#env GRAPHDEN_SSE_PORT nil]
+  :notify-listener #ig/ref :db/notify-listener
+  :auth-provider #ig/ref :auth/provider}
+
  ;; Load packages from resources/packages/
  ;; `examples` is dev/test-only per its package.edn description
  ;; ("pedagogical fn-def examples — Load only in dev/test, never in

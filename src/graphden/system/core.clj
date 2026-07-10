@@ -49,6 +49,7 @@
     [graphden.system.api-url-drift :as api-url-drift]
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
+    [graphden.system.sse :as sse]
     [graphden.types.check :as types-check]
     [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
@@ -141,6 +142,29 @@
 (defmethod ig/halt-key! :db/notify-listener [_ listener]
   (log/info "Stopping LISTEN listener...")
   (pg-notify/close-listener! listener))
+
+
+;; =============================================================================
+;; SSE invalidation relay — forwards `graphden_events` to remote / BYO
+;; executors that can't LISTEN on Postgres (docs/SCALING.md § SSE).
+;;
+;; Opt-in: only starts when `GRAPHDEN_SSE_PORT` is set. On its own httpkit
+;; server / port, parallel to the app server + the LISTEN connection —
+;; invalidation is infra below the graph-composed router, not an app route.
+;; =============================================================================
+
+(defmethod ig/init-key :sse/relay [_ {:keys [port notify-listener auth-provider]}]
+  (let [p (if (string? port) (parse-long port) port)]
+    (if (and p (pos? p))
+      (do (log/info "Wiring SSE invalidation relay" {:port p})
+          (sse/start-relay! {:port p
+                             :notify-listener notify-listener
+                             :auth-provider auth-provider}))
+      (do (log/info "SSE relay disabled (no GRAPHDEN_SSE_PORT)") nil))))
+
+
+(defmethod ig/halt-key! :sse/relay [_ relay]
+  (when relay (sse/stop-relay! relay)))
 
 
 ;; =============================================================================

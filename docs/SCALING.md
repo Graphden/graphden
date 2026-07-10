@@ -185,10 +185,45 @@ their OWN hardware, but the graph stays in our Postgres. Built in pieces:
   it doesn't author it; the FaaS app path is read-only and works, the
   `/api/execute` persistence path stays on the hosted editor. `refresh!`
   re-fetches (called by the SSE source below).
-- **SSE invalidation — NOT built.** The BYO executor has no PG connection, so
-  it can't `LISTEN`. It needs an SSE source that parses the same
-  `graphden_events` wire format and calls the existing transport-agnostic
-  `on-notify`, fed by a hub-side relay of `pg_notify` events.
+- **SSE invalidation — DONE.** The BYO executor has no PG connection, so it
+  can't `LISTEN`. Invalidation is INFRASTRUCTURE here (the same as the
+  dedicated `graphden_events` LISTEN connection), so it's a second consumer of
+  that stream, NOT an app route:
+  - **Hub** — `system.sse/start-relay!` registers a callback on the
+    `:db/notify-listener` (like the reconciler does) and forwards each event
+    over SSE to subscribed executors. It runs on its OWN httpkit server /
+    port, parallel to the app server — keeping the async SSE channel out of
+    the graph-composed router + tenancy request-scope, which expect ordinary
+    response maps. Wired as the `:sse/relay` integrant component, opt-in via
+    `GRAPHDEN_SSE_PORT` (unset ⇒ no-op). Bearer-gated.
+  - **Remote** — `storage.remote.sse/start-source!` holds an SSE connection to
+    the hub (`java.net.http.HttpClient`, which streams on the response head —
+    the httpkit client buffers the whole body and can't do SSE), parses each
+    frame with the shared `notify/parse-payload`, and calls `on-event` — the
+    same parsed `{:kind :op :id :branch-id}` map a local pod gets. Reconnects
+    with backoff.
+  - v1 relays EVERY event to EVERY subscriber (the wire payload has no
+    org-id), and the remote's `on-event` refetches its own org-scoped bundle
+    (`remote/refresh!`) + recompiles. Over-refetch on unrelated writes, but
+    BYO orgs have small graphs and writes are rare; org-tagging the payload
+    for precise fan-out is a future optimization.
+
+A BYO executor is a deployment ASSEMBLY of these pieces (a graphden-cloud /
+byo integrant profile, not the base system, which has Postgres): use a
+`RemoteStorage` as `:storage`, and start an SSE source whose `on-event`
+refreshes it and rebuilds the compiled registry —
+
+```clojure
+(let [storage (remote/create-remote-storage hub-url token)
+      ctx     (ectx/create-context {:storage storage :executor-orgs #{my-org}
+                                    :byo-executor? true})]
+  (remote-sse/start-source!
+    {:hub-url hub-url :token token
+     :on-event (fn [event]
+                 (when (= :fn (:kind event))
+                   (remote/refresh! storage)
+                   (cr/rebuild! ctx)))}))
+```
 
 Provisioning an org to `"byo"` is a direct `:org` write today
 (`tenancy.context/invalidate-byo-cache!` drops the memo after the flip); a

@@ -44,9 +44,24 @@
 ;; ============================================================================
 
 (deftest payload-roundtrip-test
-  (testing "format then parse → identity"
+  (testing "format then parse → identity (no branch)"
     (let [event {:kind :service :op :write :id "abc-123"}]
       (is (= event (pg-notify/parse-payload (pg-notify/format-payload event))))))
+
+  (testing "format then parse → identity (with branch)"
+    (let [event {:kind :fn :op :invalidate :id "fn-1" :branch-id "br-9"}]
+      (is (= event (pg-notify/parse-payload (pg-notify/format-payload event))))))
+
+  (testing "full-clear: empty id, branch still carried"
+    (let [payload (pg-notify/format-payload
+                    {:kind :fn :op :invalidate :id "" :branch-id "br-9"})]
+      (is (= "fn:invalidate:|br-9" payload))
+      (is (= {:kind :fn :op :invalidate :id "" :branch-id "br-9"}
+             (pg-notify/parse-payload payload)))))
+
+  (testing "a payload from a pod that predates :branch-id omits the key"
+    (is (= {:kind :fn :op :invalidate :id "fn-1"}
+           (pg-notify/parse-payload "fn:invalidate:fn-1"))))
 
   (testing "parse on a malformed payload → nil"
     (is (nil? (pg-notify/parse-payload "")))

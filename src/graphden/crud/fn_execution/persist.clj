@@ -62,6 +62,26 @@
   (get @futures-registry execution-id))
 
 
+(defn cancel-local!
+  "Cancel `execution-id` if THIS pod is the one running it. Returns true
+   when a live future was found and cancelled, false otherwise.
+
+   The registry is per-process, so in a multi-pod deployment the pod that
+   receives `POST /api/execute/:id/cancel` is usually NOT the pod running
+   the execution. The load balancer picked one; the future lives on
+   another. Setting the row's `:cancel-requested?` flag doesn't help by
+   itself — the executor's `*cancel-check*` closes over the in-process
+   `cancel-flag` atom, not over the DB row. So the receiving pod fans the
+   request out over NOTIFY and every pod calls this; at most one of them
+   owns the future."
+  [execution-id]
+  (if-let [entry (lookup-future execution-id)]
+    (do (reset! (:cancel-flag entry) true)
+        (future-cancel (:future entry))
+        true)
+    false))
+
+
 ;; =============================================================================
 ;; Truncation / JSON-size enforcement
 ;; =============================================================================

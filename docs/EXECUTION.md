@@ -168,6 +168,13 @@ Sets `:cancel-requested? true` + `future-cancel`. **Best-effort**:
 - **Blocking JDBC** / sleep / blocking IO inside a base-fn won't
   respond to `Thread.interrupt()` without explicit cooperation
   (e.g., `Statement.cancel()`). Documented as a soft contract.
+- **Multi-pod**: `futures-registry` is per-process, so the pod that
+  receives the cancel is usually not the pod running the execution.
+  When it doesn't own the future it emits `execution:cancel:<id>` on
+  `graphden_events`; every pod calls `persist/cancel-local!` and at
+  most one owns it. Setting the DB flag alone would do nothing —
+  `*cancel-check*` reads the in-process atom, not the row. See
+  [SCALING.md](SCALING.md).
 
 ### `GET /api/executions?fn-id=X`
 

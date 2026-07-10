@@ -15,9 +15,23 @@
 
    - `service:write:<service-uuid>`  — `:service` row inserted / updated
    - `service:delete:<service-uuid>` — row deleted
-   - `fn:invalidate:<fn-uuid>`       — delta invalidation of one fn's
-                                       compiled closure (empty id ⇒
+   - `fn:invalidate:<fn-uuid>|<branch-uuid>`
+                                     — delta invalidation of one fn's
+                                       compiled closure (empty fn-uuid ⇒
                                        full-clear)
+   - `execution:cancel:<execution-uuid>`
+                                     — cancel a running `:fn-execution`.
+                                       The `futures-registry` is
+                                       per-process, so the pod that got
+                                       the HTTP cancel fans out and the
+                                       owning pod acts on it.
+
+   The `|<branch-uuid>` suffix is optional and names the branch the write
+   landed on. The receiving pod needs it: a fn edit on `dev` must not
+   recompile `main`, and an edit on `main` must recompile every cached
+   branch that inherits from it. A payload without the suffix parses to
+   `:branch-id nil` and the receiver falls back to invalidating its base
+   ctx — which is what pods did before the field existed.
 
    Callbacks pattern-match on `:kind` to opt in."
   (:require
@@ -39,23 +53,32 @@
 
 
 (defn parse-payload
-  "Wire-format → `{:kind <keyword> :op <keyword> :id <string>}`. nil
-   when the payload doesn't match the expected shape — used for
-   defensive parsing so a malformed NOTIFY from a future graphden
-   version doesn't crash the loop."
+  "Wire-format → `{:kind <keyword> :op <keyword> :id <string>
+                   :branch-id <string-or-nil>}`. nil when the payload
+   doesn't match the expected shape — used for defensive parsing so a
+   malformed NOTIFY from a future graphden version doesn't crash the
+   loop.
+
+   The trailing `|<branch-uuid>` is optional. When absent the `:branch-id`
+   key is OMITTED rather than set to nil — an event map is compared by
+   exact shape in several tests and by `service`-kind consumers that
+   never carry a branch, so a nil-valued key would be noise."
   [payload]
   (when (string? payload)
     (let [parts (str/split payload #":" 3)]
       (when (= 3 (count parts))
-        {:kind (keyword (nth parts 0))
-         :op (keyword (nth parts 1))
-         :id (nth parts 2)}))))
+        (let [[id branch-id] (str/split (nth parts 2) #"\|" 2)]
+          (cond-> {:kind (keyword (nth parts 0))
+                   :op (keyword (nth parts 1))
+                   :id (or id "")}
+            (not (str/blank? branch-id)) (assoc :branch-id branch-id)))))))
 
 
 (defn format-payload
   "Inverse of `parse-payload`. Used by emitters."
-  [{:keys [kind op id]}]
-  (str (name kind) ":" (name op) ":" (or id "")))
+  [{:keys [kind op id branch-id]}]
+  (str (name kind) ":" (name op) ":" (or id "")
+       (when branch-id (str "|" branch-id))))
 
 
 ;; =============================================================================

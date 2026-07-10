@@ -467,6 +467,55 @@
 ;; be a benign no-op on the future side, not a crash.
 ;; ============================================================================
 
+(deftest cancel-fans-out-to-siblings-when-future-is-elsewhere-test
+  ;; `futures-registry` is per-process. Behind a load balancer the pod
+  ;; that receives POST /api/execute/:id/cancel usually isn't the pod
+  ;; running the execution — so it must fan the request out on
+  ;; `graphden_events` instead of silently flipping a DB flag nobody
+  ;; reads (`*cancel-check*` closes over the in-process atom, not the row).
+  (let [storage (create-full-storage)
+        {composed :composed} (make-pure-add-fn! storage "cancel-fanout")
+        vid (->> (sp/query-entities storage :fn-version {:fn-id (:id composed)})
+                 first :id)
+        row (sp/create-entity storage :fn-execution
+                              {:fn-version-id vid
+                               :started-at (java.time.Instant/now)
+                               :status :pending})
+        emitted (atom [])
+        c (assoc (test-ctx storage) :notify-emitter #(swap! emitted conj %))]
+    (testing "no local future → emit execution:cancel so the owning pod acts"
+      (fn-exec/cancel-execution! c (:id row))
+      (is (= [{:kind :execution :op :cancel :id (str (:id row))}] @emitted)))
+
+    (testing "local future → cancel in-process, no fan-out needed"
+      (reset! emitted [])
+      (let [flag (atom false)
+            fut (future (Thread/sleep 60000))]
+        (persist/register-future! (:id row) fut flag)
+        (try
+          (fn-exec/cancel-execution! c (:id row))
+          (is (true? @flag) "the in-process cancel-flag was flipped")
+          (is (= [] @emitted) "owning pod doesn't need to tell anyone")
+          (finally
+            (persist/unregister-future! (:id row))
+            (future-cancel fut)))))))
+
+
+(deftest cancel-local-reports-whether-this-pod-owns-the-future-test
+  (let [exec-id (random-uuid)]
+    (is (false? (persist/cancel-local! exec-id))
+        "a pod that isn't running it says so, rather than pretending success")
+    (let [flag (atom false)
+          fut (future (Thread/sleep 60000))]
+      (persist/register-future! exec-id fut flag)
+      (try
+        (is (true? (persist/cancel-local! exec-id)))
+        (is (true? @flag))
+        (finally
+          (persist/unregister-future! exec-id)
+          (future-cancel fut))))))
+
+
 (deftest cancel-execution-with-no-future-test
   (let [storage (create-full-storage)
         ;; Use make-pure-add-fn! solely to materialise a :fn + matching

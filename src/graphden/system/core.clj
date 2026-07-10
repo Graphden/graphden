@@ -18,6 +18,7 @@
     [graphden.auth.provider :as auth]
     [graphden.clients.vault :as vault]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
+    [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.interface :as fn-composition]
@@ -974,27 +975,51 @@
       (pkg/get-seeded-services packages))))
 
 
+(defn- invalidate-from-notify!
+  "Apply a sibling pod's `fn:invalidate` event to THIS pod's caches.
+
+   Mirrors the local write path in `crud.entities/invalidate!`: the
+   branch the write landed on, plus every cached branch that inherits
+   from it. When the payload carries no branch-id (an older build's
+   emitter) fall back to the base ctx, which is what this callback did
+   before branch-ids rode along.
+
+   Empty `id` ≡ full clear; a populated id is one delta seed."
+  [ctx id branch-id]
+  (let [seeds (when-not (str/blank? id) [(java.util.UUID/fromString id)])
+        router (br/current-router)
+        branch-uuid (when-not (str/blank? branch-id)
+                      (java.util.UUID/fromString branch-id))]
+    (if (and router branch-uuid)
+      (do (br/invalidate-cached-branch! router branch-uuid seeds)
+          (br/invalidate-affected-ctxs! router branch-uuid seeds))
+      (if seeds
+        (exec-ctx/invalidate-graph-cache! ctx seeds)
+        (exec-ctx/invalidate-graph-cache! ctx)))))
+
+
 (defn- on-notify
   "Multi-purpose listener callback:
 
    - `:service` events → trigger a reconcile pass (managed-service
      ownership re-evaluation).
-   - `:fn :invalidate` events → drop the affected fn-id from the
-     compiled cache; empty id ≡ full clear (mirrors the local
-     `(invalidate-graph-cache! ctx)` no-seed path). A populated id
-     is one delta seed; pod A writes 5 binding rows under one
-     request → emits 5 events → sibling pod B fires 5 invalidates.
-     Each is cheap (delta path on the reverse-deps index)."
+   - `:fn :invalidate` events → invalidate the affected fn-id on every
+     cached ctx that can see the write (see `invalidate-from-notify!`).
+     Pod A writes 5 binding rows under one request → emits 5 events →
+     sibling pod B fires 5 invalidates. Each is cheap (delta path on the
+     reverse-deps index).
+   - `:execution :cancel` events → cancel the execution if THIS pod is
+     the one running it. Every pod gets the event; at most one owns the
+     future, the rest no-op."
   [ctx]
-  (fn [{:keys [kind op id] :as event}]
+  (fn [{:keys [kind op id branch-id] :as event}]
     (try
       (case kind
-        :service (recon/reconcile-once! ctx recon/running)
-        :fn      (when (= op :invalidate)
-                   (if (or (nil? id) (= "" id))
-                     (exec-ctx/invalidate-graph-cache! ctx)
-                     (exec-ctx/invalidate-graph-cache!
-                       ctx [(java.util.UUID/fromString id)])))
+        :service   (recon/reconcile-once! ctx recon/running)
+        :fn        (when (= op :invalidate)
+                     (invalidate-from-notify! ctx id branch-id))
+        :execution (when (and (= op :cancel) (not (str/blank? id)))
+                     (persist/cancel-local! (java.util.UUID/fromString id)))
         nil)
       (catch Exception e
         (log/error e "NOTIFY dispatch threw" {:event event})))))

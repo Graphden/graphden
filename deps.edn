@@ -4,7 +4,7 @@
  {org.clojure/clojure {:mvn/version "1.12.5"}
   ;; Logging
   org.clojure/tools.logging {:mvn/version "1.3.1"}
-  ch.qos.logback/logback-classic {:mvn/version "1.5.37"}
+  ch.qos.logback/logback-classic {:mvn/version "1.5.38"}
   ;; Schema validation
   metosin/malli {:mvn/version "0.20.1"}
   ;; PostgreSQL
@@ -95,7 +95,7 @@
   :nrepl
   {:extra-deps
    {nrepl/nrepl {:mvn/version "1.7.0"}
-    cider/cider-nrepl {:mvn/version "0.61.0"}
+    cider/cider-nrepl {:mvn/version "0.62.0"}
     refactor-nrepl/refactor-nrepl {:mvn/version "3.14.0"}}
    :main-opts
    ["-m" "nrepl.cmdline"
@@ -124,7 +124,14 @@
    :main-opts
    ["-m" "antq.core"
     "--exclude=org.testcontainers/testcontainers"
-    "--exclude=org.testcontainers/postgresql"]}
+    "--exclude=org.testcontainers/postgresql"
+    ;; why: `mathx` is a git coord onto a PRIVATE repo pinned to an exact
+    ;; SHA. antq can't read it without an ssh-agent, so it reports
+    ;; "Failed to fetch" and exits 1 — reddening `bb ci` on every branch,
+    ;; forever. Even with credentials the report would be noise: the pin is
+    ;; deliberate (see § mathx above), and moving it is a manifest decision
+    ;; made in `resources/executor-packages.edn`, not a version bump.
+    "--exclude=mathx/mathx"]}
 
   :watson
   {:extra-deps {io.github.clj-holmes/clj-watson {:git/tag "v6.1.0" :git/sha "be98e4d"}}

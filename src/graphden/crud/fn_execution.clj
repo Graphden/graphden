@@ -129,7 +129,12 @@
                                          v)])))
                             (:args parsed))
         cancel-flag (atom false)
-        release (persist/acquire-execution-slot! (tc/current-org))]
+        ;; A tenant's per-org cap is enforced FLEET-WIDE (counting pending
+        ;; rows in shared storage); the public/platform org keeps the per-pod
+        ;; atom. `storage` is the org-scoped request storage, so the fleet
+        ;; count sees only this org's own rows.
+        org (tc/current-org)
+        release (persist/acquire-execution-slot! storage org (not= org tc/public-org))]
     (if (nil? release)
       ;; Global or per-org concurrency cap hit — reject WITHOUT creating a
       ;; row or a future, so a client can't pile unbounded compute onto the

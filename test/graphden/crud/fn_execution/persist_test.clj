@@ -19,7 +19,8 @@
     [clojure.test :refer [deftest is testing]]
     [clojure.tools.logging :as log]
     [graphden.crud.fn-execution.persist :as persist]
-    [graphden.executor.registry.core :as registry]))
+    [graphden.executor.registry.core :as registry]
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; =============================================================================
@@ -291,29 +292,87 @@
     (is (<= persist/max-args-bytes persist/max-result-bytes))))
 
 
+;; A storage stub whose `:fn-execution` pending-count is controllable — the
+;; only method the fleet per-org cap calls. `pending-count` maps org → the
+;; number of pending rows to report.
+(defn- fake-exec-storage
+  "StorageCRUD stub whose only meaningful method is the 4-arg query-entities
+   the fleet per-org cap calls. `pending-count` maps org → pending-row count;
+   `query-throws?` makes every query throw (for the fail-open test)."
+  ([pending-count] (fake-exec-storage pending-count false))
+  ([pending-count query-throws?]
+   (reify sp/StorageCRUD
+     (create-entity [_ _ _] nil)
+
+     (read-entity [_ _ _] nil)
+
+     (update-entity [_ _ _ _] nil)
+
+     (delete-entity [_ _ _] nil)
+
+     (query-latest-per-group [_ _ _ _] nil)
+
+     (query-entities [_ _ _] [])
+
+     (query-entities
+       [_ _entity where opts]
+       (when query-throws? (throw (ex-info "db blip" {})))
+       (let [n (get pending-count (:org-id where) 0)
+             lim (:limit opts)]
+         (vec (repeat (cond-> n lim (min lim)) {:status :pending})))))))
+
+
 (deftest acquire-execution-slot-caps-concurrency
-  ;; The global + per-org concurrency caps gate execution futures so one
-  ;; client can't pile unbounded compute onto the shared JVM (compute-DoS).
+  ;; The global (per-pod) + per-org concurrency caps gate execution futures so
+  ;; one client can't pile unbounded compute onto the shared JVM. This test
+  ;; drives the PUBLIC/platform path (tenant? = false), where the per-org cap
+  ;; is the local atom — no storage needed.
   (reset! @#'persist/live-executions {:total 0 :by-org {}})
   (binding [persist/*max-concurrent-executions* 3
             persist/*max-concurrent-executions-per-org* 2]
-    (let [a1 (persist/acquire-execution-slot! "orgA")
-          a2 (persist/acquire-execution-slot! "orgA")
-          a3 (persist/acquire-execution-slot! "orgA")]
+    (let [acq (fn [org] (persist/acquire-execution-slot! nil org false))
+          a1 (acq "orgA")
+          a2 (acq "orgA")
+          a3 (acq "orgA")]
       (testing "per-org cap: org A gets 2, the 3rd is rejected"
         (is (fn? a1))
         (is (fn? a2))
         (is (nil? a3) "org A's per-org cap of 2 blocks a 3rd slot"))
       (testing "a different org takes the last global slot, then all reject"
-        (let [b1 (persist/acquire-execution-slot! "orgB")]
+        (let [b1 (acq "orgB")]
           (is (fn? b1) "org B takes the 3rd (global) slot")
-          (is (nil? (persist/acquire-execution-slot! "orgB"))
-              "global cap of 3 now blocks everyone")
+          (is (nil? (acq "orgB")) "global cap of 3 now blocks everyone")
           (b1)))
       (testing "release frees a slot for the capped org"
         (a1)
-        (is (fn? (persist/acquire-execution-slot! "orgA"))
-            "after a release org A can acquire again"))))
+        (is (fn? (acq "orgA")) "after a release org A can acquire again"))))
+  (reset! @#'persist/live-executions {:total 0 :by-org {}}))
+
+
+(deftest acquire-execution-slot-fleet-per-org-cap
+  ;; TENANT path (tenant? = true): the per-org cap counts pending rows in
+  ;; shared storage, so N pods enforce ONE budget. Here a single call with a
+  ;; storage stub reporting `cap` pending rows must be rejected, and one
+  ;; reporting `cap - 1` must be admitted.
+  (reset! @#'persist/live-executions {:total 0 :by-org {}})
+  (binding [persist/*max-concurrent-executions* 100
+            persist/*max-concurrent-executions-per-org* 3]
+    (testing "org already at the fleet cap → rejected, and no global slot leaks"
+      (let [storage (fake-exec-storage {"acme" 3})
+            r (persist/acquire-execution-slot! storage "acme" true)]
+        (is (nil? r) "3 pending across the fleet blocks a 4th")
+        (is (zero? (:total @@#'persist/live-executions))
+            "the global slot was released on the fleet-cap rejection")))
+    (testing "org below the fleet cap → admitted"
+      (let [storage (fake-exec-storage {"acme" 2})
+            r (persist/acquire-execution-slot! storage "acme" true)]
+        (is (fn? r) "2 pending leaves room for a 3rd")
+        (r)))
+    (testing "a storage error fails OPEN — the global cap is the safety net"
+      (let [storage (fake-exec-storage {} true)
+            r (persist/acquire-execution-slot! storage "acme" true)]
+        (is (fn? r) "count failure admits rather than wrongly rejecting")
+        (r))))
   (reset! @#'persist/live-executions {:total 0 :by-org {}}))
 
 
@@ -323,7 +382,7 @@
   ;; once, or the counter under-counts and the cap drifts (eventually
   ;; rejecting real executions or never rejecting a DoS).
   (reset! @#'persist/live-executions {:total 0 :by-org {}})
-  (let [release (persist/acquire-execution-slot! "orgA")]
+  (let [release (persist/acquire-execution-slot! nil "orgA" false)]
     (is (= 1 (:total @@#'persist/live-executions)) "one slot held after acquire")
     (release)
     (release)

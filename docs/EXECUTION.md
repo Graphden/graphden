@@ -186,6 +186,20 @@ Lists rows across all versions of base `:fn-id`, ordered
 `:started-at` desc, hard-limited at 20. Summary shape (no nested
 args). Editor's History panel calls this.
 
+## Concurrency caps
+
+Two caps gate how many executions run at once, with different scopes
+(see `crud.fn-execution.persist/acquire-execution-slot!`):
+
+| Cap | Env | Default | Scope |
+|-----|-----|---------|-------|
+| Global | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS` | 128 | Per-POD. Protects the JVM's unbounded soloExecutor from thread exhaustion. |
+| Per-org | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG` | 32 | **Fleet-wide for tenants** (counts pending `:fn-execution` rows in shared storage, so N pods share one budget); per-pod atom for the public/platform org. |
+
+Hitting either cap rejects the request without creating a row or future:
+`{:ok false :status :rejected :error-data {:reason :over-capacity}}`. See
+[SCALING.md § Fleet-wide per-org quota](SCALING.md).
+
 ## Wire caps
 
 | Field                   | Cap     | Behaviour on overflow                          |

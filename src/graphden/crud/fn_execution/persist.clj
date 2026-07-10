@@ -410,50 +410,101 @@
 ;; Concurrency governance — a plain `(future …)` runs on Clojure's UNBOUNDED
 ;; soloExecutor, so without a cap a client POSTing many expensive fns piles
 ;; unbounded threads onto the shared JVM (compute-DoS, cross-tenant on
-;; feature/tenancy-users). A global cap prevents thread exhaustion; a per-org
-;; cap keeps one tenant from monopolising the pool. Slots are atom-counted (so
-;; the limits stay dynamically rebindable for tests) and RELEASED when the
-;; computation finishes — not when the HTTP response returns (the future
-;; outlives the deref-timeout).
+;; feature/tenancy-users).
+;;
+;; TWO caps, with DIFFERENT scopes:
+;;
+;; - GLOBAL (`*max-concurrent-executions*`): per-POD. It protects THIS JVM's
+;;   soloExecutor from thread exhaustion, so it MUST be per-process — an
+;;   atom-counted slot, released when the computation finishes (not when the
+;;   HTTP response returns; the future outlives the deref-timeout).
+;;
+;; - PER-ORG (`*max-concurrent-executions-per-org*`): tenant fairness / quota.
+;;   For a TENANT this is FLEET-WIDE — counted from the shared `:fn-execution`
+;;   table so N pods enforce ONE budget instead of N×budget. It is self-
+;;   healing: the source of truth is the pending rows, so a crashed pod leaks
+;;   no counter (the zombie/TTL sweeper reaps its rows), unlike a durable
+;;   counter table. For the PUBLIC org (platform / single-tenant) it stays the
+;;   per-pod atom — the platform isn't a metered tenant and its executions are
+;;   the hot editor path we don't want to add a query to.
+;;
+;; The fleet count has a bounded TOCTOU slack: two pods can both admit in the
+;; same window before either row exists, so an org can transiently exceed the
+;; cap by ~(concurrent admissions). That's acceptable for a fairness limit —
+;; the GLOBAL per-pod cap remains the exact thread-exhaustion safety net.
 ;; =============================================================================
 
 (def ^:dynamic *max-concurrent-executions*
-  "Global cap on concurrently-running fn-execution futures."
+  "Global, PER-POD cap on concurrently-running fn-execution futures."
   (or (some-> (System/getenv "GRAPHDEN_MAX_CONCURRENT_EXECUTIONS") parse-long) 128))
 
 
 (def ^:dynamic *max-concurrent-executions-per-org*
-  "Per-org cap — fairness, so one tenant can't fill the whole global pool."
+  "Per-org cap. Fleet-wide for tenants, per-pod for the public org."
   (or (some-> (System/getenv "GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG") parse-long) 32))
 
 
 (defonce ^:private live-executions (atom {:total 0 :by-org {}}))
 
 
+(defn- over-fleet-org-cap?
+  "True when `org` already has at least `*max-concurrent-executions-per-org*`
+   non-terminal (`:pending`) executions across the fleet. Counts the shared
+   `:fn-execution` table (`:fn-execution` is non-versioned, so `:limit` is
+   safe + bounds the scan to cap+1 rows). Fails OPEN on a storage error — the
+   global per-pod cap is the safety net, so a transient count failure must not
+   wrongly reject."
+  [storage org]
+  (let [cap *max-concurrent-executions-per-org*]
+    (try
+      (>= (count (sp/query-entities storage :fn-execution
+                                    {:org-id org :status :pending}
+                                    {:limit (inc cap)}))
+          cap)
+      (catch Exception e
+        (log/warn e "fleet per-org execution count failed — admitting (global cap still applies)"
+                  {:org org})
+        false))))
+
+
 (defn acquire-execution-slot!
   "Try to reserve a concurrency slot for `org`. Returns a 0-arg RELEASE fn on
-   success, or nil when either the global or the org cap is already hit (the
-   caller must reject the execution). Atomic via `swap-vals!`."
-  [org]
+   success, or nil when a cap is already hit (caller must reject).
+
+   `tenant?` selects the per-org enforcement: true → FLEET-WIDE (count pending
+   `:fn-execution` rows in `storage`); false (the public/platform org) → the
+   per-pod atom. The global per-pod cap always applies. See the section
+   comment above for scope rationale."
+  [storage org tenant?]
   (let [[old new] (swap-vals!
                     live-executions
                     (fn [{:keys [total by-org] :as st}]
                       (if (and (< total *max-concurrent-executions*)
-                               (< (get by-org org 0) *max-concurrent-executions-per-org*))
+                               ;; Tenants gate per-org on the fleet count below;
+                               ;; public gates on the local atom here.
+                               (or tenant?
+                                   (< (get by-org org 0) *max-concurrent-executions-per-org*)))
                         (-> st (update :total inc) (update-in [:by-org org] (fnil inc 0)))
                         st)))]
     (when (not= old new)
-      ;; Idempotent: the slot must be released EXACTLY once even if both the
-      ;; future's `finally` AND a caller's error-path defensively call it.
-      (let [released? (atom false)]
-        (fn release
-          []
-          (when (compare-and-set! released? false true)
-            (swap! live-executions
-                   (fn [st]
-                     (-> st
-                         (update :total dec)
-                         (update-in [:by-org org] (fnil dec 0)))))))))))
+      (let [make-release
+            (fn []
+              ;; Idempotent: the slot must be released EXACTLY once even if both
+              ;; the future's `finally` AND a caller's error-path call it.
+              (let [released? (atom false)]
+                (fn release
+                  []
+                  (when (compare-and-set! released? false true)
+                    (swap! live-executions
+                           (fn [st]
+                             (-> st
+                                 (update :total dec)
+                                 (update-in [:by-org org] (fnil dec 0)))))))))
+            release (make-release)]
+        (if (and tenant? (over-fleet-org-cap? storage org))
+          ;; Fleet-wide per-org budget is full — give the global slot back.
+          (do (release) nil)
+          release)))))
 
 
 (def ^:dynamic *max-execution-wall-ms*

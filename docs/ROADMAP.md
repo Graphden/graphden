@@ -123,11 +123,11 @@ Requests that reach a pod outside their org's shard get a
 request-scope and the FaaS app-router), so a shard-unaware load
 balancer degrades to a retry rather than to a wall of missing fns.
 
-**Remaining**: make `*max-concurrent-executions-per-org*` a
-fleet-wide quota rather than a per-process one; optionally an LB
-rule that routes by subdomain so the 421 stays a backstop rather
-than a hot path. (Advisory-lock connection-drop reconnect landed —
-see SERVICES.md § Roadmap.)
+**Remaining**: optionally an LB rule that routes by subdomain so
+the 421 stays a backstop rather than a hot path; the external / BYO
+executor (see [SCALING.md](SCALING.md) § What is NOT built). The
+fleet-wide per-org quota and advisory-lock connection-drop reconnect
+both landed — see SCALING.md and SERVICES.md § Roadmap.
 
 ### Block 8 — Hot-reload of impls (optional)
 

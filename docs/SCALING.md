@@ -136,11 +136,28 @@ nothing wrong; the balancer sent it there. Routing by subdomain at the LB
 avoids the round trip; the 421 is the backstop that keeps a misrouted
 request honest.
 
-## What is NOT built
+## Fleet-wide per-org quota
 
-**Fleet-wide quotas.** `*max-concurrent-executions-per-org*` (default 32)
-is a per-process counter. With N pods a tenant gets N×32. Honest per-tenant
-limits need shared state; today the value should be read as "per pod".
+`*max-concurrent-executions-per-org*` (default 32,
+`GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG`) is enforced **fleet-wide for
+tenants**: `acquire-execution-slot!` counts a tenant's non-terminal
+(`:pending`) `:fn-execution` rows in shared storage, so N pods enforce ONE
+budget instead of N×budget. It is self-healing — the pending rows are the
+source of truth, so a crashed pod leaks no counter (the zombie/TTL sweeper
+reaps its rows), unlike a durable counter table would.
+
+The **global** cap (`*max-concurrent-executions*`, default 128) stays
+per-pod: it protects each JVM's unbounded soloExecutor from thread
+exhaustion, which is a per-process safety property, and it remains the exact
+bound. The per-org fleet count has a bounded TOCTOU slack (two pods can both
+admit before either row exists), which is fine for a fairness limit — the
+global per-pod cap is the hard safety net.
+
+The **public** org (platform / single-tenant) keeps the per-pod atom for its
+per-org cap: it isn't a metered tenant, and its executions are the hot editor
+path we don't add a query to. So single-tenant self-hosted is unchanged.
+
+## What is NOT built
 
 **Semi-self-hosted / external executor.** The design is the org shard plus
 two missing pieces:

@@ -567,7 +567,7 @@ This section maps each system component to the principles it serves. Use this to
 | Type system | Done (refinements / records / lists / unions / variants) | Correctness, Dev tools | Save-time check + rich-type registry |
 | Versioning | Done (`VersionedStorage` decorator) | Dev tools, Correctness | Storage overhead; migration complexity |
 | Permissions | Planned | Correctness | Query overhead; complexity |
-| Visual UI | Done (Cytoscape-based editor) | Dev simplicity | Large implementation effort |
+| Visual UI | Done (HTML overlays + SVG edges, no graph library) | Dev simplicity | Large implementation effort |
 
 ### How to Use This Mapping
 
@@ -1061,7 +1061,7 @@ If two base-fns do the same thing with different type signatures, keep one with 
 - `conj` + `conj-any` → single `:conj`
 - `identity` → fn-def of `:const` (same implementation)
 - `wrap-style` + `wrap-script` → fn-defs of `:wrap-element` (parameterized by `:tag`)
-- `with-htmx` + `with-cytoscape` → single `:with-cdn-script` (parameterized by `:url`)
+- `with-htmx` → `:with-cdn-script` (parameterized by `:url`); HTMX is the only CDN script left
 
 ### 2. Extract Reusable Primitives
 

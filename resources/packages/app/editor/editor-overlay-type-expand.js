@@ -10,7 +10,7 @@
 // anchor chip. Keeping it out of the overlay means the overlay's
 // own bounding box doesn't grow horizontally when the panel opens,
 // so the right-anchored overlay can't push under the source fn card.
-// Pan / zoom / resize re-position via cy events + window listener.
+// Pan / zoom / resize re-position via `gv.onViewportChange` + window listener.
 //
 // State (`expandedTypePaths`) is a Set of stable string paths so the
 // user's expanded selections survive overlay rebuilds and preview
@@ -1028,7 +1028,7 @@ function positionInlineHost(host, anchorEl) {
     return;
   }
   const r = anchorEl.getBoundingClientRect();
-  // Scale the host with cy zoom so it visually tracks the chip
+  // Scale the host with the viewport zoom so it visually tracks the chip
   // (which itself scales via the edge-label-overlay's transform).
   // Without this, the host stayed at native size while the chip
   // grew / shrunk with zoom, breaking the "this card describes

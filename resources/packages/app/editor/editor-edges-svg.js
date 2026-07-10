@@ -222,7 +222,7 @@ function highlightEdgesFromNode(nodeId) {
 
 /** Screen point → graph coordinates, by inverting the layer transform. */
 function screenToGraph(clientX, clientY) {
-  const container = document.getElementById('cy').getBoundingClientRect();
+  const container = document.getElementById('graph-surface').getBoundingClientRect();
   const pan = gv.pan();
   const zoom = gv.zoom();
   return {

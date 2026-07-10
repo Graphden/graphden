@@ -848,7 +848,7 @@ function enterArgTypeEditMode(arg, anchorEl) {
         // need the descendants exclusion.
         const fnId = arg['fn-id'];
         openFnPicker({
-          anchorEl: document.getElementById('cy') || document.body,
+          anchorEl: document.getElementById('graph-surface') || document.body,
           excludeIds: fnId ? [fnId] : [],
           expectedType: expectedSlotType(arg),
           onPick: async (fn) => { await saveArgRef(arg, fn.id); },
@@ -1001,7 +1001,7 @@ async function appendSequenceItem(fnId, anchorEl, expectedType) {
   // then enter the value / pick the fn. The endpoint accepts the
   // chosen body in the same request, so we wait for the user's pick.
   openInlineEditPopover({
-    anchorEl: anchorEl || document.getElementById('cy') || document.body,
+    anchorEl: anchorEl || document.getElementById('graph-surface') || document.body,
     ariaLabel: 'Append sequence item',
     makeControl(root) {
       const wrap = document.createElement('div');

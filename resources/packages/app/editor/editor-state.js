@@ -25,7 +25,6 @@ window.BUILD_HASH = BUILD_HASH;
 // for the same reason); don't switch any of these to `const`
 // without first confirming no other file rebinds it.
 
-let cy = null;                    // Cytoscape instance
 let selectedFnId = null;          // Currently selected function ID
 let graphData = null;             // Raw graph data from API
 let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
@@ -89,7 +88,6 @@ let anchorNodeId = null;          // cytoscape node id (full, incl. expansion pr
 // UI state flags
 let rebuildingOverlays = false;   // Prevents mouseleave during overlay rebuild
 let isGrabbing = false;           // True when any node is being dragged
-let suppressEdgeWarnings = false; // Suppresses Cytoscape edge warnings during drag
 
 // User-moved nodes (won't be auto-positioned by layout)
 let userMovedNodes = new Set();
@@ -135,17 +133,3 @@ const DRAG_HANDLE_HEIGHT = 14;    // Height of drag handle at bottom of nodes
 const PLACEHOLDER_SIZE = 20;      // Click-target square for free-arg / empty-sequence-anchor
 
 
-// ============================================================================
-// CONSOLE WARNING SUPPRESSION
-// ============================================================================
-
-(function() {
-  const originalWarn = console.warn;
-  console.warn = function(...args) {
-    if (args[0] && typeof args[0] === 'string' &&
-        args[0].includes('invalid endpoints')) {
-      return; // Suppress Cytoscape edge warnings (source/target overlap)
-    }
-    originalWarn.apply(console, args);
-  };
-})();

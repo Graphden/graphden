@@ -2,25 +2,22 @@
 // placeholder-overlay binder, and the `createNodeOverlays` /
 // `updateOverlayPositions` lifecycle.
 // Depends on: editor-state.js, editor-data.js, editor-drag.js,
-// editor-layout.js (taxiBendX).
+// editor-graph-view.js (gv), editor-layout.js (taxiBendX, computeRowCenters).
 
 // ============================================================================
 // OVERLAY REGISTRY
 // ============================================================================
 //
-// Cytoscape fires `pan zoom` events at high rate (every wheel tick,
-// every drag delta), and updateOverlayPositions also runs every frame
-// inside the RAF loop in editor-cytoscape.js. `document.querySelectorAll(
-// '.node-overlay')` on every tick scans the entire DOM and rebuilds a
-// fresh NodeList — for a graph with 200 overlays this is ~12k DOM
-// hits/sec just for the position update. Cache the elements in Maps
-// keyed by their identity (cy node-id / edge-id) so position updates
-// iterate a hashmap instead of touching the DOM.
+// `syncOverlayGeometry` runs every frame of a node animation and on every
+// pointer move of a drag. `document.querySelectorAll('.node-overlay')` on each
+// of those scans the whole DOM and rebuilds a NodeList — for 200 overlays that
+// is thousands of DOM hits a second, just to move things. Cache the elements in
+// Maps keyed by node / edge id so the geometry pass walks a hashmap instead.
 //
 // `registerNodeOverlay` / `registerEdgeOverlay` are called by every
 // overlay-creation site (createOverlay factory + placeholder +
 // edge-label). `unregisterOverlay` is called from removal sites in
-// editor-cytoscape.js. `removeAllOverlays` skips the optional
+// editor-render.js. `removeAllOverlays` skips the optional
 // "preserved" id (the overlay the user is currently hovering, which
 // we keep across rebuilds so mouseleave doesn't fire).
 const _overlaysByNodeId = new Map();
@@ -44,7 +41,7 @@ const GRAPH_LAYER_ID = 'graph-layer';
 function getGraphLayer() {
   let layer = document.getElementById(GRAPH_LAYER_ID);
   if (!layer) {
-    const container = document.getElementById('cy');
+    const container = document.getElementById('graph-surface');
     if (!container) return null;
     layer = document.createElement('div');
     layer.id = GRAPH_LAYER_ID;
@@ -165,9 +162,9 @@ function createPlaceholderOverlay(node, container) {
     }
   });
 
-  // Position the binder over the placeholder node's cytoscape footprint.
-  // Reuses .node-overlay's pan/zoom positioning so the +.button tracks
-  // the node through layout changes.
+  // Position the binder over the placeholder node's footprint. Reuses
+  // .node-overlay's graph-coordinate positioning so the `+` button tracks the
+  // node through layout changes.
   const wrap = document.createElement('div');
   wrap.className = 'node-overlay placeholder-overlay';
   wrap.dataset.nodeId = node.id();
@@ -214,19 +211,19 @@ function createNodeOverlays() {
   renderEdges();
 
   // Fn nodes (with ancestor list)
-  gv.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
+  gv.fnNodes().forEach(node => {
     // Skip if overlay already exists (preserved)
     if (node.id() === preservedOverlayId && getNodeOverlay(node.id())) return;
     createFnOverlay(node, container);
   });
 
   // Arg value nodes
-  gv.nodes('[type="arg"]').forEach(node => {
+  gv.argNodes().forEach(node => {
     createArgOverlay(node, container);
   });
 
   // Placeholder nodes (unset args)
-  gv.nodes('[?isPlaceholder]').forEach(node => {
+  gv.placeholderNodes().forEach(node => {
     createPlaceholderOverlay(node, container);
   });
 

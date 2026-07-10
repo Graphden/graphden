@@ -84,7 +84,7 @@ function setViewportZoom(level, screenPoint) {
 }
 
 function viewportContainer() {
-  return document.getElementById('cy');
+  return document.getElementById('graph-surface');
 }
 
 function viewportWidth() {

@@ -189,7 +189,7 @@ body.sidebar-collapsed #sidebar-resizer { display: none; }
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   display: flex; flex-direction: column; overflow: hidden;
 }
-#cy { width: 100%; height: 100%; }
+#graph-surface { width: 100%; height: 100%; }
 
 /* The overlay layer. Carries the viewport transform for every node / edge-label
    overlay at once, so panning and zooming is a single style write rather than a

@@ -305,7 +305,7 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   // HTMX migration Phase A1: the col-header row-actions content
   // is now server-rendered via `/partials/row-actions`. JS keeps
   // the popover lifecycle (open / hover / dismiss / re-anchor on
-  // cy zoom-pan) + the post-swap `data-action` dispatcher; the
+  // viewport zoom-pan) + the post-swap `data-action` dispatcher; the
   // markup + per-fn conditionals (ns badge, i badge, ↗ link) live
   // in `:partial-row-actions :_partial-row-actions-col-header`.
   const buildColPopoverContent = (host) => {

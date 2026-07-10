@@ -663,8 +663,8 @@
                  (not= 200 (:status r))
                  {:ok? false :detail (str "HTTP " (:status r))}
 
-                 (not (str/includes? (:body r) "id=\"cy\""))
-                 {:ok? false :detail "no #cy in body"}
+                 (not (str/includes? (:body r) "id=\"graph-surface\""))
+                 {:ok? false :detail "no #graph-surface in body"}
 
                  ;; Without `<script src="/assets/editor.js">` the
                  ;; page loads as a blank skeleton — see the

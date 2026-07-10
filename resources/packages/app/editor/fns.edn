@@ -18,17 +18,17 @@
 
   ;; Editor JS modules — loaded from resources and concatenated in order.
   ;; Order matters: tooltips/icons/drag must come BEFORE overlays (which
-  ;; calls into them); ui/cytoscape come after overlays (they call
+  ;; calls into them); ui/render come after overlays (they call
   ;; into the overlay management API).
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
+                  ;; The graph itself: two maps and a tween. No library.
+                  "packages/app/editor/editor-graph-model.js"
                   ;; Viewport (pan / zoom / gestures) — owns the two numbers the
                   ;; graph layer's transform is built from. `gv` reads it.
                   "packages/app/editor/editor-viewport.js"
-                  ;; `gv` — the graph-view seam. Reads `cy` lazily, so it can
-                  ;; load before the instance exists; every module downstream
-                  ;; talks to the graph through it rather than to cytoscape.
+                  ;; `gv` — the graph-view seam every module downstream reads.
                   "packages/app/editor/editor-graph-view.js"
                   "packages/web/runtime/graphden-popover.js"
                   "packages/app/editor/editor-busy.js"
@@ -78,7 +78,7 @@
                   "packages/app/editor/editor-sidebar.js"
                   "packages/app/editor/editor-expansion.js"
                   "packages/app/editor/editor-ui.js"
-                  "packages/app/editor/editor-cytoscape.js"
+                  "packages/app/editor/editor-render.js"
                   "packages/app/editor/editor-main.js"]}}
 
   ;; Raw concatenation of every editor module — still contains the
@@ -144,13 +144,13 @@
                " Only services"]]
              [:nav {:id "entity-list" :aria-label "Namespace tree"}]]
             ;; Graph container \u2014 <main> landmark
-            ;; `#cy` is a `group`, not an `img`: it hosts the cytoscape
-            ;; canvas AND the interactive HTML overlays (fn cards, arg
-            ;; rows, action buttons). `role="img"` would make a screen
+            ;; `#graph-surface` is a `group`, not an `img`: it hosts the
+            ;; SVG edge layer AND the interactive HTML overlays (fn cards,
+            ;; arg rows, action buttons). `role="img"` would make a screen
             ;; reader treat it as one atomic graphic and skip every
             ;; overlay control inside (axe `nested-interactive`).
             [:main {:id "graph-container" :aria-label "Function graph"}
-             [:div {:id "cy" :role "group" :aria-label "Composition graph"}]
+             [:div {:id "graph-surface" :role "group" :aria-label "Composition graph"}]
              ;; Navigation controls \u2014 group with role="toolbar" so
              ;; screen readers announce the buttons as a related set.
              [:div {:id "nav-controls" :role "toolbar" :aria-label "Graph navigation"}
@@ -288,21 +288,18 @@
    :parent :conj
    :args {:coll [] :item :_editor-css-link}}
 
-  ;; Cytoscape — graph canvas renderer.
-  {:name :_head-with-cytoscape
-   :parent :with-cdn-script
-   :args {:head :head-elements-0
-          :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
-
-  ;; Final editor <head> — stylesheet link + Cytoscape CDN + HTMX CDN.
+  ;; Final editor <head> — stylesheet link + HTMX CDN.
   ;; HTMX (2.x) lets server-rendered popover fragments declare their
   ;; own interactivity (`hx-get` for row-expand, `hx-on:click` for
   ;; declarative dismissal, etc.) without per-module JS post-swap
   ;; binding code — the graph fragment owns the contract end to end.
+  ;;
+  ;; The graph itself needs no library: nodes are HTML overlays, edges are SVG
+  ;; paths, and the viewport is one CSS transform.
   {:name :head
-   :description "Final editor `<head>` element vector — `:_editor-css-link` (cached stylesheet) + Cytoscape.js CDN + HTMX 2.x CDN. HTMX is the declarative-interaction layer the `/partials/*` fragments rely on."
+   :description "Final editor `<head>` element vector — `:_editor-css-link` (cached stylesheet) + HTMX 2.x CDN. HTMX is the declarative-interaction layer the `/partials/*` fragments rely on."
    :parent :with-cdn-script
-   :args {:head :_head-with-cytoscape
+   :args {:head :head-elements-0
           :url "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"}}
 
   ;; Complete HTML page

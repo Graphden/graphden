@@ -34,6 +34,8 @@ function _gvNode(el) {
     },
     width: () => el.width(),
     height: () => el.height(),
+    /** Record the card's real height, once the DOM has told us what it is. */
+    setHeight: (h) => el.data('layoutHeight', h),
     incomingEdges: () => el.incomers('edge').map(_gvEdge),
     outgoingEdges: () => el.outgoers('edge').map(_gvEdge),
   };

@@ -197,22 +197,26 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     onViewportChanged(updateZoomSlider);
   }
 
-  if (shouldFit && cy.nodes().length > 0) {
-    fitInVisibleArea(50);
-  }
-
   // Edge hover lives in editor-edges-svg.js now. An SVG path is its own
   // hit-zone, and `elementsFromPoint` returns every edge under the cursor —
   // so the three-segment geometry that used to re-derive the taxi bend just to
   // find the overlapping vertical runs cytoscape's hit-test missed is gone,
   // along with the separate mouse/touch tolerances it needed.
 
-  // Create overlays
+  // Build the overlays, then correct the layout against their measured heights
+  // and settle the nodes on it. Only then is there a bounding box worth fitting.
   createNodeOverlays();
+  if (reflowFromMeasuredHeights(layout)) {
+    cy.nodes().forEach((node) => {
+      const pos = layout.get(node.id());
+      if (pos) node.position({x: pos.x, y: pos.y});
+    });
+  }
 
-  // The initial fit fired before the overlays existed, so paint the transform
-  // and the slider now that there is something to place.
-  applyViewportTransform();
+  if (shouldFit && cy.nodes().length > 0) {
+    fitInVisibleArea(50);
+  }
+  updateOverlayPositions();
   updateZoomSlider();
 }
 
@@ -404,6 +408,16 @@ async function renderGraph(shouldFit = true) {
       cy.add(edgesToAdd);
     }
 
+    // Build the overlays BEFORE deciding where anything goes. A card's height is
+    // content-driven — the effects strip wraps to as many chip rows as it needs
+    // — so it can only be measured, never predicted. `reflowFromMeasuredHeights`
+    // corrects `layout` in place, and the animation below drives towards those
+    // corrected targets rather than snapping to them afterwards.
+    rebuildingOverlays = true;
+    createNodeOverlays();
+    rebuildingOverlays = false;
+    reflowFromMeasuredHeights(layout);
+
     // Apply layout positions with animation
     const animPromises = [];
 
@@ -418,6 +432,8 @@ async function renderGraph(shouldFit = true) {
       const targetPos = { x: pos.x, y: pos.y };
       const currentPos = node.position();
 
+      // A node that has just appeared jumps to its place; one that was already
+      // on screen eases there. Either way the target is the corrected one.
       const isNewNode = nodesToAdd.some(n => n.data.id === nodeId);
       if (!isNewNode && (Math.abs(currentPos.x - targetPos.x) > 1 || Math.abs(currentPos.y - targetPos.y) > 1)) {
         const anim = node.animation({
@@ -426,7 +442,7 @@ async function renderGraph(shouldFit = true) {
           easing: 'ease-out'
         });
         animPromises.push(anim.play().promise());
-      } else if (!isNewNode) {
+      } else {
         node.position(targetPos);
       }
     });
@@ -440,9 +456,7 @@ async function renderGraph(shouldFit = true) {
       }
     }
 
-    rebuildingOverlays = true;
-    createNodeOverlays();
-    rebuildingOverlays = false;
+    updateOverlayPositions();
     requestAnimationFrame(updateLoop);
 
     Promise.all(animPromises).then(() => {

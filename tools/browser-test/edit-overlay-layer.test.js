@@ -163,6 +163,48 @@ const TOL = 1.5;
            'every edge label anchors at or after its bend: '
            + edgeLabels.afterBend + '/' + edgeLabels.count);
 
+    // ===================================================================
+    // Phase E — a card's declared box is its real box.
+    //
+    // `calculateNodeSize` predicts card height by mirroring the overlay
+    // renderer, and the mirror cannot keep up: the effects strip wraps to as
+    // many chip rows as the width allows, and it had already forgotten the
+    // `branch-local` strip. `web-server` came out 90 graph units against a real
+    // 167 — enough to push the card 77 units into the row below, where the grid
+    // leaves 40, and to anchor its edges 38 units above its visual centre.
+    // `reflowFromMeasuredHeights` re-lays the rows against measured heights.
+    // ===================================================================
+    const boxes = await page.evaluate(() => {
+      const cards = [];
+      for (const [nodeId, overlay] of _overlaysByNodeId) {
+        const node = gv.node(nodeId);
+        if (!node || node.data('isPlaceholder')) continue;
+        cards.push({
+          declared: parseFloat(overlay.style.minHeight) || 0,
+          rendered: overlay.offsetHeight,
+          top: node.position().y - node.height() / 2,
+          col: node.data('colRightX'),
+        });
+      }
+      // Two cards in the same column must not overlap vertically.
+      let overlaps = 0;
+      for (let i = 0; i < cards.length; i++) {
+        for (let j = i + 1; j < cards.length; j++) {
+          const a = cards[i];
+          const b = cards[j];
+          if (a.col !== b.col || a.col === undefined) continue;
+          if (a.top < b.top + b.rendered && b.top < a.top + a.rendered) overlaps++;
+        }
+      }
+      const worst = Math.max(...cards.map((c) => Math.abs(c.rendered - c.declared)));
+      return {count: cards.length, worst, overlaps};
+    });
+    assert(boxes.count > 0, 'measured ' + boxes.count + ' cards');
+    assert(boxes.worst <= 1,
+           'every card\'s declared height matches what it renders (worst gap: '
+           + boxes.worst + ' graph units)');
+    assert(boxes.overlaps === 0, 'no two cards in a column overlap');
+
     console.log('  PASS');
   } finally {
     await browser.close();

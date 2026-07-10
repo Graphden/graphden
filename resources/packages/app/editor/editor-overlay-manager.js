@@ -351,3 +351,61 @@ function updateOverlayPositions() {
   syncOverlayGeometry();
   applyViewportTransform();
 }
+
+
+/**
+ * Correct the layout against the cards' REAL heights.
+ *
+ * `calculateNodeSize` predicts a card's height by mirroring what the overlay
+ * renderer will draw. That mirror cannot be right: the effects strip wraps to
+ * as many chip rows as the card's width allows, which depends on font metrics,
+ * and every strip the renderer gains has to be remembered here too — it had
+ * already forgotten `branch-local`. On `web-server` the estimate was 90 graph
+ * units against a real 167.
+ *
+ * Under-estimating pushes a card 77 units into the row below (the grid leaves
+ * 40), and anchors its edges 38 units above its visual centre.
+ *
+ * So the estimate is demoted to a first guess that keeps the first paint from
+ * flashing, and the DOM — which knows — supplies the answer. `offsetHeight`
+ * ignores ancestor transforms, so inside the scaled layer it already reports
+ * graph units.
+ *
+ * Mutates `layout` (node id → {x, y, …}) in place and returns whether anything
+ * moved, so the caller can animate towards the corrected targets.
+ */
+function reflowFromMeasuredHeights(layout) {
+  const gridPos = lastGridPos();
+  if (!gv.ready() || !gridPos || !layout) return false;
+
+  const measured = new Map();
+  let changed = false;
+  for (const [nodeId, overlay] of _overlaysByNodeId) {
+    const node = gv.node(nodeId);
+    // Placeholders are a fixed-size `+` target, not a card: their overlay is a
+    // transparent wrapper whose height says nothing about the slot.
+    if (!node || node.data('isPlaceholder')) continue;
+    const h = overlay.offsetHeight;
+    if (!h) continue;
+    measured.set(nodeId, h);
+    if (Math.abs(h - node.height()) > 0.5) changed = true;
+  }
+  if (!changed) return false;
+
+  for (const [nodeId, h] of measured) {
+    gv.node(nodeId)?.setHeight(h);
+    const entry = layout.get(nodeId);
+    if (entry) entry.height = h;
+  }
+
+  // Rows restack around the tallest card in each. Columns are untouched: an
+  // overlay's width is set from the node, so it never overflows.
+  const rowCenterY = computeRowCenters(
+    gridPos, (id) => measured.get(id) ?? layout.get(id)?.height);
+  for (const [nodeId, pos] of Object.entries(gridPos)) {
+    const y = rowCenterY.get(pos.row);
+    const entry = layout.get(nodeId);
+    if (y !== undefined && entry) entry.y = y;
+  }
+  return true;
+}

@@ -231,12 +231,42 @@
 
 (defn- lock-conn-from-ctx
   "Pull the service-locks Connection off the executor context.
-   When the ctx wasn't built with a `:service-locks-connection` (test
-   contexts using an in-memory storage), returns nil — callers
-   degrade gracefully (single-pod path: every lock attempt
-   `succeeds` because there's no contention)."
+   Prefers the reconnecting holder (`:service-locks-holder`, production);
+   falls back to a raw `:service-locks-connection` (test contexts). When
+   neither is present (in-memory storage), returns nil — callers degrade
+   gracefully (single-pod path: every lock attempt `succeeds` because
+   there's no contention)."
   ^Connection [ctx]
-  (:service-locks-connection ctx))
+  (if-let [holder (:service-locks-holder ctx)]
+    (pg-lock/holder-conn holder)
+    (:service-locks-connection ctx)))
+
+
+(defn- reassert-lock-ownership!
+  "Called after the lock connection reconnected: the new Postgres session
+   holds NONE of the locks this pod took, so re-take them. For each running
+   `:singleton` service we believed we owned (`:locked?`), `try-lock!` on
+   the fresh connection:
+
+   - succeeds → nobody grabbed it during the outage; keep running.
+   - fails    → a sibling won it while we were disconnected; STOP the local
+                copy and drop it. That sibling is now the single owner —
+                exactly the double-run this whole mechanism prevents.
+
+   `:per-pod` entries never took a lock, so they're skipped."
+  [lock-conn running-atom]
+  (doseq [[sid entry] @running-atom
+          :when (and (map? entry) (:locked? entry))]
+    (let [reacquired? (try (pg-lock/try-lock! lock-conn sid)
+                           (catch Exception e
+                             (log/warn e "re-acquire try-lock failed after reconnect"
+                                       {:service-id sid})
+                             false))]
+      (when-not reacquired?
+        (log/warn "lost service ownership during lock-conn outage — stopping local copy"
+                  {:service-id sid})
+        (stop-service! sid entry)
+        (swap! running-atom dissoc sid)))))
 
 
 (defn- stop-and-forget!
@@ -291,11 +321,18 @@
 
    A `:singleton` service's start is gated on
    `pg_try_advisory_lock(service-id-hash)` on the pod's dedicated
-   lock connection (`:service-locks-connection` on ctx). When the
+   lock connection (via `:service-locks-holder` on ctx). When the
    lock is unavailable — another pod owns this service — we record a
    `:not-our-lock` entry in `running-atom` so the next reconcile pass
    doesn't re-try until a NOTIFY tells us the situation changed.
    A `:per-pod` service skips the lock and always starts here.
+
+   Before the diff, `pg-lock/ensure-live!` heals a dropped lock
+   connection. A drop released every advisory lock the pod held, so a
+   reconnect triggers `reassert-lock-ownership!` — each `:singleton`
+   we were running re-takes its lock, and any a sibling stole during the
+   outage stops locally. Without this a `:per-pod`-vs-`:singleton` pair
+   could double-run one service until a `:service` edit happened by.
 
    `start-opts` (optional) is passed straight to `start-service!`,
    e.g. `{:max-retries 0 :backoff-ms 0}` keeps tests responsive when
@@ -313,6 +350,12 @@
    (reconcile-once! ctx running-atom {}))
   ([ctx running-atom start-opts]
    (locking reconcile-monitor
+     ;; First, heal the lock connection if it dropped. A dead connection
+     ;; released every advisory lock this pod held, so on reconnect we must
+     ;; re-assert ownership BEFORE the diff below trusts `:locked?` entries.
+     (when-let [holder (:service-locks-holder ctx)]
+       (when (pg-lock/ensure-live! holder)
+         (reassert-lock-ownership! (pg-lock/holder-conn holder) running-atom)))
      (let [storage (:storage ctx)
            lock-conn (lock-conn-from-ctx ctx)
            enabled-services (vec (sp/query-entities storage :service {:enabled? true}))

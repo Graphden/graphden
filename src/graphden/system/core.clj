@@ -156,20 +156,19 @@
 
 (defmethod ig/init-key :db/service-locks [_ {:keys [pg-opts]}]
   (log/info "Opening service-locks connection...")
-  {:connection (pg-lock/create-lock-conn pg-opts)})
+  ;; A reconnecting HOLDER, not a bare Connection: a dropped lock
+  ;; connection releases every advisory lock this pod held, and
+  ;; `advisory-lock/ensure-live!` (called from the reconciler) reopens it
+  ;; + re-asserts ownership. The holder IS the integrant value.
+  (pg-lock/create-lock-holder pg-opts))
 
 
-(defmethod ig/halt-key! :db/service-locks [_ {:keys [connection]}]
+(defmethod ig/halt-key! :db/service-locks [_ holder]
   (log/info "Releasing service-locks + closing connection...")
-  ;; Release-all is best-effort during shutdown — we still need to
-  ;; close the connection even if a release fails. But silencing
-  ;; the failure entirely would hide DB-side state-leak (advisory
-  ;; locks persisting on the connection until the session truly
-  ;; dies). Log so dashboards see shutdown-time PG drift.
-  (try (pg-lock/release-all! connection)
-       (catch Exception e
-         (log/warn e "service-locks release-all failed during halt — continuing close")))
-  (pg-lock/close-lock-conn! connection))
+  ;; `close-holder!` releases all locks (best-effort, logged so
+  ;; shutdown-time PG drift is visible) then closes the underlying
+  ;; connection.
+  (pg-lock/close-holder! holder))
 
 
 ;; =============================================================================
@@ -1057,10 +1056,12 @@
   ;; (e.g. test fixture or REPL reset) before reconciling.
   (reset! recon/running {})
   (let [storage (:storage context)
-        ;; Thread the lock connection through ctx so reconcile-once!
-        ;; can use it without changing its arglist contract.
+        ;; Thread the lock HOLDER through ctx so reconcile-once! can use it
+        ;; without changing its arglist contract. The holder (not a bare
+        ;; connection) is what lets a pass reconnect a dropped lock conn +
+        ;; re-assert ownership.
         ctx (cond-> context
-              service-locks (assoc :service-locks-connection (:connection service-locks)))
+              service-locks (assoc :service-locks-holder service-locks))
         seeded (seed-package-services! storage packages)
         new-seeds (filterv :seeded? seeded)
         enabled-services (sp/query-entities storage :service {:enabled? true})]

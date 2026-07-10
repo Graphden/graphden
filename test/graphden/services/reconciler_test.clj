@@ -978,3 +978,83 @@
       (finally
         (recon/stop-all! pod)
         (sp/close storage)))))
+
+
+;; ============================================================================
+;; reassert-lock-ownership! — after a lock-conn reconnect, re-take the locks
+;; we held, and stop the ones a sibling grabbed during the outage.
+;; ============================================================================
+
+(deftest reassert-keeps-services-we-re-acquire-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "reassert-keep" calls stops)
+        svc (sp/create-entity storage :service
+                              {:fn-id (:id composed) :enabled? true
+                               :restart-policy :always :cardinality :singleton})
+        pod (atom {})]
+    (try
+      ;; Start under a (fake) lock connection so the entry is :locked? true.
+      (with-redefs [pg-lock/try-lock! (fn [_ _] true)]
+        (recon/reconcile-once! (pod-ctx storage) pod))
+      (is (true? (:locked? (get @pod (:id svc)))))
+      ;; Reconnect scenario: re-acquire SUCCEEDS (nobody stole it).
+      (with-redefs [pg-lock/try-lock! (fn [_ _] true)]
+        (#'recon/reassert-lock-ownership! ::fresh-conn pod))
+      (testing "service we re-acquired stays running, not stopped"
+        (is (contains? @pod (:id svc)))
+        (is (empty? @stops)))
+      (finally
+        (recon/stop-all! pod)
+        (sp/close storage)))))
+
+
+(deftest reassert-stops-a-service-a-sibling-stole-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "reassert-yield" calls stops)
+        svc (sp/create-entity storage :service
+                              {:fn-id (:id composed) :enabled? true
+                               :restart-policy :always :cardinality :singleton})
+        pod (atom {})]
+    (try
+      (with-redefs [pg-lock/try-lock! (fn [_ _] true)]
+        (recon/reconcile-once! (pod-ctx storage) pod))
+      (is (true? (:locked? (get @pod (:id svc)))))
+      ;; Reconnect scenario: re-acquire FAILS — a sibling took it during the
+      ;; outage. The pod must stop its local copy and yield.
+      (with-redefs [pg-lock/try-lock! (fn [_ _] false)]
+        (#'recon/reassert-lock-ownership! ::fresh-conn pod))
+      (testing "we stopped the local copy and dropped the entry"
+        (is (not (contains? @pod (:id svc))))
+        (is (= 1 (count @stops)) "the stopper fired exactly once"))
+      (finally
+        (recon/stop-all! pod)
+        (sp/close storage)))))
+
+
+(deftest per-pod-service-is-untouched-by-reassert-test
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "reassert-perpod" calls stops)
+        svc (sp/create-entity storage :service
+                              {:fn-id (:id composed) :enabled? true
+                               :restart-policy :always :cardinality :per-pod})
+        c (test-ctx storage)
+        pod (atom {})]
+    (try
+      (recon/reconcile-once! c pod)
+      (is (false? (:locked? (get @pod (:id svc)))) ":per-pod never locked")
+      ;; Even if try-lock! would fail, a :per-pod entry (:locked? false) is
+      ;; skipped — it never depended on a lock.
+      (with-redefs [pg-lock/try-lock! (fn [_ _] (throw (ex-info "should not be called" {})))]
+        (#'recon/reassert-lock-ownership! ::fresh-conn pod))
+      (testing ":per-pod service stays running, try-lock! never consulted"
+        (is (contains? @pod (:id svc)))
+        (is (empty? @stops)))
+      (finally
+        (recon/stop-all! pod)
+        (sp/close storage)))))

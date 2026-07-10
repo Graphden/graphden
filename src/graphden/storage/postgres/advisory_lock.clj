@@ -128,3 +128,61 @@
   [^Connection conn]
   (jdbc/execute! conn ["SELECT pg_advisory_unlock_all()"])
   nil)
+
+
+;; =============================================================================
+;; Reconnecting holder
+;;
+;; A dropped lock connection (DB restart / network blip) silently ends the
+;; Postgres session, which RELEASES every advisory lock this pod held — but
+;; the pod still believes it owns those services. Left unhandled, a sibling
+;; can take the lock and two pods run the same `:singleton` service.
+;;
+;; The holder wraps the connection in an atom so it can be transparently
+;; reopened. `ensure-live!` reports whether it had to reconnect, and the
+;; reconciler re-asserts ownership when it did.
+;; =============================================================================
+
+(defn create-lock-holder
+  "Open the first lock connection and return a holder — an atom of
+   `{:conn Connection :pg-opts opts}`. Pass the holder to `holder-conn`
+   / `ensure-live!` / `close-holder!`."
+  [pg-opts]
+  (atom {:conn (create-lock-conn pg-opts) :pg-opts pg-opts}))
+
+
+(defn holder-conn
+  "The holder's current live `Connection`. Callers that ran `ensure-live!`
+   this pass can pass this straight to `try-lock!` / `release-lock!`."
+  ^Connection [holder]
+  (:conn @holder))
+
+
+(defn ensure-live!
+  "Validate the holder's connection; if it's dead, close it and open a
+   fresh one. Returns true IFF it reconnected — a reconnect means a new
+   Postgres session that holds NONE of the pod's previous advisory locks,
+   so the caller must re-acquire ownership of whatever it was running.
+
+   `isValid` runs a lightweight validation query (1s timeout); a throw
+   from it is treated as dead."
+  [holder]
+  (let [{:keys [conn pg-opts]} @holder]
+    (if (try (Connection/.isValid conn 1) (catch Exception _ false))
+      false
+      (do
+        (log/warn "service-locks connection is dead — reconnecting")
+        (try (pg-conn/close-dedicated! conn "service-locks") (catch Exception _ nil))
+        (reset! holder {:conn (create-lock-conn pg-opts) :pg-opts pg-opts})
+        true))))
+
+
+(defn close-holder!
+  "Release every lock + close the holder's connection. Best-effort, for
+   pod halt."
+  [holder]
+  (let [conn (:conn @holder)]
+    (try (release-all! conn)
+         (catch Exception e
+           (log/warn e "service-locks release-all failed during holder close")))
+    (pg-conn/close-dedicated! conn "service-locks")))

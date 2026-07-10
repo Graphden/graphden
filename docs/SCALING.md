@@ -156,9 +156,11 @@ two missing pieces:
 Plus an `:org` field saying where that org runs, so shared pods refuse to
 serve it and it isn't scheduled onto them.
 
-**Advisory-lock reconnect.** A dropped lock connection silently
-session-releases the pod's locks. Two pods could then run one `:singleton`
-service until the next reconcile stops the loser. Tracked in
+**Advisory-lock reconnect** — DONE. The lock connection lives behind a
+reconnecting holder; each reconcile pass calls `advisory-lock/ensure-live!`,
+and a reconnect (DB restart / network blip) triggers
+`reassert-lock-ownership!` — the pod re-takes every `:singleton` it was
+running and stops any a sibling grabbed during the outage. See
 SERVICES.md § Roadmap.
 
 ## Rolling upgrade note

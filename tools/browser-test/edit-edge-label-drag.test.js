@@ -93,12 +93,11 @@ const DRAG_DX = 600;
         src.position({x: startX + dx, y: startY});
         updateOverlayPositions();
 
-        // cy.pan() hands back a LIVE reference — snapshot the primitives.
-        const panX = cy.pan().x;
-        const zoom = cy.zoom();
-
+        // Overlays are laid out in GRAPH coordinates inside `#graph-layer`,
+        // which carries the viewport transform — so `style.left` is already
+        // the value we want to compare against the bend. No un-projection.
         const bendGraph = taxiBendX(src);
-        const labelLeftGraph = (parseFloat(overlay.style.left) - panX) / zoom;
+        const labelLeftGraph = parseFloat(overlay.style.left);
         // What the old formula would have produced, to prove this scenario
         // actually engages the clamp rather than passing vacuously.
         const staleBendGraph = src.data('colRightX') + 20;
@@ -134,9 +133,7 @@ const DRAG_DX = 600;
       updateOverlayPositions();
 
       const overlay = _edgeOverlaysByEdgeId.get(edgeId);
-      const panX = cy.pan().x;
-      const zoom = cy.zoom();
-      const labelLeftGraph = (parseFloat(overlay.style.left) - panX) / zoom;
+      const labelLeftGraph = parseFloat(overlay.style.left);
 
       // Restore before anything else observes the patched global.
       taxiBendX = fixed;
@@ -154,11 +151,9 @@ const DRAG_DX = 600;
     // And the restore actually took, so we leave the page consistent.
     const restored = await page.evaluate((edgeId) => {
       const overlay = _edgeOverlaysByEdgeId.get(edgeId);
-      const panX = cy.pan().x;
-      const zoom = cy.zoom();
       const edge = cy.getElementById(edgeId);
       return {
-        labelLeftGraph: (parseFloat(overlay.style.left) - panX) / zoom,
+        labelLeftGraph: parseFloat(overlay.style.left),
         bendGraph: taxiBendX(edge.source()),
       };
     }, rendered.edgeId);

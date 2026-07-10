@@ -82,7 +82,7 @@ function navZoom(dir) {
   if (!cy) return;
   const newZoom = Math.max(0.1, Math.min(3, cy.zoom() + dir * ZOOM_STEP));
   cy.zoom({ level: newZoom, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
-  updateOverlayPositions();
+  applyViewportTransform();
   updateZoomSlider();
 }
 
@@ -91,7 +91,9 @@ function navZoomTo(level) {
   if (!cy) return;
   const clamped = Math.max(0.1, Math.min(3, level));
   cy.zoom({ level: clamped, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
-  updateOverlayPositions();
+  // Slider `oninput` fires per pixel of thumb travel — the overlays' graph
+  // coordinates haven't changed, only the viewport, so this stays O(1).
+  applyViewportTransform();
 }
 
 /** Sync the slider thumb with the current zoom level. */
@@ -104,7 +106,7 @@ function updateZoomSlider() {
 function navResetZoom() {
   if (!cy || cy.nodes().length === 0) return;
   fitInVisibleArea(50);
-  updateOverlayPositions();
+  applyViewportTransform();
   updateZoomSlider();
 }
 
@@ -119,7 +121,7 @@ function navGoToRoot() {
   if (!rootNode) rootNode = cy.nodes().first();
   if (rootNode?.length) {
     cy.animate({ center: { eles: rootNode }, duration: 200 });
-    setTimeout(() => { updateOverlayPositions(); updateZoomSlider(); }, 250);
+    setTimeout(() => { applyViewportTransform(); updateZoomSlider(); }, 250);
   }
 }
 

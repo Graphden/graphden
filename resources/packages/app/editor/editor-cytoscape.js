@@ -256,9 +256,11 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     fitInVisibleArea(50);
   }
 
-  // Event handlers for pan/zoom
+  // Event handlers for pan/zoom. These fire on every wheel tick and every
+  // drag delta, so they must stay O(1): the overlays ride the layer's
+  // transform and need no per-node work here.
   cy.on('pan zoom', function() {
-    updateOverlayPositions();
+    applyViewportTransform();
     updateZoomSlider();
     updateEdgeWidthForZoom();
   });

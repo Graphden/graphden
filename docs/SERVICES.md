@@ -340,7 +340,7 @@ all loaded packages.
 |------|------|
 | Done | `:service` schema, reconciler, integrant, generic CRUD via /api/entities/service, supervisor for startup failures, packages-based seeding, already-running rejection, validation that target fn has zero free args |
 | Done | Multi-pod: per-pod reconcilers, PG advisory-lock ownership for `:singleton` services, `:cardinality` so `:per-pod` listeners run everywhere, `service:*` NOTIFY so siblings reconcile within ~1s, lock auto-release on pod crash. No `:owner-pod-id` column — ownership is implicit in who holds the lock. |
-| Next | Periodic reconcile poll (picks up out-of-band DB edits); `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter); a `:cardinality` control in the ⚙ popover |
+| Next | Periodic reconcile poll (picks up out-of-band DB edits); `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
 | Then | Advisory-lock connection-drop reconnect + re-acquire (a dropped lock conn silently session-releases the pod's advisory locks — single-pod-latent, but two pods could then double-run one `:singleton` service until the next reconcile stops the loser); cross-pod cancel routing for `:fn-execution` |
 | Future | Healthcheck-based runtime crash detection (lets `:always` honor "restart on clean exit"); pluggable supervisor strategies |
 

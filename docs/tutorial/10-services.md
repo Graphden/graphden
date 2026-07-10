@@ -179,21 +179,15 @@ contender, every lock attempt succeeds.
 
 ### Try it (cardinality edition)
 
-The `⚙` popover doesn't offer a cardinality control yet; set it
-through the entity API. Take the service id from
-`GET /api/services`, then:
+The `⚙` popover has a **Cardinality** control — two radios,
+`singleton` / `per-pod`, right under Restart policy. It pre-selects
+the row's current value (a new service starts at `singleton`, since
+a nil column reads that way). Pick one and hit `Save & reconcile`.
 
-```bash
-curl -X PUT "$BASE/api/entities/service/$SERVICE_ID" \
-  -H "Authorization: Bearer $AUTH_TOKEN" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  --data "fn-id=$FN_ID&enabled?=true&restart-policy=always&cardinality=singleton"
-```
-
-Watch what happens. Changing cardinality is a **config drift**:
-the reconciler notices the running entry no longer matches the
-row, stops the service, and starts it again under the new rule.
-You can see the lock appear and disappear:
+Changing cardinality is a **config drift**: the reconciler notices
+the running entry no longer matches the row, stops the service, and
+starts it again under the new rule. You can watch the advisory lock
+appear and disappear:
 
 ```sql
 select count(*) from pg_locks where locktype = 'advisory';
@@ -201,8 +195,22 @@ select count(*) from pg_locks where locktype = 'advisory';
 -- per-pod   → 0   (nobody locks; every pod just runs it)
 ```
 
-Flip it back to `per-pod` when you're done — a `:singleton`
-web-server is exactly the misconfiguration described above.
+> ⚠️ One sharp edge: the editor is itself served by the
+> `:web-server` service. Flipping *its* cardinality restarts *its*
+> listener — the port drops for a moment and the page you're on
+> briefly can't reach the server before it comes back. Expected, but
+> don't do it to a production editor mid-session for fun. And flip it
+> back to `per-pod` when you're done experimenting — a `:singleton`
+> web-server is exactly the misconfiguration described above.
+
+Prefer the API? The same fields go through generic CRUD:
+
+```bash
+curl -X PUT "$BASE/api/entities/service/$SERVICE_ID" \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "fn-id=$FN_ID&enabled?=true&restart-policy=always&cardinality=singleton"
+```
 
 ## Per-branch services
 

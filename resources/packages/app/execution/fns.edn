@@ -2306,6 +2306,98 @@
           :children :_sp-policy-wrap-children}}
 
   ;; ---------------------------------------------------------------------
+  ;; Cardinality radios — mirrors the restart-policy block exactly, one
+  ;; row per `:service.cardinality` enum value. `:singleton` (advisory-
+  ;; lock-gated, one pod cluster-wide) vs `:per-pod` (every pod runs its
+  ;; own — what an `:http-server` listener needs). A nil column reads as
+  ;; `:singleton`, so that's the default for a new row. See
+  ;; `schema/services/schema.clj` and docs/SCALING.md.
+  ;; ---------------------------------------------------------------------
+
+  {:name :_sp-existing-card-raw
+   :parent :get :args {:coll :_sp-existing :key {:value :cardinality} :default nil}}
+
+  {:name :_sp-existing-card-keyword-name
+   :description "Strip the leading `:` from the keyword form (e.g. `:per-pod` → `\"per-pod\"`); nil-safe."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_sp-existing-card-raw}}
+          :then {:parent :name :args {:value :_sp-existing-card-raw}}
+          :else {:value nil}}}
+
+  {:name :_sp-current-card
+   :description "Selected cardinality for the radios: the existing row's value, or `\"singleton\"` for a new row (matches nil-reads-as-singleton)."
+   :parent :coalesce
+   :args {:value :_sp-existing-card-keyword-name :default {:value "singleton"}}}
+
+  {:name :_sp-cardinalities
+   :description "Hardcoded enum — matches the `:service.cardinality` column. Admins MUST change the column enum + storage schema before adding values here."
+   :parent :list
+   :args {:items [{:value "singleton"} {:value "per-pod"}]}}
+
+  ;; Per-radio callback. `{:as :item}` is the cardinality string.
+  {:name :_sp-card-name
+   :parent :str :args {:parts [{:as :item}]}}
+
+  {:name :_sp-card-selected?
+   :parent :equal? :args {:a :_sp-card-name :b {:as :current-cardinality}}}
+
+  {:name :_sp-card-radio-attrs-base
+   :parent :assoc
+   :args {:map {:value {:type "radio" :name "service-cardinality"}}
+          :key {:value :value}
+          :value :_sp-card-name}}
+
+  {:name :_sp-card-radio-attrs-with-checked
+   :parent :assoc
+   :args {:map :_sp-card-radio-attrs-base
+          :key {:value :checked}
+          :value {:value "checked"}}}
+
+  {:name :_sp-card-radio-attrs
+   :parent :if
+   :args {:test :_sp-card-selected?
+          :then :_sp-card-radio-attrs-with-checked
+          :else :_sp-card-radio-attrs-base}}
+
+  {:name :_sp-card-radio-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs :_sp-card-radio-attrs
+          :children {:value []}}}
+
+  {:name :_sp-card-radio-label-text
+   :parent :str :args {:parts [{:value " "} :_sp-card-name]}}
+
+  {:name :_sp-card-radio-label
+   :parent :hiccup
+   :args {:tag {:value "label"}
+          :attrs {:value {:class "service-popover-policy-option"}}
+          :children [:_sp-card-radio-input :_sp-card-radio-label-text]}}
+
+  {:name :_sp-card-radios
+   :parent :map
+   :args {:func :_sp-card-radio-label
+          :coll :_sp-cardinalities
+          :current-cardinality :_sp-current-card}}
+
+  {:name :_sp-card-label-div
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-policy-label"
+                          :title "singleton = one pod runs it (cron / :schedule); per-pod = every pod runs its own (listeners like :http-server)"}}
+          :children [{:value "Cardinality:"}]}}
+
+  {:name :_sp-card-wrap-children
+   :parent :cons
+   :args {:item :_sp-card-label-div :coll :_sp-card-radios}}
+
+  {:name :_sp-card-wrap
+   :parent :hiccup
+   :args {:tag {:value "div"}
+          :attrs {:value {:class "service-popover-policy"}}
+          :children :_sp-card-wrap-children}}
+
+  ;; ---------------------------------------------------------------------
   ;; Action bar: save (always) + delete (only when existing).
   ;; `data-existing-service-id` carries the row id (or empty for new)
   ;; so the JS save handler picks PUT-vs-POST and the delete handler
@@ -2368,7 +2460,7 @@
           :attrs {:value {}}
           :children [:_sp-header-div :_sp-status-div :_sp-sibling-warn-div
                      :_sp-enabled-label :_sp-branch-wrap :_sp-policy-wrap
-                     :_sp-actions-div]
+                     :_sp-card-wrap :_sp-actions-div]
           :fn-id :_partial-service-popover-fn-id
           :fn-name :_partial-service-popover-fn-name
           :enriched-services :_partial-service-popover-services

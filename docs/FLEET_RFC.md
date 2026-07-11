@@ -158,21 +158,37 @@ is a rewrite of the package layer — not a spike. **Shelved.**
 Candidates that are **compatible with the eval-load model**, in payoff order:
 
 - **CRaC (Coordinated Restore at Checkpoint)** — snapshot the warm JVM *after*
-  package-load, restore in ~10–50 ms. Sidesteps the eval blocker entirely (the
-  eval already ran before the checkpoint) and directly kills the cold-start
-  (~35 s documented; **~113 s measured here** on a container restart, likely
-  inflated by dependency reconnect — needs a clean re-measure) that makes
-  scale-to-zero and frequent rebalance painful. Requires a CRaC-enabled JDK (Azul
-  Zulu / OpenJDK CRaC) + `Resource` handlers to close/reopen the DB pool + sockets
-  across the checkpoint, and privileged CRIU at restore. **Highest-payoff realistic
-  path; architecturally a fit.**
+  package-load, restore in a fraction of the boot time. Sidesteps the eval
+  blocker entirely (the eval already ran before the checkpoint) and directly
+  kills the cold-start (~35 s documented; **~113 s measured here** on a container
+  restart, likely inflated by dependency reconnect — needs a clean re-measure)
+  that makes scale-to-zero and frequent rebalance painful. Requires a CRaC-enabled
+  JDK (Azul Zulu / OpenJDK CRaC) + `Resource` handlers to close/reopen the DB pool
+  and sockets across the checkpoint, and privileged CRIU at restore.
+  **Highest-payoff realistic path; architecturally a fit.**
 - **AppCDS / dynamic CDS** — share class metadata across pods; modest RSS + start
   win, trivial to enable.
 - **JVM tuning for small pods** — heap cap, GC choice, tiered-stop → RSS control.
 
-**Cannot be measured in this sandbox** (no CRaC JDK, no CRIU). The architectural
-fit is clear, so CRaC enters the plan as a track (§8), **gated on a real
-restore-time measurement in a CRaC-capable environment** before committing effort.
+**Environment feasibility CONFIRMED in this sandbox (2026-07).** Both pieces are
+obtainable and functional here:
+
+- **CRIU works**: `apt-get install criu` (v3.16.1), `criu check` → "Looks good".
+  Kernel **5.15** has `CAP_CHECKPOINT_RESTORE`, and the process already holds
+  `CAP_SYS_ADMIN` / `CAP_SYS_PTRACE` / `CAP_CHECKPOINT_RESTORE`. In prod a pod
+  needs those caps (`--privileged`, or `--cap-add=CHECKPOINT_RESTORE,SYS_PTRACE,SYS_ADMIN
+  --security-opt seccomp=unconfined`).
+- **CRaC JDK works**: Azul Zulu `zulu21.50.19-ca-crac-jdk21.0.11` runs and exposes
+  `CRaCCheckpointTo` / `CRaCRestoreFrom`. A checkpoint of a **dirty ~300 MB heap
+  succeeded** → a ~330 MB image; restore is functional (criu "Restore successful!").
+
+So the gate is **no longer "is the environment capable"** — it is **"integrate the
+`Resource` handlers and measure restore of the *real* ~655 MB warm image."** A
+naive checkpoint of the running system fails on its live external connections
+(Hikari→Postgres, the http-kit listener, the vault/openbao client, the
+notify-listener + advisory-lock connections, SSE) — CRIU won't snapshot live
+sockets without app cooperation. The remaining work, therefore, is the CRaC
+integration itself (§8 track), not proving the substrate.
 
 Corollary: since the ~655 MB base can't shrink cheaply, that **reinforces**
 grouping (Path A) — the base is paid once per pod and shared by all cells the pod
@@ -298,8 +314,10 @@ Verified against the executor:
   if evidence justifies it (§3.2).
 - **Phase 3 — substrate.** k8s operator; HPA/Knative under shards; optional
   scale-to-zero for the idle tail.
-- **Parallel track — footprint/start (§5.1).** CRaC PoC in a CRaC-capable env
-  (measure restore time + RSS) → decision → AppCDS. NOT GraalVM.
+- **Parallel track — footprint/start (§5.1).** Substrate confirmed (CRIU + Zulu
+  CRaC JDK work here). Track = CRaC `Resource` handlers (close/reopen the pool +
+  sockets) → checkpoint after warm boot → measure restore of the real ~655 MB
+  image → decision → AppCDS. NOT GraalVM.
 
 ## 9. Relationship to graph hot-reload (already shipped)
 
@@ -348,8 +366,10 @@ is the foundation this RFC reuses — not new work.**
 
 - **Cold-start number** — re-measure cleanly (isolate app boot from dependency
   reconnect); the ~113 s observed contradicts the ~35 s documented.
-- **CRaC feasibility** — needs a CRaC JDK + privileged CRIU env (absent here);
-  open resources (DB pool, sockets, http-kit) must survive checkpoint/restore.
+- **CRaC feasibility** — substrate CONFIRMED (CRIU v3.16.1 + Zulu 21 CRaC JDK
+  both work here, §5.1). Remaining risk is the integration: open resources (Hikari
+  pool, http-kit listener, vault client, notify/advisory-lock connections, SSE)
+  must be closed before checkpoint and reopened + rewired after restore.
 - **Edge vs internal-forward routing** — start with internal forward, measure the
   hop cost, add L7 if it hurts.
 - **Overlap accounting** — shared fns compiled on multiple pods inflate memory;
@@ -368,8 +388,11 @@ is the foundation this RFC reuses — not new work.**
   footprint/start track in parallel. Distributed execution of a single call is a
   **non-goal**. Substrate = k8s; Knative/HPA sit *below* the controller.
 - 2026-07: **GraalVM native-image shelved** — the eval-at-boot package model is a
-  fundamental blocker; footprint/start track pivots to **CRaC-first** (+ AppCDS),
-  gated on a real restore-time measurement.
+  fundamental blocker; footprint/start track pivots to **CRaC-first** (+ AppCDS).
+- 2026-07: **CRaC substrate confirmed working in-env** (CRIU v3.16.1 + Zulu 21
+  CRaC JDK; checkpoint of a ~300 MB heap succeeds). The gate moves from
+  environment feasibility to the `Resource`-handler integration + measuring the
+  real ~655 MB image.
 - 2026-07: graph **hot-reload is already shipped** and is the foundation cell-load
   reuses; this task adds **placement**, not freshness. Strict route-to-up-to-date
   (version epoch) is a separate, optional layer.

@@ -377,8 +377,9 @@ keeps its inline 📍 badge on the same rows.
 
 ## Known gaps
 
-- Per-branch ctx cache has no eviction — fine for the dev workflow
-  (handful of branches), needs LRU for multi-tenant prod.
+- Per-branch ctx cache is LRU-bounded (`default-max-cached-branches` = 16,
+  `evict-lru-if-full` keyed on `:last-used`); a busier multi-tenant prod
+  may want the cap raised or made configurable.
 - `resolve-branch-id`'s ref-cache has a narrow TOCTOU: a branch deleted
   concurrently with the FIRST (uncached) resolution of its name can
   leave the just-deleted id cached (the resolve's DB read raced ahead

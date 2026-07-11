@@ -13,6 +13,9 @@
     [graphden.tenancy.grant-schema :as grant-schema]))
 
 
+(defn- subj [s] {:id s :name s})
+
+
 (use-fixtures :once (setup/create-container-fixture))
 
 
@@ -25,17 +28,17 @@
                    (ds/build))]
     (sp/initialize storage schema)
     (testing "the :grant table was created and rows persist"
-      (sp/create-entity storage :grant {:subject "alice" :capability "write" :namespace "acme"})
-      (sp/create-entity storage :grant {:subject "alice" :capability "admin" :namespace "acme.ops"})
-      (sp/create-entity storage :grant {:subject "bob" :capability "read" :namespace "acme"}))
+      (sp/create-entity storage :grant {:subject-id "alice" :subject "alice" :capability "write" :namespace "acme"})
+      (sp/create-entity storage :grant {:subject-id "alice" :subject "alice" :capability "admin" :namespace "acme.ops"})
+      (sp/create-entity storage :grant {:subject-id "bob" :subject "bob" :capability "read" :namespace "acme"}))
     (let [store (grant-schema/storage-grant-store storage)]
       (testing "can? reads the stored grants (capability text → keyword)"
-        (is (grant/can? store "alice" :write "acme.team") "parent grant covers descendant")
-        (is (grant/can? store "alice" :write "acme.ops") "admin subsumes :write")
-        (is (not (grant/can? store "alice" :read "acme")) "alice has no :read")
-        (is (grant/can? store "bob" :read "acme"))
-        (is (not (grant/can? store "bob" :write "acme")) "bob only :read"))
+        (is (grant/can? store (subj "alice") :write "acme.team") "parent grant covers descendant")
+        (is (grant/can? store (subj "alice") :write "acme.ops") "admin subsumes :write")
+        (is (not (grant/can? store (subj "alice") :read "acme")) "alice has no :read")
+        (is (grant/can? store (subj "bob") :read "acme"))
+        (is (not (grant/can? store (subj "bob") :write "acme")) "bob only :read"))
       (testing "subjects are isolated"
-        (is (= 2 (count (grant/grants-for store "alice"))))
-        (is (empty? (grant/grants-for store "carol")))))
+        (is (= 2 (count (grant/grants-for store (subj "alice")))))
+        (is (empty? (grant/grants-for store (subj "carol"))))))
     (sp/close storage)))

@@ -100,11 +100,11 @@
         acme-ns (sp/create-entity base :ns {:name "acme"})
         team-ns (sp/create-entity base :ns {:name "team" :parent-id (:id acme-ns)})
         grants (grant/static-grant-store
-                 [{:subject "alice" :capability :write :namespace "acme.team"}])
+                 [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme.team"}])
         s (ts/org-scoped-storage base ts/default-scoped-entities
                                  (authz/authorize-writer grants base))]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "alice"}]
+                 (binding [tc/*current-principal* {:user "alice" :user-id "alice"}]
                    (testing "alice (granted on acme.team) can create a fn there"
                      (is (some? (sp/create-entity s :fn {:name "pns-ok" :namespace-id (:id team-ns)}))))
                    (testing "...but NOT in acme (root) — her grant doesn't cover the parent"
@@ -112,7 +112,7 @@
                            (sp/create-entity s :fn {:name "pns-bad" :namespace-id (:id acme-ns)}))))))
     (testing "admin (public org) writes anywhere — guard skips"
       (tc/with-org tc/public-org
-                   (binding [tc/*current-principal* {:user "root"}]
+                   (binding [tc/*current-principal* {:user "root" :user-id "root"}]
                      (is (some? (sp/create-entity s :fn {:name "pns-admin" :namespace-id (:id acme-ns)}))))))))
 
 
@@ -126,28 +126,28 @@
         team-ns (sp/create-entity base :ns {:name "team" :parent-id (:id acme-ns)})
         int-id (get setup/primitive-fn-ids :int)
         grants (grant/static-grant-store
-                 [{:subject "wendy" :capability :write :namespace "acme.team"}
-                  {:subject "edith" :capability :bind-args :namespace "acme.team"}
-                  {:subject "ann" :capability :append-list :namespace "acme.team"}])
+                 [{:subject-id "wendy" :subject "wendy" :capability :write :namespace "acme.team"}
+                  {:subject-id "edith" :subject "edith" :capability :bind-args :namespace "acme.team"}
+                  {:subject-id "ann" :subject "ann" :capability :append-list :namespace "acme.team"}])
         s (ts/org-scoped-storage base ts/default-scoped-entities
                                  (authz/authorize-writer grants base))
         ;; wendy (:write) builds the fn + slot + binding — all stamped "acme".
         [f b]
         (tc/with-org "acme"
-                     (binding [tc/*current-principal* {:user "wendy"}]
+                     (binding [tc/*current-principal* {:user "wendy" :user-id "wendy"}]
                        (let [f (sp/create-entity s :fn {:name "tf" :namespace-id (:id team-ns)})
                              slot (sp/create-entity s :slot {:name "arg" :type-fn-id int-id})
                              b (sp/create-entity s :binding {:fn-id (:id f) :slot-id (:id slot)
                                                              :value 1 :value-present true})]
                          [f b])))]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "edith"}]
+                 (binding [tc/*current-principal* {:user "edith" :user-id "edith"}]
                    (testing ":bind-args edits the binding VALUE via real sp/update-entity"
                      (is (some? (sp/update-entity s :binding (:id b) {:value 2 :value-present true}))))
                    (testing "...but a ref / structure change is forbidden (needs :write)"
                      (is (thrown? clojure.lang.ExceptionInfo
                            (sp/update-entity s :binding (:id b) {:ref-fn-id (:id f)})))))
-                 (binding [tc/*current-principal* {:user "ann"}]
+                 (binding [tc/*current-principal* {:user "ann" :user-id "ann"}]
                    (testing ":append-list writes a list-item but cannot edit a binding value"
                      (is (some? (sp/create-entity s :binding-list-item
                                                   {:binding-id (:id b) :position 0 :value 5})))

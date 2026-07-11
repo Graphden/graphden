@@ -49,6 +49,7 @@
     [graphden.tenancy.token-schema :as token-schema]
     [graphden.tenancy.user-schema :as user-schema]
     [graphden.tenancy.users :as users]
+    [graphden.tenancy.users :as users]
     [integrant.core :as ig]))
 
 
@@ -203,7 +204,14 @@
   ;; `:personal-ns-prefix` (e.g. "users") → every user implicitly owns
   ;; `<prefix>.<user>` (§4.4 personal namespaces).
   (cond-> (if storage
-            (grant-schema/storage-grant-store storage)
+            (do
+              ;; One-time, idempotent migration for the P1 name→id authz change:
+              ;; stamp `:token.user-id` / `:grant.subject-id` on any pre-P1 rows
+              ;; so a LIVE DB keeps authorizing after this deploy. No-op on a
+              ;; fresh DB. Runs here because this is the addon seam that has the
+              ;; base storage in hand at startup.
+              (users/backfill-auth-subject-ids! storage)
+              (grant-schema/storage-grant-store storage))
             (grant/static-grant-store (or grants [])))
     personal-ns-prefix (grant/with-personal-namespaces personal-ns-prefix)))
 
@@ -315,9 +323,10 @@
    Empty for platform/admin or no grant store (no workspace hint → editor
    shows everything)."
   [grant-store principal org]
-  (if (or (= org tc/public-org) (nil? grant-store))
-    []
-    (vec (grant/workspace grant-store (:user principal)))))
+  (if-let [subj (and (not= org tc/public-org) grant-store
+                     (grant/subject principal))]
+    (vec (grant/workspace grant-store subj))
+    []))
 
 
 (defn- with-tenancy-headers

@@ -25,8 +25,14 @@
 ;; tenant-forbidden), so a tenant POST is denied by OrgScoped.
 (defbase create-token
   [token user org]
-  (sp/create-entity (:storage ctx) :token
-                    {:token-hash (token-sha256 token) :user user :org org}))
+  ;; Resolve the username to the user's STABLE id at the boundary so an
+  ;; operator-minted API token carries `:user-id` — authz keys on it, not the
+  ;; mutable username. nil id (no such user) → a token that authenticates but
+  ;; holds no grants, same as before this field existed.
+  (let [storage (:storage ctx)
+        user-id (some-> (first (sp/query-entities storage :user {:username user})) :id str)]
+    (sp/create-entity storage :token
+                      {:token-hash (token-sha256 token) :user user :user-id user-id :org org})))
 
 
 (defbase create-org

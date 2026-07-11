@@ -13,6 +13,10 @@
     [integrant.core :as ig]))
 
 
+;; Matching keys on the stable subject-id; in tests id = name = the string.
+(defn- subj [s] {:id s :name s})
+
+
 (deftest extend-builder-adds-the-grant-entity
   (let [schema (-> (mds/create-builder)
                    (gds/extend-builder)
@@ -20,8 +24,8 @@
                    (ds/build))]
     (is (contains? (set (ds/entities schema)) :grant))
     (is (every? (set (keys (ds/entity-fields schema :grant)))
-                [:subject :capability :namespace])
-        ":grant carries subject / capability / namespace")))
+                [:subject :subject-id :capability :namespace])
+        ":grant carries subject / subject-id / capability / namespace")))
 
 
 (deftest db-schema-seam-applies-extensions
@@ -34,13 +38,14 @@
 
 
 (defn- grant-storage
-  "Storage whose :grant query returns `rows` for matching `:subject`."
+  "Storage whose :grant query returns `rows` matching `:subject-id` (the
+   stable key the store now queries on)."
   [rows]
   (reify sp/StorageCRUD
     (query-entities
       [_ entity-name where]
       (when (= entity-name :grant)
-        (filterv #(= (:subject %) (:subject where)) rows)))
+        (filterv #(= (:subject-id %) (:subject-id where)) rows)))
 
     (query-entities [_ _ _ _] nil)
 
@@ -58,15 +63,15 @@
 (deftest storage-backed-store-reads-and-keywordizes
   (let [store (grant-schema/storage-grant-store
                 (grant-storage
-                  [{:subject "alice" :capability "write" :namespace "acme"}
-                   {:subject "alice" :capability "admin" :namespace "acme.ops"}]))]
-    (testing "grants-for queries by subject + keywordizes the capability"
-      (is (= [{:subject "alice" :capability :write :namespace "acme"}
-              {:subject "alice" :capability :admin :namespace "acme.ops"}]
-             (grant/grants-for store "alice"))))
+                  [{:subject-id "alice" :subject "alice" :capability "write" :namespace "acme"}
+                   {:subject-id "alice" :subject "alice" :capability "admin" :namespace "acme.ops"}]))]
+    (testing "grants-for queries by subject-id + keywordizes the capability"
+      (is (= [{:subject-id "alice" :capability :write :namespace "acme"}
+              {:subject-id "alice" :capability :admin :namespace "acme.ops"}]
+             (grant/grants-for store (subj "alice")))))
     (testing "can? works over the storage-backed grants"
-      (is (grant/can? store "alice" :write "acme.billing") "descendant of acme")
-      (is (grant/can? store "alice" :write "acme.ops") "admin subsumes :write")
-      (is (not (grant/can? store "alice" :read "acme")) "no :read grant"))
+      (is (grant/can? store (subj "alice") :write "acme.billing") "descendant of acme")
+      (is (grant/can? store (subj "alice") :write "acme.ops") "admin subsumes :write")
+      (is (not (grant/can? store (subj "alice") :read "acme")) "no :read grant"))
     (testing "unknown subject → no grants"
-      (is (empty? (grant/grants-for store "bob"))))))
+      (is (empty? (grant/grants-for store (subj "bob")))))))

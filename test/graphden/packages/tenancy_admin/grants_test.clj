@@ -36,7 +36,11 @@
   (reify sp/StorageCRUD
     (create-entity [_ entity-name data] (reset! sink [entity-name data]) data)
 
-    (query-entities [_ _ _] nil)
+    ;; create-grant resolves the authored username → the user's stable id
+    ;; before writing `:subject-id`. Return a user row so the resolution
+    ;; yields a non-nil id.
+    (query-entities [_ entity-name _where]
+      (when (= entity-name :user) [{:id "u-id"}]))
 
     (query-entities [_ _ _ _] nil)
 
@@ -67,7 +71,7 @@
     (testing "the impl creates a :grant from the three fields"
       (create-grant {:subject "carol" :capability "admin" :namespace "ops"}
                     {:storage (capturing-storage sink)})
-      (is (= [:grant {:subject "carol" :capability "admin" :namespace "ops"}] @sink)))))
+      (is (= [:grant {:subject "carol" :subject-id "u-id" :capability "admin" :namespace "ops"}] @sink)))))
 
 
 (deftest create-grant-rejects-unknown-capability
@@ -83,4 +87,4 @@
     (testing "a valid (previously-undocumented) capability still writes"
       (create-grant {:subject "carol" :capability "bind-args" :namespace "ops"}
                     {:storage (capturing-storage sink)})
-      (is (= [:grant {:subject "carol" :capability "bind-args" :namespace "ops"}] @sink)))))
+      (is (= [:grant {:subject "carol" :subject-id "u-id" :capability "bind-args" :namespace "ops"}] @sink)))))

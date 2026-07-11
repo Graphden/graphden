@@ -5,6 +5,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.users :as users]))
 
 
@@ -49,3 +50,41 @@
     (is (= "1.2.3.4" (users/client-ip {:headers {"x-forwarded-for" "1.2.3.4, 5.6.7.8"}})))
     (is (= "9.9.9.9" (users/client-ip {:remote-addr "9.9.9.9"})))
     (is (= "unknown" (users/client-ip {})))))
+
+
+(deftest backfill-auth-subject-ids-stamps-missing-ids
+  ;; P1 name→id migration: pre-P1 rows carry a name but no stable id. The
+  ;; backfill resolves the (immutable) username and stamps the id — idempotently
+  ;; (existing ids untouched), skipping rows whose user no longer resolves.
+  (let [alice-id #uuid "11111111-1111-1111-1111-111111111111"
+        updates  (atom [])
+        users    [{:id alice-id :username "alice"}]
+        tokens   [{:id :t1 :user "alice" :user-id nil}          ; stamped
+                  {:id :t2 :user "alice" :user-id "existing"}]  ; already set → left
+        grants   [{:id :g1 :subject "alice" :subject-id nil}    ; stamped
+                  {:id :g2 :subject "ghost" :subject-id nil}]   ; no such user → left
+        storage  (reify sp/StorageCRUD
+                   (query-entities [_ ent where]
+                     (case ent
+                       :token tokens
+                       :grant grants
+                       :user  (filterv #(= (:username %) (:username where)) users)
+                       nil))
+                   (query-entities [_ _ _ _] nil)
+                   (update-entity [_ ent id data] (swap! updates conj [ent id data]) data)
+                   (create-entity [_ _ _] nil)
+                   (read-entity [_ _ _] nil)
+                   (delete-entity [_ _ _] nil)
+                   (query-latest-per-group [_ _ _ _] nil))
+        result   (users/backfill-auth-subject-ids! storage)]
+    (testing "counts only the rows actually stamped"
+      (is (= 1 (:tokens-backfilled result)) "t1 stamped; t2 already had an id")
+      (is (= 1 (:grants-backfilled result)) "g1 stamped; g2's 'ghost' user doesn't resolve"))
+    (testing "the stamped id is the user's id in STRING form"
+      (is (= [:token :t1 {:user-id (str alice-id)}]
+             (first (filter #(= :token (first %)) @updates))))
+      (is (= [:grant :g1 {:subject-id (str alice-id)}]
+             (first (filter #(= :grant (first %)) @updates)))))
+    (testing "already-stamped + unresolvable rows are NOT written"
+      (is (not (some #(= :t2 (second %)) @updates)))
+      (is (not (some #(= :g2 (second %)) @updates))))))

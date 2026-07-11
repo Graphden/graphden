@@ -25,13 +25,28 @@
   #uuid "dfb5a1f7-2481-44e6-98dd-ec5c821f7767")
 
 
+(def ^:private grant-subject-id-field-uuid
+  #uuid "5c8f2a41-6b39-4e7d-8a02-9f1c3b6e0d84")
+
+
 (defn extend-builder
-  "Add the `:grant` entity — `(subject, capability, namespace)`. Capability
-   is plain text (`\"write\"`, not `\":write\"`) so the codec round-trips it
-   cleanly; the store keywordizes on read."
+  "Add the `:grant` entity — `(subject, subject-id, capability, namespace)`.
+   `subject-id` is the STABLE authz key (the user's id) that enforcement
+   matches on; `subject` (username) is kept for display + the personal-
+   namespace path. Capability is plain text (`\"write\"`, not `\":write\"`)
+   so the codec round-trips it cleanly; the store keywordizes on read."
   [builder]
   (ds/add-entity builder :grant grant-entity-uuid
                  {:subject {:uuid grant-subject-field-uuid :type :text :indexed? true}
+                  ;; nullable for the additive migration (backfilled from
+                  ;; `:subject`); indexed for enforcement lookup + delete cascade.
+                  ;; :text (the id's string form), not :uuid — written as
+                  ;; `(str user-id)` so the column carries both prod uuids and
+                  ;; any test-supplied id uniformly.
+                  :subject-id {:uuid grant-subject-id-field-uuid
+                               :type :text
+                               :nullable? true
+                               :indexed? true}
                   :capability {:uuid grant-capability-field-uuid :type :text}
                   :namespace {:uuid grant-namespace-field-uuid
                               :type :text
@@ -44,13 +59,13 @@
   grant/GrantStore
 
   (grants-for
-    [_ subject]
+    [_ subj]
     (mapv (fn [row]
-            {:subject (:subject row)
+            {:subject-id (:subject-id row)
              ;; stored as text → back to the keyword `grant-allows?` compares
              :capability (keyword (:capability row))
              :namespace (:namespace row)})
-          (sp/query-entities storage :grant {:subject subject}))))
+          (sp/query-entities storage :grant {:subject-id (:id subj)}))))
 
 
 (defn storage-grant-store

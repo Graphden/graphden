@@ -80,4 +80,7 @@
       (when-not (str/blank? token)
         (when-let [row (first (sp/query-entities storage :token {:token-hash (sha256-hex token)}))]
           (when (token-live? row)
-            {:user (:user row) :org (:org row)}))))))
+            ;; `:user-id` is the STABLE authz identity (grants key on it);
+            ;; `:user` (username) rides along for display + the personal-
+            ;; namespace path. See `grant/subject`.
+            {:user (:user row) :user-id (:user-id row) :org (:org row)}))))))

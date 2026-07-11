@@ -48,11 +48,12 @@
 
 
 (defn grant-allows?
-  "Does one grant authorize `(subj, cap, ns-path)`? Matches subject exactly,
-   capability by `cap-implies?` (`:admin`/`:write` subsumption), and namespace
-   by scope coverage."
-  [{:keys [subject capability namespace]} subj cap ns-path]
-  (and (= subject subj)
+  "Does one grant authorize `(subject-id, cap, ns-path)`? Matches the grant's
+   `:subject-id` — the user's STABLE id, NOT the mutable username — capability
+   by `cap-implies?` (`:admin`/`:write` subsumption), and namespace by scope
+   coverage."
+  [{:keys [subject-id capability namespace]} subj-id cap ns-path]
+  (and (= subject-id subj-id)
        (cap-implies? capability cap)
        (ns-covers? namespace ns-path)))
 
@@ -60,23 +61,25 @@
 (defprotocol GrantStore
 
   (grants-for
-    [store subject]
-    "The grants held by `subject` (a coll of {:subject :capability
-     :namespace}); empty when none."))
+    [store subj]
+    "The grants held by `subj` — a `{:id user-id :name username}` identity
+     pair — as a coll of {:subject-id :capability :namespace}; empty when
+     none. Stored-grant matching keys on the stable `:id`; the `:name`
+     (username) is used ONLY to build the personal-namespace path."))
 
 
 (defrecord StaticGrantStore
-  [by-subject]
+  [by-subject-id]
 
   GrantStore
 
-  (grants-for [_ subject] (get by-subject subject [])))
+  (grants-for [_ subj] (get by-subject-id (:id subj) [])))
 
 
 (defn static-grant-store
-  "A `GrantStore` over a static collection of grants."
+  "A `GrantStore` over a static collection of grants, keyed by `:subject-id`."
   [grants]
-  (->StaticGrantStore (group-by :subject grants)))
+  (->StaticGrantStore (group-by :subject-id grants)))
 
 
 (defn personal-namespace
@@ -92,13 +95,16 @@
   GrantStore
 
   (grants-for
-    [_ subject]
+    [_ subj]
     ;; Every user implicitly holds :admin on their own namespace, in
-    ;; addition to whatever the base store grants.
-    (conj (vec (grants-for base subject))
-          {:subject subject
+    ;; addition to whatever the base store grants. The personal-namespace
+    ;; PATH is built from the human `:name` (users.alice); the implicit
+    ;; grant still carries the stable `:subject-id` so `grant-allows?`
+    ;; matches it by id like every other grant.
+    (conj (vec (grants-for base subj))
+          {:subject-id (:id subj)
            :capability :admin
-           :namespace (personal-namespace prefix subject)})))
+           :namespace (personal-namespace prefix (:name subj))})))
 
 
 (defn with-personal-namespaces
@@ -117,11 +123,11 @@
   GrantStore
 
   (grants-for
-    [_ subject]
-    (if-let [hit (find @cache subject)]
+    [_ subj]
+    (if-let [hit (find @cache (:id subj))]
       (val hit)
-      (let [g (grants-for base subject)]
-        (swap! cache assoc subject g)
+      (let [g (grants-for base subj)]
+        (swap! cache assoc (:id subj) g)
         g))))
 
 
@@ -156,30 +162,42 @@
 
 
 (defn can?
-  "Does `subject` hold `capability` in `ns-path`, per `store`? A subject
-   with no matching grant is denied (default-deny)."
-  [store subject capability ns-path]
-  (boolean (some #(grant-allows? % subject capability ns-path)
-                 (grants-for store subject))))
+  "Does `subj` (`{:id user-id :name username}`) hold `capability` in
+   `ns-path`, per `store`? Default-deny. Stored-grant matching keys on
+   `(:id subj)`; `:name` only feeds the personal-namespace path."
+  [store subj capability ns-path]
+  (boolean (some #(grant-allows? % (:id subj) capability ns-path)
+                 (grants-for store subj))))
+
+
+(defn subject
+  "The grant-subject identity for an auth principal: `{:id user-id :name
+   username}` — the STABLE id keys stored-grant matching, the human name only
+   builds the personal-namespace path. Returns nil for an UNAUTHENTICATED
+   principal (no `:user-id`); callers must treat nil as default-deny and never
+   pass it to `grants-for` (a nil id would spuriously match a nil subject-id)."
+  [principal]
+  (when-let [uid (:user-id principal)]
+    {:id uid :name (:user principal)}))
 
 
 (defn authorized?
-  "Bridge from an auth principal (the `AuthProvider` result) to `can?` — the
-   grant subject is the principal's `:user`. An unauthenticated principal
-   (no `:user`) is denied. This is the call an enforced handler makes:
-   `(authorized? store principal :write ns-path)`."
+  "Bridge from an auth principal (the `AuthProvider` result) to `can?` via
+   `subject`. An unauthenticated principal (no `:user-id`) is denied. This is
+   the call an enforced handler makes: `(authorized? store principal :write
+   ns-path)`."
   [store principal capability ns-path]
-  (boolean (when-let [user (:user principal)]
-             (can? store user capability ns-path))))
+  (boolean (when-let [subj (subject principal)]
+             (can? store subj capability ns-path))))
 
 
 (defn has-capability?
   "Does `subject` hold `capability` (or `:admin`) in ANY namespace? The
    coarse 'is this subject a writer / executor at all' gate — the precise
    per-target-namespace check runs later (writes: at the storage layer)."
-  [store subject capability]
+  [store subj capability]
   (boolean (some #(or (= (:capability %) :admin) (= (:capability %) capability))
-                 (grants-for store subject))))
+                 (grants-for store subj))))
 
 
 (defn can-mutate?
@@ -187,10 +205,10 @@
    capability (`:write` / `:bind-args` / `:append-list`) or `:admin` in ANY
    namespace. Used by `request-permitted?` so a `:bind-args`-only user isn't
    rejected at the coarse gate before the precise per-field check at storage."
-  [store subject]
+  [store subj]
   (boolean (some (fn [{:keys [capability]}]
                    (contains? #{:admin :write :bind-args :append-list} capability))
-                 (grants-for store subject))))
+                 (grants-for store subj))))
 
 
 (defn workspace
@@ -199,10 +217,10 @@
    namespaces wired, the user's own namespace is included. Root/blank grants
    (whole-org admin) and the shared public namespace aren't listed — they're
    not a bounded 'set of namespaces'. Returns a sorted set of paths."
-  [store user]
+  [store subj]
   (into (sorted-set)
         (comp (map :namespace) (remove str/blank?))
-        (grants-for store user)))
+        (grants-for store subj)))
 
 
 (defn request->capability
@@ -225,9 +243,13 @@
    layer (`tenancy.authz`), which can see the entity's `:namespace-id`."
   [store principal request _org]
   (let [cap (request->capability request)]
-    (case cap
-      :read true
+    (if (= cap :read)
+      true
       ;; A mutation may need only a narrow §4.3 edit cap — let the write-family
-      ;; through; the precise per-field check runs at the storage layer.
-      :write (can-mutate? store (:user principal))
-      (has-capability? store (:user principal) cap))))
+      ;; through; the precise per-field check runs at the storage layer. An
+      ;; unauthenticated principal (nil subject) is denied any write.
+      (if-let [subj (subject principal)]
+        (case cap
+          :write (can-mutate? store subj)
+          (has-capability? store subj cap))
+        false))))

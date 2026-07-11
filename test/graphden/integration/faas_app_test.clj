@@ -204,8 +204,8 @@
 ;; partial renders the real grants table, not the degraded notice.
 ;; ---------------------------------------------------------------------------
 (deftest grants-panel-renders-real-grants
-  (sp/create-entity (:storage *ctx*) :grant {:subject "alice" :capability "write" :namespace "acme"})
-  (sp/create-entity (:storage *ctx*) :grant {:subject "bob" :capability "read" :namespace "shared"})
+  (sp/create-entity (:storage *ctx*) :grant {:subject-id "alice" :subject "alice" :capability "write" :namespace "acme"})
+  (sp/create-entity (:storage *ctx*) :grant {:subject-id "bob" :subject "bob" :capability "read" :namespace "shared"})
   (let [handler-id (fn-id-of (:storage *ctx*) "_partial-grants-admin-handler")
         resp (cr/execute *ctx* handler-id {})
         body (:body resp)]
@@ -289,8 +289,11 @@
         provider (tauth/storage-token-provider (:storage *ctx*))]
     (cr/execute *ctx* create-id {:token "s3cr3t-bearer" :user "alice" :org "acme"})
     (testing "a minted bearer authenticates to its principal (create→hash→store→provider→hash→match)"
+      ;; This tests the PROVIDER roundtrip (user/org carried through create→
+      ;; hash→store→read), not user-mgmt — create-token resolves :user-id from
+      ;; whatever `alice` user happens to exist, so compare without it.
       (is (= {:authenticated? true :user "alice" :org "acme"}
-             (auth/authenticate provider (bearer-req "s3cr3t-bearer")))))
+             (dissoc (auth/authenticate provider (bearer-req "s3cr3t-bearer")) :user-id))))
     (testing "an unknown bearer fails closed"
       (is (= {:authenticated? false} (auth/authenticate provider (bearer-req "wrong-token")))))
     (testing "no bearer → not authenticated"
@@ -301,7 +304,7 @@
   (testing "a tenant writing :token directly is denied (no self-escalation)"
     (let [ex (try (tc/with-org "evil-org"
                                (sp/create-entity (:storage *ctx*) :token
-                                                 {:token-hash "deadbeef" :user "evil" :org "victim"}))
+                                                 {:token-hash "deadbeef" :user "evil" :user-id "evil" :org "victim"}))
                   nil (catch clojure.lang.ExceptionInfo e e))]
       (is (= :authz/forbidden (:type (ex-data ex)))))))
 
@@ -392,8 +395,12 @@
       (let [result (cr/execute seam-ctx login-id {:username "alice" :password "s3cret-pw"})
             token (:token result)]
         (is (string? token))
-        (is (= {:authenticated? true :user "alice" :org "acme"}
-               (auth/authenticate provider (bearer-req token))))))
+        (let [p (auth/authenticate provider (bearer-req token))]
+          ;; user-id is the user's real (uuid) id — compare the rest, then
+          ;; pin that login DID stamp a stable id (the whole point of P1).
+          (is (= {:authenticated? true :user "alice" :org "acme"} (dissoc p :user-id)))
+          ;; user-id is the user's real id in STRING form (str of the uuid).
+          (is (uuid? (parse-uuid (:user-id p))) "login stamps the stable user-id"))))
     (testing "login with the wrong password → nil (no token minted)"
       (is (nil? (cr/execute seam-ctx login-id {:username "alice" :password "WRONG"}))))
     (testing "login for an unknown user → nil"
@@ -497,19 +504,19 @@
   (let [provider (tauth/storage-token-provider (:storage *ctx*))
         now (System/currentTimeMillis)]
     (sp/create-entity (:storage *ctx*) :token
-                      {:token-hash (tauth/token-hash "ttl-live") :user "u" :org "acme"
+                      {:token-hash (tauth/token-hash "ttl-live") :user "u" :user-id "u" :org "acme"
                        :expires-at (+ now 100000)})
     (sp/create-entity (:storage *ctx*) :token
-                      {:token-hash (tauth/token-hash "ttl-dead") :user "u" :org "acme"
+                      {:token-hash (tauth/token-hash "ttl-dead") :user "u" :user-id "u" :org "acme"
                        :expires-at (- now 1000)})
     (sp/create-entity (:storage *ctx*) :token
-                      {:token-hash (tauth/token-hash "ttl-none") :user "u" :org "acme"})
+                      {:token-hash (tauth/token-hash "ttl-none") :user "u" :user-id "u" :org "acme"})
     (testing "a non-expired token authenticates"
-      (is (= {:authenticated? true :user "u" :org "acme"} (auth/authenticate provider (bearer-req "ttl-live")))))
+      (is (= {:authenticated? true :user "u" :user-id "u" :org "acme"} (auth/authenticate provider (bearer-req "ttl-live")))))
     (testing "an expired token fails closed (like an unknown token)"
       (is (= {:authenticated? false} (auth/authenticate provider (bearer-req "ttl-dead")))))
     (testing "a NULL-expiry token (operator API key) never expires"
-      (is (= {:authenticated? true :user "u" :org "acme"} (auth/authenticate provider (bearer-req "ttl-none")))))))
+      (is (= {:authenticated? true :user "u" :user-id "u" :org "acme"} (auth/authenticate provider (bearer-req "ttl-none")))))))
 
 
 (deftest users-panel-renders-real-users-without-hashes
@@ -569,13 +576,13 @@
     (seed "m1" "multi") (seed "m2" "multi") (seed "m3" "multi")
     (seed "other1" "bystander")
     (testing "logout-all deletes ALL the current user's sessions, never another user's"
-      (let [n (binding [tc/*current-principal* {:user "multi" :org "acme"}]
+      (let [n (binding [tc/*current-principal* {:user "multi" :user-id "multi" :org "acme"}]
                 (users/logout-all! *ctx*))]
         (is (= 3 n))
         (is (= {:authenticated? false} (auth/authenticate provider (bearer-req "m1"))))
         (is (= {:authenticated? false} (auth/authenticate provider (bearer-req "m3"))))
         (is (= {:authenticated? true :user "bystander" :org "acme"}
-               (auth/authenticate provider (bearer-req "other1"))))))
+               (dissoc (auth/authenticate provider (bearer-req "other1")) :user-id)))))
     (testing "unauthenticated caller → 0 (no principal)"
       (is (zero? (binding [tc/*current-principal* nil] (users/logout-all! *ctx*)))))))
 
@@ -586,13 +593,13 @@
                    (some? (first (sp/query-entities (:storage *ctx*) :token
                                                     {:token-hash (tauth/token-hash t)}))))]
     (sp/create-entity (:storage *ctx*) :token
-                      {:token-hash (tauth/token-hash "clean-live") :user "u" :org "acme" :expires-at (+ now 100000)})
+                      {:token-hash (tauth/token-hash "clean-live") :user "u" :user-id "u" :org "acme" :expires-at (+ now 100000)})
     (sp/create-entity (:storage *ctx*) :token
-                      {:token-hash (tauth/token-hash "clean-dead1") :user "u" :org "acme" :expires-at (- now 5000)})
+                      {:token-hash (tauth/token-hash "clean-dead1") :user "u" :user-id "u" :org "acme" :expires-at (- now 5000)})
     (sp/create-entity (:storage *ctx*) :token
-                      {:token-hash (tauth/token-hash "clean-dead2") :user "u" :org "acme" :expires-at (dec now)})
+                      {:token-hash (tauth/token-hash "clean-dead2") :user "u" :user-id "u" :org "acme" :expires-at (dec now)})
     (sp/create-entity (:storage *ctx*) :token
-                      {:token-hash (tauth/token-hash "clean-apikey") :user "u" :org "acme"})
+                      {:token-hash (tauth/token-hash "clean-apikey") :user "u" :user-id "u" :org "acme"})
     (let [deleted (users/cleanup-expired-tokens! *base-pool*)]
       (testing "the sweep deletes the expired rows (returns a count ≥ the two seeded)"
         (is (>= deleted 2)))
@@ -652,7 +659,7 @@
         (is (some? (first (sp/query-entities (:storage *ctx*) :org {:name "newco"}))))
         (is (some? (first (sp/query-entities (:storage *ctx*) :user {:username "newbie"}))))
         (is (= {:authenticated? true :user "newbie" :org "newco"}
-               (auth/authenticate provider (bearer-req token))))))
+               (dissoc (auth/authenticate provider (bearer-req token)) :user-id)))))
     (testing "a taken username → nil (no second account)"
       (is (nil? (cr/execute seam-ctx signup-id {:username "newbie" :password "x" :org "other-org"})))
       (is (nil? (first (sp/query-entities (:storage *ctx*) :org {:name "other-org"}))) "no partial org created"))

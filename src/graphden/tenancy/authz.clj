@@ -35,8 +35,8 @@
   "May `principal` write the namespace `ns-id` resolves to, per grant
    `store`? nil principal / `:user` → denied."
   [store storage principal ns-id]
-  (boolean (when-let [user (:user principal)]
-             (grant/can? store user :write (namespace-path storage ns-id)))))
+  (boolean (when-let [subj (grant/subject principal)]
+             (grant/can? store subj :write (namespace-path storage ns-id)))))
 
 
 (defn- binding-owner-fn-id
@@ -66,9 +66,8 @@
   [store storage cap fn-id]
   (when fn-id
     (let [ns-id (:namespace-id (sp/read-entity storage :fn fn-id))]
-      (when-not (and (:user tc/*current-principal*)
-                     (grant/can? store (:user tc/*current-principal*)
-                                 cap (namespace-path storage ns-id)))
+      (when-not (when-let [subj (grant/subject tc/*current-principal*)]
+                  (grant/can? store subj cap (namespace-path storage ns-id)))
         (throw (ex-info (str "forbidden: no :" (name cap) " grant on the target namespace")
                         {:type :authz/forbidden :fn-id fn-id :namespace-id ns-id}))))))
 
@@ -148,8 +147,8 @@
   "May `principal` execute the fn whose `:namespace-id` is `ns-id`, per grant
    `store`? Resolves the fn's namespace path and checks `:execute`."
   [store storage principal ns-id]
-  (boolean (when-let [user (:user principal)]
-             (grant/can? store user :execute (namespace-path storage ns-id)))))
+  (boolean (when-let [subj (grant/subject principal)]
+             (grant/can? store subj :execute (namespace-path storage ns-id)))))
 
 
 (defn authorize-executor

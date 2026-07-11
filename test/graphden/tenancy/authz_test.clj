@@ -43,24 +43,24 @@
 
 (deftest writable?-checks-grant-against-the-resolved-path
   (let [grants (grant/static-grant-store
-                 [{:subject "alice" :capability :write :namespace "acme"}
-                  {:subject "bob" :capability :write :namespace "acme.team"}])]
+                 [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme"}
+                  {:subject-id "bob" :subject "bob" :capability :write :namespace "acme.team"}])]
     (testing "a parent-namespace grant covers descendants"
-      (is (authz/writable? grants store {:user "alice"} "acme"))
-      (is (authz/writable? grants store {:user "alice"} "team")))
+      (is (authz/writable? grants store {:user "alice" :user-id "alice"} "acme"))
+      (is (authz/writable? grants store {:user "alice" :user-id "alice"} "team")))
     (testing "a sub-namespace grant does NOT cover the parent"
-      (is (authz/writable? grants store {:user "bob"} "team"))
-      (is (not (authz/writable? grants store {:user "bob"} "acme"))))
+      (is (authz/writable? grants store {:user "bob" :user-id "bob"} "team"))
+      (is (not (authz/writable? grants store {:user "bob" :user-id "bob"} "acme"))))
     (testing "no :user → denied"
       (is (not (authz/writable? grants store {} "acme"))))))
 
 
 (deftest authorize-writer-gates-tenant-fn-writes
   (let [grants (grant/static-grant-store
-                 [{:subject "bob" :capability :write :namespace "acme.team"}])
+                 [{:subject-id "bob" :subject "bob" :capability :write :namespace "acme.team"}])
         guard (authz/authorize-writer grants store)]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "bob"}]
+                 (binding [tc/*current-principal* {:user "bob" :user-id "bob"}]
                    (testing "write to a granted namespace passes"
                      (is (nil? (guard :fn {:namespace-id "team"} nil))))
                    (testing "write to an ungranted namespace throws :authz/forbidden"
@@ -74,7 +74,7 @@
                      (is (nil? (guard :binding {:slot-id "s"} nil))))))
     (testing "platform / admin (public org) is never gated"
       (tc/with-org tc/public-org
-                   (binding [tc/*current-principal* {:user "nobody"}]
+                   (binding [tc/*current-principal* {:user "nobody" :user-id "nobody"}]
                      (is (nil? (guard :fn {:namespace-id "acme"} nil))))))))
 
 
@@ -115,10 +115,10 @@
                   {"b-team" {:fn-id "f-team"}
                    "b-acme" {:fn-id "f-acme"}})
         grants (grant/static-grant-store
-                 [{:subject "bob" :capability :write :namespace "acme.team"}])
+                 [{:subject-id "bob" :subject "bob" :capability :write :namespace "acme.team"}])
         guard (authz/authorize-writer grants storage)]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "bob"}]
+                 (binding [tc/*current-principal* {:user "bob" :user-id "bob"}]
                    (testing "CREATE (data carries :fn-id) — granted ns passes, ungranted denied"
                      (is (nil? (guard :binding {:fn-id "f-team" :slot-id "s" :value 1} nil)))
                      (is (thrown? clojure.lang.ExceptionInfo
@@ -130,7 +130,7 @@
                      (is (thrown? clojure.lang.ExceptionInfo (guard :binding nil "b-acme"))))))
     (testing "platform (public org) writes bindings freely"
       (tc/with-org tc/public-org
-                   (binding [tc/*current-principal* {:user "x"}]
+                   (binding [tc/*current-principal* {:user "x" :user-id "x"}]
                      (is (nil? (guard :binding {:fn-id "f-acme"} nil))))))))
 
 
@@ -147,12 +147,12 @@
                   {})
         ;; alice: :write on acme.x only (NOT acme.y).
         alice-grants (grant/static-grant-store
-                       [{:subject "alice" :capability :write :namespace "acme.x"}])
+                       [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme.x"}])
         ;; root: :write on all of acme (covers both x and y).
         both-grants  (grant/static-grant-store
-                       [{:subject "root" :capability :write :namespace "acme"}])]
+                       [{:subject-id "root" :subject "root" :capability :write :namespace "acme"}])]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "alice"}]
+                 (binding [tc/*current-principal* {:user "alice" :user-id "alice"}]
                    (let [guard (authz/authorize-writer alice-grants storage)]
                      (testing "CREATE into a granted target (no source) passes"
                        (is (nil? (guard :fn {:namespace-id "nx"} nil))))
@@ -162,7 +162,7 @@
                        (is (= :authz/forbidden
                               (try (guard :fn {:namespace-id "nx"} "f-y")
                                    (catch clojure.lang.ExceptionInfo e (:type (ex-data e)))))))))
-                 (binding [tc/*current-principal* {:user "root"}]
+                 (binding [tc/*current-principal* {:user "root" :user-id "root"}]
                    (let [guard (authz/authorize-writer both-grants storage)]
                      (testing "MOVE passes when :write is held on both source and target"
                        (is (nil? (guard :fn {:namespace-id "nx"} "f-y")))))))))
@@ -180,10 +180,10 @@
         guard-of (fn [caps]
                    (authz/authorize-writer
                      (grant/static-grant-store
-                       (for [c caps] {:subject "u" :capability c :namespace "acme.team"}))
+                       (for [c caps] {:subject-id "u" :subject "u" :capability c :namespace "acme.team"}))
                      storage))]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "u"}]
+                 (binding [tc/*current-principal* {:user "u" :user-id "u"}]
                    (testing ":bind-args allows a value-only binding update"
                      (is (nil? ((guard-of [:bind-args]) :binding
                                                         {:value 7 :value-present true} "b-team"))))
@@ -221,7 +221,7 @@
   ;; rows share ONE `:grant` query for the same subject (vs one per row without).
   (let [calls (atom 0)
         base (grant/static-grant-store
-               [{:subject "alice" :capability :write :namespace "acme"}])
+               [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme"}])
         counting (reify grant/GrantStore
                    (grants-for
                      [_ subject]
@@ -229,7 +229,7 @@
                      (grant/grants-for base subject)))
         guard (authz/authorize-writer counting store)]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "alice"}]
+                 (binding [tc/*current-principal* {:user "alice" :user-id "alice"}]
                    (testing "no request memo → one :grant query per guarded row"
                      (reset! calls 0)
                      (guard :fn {:namespace-id "acme"} nil)
@@ -277,18 +277,18 @@
                   {"f-team" {:namespace-id "team"}
                    "f-acme" {:namespace-id "acme"}})
         grants (grant/static-grant-store
-                 [{:subject "bob" :capability :execute :namespace "acme.team"}])
+                 [{:subject-id "bob" :subject "bob" :capability :execute :namespace "acme.team"}])
         guard (authz/authorize-executor grants)
         ctx {:storage storage}]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "bob"}]
+                 (binding [tc/*current-principal* {:user "bob" :user-id "bob"}]
                    (testing "execute of a fn in a granted namespace passes"
                      (is (nil? (guard ctx "f-team"))))
                    (testing "...but not one in an ungranted namespace"
                      (is (thrown? clojure.lang.ExceptionInfo (guard ctx "f-acme"))))))
     (testing "platform/admin (public org) skips"
       (tc/with-org tc/public-org
-                   (binding [tc/*current-principal* {:user "bob"}]
+                   (binding [tc/*current-principal* {:user "bob" :user-id "bob"}]
                      (is (nil? (guard ctx "f-acme"))))))
     (testing "system execution (no principal) skips"
       (tc/with-org "acme"
@@ -317,7 +317,7 @@
   ;; (delta carries no :namespace-id) skipped the per-namespace grant entirely,
   ;; letting a :bind-args holder delete/reparent any fn in the org.
   (let [grants (grant/static-grant-store
-                 [{:subject "bob" :capability :write :namespace "acme.team"}])
+                 [{:subject-id "bob" :subject "bob" :capability :write :namespace "acme.team"}])
         storage (bind-store {"acme" {:name "acme" :parent-id nil}
                              "team" {:name "team" :parent-id "acme"}}
                             {"f-team" {:namespace-id "team"}
@@ -325,7 +325,7 @@
                             {})
         guard (authz/authorize-writer grants storage)]
     (tc/with-org "acme"
-                 (binding [tc/*current-principal* {:user "bob"}]
+                 (binding [tc/*current-principal* {:user "bob" :user-id "bob"}]
                    (testing "delete of a fn in a GRANTED namespace passes"
                      (is (nil? (guard :fn nil "f-team"))))
                    (testing "delete of a fn in an UNGRANTED namespace → :authz/forbidden"

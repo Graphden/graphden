@@ -92,7 +92,7 @@
 
 (deftest tenant-requests-are-effect-gated
   (let [scope (ig/init-key :tenancy/request-scope {})
-        provider (tauth/token-map-provider {"acme-tok" {:user "a" :org "acme"}})
+        provider (tauth/token-map-provider {"acme-tok" {:user "a" :user-id "a" :org "acme"}})
         base-ctx {:auth-provider provider :request-scope scope}
         ;; dispatch a request whose handler attempts `effect`
         run (fn [effect authz]
@@ -141,10 +141,10 @@
 
 (deftest grant-enforcement-gates-tenant-writes
   (let [grant-store (ig/init-key :tenancy/grant-store
-                                 {:grants [{:subject "alice" :capability :write :namespace "acme"}]})
+                                 {:grants [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme"}]})
         scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
-        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}
-                                            "mallory-tok" {:user "mallory" :org "acme"}})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :user-id "alice" :org "acme"}
+                                            "mallory-tok" {:user "mallory" :user-id "mallory" :org "acme"}})
         base-ctx {:auth-provider provider :request-scope scope}
         router (router-with base-ctx (fn [_req] :ran))
         call (fn [method uri authz]
@@ -165,10 +165,10 @@
 
 (deftest capabilities-header-reflects-grants
   (let [grant-store (ig/init-key :tenancy/grant-store
-                                 {:grants [{:subject "alice" :capability :write :namespace "acme"}]})
+                                 {:grants [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme"}]})
         scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
-        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}
-                                            "mallory-tok" {:user "mallory" :org "acme"}})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :user-id "alice" :org "acme"}
+                                            "mallory-tok" {:user "mallory" :user-id "mallory" :org "acme"}})
         base-ctx {:auth-provider provider :request-scope scope}
         ;; a handler that returns a Ring response map (so the header attaches)
         router (router-with base-ctx (fn [_req] {:status 200 :body "ok"}))
@@ -189,9 +189,9 @@
   ;; A per-namespace denial is thrown at the storage layer as :authz/forbidden;
   ;; the request-scope catches it and returns a clean 403.
   (let [grant-store (ig/init-key :tenancy/grant-store
-                                 {:grants [{:subject "alice" :capability :write :namespace "acme"}]})
+                                 {:grants [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme"}]})
         scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
-        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :user-id "alice" :org "acme"}})
         base-ctx {:auth-provider provider :request-scope scope}
         post (fn [handler]
                (br/dispatch (router-with base-ctx handler)
@@ -212,9 +212,9 @@
   ;; control-plane routes return a 4xx, not a 500. Without the mapping these
   ;; uncaught throws became 500s (and HTMX won't swap on a 500).
   (let [grant-store (ig/init-key :tenancy/grant-store
-                                 {:grants [{:subject "alice" :capability :write :namespace "acme"}]})
+                                 {:grants [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme"}]})
         scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
-        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :user-id "alice" :org "acme"}})
         base-ctx {:auth-provider provider :request-scope scope}
         respond (fn [err-type]
                   (br/dispatch
@@ -240,10 +240,10 @@
 
 (deftest workspace-header-lists-the-users-namespaces
   (let [grant-store (ig/init-key :tenancy/grant-store
-                                 {:grants [{:subject "alice" :capability :write :namespace "acme.team"}]
+                                 {:grants [{:subject-id "alice" :subject "alice" :capability :write :namespace "acme.team"}]
                                   :personal-ns-prefix "users"})
         scope (ig/init-key :tenancy/request-scope {:grant-store grant-store})
-        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :user-id "alice" :org "acme"}})
         base-ctx {:auth-provider provider :request-scope scope}
         router (router-with base-ctx (fn [_req] {:status 200 :body "ok"}))
         ws (fn [authz]
@@ -259,7 +259,7 @@
 
 (deftest grant-enforcement-is-opt-in
   (let [scope (ig/init-key :tenancy/request-scope {})       ; no grant-store
-        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :org "acme"}})
+        provider (tauth/token-map-provider {"alice-tok" {:user "alice" :user-id "alice" :org "acme"}})
         base-ctx {:auth-provider provider :request-scope scope}
         router (router-with base-ctx (fn [_req] :ran))]
     (is (= :ran (br/dispatch router {:request-method :post :uri "/api/entities/fn"

@@ -180,15 +180,53 @@
     (when-not user
       (throw (ex-info "user not found" {:type :user/not-found :id user-id})))
     (let [username (:username user)
-          tokens (sp/query-entities storage :token {:user username})
-          grants (sp/query-entities storage :grant {:subject username})]
-      (when (seq tokens)
-        (sp/delete-entities storage :token (mapv :id tokens)))
-      (when (seq grants)
-        (sp/delete-entities storage :grant (mapv :id grants)))
+          ;; Cascade by BOTH the stable id AND the (legacy) name, unioned by
+          ;; row id: catches backfilled AND un-backfilled rows, and a row whose
+          ;; username ever drifted from the account is still caught by user-id.
+          uid-str (str user-id)
+          token-ids (into #{} (map :id)
+                          (concat (sp/query-entities storage :token {:user-id uid-str})
+                                  (sp/query-entities storage :token {:user username})))
+          grant-ids (into #{} (map :id)
+                          (concat (sp/query-entities storage :grant {:subject-id uid-str})
+                                  (sp/query-entities storage :grant {:subject username})))]
+      (when (seq token-ids)
+        (sp/delete-entities storage :token (vec token-ids)))
+      (when (seq grant-ids)
+        (sp/delete-entities storage :grant (vec grant-ids)))
       (sp/delete-entity storage :user user-id)
-      {:tokens-deleted (count tokens)
-       :grants-deleted (count grants)})))
+      {:tokens-deleted (count token-ids)
+       :grants-deleted (count grant-ids)})))
+
+
+(defn backfill-auth-subject-ids!
+  "One-time, IDEMPOTENT migration for the P1 name→id authz change: for every
+   `:token` / `:grant` row still missing its stable id, resolve the (immutable)
+   username and stamp the id (`:token.user-id` / `:grant.subject-id`). Runs at
+   addon startup so a LIVE DB carrying pre-P1 rows keeps authorizing after the
+   deploy; a no-op on a fresh DB (every row is minted with its id). A row whose
+   username no longer resolves to a user is left as-is (a dead grant / an
+   orphaned token — the delete-user! cascade or expiry reaps it).
+
+   Correctness note: filters nil-id rows in memory rather than querying
+   `{:user-id nil}` — SQL `= NULL` matches nothing, so a where-clause filter
+   would silently backfill zero rows."
+  [storage]
+  (let [user-id-of (memoize
+                     (fn [username]
+                       (some-> (first (sp/query-entities storage :user {:username username}))
+                               :id str)))
+        tokens (filter #(nil? (:user-id %)) (sp/query-entities storage :token {}))
+        grants (filter #(nil? (:subject-id %)) (sp/query-entities storage :grant {}))
+        stamped (fn [entity id-key name-key rows]
+                  (reduce (fn [n row]
+                            (if-let [uid (user-id-of (name-key row))]
+                              (do (sp/update-entity storage entity (:id row) {id-key uid})
+                                  (inc n))
+                              n))
+                          0 rows))]
+    {:tokens-backfilled (stamped :token :user-id :user tokens)
+     :grants-backfilled (stamped :grant :subject-id :subject grants)}))
 
 
 (defn login!
@@ -210,6 +248,10 @@
                         (sp/create-entity storage :token
                                           {:token-hash (tauth/token-hash raw)
                                            :user username
+                                           ;; the STABLE identity (string form) —
+                                           ;; authz keys on this, not the mutable
+                                           ;; username
+                                           :user-id (str (:id user))
                                            :org org
                                            :expires-at (+ (System/currentTimeMillis) default-session-ttl-ms)})
                         {:token raw :user username :org org}))))))

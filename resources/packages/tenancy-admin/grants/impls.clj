@@ -32,8 +32,18 @@
     (throw (ex-info (str "Unknown capability " (pr-str capability)
                          " (valid: " (str/join ", " (sort (map name grant/capabilities))) ")")
                     {:type :grant/invalid-capability :capability capability})))
-  (sp/create-entity (:storage ctx) :grant
-                    {:subject subject :capability capability :namespace namespace}))
+  ;; Resolve the authored username to the user's STABLE id at the boundary and
+  ;; store BOTH: `:subject-id` is what enforcement matches on (survives a
+  ;; username edit / delete-recreate); `:subject` (username) is kept for
+  ;; display + the personal-namespace path. nil id (no such user yet) → a dead
+  ;; grant, same as a typo'd capability but non-throwing.
+  (let [storage (:storage ctx)
+        user-id (some-> (first (sp/query-entities storage :user {:username subject})) :id str)]
+    (sp/create-entity storage :grant
+                      {:subject subject
+                       :subject-id user-id
+                       :capability capability
+                       :namespace namespace})))
 
 
 (def impls

@@ -43,6 +43,10 @@
   #uuid "1d8e3f60-9a47-4b25-8c91-5f0a6d2b7e84")
 
 
+(def ^:private token-user-id-field-uuid
+  #uuid "3a1b7e92-4c05-4d68-9f2a-8b6c1e0d47a5")
+
+
 (defn extend-builder
   "Add the `:token` entity — `(token-hash, user, org, expires-at)` with a
    UNIQUE hash."
@@ -51,6 +55,20 @@
       (ds/add-entity :token token-entity-uuid
                      {:token-hash {:uuid token-hash-field-uuid :type :text}
                       :user {:uuid token-user-field-uuid :type :text :indexed? true}
+                      ;; The STABLE identity for the session. `:user` above is
+                      ;; the human-facing username (kept for display); every
+                      ;; authz/session linkage keys on this id so a future
+                      ;; username edit / delete-recreate can't detach or carry
+                      ;; over sessions. Nullable for the additive migration
+                      ;; (backfilled from `:user`); indexed for the
+                      ;; delete-user! cascade.
+                      ;; :text (the id's string form), not :uuid — the id is
+                      ;; written as `(str (:id user))` so the same column format
+                      ;; carries both prod uuids and any test-supplied id.
+                      :user-id {:uuid token-user-id-field-uuid
+                                :type :text
+                                :nullable? true
+                                :indexed? true}
                       :org {:uuid token-org-field-uuid :type :text}
                       :expires-at {:uuid token-expires-at-field-uuid
                                    :type :int

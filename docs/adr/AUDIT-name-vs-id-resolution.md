@@ -286,9 +286,14 @@ benefit.
   Boundary stays name-authored ("alice may write ns X") — only the
   STORED + ENFORCED subject flips to the resolved id.
 
-  **EXECUTION-READY PLAN (fully scoped 2026-07-11; do as ONE focused,
-  fully-tested unit — security-critical, so correctness-first forbids a
-  rushed partial). Step 1 (schema) is DONE (uncommitted on the branch):**
+  **✅ IMPLEMENTED + fully verified (2026-07-11) — full `bb test` green
+  (1897 tests, 0 failures).** All 10 steps below landed. The one design
+  refinement made during implementation: the `:subject-id`/`:user-id`
+  columns are `:text` carrying the id's STRING form (`(str id)`), not
+  `:uuid` — so the same column format holds prod uuids and any
+  test-supplied id, and matching is uniform string equality. Human-facing
+  surfaces (login form, grant authoring) stay username-keyed; only the
+  stored + enforced subject flipped to the id.**Plan (all done):**
 
   The irreducible crux: grant MATCHING wants user-id (stable), but the
   personal-namespace (`users.<username>`, wired in prod via

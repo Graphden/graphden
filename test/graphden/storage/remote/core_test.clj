@@ -115,8 +115,10 @@
         bundle {:fns [{:id id :name "over-http"}]
                 :slots [] :fn-slots [] :bindings [] :list-items []}
         seen-auth (atom nil)
+        seen-branch (atom :unset)
         handler (fn [req]
                   (reset! seen-auth (get-in req [:headers "authorization"]))
+                  (reset! seen-branch (get-in req [:headers "x-graphden-branch"]))
                   (if (= "/api/export/graph-rows" (:uri req))
                     {:status 200
                      :headers {"Content-Type" "application/edn"}
@@ -130,8 +132,16 @@
           (is (= "over-http" (:name (sp/read-entity rs :fn id)))))
         (testing "the bearer token was sent"
           (is (= "Bearer tok-123" @seen-auth)))
+        (testing "no branch pin → no branch header"
+          (is (nil? @seen-branch)))
         (testing "refresh! re-fetches"
           (is (true? (remote/refresh! rs)))))
+      (testing "a branch pin sends X-Graphden-Branch on bootstrap AND refresh"
+        (let [rs (remote/create-remote-storage (str "http://localhost:" port) "tok" "dev")]
+          (is (= "dev" @seen-branch) "bootstrap carried the branch")
+          (reset! seen-branch :unset)
+          (remote/refresh! rs)
+          (is (= "dev" @seen-branch) "refresh! re-fetches the same branch")))
       (finally (stop)))))
 
 

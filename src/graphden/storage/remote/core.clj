@@ -18,7 +18,12 @@
    hosted-editor concern and is NOT supported here (see SCALING.md).
 
    Freshness: `refresh!` re-fetches the bundle; the SSE invalidation source
-   (docs/SCALING.md § SSE) calls it when the hub signals a graph change."
+   (docs/SCALING.md § SSE) calls it when the hub signals a graph change.
+
+   Branch: a RemoteStorage is pinned to ONE branch (nil ⇒ main), sent as the
+   `X-Graphden-Branch` header on every fetch — so a BYO executor can serve
+   prod or dev. Multiple branches on one BYO executor = multiple RemoteStorages
+   (out of scope for the single-org serve case)."
   (:require
     [clojure.edn :as edn]
     [clojure.tools.logging :as log]
@@ -44,22 +49,27 @@
    and return it keyed by ENTITY NAME: `{:fn [...] :slot [...] :fn-slot [...]
    :binding [...] :binding-list-item [...]}`. Throws on a transport error or
    non-200. `edn/read-string` (not `read`) parses the body — safe, no eval;
-   `#uuid` / `#inst` are native edn tags."
-  [hub-url token]
-  (let [url (str hub-url "/api/export/graph-rows")
-        resp @(http/get url {:headers {"Authorization" (str "Bearer " token)}
-                             :timeout 30000
-                             :as :text})]
-    (when-let [err (:error resp)]
-      (throw (ex-info (str "RemoteStorage bootstrap GET failed: " (Throwable/.getMessage err))
-                      {:type :remote-storage/fetch-failed :url url})))
-    (when (not= 200 (:status resp))
-      (throw (ex-info (str "RemoteStorage bootstrap GET returned " (:status resp))
-                      {:type :remote-storage/fetch-failed :url url :status (:status resp)})))
-    (let [bundle (edn/read-string (:body resp))]
-      (reduce-kv (fn [m bkey entity] (assoc m entity (vec (get bundle bkey))))
-                 {}
-                 bundle-key->entity))))
+   `#uuid` / `#inst` are native edn tags.
+
+   `branch` (nil ⇒ the org's main branch) pins the bootstrap to one branch via
+   the same `X-Graphden-Branch` header the editor uses — so a BYO executor can
+   serve prod or dev, not only main."
+  ([hub-url token] (fetch-graph-rows hub-url token nil))
+  ([hub-url token branch]
+   (let [url (str hub-url "/api/export/graph-rows")
+         headers (cond-> {"Authorization" (str "Bearer " token)}
+                   branch (assoc "X-Graphden-Branch" branch))
+         resp @(http/get url {:headers headers :timeout 30000 :as :text})]
+     (when-let [err (:error resp)]
+       (throw (ex-info (str "RemoteStorage bootstrap GET failed: " (Throwable/.getMessage err))
+                       {:type :remote-storage/fetch-failed :url url})))
+     (when (not= 200 (:status resp))
+       (throw (ex-info (str "RemoteStorage bootstrap GET returned " (:status resp))
+                       {:type :remote-storage/fetch-failed :url url :status (:status resp)})))
+     (let [bundle (edn/read-string (:body resp))]
+       (reduce-kv (fn [m bkey entity] (assoc m entity (vec (get bundle bkey))))
+                  {}
+                  bundle-key->entity)))))
 
 
 ;; =============================================================================
@@ -98,7 +108,7 @@
 ;; =============================================================================
 
 (defrecord RemoteStorage
-  [rows hub-url token]
+  [rows hub-url token branch]
 
   sp/StorageCRUD
 
@@ -177,36 +187,40 @@
    OR the entity-keyed shape). No HTTP — used by tests and by
    `create-remote-storage` after the fetch. `hub-url`/`token` are kept so
    `refresh!` can re-fetch (nil ⇒ refresh is a no-op-able snapshot)."
-  ([bundle] (from-bundle bundle nil nil))
-  ([bundle hub-url token]
+  ([bundle] (from-bundle bundle nil nil nil))
+  ([bundle hub-url token] (from-bundle bundle hub-url token nil))
+  ([bundle hub-url token branch]
    (let [rows (if (contains? bundle :fns)
                 (reduce-kv (fn [m bkey entity] (assoc m entity (vec (get bundle bkey))))
                            {}
                            bundle-key->entity)
                 bundle)]
-     (->RemoteStorage (atom rows) hub-url token))))
+     (->RemoteStorage (atom rows) hub-url token branch))))
 
 
 (defn create-remote-storage
   "Bootstrap a RemoteStorage: fetch the whole graph from `hub-url` (org +
    public, authenticated with `token`) into memory. `hub-url` is the platform
-   base URL, e.g. \"https://acme.graphden.app\"."
-  [hub-url token]
-  (let [rows (fetch-graph-rows hub-url token)]
-    (log/info "RemoteStorage bootstrapped"
-              {:hub hub-url :counts (into {} (map (fn [[k v]] [k (count v)])) rows)})
-    (->RemoteStorage (atom rows) hub-url token)))
+   base URL, e.g. \"https://acme.graphden.app\". `branch` (nil ⇒ main) pins it
+   to one branch — `refresh!` re-fetches the same branch."
+  ([hub-url token] (create-remote-storage hub-url token nil))
+  ([hub-url token branch]
+   (let [rows (fetch-graph-rows hub-url token branch)]
+     (log/info "RemoteStorage bootstrapped"
+               {:hub hub-url :branch branch
+                :counts (into {} (map (fn [[k v]] [k (count v)])) rows)})
+     (->RemoteStorage (atom rows) hub-url token branch))))
 
 
 (defn refresh!
-  "Re-fetch the whole graph and swap it in. Called by the SSE invalidation
-   source when the hub signals a change. Best-effort: on a fetch error the
-   previous snapshot is kept and the error logged, so a transient blip doesn't
-   blank the executor's graph."
-  [{:keys [rows hub-url token]}]
+  "Re-fetch the whole graph (same branch) and swap it in. Called by the SSE
+   invalidation source when the hub signals a change. Best-effort: on a fetch
+   error the previous snapshot is kept and the error logged, so a transient
+   blip doesn't blank the executor's graph."
+  [{:keys [rows hub-url token branch]}]
   (try
-    (reset! rows (fetch-graph-rows hub-url token))
-    (log/info "RemoteStorage refreshed" {:hub hub-url})
+    (reset! rows (fetch-graph-rows hub-url token branch))
+    (log/info "RemoteStorage refreshed" {:hub hub-url :branch branch})
     true
     (catch Exception e
       (log/warn e "RemoteStorage refresh failed — keeping the previous snapshot"

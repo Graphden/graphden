@@ -116,3 +116,17 @@
             (byo/start-byo! {:hub-url hub-url :token token :org "acme"
                              :handler-fn "does-not-exist" :port 0 :packages []})))
       (finally (hub) (sp/close storage)))))
+
+
+(deftest start-byo-preflight-rejects-missing-config
+  ;; A forgotten env var should fail with a clear message BEFORE any network /
+  ;; NPE deeper in. Each required key, omitted in turn, throws :byo/missing-config.
+  (let [full {:hub-url "http://localhost:1" :token "t" :org "o"
+              :handler-fn "h" :port 0 :packages []}]
+    (doseq [k [:hub-url :token :org :handler-fn]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"missing required config"
+            (byo/start-byo! (assoc full k nil)))
+          (str "omitting " k " is rejected")))
+    (testing "a blank string counts as missing too"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"missing required config"
+            (byo/start-byo! (assoc full :org "  ")))))))

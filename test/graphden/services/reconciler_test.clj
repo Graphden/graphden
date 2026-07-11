@@ -1035,6 +1035,43 @@
         (sp/close storage)))))
 
 
+(deftest reconcile-once!-drives-reassert-after-a-reconnect-test
+  ;; The reassert UNIT is tested above; this covers the GLUE in reconcile-once!
+  ;; (`:service-locks-holder` → ensure-live! → reassert-lock-ownership!), which
+  ;; had no coverage — deleting that call would leave every other test green
+  ;; while a reconnected pod double-ran a singleton a sibling stole.
+  (let [storage (create-full-storage)
+        calls (atom [])
+        stops (atom [])
+        {composed :composed} (make-trackable-fn! storage "reassert-glue" calls stops)
+        svc (sp/create-entity storage :service
+                              {:fn-id (:id composed) :enabled? true
+                               :restart-policy :always :cardinality :singleton})
+        pod (atom {})
+        holder (atom {:conn ::stale})
+        ctx (assoc (pod-ctx storage) :service-locks-holder holder)]
+    (try
+      ;; Pass 1: no reconnect (ensure-live! false) — acquire the lock so the
+      ;; entry is :locked? true, exactly as a healthy pass would leave it.
+      (with-redefs [pg-lock/ensure-live! (fn [_] false)
+                    pg-lock/try-lock! (fn [_ _] true)]
+        (recon/reconcile-once! ctx pod))
+      (is (true? (:locked? (get @pod (:id svc)))))
+      ;; Pass 2: the holder reconnected (ensure-live! true) → the glue must
+      ;; re-assert on the fresh conn. A sibling grabbed the lock during the
+      ;; outage (try-lock! false), so reassert stops our local copy.
+      (with-redefs [pg-lock/ensure-live! (fn [_] true)
+                    pg-lock/holder-conn (fn [_] ::fresh)
+                    pg-lock/try-lock! (fn [_ _] false)]
+        (recon/reconcile-once! ctx pod))
+      (testing "the reconnect drove reassert: the stolen singleton was stopped"
+        (is (= 1 (count @stops)) "the local copy's stopper fired exactly once")
+        (is (not (map? (get @pod (:id svc)))) "no longer a live running entry"))
+      (finally
+        (recon/stop-all! pod)
+        (sp/close storage)))))
+
+
 (deftest per-pod-service-is-untouched-by-reassert-test
   (let [storage (create-full-storage)
         calls (atom [])

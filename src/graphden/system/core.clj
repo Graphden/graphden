@@ -951,10 +951,18 @@
 ;; On halt: stop every running service.
 ;;
 ;; The in-process atom is modified from CRUD endpoints (which call
-;; `recon/reconcile-once!` after writing) and from this init-key.
-;; Out-of-band DB edits (psql, other tools) won't be picked up until
-;; restart — acceptable for the admin workflow today. Periodic poll
-;; is on the Phase-2 roadmap (next sub-feature).
+;; `recon/reconcile-once!` after writing), from NOTIFY events, and from
+;; a periodic tick.
+;;
+;; Level-triggered convergence: a `ScheduledExecutorService` re-runs the
+;; reconcile every `reconcile-period-ms` (default 15s). This is what makes
+;; the reconciler robust rather than purely edge-triggered:
+;;   - a `:singleton`'s pod CRASHES → its advisory lock auto-releases, but
+;;     the crash emits no NOTIFY; a sibling that recorded `::not-our-lock`
+;;     re-attempts the lock on the next tick and takes over (HA cron);
+;;   - an out-of-band DB edit (psql, other tools) is picked up within a tick;
+;;   - a transient start failure (port not yet freed) reconverges on a tick
+;;     instead of sleeping under `reconcile-monitor` inline.
 ;; =============================================================================
 
 (defn- resolve-fn-id-by-name
@@ -1070,7 +1078,10 @@
   (fn [{:keys [kind op id branch-id] :as event}]
     (try
       (case kind
-        :service   (recon/reconcile-once! ctx recon/running)
+        ;; Retry-free: a start failure isn't retried inline (which would sleep
+        ;; under `reconcile-monitor` and block the listener thread + every
+        ;; other reconcile trigger) — the periodic tick reconverges instead.
+        :service   (recon/reconcile-once! ctx recon/running {:max-retries 0 :backoff-ms 0})
         :fn        (when (= op :invalidate)
                      (invalidate-from-notify! ctx id branch-id))
         :execution (when (and (= op :cancel) (not (str/blank? id)))
@@ -1080,8 +1091,26 @@
         (log/error e "NOTIFY dispatch threw" {:event event})))))
 
 
+(defn- start-reconcile-ticker!
+  "Spawn a scheduled tick that re-runs `reconcile-once!` every `period-ms`,
+   retry-free (a failed start reconverges on the next tick rather than
+   sleeping under `reconcile-monitor`). Returns the scheduler for halt."
+  [ctx period-ms]
+  (let [scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+    (log/info "Starting service reconcile ticker — period" period-ms "ms")
+    (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
+      scheduler
+      ^Runnable (fn []
+                  (try (recon/reconcile-once! ctx recon/running {:max-retries 0 :backoff-ms 0})
+                       (catch Exception e
+                         (log/warn e "periodic reconcile failed"))))
+      period-ms period-ms
+      java.util.concurrent.TimeUnit/MILLISECONDS)
+    scheduler))
+
+
 (defmethod ig/init-key :exec/service-reconciler
-  [_ {:keys [context packages notify-listener service-locks]}]
+  [_ {:keys [context packages notify-listener service-locks reconcile-period-ms]}]
   (log/info "Starting service reconciler...")
   ;; Production singleton — clear any stale state from a previous run
   ;; (e.g. test fixture or REPL reset) before reconciling.
@@ -1107,16 +1136,23 @@
     ;; ctx so per-NOTIFY reconciles use the same advisory-lock path
     ;; as boot.
     (let [callback (when notify-listener
-                     (pg-notify/register! notify-listener (on-notify ctx)))]
+                     (pg-notify/register! notify-listener (on-notify ctx)))
+          ticker (start-reconcile-ticker! ctx (or reconcile-period-ms 15000))]
       {:running recon/running
        :context ctx
        :notify-listener notify-listener
-       :notify-callback callback})))
+       :notify-callback callback
+       :ticker ticker})))
 
 
 (defmethod ig/halt-key! :exec/service-reconciler
-  [_ {:keys [running notify-listener notify-callback]}]
+  [_ {:keys [running notify-listener notify-callback ticker]}]
   (log/info "Stopping service reconciler...")
+  (when ticker
+    (java.util.concurrent.ExecutorService/.shutdown ^java.util.concurrent.ExecutorService ticker)
+    (try (java.util.concurrent.ExecutorService/.awaitTermination
+           ^java.util.concurrent.ExecutorService ticker 5 java.util.concurrent.TimeUnit/SECONDS)
+         (catch InterruptedException _ nil)))
   (when (and notify-listener notify-callback)
     (pg-notify/unregister! notify-listener notify-callback))
   (when running (recon/stop-all! running))

@@ -10,7 +10,10 @@
    during a reconcile pass. `pg_try_advisory_lock` (session-scoped)
    stays held until the connection's session ends — either by
    `pg_advisory_unlock` or by connection close. Pod crash → session
-   ends → lock auto-released → another pod can take over.
+   ends → lock auto-released → another pod re-takes it on the next
+   periodic reconcile tick (`:exec/service-reconciler`, ~15s). The
+   crash emits no NOTIFY, so the periodic pass — not an event — is
+   what heals a dropped singleton.
 
    ## Why a dedicated connection
 

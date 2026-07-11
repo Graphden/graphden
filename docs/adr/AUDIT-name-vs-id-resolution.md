@@ -143,12 +143,19 @@ Debt clusters in authz, structural type constraints, slot-owner tie-break.
   `export.clj:589 constraint-type-names` special-cases this (the dep
   scanner is blind to them). Rename → dangling name. Fix: resolve members
   to fn-ids at parse time, names only at EDN export. Plumbing.
-- **P3 — `resolve-slot-owner` ambiguity falls through to inheritance
-  owner SILENTLY.** `slot_resolution.clj:360-438`: on a true
-  same-name/same-type collision the tie-break defaults to `inh-hit` →
-  a `binding-id` against a real-but-wrong `slot-id` (silent mis-bind).
-  Author writes names (boundary), so can't eliminate — but should
-  **hard-fail on unresolved ambiguity** instead of guessing.
+- **P3 — `resolve-slot-owner` ambiguity → inheritance owner.**
+  `slot_resolution.clj:360-438`. INVESTIGATED — **NOT a bug.** A
+  parse-time hard-fail was tried and **reverted**: it false-positives on
+  legitimate shared args. Real case: `:_er-list-total-count` binds
+  `:coll`; inheritance resolves to `:count.:coll` (type includes `:text`),
+  the ref tree to `:get.:coll` (subtype, no `:text`) — the SAME logical
+  shared arg, value propagates to both via the ext-name. Inheritance-wins
+  is a sound DEFAULT, backstopped: a typed binding value disambiguates
+  when present; a free arg that genuinely can't satisfy two incompatible
+  slots surfaces as a **type-check failure** (the sweep is the backstop),
+  not a silent mis-bind. Fix applied: **document the rationale in the
+  code** (the silent-ness the audit flagged is now explained, not
+  removed). No behaviour change.
 - **P4 (low, display-only) — layout free-arg migration by arg-name.**
   `layout/graph.clj:229 migration-via-free-arg-name` fallback (slot-id
   paths tried first). Affects which editor edge is drawn, not runtime.
@@ -182,10 +189,11 @@ name-derived ids + globally-unique fn-names made name-keying "just work",
 so it accreted; it breaks only on non-unique names (slot/arg as-names) and
 mutable names (username, branch name).
 
-**Tier 1 — genuine correctness bugs, LOCAL, safe, do first:**
-- **C1** root branch by `:base-branch-id nil` (not name "main").
-- **P3** hard-fail `resolve-slot-owner` on unresolved ambiguity (surfaces
-  any existing latent mis-bind via `bb test` golden bootstrap).
+**Tier 1 — genuine correctness bugs, LOCAL, safe:**
+- **C1** ✅ DONE — root branch by `:base-branch-id nil` (not name "main").
+- **P3** ✅ CLOSED — investigated, NOT a bug (hard-fail reverted, false-
+  positived on shared args); documented the sound-default rationale.
+  `bb test` (golden bootstrap) confirmed the hard-fail was over-eager.
 
 **Tier 2 — finish the slot-id runtime migration (executor F1–F6).** Hot
 path, high-value (retires the #104 wrong-cache-hit / mis-route class),

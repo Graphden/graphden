@@ -404,6 +404,23 @@
            ;; Type-based disambiguation: both passes hit and we have a
            ;; value-return-type to compare against the two slots'
            ;; declared types.
+           ;; Both passes hit DIFFERENT owners for this ext-name. In the
+           ;; common case these are the SAME logical shared arg exposed by
+           ;; sibling composed refs (e.g. `:coll` on both `:count` and
+           ;; `:get` in `:_er-list-total-count` — the value propagates to
+           ;; both via the shared ext-name), often with sibling base-fns
+           ;; declaring subtype-related types. Inheritance-wins is a sound
+           ;; DEFAULT here, backstopped two ways so a genuinely-wrong pick
+           ;; can't pass silently:
+           ;;   - when a typed binding VALUE is present, it disambiguates
+           ;;     (each candidate slot's type vs the value's return-type);
+           ;;   - when the arg is free (no value), the sweep type-checker
+           ;;     is the backstop — a free arg cannot satisfy two
+           ;;     genuinely-incompatible slot types, so a real mis-pairing
+           ;;     surfaces as a type-check failure, not a silent mis-bind.
+           ;; (A parse-time hard-fail on "different types" was tried and
+           ;; reverted: it false-positives on legitimate shared args whose
+           ;; sibling slots are merely subtype-related, not distinct.)
            (and inh-hit ref-hit (not= inh-hit ref-hit))
            (if-let [vt (value-return-type binding-value defs-by-name)]
              (let [inh-slot-type (apply slot-type-of (conj inh-hit defs-by-name))

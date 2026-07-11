@@ -171,9 +171,10 @@
 
 (defn -main
   "Entry point — reads config from the environment:
-   `GRAPHDEN_HUB_URL`, `GRAPHDEN_EXECUTOR_TOKEN`, `GRAPHDEN_EXECUTOR_ORG`,
-   `GRAPHDEN_EXECUTOR_BRANCH` (optional), `GRAPHDEN_APP_HANDLER_FN`,
-   `GRAPHDEN_PORT` (default 8080)."
+   `GRAPHDEN_HUB_URL`, `GRAPHDEN_SSE_URL` (optional — the hub's SSE relay;
+   unset ⇒ bootstrap-only, no live refresh), `GRAPHDEN_EXECUTOR_TOKEN`,
+   `GRAPHDEN_EXECUTOR_ORG`, `GRAPHDEN_EXECUTOR_BRANCH` (optional),
+   `GRAPHDEN_APP_HANDLER_FN`, `GRAPHDEN_PORT` (default 8080)."
   [& _args]
   (let [handle (start-byo!
                  {:hub-url (System/getenv "GRAPHDEN_HUB_URL")

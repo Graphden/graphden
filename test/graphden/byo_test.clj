@@ -11,6 +11,7 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.byo :as byo]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.packages.export :as export]
@@ -103,6 +104,34 @@
         (finally
           (byo/stop-byo! handle)
           (sse/stop-relay! relay)
+          (hub)
+          (sp/close storage))))))
+
+
+(deftest byo-handler-runs-with-effects-unclamped
+  ;; A BYO executor runs the customer's OWN graph on their OWN hardware, so its
+  ;; handler must NOT carry the cloud effect clamp (which forbids :network et
+  ;; al. to protect shared infra). Guard the decision: a handler that records a
+  ;; :network effect serves 200 here; under the cloud clamp it would 500.
+  (let [storage (hub-storage!)]
+    (exec/register-base-fn! :byo-net
+                            (fn [_args _ctx]
+                              (cr/record-effect! :network)
+                              {:status 200 :body "net-ok"}))
+    (let [base (setup/create-base-fn! storage "byo-net" :any)
+          _ (setup/create-composed-fn! storage "byo-net-handler" (:id base))
+          hub (graph-rows-server storage)
+          hub-url (str "http://localhost:" (:local-port (meta hub)))
+          handle (byo/start-byo! {:hub-url hub-url :token token :org "acme"
+                                  :handler-fn "byo-net-handler" :port 0 :packages []
+                                  :extra-base-fns {:byo-net (exec/get-base-fn :byo-net)}})
+          byo-port (:local-port (meta (:server handle)))]
+      (try
+        (let [resp @(http/get (str "http://localhost:" byo-port "/") {:as :text :timeout 5000})]
+          (is (= 200 (:status resp)) "network effect was allowed (no cloud clamp)")
+          (is (= "net-ok" (:body resp))))
+        (finally
+          (byo/stop-byo! handle)
           (hub)
           (sp/close storage))))))
 

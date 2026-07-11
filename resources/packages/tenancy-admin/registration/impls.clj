@@ -72,11 +72,13 @@
 ;; tenant-forbidden).
 (defbase set-org-execution-mode
   [name execution-mode]
-  (when-let [row (first (sp/query-entities (:storage ctx) :org {:name name}))]
+  (if-let [row (first (sp/query-entities (:storage ctx) :org {:name name}))]
     (let [result (sp/update-entity (:storage ctx) :org (:id row)
                                    {:execution-mode execution-mode})]
       (tc/invalidate-byo-cache! name)
-      result)))
+      result)
+    (throw (ex-info (str "No org named " (pr-str name))
+                    {:type :org/not-found :name name}))))
 
 
 (def impls

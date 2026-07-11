@@ -114,8 +114,9 @@
 
                      (query-latest-per-group [_ _ _ _] nil))
                    "acme"))))
-    (testing "a missing org is a no-op (nil), not a throw"
+    (testing "a missing org throws (loud feedback for a bad slug), no write"
       (reset! updated nil)
-      (is (nil? (set-mode {:name "ghost" :execution-mode "byo"} {:storage (org-storage {})})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No org named"
+            (set-mode {:name "ghost" :execution-mode "byo"} {:storage (org-storage {})})))
       (is (nil? @updated)))
     (tc/invalidate-byo-cache!)))

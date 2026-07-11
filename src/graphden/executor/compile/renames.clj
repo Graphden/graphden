@@ -204,14 +204,27 @@
    every secret invocation hashed to one cache slot — `GET
    /api/secrets` returned every row with the FIRST secret's `:path`.
 
+   SLOT-ID discrimination (name-collision hardening): the projected
+   set ALSO carries the surface frees' `:slot-id`s (from
+   `deep-free-ext-entries`). `fa` is hybrid — every caller value is
+   written under BOTH its ext-name AND its slot-id — so when two
+   DISTINCT slots share one ext-name, the name cell `fa[name]` holds
+   only the last write and two calls that differ only in the other
+   slot would hash equal (a latent wrong cache-hit). Including the
+   distinct `slot-id`s in the key discriminates them. This is purely
+   additive over the name set: `fa[slot-id]` absent → `select-keys`
+   skips it (no regression); present → correct discrimination. The
+   name half stays, so name-only values (e.g. env-bindings that never
+   get a slot-id key) are still covered.
+
    Invariant (verified by
    `verify-cache-projection-frees-superset-of-deep-free!`):
    `(set/superset? (cache-projection-frees F) (set (deep-free-ext-names F)))`
-   for every fn-id F. A strict superset can only ever produce MORE
-   cache misses (slower), never a wrong cache hit. If this invariant
-   ever breaks, the bug-class (stale-cache returning a
-   `make-shape-callable` closure that flows as data into a sibling
-   evaluation) returns.
+   for every fn-id F — still holds (the name set is unchanged; slot-ids
+   are added). A strict superset can only ever produce MORE cache
+   misses (slower), never a wrong cache hit. If this invariant ever
+   breaks, the bug-class (stale-cache returning a `make-shape-callable`
+   closure that flows as data into a sibling evaluation) returns.
 
    Memoised per fn-id via `:cache-projection-frees-cache`. The cache
    is seeded with `#{}` before the recursive descent so any
@@ -222,12 +235,15 @@
     (or (get @cache fn-id)
         (let [_ (swap! cache assoc fn-id #{})
               direct (set (deep-free-ext-names fn-id lookups))
+              direct-slot-ids (into #{} (keep :slot-id)
+                                    (deep-free-ext-entries fn-id lookups))
               captured (hof-closure-captures fn-id lookups)
-              result (into direct captured)]
+              result (-> direct (into direct-slot-ids) (into captured))]
           (swap! cache assoc fn-id result)
           result))
-    (into (set (deep-free-ext-names fn-id lookups))
-          (hof-closure-captures fn-id lookups))))
+    (-> (set (deep-free-ext-names fn-id lookups))
+        (into (keep :slot-id (deep-free-ext-entries fn-id lookups)))
+        (into (hof-closure-captures fn-id lookups)))))
 
 
 (defn verify-cache-projection-frees-superset-of-deep-free!

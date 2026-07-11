@@ -191,3 +191,41 @@
           (is (identical? r1 r2)
               "second call hits :deep-free-ext-entries-cache and returns same vec"))
         (finally (sp/close storage))))))
+
+
+(deftest cache-projection-carries-collision-slot-ids-test
+  ;; F3 (name→id audit): the per-execute call-cache projects `fa` into
+  ;; its key via `cache-projection-frees`. Projecting by NAME collapses
+  ;; two distinct slots that share an ext-name (`fa[:x]` holds only the
+  ;; last write) → a latent WRONG cache-hit even though the slot-id-aware
+  ;; readers would route correctly. The projection now ALSO carries the
+  ;; surface slot-ids so the two slots discriminate in the cache key.
+  (testing "cache-projection-frees carries BOTH distinct slot-ids for a shared ext-name"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (let [base-g (setup/build-fn! storage
+                                      {:name "cpf-collide-base-g"
+                                       :slots [{:name "x" :type :int}]})
+              fn-g   (setup/build-fn! storage
+                                      {:name "cpf-collide-g" :parent base-g})
+              base-f (setup/build-fn! storage
+                                      {:name "cpf-collide-base-f"
+                                       :slots [{:name "x" :type :int}
+                                               {:name "y" :type :int}]})
+              fn-f   (setup/build-fn! storage
+                                      {:name "cpf-collide-f"
+                                       :parent base-f
+                                       :bindings {"y" {:ref fn-g}}})
+              proj    (r/cache-projection-frees (-> fn-f :fn :id)
+                                                (lookups-for storage))
+              sid-f-x (-> base-f :slots (get "x") :id)
+              sid-g-x (-> base-g :slots (get "x") :id)]
+          (is (contains? proj :x)
+              "ext-name :x still projected — the superset-of-names invariant holds")
+          (is (not= sid-f-x sid-g-x)
+              "the two same-named slots have genuinely distinct ids")
+          (is (contains? proj sid-f-x)
+              "F's own :x slot-id is in the cache key")
+          (is (contains? proj sid-g-x)
+              "G's :x slot-id (reached via ref) is in the cache key — no collapse"))
+        (finally (sp/close storage))))))

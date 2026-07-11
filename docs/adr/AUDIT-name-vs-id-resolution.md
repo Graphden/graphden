@@ -47,6 +47,53 @@ env-bindings, and the cache key.
 | **F4** | `bindings.clj:302-375` `collect-env-bindings` (dedup by env-name), write `compile_eager.clj:616`, read `:418-419` | slot-name (env-name) | env-binding dedup collapses two different non-root slots sharing a name; dropped entry vanishes from `fa`. Value-flow is name-only (never gets a slot-id key). |
 | **F5** | `renames.clj:434-445`, `:577-591`, `own-rename-chain-map:44-56`, `compute-rename-aliases:958-987`; runtime `apply-rename-aliases` (`compile_eager.clj:606`) | as-name / slot-name | positional `{:as}` deep-walk resolves via `[fid name]`; runtime alias copy is pure name→name on every top-level invocation. |
 
+### ⚠ RECONCILIATION with `RUNTIME_SLOT_ID_REFACTOR.md` (#104) — READ
+
+The executor audit was run WITHOUT the #104 design record. Cross-checking
+it flips most of F1–F6 from "debt" to **deliberate final design**:
+
+- The **hybrid `fa` (slot-id + name) is the FINAL architecture, not a
+  transitional state** (that doc §3/§4/§7). slot-id keys distinguish
+  *structural* ambiguity at the boundary (#104); **name keys deliberately
+  cover DYNAMIC writes** (env-bindings, HOF lambda-args, cross-fn
+  cascades) where "a value flows under one name, set per call" — no
+  structural ambiguity.
+- The full slot-id-only flip was **attempted twice and dropped**:
+  env-builder slot-id writes caused **stack overflows** (thunk re-entry
+  via `force-value`, `:list-fn-versions` chains); the cross-fn rename
+  slot-id cascade needs those writes + readers dropping name-fallback.
+  Marginal benefit (2 `:on-throw :const` sites) didn't justify the risk.
+
+So the reclassification:
+- **F1 (`build-ref-renames`)** — the doc calls this "the load-bearing
+  cross-fn cascade path." Flipping it = the rejected env-builder path.
+  **NOT debt. Do not touch.**
+- **F2/F6 (HOF lambda by name)** — Phase 5 already shipped the
+  *conservative* HOF wrap-time slot-id translation
+  (`build/apply-hof-translation`). Going further hits the same rejected
+  ground. **Leave.**
+- **F4 (env-binding by name)** — the doc EXPLICITLY keeps env-builder
+  name-only; slot-id writes = the stack-overflow class. A partial sweep
+  (commit `c49f577c`) was reverted after `bb test-e2e` reproduced a
+  failure. **Do not touch** (residual leak managed by documented
+  defensive pins).
+- **F5 (`apply-rename-aliases` positional)** — "still use name-fallback,"
+  final. **Leave.**
+- **F3 (cache projection by slot-id)** — the ONE genuine gap: the readers
+  are slot-id-aware but the cache KEY still projected by NAME, so the
+  cache could serve a wrong result the readers would have routed
+  correctly. The `RUNTIME_SLOT_ID_REFACTOR.md` §4 target arch itself
+  lists `cache-projection → set of slot-uuid`; it was unfinished.
+  **FIXED — additively** (slot-ids ADDED to the name projection, superset
+  invariant preserved, no fa-write/read change → the stack-overflow class
+  is structurally impossible). Test:
+  `cache-projection-carries-collision-slot-ids-test`.
+
+**Net executor outcome: F3 fixed; F1/F2/F4/F5 are the deliberate,
+empirically-validated hybrid, vindicated by the design record — like
+Variant B, "half-built" is actually "the other half was tried and
+rejected for real runtime reasons."**
+
 **Each has an existing id-based analogue to mirror:**
 `deep-free-ext-entries` (`renames.clj:101`), `apply-hof-translation` /
 `build-hof-translation` (`renames.clj:914`, `compile_eager.clj:271`),
@@ -195,17 +242,39 @@ mutable names (username, branch name).
   positived on shared args); documented the sound-default rationale.
   `bb test` (golden bootstrap) confirmed the hard-fail was over-eager.
 
-**Tier 2 — finish the slot-id runtime migration (executor F1–F6).** Hot
-path, high-value (retires the #104 wrong-cache-hit / mis-route class),
-higher risk. Order: F3 (cache key by slot-id) → F1 (ref-rename copy) →
-F2+F6 (HOF lambda by slot-id) → F4 (env-binding) → F5 (positional
-rename). Each mirrors an existing id-based analogue; each gated by full
-`bb test` + live re-verify. Keep the name half as compat until the
-slot-id half is proven, then drop.
+**Tier 2 — executor. RESCOPED to F3 only** (see § RECONCILIATION). The
+hybrid `fa` is the final design per `RUNTIME_SLOT_ID_REFACTOR.md`;
+F1/F2/F4/F5 are deliberate and their slot-id flip was tried + rejected
+(stack overflows). Only **F3 (cache-projection by slot-id)** was a real
+unfinished gap — **DONE** additively + tested. No further executor work:
+pursuing F1/F2/F4/F5 would repeat failed multi-day attempts for marginal
+benefit.
 
 **Tier 3 — plumbing robustness:**
-- **P1** authz/session by user-id (security).
-- **P2** type-constraint members by fn-id.
+- **P1** authz/session by user-id (security). CONFIRMED a real fix (unlike
+  F1–F5, no rejection-record; `username` is a mutable field used as
+  identity). Latent today (no user-rename feature + `delete-user!`
+  cascades tokens/grants by name), but the id is the correct identity.
+  Change surface (implement as ONE unit, full `bb test` + tenancy/auth
+  suites):
+  1. schema: `token.user-id` + `grant.subject-id` (ref → `:user`,
+     nullable for migration).
+  2. `login!` (`users.clj:210`): also store `:user-id (:id user)` on the
+     token (the `user` row is already fetched).
+  3. token-provider / `*current-principal*`: carry `:user-id`.
+  4. grant creation (`grant.clj:99`): resolve subject username → user-id,
+     store `:subject-id`.
+  5. `grant-allows?`/`can?` (`grant.clj:50,158`) + `authz` (`writable?`/
+     `executable?`): match on `:user-id`/`:subject-id`, with a
+     name-fallback for un-backfilled rows during migration.
+  6. `delete-user!` (`users.clj:166`): cascade by user-id (already held).
+  7. migration: backfill `user-id`/`subject-id` from `username` on
+     existing rows.
+  Boundary stays name-authored ("alice may write ns X") — only the
+  STORED + ENFORCED subject flips to the resolved id.
+- **P2** type-constraint members by fn-id — investigate deliberateness
+  first (the alias registry is name-keyed by design; may be BENIGN like
+  ns-path-grants).
 
 **Tier 4 — cosmetic / invariant-documentation:**
 - **C2** sequence slot by id; **P4** layout note; anon-hash assertion +
@@ -220,6 +289,22 @@ slot-chain helpers Tier 2 consolidates.
 
 Every fix: own commit, sweep-green + full `bb test`, skills + linters,
 new test pinning the id-based behaviour.
+
+## Incidental pre-existing bugs found + fixed along the way
+
+Not name/id issues, but surfaced by the "clean at every stage" full
+`bb test` and fixed per the no-ignored-errors bar:
+
+- **app-router error/timeout sentinel namespace mismatch** (fixed
+  `ecc78fdb`). `tenancy/app_router.clj` matched `run-with-timeout`'s
+  result with BARE `::error`/`::timeout` — which resolve to app_router's
+  own namespace, so they silently never matched
+  `:compile-runtime/{error,timeout}`. An errored tenant handler (incl. a
+  cloud-sandbox forbidden-effect throw → "blocked → 500") leaked the raw
+  `::error` keyword instead of a 500. Reproduced on the pristine base
+  (`7d39f34a`). `byo.clj` already matched correctly (`::cr/error`); the
+  fix aligns app-router + documents the footgun on `run-with-timeout`.
+  Caught by `faas-app-test/app-router-runs-handler-effect-gated`.
 
 ## `src/graphden/types/**`
 

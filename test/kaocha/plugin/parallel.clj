@@ -154,7 +154,13 @@
     ;; post-merge `fn-by-name` then returns nil). Seeded to `nil` so each
     ;; thread starts router-less and falls back to its own request ctx.
     graphden.system.branch-router/*active-router-override*
-    graphden.system.tenancy-router/*active-router-override*])
+    graphden.system.tenancy-router/*active-router-override*
+    ;; The byo-mode memo. Without isolation a sibling NS-thread caching an org
+    ;; as byo (or hosted) leaks into another test that reuses the org name
+    ;; (`acme`/`beta`) — e.g. subdomain-test's request-scope 421s an apex
+    ;; request whose org was cached byo elsewhere. Empty `{}` seed is the
+    ;; correct default (no orgs cached).
+    graphden.tenancy.context/*byo-cache-override*])
 
 
 ;; Per-var seeders. Some isolation atoms must start non-empty — the

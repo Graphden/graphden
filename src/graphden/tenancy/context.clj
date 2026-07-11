@@ -79,6 +79,18 @@
   (atom {}))
 
 
+;; Parallel-test isolation: bound per test-thread to a fresh atom (see the
+;; kaocha parallel plugin's `isolation-vars`) so one test caching an org as
+;; byo can't leak that verdict into a sibling test that shares the org name.
+;; nil in production → the process-global `byo-cache`.
+(def ^:dynamic *byo-cache-override* nil)
+
+
+(defn- byo-cache-atom
+  []
+  (or *byo-cache-override* byo-cache))
+
+
 (def ^:private byo-cache-ttl-ms 5000)
 
 
@@ -94,8 +106,9 @@
   [storage org]
   (if (or (nil? org) (= public-org org))
     false
-    (let [now (System/currentTimeMillis)
-          cached (get @byo-cache org)]
+    (let [cache (byo-cache-atom)
+          now (System/currentTimeMillis)
+          cached (get @cache org)]
       (if (and cached (< (- now (:at cached)) byo-cache-ttl-ms))
         (:byo? cached)
         (let [byo? (try
@@ -103,12 +116,12 @@
                         (some-> (first (sp/query-entities storage :org {:name org}))
                                 :execution-mode))
                      (catch Exception _ false))]
-          (swap! byo-cache assoc org {:byo? byo? :at now})
+          (swap! cache assoc org {:byo? byo? :at now})
           byo?)))))
 
 
 (defn invalidate-byo-cache!
   "Drop the byo-mode memo (all orgs, or one). Call after writing an org's
    `:execution-mode` so the flip takes effect before the TTL elapses."
-  ([] (reset! byo-cache {}))
-  ([org] (swap! byo-cache dissoc org)))
+  ([] (reset! (byo-cache-atom) {}))
+  ([org] (swap! (byo-cache-atom) dissoc org)))

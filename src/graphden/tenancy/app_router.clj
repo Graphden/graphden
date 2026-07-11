@@ -129,6 +129,12 @@
                                                 handler-fn-id
                                                 {:request request})))))]
              (cond
-               (identical? result ::timeout) app-timeout
-               (identical? result ::error) app-error
+               ;; run-with-timeout returns ITS namespace's sentinels
+               ;; (`::compile-runtime/{timeout,error}`) — must be matched
+               ;; qualified (`::cr/…`), NOT bare `::timeout`/`::error`
+               ;; (which would resolve to THIS ns and silently never
+               ;; match → an errored handler returns the raw sentinel
+               ;; keyword instead of a 500). byo.clj does this correctly.
+               (identical? result ::cr/timeout) app-timeout
+               (identical? result ::cr/error) app-error
                :else result))))))))

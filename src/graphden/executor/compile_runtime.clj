@@ -727,7 +727,14 @@
    `*cancel-check*` inside the thunk so an interrupted execute aborts). Lives
    here, next to `execute`, so both the cloud app-router and a BYO executor
    bound a handler through the same helper without either depending on the
-   other."
+   other.
+
+   CALLER CONTRACT: the sentinels are keywords in THIS namespace —
+   `:graphden.executor.compile-runtime/{timeout,error}`. Callers MUST match
+   them QUALIFIED (`::cr/timeout` via an alias, or the fully-qualified form),
+   never bare `::timeout`/`::error` — a bare `::error` resolves to the
+   caller's OWN namespace, compiles fine, and silently never matches, so an
+   errored/timed-out handler leaks the raw sentinel instead of a 5xx."
   [timeout-ms thunk]
   (let [fut (future (thunk))
         result (try (deref fut timeout-ms ::timeout)

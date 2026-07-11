@@ -63,7 +63,7 @@ remaining production integration is the resource close/reopen/rewire (blocker 2)
 plus a `Dockerfile.crac` that checkpoints at build time. Recommended as the
 FLEET_RFC §8 footprint track, after (or alongside) the Phase-0 placement work.
 
-## Running it
+## Running the standalone PoC
 
 ```bash
 export CRAC_JDK=/path/to/zulu-crac-jdk-21   # download from Azul (crac_supported=true)
@@ -71,3 +71,35 @@ sudo apt-get install -y criu                # or use $CRAC_JDK/lib/criu
 criu check                                  # must say "Looks good"; needs privileged caps
 ./run-crac-poc.sh
 ```
+
+## Production flow (as-built)
+
+The full system integration lives in `src/graphden/crac.clj` (quiesce/resume the
+pool + LISTEN + advisory-lock connections around a checkpoint) with
+`Dockerfile.crac` (restore image) and `build-checkpoint.sh` (the checkpoint
+phase). The quiesce→resume cycle is tested against real DB resources in
+`test/graphden/crac_test.clj` (no checkpoint needed — it validates the risky
+part: that closing and re-establishing the connections keeps the system
+working).
+
+```bash
+# 1. checkpoint phase — needs a reachable Postgres (synced graph) + privileged CRIU
+export CRAC_JDK=/path/to/zulu-crac-jdk-21
+export JDBC_URL=jdbc:postgresql://postgres:5432/graphden   # SAME url the runtime uses
+bb rebuild                       # build target/executor-server.jar
+./build-checkpoint.sh            # → target/crac-checkpoint + target/native
+
+# 2. bake the restore image and run it (privileged for CRIU)
+docker build -f Dockerfile.crac -t graphden:crac .
+docker run --cap-add=CHECKPOINT_RESTORE --cap-add=SYS_PTRACE --cap-add=SYS_ADMIN \
+           --security-opt seccomp=unconfined -p 8080:8080 graphden:crac
+```
+
+Two hard constraints (standard CRaC same-topology rules):
+
+- **Same JDBC_URL** at checkpoint and restore — the pool config is baked into the
+  image; `graphden.crac` cycles the pool's *connections*, it does not reconfigure
+  the URL. Point both at a DB reachable by the same address (e.g. a k8s Service
+  name).
+- **Privileged CRIU** at restore (the caps above), and the brotli native lib at a
+  stable `-Dgraphden.native-lib.dir` present in the image (blocker 1).

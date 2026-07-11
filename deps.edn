@@ -39,6 +39,12 @@
   ;; bcrypt password hashing — `tenancy.users` (§4.1). Static API
   ;; (BCrypt/hashpw, BCrypt/checkpw, BCrypt/gensalt); standard $2a$ format.
   org.mindrot/jbcrypt {:mvn/version "0.4"}
+  ;; CRaC portable API — used by `graphden.crac` to quiesce/resume live
+  ;; resources (DB pool, LISTEN + advisory-lock connections) around a
+  ;; Coordinated Restore at Checkpoint (docs/FLEET_RFC.md §5.1). A no-op shim
+  ;; on a non-CRaC JVM (the API resolves to a global context that never fires),
+  ;; so it's inert in the normal Temurin build and active under a CRaC JDK.
+  org.crac/crac {:mvn/version "1.5.0"}
 
   ;; mathx — an EXTERNAL Type-2 (impl+fns) package, loaded by NAME via the
   ;; executor-packages.edn manifest. This is the REAL distribution form: a

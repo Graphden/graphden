@@ -1,0 +1,55 @@
+# CRaC (Coordinated Restore at Checkpoint) image — restores a WARM graphden
+# JVM in tens of ms instead of the ~110 s cold boot (docs/FLEET_RFC.md §5.1,
+# development/crac/). This is the RUNTIME (restore) image; the checkpoint itself
+# is produced by a separate privileged step — see development/crac/build-checkpoint.sh
+# and the README — because a build-time checkpoint needs (a) a reachable Postgres
+# holding the synced graph and (b) privileged CRIU, neither of which a plain
+# `docker build` RUN provides.
+#
+# Two hard deployment constraints (standard CRaC same-topology rules):
+#   1. The Postgres used at CHECKPOINT time must be reachable at the SAME
+#      JDBC_URL as at RESTORE time — the pool's config is baked into the image
+#      (the pool object is preserved; graphden.crac only cycles its connections,
+#      it does not reconfigure the URL).
+#   2. The pod must run with CRIU's capabilities at restore:
+#      --cap-add=CHECKPOINT_RESTORE --cap-add=SYS_PTRACE --cap-add=SYS_ADMIN
+#      --security-opt seccomp=unconfined   (or --privileged).
+
+# Azul Zulu 21 with CRaC. `crac_supported=true` builds bundle criu under
+# $JAVA_HOME/lib/criu; a distro criu also works.
+FROM azul/zulu-openjdk:21-jdk-crac
+
+WORKDIR /app
+
+# The uberjar (same artifact as the normal image) …
+COPY target/executor-server.jar /app/executor-server.jar
+# … and the checkpoint image produced by build-checkpoint.sh (a directory of
+# CRIU image files + the JVM's warm memory). Ships INSIDE this image so restore
+# reads it from the local filesystem.
+COPY target/crac-checkpoint /app/crac-checkpoint
+# The brotli native lib is extracted to a deterministic, image-resident path at
+# checkpoint time (graphden.native-lib.dir) and mmapped from there; it MUST be
+# present at the same path on restore. build-checkpoint.sh copies it into
+# /app/native and both phases set -Dgraphden.native-lib.dir=/app/native.
+COPY target/native /app/native
+
+ENV PORT=8080
+ENV STORAGE_TYPE=postgres
+EXPOSE 8080
+
+# Run as a non-root user (trivy AVD-DS-0002). NOTE: CRIU restores the process
+# under its checkpoint-time uid, so build-checkpoint.sh must run the JVM as the
+# SAME uid (1001). No apt/curl here (the base has no curl and pinning it across
+# a different base is brittle) — configure liveness/readiness as k8s probes on
+# GET /health, which is fast to answer once restored.
+RUN useradd --system --uid 1001 --user-group --shell /sbin/nologin \
+        --home-dir /nonexistent graphden \
+    && chown -R graphden:graphden /app
+USER graphden
+
+# Restore the warm JVM. `-XX:CRaCRestoreFrom` skips main() and resumes at the
+# checkpoint point; graphden.crac's afterRestore hook reconnects the pool +
+# LISTEN + advisory-lock before the first request is served.
+CMD ["java", \
+     "-XX:CRaCRestoreFrom=/app/crac-checkpoint", \
+     "-Dgraphden.native-lib.dir=/app/native"]

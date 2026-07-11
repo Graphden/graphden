@@ -139,11 +139,14 @@
   (query-latest-per-group
     [_ entity where group-cols]
     ;; In-memory grouping (the protocol says the contract is the result, not
-    ;; the mechanism). Latest per group-cols tuple by :created-at.
+    ;; the mechanism). Latest per group-cols tuple by :created-at. `:created-at`
+    ;; is a `#inst` (java.util.Date), so compare by `inst-ms` — `max-key` over
+    ;; a raw Date-vs-0 mix would throw ClassCastException.
     (->> (query-rows @rows entity where)
          (group-by (apply juxt group-cols))
          (vals)
-         (mapv (fn [group] (apply max-key #(or (:created-at %) 0) group)))))
+         (mapv (fn [group]
+                 (apply max-key #(if-let [c (:created-at %)] (inst-ms c) 0) group)))))
 
 
   sp/StorageBatchCRUD

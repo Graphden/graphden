@@ -85,6 +85,18 @@
     (is (nil? (pg-notify/parse-payload 42)))))
 
 
+(deftest make-emitter-swallows-a-notify-failure
+  ;; A NOTIFY is best-effort: the row write already committed, so a transient
+  ;; pg_notify failure must NOT throw back into the caller (which could roll it
+  ;; back). The reconcile/mutation path is the correctness mechanism; NOTIFY
+  ;; only speeds propagation.
+  (let [bad-ds (reify javax.sql.DataSource
+                 (getConnection [_] (throw (java.sql.SQLException. "pool exhausted"))))
+        emit (pg-notify/make-emitter bad-ds)]
+    (is (nil? (emit {:kind :fn :op :invalidate :id "x"}))
+        "the SQLException is swallowed, emit returns nil")))
+
+
 ;; ============================================================================
 ;; end-to-end: emitter → channel → listener callback
 ;; ============================================================================

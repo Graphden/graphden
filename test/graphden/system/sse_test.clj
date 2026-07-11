@@ -8,7 +8,8 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.auth.provider :as auth]
     [graphden.storage.remote.sse :as remote-sse]
-    [graphden.system.sse :as sse]))
+    [graphden.system.sse :as sse]
+    [org.httpkit.server :as hk]))
 
 
 (defn- wait-for
@@ -25,6 +26,21 @@
 (defn- relay-port
   [relay]
   (:local-port (meta (:server relay))))
+
+
+(deftest broadcast-evicts-a-subscriber-whose-send-fails
+  ;; A subscriber whose channel closed underneath us (send! throws or returns
+  ;; falsey) must be dropped, and not counted as delivered, so a dead channel
+  ;; doesn't linger in the fan-out set. Pure — redef send! to fail one channel.
+  (let [subscribers (atom {:good "acme" :bad "acme"})]
+    (with-redefs [hk/send! (fn [ch _frame _close?]
+                             (if (= ch :bad)
+                               (throw (Exception. "channel closed"))
+                               true))]
+      (let [delivered (sse/broadcast! subscribers
+                                      {:kind :fn :op :invalidate :id "f" :org-id "acme"})]
+        (is (= 1 delivered) "only the healthy subscriber is counted")
+        (is (= {:good "acme"} @subscribers) "the failed subscriber was evicted")))))
 
 
 (deftest sse-relay-round-trips-an-event-to-the-remote-source

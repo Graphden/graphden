@@ -468,6 +468,45 @@
         @holder))))
 
 
+(defn load-cell!
+  "Compile a CELL — a root fn + its transitive forward ref-closure
+   (docs/FLEET_RFC.md §3) — INTO the ctx's compiled registry, ON TOP of
+   whatever is already loaded. This is the unit a fleet executor adds at
+   runtime WITHOUT a full rebuild: only the cell's closure is compiled, not
+   the whole graph.
+
+   Reuses the delta machinery: `forward-closure` over the `:forward-deps`
+   index (primed, or built from the graph on a fresh executor), then
+   `compile-subset` on top of the current registry, swapped in under CAS so a
+   concurrent load / delta-recompile isn't dropped. The graph read is
+   transient — only the compiled closure is kept, which is the whole point.
+
+   Returns the set of fn-ids the cell contributed (empty if `root-fn-id` isn't
+   in this executor's shard). Cell fns absent from the graph (a stale forward
+   edge to a deleted fn) are filtered out rather than crashing the compile."
+  [ctx root-fn-id]
+  (let [holder (:compiled-registry ctx)
+        storage (compile-storage ctx)
+        graph (read-graph storage (:executor-orgs ctx))
+        _ (register-type-aliases-from-db! graph)
+        base-fns (:base-fns ctx)
+        fns-map (if (map? (:fns graph))
+                  (:fns graph)
+                  (into {} (map (juxt :id identity)) (:fns graph)))
+        _ (prime-always-fresh! (vals fns-map))
+        forward-deps (or (:forward-deps (some-> (:compile-deps ctx) deref))
+                         (:forward-deps (deps/build-deps-state graph)))
+        cell (into #{}
+                   (filter #(contains? fns-map %))
+                   (deps/forward-closure forward-deps [root-fn-id]))
+        lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)]
+    (when (seq cell)
+      (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
+      (prime-graph-cache! ctx graph)
+      (prime-compile-deps! ctx graph (vec cell)))
+    cell))
+
+
 (defn registry
   "Return the current compiled registry from `ctx`, rebuilding on-demand
    when missing. Tests that skip the `:exec/compiled-registry` init-key

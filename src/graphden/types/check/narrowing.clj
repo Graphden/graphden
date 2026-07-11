@@ -124,7 +124,11 @@
 
 (defn build-caller-narrowings
   "Pass 2 — narrowings for rename-host fn-defs. Returns
-   `{rename-host-name → {as-name → narrowed-type}}`."
+   `{rename-host-name → {as-name → narrowed-type}}`.
+
+   PRECONDITION: call AFTER a full `check-all-defs!` sweep — it reads
+   each ref's `:return` via `registry/rich-type-of`, so an under-
+   populated registry silently produces no narrowings."
   [fn-defs]
   (let [fn-defs-by-name (into {} (map (fn [fd] [(:name fd) fd])) fn-defs)
         known-names     (set (keys fn-defs-by-name))
@@ -189,20 +193,6 @@
 ;; `docs/TYPE_SYSTEM_DECISIONS.md`.
 ;; =============================================================================
 
-(defn- root-of-ref
-  "Walk `:primary-parent` chain to the root base-fn. Returns the root
-   name, or `nil` when the ref is unknown."
-  [ref-name]
-  (loop [n ref-name seen #{}]
-    (cond
-      (or (nil? n) (contains? seen n)) n
-      :else (let [info (registry/rich-type-of n)
-                  parent (:primary-parent info)]
-              (if (or (nil? parent) (= parent n))
-                n
-                (recur parent (conj seen n)))))))
-
-
 (defn- direct-predicate-of-ref
   "If `ref-name`'s impl-chain root is `:some?` / `:nil?` / `:is-a?`
    and its target slot is a ref to fn-name T, return:
@@ -215,7 +205,7 @@
   [ref-name]
   (when ref-name
     (when-let [info (registry/rich-type-of ref-name)]
-      (let [root (root-of-ref ref-name)
+      (let [root (registry/root-base-fn-name ref-name)
             rb (:resolved-bindings info {})]
         (cond
           (#{:some? :nil?} root)
@@ -264,20 +254,6 @@
     (and (map? b) (keyword? (:ref b))) (:ref b)))
 
 
-(defn- strip-null-from-type
-  "Strip `:null` from a union; for the bare `:null` type return
-   `:never`. Mirrors the local helper in `core/logic/impls.clj`
-   but unparameterised — we only need the structural shape."
-  [t]
-  (cond
-    (types/union-type? t)
-    (let [members (vec (remove #{:null} (types/union-members t)))]
-      (cond
-        (empty? members) :never
-        (= 1 (count members)) (first members)
-        :else (types/make-union members)))
-    (= t :null) :never
-    :else t))
 
 
 (defn- narrowed-type-for-predicate
@@ -297,7 +273,7 @@
 
     (or (and (= pred-kind :some?) (= polarity :taken))
         (and (= pred-kind :nil?)  (= polarity :not-taken)))
-    (strip-null-from-type target-static)
+    (types/strip-null target-static)
 
     :else :null))
 
@@ -402,7 +378,13 @@
    branch overrides and propagate into the branch's transitive ref-
    tree. Pass 3 binds `*ref-return-overrides*` to the per-callee
    entry, so the type-checker sees narrowed returns when re-checking
-   a fn-def reachable only from a provably-non-null guarded branch."
+   a fn-def reachable only from a provably-non-null guarded branch.
+
+   PRECONDITION: call AFTER a full `check-all-defs!` sweep — this reads
+   every target's `:return` via `registry/rich-type-of`, so a registry
+   not yet fully populated yields empty / `:any` overrides (no error,
+   just no narrowing). Same ordering dependency as `build-caller-
+   narrowings`."
   [fn-defs]
   (let [fn-defs-by-name (into {} (map (fn [fd] [(:name fd) fd])) fn-defs)
         known-names     (set (keys fn-defs-by-name))
@@ -413,7 +395,7 @@
     (reduce
       (fn [acc fd]
         (let [parent (or (:parent fd) (first (:parents fd)))
-              root   (when parent (root-of-ref parent))
+              root   (when parent (registry/root-base-fn-name parent))
               branch-overrides (case root
                                  :if    (if-branch-overrides fd)
                                  :cond  (cond-branch-overrides fd)

@@ -88,6 +88,8 @@
 (def tuple-type?                   shapes/tuple-type?)
 (def tuple-elems                   shapes/tuple-elems)
 (def contains-secret?              shapes/contains-secret?)
+(def child-types                   shapes/child-types)
+(def type-any?                     shapes/type-any?)
 (def taint-with-secret-if-tainted  shapes/taint-with-secret-if-tainted)
 (def wrap-with-taint               shapes/wrap-with-taint)
 
@@ -225,6 +227,29 @@
       (= 1 (count unique)) (first unique)
       (some #{:any} unique) :any        ; :any absorbs everything
       :else (into [:union] unique))))
+
+
+(defn strip-null
+  "Remove `:null` members from a top-level union; the bare `:null` type
+   becomes `:never` (bottom). A non-union, non-`:null` input passes
+   through unchanged. Conservative on `[:secret …]`: a secret-wrapped
+   nullable carries `:null` INSIDE the wrapped union, not at top level,
+   so this leaves the taint marker intact — it never strips a secret.
+
+   The narrowing helper (`:some?`/`:nil?` control-flow refinement in
+   `types.check.narrowing`) and the `:coalesce` return-rule
+   (`core/logic/impls.clj`) both remove nullability the same way; this
+   is their single source of truth."
+  [t]
+  (cond
+    (union-type? t)
+    (let [members (vec (remove #{:null} (union-members t)))]
+      (cond
+        (empty? members) :never
+        (= 1 (count members)) (first members)
+        :else (make-union members)))
+    (= t :null) :never
+    :else t))
 
 
 (defn desugar-variant

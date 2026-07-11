@@ -361,12 +361,32 @@ benefit.
   the deterministic `(ids/slot-id owner name)` id, not the resolved name.
   Found by the CI-guard, not the manual pass.
 
-**Type-checker (option-3):** its name-keying is mostly BENIGN (fn-name
-unique). The FRAGILE core is the α' as-name narrowing — which we KEEP
-(soundness). option-3 = tidy/consolidate/test/document the α' machinery,
-NOT re-key it (per `ADR-slot-id-keyed-type-checker.md`, re-keying is a
-lateral move). Fold into Tier 4 as debt-reduction where it overlaps the
-slot-chain helpers Tier 2 consolidates.
+**Type-checker (option-3):** ✅ DONE (behavior-preserving consolidation;
+soundness untouched — re-keying was NOT attempted, it's a lateral move
+per `ADR-slot-id-keyed-type-checker.md`). Its name-keying is mostly
+BENIGN (fn-name unique); the FRAGILE core is the α' as-name narrowing,
+KEPT. A subagent survey mapped the real debt; verified + fixed:
+- **`strip-null`** was byte-identical in `narrowing.clj` + `core/logic/
+  impls.clj` → one `types.core/strip-null` (single source of truth).
+- **root-of-inheritance walk** was copied THREE times (`check.clj`
+  `root-base-fn-name`, `narrowing.clj` `root-of-ref`, impls
+  `root-base-fn-name`) → one `registry.core/root-base-fn-name` (lives in
+  registry so no caller needs a type-checker dep — the cycle the copies
+  existed to dodge).
+- **`contains-secret?` / `has-type-var?`** were the same 8-arm structural
+  fold with different leaf predicates (each docstring warned "a missing
+  arm lets X slip through") → a `types.core/type-any?` combinator over a
+  single `child-types` enumeration; a new type-kind is now covered in ONE
+  place. Proven arm-equivalent (incl. the secret-node short-circuit).
+- **undocumented ordering invariant** on `check-all-defs!` +
+  `build-{caller-narrowings,ref-return-overrides}` (they need a
+  topo-ordered / fully-swept registry or silently under-narrow) — now
+  stated at each entry point.
+Deliberately NOT done: `check-fn-def!` phase-extraction and the
+`unify-or-keep` micro-helper (readability-only, not worth churn on the
+checker's hottest function); `walk-type-shallow` merge of `resolve`/
+`freshen*` (the agent flagged `freshen*`'s intentional `:effects`-drop —
+a naive merge would change behavior).
 
 Every fix: own commit, sweep-green + full `bb test`, skills + linters,
 new test pinning the id-based behaviour.

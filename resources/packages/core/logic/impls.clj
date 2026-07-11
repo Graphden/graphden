@@ -166,7 +166,7 @@
 ;; === Type-rules ===
 ;; :const / :identity — `(:const :value V)` returns V. `:identity`
 ;; is `:parent :const` so the rule covers both via the type-checker's
-;; `root-base-fn-name` walk. Used by graphden renames
+;; `registry/root-base-fn-name` walk. Used by graphden renames
 ;; (`:value {:as :request :type :ring-request-shape}` → `:ring-request`
 ;; exposes `:value` as the free arg `:request`, type flows through).
 ;; Without this rule the result type defaults to the polymorphic `'a`
@@ -207,21 +207,6 @@
     (when (integer? lit) lit)))
 
 
-(defn- root-base-fn-name
-  "Walk a fn-ref's `:primary-parent` chain to the root base-fn. Mirrors
-   `graphden.types.check/root-base-fn-name` but reusing the registry
-   only — no internal dependency on the type-checker namespace
-   (which would create a cycle: types.check → core/logic via the rule)."
-  [name]
-  (loop [n name seen #{}]
-    (cond
-      (or (nil? n) (contains? seen n)) n
-      :else (let [parent (:primary-parent (registry/rich-type-of n))]
-              (if (or (nil? parent) (= parent n))
-                n
-                (recur parent (conj seen n)))))))
-
-
 (defn- predicate-of-ref
   "If `test-ref` (a fn-ref keyword) computes `(:some? :_x)` or
    `(:nil? :_x)`, return `[:some? ref-keyword]` or
@@ -238,7 +223,7 @@
   [test-ref]
   (when test-ref
     (when-let [info (registry/rich-type-of test-ref)]
-      (let [root (root-base-fn-name test-ref)
+      (let [root (registry/root-base-fn-name test-ref)
             rb (:resolved-bindings info {})
             value-binding (get rb :value)
             target (:ref value-binding)]
@@ -246,23 +231,6 @@
           [root target])))))
 
 
-(defn- strip-null-from-union
-  "Remove `:null` members from a top-level union. For non-union
-   inputs that are exactly `:null`, return `:never`. Anything else
-   passes through unchanged. Conservative: a `[:secret …]`-wrapped
-   nullable would NOT have `:null` at the top level (the secret
-   marker wraps the whole union), so this function leaves it intact
-   — no chance of accidentally stripping the taint marker."
-  [t]
-  (cond
-    (types/union-type? t)
-    (let [members (vec (remove #{:null} (types/union-members t)))]
-      (cond
-        (empty? members) :never
-        (= 1 (count members)) (first members)
-        :else (types/make-union members)))
-    (= t :null) :never
-    :else t))
 
 
 (defn if-return-rule
@@ -288,7 +256,7 @@
       ;; Laziness is preserved — `if-fn` itself only evaluates the
       ;; taken branch; this rule reasons about types only. Secret-
       ;; tainted values stay tainted: a `[:secret [:union :null T]]`
-      ;; wraps `:null` inside the marker, so `strip-null-from-union`
+      ;; wraps `:null` inside the marker, so `types/strip-null`
       ;; never reaches it (it only strips top-level union members).
       (let [test-ref (:ref (get bindings-info :test))
             pred (predicate-of-ref test-ref)]
@@ -298,12 +266,12 @@
                 else-ref (:ref else-info)
                 narrowed-then (when (= then-ref target-ref)
                                 (if (= pred-kind :some?)
-                                  (strip-null-from-union (:type then-info))
+                                  (types/strip-null (:type then-info))
                                   :null))
                 narrowed-else (when (= else-ref target-ref)
                                 (if (= pred-kind :some?)
                                   :null
-                                  (strip-null-from-union (:type else-info))))]
+                                  (types/strip-null (:type else-info))))]
             (if (or narrowed-then narrowed-else)
               (types/make-union [(or narrowed-then (:type then-info))
                                  (or narrowed-else (:type else-info))])
@@ -354,7 +322,7 @@
 
    Same conservatism as `if-return-rule`'s narrowing: secret-tainted
    nullables (`[:secret [:union :null T]]`) never have `:null` at
-   the top level, so `strip-null-from-union` won't reach inside the
+   the top level, so `types/strip-null` won't reach inside the
    marker. Laziness is preserved — `:cond` short-circuits at the
    IMPL level (`:lazy-seq-args` on `:clauses`); this rule is types-
    only."
@@ -363,7 +331,7 @@
     (if-let [[pred-kind target-ref] (predicate-of-ref pred-form)]
       (if (= target-ref result-form)
         (case pred-kind
-          :some? (strip-null-from-union recorded-t)
+          :some? (types/strip-null recorded-t)
           :nil?  :null)
         recorded-t)
       recorded-t)

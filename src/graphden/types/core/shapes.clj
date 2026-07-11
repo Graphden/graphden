@@ -307,29 +307,48 @@
 ;; -----------------------------------------------------------------------------
 ;; Secret-taint helpers — pure on shape, no alias / subtype dependency.
 
+(defn child-types
+  "The immediate constituent types of a compound type — the arms every
+   structural fold must recurse through. Primitives / type-vars / any
+   non-compound have none. THE single enumeration of a type's sub-types:
+   `type-any?` (and any future structural fold) rides on it, so a new
+   type-kind is covered everywhere by adding ONE arm here rather than in
+   each hand-written recursion."
+  [t]
+  (cond
+    (fn-type? t)     (conj (vec (vals (fn-args t))) (fn-ret t))
+    (list-type? t)   [(list-elem t)]
+    (map-type? t)    [(map-key t) (map-val t)]
+    (tuple-type? t)  (vec (tuple-elems t))
+    (refine-type? t) [(refine-base t)]
+    (secret-type? t) [(secret-inner t)]
+    (union-type? t)  (vec (union-members t))
+    (record-type? t) (vec (vals t))
+    :else            []))
+
+
+(defn type-any?
+  "True iff `pred` holds for `t` or for any type nested anywhere within
+   it (recursing via `child-types`). The one traversal behind
+   `contains-secret?` and the checker's `has-type-var?` — swap the leaf
+   predicate, keep the recursion in ONE place so an added type-kind can't
+   silently escape a fold (the historic 'a missing arm lets X slip
+   through' hazard). `pred` short-circuits: a node it matches is not
+   descended into (correct for `contains-secret?`, where a `[:secret …]`
+   IS the hit)."
+  [pred t]
+  (or (boolean (pred t))
+      (boolean (some #(type-any? pred %) (child-types t)))))
+
+
 (defn contains-secret?
   "True iff `t` contains a `[:secret …]` anywhere in its structure.
    Used by `:return-type-rule` propagators: an arg whose type holds a
    secret ANYWHERE (top-level, list element, record field, union
-   branch) taints the fn's return.
-
-   Mirrors the recursion shape of `well-formed?` / `occurs?` — a
-   missing arm here lets a secret slip through propagation silently,
-   so keep this in sync when adding new type-kinds."
+   branch) taints the fn's return. `type-any?` over `secret-type?` —
+   `child-types` owns the recursion, so this can't miss a new type-kind."
   [t]
-  (cond
-    (or (primitive? t) (type-var? t)) false
-    (secret-type? t)  true
-    (fn-type? t)      (or (some contains-secret? (vals (fn-args t)))
-                          (contains-secret? (fn-ret t)))
-    (list-type? t)    (contains-secret? (list-elem t))
-    (map-type? t)     (or (contains-secret? (map-key t))
-                          (contains-secret? (map-val t)))
-    (tuple-type? t)   (some contains-secret? (tuple-elems t))
-    (refine-type? t)  (contains-secret? (refine-base t))
-    (union-type? t)   (some contains-secret? (union-members t))
-    (record-type? t)  (some contains-secret? (vals t))
-    :else             false))
+  (type-any? secret-type? t))
 
 
 (defn taint-with-secret-if-tainted

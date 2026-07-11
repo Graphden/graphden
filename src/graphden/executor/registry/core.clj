@@ -487,6 +487,29 @@
            [:args arg-name])))
 
 
+(defn root-base-fn-name
+  "Walk a fn's `:primary-parent` chain to the base-fn at the root of its
+   inheritance. Lets a rule/narrowing dispatch on the BASE fn's name even
+   when the immediate parent is a composed fn-def (e.g. `:_jvm-section
+   :parent :assoc-empty` still benefits from the `:assoc` rule). `seen`
+   guards an unexpected cycle (registration-order bugs, manual rich-type
+   tampering). Returns the root name, or `nil`/the input unchanged when
+   the ref is unknown or already a root.
+
+   Single source of truth for the three former copies (types.check,
+   types.check.narrowing, core/logic/impls) — it lives here because the
+   walk needs only `rich-type-of`, so every caller can reach it without a
+   type-checker dependency (which would cycle: types.check → the rule)."
+  [fn-name]
+  (loop [cur fn-name, seen #{}]
+    (if (or (nil? cur) (contains? seen cur))
+      cur
+      (let [parent (:primary-parent (rich-type-of cur))]
+        (if parent
+          (recur parent (conj seen cur))
+          cur)))))
+
+
 (defn rich-types-snapshot
   []
   (rich-types-view))

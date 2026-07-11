@@ -167,19 +167,7 @@
    that shape and reject a binding whose unification would have
    succeeded (e.g. record ↔ `[:map a :any]`)."
   [t]
-  (cond
-    (types/type-var? t)    true
-    (types/fn-type? t)     (or (some has-type-var? (vals (types/fn-args t)))
-                               (has-type-var? (types/fn-ret t)))
-    (types/list-type? t)   (has-type-var? (types/list-elem t))
-    (types/map-type? t)    (or (has-type-var? (types/map-key t))
-                               (has-type-var? (types/map-val t)))
-    (types/tuple-type? t)  (some has-type-var? (types/tuple-elems t))
-    (types/refine-type? t) (has-type-var? (types/refine-base t))
-    (types/secret-type? t) (has-type-var? (types/secret-inner t))
-    (types/union-type? t)  (some has-type-var? (types/union-members t))
-    (types/record-type? t) (some has-type-var? (vals t))
-    :else                  false))
+  (types/type-any? types/type-var? t))
 
 
 (defn- any-shape?
@@ -1519,8 +1507,7 @@
 
 (declare base-fn-type-rule
          effective-ref-return
-         effective-ref-return-uncached
-         root-base-fn-name)
+         effective-ref-return-uncached)
 
 
 (defn- effective-binding-type
@@ -1575,7 +1562,7 @@
                                   [k {:type (effective-binding-type v combined seen' (inc depth))
                                       :value (:value v)}]))
                            combined)
-          root-base (root-base-fn-name ref-name)
+          root-base (registry/root-base-fn-name ref-name)
           static (or (:return info) :any)
           recomputed (if-let [rule (base-fn-type-rule :return-type-rule root-base)]
                        (rule inner-info static)
@@ -1807,7 +1794,7 @@
   "Snapshot the fn-def's computed rich-type into the registry so
    downstream `check-fn-def!` runs can resolve refs to it.
 
-   `:primary-parent` is the immediate parent name — `root-base-fn-name`
+   `:primary-parent` is the immediate parent name — `registry/root-base-fn-name`
    walks this to find the base-fn that `compute-return-type` should
    dispatch on. Without it, a chain `child :parent :assoc-empty :parent
    :assoc` would dispatch on `:assoc-empty` (no rule) and silently
@@ -1870,25 +1857,6 @@
 ;; -----------------------------------------------------------------------------
 ;; Top-level: compose the phases.
 
-(defn- root-base-fn-name
-  "Walk the registry's `:primary-parent` chain to find the base-fn at
-   the root of an inheritance chain. Used to dispatch
-   `compute-return-type` on the BASE fn's name even when the
-   immediate parent is a composed fn-def — e.g. `:_jvm-section
-   :parent :assoc-empty` should still benefit from the `:assoc`
-   rule. `seen` guards an unexpected cycle (registration order
-   bugs, manual rich-type tampering)."
-  [fn-name]
-  (loop [cur fn-name, seen #{}]
-    (if (or (nil? cur) (contains? seen cur))
-      cur
-      (let [info (registry/rich-type-of cur)
-            parent (:primary-parent info)]
-        (if parent
-          (recur parent (conj seen cur))
-          cur)))))
-
-
 (defn- base-fn-type-rule
   "Look up a per-base-fn type-rule — `:return-type-rule`,
    `:slot-types-rule` or `:nav-types-rule` — from the rich-types
@@ -1902,7 +1870,7 @@
 (defn- compute-return-type
   "Run the ROOT base-fn's type-rule (e.g. `:assoc` record-builder) on
    `static-ret` to produce the rich, possibly-narrowed return shape.
-   Walking to the root via `root-base-fn-name` lets rules fire even
+   Walking to the root via `registry/root-base-fn-name` lets rules fire even
    when the immediate parent is an intermediate fn-def
    (`:assoc-empty`, `:_jvm-section`).
 
@@ -1915,7 +1883,7 @@
    it can lift `:request-method`'s primitive type out of the shape."
   [fn-def primary-parent parent-args static-ret]
   (if-let [rule (base-fn-type-rule :return-type-rule
-                                   (root-base-fn-name primary-parent))]
+                                   (registry/root-base-fn-name primary-parent))]
     (rule (bindings-info-for-rule (:args fn-def) parent-args) static-ret)
     static-ret))
 
@@ -1929,7 +1897,7 @@
    the two rules whose docs differ but bodies were byte-identical."
   [rule-key fn-def primary-parent parent-args]
   (if-let [rule (base-fn-type-rule rule-key
-                                   (root-base-fn-name primary-parent))]
+                                   (registry/root-base-fn-name primary-parent))]
     (rule (bindings-info-for-rule (:args fn-def) parent-args))
     {}))
 
@@ -2226,7 +2194,17 @@
 (defn check-all-defs!
   "Run type-check on every fn-def. Stops at the first mismatch.
    Returns the per-fn substitution map (for diagnostic / future
-   computed-type cache) on success."
+   computed-type cache) on success.
+
+   PRECONDITION: `fn-defs` must be topologically ordered,
+   dependencies-first. `check-fn-def!` records each computed rich-type
+   into the shared registry (`record-result!` → `record-rich-types-raw!`),
+   and downstream defs read parents / ref-returns back out via
+   `registry/rich-type-of` (`resolve-parent-info`, `effective-ref-return`).
+   A def checked BEFORE the def it references resolves that ref to `:any`
+   instead of its real type — no error, just a silently looser check.
+   Callers (`sync-fn-entities-from-packages!`) topo-sort before calling;
+   the narrowing passes below have the same ordering dependency."
   [fn-defs]
   (into {}
         (map (fn [fn-def]

@@ -363,7 +363,12 @@
                         {:cancel-requested? true})
       (when-not (persist/cancel-local! execution-id)
         (when-let [emit (:notify-emitter ctx)]
-          (emit {:kind :execution :op :cancel :id (str execution-id)})))
+          ;; Tag with the row's org so the SSE relay fans the cancel out only
+          ;; to that org's subscribers (uniform with fn-invalidate events),
+          ;; instead of leaking a bare execution UUID to every org's remote
+          ;; executors. nil org (single-tenant) still reaches everyone.
+          (emit (cond-> {:kind :execution :op :cancel :id (str execution-id)}
+                  (:org-id row) (assoc :org-id (:org-id row))))))
       {:ok true :cancel-requested true})))
 
 

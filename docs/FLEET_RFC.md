@@ -182,13 +182,30 @@ obtainable and functional here:
   `CRaCCheckpointTo` / `CRaCRestoreFrom`. A checkpoint of a **dirty ~300 MB heap
   succeeded** → a ~330 MB image; restore is functional (criu "Restore successful!").
 
-So the gate is **no longer "is the environment capable"** — it is **"integrate the
-`Resource` handlers and measure restore of the *real* ~655 MB warm image."** A
-naive checkpoint of the running system fails on its live external connections
-(Hikari→Postgres, the http-kit listener, the vault/openbao client, the
-notify-listener + advisory-lock connections, SSE) — CRIU won't snapshot live
-sockets without app cooperation. The remaining work, therefore, is the CRaC
-integration itself (§8 track), not proving the substrate.
+So the gate is **no longer "is the environment capable"** — it is the CRaC
+integration itself (§8 track).
+
+**Integration PoC run** (`development/crac/`, 2026-07): a warm graphden JVM that
+has done the expensive `load-packages` (eval of 32 `impls.clj` → 251 base-fns,
+**4484 ms**) checkpointed to a **201 MB** image and **restored in ~41 ms** —
+>100× vs the load, >800× vs a cold boot. That is the value, demonstrated. The PoC
+also surfaced the two blockers a production path must solve:
+
+1. **Native-library temp-mmap.** `brotli4j` (`deps.edn`, the `:brotli-bytes`
+   base-fn) extracts `libbrotli.so` to a random `/tmp` dir and mmaps it; CRIU
+   restore fails once that file is gone (`Cannot open mapped file …/libbrotli.so`).
+   The first restore worked (file still present) — hence the ~41 ms — but it isn't
+   reproducible without pinning/re-extracting the native lib. Every long-lived
+   native mmap needs the same treatment.
+2. **Live external connections.** A full-system checkpoint needs CRaC `Resource`
+   handlers to close-before / reopen-and-**rewire**-after every live resource
+   (Hikari→Postgres pool, http-kit listener, vault/openbao client, notify +
+   advisory-lock connections, SSE). CRIU won't snapshot live sockets without app
+   cooperation; the executor context holds a reference to the pool-wrapping
+   storage, so reopening means re-threading it.
+
+So CRaC is feasible and high-value, but the integration is a **real feature**, not
+a config flip — see `development/crac/README.md`.
 
 Corollary: since the ~655 MB base can't shrink cheaply, that **reinforces**
 grouping (Path A) — the base is paid once per pod and shared by all cells the pod

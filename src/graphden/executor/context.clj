@@ -196,6 +196,11 @@
       ;; monitor pins its carrier (JDK 21) — see
       ;; `compile-runtime/call-with-invalidation-lock`.
       (assoc :invalidation-lock (java.util.concurrent.locks.ReentrantLock.))
+      ;; Fleet placement bookkeeping (docs/FLEET_RFC.md §6.2): the set of cell
+      ;; ROOTS this executor has loaded via `compile-runtime/load-cell!`. Lets
+      ;; `evict-cell!` reference-count shared fns. Empty + unused on a
+      ;; non-fleet ctx (which loads its whole shard via `rebuild!`).
+      (assoc :loaded-roots (atom #{}))
       ;; Effect sandbox — nil = unrestricted. Read on the hot path by
       ;; `compile-runtime/execute`, which binds `*allowed-effects*` for
       ;; the execution so `record-effect!` can gate.

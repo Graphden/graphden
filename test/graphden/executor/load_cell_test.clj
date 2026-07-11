@@ -73,4 +73,48 @@
         (testing "loading a root outside the shard/graph returns an empty cell"
           (is (empty? (cr/load-cell! ctx (random-uuid)))))
 
+        (testing "loaded-roots tracks both roots"
+          (is (= #{(:id root) (:id other)} @(:loaded-roots ctx))))
+
+        (finally (sp/close storage))))))
+
+
+(deftest evict-cell-refcounts-shared-fns
+  (let [storage (versioned-storage!)]
+    (exec/register-base-fn! :echo-x (fn [args _ctx] (get args :x)))
+    (let [base (setup/create-base-fn! storage "echo-x" :any)
+          slot (setup/create-slot! storage "x" :any)
+          _ (setup/attach-slot! storage (:id base) (:id slot) 0)
+          root (setup/create-composed-fn! storage "echo-42" (:id base))
+          _ (setup/bind-value! storage (:id root) (:id slot) 42)
+          other (setup/create-composed-fn! storage "echo-99" (:id base))
+          _ (setup/bind-value! storage (:id other) (:id slot) 99)
+          ctx (ectx/create-context {:storage storage
+                                    :base-fns (exec/get-default-registry)})]
+      (try
+        (cr/load-cell! ctx (:id root))
+        (cr/load-cell! ctx (:id other))
+
+        (testing "evicting one root drops it but keeps the base-fn the other still needs"
+          (let [evicted (cr/evict-cell! ctx (:id root))]
+            (is (contains? evicted (:id root)) "the evicted root itself is dropped")
+            (is (not (contains? evicted (:id base)))
+                "the shared echo-x survives — echo-99 still references it (refcount)")
+            (is (not (contains? @(:compiled-registry ctx) (:id root))) "root gone from registry")
+            (is (contains? @(:compiled-registry ctx) (:id base)) "shared base still compiled")
+            (is (= #{(:id other)} @(:loaded-roots ctx)) "only the other root remains loaded")))
+
+        (testing "the surviving cell still executes"
+          (is (= 99 (cr/execute ctx (:id other) {}))))
+
+        (testing "evicting the last root clears its whole closure (nothing else needs it)"
+          (let [evicted (cr/evict-cell! ctx (:id other))]
+            (is (contains? evicted (:id other)))
+            (is (contains? evicted (:id base)) "now nothing needs echo-x → it's evicted too")
+            (is (empty? @(:loaded-roots ctx)))
+            (is (not (contains? @(:compiled-registry ctx) (:id other))))))
+
+        (testing "evicting an unloaded root is a no-op"
+          (is (empty? (cr/evict-cell! ctx (random-uuid)))))
+
         (finally (sp/close storage))))))

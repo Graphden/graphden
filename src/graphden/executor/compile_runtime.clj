@@ -503,8 +503,43 @@
     (when (seq cell)
       (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
       (prime-graph-cache! ctx graph)
-      (prime-compile-deps! ctx graph (vec cell)))
+      (prime-compile-deps! ctx graph (vec cell))
+      ;; Record the root so `evict-cell!` can reference-count shared fns.
+      (when-let [roots (:loaded-roots ctx)]
+        (swap! roots conj root-fn-id)))
     cell))
+
+
+(defn evict-cell!
+  "Drop a cell loaded by `load-cell!`: remove `root-fn-id` from the ctx's
+   `:loaded-roots` and evict from the registry the fns in its forward-closure
+   that NO OTHER loaded root still needs — reference counting via the union of
+   the remaining roots' closures, so a fn shared with another live cell stays.
+   The inverse of `load-cell!` (docs/FLEET_RFC.md §6.2).
+
+   Reads the `:forward-deps` index — from the primed `:compile-deps` if present
+   (no graph read needed), else built from a transient graph read. Returns the
+   set of fn-ids evicted (empty if the root wasn't loaded)."
+  [ctx root-fn-id]
+  (let [holder (:compiled-registry ctx)
+        roots-atom (:loaded-roots ctx)]
+    (if (or (nil? holder) (nil? roots-atom) (not (contains? @roots-atom root-fn-id)))
+      #{}
+      (let [forward-deps (or (:forward-deps (some-> (:compile-deps ctx) deref))
+                             (:forward-deps
+                               (deps/build-deps-state
+                                 (read-graph (compile-storage ctx) (:executor-orgs ctx)))))
+            remaining (disj @roots-atom root-fn-id)
+            ;; Union of every OTHER loaded root's closure — the fns that must
+            ;; survive. `forward-closure` over a set of roots is their union.
+            still-needed (deps/forward-closure forward-deps remaining)
+            evictable (into #{}
+                            (remove still-needed)
+                            (deps/forward-closure forward-deps [root-fn-id]))]
+        (swap! roots-atom disj root-fn-id)
+        (when (seq evictable)
+          (swap! holder (fn [current] (apply dissoc current evictable))))
+        evictable))))
 
 
 (defn registry

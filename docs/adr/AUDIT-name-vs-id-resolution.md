@@ -217,8 +217,20 @@ Debt clusters in authz, structural type constraints, slot-owner tie-break.
   code** (the silent-ness the audit flagged is now explained, not
   removed). No behaviour change.
 - **P4 (low, display-only) — layout free-arg migration by arg-name.**
-  `layout/graph.clj:229 migration-via-free-arg-name` fallback (slot-id
+  `layout/graph.clj migration-via-free-arg-name` fallback (slot-id
   paths tried first). Affects which editor edge is drawn, not runtime.
+  Arg-name↔arg-name (no id in hand), so it's a legitimate boundary
+  fallback — the CI-guard below correctly does NOT flag it. Leave.
+- **P4b ✅ FIXED — layout synth-slot detection by resolved name.**
+  `layout/graph.clj` identified the loader's synthetic `value`/`items`
+  slot by resolving `(:slot-id arg)` back to its name and comparing.
+  We hold both the owner (`display-fn-id`) and the slot-id, so the synth
+  id is deterministic — `(ids/slot-id display-fn-id slot-name)`, exactly
+  how `records/parse.clj` seeds it. Now compares that id (also stricter:
+  no longer hides a same-named non-synthetic slot). This occurrence was
+  NOT individually catalogued in the manual pass — the **CI-guard found
+  it** (it compares against a symbol, not a string literal, so grep
+  missed it). Commit `d1d1ff64`.
 
 ### BENIGN / documented-dependency
 - **anon `[parent-name arg-name]` use-site hash** (`parse.clj:798`): SOUND
@@ -343,8 +355,11 @@ benefit.
   invariant on `parse.clj/anon-fn-name` (assertion would duplicate
   `validate-no-name-collisions!`; a comment pinning the dependency is the
   right fix).
-- **P4** (layout free-arg migration by name) — display-only, slot-id
-  paths tried first; left as-is (lowest severity, editor-render only).
+- **P4** (layout free-arg migration by arg-name) — display-only,
+  arg-name↔arg-name boundary fallback; left as-is (not a name-of-id).
+- **P4b** ✅ FIXED (`d1d1ff64`) — layout synth-slot detection now compares
+  the deterministic `(ids/slot-id owner name)` id, not the resolved name.
+  Found by the CI-guard, not the manual pass.
 
 **Type-checker (option-3):** its name-keying is mostly BENIGN (fn-name
 unique). The FRAGILE core is the α' as-name narrowing — which we KEEP
@@ -355,6 +370,19 @@ slot-chain helpers Tier 2 consolidates.
 
 Every fix: own commit, sweep-green + full `bb test`, skills + linters,
 new test pinning the id-based behaviour.
+
+## Enforcement (durable) — the CI-guard
+
+`test/graphden/id_resolution_guard_test.clj` (commit `d1d1ff64`) makes the
+core anti-pattern a red build so this audit's discipline doesn't erode:
+it scans `src/` and fails on **dispatching by the NAME of a value held by
+id** — `(:name (get/get-in/read-entity … id))` fed into `=`/`not=`/`case`/
+`condp`. Drawn narrowly to have no false positives: name EXTRACTION for
+display/serialisation (not in a comparison) and finding an entity BY name
+(loop var, not an id-deref) are both left alone. It caught P4b on its
+first run — an occurrence the manual pass had missed because it compares
+against a symbol, not a string literal. Scope: `src/` mechanism layer
+only (package `impls.clj` legitimately resolve name→id at boundaries).
 
 ## Incidental pre-existing bugs found + fixed along the way
 

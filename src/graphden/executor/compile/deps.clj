@@ -8,7 +8,9 @@
    `build-reverse-deps` inverts the forward graph so
    `delta-recompile!` can ask 'who needs recompile when X changes?'
    in O(degree). `transitive-blast` is the closure walk over those
-   reverse-deps.")
+   reverse-deps; `forward-closure` is the same walk over the FORWARD
+   deps — 'what does X transitively depend on?' — which is the content
+   of a fleet CELL (docs/FLEET_RFC.md §3).")
 
 
 (defn- index-bindings-by-fn
@@ -171,11 +173,12 @@
       changed-fn-ids)))
 
 
-(defn transitive-blast
-  "Inverse-closure walk over `reverse-deps`. Returns every fn-id that
-   transitively depends on at least one of `seed-ids`. The seeds are
-   included — their own closures need recompile too."
-  [reverse-deps seed-ids]
+(defn- reachable-closure
+  "Transitive reachability over an adjacency map `{id → #{neighbours}}`,
+   seeded at `seed-ids` and INCLUDING them. The generic walk shared by the
+   reverse (`transitive-blast`) and forward (`forward-closure`) closures — the
+   only difference between them is which dep map they walk."
+  [adjacency seed-ids]
   (loop [seen #{}
          q (vec seed-ids)]
     (if (empty? q)
@@ -184,4 +187,23 @@
         (if (contains? seen x)
           (recur seen q')
           (recur (conj seen x)
-                 (into q' (get reverse-deps x #{}))))))))
+                 (into q' (get adjacency x #{}))))))))
+
+
+(defn transitive-blast
+  "Inverse-closure walk over `reverse-deps`. Returns every fn-id that
+   transitively depends on at least one of `seed-ids`. The seeds are
+   included — their own closures need recompile too."
+  [reverse-deps seed-ids]
+  (reachable-closure reverse-deps seed-ids))
+
+
+(defn forward-closure
+  "Forward-closure walk over `forward-deps` (`{fn-id → #{ids-it-depends-on}}`,
+   as built by `build-deps-state`): every fn-id that `root-ids` transitively
+   DEPEND ON, roots included. This is the CONTENT of a cell (docs/FLEET_RFC.md
+   §3) — the self-contained set of fns that must be compiled together for a
+   root to run, and the unit a fleet executor loads / evicts. Mirror of
+   `transitive-blast`; only the walked dep-map differs."
+  [forward-deps root-ids]
+  (reachable-closure forward-deps root-ids))

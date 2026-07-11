@@ -303,6 +303,42 @@
       (finally (sp/close base)))))
 
 
+(deftest sibling-merge-detects-conflict-regardless-of-creation-order-test
+  ;; Regression: `fork-point`'s old `:else` fallback used the SOURCE
+  ;; branch's created-at whenever neither branch was a direct child of the
+  ;; other (two siblings off main). If the TARGET sibling was created — and
+  ;; edited — BEFORE the source sibling existed, the target's edit predated
+  ;; that fork-point, so `detect-conflicts` silently MISSED the overlap and
+  ;; a merge would clobber the target's value with no prompt (a false
+  ;; NEGATIVE — the dangerous kind). The LCA-based fork-point forks at the
+  ;; EARLIER sibling's divergence, catching it.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      ;; Seed the contested entity on main so both siblings inherit it.
+      (let [seeded (sp/create-entity v :fn {:name "contested" :parent-ids []
+                                            :description "from-main"})
+            id     (:id seeded)
+            ;; TARGET sibling created + edited FIRST (v stays on main, so
+            ;; both create-branch! calls fork from main → siblings).
+            b-tgt  (vs/create-branch! v "sib-target")
+            vb     (vs/switch-branch v (:id b-tgt))
+            _      (sp/update-entity vb :fn id {:description "from-target"})
+            _      (Thread/sleep 5)   ; guarantee a-src.created > b-tgt's edit
+            ;; SOURCE sibling created AFTER — also off main.
+            a-src  (vs/create-branch! v "sib-source")
+            va     (vs/switch-branch v (:id a-src))
+            _      (sp/update-entity va :fn id {:description "from-source"})]
+        (testing "both siblings edited the same entity → a conflict, even
+                  though the target's edit predates the source branch"
+          (let [{:keys [conflicts]} (vs/detect-conflicts vb (:id a-src))]
+            (is (= 1 (count conflicts))
+                "the pre-fork target edit must not be silently dropped")
+            (is (= id (:entity-id (first conflicts))))
+            (is (= :fn (:entity-name (first conflicts)))))))
+      (finally (sp/close base)))))
+
+
 (deftest merge-applies-source-overlay-on-batch-read-path-test
   ;; Regression for #52. The batch read path (`resolve-all-entities`,
   ;; `resolve-entities-batch`, the executor's compiled-graph load via

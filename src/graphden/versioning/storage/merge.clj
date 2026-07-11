@@ -29,27 +29,55 @@
 
 
 (defn- fork-point
-  "Determines the fork point between source and target branches.
-   Fork point is the later of:
-   - the CHILD branch's created-at (when it forked off its parent)
-   - latest merge timestamp between the two branches (if any previous merges)
+  "The point after which own-branch changes on source and target count as
+   divergent for conflict detection. The later of:
+   - the branches' DIVERGENCE from their lowest common ancestor, and
+   - the latest prior merge timestamp between the two (if any).
 
-   The fork base is the created-at of whichever branch DESCENDS from the
-   other (its `:base-branch-id` points at the other) — for a feature→main
-   merge that's the source (feature), but for a main→feature (pull) merge it
-   is the TARGET (feature). Picking the source unconditionally would fork a
-   main→feature merge at main's root created-at, counting every already-
-   inherited main change as \"modified after fork\" → spurious conflicts, so
-   don't simplify this to always-source. Unrelated / multi-level branches
-   fall back to the source until a true common-ancestor walk is added."
+   Divergence comes from the `:base-branch-id` chains (`collect-branch-
+   chain`): each side's divergence branch is the deepest chain element the
+   OTHER side doesn't share — the branch that forked off the common line —
+   and its `created-at` is when that side diverged.
+
+   - feature→main (feature.base = main): only feature diverged, so the fork
+     is feature's created-at; main is an ancestor and never diverged.
+     (Forking at main's root created-at would count every already-inherited
+     main change as \"modified after fork\" → spurious conflicts.)
+   - siblings A, B off main: BOTH diverged; the fork is the EARLIER of the
+     two creations, so no own-change on either side predates the fork and
+     gets silently dropped. This replaced an `:else` fallback to
+     source.created-at that MISSED a conflict when the target sibling was
+     edited before the source branch existed (a false negative → silent
+     clobber). See `sibling-merge-detects-conflict-…-test`.
+
+   Residual (documented, not solved here): `detect-conflicts` inspects only
+   the two ENDPOINTS' own version rows, so a change on an INTERMEDIATE
+   branch of a multi-level merge (grandchild→grandparent) that is inherited
+   but not re-stamped on an endpoint is still not compared — that needs
+   examining inherited rows, a larger change than the fork-point."
   [base-storage source-branch-id target-branch-id]
-  (let [source-branch (sp/read-entity base-storage :branch source-branch-id)
-        target-branch (sp/read-entity base-storage :branch target-branch-id)
-        child-branch (cond
-                       (= (:base-branch-id source-branch) target-branch-id) source-branch
-                       (= (:base-branch-id target-branch) source-branch-id) target-branch
-                       :else source-branch)
-        branch-created (:created-at child-branch)
+  (let [source-chain (res/collect-branch-chain base-storage source-branch-id)
+        target-chain (res/collect-branch-chain base-storage target-branch-id)
+        target-set   (set target-chain)
+        source-set   (set source-chain)
+        ;; The deepest chain element the other side doesn't share = the
+        ;; branch that forked off the common line. nil when this side is an
+        ;; ancestor of the other (its whole chain is shared) → it never
+        ;; diverged.
+        divergence-created (fn [chain other-set]
+                             (when-let [b (first (remove other-set chain))]
+                               (:created-at (sp/read-entity base-storage :branch b))))
+        src-div (divergence-created source-chain target-set)
+        tgt-div (divergence-created target-chain source-set)
+        branch-created (cond
+                         (and src-div tgt-div) (if (neg? (compare src-div tgt-div))
+                                                 src-div tgt-div)
+                         src-div src-div
+                         tgt-div tgt-div
+                         ;; Degenerate: source == target (self-merge, no
+                         ;; conflicts anyway). Keep the ts non-nil.
+                         :else (:created-at (sp/read-entity base-storage :branch
+                                                            source-branch-id)))
         ;; Previous merges between these branches in EITHER direction.
         ;; One SQL roundtrip via `WHERE source IN (a, b) AND target IN
         ;; (a, b)` covers the 4 (source,target) combos; in-memory we

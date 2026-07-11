@@ -314,7 +314,7 @@
       chain)))
 
 
-(defn- collect-branch-chain
+(defn collect-branch-chain
   "Returns vector of branch-ids from current to root (for inheritance
    lookup). When `*branch-chain-cache*` is bound it wins (test
    isolation); otherwise consults the process-wide

@@ -720,6 +720,22 @@
   (conj default-cloud-allowed-effects :raw-sql))
 
 
+(defn run-with-timeout
+  "Run `thunk` in a future bounded by `timeout-ms`. Returns its value, or
+   `::timeout` (cancelling the future) when it overruns, or `::error` when it
+   throws. Generic — the caller arranges cooperative cancellation (bind
+   `*cancel-check*` inside the thunk so an interrupted execute aborts). Lives
+   here, next to `execute`, so both the cloud app-router and a BYO executor
+   bound a handler through the same helper without either depending on the
+   other."
+  [timeout-ms thunk]
+  (let [fut (future (thunk))
+        result (try (deref fut timeout-ms ::timeout)
+                    (catch Exception _ ::error))]
+    (when (identical? result ::timeout) (future-cancel fut))
+    result))
+
+
 (defn record-effect!
   "Record that the calling impl is about to perform an effect of
    `category`. The vocabulary in use across the package layer is

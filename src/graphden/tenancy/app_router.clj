@@ -77,18 +77,6 @@
   10000)
 
 
-(defn run-with-timeout
-  "Run `thunk` in a future bounded by `timeout-ms`. Returns its value, or
-   `::timeout` (cancelling the future) when it overruns, or `::error` when it
-   throws. Generic — the caller arranges cooperative cancellation."
-  [timeout-ms thunk]
-  (let [fut (future (thunk))
-        result (try (deref fut timeout-ms ::timeout)
-                    (catch Exception _ ::error))]
-    (when (identical? result ::timeout) (future-cancel fut))
-    result))
-
-
 (defn make-app-router
   "Build the `:app-router` seam — `(fn [ctx request] ring-response-or-nil)`.
    `org-resolver` + `base-domain` (subdomain) and `host-resolver` (custom
@@ -120,7 +108,7 @@
 
            :else
            (let [result
-                 (run-with-timeout
+                 (cr/run-with-timeout
                    timeout-ms
                    (fn []
                      ;; Cooperative cancellation: each `execute` step calls

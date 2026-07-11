@@ -1,6 +1,7 @@
 (ns graphden.tenancy.app-router-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.app-router :as app]
     [graphden.tenancy.context :as tc]
@@ -56,13 +57,13 @@
 
 (deftest run-with-timeout-test
   (testing "a fast thunk returns its value"
-    (is (= :done (app/run-with-timeout 1000 (fn [] :done)))))
+    (is (= :done (cr/run-with-timeout 1000 (fn [] :done)))))
   (testing "an overrunning thunk → ::timeout (request bounded)"
-    (is (= :graphden.tenancy.app-router/timeout
-           (app/run-with-timeout 30 (fn [] (Thread/sleep 2000) :done)))))
+    (is (= :graphden.executor.compile-runtime/timeout
+           (cr/run-with-timeout 30 (fn [] (Thread/sleep 2000) :done)))))
   (testing "a throwing thunk → ::error"
-    (is (= :graphden.tenancy.app-router/error
-           (app/run-with-timeout 1000 (fn [] (throw (RuntimeException. "boom"))))))))
+    (is (= :graphden.executor.compile-runtime/error
+           (cr/run-with-timeout 1000 (fn [] (throw (RuntimeException. "boom"))))))))
 
 
 (deftest make-app-router-non-execution-paths

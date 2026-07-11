@@ -41,6 +41,15 @@
   ["core" "storage" "web" "app"])
 
 
+(def default-timeout-ms
+  "Wall-clock bound on one BYO app-handler request. A runaway/blocking graph
+   handler would otherwise pin an httpkit worker; enough of them exhaust the
+   pool. More generous than the cloud's 10s — it's the customer's own box, not
+   shared infra — but still bounded so one bad request can't take the service
+   down. (Independent of effects: this is a reliability guard, not a sandbox.)"
+  30000)
+
+
 (defn- register-impls-in-memory!
   "Register the packages' base-fn impls + type-aliases in the process registry
    WITHOUT any DB sync (unlike `:exec/base-fns`, which writes to storage). The
@@ -58,17 +67,41 @@
 
 (defn- app-handler
   "Ring handler that runs the org's app fn for every request — the BYO
-   executor's whole job. Mirrors the hub app-router's execution: org-scoped,
-   effect-gated (no env/io/network/process), no execute-guard (the app is the
-   org's public face). The graph is already org-scoped in RemoteStorage."
+   executor's whole job. Org-scoped (the graph is already org-scoped in
+   RemoteStorage), no execute-guard (the app is the org's public face), and
+   time-bounded with cooperative cancellation like the hub app-router.
+
+   Effects are NOT clamped. A BYO executor runs the customer's OWN graph on
+   the customer's OWN hardware — the same trust posture as a self-hosted
+   deployment, which runs with no effect gate. The cloud clamp
+   (`default-cloud-allowed-effects`) exists to protect the SHARED platform
+   from untrusted co-located tenant code; here there is no shared platform to
+   protect, and clamping would break the core BYO case of an app that calls
+   external APIs. So `:allowed-effects` is left unset (nil ⇒ the gate is a
+   no-op, `compile-runtime/*allowed-effects*`)."
   [ctx org handler-fn-id]
   (fn [request]
-    (tc/with-org org
-                 (cr/execute (assoc ctx
-                                    :allowed-effects cr/default-cloud-allowed-effects
-                                    :execute-guard nil)
-                             handler-fn-id
-                             {:request request}))))
+    (let [result
+          (tc/with-org org
+                       (cr/run-with-timeout
+                         default-timeout-ms
+                         (fn []
+                           ;; Cooperative cancel: each execute step consults
+                           ;; `*cancel-check*`, so `future-cancel` (interrupt)
+                           ;; on timeout aborts the handler instead of leaking
+                           ;; a thread.
+                           (binding [cr/*cancel-check*
+                                     #(when (Thread/.isInterrupted (Thread/currentThread))
+                                        (throw (InterruptedException. "app handler cancelled")))]
+                             (cr/execute (assoc ctx :execute-guard nil)
+                                         handler-fn-id
+                                         {:request request})))))]
+      (cond
+        (identical? result ::cr/timeout)
+        {:status 504 :headers {"Content-Type" "text/plain"} :body "Application timed out."}
+        (identical? result ::cr/error)
+        {:status 500 :headers {"Content-Type" "text/plain"} :body "Application error."}
+        :else result))))
 
 
 (defn start-byo!

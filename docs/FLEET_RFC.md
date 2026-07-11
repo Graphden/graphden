@@ -191,12 +191,18 @@ has done the expensive `load-packages` (eval of 32 `impls.clj` → 251 base-fns,
 >100× vs the load, >800× vs a cold boot. That is the value, demonstrated. The PoC
 also surfaced the two blockers a production path must solve:
 
-1. **Native-library temp-mmap.** `brotli4j` (`deps.edn`, the `:brotli-bytes`
-   base-fn) extracts `libbrotli.so` to a random `/tmp` dir and mmaps it; CRIU
-   restore fails once that file is gone (`Cannot open mapped file …/libbrotli.so`).
-   The first restore worked (file still present) — hence the ~41 ms — but it isn't
-   reproducible without pinning/re-extracting the native lib. Every long-lived
-   native mmap needs the same treatment.
+1. **Native-library temp-mmap — FIXED.** `brotli4j` (`deps.edn`, the
+   `:brotli-bytes` base-fn) extracted `libbrotli.so` to a random
+   `${tmpdir}/com_aayushatharva_brotli4j_<nanoTime>/` dir marked `deleteOnExit`
+   and mmapped it; CRIU restore then failed once that file was gone
+   (`Cannot open mapped file …/libbrotli.so`) — so only the very first restore
+   worked. Resolved in `web/http/impls.clj`: extract the `.so` once to a
+   deterministic path (`-Dgraphden.native-lib.dir`, default
+   `${tmpdir}/graphden-native`) and point brotli4j at it via its supported
+   `brotli4j.library.path` property → `System.load` of a stable, image-resident
+   file, no temp dir, no `deleteOnExit`. Restore is now **reproducible**
+   (3/3 restores OK, ~30–38 ms). General rule for any future extract-and-mmap
+   native lib: pin it to a stable path the checkpoint image ships.
 2. **Live external connections.** A full-system checkpoint needs CRaC `Resource`
    handlers to close-before / reopen-and-**rewire**-after every live resource
    (Hikari→Postgres pool, http-kit listener, vault/openbao client, notify +

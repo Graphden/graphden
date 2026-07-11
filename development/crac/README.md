@@ -28,7 +28,7 @@ Environment: kernel 5.15 (`CAP_CHECKPOINT_RESTORE` present), CRIU 3.16.1
 | Package load (eval 32 impls → 251 base-fns) | **4484 ms** |
 | Full cold boot, for context (§5.1) | ~35 s documented / ~113 s measured |
 | Warm checkpoint image / RSS | 201 MB / ~358 MB |
-| **Restore (native mmaps intact)** | **~41 ms** — >100× vs load, >800× vs cold boot |
+| **Restore** | **~30–41 ms** (reproducible after the brotli fix) — >100× vs load, >800× vs cold boot |
 
 The ~41 ms restore is the headline: CRaC can turn a tens-of-seconds boot into a
 sub-100 ms restore, which is what makes scale-to-zero and frequent
@@ -36,17 +36,17 @@ placement/rebalance (FLEET_RFC §8) affordable.
 
 ## Blockers found (what a production CRaC path must solve)
 
-1. **Native library temp-mmap — `brotli4j` (`deps.edn`, the `:brotli-bytes`
-   base-fn).** brotli4j extracts `libbrotli.so` to a *random* `/tmp/com_aayushatharva_brotli4j_*`
-   dir and mmaps it. CRIU snapshots that mapping; on restore the file must exist
-   at the same path. It doesn't (temp cleanup / a fresh container), so restore
-   fails: `Cannot open mapped file …/libbrotli.so`. The first restore right after
-   checkpoint succeeded (file still present) — hence the ~41 ms number — but it is
-   not reproducible without handling this.
-   *Fix directions:* pin brotli's extraction to a stable, image-baked path;
-   re-extract in an `afterRestore` hook; or make brotli load lazily post-restore
-   (it's only used by one base-fn). Any long-lived native mmap needs the same
-   treatment.
+1. **Native library temp-mmap — `brotli4j` — FIXED.** brotli4j extracted
+   `libbrotli.so` to a *random* `${tmpdir}/com_aayushatharva_brotli4j_<nanoTime>/`
+   dir (marked `deleteOnExit`) and mmapped it. CRIU snapshots that mapping; on
+   restore the file must exist at the same path, but the random, self-deleting
+   temp dir is gone → `Cannot open mapped file …/libbrotli.so`, so only the first
+   restore worked (~41 ms). **Resolved** in `web/http/impls.clj`: extract the
+   `.so` once to a deterministic path (`-Dgraphden.native-lib.dir`, default
+   `${tmpdir}/graphden-native`) and point brotli4j at it via its supported
+   `brotli4j.library.path` property (direct `System.load`, no temp, no
+   `deleteOnExit`). Re-verified: **3/3 restores OK, ~30–38 ms**. General rule for
+   any future extract-and-mmap native lib: pin it to a stable, image-shipped path.
 2. **Live external connections.** This PoC deliberately avoids them
    (`load-packages` opens no sockets). A full-system checkpoint additionally needs
    CRaC `Resource` handlers to close **before** and reopen + **rewire after** every
@@ -57,11 +57,11 @@ placement/rebalance (FLEET_RFC §8) affordable.
 
 ## Assessment
 
-CRaC is **feasible and high-value** (substrate confirmed, ~41 ms restore
-demonstrated), but the production integration is a **real feature**, not a config
-flip: solve the native-mmap reproducibility (blocker 1) and the resource
-close/reopen/rewire (blocker 2). Recommended as the FLEET_RFC §8 footprint track,
-after (or alongside) the Phase-0 placement work.
+CRaC is **feasible and high-value** (substrate confirmed, ~30 ms reproducible
+restore demonstrated). Blocker 1 (native-mmap reproducibility) is **fixed**; the
+remaining production integration is the resource close/reopen/rewire (blocker 2)
+plus a `Dockerfile.crac` that checkpoints at build time. Recommended as the
+FLEET_RFC §8 footprint track, after (or alongside) the Phase-0 placement work.
 
 ## Running it
 

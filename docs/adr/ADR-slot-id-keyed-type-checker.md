@@ -191,7 +191,7 @@ Reusable, all pure or lookups-based:
 
 Two "root" notions today do NOT meet: runtime root = root SLOT (via
 `source-slot-id`); checker root = root base-fn NAME (via `:primary-parent`,
-`narrowing/root-of-ref`). Bridging them is the work.
+`registry.core/root-base-fn-name`). Bridging them is the work.
 
 ## ⚠ Critical risk surfaced by investigation (blocks the "−30%" claim)
 

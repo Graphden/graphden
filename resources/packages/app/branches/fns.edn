@@ -1002,7 +1002,7 @@
   ;; `(:type (ex-data e))` uses the `:ex-data` primitive in
   ;; `core.system`.
   {:name :delete-branch!
-   :description "Atomic library boundary over `vs/delete-branch!` — removes branch by id. Throws ex-info with `:type :constraint-violation/{main-branch-undeletable, branch-has-children}` (latter carries `:child-branch-ids`) or `:not-found`."
+   :description "Atomic library boundary over `vs/delete-branch!` — removes branch by id. Throws ex-info with `:type :constraint-violation/{root-branch-undeletable, branch-has-children}` (latter carries `:child-branch-ids`) or `:not-found`."
    :args {:branch-id {:type :uuid :description "Branch id to remove."}}
    :return-type :any
    :effects #{:db}}
@@ -1058,8 +1058,8 @@
   {:name :_delete-branch-err-main
    :parent :const
    :return-type :_error-result-with-reason-shape
-   :args {:value {:ok false :reason :main-branch-undeletable
-                  :error "Cannot delete the main branch"}}}
+   :args {:value {:ok false :reason :root-branch-undeletable
+                  :error "Cannot delete the root branch"}}}
 
   {:name :_delete-branch-err-children
    :parent :zipmap
@@ -1098,7 +1098,7 @@
   {:name :_delete-branch-apply-clauses
    :description "Dynamic `:case` clauses — built via `:zipmap` so the vals stay as refs (resolving to the per-type envelope), not literal keywords."
    :parent :zipmap
-   :args {:keys [{:value :constraint-violation/main-branch-undeletable}
+   :args {:keys [{:value :constraint-violation/root-branch-undeletable}
                  {:value :constraint-violation/branch-has-children}
                  {:value :not-found}]
           :vals [:_delete-branch-err-main

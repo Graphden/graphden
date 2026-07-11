@@ -102,7 +102,7 @@
 (defbase delete-branch!
   "Atomic library boundary over `vs/delete-branch!` — removes the
    branch by id. Throws `ex-info` with
-   `:type :constraint-violation/main-branch-undeletable` or
+   `:type :constraint-violation/root-branch-undeletable` or
    `:type :constraint-violation/branch-has-children` (latter carries
    a `:child-branch-ids` vec); the graph `:on-throw` handler
    dispatches on `:type` via `:case`. Returns nil on success.

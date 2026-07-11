@@ -1,6 +1,7 @@
 (ns graphden.executor.context
   "Execution context for the function executor."
   (:require
+    [graphden.crud.fn-execution.free-arg-cache :as free-arg-cache]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.registry :as registry]
     [graphden.storage.protocol.core :as sp]))
@@ -71,6 +72,12 @@
    (let [body (fn []
                 (when-let [c (:graph-cache ctx)]
                   (reset! c nil))
+                ;; The per-execute free-arg-slot-map memo is a pure
+                ;; function of graph state; any mutation may change a
+                ;; fn's free-arg surface, so drop it here. Full drop
+                ;; (not delta) — the recompute lands only on the first
+                ;; post-edit execute of each fn.
+                (free-arg-cache/clear!)
                 (cond
                   ;; Storage isn't wired (stripped test ctx) — nothing
                   ;; to refresh.

@@ -114,7 +114,10 @@
         fn-id (:id fn-row)
         fn-name (:name fn-row)
         fn-version-id (lookup/resolve-fn-version-id ctx fn-id)
-        free-slots (lookup/free-arg-slot-map ctx fn-id)
+        ;; Cached: this call was ~1.3–1.9 s uncached and runs once per
+        ;; request. Safe here because /api/execute runs after CRUD writes
+        ;; (which invalidate), never during one. See lookup ns.
+        free-slots (lookup/free-arg-slot-map-cached ctx fn-id)
         declared-eff (persist/declared-effects-of fn-name)
         need-persist? (or (:persist? parsed) (seq declared-eff))
         executor-args (into {}

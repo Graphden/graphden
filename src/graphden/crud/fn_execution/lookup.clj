@@ -6,6 +6,7 @@
    Extracted from `graphden.crud.fn-execution` so the
    parse/validate/apply orchestrator can stay focused on policy."
   (:require
+    [graphden.crud.fn-execution.free-arg-cache :as fac]
     [graphden.crud.request :as request]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]
@@ -313,8 +314,45 @@
 
    See `docs/CLOSURE_CAPTURE.md` § Implementation Contract for the
    semantics. Subsequent commits layer wrap-time capture in
-   `hof-callable` (3) and type-checker propagation (4) on top."
+   `hof-callable` (3) and type-checker propagation (4) on top.
+
+   This function is PURE — it re-reads the graph every call. The BFS
+   below issues versioned-storage queries per level per entity type
+   (~1.3–1.9 s on a warm production graph). Callers on the hot
+   `/api/execute` path use `free-arg-slot-map-cached` instead; direct
+   callers (tests, the `:free-arg-slot-map` admin base-fn) keep the
+   exact, always-fresh behaviour."
+  [ctx fn-id]
+  (let [storage (request/require-storage ctx)]
+    (free-args-via fn-id #{} (collect-reachable-graph storage fn-id))))
+
+
+(defn free-arg-slot-map-cached
+  "Memoized `free-arg-slot-map` for the `/api/execute` hot path, where
+   this call was measured at ~1.3–1.9 s and runs once per request.
+
+   The result is a pure function of the graph state for a given
+   `[storage branch fn]`, so it's cached in `free-arg-cache` and dropped
+   wholesale by `context/invalidate-graph-cache!` on every mutation —
+   the choke point every CRUD write already goes through. Keyed on the
+   BASE storage's identity (via `vs/unwrap`) as well as branch + fn, so
+   two distinct graphs never collide even without an intervening clear
+   (e.g. across tests that share the process-wide cache). Org needn't be
+   in the key: a fn's reachable closure is confined to own-org∪public
+   (`reject-cross-org-refs!`), so the free-arg map is invariant across
+   requesters who can see the fn.
+
+   ONLY safe where every graph mutation before the call routes through
+   `invalidate-graph-cache!`. That holds for `/api/execute` (it runs
+   after CRUD writes, never during one). Callers that mutate storage
+   directly without invalidating must use the pure `free-arg-slot-map`."
   [ctx fn-id]
   (let [storage (request/require-storage ctx)
-        db (collect-reachable-graph storage fn-id)]
-    (free-args-via fn-id #{} db)))
+        base (if (vs/versioned-storage? storage) (vs/unwrap storage) storage)
+        branch-id (when (vs/versioned-storage? storage)
+                    (vs/current-branch-id storage))
+        k [(System/identityHashCode base) branch-id fn-id]]
+    (fac/get-or-compute
+      k
+      (fn []
+        (free-args-via fn-id #{} (collect-reachable-graph storage fn-id))))))

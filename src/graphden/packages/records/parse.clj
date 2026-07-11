@@ -815,7 +815,18 @@
 
    For nested anons (anon inside anon's arg), `host` carries the
    OUTER anon's already-uniquified name + the nested arg-name; the
-   uniqueness propagates down."
+   uniqueness propagates down.
+
+   LOAD-BEARING INVARIANT: `host`'s `parent-fn-def-name` is a bare fn
+   NAME, NOT namespace-qualified. Its use-site uniqueness therefore
+   RELIES on fn-names being GLOBALLY unique — enforced by
+   `system/core/validate-no-name-collisions!` (frequencies over every
+   base-fn + fn-def name at sync). If that invariant were ever relaxed
+   to per-namespace names, two parents sharing a name in different
+   namespaces would collapse distinct anons back onto one synthetic
+   entry and re-introduce the Phase-α' cross-flow poisoning above.
+   Any move to per-namespace names MUST add the namespace to this host
+   tuple first."
   [anon-def host]
   (let [shape-with-host (assoc anon-def ::_use-site host)]
     (keyword (str "_anon-" (subs (ids/shape-hash shape-with-host) 0 16)))))

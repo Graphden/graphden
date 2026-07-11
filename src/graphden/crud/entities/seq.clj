@@ -39,9 +39,15 @@
         bindings-by-fn-slot (into {}
                                   (map (fn [b] [[(:fn-id b) (:slot-id b)] b]))
                                   (:bindings graph))
+        ;; Resolve the `:sequence` base-fn's id ONCE (name→id at the
+        ;; boundary), then test each slot's `:type-fn-id` by ID — internal
+        ;; dispatch keys on the stable id, not a per-slot name compare.
+        sequence-type-fn-id (some (fn [f] (when (= "sequence" (:name f)) (:id f)))
+                                  (:fns graph))
         sequence?
         (fn [slot]
-          (= "sequence" (:name (get fns-by-id (:type-fn-id slot)))))
+          (and sequence-type-fn-id
+               (= sequence-type-fn-id (:type-fn-id slot))))
         ;; Walk parent chain in memory.
         chain (loop [acc [], seen #{}, queue [fn-id]]
                 (if (empty? queue)

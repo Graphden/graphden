@@ -185,11 +185,24 @@ Debt clusters in authz, structural type constraints, slot-owner tie-break.
   privileges over. Fix: `:token.user-id` + `:grant.subject-id`, resolve
   username→id at login. Plumbing (schema col + write/read sites).
 - **P2 — structural type-constraint members stored BY NAME.**
-  `parse.clj` union/variant/map/tuple/fn-type stash member types as
-  keyword names in `:constraint`; every *other* type ref is a fn-id.
-  `export.clj:589 constraint-type-names` special-cases this (the dep
-  scanner is blind to them). Rename → dangling name. Fix: resolve members
-  to fn-ids at parse time, names only at EDN export. Plumbing.
+  INVESTIGATED — **BENIGN (deliberate).** union/variant/map/tuple/fn-type
+  stash member types as keyword names in `:constraint`, resolved via the
+  **name-keyed type-alias registry** (`register-type-aliases!` /
+  `resolve-alias`) — which is how the type-alias system works BY DESIGN
+  (TYPES.md § Type Aliases: types are a name-keyed namespace). So this is
+  the intended reference mechanism, not debt:
+  - the package version-update rewrite (`rewrite-refs-to-version!`) only
+    rewrites `:ref-fn-id` — it doesn't touch parent-ids / type-override /
+    constraints for ANY type ref, and name-in-constraint auto-resolves to
+    the current version's type-row BY NAME (stable across versions), so
+    it's if anything MORE robust than an id-ref there;
+  - no type-rename feature (a rename changes the deterministic fn-id too,
+    same as P1);
+  - export's dep-scanner blindness is already handled
+    (`constraint-type-names`).
+  Resolving members to fn-ids would FIGHT the name-keyed alias design for
+  consistency-only gain with no bug fixed — same call as the rejected
+  slot-id type-checker migration. Leave.
 - **P3 — `resolve-slot-owner` ambiguity → inheritance owner.**
   `slot_resolution.clj:360-438`. INVESTIGATED — **NOT a bug.** A
   parse-time hard-fail was tried and **reverted**: it false-positives on
@@ -272,13 +285,61 @@ benefit.
      existing rows.
   Boundary stays name-authored ("alice may write ns X") — only the
   STORED + ENFORCED subject flips to the resolved id.
+
+  **EXECUTION-READY PLAN (fully scoped 2026-07-11; do as ONE focused,
+  fully-tested unit — security-critical, so correctness-first forbids a
+  rushed partial). Step 1 (schema) is DONE (uncommitted on the branch):**
+
+  The irreducible crux: grant MATCHING wants user-id (stable), but the
+  personal-namespace (`users.<username>`, wired in prod via
+  `addon.clj:208 with-personal-namespaces`) wants USERNAME. So the
+  identity must thread as a PAIR `{:id user-id :name username}` through
+  the `GrantStore` subsystem — stores match stored grants by `:id`,
+  `PersonalNamespaceGrantStore` builds the path from `:name`.
+
+  1. ✅ Schema: `token.user-id` + `grant.subject-id` (`:uuid`, nullable,
+     indexed) — DONE in `token_schema.clj` / `grant_schema.clj`.
+  2. `login!` (`users.clj:210`): store `:user-id (:id user)` on the token.
+  3. principal (`auth.clj:83` `{:user … :org …}`): add
+     `:user-id (:user-id row)`; the token-provider (`users.clj` §token
+     read) selects it.
+  4. `grant.clj` — thread the pair (the ~6 fns + 4 stores):
+     - `grant-allows?` match `(= (:subject-id grant) (:id subj))`.
+     - `grants-for [store subj]` — subj = `{:id :name}`;
+       `StaticGrantStore`/`MemoGrantStore` key by `:id`;
+       `PersonalNamespaceGrantStore` uses `(:name subj)` for the path
+       (grant it emits carries `:subject-id (:id subj)`).
+     - `can?`/`has-capability?`/`can-mutate?`/`workspace` take subj.
+     - `authorized? [store principal …]` builds
+       `subj = {:id (:user-id principal) :name (:user principal)}`;
+       deny when no `:user-id`.
+  5. `grant_schema.clj` `StorageBackedGrantStore/grants-for`: query
+     `:grant {:subject-id (:id subj)}`; returned grant maps carry
+     `:subject-id`.
+  6. `authz.clj` `writable?`/`executable?` + `addon.clj:327/339`
+     (`authorized?`/`workspace`): pass the pair from the principal.
+  7. package grant-create (`tenancy-admin/grants/impls.clj:35`): resolve
+     the authored username → user-id, store `:subject-id` (keep
+     `:subject` for display/personal-ns).
+  8. `delete-user!` (`users.clj:184`): cascade `:token {:user-id …}` +
+     `:grant {:subject-id …}` (user-id already held).
+  9. Migration: backfill `token.user-id` / `grant.subject-id` from the
+     name columns; enforcement keeps a name-fallback until backfilled.
+  10. Tests: extend the tenancy/authz suites — a grant enforced across a
+     username change still authorizes (the pin the whole change earns).
 - **P2** type-constraint members by fn-id — investigate deliberateness
   first (the alias registry is name-keyed by design; may be BENIGN like
   ns-path-grants).
 
-**Tier 4 — cosmetic / invariant-documentation:**
-- **C2** sequence slot by id; **P4** layout note; anon-hash assertion +
-  comment pinning the global-fn-name-uniqueness dependency.
+**Tier 4 — cosmetic / invariant-documentation:** ✅ DONE.
+- **C2** ✅ sequence slot dispatched by id (`entities/seq.clj`): resolve
+  the `:sequence` type-fn-id once, compare per-slot by id.
+- **anon-hash** ✅ documented the load-bearing global-fn-name-uniqueness
+  invariant on `parse.clj/anon-fn-name` (assertion would duplicate
+  `validate-no-name-collisions!`; a comment pinning the dependency is the
+  right fix).
+- **P4** (layout free-arg migration by name) — display-only, slot-id
+  paths tried first; left as-is (lowest severity, editor-render only).
 
 **Type-checker (option-3):** its name-keying is mostly BENIGN (fn-name
 unique). The FRAGILE core is the α' as-name narrowing — which we KEEP

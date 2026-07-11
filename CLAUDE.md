@@ -541,6 +541,7 @@ src/graphden/
 ├── tenancy/            # Multi-tenant router, users, grants, RLS
 ├── auth/               # Pluggable auth-provider seam
 ├── clients/            # External clients (vault / OpenBao)
+├── util/               # Small shared helpers (backoff — reconnect policy)
 ├── system/             # Integrant lifecycle management
 │   ├── interface.clj   # start!, stop!, read-config
 │   ├── config.clj      # Aero config loading

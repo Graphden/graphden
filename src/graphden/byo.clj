@@ -136,9 +136,12 @@
   (let [loaded (when (seq packages) (pkg/load-packages packages))
         base-fns (register-impls-in-memory! loaded extra-base-fns)
         storage (remote/create-remote-storage hub-url token branch)
+        ;; No `:executor-orgs`: RemoteStorage already holds ONLY this org's +
+        ;; public rows (the hub scoped the bundle server-side), so re-filtering
+        ;; in `read-graph` is redundant — and `#{org}` would wrongly drop any
+        ;; shared row that happened to carry a non-nil org-id ≠ org.
         ctx (ectx/create-context {:storage storage
                                   :base-fns base-fns
-                                  :executor-orgs #{org}
                                   :byo-executor? true})
         _ (cr/rebuild! ctx)
         handler-fn-id (:id (first (sp/query-entities storage :fn {:name handler-fn})))
@@ -146,25 +149,42 @@
             (throw (ex-info (str "BYO handler fn not found in the graph: " handler-fn)
                             {:type :byo/handler-not-found :handler-fn handler-fn})))
         server (hk/run-server (app-handler ctx org handler-fn-id) {:port port})
-        ;; Stay fresh: on any fn-invalidate the hub pushes, refetch the org's
-        ;; bundle + recompile. (The relay already fans out only this org's
-        ;; events + public ones.) The relay is on its OWN URL/port. nil ⇒
-        ;; bootstrap-only (no live refresh).
+        ;; Stay fresh WITHOUT blocking the SSE reader thread. Each fn-invalidate
+        ;; the hub pushes marks the graph dirty and submits a refetch+recompile
+        ;; to a single-thread executor; the reader returns immediately and keeps
+        ;; draining frames. CAS coalescing collapses a burst to ≤2 rebuilds
+        ;; (one in flight + one trailing) — a rebuild already picks up every
+        ;; change since the last refresh, so N rapid edits don't mean N refetches.
+        refresh-exec (java.util.concurrent.Executors/newSingleThreadExecutor)
+        refresh-pending (atom false)
+        submit-refresh! (fn []
+                          (when (compare-and-set! refresh-pending false true)
+                            (java.util.concurrent.ExecutorService/.submit
+                              refresh-exec
+                              ^Runnable (fn []
+                                          (reset! refresh-pending false)
+                                          (try (remote/refresh! storage)
+                                               (cr/rebuild! ctx)
+                                               (catch Exception e
+                                                 (log/warn e "BYO refresh failed" {:org org})))))))
+        ;; The relay already fans out only this org's events + public ones. Its
+        ;; URL/port is separate from the hub. nil ⇒ bootstrap-only, no refresh.
         source (when sse-url
                  (remote-sse/start-source!
                    {:hub-url sse-url :token token
                     :on-event (fn [event]
-                                (when (= :fn (:kind event))
-                                  (remote/refresh! storage)
-                                  (cr/rebuild! ctx)))}))]
+                                (when (= :fn (:kind event)) (submit-refresh!)))}))]
     (log/info "BYO executor serving" {:org org :handler handler-fn :port port})
-    {:server server :source source :ctx ctx :storage storage}))
+    {:server server :source source :ctx ctx :storage storage :refresh-exec refresh-exec}))
 
 
 (defn stop-byo!
-  "Stop a BYO executor handle: SSE source + HTTP server."
-  [{:keys [server source]}]
+  "Stop a BYO executor handle: SSE source, refresh worker, then HTTP server."
+  [{:keys [server source refresh-exec]}]
   (when source (remote-sse/stop-source! source))
+  (when refresh-exec
+    (java.util.concurrent.ExecutorService/.shutdown
+      ^java.util.concurrent.ExecutorService refresh-exec))
   (when server (server))
   (log/info "BYO executor stopped"))
 

@@ -544,8 +544,11 @@ src/graphden/
 │   ├── interface.clj   # start!, stop!, read-config
 │   ├── config.clj      # Aero config loading
 │   └── core.clj        # ig/init-key implementations
-└── executor_runtime/   # Main entry point
-    └── core.clj        # -main, shutdown hooks
+├── executor_runtime/   # Main entry point
+│   └── core.clj        # -main, shutdown hooks
+└── byo.clj             # BYO executor assembly (RemoteStorage + SSE source +
+                        #   direct http-server); `-main` for a customer-hosted
+                        #   executor. See docs/SCALING.md § External / BYO.
 
 resources/packages/     # First-party package definitions (EDN + Clojure impls)
 ├── core/               # Core primitives (arithmetic, logic, HOF, etc.)

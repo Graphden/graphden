@@ -188,10 +188,10 @@ The **public** org (platform / single-tenant) keeps the per-pod atom for its
 per-org cap: it isn't a metered tenant, and its executions are the hot editor
 path we don't add a query to. So single-tenant self-hosted is unchanged.
 
-## What is NOT built
+## External / BYO executor
 
-**Semi-self-hosted / external executor.** A customer runs the executor on
-their OWN hardware, but the graph stays in our Postgres. Built in pieces:
+A customer runs the executor on their OWN hardware, but the graph stays in
+our Postgres. Built in these pieces:
 
 - **Pod role + BYO refusal — DONE.** An org carries `:org.execution-mode`
   (`"hosted"` default, `"byo"`). A `"byo"` org runs on the customer's own
@@ -241,35 +241,67 @@ their OWN hardware, but the graph stays in our Postgres. Built in pieces:
     single-tenant write — shared rows every bundle holds) goes to everyone. So
     a BYO executor is woken only by changes it actually holds.
 
-A BYO executor is a deployment ASSEMBLY of these pieces (a graphden-cloud /
-byo integrant profile, not the base system, which has Postgres): use a
-`RemoteStorage` as `:storage`, and start an SSE source whose `on-event`
-refreshes it and rebuilds the compiled registry —
+### Running one (`graphden.byo`)
 
-```clojure
-(let [storage (remote/create-remote-storage hub-url token)
-      ctx     (ectx/create-context {:storage storage :executor-orgs #{my-org}
-                                    :byo-executor? true})]
-  (remote-sse/start-source!
-    {:hub-url hub-url :token token
-     :on-event (fn [event]
-                 (when (= :fn (:kind event))
-                   (remote/refresh! storage)
-                   (cr/rebuild! ctx)))}))
+The pieces are assembled by `graphden.byo/start-byo!`, and `-main` reads the
+config from the environment — so a customer runs the same jar with:
+
+```bash
+GRAPHDEN_HUB_URL=https://hub.example.com \
+GRAPHDEN_SSE_URL=https://hub.example.com:8081 \
+GRAPHDEN_EXECUTOR_TOKEN=<bearer> \
+GRAPHDEN_EXECUTOR_ORG=acme \
+GRAPHDEN_EXECUTOR_BRANCH=main \
+GRAPHDEN_APP_HANDLER_FN=<org-app-handler> \
+GRAPHDEN_PORT=8080 \
+  clojure -M -m graphden.byo
 ```
 
+It loads the packages LOCALLY for their base-fn impls (no DB sync — the graph
+lives on the hub), reads the graph over HTTP into a `RemoteStorage`, compiles
+it, serves the org's handler fn over HTTP directly (not via the PG-backed
+service registry), and refreshes on each SSE push. `GRAPHDEN_HUB_URL` is the
+hub's APP url (`/api/export/graph-rows`); `GRAPHDEN_SSE_URL` is the relay's
+separate port — omit it for a bootstrap-only executor with no live refresh.
+
 Provisioning a BYO customer, operator-side (platform-only, `:org` is
-tenant-forbidden): create the org, mint its executor token, then flip it with
+tenant-forbidden): create the org, mint its executor token, point the org at
+its handler, then flip it with
 `POST /api/orgs/execution-mode {name, execution-mode=byo}`
 (`tenancy-admin/registration`), which drops the byo memo so hosted pods start
 421'ing it at once.
 
-**Advisory-lock reconnect** — DONE. The lock connection lives behind a
-reconnecting holder; each reconcile pass calls `advisory-lock/ensure-live!`,
-and a reconnect (DB restart / network blip) triggers
-`reassert-lock-ownership!` — the pod re-takes every `:singleton` it was
-running and stops any a sibling grabbed during the outage. See
-SERVICES.md § Roadmap.
+### Boundaries (what a BYO executor does NOT do)
+
+The read-only, one-org shape is deliberate:
+
+- **Serves the app path, not `/api/execute` with history.** `RemoteStorage`
+  writes throw, and `/api/execute` persists `:fn-execution` rows. So a BYO
+  executor runs the org's APP (FaaS handler, no persistence); the editor's
+  Run-with-history stays on the hosted hub.
+- **Pinned to one branch.** A `RemoteStorage` bootstraps one branch
+  (`GRAPHDEN_EXECUTOR_BRANCH`, default main). Serving several branches on one
+  BYO executor means several RemoteStorages — out of scope for the single-org
+  serve case.
+- **The fleet per-org quota doesn't apply.** It counts `:fn-execution` rows,
+  which a BYO executor doesn't persist, so the count is always 0. That's
+  intended — a BYO customer runs their own compute on their own hardware, so
+  the platform's fairness cap isn't theirs to enforce.
+
+## Advisory-lock reconnect
+
+The lock connection lives behind a reconnecting holder; each reconcile pass
+calls `advisory-lock/ensure-live!`, and a reconnect (DB restart / network
+blip) triggers `reassert-lock-ownership!` — the pod re-takes every
+`:singleton` it was running and stops any a sibling grabbed during the outage.
+See SERVICES.md § Roadmap.
+
+## Still open
+
+Only the genuinely-external remains: a real BYO executor on a **second
+physical machine** end-to-end (this dev environment can't spin one — but the
+whole loop is proven in one JVM by `storage.remote.e2e-test` and the assembly
+by `byo-test`). The boundaries above are intentional scope, not gaps.
 
 ## Rolling upgrade note
 

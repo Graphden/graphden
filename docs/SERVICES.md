@@ -6,15 +6,18 @@ also write `:service` rows directly through `/api/entities/service`.
 The reconciler turns enabled rows into running futures, supervises
 startup failures, and stops them on shutdown.
 
-Reconcile fires on integrant init, on every CRUD mutation, and on a
-`service:*` NOTIFY from a sibling pod. There is still **no periodic
-poll**, so an out-of-band DB edit isn't picked up until something
-else triggers a pass.
+Reconcile fires on integrant init, on every CRUD mutation, on a
+`service:*` NOTIFY from a sibling pod, **and on a periodic tick**
+(`:exec/service-reconciler`, ~15s). The tick makes the reconciler
+level-triggered rather than purely edge-driven: it re-takes a
+`:singleton`'s advisory lock after the holder pod crashes (the crash
+emits no NOTIFY), picks up an out-of-band DB edit, and reconverges a
+transient start failure — all without a restart.
 
 **Multi-pod coordination is built.** Every pod runs its own
 reconciler; a service's `:cardinality` decides how many pods run it
 (`:singleton` → advisory-lock-gated, `:per-pod` → everywhere). Cron
-schedules and the periodic poll come in later phases (see § Roadmap).
+schedules come in a later phase (see § Roadmap).
 
 ## Why services?
 
@@ -259,8 +262,10 @@ that still has free arguments, the create is rejected with:
 
 ### `POST /api/services/reconcile`
 
-Trigger reconciliation. Without periodic poll, this is the admin's
-"apply changes" button.
+Trigger reconciliation on demand — the admin's "apply changes"
+button. (A periodic tick also reconciles every ~15s, so an
+out-of-band change is picked up either way; this endpoint just makes
+it immediate.)
 
 ```jsonc
 {"ok": true,
@@ -277,7 +282,7 @@ Workarounds:
 - Restart the container so init-key picks up the new rows directly
 - Trigger reconcile from a non-HTTP path (REPL, CLI, future
   supervisor daemon)
-- Wait for the planned periodic-poll feature
+- Wait for the periodic reconcile tick (~15s) to apply it
 
 For services that DON'T displace the API-serving web-server (a
 metrics server on a different port, say), the endpoint works fine
@@ -340,7 +345,8 @@ all loaded packages.
 |------|------|
 | Done | `:service` schema, reconciler, integrant, generic CRUD via /api/entities/service, supervisor for startup failures, packages-based seeding, already-running rejection, validation that target fn has zero free args |
 | Done | Multi-pod: per-pod reconcilers, PG advisory-lock ownership for `:singleton` services, `:cardinality` so `:per-pod` listeners run everywhere, `service:*` NOTIFY so siblings reconcile within ~1s, lock auto-release on pod crash. No `:owner-pod-id` column — ownership is implicit in who holds the lock. |
-| Next | Periodic reconcile poll (picks up out-of-band DB edits); `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
+| Done | Periodic reconcile tick (`:exec/service-reconciler`, ~15s) — level-triggered convergence: re-takes a `:singleton` lock after the holder crashes (no NOTIFY is emitted), picks up out-of-band DB edits, reconverges transient start failures. Retry-free under `reconcile-monitor` so a failing start never blocks the listener. |
+| Next | `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
 | Done | Advisory-lock connection-drop reconnect + re-acquire. The lock connection is held behind a reconnecting holder; every reconcile pass runs `advisory-lock/ensure-live!`, and on a reconnect `reassert-lock-ownership!` re-takes each `:singleton` this pod was running (stopping any a sibling stole during the outage). Closes the "two pods double-run one service until the next reconcile" window. |
 | Done | Cross-pod cancel routing for `:fn-execution` — `execution:cancel:<id>` NOTIFY fan-out; see [EXECUTION.md](EXECUTION.md). |
 | Future | Healthcheck-based runtime crash detection (lets `:always` honor "restart on clean exit"); pluggable supervisor strategies |

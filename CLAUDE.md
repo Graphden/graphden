@@ -115,8 +115,8 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
 | [docs/EXECUTION.md](docs/EXECUTION.md) | Function execution feature: schema, HTTP API, cancel/TTL/UI | When touching `/api/execute*` or the editor's Run popover |
-| [docs/SERVICES.md](docs/SERVICES.md) | Phase 1 service registry: `:service` schema (incl. `:cardinality` — `:singleton` advisory-lock-gated vs `:per-pod` listeners), reconciler, supervisor, HTTP API, legacy fallback + displacement, roadmap to cron | When touching `services/`, `:exec/service-reconciler`, or anything that needs to know what services are |
-| [docs/SCALING.md](docs/SCALING.md) | Multi-executor fleet: why the shard key is the **org** and not fn-popularity, what multi-pod already does (NOTIFY delta-invalidation, advisory-lock singletons, per-pod listeners, cross-pod cancel), per-branch invalidation via `collect-branch-chain`, `:executor-orgs` predicate on the ctx, `421 Misdirected Request` when a request lands on a pod outside its org's shard, and the explicit NOT-built list (fleet-wide quotas, external/BYO executor, advisory-lock reconnect) | Before touching `services/reconciler`, `system/branch_router` invalidation, `storage/postgres/notify`, `compile_runtime/read-graph`, or the `:executor-orgs` checks in `tenancy/{addon,app_router}`; and before proposing any distribution work |
+| [docs/SERVICES.md](docs/SERVICES.md) | Phase 1 service registry: `:service` schema (incl. `:cardinality` — `:singleton` advisory-lock-gated vs `:per-pod` listeners), reconciler (edge-triggered on CRUD/NOTIFY **plus** a level-triggered periodic tick for crash-failover + out-of-band drift), supervisor, HTTP API, legacy fallback + displacement, roadmap to cron | When touching `services/`, `:exec/service-reconciler`, or anything that needs to know what services are |
+| [docs/SCALING.md](docs/SCALING.md) | Multi-executor fleet: why the shard key is the **org** and not fn-popularity, what multi-pod does (NOTIFY delta-invalidation, advisory-lock singletons + reconnect/reassert, per-pod listeners, cross-pod cancel, level-triggered reconcile tick), per-branch invalidation via `collect-branch-chain`, `:executor-orgs` predicate on the ctx, `421 Misdirected Request` off-shard, the **fleet-wide per-org quota**, and the full **external/BYO executor** (`graphden.byo` + `RemoteStorage` over HTTP + SSE relay/source + `:org.execution-mode`) — all SHIPPED; only a real BYO executor on a second physical machine (§ Still open) remains | Before touching `services/reconciler`, `system/branch_router` invalidation, `storage/{postgres/notify,remote/*}`, `system/sse`, `byo.clj`, `compile_runtime/read-graph`, or the `:executor-orgs` checks in `tenancy/{addon,app_router}`; and before proposing any distribution work |
 | [docs/VERSIONING.md](docs/VERSIONING.md) | Branches surface — per-branch ExecutionContext routing, HTTP API (`/api/branches`, diff, merge, conflicts), editor UI (branch chip + popover + ⌛ history + conflict modal), demo seeder + env toggle, known gaps | When touching `system/branch_router`, `crud/branches`, `web.branch-router`, `app.branches`, `editor-branches.js`, `editor-fn-versions.js`, or the demo seeder |
 | [docs/CLOSURE_CAPTURE.md](docs/CLOSURE_CAPTURE.md) | Closure-capture extension to the fn-graph model: call-site vs captured args, wrap-time capture contract, type-checker propagation, as-shipped commit map | Before touching `hof-wrap` / `hof-lambda-params` / `ref-free-args` / `free-arg-slot-map`; needed to understand why `:schedule` works |
 | [docs/RECURSION.md](docs/RECURSION.md) | Graph-level recursion: Approach A (`:fix` Y-combinator) is SHIPPED (`core/recursion`, depth-guarded, used by `storage/branches` `:branch-chain`); Approach B (lazy ref resolution) is the road not taken. | When considering recursion-related work; runtime cycle/recursion model is in ARCHITECTURE.md § Part 3 |
@@ -531,7 +531,8 @@ src/graphden/
 │   └── fields/
 ├── storage/            # Protocol, postgres
 │   ├── protocol/
-│   └── postgres/
+│   ├── postgres/
+│   └── remote/         # RemoteStorage (read-only HTTP leaf) + SSE source — BYO
 ├── versioning/         # Storage decorator, merge protection
 │   ├── storage/
 │   └── merge/
@@ -543,6 +544,7 @@ src/graphden/
 ├── system/             # Integrant lifecycle management
 │   ├── interface.clj   # start!, stop!, read-config
 │   ├── config.clj      # Aero config loading
+│   ├── sse.clj         # SSE invalidation relay (BYO freshness, per-org fan-out)
 │   └── core.clj        # ig/init-key implementations
 ├── executor_runtime/   # Main entry point
 │   └── core.clj        # -main, shutdown hooks

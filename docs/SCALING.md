@@ -36,7 +36,7 @@ Run N containers against one Postgres, put a load balancer in front.
 | A write on pod A reaches pod B | `NOTIFY graphden_events` → delta invalidate | `storage/postgres/notify.clj`, `system/core.clj` `on-notify` |
 | Only one pod runs a cron | `:cardinality :singleton` + `pg_try_advisory_lock` | `services/reconciler.clj` |
 | Every pod runs the HTTP listener | `:cardinality :per-pod` | `resources/packages/app/package.edn` |
-| A pod dies mid-service | its PG session ends → advisory lock auto-releases → a sibling takes over on the next reconcile | `storage/postgres/advisory_lock.clj` |
+| A pod dies mid-service | its PG session ends → advisory lock auto-releases → a sibling re-takes it on the periodic reconcile tick (~15s; the crash emits no NOTIFY, so the level-triggered pass — not an event — heals it) | `storage/postgres/advisory_lock.clj`, `system/core.clj` |
 | Cancel reaches the pod actually running the execution | `execution:cancel:<id>` NOTIFY fan-out | `crud/fn_execution.clj`, `persist/cancel-local!` |
 
 ### Cardinality is the thing people get wrong
@@ -287,6 +287,14 @@ The read-only, one-org shape is deliberate:
   which a BYO executor doesn't persist, so the count is always 0. That's
   intended — a BYO customer runs their own compute on their own hardware, so
   the platform's fairness cap isn't theirs to enforce.
+- **Effects are NOT clamped.** The cloud effect gate
+  (`default-cloud-allowed-effects` — no env/io/network/process) protects the
+  SHARED platform from untrusted co-located tenant code. A BYO executor runs
+  the customer's OWN graph on their OWN hardware — the same trust posture as a
+  self-hosted deployment, which has no gate — so its handler runs with
+  `:allowed-effects` unset (an app that calls external APIs is the point). It
+  is still bounded by a per-request wall-clock timeout (`byo/default-timeout-ms`,
+  30s) with cooperative cancellation, so one runaway handler can't pin the pool.
 
 ## Advisory-lock reconnect
 

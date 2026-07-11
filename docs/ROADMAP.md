@@ -123,11 +123,15 @@ Requests that reach a pod outside their org's shard get a
 request-scope and the FaaS app-router), so a shard-unaware load
 balancer degrades to a retry rather than to a wall of missing fns.
 
-**Remaining**: optionally an LB rule that routes by subdomain so
-the 421 stays a backstop rather than a hot path; the external / BYO
-executor (see [SCALING.md](SCALING.md) § What is NOT built). The
-fleet-wide per-org quota and advisory-lock connection-drop reconnect
-both landed — see SCALING.md and SERVICES.md § Roadmap.
+The fleet-wide per-org quota, advisory-lock connection-drop reconnect,
+the periodic reconcile tick, and the external / BYO executor
+(`graphden.byo` + `RemoteStorage` + SSE relay/source) all landed — see
+[SCALING.md](SCALING.md) and SERVICES.md § Roadmap.
+
+**Remaining**: optionally an LB rule that routes by subdomain so the 421
+stays a backstop rather than a hot path, and a real BYO executor on a
+second physical machine end-to-end (proven in one JVM today — see
+SCALING.md § Still open).
 
 ### Block 8 — Hot-reload of impls (optional)
 

@@ -1,242 +1,183 @@
 # Graphden
 
 [![Clojure](https://img.shields.io/badge/Clojure-1.12-blue.svg)](https://clojure.org/)
-[![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](#testing)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-**Visual functional programming environment and distributed execution runtime** — a function graph stored in a database.
+**A functional programming environment where the program is a typed graph
+in a database — not text in files — and the runtime executes that graph
+directly, hot-reloads it, branches it, and multi-tenants it.**
 
-## Vision
+Functions and their compositions are stored as rows (`fn`, `slot`,
+`binding`), edited through a visual graph editor, type-checked and
+effect-tracked as you build, and executed by an in-memory compiled
+registry that refreshes from the database without a redeploy.
 
-Graphden is an experimental platform where:
+---
 
-- **Code = Graph in DB** — functions and their compositions are stored as structured data
-- **Visual Editing** — graphical interface instead of text
-- **Lazy Execution** — only computes what's needed
-- **Integrant System** — component lifecycle management with hot reload
+## Why this exists
 
-**Goals**:
+Text-in-files is a great substrate for humans and a *hostile* one for
+everything else. Version control, branching, hot-reload, multi-tenancy,
+type/effect analysis, and safe automated editing are all bolted on top of
+files with external tooling. Graphden's bet is to make the program a
+**typed graph in a database**, so those become properties of the
+substrate instead of surrounding machinery:
 
-1. Test the hypothesis that graph-based visual programming can be simpler and more readable than text code for high-level logic
-2. Leverage the graph structure for automatic parallelization — independent subgraphs can be computed concurrently on different executors
+- **The program is data.** A function is rows, not a string. Every
+  composition is structurally valid by construction — whole classes of
+  syntax and shape errors are unrepresentable.
+- **Versioning, branching, and merge are storage features**, not a
+  parallel git checkout. Branch a project, diff it, merge it with
+  conflict detection — of the code itself.
+- **Types, effects, and secrets are first-class graph metadata.** Every
+  slot carries a type; every fn carries its tracked effects
+  (`db`/`io`/`network`/`time`/…); values marked `[:secret T]` are tracked
+  through the graph and hidden at execution sinks. The editor shows you
+  all of it while you build.
+- **Hot-reload is native.** Edit a fn and the compiled registry
+  delta-recompiles the affected closures — no redeploy.
+- **Multi-tenant by construction.** The org is the isolation boundary,
+  enforced in storage (RLS) and in the executor shard.
 
-See [Architecture](docs/ARCHITECTURE.md) for detailed design decisions and technical documentation.
+**Why now:** free-form text is a poor target for *machine-authored*
+software — a model easily emits structurally- or semantically-invalid
+code. A typed, effect-annotated, structurally-constrained graph is a
+better target, because the structure itself is the guardrail. That is the
+wedge earlier visual-programming attempts didn't have.
 
-## Example: Building a Web Server from fn-defs
+**What this is not:** a claim that visual programming beats text for all
+work. It's a bet on a specific niche — internal tools, low-ops backends,
+and multi-tenant SaaS where branch-per-tenant, hot-reload, and
+effect-gating *are* the product. It's an experimental platform, not a
+finished one; see [ROADMAP.md](docs/ROADMAP.md) for what's shipped vs
+planned.
 
-Graphden separates **base functions** (Clojure implementations) from **fn entities** (pure data compositions):
+---
+
+## Example: a web server as pure data
+
+Graphden separates **base functions** (small Clojure primitives, each
+wrapping ~one library call) from **fn-defs** (pure-data compositions of
+them). A running HTTP server is just a composition:
 
 ```clojure
 ;; fn-defs are pure data — no Clojure code
 (def fn-defs
-  [;; Create constant handler: (fn [_] response)
+  [;; Constant handler: (fn [_] response)
    {:name :hello-handler-fn
     :parent :const
     :args {:x {:status 200 :body "Hello from Graphden!"}}}
 
-   ;; Build route map: {"handler" <handler-result>}
-   ;; :hello-handler-fn is EXECUTED here — assoc's :v slot is not :fn-typed,
-   ;; so the executor evaluates the ref and uses its result.
+   ;; Build a route map. :hello-handler-fn is EXECUTED here — assoc's :v
+   ;; slot is not :fn-typed, so the executor evaluates the ref.
    {:name :hello-route-data-fn
     :parent :assoc
     :args {:m {}, :k "handler", :v :hello-handler-fn}}
 
-   ;; Create router from routes
+   ;; A router over those routes.
    {:name :router-fn
     :parent :router
     :args {:routes [["/" {:get :hello-route-data-fn}]]}}
 
-   ;; Start HTTP server
-   ;; :router-fn is PASSED AS A FUNCTION here — http-server's :handler
-   ;; slot is :fn-typed, so the executor hands the fn-id over instead
-   ;; of executing it.
+   ;; Start the server. :router-fn is PASSED AS A FUNCTION here —
+   ;; http-server's :handler slot IS :fn-typed, so the executor hands the
+   ;; fn-id over instead of executing it.
    {:name :web-server-fn
     :parent :http-server
     :args {:handler :router-fn
            :port 8080}}])
-
-;; Reference syntax: :fn-name creates a ref to another fn.
-;; Whether the executor executes the ref and uses its result, or
-;; passes the fn-id directly (HOF callable), is determined by the
-;; SLOT TYPE: `:fn`-typed slots receive the fn-id; everything else
-;; gets the executed result. One concept — the type chip in the
-;; editor — drives both the UI and the dispatch.
 ```
 
-The executor resolves this graph and starts a working HTTP server.
+One concept — the **slot's type** — drives both the editor's type chip
+and the runtime dispatch: `:fn`-typed slots receive the fn-id (a
+higher-order callable); every other slot gets the executed result. There
+is no name-based special-casing anywhere in the executor.
 
-For a complete step-by-step example, see [ARCHITECTURE.md Part 5.5](docs/ARCHITECTURE.md#part-55-function-composition-fn-defs).
+Full walkthrough: [ARCHITECTURE.md § Function composition](docs/ARCHITECTURE.md#part-55-function-composition-fn-defs).
 
-## Quick Start
+---
 
-### Requirements
+## Quick start
 
-- Java 21+
-- Clojure 1.12+
-- [Babashka](https://github.com/babashka/babashka)
-
-### Commands
+**Requirements:** Java 21+, Clojure 1.12+, [Babashka](https://github.com/babashka/babashka), Docker (for Postgres + the executor container).
 
 ```bash
-bb repl      # Start REPL
-bb ci        # Full CI: linters + tests + coverage (parallel)
-bb test      # Tests only
-bb coverage  # Tests with coverage report
-bb check     # Linters only (parallel)
-bb fix       # Auto-fix formatting
+bb repl        # REPL with the dev profile
+bb rebuild     # Build uberjar + docker image, restart the executor container
+bb test        # Run the test suite (uses testcontainers for Postgres)
+bb ci          # Full gate: clj + JS/CSS linters + tests + coverage
+bb check       # Clojure linters only (clj-kondo / splint / cljstyle)
+bb fix         # Auto-fix Clojure formatting
 ```
 
-### Linter prerequisites
+After a backend change, `bb rebuild` then `bb verify` (per-section
+frontend/packages/backend hash check against `/version`). Linters mostly
+self-install on first run; `npm install` once for the JS/CSS set. See
+[DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full toolchain and prereqs.
 
-Most linters install themselves on first run (no host setup
-required):
+---
 
-- **Clojure** — clj-kondo / splint / cljstyle: pulled by `setup-clojure`
-  in CI; locally either install native binaries (`brew install
-  clj-kondo cljstyle`, etc.) or let `bb check` fall through to the
-  `clojure -M:kondo` / `-M:splint` / `-M:cljstyle` aliases.
-- **JS + CSS + markdown** — biome / stylelint / markdownlint-cli2:
-  npm devDeps in `package.json`; run `npm install` once after clone.
-- **shell / Dockerfile / secrets / workflows / supply-chain** —
-  shellcheck / hadolint / gitleaks / actionlint / trivy / lychee:
-  pulled as Docker images on first invocation (`bb shellcheck`,
-  `bb hadolint`, `bb gitleaks`, `bb actionlint`, `bb trivy`,
-  `bb lychee`). Requires Docker (already needed for the executor
-  and Postgres containers).
-- **Spelling** — `typos`: `bb typos` downloads the binary into
-  `.tools/typos` on first run (Linux x86_64 release tarball, pinned
-  version). `.tools/` is gitignored.
-- **Licenses** — `bb license-check`: scans npm devDeps in the root,
-  `tools/browser-test`, and `tools/visual-tests` trees against the
-  allowlist of permissive licenses (MIT / BSD / Apache / ISC / CC0 /
-  Unlicense / Python-2.0). Fails on copyleft.
-- **Commit messages** — `bb commitlint [HEAD~N..HEAD]`: validates
-  recent commit messages against Conventional Commits (config in
-  `commitlint.config.cjs`). CI's `commitlint` job runs over each PR's
-  commit range.
+## Architecture at a glance
 
-For day-to-day work: `npm install`, then `bb check` runs every
-linter. CI runs the same set on every PR.
-
-## Architecture
+Three layers, each depending only on the one below:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    EXECUTOR LAYER                           │
-│  executor + base-functions + fn-registry + fn-composition   │
-├─────────────────────────────────────────────────────────────┤
-│                     STORAGE LAYER                           │
-│  storage-protocol: StorageCRUD, ExecutionGraph, Constraints │
-│  postgres-storage + VersionedStorage decorator (optional)   │
-├─────────────────────────────────────────────────────────────┤
-│                  DATA SCHEMA LAYER                          │
-│  schemas: malli-data-schema, graph-data-schema              │
-│          (fn / slot / fn-slot / binding /                   │
-│           binding-list-item),                               │
-│          versioned-data-schema (branch + version tables)    │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│  EXECUTOR      compile graph → in-memory registry of         │
+│                closures; execute; type-check; effect-track   │
+├────────────────────────────────────────────────────────────┤
+│  STORAGE       StorageCRUD / ExecutionGraph / Constraints    │
+│                Postgres backend · VersionedStorage decorator │
+│                · RemoteStorage (BYO executor over HTTP)      │
+├────────────────────────────────────────────────────────────┤
+│  DATA SCHEMA   fn / slot / fn-slot / binding /               │
+│                binding-list-item · versioned (branch+version)│
+└────────────────────────────────────────────────────────────┘
 ```
 
-## Modules
+Execution is served entirely from the in-memory compiled registry
+(~microseconds/node); Postgres is touched at compile/invalidation time
+and for durable writes, not on the execution inner loop. See
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) and [SCALING.md](docs/SCALING.md).
 
-### Core Protocols (`src/graphden/`)
+### Source layout (`src/graphden/`)
 
-| Module | Description |
-|--------|-------------|
-| `storage/protocol/` | Storage, CRUD, ExecutionGraph protocols |
-| `schema/protocol/` | DataSchema protocol for entity definitions |
-| `schema/fields/` | Supported data types (:int, :text, :bool, :jsonb, etc.) |
-| `schema/malli/` | Malli-based schema builder |
-| `schema/graph/` | Function graph entity schema (fn / slot / fn-slot / binding / binding-list-item) |
+| Area | Namespaces |
+|------|-----------|
+| Executor | `executor/` (compile pipeline, registry, composition), `executor_runtime/` (`-main`) |
+| CRUD & API | `crud/` (entities, branches, secrets, type-check, fn-execution) |
+| Types | `types/` (subtype/unify/narrow, checker) |
+| Schema | `schema/` (protocol, malli, graph, versioned, fields) |
+| Storage | `storage/` (protocol, postgres, `remote/` for BYO) |
+| Versioning | `versioning/` (storage decorator, merge protection) |
+| Platform | `tenancy/`, `auth/`, `services/`, `layout/`, `system/`, `clients/` |
+| Packages | `packages/` (loader for `resources/packages/`) |
 
-### Storage
+Base functions and fn-defs live under `resources/packages/{pkg}/{module}/`
+as `fns.edn` (declarations) + `impls.clj` (Clojure impls); dependencies in
+`package.edn` drive load order. See [PACKAGES.md](docs/PACKAGES.md).
 
-| Module | Description |
-|--------|-------------|
-| `storage/postgres/` | PostgreSQL storage backend |
-
-### Execution
-
-| Module | Description |
-|--------|-------------|
-| `executor/` | Graph executor with lazy evaluation, depth/timeout protection |
-| `executor/base-fns/` | 50+ base functions (arithmetic, strings, collections, HOF) |
-| `executor/registry/` | Base function registration and synchronization |
-| `executor/composition/` | Function composition utilities |
-
-### Web
-
-| Module | Description |
-|--------|-------------|
-| `web/http-kit/` | HTTP server base functions |
-| `web/reitit/` | Reitit router base functions |
-| `web/server/` | Web server utilities |
-
-### System & Runtime
-
-| Module | Description |
-|--------|-------------|
-| `system/` | Integrant lifecycle management, Aero config loading |
-| `executor_runtime/` | Main entry point (-main), shutdown hooks |
-| `logging/` | Structured logging with MDC context |
-
-### Versioning (Optional)
-
-| Module | Description |
-|--------|-------------|
-| `versioning/storage/` | Version tracking decorator |
-| `schema/versioned/` | Versioning schema extensions |
+---
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [PHILOSOPHY.md](docs/PHILOSOPHY.md) | Core principles and design philosophy |
-| [DISTRIBUTION.md](docs/DISTRIBUTION.md) | License layout, deployment shapes, packages model, competitors, feature acceptance rules |
-| [tutorial/](docs/tutorial/) | Step-by-step lessons for new users — grows with every feature block |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions, data model, constraints, execution model |
-| [ROADMAP.md](docs/ROADMAP.md) | Implementation status, phases, future plans |
-| [CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications |
-| [ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference |
-| [EXTENDING.md](docs/EXTENDING.md) | Guide for adding new storage backends |
-| [CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config and Aero tags |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment setup |
+Start here, then follow the map in [CLAUDE.md](CLAUDE.md) (a per-topic
+index of all 45+ docs).
 
-## Project Structure
+| Document | For |
+|----------|-----|
+| [PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles and rationale |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Data model, execution model, examples |
+| [PACKAGES.md](docs/PACKAGES.md) | Writing base-fns and fn-defs |
+| [TYPES.md](docs/TYPES.md) | The type system |
+| [VERSIONING.md](docs/VERSIONING.md) | Branches, diff, merge |
+| [SCALING.md](docs/SCALING.md) · [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Fleet, ops, deploy |
+| [ROADMAP.md](docs/ROADMAP.md) | What's shipped vs planned |
+| [tutorial/](docs/tutorial/) | Step-by-step lessons for new users |
 
-```
-graphden/
-├── src/graphden/            # Source code
-│   ├── executor/            # Executor, base-fns, registry, composition
-│   ├── executor_runtime/    # Main entry point (-main, shutdown hooks)
-│   ├── logging/             # Structured logging with MDC
-│   ├── schema/              # Protocol, malli, graph, versioned, traits
-│   ├── storage/             # Protocol, postgres, AGE
-│   ├── system/              # Integrant lifecycle management
-│   ├── versioning/          # Storage, merge protection
-│   └── web/                 # HTTP-kit, reitit, server, editor, CRUD
-├── test/graphden/           # Tests (mirrors src structure)
-├── docs/                    # Documentation
-├── resources/               # Config files (config.edn, logback.xml)
-├── bb.edn                   # Babashka tasks
-└── deps.edn                 # Dependencies
-```
-
-## Testing
-
-```bash
-bb test                    # Run all tests
-bb coverage                # Tests with coverage report
-open target/coverage/index.html
-```
-
-Coverage is tracked per build — run `bb coverage` and open
-`target/coverage/index.html` for the current breakdown. The badge at
-the top of this file shows the latest CI value.
+---
 
 ## License
 
-GNU Affero General Public License v3.0 (AGPL-3.0).
-See [LICENSE](LICENSE).
-
+GNU Affero General Public License v3.0 (AGPL-3.0) — see [LICENSE](LICENSE).
 For commercial licensing: licensing@graphden.dev

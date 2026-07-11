@@ -39,6 +39,7 @@
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.connection :as pg-conn]
     [graphden.storage.postgres.errors :as pg-errors]
+    [graphden.util.backoff :as backoff]
     [next.jdbc :as jdbc])
   (:import
     (java.sql
@@ -165,7 +166,7 @@
    backoff 1s → 30s cap so a prolonged DB outage doesn't hammer it."
   [conn-atom pg-opts running? cause]
   (log/warn cause "NOTIFY connection lost — reconnecting")
-  (loop [backoff-ms 1000]
+  (loop [backoff-ms backoff/initial-ms]
     (when @running?
       (Thread/sleep (long backoff-ms))
       (when-not (try (reconnect! conn-atom pg-opts)
@@ -174,7 +175,7 @@
                      (catch Exception re
                        (log/warn re "NOTIFY reconnect attempt failed — retrying")
                        false))
-        (recur (min 30000 (* 2 backoff-ms)))))))
+        (recur (backoff/next-ms backoff-ms))))))
 
 
 (defn- listen-loop

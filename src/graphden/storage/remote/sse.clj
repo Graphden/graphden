@@ -14,7 +14,8 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [graphden.storage.postgres.notify :as pg-notify])
+    [graphden.storage.postgres.notify :as pg-notify]
+    [graphden.util.backoff :as backoff])
   (:import
     (java.io
       BufferedReader
@@ -99,7 +100,7 @@
         body-atom (atom nil)
         thread (Thread.
                  (fn []
-                   (loop [backoff-ms 1000]
+                   (loop [backoff-ms backoff/initial-ms]
                      (when @running?
                        (let [ok? (try (stream-once! client hub-url token on-event running? body-atom)
                                       true
@@ -110,7 +111,7 @@
                                         false))]
                          (when (and @running? (not ok?))
                            (Thread/sleep (long backoff-ms)))
-                         (recur (if ok? 1000 (min 30000 (* 2 backoff-ms))))))))
+                         (recur (if ok? backoff/initial-ms (backoff/next-ms backoff-ms)))))))
                  "remote-sse-source")]
     (Thread/.setDaemon thread true)
     (Thread/.start thread)

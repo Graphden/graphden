@@ -27,7 +27,8 @@
     [graphden.executor.compile.renames :as renames]
     [graphden.layout.bindings :as bnd]
     [graphden.layout.builder-helpers :as bh]
-    [graphden.layout.data :as data]))
+    [graphden.layout.data :as data]
+    [graphden.packages.records.ids :as ids]))
 
 
 ;; ---------------------------------------------------------------------------
@@ -131,20 +132,24 @@
             ;; `items` slot on every list type-row. Hidden at the type-row's
             ;; own page (its structure is already carried by base/element
             ;; edges); composed children still see + bind via inheritance.
-            hidden-synth-slot
+            ;; The synth slot's id is deterministic — records/parse.clj
+            ;; seeds it as `(ids/slot-id owner-fn-id slot-name)`. Match on
+            ;; that id, not the resolved name: we already hold both the
+            ;; owner (`display-fn-id`) and `(:slot-id arg)`.
+            hidden-synth-slot-id
             (when is-root
               (let [f (get fn-map display-fn-id)
                     has-slots? (boolean
                                  (seq (get fn-slots-by-fn display-fn-id)))]
-                (case (bh/type-row-role f has-slots?)
-                  :refinement "value"
-                  :list       "items"
-                  nil)))
+                (when-let [nm (case (bh/type-row-role f has-slots?)
+                                :refinement "value"
+                                :list       "items"
+                                nil)]
+                  (ids/slot-id display-fn-id nm))))
             synth-slot?
             (fn [arg]
-              (and hidden-synth-slot
-                   (= hidden-synth-slot
-                      (:name (get-in lookups [:slot-map (:slot-id arg)])))))
+              (and hidden-synth-slot-id
+                   (= hidden-synth-slot-id (:slot-id arg))))
 
             filtered-args
             (filterv (fn [arg]

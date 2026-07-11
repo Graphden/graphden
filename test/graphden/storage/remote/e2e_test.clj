@@ -72,6 +72,47 @@
                           (Thread/sleep 25) (recur))))))
 
 
+(defn- flaky-sse-server
+  "SSE stub exercising the reconnect loop: the FIRST client gets one frame and
+   then the stream is dropped (send-with-close); the SECOND (reconnecting)
+   client gets a distinct frame and the stream stays open. `conns` counts
+   connections so the test can assert a reopen happened."
+  [conns]
+  (hk/run-server
+    (fn [req]
+      (hk/as-channel
+        req
+        {:on-open (fn [ch]
+                    (let [n (swap! conns inc)]
+                      (hk/send! ch {:status 200
+                                    :headers {"Content-Type" "text/event-stream"}}
+                                false)
+                      (if (= n 1)
+                        ;; frame + close → the source sees EOF and reconnects
+                        (hk/send! ch "data: fn:invalidate:aaa\n\n" true)
+                        (hk/send! ch "data: fn:invalidate:bbb\n\n" false))))}))
+    {:port 0}))
+
+
+(deftest sse-source-reconnects-after-a-dropped-connection
+  ;; A network blip must not leave a BYO executor permanently deaf. When the
+  ;; hub connection drops, the source must reopen it and keep delivering.
+  (let [conns (atom 0)
+        events (atom [])
+        srv (flaky-sse-server conns)
+        url (str "http://localhost:" (:local-port (meta srv)))
+        source (remote-sse/start-source!
+                 {:hub-url url :token token
+                  :on-event (fn [e] (swap! events conj (:id e)))})]
+    (try
+      (is (wait-for 8000 #(some #{"bbb"} @events))
+          "after the first stream dropped, the source reconnected and got the 2nd event")
+      (is (>= @conns 2) "the source actually reopened the connection")
+      (finally
+        (remote-sse/stop-source! source)
+        (srv)))))
+
+
 (deftest byo-executor-bootstraps-then-live-refreshes-over-sse
   (let [storage (hub-storage!)]
     (exec/register-base-fn! :echo-x (fn [args _ctx] (get args :x)))

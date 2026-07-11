@@ -188,9 +188,9 @@
          {:category :constraint :retryable? false
           :description "Cycle in arg-value references"}
 
-         :constraint-violation/main-branch-undeletable
+         :constraint-violation/root-branch-undeletable
          {:category :constraint :retryable? false
-          :description "Attempted to delete the main branch"}
+          :description "Attempted to delete the root branch (base-branch-id nil)"}
 
          :constraint-violation/branch-has-children
          {:category :constraint :retryable? false

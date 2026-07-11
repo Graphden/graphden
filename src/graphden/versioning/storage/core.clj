@@ -758,9 +758,15 @@
     (when-not branch
       (throw (ex-info "Branch not found"
                       {:type :not-found :branch-id branch-id})))
-    (when (= "main" (:name branch))
-      (throw (ex-info "Cannot delete main branch"
-                      {:type :constraint-violation/main-branch-undeletable :branch-id branch-id})))
+    ;; Protect the ROOT branch by its structural identity —
+    ;; `:base-branch-id nil` — NOT by the display name "main". Branch
+    ;; names are only `[:org-id :name]`-unique and the root id is
+    ;; non-deterministic (`random-uuid`), so the name is the wrong and
+    ;; org-unsafe handle: a root named otherwise would be unprotected, a
+    ;; non-root named "main" falsely protected.
+    (when (nil? (:base-branch-id branch))
+      (throw (ex-info "Cannot delete the root branch"
+                      {:type :constraint-violation/root-branch-undeletable :branch-id branch-id})))
     ;; Check no child branches
     (let [children (sp/query-entities base :branch {:base-branch-id branch-id})]
       (when (seq children)

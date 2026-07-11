@@ -183,11 +183,29 @@
           (is (not (contains? (set (map :name (vs/list-branches v)))
                               "to-delete")))))
 
-      (testing "deleting the main branch is forbidden"
+      (testing "deleting the root branch is forbidden"
         (let [ex (try (vs/delete-branch! v (vs/current-branch-id v))
                       (catch clojure.lang.ExceptionInfo e e))]
-          (is (= :constraint-violation/main-branch-undeletable
+          (is (= :constraint-violation/root-branch-undeletable
                  (:type (ex-data ex))))))
+
+      (testing "root protection is STRUCTURAL (base-branch-id nil), not the name 'main'"
+        ;; Regression pin for the name-vs-id bug: a root branch named
+        ;; anything but 'main' must still be undeletable. Create one
+        ;; directly on the base storage (bypassing the name-based
+        ;; bootstrap) so its identity is purely structural.
+        (let [base* (:base-storage v)
+              trunk-id (random-uuid)
+              _     (sp/create-entity base* :branch
+                                      {:id trunk-id
+                                       :name "trunk"
+                                       :base-branch-id nil
+                                       :created-at (java.time.Instant/now)})
+              ex    (try (vs/delete-branch! v trunk-id)
+                         (catch clojure.lang.ExceptionInfo e e))]
+          (is (= :constraint-violation/root-branch-undeletable
+                 (:type (ex-data ex)))
+              "a root branch NOT named 'main' is still protected by root-ness")))
 
       (testing "deleting a branch that has children is forbidden"
         (let [parent (vs/create-branch! v "parent-branch")

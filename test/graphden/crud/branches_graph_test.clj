@@ -399,7 +399,7 @@
   (let [body (json-body (via :delete-branch-handler
                              (delete-req "/api/branches/main")))]
     (is (not (:ok body)))
-    (is (#{"main-branch-undeletable" :main-branch-undeletable}
+    (is (#{"root-branch-undeletable" :root-branch-undeletable}
          (:reason body)))))
 
 

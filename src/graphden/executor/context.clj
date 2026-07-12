@@ -177,7 +177,7 @@
                 `tenancy.context/byo-org?`."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
            execute-guard app-router set-org-handler verify-domain user-ops
-           executor-orgs byo-executor? fleet-forward]}]
+           executor-orgs byo-executor? fleet-forward fleet-command]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -245,7 +245,11 @@
       ;; consults BEFORE 421'ing — forwards to the executor that holds the cell
       ;; (per `:placement`). Absent (single-tenant / no fleet identity) → 421 as
       ;; before.
-      (cond-> fleet-forward (assoc :fleet-forward fleet-forward))))
+      (cond-> fleet-forward (assoc :fleet-forward fleet-forward))
+      ;; Fleet control-plane command seam (docs/FLEET_RFC.md §6.3) — the
+      ;; `branch-router/dispatch` consults it for `POST /internal/fleet/cell/…`.
+      ;; Absent (single-tenant / no fleet identity) → no internal endpoint.
+      (cond-> fleet-command (assoc :fleet-command fleet-command))))
 
 
 (defn current-time-ms

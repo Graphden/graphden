@@ -50,6 +50,27 @@
         (sp/close storage)))))
 
 
+(deftest create-context-threads-fleet-seams
+  ;; Regression: the fleet control-plane seams must survive create-context — a
+  ;; missing key in the destructure silently drops the seam (as :fleet-command
+  ;; once was), so `branch-router/dispatch` sees nil and the internal endpoint
+  ;; 404s. Assert each seam threads through to the ctx.
+  (let [storage (setup/create-test-storage)
+        forward (fn [_ _ _] :forwarded)
+        command (fn [_ _] :handled)
+        app (fn [_ _] :app)]
+    (try
+      (let [c (ctx/create-context {:storage storage
+                                   :fleet-forward forward
+                                   :fleet-command command
+                                   :app-router app})]
+        (is (= forward (:fleet-forward c)) "fleet-forward seam preserved")
+        (is (= command (:fleet-command c)) "fleet-command seam preserved")
+        (is (= app (:app-router c)) "app-router seam preserved"))
+      (finally
+        (sp/close storage)))))
+
+
 (deftest create-context-custom-clock
   (testing "custom clock threads through as :clock and is sampled on demand"
     (let [storage (setup/create-test-storage)

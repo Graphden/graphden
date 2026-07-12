@@ -175,3 +175,32 @@
           "spread across both pods, not piled on one"))
     (testing "each applied command carries org + entry + target"
       (is (every? #(and (:org %) (:entry-fn-id %) (:to-executor %)) @applied)))))
+
+
+;; ---------------------------------------------------------------------------
+;; Overlap-aware initial placement (docs/FLEET_RFC.md T4.5) — opt-in :w-overlap.
+;; ---------------------------------------------------------------------------
+
+(deftest discover-cells-attaches-closure-when-requested
+  (let [storage (fleet-storage {:orgs {"acme" c1} :pending {}})]
+    (testing "default omits :closure (cheap, no per-cell closure walk)"
+      (is (nil? (:closure (first (loop/discover-cells storage {}))))))
+    (testing "with-closure? attaches the cell's forward-closure fn-set"
+      (let [cells (loop/discover-cells storage {} {:with-closure? true})]
+        (is (= #{c1} (:closure (first cells)))
+            "a root with no forward edges is a one-fn closure")))))
+
+
+(deftest initial-placement-co-locates-with-overlap
+  ;; c1 is already placed on p2; c2 is unplaced and shares c1's whole closure.
+  ;; Pure load would send c2 to the empty p1; overlap sends it to p2.
+  (let [cells [{:org "o" :entry-fn-id c1 :weight 1.0 :closure #{:a :b}}
+               {:org "o" :entry-fn-id c2 :weight 1.0 :closure #{:a :b}}]
+        current {["o" c1] "p2"}
+        inputs {:cells cells :current current :executors ["p1" "p2"]}]
+    (testing "w-overlap 0 → the unplaced cell goes to the least-loaded pod (p1)"
+      (is (= [{:org "o" :entry-fn-id c2 :to "p1"}]
+             (:initial-placements (loop/plan-tick inputs {} {})))))
+    (testing "w-overlap > 0 → it co-locates on p2, which holds its closure"
+      (is (= [{:org "o" :entry-fn-id c2 :to "p2"}]
+             (:initial-placements (loop/plan-tick inputs {} {:w-overlap 2.0})))))))

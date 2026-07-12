@@ -1215,11 +1215,14 @@
 (defn- fleet-controller-opts
   "Controller knobs from env (read directly, like the other fleet vars):
    `:sustain-ticks` (imbalance must persist this many ticks before a move),
-   `:min-improvement` (magnitude floor), `:max-moves` (per-tick cap)."
+   `:min-improvement` (magnitude floor), `:max-moves` (per-tick cap),
+   `:w-overlap` (overlap-accounting weight — > 0 co-locates code-sharing cells;
+   default 0 keeps pure load-balancing, so overlap is strictly opt-in)."
   []
   {:sustain-ticks (or (some-> (System/getenv "GRAPHDEN_FLEET_SUSTAIN_TICKS") parse-long) 3)
    :min-improvement (or (some-> (System/getenv "GRAPHDEN_FLEET_MIN_IMPROVEMENT") parse-double) 0.0)
-   :max-moves (or (some-> (System/getenv "GRAPHDEN_FLEET_MAX_MOVES") parse-long) Integer/MAX_VALUE)})
+   :max-moves (or (some-> (System/getenv "GRAPHDEN_FLEET_MAX_MOVES") parse-long) Integer/MAX_VALUE)
+   :w-overlap (or (some-> (System/getenv "GRAPHDEN_FLEET_OVERLAP_WEIGHT") parse-double) 0.0)})
 
 
 (defn- fleet-controller-tick!

@@ -61,3 +61,42 @@
   (testing "no cells → empty placement, every pod at zero load"
     (is (= {:placement {} :loads {"a" 0.0 "b" 0.0}}
            (packer/pack [] ["a" "b"])))))
+
+
+;; ---------------------------------------------------------------------------
+;; Overlap-aware placement (docs/FLEET_RFC.md T4.5) — opt-in via :w-overlap.
+;; ---------------------------------------------------------------------------
+
+(deftest best-target-overlap-vs-pure-load
+  (let [loads {"a" 0.0 "b" 0.0}
+        pod-fns {"a" #{} "b" #{:x :y}}
+        execs ["a" "b"]]
+    (testing "w-overlap 0 ignores b's overlap → least-loaded id tiebreak picks a"
+      (is (= "a" (packer/best-target loads execs
+                                     {:pod-fns pod-fns :cell-fns #{:x :y} :w-overlap 0.0}))))
+    (testing "w-overlap > 0 pulls the cell to b, which already holds its closure"
+      (is (= "b" (packer/best-target loads execs
+                                     {:pod-fns pod-fns :cell-fns #{:x :y} :w-overlap 1.0}))))
+    (testing "nil cell-fns → pure least-loaded even with a positive weight"
+      (is (= "a" (packer/best-target loads execs
+                                     {:pod-fns pod-fns :cell-fns nil :w-overlap 1.0}))))
+    (testing "a big load gap still dominates a small overlap discount"
+      (is (= "a" (packer/best-target {"a" 0.0 "b" 5.0} execs
+                                     {:pod-fns pod-fns :cell-fns #{:x :y} :w-overlap 1.0}))))))
+
+
+(deftest pack-co-locates-cells-that-share-code
+  (let [cells [(cell "o" c1 1) (cell "o" c2 1) (cell "o" c3 1)]
+        cell-fns {["o" c1] #{:a :b :c}
+                  ["o" c2] #{:a :b :d}    ; shares :a :b with c1
+                  ["o" c3] #{:x :y :z}}]  ; disjoint
+    (testing "pure LPT (default opts) spreads the two equal-weight sharing cells"
+      (let [{:keys [placement]} (packer/pack cells ["p1" "p2"])]
+        (is (not= (placement ["o" c1]) (placement ["o" c2])))))
+    (testing "w-overlap co-locates c1 + c2 (shared :a :b) while c3 balances away"
+      (let [{:keys [placement]} (packer/pack cells ["p1" "p2"] {:cell-fns cell-fns :w-overlap 2.0})]
+        (is (= (placement ["o" c1]) (placement ["o" c2])) "sharing cells land together")
+        (is (not= (placement ["o" c1]) (placement ["o" c3])) "the disjoint cell still balances")))
+    (testing "w-overlap 0 reproduces pure LPT exactly (opt-in, no regression)"
+      (is (= (packer/pack cells ["p1" "p2"])
+             (packer/pack cells ["p1" "p2"] {:cell-fns cell-fns :w-overlap 0.0}))))))

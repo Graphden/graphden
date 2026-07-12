@@ -23,20 +23,38 @@
 
 
 (defn- plan-initial-placements
-  "Assign each `unplaced` cell-key to the least-loaded executor, greedily and
+  "Assign each `unplaced` cell-key to the best target, greedily and
    deterministically (unplaced keys sorted, running loads updated per pick).
-   Returns `[{:org :entry-fn-id :to} ...]`."
-  [unplaced cells current executors]
+   With `:w-overlap` > 0 and cells carrying a `:closure`, a new cell prefers the
+   pod already holding more of its closure (co-location) — otherwise it is the
+   least-loaded pod. Returns `[{:org :entry-fn-id :to} ...]`."
+  [unplaced cells current executors {:keys [w-overlap] :or {w-overlap 0.0}}]
   (if (empty? executors)
     []
-    (let [weight-of (into {} (map (juxt (juxt :org :entry-fn-id) (comp double :weight))) cells)]
+    (let [key-of (juxt :org :entry-fn-id)
+          weight-of (into {} (map (juxt key-of (comp double :weight))) cells)
+          closure-of (into {} (keep (fn [c] (when-let [cl (:closure c)] [(key-of c) cl]))) cells)
+          ;; Seed each pod's held-fn set from the cells ALREADY placed on it, so
+          ;; overlap is scored against real current contents, not an empty pod.
+          init-pod-fns (reduce (fn [m c]
+                                 (let [k (key-of c)
+                                       e (get current k)]
+                                   (if (and e (:closure c) (contains? m e))
+                                     (update m e into (:closure c))
+                                     m)))
+                               (zipmap executors (repeat #{}))
+                               cells)]
       (loop [remaining (sort unplaced)
              loads (packer/loads-of cells current executors)
+             pod-fns init-pod-fns
              acc []]
         (if-let [k (first remaining)]
-          (let [target (packer/least-loaded loads executors)]
+          (let [cfns (get closure-of k)
+                target (packer/best-target loads executors
+                                           {:pod-fns pod-fns :cell-fns cfns :w-overlap w-overlap})]
             (recur (rest remaining)
                    (update loads target + (weight-of k 0.0))
+                   (if cfns (update pod-fns target into cfns) pod-fns)
                    (conj acc {:org (first k) :entry-fn-id (second k) :to target})))
           acc)))))
 
@@ -47,7 +65,9 @@
      inputs — `{:cells [{:org :entry-fn-id :weight}] :current {[org entry] exec}
                :executors [id ...]}` — the live reading.
      state  — the prior tick's state (`{:over-count n}`, `{}` on the first tick).
-     opts   — `{:min-improvement <double> :sustain-ticks <int> :max-moves <int>}`.
+     opts   — `{:min-improvement <double> :sustain-ticks <int> :max-moves <int>
+               :w-overlap <double>}` — `:w-overlap` > 0 makes initial placement
+               co-locate cells that share code (default 0 = pure load balance).
 
    Returns
      `{:initial-placements [{:org :entry-fn-id :to} ...]  ; apply every tick
@@ -59,16 +79,17 @@
    magnitude floor) has recurred for `:sustain-ticks` consecutive ticks; the
    counter resets when it fires or when a tick finds nothing worth moving.
    Initial placements are NOT gated — new load lands at once."
-  [{:keys [cells current executors]} state {:keys [min-improvement sustain-ticks max-moves]
+  [{:keys [cells current executors]} state {:keys [min-improvement sustain-ticks max-moves w-overlap]
                                             :or {min-improvement 0.0 sustain-ticks 1
-                                                 max-moves Integer/MAX_VALUE}}]
+                                                 max-moves Integer/MAX_VALUE w-overlap 0.0}}]
   (let [{:keys [moves unplaced current-imbalance]}
         (rebalance/rebalance cells current executors
                              {:min-improvement min-improvement :max-moves max-moves})
         would-move? (boolean (seq moves))
         over-count (if would-move? (inc (:over-count state 0)) 0)
         fire? (and would-move? (>= over-count sustain-ticks))]
-    {:initial-placements (plan-initial-placements unplaced cells current executors)
+    {:initial-placements (plan-initial-placements unplaced cells current executors
+                                                  {:w-overlap w-overlap})
      :moves (if fire? moves [])
      :current-imbalance current-imbalance
      :state {:over-count (if fire? 0 over-count)}}))
@@ -104,19 +125,25 @@
    `:handler-fn-id`) unioned with whatever is already placed. Platform
    `:service` cells are deliberately EXCLUDED — the reconciler owns their
    advisory-lock singleton placement, so the fleet controller must not also
-   move them."
-  [storage forward-deps]
-  (let [org-roots (keep (fn [o]
-                          (when-let [h (:handler-fn-id o)]
-                            {:org (:name o) :entry-fn-id h}))
-                        (safe-query storage :org {}))
-        placed-roots (map (fn [r] {:org (:org r) :entry-fn-id (:entry-fn-id r)})
-                          (safe-query storage :placement {}))]
-    (map (fn [{:keys [org entry-fn-id]}]
-           {:org org
-            :entry-fn-id entry-fn-id
-            :weight (metrics/cell-weight forward-deps storage org entry-fn-id)})
-         (distinct (concat org-roots placed-roots)))))
+   move them.
+
+   `opts` — `{:with-closure? bool}`. When true each cell also carries its
+   `:closure` (forward-closure fn-set) for overlap-aware placement; computed
+   only on demand since it walks every cell's closure each tick."
+  ([storage forward-deps] (discover-cells storage forward-deps {}))
+  ([storage forward-deps {:keys [with-closure?]}]
+   (let [org-roots (keep (fn [o]
+                           (when-let [h (:handler-fn-id o)]
+                             {:org (:name o) :entry-fn-id h}))
+                         (safe-query storage :org {}))
+         placed-roots (map (fn [r] {:org (:org r) :entry-fn-id (:entry-fn-id r)})
+                           (safe-query storage :placement {}))]
+     (map (fn [{:keys [org entry-fn-id]}]
+            (cond-> {:org org
+                     :entry-fn-id entry-fn-id
+                     :weight (metrics/cell-weight forward-deps storage org entry-fn-id)}
+              with-closure? (assoc :closure (metrics/cell-closure forward-deps entry-fn-id))))
+          (distinct (concat org-roots placed-roots))))))
 
 
 (defn run-tick!
@@ -127,9 +154,12 @@
    directed transport. Returns the `plan-tick` decision (so the caller carries
    `:state` to the next tick).
 
-   `env` — `{:storage :forward-deps :executors :move-fn}`."
+   `env` — `{:storage :forward-deps :executors :move-fn}`. With `:w-overlap` > 0
+   in `opts`, cells are discovered WITH their closures so placement can co-locate
+   code-sharing cells."
   [{:keys [storage forward-deps executors move-fn]} state opts]
-  (let [cells (discover-cells storage forward-deps)
+  (let [cells (discover-cells storage forward-deps
+                              {:with-closure? (pos? (double (:w-overlap opts 0.0)))})
         current (current-placement storage)
         decision (plan-tick {:cells cells :current current :executors executors} state opts)]
     (doseq [{:keys [org entry-fn-id to]} (:initial-placements decision)]

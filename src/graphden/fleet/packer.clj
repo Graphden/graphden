@@ -15,7 +15,9 @@
    per-pod budget (⇒ scale out) is a separate read over the returned `:loads`, so
    the packing policy and the capacity policy stay independent. Pure — the
    controller (Phase 2) feeds it live weights + the executor set and diffs the
-   result against the current `:placement` map to derive moves.")
+   result against the current `:placement` map to derive moves."
+  (:require
+    [clojure.set :as set]))
 
 
 (defn loads-of
@@ -41,27 +43,60 @@
   (first (sort-by (juxt loads identity) executors)))
 
 
+(defn best-target
+  "The executor to place a cell on: least EFFECTIVE load, where effective load
+   discounts overlap — a pod that already holds much of the cell's forward-
+   closure serves it more cheaply (§ overlap-accounting, docs/FLEET_RFC.md T4.5).
+
+   `pod-fns`   — `{executor-id → #{fn-ids it already holds}}`.
+   `cell-fns`  — this cell's closure (`#{fn-ids}`), or nil when unknown.
+   `w-overlap` — how much a shared fn discounts load (0.0 = pure load balance).
+
+   Score = `load(e) − w-overlap · |cell-fns ∩ pod-fns(e)|`; ties broken by id so
+   the result is deterministic. With `w-overlap` 0 or a nil `cell-fns` this is
+   exactly `least-loaded`, so overlap is strictly opt-in and never perturbs the
+   verified pure-LPT behaviour."
+  [loads executors {:keys [pod-fns cell-fns w-overlap] :or {w-overlap 0.0}}]
+  (if (or (zero? (double w-overlap)) (nil? cell-fns))
+    (least-loaded loads executors)
+    (first (sort-by (fn [e]
+                      (let [overlap (count (set/intersection
+                                             cell-fns (get pod-fns e #{})))]
+                        [(- (double (loads e)) (* (double w-overlap) overlap)) e]))
+                    executors))))
+
+
 (defn pack
   "Assign every cell in `cells` to one of `executors`, LPT-greedy.
 
    `cells`     — seq of `{:org :entry-fn-id :weight}` (weight from
                  `fleet.metrics/cell-weight`).
    `executors` — seq of executor-id strings.
+   `opts`      — optional `{:cell-fns {[org entry] #{fn-ids}} :w-overlap n}`.
+                 When `:w-overlap` > 0 and a cell's closure is in `:cell-fns`,
+                 placement prefers the pod that already holds more of it (co-
+                 locating cells that share code). Omitted / 0 ⇒ pure LPT.
 
    Returns `{:placement {[org entry-fn-id] executor-id} :loads {executor-id
    total-weight}}`, or nil when there are no executors to place onto. Heaviest
-   cell first, each onto the least-loaded pod; equal-weight cells are ordered by
+   cell first, each onto the best target; equal-weight cells are ordered by
    entry-fn-id so the output is stable."
-  [cells executors]
-  (when (seq executors)
-    (let [execs (vec executors)
-          ordered (sort-by (juxt (comp - double :weight) :entry-fn-id) cells)]
-      (loop [remaining ordered
-             loads (zipmap execs (repeat 0.0))
-             placement {}]
-        (if-let [cell (first remaining)]
-          (let [target (least-loaded loads execs)]
-            (recur (next remaining)
-                   (update loads target + (double (:weight cell)))
-                   (assoc placement [(:org cell) (:entry-fn-id cell)] target)))
-          {:placement placement :loads loads})))))
+  ([cells executors] (pack cells executors {}))
+  ([cells executors {:keys [cell-fns w-overlap] :or {w-overlap 0.0}}]
+   (when (seq executors)
+     (let [execs (vec executors)
+           ordered (sort-by (juxt (comp - double :weight) :entry-fn-id) cells)]
+       (loop [remaining ordered
+              loads (zipmap execs (repeat 0.0))
+              pod-fns (zipmap execs (repeat #{}))
+              placement {}]
+         (if-let [cell (first remaining)]
+           (let [ck [(:org cell) (:entry-fn-id cell)]
+                 cfns (get cell-fns ck)
+                 target (best-target loads execs {:pod-fns pod-fns :cell-fns cfns
+                                                  :w-overlap w-overlap})]
+             (recur (next remaining)
+                    (update loads target + (double (:weight cell)))
+                    (if cfns (update pod-fns target into cfns) pod-fns)
+                    (assoc placement ck target)))
+           {:placement placement :loads loads}))))))

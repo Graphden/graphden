@@ -24,6 +24,15 @@
   {:w-fn-count 1.0 :w-load 1.0})
 
 
+(defn cell-closure
+  "The SET of fn-ids the cell rooted at `root-fn-id` compiles — its forward-
+   closure (the same set `load-cell!` puts in the registry). Overlap between
+   two cells' closures is the shared code they'd co-locate to save; the packer
+   uses it for overlap-aware placement."
+  [forward-deps root-fn-id]
+  (deps/forward-closure forward-deps [root-fn-id]))
+
+
 (defn cell-fn-count
   "How many fns the cell rooted at `root-fn-id` compiles — its structural
    weight. `forward-deps` is the `{fn-id → #{deps}}` index from
@@ -31,7 +40,7 @@
    exact set `load-cell!` would compile. A root with no forward edges is a
    one-fn cell (count 1)."
   [forward-deps root-fn-id]
-  (count (deps/forward-closure forward-deps [root-fn-id])))
+  (count (cell-closure forward-deps root-fn-id)))
 
 
 (defn org-pending-load

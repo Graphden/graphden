@@ -13,7 +13,10 @@
    ends → lock auto-released → another pod re-takes it on the next
    periodic reconcile tick (`:exec/service-reconciler`, ~15s). The
    crash emits no NOTIFY, so the periodic pass — not an event — is
-   what heals a dropped singleton.
+   what heals a dropped singleton; the reconciler makes this real by
+   dropping its `::not-our-lock` placeholders at the top of every pass,
+   so a would-be owner re-attempts the lock each tick rather than idling
+   until a NOTIFY.
 
    ## Why a dedicated connection
 
@@ -30,6 +33,15 @@
    service-id UUID's `Most Significant Bits` long. Collisions across
    service-ids would need two UUIDv5 values whose first 64 bits
    match — astronomically unlikely for our scale.
+
+   ## Pool slots
+
+   A `:pool` service (`:cardinality :pool`, `:pool-size N`) must run on up
+   to N pods at once. It gets N distinct keys — `msb+0 … msb+(N-1)` — and a
+   pod holds the FIRST free one (`try-acquire-slot!`). A `:singleton` is
+   the N=1 case (slot 0, key `msb+0` = `msb`), so the two share one code
+   path. The `+slot` offset can only collide with another service whose msb
+   is within N of this one — astronomically unlikely at these key widths.
 
    The single dedicated connection holds ALL of this pod's service
    locks simultaneously — Postgres advisory locks are independent
@@ -63,6 +75,14 @@
   (UUID/.getMostSignificantBits ^UUID (if (uuid? service-id) service-id (UUID/fromString service-id))))
 
 
+(defn- slot-lock-key
+  "Advisory-lock key for `service-id`'s pool `slot` — the service's base
+   key offset by the slot index. Slot 0 is the base key, so a singleton
+   (a pool of 1 using slot 0) and a pool's slot 0 are the same key."
+  ^long [service-id slot]
+  (unchecked-add (service-id->lock-key service-id) (long slot)))
+
+
 ;; =============================================================================
 ;; Lock-connection lifecycle
 ;; =============================================================================
@@ -88,38 +108,49 @@
 ;; Lock operations
 ;; =============================================================================
 
-(defn try-lock!
-  "Attempt `pg_try_advisory_lock(key)` for `service-id` on the
-   pod's dedicated lock connection. Non-blocking — returns true
-   when we acquired the lock, false when another pod already holds
-   it.
+(defn try-acquire-slot!
+  "Attempt `pg_try_advisory_lock` for `service-id`'s pool `slot` on the
+   pod's dedicated lock connection. Non-blocking — true when we acquired
+   the slot, false when a sibling already holds it. `try-lock!` is the
+   slot-0 special case.
 
    Thread-safety: the dedicated `Connection` is NOT thread-safe;
    call from a single coordination thread (the reconciler is
    serial today, so this isn't a concern, but if a future caller
    parallelises reconciles they need to lock around this call)."
-  [^Connection conn service-id]
-  (let [k (service-id->lock-key service-id)
+  [^Connection conn service-id slot]
+  (let [k (slot-lock-key service-id slot)
         rows (jdbc/execute! conn ["SELECT pg_try_advisory_lock(?) AS acquired" k])]
     (boolean (:acquired (first rows)))))
 
 
-(defn release-lock!
-  "Release the advisory lock for `service-id`. Returns true if a
-   lock was held by this session (and is now released), false if
-   no such lock was held — same semantics as
-   `pg_advisory_unlock`.
-
-   Idempotent at the call-site level: calling for a service we
-   don't own logs a debug line and returns false."
-  [^Connection conn service-id]
-  (let [k (service-id->lock-key service-id)
+(defn release-slot!
+  "Release the advisory lock for `service-id`'s pool `slot`. Returns true
+   if this session held it (now released), false otherwise — same
+   semantics as `pg_advisory_unlock`. `release-lock!` is the slot-0 case."
+  [^Connection conn service-id slot]
+  (let [k (slot-lock-key service-id slot)
         rows (jdbc/execute! conn ["SELECT pg_advisory_unlock(?) AS released" k])
         released? (boolean (:released (first rows)))]
     (when-not released?
-      (log/debug "advisory unlock of service we don't own — no-op"
-                 {:service-id service-id}))
+      (log/debug "advisory unlock of service slot we don't own — no-op"
+                 {:service-id service-id :slot slot}))
     released?))
+
+
+(defn try-lock!
+  "Attempt the singleton advisory lock (pool slot 0) for `service-id`.
+   Non-blocking — true when acquired, false when another pod holds it."
+  [^Connection conn service-id]
+  (try-acquire-slot! conn service-id 0))
+
+
+(defn release-lock!
+  "Release the singleton advisory lock (pool slot 0) for `service-id`.
+   Idempotent at the call-site level: unlocking a service we don't own
+   logs a debug line and returns false."
+  [^Connection conn service-id]
+  (release-slot! conn service-id 0))
 
 
 (defn release-all!

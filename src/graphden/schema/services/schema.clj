@@ -56,6 +56,18 @@
      listener like `:http-server` needs: N pods behind a load balancer
      must each bind their port. Gating a listener on a cluster-wide
      lock means only ONE pod ever serves HTTP.
+   - `:pool` — up to `:pool-size` N pods run it at once (exactly N when
+     the fleet has ≥ N pods; fewer pods ⇒ one copy each). It generalises
+     `:singleton` (which is a pool of 1): the reconciler races for one of
+     N advisory-lock SLOTS (keys `msb+0 … msb+(N-1)`), holding the first
+     free slot; when all N slots are held by siblings the pod idles. Use
+     it for a background worker that should be redundant/parallel across a
+     bounded number of pods without fanning out to the whole fleet. A
+     `:pool` row with a nil / non-positive `:pool-size` degrades to a
+     singleton (safe — one copy, not a fan-out). NOTE: the pool SIZE is
+     fixed; load-driven autoscaling of N is intentionally out of scope
+     (that would need a per-service load signal + a scaling controller —
+     the request path scales via cells + HPA instead).
 
    nil ≡ `:singleton` for rows that pre-date the field (the reconciler
    reads it through `service-cardinality`), so an un-migrated row keeps
@@ -95,7 +107,8 @@
 (def ^:private cardinality-values
   (array-map
     :singleton #uuid "df3c1776-17de-456d-b9e9-12a46543d18e"
-    :per-pod   #uuid "f7f7154a-0208-475a-9c99-200b10e609ba"))
+    :per-pod   #uuid "f7f7154a-0208-475a-9c99-200b10e609ba"
+    :pool      #uuid "c7a4e0b2-9d61-4f3a-8b2c-1e5f7a0d6c93"))
 
 
 (defn- cardinality-enum-values
@@ -123,6 +136,31 @@
    i.e. its start has to be gated on the advisory lock."
   [svc]
   (= :singleton (service-cardinality svc)))
+
+
+(defn effective-pool-size
+  "How many pods may run this service at once — the advisory-lock SLOT
+   count. `:per-pod` → nil (unbounded, no lock). `:singleton` → 1.
+   `:pool` → its `:pool-size`, degrading a nil / non-positive size to 1
+   (safe: behaves as a singleton rather than fanning out). This is the
+   ONE place that resolves the cardinality → slot count, so the reconciler
+   never re-derives it."
+  [svc]
+  (case (service-cardinality svc)
+    :per-pod nil
+    :singleton 1
+    :pool (let [n (:pool-size svc)]
+            (if (and (integer? n) (pos? n)) n 1))
+    ;; unknown cardinality — treat conservatively as a singleton
+    1))
+
+
+(defn lock-gated?
+  "True when this service's start must race for one of its advisory-lock
+   slots (`:singleton` or `:pool`). `:per-pod` runs on every pod without a
+   lock, so it is never gated."
+  [svc]
+  (some? (effective-pool-size svc)))
 
 
 ;; =============================================================================
@@ -155,6 +193,14 @@
 ;; `service-cardinality` reads nil as `:singleton`.
 (def ^:private service-cardinality-field-uuid
   #uuid "5ba1c395-2012-43d0-897d-8beae71344cf")
+
+
+;; How many pods run this service when `:cardinality` is `:pool`. Nullable
+;; (only meaningful for `:pool`; nil / non-positive degrades to 1 via
+;; `effective-pool-size`). Adding it needs no backfill — legacy rows read
+;; nil, and only `:pool` rows consult it.
+(def ^:private service-pool-size-field-uuid
+  #uuid "a1f9d3c7-6b28-4e05-9c14-3d7e8f2b0a56")
 
 
 ;; Per-branch service binding. The same fn-id can have a different
@@ -200,6 +246,9 @@
                                     :type :enum
                                     :enum-name :cardinality
                                     :nullable? true}
+                      :pool-size {:uuid service-pool-size-field-uuid
+                                  :type :int
+                                  :nullable? true}
                       :branch-id {:uuid service-branch-id-field-uuid
                                   :type :ref
                                   :ref-entity :branch

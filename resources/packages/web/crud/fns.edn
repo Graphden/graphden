@@ -3997,7 +3997,7 @@
           :else {:value {}}}}
 
   {:name :_parse-svc-form-cardinality-fragment
-   :description "Optional `:cardinality` form-field — `:singleton` (advisory-lock-gated, one pod cluster-wide) or `:per-pod` (every pod runs its own copy; what an `:http-server` listener needs). Absent ⇒ the column stays nil, which the reconciler reads as `:singleton`. Same `:str-to-keyword` coercion as `:restart-policy`."
+   :description "Optional `:cardinality` form-field — `:singleton` (advisory-lock-gated, one pod cluster-wide), `:per-pod` (every pod runs its own copy; what an `:http-server` listener needs), or `:pool` (up to `:pool-size` pods, coordinated by N advisory-lock slots). Absent ⇒ the column stays nil, which the reconciler reads as `:singleton`. Same `:str-to-keyword` coercion as `:restart-policy`."
    :parent :if
    :args {:test {:parent :contains?
                  :args {:coll {:as :form-data} :key {:value :cardinality}}}
@@ -4008,6 +4008,20 @@
                                                 :args {:coll {:as :form-data}
                                                        :key {:value :cardinality}
                                                        :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-svc-form-pool-size-fragment
+   :description "Optional `:pool-size` form-field (int) — how many pods a `:pool` service runs on. Parsed via `:parse-int`; ignored by the reconciler for non-`:pool` cardinalities. Absent / blank ⇒ the column stays nil (a `:pool` row with nil size degrades to a singleton)."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :pool-size}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :pool-size}]
+                        :vals [{:parent :parse-int
+                                :args {:s {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :pool-size}
+                                                  :default nil}}}}]}}
           :else {:value {}}}}
 
   {:name :_parse-svc-form-branch-id-fragment
@@ -4025,13 +4039,14 @@
           :else {:value {}}}}
 
   {:name :parse-service-from-form
-   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:cardinality` (`:singleton` / `:per-pod`, optional) says how many pods run it at once; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
+   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:cardinality` (`:singleton` / `:per-pod` / `:pool`, optional) says how many pods run it at once; `:pool-size` (int, optional) is the pod count for `:pool`; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
    :parent :merge
    :args {:maps [{:value {}}
                  :_parse-svc-form-fn-id-fragment
                  :_parse-svc-form-enabled-fragment
                  :_parse-svc-form-restart-policy-fragment
                  :_parse-svc-form-cardinality-fragment
+                 :_parse-svc-form-pool-size-fragment
                  :_parse-svc-form-branch-id-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}

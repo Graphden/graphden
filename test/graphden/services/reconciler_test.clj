@@ -835,18 +835,35 @@
     (is (svcs/singleton? {})))
   (testing "an explicit value wins"
     (is (= :per-pod (svcs/service-cardinality {:cardinality :per-pod})))
-    (is (not (svcs/singleton? {:cardinality :per-pod})))))
+    (is (not (svcs/singleton? {:cardinality :per-pod}))))
+  (testing "effective-pool-size resolves the advisory-lock slot count"
+    (is (= 1 (svcs/effective-pool-size {})) "legacy row → singleton → 1 slot")
+    (is (= 1 (svcs/effective-pool-size {:cardinality :singleton})))
+    (is (nil? (svcs/effective-pool-size {:cardinality :per-pod})) "per-pod → no lock")
+    (is (= 3 (svcs/effective-pool-size {:cardinality :pool :pool-size 3})))
+    (is (= 1 (svcs/effective-pool-size {:cardinality :pool :pool-size nil}))
+        "a :pool with no size degrades to a singleton, not a fan-out")
+    (is (= 1 (svcs/effective-pool-size {:cardinality :pool :pool-size 0}))
+        "non-positive size degrades to 1"))
+  (testing "lock-gated? is true for singleton + pool, false for per-pod"
+    (is (svcs/lock-gated? {:cardinality :singleton}))
+    (is (svcs/lock-gated? {:cardinality :pool :pool-size 2}))
+    (is (not (svcs/lock-gated? {:cardinality :per-pod})))))
 
 
 (defn- fake-lock-table
-  "Model the cluster-wide advisory-lock table: `try-lock!` succeeds for
-   whoever asks first, `release-lock!` frees the key. Returns
-   `[held-atom try-lock-fn release-fn]`."
+  "Model the cluster-wide advisory-lock SLOT table: `try-acquire-slot!`
+   succeeds for whoever asks for a given `(service-id, slot)` first,
+   `release-slot!` frees it. Returns `[held-atom acquire-fn release-fn]`
+   where `held-atom` holds the set of taken `[service-id slot]` keys
+   (a singleton uses slot 0, a pool uses 0..N-1)."
   []
   (let [held (atom #{})]
     [held
-     (fn [_conn sid] (not (contains? (first (swap-vals! held conj sid)) sid)))
-     (fn [_conn sid] (swap! held disj sid) true)]))
+     (fn [_conn sid slot]
+       (let [k [sid slot]]
+         (not (contains? (first (swap-vals! held conj k)) k))))
+     (fn [_conn sid slot] (swap! held disj [sid slot]) true)]))
 
 
 (defn- pod-ctx
@@ -870,8 +887,8 @@
         pod-a (atom {})
         pod-b (atom {})]
     (try
-      (with-redefs [pg-lock/try-lock! try-lock
-                    pg-lock/release-lock! release]
+      (with-redefs [pg-lock/try-acquire-slot! try-lock
+                    pg-lock/release-slot! release]
         (let [ra (recon/reconcile-once! (pod-ctx storage) pod-a)
               rb (recon/reconcile-once! (pod-ctx storage) pod-b)]
           (testing "pod A wins the lock and starts it"
@@ -903,8 +920,8 @@
         pod-a (atom {})
         pod-b (atom {})]
     (try
-      (with-redefs [pg-lock/try-lock! try-lock
-                    pg-lock/release-lock! release]
+      (with-redefs [pg-lock/try-acquire-slot! try-lock
+                    pg-lock/release-slot! release]
         (let [ra (recon/reconcile-once! (pod-ctx storage) pod-a)
               rb (recon/reconcile-once! (pod-ctx storage) pod-b)]
           (testing "both pods start their own copy — a listener must bind on each"
@@ -936,9 +953,9 @@
         released (atom [])
         pod (atom {})]
     (try
-      (with-redefs [pg-lock/try-lock! try-lock
-                    pg-lock/release-lock!
-                    (fn [_conn sid] (swap! released conj sid) true)]
+      (with-redefs [pg-lock/try-acquire-slot! try-lock
+                    pg-lock/release-slot!
+                    (fn [_conn sid _slot] (swap! released conj sid) true)]
         (recon/reconcile-once! (pod-ctx storage) pod)
         (sp/update-entity storage :service (:id svc) {:enabled? false})
         (recon/reconcile-once! (pod-ctx storage) pod)
@@ -961,8 +978,8 @@
         [_held try-lock release] (fake-lock-table)
         pod (atom {})]
     (try
-      (with-redefs [pg-lock/try-lock! try-lock
-                    pg-lock/release-lock! release]
+      (with-redefs [pg-lock/try-acquire-slot! try-lock
+                    pg-lock/release-slot! release]
         (recon/reconcile-once! (pod-ctx storage) pod)
         (is (true? (:locked? (get @pod (:id svc)))))
         (sp/update-entity storage :service (:id svc) {:cardinality :per-pod})
@@ -978,6 +995,105 @@
       (finally
         (recon/stop-all! pod)
         (sp/close storage)))))
+
+
+(deftest pool-service-runs-on-exactly-N-pods-test
+  (testing ":pool with :pool-size 2 runs on 2 of 3 pods, each on a distinct slot"
+    (let [storage (create-full-storage)
+          calls (atom [])
+          stops (atom [])
+          {composed :composed} (make-trackable-fn! storage "pool" calls stops)
+          svc (sp/create-entity storage :service
+                                {:fn-id (:id composed)
+                                 :enabled? true
+                                 :restart-policy :always
+                                 :cardinality :pool
+                                 :pool-size 2})
+          [_held try-lock release] (fake-lock-table)
+          pods [(atom {}) (atom {}) (atom {})]]
+      (try
+        (with-redefs [pg-lock/try-acquire-slot! try-lock
+                      pg-lock/release-slot! release]
+          (let [results (mapv #(recon/reconcile-once! (pod-ctx storage) %) pods)
+                started (filter #(seq (:started %)) results)
+                idle (filter #(seq (:not-our-lock %)) results)
+                slots (->> pods
+                           (keep #(:pool-slot (get @% (:id svc))))
+                           set)]
+            (testing "exactly 2 pods started it, 1 idled"
+              (is (= 2 (count started)))
+              (is (= 1 (count idle))))
+            (testing "the fn ran exactly twice cluster-wide"
+              (is (= 2 (count @calls))))
+            (testing "the two runners hold distinct slots (0 and 1)"
+              (is (= #{0 1} slots)))))
+        (finally
+          (doseq [p pods] (recon/stop-all! p))
+          (sp/close storage))))))
+
+
+(deftest not-our-lock-is-retried-so-a-crashed-owner-fails-over-test
+  (testing "an idle pod re-attempts the lock each pass; when the owner's slot frees, it takes over"
+    (let [storage (create-full-storage)
+          calls (atom [])
+          stops (atom [])
+          {composed :composed} (make-trackable-fn! storage "failover" calls stops)
+          svc (sp/create-entity storage :service
+                                {:fn-id (:id composed)
+                                 :enabled? true
+                                 :restart-policy :always
+                                 :cardinality :singleton})
+          [_held try-lock release] (fake-lock-table)
+          pod-a (atom {})
+          pod-b (atom {})]
+      (try
+        (with-redefs [pg-lock/try-acquire-slot! try-lock
+                      pg-lock/release-slot! release]
+          (recon/reconcile-once! (pod-ctx storage) pod-a)
+          (recon/reconcile-once! (pod-ctx storage) pod-b)
+          (testing "pod A owns it, pod B idles (::not-our-lock)"
+            (is (true? (:locked? (get @pod-a (:id svc)))))
+            (is (= ::recon/not-our-lock (get @pod-b (:id svc))))
+            (is (= 1 (count @calls))))
+          ;; Simulate pod A crashing: its session ends, freeing slot 0.
+          (release ::conn (:id svc) 0)
+          ;; pod B's next pass drops its stale ::not-our-lock and re-attempts.
+          (recon/reconcile-once! (pod-ctx storage) pod-b)
+          (testing "pod B took over the freed slot on its next reconcile"
+            (is (true? (:locked? (get @pod-b (:id svc)))))
+            (is (= 2 (count @calls)) "the fn now runs on pod B too")))
+        (finally
+          (recon/stop-all! pod-b)
+          (sp/close storage))))))
+
+
+(deftest pool-shrink-restarts-out-of-range-slot-test
+  (testing "shrinking :pool-size drifts the entry so the pod re-evaluates its slot"
+    (let [storage (create-full-storage)
+          calls (atom [])
+          stops (atom [])
+          {composed :composed} (make-trackable-fn! storage "shrink" calls stops)
+          svc (sp/create-entity storage :service
+                                {:fn-id (:id composed)
+                                 :enabled? true
+                                 :restart-policy :always
+                                 :cardinality :pool
+                                 :pool-size 2})
+          [_held try-lock release] (fake-lock-table)
+          pod (atom {})]
+      (try
+        (with-redefs [pg-lock/try-acquire-slot! try-lock
+                      pg-lock/release-slot! release]
+          (recon/reconcile-once! (pod-ctx storage) pod)
+          (is (= 2 (:pool-size (get @pod (:id svc)))))
+          (sp/update-entity storage :service (:id svc) {:pool-size 1})
+          (let [r (recon/reconcile-once! (pod-ctx storage) pod)]
+            (testing "drift detection catches the pool-size change and restarts"
+              (is (= [(:id svc)] (:stopped r)))
+              (is (= 1 (:pool-size (get @pod (:id svc))))))))
+        (finally
+          (recon/stop-all! pod)
+          (sp/close storage))))))
 
 
 ;; ============================================================================
@@ -996,11 +1112,11 @@
         pod (atom {})]
     (try
       ;; Start under a (fake) lock connection so the entry is :locked? true.
-      (with-redefs [pg-lock/try-lock! (fn [_ _] true)]
+      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] true)]
         (recon/reconcile-once! (pod-ctx storage) pod))
       (is (true? (:locked? (get @pod (:id svc)))))
       ;; Reconnect scenario: re-acquire SUCCEEDS (nobody stole it).
-      (with-redefs [pg-lock/try-lock! (fn [_ _] true)]
+      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] true)]
         (#'recon/reassert-lock-ownership! ::fresh-conn pod))
       (testing "service we re-acquired stays running, not stopped"
         (is (contains? @pod (:id svc)))
@@ -1020,12 +1136,12 @@
                                :restart-policy :always :cardinality :singleton})
         pod (atom {})]
     (try
-      (with-redefs [pg-lock/try-lock! (fn [_ _] true)]
+      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] true)]
         (recon/reconcile-once! (pod-ctx storage) pod))
       (is (true? (:locked? (get @pod (:id svc)))))
       ;; Reconnect scenario: re-acquire FAILS — a sibling took it during the
       ;; outage. The pod must stop its local copy and yield.
-      (with-redefs [pg-lock/try-lock! (fn [_ _] false)]
+      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] false)]
         (#'recon/reassert-lock-ownership! ::fresh-conn pod))
       (testing "we stopped the local copy and dropped the entry"
         (is (not (contains? @pod (:id svc))))
@@ -1054,7 +1170,7 @@
       ;; Pass 1: no reconnect (ensure-live! false) — acquire the lock so the
       ;; entry is :locked? true, exactly as a healthy pass would leave it.
       (with-redefs [pg-lock/ensure-live! (fn [_] false)
-                    pg-lock/try-lock! (fn [_ _] true)]
+                    pg-lock/try-acquire-slot! (fn [_ _ _] true)]
         (recon/reconcile-once! ctx pod))
       (is (true? (:locked? (get @pod (:id svc)))))
       ;; Pass 2: the holder reconnected (ensure-live! true) → the glue must
@@ -1062,7 +1178,7 @@
       ;; outage (try-lock! false), so reassert stops our local copy.
       (with-redefs [pg-lock/ensure-live! (fn [_] true)
                     pg-lock/holder-conn (fn [_] ::fresh)
-                    pg-lock/try-lock! (fn [_ _] false)]
+                    pg-lock/try-acquire-slot! (fn [_ _ _] false)]
         (recon/reconcile-once! ctx pod))
       (testing "the reconnect drove reassert: the stolen singleton was stopped"
         (is (= 1 (count @stops)) "the local copy's stopper fired exactly once")
@@ -1087,7 +1203,7 @@
       (is (false? (:locked? (get @pod (:id svc)))) ":per-pod never locked")
       ;; Even if try-lock! would fail, a :per-pod entry (:locked? false) is
       ;; skipped — it never depended on a lock.
-      (with-redefs [pg-lock/try-lock! (fn [_ _] (throw (ex-info "should not be called" {})))]
+      (with-redefs [pg-lock/try-acquire-slot! (fn [_ _ _] (throw (ex-info "should not be called" {})))]
         (#'recon/reassert-lock-ownership! ::fresh-conn pod))
       (testing ":per-pod service stays running, try-lock! never consulted"
         (is (contains? @pod (:id svc)))

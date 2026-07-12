@@ -80,13 +80,16 @@
    ;; is exactly why they're unit not integration — so they can't be
    ;; dropped to speed the run up. Measured wall on a dev host: ~19 min
    ;; (the old "~1:30" comment was a stale / faster-host figure and is
-   ;; what mis-sized this to 5 min). Ceiling set to 25 min: headroom
-   ;; over the observed ~19 min + CI parallel load, while still
-   ;; surfacing a true hang (test deadlock, testcontainer stuck on the
-   ;; Docker daemon). Integration + e2e live at `bb test-integration` /
-   ;; `bb test-e2e` and run outside CI on demand — their wall budgets
-   ;; (~10-12 min / ~15-25 min) are documented in `bb.edn`.
-   "tests-unit-coverage" 1500000
+   ;; what mis-sized this to 5 min).
+   ;; 2026-07: the develop merge (type-checker fold consolidation + its
+   ;; new unit tests) grew the instrumented suite past the old 25-min
+   ;; ceiling — a `bb ci` run TIMED OUT at 1500 s (the tests themselves
+   ;; all pass; it was purely the wall). Bumped to 35 min: headroom over
+   ;; the grown suite under CI parallel load, while still surfacing a
+   ;; true hang (a deadlock runs unbounded, ≫ 35 min). Integration + e2e
+   ;; live at `bb test-integration` / `bb test-e2e` and run outside CI on
+   ;; demand — their wall budgets (~10-12 min / ~15-25 min) are in `bb.edn`.
+   "tests-unit-coverage" 2100000
    "outdated"  120000
    "security"  180000
    ;; Docker-based linters get extra headroom for first-run image

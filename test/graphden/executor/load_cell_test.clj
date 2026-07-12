@@ -48,14 +48,16 @@
           ctx (ectx/create-context {:storage storage
                                     :base-fns (exec/get-default-registry)})]
       (try
-        (testing "before any load the registry is empty"
-          (is (empty? (or @(:compiled-registry ctx) {}))))
+        (testing "before any load the registry is empty + nothing is held"
+          (is (empty? (or @(:compiled-registry ctx) {})))
+          (is (not (cr/cell-held? ctx (:id root))) "cell-held? false before load"))
 
         (testing "load-cell! compiles the root's closure"
           (let [cell (cr/load-cell! ctx (:id root))]
             (is (contains? cell (:id root)) "the root is in its own cell")
             (is (contains? @(:compiled-registry ctx) (:id root))
-                "root compiled into the registry")))
+                "root compiled into the registry")
+            (is (cr/cell-held? ctx (:id root)) "cell-held? true after load")))
 
         (testing "the OTHER independent root was NOT loaded"
           (is (not (contains? @(:compiled-registry ctx) (:id other)))
@@ -102,7 +104,9 @@
                 "the shared echo-x survives — echo-99 still references it (refcount)")
             (is (not (contains? @(:compiled-registry ctx) (:id root))) "root gone from registry")
             (is (contains? @(:compiled-registry ctx) (:id base)) "shared base still compiled")
-            (is (= #{(:id other)} @(:loaded-roots ctx)) "only the other root remains loaded")))
+            (is (= #{(:id other)} @(:loaded-roots ctx)) "only the other root remains loaded")
+            (is (not (cr/cell-held? ctx (:id root))) "evicted root no longer held")
+            (is (cr/cell-held? ctx (:id other)) "the surviving cell is still held")))
 
         (testing "the surviving cell still executes"
           (is (= 99 (cr/execute ctx (:id other) {}))))

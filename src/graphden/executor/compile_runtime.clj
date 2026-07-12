@@ -542,6 +542,22 @@
         evictable))))
 
 
+(defn cell-held?
+  "Is `fn-id` currently servable on THIS executor? Runtime membership at CELL
+   granularity (docs/FLEET_RFC.md §6.2): a fn is held iff it's in the compiled
+   registry — `load-cell!` puts a cell's whole closure there, `evict-cell!`
+   removes what nothing else needs. The fleet generalisation of `org-in-shard?`
+   (which answers the same question at whole-org granularity for the static
+   shard): a non-fleet executor compiles its whole shard, so `cell-held?` is
+   true for every shard fn; a fleet executor holds only the cells it loaded.
+
+   The predicate is LIVE — it reads the registry atom that load/evict mutate,
+   so membership changes at runtime with no ctx rebuild. nil / empty registry
+   (before the first load) ⇒ false."
+  [ctx fn-id]
+  (boolean (some-> (:compiled-registry ctx) deref (contains? fn-id))))
+
+
 (defn registry
   "Return the current compiled registry from `ctx`, rebuilding on-demand
    when missing. Tests that skip the `:exec/compiled-registry` init-key

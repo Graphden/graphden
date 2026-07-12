@@ -139,7 +139,13 @@ What that run confirmed:
   token-gated (401 without / with a wrong token) and runs `load-cell!` (409 for a
   cell not in the pod's shard) with a valid token.
 - **Cross-pod transport** — pod-0 reaches pod-1's endpoint at its FQDN, the move
-  controller's directed load/evict path.
+  controller's directed load/evict path (a real cell → `{"loaded":1}`).
+- **Autonomous rebalance** — seeding two cells onto one pod, the leader
+  controller detects the imbalance (`Fleet controller applied placement
+  {:moves 1 :imbalance 2.0}`) and, after the sustain window, moves one cell to
+  the idle pod via the directed transport — the `:placement` epoch flips and
+  load evens 1+1. The whole loop (discover → weigh → rebalance → move) on live
+  pods.
 
 See [SCALING.md](SCALING.md) for the static-shard / BYO story this builds on, and
 [FLEET_RFC.md](FLEET_RFC.md) §6 for the routing + controller internals.

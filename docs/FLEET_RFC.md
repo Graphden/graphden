@@ -366,8 +366,17 @@ Verified against the executor:
   - **T4.5 (deferred, on evidence)** overlap-accounting on evict (co-locate cells
     sharing large closures) + per-route cell-splitting (§3.2) — both wait for
     evidence that a single-cell-per-org grain is insufficient.
-- **Phase 3 — substrate.** k8s operator; HPA/Knative under shards; optional
-  scale-to-zero for the idle tail.
+- **Phase 3 — substrate (core SHIPPED).** Concrete tasks:
+  - **T5.1 ✅** DNS-SRV membership discovery (`fleet.discovery`) — headless-
+    Service SRV → live executor set, tracking StatefulSet/HPA scaling. Pure DNS,
+    no k8s API / RBAC.
+  - **T5.2 ✅** Helm chart (`deploy/helm/graphden`) — StatefulSet + headless +
+    front-door Service + Secret/ConfigMap + opt-in HPA. Each pod's
+    `GRAPHDEN_EXECUTOR_ID` is its FQDN; the controller runs in-app (no separate
+    operator/CRD). See [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
+  - **T5.3 (deferred, CRaC-gated)** scale-to-zero for the idle tail — needs the
+    footprint/start track (§5.1) to make cold start acceptable first. Knative
+    activator buffering slots in here.
 - **Parallel track — footprint/start (§5.1).** Substrate confirmed (CRIU + Zulu
   CRaC JDK work here). Track = CRaC `Resource` handlers (close/reopen the pool +
   sockets) → checkpoint after warm boot → measure restore of the real ~655 MB
@@ -452,10 +461,11 @@ is the foundation this RFC reuses — not new work.**
   (version epoch) is a separate, optional layer.
 - 2026-07: **services are already cells**; **an org app is one cell today**, and
   per-route splitting is pure fn-def rewiring, deferred to Phase 2+ on evidence.
-- 2026-07: **Phase 0 + Phase 1 + Phase 2 core SHIPPED** (`fleet.{placement,
-  router,command,metrics,controller,packer,rebalance,control-loop}` +
-  `:exec/fleet-controller`). The fleet now auto-places new tenant cells and
-  rebalances sustained load imbalance under a leader-locked controller, all on
-  the executor set from `GRAPHDEN_FLEET_EXECUTORS`. Remaining: overlap-
-  accounting + per-route split (evidence-gated), the CRaC footprint track's
-  final measurement, and the Phase-3 k8s substrate.
+- 2026-07: **Phase 0 + Phase 1 + Phase 2 + Phase 3 core SHIPPED**
+  (`fleet.{placement,router,command,metrics,controller,packer,rebalance,
+  control-loop,discovery}` + `:exec/fleet-controller` + the Helm chart). The
+  fleet auto-places new tenant cells and rebalances sustained load imbalance
+  under a leader-locked controller, over a k8s StatefulSet whose SRV membership
+  tracks HPA scaling. Remaining: overlap-accounting + per-route split
+  (evidence-gated, T4.5), scale-to-zero (CRaC-gated, T5.3), and the CRaC
+  footprint track's final measurement.

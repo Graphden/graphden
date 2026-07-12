@@ -118,6 +118,19 @@ DB_PASSWORD=graphden \
 java -jar target/executor-server.jar
 ```
 
+### Option 4: Kubernetes (Helm) — the dynamic fleet
+
+For a multi-pod fleet with automatic placement + rebalancing, deploy the Helm
+chart in `deploy/helm/graphden`. It brings up a StatefulSet of executors behind
+a headless Service (SRV membership discovery) with the leader-locked placement
+controller, and an optional HPA. Full walkthrough: **[FLEET_DEPLOY.md](FLEET_DEPLOY.md)**.
+
+```bash
+helm install fleet deploy/helm/graphden \
+  --set database.jdbcUrl=jdbc:postgresql://your-managed-pg:5432/graphden \
+  --set secrets.authToken=... --set secrets.internalToken=... --set secrets.dbPassword=...
+```
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -142,6 +155,22 @@ java -jar target/executor-server.jar
 | `GRAPHDEN_SSE_PORT` | *(empty)* | Port for the SSE invalidation relay (keeps external/BYO executors fresh). Unset ⇒ relay disabled |
 | `GRAPHDEN_EXECUTOR_ORGS` | *(empty)* | Comma/JSON set of org-ids this pod's shard serves. Unset ⇒ compiles everything (single-tenant / unsharded). A request for an org outside the shard gets `421` |
 | `GRAPHDEN_BYO_EXECUTOR` | *(empty)* | Truthy ⇒ this pod is a customer's own executor and serves `:byo` orgs (a hosted pod `421`s them) |
+
+### Dynamic fleet — placement controller (see [FLEET_RFC.md](FLEET_RFC.md) + [FLEET_DEPLOY.md](FLEET_DEPLOY.md))
+
+Set on hosted pods that participate in the dynamic fleet. The Helm chart wires all of these.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GRAPHDEN_EXECUTOR_ID` | *(empty)* | This pod's fleet identity — its own DNS name (k8s pod FQDN). Set ⇒ forward-hop + the `/internal/fleet/cell` endpoint + the placement controller all activate. Unset ⇒ single-tenant, none of them |
+| `GRAPHDEN_PORT` | `8080` | Port sibling pods dial for forward-hop + cell commands |
+| `GRAPHDEN_INTERNAL_TOKEN` | *(empty)* | Shared control-plane secret gating `POST /internal/fleet/cell/...`. Unset ⇒ endpoint fail-closes, moves disabled |
+| `GRAPHDEN_FLEET_EXECUTORS` | *(empty)* | Explicit comma-separated executor set (static / non-k8s). Takes precedence over DNS discovery |
+| `GRAPHDEN_FLEET_DNS` | *(empty)* | Headless-Service SRV name; resolved for live membership when the explicit list is unset (tracks HPA scaling) |
+| `GRAPHDEN_FLEET_CONTROLLER_PERIOD_MS` | `30000` | Controller tick period |
+| `GRAPHDEN_FLEET_SUSTAIN_TICKS` | `3` | Ticks an imbalance must persist before a rebalance move fires |
+| `GRAPHDEN_FLEET_MIN_IMPROVEMENT` | `0.0` | Magnitude floor — a plan is dropped unless it improves imbalance by more than this |
+| `GRAPHDEN_FLEET_MAX_MOVES` | *(unbounded)* | Per-tick cap on rebalance moves |
 
 ### BYO entrypoint (`clojure -M -m graphden.byo` — see [SCALING.md § External / BYO](SCALING.md))
 

@@ -146,6 +146,14 @@ What that run confirmed:
   the idle pod via the directed transport — the `:placement` epoch flips and
   load evens 1+1. The whole loop (discover → weigh → rebalance → move) on live
   pods.
+- **Forward-hop with tenancy** — two sharded tenancy pods (fleet-a shard
+  `public`, fleet-b `public,orgb`, both with
+  `GRAPHDEN_ADDON_CONFIGS=graphden/tenancy/addon.edn,graphden/tenancy/faas.edn`).
+  A request `Host: orgb.graphden.app` to fleet-a (which doesn't hold orgb)
+  forward-hops to fleet-b per `:placement` and returns fleet-b's byte-identical
+  app response (vs the apex editor fleet-a serves itself, and vs `421` with no
+  placement). This surfaced + fixed the Host-stripping bug (69203eff): the hop
+  must preserve the tenant subdomain, the holder's routing key.
 
 See [SCALING.md](SCALING.md) for the static-shard / BYO story this builds on, and
 [FLEET_RFC.md](FLEET_RFC.md) §6 for the routing + controller internals.

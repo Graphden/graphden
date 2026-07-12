@@ -378,9 +378,14 @@ Verified against the executor:
     front-door Service + Secret/ConfigMap + opt-in HPA. Each pod's
     `GRAPHDEN_EXECUTOR_ID` is its FQDN; the controller runs in-app (no separate
     operator/CRD). See [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
-  - **T5.3 (deferred, CRaC-gated)** scale-to-zero for the idle tail — needs the
-    footprint/start track (§5.1) to make cold start acceptable first. Knative
-    activator buffering slots in here.
+  - **T5.3 (Knative half DEMONSTRATED; CRaC-gated for production)** scale-to-zero
+    for the idle tail. Verified on kind (2026-07-12, deploy/kind/knative/): the
+    graphden app as a Knative Service scales to **0 pods** when idle and a request
+    cold-starts one (the activator buffers it) — but the cold-start was **115 s**
+    (the compute-bound boot). So the substrate works; making it PRACTICAL still
+    needs the footprint/start track (§5.1) — CRaC restore (~178 ms) fronting the
+    ksvc turns that 115 s into sub-200 ms (~650×). Wiring the CRaC restore image
+    into the ksvc is the remaining step.
 - **Parallel track — footprint/start (§5.1) — MEASURED + DECISION: ADOPT.**
   The full-system checkpoint now works end-to-end (three `graphden.crac`
   quiesce/resume blockers fixed — see `development/crac/README.md`). Measured on

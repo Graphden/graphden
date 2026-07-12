@@ -14,6 +14,13 @@
 # Requirements: a CRaC JDK ($CRAC_JDK), criu on PATH (or $CRAC_JDK/lib/criu),
 # CAP_CHECKPOINT_RESTORE/SYS_PTRACE/SYS_ADMIN (run the build host / container
 # privileged), a synced graph in $JDBC_URL, and target/executor-server.jar.
+#
+# uid: CRIU restores the process under its CHECKPOINT-time uid, and
+# Dockerfile.crac's restore runs as uid 1001 (USER graphden). So this checkpoint
+# MUST be taken as uid 1001 too, or the restore fails with a uid mismatch. Run
+# the script in a container whose USER is 1001 (privileged for CRIU); the guard
+# below enforces it. Override CHECKPOINT_UID here AND Dockerfile.crac's USER
+# together if you need a different uid.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -21,7 +28,17 @@ JDK="${CRAC_JDK:?set CRAC_JDK to a CRaC-enabled JDK home}"
 JAR="$ROOT/target/executor-server.jar"
 OUT="$ROOT/target/crac-checkpoint"
 NATIVE="$ROOT/target/native"
+CHECKPOINT_UID="${CHECKPOINT_UID:-1001}"  # MUST match Dockerfile.crac's USER
 : "${JDBC_URL:?set JDBC_URL to the Postgres the restore image will also use}"
+
+if [ "$(id -u)" != "$CHECKPOINT_UID" ]; then
+  echo "checkpoint uid $(id -u) != restore-image uid $CHECKPOINT_UID." >&2
+  echo "CRIU restores under the checkpoint-time uid, so the resulting image would" >&2
+  echo "fail to restore. Run this as uid $CHECKPOINT_UID (e.g. in a container whose" >&2
+  echo "USER is $CHECKPOINT_UID, privileged for CRIU), or set CHECKPOINT_UID +" >&2
+  echo "Dockerfile.crac's USER to the same value. Aborting." >&2
+  exit 1
+fi
 
 command -v criu >/dev/null 2>&1 || export PATH="$JDK/lib:$PATH"
 criu check >/dev/null || { echo "criu check failed — need privileged caps"; exit 1; }

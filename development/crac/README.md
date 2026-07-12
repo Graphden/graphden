@@ -114,10 +114,13 @@ working).
 
 ```bash
 # 1. checkpoint phase — needs a reachable Postgres (synced graph) + privileged CRIU
+#    AND must run as uid 1001 (the restore image's USER) — CRIU restores under
+#    the checkpoint-time uid. Run it in a container whose USER is 1001; the
+#    script's guard aborts otherwise.
 export CRAC_JDK=/path/to/zulu-crac-jdk-21
 export JDBC_URL=jdbc:postgresql://postgres:5432/graphden   # SAME url the runtime uses
 bb rebuild                       # build target/executor-server.jar
-./build-checkpoint.sh            # → target/crac-checkpoint + target/native
+./build-checkpoint.sh            # → target/crac-checkpoint + target/native (as uid 1001)
 
 # 2. bake the restore image and run it (privileged for CRIU)
 docker build -f Dockerfile.crac -t graphden:crac .
@@ -133,3 +136,6 @@ Two hard constraints (standard CRaC same-topology rules):
   name).
 - **Privileged CRIU** at restore (the caps above), and the brotli native lib at a
   stable `-Dgraphden.native-lib.dir` present in the image (blocker 1).
+- **Matching uid** — checkpoint and restore must run as the same uid (1001).
+  `build-checkpoint.sh` guards on `CHECKPOINT_UID` (default 1001 = Dockerfile.crac's
+  `USER`); run the checkpoint in a container whose USER is 1001.

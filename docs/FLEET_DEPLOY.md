@@ -108,5 +108,38 @@ places or moves cells. Non-leaders stay quiet.
 3. A stale/absent placement falls back to `421 Misdirected` — the rare backstop,
    not the mechanism.
 
+## Local verification with kind
+
+The chart + fleet mechanics were validated end-to-end on a local
+[kind](https://kind.sigs.k8s.io/) cluster (2026-07-12). To reproduce:
+
+```bash
+kind create cluster --name gfleet
+kind load docker-image graphden-executor:latest --name gfleet   # after bb rebuild
+# deploy an in-cluster Postgres (Deployment + Service named `postgres`), then:
+helm install fleet deploy/helm/graphden \
+  --set image.repository=graphden-executor --set image.tag=latest \
+  --set image.pullPolicy=Never --set replicaCount=1 \
+  --set database.jdbcUrl=jdbc:postgresql://postgres:5432/graphden \
+  --set secrets.authToken=… --set secrets.internalToken=… --set secrets.dbPassword=graphden
+kubectl rollout status statefulset/fleet-graphden
+kubectl scale statefulset/fleet-graphden --replicas=2
+```
+
+What that run confirmed:
+
+- **executor-id** = the pod FQDN (`fleet-graphden-0.fleet-graphden-headless.<ns>.svc.cluster.local`),
+  composed via the downward API.
+- **SRV membership** — the headless Service publishes one endpoint per ready pod;
+  the controller resolves `GRAPHDEN_FLEET_DNS` to the live set.
+- **Leader election** — both pods start the controller, but exactly ONE holds the
+  fleet-controller advisory lock (`SELECT … FROM pg_locks WHERE locktype='advisory'`
+  shows the controller key from a single pod).
+- **Internal endpoint** — `POST /internal/fleet/cell/{load,evict}/{uuid}` is
+  token-gated (401 without / with a wrong token) and runs `load-cell!` (409 for a
+  cell not in the pod's shard) with a valid token.
+- **Cross-pod transport** — pod-0 reaches pod-1's endpoint at its FQDN, the move
+  controller's directed load/evict path.
+
 See [SCALING.md](SCALING.md) for the static-shard / BYO story this builds on, and
 [FLEET_RFC.md](FLEET_RFC.md) §6 for the routing + controller internals.

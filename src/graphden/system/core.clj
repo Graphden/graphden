@@ -35,6 +35,7 @@
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.packages.schema :as pkgs]
+    [graphden.schema.placement.schema :as placement]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.schema.services.schema :as svcs]
     [graphden.schema.traits.schema :as vts]
@@ -77,7 +78,11 @@
                  (svcs/extend-builder)
                  ;; Registry artifacts — immutable published package snapshots.
                  ;; Non-versioned (immutable by contract), refs nothing graph-side.
-                 (pkgs/extend-builder))]
+                 (pkgs/extend-builder)
+                 ;; Fleet placement map `(org, entry-fn-id) → executor-id`
+                 ;; (docs/FLEET_RFC.md §6.1). Refs :fn (logical). Non-versioned —
+                 ;; control-plane routing state that mutates in place.
+                 (placement/extend-builder))]
     ;; Addon schema-extension seam (PLATFORM_PLAN §3.0): each `extensions`
     ;; entry is a `(builder → builder)` fn — the tenancy addon adds its
     ;; `:grant` entity here without editing core. Absent → core schema.

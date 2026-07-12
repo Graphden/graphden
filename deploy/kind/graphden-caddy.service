@@ -1,0 +1,21 @@
+# Persistent TLS proxy for the graphden kind fleet (example.com:9443).
+# Install (needs root — host-level auto-start):
+#   sudo cp deploy/kind/graphden-caddy.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now graphden-caddy
+# Adjust the caddy path / Caddyfile path below if your checkout differs.
+[Unit]
+Description=Caddy TLS proxy for the graphden kind fleet (example.com:9443)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/root
+ExecStart=/root/.nix-profile/bin/caddy run --config /root/projects/graphden/deploy/kind/Caddyfile --adapter caddyfile
+ExecReload=/root/.nix-profile/bin/caddy reload --config /root/projects/graphden/deploy/kind/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

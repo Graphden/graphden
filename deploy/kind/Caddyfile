@@ -1,0 +1,17 @@
+# Public TLS front for the graphden kind fleet at example.com:9443.
+# Port 443 is NOT used — it belongs to the host's another service. We take a
+# separate port and get a Let's Encrypt cert via the HTTP-01 challenge on port
+# 80 (TLS-ALPN, which needs 443, is disabled).
+{
+	email admin@graphden.dev
+	auto_https disable_redirects
+}
+
+example.com:9443 {
+	reverse_proxy localhost:30080
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+		}
+	}
+}

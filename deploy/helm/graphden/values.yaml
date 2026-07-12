@@ -21,6 +21,8 @@ fullnameOverride: ""
 service:
   type: ClusterIP
   port: 80
+  # nodePort: 30080   # set with type: NodePort to expose on a fixed node port
+  #                     (e.g. a kind extraPortMapping → host port → reverse proxy)
 
 resources:
   requests:

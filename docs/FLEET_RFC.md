@@ -1,10 +1,14 @@
 # RFC: Dynamic fleet — load-based placement & rebalancing
 
-**Status: PROPOSAL / RFC. Nothing here is shipped.** The as-built fleet
-(static org sharding, `421` backstop, per-org quota, advisory-lock singletons,
-SSE invalidation, BYO) is in [SCALING.md](SCALING.md). This document designs the
-*next* step: automatic placement and rebalancing of tenant graphs across a fleet
-of executors by load and size, and the runtime substrate to run it on.
+**Status: Phases 0-3 CORE SHIPPED + verified end-to-end on a kind cluster (§8,
+§12; ops guide in [FLEET_DEPLOY.md](FLEET_DEPLOY.md)).** Still open: T4.5 overlap-
+accounting + per-route split (evidence-gated), T5.3 scale-to-zero (Knative/CRaC-
+gated), and the CRaC checkpoint CI bake. The as-built STATIC fleet (org sharding,
+`421` backstop, per-org quota, advisory-lock singletons, SSE invalidation, BYO)
+is the base layer in [SCALING.md](SCALING.md); this document designed — and the
+branch then built — the *dynamic* step on top: automatic placement and
+rebalancing of tenant graphs across a fleet of executors by load and size, and
+the runtime substrate to run it on.
 
 Read SCALING.md first — this RFC extends it and reuses most of its machinery.
 

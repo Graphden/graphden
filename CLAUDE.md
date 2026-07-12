@@ -540,6 +540,11 @@ src/graphden/
 │   └── merge/
 ├── layout/             # Graph-editor layout pipeline (Stages 1–7)
 ├── services/           # Service registry — reconciler + supervisor
+├── fleet/              # Dynamic fleet (docs/FLEET_RFC.md) — placement table +
+│                       #   forward-hop router, cell load/evict metrics, LPT
+│                       #   packer, churn-min rebalancer, control-loop (sustained
+│                       #   hysteresis), directed cell-command transport,
+│                       #   DNS-SRV discovery. Driven by :exec/fleet-controller.
 ├── tenancy/            # Multi-tenant router, users, grants, RLS
 ├── auth/               # Pluggable auth-provider seam
 ├── clients/            # External clients (vault / OpenBao)
@@ -551,9 +556,19 @@ src/graphden/
 │   └── core.clj        # ig/init-key implementations
 ├── executor_runtime/   # Main entry point
 │   └── core.clj        # -main, shutdown hooks
-└── byo.clj             # BYO executor assembly (RemoteStorage + SSE source +
-                        #   direct http-server); `-main` for a customer-hosted
-                        #   executor. See docs/SCALING.md § External / BYO.
+├── byo.clj             # BYO executor assembly (RemoteStorage + SSE source +
+│                       #   direct http-server); `-main` for a customer-hosted
+│                       #   executor. See docs/SCALING.md § External / BYO.
+└── crac.clj            # CRaC checkpoint integration — quiesce!/resume! the pool
+                        #   + LISTEN + advisory-lock + services around a
+                        #   checkpoint; `-main` for the restore image. See
+                        #   development/crac/README.md.
+
+resources/graphden/tenancy/  # Addon config fragments (spliced via
+                             #   GRAPHDEN_ADDON_CONFIGS): addon.edn (org-scoped
+                             #   storage + RLS + request-scope) and faas.edn
+                             #   (app-router + :org schema → FaaS app-routing +
+                             #   the fleet forward-hop). See docs/PLATFORM_PLAN.md.
 
 resources/packages/     # First-party package definitions (EDN + Clojure impls)
 ├── core/               # Core primitives (arithmetic, logic, HOF, etc.)

@@ -1,9 +1,10 @@
 # RFC: Dynamic fleet — load-based placement & rebalancing
 
 **Status: Phases 0-3 CORE SHIPPED + verified end-to-end on a kind cluster (§8,
-§12; ops guide in [FLEET_DEPLOY.md](FLEET_DEPLOY.md)).** Still open: T4.5 overlap-
-accounting + per-route split (evidence-gated), T5.3 scale-to-zero (Knative/CRaC-
-gated), and the CRaC checkpoint CI bake. The as-built STATIC fleet (org sharding,
+§12; ops guide in [FLEET_DEPLOY.md](FLEET_DEPLOY.md)).** T4.5 overlap-accounting
+is SHIPPED opt-in (`GRAPHDEN_FLEET_OVERLAP_WEIGHT`, default off); still open: the
+per-route split (evidence-gated) and the CRaC-gated pieces (T5.3 scale-to-zero is
+demonstrated on KEDA+CRaC — the CRaC checkpoint CI bake shipped too). The as-built STATIC fleet (org sharding,
 `421` backstop, per-org quota, advisory-lock singletons, SSE invalidation, BYO)
 is the base layer in [SCALING.md](SCALING.md); this document designed — and the
 branch then built — the *dynamic* step on top: automatic placement and
@@ -367,9 +368,17 @@ Verified against the executor:
   - **T4.4 ✅** `:exec/fleet-controller` — the leader-locked periodic component
     (own advisory-lock conn, re-asserted per tick) that drives `run-tick!` via
     the directed cell-command transport. One controller fleet-wide.
-  - **T4.5 (deferred, on evidence)** overlap-accounting on evict (co-locate cells
-    sharing large closures) + per-route cell-splitting (§3.2) — both wait for
-    evidence that a single-cell-per-org grain is insufficient.
+  - **T4.5 (overlap-accounting SHIPPED opt-in; per-route split still deferred)**
+    Overlap-aware placement: `packer/best-target` scores a pod as
+    `load − w-overlap·|cell-closure ∩ pod-fns|`, so cells sharing a forward-closure
+    co-locate (shared fns compiled once → less memory, cheaper moves). Threaded
+    through `pack` + `control-loop/plan-initial-placements` + `discover-cells`
+    (attaches `:closure` only when enabled). **Off by default** (`w-overlap 0` =
+    pure LPT, the verified behaviour); a deployment opts in via
+    `GRAPHDEN_FLEET_OVERLAP_WEIGHT` — honouring the evidence-gate (turn it on when
+    multi-cell-per-org proves common). Per-route cell-splitting (§3.2) still waits
+    on that same evidence. NOTE overlap currently biases INITIAL placement; making
+    the rebalancer's `best-move` overlap-aware is the natural follow-on.
 - **Phase 3 — substrate (core SHIPPED).** Concrete tasks:
   - **T5.1 ✅** DNS-SRV membership discovery (`fleet.discovery`) — headless-
     Service SRV → live executor set, tracking StatefulSet/HPA scaling. Pure DNS,
@@ -520,6 +529,9 @@ is the foundation this RFC reuses — not new work.**
   control-loop,discovery}` + `:exec/fleet-controller` + the Helm chart). The
   fleet auto-places new tenant cells and rebalances sustained load imbalance
   under a leader-locked controller, over a k8s StatefulSet whose SRV membership
-  tracks HPA scaling. Remaining: overlap-accounting + per-route split
-  (evidence-gated, T4.5), scale-to-zero (CRaC-gated, T5.3), and the CRaC
-  footprint track's final measurement.
+  tracks HPA scaling.
+- 2026-07: **T4.5 overlap-accounting SHIPPED opt-in** — overlap-aware placement
+  (`packer/best-target` + `discover-cells` closures) behind
+  `GRAPHDEN_FLEET_OVERLAP_WEIGHT` (default 0 = pure LPT). Remaining: per-route
+  split (evidence-gated), rebalancer-side overlap (follow-on), scale-to-zero
+  (demonstrated on KEDA+CRaC, T5.3).

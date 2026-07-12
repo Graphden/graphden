@@ -102,7 +102,8 @@ services spawn).
 | `:fn-id`          | `:ref :fn`        | **Logical** fn id — service tracks the current graph; editing the fn picks up at next restart. (Compare `:fn-execution.fn-version-id` which is a frozen snapshot.) Must point at a fn with zero free args. |
 | `:enabled?`       | `:bool`           | Reconciler only starts enabled rows. Toggle this + reconcile to stop a service without deleting it. |
 | `:restart-policy` | `:restart-policy` | `:always` / `:on-failure` / `:never` — see § Supervisor below.    |
-| `:cardinality`    | `:cardinality`    | `:singleton` / `:per-pod` — how many pods run it at once; see § Cardinality. Nullable; nil ≡ `:singleton` (rows that pre-date the field). |
+| `:cardinality`    | `:cardinality`    | `:singleton` / `:per-pod` / `:pool` — how many pods run it at once; see § Cardinality. Nullable; nil ≡ `:singleton` (rows that pre-date the field). |
+| `:pool-size`      | `:int`            | Pod count for `:cardinality :pool` (ignored otherwise). Nullable — a `:pool` row with nil/non-positive size degrades to a singleton. |
 | `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil falls back to the reconciler's base ctx (= main behavior). The editor's ⚙ popover picker defaults to the editor's current branch on create. |
 
 ### `:restart-policy` enum
@@ -111,13 +112,19 @@ services spawn).
 
 ### `:cardinality` enum
 
-How many pods run the service simultaneously. The two values exist
-because the two ship-today service shapes want opposite things:
+How many pods run the service simultaneously:
 
 | Value | Lock? | Use it for | If you get it wrong |
 |-------|-------|-----------|---------------------|
-| `:singleton` | `pg_try_advisory_lock(service-id)` on the pod's dedicated lock connection; losers idle with a `::not-our-lock` placeholder | cron / `:schedule` loops, one-shot migrations, anything whose side-effects must happen once per tick | a `:per-pod` cron fires N times per tick, once per pod |
+| `:singleton` | `pg_try_advisory_lock(service-id, slot 0)` on the pod's dedicated lock connection; losers idle with a `::not-our-lock` placeholder | cron / `:schedule` loops, one-shot migrations, anything whose side-effects must happen once per tick | a `:per-pod` cron fires N times per tick, once per pod |
 | `:per-pod` | none — every pod starts its own copy | listeners (`:http-server`), anything a load balancer fans traffic into | a `:singleton` listener means only ONE pod ever binds a port; every other pod fails its healthcheck and the LB sees a single backend no matter how many pods you run |
+| `:pool` (`:pool-size N`) | races for the first free of **N** advisory-lock slots (keys `service-id+0 … +N-1`); holds it | a background worker that should be redundant / parallel across a **bounded** number of pods — not one, not all | too small an N under-provisions; too large just caps at the pod count |
+
+`:pool` generalises `:singleton` (a pool of 1, slot 0). With ≥ N pods
+exactly N run; with fewer pods, one copy each. The pool SIZE is fixed —
+load-driven autoscaling of N is intentionally out of scope (it would need
+a per-service load signal + a scaling controller; the request path scales
+via cells + HPA instead — see docs/SCALING.md).
 
 `app/package.edn` declares the seeded `:default → :web-server` service
 as `:per-pod` for exactly this reason.
@@ -190,8 +197,10 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
 ```clojure
 {service-uuid → {:fn-id            :uuid
                  :restart-policy   :always | :on-failure | :never
-                 :cardinality      :singleton | :per-pod
+                 :cardinality      :singleton | :per-pod | :pool
+                 :pool-size        Int | nil (slot count; 1 for singleton)
                  :locked?          Bool
+                 :pool-slot        Int | nil (which advisory-lock slot we hold)
                  :branch-id        :uuid (set only for per-branch rows)
                  :stopper          (fn []) | nil
                  :started-at       Instant
@@ -203,15 +212,19 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
 that stops the listener; other shapes are logged on stop but otherwise
 ignored). `nil` means the start failed and retries were exhausted.
 
-`:locked?` says whether THIS pod holds the service's advisory lock. Only
-`:singleton` services ever take one, and only the holder releases it —
-asking Postgres to unlock a key the session never held is a no-op that
-returns false. `:cardinality` is mirrored onto the entry so the
-config-drift detector notices an admin flipping it.
+`:locked?` says whether THIS pod holds one of the service's advisory-lock
+slots, and `:pool-slot` records WHICH slot (0 for a singleton), so stop
+releases exactly the key it took and a post-reconnect re-assert re-takes
+the right one. Only lock-gated (`:singleton` / `:pool`) services take a
+slot; `:cardinality` + `:pool-size` are mirrored onto the entry so the
+config-drift detector notices an admin flipping either.
 
-A pod that lost the race for a `:singleton` stores the sentinel
-`::not-our-lock` instead of a map, so it neither retries every pass nor
-looks like a running service.
+A pod that couldn't get a slot stores the sentinel `::not-our-lock`
+instead of a map. That placeholder is **transient**: the top of every
+reconcile pass drops it, so the service is re-attempted each pass. This is
+what makes the periodic tick heal a crashed owner — its slot auto-releases
+(no NOTIFY), and a sibling re-acquires it on the next tick rather than
+idling until a `:service` edit happens by.
 
 ## Supervisor
 
@@ -345,7 +358,8 @@ all loaded packages.
 |------|------|
 | Done | `:service` schema, reconciler, integrant, generic CRUD via /api/entities/service, supervisor for startup failures, packages-based seeding, already-running rejection, validation that target fn has zero free args |
 | Done | Multi-pod: per-pod reconcilers, PG advisory-lock ownership for `:singleton` services, `:cardinality` so `:per-pod` listeners run everywhere, `service:*` NOTIFY so siblings reconcile within ~1s, lock auto-release on pod crash. No `:owner-pod-id` column — ownership is implicit in who holds the lock. |
-| Done | Periodic reconcile tick (`:exec/service-reconciler`, ~15s) — level-triggered convergence: re-takes a `:singleton` lock after the holder crashes (no NOTIFY is emitted), picks up out-of-band DB edits, reconverges transient start failures. Retry-free under `reconcile-monitor` so a failing start never blocks the listener. |
+| Done | Periodic reconcile tick (`:exec/service-reconciler`, ~15s) — level-triggered convergence: re-takes a `:singleton` lock after the holder crashes (no NOTIFY is emitted), picks up out-of-band DB edits, reconverges transient start failures. Retry-free under `reconcile-monitor` so a failing start never blocks the listener. The tick actually heals a crash because the reconciler now drops `::not-our-lock` placeholders at the top of every pass (they were sticky before, so an idle pod never re-attempted the freed lock). |
+| Done | `:pool` cardinality (`:pool-size N`) — a service runs on up to N pods, coordinated by N advisory-lock slots (generalises `:singleton` = slot 0). Fixed `:pool-size` only; load-driven autoscaling of N is out of scope (the request path scales via cells + HPA). |
 | Next | `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
 | Done | Advisory-lock connection-drop reconnect + re-acquire. The lock connection is held behind a reconnecting holder; every reconcile pass runs `advisory-lock/ensure-live!`, and on a reconnect `reassert-lock-ownership!` re-takes each `:singleton` this pod was running (stopping any a sibling stole during the outage). Closes the "two pods double-run one service until the next reconcile" window. |
 | Done | Cross-pod cancel routing for `:fn-execution` — `execution:cancel:<id>` NOTIFY fan-out; see [EXECUTION.md](EXECUTION.md). |

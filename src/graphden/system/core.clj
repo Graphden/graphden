@@ -26,6 +26,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
+    [graphden.fleet.router :as fleet-router]
     [graphden.packages.loader :as pkg]
     [graphden.packages.manifest :as manifest]
     [graphden.packages.records :as records]
@@ -728,7 +729,7 @@
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
              execute-guard app-router set-org-handler verify-domain user-ops
-             executor-orgs byo-executor?]}]
+             executor-orgs byo-executor? executor-id]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -748,6 +749,15 @@
   (let [emitter (if pg-storage
                   (pg-notify/make-emitter (:pool pg-storage))
                   pg-notify/noop-emitter)
+        ;; Fleet forward-hop seam (T2.6): only wired when this pod has a fleet
+        ;; identity (`GRAPHDEN_EXECUTOR_ID`). Forwards a misdirected request to
+        ;; the executor holding the org's cell (per `:placement`) instead of
+        ;; 421. All executors listen on the same port (`GRAPHDEN_PORT`).
+        fleet-forward (when (seq executor-id)
+                        (let [port (or (some-> (System/getenv "GRAPHDEN_PORT") parse-long) 8080)]
+                          (fn [request org entry-fn-id]
+                            (fleet-router/forward-or-nil storage executor-id port
+                                                         org entry-fn-id request))))
         ctx-opts (cond-> {:storage storage}
                    (and base-fns (:base-fns base-fns))
                    (assoc :base-fns (:base-fns base-fns))
@@ -784,7 +794,10 @@
                    byo-executor?
                    (assoc :byo-executor? (if (string? byo-executor?)
                                            (contains? #{"true" "1" "yes"} byo-executor?)
-                                           (boolean byo-executor?))))]
+                                           (boolean byo-executor?)))
+                   ;; Fleet forward-hop seam — only present when this pod has a
+                   ;; fleet identity (see the let above).
+                   fleet-forward (assoc :fleet-forward fleet-forward))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client)

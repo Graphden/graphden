@@ -101,7 +101,12 @@
   ;; the `:byo` orgs in its shard. Unset/false ⇒ a hosted pod, which 421s
   ;; any `:byo` org. A BYO pod also sets GRAPHDEN_EXECUTOR_ORGS to just its
   ;; own org.
-  :byo-executor? #or [#env GRAPHDEN_BYO_EXECUTOR nil]}
+  :byo-executor? #or [#env GRAPHDEN_BYO_EXECUTOR nil]
+  ;; Fleet identity (docs/FLEET_RFC.md §6.1, T2.6). The DNS name other
+  ;; executors reach this pod at (k8s StatefulSet / headless-service pod name).
+  ;; Set ⇒ this pod forward-hops a misdirected request to the cell's holder
+  ;; instead of 421. Unset (single-tenant / self-hosted) ⇒ 421 as before.
+  :executor-id #or [#env GRAPHDEN_EXECUTOR_ID nil]}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on
  ;; fn-entities so every composed fn is already in storage before we

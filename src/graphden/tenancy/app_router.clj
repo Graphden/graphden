@@ -101,7 +101,13 @@
            ;;     the platform context, same as `read-handler-fn-id` above.
            (or (not (cr/org-in-shard? (:executor-orgs ctx) org))
                (and (not (:byo-executor? ctx)) (tc/byo-org? (:storage ctx) org)))
-           app-misdirected
+           ;; Fleet forward-hop (T2.6): before 421'ing, ask the `:fleet-forward`
+           ;; seam whether this org's cell is placed on another executor and, if
+           ;; so, proxy the request there. nil (no placement, byo, or no seam) →
+           ;; the 421 backstop. `handler-fn-id` is the cell's entry.
+           (or (when-let [fwd (:fleet-forward ctx)]
+                 (fwd request org handler-fn-id))
+               app-misdirected)
 
            (not handler-fn-id)
            app-not-configured

@@ -110,6 +110,38 @@
         (is (= 404 (:status (ar ctx (req "beta.graphden.app")))))))))
 
 
+(deftest make-app-router-forward-hops-before-421
+  ;; T2.6: a misdirected request consults the `:fleet-forward` seam BEFORE
+  ;; 421'ing — if the org's cell is placed elsewhere the request is proxied
+  ;; there; only a nil seam result falls through to the 421 backstop.
+  (let [handler-id (random-uuid)
+        storage (org-storage {"acme" handler-id "beta" handler-id})
+        ar (app/make-app-router (subdomain/identity-org-resolver) "graphden.app" nil)
+        forwarded {:status 200 :headers {"X-Served-By" "holder"} :body "forwarded"}]
+    (testing "misdirected + a seam that finds a holder → forwards, not 421"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}
+                 :fleet-forward (fn [_req org entry]
+                                  (when (and (= org "beta") (= entry handler-id)) forwarded))}]
+        (is (= forwarded (ar ctx (req "beta.graphden.app")))
+            "beta's request proxied to its holder with the handler-fn-id as the cell entry")))
+
+    (testing "seam returns nil (no placement / byo org) → 421 backstop"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}
+                 :fleet-forward (fn [_ _ _] nil)}]
+        (is (= 421 (:status (ar ctx (req "beta.graphden.app")))))))
+
+    (testing "no seam wired (single-tenant / self-hosted) → 421 as before"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}}]
+        (is (= 421 (:status (ar ctx (req "beta.graphden.app")))))))
+
+    (testing "an org we DO hold is served locally — the seam is never consulted"
+      (let [consulted (atom false)
+            ctx {:storage storage :executor-orgs #{"public" "acme"}
+                 :fleet-forward (fn [_ _ _] (reset! consulted true) nil)}]
+        (is (not= 421 (:status (ar ctx (req "acme.graphden.app")))))
+        (is (false? @consulted) "held org never hits the forward path")))))
+
+
 ;; ============================================================================
 ;; BYO refusal — a hosted pod 421s a :byo org (it runs on the customer's own
 ;; executor); a BYO executor pod serves it.

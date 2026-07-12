@@ -177,7 +177,7 @@
                 `tenancy.context/byo-org?`."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
            execute-guard app-router set-org-handler verify-domain user-ops
-           executor-orgs byo-executor?]}]
+           executor-orgs byo-executor? fleet-forward]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -239,7 +239,13 @@
                                 (set executor-orgs))))
       ;; Pod role — a BYO executor may serve the `:byo` orgs in its shard;
       ;; a hosted pod (default) 421s them.
-      (cond-> byo-executor? (assoc :byo-executor? true))))
+      (cond-> byo-executor? (assoc :byo-executor? true))
+      ;; Fleet forward-hop seam (docs/FLEET_RFC.md §6.1, T2.6): a
+      ;; `(fn [request org entry-fn-id] → response-or-nil)` the app-router
+      ;; consults BEFORE 421'ing — forwards to the executor that holds the cell
+      ;; (per `:placement`). Absent (single-tenant / no fleet identity) → 421 as
+      ;; before.
+      (cond-> fleet-forward (assoc :fleet-forward fleet-forward))))
 
 
 (defn current-time-ms

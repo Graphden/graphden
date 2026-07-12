@@ -962,8 +962,7 @@
                     :_update-record-type-fields-empty?  :_err-fields-required
                     :_update-record-type-fn-not-found?  :_update-record-type-err-not-found
                     {:value true}                       {:value nil}]
-          :parsed :_update-record-type-parsed}
-   :effects #{:db}}
+          :parsed :_update-record-type-parsed}}
 
   ;; --- Stage 3 of update-record-type — journalled txn split for graph.
   ;; Was one 141-line Clojure defn; now a `:try` (core.system) over an

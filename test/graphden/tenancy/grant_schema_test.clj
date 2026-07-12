@@ -14,7 +14,9 @@
 
 
 ;; Matching keys on the stable subject-id; in tests id = name = the string.
-(defn- subj [s] {:id s :name s})
+(defn- subj
+  [s]
+  {:id s :name s})
 
 
 (deftest extend-builder-adds-the-grant-entity

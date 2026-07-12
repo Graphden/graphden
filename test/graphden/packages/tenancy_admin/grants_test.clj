@@ -39,7 +39,8 @@
     ;; create-grant resolves the authored username → the user's stable id
     ;; before writing `:subject-id`. Return a user row so the resolution
     ;; yields a non-nil id.
-    (query-entities [_ entity-name _where]
+    (query-entities
+      [_ entity-name _where]
       (when (= entity-name :user) [{:id "u-id"}]))
 
     (query-entities [_ _ _ _] nil)

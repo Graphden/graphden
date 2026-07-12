@@ -13,7 +13,9 @@
     [graphden.tenancy.grant-schema :as grant-schema]))
 
 
-(defn- subj [s] {:id s :name s})
+(defn- subj
+  [s]
+  {:id s :name s})
 
 
 (use-fixtures :once (setup/create-container-fixture))

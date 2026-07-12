@@ -49,7 +49,6 @@
     [graphden.tenancy.token-schema :as token-schema]
     [graphden.tenancy.user-schema :as user-schema]
     [graphden.tenancy.users :as users]
-    [graphden.tenancy.users :as users]
     [integrant.core :as ig]))
 
 

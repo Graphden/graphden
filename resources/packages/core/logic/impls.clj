@@ -231,8 +231,6 @@
           [root target])))))
 
 
-
-
 (defn if-return-rule
   [bindings-info default-ret]
   (let [then-info (get bindings-info :then)

@@ -102,14 +102,41 @@ criu check                                  # must say "Looks good"; needs privi
 ./run-crac-poc.sh
 ```
 
+## Restore IMAGE — checkpoint IN the same-base container (2026-07-12)
+
+`build-checkpoint.sh` checkpoints on the HOST (JDK at `$CRAC_JDK`, jar + native
+under `./target`). But CRIU snapshots the ABSOLUTE path of every file mapped into
+memory, and NONE of those host paths exist inside the `Dockerfile.crac` restore
+container (`$JAVA_HOME=/opt/java/openjdk`, jar + checkpoint + native under
+`/app`). A restore of a host checkpoint therefore dies immediately with
+`warp: error: Cannot open mapped file …` — for the JDK libs, the jar, and the
+brotli `.so` in turn. (Found while packaging the restore image.)
+
+Fix: checkpoint IN a container from the **same base image** the restore uses, with
+everything under `/app`. `build-checkpoint-in-container.sh` does this:
+
+```bash
+JDBC_URL=jdbc:postgresql://localhost:5435/graphden ./build-checkpoint-in-container.sh
+docker build -f ../../Dockerfile.crac -t graphden:crac ../..
+docker run -d --privileged --network host --security-opt seccomp=unconfined \
+  --cap-add=CHECKPOINT_RESTORE --cap-add=SYS_PTRACE --cap-add=SYS_ADMIN graphden:crac
+```
+
+Verified: the restore image serves `/health` **200 in ~411 ms** (full: CRIU
+restore + pool resume + web-server rebind), vs the ~141 s cold boot — ~340× in a
+real container. The 411 ms includes docker start + a coarse poll; the raw restore
+is ~30-40 ms (§ Results). This closes "the restore IMAGE works"; the host
+`build-checkpoint.sh` stays for a bare-metal same-path deploy.
+
 ## Production flow (as-built)
 
 The full system integration lives in `src/graphden/crac.clj` (quiesce/resume the
-pool + LISTEN + advisory-lock connections around a checkpoint) with
-`Dockerfile.crac` (restore image) and `build-checkpoint.sh` (the checkpoint
-phase). The quiesce→resume cycle is tested against real DB resources in
-`test/graphden/crac_test.clj` (no checkpoint needed — it validates the risky
-part: that closing and re-establishing the connections keeps the system
+pool + LISTEN + advisory-lock connections + managed services around a checkpoint)
+with `Dockerfile.crac` (restore image) and `build-checkpoint-in-container.sh`
+(the checkpoint phase — path-aligned, the recommended one) or `build-checkpoint.sh`
+(host, bare-metal same-path only). The quiesce→resume cycle is tested against real
+DB resources in `test/graphden/crac_test.clj` (no checkpoint needed — it validates
+the risky part: that closing and re-establishing the connections keeps the system
 working).
 
 ```bash

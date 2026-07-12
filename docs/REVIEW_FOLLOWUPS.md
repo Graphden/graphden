@@ -37,6 +37,7 @@ time. Full write-up, numbers, and the memoization fix:
 [`adr/ADR-free-arg-slot-map-perf.md`](adr/ADR-free-arg-slot-map-perf.md).
 
 Code (this branch):
+
 - `src/graphden/crud/fn_execution/free_arg_cache.clj` — new leaf-ns memo.
 - `src/graphden/crud/fn_execution/lookup.clj` — `free-arg-slot-map` stays
   PURE; new `free-arg-slot-map-cached` for the hot path.
@@ -50,7 +51,7 @@ identical to baseline (`cached=pure? true`), invalidation clears on both
 arities, `72 tests 0 failures`. The window caught a real bug — the first
 version cached the pure fn and broke `closure-capture` (direct callers
 mutate-without-invalidate); fixed by the pure/cached split. Full results
-+ the caught-bug write-up in the ADR.
+and the caught-bug write-up in the ADR.
 
 ### 1b (follow-on, not this pass): unify the two free-arg walkers
 
@@ -143,6 +144,7 @@ interior mixes "current truth" with "diary" (sweep ledgers, rejected
 ADRs).
 
 **Plan:**
+
 1. **Rewrite README** as the product pitch: what/why in the first
    screen, a 60-second "here's the idea" + demo, then quickstart. (The
    product-hypothesis defense from the review is the raw material.)

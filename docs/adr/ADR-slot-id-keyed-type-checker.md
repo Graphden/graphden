@@ -30,6 +30,7 @@ move, not a reduction.** The conflation is confined to the AS-name-keyed
 `*caller-narrowings*` path; re-keying it on a derived slot-id is sound and
 possible — but it delivers the *same* correctness α' already delivers,
 while:
+
 - it **cannot remove the per-use-site anon-split hack** (the main +30%
   complexity). Anon fn-DEFS are split per use-site precisely so Pass 3 can
   bind a *per-use-site* narrowing. If you dedup them, the single anon has
@@ -71,6 +72,7 @@ not a technical-correctness call.
 ---
 
 ## (Original plan below — retained for the record; superseded by the
+
 ## Conclusion above.)
 
 **Supersedes the "if revisiting" note in** `TYPE_SYSTEM_DECISIONS.md § β`.
@@ -134,7 +136,7 @@ registry and match narrowing on (root) slot-id. This is the ADR's own
      we thread it from the parser's pre-pass output.
 
 2. **Narrowing** (`types/check/narrowing.clj`): `build-caller-narrowings`
-   + `propagate-narrowing-to-rename-hosts` key the narrowing map and the
+   - `propagate-narrowing-to-rename-hosts` key the narrowing map and the
    BFS match on **root-slot-id** (via the `source-slot-id` chain), not
    `as-name`. `check.clj`'s readers of `*caller-narrowings*`
    (`bindings-info-for-rule`, `collect-free-args`, `effective-ref-return`)
@@ -174,6 +176,7 @@ registry and match narrowing on (root) slot-id. This is the ADR's own
 ## Grounding — infrastructure map (agent 2, confirmed by code)
 
 Reusable, all pure or lookups-based:
+
 - `ids/slot-id [owner-fn-id name]` — deterministic slot-id (uuid-v5),
   owner-scoped; same fn the parser/runtime use. `ids/anonymous-fn-id`,
   `ids/shape-hash`.

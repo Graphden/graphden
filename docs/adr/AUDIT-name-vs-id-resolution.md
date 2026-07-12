@@ -65,6 +65,7 @@ it flips most of F1–F6 from "debt" to **deliberate final design**:
   Marginal benefit (2 `:on-throw :const` sites) didn't justify the risk.
 
 So the reclassification:
+
 - **F1 (`build-ref-renames`)** — the doc calls this "the load-bearing
   cross-fn cascade path." Flipping it = the rejected env-builder path.
   **NOT debt. Do not touch.**
@@ -106,6 +107,7 @@ each need threading (producer returns slot-id pairs + runtime copy writes
 slot-id keys).
 
 ### CORRECT-BY-ID in executor (mirror these)
+
 `deep-free-ext-entries`, `translate-named-args` (name-match only to
 accept the caller's necessarily-named args, output is per-slot-id),
 `effective-reader-slot-id` + `arg-builder :free`, `seq-item-builder`,
@@ -114,6 +116,7 @@ accept the caller's necessarily-named args, output is per-slot-id),
 `slot.source-slot-id` FK.
 
 ### BENIGN in executor (do NOT churn)
+
 `rich-type-of` keyed by unique fn-name (resolution at `bindings.clj:181,193`,
 `compile_runtime.clj:326`); `resolve-impl`/`has-impl?` (base-fns
 name-registry by design); `compute-fn-typed-fn-ids` matching the `:fn`
@@ -134,6 +137,7 @@ cosmetic, a benign registry cluster.
 **C1 (REAL BUG) — root branch protected/bootstrapped by the NAME string
 `"main"`, not by structural root-ness.** `versioning/storage/core.clj:761`
 `delete-branch!` guards with `(= "main" (:name branch))`. But:
+
 - branch names are only `[:org-id :name]`-unique (per-org), not global
   (`schema/versioned/schema.clj:355`);
 - the main branch id is minted with **`random-uuid`**
@@ -149,6 +153,7 @@ the root a deterministic well-known id so bootstrap stops leaning on the
 name (small plumbing). **Must fix (correctness).**
 
 ### BORDERLINE
+
 **C2 — sequence slot detected by name.** `crud/entities/seq.clj:44`
 `(= "sequence" (:name (get fns-by-id (:type-fn-id slot))))` — dispatches
 on the resolved name of an id it already holds. Safe today (base-fn name
@@ -156,6 +161,7 @@ unique + deterministic id). Tidy: compare `(:type-fn-id slot)` against the
 resolved `sequence` type-fn-id. LOCAL, cosmetic.
 
 ### BENIGN (name-keyed rich-type/tag registry round-trips; decisions id-based)
+
 `crud/type_check.clj:356`, `crud/fn_execution/persist.clj:207`
 `declared-effects-of`, `crud/entities.clj:946` `chain-has-process-effect?`,
 `crud/entities.clj:318` `unregister-rich-type!`, `crud/secret_shape.clj:29`
@@ -163,6 +169,7 @@ resolved `sequence` type-fn-id. LOCAL, cosmetic.
 id). Keying the registry by fn-id is plumbing for nil value — leave.
 
 ### CORRECT-BY-ID / boundary (no change)
+
 Versioning resolves by `(entity-name, entity-id, branch-id)` throughout
 (`resolution.clj`, `merge.clj` matches by fn-id, `:fn-name` display-only);
 `entities/seq.clj` `[fn-id slot-id]`; renamed-view slots get deterministic
@@ -176,6 +183,7 @@ Runtime spine (executor-dispatch, reconciler, routers) is clean id.
 Debt clusters in authz, structural type constraints, slot-owner tie-break.
 
 ### FRAGILE
+
 - **P1 (security) — authz subject + session tokens keyed by USERNAME,
   not user-id.** `tenancy/users.clj:213` (token `:user username`),
   `:184` (grant cascade by name), `tenancy/authz.clj:39,71` +
@@ -233,6 +241,7 @@ Debt clusters in authz, structural type constraints, slot-owner tie-break.
   missed it). Commit `d1d1ff64`.
 
 ### BENIGN / documented-dependency
+
 - **anon `[parent-name arg-name]` use-site hash** (`parse.clj:798`): SOUND
   today — parent-name globally unique, arg-name unique in parent →
   id-equivalent. BUT load-bearing on global-fn-name-uniqueness (omits
@@ -244,6 +253,7 @@ Debt clusters in authz, structural type constraints, slot-owner tie-break.
   effectively immutable ids).
 
 ### CORRECT-BY-ID
+
 services reconciler (all `service-id`/`fn-id`), service seeding
 (deterministic service-id, stores fn-id), branch router (`branch-id` +
 pre-resolved `handler-fn-id`), app router/deploy (`:org.handler-fn-id`),
@@ -262,6 +272,7 @@ so it accreted; it breaks only on non-unique names (slot/arg as-names) and
 mutable names (username, branch name).
 
 **Tier 1 — genuine correctness bugs, LOCAL, safe:**
+
 - **C1** ✅ DONE — root branch by `:base-branch-id nil` (not name "main").
 - **P3** ✅ CLOSED — investigated, NOT a bug (hard-fail reverted, false-
   positived on shared args); documented the sound-default rationale.
@@ -276,6 +287,7 @@ pursuing F1/F2/F4/F5 would repeat failed multi-day attempts for marginal
 benefit.
 
 **Tier 3 — plumbing robustness:**
+
 - **P1** authz/session by user-id (security). CONFIRMED a real fix (unlike
   F1–F5, no rejection-record; `username` is a mutable field used as
   identity). Latent today (no user-rename feature + `delete-user!`
@@ -349,6 +361,7 @@ benefit.
   ns-path-grants).
 
 **Tier 4 — cosmetic / invariant-documentation:** ✅ DONE.
+
 - **C2** ✅ sequence slot dispatched by id (`entities/seq.clj`): resolve
   the `:sequence` type-fn-id once, compare per-slot by id.
 - **anon-hash** ✅ documented the load-bearing global-fn-name-uniqueness
@@ -366,6 +379,7 @@ soundness untouched — re-keying was NOT attempted, it's a lateral move
 per `ADR-slot-id-keyed-type-checker.md`). Its name-keying is mostly
 BENIGN (fn-name unique); the FRAGILE core is the α' as-name narrowing,
 KEPT. A subagent survey mapped the real debt; verified + fixed:
+
 - **`strip-null`** was byte-identical in `narrowing.clj` + `core/logic/
   impls.clj` → one `types.core/strip-null` (single source of truth).
 - **root-of-inheritance walk** was copied THREE times (`check.clj`
@@ -432,4 +446,4 @@ inherited-free-arg slot identity is not locally derivable (needs the
 
 ## Synthesis / plan
 
-_pending full audit — see next section once all subsystems reported._
+*pending full audit — see next section once all subsystems reported.*

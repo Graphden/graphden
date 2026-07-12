@@ -401,7 +401,13 @@ Verified against the executor:
   boot (~780×)**. Decision: **adopt CRaC** as the footprint track — it directly
   unblocks scale-to-zero (T5.3). AppCDS is DE-PRIORITISED: the boot is
   compute-bound (type-check + eager-compile), which AppCDS doesn't touch.
-  Remaining is operational: bake the checkpoint in CI via `Dockerfile.crac`.
+  The CI bake shipped: `.github/workflows/crac-bake.yml` (manual, off the PR
+  path — CRIU needs a privileged/CRIU-capable runner) builds the jar, checkpoints
+  in the azul base against a Postgres service, builds `Dockerfile.crac`, and
+  smoke-tests restore→/health. NOTE the restore image only restores if the
+  checkpoint was path-aligned (all mmap paths under `/app` + the base's JDK) —
+  the host `build-checkpoint.sh` is NOT restorable by the container image; use
+  `build-checkpoint-in-container.sh` (found 2026-07-12).
   NOT GraalVM.
 
 ## 9. Relationship to graph hot-reload (already shipped)

@@ -271,7 +271,8 @@ jobs:
             koalaman/shellcheck:stable \
             tools/browser-test/run-edit-tests.sh \
             .claude/hooks/check-ui-on-stop.sh \
-            .claude/hooks/remind-packages-quality-on-impls-edit.sh
+            .claude/hooks/remind-packages-quality-on-impls-edit.sh \
+            development/crac/build-checkpoint-in-container.sh
 
   hadolint:
     name: hadolint (Dockerfile)

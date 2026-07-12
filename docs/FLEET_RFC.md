@@ -330,8 +330,25 @@ Verified against the executor:
   - **T2.6** Internal forward-hop router (miss → forward to holder, not `421`).
   - **First sprint = T2.1 → T2.2 → T2.3**: pure in-JVM executor work, fully
     testable without k8s, delivers load/evict of individual closures at runtime.
-- **Phase 1 — metrics + assisted moves.** Weight collection; a controller that
-  *executes* a move on command. Rebalance decisions still human/heuristic.
+- **Phase 1 — metrics + assisted moves (core SHIPPED).** Weight collection; a
+  controller that *executes* a move on command. Rebalance decisions still
+  human/heuristic. Concrete tasks:
+  - **T3.1 ✅** `fleet.metrics` — `cell-fn-count` (forward-closure size),
+    `org-pending-load` (the quota's own `:pending` `:fn-execution` count),
+    `cell-weight` folding the two with overridable weights.
+  - **T3.2 ✅** `fleet.controller/move-cell!` — the load→flip-epoch→evict
+    orchestration with its invariants (load-before-flip, abort-before-flip,
+    evict-after-flip), cross-pod effects behind `load-on` / `evict-on` seams,
+    serialized under a `move-monitor`. Fully in-JVM tested.
+  - **T3.3 ✅** `fleet.command` — the directed, ACK-gated cross-pod transport
+    that fills the seams: `POST /internal/fleet/cell/{load|evict}/{root}` on
+    each pod (runs `load-cell!` / `evict-cell!`), gated by a shared internal
+    token (`GRAPHDEN_INTERNAL_TOKEN`), NOT the tenant auth-provider (a move is
+    cross-org platform authority). `execute-move!` is the ops/REPL entry.
+  - **T3.4 (Phase 2)** an autonomous controller loop, elected by an advisory
+    leader-lock (reusing the reconciler's), that *decides* moves. Phase 1's
+    `move-monitor` orders a single controller's moves; the leader-lock makes
+    ONE controller authoritative fleet-wide.
 - **Phase 2 — automatic placement & rebalance.** Packing + hysteresis +
   churn-minimising mover as a locked singleton. Per-route cell-splitting lands here
   if evidence justifies it (§3.2).

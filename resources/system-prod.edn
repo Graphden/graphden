@@ -105,7 +105,17 @@
   ;; Fleet identity (docs/FLEET_RFC.md §6.1, T2.6). The DNS name other
   ;; executors reach this pod at (k8s StatefulSet / headless-service pod name).
   ;; Set ⇒ this pod forward-hops a misdirected request to the cell's holder
-  ;; instead of 421. Unset (single-tenant / self-hosted) ⇒ 421 as before.
+  ;; instead of 421, AND exposes the internal cell-command endpoint (§6.3, T3.3)
+  ;; that a move drives. Unset (single-tenant / self-hosted) ⇒ 421 as before,
+  ;; no fleet endpoint. Two more env vars, read directly (not Aero keys), tune
+  ;; the fleet transport when this is set:
+  ;;   GRAPHDEN_PORT           — the port every pod's app server listens on
+  ;;                             (default 8080); the forward-hop + cell-command
+  ;;                             clients dial `http://<executor-id>:<port>`.
+  ;;   GRAPHDEN_INTERNAL_TOKEN — shared control-plane secret gating
+  ;;                             `POST /internal/fleet/cell/...` (a k8s secret,
+  ;;                             same on every pod). Unset ⇒ the endpoint
+  ;;                             fail-closes and moves are disabled.
   :executor-id #or [#env GRAPHDEN_EXECUTOR_ID nil]}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on

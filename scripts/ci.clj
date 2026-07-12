@@ -1,5 +1,5 @@
 (ns ci
-  "CI runner with live progress display and coverage report.
+  "CI runner with live progress display.
 
    Concurrency contract: AT MOST ONE bb ci runs at a time per checkout.
    We acquire an exclusive flock on `/tmp/graphden-ci-<checkout-hash>.lock`
@@ -67,29 +67,15 @@
    "cljstyle"  120000
    "biome"      60000
    "stylelint" 120000
-   ;; The single test check runs `bb test-unit-coverage` (unit suite +
-   ;; cloverage instrumentation). The wall is dominated NOT by test
-   ;; count but by a handful of full-graph tests — `packages.registry`
-   ;; (install-package syncs + recompiles the whole 2485-fn graph),
-   ;; `packages.export` (corpus fixpoint), `executor.effect-gating`
-   ;; (golden bootstrap fixture). Cloverage instruments every
-   ;; `graphden.*` form, so each full recompile fires the instrumented
-   ;; loader/compiler path and amplifies ~50×. These tests earn their
-   ;; keep — they give the real coverage of `packages.loader` (86%),
-   ;; `packages.export` (93%), `executor.compile.*` (77-100%), which
-   ;; is exactly why they're unit not integration — so they can't be
-   ;; dropped to speed the run up. Measured wall on a dev host: ~19 min
-   ;; (the old "~1:30" comment was a stale / faster-host figure and is
-   ;; what mis-sized this to 5 min).
-   ;; 2026-07: the develop merge (type-checker fold consolidation + its
-   ;; new unit tests) grew the instrumented suite past the old 25-min
-   ;; ceiling — a `bb ci` run TIMED OUT at 1500 s (the tests themselves
-   ;; all pass; it was purely the wall). Bumped to 35 min: headroom over
-   ;; the grown suite under CI parallel load, while still surfacing a
-   ;; true hang (a deadlock runs unbounded, ≫ 35 min). Integration + e2e
-   ;; live at `bb test-integration` / `bb test-e2e` and run outside CI on
-   ;; demand — their wall budgets (~10-12 min / ~15-25 min) are in `bb.edn`.
-   "tests-unit-coverage" 2100000
+   ;; The blocking test gate is `bb test-unit` — UNIT tests WITHOUT cloverage
+   ;; (skip `^:integration`). Measured ~3 min (parallel ×8 + shared container).
+   ;; Coverage is decoupled (`bb test-unit-coverage`, ~24 min, run separately)
+   ;; because 21 of those 24 min are instrumentation overhead, not test signal.
+   ;; Ceiling 10 min: generous headroom over ~3 min (CI parallel load + the
+   ;; full-graph recompile tests) while a true hang (deadlock, unbounded) still
+   ;; surfaces. Integration + e2e live at `bb test-integration` / `bb test-e2e`
+   ;; and run outside CI on demand — budgets (~10-12 / ~15-25 min) in `bb.edn`.
+   "tests-unit" 600000
    "outdated"  120000
    "security"  180000
    ;; Docker-based linters get extra headroom for first-run image
@@ -292,11 +278,15 @@
                                    ["clojure" "-M:cljstyle" "check"])
                                  lint-paths)
             splint-cmd (concat ["clojure" "-M:splint"] lint-paths)
-            ;; bb ci runs UNIT-only tests under cloverage. Test results
-            ;; AND coverage report come out of the same kaocha run, so
-            ;; the previous separate `test-cmd = ["bb" "test-unit"]`
-            ;; check has been dropped (it was running the same suite a
-            ;; second time un-instrumented).
+            ;; bb ci runs UNIT tests WITHOUT cloverage instrumentation — the
+            ;; blocking gate is pass/fail, and that's ~3 min. Measured 2026-07:
+            ;; the same suite UNDER cloverage is ~24 min (~3 min tests + ~21 min
+            ;; instrumentation — cloverage instruments every `graphden.*` form
+            ;; and the handful of full-graph recompile tests fire all of them,
+            ;; ~50×). Coupling a 3-min pass/fail signal to 21 min of coverage
+            ;; measurement was the wrong trade, so coverage is DECOUPLED: run
+            ;; `bb test-unit-coverage` separately (on demand / nightly), not in
+            ;; the per-push ci gate.
             ;;
             ;; Integration + e2e live at `bb test-integration` and
             ;; `bb test-e2e` — manual runs before merging changes that
@@ -306,7 +296,7 @@
             ;; type-check / pure-fn test) shouldn't gate on them.
             ;; Combined `bb test` (unit + integration) and `bb test-all`
             ;; (everything) stay available for the manual full passes.
-            coverage-cmd ["bb" "test-unit-coverage"]
+            test-cmd ["bb" "test-unit"]
             outdated-cmd ["clojure" "-M:outdated"]
             biome-cmd ["npx" "biome" "check" "resources/packages/app/editor"]
             stylelint-cmd ["npx" "stylelint" "resources/packages/app/editor/**/*.css"]
@@ -348,10 +338,10 @@
             commitlint-cmd ["bb" "commitlint"]
 
             ;; Define checks. security check disabled — requires NVD API
-            ;; key, run manually with `bb security`. The `tests-unit-
-            ;; coverage` check is the single test run: kaocha :unit
-            ;; with cloverage. Test pass/fail AND coverage report come
-            ;; out of it together.
+            ;; key, run manually with `bb security`. The `tests-unit` check
+            ;; is the blocking test gate: kaocha :unit, NO cloverage (~3 min).
+            ;; Coverage is decoupled — `bb test-unit-coverage` / `bb coverage`,
+            ;; run separately.
             checks [{:name "clj-kondo" :cmd kondo-cmd}
                     {:name "splint" :cmd splint-cmd}
                     {:name "cljstyle" :cmd cljstyle-cmd}
@@ -367,7 +357,7 @@
                     {:name "trivy" :cmd trivy-cmd}
                     {:name "license-check" :cmd license-check-cmd}
                     {:name "commitlint" :cmd commitlint-cmd}
-                    {:name "tests-unit-coverage" :cmd coverage-cmd}
+                    {:name "tests-unit" :cmd test-cmd}
                     {:name "outdated" :cmd outdated-cmd}]
 
             ;; Status tracking

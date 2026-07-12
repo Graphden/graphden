@@ -110,3 +110,12 @@
       (finally
         (holder)
         (sp/close storage)))))
+
+
+(deftest unreachable-holder-is-502
+  (testing "a holder that can't be reached → 502, not a thrown or hung request"
+    ;; Nothing listens on port 1 → connection refused → httpkit packs it into
+    ;; `:error`, which `forward-request` maps to a clean 502.
+    (let [resp (router/forward-request "localhost" 1 {:request-method :get :uri "/"})]
+      (is (= 502 (:status resp)))
+      (is (= "Cell holder unreachable" (:body resp))))))

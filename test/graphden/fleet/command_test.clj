@@ -8,6 +8,8 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.compile-runtime :as cr]
     [graphden.fleet.command :as cmd]
+    [graphden.fleet.placement :as placement]
+    [graphden.storage.protocol.core :as sp]
     [org.httpkit.client :as http]))
 
 
@@ -100,3 +102,61 @@
       (let [evict-on ((cmd/directed-evict 9000 "t") "pod-y" ROOT)]
         (is (true? evict-on))
         (is (= (str "http://pod-y:9000" cmd/path-prefix "evict/" ROOT) @seen))))))
+
+
+(deftest server-seam-500-on-a-thrown-command
+  (testing "an authorized command whose handler throws → 500 (not a leaked stack)"
+    (let [handler (cmd/make-command-handler TOKEN)]
+      (with-redefs [cr/load-cell! (fn [_ _] (throw (RuntimeException. "compile blew up")))]
+        (let [resp (handler {} (req :post (str cmd/path-prefix "load/" ROOT) TOKEN))]
+          (is (= 500 (:status resp)))
+          (is (= {"ok" false "error" "command failed"} (json/parse-string (:body resp)))))))))
+
+
+(defn- mem-placement-storage
+  []
+  (let [rows (atom [])]
+    (reify sp/StorageCRUD
+      (query-entities
+        [_ en where]
+        (when (= en :placement)
+          (filterv #(and (= (:org %) (:org where)) (= (:entry-fn-id %) (:entry-fn-id where))) @rows)))
+
+      (query-entities [_ _ _ _] nil)
+
+      (create-entity
+        [_ en row]
+        (when (= en :placement)
+          (let [r (assoc row :id (random-uuid))] (swap! rows conj r) r)))
+
+      (read-entity [_ _ _] nil)
+
+      (update-entity
+        [_ en id patch]
+        (when (= en :placement)
+          (swap! rows (fn [rs] (mapv #(if (= (:id %) id) (merge % patch) %) rs)))
+          (first (filter #(= (:id %) id) @rows))))
+
+      (delete-entity [_ _ _] nil)
+
+      (query-latest-per-group [_ _ _ _] nil))))
+
+
+(deftest execute-move-assembles-directed-seams-and-relocates
+  ;; execute-move! is the ops/controller entry: read port+token from env, build
+  ;; the directed load/evict seams, run move-cell!. Redefine the HTTP transport
+  ;; so the load acks 200 (no real pod) and assert the placement actually flips.
+  (let [storage (mem-placement-storage)
+        ctx {:storage storage}
+        posts (atom [])]
+    (placement/assign! storage {:org "acme" :entry-fn-id ROOT :executor-id "pod-a" :epoch 1})
+    (with-redefs [http/request (fn [opts] (swap! posts conj (:url opts)) (future {:status 200 :body "{}"}))]
+      (let [r (cmd/execute-move! ctx {:org "acme" :entry-fn-id ROOT :to-executor "pod-b"})]
+        (testing "the move ran end-to-end through the directed seams"
+          (is (= true (:ok r)))
+          (is (= "pod-b" (:to r)))
+          (is (= 2 (:epoch r)))
+          (is (= "pod-b" (placement/executor-for storage "acme" ROOT)) "placement flipped to the target"))
+        (testing "a load POST hit the target and an evict POST hit the source"
+          (is (some #(re-find #"pod-b.*/load/" %) @posts) "target loaded")
+          (is (some #(re-find #"pod-a.*/evict/" %) @posts) "source evicted"))))))

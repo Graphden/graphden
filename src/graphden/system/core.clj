@@ -757,7 +757,7 @@
         ;; the executor holding the org's cell (per `:placement`) instead of
         ;; 421. All executors listen on the same port (`GRAPHDEN_PORT`).
         fleet-forward (when (seq executor-id)
-                        (let [port (or (some-> (System/getenv "GRAPHDEN_PORT") parse-long) 8080)]
+                        (let [port (fleet-command/fleet-port)]
                           (fn [request org entry-fn-id]
                             (fleet-router/forward-or-nil storage executor-id port
                                                          org entry-fn-id request))))
@@ -1248,7 +1248,10 @@
 
 (defmethod ig/init-key :exec/fleet-controller
   [_ {:keys [context pg-opts enabled? period-ms]}]
-  (if-not (seq (str enabled?))
+  ;; `enabled?` is the fleet identity (`GRAPHDEN_EXECUTOR_ID`) — a non-blank
+  ;; string on a fleet member, nil/false otherwise. Guard against a literal
+  ;; `false` (whose `(str false)` = "false" is non-blank) reading as enabled.
+  (if-not (and enabled? (not (str/blank? (str enabled?))))
     (do (log/info "Fleet controller disabled (not a fleet member)") nil)
     (let [holder (pg-lock/create-lock-holder pg-opts)
           state-atom (atom {})

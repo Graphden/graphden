@@ -33,9 +33,10 @@
           cells))
 
 
-(defn- least-loaded
+(defn least-loaded
   "The executor with the smallest current load, ties broken by id order so the
-   packing is deterministic across runs."
+   result is deterministic. Shared by the packer's LPT loop and the control
+   loop's initial placement."
   [loads executors]
   (first (sort-by (juxt loads identity) executors)))
 

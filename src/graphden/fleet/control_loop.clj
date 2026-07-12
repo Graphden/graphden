@@ -22,11 +22,6 @@
     [graphden.storage.protocol.core :as sp]))
 
 
-(defn- least-loaded
-  [loads executors]
-  (first (sort-by (juxt loads identity) executors)))
-
-
 (defn- plan-initial-placements
   "Assign each `unplaced` cell-key to the least-loaded executor, greedily and
    deterministically (unplaced keys sorted, running loads updated per pick).
@@ -39,7 +34,7 @@
              loads (packer/loads-of cells current executors)
              acc []]
         (if-let [k (first remaining)]
-          (let [target (least-loaded loads executors)]
+          (let [target (packer/least-loaded loads executors)]
             (recur (rest remaining)
                    (update loads target + (weight-of k 0.0))
                    (conj acc {:org (first k) :entry-fn-id (second k) :to target})))

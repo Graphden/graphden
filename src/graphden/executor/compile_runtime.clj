@@ -468,6 +468,16 @@
         @holder))))
 
 
+(defn- ctx-forward-deps
+  "The `:forward-deps` index for cell load/evict — from the primed
+   `:compile-deps` if present, else built from the graph. `graph-fn` (a thunk) is
+   called only on the cold path, so a caller that already read the graph can pass
+   it back without a second read."
+  [ctx graph-fn]
+  (or (:forward-deps (some-> (:compile-deps ctx) deref))
+      (:forward-deps (deps/build-deps-state (graph-fn)))))
+
+
 (defn load-cell!
   "Compile a CELL — a root fn + its transitive forward ref-closure
    (docs/FLEET_RFC.md §3) — INTO the ctx's compiled registry, ON TOP of
@@ -494,8 +504,7 @@
                   (:fns graph)
                   (into {} (map (juxt :id identity)) (:fns graph)))
         _ (prime-always-fresh! (vals fns-map))
-        forward-deps (or (:forward-deps (some-> (:compile-deps ctx) deref))
-                         (:forward-deps (deps/build-deps-state graph)))
+        forward-deps (ctx-forward-deps ctx (constantly graph))
         cell (into #{}
                    (filter #(contains? fns-map %))
                    (deps/forward-closure forward-deps [root-fn-id]))
@@ -525,10 +534,8 @@
         roots-atom (:loaded-roots ctx)]
     (if (or (nil? holder) (nil? roots-atom) (not (contains? @roots-atom root-fn-id)))
       #{}
-      (let [forward-deps (or (:forward-deps (some-> (:compile-deps ctx) deref))
-                             (:forward-deps
-                               (deps/build-deps-state
-                                 (read-graph (compile-storage ctx) (:executor-orgs ctx)))))
+      (let [forward-deps (ctx-forward-deps
+                           ctx #(read-graph (compile-storage ctx) (:executor-orgs ctx)))
             remaining (disj @roots-atom root-fn-id)
             ;; Union of every OTHER loaded root's closure — the fns that must
             ;; survive. `forward-closure` over a set of roots is their union.

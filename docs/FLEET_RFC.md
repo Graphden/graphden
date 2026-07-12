@@ -377,10 +377,15 @@ Verified against the executor:
   - **T5.3 (deferred, CRaC-gated)** scale-to-zero for the idle tail — needs the
     footprint/start track (§5.1) to make cold start acceptable first. Knative
     activator buffering slots in here.
-- **Parallel track — footprint/start (§5.1).** Substrate confirmed (CRIU + Zulu
-  CRaC JDK work here). Track = CRaC `Resource` handlers (close/reopen the pool +
-  sockets) → checkpoint after warm boot → measure restore of the real ~655 MB
-  image → decision → AppCDS. NOT GraalVM.
+- **Parallel track — footprint/start (§5.1) — MEASURED + DECISION: ADOPT.**
+  The full-system checkpoint now works end-to-end (three `graphden.crac`
+  quiesce/resume blockers fixed — see `development/crac/README.md`). Measured on
+  the real image: checkpoint 219 MB, **restore→serving ~178 ms vs ~141 s cold
+  boot (~780×)**. Decision: **adopt CRaC** as the footprint track — it directly
+  unblocks scale-to-zero (T5.3). AppCDS is DE-PRIORITISED: the boot is
+  compute-bound (type-check + eager-compile), which AppCDS doesn't touch.
+  Remaining is operational: bake the checkpoint in CI via `Dockerfile.crac`.
+  NOT GraalVM.
 
 ## 9. Relationship to graph hot-reload (already shipped)
 
@@ -427,8 +432,12 @@ is the foundation this RFC reuses — not new work.**
 
 ## 11. Open questions / risks
 
-- **Cold-start number** — re-measure cleanly (isolate app boot from dependency
-  reconnect); the ~113 s observed contradicts the ~35 s documented.
+- **Cold-start number** — RE-MEASURED cleanly (2026-07-12): ~141 s to serving,
+  decomposed as fn-entities + type-check sweep ~55 s and eager-compile of 4085
+  fns ~81 s. It is **compute-bound**, not dependency-reconnect or class-loading —
+  so AppCDS (which only speeds class-load) barely helps, and CRaC (which captures
+  the whole compiled registry) is the lever. The earlier ~35 s figure predates
+  the graph's growth to 4085 fns.
 - **CRaC feasibility** — substrate CONFIRMED (CRIU v3.16.1 + Zulu 21 CRaC JDK
   both work here, §5.1). Remaining risk is the integration: open resources (Hikari
   pool, http-kit listener, vault client, notify/advisory-lock connections, SSE)
@@ -456,6 +465,15 @@ is the foundation this RFC reuses — not new work.**
   CRaC JDK; checkpoint of a ~300 MB heap succeeds). The gate moves from
   environment feasibility to the `Resource`-handler integration + measuring the
   real ~655 MB image.
+- 2026-07-12: **CRaC full-system checkpoint MEASURED end-to-end; DECISION =
+  ADOPT.** The real warm image (4085 fns compiled + web-server up) checkpoints to
+  219 MB and restores to serving in ~178 ms vs a ~141 s cold boot (~780×). Three
+  `graphden.crac` quiesce/resume blockers were found + fixed (lazy class-init on
+  the checkpoint thread, Hikari pool not draining to zero, http-kit
+  listener/selector). Cold boot re-measured clean = compute-bound (type-check +
+  eager-compile), so **AppCDS is de-prioritised** and CRaC is the footprint
+  lever. Remaining is operational (CI checkpoint bake); this unblocks
+  scale-to-zero (T5.3).
 - 2026-07: graph **hot-reload is already shipped** and is the foundation cell-load
   reuses; this task adds **placement**, not freshness. Strict route-to-up-to-date
   (version epoch) is a separate, optional layer.

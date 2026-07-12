@@ -23,16 +23,30 @@ restore.
 Environment: kernel 5.15 (`CAP_CHECKPOINT_RESTORE` present), CRIU 3.16.1
 (`criu check` → "Looks good"), Azul Zulu 21.0.11 CRaC JDK.
 
+### Standalone PoC (package-load only)
+
 | Metric | Value |
 |--------|-------|
 | Package load (eval 32 impls → 251 base-fns) | **4484 ms** |
-| Full cold boot, for context (§5.1) | ~35 s documented / ~113 s measured |
 | Warm checkpoint image / RSS | 201 MB / ~358 MB |
-| **Restore** | **~30–41 ms** (reproducible after the brotli fix) — >100× vs load, >800× vs cold boot |
+| **Restore** | **~30–41 ms** (reproducible after the brotli fix) |
 
-The ~41 ms restore is the headline: CRaC can turn a tens-of-seconds boot into a
-sub-100 ms restore, which is what makes scale-to-zero and frequent
-placement/rebalance (FLEET_RFC §8) affordable.
+### Full system, end-to-end (the real image) — measured 2026-07-12
+
+The `graphden.crac` entrypoint checkpointed with the WHOLE system warm
+(3559 fn-entities loaded + type-check sweep + 4085 fns eagerly compiled + the
+http-kit web-server started), then restored to serving.
+
+| Metric | Value |
+|--------|-------|
+| Cold boot to serving | **~141 s** — decomposed: fn-entities + type-check sweep ~55 s, eager-compile 4085 fns ~81 s (the §11 re-measure: boot is **compute-bound**, not dependency-reconnect or class-loading — so AppCDS, which only speeds class-load, barely helps; CRaC captures the whole compiled registry) |
+| Checkpoint image | **219 MB** |
+| **Restore → serving** (`/health` 200, incl. pool resume + web-server rebind) | **~173–182 ms** (3 runs) |
+| **Speedup** | **~780×** (178 ms vs 141 s) |
+
+The ~178 ms restore-to-serving is the headline: CRaC turns graphden's two-minute
+compute-bound boot into a sub-200 ms restore, which is what makes scale-to-zero
+and frequent placement/rebalance (FLEET_RFC §8) affordable.
 
 ## Blockers found (what a production CRaC path must solve)
 
@@ -47,21 +61,37 @@ placement/rebalance (FLEET_RFC §8) affordable.
    `brotli4j.library.path` property (direct `System.load`, no temp, no
    `deleteOnExit`). Re-verified: **3/3 restores OK, ~30–38 ms**. General rule for
    any future extract-and-mmap native lib: pin it to a stable, image-shipped path.
-2. **Live external connections.** This PoC deliberately avoids them
-   (`load-packages` opens no sockets). A full-system checkpoint additionally needs
-   CRaC `Resource` handlers to close **before** and reopen + **rewire after** every
-   live resource: the Hikari→Postgres pool, the http-kit listener, the
-   vault/openbao client, the notify-listener + advisory-lock connections, and SSE.
-   Rewiring is the real work — the executor context holds a reference to the
-   storage that wraps the pool, so reopening the pool means re-threading it.
+2. **Live external connections — FIXED (2026-07-12).** The full-system
+   checkpoint failed on open sockets; three fixes in `graphden.crac`, each
+   confirmed against a real checkpoint→restore:
+   - **Lazy class-init on the checkpoint thread.** CRaC runs `beforeCheckpoint`
+     on an internal thread; a class whose `<clinit>` first ran there threw
+     `ExceptionInInitializerError` (`HikariConfigMXBean`, never touched in normal
+     operation). Fix: a dry `quiesce!→resume!` warm-up in `-main` initialises
+     every class in both handlers in a normal JVM state before the hook is armed.
+   - **Hikari pool left ~minIdle sockets open.** `suspendPool` +
+     `softEvictConnections` don't reach zero — the housekeeper reopens idle
+     connections. Fix: `setMinimumIdle 0` first, softEvict, poll
+     `getTotalConnections` to 0; `resume!` restores minIdle + `resumePool`.
+   - **http-kit listener + selector on :8080.** An open `ServerSocketChannel` +
+     EPoll selector CRIU can't snapshot. Fix: `quiesce!` stops managed services
+     via the reconciler (closing them); `resume!` restarts them with a reconcile
+     pass. The fleet-controller's own advisory-lock connection is closed too.
+
+   General rule confirmed: any FD open at checkpoint (socket, selector, mmap)
+   must be closed by a `Resource`/quiesce path AND its classes pre-initialised.
 
 ## Assessment
 
-CRaC is **feasible and high-value** (substrate confirmed, ~30 ms reproducible
-restore demonstrated). Blocker 1 (native-mmap reproducibility) is **fixed**; the
-remaining production integration is the resource close/reopen/rewire (blocker 2)
-plus a `Dockerfile.crac` that checkpoints at build time. Recommended as the
-FLEET_RFC §8 footprint track, after (or alongside) the Phase-0 placement work.
+CRaC is **feasible, validated end-to-end, and high-value** — the real ~219 MB
+image checkpoints and restores to serving in **~178 ms vs a ~141 s cold boot
+(~780×)**. All blockers are fixed (native-mmap reproducibility; the three
+resource-quiesce issues above). What remains before a production rollout is
+operational, not a feasibility question: bake the checkpoint in CI via
+`Dockerfile.crac` (privileged CRIU + a reachable Postgres at the same JDBC_URL),
+and confirm the same-topology constraints on the target cluster. **Recommended
+to adopt** as the FLEET_RFC §8 footprint track; it directly unblocks
+scale-to-zero (T5.3).
 
 ## Running the standalone PoC
 

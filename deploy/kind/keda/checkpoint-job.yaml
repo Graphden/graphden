@@ -1,0 +1,48 @@
+# One-shot: boot graphden fully against crac-pg (syncs the graph + warms the
+# compiled registry), then JDK.checkpoint. Writes the checkpoint + brotli native
+# to a node hostPath shared with the restore Deployment (single-node kind).
+# Privileged: CRIU needs CAP_SYS_ADMIN/CHECKPOINT_RESTORE/PTRACE in-container —
+# exactly what stock Knative forbids and KEDA-over-a-Deployment permits.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: crac-checkpoint
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: checkpoint
+          image: kind.local/graphden-crac:latest
+          imagePullPolicy: Never
+          securityContext:
+            privileged: true
+            runAsUser: 0   # CRIU checkpoint runs as root; restore must match uid
+          env:
+            - { name: JDBC_URL, value: "jdbc:postgresql://crac-pg:5432/graphden" }
+            - { name: DB_USERNAME, value: graphden }
+            - { name: DB_PASSWORD, value: graphden }
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -e
+              mkdir -p /crac/checkpoint /crac/native
+              rm -rf /crac/checkpoint/* /crac/native/*
+              chmod 777 /crac/checkpoint /crac/native
+              java -XX:CRaCCheckpointTo=/crac/checkpoint \
+                   -Dgraphden.native-lib.dir=/crac/native \
+                   -cp /app/executor-server.jar clojure.main -m graphden.crac &
+              PID=$!
+              echo "waiting warm-ready…"
+              for _ in $(seq 1 600); do [ -f /tmp/graphden-crac.ready ] && break; sleep 0.5; done
+              [ -f /tmp/graphden-crac.ready ] || { echo BOOT-FAILED; exit 1; }
+              echo "checkpointing…"
+              jcmd "$PID" JDK.checkpoint
+              wait "$PID" 2>/dev/null || true
+              echo "CKPT-DONE size=$(du -sh /crac/checkpoint | cut -f1)"
+          volumeMounts:
+            - { name: crac, mountPath: /crac }
+      volumes:
+        - name: crac
+          hostPath: { path: /crac-store, type: DirectoryOrCreate }

@@ -1,0 +1,65 @@
+# The CRaC restore Deployment + Service + KEDA HTTPScaledObject.
+# KEDA's HTTP add-on scales this 0↔N: idle → 0 replicas; a request hits the
+# interceptor, which holds it while a pod scales up. Because the pod's cold
+# start IS a CRIU restore (~sub-second), scale-from-zero is fast — the thing
+# stock Knative can't do here (its ksvc user container can't hold CRIU caps).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crac-app
+spec:
+  replicas: 0
+  selector: { matchLabels: { app: crac-app } }
+  template:
+    metadata: { labels: { app: crac-app } }
+    spec:
+      containers:
+        - name: crac-app
+          image: kind.local/graphden-crac:latest
+          imagePullPolicy: Never
+          securityContext:
+            privileged: true
+            runAsUser: 0   # must match the checkpoint uid (CRaC uid-alignment)
+          env:
+            - { name: JDBC_URL, value: "jdbc:postgresql://crac-pg:5432/graphden" }
+            - { name: DB_USERNAME, value: graphden }
+            - { name: DB_PASSWORD, value: graphden }
+          command: ["java"]
+          args:
+            - "-XX:CRaCRestoreFrom=/crac/checkpoint"
+            - "-Dgraphden.native-lib.dir=/crac/native"
+          ports: [{ containerPort: 8080 }]
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            periodSeconds: 1
+            failureThreshold: 30
+          volumeMounts:
+            - { name: crac, mountPath: /crac, readOnly: true }
+      volumes:
+        - name: crac
+          hostPath: { path: /crac-store, type: Directory }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crac-app
+spec:
+  selector: { app: crac-app }
+  ports: [{ port: 8080, targetPort: 8080 }]
+---
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: crac-app
+spec:
+  hosts: ["crac.local"]
+  scaleTargetRef:
+    name: crac-app
+    kind: Deployment
+    apiVersion: apps/v1
+    service: crac-app
+    port: 8080
+  replicas:
+    min: 0
+    max: 1
+  scaledownPeriod: 30

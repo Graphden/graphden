@@ -378,14 +378,22 @@ Verified against the executor:
     front-door Service + Secret/ConfigMap + opt-in HPA. Each pod's
     `GRAPHDEN_EXECUTOR_ID` is its FQDN; the controller runs in-app (no separate
     operator/CRD). See [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
-  - **T5.3 (Knative half DEMONSTRATED; CRaC-gated for production)** scale-to-zero
-    for the idle tail. Verified on kind (2026-07-12, deploy/kind/knative/): the
-    graphden app as a Knative Service scales to **0 pods** when idle and a request
-    cold-starts one (the activator buffers it) — but the cold-start was **115 s**
-    (the compute-bound boot). So the substrate works; making it PRACTICAL still
-    needs the footprint/start track (§5.1) — CRaC restore (~178 ms) fronting the
-    ksvc turns that 115 s into sub-200 ms (~650×). Wiring the CRaC restore image
-    into the ksvc is the remaining step.
+  - **T5.3 (DEMONSTRATED end-to-end on KEDA+CRaC; substrate = KEDA, not Knative)**
+    scale-to-zero for the idle tail. Two substrates verified on kind (2026-07-12):
+    - **Knative** (deploy/kind/knative/): the app as a ksvc scales to **0 pods**
+      idle, a request cold-starts one (activator buffers) — but the cold-start was
+      **115 s** (the compute-bound boot). AND stock Knative **cannot** front this
+      with CRaC: a ksvc user container may not be `privileged` and cannot
+      `capabilities.add`, while CRIU restore needs `CAP_SYS_ADMIN` /
+      `CAP_CHECKPOINT_RESTORE` in-container. So Knative's fast-restore is blocked
+      *by design*, not by plumbing.
+    - **KEDA + HTTP add-on** (deploy/kind/keda/): scales an ordinary **Deployment**
+      (unrestricted PodSpec → CAN be privileged), the add-on's interceptor supplies
+      the activator. A privileged Deployment running the CRaC **restore** image,
+      scaled 0↔1, serves `/health` **200 in ~3.1–3.5 s from 0 pods** (raw CRIU
+      restore in-pod ~1.2 s; the rest is KEDA detect + schedule + 1 s probe). vs
+      Knative's 115 s → **~33×**. This is the practical scale-to-zero path; Knative
+      stays the reference for the caps limitation.
 - **Parallel track — footprint/start (§5.1) — MEASURED + DECISION: ADOPT.**
   The full-system checkpoint now works end-to-end (three `graphden.crac`
   quiesce/resume blockers fixed — see `development/crac/README.md`). Measured on

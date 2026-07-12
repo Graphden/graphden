@@ -26,6 +26,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
+    [graphden.fleet.command :as fleet-command]
     [graphden.fleet.router :as fleet-router]
     [graphden.packages.loader :as pkg]
     [graphden.packages.manifest :as manifest]
@@ -758,6 +759,13 @@
                           (fn [request org entry-fn-id]
                             (fleet-router/forward-or-nil storage executor-id port
                                                          org entry-fn-id request))))
+        ;; Fleet control-plane command seam (docs/FLEET_RFC.md §6.3): the
+        ;; internal cell load/evict endpoint a move (or an ops call) drives.
+        ;; Wired on the same condition as the forward-hop (this pod is a fleet
+        ;; member). Gated by the shared internal token, NOT the tenant auth-
+        ;; provider — a cell command is cross-org platform authority.
+        fleet-cmd (when (seq executor-id)
+                    (fleet-command/make-command-handler (fleet-command/internal-token)))
         ctx-opts (cond-> {:storage storage}
                    (and base-fns (:base-fns base-fns))
                    (assoc :base-fns (:base-fns base-fns))
@@ -797,7 +805,9 @@
                                            (boolean byo-executor?)))
                    ;; Fleet forward-hop seam — only present when this pod has a
                    ;; fleet identity (see the let above).
-                   fleet-forward (assoc :fleet-forward fleet-forward))]
+                   fleet-forward (assoc :fleet-forward fleet-forward)
+                   ;; Fleet control-plane command seam — same condition.
+                   fleet-cmd (assoc :fleet-command fleet-cmd))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client)

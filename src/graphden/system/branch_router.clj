@@ -530,6 +530,14 @@
    misrouting."
   [router request]
   (let [base-ctx (:base-ctx router)
+        ;; Fleet control-plane seam (docs/FLEET_RFC.md §6.3): the internal
+        ;; cell load/evict command (`POST /internal/fleet/cell/...`). Checked
+        ;; FIRST — it's infra, org-agnostic, internal-token-gated, and never a
+        ;; tenant path. Returns a response for a matching command, nil for
+        ;; anything else (→ falls through). Absent unless this pod is a fleet
+        ;; member (`GRAPHDEN_EXECUTOR_ID` set).
+        fleet-command (:fleet-command base-ctx)
+        fleet-resp (when fleet-command (fleet-command base-ctx request))
         ;; App-router seam (§3.4 FaaS): a request to a TENANT's subdomain is
         ;; the tenant's APP — served by that org's handler fn (org-scoped +
         ;; effect-gated), NOT the editor/API. The app-router returns a
@@ -537,7 +545,8 @@
         ;; which then falls through to the editor/API flow below. Absent
         ;; (core / single-tenant) → straight to editor/API.
         app-router (:app-router base-ctx)
-        app-resp (when app-router (app-router base-ctx request))]
+        app-resp (or fleet-resp
+                     (when app-router (app-router base-ctx request)))]
     (or app-resp
         ;; Branch resolution runs INSIDE the request-scope (§4): `:branch` is
         ;; org-scoped, so `*current-org*` must be bound when resolve-branch-id

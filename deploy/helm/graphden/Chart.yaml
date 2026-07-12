@@ -1,0 +1,14 @@
+apiVersion: v2
+name: graphden
+description: >-
+  Graphden executor fleet — a StatefulSet of executor pods with headless-Service
+  SRV discovery, the in-app leader-locked placement controller (docs/FLEET_RFC.md
+  §6.3), and optional HPA. See docs/FLEET_DEPLOY.md.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - graphden
+  - executor
+  - fleet
+home: https://github.com/BonsaiFlow/graphden

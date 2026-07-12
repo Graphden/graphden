@@ -1,0 +1,26 @@
+{{/*
+Non-secret env — DB coordinates, ports, and fleet-controller tuning. Secrets
+(tokens, DB password) ride separately via secretKeyRef in the StatefulSet.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "graphden.fullname" . }}
+  labels:
+    {{- include "graphden.labels" . | nindent 4 }}
+data:
+  PORT: {{ .Values.port | quote }}
+  GRAPHDEN_PORT: {{ .Values.port | quote }}
+  STORAGE_TYPE: "postgres"
+  JDBC_URL: {{ .Values.database.jdbcUrl | quote }}
+  DB_USERNAME: {{ .Values.database.username | quote }}
+  DB_POOL_SIZE: {{ .Values.database.poolSize | quote }}
+  GRAPHDEN_FLEET_CONTROLLER_PERIOD_MS: {{ .Values.fleet.controllerPeriodMs | quote }}
+  GRAPHDEN_FLEET_SUSTAIN_TICKS: {{ .Values.fleet.sustainTicks | quote }}
+  GRAPHDEN_FLEET_MIN_IMPROVEMENT: {{ .Values.fleet.minImprovement | quote }}
+  {{- with .Values.fleet.maxMoves }}
+  GRAPHDEN_FLEET_MAX_MOVES: {{ . | quote }}
+  {{- end }}
+  {{- if .Values.vault.enabled }}
+  VAULT_ADDR: {{ .Values.vault.address | quote }}
+  {{- end }}

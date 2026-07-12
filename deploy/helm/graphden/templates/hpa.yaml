@@ -1,0 +1,28 @@
+{{- if .Values.autoscaling.enabled }}
+{{/*
+HPA over the StatefulSet. As it scales pods in/out, the headless Service's SRV
+membership follows, and the placement controller load/evicts cells to match
+(docs/FLEET_RFC.md §6.2, §7) — HPA owns the pod COUNT, the controller owns WHICH
+cells run where.
+*/}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "graphden.fullname" . }}
+  labels:
+    {{- include "graphden.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ include "graphden.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

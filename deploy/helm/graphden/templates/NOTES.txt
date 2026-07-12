@@ -1,0 +1,24 @@
+Graphden executor fleet "{{ include "graphden.fullname" . }}" deployed.
+
+Pods:        {{ if .Values.autoscaling.enabled }}HPA {{ .Values.autoscaling.minReplicas }}–{{ .Values.autoscaling.maxReplicas }}{{ else }}{{ .Values.replicaCount }} (fixed){{ end }}
+Front door:  Service {{ include "graphden.fullname" . }}:{{ .Values.service.port }}
+Membership:  SRV _http._tcp.{{ include "graphden.headlessName" . }}.<ns>.svc.cluster.local
+Controller:  leader-locked, period {{ .Values.fleet.controllerPeriodMs }}ms, sustain {{ .Values.fleet.sustainTicks }} ticks
+
+Each pod's GRAPHDEN_EXECUTOR_ID is its own FQDN, so forward-hops resolve directly.
+The leader controller auto-places new tenant cells and rebalances sustained load.
+
+1. Watch the fleet come up:
+     kubectl rollout status statefulset/{{ include "graphden.fullname" . }}
+
+2. Confirm membership is discoverable (from any pod):
+     kubectl exec {{ include "graphden.fullname" . }}-0 -- nslookup -type=SRV \
+       _http._tcp.{{ include "graphden.headlessName" . }}.$(kubectl config view --minify -o jsonpath='{..namespace}').svc.cluster.local
+
+{{- if .Values.secrets.create }}
+{{- if not .Values.secrets.internalToken }}
+
+WARNING: secrets.internalToken is empty — the internal cell-command endpoint
+fail-closes and the controller cannot move cells. Set a shared token.
+{{- end }}
+{{- end }}

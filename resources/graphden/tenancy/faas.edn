@@ -1,0 +1,22 @@
+;; FaaS app-routing addon fragment (PLATFORM_PLAN §3.4, docs/FLEET_RFC.md §6.1).
+;; Merge AFTER graphden/tenancy/addon.edn:
+;;   GRAPHDEN_ADDON_CONFIGS=graphden/tenancy/addon.edn,graphden/tenancy/faas.edn
+;; Turns on the app-router so a request to a tenant subdomain
+;; (`<org>.<base-domain>`) is served by that org's handler fn — and, in a
+;; SHARDED fleet, forward-hopped to the executor holding the org's cell when it
+;; isn't in this pod's shard (the `:fleet-forward` seam). base-domain via
+;; GRAPHDEN_BASE_DOMAIN (default graphden.app). Splices the :org registry (the
+;; app-router reads `:org.handler-fn-id`).
+{:graphden/require [graphden.tenancy.addon]
+
+ :tenancy/org-schema {}
+
+ :db/schema {:extensions [#ig/ref :tenancy/org-schema]}
+
+ :tenancy/org-resolver {}
+
+ :tenancy/app-router {:org-resolver #ig/ref :tenancy/org-resolver
+                      :base-domain #or [#env GRAPHDEN_BASE_DOMAIN "graphden.app"]
+                      :timeout-ms 10000}
+
+ :exec/context {:app-router #ig/ref :tenancy/app-router}}

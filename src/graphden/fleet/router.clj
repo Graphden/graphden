@@ -30,9 +30,15 @@
   (let [{:keys [request-method uri query-string headers body]} request
         resp @(http/request {:method (or request-method :get)
                              :url (forward-url executor-id port uri query-string)
-                             ;; Drop Host (rewritten by the target) + framing
-                             ;; headers httpkit sets itself.
-                             :headers (dissoc headers "host" "content-length" "connection")
+                             ;; PRESERVE Host — for the fleet forward-hop it is the
+                             ;; tenant subdomain (`<org>.<base-domain>`), the routing
+                             ;; key the HOLDER's app-router resolves the org from. A
+                             ;; plain reverse proxy rewrites Host to the target; here
+                             ;; that would make the holder see its own FQDN, fail to
+                             ;; resolve the org, and serve the apex editor instead of
+                             ;; the tenant's app. Only drop the framing headers
+                             ;; httpkit sets itself.
+                             :headers (dissoc headers "content-length" "connection")
                              :body body
                              :timeout 30000
                              :as :text})]

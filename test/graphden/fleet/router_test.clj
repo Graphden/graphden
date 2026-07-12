@@ -81,3 +81,32 @@
       (finally
         (holder)
         (sp/close storage)))))
+
+
+(deftest forward-preserves-the-tenant-host
+  ;; Regression: the forward-hop MUST keep the request's Host — for a tenant app
+  ;; it is `<org>.<base-domain>`, the routing key the holder's app-router
+  ;; resolves the org from. Dropping it (plain reverse-proxy convention) made the
+  ;; holder see its own FQDN, fail to resolve the org, and serve the apex editor
+  ;; instead of the tenant's app (found on a kind cluster, 2026-07-12).
+  (let [storage (storage-with-placement!)
+        entry (setup/create-base-fn! storage "cell-root-host" :any)
+        eid (:id entry)
+        seen-host (atom :unset)
+        holder (hk/run-server
+                 (fn [req]
+                   (reset! seen-host (get-in req [:headers "host"]))
+                   {:status 200 :body "ok"})
+                 {:port 0})
+        port (:local-port (meta holder))]
+    (try
+      (placement/assign! storage {:org "acme" :entry-fn-id eid
+                                  :executor-id "localhost" :epoch 1})
+      (router/forward-or-nil storage "pod-1" port "acme" eid
+                             {:request-method :get :uri "/"
+                              :headers {"host" "acme.graphden.app"}})
+      (is (= "acme.graphden.app" @seen-host)
+          "the holder receives the original tenant-subdomain Host, not the target FQDN")
+      (finally
+        (holder)
+        (sp/close storage)))))

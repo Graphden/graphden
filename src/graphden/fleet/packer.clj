@@ -18,6 +18,21 @@
    result against the current `:placement` map to derive moves.")
 
 
+(defn loads-of
+  "Per-executor total weight for an ARBITRARY placement (not necessarily the
+   packer's own). Every executor in `executors` appears, at 0.0 if it holds
+   nothing. A cell whose holder isn't among `executors` (unplaced, or a departed
+   pod) contributes to no total — its weight is the caller's to re-place. Used by
+   the rebalancer to score the CURRENT placement against a packed one."
+  [cells placement executors]
+  (reduce (fn [loads {:keys [org entry-fn-id weight]}]
+            (let [holder (get placement [org entry-fn-id])]
+              (cond-> loads
+                (contains? loads holder) (update holder + (double weight)))))
+          (zipmap executors (repeat 0.0))
+          cells))
+
+
 (defn- least-loaded
   "The executor with the smallest current load, ties broken by id order so the
    packing is deterministic across runs."

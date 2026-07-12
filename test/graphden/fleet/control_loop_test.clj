@@ -4,7 +4,8 @@
    tested without a fleet."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.fleet.control-loop :as loop]))
+    [graphden.fleet.control-loop :as loop]
+    [graphden.storage.protocol.core :as sp]))
 
 
 (defn- cell
@@ -78,3 +79,71 @@
         (loop/plan-tick {:cells [(cell c1 1)] :current {} :executors []} {} {})]
     (is (empty? initial-placements))
     (is (empty? moves))))
+
+
+;; ---------------------------------------------------------------------------
+;; Reading the live fleet + driving a tick through the move-fn seam.
+;; ---------------------------------------------------------------------------
+
+(defn- fleet-storage
+  "Fake storage: `:org` rows (name→handler-fn-id), `:placement` rows, and a
+   pending-execution count per org (for cell-weight's load term)."
+  [{:keys [orgs placements pending]}]
+  (reify sp/StorageCRUD
+    (query-entities
+      [_ en where]
+      (case en
+        :org (mapv (fn [[nm h]] {:name nm :handler-fn-id h}) orgs)
+        :placement placements
+        :fn-execution (when (= :pending (:status where))
+                        (vec (repeat (get pending (:org-id where) 0) {:status :pending})))
+        nil))
+
+    (query-entities [_ _ _ _] nil)
+
+    (create-entity [_ _ _] nil)
+
+    (read-entity [_ _ _] nil)
+
+    (update-entity [_ _ _ _] nil)
+
+    (delete-entity [_ _ _] nil)
+
+    (query-latest-per-group [_ _ _ _] nil)))
+
+
+(deftest current-placement-reads-highest-epoch
+  (let [storage (fleet-storage
+                  {:placements [{:org "o" :entry-fn-id c1 :executor-id "e1" :epoch 1}
+                                {:org "o" :entry-fn-id c1 :executor-id "e2" :epoch 2}]})]
+    (is (= {["o" c1] "e2"} (loop/current-placement storage))
+        "a stale duplicate is shadowed by the highest epoch")))
+
+
+(deftest discover-cells-unions-org-apps-and-placements
+  (let [storage (fleet-storage {:orgs {"acme" c1}
+                                :placements [{:org "beta" :entry-fn-id c2 :executor-id "e1" :epoch 1}]
+                                :pending {"acme" 2}})
+        ;; c1's cell = {c1}; weight = 1 fn + 2 pending = 3. c2's cell = {c2}=1, no load.
+        fwd {}
+        cells (loop/discover-cells storage fwd)]
+    (is (= #{{:org "acme" :entry-fn-id c1 :weight 3.0}
+             {:org "beta" :entry-fn-id c2 :weight 1.0}}
+           (set cells))
+        "tenant app cell + already-placed cell, each weighted")))
+
+
+(deftest run-tick-drives-plan-through-the-move-seam
+  (let [;; two org apps, both unplaced → both get an initial placement this tick.
+        storage (fleet-storage {:orgs {"acme" c1 "beta" c2}})
+        applied (atom [])
+        env {:storage storage :forward-deps {}
+             :executors ["e1" "e2"] :move-fn #(swap! applied conj %)}
+        decision (loop/run-tick! env {} {})]
+    (testing "both unplaced cells are placed via move-fn (least-loaded spread)"
+      (is (= 2 (count (:initial-placements decision))))
+      (is (= 2 (count @applied)))
+      (is (= #{"e1" "e2"} (set (map :to-executor @applied)))
+          "spread across both pods, not piled on one"))
+    (testing "each applied command carries org + entry + target"
+      (is (every? #(and (:org %) (:entry-fn-id %) (:to-executor %)) @applied)))))

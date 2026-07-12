@@ -16,8 +16,11 @@
    Keeping the decision pure means the whole policy — thresholds, sustained
    counting, initial-vs-rebalance split — is unit-tested without a fleet."
   (:require
+    [clojure.string :as str]
+    [graphden.fleet.metrics :as metrics]
     [graphden.fleet.packer :as packer]
-    [graphden.fleet.rebalance :as rebalance]))
+    [graphden.fleet.rebalance :as rebalance]
+    [graphden.storage.protocol.core :as sp]))
 
 
 (defn- least-loaded
@@ -75,3 +78,79 @@
      :moves (if fire? moves [])
      :current-imbalance current-imbalance
      :state {:over-count (if fire? 0 over-count)}}))
+
+
+;; =============================================================================
+;; Reading the live fleet (the inputs `plan-tick` decides over)
+;; =============================================================================
+
+(defn- safe-query
+  "Query, tolerating an entity the deployment doesn't define (`:org` is
+   tenancy-only) — a missing entity reads as no rows, not a crash."
+  [storage entity where]
+  (try
+    (sp/query-entities storage entity where)
+    (catch Exception _ nil)))
+
+
+(defn current-placement
+  "The fleet's current placement as `{[org entry-fn-id] executor-id}`, taking the
+   highest-epoch row per cell (defensive against a stale duplicate a partial move
+   might leave)."
+  [storage]
+  (into {}
+        (map (fn [[k rows]]
+               [k (:executor-id (first (sort-by :epoch > rows)))]))
+        (group-by (juxt :org :entry-fn-id) (safe-query storage :placement {}))))
+
+
+(defn discover-cells
+  "The cells the fleet manages, each weighted by `metrics/cell-weight`
+   (fn-count + org load): every tenant app cell (an `:org` row's
+   `:handler-fn-id`) unioned with whatever is already placed. Platform
+   `:service` cells are deliberately EXCLUDED — the reconciler owns their
+   advisory-lock singleton placement, so the fleet controller must not also
+   move them."
+  [storage forward-deps]
+  (let [org-roots (keep (fn [o]
+                          (when-let [h (:handler-fn-id o)]
+                            {:org (:name o) :entry-fn-id h}))
+                        (safe-query storage :org {}))
+        placed-roots (map (fn [r] {:org (:org r) :entry-fn-id (:entry-fn-id r)})
+                          (safe-query storage :placement {}))]
+    (map (fn [{:keys [org entry-fn-id]}]
+           {:org org
+            :entry-fn-id entry-fn-id
+            :weight (metrics/cell-weight forward-deps storage org entry-fn-id)})
+         (distinct (concat org-roots placed-roots)))))
+
+
+(defn fleet-executors
+  "The live executor set from `GRAPHDEN_FLEET_EXECUTORS` (comma-separated DNS
+   names — a k8s StatefulSet fills it). Empty when unset ⇒ the controller plans
+   nothing (there is nowhere to place)."
+  []
+  (or (some-> (System/getenv "GRAPHDEN_FLEET_EXECUTORS")
+              (str/split #",")
+              (->> (into [] (comp (map str/trim) (remove str/blank?)))))
+      []))
+
+
+(defn run-tick!
+  "One control pass with side effects behind the `move-fn` seam. Reads the live
+   cells + current placement, decides via `plan-tick`, then realises the decision
+   by calling `move-fn` with `{:org :entry-fn-id :to-executor}` for each initial
+   placement and then each (sustained) move — `move-fn` owns the `move-cell!` +
+   directed transport. Returns the `plan-tick` decision (so the caller carries
+   `:state` to the next tick).
+
+   `env` — `{:storage :forward-deps :executors :move-fn}`."
+  [{:keys [storage forward-deps executors move-fn]} state opts]
+  (let [cells (discover-cells storage forward-deps)
+        current (current-placement storage)
+        decision (plan-tick {:cells cells :current current :executors executors} state opts)]
+    (doseq [{:keys [org entry-fn-id to]} (:initial-placements decision)]
+      (move-fn {:org org :entry-fn-id entry-fn-id :to-executor to}))
+    (doseq [{:keys [org entry-fn-id to]} (:moves decision)]
+      (move-fn {:org org :entry-fn-id entry-fn-id :to-executor to}))
+    decision))

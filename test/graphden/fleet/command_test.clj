@@ -14,6 +14,7 @@
 
 
 (def ^:private ROOT #uuid "00000000-0000-0000-0000-0000000000e1")
+(def ^:private ROOT2 #uuid "00000000-0000-0000-0000-0000000000e2")
 (def ^:private TOKEN "s3cret-internal")
 
 
@@ -140,6 +141,39 @@
       (delete-entity [_ _ _] nil)
 
       (query-latest-per-group [_ _ _ _] nil))))
+
+
+(deftest status-endpoint-reports-placement-and-loads
+  (let [rows [{:org "acme" :entry-fn-id ROOT :executor-id "pod-a" :epoch 1}
+              {:org "beta" :entry-fn-id ROOT2 :executor-id "pod-b" :epoch 1}]
+        storage (reify sp/StorageCRUD
+                  (query-entities [_ en _] (when (= en :placement) rows))
+
+                  (query-entities [_ _ _ _] nil)
+
+                  (create-entity [_ _ _] nil)
+
+                  (read-entity [_ _ _] nil)
+
+                  (update-entity [_ _ _ _] nil)
+
+                  (delete-entity [_ _ _] nil)
+
+                  (query-latest-per-group [_ _ _ _] nil))
+        handler (cmd/make-command-handler TOKEN)
+        ctx {:storage storage}]
+    (testing "GET status without a token → 401"
+      (is (= 401 (:status (handler ctx (req :get cmd/status-path nil))))))
+    (testing "GET status with the token → 200 + placement map + per-pod loads"
+      (let [resp (handler ctx (req :get cmd/status-path TOKEN))
+            body (json/parse-string (:body resp) true)]
+        (is (= 200 (:status resp)))
+        (is (= #{"acme" "beta"} (set (map :org (:placements body)))))
+        (is (= #{"pod-a" "pod-b"} (set (map :executor-id (:placements body)))))
+        (is (contains? (:loads body) :pod-a))
+        (is (contains? (:loads body) :pod-b))))
+    (testing "a non-status GET falls through (nil → app/editor)"
+      (is (nil? (handler ctx (req :get "/api/branches" TOKEN)))))))
 
 
 (deftest execute-move-assembles-directed-seams-and-relocates

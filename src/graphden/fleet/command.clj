@@ -32,6 +32,7 @@
     [graphden.auth.provider :as auth]
     [graphden.executor.compile-runtime :as cr]
     [graphden.fleet.controller :as controller]
+    [graphden.fleet.status :as status]
     [org.httpkit.client :as http])
   (:import
     (java.util
@@ -42,6 +43,18 @@
   "URL prefix for the internal cell-command endpoint. Under `/internal/` so it
    reads as infra, never a tenant path."
   "/internal/fleet/cell/")
+
+
+(def status-path
+  "Read-only fleet observability endpoint (GET)."
+  "/internal/fleet/status")
+
+
+(defn executor-id
+  "This pod's fleet identity (`GRAPHDEN_EXECUTOR_ID`), or nil — reported by the
+   status endpoint so an operator can see which pod answered."
+  []
+  (System/getenv "GRAPHDEN_EXECUTOR_ID"))
 
 
 (defn parse-command-uri
@@ -95,20 +108,31 @@
 
 (defn make-command-handler
   "Build the `:fleet-command` dispatch seam — `(fn [ctx request]
-   response-or-nil)`. nil for any request that isn't a POST to the internal
-   cell-command path (→ `dispatch` falls through to the app/editor flow).
-   `internal-token` gates it (control-plane authority)."
+   response-or-nil)`. Serves the internal control-plane surface:
+     - `POST /internal/fleet/cell/{load|evict}/{root}` — the move commands;
+     - `GET  /internal/fleet/status` — the read-only placement + load snapshot.
+   nil for anything else (→ `dispatch` falls through to the app/editor flow).
+   `internal-token` gates both (control-plane authority)."
   [internal-token]
-  (fn [ctx request]
-    (when (= :post (:request-method request))
-      (when-let [cmd (parse-command-uri (:uri request))]
-        (if (authorized? internal-token request)
-          (try
-            (handle-command ctx cmd)
-            (catch Exception e
-              (log/error e "fleet cell command failed" {:cmd cmd})
-              (json-resp 500 {:ok false :error "command failed"})))
-          (json-resp 401 {:ok false :error "unauthorized"}))))))
+  (letfn [(gated
+            [request thunk err]
+            (if (authorized? internal-token request)
+              (try
+                (thunk)
+                (catch Exception e
+                  (log/error e (str "fleet " err))
+                  (json-resp 500 {:ok false :error err})))
+              (json-resp 401 {:ok false :error "unauthorized"})))]
+    (fn [ctx request]
+      (let [{:keys [request-method uri]} request]
+        (cond
+          (and (= :post request-method) (parse-command-uri uri))
+          (gated request #(handle-command ctx (parse-command-uri uri)) "command failed")
+
+          (and (= :get request-method) (= uri status-path))
+          (gated request #(json-resp 200 (status/fleet-status ctx (executor-id))) "status failed")
+
+          :else nil)))))
 
 
 ;; =============================================================================

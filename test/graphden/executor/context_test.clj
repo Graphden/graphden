@@ -71,6 +71,23 @@
         (sp/close storage)))))
 
 
+(deftest create-context-coerces-executor-orgs-and-byo
+  (let [storage (setup/create-test-storage)]
+    (try
+      (testing "a collection executor-orgs is coerced to a set (shard membership)"
+        (let [c (ctx/create-context {:storage storage :executor-orgs ["public" "acme"]})]
+          (is (= #{"public" "acme"} (:executor-orgs c)))))
+      (testing "a predicate executor-orgs passes through unchanged (hash-shard)"
+        (let [pred (fn [o] (= "acme" o))
+              c (ctx/create-context {:storage storage :executor-orgs pred})]
+          (is (= pred (:executor-orgs c)))))
+      (testing "byo-executor? true is threaded onto the ctx"
+        (let [c (ctx/create-context {:storage storage :byo-executor? true})]
+          (is (true? (:byo-executor? c)))))
+      (finally
+        (sp/close storage)))))
+
+
 (deftest create-context-custom-clock
   (testing "custom clock threads through as :clock and is sampled on demand"
     (let [storage (setup/create-test-storage)

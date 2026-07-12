@@ -456,6 +456,14 @@ enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user
 
 ### 3.4. ADR: tenant-приложения = FaaS (handler-only), НЕ PaaS (свой сервер)
 
+> **Как включается (as-built).** App-routing больше НЕ зашит в базовый tenancy-
+> аддон: он в отдельном фрагменте `resources/graphden/tenancy/faas.edn` (app-
+> router + `:org`-схема), подключаемом через
+> `GRAPHDEN_ADDON_CONFIGS=graphden/tenancy/addon.edn,graphden/tenancy/faas.edn`.
+> В шардированном флоте app-router перед `421` консультирует seam
+> `:fleet-forward` (`app_router.clj`) — форвард-хоп на executor, держащий cell
+> орга (docs/FLEET_RFC.md §6.1). См. [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
+
 **Решение (заменяет подход «service-sandbox» из §3.3-note).** Облачный
 тенант НЕ владеет `:service`/веб-сервером (Heroku-модель). Вместо этого —
 **FaaS / Cloudflare-Workers-модель**: платформа владеет web-server'ами

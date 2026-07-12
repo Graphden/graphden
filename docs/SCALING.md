@@ -5,6 +5,12 @@ missing. Companion to [SERVICES.md](SERVICES.md) (what a service is),
 [VERSIONING.md](VERSIONING.md) (per-branch contexts) and
 [PLATFORM_PLAN.md](PLATFORM_PLAN.md) (orgs, RLS, the effect gate).
 
+This document is the STATIC layer — fixed `:executor-orgs` shards + the `421`
+backstop. The DYNAMIC layer built on top of it (automatic load-based placement,
+cell load/evict, a leader-locked rebalancing controller, and forward-hop routing
+to a cell's holder instead of `421`) is [FLEET_RFC.md](FLEET_RFC.md), with the
+ops guide in [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
+
 ## The one idea
 
 Four separate-looking problems — "don't compile every tenant's fns",

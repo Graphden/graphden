@@ -133,6 +133,34 @@
         "tenant app cell + already-placed cell, each weighted")))
 
 
+(deftest discover-cells-tolerates-a-missing-org-entity
+  ;; `safe-query` swallows the throw when the `:org` entity isn't defined (a
+  ;; non-tenancy deployment), so discovery still returns the placed cells.
+  (let [storage (reify sp/StorageCRUD
+                  (query-entities
+                    [_ en where]
+                    (case en
+                      :org (throw (ex-info "entity :org not defined" {}))
+                      :placement [{:org "beta" :entry-fn-id c2 :executor-id "e1" :epoch 1}]
+                      :fn-execution (when (= :pending (:status where)) [])
+                      nil))
+
+                  (query-entities [_ _ _ _] nil)
+
+                  (create-entity [_ _ _] nil)
+
+                  (read-entity [_ _ _] nil)
+
+                  (update-entity [_ _ _ _] nil)
+
+                  (delete-entity [_ _ _] nil)
+
+                  (query-latest-per-group [_ _ _ _] nil))
+        cells (loop/discover-cells storage {})]
+    (is (= [{:org "beta" :entry-fn-id c2 :weight 1.0}] cells)
+        "a throwing :org read is tolerated; placement cells are still discovered")))
+
+
 (deftest run-tick-drives-plan-through-the-move-seam
   (let [;; two org apps, both unplaced → both get an initial placement this tick.
         storage (fleet-storage {:orgs {"acme" c1 "beta" c2}})

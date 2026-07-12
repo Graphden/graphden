@@ -149,6 +149,35 @@
             "default handler must NOT fire when feature is selected")))))
 
 
+(deftest dispatch-consults-fleet-command-first
+  (testing "a fleet-command that returns a response short-circuits before the
+            app-router AND before branch resolution (docs/FLEET_RFC.md §6.3)"
+    (let [branch-fired (atom false)
+          base-ctx {:fleet-command (fn [_ctx _req] {:status 218 :body "cell-cmd"})
+                    :app-router (fn [_ _] {:status 200 :body "app"})}
+          router (br/->BranchRouter
+                   base-ctx default-id
+                   (atom {default-id {:handler (fn [_]
+                                                 (reset! branch-fired true)
+                                                 {:status 200 :body "editor"})}})
+                   :stub)
+          resp (br/dispatch router {:headers {} :query-string nil})]
+      (is (= 218 (:status resp)) "the fleet-command response wins")
+      (is (= "cell-cmd" (:body resp)))
+      (is (false? @branch-fired) "neither app-router nor the branch handler ran"))))
+
+
+(deftest dispatch-falls-through-when-fleet-command-nil
+  (testing "fleet-command nil → app-router is consulted next"
+    (let [base-ctx {:fleet-command (fn [_ _] nil)
+                    :app-router (fn [_ _] {:status 200 :body "app"})}
+          router (br/->BranchRouter base-ctx default-id
+                                    (atom {default-id {:handler (constantly {:status 500})}})
+                                    :stub)
+          resp (br/dispatch router {:headers {} :query-string nil})]
+      (is (= "app" (:body resp)) "a nil fleet-command result does not swallow the request"))))
+
+
 (deftest dispatch-rejects-unknown-branch
   (testing "explicit ref that doesn't resolve → 400 JSON, default NOT called"
     (with-redefs [br/resolve-branch-id

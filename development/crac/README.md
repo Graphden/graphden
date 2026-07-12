@@ -128,6 +128,18 @@ real container. The 411 ms includes docker start + a coarse poll; the raw restor
 is ~30-40 ms (§ Results). This closes "the restore IMAGE works"; the host
 `build-checkpoint.sh` stays for a bare-metal same-path deploy.
 
+### The DB endpoint is frozen too (same-topology extends to Postgres)
+
+`resume!` does NOT re-read `JDBC_URL` — it resumes the SAME `HikariDataSource`
+captured in the checkpoint, re-opening sockets to the **same `jdbcUrl` +
+credentials**. So the restore-time Postgres must be reachable at the exact URL +
+creds the checkpoint used; you cannot bake against DB A and set `JDBC_URL=B` at
+restore. In production (cloud/RDS PG) front it with a stable logical endpoint
+(k8s `ExternalName` or a PgBouncer proxy holding the real secret), identical at
+checkpoint (CI, throwaway PG) and restore (prod, cloud PG). Full write-up +
+the env-portable `resume!`-rebuild alternative: `deploy/kind/keda/README.md`
+§ "Production: cloud PG" and FLEET_RFC §8.
+
 ## Production flow (as-built)
 
 The full system integration lives in `src/graphden/crac.clj` (quiesce/resume the

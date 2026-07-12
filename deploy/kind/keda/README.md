@@ -72,3 +72,40 @@ kubectl run k --rm -i --restart=Never --image=curlimages/curl:8.10.1 -- \
 The ~3 s includes KEDA request-detect → Deployment 0→1 → k8s schedule → CRIU
 restore (~1.2 s) → readiness probe (1 s period) → interceptor forward. Tightening
 the probe granularity closes most of the gap to the raw restore.
+
+## Production: cloud PG — `crac-pg` is a demo artifact, not a prod component
+
+`crac-pg` here plays two single-node-kind roles: a clean, uncontended DB so the
+checkpoint boot fully starts (incl. the singleton-gated web-server, which
+wouldn't bind against the running fleet's DB), and a stable Service-DNS name
+reused at restore. Neither role is a production database.
+
+The load-bearing constraint is in `graphden.crac/resume!`: it does **not** re-read
+`JDBC_URL` or rebuild the pool — it resumes the SAME `HikariDataSource` frozen in
+the checkpoint, re-opening sockets to the **same `jdbcUrl` + credentials**. So the
+CRaC same-topology rule extends to the DB endpoint: you cannot bake against
+`crac-pg` and then just set `JDBC_URL=…rds.amazonaws.com` at restore — the pool
+still dials the frozen address.
+
+Production shape with a provider-managed PG:
+
+- **Checkpoint (CI, build-time)** runs against an EPHEMERAL throwaway Postgres —
+  the `postgres` service container in `.github/workflows/crac-bake.yml`, exactly
+  `crac-pg`'s role. The cloud PG is NOT involved (CI must not touch prod RDS).
+- **Restore (prod, run-time)** pods talk to the cloud PG — but it must be
+  reachable at the SAME `jdbcUrl` + creds the CI checkpoint used. Front it with a
+  **stable logical endpoint** identical in both contexts:
+  - a k8s `ExternalName` Service (`graphden-db` → `xxx.rds.amazonaws.com`), or
+  - a **PgBouncer / connection proxy** at `graphden-db:5432` that holds the real
+    cloud secret and upstreams to RDS. The proxy also resolves credentials: the
+    pool freezes `username`/`password` too, so if the cloud creds differ from the
+    CI ones, `resume!` fails on auth unless a proxy presents stable creds.
+
+  Bake and restore both use e.g. `jdbc:postgresql://graphden-db:5432/graphden`;
+  only the backend behind the name swaps (throwaway PG in CI, cloud PG in prod).
+
+Alternative (not shipped): teach `resume!` to REBUILD `:db/postgres` from the
+current env on restore instead of resuming the frozen pool — env-portable images,
+no endpoint pinning. It's a real refactor, not a one-liner: the whole `system` map
+holds direct references to the frozen `HikariDataSource`, so repointing needs a
+`DataSource` indirection wrapper + re-init of every consumer. See FLEET_RFC §8.

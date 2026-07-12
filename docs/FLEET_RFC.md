@@ -409,6 +409,19 @@ Verified against the executor:
   the host `build-checkpoint.sh` is NOT restorable by the container image; use
   `build-checkpoint-in-container.sh` (found 2026-07-12).
   NOT GraalVM.
+  - **DB endpoint is frozen (same-topology extends to Postgres).** `resume!` does
+    not re-read `JDBC_URL`; it resumes the SAME `HikariDataSource` from the
+    checkpoint, re-dialing the frozen `jdbcUrl` + creds. So a CRaC image is pinned
+    to the DB URL it was baked against — you cannot bake against a throwaway PG in
+    CI and set `JDBC_URL=…rds` at restore. Prod shape: front the cloud PG with a
+    STABLE logical endpoint (k8s `ExternalName`, or a PgBouncer proxy holding the
+    real secret) identical at bake (CI) and restore (prod); the demo's `crac-pg`
+    Service name is that stand-in. Env-portable alternative (NOT shipped): have
+    `resume!` REBUILD `:db/postgres` from env on restore instead of resuming the
+    frozen pool — a real refactor (the `system` map holds direct references to the
+    frozen `HikariDataSource`; needs a `DataSource` indirection + consumer re-init),
+    worth it only if the endpoint-indirection proves operationally awkward. Full
+    write-up: `deploy/kind/keda/README.md` § "Production: cloud PG".
 
 ## 9. Relationship to graph hot-reload (already shipped)
 

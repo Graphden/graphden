@@ -100,6 +100,22 @@ kubectl logs -l app.kubernetes.io/name=graphden | grep "Fleet controller"
 A pod that is the leader logs `Fleet controller applied placement {...}` when it
 places or moves cells. Non-leaders stay quiet.
 
+## Observability — `GET /internal/fleet/status`
+
+The placement map + per-executor load, without going to Postgres. Behind the
+same `GRAPHDEN_INTERNAL_TOKEN` gate as the cell commands:
+
+```bash
+kubectl exec fleet-graphden-0 -- curl -s \
+  -H "Authorization: Bearer $GRAPHDEN_INTERNAL_TOKEN" \
+  http://localhost:8080/internal/fleet/status
+# → {"executor-id":"fleet-graphden-0…","placements":[{"org":…,"executor-id":…}…],
+#    "loads":{"fleet-graphden-0…":N,…}}
+```
+
+`executor-id` is the pod that answered; `loads` is advisory (falls back to 1 per
+cell if that pod hasn't primed its `:forward-deps` yet).
+
 ## How a request finds its cell
 
 1. The front-door Service round-robins the request to some pod.

@@ -560,7 +560,18 @@
 
    The predicate is LIVE — it reads the registry atom that load/evict mutate,
    so membership changes at runtime with no ctx rebuild. nil / empty registry
-   (before the first load) ⇒ false."
+   (before the first load) ⇒ false.
+
+   RESERVED, not yet wired into routing. Today the app-router forward-hop gates
+   on the STATIC `org-in-shard?` (docs/FLEET_RFC.md T2.4 — the smaller step), and
+   in a sharded fleet that is sufficient (verified on the cluster). `cell-held?`
+   is the primitive for the deferred LOAD-ON-DEMAND mode: pods start with only
+   `public` compiled and load a cell on demand / on placement, at which point
+   routing consults `cell-held?` (serve here vs forward to the holder / lazy-
+   load). Adopting that mode is a coupled change (empty-start boot + the
+   controller becoming shard-aware), so it stays a separate scoped effort — hence
+   this predicate is built + tested (`load_cell_test`) but intentionally
+   unreferenced by the request path for now."
   [ctx fn-id]
   (boolean (some-> (:compiled-registry ctx) deref (contains? fn-id))))
 

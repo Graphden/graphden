@@ -2413,11 +2413,20 @@
                          :value :_sp-existing-pool-size-str}}
           :children {:value []}}}
 
+  ;; concat's :colls resolves each ELEMENT as a fn-ref, but NOT refs nested in a
+  ;; sub-vector — so wrap the two single hiccup nodes in :list (whose :items DO
+  ;; resolve bare fn-refs) to get 1-element colls, then concat all three.
+  {:name :_sp-card-label-list
+   :parent :list :args {:items [:_sp-card-label-div]}}
+
+  {:name :_sp-pool-size-list
+   :parent :list :args {:items [:_sp-pool-size-input]}}
+
   {:name :_sp-card-wrap-children
    :parent :concat
-   :args {:colls [[:_sp-card-label-div]
+   :args {:colls [:_sp-card-label-list
                   :_sp-card-radios
-                  [:_sp-pool-size-input]]}}
+                  :_sp-pool-size-list]}}
 
   {:name :_sp-card-wrap
    :parent :hiccup

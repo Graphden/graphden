@@ -144,6 +144,29 @@
                                      :load-on (fn [_ _] true) :evict-on (fn [_ _] nil)})))))
 
 
+(deftest concurrent-same-cell-moves-serialize
+  ;; Two moves of the SAME cell fired at once. Without per-cell serialization
+  ;; both read epoch 1 and both write epoch 2 (a collision). With it, the second
+  ;; reads the first's result → the epoch reaches 3. So epoch 3 IS the proof the
+  ;; moves did not interleave.
+  (let [storage (mem-placement-storage)
+        barrier (java.util.concurrent.CyclicBarrier. 2)
+        move (fn [to]
+               (fn []
+                 (java.util.concurrent.CyclicBarrier/.await barrier)
+                 (ctrl/move-cell! storage {:org ORG :entry-fn-id ENTRY :to-executor to
+                                           :load-on (fn [_ _] true) :evict-on (fn [_ _] nil)})))]
+    (placement/assign! storage {:org ORG :entry-fn-id ENTRY :executor-id "e1" :epoch 1})
+    (let [f1 (future ((move "e2")))
+          f2 (future ((move "e3")))]
+      @f1
+      @f2
+      (testing "serialized: the epoch bumps twice (1→2→3), no collision at 2"
+        (is (= 3 (:epoch (placement/placement-for storage ORG ENTRY)))))
+      (testing "and the final holder is one of the two targets, consistently"
+        (is (contains? #{"e2" "e3"} (placement/executor-for storage ORG ENTRY)))))))
+
+
 (deftest evict-failure-is-post-flip-move-still-succeeds
   (let [storage (mem-placement-storage)]
     (placement/assign! storage {:org ORG :entry-fn-id ENTRY :executor-id "e1" :epoch 1})

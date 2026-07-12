@@ -40,6 +40,30 @@
     [graphden.fleet.placement :as placement]))
 
 
+;; =============================================================================
+;; Move serialization
+;;
+;; A move is read-current → load → flip-epoch → evict. Two moves that interleave
+;; on the SAME cell would both read epoch N and both write epoch N+1 — a
+;; collision that leaves two rows at one epoch AND leaks the loser's loaded
+;; target. So a move takes a monitor; the second move reads the first's result
+;; (a clean epoch bump + a real source to evict).
+;;
+;; A single process-wide monitor (not per-cell) is deliberate: Phase-1 moves are
+;; rare ops/REPL actions, not a hot path, so serializing ALL moves costs nothing
+;; and mirrors the reconciler's `reconcile-monitor`. Per-cell striping would let
+;; unrelated cells move concurrently, an optimization Phase 1 has no use for.
+;;
+;; This is IN-PROCESS — correct for the single controller/operator Phase 1 has
+;; (no autonomous loop). Electing ONE controller FLEET-WIDE (so two pods can't
+;; both move a cell) is the Phase-2 job: an advisory leader-lock reusing the
+;; reconciler's (docs/FLEET_RFC.md §6.3 Safety). The layers compose — the
+;; leader-lock elects the controller, this monitor orders its moves.
+;; =============================================================================
+
+(defonce ^:private move-monitor (Object.))
+
+
 (defn move-cell!
   "Relocate `(org, entry-fn-id)`'s cell to `to-executor`, keeping it served
    throughout (see ns docstring). Reads the current placement for the source +
@@ -54,39 +78,40 @@
      {:ok false :reason :no-target}                             — nil target.
      {:ok false :reason :target-load-failed :from <id> :to <id>} — aborted pre-flip."
   [storage {:keys [org entry-fn-id to-executor load-on evict-on]}]
-  (let [current (placement/placement-for storage org entry-fn-id)
-        from (:executor-id current)
-        epoch (:epoch current)]
-    (cond
-      (nil? to-executor)
-      {:ok false :reason :no-target}
+  (locking move-monitor
+    (let [current (placement/placement-for storage org entry-fn-id)
+          from (:executor-id current)
+          epoch (:epoch current)]
+      (cond
+        (nil? to-executor)
+        {:ok false :reason :no-target}
 
-      (= from to-executor)
-      ;; Already placed here — idempotent success, no load/flip/evict churn.
-      {:ok true :from from :to to-executor :epoch epoch :noop true}
+        (= from to-executor)
+        ;; Already placed here — idempotent success, no load/flip/evict churn.
+        {:ok true :from from :to to-executor :epoch epoch :noop true}
 
-      :else
-      (let [loaded? (try
-                      (boolean (load-on to-executor entry-fn-id))
-                      (catch Exception e
-                        (log/warn e "move-cell! target load threw — aborting move (no flip)"
-                                  {:org org :entry-fn-id entry-fn-id :to to-executor})
-                        false))]
-        (if-not loaded?
-          {:ok false :reason :target-load-failed :from from :to to-executor}
-          (let [new-epoch (inc (or epoch 0))]
-            ;; Flip the routing map: new requests forward to the target now; the
-            ;; source keeps serving whatever it already admitted.
-            (placement/assign! storage {:org org
-                                        :entry-fn-id entry-fn-id
-                                        :executor-id to-executor
-                                        :epoch new-epoch})
-            ;; Source drops the cell. Post-flip, so a failure only leaks the
-            ;; source's closure (reclaimed later) — the move already succeeded.
-            (when from
-              (try
-                (evict-on from entry-fn-id)
-                (catch Exception e
-                  (log/warn e "move-cell! source evict threw — cell relocated, source closure leaked until reclaim"
-                            {:org org :entry-fn-id entry-fn-id :from from}))))
-            {:ok true :from from :to to-executor :epoch new-epoch}))))))
+        :else
+        (let [loaded? (try
+                        (boolean (load-on to-executor entry-fn-id))
+                        (catch Exception e
+                          (log/warn e "move-cell! target load threw — aborting move (no flip)"
+                                    {:org org :entry-fn-id entry-fn-id :to to-executor})
+                          false))]
+          (if-not loaded?
+            {:ok false :reason :target-load-failed :from from :to to-executor}
+            (let [new-epoch (inc (or epoch 0))]
+              ;; Flip the routing map: new requests forward to the target now; the
+              ;; source keeps serving whatever it already admitted.
+              (placement/assign! storage {:org org
+                                          :entry-fn-id entry-fn-id
+                                          :executor-id to-executor
+                                          :epoch new-epoch})
+              ;; Source drops the cell. Post-flip, so a failure only leaks the
+              ;; source's closure (reclaimed later) — the move already succeeded.
+              (when from
+                (try
+                  (evict-on from entry-fn-id)
+                  (catch Exception e
+                    (log/warn e "move-cell! source evict threw — cell relocated, source closure leaked until reclaim"
+                              {:org org :entry-fn-id entry-fn-id :from from}))))
+              {:ok true :from from :to to-executor :epoch new-epoch})))))))

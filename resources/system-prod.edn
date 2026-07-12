@@ -166,6 +166,25 @@
   :_compiled-registry #ig/ref :exec/compiled-registry
   :_branch-router #ig/ref :exec/branch-router}
 
+ ;; Fleet placement controller (docs/FLEET_RFC.md §6.3, Phase 2). A leader-
+ ;; locked periodic tick that reads live cell weights + the executor set
+ ;; (GRAPHDEN_FLEET_EXECUTORS) and applies placement: places new tenant app
+ ;; cells, rebalances SUSTAINED imbalance via the directed cell-command
+ ;; transport. Own advisory-lock connection (distinct from the reconciler's)
+ ;; elects one controller fleet-wide. Inert unless this pod is a fleet member
+ ;; (:enabled? ← GRAPHDEN_EXECUTOR_ID). Tuning envs (read directly):
+ ;; GRAPHDEN_FLEET_SUSTAIN_TICKS, GRAPHDEN_FLEET_MIN_IMPROVEMENT,
+ ;; GRAPHDEN_FLEET_MAX_MOVES.
+ :exec/fleet-controller
+ {:context #ig/ref :exec/context
+  :_compiled-registry #ig/ref :exec/compiled-registry
+  :pg-opts
+  {:jdbc-url #or [#env JDBC_URL "jdbc:postgresql://localhost:5432/graphden"]
+   :username #or [#env DB_USERNAME "graphden"]
+   :password #or [#env DB_PASSWORD "graphden"]}
+  :enabled? #or [#env GRAPHDEN_EXECUTOR_ID nil]
+  :period-ms #long #or [#env GRAPHDEN_FLEET_CONTROLLER_PERIOD_MS "30000"]}
+
  ;; Hourly sweep of :fn-execution rows past per-status TTL.
  ;; period-ms overridable via env (e.g. 600000 for 10-min sweeps in
  ;; staging). Independent of HTTP — runs even when nobody hits /api.

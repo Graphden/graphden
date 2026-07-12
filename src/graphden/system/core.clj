@@ -28,6 +28,7 @@
     [graphden.executor.registry.interface :as registry]
     [graphden.fleet.command :as fleet-command]
     [graphden.fleet.control-loop :as fleet-loop]
+    [graphden.fleet.discovery :as fleet-discovery]
     [graphden.fleet.router :as fleet-router]
     [graphden.packages.loader :as pkg]
     [graphden.packages.manifest :as manifest]
@@ -1231,7 +1232,7 @@
     (if (pg-lock/try-lock! (pg-lock/holder-conn holder) fleet-controller-lock-id)
       (let [env {:storage (:storage ctx)
                  :forward-deps (:forward-deps (some-> (:compile-deps ctx) deref))
-                 :executors (fleet-loop/fleet-executors)
+                 :executors (fleet-discovery/fleet-executors)
                  :move-fn (fn [cmd] (fleet-command/execute-move! ctx cmd))}
             decision (fleet-loop/run-tick! env @state-atom opts)]
         (reset! state-atom (:state decision))

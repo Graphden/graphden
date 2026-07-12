@@ -16,7 +16,6 @@
    Keeping the decision pure means the whole policy — thresholds, sustained
    counting, initial-vs-rebalance split — is unit-tested without a fleet."
   (:require
-    [clojure.string :as str]
     [graphden.fleet.metrics :as metrics]
     [graphden.fleet.packer :as packer]
     [graphden.fleet.rebalance :as rebalance]
@@ -123,17 +122,6 @@
             :entry-fn-id entry-fn-id
             :weight (metrics/cell-weight forward-deps storage org entry-fn-id)})
          (distinct (concat org-roots placed-roots)))))
-
-
-(defn fleet-executors
-  "The live executor set from `GRAPHDEN_FLEET_EXECUTORS` (comma-separated DNS
-   names — a k8s StatefulSet fills it). Empty when unset ⇒ the controller plans
-   nothing (there is nowhere to place)."
-  []
-  (or (some-> (System/getenv "GRAPHDEN_FLEET_EXECUTORS")
-              (str/split #",")
-              (->> (into [] (comp (map str/trim) (remove str/blank?)))))
-      []))
 
 
 (defn run-tick!

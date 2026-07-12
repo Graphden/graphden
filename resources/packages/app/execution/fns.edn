@@ -2332,7 +2332,7 @@
   {:name :_sp-cardinalities
    :description "Hardcoded enum — matches the `:service.cardinality` column. Admins MUST change the column enum + storage schema before adding values here."
    :parent :list
-   :args {:items [{:value "singleton"} {:value "per-pod"}]}}
+   :args {:items [{:value "singleton"} {:value "per-pod"} {:value "pool"}]}}
 
   ;; Per-radio callback. `{:as :item}` is the cardinality string.
   {:name :_sp-card-name
@@ -2384,12 +2384,40 @@
    :parent :hiccup
    :args {:tag {:value "div"}
           :attrs {:value {:class "service-popover-policy-label"
-                          :title "singleton = one pod runs it (cron / :schedule); per-pod = every pod runs its own (listeners like :http-server)"}}
+                          :title "singleton = one pod runs it (cron / :schedule); per-pod = every pod runs its own (listeners like :http-server); pool = up to :pool-size pods"}}
           :children [{:value "Cardinality:"}]}}
 
+  ;; pool-size number input — only meaningful for :cardinality pool; the
+  ;; reconciler ignores it otherwise. Pre-filled from the existing row.
+  ;; The JS save handler reads name="service-pool-size" into the POST body.
+  {:name :_sp-existing-pool-size-str
+   :description "The existing row's `:pool-size` as a string for the input value, or empty for a new row / non-pool service."
+   :parent :if
+   :args {:test {:parent :some? :args {:value :_sp-existing-pool-size-raw}}
+          :then {:parent :to-str :args {:value :_sp-existing-pool-size-raw}}
+          :else {:value ""}}}
+
+  {:name :_sp-existing-pool-size-raw
+   :parent :get :args {:coll :_sp-existing :key {:value :pool-size} :default nil}}
+
+  {:name :_sp-pool-size-input
+   :parent :hiccup
+   :args {:tag {:value "input"}
+          :attrs {:parent :assoc
+                  :args {:map {:value {:type "number" :min "1" :step "1"
+                                       :name "service-pool-size"
+                                       :class "service-popover-pool-size"
+                                       :placeholder "pods (pool)"
+                                       :title "Number of pods for :cardinality pool"}}
+                         :key {:value :value}
+                         :value :_sp-existing-pool-size-str}}
+          :children {:value []}}}
+
   {:name :_sp-card-wrap-children
-   :parent :cons
-   :args {:item :_sp-card-label-div :coll :_sp-card-radios}}
+   :parent :concat
+   :args {:colls [[:_sp-card-label-div]
+                  :_sp-card-radios
+                  [:_sp-pool-size-input]]}}
 
   {:name :_sp-card-wrap
    :parent :hiccup

@@ -349,9 +349,23 @@ Verified against the executor:
     leader-lock (reusing the reconciler's), that *decides* moves. Phase 1's
     `move-monitor` orders a single controller's moves; the leader-lock makes
     ONE controller authoritative fleet-wide.
-- **Phase 2 — automatic placement & rebalance.** Packing + hysteresis +
-  churn-minimising mover as a locked singleton. Per-route cell-splitting lands here
-  if evidence justifies it (§3.2).
+- **Phase 2 — automatic placement & rebalance (core SHIPPED).** Packing +
+  hysteresis + churn-minimising mover as a locked singleton. Concrete tasks:
+  - **T4.1 ✅** `fleet.packer` — LPT bin-pack (heaviest cell → least-loaded pod),
+    the desired-placement baseline; budget-free (capacity is a separate read).
+  - **T4.2 ✅** `fleet.rebalance` — churn-minimising steepest-descent (move the
+    fewest cells that flatten load) + magnitude hysteresis (`:min-improvement`);
+    surfaces `:unplaced` cells separately for initial placement.
+  - **T4.3 ✅** `fleet.control-loop` — the pure `plan-tick` (initial placement
+    every tick, rebalance only on SUSTAINED imbalance via `:sustain-ticks`) plus
+    live-fleet discovery (`:org` app cells ∪ `:placement`, `:service` excluded)
+    and `run-tick!` executing through a `move-fn` seam.
+  - **T4.4 ✅** `:exec/fleet-controller` — the leader-locked periodic component
+    (own advisory-lock conn, re-asserted per tick) that drives `run-tick!` via
+    the directed cell-command transport. One controller fleet-wide.
+  - **T4.5 (deferred, on evidence)** overlap-accounting on evict (co-locate cells
+    sharing large closures) + per-route cell-splitting (§3.2) — both wait for
+    evidence that a single-cell-per-org grain is insufficient.
 - **Phase 3 — substrate.** k8s operator; HPA/Knative under shards; optional
   scale-to-zero for the idle tail.
 - **Parallel track — footprint/start (§5.1).** Substrate confirmed (CRIU + Zulu
@@ -438,3 +452,10 @@ is the foundation this RFC reuses — not new work.**
   (version epoch) is a separate, optional layer.
 - 2026-07: **services are already cells**; **an org app is one cell today**, and
   per-route splitting is pure fn-def rewiring, deferred to Phase 2+ on evidence.
+- 2026-07: **Phase 0 + Phase 1 + Phase 2 core SHIPPED** (`fleet.{placement,
+  router,command,metrics,controller,packer,rebalance,control-loop}` +
+  `:exec/fleet-controller`). The fleet now auto-places new tenant cells and
+  rebalances sustained load imbalance under a leader-locked controller, all on
+  the executor set from `GRAPHDEN_FLEET_EXECUTORS`. Remaining: overlap-
+  accounting + per-route split (evidence-gated), the CRaC footprint track's
+  final measurement, and the Phase-3 k8s substrate.

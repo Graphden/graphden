@@ -50,7 +50,7 @@ function loadKindPrefs() {
   } catch (_) { /* private-mode / corrupt → defaults */ }
   return def;
 }
-let kindVisible = loadKindPrefs();
+const kindVisible = loadKindPrefs();
 
 function saveKindPrefs() {
   try { localStorage.setItem(KIND_PREFS_STORAGE, JSON.stringify(kindVisible)); }
@@ -237,7 +237,7 @@ function buildFnItem(fn) {
   // section). `secretRecordForFn` reads the primed /api/secrets list.
   if (isSecret && typeof secretRecordForFn === 'function') {
     const rec = secretRecordForFn(fn.id);
-    if (rec && rec.path) {
+    if (rec?.path) {
       const pathSpan = document.createElement('span');
       pathSpan.className = 'secret-path';
       pathSpan.textContent = rec.path;
@@ -390,7 +390,7 @@ function clearSearch() {
 // Eye-toggle click (from the #kind-filters buttons). Flips the kind's
 // visibility, persists it, re-renders.
 function toggleKind(kind, btn) {
-  const next = !btn || btn.getAttribute('aria-pressed') !== 'true';
+  const next = btn?.getAttribute('aria-pressed') !== 'true';
   if (btn) btn.setAttribute('aria-pressed', String(next));
   setKindVisible(kind, next);
 }

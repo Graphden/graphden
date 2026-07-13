@@ -64,9 +64,18 @@ You were started in one of two ways:
    pass through your context on the way to being acknowledged. Read them, decide
    whether they change what you are doing, then re-run the gate.
 4. **Commit as you go** — conventional-commit format, English messages.
-5. **Propose the outward-facing steps; act only on the user's OK.** Landing on
-   `develop` and removing yourself from the pool are the two moments you pause
-   and ask first (see the loop). Everything in between you do autonomously.
+5. **Land it yourself. Don't ask permission to finish.** When the feature is
+   complete and `bb ci` is green, run the gate (`bb wt merge`) — then, once it
+   is green, clean up (`bb wt drop`). Report what happened. You do not pause for
+   a sign-off at either step: the gate cannot advance `develop` on a red result,
+   and `wt drop` refuses a branch that is not merged, so neither step can lose
+   work. Asking "shall I merge now?" of a finished, green feature is ceremony,
+   and it stalls a serialized queue for as long as it takes a human to answer.
+
+   **Do** stop and ask when a real decision is yours to make and the answer
+   changes what you build: an ambiguous requirement, a trade-off with no obvious
+   default, a change of scope you discovered mid-task. That is judgement, not
+   ceremony.
 
 ## Loop
 
@@ -76,8 +85,8 @@ You were started in one of two ways:
 2. **Implement** in small commits, inside your worktree.
 3. **Fast feedback:** run `bb ci` (linters + unit) — parallel-safe across
    worktrees. Iterate until green. This is your only local test command.
-4. **Land** — when the feature is complete and `bb ci` is green, **propose to
-   the user that you enter the merge queue.** On their OK, run the gate:
+4. **Land** — when the feature is complete and `bb ci` is green, run the gate.
+   No sign-off needed (Rule 5):
 
    `bb wt merge` takes **~30–40 min** (merge develop → ci → build image →
    integration → e2e → fast-forward develop → advance the demo instance) —
@@ -93,8 +102,7 @@ You were started in one of two ways:
      Iterate until green. Never weaken a test or skip a check to go green.
    - If the queue is busy the gate blocks waiting its turn — expected; let the
      background run wait.
-5. **Clean up** — once landed and you have nothing left to do, **propose to the
-   user that you remove yourself from the pool.** On their OK: `cd` back to the
+5. **Clean up** — once landed and you have nothing left to do: `cd` back to the
    main checkout first (you cannot delete the worktree you are standing in),
    then `bb wt drop <name>`. Report done.
 

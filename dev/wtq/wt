@@ -19,7 +19,8 @@
 # Two ways to start an agent:
 #   A) hands-off:  wt agent   -> a NAMELESS discussion session. You describe the
 #      task; the agent picks its own branch name, self-registers with `wt claim`,
-#      works, then proposes to land and to clean up. You never invent a name.
+#      works, lands it through the gate and cleans up after itself. You never
+#      invent a name, and you are not asked to sign off on a finished feature.
 #   B) manual:     wt new <name> [task...] [--start]  -> you pick the name.
 #
 # Commands:
@@ -304,10 +305,12 @@ isolated workspace.
    This creates feature/<name> + an isolated worktree and registers you in the
    pool. cd into the printed WORKTREE path and do ALL work there.
 3. Implement, keeping `bb ci` green.
-4. When the code is ready, PROPOSE to land it; only on my OK run the gate
-   (`bb wt merge` in the BACKGROUND — it can take ~1h).
-5. When the feature is fully landed and you're done, PROPOSE to clean up; only on
-   my OK, cd back to the main checkout and run `bb wt drop <name>`.
+4. When the code is ready and `bb ci` is green, LAND IT YOURSELF — run the gate
+   (`bb wt merge` in the BACKGROUND). Don't ask permission to finish: the gate
+   cannot advance develop on a red result. Handle any conflict or failure it
+   reports, and iterate until it is green.
+5. Once landed, clean up yourself: cd back to the main checkout and run
+   `bb wt drop <name>`. Then report what happened.
 
 Read dev/wtq/AGENT.md now for the full contract, then ask me what to build.
 EOF
@@ -337,10 +340,11 @@ EOF
   if [ "${commits:-0}" -eq 0 ]; then
     cat <<EOF
 Execute the task end to end: implement in small commits, keep 'bb ci' green as
-your fast loop, and when the feature is complete PROPOSE landing it — on the
-user's OK run the gate with 'bb wt merge' (in the BACKGROUND — it takes ~40
-min), handling any conflict or gate failure it reports. Report back when it
-lands, or ask if you hit a real decision you can't make.
+your fast loop, and when the feature is complete LAND IT YOURSELF — run the gate
+with 'bb wt merge' (in the BACKGROUND — it takes ~40 min), handling any conflict
+or failure it reports, then clean up with 'bb wt drop'. Do not ask permission to
+finish. Report what happened, and ask only if you hit a real decision you can't
+make.
 EOF
     return 0
   fi
@@ -375,10 +379,10 @@ EOF
 
   cat <<EOF
 
-Then finish the job: keep 'bb ci' green, and when the feature is complete
-PROPOSE landing it — on the user's OK run 'bb wt merge' (in the BACKGROUND —
-it takes ~40 min), handling any conflict or gate failure it reports. Ask if you
-hit a real decision you can't make.
+Then finish the job: keep 'bb ci' green, and when the feature is complete land it
+yourself — 'bb wt merge' (in the BACKGROUND — it takes ~40 min), handling any
+conflict or failure it reports, then 'bb wt drop'. Do not ask permission to
+finish. Ask only if you hit a real decision you can't make.
 EOF
 }
 

@@ -112,6 +112,15 @@ bootstrap_node_modules() {
       warn "no node_modules in $MAIN_WT/$dir — run 'npm ci' there, or bb ci cannot pass in a worktree"
       continue
     fi
+    # A SYMLINK here is actively harmful, not merely different: git records a
+    # symlink as a file, so the `node_modules/` ignore rule (trailing slash =
+    # directories only) does not match it. It shows up as untracked, and the
+    # gate's first act is to refuse a worktree that `git status` calls dirty —
+    # so a symlinked tree cannot land at all. Replace it with the real thing.
+    if [ -L "$dst" ]; then
+      warn "$dir/node_modules is a symlink — git leaves it untracked, which blocks the gate. Replacing with a hardlink copy."
+      rm -f "$dst"
+    fi
     [ -e "$dst" ] && continue
     cp -al "$src" "$dst" 2>/dev/null || cp -a "$src" "$dst"
   done < <(git -C "$MAIN_WT" ls-files '*package.json' | xargs -r -n1 dirname | sort -u)

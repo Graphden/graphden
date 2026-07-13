@@ -76,6 +76,34 @@ die()  { printf '%s%s%s\n' "$RED" "$*" "$RST" >&2; exit 1; }
 
 branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
 
+# node_modules/ is gitignored, so a fresh worktree gets every package.json but
+# none of the installed deps. The damage is worse than a missing linter:
+#   - stylelint cannot resolve stylelint-config-standard and fails outright;
+#   - license-checker exits 0 on "No packages found", so the licence audit
+#     silently passes while auditing nothing;
+#   - the e2e suite has no playwright.
+# So `bb ci` is red — or, worse, green and hollow — before the agent has
+# written a line, while AGENT.md declares it the loop to iterate until green.
+#
+# Hardlink the main checkout's trees rather than symlinking them: the copy must
+# be a real directory, because license-checker refuses to walk a symlinked
+# node_modules (the very silent-pass this guards against). Hardlinks make that
+# nearly free — the files share inodes, so a 200 MB tree costs ~0 extra disk
+# and ~0.1 s, and the linters only ever read it.
+bootstrap_node_modules() {
+  local path="$1" dir src dst
+  while IFS= read -r dir; do
+    src="$MAIN_WT/$dir/node_modules"
+    dst="$path/$dir/node_modules"
+    if [ ! -d "$src" ]; then
+      warn "no node_modules in $MAIN_WT/$dir — run 'npm ci' there, or bb ci cannot pass in a worktree"
+      continue
+    fi
+    [ -e "$dst" ] && continue
+    cp -al "$src" "$dst" 2>/dev/null || cp -a "$src" "$dst"
+  done < <(git -C "$MAIN_WT" ls-files '*package.json' | xargs -r -n1 dirname | sort -u)
+}
+
 # bootstrap prompt for a NAMELESS agent (discussion phase, before it self-claims)
 bootstrap_kickoff() {
   cat <<'EOF'
@@ -145,6 +173,7 @@ cmd_new() {
   mkdir -p "$WTQ_ROOT"
   info "Creating $branch off $TARGET at $path ..."
   git -C "$MAIN_WT" worktree add -b "$branch" "$path" "$TARGET" >/dev/null
+  bootstrap_node_modules "$path"
 
   if [ -n "$task" ]; then
     printf '# Task for feature/%s\n\n%s\n' "$name" "$task" > "$TASKS_DIR/$name.md"
@@ -202,6 +231,7 @@ cmd_start() {
   local path="$WTQ_ROOT/$name"
   [ -d "$path" ] || die "no worktree '$name' — run 'wt new $name \"<task>\"' first"
   [ -f "$TASKS_DIR/$name.md" ] || warn "no task spec at $TASKS_DIR/$name.md (agent will need direction)"
+  bootstrap_node_modules "$path"   # heals worktrees created before this existed
   local kick; kick="$(kickoff_text "$name")"
 
   if command -v claude >/dev/null && [ -t 1 ]; then
@@ -365,6 +395,7 @@ cmd_merge() {
   local branch; branch="$(branch_of "$wt")"
   [ "$branch" != "$TARGET" ] || die "you are on $TARGET — run 'wt merge' from inside a feature worktree."
   [ "$wt" != "$MAIN_WT" ]    || die "run 'wt merge' from a feature worktree, not the main checkout."
+  bootstrap_node_modules "$wt"     # the gate runs bb ci in here — it needs the deps
 
   exec 9>"$LOCK"
   if ! flock -n -x 9; then

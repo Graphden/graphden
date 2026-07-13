@@ -322,6 +322,10 @@
    :task (p/shell "clojure" "-M:dev" "-m" "graphden.dev.e2e-stack"
                   "tools/browser-test/run-edit-tests.sh")}
 
+  test-fleet-e2e
+  {:doc "Two-container fleet e2e (kaocha :container-e2e) — boots `graphden-executor:latest` TWICE as a real two-pod fleet over a shared Postgres (testcontainers) and drives the cross-container control plane over real HTTP: /health, token-gated /internal/fleet/{status,cell/load}, shared graph, agreed placement view. Requires `bb rebuild` first so the image is present. ~4 min (two cold boots). Ryuk reaps the containers on JVM exit."
+   :task (clojure "-M:dev:test -m kaocha.runner :container-e2e")}
+
   test-all
   {:doc "Run ALL tests (unit + integration + e2e), sequential. ~30-35 min wall. e2e requires `bb rebuild` first + AUTH_TOKEN."
    :task (do (p/shell "bb" "test-unit")

@@ -10,7 +10,10 @@
   ;; pool.
   {:id :unit
    :test-paths ["test"]
-   :skip-meta [:integration]
+   ;; `:container-e2e` (the two-executor fleet test) needs the locally-built
+   ;; `graphden-executor:latest` image + ~4 min of container boots — skip it in
+   ;; the fast unit run; it has its own suite below.
+   :skip-meta [:integration :container-e2e]
    :kaocha/parallelism 8}
 
   ;; Integration tests — run against the shared PG container. Each NS
@@ -31,7 +34,17 @@
    ;; `GenericContainer.start` calls land at once — the `Wait/forHttp`
    ;; ready-check times out before the container actually boots.
    ;; Constraint is on the Docker daemon, not our code.
-   :kaocha/parallelism 4}]
+   :kaocha/parallelism 4}
+
+  ;; Container fleet e2e — boots the locally-built `graphden-executor:latest`
+  ;; TWICE as a real two-pod fleet over a shared Postgres (testcontainers) and
+  ;; drives the cross-container control plane over real HTTP. Kept OUT of :unit
+  ;; and :integration (needs the built image + ~4 min); run explicitly after a
+  ;; `bb rebuild`, like the Playwright e2e. `clojure -M:dev:test -m kaocha.runner
+  ;; :container-e2e`.
+  {:id :container-e2e
+   :test-paths ["test"]
+   :focus-meta [:container-e2e]}]
 
  ;; Plugins:
  ;; - profiling: shows slowest tests

@@ -21,7 +21,81 @@
             "Run shell commands in parallel. Wait for all, fail if any fails."
             [cmds]
             (let [procs (mapv (fn [cmd] (p/process cmd {:out :inherit :err :inherit})) cmds)]
-              (doseq [proc procs] (p/check proc)))))
+              (doseq [proc procs] (p/check proc))))
+
+          ;; --- docker instance addressing -----------------------------------
+          ;; Mirrors the GD_* defaults in docker-compose.yml. Unset => the
+          ;; canonical stack, i.e. exactly the historical behaviour.
+          (def gd-instance (or (System/getenv "GD_INSTANCE") "graphden"))
+          (def gd-executor (str gd-instance "-executor"))
+          (def gd-url (str "http://localhost:" (or (System/getenv "GD_PORT_HTTP") "9002")))
+
+          (defn linked-worktree?
+            "True inside an agent worktree (git-dir is <common>/worktrees/<name>),
+             false in the main checkout where the two paths coincide."
+            []
+            (let [git-dir (fn [flag] (-> (p/shell {:out :string :err :string :continue true}
+                                                  "git" "rev-parse" flag)
+                                         :out str/trim))]
+              (not= (fs/canonicalize (git-dir "--git-dir"))
+                    (fs/canonicalize (git-dir "--git-common-dir")))))
+
+          (defn assert-not-clobbering-shared-stack!
+            "`bb rebuild`/`bb deploy` with no GD_INSTANCE target the CANONICAL
+             stack: container graphden-executor, port 9002, image
+             graphden-executor:latest. From an agent worktree that means
+             stealing the demo instance and overwriting the very image tag the
+             e2e suite boots — silently testing one agent's code against
+             another's binary. Refuse; point at the isolated alternative."
+            [task]
+            (when (and (linked-worktree?) (nil? (System/getenv "GD_INSTANCE")))
+              (println (str red "✗ " task " targets the SHARED instance (" gd-executor
+                            " on " gd-url ") and the shared image tag." reset))
+              (println "  You are in an agent worktree. Use your own isolated stack instead:")
+              (println (str yellow "      bb wt up" reset "     # build + run this branch on its own ports"))
+              (println (str yellow "      bb wt down" reset "   # stop it"))
+              (println "  The canonical build happens in the landing gate, under the queue lock.")
+              (System/exit 1)))
+
+          (defn await-healthy-then-verify!
+            "Block until the instance's /health answers, then confirm the running
+             build IS the local tree (`bb verify`) and that it serves (`bb smoke`).
+             Shared by `bb rebuild` and `bb deploy`, which differ only in how they
+             get there.
+
+             Bootstrap is dominated by compiled-registry build (~21s) + fn-entities
+             create (~40s) + integrant init (~10s) — ~70-80s wall in practice. The
+             90 × 2s = 180s ceiling leaves margin for a cold-cache JVM warmup
+             without flaking on a slow host."
+            []
+            (loop [attempts 0]
+              (Thread/sleep 2000)
+              (let [health (p/shell {:continue true :out :string :err :string}
+                                    (str "docker exec " gd-executor
+                                         " curl -sf http://localhost:8080/health"))]
+                (cond
+                  (zero? (:exit health))
+                  (do (println (str green "✓ Server ready at " gd-url "/" reset))
+                      (doseq [check ["verify" "smoke"]]
+                        (let [{:keys [exit]} (p/shell {:continue true} "bb" check gd-url)]
+                          (when-not (zero? exit) (System/exit exit)))))
+
+                  (< attempts 90)
+                  (do (print ".") (flush) (recur (inc attempts)))
+
+                  :else
+                  (do (println (str red "✗ Server failed to start (180s timeout — check `docker logs "
+                                    gd-executor "`)" reset))
+                      (System/exit 1))))))
+
+          (defn instance-up!
+            "(Re)start the instance from the image that is ALREADY built, then
+             wait + verify + smoke. Split out of `bb rebuild` so the landing gate
+             can refresh the develop instance from the image it built in the
+             feature worktree, without paying for a second uberjar."
+            []
+            (p/shell "docker-compose up -d executor")
+            (await-healthy-then-verify!)))
 
   :enter (println (str cyan "▶ " (:name (current-task)) reset))
 
@@ -123,6 +197,7 @@
                   "-v" (str (System/getenv "PWD") ":/src")
                   "-w" "/src"
                   "koalaman/shellcheck:stable"
+                  "dev/wtq/wt"
                   "tools/browser-test/run-edit-tests.sh"
                   ".claude/hooks/check-ui-on-stop.sh"
                   ".claude/hooks/remind-packages-quality-on-impls-edit.sh")}
@@ -486,6 +561,7 @@
                stylelint-cmd "npx stylelint resources/packages/app/editor/**/*.css"
                shellcheck-cmd (str "docker run --rm -v " (System/getenv "PWD")
                                    ":/src -w /src koalaman/shellcheck:stable"
+                                   " dev/wtq/wt"
                                    " tools/browser-test/run-edit-tests.sh"
                                    " .claude/hooks/check-ui-on-stop.sh"
                                    " .claude/hooks/remind-packages-quality-on-impls-edit.sh")
@@ -597,43 +673,45 @@
   ;; === DOCKER DEPLOYMENT ===
 
   rebuild
-  {:doc "Rebuild jar + docker and restart (keeps DB data)"
+  {:doc "Rebuild jar + docker and restart the CANONICAL instance (keeps DB data). In an agent worktree this refuses to run unless GD_INSTANCE is set — use `bb wt up` for your own isolated stack."
    :task (do
+           (assert-not-clobbering-shared-stack! "bb rebuild")
+
            (println "1. Building uberjar...")
            (p/shell "clojure -T:build uber")
 
            (println "2. Rebuilding docker image...")
            (p/shell "docker-compose build executor")
 
-           (println "3. Restarting container...")
-           (p/shell "docker-compose up -d executor")
+           (println "3. Restarting container + waiting for server...")
+           (instance-up!))}
 
-           (println "4. Waiting for server...")
-           ;; Bootstrap is dominated by compiled-registry build (~21s)
-           ;; + fn-entities create (~40s) + integrant init (~10s) —
-           ;; ~70-80s wall in practice. The 90 × 2s = 180s ceiling
-           ;; gives enough margin for cold-cache JVM warmup without
-           ;; flaking on a slow host.
-           (loop [attempts 0]
-             (Thread/sleep 2000)
-             (let [result (p/shell {:continue true :out :string :err :string}
-                                   "docker exec graphden-executor curl -sf http://localhost:8080/health")]
-               (if (= 0 (:exit result))
-                 (do (println (str green "✓ Server ready at http://localhost:9002/" reset))
-                     (let [verify (p/shell {:continue true} "bb" "verify")]
-                       (when-not (zero? (:exit verify))
-                         (System/exit (:exit verify))))
-                     (let [smoke (p/shell {:continue true} "bb" "smoke")]
-                       (when-not (zero? (:exit smoke))
-                         (System/exit (:exit smoke)))))
-                 (if (< attempts 90)
-                   (do (print ".") (flush) (recur (inc attempts)))
-                   (do (println (str red "✗ Server failed to start (180s timeout — check `docker logs graphden-executor`)" reset))
-                       (System/exit 1)))))))}
+  instance-up
+  {:doc "Start/refresh the instance from the ALREADY-BUILT image, then wait for health + `bb verify` + `bb smoke`. No jar, no docker build. The landing gate uses this to advance the develop instance onto the image it built in the feature worktree, under the queue lock."
+   :task (do
+           (assert-not-clobbering-shared-stack! "bb instance-up")
+           (instance-up!))}
+
+  instance-reset
+  {:doc "Drop the instance's schema, then force-recreate it from the ALREADY-BUILT image so the graph re-seeds. The gate's `--deploy` path uses this when a branch changes the schema; a plain landing keeps the data."
+   :task (do
+           (assert-not-clobbering-shared-stack! "bb instance-reset")
+           (println "1. Resetting database schema...")
+           (p/shell (str "docker exec " gd-instance "-postgres"
+                         " psql -U graphden -d graphden -c"
+                         " \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\""))
+           (println "2. Force-recreating container + waiting for server...")
+           ;; --force-recreate: the image may be byte-identical to the running
+           ;; one, and compose would then do nothing — but the schema underneath
+           ;; it was just dropped, so the executor MUST re-bootstrap.
+           (p/shell "docker-compose up -d --force-recreate executor")
+           (await-healthy-then-verify!))}
 
   deploy
-  {:doc "Build and deploy to docker (clean rebuild with DB truncate)"
+  {:doc "Build and deploy to docker (clean rebuild with DB truncate). Same worktree guard as `bb rebuild`."
    :task (do
+           (assert-not-clobbering-shared-stack! "bb deploy")
+
            (println "1. Cleaning target...")
            (fs/delete-tree "target")
            (fs/create-dirs "target")
@@ -642,35 +720,15 @@
            (p/shell "clojure -T:build uber")
 
            (println "3. Resetting database schema...")
-           (p/shell "docker exec graphden-postgres psql -U graphden -d graphden -c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\"")
+           (p/shell (str "docker exec " gd-instance "-postgres"
+                         " psql -U graphden -d graphden -c"
+                         " \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\""))
 
            (println "4. Rebuilding docker image...")
            (p/shell "docker-compose build --no-cache executor")
 
-           (println "5. Restarting container...")
-           (p/shell "docker-compose up -d executor")
-
-           (println "6. Waiting for server...")
-           ;; Same bootstrap budget as `bb rebuild`: ~70-80s wall;
-           ;; 90 × 2s = 180s ceiling. `bb deploy`'s --no-cache rebuild
-           ;; can stretch slightly longer on the docker side, but the
-           ;; in-container bootstrap is the same path.
-           (loop [attempts 0]
-             (Thread/sleep 2000)
-             (let [result (p/shell {:continue true :out :string :err :string}
-                                   "docker exec graphden-executor curl -sf http://localhost:8080/health")]
-               (if (= 0 (:exit result))
-                 (do (println (str green "✓ Server ready at http://localhost:9002/" reset))
-                     (let [verify (p/shell {:continue true} "bb" "verify")]
-                       (when-not (zero? (:exit verify))
-                         (System/exit (:exit verify))))
-                     (let [smoke (p/shell {:continue true} "bb" "smoke")]
-                       (when-not (zero? (:exit smoke))
-                         (System/exit (:exit smoke)))))
-                 (if (< attempts 90)
-                   (do (print ".") (flush) (recur (inc attempts)))
-                   (do (println (str red "✗ Server failed to start (180s timeout — check `docker logs graphden-executor`)" reset))
-                       (System/exit 1)))))))}
+           (println "5. Restarting container + waiting for server...")
+           (instance-up!))}
 
   smoke
   {:doc "Run smoke tests against a running instance: editor page, graph layout (collapsed + expanded), auth challenge. Usage: bb smoke [http://host:port]"

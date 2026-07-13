@@ -3,6 +3,11 @@
 
 FROM eclipse-temurin:21-jre-jammy
 
+# Marks every executor image we build — canonical and per-agent alike — so
+# `wt gc` can reclaim OUR stale/dangling layers by label without ever
+# considering an unrelated image on the same host.
+LABEL graphden.image="executor"
+
 # Install curl for healthcheck. Pinned via base-image's apt repo
 # (jammy = Ubuntu 22.04 LTS) — a security update bumps the available
 # version and `apt-get update` warns; re-pin then. This is the

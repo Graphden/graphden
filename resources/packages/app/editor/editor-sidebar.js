@@ -95,6 +95,10 @@ function nodeShouldShow(node) {
 let _serviceCachePrimed = false;
 function primeServiceCacheOnce() {
   if (_serviceCachePrimed || typeof loadAllServiceFnIds !== 'function') return;
+  // Anonymous visitors get 401 on /api/services and have no service data
+  // to classify against — skip the prime so we don't fire a redundant
+  // (already-401'd by the badge eager-load) request.
+  if (typeof isAuthenticated === 'function' && !isAuthenticated()) return;
   _serviceCachePrimed = true;
   loadAllServiceFnIds().then(() => updateEntityList(graphData));
 }

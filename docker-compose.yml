@@ -157,6 +157,13 @@ services:
       - "${GD_PORT_HTTP:-9002}:8080"
       - "${GD_PORT_HISTORY:-9081}:8081"  # Tutorial: user-built history endpoint runs here
       - "${GD_PORT_NREPL:-9099}:7888"  # Opt-in nREPL — only listens when GRAPHDEN_NREPL_PORT=7888
+    # The JVM runs with -XX:+UseContainerSupport -XX:MaxRAMPercentage=75, so it
+    # sizes its heap against the CONTAINER's limit — and with no limit set, that
+    # is the whole host. One executor got away with it; N of them (one per agent
+    # instance) each believe they may take 75% of the box, and it thrashes.
+    # 0 = unlimited, preserving the canonical stack's historical behaviour;
+    # `wt up` pins a modest ceiling for the throwaway agent instances.
+    mem_limit: ${GD_MEM_LIMIT:-0}
     restart: unless-stopped
 
 volumes:

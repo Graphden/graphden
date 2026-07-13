@@ -10,6 +10,26 @@ This PoC is **not wired into production**. It exercises the *real* graphden
 package loader under a CRaC JDK, measures the win, and — importantly — surfaces
 the concrete integration blockers a production CRaC path must solve.
 
+## When do we actually need this (+ the CI requirement)
+
+CRaC is a **runtime startup** optimisation, not a CI/CD feature. Its ONLY payoff
+is fast scale-from-zero: a pod that restores a warm JVM serves in sub-second
+instead of ~141 s of cold boot (measured ~178 ms raw; ~3.1–3.5 s end-to-end on
+KEDA, see `deploy/kind/keda/`). So we need it **only if we adopt scale-to-zero**
+(FLEET_RFC T5.3) — which is currently demonstrated, not a shipped default. Until
+then this stays a PoC.
+
+The CI angle is narrow: BAKING the checkpoint image (`.github/workflows/crac-bake.yml`)
+needs a runner that can run CRIU — `CAP_SYS_ADMIN` / `CAP_CHECKPOINT_RESTORE`
+inside a `--privileged` container. Stock **GitHub-hosted** runners allow
+`docker run --privileged`, but whether CRIU's checkpoint/restore succeeds depends
+on the hosted kernel and is **not guaranteed** — so the bake is `workflow_dispatch`
+(off the PR path) with a `runner` input that can point at a **self-hosted
+privileged runner** (the reliable substrate). This is the one place the current
+GitHub Actions setup may not suffice; the rest of CI is unaffected. If/when we
+turn on CRaC scale-from-zero, wire a privileged self-hosted runner for that one
+bake job — otherwise nothing here is on the critical path.
+
 ## What it does
 
 `graphden_crac_poc.clj` calls the real `packages.loader/load-packages`

@@ -510,6 +510,20 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 
     [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: worktree dirty — commit first."; return 3; }
 
+    # Preflight. The e2e suite needs playwright to be resolvable from
+    # tools/browser-test; a broken install there does not surface until the
+    # suite runs — 40 minutes into the gate — as a wall of
+    # "Cannot find module 'playwright'". Cost of asking now: ~50 ms.
+    step "preflight: e2e runner dependencies"
+    if [ "$no_e2e" != "1" ] && ! ( cd "$wt/tools/browser-test" && node -e "require.resolve('playwright')" ) 2>/dev/null; then
+      echo "ABORT: cannot resolve 'playwright' from $wt/tools/browser-test."
+      echo "  The e2e suite would fail an hour from now with MODULE_NOT_FOUND."
+      echo "  Fix the SOURCE tree (worktrees are hardlinked from it), then retry:"
+      echo "      (cd $MAIN_WT/tools/browser-test && npm ci)"
+      return 3
+    fi
+    echo "ok"
+
     step "fetch + refresh $TARGET"
     git -C "$MAIN_WT" fetch origin || echo "(fetch failed — using local $TARGET)"
     git -C "$MAIN_WT" merge --ff-only "origin/$TARGET" 2>/dev/null || true

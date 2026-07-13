@@ -73,7 +73,8 @@ bb wt start <name>                     # launch an agent inside an existing work
   / the `origin` push need (`AUTH_TOKEN`, `GITHUB_TOKEN`, and an `ssh-agent`
   with your key) before an agent lands anything. Without ssh, the gate still
   runs and advances `develop` **locally**, but the final `git push` is skipped
-  (it warns).
+  (it warns). To push develop yourself and keep the gate from even trying, set
+  `export WTQ_NO_PUSH=1` — then you `git push origin develop` when you like.
 - The main checkout must have no uncommitted **tracked** changes while a gate
   runs (untracked files are fine). Keep it as the clean "develop holder"; all
   feature work happens in worktrees.

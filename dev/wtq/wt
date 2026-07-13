@@ -37,6 +37,7 @@
 # Env overrides:
 #   WTQ_TARGET   integration branch (default: develop)
 #   WTQ_ROOT     where worktrees live (default: <repo-parent>/graphden-wt)
+#   WTQ_NO_PUSH  =1 -> gate advances develop LOCALLY only, never pushes (push yourself)
 set -euo pipefail
 
 # --- locate the repo / shared plumbing -------------------------------------
@@ -343,7 +344,11 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     # feature now contains $TARGET as ancestor (we just merged it in) and
     # the lock guarantees $TARGET has not moved -> ff is always possible.
     git -C "$MAIN_WT" merge --ff-only "$branch" || { echo "FAIL: could not ff $TARGET (did it move? it shouldn't have)"; return 1; }
-    git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push manually)"
+    if [ "${WTQ_NO_PUSH:-0}" = 1 ]; then
+      echo "(WTQ_NO_PUSH set — $TARGET advanced LOCALLY only; push it yourself)"
+    else
+      git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push it yourself)"
+    fi
 
     echo; echo "=== GREEN: $branch landed on $TARGET ==="
     return 0

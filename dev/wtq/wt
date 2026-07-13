@@ -172,6 +172,50 @@ governance_drift() {
   git -C "$MAIN_WT" diff --name-only "$acked..$TARGET" -- "${GOV_PATHS[@]}" 2>/dev/null
 }
 
+# --- what a change actually needs -------------------------------------------
+# The queue is serialized, so a minute spent in the gate is a minute charged to
+# every branch waiting behind it. A docs-only branch should not pay 25 minutes
+# of browser tests.
+#
+# But a WRONG skip costs far more than a slow gate: it lands untested code under
+# a green tick, and green-but-hollow is the failure mode this whole tool has
+# been fighting. So:
+#
+#   - the table is FAIL-SAFE: anything it does not recognise runs EVERYTHING;
+#   - whatever is skipped is PRINTED, because a silent skip reads as "checked";
+#   - `bb ci` always runs, whatever changed. It is 5 minutes, and it is what
+#     catches a broken lint, unit test or commit message.
+#
+#   *.md, docs/**                    no runtime surface     -> nothing heavy
+#   dev/**                           this queue's own tooling; not on any
+#                                    classpath, not bundled -> nothing heavy
+#   tools/browser-test/**            the e2e suite itself   -> e2e
+#   packages' .js/.css/.html/.svg    browser-only surface   -> e2e
+#   everything else                  src, .clj/.edn, deps.edn, bb.edn, scripts/,
+#                                    Dockerfile*, compose,  -> integration + e2e
+#                                    CI config, unknown
+#
+# On dev/**: it holds only `wt` and its docs. `bb ci` shellchecks the script,
+# and the gate is itself the script executing — that IS its test. Putting app
+# code there would mean adding it to a classpath, i.e. touching deps.edn or
+# build.clj, which lands in "everything else" and runs the lot.
+classify_changes() {   # <worktree> -> sets NEED_INTEGRATION / NEED_E2E / CHANGED_N
+  local wt="$1" f
+  NEED_INTEGRATION=0; NEED_E2E=0; CHANGED_N=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    CHANGED_N=$((CHANGED_N + 1))
+    case "$f" in
+      *.md|docs/*|dev/*)              : ;;
+      tools/browser-test/*)           NEED_E2E=1 ;;
+      resources/packages/*.js|resources/packages/*.css|\
+      resources/packages/*.html|resources/packages/*.svg)
+                                      NEED_E2E=1 ;;
+      *)                              NEED_INTEGRATION=1; NEED_E2E=1 ;;
+    esac
+  done < <(git -C "$wt" diff --name-only "$TARGET..HEAD")
+}
+
 # --- per-worktree docker instance -------------------------------------------
 # docker-compose.yml is parameterised by GD_*; with none set it raises the
 # CANONICAL stack (graphden-executor on :9002, image graphden-executor:latest).
@@ -684,8 +728,24 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       return 2
     fi
 
+    step "scope: what this change needs"
+    classify_changes "$wt"
+    [ "$no_e2e" = "1" ] && NEED_E2E=0     # explicit override still wins
+    echo "  $CHANGED_N file(s) changed vs $TARGET"
+    if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
+    else echo "  integration: SKIPPED — nothing outside docs / browser-only assets changed"; fi
+    if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e"
+    elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
+    else echo "  e2e:         SKIPPED — docs only, no runtime surface"; fi
+    echo "  (bb ci always runs. Anything unrecognised runs everything.)"
+
     step "bb ci (lint + unit, on merged result)"
     ( cd "$wt" && bb ci ) || { echo "FAIL: bb ci"; return 1; }
+
+    if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ]; then
+      step "no runtime surface changed — skipping image build + suites"
+      echo "ok"
+    else
 
     step "build the canonical image from the merged tree"
     # BUILD ONLY — deliberately no `up`. Two reasons:
@@ -698,15 +758,19 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
     ( cd "$wt" && docker-compose build executor ) || { echo "FAIL: docker build"; return 1; }
 
-    step "bb test-integration"
-    ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
+    if [ "$NEED_INTEGRATION" = 1 ]; then
+      step "bb test-integration"
+      ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
+    fi
 
-    if [ "$no_e2e" = "1" ]; then
-      echo; echo "(skipping e2e per --no-e2e)"
+    if [ "$NEED_E2E" = 0 ]; then
+      echo; echo "(e2e skipped — see the scope step above)"
     else
       step "bb test-e2e"
       ( cd "$wt" && bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
     fi
+
+    fi   # end: a runtime surface changed
 
     # NO coverage step. It cost 15-19 minutes of every landing — a third of the
     # gate — and gated nothing:

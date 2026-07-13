@@ -236,6 +236,14 @@
                                 "Apache-2.0 OR MIT" "(MIT OR CC0-1.0)"])]
            (doseq [dir ["." "tools/browser-test" "tools/visual-tests"]]
              (println (str "▶ license-check " dir))
+             ;; license-checker exits 0 on "No packages found in this path",
+             ;; so a missing node_modules turns the audit into a silent no-op
+             ;; that still reports green. Refuse to run rather than pretend.
+             (when-not (fs/directory? (fs/path dir "node_modules"))
+               (throw (ex-info (str "license-check: " dir "/node_modules is missing — "
+                                    "the audit would pass without checking anything. "
+                                    "Run 'npm ci' in " dir ".")
+                               {:dir dir})))
              (p/shell {:dir dir}
                       "npx" "license-checker-rseidelsohn"
                       "--summary" "--onlyAllow" allow)))}

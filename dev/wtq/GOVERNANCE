@@ -1,0 +1,23 @@
+# Files that define how an agent must BEHAVE — not merely what the code does.
+#
+# An agent's rules reach it exactly once: CLAUDE.md is injected when its session
+# starts, AGENT.md is read in its first minutes, skills load on demand. Nothing
+# re-reads them. So an agent that has been working for hours is still operating
+# under the rules as they were when it started — and `develop` may have changed
+# them underneath it.
+#
+# `wt merge` refuses to land a branch whose author never saw a change to any
+# path below. `bb wt ack` prints the diff (so the new rules actually enter the
+# agent's context) and records that it has been seen.
+#
+# This is an EXPLICIT list, not a heuristic over the diff. Guessing "is this a
+# rule, or just a doc?" is precisely how a rule change slips past unnoticed.
+# One path or prefix per line; blank lines and #-comments ignored.
+
+CLAUDE.md
+dev/wtq/AGENT.md
+dev/wtq/README.md
+dev/wtq/GOVERNANCE
+.claude/skills/
+.claude/hooks/
+.claude/settings.json

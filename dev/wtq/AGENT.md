@@ -48,6 +48,21 @@ You were started in one of two ways:
 3. **Follow the repo's rules** — `CLAUDE.md` and the relevant skills
    (`graphden-code-quality`, `graphden-packages-quality`, `graphden-ui`, …).
    Write it clean the first time.
+
+   **Those rules can change while you work.** They reached you once — `CLAUDE.md`
+   when your session started, this file in your first minutes — and nothing
+   re-reads them. Meanwhile `develop` moves. So the gate checks: if `develop`
+   has changed any path in [`dev/wtq/GOVERNANCE`](GOVERNANCE) since you last
+   looked, it **refuses to land** and sends you back. Landing work done under
+   rules that no longer exist is not a thing you can do by accident.
+
+   ```bash
+   bb wt ack     # prints the diff of what changed, records that you have seen it
+   ```
+
+   It prints the actual diff, not a summary — the point is that the new rules
+   pass through your context on the way to being acknowledged. Read them, decide
+   whether they change what you are doing, then re-run the gate.
 4. **Commit as you go** — conventional-commit format, English messages.
 5. **Propose the outward-facing steps; act only on the user's OK.** Landing on
    `develop` and removing yourself from the pool are the two moments you pause

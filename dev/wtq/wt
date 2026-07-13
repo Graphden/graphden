@@ -35,6 +35,8 @@
 #                          ports — your private instance; never touches the demo
 #   wt down                (inside a worktree) stop it (keeps the DB volume)
 #   wt gc                  reclaim superseded / orphaned executor images
+#   wt ack                 (inside a worktree) print what develop changed in the
+#                          rules you work under, and record that you have read it
 #   wt status              show queue lock holder + recent gate logs
 #   wt drop <name> [-f]    remove a worktree + its branch (must be merged; -f overrides)
 #   wt log <name>          tail the most recent gate log for a feature
@@ -124,6 +126,50 @@ bootstrap_node_modules() {
     [ -e "$dst" ] && continue
     cp -al "$src" "$dst" 2>/dev/null || cp -a "$src" "$dst"
   done < <(git -C "$MAIN_WT" ls-files '*package.json' | xargs -r -n1 dirname | sort -u)
+}
+
+# --- governance drift -------------------------------------------------------
+# The rules an agent works under reach it ONCE: CLAUDE.md at session start,
+# AGENT.md in its first minutes. Nothing re-reads them. An agent that has been
+# working for hours may therefore be operating under rules develop has since
+# replaced — and it would land that work without ever noticing.
+#
+# So: record the target SHA whose governance the agent has seen, and refuse to
+# land while develop has moved any governed path past it.
+ACK_DIR="$WTQ_DIR/ack"
+mkdir -p "$ACK_DIR"
+
+# The governed paths, from the explicit list. A heuristic over the diff would
+# have to guess "rule, or just a doc?" — which is how a rule change slips past.
+# Fills the GOV_PATHS array. An array, not a bare $(...) splat: pathspecs go
+# straight to git without the shell re-splitting them on whitespace.
+GOV_PATHS=()
+governance_paths() {
+  [ "${#GOV_PATHS[@]}" -gt 0 ] && return 0
+  mapfile -t GOV_PATHS < <(grep -vE '^[[:space:]]*(#|$)' "$SCRIPT_DIR/GOVERNANCE")
+}
+
+ack_file() { printf '%s/%s' "$ACK_DIR" "$1"; }
+
+# The SHA whose governance this agent has seen. A worktree with no record — one
+# created before this existed — is credited with its fork point: that IS the
+# state of the rules when it read them.
+acked_sha() {
+  local name="$1" branch="$2"
+  local f; f="$(ack_file "$name")"
+  if [ ! -s "$f" ]; then
+    git -C "$MAIN_WT" merge-base "$branch" "$TARGET" > "$f" 2>/dev/null || true
+  fi
+  cat "$f" 2>/dev/null
+}
+
+# Governed paths that $TARGET moved since the agent last acknowledged them.
+governance_drift() {
+  local name="$1" branch="$2" acked
+  acked="$(acked_sha "$name" "$branch")"
+  [ -n "$acked" ] || return 0
+  governance_paths
+  git -C "$MAIN_WT" diff --name-only "$acked..$TARGET" -- "${GOV_PATHS[@]}" 2>/dev/null
 }
 
 # --- per-worktree docker instance -------------------------------------------
@@ -272,6 +318,31 @@ cmd_down() {
   ok "✓ stopped (DB volume kept — 'bb wt drop $name' removes it)"
 }
 
+cmd_ack() {
+  local name; name="$(this_worktree)"
+  local branch="feature/$name"
+  local drift; drift="$(governance_drift "$name" "$branch")"
+  local tip; tip="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+
+  if [ -z "$drift" ]; then
+    ok "✓ already current — $TARGET has not moved any governed path since you last looked."
+    printf '%s\n' "$tip" > "$(ack_file "$name")"
+    return 0
+  fi
+
+  # Print the diff, not a summary. The point is not to tick a box: it is that
+  # the new rules pass through the agent's context on their way to being
+  # acknowledged. A one-line "3 files changed" would defeat that entirely.
+  info "== $TARGET changed the rules you work under. Read this. =="
+  echo
+  governance_paths
+  git -C "$MAIN_WT" diff "$(acked_sha "$name" "$branch")..$TARGET" -- "${GOV_PATHS[@]}"
+  echo
+  printf '%s\n' "$tip" > "$(ack_file "$name")"
+  ok "✓ acknowledged $TARGET@${tip:0:8}"
+  say "  Re-read anything above that changes what you are doing, then: ${BLD}bb wt merge${RST}"
+}
+
 cmd_gc() {
   info "Reclaiming superseded executor layers (label graphden.image=executor) ..."
   docker image prune -f --filter label=graphden.image=executor || true
@@ -331,6 +402,9 @@ cmd_new() {
   info "Creating $branch off $TARGET at $path ..."
   git -C "$MAIN_WT" worktree add -b "$branch" "$path" "$TARGET" >/dev/null
   bootstrap_node_modules "$path"
+  # The agent is about to read the contract as it stands right now — record
+  # that, so only LATER changes to it count as drift.
+  git -C "$MAIN_WT" rev-parse "$TARGET" > "$(ack_file "$name")"
 
   if [ -n "$task" ]; then
     printf '# Task for feature/%s\n\n%s\n' "$name" "$task" > "$TASKS_DIR/$name.md"
@@ -478,6 +552,7 @@ cmd_drop() {
   # compose file that names them is gone too.
   info "Tearing down the '$name' instance (containers, volumes, image, ports) ..."
   teardown_instance "$name"
+  rm -f "$(ack_file "$name")"
 
   info "Removing worktree $path ..."
   git -C "$MAIN_WT" worktree remove ${force:+--force} "$path"
@@ -528,6 +603,28 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     git -C "$MAIN_WT" fetch origin || echo "(fetch failed — using local $TARGET)"
     git -C "$MAIN_WT" merge --ff-only "origin/$TARGET" 2>/dev/null || true
     [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
+
+    # Before any of the expensive work, and before we merge develop in: is this
+    # agent still operating under the rules that develop now enforces? Its
+    # contract arrived once, as a launch message. If develop has rewritten
+    # CLAUDE.md / AGENT.md / a skill since, the agent has been working to rules
+    # that no longer exist — and nothing would have told it.
+    step "governance: are you working under the current rules?"
+    local drift; drift="$(governance_drift "$name" "$branch")"
+    if [ -n "$drift" ]; then
+      echo "ABORT: $TARGET changed the rules you operate under, and you have not seen them."
+      echo
+      printf '%s\n' "$drift" | sed 's/^/    /'
+      echo
+      echo "  These govern how you must WORK — they are not ordinary docs, and"
+      echo "  nothing re-reads them into a running agent's context."
+      echo
+      echo "  Read them, then confirm and retry:"
+      echo "      bb wt ack        # prints the diff, records that you have seen it"
+      echo "      bb wt merge"
+      return 3
+    fi
+    echo "ok"
 
     step "merge $TARGET -> $branch"
     if ! git -C "$wt" merge --no-edit "$TARGET"; then
@@ -663,6 +760,7 @@ main() {
     up)     cmd_up     "$@" ;;
     down)   cmd_down   "$@" ;;
     gc)     cmd_gc     "$@" ;;
+    ack)    cmd_ack    "$@" ;;
     status) cmd_status "$@" ;;
     log)    cmd_log    "$@" ;;
     drop|rm) cmd_drop  "$@" ;;

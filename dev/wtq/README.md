@@ -74,6 +74,8 @@ bb wt up                        # (agent, inside a worktree) build + run THIS br
 bb wt down                      # (agent, inside a worktree) stop it (keeps the DB volume)
 bb wt drop <name> [-f]          # remove a worktree + branch + its instance, volumes, image, ports
 bb wt gc                        # reclaim superseded / orphaned executor images
+bb wt ack                       # (agent, inside a worktree) show what develop changed in the
+                                #   rules the agent works under, and record that it has read them
 
 # Manual escape hatch (you name it yourself, no agent):
 bb wt new <name> [task...] [--start]   # create the worktree; --start also launches an agent
@@ -108,8 +110,27 @@ bb wt start <name>                     # launch an agent inside an existing work
   `bb wt drop` reclaims them; the gate prunes the layers each build supersedes;
   `bb wt gc` sweeps whatever a hard-killed agent left behind.
 
+## Rules can change under a running agent
+
+An agent's rules reach it exactly once: `CLAUDE.md` is injected when its session
+starts, `AGENT.md` is read in its first minutes, skills load on demand. Nothing
+re-reads them — so an agent that has been working for hours may be following
+rules `develop` has since replaced, and it would land that work without ever
+noticing.
+
+The gate closes that: it diffs the paths listed in `dev/wtq/GOVERNANCE` between
+the commit the agent last acknowledged and `develop`, and **refuses to land**
+while they differ. `bb wt ack` prints the diff (so the new rules actually enter
+the agent's context) and records it. A resumed agent is told about the drift in
+its kickoff prompt too.
+
+This is why the list is an explicit file rather than a heuristic over the diff:
+guessing "is this a rule, or just a doc?" is exactly how a rule change slips
+past.
+
 ## Files
 
 - `dev/wtq/wt` — the tool (wired as `bb wt`).
 - `dev/wtq/AGENT.md` — the operating contract every agent follows.
+- `dev/wtq/GOVERNANCE` — the paths that govern agent behaviour (see above).
 - `dev/wtq/README.md` — this file.

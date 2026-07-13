@@ -138,7 +138,7 @@ everything under `/app`. `build-checkpoint-in-container.sh` does this:
 ```bash
 JDBC_URL=jdbc:postgresql://localhost:5435/graphden ./build-checkpoint-in-container.sh
 docker build -f ../../Dockerfile.crac -t graphden:crac ../..
-docker run -d --privileged --network host --security-opt seccomp=unconfined \
+docker run -d --network host --security-opt seccomp=unconfined --read-only --tmpfs /tmp \
   --cap-add=CHECKPOINT_RESTORE --cap-add=SYS_PTRACE --cap-add=SYS_ADMIN graphden:crac
 ```
 

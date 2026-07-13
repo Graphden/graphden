@@ -12,10 +12,12 @@
 # base container keeps all four paths identical (everything under /app + the
 # base's /opt/java). This is the CI-bake recipe.
 #
-# Requires: docker with privileged + CAP_CHECKPOINT_RESTORE/SYS_PTRACE/SYS_ADMIN
-# (the azul crac image bundles criu), a reachable Postgres at $JDBC_URL holding a
-# synced graph, and target/executor-server.jar (bb rebuild). Postgres MUST be
-# reachable at the SAME $JDBC_URL on restore (standard CRaC same-topology rule).
+# Requires: docker with CAP_CHECKPOINT_RESTORE + CAP_SYS_PTRACE + CAP_SYS_ADMIN
+# and seccomp=unconfined — NOT full --privileged (verified: caps-only checkpoint
+# AND restore work). The azul crac image bundles criu. Also a reachable Postgres
+# at $JDBC_URL holding a synced graph, and target/executor-server.jar (bb
+# rebuild). Postgres MUST be reachable at the SAME $JDBC_URL on restore (standard
+# CRaC same-topology rule).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -30,7 +32,8 @@ rm -rf "$ROOT/target/crac-checkpoint" "$ROOT/target/native"
 mkdir -p "$ROOT/target/crac-checkpoint" "$ROOT/target/native"
 
 echo "▶ checkpointing in a $BASE_IMAGE container (all paths under /app)…"
-docker run --rm --privileged --network "$NET" \
+docker run --rm --network "$NET" \
+  --cap-add=CHECKPOINT_RESTORE --cap-add=SYS_PTRACE --cap-add=SYS_ADMIN \
   --security-opt seccomp=unconfined \
   -e JDBC_URL="$JDBC_URL" -e DB_USERNAME="$DB_USERNAME" -e DB_PASSWORD="$DB_PASSWORD" \
   -v "$ROOT/target:/app" \
@@ -49,5 +52,6 @@ docker run --rm --privileged --network "$NET" \
 
 echo "✓ checkpoint at target/crac-checkpoint ($(du -sh "$ROOT/target/crac-checkpoint" | cut -f1)); native at target/native"
 echo "  now: docker build -f Dockerfile.crac -t graphden:crac ."
-echo "  run: docker run --privileged --network host --security-opt seccomp=unconfined \\"
+echo "  run: docker run --network host --security-opt seccomp=unconfined \\"
+echo "         --read-only --tmpfs /tmp \\"
 echo "         --cap-add=CHECKPOINT_RESTORE --cap-add=SYS_PTRACE --cap-add=SYS_ADMIN graphden:crac"

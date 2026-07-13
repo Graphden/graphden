@@ -381,6 +381,10 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           skip-dirs: node_modules,target,.tools
+          # Path-scoped, documented misconfig exceptions for the dev/demo kind
+          # manifests (CRIU caps + stock-postgres writable fs). The prod Helm
+          # chart under deploy/helm is fully hardened + not exempted.
+          trivyignores: .trivyignore.yaml
 
   license-check:
     name: license-check (npm)

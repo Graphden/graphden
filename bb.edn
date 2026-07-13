@@ -212,6 +212,10 @@
                     "aquasec/trivy:0.58.2"
                     "config" "--severity" "HIGH,CRITICAL"
                     "--skip-dirs" "node_modules,target,.tools"
+                    ;; Path-scoped, documented misconfig exceptions for the
+                    ;; dev/demo kind manifests (CRIU caps, stock-postgres fs).
+                    ;; Not auto-detected — must be passed explicitly.
+                    "--ignorefile" ".trivyignore.yaml"
                     "--exit-code" "1" "--quiet" ".")
            (println "▶ trivy fs (CVE in npm + maven deps)")
            (p/shell "docker" "run" "--rm"

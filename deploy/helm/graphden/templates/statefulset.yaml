@@ -28,6 +28,13 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
+      # Pod-level hardening (the image runs as uid 1001, USER graphden).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -104,6 +111,25 @@ spec:
             periodSeconds: {{ .Values.probes.readinessPeriodSeconds }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          # Hardened by default (the image runs as uid 1001, USER graphden).
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            # readOnlyRootFilesystem is on; the JVM still writes /tmp (heap
+            # dumps on OOM per the Dockerfile CMD, hsperfdata) — back it with
+            # an emptyDir so the root FS can stay read-only.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

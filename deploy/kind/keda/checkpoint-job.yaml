@@ -17,8 +17,18 @@ spec:
           image: kind.local/graphden-crac:latest
           imagePullPolicy: Never
           securityContext:
-            privileged: true
+            # NOT privileged — CRIU checkpoint works with just these caps
+            # (verified: a caps-only `JDK.checkpoint` prints "Checkpoint
+            # successful!"). Writes go to the /crac volume + the /tmp emptyDir,
+            # so the root fs stays read-only.
             runAsUser: 0   # CRIU checkpoint runs as root; restore must match uid
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHECKPOINT_RESTORE", "SYS_PTRACE", "SYS_ADMIN"]
+            seccompProfile:
+              type: Unconfined
           env:
             - { name: JDBC_URL, value: "jdbc:postgresql://crac-pg:5432/graphden" }
             - { name: DB_USERNAME, value: graphden }
@@ -43,6 +53,9 @@ spec:
               echo "CKPT-DONE size=$(du -sh /crac/checkpoint | cut -f1)"
           volumeMounts:
             - { name: crac, mountPath: /crac }
+            - { name: tmp, mountPath: /tmp }   # writable /tmp for the read-only root
       volumes:
         - name: crac
           hostPath: { path: /crac-store, type: DirectoryOrCreate }
+        - name: tmp
+          emptyDir: {}

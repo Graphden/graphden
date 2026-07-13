@@ -18,8 +18,18 @@ spec:
           image: kind.local/graphden-crac:latest
           imagePullPolicy: Never
           securityContext:
-            privileged: true
+            # NOT privileged — CRIU restore needs only these three caps, and it
+            # runs fine on a READ-ONLY root fs (both verified: `docker run
+            # --read-only --tmpfs /tmp --cap-add=CHECKPOINT_RESTORE,SYS_PTRACE,
+            # SYS_ADMIN --security-opt seccomp=unconfined` serves /health 200).
             runAsUser: 0   # must match the checkpoint uid (CRaC uid-alignment)
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHECKPOINT_RESTORE", "SYS_PTRACE", "SYS_ADMIN"]
+            seccompProfile:
+              type: Unconfined
           env:
             - { name: JDBC_URL, value: "jdbc:postgresql://crac-pg:5432/graphden" }
             - { name: DB_USERNAME, value: graphden }
@@ -35,9 +45,12 @@ spec:
             failureThreshold: 30
           volumeMounts:
             - { name: crac, mountPath: /crac, readOnly: true }
+            - { name: tmp, mountPath: /tmp }   # writable /tmp for the read-only root
       volumes:
         - name: crac
           hostPath: { path: /crac-store, type: Directory }
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

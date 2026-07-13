@@ -136,6 +136,16 @@
   (and (vector? t) (= :fn (first t)) (#{3 4} (count t))))
 
 
+(defn callable-type?
+  "True when a slot's type ACCEPTS A CALLABLE — the bare `:fn` primitive
+   (any callable, no structural shape) OR a structural `[:fn args ret …]`.
+   The one predicate for \"is this a HOF slot\", shared by the type-checker
+   (`ref-free-args`) and the CRUD free-arg lookup (`free-args-via`) so the
+   two don't each hand-roll `(or (= :fn t) (fn-type? t))`."
+  [t]
+  (or (= :fn t) (fn-type? t)))
+
+
 (defn make-fn-type
   "Canonical constructor for a function type. Always produces the
    four-element form; `eff` defaults to `:any` (unconstrained slot)

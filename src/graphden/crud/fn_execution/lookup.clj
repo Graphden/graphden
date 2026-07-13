@@ -9,6 +9,7 @@
     [graphden.crud.fn-execution.free-arg-cache :as fac]
     [graphden.crud.request :as request]
     [graphden.storage.protocol.core :as sp]
+    [graphden.types.core :as types]
     [graphden.versioning.storage.core :as vs]
     [graphden.versioning.storage.resolution :as res]))
 
@@ -200,16 +201,23 @@
         sid))))
 
 
-(defn- hof-slot-call-site-names
-  "Call-site arg names of a slot whose type-fn is a structural HOF type
-   `[:fn {ARGS} RET …]` — the keys of ARGS, supplied per invocation by
-   the parent's impl (not captured). nil for a bare `:fn` primitive
-   (no structural shape → every free arg is captured) or a non-fn slot.
-   Mirrors the type-checker's `hof-call-site-arg-names`."
+(defn- slot-type
+  "The type expression `slot-id` declares — its type-fn's `:constraint`
+   (e.g. `[:fn {:item :any} :any]`, `:jsonb`), or nil. This is the SAME
+   representation the type-checker resolves, so the `graphden.types.core`
+   predicates apply to it directly."
   [slot-id slots-by-id fns-by-id]
-  (let [c (some-> (get slots-by-id slot-id) :type-fn-id fns-by-id :constraint)]
-    (when (and (sequential? c) (= :fn (first c)) (map? (second c)))
-      (set (keys (second c))))))
+  (some-> (get slots-by-id slot-id) :type-fn-id fns-by-id :constraint))
+
+
+(defn- hof-slot-call-site-names
+  "Call-site arg names of a slot whose type is a structural HOF type
+   `[:fn {ARGS} RET …]` — the keys of ARGS, supplied per invocation by the
+   parent's impl (not captured). `#{}` for a bare `:fn` primitive (no
+   structural shape → every free arg is captured) or a non-fn slot.
+   Shares `types/fn-args` with the type-checker's `hof-call-site-arg-names`."
+  [slot-id slots-by-id fns-by-id]
+  (set (keys (types/fn-args (slot-type slot-id slots-by-id fns-by-id)))))
 
 
 (defn- fn-typed-slot?
@@ -218,16 +226,25 @@
    the parent's impl INVOKES it (per request for an `:http-server` handler,
    per tick for a `:schedule` body), so the callback's free args are supplied
    at invocation, not by the outer fn's caller at start. Used by the
-   service-ability projection to drop those subtrees."
+   service-ability projection to drop those subtrees. Shares
+   `types/callable-type?` with the type-checker's `hof-slot?`."
   [slot-id slots-by-id fns-by-id]
-  (let [c (some-> (get slots-by-id slot-id) :type-fn-id fns-by-id :constraint)]
-    (boolean (or (= :fn c) (and (sequential? c) (= :fn (first c)))))))
+  (boolean (types/callable-type? (slot-type slot-id slots-by-id fns-by-id))))
 
 
 (defn- free-args-via
   "Internal: `{arg-name → slot-id}` for `fn-id`'s free args, walking
    ref-fn-id bindings transitively. `visited` guards against cycles
    (GraphConstraints forbid them already, defence-in-depth).
+
+   This is a DELIBERATE sibling of the type-checker's `collect-free-args`
+   / `ref-free-args` (`types/check`), NOT accidental duplication: that one
+   walks the rich-types REGISTRY at type-check time and returns `{name →
+   type}` (with type-var freshening); this walks the live DB GRAPH for
+   /api/execute + CRUD-guard freshness and returns `{name → slot-id}`.
+   Different data source, different return — the only shared logic (the
+   HOF call-site rule) lives in `types/callable-type?` + `types/fn-args`,
+   which both call.
 
    `db` is the pre-loaded reachable-closure from
    `collect-reachable-graph` — every storage round-trip happened

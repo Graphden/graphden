@@ -1362,8 +1362,7 @@
    wrapped fn-graph (captured args, per docs/CLOSURE_CAPTURE.md) DO
    propagate as free args of the outer fn-def — see `ref-free-args`."
   [parent-args arg-name]
-  (let [t (get parent-args arg-name)]
-    (or (= :fn t) (types/fn-type? t))))
+  (types/callable-type? (get parent-args arg-name)))
 
 
 (defn- hof-call-site-arg-names

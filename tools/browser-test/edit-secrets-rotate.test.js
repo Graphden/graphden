@@ -103,7 +103,13 @@ async function cleanup(page) {
     // Expand every namespace + the "(root)" node so the secret row is
     // visible wherever it was placed, then re-render. The subsequent
     // waitForFunction on the row is the real timing signal.
-    await page.evaluate(() => {
+    // The graph refresh is load-bearing: a secret renders as a row of the
+    // namespace tree, which is built from `graphData`. We seeded this one
+    // through the API, and the navigation above is hash-only (no reload),
+    // so the page still holds the pre-seed graph. `loadGraphData` is what
+    // the New-secret form itself calls after a successful POST.
+    await page.evaluate(async () => {
+      if (typeof loadGraphData === 'function') await loadGraphData();
       if (typeof lookups !== 'undefined' && lookups?.nsPathMap) {
         for (const p of lookups.nsPathMap.values()) expandedNamespaces.add(p);
       }

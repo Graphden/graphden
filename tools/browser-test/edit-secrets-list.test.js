@@ -114,10 +114,19 @@ async function cleanup(page) {
            + fetchMs + 'ms (regression budget — historical hang was 30 s+)');
 
     // ===================================================================
-    // Expand every namespace + the "(root)" node so the seeded secret is
-    // visible wherever it was placed, then locate the row.
+    // Refresh the graph, then expand every namespace + the "(root)" node
+    // so the seeded secret is visible wherever it was placed.
+    //
+    // The graph refresh is load-bearing. A secret renders as a row of the
+    // namespace tree, and that tree is built from `graphData` — so the
+    // seeded fn-def has to be IN `graphData` to show up. We seeded it
+    // through the API, behind the editor's back, and the navigation above
+    // only changes the hash (same document, no reload), so the page is
+    // still holding the graph it fetched before the seed. `loadGraphData`
+    // is exactly what the New-secret form calls after a successful POST.
     // ===================================================================
-    await page.evaluate(() => {
+    await page.evaluate(async () => {
+      if (typeof loadGraphData === 'function') await loadGraphData();
       if (typeof lookups !== 'undefined' && lookups?.nsPathMap) {
         for (const p of lookups.nsPathMap.values()) expandedNamespaces.add(p);
       }

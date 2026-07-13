@@ -67,16 +67,6 @@ function classifyFnKind(fn) {
 }
 function fnKindVisible(fn) { return kindVisible[classifyFnKind(fn)] !== false; }
 
-// A namespace node is shown iff it has ≥1 currently-visible entity
-// (recursively) OR an active inline-create rooted at it / a descendant
-// (so an in-progress create row is never hidden out from under the user).
-function nodeHasVisibleContent(node) {
-  if (node.fns.some(fnKindVisible)) return true;
-  for (const child of node.children.values()) {
-    if (nodeHasVisibleContent(child)) return true;
-  }
-  return false;
-}
 function nodeHasActiveCreate(node) {
   if (node.nsId && typeof window.hasActiveCreateIn === 'function'
       && window.hasActiveCreateIn(node.nsId)) return true;
@@ -85,13 +75,51 @@ function nodeHasActiveCreate(node) {
   }
   return false;
 }
+
+// Entities under `node`, ignoring the kind filters. This is what tells
+// "hidden because a filter took everything away" apart from "empty in
+// the first place" — the two must not render the same.
+function nodeEntityCount(node) {
+  let n = node.fns.length;
+  for (const child of node.children.values()) n += nodeEntityCount(child);
+  return n;
+}
+
+// A namespace is shown when it still has something to show: a visible
+// entity of its own, a child that is itself shown, or an in-progress
+// inline-create (so the create row is never hidden out from under the
+// user mid-type).
+//
+// Otherwise it is hidden ONLY if a filter is what emptied it. A namespace
+// that holds nothing at all stays visible: `buildNsTree` deliberately
+// pre-creates a node for every declared namespace so a just-created one
+// appears immediately, and hiding it would make it impossible to put the
+// first entity into it — you would create a namespace and watch it vanish.
 function nodeShouldShow(node) {
-  return nodeHasVisibleContent(node) || nodeHasActiveCreate(node);
+  if (node.fns.some(fnKindVisible)) return true;
+  for (const child of node.children.values()) {
+    if (nodeShouldShow(child)) return true;
+  }
+  if (nodeHasActiveCreate(node)) return true;
+  return nodeEntityCount(node) === 0;
 }
 
 // Classification reads two caches via sync helpers (getServiceForFnId,
 // isSecretFn/secret paths). Prime them once per graph load and re-render
 // so the first paint is accurate.
+//
+// A prime lands on the NETWORK's schedule, not the user's, so its
+// re-render can arrive at any moment — including mid-interaction. An
+// inline-create row is user-owned, transient DOM: it holds the name being
+// typed and the server's rejection message, and a full-tree re-render
+// rebuilds it from scratch and wipes both. So a prime never repaints over
+// an open create row. Nothing is lost by waiting: finishing the create
+// runs initGraph → a fresh graphData → the prime re-fires and repaints
+// with the classification it just loaded.
+function repaintAfterPrime() {
+  if (typeof window.hasActiveCreate === 'function' && window.hasActiveCreate()) return;
+  updateEntityList(graphData);
+}
 let _serviceCachePrimed = false;
 function primeServiceCacheOnce() {
   if (_serviceCachePrimed || typeof loadAllServiceFnIds !== 'function') return;
@@ -100,14 +128,14 @@ function primeServiceCacheOnce() {
   // (already-401'd by the badge eager-load) request.
   if (typeof isAuthenticated === 'function' && !isAuthenticated()) return;
   _serviceCachePrimed = true;
-  loadAllServiceFnIds().then(() => updateEntityList(graphData));
+  loadAllServiceFnIds().then(repaintAfterPrime);
 }
 let _secretsPrimedGraph = null;
 function primeSecretsOnce() {
   if (typeof isAuthenticated !== 'function' || !isAuthenticated()) return;
   if (_secretsPrimedGraph === graphData || typeof loadSecrets !== 'function') return;
   _secretsPrimedGraph = graphData;
-  loadSecrets().then(() => updateEntityList(graphData));
+  loadSecrets().then(repaintAfterPrime);
 }
 
 /**

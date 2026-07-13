@@ -12,11 +12,11 @@
    for audit-correct event history.
 
    Service args: there is NO separate args table. The fn pointed at
-   by `:fn-id` MUST have zero free arguments — every slot must be
-   bound in the fn-graph itself (via fn-defs / bindings). To run the
-   same impl with different parameters (e.g. web-server on a
-   different port), create a derived fn-def that binds the slot
-   differently:
+   by `:fn-id` must have no START-BLOCKING free arguments — every slot
+   the fn needs to compute/configure itself at start must be bound in
+   the fn-graph (via fn-defs / bindings). To run the same impl with
+   different parameters (e.g. web-server on a different port), create a
+   derived fn-def that binds the slot differently:
 
        {:name :web-server-9001 :parent :http-server
         :args {:handler :_app-ring-response :port 9001}}
@@ -25,10 +25,22 @@
    service config visible in the graph (versioned, type-checked,
    composable) and avoids duplicating the binding mechanism.
 
-   The 'no free args' rule is enforced at service-create time by the
-   graph guard `:_create-service-free-args-rej` (in `web/crud/fns.edn`),
-   which rejects the create when `:free-arg-slot-map` reports the target
-   fn still has any unbound slot.
+   NOTE 'start-blocking' is NARROWER than 'any free arg'. A listener's
+   handler (an `:http-server` `:handler`, a `:schedule` body) is a
+   callback the deferred invoker runs per request/tick — its own free
+   args are per-invocation and DON'T block starting the service. So
+   `web-server` (whose handler is the whole editor+API router, with ~45
+   free args deep in that per-request tree) IS service-able even though
+   `free-arg-slot-map` reports those 45. The rule blocks only DIRECT
+   free args + args lifted through DATA slots (a genuinely unstartable
+   fn — `add` with no operand, a cron missing `:cron`).
+
+   Enforced at service-create time by the graph guard
+   `:_create-service-free-args-rej` (in `web/crud/fns.edn`), which
+   rejects the create when `:service-blocking-free-args` (the
+   service-ability projection of `:free-arg-slot-map` — drops the
+   callback subtrees) reports the target fn still has an unbound
+   start-blocking slot.
 
    NOT versioned. Services mutate in place — when the admin toggles
    `:enabled?` or changes `:restart-policy`, the new value is the

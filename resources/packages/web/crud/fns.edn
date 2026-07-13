@@ -209,6 +209,20 @@
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
+  ;; --- :service-blocking-free-args — the service-ability PROJECTION of
+  ;; :free-arg-slot-map. Same graph-traversal primitive (§3.3 carve-out),
+  ;; but drops the fn's own top-level CALLBACK-slot subtrees: an
+  ;; `:http-server` handler / `:schedule` body is invoked by the deferred
+  ;; invoker per request/tick, so its free args are per-invocation and don't
+  ;; block STARTING the service. Only `:_create-service-free-args-rej` uses
+  ;; it, so a whole-app listener (all free args below its `:handler` HOF
+  ;; slot) isn't falsely rejected while a genuinely unstartable fn still is.
+  {:name :service-blocking-free-args
+   :description "Map of `arg-name → slot-id` for only the free args that would prevent `fn-id` from being STARTED as a service (drops callback subtrees the deferred invoker supplies per-invocation). `{}` when fn-id is nil."
+   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil short-circuits to empty map."}}
+   :return-type [:map :keyword :uuid]
+   :effects #{:db}}
+
   {:name :list-all-graph-entities
    :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. With `scope :index`, drops `:slots / :fn-slots / :bindings / :list-items` for a ~95% smaller response (sidebar-only use). With `scope :subtree` + `root-id`, returns only the transitive closure reachable from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids (~98% smaller — typical per-fn editor view)."
    :args {:scope {:type :nullable-keyword
@@ -1339,8 +1353,8 @@
                    {:parent :some? :args {:value :_create-svc-fn-id}}]}}
 
   {:name :_create-svc-free-args
-   :description "`{name → slot-id}` of the target fn's free args. `{}` when fn-id missing."
-   :parent :free-arg-slot-map
+   :description "`{name → slot-id}` of the target fn's free args that would BLOCK starting it as a service. Uses `:service-blocking-free-args` (not the full `:free-arg-slot-map`), so a listener/whole-app fn whose free args are all per-request callback args isn't falsely rejected, while a genuinely unstartable fn still is."
+   :parent :service-blocking-free-args
    :args {:fn-id :_create-svc-fn-id}}
 
   {:name :_create-svc-free-keys

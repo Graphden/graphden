@@ -40,9 +40,11 @@ admin retains the option to disable them.
 ## The model: a service IS a no-arg fn
 
 A `:service` row is just a marker on a fn that says "keep this alive".
-The fn it points at MUST have **zero free arguments** — every slot
-bound via fn-defs / bindings. The reconciler invokes the fn with
-empty args.
+The fn it points at must have **no start-blocking free arguments** —
+every slot the fn needs to compute/configure itself at start must be
+bound via fn-defs / bindings. The reconciler invokes the fn with empty
+args. (A listener's handler args — supplied by the deferred invoker per
+request/tick — are NOT start-blocking; see § Guard below.)
 
 To run the same impl with different parameters, **create a derived
 fn-def that binds the slot differently**, then declare a service for
@@ -99,7 +101,7 @@ services spawn).
 | Field             | Type              | Notes                                                              |
 |-------------------|-------------------|--------------------------------------------------------------------|
 | `:id`             | `:uuid`           | Returned to clients as `service-id`.                              |
-| `:fn-id`          | `:ref :fn`        | **Logical** fn id — service tracks the current graph; editing the fn picks up at next restart. (Compare `:fn-execution.fn-version-id` which is a frozen snapshot.) Must point at a fn with zero free args. |
+| `:fn-id`          | `:ref :fn`        | **Logical** fn id — service tracks the current graph; editing the fn picks up at next restart. (Compare `:fn-execution.fn-version-id` which is a frozen snapshot.) Must point at a fn with no start-blocking free args (§ Guard). |
 | `:enabled?`       | `:bool`           | Reconciler only starts enabled rows. Toggle this + reconcile to stop a service without deleting it. |
 | `:restart-policy` | `:restart-policy` | `:always` / `:on-failure` / `:never` — see § Supervisor below.    |
 | `:cardinality`    | `:cardinality`    | `:singleton` / `:per-pod` / `:pool` — how many pods run it at once; see § Cardinality. Nullable; nil ≡ `:singleton` (rows that pre-date the field). |
@@ -264,14 +266,25 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 `PUT /api/entities/service/:id` updates the row in place;
 `DELETE /api/entities/service/:id` removes it.
 
-**Rejection: free args on target fn.** If `fn-id` points at a fn
-that still has free arguments, the create is rejected with:
+**Rejection: start-blocking free args on target fn.** If `fn-id` points
+at a fn with a free arg it needs to START (a direct unbound operand, or
+one lifted through a data slot), the create is rejected with:
 
 ```html
 <p class="error">Cannot make a :service for a fn that has free args:
-  [:port :handler]. Create a derived fn-def that binds them, then
+  [:nums]. Create a derived fn-def that binds them, then
   declare a :service for the derived fn.</p>
 ```
+
+The guard uses `:service-blocking-free-args`, the service-ability
+projection of `:free-arg-slot-map`: it drops the fn's own top-level
+CALLBACK-slot subtrees (an `:http-server` handler, a `:schedule` body),
+because those free args are the callback's per-invocation concern —
+supplied by the deferred invoker (per request / per tick), not needed
+to start the listener/loop. So a whole-app listener like `web-server`
+(whose ~45 free args all live below its `:handler` HOF slot) is
+service-able, while a genuinely unstartable fn is still rejected. The
+full free-arg surface stays visible to `/api/execute`'s arg form.
 
 ### `POST /api/services/reconcile`
 

@@ -212,6 +212,18 @@
       (set (keys (second c))))))
 
 
+(defn- fn-typed-slot?
+  "True when `slot-id`'s type is a CALLABLE — the bare `:fn` primitive or a
+   structural `[:fn {ARGS} RET]`. A ref bound to such a slot is a callback:
+   the parent's impl INVOKES it (per request for an `:http-server` handler,
+   per tick for a `:schedule` body), so the callback's free args are supplied
+   at invocation, not by the outer fn's caller at start. Used by the
+   service-ability projection to drop those subtrees."
+  [slot-id slots-by-id fns-by-id]
+  (let [c (some-> (get slots-by-id slot-id) :type-fn-id fns-by-id :constraint)]
+    (boolean (or (= :fn c) (and (sequential? c) (= :fn (first c)))))))
+
+
 (defn- free-args-via
   "Internal: `{arg-name → slot-id}` for `fn-id`'s free args, walking
    ref-fn-id bindings transitively. `visited` guards against cycles
@@ -219,80 +231,98 @@
 
    `db` is the pre-loaded reachable-closure from
    `collect-reachable-graph` — every storage round-trip happened
-   upfront, so the recursive resolution is pure in-memory."
-  [fn-id visited db]
-  (if (contains? visited fn-id)
-    {}
-    (let [{:keys [fns-by-id slots-by-id all-bindings all-list-items
-                  all-fn-slots]} db
-          visited' (conj visited fn-id)
-          chain-fns (set (inheritance-chain-in-memory fn-id fns-by-id))
-          chain-fn-slots (filter #(chain-fns (:fn-id %)) all-fn-slots)
-          chain-bindings (filter #(chain-fns (:fn-id %)) all-bindings)
-          chain-binding-ids (set (map :id chain-bindings))
-          chain-list-items (filter #(chain-binding-ids (:binding-id %))
-                                   all-list-items)
-          ;; Bound bindings are tracked by ROOT slot-id (see
-          ;; `root-source-slot-id`). All rename siblings collapse to
-          ;; the same root, so the bound check is rename-insensitive.
-          root-of (fn [sid] (root-source-slot-id sid slots-by-id))
-          bound-roots (->> chain-bindings
-                           ;; `:value-present` flag — `{:default nil}`
-                           ;; in fns.edn is a real binding (slot is
-                           ;; pinned to nil), so the slot is NOT free
-                           ;; at execute-by-name time.
-                           (filter #(or (true? (:value-present %))
-                                        (some? (:ref-fn-id %))
-                                        (true? (:list-append %))))
-                           (map (comp root-of :slot-id))
-                           set)
-          direct (into {}
-                       (keep (fn [{:keys [slot-id]}]
-                               (when-not (bound-roots (root-of slot-id))
-                                 (when-let [s (get slots-by-id slot-id)]
-                                   [(keyword (:name s)) slot-id]))))
-                       chain-fn-slots)
-          ;; Recurse into every ref-fn-id reachable from chain bindings
-          ;; — slot-bound refs + list-item refs. Each is a captured
-          ;; sub-graph whose still-unbound free-args propagate up as
-          ;; free-args of the outer fn-def.
-          ;;
-          ;; A ref bound to a HOF slot is the exception: its lifted set
-          ;; is MINUS the slot's structural call-site arg names — those
-          ;; are supplied per invocation by the parent impl, not by the
-          ;; caller. Mirrors the type-checker's `ref-free-args`; without
-          ;; it a HOF-composed fn's callback leaks e.g. `:item` as a
-          ;; phantom free arg (→ spurious service-create rejection).
-          ;; List-item refs are list elements, not callbacks — no
-          ;; call-site notion, so they recurse unmodified.
-          binding-ref-frees
-          (reduce (fn [acc {:keys [ref-fn-id slot-id]}]
-                    (if ref-fn-id
-                      (let [lifted (free-args-via ref-fn-id visited' db)
-                            call-site (hof-slot-call-site-names
-                                        slot-id slots-by-id fns-by-id)]
-                        (merge acc (if (seq call-site)
-                                     (into {} (remove (comp call-site key)) lifted)
-                                     lifted)))
-                      acc))
-                  {}
-                  chain-bindings)
-          list-item-ref-frees
-          (reduce (fn [acc rfid]
-                    (merge acc (free-args-via rfid visited' db)))
-                  {}
-                  (distinct (keep :ref-fn-id chain-list-items)))
-          transitive (merge list-item-ref-frees binding-ref-frees)
-          ;; A slot bound at THIS level removes that slot from the
-          ;; combined free-arg map — both direct and transitive. Lets
-          ;; a derived fn-def bind a captured arg (e.g.
-          ;; `:my-cron :args {:cron …}`) and have it disappear. Compare
-          ;; by ROOT slot-id so a binding on a rename slot closes its
-          ;; siblings everywhere in the chain (#51).
-          combined (merge transitive direct)]
-      (into {}
-            (remove (fn [[_ sid]] (bound-roots (root-of sid))))
-            combined))))
+   upfront, so the recursive resolution is pure in-memory.
+
+   `drop-hof-refs?` (service-ability projection, top-level only): when
+   true, refs bound to THIS fn's fn-typed (callback) slots are dropped
+   ENTIRELY — those free args are the callback's per-invocation concern
+   (supplied by the deferred invoker, e.g. `:http-server` per request),
+   not needed to START the fn. The flag is NOT propagated into the
+   recursion, so it only strips the service fn's OWN top-level callback
+   bindings (a nested `:map` deep inside a one-shot computation keeps its
+   captured args, which genuinely block). Default false = the exact
+   full free-arg surface `/api/execute` needs for its arg form."
+  ([fn-id visited db] (free-args-via fn-id visited db false))
+  ([fn-id visited db drop-hof-refs?]
+   (if (contains? visited fn-id)
+     {}
+     (let [{:keys [fns-by-id slots-by-id all-bindings all-list-items
+                   all-fn-slots]} db
+           visited' (conj visited fn-id)
+           chain-fns (set (inheritance-chain-in-memory fn-id fns-by-id))
+           chain-fn-slots (filter #(chain-fns (:fn-id %)) all-fn-slots)
+           chain-bindings (filter #(chain-fns (:fn-id %)) all-bindings)
+           chain-binding-ids (set (map :id chain-bindings))
+           chain-list-items (filter #(chain-binding-ids (:binding-id %))
+                                    all-list-items)
+           ;; Bound bindings are tracked by ROOT slot-id (see
+           ;; `root-source-slot-id`). All rename siblings collapse to
+           ;; the same root, so the bound check is rename-insensitive.
+           root-of (fn [sid] (root-source-slot-id sid slots-by-id))
+           bound-roots (->> chain-bindings
+                            ;; `:value-present` flag — `{:default nil}`
+                            ;; in fns.edn is a real binding (slot is
+                            ;; pinned to nil), so the slot is NOT free
+                            ;; at execute-by-name time.
+                            (filter #(or (true? (:value-present %))
+                                         (some? (:ref-fn-id %))
+                                         (true? (:list-append %))))
+                            (map (comp root-of :slot-id))
+                            set)
+           direct (into {}
+                        (keep (fn [{:keys [slot-id]}]
+                                (when-not (bound-roots (root-of slot-id))
+                                  (when-let [s (get slots-by-id slot-id)]
+                                    [(keyword (:name s)) slot-id]))))
+                        chain-fn-slots)
+           ;; Recurse into every ref-fn-id reachable from chain bindings
+           ;; — slot-bound refs + list-item refs. Each is a captured
+           ;; sub-graph whose still-unbound free-args propagate up as
+           ;; free-args of the outer fn-def.
+           ;;
+           ;; A ref bound to a HOF slot is the exception: its lifted set
+           ;; is MINUS the slot's structural call-site arg names — those
+           ;; are supplied per invocation by the parent impl, not by the
+           ;; caller. Mirrors the type-checker's `ref-free-args`; without
+           ;; it a HOF-composed fn's callback leaks e.g. `:item` as a
+           ;; phantom free arg (→ spurious service-create rejection).
+           ;; List-item refs are list elements, not callbacks — no
+           ;; call-site notion, so they recurse unmodified.
+           binding-ref-frees
+           (reduce (fn [acc {:keys [ref-fn-id slot-id]}]
+                     ;; Skip a ref with no target, AND — under the service-
+                     ;; ability projection (top level only) — a ref in a
+                     ;; callback slot: it's invoked by the deferred invoker, so
+                     ;; its whole free-arg subtree is per-invocation, not
+                     ;; start-blocking.
+                     (if (or (nil? ref-fn-id)
+                             (and drop-hof-refs?
+                                  (fn-typed-slot? slot-id slots-by-id fns-by-id)))
+                       acc
+                       (let [lifted (free-args-via ref-fn-id visited' db)
+                             call-site (hof-slot-call-site-names
+                                         slot-id slots-by-id fns-by-id)]
+                         (merge acc (if (seq call-site)
+                                      (into {} (remove (comp call-site key)) lifted)
+                                      lifted)))))
+                   {}
+                   chain-bindings)
+           list-item-ref-frees
+           (reduce (fn [acc rfid]
+                     (merge acc (free-args-via rfid visited' db)))
+                   {}
+                   (distinct (keep :ref-fn-id chain-list-items)))
+           transitive (merge list-item-ref-frees binding-ref-frees)
+           ;; A slot bound at THIS level removes that slot from the
+           ;; combined free-arg map — both direct and transitive. Lets
+           ;; a derived fn-def bind a captured arg (e.g.
+           ;; `:my-cron :args {:cron …}`) and have it disappear. Compare
+           ;; by ROOT slot-id so a binding on a rename slot closes its
+           ;; siblings everywhere in the chain (#51).
+           combined (merge transitive direct)]
+       (into {}
+             (remove (fn [[_ sid]] (bound-roots (root-of sid))))
+             combined)))))
 
 
 (defn free-arg-slot-map
@@ -325,6 +355,26 @@
   [ctx fn-id]
   (let [storage (request/require-storage ctx)]
     (free-args-via fn-id #{} (collect-reachable-graph storage fn-id))))
+
+
+(defn service-blocking-free-args
+  "Like `free-arg-slot-map`, but the SERVICE-ABILITY projection: `{arg-name
+   → slot-id}` for only the free args that would prevent the fn from being
+   STARTED as a service (the reconciler runs it with empty args).
+
+   Drops the fn's own top-level CALLBACK-slot subtrees — an `:http-server`
+   handler or a `:schedule` body is invoked by the deferred invoker (per
+   request / per tick), so its free args are per-invocation and irrelevant
+   to starting the listener/loop. Keeps direct free args and args lifted
+   through DATA slots (a genuinely unstartable fn — `increment` with no
+   operand, a cron missing its `:cron` schedule, a helper with a required
+   data input — still surfaces here).
+
+   This is the check the `:service` create-guard wants; `/api/execute`
+   keeps `free-arg-slot-map` (its arg form needs the FULL surface)."
+  [ctx fn-id]
+  (let [storage (request/require-storage ctx)]
+    (free-args-via fn-id #{} (collect-reachable-graph storage fn-id) true)))
 
 
 (defn free-arg-slot-map-cached

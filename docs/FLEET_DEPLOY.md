@@ -79,9 +79,12 @@ load/evicts cells to match. (When `autoscaling.enabled`, the StatefulSet's
 | `fleet.sustainTicks` | `GRAPHDEN_FLEET_SUSTAIN_TICKS` | Ticks an imbalance must persist before a move fires (time hysteresis) |
 | `fleet.minImprovement` | `GRAPHDEN_FLEET_MIN_IMPROVEMENT` | Magnitude floor — drop a plan that improves imbalance by less (magnitude hysteresis) |
 | `fleet.maxMoves` | `GRAPHDEN_FLEET_MAX_MOVES` | Per-tick cap on rebalance moves |
+| `fleet.overlapWeight` | `GRAPHDEN_FLEET_OVERLAP_WEIGHT` | Overlap-accounting weight (default 0 = pure load balancing). > 0 makes both initial placement and rebalance prefer co-locating cells that share a forward-closure — turn it on when orgs run multiple code-sharing cells |
 
 Both hysteresis levers exist because a move costs a compile + cache-warm on the
 target — raise `sustainTicks` / `minImprovement` if you see the fleet churning.
+`overlapWeight` stays 0 unless you have evidence that co-locating code-sharing
+cells saves enough memory to be worth biasing placement.
 
 ## Verify
 

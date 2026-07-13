@@ -143,6 +143,7 @@ one database, how many of them run this service?**
 |---|---|
 | `:singleton` | Exactly one pod, cluster-wide. Each pod tries `pg_try_advisory_lock` on the service id; the loser idles. |
 | `:per-pod` | Every pod runs its own copy. No lock. |
+| `:pool` (`:pool-size N`) | Up to **N** pods run it — exactly N when the fleet has ≥ N pods, one copy each when fewer. |
 
 The two ship-today service shapes want opposite answers, and you
 can't infer it from the fn:
@@ -155,6 +156,16 @@ can't infer it from the fn:
   `:singleton` and only the lock-winner ever listens; the other
   pods answer nothing, fail their healthcheck, and your load
   balancer sees one backend no matter how many pods you started.
+
+`:pool` covers the middle: a background worker you want **redundant
+or parallel across a bounded number of pods** — not one, not all.
+It generalises `:singleton` (a pool of 1): instead of racing for a
+single lock, each pod races for the first free of **N** slots
+(`pg_try_advisory_lock` on `service-id + 0 … N-1`) and holds it. If a
+holder crashes, its slot frees and another pod takes it on the next
+reconcile tick. The size is fixed — set `:pool-size` to the number
+of pods you want; graphden does **not** grow or shrink it by load
+(that's the request-serving path's job, not a service's).
 
 That's why the editor's own `:web-server` is declared `:per-pod`
 in `app/package.edn`:
@@ -179,10 +190,12 @@ contender, every lock attempt succeeds.
 
 ### Try it (cardinality edition)
 
-The `⚙` popover has a **Cardinality** control — two radios,
-`singleton` / `per-pod`, right under Restart policy. It pre-selects
-the row's current value (a new service starts at `singleton`, since
-a nil column reads that way). Pick one and hit `Save & reconcile`.
+The `⚙` popover has a **Cardinality** control — three radios,
+`singleton` / `per-pod` / `pool`, right under Restart policy, plus a
+`pool-size` number input (used only when you pick `pool`). It
+pre-selects the row's current value (a new service starts at
+`singleton`, since a nil column reads that way). Pick one and hit
+`Save & reconcile`.
 
 Changing cardinality is a **config drift**: the reconciler notices
 the running entry no longer matches the row, stops the service, and

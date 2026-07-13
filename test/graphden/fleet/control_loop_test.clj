@@ -46,7 +46,7 @@
       (is (= 2 (:over-count (:state t2)))))
     (testing "tick 3 fires the move and resets the counter"
       (is (= 1 (count (:moves t3))))
-      (is (= 0 (:over-count (:state t3)))))))
+      (is (zero? (:over-count (:state t3)))))))
 
 
 (deftest transient-spike-resets-the-counter
@@ -60,7 +60,7 @@
         t1 (loop/plan-tick skewed {} opts)
         t2 (loop/plan-tick balanced (:state t1) opts)]  ; imbalance vanished
     (is (= 1 (:over-count (:state t1))))
-    (is (= 0 (:over-count (:state t2))) "a balanced tick resets the sustained counter")
+    (is (zero? (:over-count (:state t2))) "a balanced tick resets the sustained counter")
     (is (empty? (:moves t2)))))
 
 
@@ -71,7 +71,7 @@
                   :executors ["e1" "e2"]}
           {:keys [moves state]} (loop/plan-tick inputs {} {})]
       (is (= 1 (count moves)))
-      (is (= 0 (:over-count state))))))
+      (is (zero? (:over-count state))))))
 
 
 (deftest no-executors-plans-nothing

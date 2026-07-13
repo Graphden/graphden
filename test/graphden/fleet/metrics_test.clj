@@ -54,8 +54,8 @@
     (testing "an org's live load is its pending-execution row count"
       (is (= 5 (metrics/org-pending-load storage "acme"))))
     (testing "an idle org loads zero"
-      (is (= 0 (metrics/org-pending-load storage "beta")))
-      (is (= 0 (metrics/org-pending-load storage "ghost"))
+      (is (zero? (metrics/org-pending-load storage "beta")))
+      (is (zero? (metrics/org-pending-load storage "ghost"))
           "an org with no rows at all also loads zero"))))
 
 

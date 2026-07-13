@@ -187,7 +187,7 @@
     (with-redefs [http/request (fn [opts] (swap! posts conj (:url opts)) (future {:status 200 :body "{}"}))]
       (let [r (cmd/execute-move! ctx {:org "acme" :entry-fn-id ROOT :to-executor "pod-b"})]
         (testing "the move ran end-to-end through the directed seams"
-          (is (= true (:ok r)))
+          (is (true? (:ok r)))
           (is (= "pod-b" (:to r)))
           (is (= 2 (:epoch r)))
           (is (= "pod-b" (placement/executor-for storage "acme" ROOT)) "placement flipped to the target"))

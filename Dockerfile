@@ -63,6 +63,34 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=90s --retries=3 \
 # within ~10s. Found because the e2e isolated stack cascaded on a
 # memory leak around row->entity / cheshire-encode of the
 # `/api/graph/entities` payload (see 2026-06-20 logs).
+# MEMORY: the ceiling is the container's, and that is the whole mechanism.
+#
+# `UseContainerSupport` measures `MaxRAMPercentage` against the CONTAINER's
+# memory limit. With no limit set, that is the whole HOST — this JVM sized
+# itself for an 8.8 GB heap on an 11.7 GB box, and so would every other executor
+# on it (an agent instance, the e2e stack). G1 then grows the committed heap to
+# absorb each allocation burst (a graph compile, a demo seed, a test sweep) and
+# never gives it back: measured on the demo, RSS reached 4.19 GB over three days
+# while the LIVE SET was 125 MB. Not a leak — collectable the whole time, and
+# nothing ever asked. `docker-compose.yml` now sets the limit; that bounds it.
+#
+# WHAT DOES NOT WORK — do not re-add it: `-XX:G1PeriodicGCInterval`. It is the
+# documented answer (JEP 346, "promptly return unused memory"), and on this
+# service it fires exactly never. The periodic GC is skipped if ANY collection
+# happened during the interval, and the executor is never that quiet: the
+# service reconciler ticks every 15 s and the NOTIFY listener runs, so young GCs
+# tick over continuously. Measured over 7 idle minutes with the flag set (both
+# with and without `-G1PeriodicGCInvokesConcurrent`): 423 young GCs, ZERO
+# periodic collections, committed heap pinned at 826 MB. A hand-rolled
+# `System.gc()` in the same JVM dropped committed 826 MB -> 230 MB and RSS
+# 1.05 GB -> 488 MB, so the JVM CAN uncommit — it simply never decides to.
+# ALSO DOES NOT WORK — measured, not assumed: ZGC (`-XX:+UseZGC
+# -XX:ZUncommitDelay=60`). It does uncommit on its own schedule, but it commits
+# almost the whole ceiling up front: on the same 2 GB-capped instance, committed
+# heap 1474 MB of a 1536 MB max — 96% — for a 158 MB live set, and 1.76 GB RSS
+# before serving a request, against 0.5-0.7 GB under G1. ZGC is built for large
+# heaps and low pause times; on a 125 MB live set its overhead IS the problem it
+# would be solving. Rejected.
 CMD ["java", \
      "-XX:+UseContainerSupport", \
      "-XX:MaxRAMPercentage=75.0", \

@@ -377,8 +377,10 @@ Verified against the executor:
     pure LPT, the verified behaviour); a deployment opts in via
     `GRAPHDEN_FLEET_OVERLAP_WEIGHT` — honouring the evidence-gate (turn it on when
     multi-cell-per-org proves common). Per-route cell-splitting (§3.2) still waits
-    on that same evidence. NOTE overlap currently biases INITIAL placement; making
-    the rebalancer's `best-move` overlap-aware is the natural follow-on.
+    on that same evidence. Overlap biases BOTH initial placement (`best-target`)
+    AND rebalance: `rebalance/best-move` scores an imbalance-reducing move
+    `imbalance-after − w-overlap·overlap(cell, dest-fns)`, so among moves that
+    equally flatten load the co-locating one wins (load stays the hard constraint).
 - **Phase 3 — substrate (core SHIPPED).** Concrete tasks:
   - **T5.1 ✅** DNS-SRV membership discovery (`fleet.discovery`) — headless-
     Service SRV → live executor set, tracking StatefulSet/HPA scaling. Pure DNS,
@@ -533,5 +535,5 @@ is the foundation this RFC reuses — not new work.**
 - 2026-07: **T4.5 overlap-accounting SHIPPED opt-in** — overlap-aware placement
   (`packer/best-target` + `discover-cells` closures) behind
   `GRAPHDEN_FLEET_OVERLAP_WEIGHT` (default 0 = pure LPT). Remaining: per-route
-  split (evidence-gated), rebalancer-side overlap (follow-on), scale-to-zero
+  split (evidence-gated), scale-to-zero
   (demonstrated on KEDA+CRaC, T5.3).

@@ -84,7 +84,8 @@
                                                  max-moves Integer/MAX_VALUE w-overlap 0.0}}]
   (let [{:keys [moves unplaced current-imbalance]}
         (rebalance/rebalance cells current executors
-                             {:min-improvement min-improvement :max-moves max-moves})
+                             {:min-improvement min-improvement :max-moves max-moves
+                              :w-overlap w-overlap})
         would-move? (boolean (seq moves))
         over-count (if would-move? (inc (:over-count state 0)) 0)
         fire? (and would-move? (>= over-count sustain-ticks))]

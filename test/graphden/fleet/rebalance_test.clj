@@ -74,3 +74,36 @@
         current {["o" c1] "e1" ["o" c2] "e1" ["o" c3] "e1" ["o" c4] "e1"}
         {:keys [moves]} (rebalance/rebalance cells current ["e1" "e2"] {:max-moves 1})]
     (is (= 1 (count moves)) "stops at the cap even if more moves would help further")))
+
+
+;; ---------------------------------------------------------------------------
+;; Overlap-aware rebalance (docs/FLEET_RFC.md T4.5) — opt-in via :w-overlap.
+;; Among imbalance-reducing moves (the hard filter), prefer the one that
+;; co-locates the cell with code it shares on the destination.
+;; ---------------------------------------------------------------------------
+
+(deftest rebalance-overlap-prefers-co-locating-move
+  ;; p1 (busiest) holds c1 + c2 (equal weight); p2 (lightest) holds c3, whose
+  ;; closure shares :a :b with c2 but nothing with c1. Moving EITHER c1 or c2
+  ;; flattens load equally, so pure descent breaks the tie by key; overlap
+  ;; instead moves the code-sharing cell (c2) onto its shared pod.
+  (let [cells [{:org "o" :entry-fn-id c1 :weight 2.0 :closure #{:x :y}}
+               {:org "o" :entry-fn-id c2 :weight 2.0 :closure #{:a :b}}
+               {:org "o" :entry-fn-id c3 :weight 0.0 :closure #{:a :b :z}}]
+        current {["o" c1] "p1" ["o" c2] "p1" ["o" c3] "p2"}
+        execs ["p1" "p2"]]
+    (testing "w-overlap 0 → pure churn-min descent breaks the tie by key (moves c1)"
+      (let [{:keys [moves]} (rebalance/rebalance cells current execs {})]
+        (is (= 1 (count moves)))
+        (is (= c1 (:entry-fn-id (first moves))) "lower key wins the imbalance tie")))
+    (testing "w-overlap > 0 → moves c2 instead, co-locating it with the shared code on p2"
+      (let [{:keys [moves]} (rebalance/rebalance cells current execs {:w-overlap 2.0})]
+        (is (= 1 (count moves)))
+        (is (= c2 (:entry-fn-id (first moves))) "the code-sharing cell moves")
+        (is (= "p2" (:to (first moves))))))
+    (testing "overlap never overrides the load constraint — still exactly one balancing move"
+      (let [{:keys [moves current-imbalance planned-imbalance]}
+            (rebalance/rebalance cells current execs {:w-overlap 2.0})]
+        (is (= 4.0 current-imbalance))
+        (is (= 0.0 planned-imbalance) "load is still fully balanced")
+        (is (= 1 (count moves)))))))

@@ -22,6 +22,7 @@
    is returned under `:unplaced` for the controller to place initially — keeping
    'balance existing load' and 'place new load' as separate, clear steps."
   (:require
+    [clojure.set :as set]
     [graphden.fleet.packer :as packer]))
 
 
@@ -50,18 +51,30 @@
 
 (defn- best-move
   "Among the cells currently on `busiest`, the key whose move to `lightest` most
-   reduces imbalance — or nil if no such move strictly helps. `weight-of` maps a
-   cell-key to its weight; `holder` is the evolving assignment."
-  [loads holder weight-of busiest lightest]
+   reduces imbalance — or nil if no such move strictly helps. Reducing imbalance
+   is a HARD filter; among the moves that pass it, the pick minimises
+   `imbalance-after − w-overlap·overlap(cell-closure, lightest's fns)`, so with
+   `w-overlap` > 0 a move that also CO-LOCATES the cell with code it shares on the
+   destination wins the tie (memory + a cheaper move). `w-overlap` 0 (or absent
+   closures) reduces exactly to the pure churn-minimising descent. `weight-of` /
+   `closure-of` map a cell-key to its weight / forward-closure; `pod-fns` maps an
+   executor to the fn-set it currently holds."
+  [loads holder weight-of closure-of pod-fns busiest lightest w-overlap]
   (let [current-imb (imbalance loads)
+        dest-fns (get pod-fns lightest #{})
         on-busiest (keep (fn [[k e]] (when (= e busiest) k)) holder)]
     (->> on-busiest
          (map (fn [k]
                 (let [w (weight-of k)
-                      after (-> loads (update busiest - w) (update lightest + w))]
-                  {:key k :imbalance (imbalance after)})))
+                      after (-> loads (update busiest - w) (update lightest + w))
+                      imb (imbalance after)
+                      ov (if-let [cl (get closure-of k)]
+                           (count (set/intersection cl dest-fns))
+                           0)]
+                  {:key k :imbalance imb
+                   :score (- imb (* (double w-overlap) ov))})))
          (filter #(< (:imbalance %) current-imb))
-         (sort-by (juxt :imbalance (comp str :key)))
+         (sort-by (juxt :score (comp str :key)))
          first)))
 
 
@@ -69,9 +82,12 @@
   "Plan the moves that rebalance `cells` over `executors`, given `current`
    placement (`{[org entry] executor-id}`).
 
-   `opts` — `{:min-improvement <double> :max-moves <int>}`. `:min-improvement`
-   (default 0.0) is the hysteresis floor: the plan is dropped unless it improves
-   imbalance by more than this. `:max-moves` caps the plan size.
+   `opts` — `{:min-improvement <double> :max-moves <int> :w-overlap <double>}`.
+   `:min-improvement` (default 0.0) is the hysteresis floor: the plan is dropped
+   unless it improves imbalance by more than this. `:max-moves` caps the plan
+   size. `:w-overlap` (default 0.0) makes an imbalance-reducing move prefer a
+   destination that already holds the cell's code (needs cells carrying a
+   `:closure`); 0 keeps the pure churn-minimising descent.
 
    Returns
      `{:moves [{:org :entry-fn-id :from :to} ...]  ; churn-minimising, applied in order
@@ -80,27 +96,45 @@
        :planned-imbalance <double>
        :improvement <double>}`.
    `:moves` is empty when the fleet is already balanced within the floor."
-  [cells current executors {:keys [min-improvement max-moves]
-                            :or {min-improvement 0.0 max-moves Integer/MAX_VALUE}}]
+  [cells current executors {:keys [min-improvement max-moves w-overlap]
+                            :or {min-improvement 0.0 max-moves Integer/MAX_VALUE
+                                 w-overlap 0.0}}]
   (let [exec-set (set executors)
         placed? #(contains? exec-set (get current (cell-key %)))
         placed (filter placed? cells)
         unplaced (into [] (comp (remove placed?) (map cell-key)) cells)
         weight-of (into {} (map (juxt cell-key (comp double :weight))) placed)
+        closure-of (into {} (keep (fn [c] (when-let [cl (:closure c)] [(cell-key c) cl]))) placed)
+        ;; Seed each pod's held-fn set from the cells currently on it, so overlap
+        ;; is scored against real contents. A moved cell's fns are ADDED to the
+        ;; destination as the descent proceeds (not removed from the source — an
+        ;; over-estimate that only affects the secondary tiebreak, never the exact
+        ;; imbalance descent).
+        init-pod-fns (reduce (fn [m c]
+                               (let [k (cell-key c) e (get current k)]
+                                 (if (and e (:closure c) (contains? m e))
+                                   (update m e into (:closure c))
+                                   m)))
+                             (zipmap executors (repeat #{}))
+                             placed)
         init-loads (packer/loads-of placed current executors)
         init-imb (imbalance init-loads)
         result (loop [loads init-loads
                       holder (select-keys current (map cell-key placed))
+                      pod-fns init-pod-fns
                       moves []]
                  (let [[lightest busiest] (extremes loads executors)]
                    (if (or (= lightest busiest)
                            (>= (count moves) max-moves)
                            (nil? busiest))
                      {:loads loads :moves moves}
-                     (if-let [{:keys [key]} (best-move loads holder weight-of busiest lightest)]
-                       (let [w (weight-of key)]
+                     (if-let [{:keys [key]} (best-move loads holder weight-of closure-of
+                                                       pod-fns busiest lightest w-overlap)]
+                       (let [w (weight-of key)
+                             cl (get closure-of key)]
                          (recur (-> loads (update busiest - w) (update lightest + w))
                                 (assoc holder key lightest)
+                                (cond-> pod-fns cl (update lightest into cl))
                                 (conj moves {:org (first key) :entry-fn-id (second key)
                                              :from busiest :to lightest})))
                        {:loads loads :moves moves}))))

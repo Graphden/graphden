@@ -497,6 +497,12 @@
            (p/shell "bb" "commitlint")
            (println (str green "✓ All linters passed" reset)))}
 
+  wt
+  {:doc "Parallel feature dev + merge queue (dev/wtq/README.md). Usage: bb wt <new|list|merge|status|log|drop|help> ..."
+   :task (let [root (-> (p/shell {:out :string} "git" "rev-parse" "--show-toplevel")
+                        :out str/trim)]
+           (apply p/shell (str root "/dev/wtq/wt") *command-line-args*))}
+
   ;; === HELPERS ===
 
   fix

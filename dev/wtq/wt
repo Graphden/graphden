@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+# wt — worktree + merge-queue helper for parallel feature development.
+#
+# Model: N git worktrees, one per in-flight feature, each on its own
+# `feature/<name>` branch off develop. You run a separate Claude Code
+# (or human) session per worktree — real independent dialogs. Each runs
+# the FAST loop (`bb ci` = linters + unit) freely and in parallel.
+#
+# When a feature is ready, `wt merge` (run FROM INSIDE that worktree)
+# enters a machine-wide flock queue: at most one merge runs at a time.
+# The gate merges the latest develop into the feature, runs the HEAVY
+# suite (rebuild + integration + e2e + coverage) on the MERGED result,
+# and only then fast-forwards develop. Green -> develop advances; red ->
+# the branch bounces back to you with the log, develop untouched.
+#
+# The queue is stateless (the lock knows nothing about who is waiting),
+# so worktrees can be created and dropped at any time.
+#
+# Commands:
+#   wt new <name>          create feature/<name> + a worktree for it
+#   wt list                show every worktree, branch, ahead/behind, dirty
+#   wt merge [--no-e2e]    (run inside a worktree) queue + gate + land on develop
+#   wt status              show queue lock holder + recent gate logs
+#   wt drop <name> [-f]    remove a worktree + its branch (must be merged; -f overrides)
+#   wt log <name>          tail the most recent gate log for a feature
+#
+# Env overrides:
+#   WTQ_TARGET   integration branch (default: develop)
+#   WTQ_ROOT     where worktrees live (default: <repo-parent>/graphden-wt)
+set -euo pipefail
+
+# --- locate the repo / shared plumbing -------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+cd "$SCRIPT_DIR"
+COMMON_DIR="$(cd "$(git rev-parse --git-common-dir)" && pwd)"   # shared .git across all worktrees
+WTQ_DIR="$COMMON_DIR/wtq"                                        # coordination lives here (untracked, shared)
+LOCK="$WTQ_DIR/queue.lock"
+HOLDER="$WTQ_DIR/holder"
+LOG_DIR="$WTQ_DIR/logs"
+mkdir -p "$LOG_DIR"
+
+TARGET="${WTQ_TARGET:-develop}"
+
+# main worktree = wherever $TARGET is checked out (that is the branch we advance)
+main_worktree() {
+  git worktree list --porcelain | awk -v tgt="refs/heads/$TARGET" '
+    /^worktree /  { wt=$2 }
+    $0 == "branch " tgt { print wt; exit }'
+}
+MAIN_WT="$(main_worktree)"
+REPO_PARENT="$(dirname "${MAIN_WT:-$(git rev-parse --show-toplevel)}")"
+WTQ_ROOT="${WTQ_ROOT:-$REPO_PARENT/graphden-wt}"
+
+# --- pretty ----------------------------------------------------------------
+c()  { printf '\033[%sm' "$1"; }
+GRN="$(c 32)"; RED="$(c 31)"; YLW="$(c 33)"; BLU="$(c 34)"; BLD="$(c 1)"; RST="$(c 0)"
+say()  { printf '%s\n' "$*"; }
+info() { printf '%s%s%s\n' "$BLU" "$*" "$RST"; }
+ok()   { printf '%s%s%s\n' "$GRN" "$*" "$RST"; }
+warn() { printf '%s%s%s\n' "$YLW" "$*" "$RST"; }
+die()  { printf '%s%s%s\n' "$RED" "$*" "$RST" >&2; exit 1; }
+
+branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
+
+# =====================================================================
+# new
+# =====================================================================
+cmd_new() {
+  local name="${1:-}"
+  [ -n "$name" ] || die "usage: wt new <name>"
+  [[ "$name" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "bad name '$name' (use a-z 0-9 . _ -)"
+  local branch="feature/$name"
+  local path="$WTQ_ROOT/$name"
+
+  [ -e "$path" ] && die "worktree path already exists: $path"
+  git show-ref --verify --quiet "refs/heads/$branch" && die "branch already exists: $branch"
+
+  info "Refreshing $TARGET from origin ..."
+  git -C "$MAIN_WT" fetch --quiet origin || warn "fetch failed (offline?) — using local $TARGET"
+  # fast-forward local target to origin if possible (never rewrite)
+  git -C "$MAIN_WT" merge --ff-only "origin/$TARGET" --quiet 2>/dev/null || true
+
+  mkdir -p "$WTQ_ROOT"
+  info "Creating $branch off $TARGET at $path ..."
+  git -C "$MAIN_WT" worktree add -b "$branch" "$path" "$TARGET" >/dev/null
+  ok "✓ worktree ready"
+  echo
+  say "  cd $path"
+  say "  claude          # start a dedicated session for '$name'"
+  echo
+  say "Fast loop inside it:   ${BLD}bb ci${RST}   (lint + unit, parallel-safe)"
+  say "When ready to land:    ${BLD}$SCRIPT_DIR/wt merge${RST}   (from that worktree)"
+}
+
+# =====================================================================
+# list
+# =====================================================================
+cmd_list() {
+  local holder="—"
+  [ -f "$HOLDER" ] && holder="$(cat "$HOLDER" 2>/dev/null || echo '—')"
+  printf '%sQueue lock:%s %s\n\n' "$BLD" "$RST" "$holder"
+  printf '%-22s %-26s %-14s %s\n' "WORKTREE" "BRANCH" "vs $TARGET" "STATE"
+  git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do
+    local br dirty ab base
+    br="$(branch_of "$wt" 2>/dev/null || echo '?')"
+    dirty=""
+    [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ] && dirty="${YLW}dirty${RST}"
+    ab=""
+    if [ "$br" != "$TARGET" ] && git -C "$wt" rev-parse --verify --quiet "$TARGET" >/dev/null; then
+      base="$(git -C "$wt" rev-list --left-right --count "$TARGET...HEAD" 2>/dev/null || echo '? ?')"
+      ab="-$(echo "$base" | awk '{print $1}') +$(echo "$base" | awk '{print $2}')"
+    fi
+    printf '%-22s %-26s %-14s %b\n' "$(basename "$wt")" "$br" "$ab" "$dirty"
+  done
+}
+
+# =====================================================================
+# status / log
+# =====================================================================
+cmd_status() {
+  cmd_list
+  echo
+  printf '%sRecent gate runs:%s\n' "$BLD" "$RST"
+  ls -1t "$LOG_DIR" 2>/dev/null | head -5 | sed 's/^/  /' || say "  (none)"
+}
+cmd_log() {
+  local name="${1:-}"; [ -n "$name" ] || die "usage: wt log <name>"
+  local f; f="$(ls -1t "$LOG_DIR/$name-"*.log 2>/dev/null | head -1 || true)"
+  [ -n "$f" ] || die "no gate log for '$name'"
+  info "== $f =="; tail -n 120 "$f"
+}
+
+# =====================================================================
+# drop
+# =====================================================================
+cmd_drop() {
+  local name="${1:-}"; local force="${2:-}"
+  [ -n "$name" ] || die "usage: wt drop <name> [-f]"
+  local path="$WTQ_ROOT/$name" branch="feature/$name"
+  [ -d "$path" ] || die "no worktree at $path"
+
+  if [ "$force" != "-f" ] && [ "$force" != "--force" ]; then
+    # refuse unless the branch is fully contained in target (i.e. merged)
+    if git -C "$MAIN_WT" merge-base --is-ancestor "$branch" "$TARGET" 2>/dev/null; then
+      :
+    else
+      die "'$branch' is NOT merged into $TARGET yet — run 'wt merge' first, or 'wt drop $name -f' to discard."
+    fi
+    [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ] || die "worktree is dirty — commit/stash, or use -f"
+  fi
+
+  info "Removing worktree $path ..."
+  git -C "$MAIN_WT" worktree remove ${force:+--force} "$path"
+  git -C "$MAIN_WT" branch -D "$branch" 2>/dev/null && ok "✓ deleted $branch" || warn "branch $branch kept"
+  ok "✓ dropped $name"
+}
+
+# =====================================================================
+# merge — the gated, flock-serialized landing
+# =====================================================================
+run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
+  local wt="$1" no_e2e="$2"
+  local branch; branch="$(branch_of "$wt")"
+  local ts; ts="$(date +%Y%m%d-%H%M%S)"
+  local name; name="$(basename "$wt")"
+  local log="$LOG_DIR/$name-$ts.log"
+  printf '%s (pid %s) since %s' "$branch" "$$" "$ts" > "$HOLDER"
+
+  {
+    echo "=== gate: $branch @ $ts ==="
+    step() { echo; echo ">>> $*"; }
+
+    [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: worktree dirty — commit first."; return 3; }
+
+    step "fetch + refresh $TARGET"
+    git -C "$MAIN_WT" fetch origin || echo "(fetch failed — using local $TARGET)"
+    git -C "$MAIN_WT" merge --ff-only "origin/$TARGET" 2>/dev/null || true
+    [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
+
+    step "merge $TARGET -> $branch"
+    if ! git -C "$wt" merge --no-edit "$TARGET"; then
+      git -C "$wt" merge --abort || true
+      echo "CONFLICT merging $TARGET into $branch — resolve in the worktree, then re-run 'wt merge'."
+      return 2
+    fi
+
+    step "bb ci (lint + unit, on merged result)"
+    ( cd "$wt" && bb ci ) || { echo "FAIL: bb ci"; return 1; }
+
+    step "bb rebuild (bake merged code into graphden-executor:latest)"
+    ( cd "$wt" && bb rebuild ) || { echo "FAIL: bb rebuild"; return 1; }
+
+    step "bb test-integration"
+    ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
+
+    if [ "$no_e2e" = "1" ]; then
+      echo; echo "(skipping e2e per --no-e2e)"
+    else
+      step "bb test-e2e"
+      ( cd "$wt" && bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+    fi
+
+    step "bb coverage"
+    ( cd "$wt" && bb coverage ) || { echo "FAIL: coverage"; return 1; }
+
+    step "land: fast-forward $TARGET -> $branch"
+    # feature now contains $TARGET as ancestor (we just merged it in) and
+    # the lock guarantees $TARGET has not moved -> ff is always possible.
+    git -C "$MAIN_WT" merge --ff-only "$branch" || { echo "FAIL: could not ff $TARGET (did it move? it shouldn't have)"; return 1; }
+    git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push manually)"
+
+    echo; echo "=== GREEN: $branch landed on $TARGET ==="
+    return 0
+  } 2>&1 | tee "$log"
+
+  # propagate the gate's status, not tee's
+  return "${PIPESTATUS[0]}"
+}
+
+cmd_merge() {
+  local no_e2e=0
+  [ "${1:-}" = "--no-e2e" ] && no_e2e=1
+  local wt; wt="$(git rev-parse --show-toplevel)"
+  local branch; branch="$(branch_of "$wt")"
+  [ "$branch" != "$TARGET" ] || die "you are on $TARGET — run 'wt merge' from inside a feature worktree."
+  [ "$wt" != "$MAIN_WT" ]    || die "run 'wt merge' from a feature worktree, not the main checkout."
+
+  exec 9>"$LOCK"
+  if ! flock -n -x 9; then
+    warn "Queue busy — held by: $(cat "$HOLDER" 2>/dev/null || echo '?')"
+    warn "Waiting for the lock (Ctrl-C leaves the queue; nothing is lost) ..."
+    flock -x 9            # block here until it is our turn — THIS is the queue
+  fi
+  ok "Acquired queue lock — running gate."
+
+  local rc=0
+  run_gate "$wt" "$no_e2e" || rc=$?
+  : > "$HOLDER"
+  flock -u 9 || true      # release for the next in line
+
+  echo
+  case "$rc" in
+    0) ok   "✓ landed. You can now:  $SCRIPT_DIR/wt drop $(basename "$wt")" ;;
+    2) warn "↩ merge conflict — resolve, commit, re-run 'wt merge'." ;;
+    3) warn "↩ precondition failed (dirty tree) — see log above." ;;
+    *) die  "✗ gate failed — fix on this branch, then re-run 'wt merge'. Log: wt log $(basename "$wt")" ;;
+  esac
+}
+
+# =====================================================================
+main() {
+  local cmd="${1:-}"; shift || true
+  case "$cmd" in
+    new)    cmd_new    "$@" ;;
+    list|ls) cmd_list  "$@" ;;
+    merge|land) cmd_merge "$@" ;;
+    status) cmd_status "$@" ;;
+    log)    cmd_log    "$@" ;;
+    drop|rm) cmd_drop  "$@" ;;
+    ""|help|-h|--help)
+      sed -n '2,40p' "$SELF" | sed 's/^# \{0,1\}//' ;;
+    *) die "unknown command '$cmd' (try: wt help)" ;;
+  esac
+}
+main "$@"

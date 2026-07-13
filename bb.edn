@@ -498,10 +498,14 @@
            (println (str green "✓ All linters passed" reset)))}
 
   wt
-  {:doc "Parallel feature dev + merge queue (dev/wtq/README.md). Usage: bb wt <new|list|merge|status|log|drop|help> ..."
+  {:doc "Parallel feature dev + merge queue (dev/wtq/README.md). Usage: bb wt <new|start|task|list|merge|status|log|drop|help> ..."
    :task (let [root (-> (p/shell {:out :string} "git" "rev-parse" "--show-toplevel")
-                        :out str/trim)]
-           (apply p/shell (str root "/dev/wtq/wt") *command-line-args*))}
+                        :out str/trim)
+               ;; :continue so a non-zero child (e.g. a failing gate) propagates
+               ;; as a clean exit code, not a babashka stack trace.
+               res (apply p/shell {:continue true} (str root "/dev/wtq/wt")
+                          *command-line-args*)]
+           (System/exit (:exit res)))}
 
   ;; === HELPERS ===
 

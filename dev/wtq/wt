@@ -16,9 +16,19 @@
 # The queue is stateless (the lock knows nothing about who is waiting),
 # so worktrees can be created and dropped at any time.
 #
+# Two ways to start an agent:
+#   A) hands-off:  wt agent   -> a NAMELESS discussion session. You describe the
+#      task; the agent picks its own branch name, self-registers with `wt claim`,
+#      works, then proposes to land and to clean up. You never invent a name.
+#   B) manual:     wt new <name> [task...] [--start]  -> you pick the name.
+#
 # Commands:
-#   wt new <name>          create feature/<name> + a worktree for it
-#   wt list                show every worktree, branch, ahead/behind, dirty
+#   wt agent               launch a nameless autonomous agent (discuss -> self-claim -> work)
+#   wt claim <name> [task] (agent-invoked) register feature/<name> + worktree in the pool
+#   wt new <name> [task...] [--start]  manual: create the worktree yourself (+ --start)
+#   wt start <name>        launch an autonomous agent inside an existing worktree
+#   wt task  <name>        print the feature's task spec
+#   wt list                show every worktree, branch, ahead/behind, dirty, result
 #   wt merge [--no-e2e]    (run inside a worktree) queue + gate + land on develop
 #   wt status              show queue lock holder + recent gate logs
 #   wt drop <name> [-f]    remove a worktree + its branch (must be merged; -f overrides)
@@ -38,7 +48,9 @@ WTQ_DIR="$COMMON_DIR/wtq"                                        # coordination 
 LOCK="$WTQ_DIR/queue.lock"
 HOLDER="$WTQ_DIR/holder"
 LOG_DIR="$WTQ_DIR/logs"
-mkdir -p "$LOG_DIR"
+TASKS_DIR="$WTQ_DIR/tasks"       # task specs — live under .git, never in the working tree
+RESULT_DIR="$WTQ_DIR/results"    # machine-readable last gate outcome per feature
+mkdir -p "$LOG_DIR" "$TASKS_DIR" "$RESULT_DIR"
 
 TARGET="${WTQ_TARGET:-develop}"
 
@@ -63,12 +75,60 @@ die()  { printf '%s%s%s\n' "$RED" "$*" "$RST" >&2; exit 1; }
 
 branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
 
+# bootstrap prompt for a NAMELESS agent (discussion phase, before it self-claims)
+bootstrap_kickoff() {
+  cat <<'EOF'
+You are an autonomous feature agent for the graphden repo, launched into a
+DISCUSSION phase in the main checkout (on develop). You may READ anything, but
+you MUST NOT create, edit, or delete any file until you have claimed your own
+isolated workspace.
+
+1. Discuss the task with me until the goal is clear — ask questions, propose an
+   approach. Do NOT write code yet.
+2. When we agree, CLAIM a workspace: pick a short kebab-case branch name and run
+       bb wt claim <name> "<one-line task summary>"
+   This creates feature/<name> + an isolated worktree and registers you in the
+   pool. cd into the printed WORKTREE path and do ALL work there.
+3. Implement, keeping `bb ci` green.
+4. When the code is ready, PROPOSE to land it; only on my OK run the gate
+   (`bb wt merge` in the BACKGROUND — it can take ~1h).
+5. When the feature is fully landed and you're done, PROPOSE to clean up; only on
+   my OK, cd back to the main checkout and run `bb wt drop <name>`.
+
+Read dev/wtq/AGENT.md now for the full contract, then ask me what to build.
+EOF
+}
+
+# kickoff prompt handed to an autonomous agent session for <name>
+kickoff_text() {
+  local name="$1"
+  cat <<EOF
+You are an autonomous feature agent for '$name', working in an ISOLATED git
+worktree on branch feature/$name. Other agents may be working in parallel
+worktrees — never assume repo-global state, and never touch develop or other
+worktrees directly.
+
+First read your operating contract at dev/wtq/AGENT.md, then your task spec at
+$TASKS_DIR/$name.md. Execute the task end to end: implement in small commits,
+keep 'bb ci' green as your fast loop, and when the feature is complete run the
+landing gate yourself with 'bb wt merge' (in the BACKGROUND — it can take an
+hour) to merge into develop, handling any conflict or gate failure it reports.
+Report back when it lands, or ask me if you hit a real decision you can't make.
+EOF
+}
+
 # =====================================================================
 # new
 # =====================================================================
 cmd_new() {
-  local name="${1:-}"
-  [ -n "$name" ] || die "usage: wt new <name>"
+  local name="" task="" start=0
+  for a in "$@"; do
+    case "$a" in
+      --start) start=1 ;;
+      *) if [ -z "$name" ]; then name="$a"; else task="${task:+$task }$a"; fi ;;
+    esac
+  done
+  [ -n "$name" ] || die "usage: wt new <name> [task description...] [--start]"
   [[ "$name" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || die "bad name '$name' (use a-z 0-9 . _ -)"
   local branch="feature/$name"
   local path="$WTQ_ROOT/$name"
@@ -84,25 +144,99 @@ cmd_new() {
   mkdir -p "$WTQ_ROOT"
   info "Creating $branch off $TARGET at $path ..."
   git -C "$MAIN_WT" worktree add -b "$branch" "$path" "$TARGET" >/dev/null
-  ok "✓ worktree ready"
+
+  if [ -n "$task" ]; then
+    printf '# Task for feature/%s\n\n%s\n' "$name" "$task" > "$TASKS_DIR/$name.md"
+    ok "✓ worktree + task spec ready ($TASKS_DIR/$name.md)"
+  else
+    ok "✓ worktree ready"
+  fi
+
   echo
-  say "  cd $path"
-  say "  claude          # start a dedicated session for '$name'"
+  say "WORKTREE: $path"
+
+  if [ "$start" = 1 ]; then echo; cmd_start "$name"; return; fi
+
+  if [ "${CLAIMED:-0}" = 1 ]; then
+    # agent self-registered — it is already running; just point it at the workspace
+    ok "Registered in the pool. cd into WORKTREE above and do ALL edits there; keep 'bb ci' green."
+    return
+  fi
+
   echo
-  say "Fast loop inside it:   ${BLD}bb ci${RST}   (lint + unit, parallel-safe)"
-  say "When ready to land:    ${BLD}$SCRIPT_DIR/wt merge${RST}   (from that worktree)"
+  if [ -n "$task" ]; then
+    say "Launch the autonomous agent:  ${BLD}bb wt start $name${RST}"
+    say "(or paste the kickoff below into a fresh 'claude' session in $path)"
+    echo
+    kickoff_text "$name" | sed 's/^/  │ /'
+  else
+    say "  cd $path && claude          # dedicated session for '$name'"
+    say "Fast loop:  ${BLD}bb ci${RST}   ·   Land:  ${BLD}bb wt merge${RST}   (from that worktree)"
+  fi
+}
+
+# =====================================================================
+# agent — launch a NAMELESS autonomous session; it self-claims after discussion
+# =====================================================================
+cmd_agent() {
+  local kick; kick="$(bootstrap_kickoff)"
+  if command -v claude >/dev/null && [ -t 1 ]; then
+    info "Launching an autonomous agent (discussion phase) in $MAIN_WT ..."
+    info "Describe the task in the chat; it will name its own branch and self-register."
+    cd "$MAIN_WT"
+    exec claude "$kick"
+  else
+    warn "Not an interactive terminal (or 'claude' missing). From the main checkout run:"
+    echo
+    say "  claude \"\$(bb wt bootstrap)\""
+  fi
+}
+cmd_bootstrap() { bootstrap_kickoff; }
+
+# =====================================================================
+# start — launch an autonomous agent session inside a worktree
+# =====================================================================
+cmd_start() {
+  local name="${1:-}"; [ -n "$name" ] || die "usage: wt start <name>"
+  local path="$WTQ_ROOT/$name"
+  [ -d "$path" ] || die "no worktree '$name' — run 'wt new $name \"<task>\"' first"
+  [ -f "$TASKS_DIR/$name.md" ] || warn "no task spec at $TASKS_DIR/$name.md (agent will need direction)"
+  local kick; kick="$(kickoff_text "$name")"
+
+  if command -v claude >/dev/null && [ -t 1 ]; then
+    info "Launching agent for '$name' in $path ..."
+    cd "$path"
+    exec claude "$kick"
+  else
+    warn "Not an interactive terminal (or 'claude' missing). Run this yourself:"
+    echo
+    say "  cd $path && claude \"\$(bb wt kickoff $name)\""
+  fi
+}
+
+# =====================================================================
+# task / kickoff — inspect a feature's task spec / kickoff prompt
+# =====================================================================
+cmd_task() {
+  local name="${1:-}"; [ -n "$name" ] || die "usage: wt task <name>"
+  [ -f "$TASKS_DIR/$name.md" ] || die "no task spec for '$name'"
+  cat "$TASKS_DIR/$name.md"
+}
+cmd_kickoff() {
+  local name="${1:-}"; [ -n "$name" ] || die "usage: wt kickoff <name>"
+  kickoff_text "$name"
 }
 
 # =====================================================================
 # list
 # =====================================================================
 cmd_list() {
-  local holder="—"
-  [ -f "$HOLDER" ] && holder="$(cat "$HOLDER" 2>/dev/null || echo '—')"
+  local holder; holder="$(cat "$HOLDER" 2>/dev/null || true)"; [ -n "$holder" ] || holder="—"
   printf '%sQueue lock:%s %s\n\n' "$BLD" "$RST" "$holder"
-  printf '%-22s %-26s %-14s %s\n' "WORKTREE" "BRANCH" "vs $TARGET" "STATE"
+  printf '%-20s %-24s %-12s %-9s %s\n' "WORKTREE" "BRANCH" "vs $TARGET" "RESULT" "STATE"
   git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r wt; do
-    local br dirty ab base
+    local nm br dirty ab base result
+    nm="$(basename "$wt")"
     br="$(branch_of "$wt" 2>/dev/null || echo '?')"
     dirty=""
     [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ] && dirty="${YLW}dirty${RST}"
@@ -111,7 +245,8 @@ cmd_list() {
       base="$(git -C "$wt" rev-list --left-right --count "$TARGET...HEAD" 2>/dev/null || echo '? ?')"
       ab="-$(echo "$base" | awk '{print $1}') +$(echo "$base" | awk '{print $2}')"
     fi
-    printf '%-22s %-26s %-14s %b\n' "$(basename "$wt")" "$br" "$ab" "$dirty"
+    result="$(cut -f1 "$RESULT_DIR/$nm" 2>/dev/null || echo '·')"
+    printf '%-20s %-24s %-12s %-9s %b\n' "$nm" "$br" "$ab" "$result" "$dirty"
   done
 }
 
@@ -239,12 +374,16 @@ cmd_merge() {
   : > "$HOLDER"
   flock -u 9 || true      # release for the next in line
 
+  local nm verdict; nm="$(basename "$wt")"
+  case "$rc" in 0) verdict=GREEN ;; 2) verdict=CONFLICT ;; 3) verdict=PRECOND ;; *) verdict=FAIL ;; esac
+  printf '%s\t%s\t%s\n' "$verdict" "$rc" "$branch" > "$RESULT_DIR/$nm"   # agents/`wt status` read this
+
   echo
   case "$rc" in
-    0) ok   "✓ landed. You can now:  $SCRIPT_DIR/wt drop $(basename "$wt")" ;;
-    2) warn "↩ merge conflict — resolve, commit, re-run 'wt merge'." ;;
+    0) ok   "✓ landed. You can now:  bb wt drop $nm" ;;
+    2) warn "↩ merge conflict — resolve, commit, re-run 'bb wt merge'." ;;
     3) warn "↩ precondition failed (dirty tree) — see log above." ;;
-    *) die  "✗ gate failed — fix on this branch, then re-run 'wt merge'. Log: wt log $(basename "$wt")" ;;
+    *) die  "✗ gate failed — fix on this branch, then re-run 'bb wt merge'. Log: bb wt log $nm" ;;
   esac
 }
 
@@ -252,14 +391,20 @@ cmd_merge() {
 main() {
   local cmd="${1:-}"; shift || true
   case "$cmd" in
+    agent)  cmd_agent  "$@" ;;
+    bootstrap) cmd_bootstrap "$@" ;;
+    claim)  CLAIMED=1 cmd_new "$@" ;;
     new)    cmd_new    "$@" ;;
+    start)  cmd_start  "$@" ;;
+    task)   cmd_task   "$@" ;;
+    kickoff) cmd_kickoff "$@" ;;
     list|ls) cmd_list  "$@" ;;
     merge|land) cmd_merge "$@" ;;
     status) cmd_status "$@" ;;
     log)    cmd_log    "$@" ;;
     drop|rm) cmd_drop  "$@" ;;
     ""|help|-h|--help)
-      sed -n '2,40p' "$SELF" | sed 's/^# \{0,1\}//' ;;
+      awk 'NR>1 && /^#/{sub(/^# ?/,""); print; next} NR>1{exit}' "$SELF" ;;
     *) die "unknown command '$cmd' (try: wt help)" ;;
   esac
 }

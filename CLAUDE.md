@@ -2,6 +2,45 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Are you a pooled feature agent? (read before editing)
+
+Parallel feature work happens in **isolated git worktrees** behind a serialized
+merge queue (`dev/wtq/`). An agent's operating contract is delivered as its
+launch *message* — so `/clear` and context compaction **destroy it, while this
+file survives**. If you have no memory of a contract, re-orient here before you
+touch a single file.
+
+**Am I a pooled agent?** Yes if either holds:
+
+- your working directory is under `graphden-wt/<name>/` (one worktree per agent), or
+- `git branch --show-current` prints `feature/<name>` and `bb wt list` shows `<name>` in the pool.
+
+If neither holds, you are in the **main checkout on `develop`** — you are *not*
+claimed, and the first rule below still binds you.
+
+**Full contract: [dev/wtq/AGENT.md](dev/wtq/AGENT.md)** — read it before editing. The rules most
+often violated after a context loss:
+
+| Rule | Why it matters |
+|------|----------------|
+| **Claim before you edit** — `bb wt claim <name> "<summary>"`, then `cd` to the printed WORKTREE and work only there | Editing the main checkout on `develop` corrupts the shared baseline every other agent branches from |
+| **Stay in your worktree** — never `cd` into another agent's worktree, never edit `develop`, never touch another agent's branch | Agents change unrelated files in parallel; your view of the repo is your branch only |
+| **`bb ci` is your ONLY local test command** | `bb rebuild` / `bb deploy` / `bb test-integration` / `bb test-e2e` / `bb coverage` belong to the landing gate, serialized behind a lock. Running them by hand fights the queue and clobbers the shared Docker stack |
+| **Pause and ask before landing (`bb wt merge`) and before cleanup (`bb wt drop`)** | These two steps are outward-facing; everything between them is autonomous |
+
+**Recovering the contract and your place in it** — the branch, the worktree and
+the task spec all live on disk, so nothing but the *prompt* is lost with the
+context:
+
+```bash
+bb wt list             # every agent: branch, drift vs develop, last gate RESULT
+bb wt status           # same, plus the recent gate runs
+bb wt task <name>      # the task spec you were handed
+bb wt log <name>       # full transcript of your last gate run
+bb wt bootstrap        # reprint the discussion-phase (nameless-agent) launch prompt
+bb wt kickoff <name>   # reprint the launch prompt for an already-claimed agent
+```
+
 ## Design Principles (MUST READ)
 
 **Every change must improve at least one principle without violating others.**

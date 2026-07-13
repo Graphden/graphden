@@ -137,7 +137,16 @@
       (is (nil? (impl {:target-ms (delay (System/currentTimeMillis))} nil))
           "target=now → no-op (computed delta is non-positive)")
       (let [elapsed-ms (/ (- (System/nanoTime) t0) 1000000.0)]
-        (is (< elapsed-ms 20)
+        ;; Generous budget for the same reason as the ≥target test above:
+        ;; on a loaded box (parallel test threads + neighbours) JVM
+        ;; scheduling / GC routinely add tens of ms of slack to two
+        ;; otherwise-instant no-op calls. The property under test is
+        ;; "does NOT block for a positive duration"; a broken impl would
+        ;; sleep abs(delta), which for target=0 is ~decades, so anything
+        ;; well under a second already proves the no-op. A tight 20 ms
+        ;; window flaked under `bb ci` parallelism without the sleep
+        ;; being wrong.
+        (is (< elapsed-ms 500)
             (str "past-target no-op returned slowly: " elapsed-ms "ms"))))))
 
 

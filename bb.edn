@@ -241,13 +241,41 @@
                       "--summary" "--onlyAllow" allow)))}
 
   commitlint
-  {:doc "Lint the most recent commit messages against the conventional-commits rules in commitlint.config.cjs. Pass a commit range as `bb commitlint HEAD~5..HEAD` to lint a larger window; default is the last 20."
-   :task (let [range (or (first *command-line-args*) "HEAD~20..HEAD")
-               splitter (re-pattern "\\.\\.")
-               parts (str/split range splitter)]
-           (println (str "▶ commitlint " range))
-           (p/shell "npx" "commitlint" "--from" (first parts)
-                    "--to" (or (second parts) "HEAD")))}
+  {:doc "Lint this branch's own commit messages against the conventional-commits rules in commitlint.config.cjs. Default window is what the branch ADDS vs the integration branch (merge-base(develop,HEAD)..HEAD) — on develop itself that is empty, which is correct: develop only ever receives commits ff-only through the landing gate, so every one of them was already linted on its feature branch. Pass an explicit range (`bb commitlint HEAD~5..HEAD`) to widen it."
+   ;; The window is walked --first-parent --no-merges, and each message is
+   ;; linted individually. Both matter, and a plain `--from A --to B` gets
+   ;; each one wrong:
+   ;;   - Git range semantics mean a merge commit inside the window drags in
+   ;;     the ENTIRE merged side-branch. A `HEAD~20..HEAD` on a feature branch
+   ;;     sitting behind one merge linted 166 commits, not 20.
+   ;;   - A rolling `HEAD~N` window is anchored to HEAD, so as branches merge
+   ;;     it slides over ALREADY-LANDED history. History is immutable and
+   ;;     shared, so any pre-conventional commit it reaches fails forever and
+   ;;     can never be fixed. Anchoring to the merge-base bounds the window to
+   ;;     commits this branch actually authored — the only ones still fixable.
+   :task (let [arg (first *command-line-args*)
+               base (when-not arg
+                      (-> (p/shell {:out :string :continue true}
+                                   "git" "merge-base" "HEAD" "develop")
+                          :out str/trim not-empty))
+               ;; No `develop` (shallow clone / detached CI): fall back to the
+               ;; old last-20 window rather than silently linting nothing.
+               range (or arg (when base (str base "..HEAD")) "HEAD~20..HEAD")
+               shas (->> (p/shell {:out :string} "git" "rev-list"
+                                  "--first-parent" "--no-merges" range)
+                         :out str/split-lines (remove str/blank?))]
+           (println (str "▶ commitlint " range " (" (count shas) " commit(s))"))
+           (let [bad (doall
+                       (for [sha shas
+                             :let [msg (:out (p/shell {:out :string} "git" "log"
+                                                      "-1" "--format=%B" sha))
+                                   res (p/shell {:in msg :continue true}
+                                                "./node_modules/.bin/commitlint")]
+                             :when (not (zero? (:exit res)))]
+                         sha))]
+             (when (seq bad)
+               (println (str red "✗ commitlint: " (count bad) " commit(s) failed" reset))
+               (System/exit 1))))}
 
   visual
   {:doc "Run Playwright visual-regression tests against running editor (default http://localhost:9002). Reads AUTH_TOKEN from env or .env. Use `bb visual-update` after intentional UI changes."

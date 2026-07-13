@@ -15,9 +15,23 @@
 
    - `service:write:<service-uuid>`  — `:service` row inserted / updated
    - `service:delete:<service-uuid>` — row deleted
-   - `fn:invalidate:<fn-uuid>`       — delta invalidation of one fn's
-                                       compiled closure (empty id ⇒
+   - `fn:invalidate:<fn-uuid>|<branch-uuid>`
+                                     — delta invalidation of one fn's
+                                       compiled closure (empty fn-uuid ⇒
                                        full-clear)
+   - `execution:cancel:<execution-uuid>`
+                                     — cancel a running `:fn-execution`.
+                                       The `futures-registry` is
+                                       per-process, so the pod that got
+                                       the HTTP cancel fans out and the
+                                       owning pod acts on it.
+
+   The `|<branch-uuid>` suffix is optional and names the branch the write
+   landed on. The receiving pod needs it: a fn edit on `dev` must not
+   recompile `main`, and an edit on `main` must recompile every cached
+   branch that inherits from it. A payload without the suffix parses to
+   `:branch-id nil` and the receiver falls back to invalidating its base
+   ctx — which is what pods did before the field existed.
 
    Callbacks pattern-match on `:kind` to opt in."
   (:require
@@ -25,6 +39,7 @@
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.connection :as pg-conn]
     [graphden.storage.postgres.errors :as pg-errors]
+    [graphden.util.backoff :as backoff]
     [next.jdbc :as jdbc])
   (:import
     (java.sql
@@ -39,23 +54,39 @@
 
 
 (defn parse-payload
-  "Wire-format → `{:kind <keyword> :op <keyword> :id <string>}`. nil
-   when the payload doesn't match the expected shape — used for
-   defensive parsing so a malformed NOTIFY from a future graphden
-   version doesn't crash the loop."
+  "Wire-format → `{:kind <keyword> :op <keyword> :id <string>
+                   :branch-id <string> :org-id <string>}`. nil when the
+   payload doesn't match the expected shape — defensive parsing so a
+   malformed NOTIFY from a future graphden version doesn't crash the loop.
+
+   The payload tail is positional, `<id>|<branch>|<org>`, and blank trailing
+   segments are dropped: `id`, `id|branch`, or `id|branch-or-empty|org`. A
+   segment that is absent OR blank OMITS its key (not nil) — event maps are
+   compared by exact shape in tests, and `service`-kind consumers never carry
+   a branch/org, so a nil-valued key would be noise. `:org-id` (added for
+   precise SSE fan-out) rides in the third slot; older payloads without it
+   just omit the key."
   [payload]
   (when (string? payload)
     (let [parts (str/split payload #":" 3)]
       (when (= 3 (count parts))
-        {:kind (keyword (nth parts 0))
-         :op (keyword (nth parts 1))
-         :id (nth parts 2)}))))
+        (let [[id branch-id org-id] (str/split (nth parts 2) #"\|" 3)]
+          (cond-> {:kind (keyword (nth parts 0))
+                   :op (keyword (nth parts 1))
+                   :id (or id "")}
+            (not (str/blank? branch-id)) (assoc :branch-id branch-id)
+            (not (str/blank? org-id)) (assoc :org-id org-id)))))))
 
 
 (defn format-payload
-  "Inverse of `parse-payload`. Used by emitters."
-  [{:keys [kind op id]}]
-  (str (name kind) ":" (name op) ":" (or id "")))
+  "Inverse of `parse-payload`. The org slot forces the (possibly empty)
+   branch slot to be present so the positions line up."
+  [{:keys [kind op id branch-id org-id]}]
+  (str (name kind) ":" (name op) ":" (or id "")
+       (cond
+         org-id (str "|" (or branch-id "") "|" org-id)
+         branch-id (str "|" branch-id)
+         :else "")))
 
 
 ;; =============================================================================
@@ -135,7 +166,7 @@
    backoff 1s → 30s cap so a prolonged DB outage doesn't hammer it."
   [conn-atom pg-opts running? cause]
   (log/warn cause "NOTIFY connection lost — reconnecting")
-  (loop [backoff-ms 1000]
+  (loop [backoff-ms backoff/initial-ms]
     (when @running?
       (Thread/sleep (long backoff-ms))
       (when-not (try (reconnect! conn-atom pg-opts)
@@ -144,7 +175,7 @@
                      (catch Exception re
                        (log/warn re "NOTIFY reconnect attempt failed — retrying")
                        false))
-        (recur (min 30000 (* 2 backoff-ms)))))))
+        (recur (backoff/next-ms backoff-ms))))))
 
 
 (defn- listen-loop

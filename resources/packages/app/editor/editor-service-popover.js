@@ -131,6 +131,11 @@ async function saveService(existingId, fnId, data) {
   body.set('fn-id', fnId);
   body.set('enabled?', data.enabled ? 'true' : 'false');
   body.set('restart-policy', data.restartPolicy);
+  body.set('cardinality', data.cardinality);
+  // `:pool-size` only matters for :cardinality pool. Emit it when set so a
+  // PUT can change the pod count; a blank value clears the column (the
+  // reconciler degrades a :pool row with no size to a singleton).
+  if (data.poolSize) body.set('pool-size', data.poolSize);
   // `:branch-id` is optional on the wire: an empty string clears the
   // field (legacy no-branch-id behavior), a UUID scopes the run to
   // that branch's ExecutionContext. We always emit the key so a PUT
@@ -247,12 +252,15 @@ function wireServicePopoverHandlers(el, fnEntity) {
       const branchId = el.querySelector('.service-popover-branch-select')?.value || null;
       const policy = el.querySelector('input[name="service-restart-policy"]:checked')?.value
                      || 'always';
+      const cardinality = el.querySelector('input[name="service-cardinality"]:checked')?.value
+                          || 'singleton';
+      const poolSize = el.querySelector('input[name="service-pool-size"]')?.value?.trim() || null;
       // Save + reconcile are TWO independent calls with different
       // failure consequences (see prior version for full rationale).
       let resp;
       try {
         resp = await saveService(existingId, fnEntity.id,
-                                 { enabled, restartPolicy: policy, branchId });
+                                 { enabled, restartPolicy: policy, cardinality, branchId, poolSize });
       } catch (err) {
         alert('Save failed (network error): ' + (err?.message || err));
         saveBtn.disabled = false;

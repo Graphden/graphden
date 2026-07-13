@@ -1,0 +1,45 @@
+# Path-scoped, per-finding trivy misconfig exceptions. Each is a genuinely
+# inherent requirement of a DEV/DEMO kind manifest under deploy/kind — NOT a
+# blanket skip. The production Helm chart (deploy/helm) is fully scanned +
+# hardened (non-root, read-only root fs, dropped caps, seccomp). The CRaC pods
+# were narrowed from `privileged: true` to the three CRIU caps + a read-only
+# root fs (both verified working); only the irreducible bits remain here.
+misconfigurations:
+  - id: AVD-KSV-0005
+    paths:
+      - "deploy/kind/keda/checkpoint-job.yaml"
+      - "deploy/kind/keda/crac-scaled.yaml"
+    statement: >-
+      CRIU checkpoint/restore genuinely needs CAP_SYS_ADMIN (setns / mount /
+      /proc access). Verified: caps-only checkpoint + restore work, but dropping
+      SYS_ADMIN fails. This is the least-privilege alternative to the `privileged:
+      true` these pods used to carry; kind-demo only, never prod.
+
+  - id: AVD-KSV-0118
+    paths:
+      - "deploy/kind/keda/checkpoint-job.yaml"
+      - "deploy/kind/keda/crac-scaled.yaml"
+    statement: >-
+      The CRaC checkpoint + restore pods must run as uid 0 (CRaC uid-alignment:
+      the restore uid must match the checkpoint uid, which CRIU takes as root).
+      Everything else on their securityContext IS set (caps dropped to the CRIU
+      three, read-only root fs, seccomp). kind-demo only.
+
+  - id: AVD-KSV-0014
+    paths:
+      - "deploy/kind/keda/crac-pg.yaml"
+      - "deploy/kind/postgres.yaml"
+    statement: >-
+      Throwaway kind-demo Postgres on the stock `postgres:16` image, whose
+      entrypoint writes its socket/data/temp dirs on the container fs; a
+      read-only root fs would need a volume per writable path for a DB that
+      never ships to prod. Not a production database.
+
+  - id: AVD-KSV-0118
+    paths:
+      - "deploy/kind/keda/crac-pg.yaml"
+      - "deploy/kind/postgres.yaml"
+    statement: >-
+      Stock `postgres:16` — the official entrypoint starts as root to chown its
+      data dir before dropping to the postgres user, so it can't run
+      `runAsNonRoot`. kind-demo DB only, never prod.

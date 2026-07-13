@@ -18,6 +18,7 @@
     [graphden.auth.provider :as auth]
     [graphden.clients.vault :as vault]
     [graphden.crud.fn-execution.lookup :as fn-lookup]
+    [graphden.crud.fn-execution.persist :as persist]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.interface :as fn-composition]
@@ -25,6 +26,10 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as registry-core]
     [graphden.executor.registry.interface :as registry]
+    [graphden.fleet.command :as fleet-command]
+    [graphden.fleet.control-loop :as fleet-loop]
+    [graphden.fleet.discovery :as fleet-discovery]
+    [graphden.fleet.router :as fleet-router]
     [graphden.packages.loader :as pkg]
     [graphden.packages.manifest :as manifest]
     [graphden.packages.records :as records]
@@ -34,6 +39,7 @@
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.packages.schema :as pkgs]
+    [graphden.schema.placement.schema :as placement]
     [graphden.schema.protocol.protocol :as ds]
     [graphden.schema.services.schema :as svcs]
     [graphden.schema.traits.schema :as vts]
@@ -48,6 +54,7 @@
     [graphden.system.api-url-drift :as api-url-drift]
     [graphden.system.branch-router :as br]
     [graphden.system.demo-branches :as demo]
+    [graphden.system.sse :as sse]
     [graphden.types.check :as types-check]
     [graphden.types.check.narrowing :as types-narrowing]
     [graphden.types.core :as types]
@@ -75,7 +82,11 @@
                  (svcs/extend-builder)
                  ;; Registry artifacts — immutable published package snapshots.
                  ;; Non-versioned (immutable by contract), refs nothing graph-side.
-                 (pkgs/extend-builder))]
+                 (pkgs/extend-builder)
+                 ;; Fleet placement map `(org, entry-fn-id) → executor-id`
+                 ;; (docs/FLEET_RFC.md §6.1). Refs :fn (logical). Non-versioned —
+                 ;; control-plane routing state that mutates in place.
+                 (placement/extend-builder))]
     ;; Addon schema-extension seam (PLATFORM_PLAN §3.0): each `extensions`
     ;; entry is a `(builder → builder)` fn — the tenancy addon adds its
     ;; `:grant` entity here without editing core. Absent → core schema.
@@ -143,6 +154,29 @@
 
 
 ;; =============================================================================
+;; SSE invalidation relay — forwards `graphden_events` to remote / BYO
+;; executors that can't LISTEN on Postgres (docs/SCALING.md § SSE).
+;;
+;; Opt-in: only starts when `GRAPHDEN_SSE_PORT` is set. On its own httpkit
+;; server / port, parallel to the app server + the LISTEN connection —
+;; invalidation is infra below the graph-composed router, not an app route.
+;; =============================================================================
+
+(defmethod ig/init-key :sse/relay [_ {:keys [port notify-listener auth-provider]}]
+  (let [p (if (string? port) (parse-long port) port)]
+    (if (and p (pos? p))
+      (do (log/info "Wiring SSE invalidation relay" {:port p})
+          (sse/start-relay! {:port p
+                             :notify-listener notify-listener
+                             :auth-provider auth-provider}))
+      (do (log/info "SSE relay disabled (no GRAPHDEN_SSE_PORT)") nil))))
+
+
+(defmethod ig/halt-key! :sse/relay [_ relay]
+  (when relay (sse/stop-relay! relay)))
+
+
+;; =============================================================================
 ;; Per-service advisory-lock connection
 ;; =============================================================================
 ;;
@@ -155,20 +189,19 @@
 
 (defmethod ig/init-key :db/service-locks [_ {:keys [pg-opts]}]
   (log/info "Opening service-locks connection...")
-  {:connection (pg-lock/create-lock-conn pg-opts)})
+  ;; A reconnecting HOLDER, not a bare Connection: a dropped lock
+  ;; connection releases every advisory lock this pod held, and
+  ;; `advisory-lock/ensure-live!` (called from the reconciler) reopens it
+  ;; + re-asserts ownership. The holder IS the integrant value.
+  (pg-lock/create-lock-holder pg-opts))
 
 
-(defmethod ig/halt-key! :db/service-locks [_ {:keys [connection]}]
+(defmethod ig/halt-key! :db/service-locks [_ holder]
   (log/info "Releasing service-locks + closing connection...")
-  ;; Release-all is best-effort during shutdown — we still need to
-  ;; close the connection even if a release fails. But silencing
-  ;; the failure entirely would hide DB-side state-leak (advisory
-  ;; locks persisting on the connection until the session truly
-  ;; dies). Log so dashboards see shutdown-time PG drift.
-  (try (pg-lock/release-all! connection)
-       (catch Exception e
-         (log/warn e "service-locks release-all failed during halt — continuing close")))
-  (pg-lock/close-lock-conn! connection))
+  ;; `close-holder!` releases all locks (best-effort, logged so
+  ;; shutdown-time PG drift is visible) then closes the underlying
+  ;; connection.
+  (pg-lock/close-holder! holder))
 
 
 ;; =============================================================================
@@ -680,9 +713,26 @@
   (auth/single-token-provider token))
 
 
+(defn- parse-executor-orgs
+  "`\"public,acme,beta\"` → `#{\"public\" \"acme\" \"beta\"}`; blank / nil → nil
+   (compile the whole graph — the self-hosted default).
+
+   The operator must list the PUBLIC org explicitly if the deployment has
+   one: the platform packages live there once they are written through the
+   tenancy decorator, and a pod without them compiles nothing. Rows with a
+   NULL `:org-id` are un-owned and always in every shard, so a
+   non-tenancy deployment that sets this by accident still works."
+  [s]
+  (when (string? s)
+    (let [orgs (into #{} (comp (map str/trim) (remove str/blank?))
+                     (str/split s #","))]
+      (when (seq orgs) orgs))))
+
+
 (defmethod ig/init-key :exec/context
   [_ {:keys [storage vault-client pg-storage base-fns auth-provider request-scope
-             execute-guard app-router set-org-handler verify-domain user-ops]}]
+             execute-guard app-router set-org-handler verify-domain user-ops
+             executor-orgs byo-executor? executor-id]}]
   (log/info "Creating executor context...")
   ;; `assoc` (not the constructor's named opts) — the ExecutionContext
   ;; record stays narrow; vault rides on the extra-key surface
@@ -702,6 +752,22 @@
   (let [emitter (if pg-storage
                   (pg-notify/make-emitter (:pool pg-storage))
                   pg-notify/noop-emitter)
+        ;; Fleet forward-hop seam (T2.6): only wired when this pod has a fleet
+        ;; identity (`GRAPHDEN_EXECUTOR_ID`). Forwards a misdirected request to
+        ;; the executor holding the org's cell (per `:placement`) instead of
+        ;; 421. All executors listen on the same port (`GRAPHDEN_PORT`).
+        fleet-forward (when (seq executor-id)
+                        (let [port (fleet-command/fleet-port)]
+                          (fn [request org entry-fn-id]
+                            (fleet-router/forward-or-nil storage executor-id port
+                                                         org entry-fn-id request))))
+        ;; Fleet control-plane command seam (docs/FLEET_RFC.md §6.3): the
+        ;; internal cell load/evict endpoint a move (or an ops call) drives.
+        ;; Wired on the same condition as the forward-hop (this pod is a fleet
+        ;; member). Gated by the shared internal token, NOT the tenant auth-
+        ;; provider — a cell command is cross-org platform authority.
+        fleet-cmd (when (seq executor-id)
+                    (fleet-command/make-command-handler (fleet-command/internal-token)))
         ctx-opts (cond-> {:storage storage}
                    (and base-fns (:base-fns base-fns))
                    (assoc :base-fns (:base-fns base-fns))
@@ -723,7 +789,27 @@
                    ;; Self-serve DNS-verify seam (§3.4 #2) — addon-only.
                    verify-domain (assoc :verify-domain verify-domain)
                    ;; User-model seam (§4.1) — create-user / login. Addon-only.
-                   user-ops (assoc :user-ops user-ops))]
+                   user-ops (assoc :user-ops user-ops)
+                   ;; Executor shard — the orgs whose fns THIS pod compiles.
+                   ;; Absent ⇒ the whole graph (self-hosted / single-tenant).
+                   ;; A collection or predicate from an addon passes through;
+                   ;; a comma-separated env string is parsed here.
+                   executor-orgs
+                   (assoc :executor-orgs (if (string? executor-orgs)
+                                           (parse-executor-orgs executor-orgs)
+                                           executor-orgs))
+                   ;; Pod role — a BYO executor serves the `:byo` orgs in its
+                   ;; shard; a hosted pod 421s them. From `GRAPHDEN_BYO_EXECUTOR`
+                   ;; (parsed to bool) or an addon override.
+                   byo-executor?
+                   (assoc :byo-executor? (if (string? byo-executor?)
+                                           (contains? #{"true" "1" "yes"} byo-executor?)
+                                           (boolean byo-executor?)))
+                   ;; Fleet forward-hop seam — only present when this pod has a
+                   ;; fleet identity (see the let above).
+                   fleet-forward (assoc :fleet-forward fleet-forward)
+                   ;; Fleet control-plane command seam — same condition.
+                   fleet-cmd (assoc :fleet-command fleet-cmd))]
     (cond-> (-> (exec/create-context ctx-opts)
                 (assoc :notify-emitter emitter))
       vault-client (assoc :vault vault-client)
@@ -895,10 +981,18 @@
 ;; On halt: stop every running service.
 ;;
 ;; The in-process atom is modified from CRUD endpoints (which call
-;; `recon/reconcile-once!` after writing) and from this init-key.
-;; Out-of-band DB edits (psql, other tools) won't be picked up until
-;; restart — acceptable for the admin workflow today. Periodic poll
-;; is on the Phase-2 roadmap (next sub-feature).
+;; `recon/reconcile-once!` after writing), from NOTIFY events, and from
+;; a periodic tick.
+;;
+;; Level-triggered convergence: a `ScheduledExecutorService` re-runs the
+;; reconcile every `reconcile-period-ms` (default 15s). This is what makes
+;; the reconciler robust rather than purely edge-triggered:
+;;   - a `:singleton`'s pod CRASHES → its advisory lock auto-releases, but
+;;     the crash emits no NOTIFY; a sibling that recorded `::not-our-lock`
+;;     re-attempts the lock on the next tick and takes over (HA cron);
+;;   - an out-of-band DB edit (psql, other tools) is picked up within a tick;
+;;   - a transient start failure (port not yet freed) reconverges on a tick
+;;     instead of sleeping under `reconcile-monitor` inline.
 ;; =============================================================================
 
 (defn- resolve-fn-id-by-name
@@ -921,24 +1015,37 @@
    the fn for some reason), the entry is logged and skipped — the
    admin can re-create the fn and the next boot will pick it up.
 
+   `:cardinality` is BACKFILLED onto an existing row when that row's
+   value is nil — i.e. it was written before the field existed. Without
+   this, upgrading a live deployment would leave the seeded
+   `:web-server` row at nil ≡ `:singleton`, and only one pod would ever
+   bind a port. Backfill only touches nil, so an admin who deliberately
+   set a cardinality keeps it, same as `:enabled?`.
+
    Returns a vector of `{:id :seeded? :fn-name :package-name}` maps
    for logging."
   [storage packages]
   (vec
     (keep
-      (fn [{:keys [package-name name fn-name enabled? restart-policy]}]
+      (fn [{:keys [package-name name fn-name enabled? restart-policy cardinality]}]
         (let [svc-id (ids/seeded-service-id package-name name)
-              fn-id (resolve-fn-id-by-name storage (clojure.core/name fn-name))]
+              fn-id (resolve-fn-id-by-name storage (clojure.core/name fn-name))
+              existing (first (sp/query-entities storage :service {:id svc-id}))]
           (cond
             (nil? fn-id)
             (do (log/warn "seeded service skipped — fn-name didn't resolve"
                           {:package package-name :service name :fn-name fn-name})
                 nil)
 
-            (seq (sp/query-entities storage :service {:id svc-id}))
+            existing
             ;; Idempotent: existing row may have a different
             ;; :enabled? (admin toggled it) — don't overwrite.
-            {:id svc-id :seeded? false :fn-name fn-name :package-name package-name}
+            (do
+              (when (and cardinality (nil? (:cardinality existing)))
+                (log/info "backfilling :cardinality on pre-existing service row"
+                          {:service-id svc-id :cardinality cardinality})
+                (sp/update-entity storage :service svc-id {:cardinality cardinality}))
+              {:id svc-id :seeded? false :fn-name fn-name :package-name package-name})
 
             :else
             (try
@@ -946,7 +1053,8 @@
                                 {:id svc-id
                                  :fn-id fn-id
                                  :enabled? (if (false? enabled?) false true)
-                                 :restart-policy (or restart-policy :always)})
+                                 :restart-policy (or restart-policy :always)
+                                 :cardinality (or cardinality :singleton)})
               {:id svc-id :seeded? true :fn-name fn-name :package-name package-name}
               (catch Exception e
                 ;; Race window: two pods may seed concurrently with
@@ -960,43 +1068,90 @@
       (pkg/get-seeded-services packages))))
 
 
+(defn- invalidate-from-notify!
+  "Apply a sibling pod's `fn:invalidate` event to THIS pod's caches.
+
+   Mirrors the local write path in `crud.entities/invalidate!`: the
+   branch the write landed on, plus every cached branch that inherits
+   from it. When the payload carries no branch-id (an older build's
+   emitter) fall back to the base ctx, which is what this callback did
+   before branch-ids rode along.
+
+   Empty `id` ≡ full clear; a populated id is one delta seed."
+  [ctx id branch-id]
+  (let [seeds (when-not (str/blank? id) [(java.util.UUID/fromString id)])
+        router (br/current-router)
+        branch-uuid (when-not (str/blank? branch-id)
+                      (java.util.UUID/fromString branch-id))]
+    (if (and router branch-uuid)
+      (do (br/invalidate-cached-branch! router branch-uuid seeds)
+          (br/invalidate-affected-ctxs! router branch-uuid seeds))
+      (if seeds
+        (exec-ctx/invalidate-graph-cache! ctx seeds)
+        (exec-ctx/invalidate-graph-cache! ctx)))))
+
+
 (defn- on-notify
   "Multi-purpose listener callback:
 
    - `:service` events → trigger a reconcile pass (managed-service
      ownership re-evaluation).
-   - `:fn :invalidate` events → drop the affected fn-id from the
-     compiled cache; empty id ≡ full clear (mirrors the local
-     `(invalidate-graph-cache! ctx)` no-seed path). A populated id
-     is one delta seed; pod A writes 5 binding rows under one
-     request → emits 5 events → sibling pod B fires 5 invalidates.
-     Each is cheap (delta path on the reverse-deps index)."
+   - `:fn :invalidate` events → invalidate the affected fn-id on every
+     cached ctx that can see the write (see `invalidate-from-notify!`).
+     Pod A writes 5 binding rows under one request → emits 5 events →
+     sibling pod B fires 5 invalidates. Each is cheap (delta path on the
+     reverse-deps index).
+   - `:execution :cancel` events → cancel the execution if THIS pod is
+     the one running it. Every pod gets the event; at most one owns the
+     future, the rest no-op."
   [ctx]
-  (fn [{:keys [kind op id] :as event}]
+  (fn [{:keys [kind op id branch-id] :as event}]
     (try
       (case kind
-        :service (recon/reconcile-once! ctx recon/running)
-        :fn      (when (= op :invalidate)
-                   (if (or (nil? id) (= "" id))
-                     (exec-ctx/invalidate-graph-cache! ctx)
-                     (exec-ctx/invalidate-graph-cache!
-                       ctx [(java.util.UUID/fromString id)])))
+        ;; Retry-free: a start failure isn't retried inline (which would sleep
+        ;; under `reconcile-monitor` and block the listener thread + every
+        ;; other reconcile trigger) — the periodic tick reconverges instead.
+        :service   (recon/reconcile-once! ctx recon/running {:max-retries 0 :backoff-ms 0})
+        :fn        (when (= op :invalidate)
+                     (invalidate-from-notify! ctx id branch-id))
+        :execution (when (and (= op :cancel) (not (str/blank? id)))
+                     (persist/cancel-local! (java.util.UUID/fromString id)))
         nil)
       (catch Exception e
         (log/error e "NOTIFY dispatch threw" {:event event})))))
 
 
+(defn- start-reconcile-ticker!
+  "Spawn a scheduled tick that re-runs `reconcile-once!` every `period-ms`,
+   retry-free (a failed start reconverges on the next tick rather than
+   sleeping under `reconcile-monitor`). Returns the scheduler for halt."
+  [ctx period-ms]
+  (let [scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+    (log/info "Starting service reconcile ticker — period" period-ms "ms")
+    (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
+      scheduler
+      ^Runnable (fn []
+                  (try (recon/reconcile-once! ctx recon/running {:max-retries 0 :backoff-ms 0})
+                       (catch Exception e
+                         (log/warn e "periodic reconcile failed"))))
+      period-ms period-ms
+      java.util.concurrent.TimeUnit/MILLISECONDS)
+    scheduler))
+
+
 (defmethod ig/init-key :exec/service-reconciler
-  [_ {:keys [context packages notify-listener service-locks]}]
+  [_ {:keys [context packages notify-listener service-locks reconcile-period-ms]}]
   (log/info "Starting service reconciler...")
   ;; Production singleton — clear any stale state from a previous run
   ;; (e.g. test fixture or REPL reset) before reconciling.
   (reset! recon/running {})
   (let [storage (:storage context)
-        ;; Thread the lock connection through ctx so reconcile-once!
-        ;; can use it without changing its arglist contract.
+        ;; Thread the lock HOLDER through ctx so reconcile-once! can use it
+        ;; without changing its arglist contract. The holder (not a bare
+        ;; connection) is what lets a pass reconnect a dropped lock conn +
+        ;; re-assert ownership.
         ctx (cond-> context
-              service-locks (assoc :service-locks-connection (:connection service-locks)))
+              service-locks (assoc :service-locks-holder service-locks))
         seeded (seed-package-services! storage packages)
         new-seeds (filterv :seeded? seeded)
         enabled-services (sp/query-entities storage :service {:enabled? true})]
@@ -1011,16 +1166,23 @@
     ;; ctx so per-NOTIFY reconciles use the same advisory-lock path
     ;; as boot.
     (let [callback (when notify-listener
-                     (pg-notify/register! notify-listener (on-notify ctx)))]
+                     (pg-notify/register! notify-listener (on-notify ctx)))
+          ticker (start-reconcile-ticker! ctx (or reconcile-period-ms 15000))]
       {:running recon/running
        :context ctx
        :notify-listener notify-listener
-       :notify-callback callback})))
+       :notify-callback callback
+       :ticker ticker})))
 
 
 (defmethod ig/halt-key! :exec/service-reconciler
-  [_ {:keys [running notify-listener notify-callback]}]
+  [_ {:keys [running notify-listener notify-callback ticker]}]
   (log/info "Stopping service reconciler...")
+  (when ticker
+    (java.util.concurrent.ExecutorService/.shutdown ^java.util.concurrent.ExecutorService ticker)
+    (try (java.util.concurrent.ExecutorService/.awaitTermination
+           ^java.util.concurrent.ExecutorService ticker 5 java.util.concurrent.TimeUnit/SECONDS)
+         (catch InterruptedException _ nil)))
   (when (and notify-listener notify-callback)
     (pg-notify/unregister! notify-listener notify-callback))
   (when running (recon/stop-all! running))
@@ -1030,6 +1192,94 @@
 (defmethod ig/suspend-key! :exec/service-reconciler [_ {:keys [running]}]
   ;; Same as halt — services don't have a suspend state distinct from stop.
   (when running (recon/stop-all! running)))
+
+
+;; =============================================================================
+;; Fleet placement controller (docs/FLEET_RFC.md §6.3, Phase 2)
+;;
+;; A leader-locked periodic tick that reads live cell weights + the executor set
+;; and applies the pure `control-loop/plan-tick` decision — placing new cells and
+;; rebalancing sustained imbalance via the directed cell-command transport. Every
+;; fleet pod runs the component; a single advisory lock (its own dedicated
+;; connection, distinct from the reconciler's) elects ONE controller, so two
+;; pods can't fight (§6.3 Safety). Inert unless this pod is a fleet member
+;; (`GRAPHDEN_EXECUTOR_ID` set) — single-tenant / self-hosted never starts it.
+;; =============================================================================
+
+(def ^:private fleet-controller-lock-id
+  "Fixed advisory-lock key that elects the single fleet controller — a constant
+   so every pod contends for the SAME lock."
+  #uuid "f1ee7c07-0000-0000-0000-000000000001")
+
+
+(defn- fleet-controller-opts
+  "Controller knobs from env (read directly, like the other fleet vars):
+   `:sustain-ticks` (imbalance must persist this many ticks before a move),
+   `:min-improvement` (magnitude floor), `:max-moves` (per-tick cap),
+   `:w-overlap` (overlap-accounting weight — > 0 co-locates code-sharing cells;
+   default 0 keeps pure load-balancing, so overlap is strictly opt-in)."
+  []
+  {:sustain-ticks (or (some-> (System/getenv "GRAPHDEN_FLEET_SUSTAIN_TICKS") parse-long) 3)
+   :min-improvement (or (some-> (System/getenv "GRAPHDEN_FLEET_MIN_IMPROVEMENT") parse-double) 0.0)
+   :max-moves (or (some-> (System/getenv "GRAPHDEN_FLEET_MAX_MOVES") parse-long) Integer/MAX_VALUE)
+   :w-overlap (or (some-> (System/getenv "GRAPHDEN_FLEET_OVERLAP_WEIGHT") parse-double) 0.0)})
+
+
+(defn- fleet-controller-tick!
+  "One control pass, leader-gated. Re-asserts the advisory lock (re-acquiring
+   after a lock-conn reconnect, or failing if a sibling took over); only the
+   holder ticks. A non-leader resets its streak so a failover starts clean."
+  [ctx holder state-atom opts]
+  (try
+    (pg-lock/ensure-live! holder)
+    (if (pg-lock/try-lock! (pg-lock/holder-conn holder) fleet-controller-lock-id)
+      (let [env {:storage (:storage ctx)
+                 :forward-deps (:forward-deps (some-> (:compile-deps ctx) deref))
+                 :executors (fleet-discovery/fleet-executors)
+                 :move-fn (fn [cmd] (fleet-command/execute-move! ctx cmd))}
+            decision (fleet-loop/run-tick! env @state-atom opts)]
+        (reset! state-atom (:state decision))
+        (when (or (seq (:moves decision)) (seq (:initial-placements decision)))
+          (log/info "Fleet controller applied placement"
+                    {:initial (count (:initial-placements decision))
+                     :moves (count (:moves decision))
+                     :imbalance (:current-imbalance decision)})))
+      (reset! state-atom {}))
+    (catch Exception e
+      (log/warn e "Fleet controller tick failed — will retry next tick"))))
+
+
+(defmethod ig/init-key :exec/fleet-controller
+  [_ {:keys [context pg-opts enabled? period-ms]}]
+  ;; `enabled?` is the fleet identity (`GRAPHDEN_EXECUTOR_ID`) — a non-blank
+  ;; string on a fleet member, nil/false otherwise. Guard against a literal
+  ;; `false` (whose `(str false)` = "false" is non-blank) reading as enabled.
+  (if-not (and enabled? (not (str/blank? (str enabled?))))
+    (do (log/info "Fleet controller disabled (not a fleet member)") nil)
+    (let [holder (pg-lock/create-lock-holder pg-opts)
+          state-atom (atom {})
+          opts (fleet-controller-opts)
+          period (or period-ms 30000)
+          scheduler (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
+      (log/info "Starting fleet controller — period" period "ms," opts)
+      (java.util.concurrent.ScheduledExecutorService/.scheduleAtFixedRate
+        scheduler
+        ^Runnable (fn [] (fleet-controller-tick! context holder state-atom opts))
+        period period java.util.concurrent.TimeUnit/MILLISECONDS)
+      {:scheduler scheduler :holder holder :state state-atom})))
+
+
+(defmethod ig/halt-key! :exec/fleet-controller [_ component]
+  (when component
+    (let [{:keys [scheduler holder]} component]
+      (when scheduler
+        (java.util.concurrent.ExecutorService/.shutdown
+          ^java.util.concurrent.ExecutorService scheduler)
+        (try (java.util.concurrent.ExecutorService/.awaitTermination
+               ^java.util.concurrent.ExecutorService scheduler 5 java.util.concurrent.TimeUnit/SECONDS)
+             (catch InterruptedException _ nil)))
+      (when holder (pg-lock/close-holder! holder))
+      (log/info "Fleet controller stopped"))))
 
 
 ;; =============================================================================

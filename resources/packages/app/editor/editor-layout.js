@@ -12,6 +12,67 @@
 // 2. Converting grid positions to pixel coordinates
 // 3. Calculating node sizes for rendering
 
+// The grid cell of every node in the last layout, keyed by node id. Kept so the
+// row geometry can be recomputed from MEASURED card heights once the overlays
+// exist — see `reflowFromMeasuredHeights` in editor-overlay-manager.js.
+let _lastGridPos = null;
+
+function lastGridPos() {
+  return _lastGridPos;
+}
+
+/**
+ * Stack the rows: each row is as tall as its tallest node, separated by
+ * `GRID_GAP_Y`. Returns row → centre-Y. `heightOf(nodeId)` supplies the height,
+ * so the same function serves the estimated pass and the measured one.
+ */
+function computeRowCenters(gridPos, heightOf) {
+  const rowHeights = new Map();
+  for (const [nodeId, pos] of Object.entries(gridPos)) {
+    const h = heightOf(nodeId);
+    if (h === undefined) continue;
+    rowHeights.set(pos.row, Math.max(rowHeights.get(pos.row) || 0, h));
+  }
+  // Skip empty rows — the matrix solver leaves gaps between subtrees, and
+  // rendering them at a default height wastes vertical space.
+  const rowCenterY = new Map();
+  let y = 0;
+  for (const r of Array.from(rowHeights.keys()).sort((a, b) => a - b)) {
+    const h = rowHeights.get(r);
+    rowCenterY.set(r, y + h / 2);
+    y += h + GRID_GAP_Y;
+  }
+  return rowCenterY;
+}
+
+// ============================================================================
+// TAXI EDGE GEOMETRY
+// ============================================================================
+
+// A taxi edge leaves its source horizontally, turns once, descends, and runs
+// horizontally into its target. `taxiBendX` is the single source of truth for
+// where that turn happens, in GRAPH coordinates.
+//
+// Two callers depend on it and MUST agree, or the edge and its label drift
+// apart: the SVG edge path (editor-edges-svg.js), which draws the bend and is
+// its own hit-zone, and the edge-label anchor (editor-overlay-manager.js).
+//
+// The bend clears the source's whole column, so it never lands inside a wider
+// sibling sharing that column. `colRightX` is stamped once per layout
+// (see below) and does NOT follow a user-dragged node — hence the
+// `srcRight + TAXI_MIN_TURN` floor, which keeps the bend ahead of the source
+// even after the user drags it past its column's right edge.
+const TAXI_MIN_TURN = 20;       // bend never closer than this to source's right
+const TAXI_COL_CLEARANCE = 20;  // ...nor closer than this to the column's right
+const TAXI_FALLBACK_TURN = 40;  // pre-layout nodes carry no colRightX
+
+function taxiBendX(sourceNode) {
+  const srcRight = sourceNode.position().x + sourceNode.width() / 2;
+  const colRight = sourceNode.data('colRightX');
+  if (colRight === undefined) return srcRight + TAXI_FALLBACK_TURN;
+  return Math.max(srcRight + TAXI_MIN_TURN, colRight + TAXI_COL_CLEARANCE);
+}
+
 // ============================================================================
 // NODE SIZE CALCULATION
 // ============================================================================
@@ -243,16 +304,6 @@ async function fetchBackendLayout() {
       }
     });
 
-    // Calculate row heights
-    const rowHeights = new Map();
-    Object.entries(gridPos).forEach(([nodeId, pos]) => {
-      const size = sizes.get(nodeId);
-      if (size) {
-        const currentMax = rowHeights.get(pos.row) || 0;
-        rowHeights.set(pos.row, Math.max(currentMax, size.height));
-      }
-    });
-
     // Calculate min node width per column (for width spread compensation)
     const colMinWidths = new Map();
     Object.entries(gridPos).forEach(([nodeId, pos]) => {
@@ -347,18 +398,13 @@ async function fetchBackendLayout() {
       currentX += maxWidth + Math.max(gap, gap + widthSpread);
     });
 
-    // Calculate Y positions. Skip empty rows — they happen when the matrix
-    // solver leaves gaps between subtrees, and rendering them at the default
-    // 30px + gap wastes vertical space (seen as a big void between top row
-    // and the rest of the graph).
-    const rowCenterY = new Map();
-    let currentY = 0;
-    const usedRows = Array.from(rowHeights.keys()).sort((a, b) => a - b);
-    usedRows.forEach(r => {
-      const height = rowHeights.get(r);
-      rowCenterY.set(r, currentY + height / 2);
-      currentY += height + GRID_GAP_Y;
-    });
+    // Calculate Y positions from the ESTIMATED card heights. The estimate is
+    // only good enough to avoid a flash: a card's real height is content-driven
+    // (the effects strip wraps to as many chip rows as it needs), so the layout
+    // is corrected against measured heights as soon as the overlays exist —
+    // `reflowFromMeasuredHeights`, which reuses `computeRowCenters`.
+    _lastGridPos = gridPos;
+    const rowCenterY = computeRowCenters(gridPos, (id) => sizes.get(id)?.height);
 
     // Build final layout
     // Left-align all nodes: x = leftX + nodeWidth/2
@@ -383,7 +429,7 @@ async function fetchBackendLayout() {
     // Augment node data with colRightX (right edge of node's column).
     // Used by edge taxi-turn so the bend lands in the inter-column gap,
     // never inside a wider sibling node sharing the same column.
-    // Also store computed layoutWidth/layoutHeight so CY node sizing matches
+    // Also store computed layoutWidth/layoutHeight so graph node sizing matches
     // the actual overlay rendering (avoids overlay overflow into next row).
     nodes.forEach(n => {
       const pos = gridPos[n.data.id];
@@ -411,6 +457,7 @@ async function fetchBackendLayout() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     calculateNodeSize,
-    fetchBackendLayout
+    fetchBackendLayout,
+    taxiBendX
   };
 }

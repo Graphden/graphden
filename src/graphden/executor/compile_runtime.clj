@@ -25,16 +25,55 @@
 ;; Registry lifecycle
 ;; =============================================================================
 
+(defn org-in-shard?
+  "Is `org` part of the slice of the graph THIS executor is responsible
+   for? The single membership question, asked in two places: the compile
+   filter below (per row) and the request router (per request), which
+   must agree or a pod would serve requests for fns it never compiled.
+
+   `orgs` nil ⇒ this executor serves everything (single-tenant /
+   self-hosted). Otherwise it is a membership predicate over org-ids: a
+   SET is the usual value and is already a predicate; a hash-sharded
+   fleet passes a fn instead, so it never has to enumerate its tenants.
+
+   A nil `org` means an un-owned row — the shared platform graph (core /
+   web / app packages) that every executor needs. The public org, if the
+   deployment has one, is just another member: core deliberately doesn't
+   know its name (`tenancy.context/public-org`), so whoever builds the
+   ctx makes sure the predicate admits it."
+  [orgs org]
+  (or (nil? orgs) (nil? org) (boolean (orgs org))))
+
+
 (defn- read-graph
   "Read the slot/fn-slot/binding model entities from storage. Bundled
    so `rebuild!` and the on-demand free-arg resolver share the same
-   query shape."
-  [storage]
-  {:fns        (sp/query-entities storage :fn {})
-   :slots      (sp/query-entities storage :slot {})
-   :fn-slots   (sp/query-entities storage :fn-slot {})
-   :bindings   (sp/query-entities storage :binding {})
-   :list-items (sp/query-entities storage :binding-list-item {})})
+   query shape.
+
+   `orgs` (nil ⇒ no filtering, the single-tenant / self-hosted default)
+   restricts the graph to one executor's shard, so a pod compiles only
+   the orgs it serves instead of every tenant's fns. Filtering happens
+   after the read rather than in the where-clause because
+   `query-entities` only expresses equality while membership is a set or
+   a predicate — and the read is transient anyway; the compiled registry
+   is the thing we keep and the thing that was growing with tenant count.
+
+   Sharding is sound because a fn's ref closure never leaves its own
+   org ∪ the un-owned platform rows: a tenant can only bind refs to fns
+   its org-scoped storage let it see. `crud.entities/reject-cross-org-refs!`
+   turns that from an emergent property into an enforced one."
+  ([storage] (read-graph storage nil))
+  ([storage orgs]
+   (let [q (fn [entity]
+             (let [rows (sp/query-entities storage entity {})]
+               (if orgs
+                 (filterv #(org-in-shard? orgs (:org-id %)) rows)
+                 rows)))]
+     {:fns        (q :fn)
+      :slots      (q :slot)
+      :fn-slots   (q :fn-slot)
+      :bindings   (q :binding)
+      :list-items (q :binding-list-item)})))
 
 
 (defn- type-row-role
@@ -232,7 +271,7 @@
    on-demand by the next `execute` (via `registry`'s lazy fallback)."
   [ctx]
   (let [storage (compile-storage ctx)
-        graph (read-graph storage)]
+        graph (read-graph storage (:executor-orgs ctx))]
     (register-type-aliases-from-db! graph)
     graph))
 
@@ -337,7 +376,7 @@
     ctx
     (fn []
       (let [storage (compile-storage ctx)
-            graph (read-graph storage)
+            graph (read-graph storage (:executor-orgs ctx))
             _ (register-type-aliases-from-db! graph)
             base-fns (:base-fns ctx)
             lookups (assoc (l/cached-build-lookups graph)
@@ -400,7 +439,7 @@
 
       :else
       (let [storage (compile-storage ctx)
-            graph (read-graph storage)
+            graph (read-graph storage (:executor-orgs ctx))
             _ (register-type-aliases-from-db! graph)
             base-fns (:base-fns ctx)
             fns-map (if (map? (:fns graph))
@@ -427,6 +466,114 @@
         ;; index — sub-ms vs ~65 ms on the production graph.
         (prime-compile-deps! ctx graph changed-fn-ids)
         @holder))))
+
+
+(defn- ctx-forward-deps
+  "The `:forward-deps` index for cell load/evict — from the primed
+   `:compile-deps` if present, else built from the graph. `graph-fn` (a thunk) is
+   called only on the cold path, so a caller that already read the graph can pass
+   it back without a second read."
+  [ctx graph-fn]
+  (or (:forward-deps (some-> (:compile-deps ctx) deref))
+      (:forward-deps (deps/build-deps-state (graph-fn)))))
+
+
+(defn load-cell!
+  "Compile a CELL — a root fn + its transitive forward ref-closure
+   (docs/FLEET_RFC.md §3) — INTO the ctx's compiled registry, ON TOP of
+   whatever is already loaded. This is the unit a fleet executor adds at
+   runtime WITHOUT a full rebuild: only the cell's closure is compiled, not
+   the whole graph.
+
+   Reuses the delta machinery: `forward-closure` over the `:forward-deps`
+   index (primed, or built from the graph on a fresh executor), then
+   `compile-subset` on top of the current registry, swapped in under CAS so a
+   concurrent load / delta-recompile isn't dropped. The graph read is
+   transient — only the compiled closure is kept, which is the whole point.
+
+   Returns the set of fn-ids the cell contributed (empty if `root-fn-id` isn't
+   in this executor's shard). Cell fns absent from the graph (a stale forward
+   edge to a deleted fn) are filtered out rather than crashing the compile."
+  [ctx root-fn-id]
+  (let [holder (:compiled-registry ctx)
+        storage (compile-storage ctx)
+        graph (read-graph storage (:executor-orgs ctx))
+        _ (register-type-aliases-from-db! graph)
+        base-fns (:base-fns ctx)
+        fns-map (if (map? (:fns graph))
+                  (:fns graph)
+                  (into {} (map (juxt :id identity)) (:fns graph)))
+        _ (prime-always-fresh! (vals fns-map))
+        forward-deps (ctx-forward-deps ctx (constantly graph))
+        cell (into #{}
+                   (filter #(contains? fns-map %))
+                   (deps/forward-closure forward-deps [root-fn-id]))
+        lookups (assoc (l/cached-build-lookups graph) :base-fns base-fns)]
+    (when (seq cell)
+      (swap! holder (fn [current] (ce/compile-subset lookups (or current {}) cell)))
+      (prime-graph-cache! ctx graph)
+      (prime-compile-deps! ctx graph (vec cell))
+      ;; Record the root so `evict-cell!` can reference-count shared fns.
+      (when-let [roots (:loaded-roots ctx)]
+        (swap! roots conj root-fn-id)))
+    cell))
+
+
+(defn evict-cell!
+  "Drop a cell loaded by `load-cell!`: remove `root-fn-id` from the ctx's
+   `:loaded-roots` and evict from the registry the fns in its forward-closure
+   that NO OTHER loaded root still needs — reference counting via the union of
+   the remaining roots' closures, so a fn shared with another live cell stays.
+   The inverse of `load-cell!` (docs/FLEET_RFC.md §6.2).
+
+   Reads the `:forward-deps` index — from the primed `:compile-deps` if present
+   (no graph read needed), else built from a transient graph read. Returns the
+   set of fn-ids evicted (empty if the root wasn't loaded)."
+  [ctx root-fn-id]
+  (let [holder (:compiled-registry ctx)
+        roots-atom (:loaded-roots ctx)]
+    (if (or (nil? holder) (nil? roots-atom) (not (contains? @roots-atom root-fn-id)))
+      #{}
+      (let [forward-deps (ctx-forward-deps
+                           ctx #(read-graph (compile-storage ctx) (:executor-orgs ctx)))
+            remaining (disj @roots-atom root-fn-id)
+            ;; Union of every OTHER loaded root's closure — the fns that must
+            ;; survive. `forward-closure` over a set of roots is their union.
+            still-needed (deps/forward-closure forward-deps remaining)
+            evictable (into #{}
+                            (remove still-needed)
+                            (deps/forward-closure forward-deps [root-fn-id]))]
+        (swap! roots-atom disj root-fn-id)
+        (when (seq evictable)
+          (swap! holder (fn [current] (apply dissoc current evictable))))
+        evictable))))
+
+
+(defn cell-held?
+  "Is `fn-id` currently servable on THIS executor? Runtime membership at CELL
+   granularity (docs/FLEET_RFC.md §6.2): a fn is held iff it's in the compiled
+   registry — `load-cell!` puts a cell's whole closure there, `evict-cell!`
+   removes what nothing else needs. The fleet generalisation of `org-in-shard?`
+   (which answers the same question at whole-org granularity for the static
+   shard): a non-fleet executor compiles its whole shard, so `cell-held?` is
+   true for every shard fn; a fleet executor holds only the cells it loaded.
+
+   The predicate is LIVE — it reads the registry atom that load/evict mutate,
+   so membership changes at runtime with no ctx rebuild. nil / empty registry
+   (before the first load) ⇒ false.
+
+   RESERVED, not yet wired into routing. Today the app-router forward-hop gates
+   on the STATIC `org-in-shard?` (docs/FLEET_RFC.md T2.4 — the smaller step), and
+   in a sharded fleet that is sufficient (verified on the cluster). `cell-held?`
+   is the primitive for the deferred LOAD-ON-DEMAND mode: pods start with only
+   `public` compiled and load a cell on demand / on placement, at which point
+   routing consults `cell-held?` (serve here vs forward to the holder / lazy-
+   load). Adopting that mode is a coupled change (empty-start boot + the
+   controller becoming shard-aware), so it stays a separate scoped effort — hence
+   this predicate is built + tested (`load_cell_test`) but intentionally
+   unreferenced by the request path for now."
+  [ctx fn-id]
+  (boolean (some-> (:compiled-registry ctx) deref (contains? fn-id))))
 
 
 (defn registry
@@ -460,7 +607,7 @@
    public-API translator."
   [ctx]
   (let [graph (or (some-> (:graph-cache ctx) deref)
-                  (read-graph (:storage ctx)))]
+                  (read-graph (:storage ctx) (:executor-orgs ctx)))]
     (assoc (l/cached-build-lookups graph)
            :base-fns (:base-fns ctx))))
 
@@ -679,6 +826,29 @@
    the raw-SQL escape hatch in their own fn, but the handler serving them can
    read storage."
   (conj default-cloud-allowed-effects :raw-sql))
+
+
+(defn run-with-timeout
+  "Run `thunk` in a future bounded by `timeout-ms`. Returns its value, or
+   `::timeout` (cancelling the future) when it overruns, or `::error` when it
+   throws. Generic — the caller arranges cooperative cancellation (bind
+   `*cancel-check*` inside the thunk so an interrupted execute aborts). Lives
+   here, next to `execute`, so both the cloud app-router and a BYO executor
+   bound a handler through the same helper without either depending on the
+   other.
+
+   CALLER CONTRACT: the sentinels are keywords in THIS namespace —
+   `:graphden.executor.compile-runtime/{timeout,error}`. Callers MUST match
+   them QUALIFIED (`::cr/timeout` via an alias, or the fully-qualified form),
+   never bare `::timeout`/`::error` — a bare `::error` resolves to the
+   caller's OWN namespace, compiles fine, and silently never matches, so an
+   errored/timed-out handler leaks the raw sentinel instead of a 5xx."
+  [timeout-ms thunk]
+  (let [fut (future (thunk))
+        result (try (deref fut timeout-ms ::timeout)
+                    (catch Exception _ ::error))]
+    (when (identical? result ::timeout) (future-cancel fut))
+    result))
 
 
 (defn record-effect!

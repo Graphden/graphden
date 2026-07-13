@@ -43,6 +43,15 @@
    :username #or [#env DB_USERNAME "graphden"]
    :password #or [#env DB_PASSWORD "graphden"]}}
 
+ ;; SSE invalidation relay — forwards graphden_events to remote / BYO
+ ;; executors over SSE. Opt-in: set GRAPHDEN_SSE_PORT to enable (unset ⇒
+ ;; the component starts but the relay is a no-op). Its own port, separate
+ ;; from the app HTTP server.
+ :sse/relay
+ {:port #or [#env GRAPHDEN_SSE_PORT nil]
+  :notify-listener #ig/ref :db/notify-listener
+  :auth-provider #ig/ref :auth/provider}
+
  ;; Load packages from resources/packages/
  ;; `examples` is dev/test-only per its package.edn description
  ;; ("pedagogical fn-def examples — Load only in dev/test, never in
@@ -82,7 +91,32 @@
   :pg-storage #ig/ref :db/postgres
   ;; ctx-scoped base-fns map (sidesteps the process-global registry).
   :base-fns #ig/ref :exec/base-fns
-  :auth-provider #ig/ref :auth/provider}
+  :auth-provider #ig/ref :auth/provider
+  ;; Executor shard: comma-separated org-ids this pod compiles, e.g.
+  ;; "public,acme". Unset ⇒ the whole graph (self-hosted default, and
+  ;; what every single-tenant deployment wants). List "public"
+  ;; explicitly — the platform packages live there.
+  :executor-orgs #or [#env GRAPHDEN_EXECUTOR_ORGS nil]
+  ;; Pod role. "true" ⇒ this is a customer's OWN executor (BYO): it serves
+  ;; the `:byo` orgs in its shard. Unset/false ⇒ a hosted pod, which 421s
+  ;; any `:byo` org. A BYO pod also sets GRAPHDEN_EXECUTOR_ORGS to just its
+  ;; own org.
+  :byo-executor? #or [#env GRAPHDEN_BYO_EXECUTOR nil]
+  ;; Fleet identity (docs/FLEET_RFC.md §6.1, T2.6). The DNS name other
+  ;; executors reach this pod at (k8s StatefulSet / headless-service pod name).
+  ;; Set ⇒ this pod forward-hops a misdirected request to the cell's holder
+  ;; instead of 421, AND exposes the internal cell-command endpoint (§6.3, T3.3)
+  ;; that a move drives. Unset (single-tenant / self-hosted) ⇒ 421 as before,
+  ;; no fleet endpoint. Two more env vars, read directly (not Aero keys), tune
+  ;; the fleet transport when this is set:
+  ;;   GRAPHDEN_PORT           — the port every pod's app server listens on
+  ;;                             (default 8080); the forward-hop + cell-command
+  ;;                             clients dial `http://<executor-id>:<port>`.
+  ;;   GRAPHDEN_INTERNAL_TOKEN — shared control-plane secret gating
+  ;;                             `POST /internal/fleet/cell/...` (a k8s secret,
+  ;;                             same on every pod). Unset ⇒ the endpoint
+  ;;                             fail-closes and moves are disabled.
+  :executor-id #or [#env GRAPHDEN_EXECUTOR_ID nil]}
 
  ;; Compile fn graphs into Clojure closures at startup. Depends on
  ;; fn-entities so every composed fn is already in storage before we
@@ -131,6 +165,25 @@
   :service-locks #ig/ref :db/service-locks
   :_compiled-registry #ig/ref :exec/compiled-registry
   :_branch-router #ig/ref :exec/branch-router}
+
+ ;; Fleet placement controller (docs/FLEET_RFC.md §6.3, Phase 2). A leader-
+ ;; locked periodic tick that reads live cell weights + the executor set
+ ;; (GRAPHDEN_FLEET_EXECUTORS) and applies placement: places new tenant app
+ ;; cells, rebalances SUSTAINED imbalance via the directed cell-command
+ ;; transport. Own advisory-lock connection (distinct from the reconciler's)
+ ;; elects one controller fleet-wide. Inert unless this pod is a fleet member
+ ;; (:enabled? ← GRAPHDEN_EXECUTOR_ID). Tuning envs (read directly):
+ ;; GRAPHDEN_FLEET_SUSTAIN_TICKS, GRAPHDEN_FLEET_MIN_IMPROVEMENT,
+ ;; GRAPHDEN_FLEET_MAX_MOVES.
+ :exec/fleet-controller
+ {:context #ig/ref :exec/context
+  :_compiled-registry #ig/ref :exec/compiled-registry
+  :pg-opts
+  {:jdbc-url #or [#env JDBC_URL "jdbc:postgresql://localhost:5432/graphden"]
+   :username #or [#env DB_USERNAME "graphden"]
+   :password #or [#env DB_PASSWORD "graphden"]}
+  :enabled? #or [#env GRAPHDEN_EXECUTOR_ID nil]
+  :period-ms #long #or [#env GRAPHDEN_FLEET_CONTROLLER_PERIOD_MS "30000"]}
 
  ;; Hourly sweep of :fn-execution rows past per-status TTL.
  ;; period-ms overridable via env (e.g. 600000 for 10-min sweeps in

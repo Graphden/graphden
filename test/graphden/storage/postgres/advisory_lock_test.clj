@@ -98,3 +98,54 @@
           (finally
             (try (pg-lock/release-all! pod-b) (catch Exception _ nil))
             (Connection/.close pod-b)))))))
+
+
+;; =============================================================================
+;; Reconnecting holder — the drop-and-re-acquire hardening.
+;; =============================================================================
+
+(deftest ensure-live-reconnects-a-dead-connection-test
+  (testing "ensure-live! is a no-op on a healthy conn, reconnects a dead one"
+    (let [pg-opts (pg-opts-from-fixture)
+          holder (pg-lock/create-lock-holder pg-opts)]
+      (try
+        (let [c0 (pg-lock/holder-conn holder)]
+          (is (false? (pg-lock/ensure-live! holder))
+              "healthy connection → no reconnect")
+          (is (identical? c0 (pg-lock/holder-conn holder))
+              "same connection object after a no-op ensure-live!")
+          ;; Simulate a drop: close the underlying connection out from under
+          ;; the holder (DB restart / network blip look the same to isValid).
+          (Connection/.close c0)
+          (is (true? (pg-lock/ensure-live! holder))
+              "dead connection → reconnected")
+          (is (not (identical? c0 (pg-lock/holder-conn holder)))
+              "a fresh connection replaced the dead one")
+          (is (false? (Connection/.isClosed (pg-lock/holder-conn holder)))
+              "the fresh connection is open"))
+        (finally (pg-lock/close-holder! holder))))))
+
+
+(deftest dropped-lock-is-lost-until-reconnect-reacquires-test
+  (testing "a dropped conn releases the lock (the vulnerability); the fresh "
+    (let [pg-opts (pg-opts-from-fixture)
+          svc-id (random-uuid)
+          holder (pg-lock/create-lock-holder pg-opts)
+          sibling (open-conn pg-opts)]
+      (try
+        (is (true? (pg-lock/try-lock! (pg-lock/holder-conn holder) svc-id))
+            "pod holds the lock")
+        ;; Drop the pod's lock connection — Postgres releases its lock.
+        (Connection/.close (pg-lock/holder-conn holder))
+        (is (true? (pg-lock/try-lock! sibling svc-id))
+            "with the pod disconnected, a sibling CAN take the lock — this is ")
+        ;; Sibling releases; pod reconnects and re-acquires successfully
+        ;; (nobody holds it now).
+        (is (true? (pg-lock/release-lock! sibling svc-id)))
+        (is (true? (pg-lock/ensure-live! holder)) "pod reconnects")
+        (is (true? (pg-lock/try-lock! (pg-lock/holder-conn holder) svc-id))
+            "re-acquire succeeds on the fresh session — pod owns it again")
+        (finally
+          (try (pg-lock/release-all! sibling) (catch Exception _ nil))
+          (Connection/.close sibling)
+          (pg-lock/close-holder! holder))))))

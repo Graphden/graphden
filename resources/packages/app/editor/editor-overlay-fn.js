@@ -16,7 +16,7 @@ function attachPreviewHandlers(el, triggerPreview, onPreviewLeave, restoreStyles
   el.addEventListener('mouseleave', () => { onPreviewLeave(); restoreStyles(); });
 }
 
-// Walk a fn-card's incoming cytoscape edges and return the SINGLE
+// Walk a fn-card's incoming graph edges and return the SINGLE
 // editable arg if (a) there's exactly one such arg and (b) the
 // owning fn is in the immediate implementation closure of the
 // nav-root + the user is signed in. Returns null otherwise. Used to
@@ -24,11 +24,11 @@ function attachPreviewHandlers(el, triggerPreview, onPreviewLeave, restoreStyles
 // per-binding actions (× delete / ✎ change) — multi-incoming and
 // uneditable cards skip the affordance to keep the row clean.
 function _singleEditableIncomingArg(nodeId) {
-  if (!cy || typeof argRowFromNode !== 'function') return null;
-  const cyNode = cy.getElementById(nodeId);
-  if (!cyNode?.length) return null;
+  if (!gv.ready() || typeof argRowFromNode !== 'function') return null;
+  const graphNode = gv.node(nodeId);
+  if (!graphNode) return null;
   const editable = [];
-  cyNode.incomers('edge').forEach((edge) => {
+  graphNode.incomingEdges().forEach((edge) => {
     const arg = argRowFromNode(edge.data());
     if (!arg) return;
     const inImpl = implementationFnIds?.has(arg['fn-id']);
@@ -305,7 +305,7 @@ function renderColumnBelowMiRow(line, levelInfo, miLevelAbove, ctx) {
   // HTMX migration Phase A1: the col-header row-actions content
   // is now server-rendered via `/partials/row-actions`. JS keeps
   // the popover lifecycle (open / hover / dismiss / re-anchor on
-  // cy zoom-pan) + the post-swap `data-action` dispatcher; the
+  // viewport zoom-pan) + the post-swap `data-action` dispatcher; the
   // markup + per-fn conditionals (ns badge, i badge, ↗ link) live
   // in `:partial-row-actions :_partial-row-actions-col-header`.
   const buildColPopoverContent = (host) => {
@@ -727,14 +727,10 @@ function renderSingleFnRow(line, levelInfo, ctx) {
 //     is dragging (isGrabbing), or the overlay was already detached.
 function attachFnOverlayHoverHandlers(overlay, nodeId) {
   overlay.addEventListener('mouseenter', () => {
-    if (!cy) return;
-    const cyNode = cy.getElementById(nodeId);
-    if (cyNode?.length) {
-      cyNode.outgoers('edge').addClass('edge-hovered');
-    }
+    if (gv.ready()) gv.highlightEdgesFrom(nodeId);
   });
   overlay.addEventListener('mouseleave', () => {
-    if (cy) cy.edges('.edge-hovered').removeClass('edge-hovered');
+    if (gv.ready()) gv.clearEdgeHighlight();
   });
   overlay.addEventListener('mouseleave', () => {
     if (!rebuildingOverlays && !isGrabbing && overlay.isConnected) {

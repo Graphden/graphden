@@ -23,6 +23,7 @@
     [graphden.packages.records :as records]
     [graphden.services.reconciler :as recon]
     [graphden.storage.protocol.core :as sp]
+    [graphden.system.branch-router :as br]
     [graphden.versioning.branch-local :as branch-local]
     [graphden.versioning.storage.core :as vcore]))
 
@@ -79,6 +80,11 @@
    the cache key is the storage handle so it lives below the
    graph-cache layer.
 
+   Then sweeps sibling branch ctxs via
+   `branch-router/invalidate-affected-ctxs!`: a branch that inherits
+   from the written branch resolves the new rows on read but would keep
+   serving the compiled closures it cached earlier.
+
    Also kicks `recon/restart-services-depending-on!` against the
    affected fn-id seeds so cron-loop services whose closure was
    captured before the edit get restarted. HTTP services re-read
@@ -98,6 +104,12 @@
     (if seeds
       (exec-ctx/invalidate-graph-cache! ctx seeds)
       (exec-ctx/invalidate-graph-cache! ctx))
+    ;; The write is visible from every branch that inherits from the one
+    ;; we wrote on, and each of those may have its own cached compiled
+    ;; registry on this pod. Sweep them too — `invalidate-graph-cache!`
+    ;; above only touched the ctx the request came in on.
+    (when-let [router (br/current-router)]
+      (br/invalidate-affected-ctxs! router (vcore/current-branch-id storage) seeds))
     (when (seq seeds)
       (try
         ;; `recon/running` is a process-wide defonce atom — the same
@@ -123,11 +135,18 @@
    - `:service` writes → `service:<op>:<id>` — handled by the
      reconciler's listener callback in `system/core.clj`.
    - fn-graph writes (`:fn` / `:slot` / `:fn-slot` / `:binding` /
-     `:binding-list-item`) → one `fn:invalidate:<seed-fn-id>` event
-     per affected fn-id (delta invalidation), or
-     `fn:invalidate:` with empty id when the change is cross-cutting
-     (full clear) — handled by `:exec/compiled-registry`'s listener
-     callback.
+     `:binding-list-item`) → one `fn:invalidate:<seed-fn-id>|<branch-id>`
+     event per affected fn-id (delta invalidation), or
+     `fn:invalidate:|<branch-id>` with empty id when the change is
+     cross-cutting (full clear) — handled by `:exec/compiled-registry`'s
+     listener callback.
+
+   The branch-id rides along because the sibling pod has to answer the
+   same question this pod answered locally: which of MY cached branch
+   registries can see this write? Without it a sibling would either
+   over-invalidate (recompiling `main` for a `dev` edit) or, as it did
+   before, invalidate only its base ctx and leave every cached branch
+   serving stale closures.
 
    Cheap on the write path: one `pg_notify` SQL against the main
    pool, per emitted event. Becomes a no-op when the ctx has no
@@ -139,14 +158,30 @@
       (emit {:kind :service :op op :id (str (:id data))})
 
       (contains? fn-graph-entity-types entity-type)
-      (let [seeds (affected-fn-ids storage entity-type data)]
+      (let [seeds (affected-fn-ids storage entity-type data)
+            branch-id (some-> (vcore/current-branch-id storage) str)
+            ;; The writing org, straight off the written row — OrgScopedStorage
+            ;; stamps `:org-id` on scoped entities, so `data` (the returned
+            ;; row) carries it without this core-layer code depending on
+            ;; tenancy. nil in single-tenant / un-scoped writes → omitted. Used
+            ;; only by the SSE relay to fan an event out to the right org's
+            ;; remote executors (the local invalidate path ignores it).
+            org-id (:org-id data)
+            ;; `cond->`, not a bare assoc: an un-versioned storage has no
+            ;; branch, and a nil-valued key is a different map from an
+            ;; absent one — `parse-payload` omits it on the way back for
+            ;; the same reason.
+            event (fn [id]
+                    (cond-> {:kind :fn :op :invalidate :id id}
+                      branch-id (assoc :branch-id branch-id)
+                      org-id (assoc :org-id org-id)))]
         (if (seq seeds)
           (doseq [seed seeds]
-            (emit {:kind :fn :op :invalidate :id (str seed)}))
+            (emit (event (str seed))))
           ;; nil seeds from `affected-fn-ids` ≡ "full clear" —
           ;; mirror the local fallback `(invalidate-graph-cache!
           ;; ctx)` (no seed set).
-          (emit {:kind :fn :op :invalidate :id ""}))))))
+          (emit (event "")))))))
 
 
 (defn html-error-response

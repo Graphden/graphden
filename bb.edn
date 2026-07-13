@@ -128,9 +128,9 @@
                   ".claude/hooks/remind-packages-quality-on-impls-edit.sh")}
 
   hadolint
-  {:doc "Lint Dockerfile + Dockerfile.build via Docker hadolint/hadolint:v2.12.0-debian."
+  {:doc "Lint Dockerfile + Dockerfile.build + Dockerfile.crac via Docker hadolint/hadolint:v2.12.0-debian."
    :task (do
-           (doseq [df ["Dockerfile" "Dockerfile.build"]]
+           (doseq [df ["Dockerfile" "Dockerfile.build" "Dockerfile.crac"]]
              (println (str "▶ hadolint " df))
              (let [proc (p/shell {:in (slurp df)}
                                  "docker" "run" "--rm" "-i"
@@ -143,7 +143,8 @@
                   "-v" (str (System/getenv "PWD") ":/repo")
                   "-w" "/repo"
                   "zricethezav/gitleaks:latest"
-                  "detect" "--no-banner" "--no-git")}
+                  "detect" "--no-banner" "--no-git"
+                  "--config" "/repo/.gitleaks.toml")}
 
   typos
   {:doc "Spelling check over docs + src via crate-ci/typos. Downloads the binary to .tools/typos on first run (Linux x86_64). Config: _typos.toml at repo root."
@@ -211,6 +212,10 @@
                     "aquasec/trivy:0.58.2"
                     "config" "--severity" "HIGH,CRITICAL"
                     "--skip-dirs" "node_modules,target,.tools"
+                    ;; Path-scoped, documented misconfig exceptions for the
+                    ;; dev/demo kind manifests (CRIU caps, stock-postgres fs).
+                    ;; Not auto-detected — must be passed explicitly.
+                    "--ignorefile" ".trivyignore.yaml"
                     "--exit-code" "1" "--quiet" ".")
            (println "▶ trivy fs (CVE in npm + maven deps)")
            (p/shell "docker" "run" "--rm"
@@ -320,6 +325,10 @@
   {:doc "Playwright browser-test suite against an ISOLATED ephemeral stack via Testcontainers (postgres + user-postgres + openbao + `graphden-executor:latest`, dynamic host ports, Ryuk reaps everything on JVM exit). Demo on :9002 stays untouched. Requires `bb rebuild` (or `bb deploy`) first so `graphden-executor:latest` is present. ~30-60s for the stack to come healthy + ~15-25 min for the suite itself. See `graphden.dev.e2e-stack`."
    :task (p/shell "clojure" "-M:dev" "-m" "graphden.dev.e2e-stack"
                   "tools/browser-test/run-edit-tests.sh")}
+
+  test-fleet-e2e
+  {:doc "Two-container fleet e2e (kaocha :container-e2e) — boots `graphden-executor:latest` TWICE as a real two-pod fleet over a shared Postgres (testcontainers) and drives the cross-container control plane over real HTTP: /health, token-gated /internal/fleet/{status,cell/load}, shared graph, agreed placement view. Requires `bb rebuild` first so the image is present. ~4 min (two cold boots). Ryuk reaps the containers on JVM exit."
+   :task (clojure "-M:dev:test -m kaocha.runner :container-e2e")}
 
   test-all
   {:doc "Run ALL tests (unit + integration + e2e), sequential. ~30-35 min wall. e2e requires `bb rebuild` first + AUTH_TOKEN."
@@ -458,7 +467,8 @@
                                    " .claude/hooks/remind-packages-quality-on-impls-edit.sh")
                gitleaks-cmd (str "docker run --rm -v " (System/getenv "PWD")
                                  ":/repo -w /repo zricethezav/gitleaks:latest"
-                                 " detect --no-banner --no-git")
+                                 " detect --no-banner --no-git"
+                                 " --config /repo/.gitleaks.toml")
                markdownlint-cmd "npx markdownlint-cli2"
                actionlint-cmd (str "docker run --rm -v " (System/getenv "PWD")
                                    ":/repo -w /repo"
@@ -661,8 +671,8 @@
                  (not= 200 (:status r))
                  {:ok? false :detail (str "HTTP " (:status r))}
 
-                 (not (str/includes? (:body r) "id=\"cy\""))
-                 {:ok? false :detail "no #cy in body"}
+                 (not (str/includes? (:body r) "id=\"graph-surface\""))
+                 {:ok? false :detail "no #graph-surface in body"}
 
                  ;; Without `<script src="/assets/editor.js">` the
                  ;; page loads as a blank skeleton — see the

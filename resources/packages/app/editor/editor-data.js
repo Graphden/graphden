@@ -365,7 +365,7 @@ function getEffectiveSlotName(fnId, slotId) {
   return slot ? slot.name : null;
 }
 
-// Build an arg-shape row from a Cytoscape node's `data` plus the
+// Build an arg-shape row from a graph node's `data` plus the
 // slot/binding lookups. Replaces `lookups.argMap.get(argId)` —
 // pulls the same fields (fn-id, slot-id, binding-id, item-id,
 // value, ref-id, type, name) directly from the layout-emitted

@@ -26,7 +26,8 @@
     [graphden.executor.context :as ctx]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.tenancy-router :as tr]
-    [graphden.versioning.storage.core :as vs]))
+    [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.resolution :as vres]))
 
 
 ;; =============================================================================
@@ -102,14 +103,29 @@
     (cond-> (ctx/create-context {:storage branch-storage
                                  :base-fns (:base-fns base-ctx)
                                  :clock (:clock base-ctx)
-                                 :allowed-effects (:allowed-effects base-ctx)})
+                                 :allowed-effects (:allowed-effects base-ctx)
+                                 ;; Inherit the executor's org shard — a branch
+                                 ;; ctx must compile the same slice of the graph
+                                 ;; as its base, or the pod would pull every
+                                 ;; tenant's fns back in through the side door.
+                                 :executor-orgs (:executor-orgs base-ctx)
+                                 ;; Inherit the pod role so per-branch requests
+                                 ;; apply the same hosted/BYO refusal.
+                                 :byo-executor? (:byo-executor? base-ctx)})
       ;; Privileged structural-read storage for THIS branch (§4 Design B): the
       ;; raw PG re-wrapped at branch-id, so `rebuild!` compiles every org's fns
-      ;; org-agnostically (isolation stays on the org-scoped `:storage` above at
-      ;; runtime). Absent in single-tenant → compile reads fall back to :storage.
+      ;; in this executor's shard (isolation stays on the org-scoped `:storage`
+      ;; above at runtime). Absent in single-tenant → compile reads fall back to
+      ;; :storage.
       (:pg-storage base-ctx)
       (assoc :pg-storage (:pg-storage base-ctx)
              :compile-storage (vs/->VersionedStorage (:pg-storage base-ctx) branch-id))
+      ;; Inherit the cross-pod NOTIFY emitter. Without it a CRUD write
+      ;; served on a non-default branch tells sibling pods nothing —
+      ;; `crud.entities/notify-after-write!` reads it off the ctx, and
+      ;; only the base ctx used to carry it, so every branch edit was
+      ;; silently pod-local.
+      (:notify-emitter base-ctx) (assoc :notify-emitter (:notify-emitter base-ctx))
       ;; Inherit the off-record auth seam so per-branch execution
       ;; authenticates through the same provider as the base context.
       (:auth-provider base-ctx) (assoc :auth-provider (:auth-provider base-ctx))
@@ -344,6 +360,71 @@
     (java.util.concurrent.ConcurrentHashMap/.remove build-monitors branch-id)))
 
 
+(defn invalidate-cached-branch!
+  "Delta-invalidate ONE branch's ctx, but only if this pod has already
+   built it. Returns true when something was invalidated.
+
+   Used by the cross-pod NOTIFY path: the writing pod invalidated its own
+   ctx inline, the receiving pod has to be told. Deliberately does NOT
+   build the ctx — a pod that never served the branch has no stale state,
+   and compiling it here would make it pay for a branch nobody asked it
+   about."
+  [{:keys [handlers]} branch-id seeds]
+  (boolean
+    (when-let [branch-ctx (some-> handlers deref (get branch-id) :ctx)]
+      (if (seq seeds)
+        (ctx/invalidate-graph-cache! branch-ctx seeds)
+        (ctx/invalidate-graph-cache! branch-ctx))
+      true)))
+
+
+(defn invalidate-affected-ctxs!
+  "Delta-invalidate every CACHED branch ctx whose resolved view includes
+   a write made on `written-branch-id`, skipping that branch itself
+   (its own ctx is invalidated by the caller).
+
+   Which branches are affected? Exactly those that inherit from the
+   written branch — `written-branch-id ∈ (collect-branch-chain … C)`.
+   Version rows are branch-scoped, so a write on `dev` is invisible from
+   `main`, while a write on `main` is visible from every branch that
+   doesn't override that fn. This is the same reachability question the
+   resolver answers on read, so it uses the resolver's own (memoised)
+   chain walk.
+
+   Never BUILDS a ctx. A branch this pod has never served has no cached
+   registry to go stale, and compiling one here would make an unrelated
+   pod pay for a branch nobody asked it about.
+
+   Without this, a cached branch with no own version rows keeps serving
+   the closures it copied from `main` at build time — its storage
+   resolves the new rows, but its compiled registry never recompiles.
+   Delta seeds keep the cost proportional to the edit: each affected ctx
+   recompiles only the blast radius of `seeds`, not its whole graph.
+
+   `seeds` nil ⇒ full clear on each affected ctx (the cross-cutting
+   `:slot` / unknown-shape case)."
+  [{:keys [handlers base-ctx]} written-branch-id seeds]
+  (when-let [cached (and handlers written-branch-id base-ctx (seq @handlers))]
+    (let [base-storage (vs/unwrap (:storage base-ctx))]
+      (doseq [[branch-id entry] cached
+              :when (not= branch-id written-branch-id)
+              :let [branch-ctx (:ctx entry)]
+              :when branch-ctx
+              :when (some #(= written-branch-id %)
+                          (vres/collect-branch-chain base-storage branch-id))]
+        (try
+          (if (seq seeds)
+            (ctx/invalidate-graph-cache! branch-ctx seeds)
+            (ctx/invalidate-graph-cache! branch-ctx))
+          (catch Exception e
+            ;; Best-effort: a stale sibling ctx is worse than a slow one,
+            ;; but a throw here would fail the user's CRUD write. Drop the
+            ;; cached entry so the next request rebuilds it from scratch.
+            (log/warn e "sibling branch ctx invalidation failed — dropping entry"
+                      {:branch-id branch-id})
+            (swap! handlers dissoc branch-id)))))))
+
+
 (defn invalidate-all!
   "Drop every cached per-branch entry + the entire ref-cache. Used by
    schema-migration paths that change the executor's shape under all
@@ -449,6 +530,14 @@
    misrouting."
   [router request]
   (let [base-ctx (:base-ctx router)
+        ;; Fleet control-plane seam (docs/FLEET_RFC.md §6.3): the internal
+        ;; cell load/evict command (`POST /internal/fleet/cell/...`). Checked
+        ;; FIRST — it's infra, org-agnostic, internal-token-gated, and never a
+        ;; tenant path. Returns a response for a matching command, nil for
+        ;; anything else (→ falls through). Absent unless this pod is a fleet
+        ;; member (`GRAPHDEN_EXECUTOR_ID` set).
+        fleet-command (:fleet-command base-ctx)
+        fleet-resp (when fleet-command (fleet-command base-ctx request))
         ;; App-router seam (§3.4 FaaS): a request to a TENANT's subdomain is
         ;; the tenant's APP — served by that org's handler fn (org-scoped +
         ;; effect-gated), NOT the editor/API. The app-router returns a
@@ -456,7 +545,8 @@
         ;; which then falls through to the editor/API flow below. Absent
         ;; (core / single-tenant) → straight to editor/API.
         app-router (:app-router base-ctx)
-        app-resp (when app-router (app-router base-ctx request))]
+        app-resp (or fleet-resp
+                     (when app-router (app-router base-ctx request)))]
     (or app-resp
         ;; Branch resolution runs INSIDE the request-scope (§4): `:branch` is
         ;; org-scoped, so `*current-org*` must be bound when resolve-branch-id

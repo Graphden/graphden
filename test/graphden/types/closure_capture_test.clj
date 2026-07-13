@@ -174,6 +174,51 @@
       (finally (sp/close storage)))))
 
 
+(deftest service-blocking-free-args-drops-hof-lifted-keeps-direct-test
+  ;; The service-ability PROJECTION: a fn's top-level CALLBACK-slot subtree
+  ;; (an `:http-server` handler, a `:schedule` body) is invoked by the
+  ;; deferred invoker per request/tick — its free args are NOT needed to
+  ;; START the service. So `service-blocking-free-args` drops that subtree,
+  ;; while `free-arg-slot-map` (which /api/execute's arg form needs) keeps
+  ;; the FULL surface. A DIRECT free arg (the fn's own unbound operand)
+  ;; blocks in BOTH — a genuinely unstartable fn is still rejected. This is
+  ;; what stops the `:service` guard from falsely rejecting a whole-app
+  ;; listener whose 45 free args are all below its `:handler` HOF slot.
+  (let [storage (create-full-storage)
+        _ (exec/register-base-fn! :test-cb-base2 (fn [_ _] :ok))
+        _ (exec/register-base-fn! :test-hof-base2 (fn [_ _] :ok))
+        _ (exec/register-base-fn! :test-direct-base (fn [_ _] :ok))
+        cb-base (setup/create-base-fn! storage "test-cb-base2" :any)
+        hof-base (setup/create-base-fn! storage "test-hof-base2" :any)
+        direct-base (setup/create-base-fn! storage "test-direct-base" :any)
+        captured-slot (setup/create-slot! storage "captured2" :int)
+        func-slot (setup/create-slot! storage "func2" [:fn {:item :any} :any])
+        operand-slot (setup/create-slot! storage "operand" :int)
+        _ (setup/attach-slot! storage (:id cb-base) (:id captured-slot) 0)
+        _ (setup/attach-slot! storage (:id hof-base) (:id func-slot) 0)
+        _ (setup/attach-slot! storage (:id direct-base) (:id operand-slot) 0)
+        callback (setup/create-composed-fn! storage "test-sbfa-callback" (:id cb-base))
+        ;; listener-shaped: a captured-bearing callback bound into a HOF slot
+        listener (setup/create-composed-fn! storage "test-sbfa-listener" (:id hof-base))
+        _ (setup/bind-ref! storage (:id listener) (:id func-slot) (:id callback))
+        ;; unstartable-shaped: a direct operand left unbound
+        unstartable (setup/create-composed-fn! storage "test-sbfa-unstartable" (:id direct-base))
+        c (test-ctx storage)]
+    (try
+      (testing "listener: the callback's captured arg is HOF-lifted → NOT service-blocking"
+        (is (contains? (lookup/free-arg-slot-map c (:id listener)) :captured2)
+            "full surface (execute arg form) still sees the captured arg")
+        (is (not (contains? (lookup/service-blocking-free-args c (:id listener)) :captured2))
+            "service-ability drops it — the deferred invoker supplies it per invocation")
+        (is (empty? (lookup/service-blocking-free-args c (:id listener)))
+            "→ nothing blocks starting the listener"))
+      (testing "unstartable: a direct unbound operand blocks in BOTH projections"
+        (is (contains? (lookup/free-arg-slot-map c (:id unstartable)) :operand))
+        (is (contains? (lookup/service-blocking-free-args c (:id unstartable)) :operand)
+            "a direct free arg genuinely prevents starting — still rejected"))
+      (finally (sp/close storage)))))
+
+
 (deftest binding-on-rename-slot-marks-source-slot-bound-test
   ;; Regression for #51. The real-world reproduction: derive a fn from
   ;; `:schedule` and bind `:fn` (which is the `{:as :fn}` rename of

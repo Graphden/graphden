@@ -1,0 +1,33 @@
+# Dedicated Postgres for the CRaC scale-from-zero demo. Kept SEPARATE from the
+# fleet's `postgres` so the KEDA-scaled CRaC Deployment (0↔1) is the sole holder
+# of the web-server singleton advisory lock — no contention with fleet-graphden.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crac-pg
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: crac-pg } }
+  template:
+    metadata: { labels: { app: crac-pg } }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          env:
+            - { name: POSTGRES_DB, value: graphden }
+            - { name: POSTGRES_USER, value: graphden }
+            - { name: POSTGRES_PASSWORD, value: graphden }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "graphden"] }
+            periodSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crac-pg
+spec:
+  selector: { app: crac-pg }
+  ports: [{ port: 5432, targetPort: 5432 }]

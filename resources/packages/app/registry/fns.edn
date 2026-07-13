@@ -44,6 +44,23 @@
    :return-type :full-graph-export-shape
    :effects #{:db}}
 
+  ;; The RAW five-table shape a remote / BYO executor bootstraps its in-memory
+  ;; storage from — the compiler reads exactly these rows. Distinct from
+  ;; `:full-graph-export-shape` (named fn-def maps): this is the storage-level
+  ;; rows, not the migration/re-load shape.
+  {:name :graph-rows-shape
+   :description "The five graph tables as raw rows, org-scoped: `{:fns :slots :fn-slots :bindings :list-items}`, each a list of keyword-keyed row maps."
+   :type {:fns [:list :keyword-map]
+          :slots [:list :keyword-map]
+          :fn-slots [:list :keyword-map]
+          :bindings [:list :keyword-map]
+          :list-items [:list :keyword-map]}}
+
+  {:name :graph-rows
+   :description "Read the five graph tables as RAW rows through the request storage (org-scoped → caller's org + public, the shard a BYO executor serves). Backs GET /api/export/graph-rows — the bootstrap read for a remote / BYO executor's in-memory storage."
+   :return-type :graph-rows-shape
+   :effects #{:db}}
+
   {:name :publish-package
    :description "Atomically publish a bundle as a :package-version row — reject if `(:pkg-name, :pkg-version)` already exists (immutable), else hash + insert. Returns a tagged `{:ok …}` result (success or `:reason \"version-exists\"`)."
    :args {:pkg-name {:type :text :description "Package name, e.g. \"web.components\"."}
@@ -176,6 +193,19 @@
    :description "GET /api/export/graph — export the entire graph as an EDN migration bundle. Auth-required."
    :parent :get-auth-required
    :args {:path "/export/graph" :handler :_export-graph-handler}}
+
+  {:name :_graph-rows-result
+   :parent :graph-rows}
+  {:name :_graph-rows-edn
+   :description "The raw five-table rows as an EDN string (`:pr-str`) — keywords preserved for a faithful in-memory re-load on the remote executor."
+   :parent :pr-str :args {:value :_graph-rows-result}}
+  {:name :_graph-rows-handler
+   :description "Ring handler for GET /api/export/graph-rows (auth-required) — `application/edn` raw-rows bundle."
+   :parent :edn-ok-response :args {:body :_graph-rows-edn}}
+  {:name :api-export-graph-rows
+   :description "GET /api/export/graph-rows — the raw five-table rows a remote / BYO executor bootstraps its in-memory storage from. Org-scoped (caller's org + public). Auth-required."
+   :parent :get-auth-required
+   :args {:path "/export/graph-rows" :handler :_graph-rows-handler}}
 
   ;; ---------------------------------------------------------------------
   ;; POST /api/packages/install — install a published version into the

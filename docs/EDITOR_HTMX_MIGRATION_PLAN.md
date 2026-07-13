@@ -22,7 +22,7 @@ pattern cleanly. Two structural facts forced a re-scoping:
    we ALSO restructure data flow.
 2. **Most remaining popovers have rich client state** — hover
    timers, sticky modes, edit-mode textareas, glyph-flip on hover,
-   Cytoscape zoom/pan tracking, keystroke filters. Server-rendered
+   viewport zoom/pan tracking, keystroke filters. Server-rendered
    markup is ~10% of what they do; ~90% is JS lifecycle.
 
 User decision (recorded 2026-06-23): restructure data flow, do the
@@ -182,20 +182,20 @@ as A. Deep re-survey after A shipped revealed they don't:
 | **B — description-tooltip body** | ⏳ deferred | Post-A, the row-actions dispatcher already opens the tooltip with `data-description` inlined by the partial. Sidebar + edge-label callers read description from client-cached `graphData`. A partial would re-fetch what's already on the client AND add ~30ms latency on every hover. Net-negative. |
 | **C1 — service badge → server** | ⏳ deferred | Same pattern: `getServiceForFnId` reads from client-cached service map. The badge rendering is purely data-projection from already-loaded state. Partial = wasted roundtrip. |
 | **C2 — full-name tooltip → server** | ⏳ deferred | Pure JS DOM build from a string passed in by the caller. No server data ever involved. Migration would be pure code relocation with zero value. |
-| **edge-label overlay** (added to survey) | ⏳ deferred | Computes description via client-side BFS over `lookups`, type-chip via client helpers (`expectedSlotType`/`resolveArgType`), renders cytoscape-anchored DOM. Migrating requires building server-side equivalents of those resolvers (Phase-0-sized effort) AND splitting overlay render between client + server (fragile). |
+| **edge-label overlay** (added to survey) | ⏳ deferred | Computes description via client-side BFS over `lookups`, type-chip via client helpers (`expectedSlotType`/`resolveArgType`), renders graph-layer-anchored DOM. Migrating requires building server-side equivalents of those resolvers (Phase-0-sized effort) AND splitting overlay render between client + server (fragile). |
 
 The structural insight: Phase A captured the **server-data-only**
 surface (route compilation, conditional auth/editability state,
 multi-button assembly with per-action data). Remaining JS is
 **client-cache-driven** (description/name/namespace from
-graphData) or **canvas-bound** (cytoscape overlays). Both fall
+graphData) or **canvas-bound** (graph-layer overlays). Both fall
 under skill §6's `keep JS` criteria.
 
 ## Phase D — Cleanup
 
 | Stage | Status | What |
 |---|---|---|
-| D1 | done | Audited `graphData` usage — still needed by sidebar tree + cytoscape overlays + pickers, all of which are JS by skill §6.2. No safe trimming opportunity. |
+| D1 | done | Audited `graphData` usage — still needed by sidebar tree + graph overlays + pickers, all of which are JS by skill §6.2. No safe trimming opportunity. |
 | D2 | done | Removed dead CSS: `.edit-pencil` / `.pinned-icon-btn*` / `.action-disabled` (no JS adds these classes after A5). Consolidated `.row-actions-popover` selector list to use `.action-icon` instead of the dropped per-factory classes. |
 | D3 | done | `bb check` + `bb rebuild` smoke + full `bb test` all clean. Phase 0c (`:fn-usage-count` + `:fn-is-editable?`) STAYS deferred — not needed at any current callsite. |
 
@@ -216,7 +216,7 @@ under skill §6's `keep JS` criteria.
 - **Service badge state**: ⚙ button is disabled when fn has free
   args. Free-args computation is rich-types-dependent — server
   has it but routing through a base-fn needs care.
-- **Cytoscape zoom/pan re-anchor**: Phase A doesn't change this;
+- **Viewport zoom/pan re-anchor**: Phase A doesn't change this;
   row-actions popover still re-positions on `cy.on('zoom pan')`.
   Verify the post-swap `bindRowActionsDispatch` doesn't break
   the existing re-anchor flow.

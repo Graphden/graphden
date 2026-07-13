@@ -6,10 +6,18 @@ also write `:service` rows directly through `/api/entities/service`.
 The reconciler turns enabled rows into running futures, supervises
 startup failures, and stops them on shutdown.
 
-This is **single-pod with no periodic poll yet** — reconcile fires
-on integrant init and on every CRUD mutation. Cron schedules,
-periodic poll, and multi-pod coordination come in later phases (see
-§ Roadmap at the bottom).
+Reconcile fires on integrant init, on every CRUD mutation, on a
+`service:*` NOTIFY from a sibling pod, **and on a periodic tick**
+(`:exec/service-reconciler`, ~15s). The tick makes the reconciler
+level-triggered rather than purely edge-driven: it re-takes a
+`:singleton`'s advisory lock after the holder pod crashes (the crash
+emits no NOTIFY), picks up an out-of-band DB edit, and reconverges a
+transient start failure — all without a restart.
+
+**Multi-pod coordination is built.** Every pod runs its own
+reconciler; a service's `:cardinality` decides how many pods run it
+(`:singleton` → advisory-lock-gated, `:per-pod` → everywhere). Cron
+schedules come in a later phase (see § Roadmap).
 
 ## Why services?
 
@@ -32,9 +40,11 @@ admin retains the option to disable them.
 ## The model: a service IS a no-arg fn
 
 A `:service` row is just a marker on a fn that says "keep this alive".
-The fn it points at MUST have **zero free arguments** — every slot
-bound via fn-defs / bindings. The reconciler invokes the fn with
-empty args.
+The fn it points at must have **no start-blocking free arguments** —
+every slot the fn needs to compute/configure itself at start must be
+bound via fn-defs / bindings. The reconciler invokes the fn with empty
+args. (A listener's handler args — supplied by the deferred invoker per
+request/tick — are NOT start-blocking; see § Guard below.)
 
 To run the same impl with different parameters, **create a derived
 fn-def that binds the slot differently**, then declare a service for
@@ -91,14 +101,46 @@ services spawn).
 | Field             | Type              | Notes                                                              |
 |-------------------|-------------------|--------------------------------------------------------------------|
 | `:id`             | `:uuid`           | Returned to clients as `service-id`.                              |
-| `:fn-id`          | `:ref :fn`        | **Logical** fn id — service tracks the current graph; editing the fn picks up at next restart. (Compare `:fn-execution.fn-version-id` which is a frozen snapshot.) Must point at a fn with zero free args. |
+| `:fn-id`          | `:ref :fn`        | **Logical** fn id — service tracks the current graph; editing the fn picks up at next restart. (Compare `:fn-execution.fn-version-id` which is a frozen snapshot.) Must point at a fn with no start-blocking free args (§ Guard). |
 | `:enabled?`       | `:bool`           | Reconciler only starts enabled rows. Toggle this + reconcile to stop a service without deleting it. |
 | `:restart-policy` | `:restart-policy` | `:always` / `:on-failure` / `:never` — see § Supervisor below.    |
+| `:cardinality`    | `:cardinality`    | `:singleton` / `:per-pod` / `:pool` — how many pods run it at once; see § Cardinality. Nullable; nil ≡ `:singleton` (rows that pre-date the field). |
+| `:pool-size`      | `:int`            | Pod count for `:cardinality :pool` (ignored otherwise). Nullable — a `:pool` row with nil/non-positive size degrades to a singleton. |
 | `:branch-id`      | `:ref :branch`    | Per-branch scope. Reconciler routes the start through `branch-router/ctx-for branch-id`, so the same `:fn-id` can run with branch-specific bindings on dev + prod simultaneously. Nullable — nil falls back to the reconciler's base ctx (= main behavior). The editor's ⚙ popover picker defaults to the editor's current branch on create. |
 
 ### `:restart-policy` enum
 
 `:always`, `:on-failure`, `:never`.
+
+### `:cardinality` enum
+
+How many pods run the service simultaneously:
+
+| Value | Lock? | Use it for | If you get it wrong |
+|-------|-------|-----------|---------------------|
+| `:singleton` | `pg_try_advisory_lock(service-id, slot 0)` on the pod's dedicated lock connection; losers idle with a `::not-our-lock` placeholder | cron / `:schedule` loops, one-shot migrations, anything whose side-effects must happen once per tick | a `:per-pod` cron fires N times per tick, once per pod |
+| `:per-pod` | none — every pod starts its own copy | listeners (`:http-server`), anything a load balancer fans traffic into | a `:singleton` listener means only ONE pod ever binds a port; every other pod fails its healthcheck and the LB sees a single backend no matter how many pods you run |
+| `:pool` (`:pool-size N`) | races for the first free of **N** advisory-lock slots (keys `service-id+0 … +N-1`); holds it | a background worker that should be redundant / parallel across a **bounded** number of pods — not one, not all | too small an N under-provisions; too large just caps at the pod count |
+
+`:pool` generalises `:singleton` (a pool of 1, slot 0). With ≥ N pods
+exactly N run; with fewer pods, one copy each. The pool SIZE is fixed —
+load-driven autoscaling of N is intentionally out of scope (it would need
+a per-service load signal + a scaling controller; the request path scales
+via cells + HPA instead — see docs/SCALING.md).
+
+`app/package.edn` declares the seeded `:default → :web-server` service
+as `:per-pod` for exactly this reason.
+
+The running-atom entry records `:locked?` — whether *this* pod holds the
+advisory lock — so stopping a service releases only locks it actually
+took. A cardinality flip is picked up by the reconciler's config-drift
+detector and stop+restarts the service (dropping the lock on the way to
+`:per-pod`, racing for it on the way back).
+
+Upgrade note: the seeder backfills `:cardinality` onto an existing row
+whose value is nil, taking it from the package declaration. That is what
+moves a pre-existing `:default` row off the singleton default. It only
+touches nil, so a deliberately-set value survives, same as `:enabled?`.
 
 ### Per-branch services
 
@@ -157,6 +199,11 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
 ```clojure
 {service-uuid → {:fn-id            :uuid
                  :restart-policy   :always | :on-failure | :never
+                 :cardinality      :singleton | :per-pod | :pool
+                 :pool-size        Int | nil (slot count; 1 for singleton)
+                 :locked?          Bool
+                 :pool-slot        Int | nil (which advisory-lock slot we hold)
+                 :branch-id        :uuid (set only for per-branch rows)
                  :stopper          (fn []) | nil
                  :started-at       Instant
                  :start-attempts   Int
@@ -166,6 +213,20 @@ Lives in `graphden.services.reconciler`. Diff-driven, idempotent.
 `:stopper` is whatever the fn returned (web-server-shape: a thunk
 that stops the listener; other shapes are logged on stop but otherwise
 ignored). `nil` means the start failed and retries were exhausted.
+
+`:locked?` says whether THIS pod holds one of the service's advisory-lock
+slots, and `:pool-slot` records WHICH slot (0 for a singleton), so stop
+releases exactly the key it took and a post-reconnect re-assert re-takes
+the right one. Only lock-gated (`:singleton` / `:pool`) services take a
+slot; `:cardinality` + `:pool-size` are mirrored onto the entry so the
+config-drift detector notices an admin flipping either.
+
+A pod that couldn't get a slot stores the sentinel `::not-our-lock`
+instead of a map. That placeholder is **transient**: the top of every
+reconcile pass drops it, so the service is re-attempted each pass. This is
+what makes the periodic tick heal a crashed owner — its slot auto-releases
+(no NOTIFY), and a sibling re-acquires it on the next tick rather than
+idling until a `:service` edit happens by.
 
 ## Supervisor
 
@@ -205,19 +266,32 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 `PUT /api/entities/service/:id` updates the row in place;
 `DELETE /api/entities/service/:id` removes it.
 
-**Rejection: free args on target fn.** If `fn-id` points at a fn
-that still has free arguments, the create is rejected with:
+**Rejection: start-blocking free args on target fn.** If `fn-id` points
+at a fn with a free arg it needs to START (a direct unbound operand, or
+one lifted through a data slot), the create is rejected with:
 
 ```html
 <p class="error">Cannot make a :service for a fn that has free args:
-  [:port :handler]. Create a derived fn-def that binds them, then
+  [:nums]. Create a derived fn-def that binds them, then
   declare a :service for the derived fn.</p>
 ```
 
+The guard uses `:service-blocking-free-args`, the service-ability
+projection of `:free-arg-slot-map`: it drops the fn's own top-level
+CALLBACK-slot subtrees (an `:http-server` handler, a `:schedule` body),
+because those free args are the callback's per-invocation concern —
+supplied by the deferred invoker (per request / per tick), not needed
+to start the listener/loop. So a whole-app listener like `web-server`
+(whose ~45 free args all live below its `:handler` HOF slot) is
+service-able, while a genuinely unstartable fn is still rejected. The
+full free-arg surface stays visible to `/api/execute`'s arg form.
+
 ### `POST /api/services/reconcile`
 
-Trigger reconciliation. Without periodic poll, this is the admin's
-"apply changes" button.
+Trigger reconciliation on demand — the admin's "apply changes"
+button. (A periodic tick also reconciles every ~15s, so an
+out-of-band change is picked up either way; this endpoint just makes
+it immediate.)
 
 ```jsonc
 {"ok": true,
@@ -234,7 +308,7 @@ Workarounds:
 - Restart the container so init-key picks up the new rows directly
 - Trigger reconcile from a non-HTTP path (REPL, CLI, future
   supervisor daemon)
-- Wait for the planned periodic-poll feature
+- Wait for the periodic reconcile tick (~15s) to apply it
 
 For services that DON'T displace the API-serving web-server (a
 metrics server on a different port, say), the endpoint works fine
@@ -296,8 +370,12 @@ all loaded packages.
 | Step | What |
 |------|------|
 | Done | `:service` schema, reconciler, integrant, generic CRUD via /api/entities/service, supervisor for startup failures, packages-based seeding, already-running rejection, validation that target fn has zero free args |
-| Next | Periodic reconcile poll (picks up out-of-band DB edits); `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
-| Then | Multi-pod: `:owner-pod-id`, PG advisory-lock leader election for cron, cross-pod cancel routing, advisory-lock connection-drop reconnect + re-acquire (a dropped lock conn silently session-releases the pod's advisory locks — single-pod-latent, but two pods could then double-run one service until the next reconcile stops the loser) |
+| Done | Multi-pod: per-pod reconcilers, PG advisory-lock ownership for `:singleton` services, `:cardinality` so `:per-pod` listeners run everywhere, `service:*` NOTIFY so siblings reconcile within ~1s, lock auto-release on pod crash. No `:owner-pod-id` column — ownership is implicit in who holds the lock. |
+| Done | Periodic reconcile tick (`:exec/service-reconciler`, ~15s) — level-triggered convergence: re-takes a `:singleton` lock after the holder crashes (no NOTIFY is emitted), picks up out-of-band DB edits, reconverges transient start failures. Retry-free under `reconcile-monitor` so a failing start never blocks the listener. The tick actually heals a crash because the reconciler now drops `::not-our-lock` placeholders at the top of every pass (they were sticky before, so an idle pod never re-attempted the freed lock). |
+| Done | `:pool` cardinality (`:pool-size N`) — a service runs on up to N pods, coordinated by N advisory-lock slots (generalises `:singleton` = slot 0). Fixed `:pool-size` only; load-driven autoscaling of N is out of scope (the request path scales via cells + HPA). |
+| Next | `:service-schedule` 1-to-many for cron/interval triggers; UI Services panel (row-actions "Make service" + sidebar "Only services" filter) |
+| Done | Advisory-lock connection-drop reconnect + re-acquire. The lock connection is held behind a reconnecting holder; every reconcile pass runs `advisory-lock/ensure-live!`, and on a reconnect `reassert-lock-ownership!` re-takes each `:singleton` this pod was running (stopping any a sibling stole during the outage). Closes the "two pods double-run one service until the next reconcile" window. |
+| Done | Cross-pod cancel routing for `:fn-execution` — `execution:cancel:<id>` NOTIFY fan-out; see [EXECUTION.md](EXECUTION.md). |
 | Future | Healthcheck-based runtime crash detection (lets `:always` honor "restart on clean exit"); pluggable supervisor strategies |
 
 ## Code locations

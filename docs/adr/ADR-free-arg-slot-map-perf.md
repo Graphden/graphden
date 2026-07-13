@@ -126,6 +126,7 @@ Warm hit is **~30,000× faster** (~1.5 s → ~0.04 ms) with byte-identical
 output.
 
 **Invalidation** — populated the memo (size 3), then:
+
 - `invalidate-graph-cache! ctx` (full arity) → size 0 ✓
 - `invalidate-graph-cache! ctx #{changed}` (delta arity) → size 0 ✓
 - post-invalidate recompute measured 1262 ms (cold again) → the memo was

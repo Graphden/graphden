@@ -13,6 +13,7 @@
    per request and don't warrant graph dispatch overhead, but the
    COMPOSITION (when to encode, when to cache) IS graph-visible."
   (:require
+    [clojure.java.io :as io]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
     [org.httpkit.server :as http-kit])
@@ -21,15 +22,41 @@
       Brotli4jLoader)
     (com.aayushatharva.brotli4j.encoder
       BrotliOutputStream
-      Encoder$Parameters)))
+      Encoder$Parameters)
+    (java.io
+      File)))
 
 
-;; brotli4j ships native binaries (`native-linux-x86_64` jar) that
-;; must be loaded into the JVM once before any encode call. Doing it
-;; at namespace load eliminates a per-request init check. If the
-;; native isn't on the classpath for this JVM's arch, this throws
-;; loudly at startup — much better than the first brotli request
-;; mysteriously failing.
+;; brotli4j ships native binaries (`native-linux-x86_64` jar) that must be
+;; loaded into the JVM once before any encode call. We do it at namespace load
+;; (fail loudly at startup if the arch's native is missing, rather than on the
+;; first brotli request) — BUT NOT via brotli4j's default extraction, which
+;; drops the `.so` into a RANDOM `${tmpdir}/com_aayushatharva_brotli4j_<nanoTime>/`
+;; dir marked `deleteOnExit`. That random, self-deleting path breaks CRaC restore
+;; (docs/FLEET_RFC.md §5.1): CRIU records the mmap of the native lib and re-opens
+;; it at restore, so the file must sit at a STABLE, image-resident path.
+;;
+;; So extract the `.so` ONCE to a deterministic path and point brotli4j at it via
+;; its supported `brotli4j.library.path` property — brotli4j then `System.load`s
+;; that path directly, with no temp dir and no `deleteOnExit`. The dir is
+;; `-Dgraphden.native-lib.dir` (default `${tmpdir}/graphden-native`); a CRaC
+;; image sets it to a persistent baked-in path so the checkpoint mmap survives.
+(defn- ensure-stable-brotli-native!
+  "Extract libbrotli.so from the classpath to a deterministic, persistent path
+   and set `brotli4j.library.path`. Idempotent; returns the `.so` path."
+  []
+  (let [dir (io/file (or (System/getProperty "graphden.native-lib.dir")
+                         (str (System/getProperty "java.io.tmpdir") "/graphden-native")))
+        so  (io/file dir "libbrotli.so")]
+    (File/.mkdirs dir)
+    (when-not (File/.exists so)
+      (with-open [in (io/input-stream (io/resource "lib/linux-x86_64/libbrotli.so"))]
+        (io/copy in so)))
+    (System/setProperty "brotli4j.library.path" (File/.getAbsolutePath so))
+    so))
+
+
+(ensure-stable-brotli-native!)
 (Brotli4jLoader/ensureAvailability)
 
 

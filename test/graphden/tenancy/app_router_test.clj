@@ -1,8 +1,10 @@
 (ns graphden.tenancy.app-router-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.storage.protocol.core :as sp]
     [graphden.tenancy.app-router :as app]
+    [graphden.tenancy.context :as tc]
     [graphden.tenancy.subdomain :as subdomain]))
 
 
@@ -55,13 +57,13 @@
 
 (deftest run-with-timeout-test
   (testing "a fast thunk returns its value"
-    (is (= :done (app/run-with-timeout 1000 (fn [] :done)))))
+    (is (= :done (cr/run-with-timeout 1000 (fn [] :done)))))
   (testing "an overrunning thunk → ::timeout (request bounded)"
-    (is (= :graphden.tenancy.app-router/timeout
-           (app/run-with-timeout 30 (fn [] (Thread/sleep 2000) :done)))))
+    (is (= :graphden.executor.compile-runtime/timeout
+           (cr/run-with-timeout 30 (fn [] (Thread/sleep 2000) :done)))))
   (testing "a throwing thunk → ::error"
-    (is (= :graphden.tenancy.app-router/error
-           (app/run-with-timeout 1000 (fn [] (throw (RuntimeException. "boom"))))))))
+    (is (= :graphden.executor.compile-runtime/error
+           (cr/run-with-timeout 1000 (fn [] (throw (RuntimeException. "boom"))))))))
 
 
 (deftest make-app-router-non-execution-paths
@@ -73,3 +75,115 @@
       (is (nil? (ar ctx (req "graphden.app")))))
     (testing "org with no handler → 404 (it's an app request, don't fall through)"
       (is (= 404 (:status (ar ctx (req "beta.graphden.app"))))))))
+
+
+;; ============================================================================
+;; Shard routing. A pod compiles only `:executor-orgs` (see
+;; `compile-runtime/org-in-shard?`), so a request for an org it doesn't hold
+;; must say "wrong pod" rather than pretend the app isn't deployed.
+;; ============================================================================
+
+(deftest make-app-router-misdirected-when-org-not-in-shard
+  (let [handler-id (random-uuid)
+        storage (org-storage {"acme" handler-id "beta" handler-id})
+        ar (app/make-app-router (subdomain/identity-org-resolver) "graphden.app" nil)]
+    (testing "no shard configured → every org is ours (self-hosted default)"
+      (let [ctx {:storage storage}]
+        (is (not= 421 (:status (ar ctx (req "acme.graphden.app")))))))
+
+    (testing "org outside this pod's shard → 421, not 404"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}}]
+        (is (= 421 (:status (ar ctx (req "beta.graphden.app")))))))
+
+    (testing "an org we DO hold is not misdirected"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}}]
+        (is (not= 421 (:status (ar ctx (req "acme.graphden.app")))))))
+
+    (testing "a shard predicate works the same as a set"
+      (let [ctx {:storage storage :executor-orgs (fn [o] (= "acme" o))}]
+        (is (= 421 (:status (ar ctx (req "beta.graphden.app")))))
+        (is (not= 421 (:status (ar ctx (req "acme.graphden.app")))))))
+
+    (testing "an unconfigured org in our shard still reads as 404, not 421"
+      (let [s (org-storage {"beta" nil})
+            ctx {:storage s :executor-orgs #{"beta"}}]
+        (is (= 404 (:status (ar ctx (req "beta.graphden.app")))))))))
+
+
+(deftest make-app-router-forward-hops-before-421
+  ;; T2.6: a misdirected request consults the `:fleet-forward` seam BEFORE
+  ;; 421'ing — if the org's cell is placed elsewhere the request is proxied
+  ;; there; only a nil seam result falls through to the 421 backstop.
+  (let [handler-id (random-uuid)
+        storage (org-storage {"acme" handler-id "beta" handler-id})
+        ar (app/make-app-router (subdomain/identity-org-resolver) "graphden.app" nil)
+        forwarded {:status 200 :headers {"X-Served-By" "holder"} :body "forwarded"}]
+    (testing "misdirected + a seam that finds a holder → forwards, not 421"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}
+                 :fleet-forward (fn [_req org entry]
+                                  (when (and (= org "beta") (= entry handler-id)) forwarded))}]
+        (is (= forwarded (ar ctx (req "beta.graphden.app")))
+            "beta's request proxied to its holder with the handler-fn-id as the cell entry")))
+
+    (testing "seam returns nil (no placement / byo org) → 421 backstop"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}
+                 :fleet-forward (fn [_ _ _] nil)}]
+        (is (= 421 (:status (ar ctx (req "beta.graphden.app")))))))
+
+    (testing "no seam wired (single-tenant / self-hosted) → 421 as before"
+      (let [ctx {:storage storage :executor-orgs #{"public" "acme"}}]
+        (is (= 421 (:status (ar ctx (req "beta.graphden.app")))))))
+
+    (testing "an org we DO hold is served locally — the seam is never consulted"
+      (let [consulted (atom false)
+            ctx {:storage storage :executor-orgs #{"public" "acme"}
+                 :fleet-forward (fn [_ _ _] (reset! consulted true) nil)}]
+        (is (not= 421 (:status (ar ctx (req "acme.graphden.app")))))
+        (is (false? @consulted) "held org never hits the forward path")))))
+
+
+;; ============================================================================
+;; BYO refusal — a hosted pod 421s a :byo org (it runs on the customer's own
+;; executor); a BYO executor pod serves it.
+;; ============================================================================
+
+(defn- org-storage-with-mode
+  "Fake storage whose `:org` rows carry `:execution-mode`. `name->mode` maps
+   org → \"hosted\"/\"byo\" (all orgs also get a dummy handler so the app path
+   reaches the byo check, not the not-configured branch)."
+  [name->mode]
+  (reify sp/StorageCRUD
+    (query-entities
+      [_ en where]
+      (when (= en :org)
+        (let [n (:name where)]
+          (when (contains? name->mode n)
+            [{:name n :handler-fn-id (random-uuid) :execution-mode (get name->mode n)}]))))
+
+    (query-entities [_ _ _ _] nil)
+
+    (create-entity [_ _ _] nil)
+
+    (read-entity [_ _ _] nil)
+
+    (update-entity [_ _ _ _] nil)
+
+    (delete-entity [_ _ _] nil)
+
+    (query-latest-per-group [_ _ _ _] nil)))
+
+
+(deftest make-app-router-421s-byo-org-on-a-hosted-pod
+  (tc/invalidate-byo-cache!)
+  (let [storage (org-storage-with-mode {"acmebyo" "byo" "acmehosted" "hosted"})
+        ar (app/make-app-router (subdomain/identity-org-resolver) "graphden.app" nil)]
+    (testing "hosted pod (no :byo-executor?) → 421 for a :byo org"
+      (let [ctx {:storage storage}]
+        (is (= 421 (:status (ar ctx (req "acmebyo.graphden.app")))))))
+    (testing "hosted pod serves a :hosted org normally (not 421)"
+      (let [ctx {:storage storage}]
+        (is (not= 421 (:status (ar ctx (req "acmehosted.graphden.app")))))))
+    (testing "a BYO executor pod serves its :byo org"
+      (let [ctx {:storage storage :byo-executor? true}]
+        (is (not= 421 (:status (ar ctx (req "acmebyo.graphden.app")))))))
+    (tc/invalidate-byo-cache!)))

@@ -140,7 +140,7 @@ Two-layer fetch model:
 ```edn
 {:name :head
  :parent :with-cdn-script
- :args {:head :_head-with-cytoscape
+ :args {:head :head-elements-0
         :url "https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"}}
 ```
 

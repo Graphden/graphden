@@ -64,17 +64,24 @@
         grants   [{:id :g1 :subject "alice" :subject-id nil}    ; stamped
                   {:id :g2 :subject "ghost" :subject-id nil}]   ; no such user → left
         storage  (reify sp/StorageCRUD
-                   (query-entities [_ ent where]
+                   (query-entities
+                     [_ ent where]
                      (case ent
                        :token tokens
                        :grant grants
                        :user  (filterv #(= (:username %) (:username where)) users)
                        nil))
+
                    (query-entities [_ _ _ _] nil)
+
                    (update-entity [_ ent id data] (swap! updates conj [ent id data]) data)
+
                    (create-entity [_ _ _] nil)
+
                    (read-entity [_ _ _] nil)
+
                    (delete-entity [_ _ _] nil)
+
                    (query-latest-per-group [_ _ _ _] nil))
         result   (users/backfill-auth-subject-ids! storage)]
     (testing "counts only the rows actually stamped"
@@ -86,5 +93,5 @@
       (is (= [:grant :g1 {:subject-id (str alice-id)}]
              (first (filter #(= :grant (first %)) @updates)))))
     (testing "already-stamped + unresolvable rows are NOT written"
-      (is (not (some #(= :t2 (second %)) @updates)))
-      (is (not (some #(= :g2 (second %)) @updates))))))
+      (is (not-any? #(= :t2 (second %)) @updates))
+      (is (not-any? #(= :g2 (second %)) @updates)))))

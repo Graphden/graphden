@@ -42,8 +42,8 @@ const TEST_NAME = 'test-fn-picker-filter';
     // Wait for cytoscape and the unset-placeholder overlay (which
     // is what the next step actually targets).
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
-            && !cy.animated()
+      () => graphReady()
+            && !graph.animating
             && Array.from(document.querySelectorAll('.node-overlay'))
                  .some((el) => /^unset-/.test(el.getAttribute('data-node-id') || '')),
       null,

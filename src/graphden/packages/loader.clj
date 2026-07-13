@@ -496,6 +496,7 @@
                        :fn-name :web-server
                        :enabled? true
                        :restart-policy :always
+                       :cardinality :per-pod
                        :description \"…\"} …]}"
   [package-names]
   (let [ordered (resolve-dependencies package-names)

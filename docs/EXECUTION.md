@@ -168,6 +168,13 @@ Sets `:cancel-requested? true` + `future-cancel`. **Best-effort**:
 - **Blocking JDBC** / sleep / blocking IO inside a base-fn won't
   respond to `Thread.interrupt()` without explicit cooperation
   (e.g., `Statement.cancel()`). Documented as a soft contract.
+- **Multi-pod**: `futures-registry` is per-process, so the pod that
+  receives the cancel is usually not the pod running the execution.
+  When it doesn't own the future it emits `execution:cancel:<id>` on
+  `graphden_events`; every pod calls `persist/cancel-local!` and at
+  most one owns it. Setting the DB flag alone would do nothing —
+  `*cancel-check*` reads the in-process atom, not the row. See
+  [SCALING.md](SCALING.md).
 
 ### `GET /api/executions?fn-id=X`
 
@@ -178,6 +185,20 @@ Sets `:cancel-requested? true` + `future-cancel`. **Best-effort**:
 Lists rows across all versions of base `:fn-id`, ordered
 `:started-at` desc, hard-limited at 20. Summary shape (no nested
 args). Editor's History panel calls this.
+
+## Concurrency caps
+
+Two caps gate how many executions run at once, with different scopes
+(see `crud.fn-execution.persist/acquire-execution-slot!`):
+
+| Cap | Env | Default | Scope |
+|-----|-----|---------|-------|
+| Global | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS` | 128 | Per-POD. Protects the JVM's unbounded soloExecutor from thread exhaustion. |
+| Per-org | `GRAPHDEN_MAX_CONCURRENT_EXECUTIONS_PER_ORG` | 32 | **Fleet-wide for tenants** (counts pending `:fn-execution` rows in shared storage, so N pods share one budget); per-pod atom for the public/platform org. |
+
+Hitting either cap rejects the request without creating a row or future:
+`{:ok false :status :rejected :error-data {:reason :over-capacity}}`. See
+[SCALING.md § Fleet-wide per-org quota](SCALING.md).
 
 ## Wire caps
 

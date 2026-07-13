@@ -34,7 +34,7 @@
       (subs h 7))))
 
 
-(defn- constant-time-equal?
+(defn constant-time-equal?
   "Timing-safe string compare — mirrors core.logic's
    `:constant-time-equal?`. `MessageDigest/isEqual` XOR-accumulates every
    byte instead of short-circuiting on first mismatch, so it doesn't leak

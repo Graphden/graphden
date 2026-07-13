@@ -1,0 +1,85 @@
+# Graphden executor-fleet Helm values. See docs/FLEET_DEPLOY.md.
+
+image:
+  repository: graphden/executor-server
+  tag: "" # defaults to .Chart.appVersion when empty
+  pullPolicy: IfNotPresent
+
+# Fixed fleet size. Ignored for scaling decisions when autoscaling.enabled
+# (HPA owns the replica count then) but still the initial count.
+replicaCount: 3
+
+# The container port the executor listens on (Dockerfile fixes it at 8080).
+port: 8080
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# LB / ingress entry point for tenant traffic — fronts the whole fleet; the
+# per-pod forward-hop routes a request to the cell's holder internally.
+service:
+  type: ClusterIP
+  port: 80
+  # nodePort: 30080   # set with type: NodePort to expose on a fixed node port
+  #                     (e.g. a kind extraPortMapping → host port → reverse proxy)
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 768Mi
+  limits:
+    memory: 1536Mi
+
+# HorizontalPodAutoscaler over the StatefulSet. The SRV membership (headless
+# Service) tracks the pods HPA adds/removes; the placement controller
+# load/evicts cells to match (docs/FLEET_RFC.md §6.2, §7).
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# External Postgres (a managed DB — the fleet does NOT run its own). The
+# password comes from the Secret (secrets.dbPassword / existingSecret).
+database:
+  jdbcUrl: "jdbc:postgresql://postgres:5432/graphden"
+  username: graphden
+  poolSize: 10
+
+# Secrets. Either let the chart create one from the values below, or point at a
+# pre-existing Secret with keys: auth-token, internal-token, db-password
+# (and vault-token when vault.enabled).
+secrets:
+  create: true
+  existingSecret: ""
+  authToken: ""      # platform AUTH_TOKEN
+  internalToken: ""  # GRAPHDEN_INTERNAL_TOKEN — control-plane cell-command gate
+  dbPassword: graphden
+
+vault:
+  enabled: false
+  address: ""
+
+# Placement-controller tuning (docs/FLEET_RFC.md §6.3). Read by the leader pod.
+fleet:
+  controllerPeriodMs: 30000
+  sustainTicks: 3
+  minImprovement: "0.0"
+  maxMoves: "" # empty ⇒ unbounded
+
+# Boot is slow (package load + type-check sweep + eager compile, ~35-110s), so
+# the startup probe grants a generous budget before liveness starts counting.
+probes:
+  startupPeriodSeconds: 10
+  startupFailureThreshold: 30 # 30 * 10s = 5 min boot budget
+  livenessPeriodSeconds: 30
+  readinessPeriodSeconds: 10
+
+# Extra env (name/value) appended to every pod.
+extraEnv: []
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

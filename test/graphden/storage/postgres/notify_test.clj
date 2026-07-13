@@ -44,9 +44,38 @@
 ;; ============================================================================
 
 (deftest payload-roundtrip-test
-  (testing "format then parse → identity"
+  (testing "format then parse → identity (no branch)"
     (let [event {:kind :service :op :write :id "abc-123"}]
       (is (= event (pg-notify/parse-payload (pg-notify/format-payload event))))))
+
+  (testing "format then parse → identity (with branch)"
+    (let [event {:kind :fn :op :invalidate :id "fn-1" :branch-id "br-9"}]
+      (is (= event (pg-notify/parse-payload (pg-notify/format-payload event))))))
+
+  (testing "full-clear: empty id, branch still carried"
+    (let [payload (pg-notify/format-payload
+                    {:kind :fn :op :invalidate :id "" :branch-id "br-9"})]
+      (is (= "fn:invalidate:|br-9" payload))
+      (is (= {:kind :fn :op :invalidate :id "" :branch-id "br-9"}
+             (pg-notify/parse-payload payload)))))
+
+  (testing "a payload from a pod that predates :branch-id omits the key"
+    (is (= {:kind :fn :op :invalidate :id "fn-1"}
+           (pg-notify/parse-payload "fn:invalidate:fn-1"))))
+
+  (testing "org-id rides in the third slot; branch + org round-trip"
+    (let [event {:kind :fn :op :invalidate :id "fn-1" :branch-id "br-9" :org-id "acme"}]
+      (is (= "fn:invalidate:fn-1|br-9|acme" (pg-notify/format-payload event)))
+      (is (= event (pg-notify/parse-payload (pg-notify/format-payload event))))))
+
+  (testing "org with NO branch forces an empty branch slot so positions align"
+    (let [event {:kind :fn :op :invalidate :id "fn-1" :org-id "acme"}]
+      (is (= "fn:invalidate:fn-1||acme" (pg-notify/format-payload event)))
+      (is (= event (pg-notify/parse-payload "fn:invalidate:fn-1||acme")))))
+
+  (testing "an older payload without the org slot omits :org-id"
+    (is (= {:kind :fn :op :invalidate :id "fn-1" :branch-id "br-9"}
+           (pg-notify/parse-payload "fn:invalidate:fn-1|br-9"))))
 
   (testing "parse on a malformed payload → nil"
     (is (nil? (pg-notify/parse-payload "")))
@@ -54,6 +83,18 @@
     (is (nil? (pg-notify/parse-payload "only:one-colon")))
     (is (nil? (pg-notify/parse-payload nil)))
     (is (nil? (pg-notify/parse-payload 42)))))
+
+
+(deftest make-emitter-swallows-a-notify-failure
+  ;; A NOTIFY is best-effort: the row write already committed, so a transient
+  ;; pg_notify failure must NOT throw back into the caller (which could roll it
+  ;; back). The reconcile/mutation path is the correctness mechanism; NOTIFY
+  ;; only speeds propagation.
+  (let [bad-ds (reify javax.sql.DataSource
+                 (getConnection [_] (throw (java.sql.SQLException. "pool exhausted"))))
+        emit (pg-notify/make-emitter bad-ds)]
+    (is (nil? (emit {:kind :fn :op :invalidate :id "x"}))
+        "the SQLException is swallowed, emit returns nil")))
 
 
 ;; ============================================================================

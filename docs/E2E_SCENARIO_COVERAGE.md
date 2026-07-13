@@ -130,7 +130,7 @@ pin/unpin, prefs theme + sidebar) have shipped — see the matrix above._
 |---|---|---|
 | Hover tooltip (description + full-name popovers) | `editor-tooltips` | Hover events are notoriously flake-prone in e2e — would need slow polling |
 | ↗ open-in-new-tab fn-card link | `editor-icons` | Trivial; failure obvious to first user |
-| Drag-and-reposition overlay | `editor-drag` | Cosmetic; cytoscape handles the heavy lifting |
+| Drag-and-reposition overlay | `editor-drag` | Cosmetic; mutates the node position + re-runs the geometry pass |
 | Type-chip ▸/▾ inline expansion panel | `editor-overlay-type-expand` | Provenance popover tests would surface most regressions |
 | Tier-2 custom value-form widget (rating slider) | `editor-widget-rating` | Sample/reference code; if broken, only sample fails |
 | Bottom-of-card metadata strips (effects/parents/ns/HOF) | `editor-overlay-strips` | Read-only display; covered indirectly via overlay manager smoke |
@@ -141,7 +141,8 @@ These editor modules are foundation layer, exercised through every
 test that uses them. A failure here would surface as 40+ test fails,
 which is the e2e signal we want:
 
-`editor-busy`, `editor-cytoscape`, `editor-drag`,
+`editor-busy`, `editor-graph-model`, `editor-render`, `editor-viewport`,
+`editor-graph-view`, `editor-edges-svg`, `editor-drag`,
 `editor-overlay-manager`, `editor-overlay-arg`, `editor-overlay-edge-label`,
 `editor-popover-base`, `editor-state`, `editor-data`, `editor-layout`,
 `editor-edit-validation`, `editor-edit-modes`, `editor-edit-reparent`,

@@ -1,0 +1,23 @@
+{{/*
+Front-door Service — load-balances tenant traffic across the whole fleet. A
+request landing on any pod is forward-hopped to the cell's holder internally
+(docs/FLEET_RFC.md §6.1), so a plain round-robin LB here is correct.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graphden.fullname" . }}
+  labels:
+    {{- include "graphden.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "graphden.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}

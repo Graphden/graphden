@@ -11,7 +11,7 @@ GraphConstraints, StorageCRUD + PostgreSQL (recursive-CTE) + VersionedStorage,
 the compile-at-startup executor, the full base-fn set (arithmetic / logic / HOF
 / collections / strings / system / web: http, reitit, html, crud, ring-adapter,
 http-client), the type system (refinements / records / lists / unions /
-variants + rich-type registry), the Cytoscape editor, the REST API
+variants + rich-type registry), the visual graph editor, the REST API
 (`/api/graph/*`, `/api/entities/*`, `/api/sequence/*`, `/api/execute*`), branch
 versioning, the tenancy addon (orgs / users / grants / RLS / effect-gate / FaaS
 — see [PLATFORM_PLAN.md](PLATFORM_PLAN.md)), the package registry
@@ -96,31 +96,42 @@ Block total: **~4-5 weeks**
 
 ### Block 7 — Horizontal scaling foundation
 
-**Critical path for Cloud-Shared launch; deferrable if shipping
-only Self-Hosted + Cloud-Dedicated.** Without this block running
-more than one executor process is best-effort — fn-def writes on
-one node don't invalidate compiled registries on others.
+**Largely SHIPPED.** See [SCALING.md](SCALING.md) for the as-built
+picture; this entry now only tracks what remains.
 
-Sub-block A — **Multi-process executors over shared Postgres**:
-each JVM instance serves requests independently; load balancer in
-front (nginx / ALB / etc.); each executor builds its own
-`:compiled-registry` from the shared storage at startup. The
-self-hosted single-pod path is unchanged. Tested by spinning two
-containers against one PG and round-tripping CRUD across them.
+Sub-block A — **Multi-process executors over shared Postgres** —
+DONE. Each JVM builds its own `:compiled-registry` at startup; the
+seeded `:web-server` service is `:cardinality :per-pod` so every
+container binds its own port behind a load balancer. (Before that
+field existed, the advisory lock made `:web-server` a cluster
+singleton and only one pod ever served HTTP.)
 
-Sub-block B — **Cross-process fn-def invalidation via Postgres
-LISTEN / NOTIFY**: every storage write that today calls
-`invalidate-graph-cache!` also emits a `NOTIFY graphden_invalidate
-<payload>` carrying the affected fn-ids. Each executor LISTENs on
-the same channel and re-fires its local invalidate when it
-receives a NOTIFY from a sibling. Per-branch routing already
-in-process; the new layer is the cross-process pub/sub.
+Sub-block B — **Cross-process invalidation via Postgres
+LISTEN / NOTIFY** — DONE. Channel `graphden_events`, payload
+`fn:invalidate:<fn-id>|<branch-id>`, delta-recompiled through the
+reverse-deps index. The branch-id is load-bearing: a cached branch
+that inherits from the written branch must recompile, and one that
+doesn't must not.
 
-Estimated total: **~3-4 weeks** (A: ~1, B: ~2-3 incl. concurrency
-testing across multiple containers).
+Also shipped alongside: per-service `:cardinality`, advisory-lock
+ownership for `:singleton` services, cross-pod `execution:cancel`
+routing, and `:executor-orgs` — an org-shard predicate that lets a
+pod compile only the tenants it serves.
 
-Dependencies: Block 1 (storage-as-graph) + Block 2 (orgs/users for
-tenant routing).
+Requests that reach a pod outside their org's shard get a
+`421 Misdirected Request` from both entry points (editor/API
+request-scope and the FaaS app-router), so a shard-unaware load
+balancer degrades to a retry rather than to a wall of missing fns.
+
+The fleet-wide per-org quota, advisory-lock connection-drop reconnect,
+the periodic reconcile tick, and the external / BYO executor
+(`graphden.byo` + `RemoteStorage` + SSE relay/source) all landed — see
+[SCALING.md](SCALING.md) and SERVICES.md § Roadmap.
+
+**Remaining**: optionally an LB rule that routes by subdomain so the 421
+stays a backstop rather than a hot path, and a real BYO executor on a
+second physical machine end-to-end (proven in one JVM today — see
+SCALING.md § Still open).
 
 ### Block 8 — Hot-reload of impls (optional)
 
@@ -243,8 +254,11 @@ than text-diffs.
   and a routing layer dispatches by fn-id popularity. Requires
   millions-of-fns scale + heavy per-impl resource cost to pay back
   the orchestration complexity. We are not there for the next ~24
-  months minimum. Block 7's "every executor holds everything"
-  shape scales fine for thousands of fn-defs in modest-RAM JVMs.
+  months minimum. Still not planned — and note that the pressure it
+  was meant to relieve (a cloud pod compiling every tenant's fns) is
+  answered instead by **org sharding** (`:executor-orgs`, see
+  [SCALING.md](SCALING.md)), which needs no fn-level router because a
+  request already names its org.
 
 ---
 

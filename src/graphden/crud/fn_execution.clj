@@ -129,7 +129,12 @@
                                          v)])))
                             (:args parsed))
         cancel-flag (atom false)
-        release (persist/acquire-execution-slot! (tc/current-org))]
+        ;; A tenant's per-org cap is enforced FLEET-WIDE (counting pending
+        ;; rows in shared storage); the public/platform org keeps the per-pod
+        ;; atom. `storage` is the org-scoped request storage, so the fleet
+        ;; count sees only this org's own rows.
+        org (tc/current-org)
+        release (persist/acquire-execution-slot! storage org (not= org tc/public-org))]
     (if (nil? release)
       ;; Global or per-org concurrency cap hit — reject WITHOUT creating a
       ;; row or a future, so a client can't pile unbounded compute onto the
@@ -338,20 +343,32 @@
 ;; =============================================================================
 
 (defn cancel-execution!
-  "Mark the row's `:cancel-requested?` true, set the in-process
-   cancel-flag (executor's `*cancel-check*` will observe), and
-   `future-cancel`. Best-effort — JDBC / blocking-IO in flight won't
-   respond to interrupt."
+  "Mark the row's `:cancel-requested?` true, then stop the future.
+
+   The future may not be ours. `futures-registry` is per-process, so with
+   several pods behind a load balancer the cancel request usually lands
+   on a pod that isn't running the execution. When we don't own it, fan
+   the request out on `graphden_events` — the owning pod's listener calls
+   `persist/cancel-local!`. Without that hop the DB flag would be set and
+   the execution would keep running, because `*cancel-check*` reads the
+   in-process cancel-flag atom, not the row.
+
+   Best-effort throughout — JDBC / blocking-IO in flight won't respond to
+   interrupt, and a single-pod deployment never emits the event."
   [ctx execution-id]
   (let [storage (request/require-storage ctx)
-        row (sp/read-entity storage :fn-execution execution-id)
-        entry (persist/lookup-future execution-id)]
+        row (sp/read-entity storage :fn-execution execution-id)]
     (when row
       (sp/update-entity storage :fn-execution execution-id
                         {:cancel-requested? true})
-      (when entry
-        (reset! (:cancel-flag entry) true)
-        (future-cancel (:future entry)))
+      (when-not (persist/cancel-local! execution-id)
+        (when-let [emit (:notify-emitter ctx)]
+          ;; Tag with the row's org so the SSE relay fans the cancel out only
+          ;; to that org's subscribers (uniform with fn-invalidate events),
+          ;; instead of leaking a bare execution UUID to every org's remote
+          ;; executors. nil org (single-tenant) still reaches everyone.
+          (emit (cond-> {:kind :execution :op :cancel :id (str execution-id)}
+                  (:org-id row) (assoc :org-id (:org-id row))))))
       {:ok true :cancel-requested true})))
 
 

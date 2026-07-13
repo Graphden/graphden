@@ -418,6 +418,15 @@ enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user
   Так нет per-org компиляции и нет shared-`main` leak. ref-cache keyed
   `[org ref]`. Побочно чинит латентный баг app-router (его registry был
   public-only). Доказано `faas-app-test` (27/91), branch-router+lifecycle+rls.
+  **Уточнение (2026-07):** «registry держит fns всех org» — это дефолт, а не
+  инвариант. `:executor-orgs` на ctx сужает компиляцию до шарда пода
+  (`org-id ∈ predicate ∪ NULL`), чем и закрывается рост реестра по числу
+  тенантов, dedicated-под для платного тарифа и внешний executor. Изоляция
+  по-прежнему на runtime `:storage` + гейтах — шард это про РЕСУРСЫ, не про
+  безопасность. Корректность шарда держится на `reject-cross-org-refs!`
+  (`tenancy/storage.clj`): раньше «нет cross-org ref» было эмерджентным
+  следствием read-фильтра, теперь это проверка на записи. См.
+  [SCALING.md](SCALING.md).
 - **Follow-ups:**
   - **per-org branch-names** — `UNIQUE (org-id, name) NULLS NOT DISTINCT`
     (PG 15+). Разные org переиспользуют имя без cross-org коллизии/leak;
@@ -446,6 +455,14 @@ enumeration authz, `:domain` → hijack роутинга, `:org`/`:token`/`:user
 ---
 
 ### 3.4. ADR: tenant-приложения = FaaS (handler-only), НЕ PaaS (свой сервер)
+
+> **Как включается (as-built).** App-routing больше НЕ зашит в базовый tenancy-
+> аддон: он в отдельном фрагменте `resources/graphden/tenancy/faas.edn` (app-
+> router + `:org`-схема), подключаемом через
+> `GRAPHDEN_ADDON_CONFIGS=graphden/tenancy/addon.edn,graphden/tenancy/faas.edn`.
+> В шардированном флоте app-router перед `421` консультирует seam
+> `:fleet-forward` (`app_router.clj`) — форвард-хоп на executor, держащий cell
+> орга (docs/FLEET_RFC.md §6.1). См. [FLEET_DEPLOY.md](FLEET_DEPLOY.md).
 
 **Решение (заменяет подход «service-sandbox» из §3.3-note).** Облачный
 тенант НЕ владеет `:service`/веб-сервером (Heroku-модель). Вместо этого —
@@ -535,9 +552,10 @@ FaaS-ядро + изоляция + sandbox доказаны (`faas-app-test`, 12
    policy + `org-aware-datasource` wrap + `rls-test` под non-superuser `SET ROLE`).
    Осталась только инфра: запустить процесс под non-superuser ролью —
    задокументировано в `DEPLOYMENT.md § Multi-tenancy: non-superuser DB role`.
-4. *(scale, не блокер запуска)* multi-instance оркестрация — сейчас один
-   web-server мультиплексирует все org через app-router; «N серверов / порт
-   через функцию» — рефайнмент под нагрузку.
+4. *(scale, не блокер запуска)* multi-instance оркестрация — **в основном
+   отгружено**: multi-pod + org-шардинг (`:executor-orgs`) + `421` +
+   fleet-квота + внешний/BYO-executor. См. `SCALING.md`. Открыт только
+   реальный BYO-executor на второй физической машине (доказан в одном JVM).
 
 Остальное (Фаза-1 пакеты R4/версии, тип-R2, модель юзера §4.x, addon-active
 e2e) — не на критическом пути запуска.
@@ -695,8 +713,10 @@ Platform-ctx (`public-org`) остаётся unrestricted. Ограничени�
 
 Реестр пакетов — естественная точка paywall (gate на publish/install приватных
 и премиум-пакетов). Смешанный режим (bring-your-own-executor) — сам по себе
-платная фича. Это **не убивает проект**, а наоборот — даёт несколько ортогональных
-рычагов монетизации, не ломая бесплатный self-hosted путь.
+платная фича; **механика отгружена** (`graphden.byo` + `:org.execution-mode`,
+см. `SCALING.md`), остаётся навесить на неё биллинг. Это **не убивает проект**,
+а наоборот — даёт несколько ортогональных рычагов монетизации, не ломая
+бесплатный self-hosted путь.
 
 ---
 

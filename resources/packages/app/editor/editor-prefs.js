@@ -103,9 +103,9 @@ function applyTheme(dark) {
     btn.innerHTML = dark ? SUN_SVG : MOON_SVG;
     btn.title = dark ? 'Switch to light theme' : 'Switch to dark theme';
   }
-  // Cytoscape draws to canvas — its style needs to be re-resolved against
-  // the new CSS vars after the body class flips.
-  if (typeof applyThemeToCytoscape === 'function') applyThemeToCytoscape();
+  // Nothing else to do: edges are SVG (`stroke: var(--fg)`) and cards are HTML,
+  // so both re-resolve their tokens when the body class flips. The canvas
+  // stylesheet used to have to be rebuilt by hand here.
 }
 
 // =============================================================================
@@ -142,7 +142,7 @@ function installResizeHandle() {
     document.body.classList.remove('resizing-sidebar');
     const finalW = sidebar.getBoundingClientRect().width;
     setStoredWidth(Math.round(finalW));
-    // No cy.resize needed: the cytoscape canvas is anchored to the
+    // Nothing to resize: the graph surface is anchored to the
     // full-viewport graph-container, not the shrinking sidebar.
   });
 }
@@ -153,7 +153,7 @@ function installResizeHandle() {
 
 // Toggles the sidebar collapsed state. With overlay layout the sidebar
 // slides via CSS `transform: translateX(...)` over a graph-container
-// that never reflows — cytoscape stays completely idle, edges don't
+// that never reflows — the graph stays completely idle, edges don't
 // recompute, and no pan compensation is needed. The whole animation
 // is GPU-composited.
 function toggleCollapsed(targetCollapsed) {

@@ -124,6 +124,42 @@
       (is (= #{X} (deps/transitive-blast {} [X]))))))
 
 
+(deftest forward-closure-walks-forward-edges-test
+  ;; The cell walk (docs/FLEET_RFC.md §3): what a root DEPENDS ON, transitively.
+  (testing "closure includes the root + every transitive dependency"
+    (let [A #uuid "00000000-0000-0000-0000-00000000000a"
+          B #uuid "00000000-0000-0000-0000-00000000000b"
+          C #uuid "00000000-0000-0000-0000-00000000000c"
+          D #uuid "00000000-0000-0000-0000-00000000000d"
+          ;; forward: A depends on B, B on C, C on D
+          fwd {A #{B}, B #{C}, C #{D}}]
+      (is (= #{A B C D} (deps/forward-closure fwd [A]))
+          "root A's cell = A + everything it transitively needs")
+      (is (= #{C D} (deps/forward-closure fwd [C])))
+      (is (= #{D} (deps/forward-closure fwd [D])) "leaf dependency = just itself")))
+
+  (testing "a root with no dependencies is a one-fn cell"
+    (let [X #uuid "00000000-0000-0000-0000-00000000000a"]
+      (is (= #{X} (deps/forward-closure {} [X])))))
+
+  (testing "over a real build-deps-state — the cell is the ref-closure of the root"
+    (let [BASE  #uuid "00000000-0000-0000-0000-000000000002"
+          UTIL  #uuid "00000000-0000-0000-0000-000000000003"
+          ROOT  #uuid "00000000-0000-0000-0000-00000000000a"
+          OTHER #uuid "00000000-0000-0000-0000-00000000000b"
+          graph (->graph
+                  [{:id BASE :parent-ids []}
+                   {:id UTIL :parent-ids [BASE]}
+                   {:id ROOT :parent-ids [UTIL] :base-fn-id BASE}
+                   {:id OTHER :parent-ids []}]
+                  [] [])
+          {:keys [forward-deps]} (deps/build-deps-state graph)]
+      (is (= #{ROOT UTIL BASE} (deps/forward-closure forward-deps [ROOT]))
+          "ROOT's cell pulls in UTIL + BASE, but NOT the unrelated OTHER")
+      (is (not (contains? (deps/forward-closure forward-deps [ROOT]) OTHER))
+          "a fn outside the root's ref-closure is not in the cell"))))
+
+
 (deftest incremental-update-matches-full-rebuild-test
   ;; The invariant: after any sequence of CRUDs on a graph,
   ;; incrementally updating the deps-state must produce the SAME

@@ -24,9 +24,9 @@ const {chromium} = require('playwright');
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#ex-outer');
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+      () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
 
@@ -42,21 +42,21 @@ const {chromium} = require('playwright');
     // Poll until expansion settles — arg-* overlays render after
     // the click triggers layout + Cytoscape paint.
     await page.waitForFunction(() => {
-      if (typeof cy === 'undefined') return false;
-      const args = cy.nodes()
-        .filter(n => (n.data('id') || '').startsWith('arg-'))
-        .map(n => n.data('label'));
-      return args.length > 0 && !cy.animated();
+      if (!graphReady()) return false;
+      const args = graphView.nodeList()
+        .filter(n => (n.data.id || '').startsWith('arg-'))
+        .map(n => n.data.label);
+      return args.length > 0 && !graph.animating;
     },null,  {timeout: 8000, polling: 100});
 
     const overlays = await page.evaluate(() => {
-      if (typeof cy === 'undefined') return null;
-      return cy.nodes()
-        .filter(n => (n.data('id') || '').startsWith('arg-'))
-        .map(n => n.data('label'));
+      if (!graphReady()) return null;
+      return graphView.nodeList()
+        .filter(n => (n.data.id || '').startsWith('arg-'))
+        .map(n => n.data.label);
     });
 
-    if (!overlays) throw new Error('cy not initialised');
+    if (!overlays) throw new Error('graph not initialised');
 
     const firstCount = overlays.filter(l => l === '"first"').length;
     if (firstCount !== 1) {

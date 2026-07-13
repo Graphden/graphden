@@ -1,29 +1,54 @@
 // Editor Overlay (manager) - base `createOverlay` factory, the
 // placeholder-overlay binder, and the `createNodeOverlays` /
 // `updateOverlayPositions` lifecycle.
-// Depends on: editor-state.js, editor-data.js, editor-drag.js.
+// Depends on: editor-state.js, editor-data.js, editor-drag.js,
+// editor-graph-view.js (gv), editor-layout.js (taxiBendX, computeRowCenters).
 
 // ============================================================================
 // OVERLAY REGISTRY
 // ============================================================================
 //
-// Cytoscape fires `pan zoom` events at high rate (every wheel tick,
-// every drag delta), and updateOverlayPositions also runs every frame
-// inside the RAF loop in editor-cytoscape.js. `document.querySelectorAll(
-// '.node-overlay')` on every tick scans the entire DOM and rebuilds a
-// fresh NodeList — for a graph with 200 overlays this is ~12k DOM
-// hits/sec just for the position update. Cache the elements in Maps
-// keyed by their identity (cy node-id / edge-id) so position updates
-// iterate a hashmap instead of touching the DOM.
+// `syncOverlayGeometry` runs every frame of a node animation and on every
+// pointer move of a drag. `document.querySelectorAll('.node-overlay')` on each
+// of those scans the whole DOM and rebuilds a NodeList — for 200 overlays that
+// is thousands of DOM hits a second, just to move things. Cache the elements in
+// Maps keyed by node / edge id so the geometry pass walks a hashmap instead.
 //
 // `registerNodeOverlay` / `registerEdgeOverlay` are called by every
 // overlay-creation site (createOverlay factory + placeholder +
 // edge-label). `unregisterOverlay` is called from removal sites in
-// editor-cytoscape.js. `removeAllOverlays` skips the optional
+// editor-render.js. `removeAllOverlays` skips the optional
 // "preserved" id (the overlay the user is currently hovering, which
 // we keep across rebuilds so mouseleave doesn't fire).
 const _overlaysByNodeId = new Map();
 const _edgeOverlaysByEdgeId = new Map();
+
+// ============================================================================
+// THE GRAPH LAYER
+// ============================================================================
+//
+// Every overlay lives inside ONE absolutely-positioned div that carries the
+// viewport transform. Overlays are then laid out in GRAPH coordinates and
+// never move again: panning and zooming rewrite a single `transform` on the
+// layer instead of touching `left`/`top`/`width`/`transform` on all ~200
+// overlays. `translate(pan) scale(zoom)` maps a point v to `pan + zoom*v`,
+// which is exactly the projection the per-overlay code used to do by hand.
+//
+// The layer is zero-sized on purpose: its children are absolutely positioned
+// and overflow it, so it never intercepts pointer events of its own.
+const GRAPH_LAYER_ID = 'graph-layer';
+
+function getGraphLayer() {
+  let layer = document.getElementById(GRAPH_LAYER_ID);
+  if (!layer) {
+    const container = document.getElementById('graph-surface');
+    if (!container) return null;
+    layer = document.createElement('div');
+    layer.id = GRAPH_LAYER_ID;
+    container.appendChild(layer);
+  }
+  return layer;
+}
 
 function registerNodeOverlay(el) {
   const id = el.dataset.nodeId;
@@ -137,9 +162,9 @@ function createPlaceholderOverlay(node, container) {
     }
   });
 
-  // Position the binder over the placeholder node's cytoscape footprint.
-  // Reuses .node-overlay's pan/zoom positioning so the +.button tracks
-  // the node through layout changes.
+  // Position the binder over the placeholder node's footprint. Reuses
+  // .node-overlay's graph-coordinate positioning so the `+` button tracks the
+  // node through layout changes.
   const wrap = document.createElement('div');
   wrap.className = 'node-overlay placeholder-overlay';
   wrap.dataset.nodeId = node.id();
@@ -177,141 +202,217 @@ function createNodeOverlays() {
   // a full-DOM querySelectorAll scan).
   _removeAllNodeOverlays(preservedOverlayId);
 
-  if (!cy) return;
+  if (!gv.ready()) return;
 
-  const container = document.getElementById('cy');
+  const container = getGraphLayer();
+  if (!container) return;
+
+  // Edges first: they live in the same layer and must paint under the cards.
+  renderEdges();
 
   // Fn nodes (with ancestor list)
-  cy.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
+  gv.fnNodes().forEach(node => {
     // Skip if overlay already exists (preserved)
     if (node.id() === preservedOverlayId && getNodeOverlay(node.id())) return;
     createFnOverlay(node, container);
   });
 
   // Arg value nodes
-  cy.nodes('[type="arg"]').forEach(node => {
+  gv.argNodes().forEach(node => {
     createArgOverlay(node, container);
   });
 
   // Placeholder nodes (unset args)
-  cy.nodes('[?isPlaceholder]').forEach(node => {
+  gv.placeholderNodes().forEach(node => {
     createPlaceholderOverlay(node, container);
   });
 
   // Remove any stale edge label overlays then create fresh ones.
   _removeAllEdgeOverlays();
-  cy.edges().forEach(edge => {
+  gv.edges().forEach(edge => {
     if (edge.data('argName')) createEdgeLabelOverlay(edge, container);
   });
 
   updateOverlayPositions();
 }
 
-/**
- * Update overlay positions based on Cytoscape node positions
- */
-function updateOverlayPositions() {
-  if (!cy) return;
+// Gap (graph units) between the taxi bend and the label's left edge, so a
+// visible stretch of horizontal edge remains between them instead of the
+// label butting against the vertical segment.
+const EDGE_LABEL_POST_BEND_GAP = 18;
+// Gap (graph units) between the label's right edge and the target's left edge.
+const EDGE_LABEL_TARGET_GAP = 6;
 
-  const pan = cy.pan();
-  const zoom = cy.zoom();
+/**
+ * Move the whole overlay layer to match the viewport. O(1) — this is
+ * the hot path (every wheel tick, every pan delta), so it must not touch
+ * individual overlays.
+ */
+function applyViewportTransform() {
+  if (!gv.ready()) return;
+  const layer = getGraphLayer();
+  if (!layer) return;
+  const pan = gv.pan();
+  const zoom = gv.zoom();
+  layer.style.transform =
+    'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')';
+  // Two attribute writes, so the edges stay legible and grabbable at any zoom
+  // without re-emitting a single path.
+  applyEdgeStrokeWidths();
+}
+
+/**
+ * Lay overlays out in GRAPH coordinates. O(n), but only needed when node
+ * positions or overlay sizes actually change — a new layout, an animation
+ * frame, a drag. Pan and zoom do NOT call this.
+ */
+function syncOverlayGeometry() {
+  if (!gv.ready()) return;
+
+  // Edge paths are graph-coordinate geometry too, so they move with the nodes.
+  syncEdgeGeometry();
 
   for (const [nodeId, overlay] of _overlaysByNodeId) {
-    const node = cy.getElementById(nodeId);
-    if (!node.length) continue;
+    const node = gv.node(nodeId);
+    if (!node) continue;
 
     const pos = node.position();
     // Use width()/height() (content size, no padding) to match calculateNodeSize
     const width = node.width();
     const height = node.height();
 
-    // Position overlay's top-left at node's screen top-left
-    // Using transformOrigin 'top left' so scale doesn't shift the overlay
-    // (with 'center center', overlay content taller than node causes drift)
-    const screenLeft = (pos.x - width / 2) * zoom + pan.x;
-    const screenTop = (pos.y - height / 2) * zoom + pan.y;
-
-    overlay.style.left = screenLeft + 'px';
-    overlay.style.top = screenTop + 'px';
+    overlay.style.left = (pos.x - width / 2) + 'px';
+    overlay.style.top = (pos.y - height / 2) + 'px';
     overlay.style.width = width + 'px';
     overlay.style.minHeight = height + 'px';
-    overlay.style.transform = 'scale(' + zoom + ')';
-    overlay.style.transformOrigin = 'top left';
   }
 
-  // Position edge label overlays. Anchor: visual right edge sits 6px to the
-  // left of target's left edge, vertically centered on the target.
-  // We measure the element's UNSCALED width/height (offsetWidth/Height ignore
-  // transforms) and compute pixel positions so the visual top-left lands at
-  // (screenRight - w*zoom, screenMid - h*zoom/2). Origin 'top left' means
-  // scaling around the top-left corner — the corner stays at left/top.
+  // Position edge label overlays. Anchor: right edge sits `TARGET_GAP` to the
+  // left of the target's left edge, vertically centred on the target.
+  //
+  // `offsetWidth`/`offsetHeight` ignore transforms, so inside the scaled layer
+  // they already report graph units — the whole projection collapses away.
+  // Two passes so we never interleave a layout READ (offsetWidth/Height) with
+  // a layout WRITE (style.left/top). Interleaved, each write dirties layout and
+  // the next iteration's read forces a synchronous reflow — O(edges) reflows
+  // per frame on drag/animate. Pass 1 reads every overlay's measured size and
+  // resolves its geometry; pass 2 only writes.
+  const edgeLabelWrites = [];
   for (const [edgeId, overlay] of _edgeOverlaysByEdgeId) {
-    const edge = cy.getElementById(edgeId);
-    if (!edge.length) continue;
+    const edge = gv.edge(edgeId);
+    if (!edge) continue;
     const target = edge.target();
     const source = edge.source();
     // Skip THIS edge only (a target can be missing mid edge-removal /
     // sync race); `return` here aborted the whole loop, freezing every
-    // later edge-label on pan/zoom.
-    if (!target.length) continue;
+    // later edge-label.
+    if (!target) continue;
 
     const tPos = target.position();
-    const tWidth = target.width();
-    const targetLeftPx = (tPos.x - tWidth / 2) * zoom + pan.x;
-    const screenMid = tPos.y * zoom + pan.y;
+    const targetLeft = tPos.x - target.width() / 2;
 
     const w = overlay.offsetWidth;
     const h = overlay.offsetHeight;
-    const wPx = w * zoom;
 
     // Anchor strategy. Taxi-style edges leave the source horizontally,
     // bend at a column boundary, then continue vertically + horizontally
     // toward the target. The visually "shared part" of an edge that
     // branches to multiple slots is the initial horizontal segment up
     // to that bend, plus the vertical descent — so we want the overlay
-    // to sit AFTER the bend (in the source-side-of-target horizontal
-    // segment), not on top of the shared part. The post-bend gap is
-    // chosen so a visible stretch of horizontal edge remains BETWEEN
-    // the bend and the label (instead of the label butting against
-    // the vertical segment). Same gap is the floor on the fallback
-    // path so a wide label never gets pushed back onto the vertical
-    // edge segment — we'd rather clip the label's right side against
-    // the target than smear it across the bend.
-    let leftPx;
-    if (source.length) {
-      const sPos = source.position();
-      const sWidth = source.width();
-      const sourceRightPx = (sPos.x + sWidth / 2) * zoom + pan.x;
-      const colRight = source.data('colRightX');
-      // Matches the `taxi-turn` formula in editor-cytoscape.js:
-      // bend = colRight + 20 (graph units) when colRightX is known;
-      // otherwise taxi-turn returns a fixed 40, so the bend sits at
-      // source.right + 40 — the label must use the SAME 40 or it lands
-      // 20 units short of the actual bend.
-      const bendXpx = (colRight !== undefined)
-                      ? (colRight + 20) * zoom + pan.x
-                      : sourceRightPx + 40 * zoom;
-      // Post-bend gap scales with zoom so the visible stretch stays
-      // proportional to the edge thickness at any zoom level.
-      const postBendGap = 18 * zoom;
-      const afterBend = bendXpx + postBendGap;
-      const targetClampRight = targetLeftPx - 6;
+    // to sit AFTER the bend, not on top of the shared part.
+    let left;
+    if (source) {
+      // `taxiBendX` (editor-layout.js) is the SAME function the cytoscape
+      // `taxi-turn` style and the edge-hover hit-test call, so the label can
+      // never anchor on the wrong side of the line that actually gets drawn.
+      const afterBend = taxiBendX(source) + EDGE_LABEL_POST_BEND_GAP;
+      const targetClampRight = targetLeft - EDGE_LABEL_TARGET_GAP;
       // Preferred: start just past the bend so the shared part of the
       // edge is fully visible. Fall back to "right-anchored to target"
       // when there isn't room after the bend (very short edges) — but
       // never let the label's LEFT slide past `afterBend`, so the
       // vertical edge segment stays clear regardless of label width.
-      if (afterBend + wPx <= targetClampRight) {
-        leftPx = afterBend;
-      } else {
-        leftPx = Math.max(afterBend, targetClampRight - wPx);
-      }
+      // We'd rather clip the label's right side against the target than
+      // smear it across the bend.
+      left = (afterBend + w <= targetClampRight)
+             ? afterBend
+             : Math.max(afterBend, targetClampRight - w);
     } else {
-      leftPx = targetLeftPx - 6 - wPx;
+      left = targetLeft - EDGE_LABEL_TARGET_GAP - w;
     }
 
-    overlay.style.left = leftPx + 'px';
-    overlay.style.top = (screenMid - h * zoom / 2) + 'px';
-    overlay.style.transform = 'scale(' + zoom + ')';
+    edgeLabelWrites.push({overlay, left, top: tPos.y - h / 2});
   }
+
+  for (const {overlay, left, top} of edgeLabelWrites) {
+    overlay.style.left = left + 'px';
+    overlay.style.top = top + 'px';
+  }
+}
+
+/**
+ * Both halves. Call this after anything that MOVED a node or resized an
+ * overlay. Pan/zoom handlers should call `applyViewportTransform` alone.
+ */
+function updateOverlayPositions() {
+  syncOverlayGeometry();
+  applyViewportTransform();
+}
+
+
+/**
+ * Correct the layout against the cards' REAL heights.
+ *
+ * `calculateNodeSize` predicts a card's height by mirroring what the overlay
+ * renderer will draw. That mirror cannot be right: the effects strip wraps to
+ * as many chip rows as the card's width allows, which depends on font metrics,
+ * and every strip the renderer gains has to be remembered here too — it had
+ * already forgotten `branch-local`. On `web-server` the estimate was 90 graph
+ * units against a real 167.
+ *
+ * Under-estimating pushes a card 77 units into the row below (the grid leaves
+ * 40), and anchors its edges 38 units above its visual centre.
+ *
+ * So the estimate is demoted to a first guess that keeps the first paint from
+ * flashing, and the DOM — which knows — supplies the answer. `offsetHeight`
+ * ignores ancestor transforms, so inside the scaled layer it already reports
+ * graph units.
+ *
+ * Mutates `layout` (node id → {x, y, …}) in place and returns whether anything
+ * moved, so the caller can animate towards the corrected targets.
+ */
+function reflowFromMeasuredHeights(layout) {
+  const gridPos = lastGridPos();
+  if (!gv.ready() || !gridPos || !layout) return false;
+
+  const measured = new Map();
+  let changed = false;
+  for (const [nodeId, overlay] of _overlaysByNodeId) {
+    const node = gv.node(nodeId);
+    // Placeholders are a fixed-size `+` target, not a card: their overlay is a
+    // transparent wrapper whose height says nothing about the slot.
+    if (!node || node.data('isPlaceholder')) continue;
+    const h = overlay.offsetHeight;
+    if (!h) continue;
+    measured.set(nodeId, h);
+    if (Math.abs(h - node.height()) > 0.5) changed = true;
+  }
+  if (!changed) return false;
+
+  for (const [nodeId, h] of measured) {
+    gv.node(nodeId)?.setHeight(h);
+    const entry = layout.get(nodeId);
+    if (entry) entry.height = h;
+  }
+
+  // Rows restack around the tallest card in each. Columns are untouched: an
+  // overlay's width is set from the node, so it never overflows.
+  const rowCenterY = computeRowCenters(
+    gridPos, (id) => measured.get(id) ?? layout.get(id)?.height);
+  for (const [nodeId, pos] of Object.entries(gridPos)) {
+    const y = rowCenterY.get(pos.row);
+    const entry = layout.get(nodeId);
+    if (y !== undefined && entry) entry.y = y;
+  }
+  return true;
 }

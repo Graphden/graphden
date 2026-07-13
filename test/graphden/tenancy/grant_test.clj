@@ -7,7 +7,9 @@
 ;; Grant matching keys on the STABLE subject-id, not the mutable username.
 ;; In unit tests the id and the name are the same string (only distinctness
 ;; matters); `subj` builds the `{:id :name}` identity pair `can?` expects.
-(defn- subj [s] {:id s :name s})
+(defn- subj
+  [s]
+  {:id s :name s})
 
 
 (def ^:private store

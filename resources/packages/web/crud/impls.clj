@@ -62,6 +62,23 @@
     {}))
 
 
+(defbase service-blocking-free-args
+  "`{arg-name → slot-id}` for only the free args that would prevent `fn-id`
+   from being STARTED as a service — the service-ability projection of
+   `free-arg-slot-map` (drops callback subtrees whose free args the deferred
+   invoker supplies per invocation). `{}` for nil fn-id.
+
+   Single-library boundary over `lookup/service-blocking-free-args`; used by
+   the `:service` create-guard so a listener/whole-app fn (all its free args
+   below its `:handler` HOF slot) is not falsely rejected, while a genuinely
+   unstartable fn still is."
+  [fn-id]
+  (cr/record-effect! :db)
+  (if (some? fn-id)
+    (fn-exec-lookup/service-blocking-free-args ctx fn-id)
+    {}))
+
+
 (defbase chain-has-process-effect?
   "True iff `fn-id` itself or any ancestor (via `parent-ids`) declares
    the `:process` effect in its rich-type entry. The runtime uses this
@@ -592,6 +609,7 @@
   {:get-entity get-entity
    :delete-entity delete-entity
    :free-arg-slot-map free-arg-slot-map
+   :service-blocking-free-args service-blocking-free-args
    :list-all-graph-entities list-all-graph-entities
    :all-rich-types all-rich-types
    :fn-names-with-tag fn-names-with-tag

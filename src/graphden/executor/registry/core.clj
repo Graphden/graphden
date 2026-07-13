@@ -504,10 +504,9 @@
   (loop [cur fn-name, seen #{}]
     (if (or (nil? cur) (contains? seen cur))
       cur
-      (let [parent (:primary-parent (rich-type-of cur))]
-        (if parent
-          (recur parent (conj seen cur))
-          cur)))))
+      (if-let [parent (:primary-parent (rich-type-of cur))]
+        (recur parent (conj seen cur))
+        cur))))
 
 
 (defn rich-types-snapshot

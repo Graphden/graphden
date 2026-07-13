@@ -67,6 +67,7 @@
 (def type-var?                     shapes/type-var?)
 (def record-type?                  shapes/record-type?)
 (def fn-type?                      shapes/fn-type?)
+(def callable-type?                shapes/callable-type?)
 (def make-fn-type                  shapes/make-fn-type)
 (def list-type?                    shapes/list-type?)
 (def refine-type?                  shapes/refine-type?)

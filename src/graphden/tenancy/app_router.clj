@@ -61,23 +61,20 @@
    :body "Application timed out."})
 
 
+(def ^:private app-misdirected
+  "421 — this pod's `:executor-orgs` shard doesn't hold this org, so its
+   handler fn was never compiled here. Say so instead of 404'ing the fn
+   and letting the tenant think their app is undeployed."
+  {:status 421
+   :headers {"Content-Type" "text/plain"}
+   :body "This app is served by a different executor."})
+
+
 (def default-app-timeout-ms
   "Wall-clock budget for a tenant handler (§3.4 step 7). Untrusted tenant code
    must be time-bounded — without it a single hanging/spinning handler blocks a
    request thread (DoS)."
   10000)
-
-
-(defn run-with-timeout
-  "Run `thunk` in a future bounded by `timeout-ms`. Returns its value, or
-   `::timeout` (cancelling the future) when it overruns, or `::error` when it
-   throws. Generic — the caller arranges cooperative cancellation."
-  [timeout-ms thunk]
-  (let [fut (future (thunk))
-        result (try (deref fut timeout-ms ::timeout)
-                    (catch Exception _ ::error))]
-    (when (identical? result ::timeout) (future-cancel fut))
-    result))
 
 
 (defn make-app-router
@@ -93,10 +90,31 @@
        ;; `:org` lookup, negligible next to the graph-handler `execute` below,
        ;; and always current (a `set-org-handler!` deploy takes effect at once).
        (let [handler-fn-id (read-handler-fn-id (:storage ctx) org)]
-         (if-not handler-fn-id
+         (cond
+           ;; Wrong executor → 421, for either reason (checked BEFORE the
+           ;; handler verdict so it never reads as "not deployed"):
+           ;;   - the org isn't in this pod's shard (nothing of theirs is
+           ;;     compiled here);
+           ;;   - it's a `:byo` org on a hosted pod — the graph is stored here
+           ;;     but running it is the customer's executor's job. A BYO
+           ;;     executor pod (`:byo-executor?`) serves it. `:org` is read in
+           ;;     the platform context, same as `read-handler-fn-id` above.
+           (or (not (cr/org-in-shard? (:executor-orgs ctx) org))
+               (and (not (:byo-executor? ctx)) (tc/byo-org? (:storage ctx) org)))
+           ;; Fleet forward-hop (T2.6): before 421'ing, ask the `:fleet-forward`
+           ;; seam whether this org's cell is placed on another executor and, if
+           ;; so, proxy the request there. nil (no placement, byo, or no seam) →
+           ;; the 421 backstop. `handler-fn-id` is the cell's entry.
+           (or (when-let [fwd (:fleet-forward ctx)]
+                 (fwd request org handler-fn-id))
+               app-misdirected)
+
+           (not handler-fn-id)
            app-not-configured
+
+           :else
            (let [result
-                 (run-with-timeout
+                 (cr/run-with-timeout
                    timeout-ms
                    (fn []
                      ;; Cooperative cancellation: each `execute` step calls
@@ -117,6 +135,12 @@
                                                 handler-fn-id
                                                 {:request request})))))]
              (cond
-               (identical? result ::timeout) app-timeout
-               (identical? result ::error) app-error
+               ;; run-with-timeout returns ITS namespace's sentinels
+               ;; (`::compile-runtime/{timeout,error}`) — must be matched
+               ;; qualified (`::cr/…`), NOT bare `::timeout`/`::error`
+               ;; (which would resolve to THIS ns and silently never
+               ;; match → an errored handler returns the raw sentinel
+               ;; keyword instead of a 500). byo.clj does this correctly.
+               (identical? result ::cr/timeout) app-timeout
+               (identical? result ::cr/error) app-error
                :else result))))))))

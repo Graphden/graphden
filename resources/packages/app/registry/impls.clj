@@ -30,6 +30,12 @@
   (export/export-graph-bundle (request/require-storage ctx)))
 
 
+(defbase graph-rows
+  []
+  (cr/record-effect! :db)
+  (export/read-graph (request/require-storage ctx)))
+
+
 ;; Atomic publish: reject if `(pkg-name, pkg-version)` already exists,
 ;; else hash + insert. Invariant-bearing (immutability) algorithm — a
 ;; legitimate base-fn (packages-quality §3) and race-safer than spreading
@@ -475,6 +481,7 @@
 (def impls
   {:export-namespace export-namespace
    :export-graph export-graph
+   :graph-rows graph-rows
    :publish-package publish-package
    :list-package-versions list-package-versions
    :fetch-package-version fetch-package-version

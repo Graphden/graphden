@@ -133,6 +133,12 @@
       (HikariConfig/.setIdleTimeout config idle-timeout)
       (HikariConfig/.setMaxLifetime config max-lifetime)
       (HikariConfig/.setLeakDetectionThreshold config leak-detection-threshold)
+      ;; Allow the pool to be suspended/resumed. Costs nothing in normal
+      ;; operation (a gate that's only closed on an explicit suspend), but lets
+      ;; a CRaC checkpoint drain every physical connection before snapshotting
+      ;; and block new acquisitions until restore (graphden.crac). HikariCP has
+      ;; no built-in CRaC support, so we drive suspend/evict/resume ourselves.
+      (HikariConfig/.setAllowPoolSuspension config true)
       (HikariDataSource. config))))
 
 

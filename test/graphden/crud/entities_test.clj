@@ -24,7 +24,8 @@
     [graphden.executor.context :as ctx]
     [graphden.executor.registry.core :as registry]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (use-fixtures :once (setup/create-container-fixture))
@@ -117,6 +118,38 @@
           (let [sid (random-uuid)]
             (entities/notify-after-write! emit-ctx storage :service :start {:id sid})
             (is (= [{:kind :service :op :start :id (str sid)}] @events))))
+
+        (testing "an un-versioned storage has no branch → the key is OMITTED, not nil"
+          (clear!)
+          (entities/notify-after-write! emit-ctx storage :binding :delete
+                                        {:fn-id (random-uuid) :id (random-uuid)})
+          (is (not (contains? (first @events) :branch-id)))
+          (is (not (contains? (first @events) :org-id))
+              "no :org-id on the row → the key is omitted (single-tenant)"))
+
+        (testing "a scoped row's :org-id rides along for SSE fan-out"
+          (clear!)
+          (let [fid (random-uuid)]
+            (entities/notify-after-write! emit-ctx storage :binding :delete
+                                          {:fn-id fid :id (random-uuid) :org-id "acme"})
+            (is (= "acme" (:org-id (first @events)))
+                "the writing org is read straight off the (stamped) row")))
+
+        (testing "a versioned storage stamps the branch the write landed on"
+          ;; The receiving pod needs it: an edit on `dev` must not recompile
+          ;; `main`, and an edit on `main` must recompile every cached branch
+          ;; that inherits from it.
+          (clear!)
+          (let [branch (sp/create-entity storage :branch
+                                         {:name "naw-branch"
+                                          :created-at (java.time.Instant/now)})
+                versioned (vs/->VersionedStorage storage (:id branch))
+                fid (random-uuid)]
+            (entities/notify-after-write! emit-ctx versioned :binding :delete
+                                          {:fn-id fid :id (random-uuid)})
+            (is (= [{:kind :fn :op :invalidate
+                     :id (str fid) :branch-id (str (:id branch))}]
+                   @events))))
 
         (testing "no :notify-emitter on the ctx → no-op (tests / single-pod)"
           (clear!)

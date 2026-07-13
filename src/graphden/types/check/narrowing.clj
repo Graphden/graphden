@@ -254,8 +254,6 @@
     (and (map? b) (keyword? (:ref b))) (:ref b)))
 
 
-
-
 (defn- narrowed-type-for-predicate
   "Apply predicate-kind to target's static return. Supported predicates:
    - `:some?` taken → strip-null; not-taken → `:null`

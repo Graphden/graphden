@@ -1,0 +1,144 @@
+{{/*
+Executor fleet. StatefulSet (not Deployment) for stable per-pod DNS: each pod's
+GRAPHDEN_EXECUTOR_ID is its own FQDN, which is exactly the address a sibling's
+forward-hop / cell-command client dials. GRAPHDEN_FLEET_DNS is the headless
+Service's SRV name the leader-locked controller resolves for live membership.
+*/}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "graphden.fullname" . }}
+  labels:
+    {{- include "graphden.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "graphden.headlessName" . }}
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      {{- include "graphden.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "graphden.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      # Pod-level hardening (the image runs as uid 1001, USER graphden).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: executor
+          image: {{ include "graphden.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.port }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "graphden.fullname" . }}
+          env:
+            # Downward API — referenced by the $(VAR) fields below, so they
+            # MUST come first in the list (k8s substitutes only earlier vars).
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            # This pod's identity = its stable FQDN (what a peer forward-hops to).
+            - name: GRAPHDEN_EXECUTOR_ID
+              value: "$(POD_NAME).{{ include "graphden.headlessName" . }}.$(POD_NAMESPACE).svc.cluster.local"
+            # Live membership: the headless Service's SRV record (one target per
+            # ready pod) — grows/shrinks with the StatefulSet / HPA.
+            - name: GRAPHDEN_FLEET_DNS
+              value: "_http._tcp.{{ include "graphden.headlessName" . }}.$(POD_NAMESPACE).svc.cluster.local"
+            - name: AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphden.secretName" . }}
+                  key: auth-token
+            - name: GRAPHDEN_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphden.secretName" . }}
+                  key: internal-token
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphden.secretName" . }}
+                  key: db-password
+            {{- if .Values.vault.enabled }}
+            - name: VAULT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "graphden.secretName" . }}
+                  key: vault-token
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.probes.startupPeriodSeconds }}
+            failureThreshold: {{ .Values.probes.startupFailureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.probes.livenessPeriodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: {{ .Values.probes.readinessPeriodSeconds }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          # Hardened by default (the image runs as uid 1001, USER graphden).
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1001
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            # readOnlyRootFilesystem is on; the JVM still writes /tmp (heap
+            # dumps on OOM per the Dockerfile CMD, hsperfdata) — back it with
+            # an emptyDir so the root FS can stay read-only.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

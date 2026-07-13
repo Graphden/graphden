@@ -271,7 +271,8 @@ jobs:
             koalaman/shellcheck:stable \
             tools/browser-test/run-edit-tests.sh \
             .claude/hooks/check-ui-on-stop.sh \
-            .claude/hooks/remind-packages-quality-on-impls-edit.sh
+            .claude/hooks/remind-packages-quality-on-impls-edit.sh \
+            development/crac/build-checkpoint-in-container.sh
 
   hadolint:
     name: hadolint (Dockerfile)
@@ -284,6 +285,9 @@ jobs:
 
       - name: Lint Dockerfile.build
         run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile.build
+
+      - name: Lint Dockerfile.crac
+        run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile.crac
 
   gitleaks:
     name: gitleaks (secrets)
@@ -380,6 +384,10 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: '1'
           skip-dirs: node_modules,target,.tools
+          # Path-scoped, documented misconfig exceptions for the dev/demo kind
+          # manifests (CRIU caps + stock-postgres writable fs). The prod Helm
+          # chart under deploy/helm is fully hardened + not exempted.
+          trivyignores: .trivyignore.yaml
 
   license-check:
     name: license-check (npm)

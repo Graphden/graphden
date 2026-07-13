@@ -7,7 +7,7 @@ restart-policy + branch scoping.
 
 **Concepts introduced**: `service`, `reconciler`, `restart-
 policy`, `:enabled?`, `:process` effect, `:service.branch-id`,
-service vs `execute`.
+`:service.cardinality`, service vs `execute`.
 
 ## Service vs execute
 
@@ -133,6 +133,98 @@ In Phase 1 there's no runtime liveness check, so `:always`
 ≡ `:on-failure` in practice — both kick in only on startup
 exception (e.g. port-in-use). A future phase will add a watchdog.
 
+### Cardinality — how many pods run it
+
+Restart policy answers *when* to start the fn again. Cardinality
+answers a different question: **when several executor pods share
+one database, how many of them run this service?**
+
+| Value | What happens |
+|---|---|
+| `:singleton` | Exactly one pod, cluster-wide. Each pod tries `pg_try_advisory_lock` on the service id; the loser idles. |
+| `:per-pod` | Every pod runs its own copy. No lock. |
+| `:pool` (`:pool-size N`) | Up to **N** pods run it — exactly N when the fleet has ≥ N pods, one copy each when fewer. |
+
+The two ship-today service shapes want opposite answers, and you
+can't infer it from the fn:
+
+- A `:schedule` cron loop must be `:singleton`. Run it everywhere
+  and every tick fires once **per pod** — three pods, three
+  emails.
+- An `:http-server` must be `:per-pod`. Each pod has its own
+  network namespace and its own port to bind. Make it a
+  `:singleton` and only the lock-winner ever listens; the other
+  pods answer nothing, fail their healthcheck, and your load
+  balancer sees one backend no matter how many pods you started.
+
+`:pool` covers the middle: a background worker you want **redundant
+or parallel across a bounded number of pods** — not one, not all.
+It generalises `:singleton` (a pool of 1): instead of racing for a
+single lock, each pod races for the first free of **N** slots
+(`pg_try_advisory_lock` on `service-id + 0 … N-1`) and holds it. If a
+holder crashes, its slot frees and another pod takes it on the next
+reconcile tick. The size is fixed — set `:pool-size` to the number
+of pods you want; graphden does **not** grow or shrink it by load
+(that's the request-serving path's job, not a service's).
+
+That's why the editor's own `:web-server` is declared `:per-pod`
+in `app/package.edn`:
+
+```edn
+:services [{:name :default
+            :fn-name :web-server
+            :enabled? true
+            :restart-policy :always
+            :cardinality :per-pod}]
+```
+
+A row written before this field existed has `cardinality = NULL`,
+which reads as `:singleton` — the old behaviour, unchanged. On
+boot the package seeder backfills NULL from the package
+declaration, so upgrading moves `:web-server` to `:per-pod` for
+you. It only touches NULL: a value you set on purpose survives,
+same as `:enabled?`.
+
+Single-pod deployments are unaffected either way — with no
+contender, every lock attempt succeeds.
+
+### Try it (cardinality edition)
+
+The `⚙` popover has a **Cardinality** control — three radios,
+`singleton` / `per-pod` / `pool`, right under Restart policy, plus a
+`pool-size` number input (used only when you pick `pool`). It
+pre-selects the row's current value (a new service starts at
+`singleton`, since a nil column reads that way). Pick one and hit
+`Save & reconcile`.
+
+Changing cardinality is a **config drift**: the reconciler notices
+the running entry no longer matches the row, stops the service, and
+starts it again under the new rule. You can watch the advisory lock
+appear and disappear:
+
+```sql
+select count(*) from pg_locks where locktype = 'advisory';
+-- singleton → 1   (this pod owns the service)
+-- per-pod   → 0   (nobody locks; every pod just runs it)
+```
+
+> ⚠️ One sharp edge: the editor is itself served by the
+> `:web-server` service. Flipping *its* cardinality restarts *its*
+> listener — the port drops for a moment and the page you're on
+> briefly can't reach the server before it comes back. Expected, but
+> don't do it to a production editor mid-session for fun. And flip it
+> back to `per-pod` when you're done experimenting — a `:singleton`
+> web-server is exactly the misconfiguration described above.
+
+Prefer the API? The same fields go through generic CRUD:
+
+```bash
+curl -X PUT "$BASE/api/entities/service/$SERVICE_ID" \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "fn-id=$FN_ID&enabled?=true&restart-policy=always&cardinality=singleton"
+```
+
 ## Per-branch services
 
 `:service.branch-id` is a ref to a branch row. The reconciler
@@ -195,8 +287,9 @@ in your dev derivative.
   servers re-read the registry lazily on the next request.
 - **Delete branch**: services scoped to that branch are
   soft-disabled (`:enabled? false`) BEFORE the branch row
-  disappears, so the reconciler stops them on the next pass and
-  releases their advisory locks cleanly.
+  disappears, so the reconciler stops them on the next pass —
+  releasing the advisory lock of any `:singleton` among them.
+  (A `:per-pod` service never took one.)
 
 ## Inspecting state
 
@@ -204,6 +297,7 @@ in your dev derivative.
 GET /api/services
 → {:ok true :services [{:id ... :fn-id ... :fn-name "web-server"
                          :enabled? true :restart-policy "always"
+                         :cardinality "per-pod"
                          :branch-id ... :running {...}}]}
 ```
 
@@ -213,8 +307,10 @@ The `:running` block carries the in-process atom snapshot:
 
 ## What we glossed over
 
-- The advisory-lock dance that keeps two pods from running the
-  same service twice — see [docs/SERVICES.md § Supervisor](../SERVICES.md).
+- The rest of the multi-pod story — how a fn edit on one pod
+  invalidates the others' compiled registries, and how a
+  `:singleton` survives the pod that owned it crashing — see
+  [docs/SCALING.md](../SCALING.md).
 - Closure-capture and why cron loops need an explicit restart
   after merge — see [docs/CLOSURE_CAPTURE.md](../CLOSURE_CAPTURE.md).
 - The package-declared seed services (web-server is one) — see

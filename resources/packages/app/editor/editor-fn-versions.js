@@ -186,7 +186,12 @@ async function restoreFnVersion(fnEntity, versionId) {
       return;
     }
     closeFnVersionsPopover();
-    if (typeof applyGraphDataRefresh === 'function') applyGraphDataRefresh();
+    // Restore rewrote the fn's version row, so the editor must re-read it.
+    // This used to call `applyGraphDataRefresh`, which was never defined — so
+    // a restore silently left the canvas showing the OLD version until a manual
+    // reload. `loadGraphData` re-fetches index + subtree + rich-types (and
+    // clears the type-compatible cache), which is exactly what's needed.
+    if (typeof loadGraphData === 'function') loadGraphData();
   } catch (err) {
     alert('Restore failed: ' + (err?.message || 'network error'));
   }

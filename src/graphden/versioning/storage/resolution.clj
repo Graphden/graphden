@@ -318,7 +318,12 @@
   "Returns vector of branch-ids from current to root (for inheritance
    lookup). When `*branch-chain-cache*` is bound it wins (test
    isolation); otherwise consults the process-wide
-   `global-chain-cache`, populating on miss."
+   `global-chain-cache`, populating on miss.
+
+   Public because cache invalidation needs the same reachability
+   question the resolver asks: a write on branch W is visible from
+   branch C exactly when W ∈ (collect-branch-chain … C). See
+   `system.branch-router/invalidate-affected-ctxs!`."
   [base-storage branch-id]
   (let [cache (or *branch-chain-cache* global-chain-cache)]
     (if-let [cached (get @cache branch-id)]

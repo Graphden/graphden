@@ -12,7 +12,9 @@
    behaves exactly as before: every row is public, every read sees public.
    Only when the addon's provider resolves a real `:org` AND its storage
    decorator is wired does scoping take effect — making tenancy opt-in by
-   construction (ADR §3.0).")
+   construction (ADR §3.0)."
+  (:require
+    [graphden.storage.protocol.core :as sp]))
 
 
 (def public-org
@@ -56,3 +58,70 @@
   [org & body]
   `(binding [*current-org* (or ~org ~public-org)]
      (let [res# (do ~@body)] res#)))
+
+
+;; =============================================================================
+;; Execution mode — hosted vs bring-your-own executor
+;; =============================================================================
+
+(def byo-execution-mode
+  "`:org.execution-mode` value marking an org whose graph runs on the
+   customer's OWN executor. The platform stores the graph but hosted pods
+   refuse to run it. Anything else (incl. nil) is hosted."
+  "byo")
+
+
+(def ^:private byo-cache
+  ;; {org → {:byo? bool :at millis}}. A short-TTL memo so the per-request byo
+  ;; check on hosted pods isn't a `:org` read every time. `:execution-mode`
+  ;; only changes at provisioning, so a few seconds of staleness is fine — a
+  ;; freshly-flipped byo org is refused within the TTL.
+  (atom {}))
+
+
+;; Parallel-test isolation: bound per test-thread to a fresh atom (see the
+;; kaocha parallel plugin's `isolation-vars`) so one test caching an org as
+;; byo can't leak that verdict into a sibling test that shares the org name.
+;; nil in production → the process-global `byo-cache`.
+(def ^:dynamic *byo-cache-override* nil)
+
+
+(defn- byo-cache-atom
+  []
+  (or *byo-cache-override* byo-cache))
+
+
+(def ^:private byo-cache-ttl-ms 5000)
+
+
+(defn byo-org?
+  "True when `org`'s `:execution-mode` is byo — its graph runs on the
+   customer's own executor, so a hosted pod must refuse to run it.
+
+   MUST be called with `storage` readable and `*current-org*` NOT yet bound to
+   `org` (the request-scope reads `:org` in the public context before binding
+   the tenant org — `:org` is tenant-forbidden, so an org-scoped read would be
+   hidden). The public org is never byo. Fails hosted (returns false) on a
+   read error, so a DB blip doesn't 421 every tenant."
+  [storage org]
+  (if (or (nil? org) (= public-org org))
+    false
+    (let [cache (byo-cache-atom)
+          now (System/currentTimeMillis)
+          cached (get @cache org)]
+      (if (and cached (< (- now (:at cached)) byo-cache-ttl-ms))
+        (:byo? cached)
+        (let [byo? (try
+                     (= byo-execution-mode
+                        (some-> (first (sp/query-entities storage :org {:name org}))
+                                :execution-mode))
+                     (catch Exception _ false))]
+          (swap! cache assoc org {:byo? byo? :at now})
+          byo?)))))
+
+
+(defn invalidate-byo-cache!
+  "Drop the byo-mode memo (all orgs, or one). Call after writing an org's
+   `:execution-mode` so the flip takes effect before the TTL elapses."
+  ([] (reset! (byo-cache-atom) {}))
+  ([org] (swap! (byo-cache-atom) dissoc org)))

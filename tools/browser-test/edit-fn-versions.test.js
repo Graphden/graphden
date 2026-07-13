@@ -96,17 +96,17 @@ async function putDescription(page, fnId, branch, desc) {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#' + FN_NAME);
     // Wait for cytoscape + the `⋯` trigger + cy fit animation drain.
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+      () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
     // initGraph rebuilds the canvas — wait again for stability.
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+      () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');

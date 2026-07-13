@@ -6,8 +6,8 @@
 // DESCRIPTION TOOLTIP
 // ============================================================================
 //
-// Native `title` attribute is unreliable inside Cytoscape overlays —
-// the cy canvas + parent mouseenter/leave handlers swallow the hover
+// Native `title` attribute is unreliable inside the graph overlays —
+// the graph surface + parent mouseenter/leave handlers swallow the hover
 // before the browser's tooltip delay fires. We render our own tooltip
 // element on mouseenter/leave instead.
 

@@ -242,3 +242,57 @@
     (testing "a tenant still reads its own graph entities"
       (tc/with-org "acme" (sp/create-entity s :fn {:id 9 :name "mine"}))
       (is (some? (tc/with-org "acme" (sp/read-entity s :fn 9)))))))
+
+
+;; ============================================================================
+;; Cross-org graph edges. The org-sharded compiled registry
+;; (`executor.compile-runtime/read-graph` + `:executor-orgs`) can only be
+;; correct if no edge leaves {own-org, public}: a pod that holds only
+;; `acme`'s shard must be able to resolve every ref `acme`'s fns make.
+;; ============================================================================
+
+(deftest rejects-a-binding-ref-into-another-org
+  (let [s (ts/org-scoped-storage (fake))]
+    (tc/with-org "beta" (sp/create-entity s :fn {:id 2 :name "beta-fn"}))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"another org"
+          (tc/with-org "acme"
+                       (sp/create-entity s :binding {:id 10 :fn-id 1 :slot-id 5 :ref-fn-id 2})))
+        "acme may not point a binding at beta's fn")))
+
+
+(deftest rejects-a-parent-id-into-another-org
+  (let [s (ts/org-scoped-storage (fake))]
+    (tc/with-org "beta" (sp/create-entity s :fn {:id 2 :name "beta-fn"}))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"another org"
+          (tc/with-org "acme"
+                       (sp/create-entity s :fn {:id 1 :name "acme-fn" :parent-ids [2]})))
+        "inheritance is an edge too — it must not cross orgs")))
+
+
+(deftest allows-refs-to-public-and-own-rows
+  (let [s (ts/org-scoped-storage (fake))]
+    (tc/with-org tc/public-org (sp/create-entity s :fn {:id 3 :name "platform-fn"}))
+    (tc/with-org "acme" (sp/create-entity s :fn {:id 1 :name "acme-base"}))
+    (testing "a tenant inherits from the platform graph — the whole point of own-plus-public"
+      (is (tc/with-org "acme"
+                       (sp/create-entity s :fn {:id 4 :name "acme-child" :parent-ids [3]}))))
+    (testing "and from its own fns"
+      (is (tc/with-org "acme"
+                       (sp/create-entity s :binding {:id 11 :fn-id 4 :slot-id 5 :ref-fn-id 1}))))
+    (testing "an un-owned (NULL org) row is the shared platform graph too"
+      (sp/create-entity (fake) :fn {:id 7 :name "unowned"})
+      (is (tc/with-org "acme"
+                       (sp/create-entity s :fn {:id 8 :name "dangling-ok" :parent-ids [999]}))
+          "a target that doesn't exist is not this guard's business"))))
+
+
+(deftest rejects-a-type-override-into-another-org
+  (let [s (ts/org-scoped-storage (fake))]
+    (tc/with-org "beta" (sp/create-entity s :fn {:id 2 :name "beta-type"}))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"another org"
+          (tc/with-org "acme"
+                       (sp/update-entity s :binding 10 {:type-override-fn-id 2})))
+        "a type-override is compiled, so it is a shard edge like any other")))

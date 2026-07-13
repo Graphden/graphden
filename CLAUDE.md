@@ -115,7 +115,10 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
 | [docs/EXECUTION.md](docs/EXECUTION.md) | Function execution feature: schema, HTTP API, cancel/TTL/UI | When touching `/api/execute*` or the editor's Run popover |
-| [docs/SERVICES.md](docs/SERVICES.md) | Phase 1 service registry: `:service` schema, reconciler, supervisor, HTTP API, legacy fallback + displacement, roadmap to cron + multi-pod | When touching `services/`, `:exec/service-reconciler`, or anything that needs to know what services are |
+| [docs/SERVICES.md](docs/SERVICES.md) | Phase 1 service registry: `:service` schema (incl. `:cardinality` — `:singleton` advisory-lock-gated vs `:per-pod` listeners), reconciler (edge-triggered on CRUD/NOTIFY **plus** a level-triggered periodic tick for crash-failover + out-of-band drift), supervisor, HTTP API, legacy fallback + displacement, roadmap to cron | When touching `services/`, `:exec/service-reconciler`, or anything that needs to know what services are |
+| [docs/SCALING.md](docs/SCALING.md) | Multi-executor fleet: why the shard key is the **org** and not fn-popularity, what multi-pod does (NOTIFY delta-invalidation, advisory-lock singletons + reconnect/reassert, per-pod listeners, cross-pod cancel, level-triggered reconcile tick), per-branch invalidation via `collect-branch-chain`, `:executor-orgs` predicate on the ctx, `421 Misdirected Request` off-shard, the **fleet-wide per-org quota**, and the full **external/BYO executor** (`graphden.byo` + `RemoteStorage` over HTTP + SSE relay/source + `:org.execution-mode`) — all SHIPPED; only a real BYO executor on a second physical machine (§ Still open) remains | Before touching `services/reconciler`, `system/branch_router` invalidation, `storage/{postgres/notify,remote/*}`, `system/sse`, `byo.clj`, `compile_runtime/read-graph`, or the `:executor-orgs` checks in `tenancy/{addon,app_router}`; and before proposing any distribution work |
+| [docs/FLEET_RFC.md](docs/FLEET_RFC.md) | Dynamic fleet: load-based placement + rebalancing. **Phases 0-3 core SHIPPED** (`fleet.{placement,router,command,metrics,controller,packer,rebalance,control-loop,discovery}` + `:exec/fleet-controller` + Helm chart) — the fleet auto-places tenant cells + rebalances sustained imbalance under a leader-locked controller over a k8s StatefulSet with SRV membership. The **cell** (root fn + forward ref-closure) is the placement unit (services stay with the reconciler, NOT the fleet controller; an org app is one cell today; single-call distributed execution is a non-goal); load/evict reuses the live compiled-registry atom + `compile-subset`; footprint/start track = **CRaC-first, GraalVM shelved**; §9: graph **hot-reload is already shipped**, this adds placement not freshness. Still open: overlap-accounting + per-route split (T4.5, evidence-gated), scale-to-zero (T5.3, CRaC-gated) | Before proposing ANY dynamic-placement / autoscaling / rebalancing / hot-reload / native-image work, touching `fleet/*` or `:exec/fleet-controller`, or picking a k8s/Knative/serverless/CRaC substrate |
+| [docs/FLEET_DEPLOY.md](docs/FLEET_DEPLOY.md) | Operational how-to for the dynamic fleet: `helm install deploy/helm/graphden`, the StatefulSet + headless-SRV-discovery + leader-locked controller model, HPA, controller tuning (`GRAPHDEN_FLEET_*`), and how a request forward-hops to its cell's holder | When deploying/operating a multi-pod fleet, editing the Helm chart, or wiring the `GRAPHDEN_EXECUTOR_ID` / `GRAPHDEN_FLEET_DNS` / `GRAPHDEN_INTERNAL_TOKEN` env |
 | [docs/VERSIONING.md](docs/VERSIONING.md) | Branches surface — per-branch ExecutionContext routing, HTTP API (`/api/branches`, diff, merge, conflicts), editor UI (branch chip + popover + ⌛ history + conflict modal), demo seeder + env toggle, known gaps | When touching `system/branch_router`, `crud/branches`, `web.branch-router`, `app.branches`, `editor-branches.js`, `editor-fn-versions.js`, or the demo seeder |
 | [docs/CLOSURE_CAPTURE.md](docs/CLOSURE_CAPTURE.md) | Closure-capture extension to the fn-graph model: call-site vs captured args, wrap-time capture contract, type-checker propagation, as-shipped commit map | Before touching `hof-wrap` / `hof-lambda-params` / `ref-free-args` / `free-arg-slot-map`; needed to understand why `:schedule` works |
 | [docs/RECURSION.md](docs/RECURSION.md) | Graph-level recursion: Approach A (`:fix` Y-combinator) is SHIPPED (`core/recursion`, depth-guarded, used by `storage/branches` `:branch-chain`); Approach B (lazy ref resolution) is the road not taken. | When considering recursion-related work; runtime cycle/recursion model is in ARCHITECTURE.md § Part 3 |
@@ -222,7 +225,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-create.js` | Inline-input row helper, fn / namespace creation |
 | `editor-create-type.js` | Type-row creation popover (refinement / record / union / variant / list) |
 | `editor-data.js` | Data utilities, lookups, inheritance, free-args |
-| `editor-layout.js` | Grid layout algorithm, positioning |
+| `editor-layout.js` | Grid layout client + pixel positioning. Owns `taxiBendX` — the single source of truth for where a taxi edge turns (graph coords), called by the SVG edge path and the edge-label anchor alike; when they each kept their own copy, a dragged node put the label on the wrong side of the bend. Also `computeRowCenters`, shared by the estimated sizing pass and the measured reflow. **`calculateNodeSize` only estimates** — a card's real height is measured off the DOM by `reflowFromMeasuredHeights`, because the effects strip wraps to as many chip rows as it needs. |
 | `editor-literal-types.js` | Type-validation helpers shared by edit popovers (mirrors `graphden.types.check`). Also exports `refinementConstraintText` / `resolveRefinementAlias` — pure utilities for unwrapping refinement chips, used by stacked refinement rendering in `createTypeChip` |
 | `web/runtime/graphden-forms.js` | Platform-shared form runtime (NOT editor-specific) — hiccup→DOM `renderHiccup` (createElement-only, no innerHTML), `collectFormValue`/`fillFormValue`, `initUnions`, `installTextareaEnterGuard`, `hydrateWidgets` (mounts `window.GraphdenFormWidgets`). Pure DOM + the widget registry; bundled into BOTH the editor and `/assets/graphden-runtime.js` so user pages can render server-sent forms. |
 | `editor-value-form.js` | Editor-COUPLED half of the value-edit popover — fetches `POST /api/value-form`, live-validates against the slot type, orchestrates render (via `graphden-forms.js`), saves through the binding/sequence write helpers, singleton read-only value viewer. The generic render/collect/fill/widget core lives in `web/runtime/graphden-forms.js`. |
@@ -242,7 +245,7 @@ The editor frontend is split into modules for better maintainability:
 | `editor-execute-history.js` | Execute popover history panel — `/api/executions` fetch, summary row builder, Repeat re-fill via the orchestrator's `argFormHosts`. |
 | `editor-execute.js` | Execute popover orchestrator — ▶ button entry, free-arg lookup, value-form mount, polling state machine, Run / Cancel, effects gate + persist toggle. |
 | `editor-fn-versions.js` | `⌛` history popover anchored to the fn-card root row. Fetches `GET /api/fns/:fn-id/versions`, renders a per-branch timeline (latest first), each row has a `switch` button that jumps the editor to that branch via `switchToBranch`. |
-| `editor-service-popover.js` | Service-status popover anchored to a fn-card. Mounts the server-rendered `GET /partials/service-popover` (create / start / stop / delete a `:service` for the fn); JS owns anchored positioning + dismissal only. Holds a per-fn `_servicePopoverCache` Map, cleared via `invalidateServicePopoverCache()` on save/delete so the next open re-fetches fresh desired-state. |
+| `editor-service-popover.js` | Service-status popover anchored to a fn-card. Mounts the server-rendered `GET /partials/service-popover` (create / start / stop / delete a `:service` for the fn, plus `:enabled?` / `:restart-policy` / `:cardinality` / `:branch-id` controls); JS owns anchored positioning + dismissal only and collects the radio/checkbox values into the save `PUT`/`POST`. Holds a per-fn `_servicePopoverCache` Map, cleared via `invalidateServicePopoverCache()` on save/delete so the next open re-fetches fresh desired-state. |
 | `editor-secrets.js` | Admin Secrets-panel CRUD — collapsible section at the top of the sidebar listing every fn-def whose parents are exactly `[:secret-leaf]`. Per-row rotate (↻) + delete (×) actions, header `+` opens the New-secret form (name + path + value + description, value is write-only). Exposes `isSecretFn(fn)` so `editor-sidebar.js` can put a 🔒 badge on the SAME fn when it appears in the namespace tree. Backed by `/api/secrets/*`. |
 | `editor-grants-admin.js` | Org-admin Grants sidebar section (PLATFORM_PLAN §6). Server-rendered via `GET /partials/grants-admin` (table of subject \| capability \| namespace); JS mounts the partial + owns the collapsible section lifecycle. Backed by `/api/grants`. |
 | `editor-users-admin.js` | Users-admin sidebar section (PLATFORM_PLAN §4.1). Server-rendered via `GET /partials/users-admin` (table of username \| org; password hashes stripped server-side); JS mounts the partial + section lifecycle. Backed by `/api/users`. |
@@ -255,14 +258,18 @@ The editor frontend is split into modules for better maintainability:
 | `editor-overlay-edge-label.js` | Edge-label overlay (rename click, type-chip + inline-expand trigger, stacked type-narrowing chain, description badge, sequence add/remove, `↳` provenance badge for ref-binding narrowing). Anchored AFTER the taxi-bend so the shared part of a branching edge stays visible |
 | `editor-overlay-fn.js` | Fn-overlay renderer — ancestor rows, MI cells, paint state machine, `createFnOverlay` |
 | `editor-overlay-strips.js` | Bottom-of-card metadata strips — return-type (refinement variant stacks `→ base` over `(constraint)`) / effects / parents / ns / optional-args (each entry on the wire is `{:name :slot-id}`; the strip emits one span per `?name`, title carries the arg-type from rich-types + the declaring ancestor via `findSlotDeclaringFn`) / HOF-captured-args, sign-in CTA |
-| `editor-overlay-manager.js` | Base `createOverlay` factory, placeholder-overlay binder, `createNodeOverlays` / `updateOverlayPositions` lifecycle |
+| `editor-overlay-manager.js` | Base `createOverlay` factory, placeholder-overlay binder, `createNodeOverlays` lifecycle. Owns `#graph-layer` — the single div that carries `translate(pan) scale(zoom)` for every overlay at once. Overlays are laid out in **graph coordinates**, so `applyViewportTransform()` (O(1), on `gv.onViewportChange`) is separate from `syncOverlayGeometry()` (O(n), only when a node moves or an overlay resizes). `updateOverlayPositions()` calls both; use it after a layout / animation frame / drag, never on pan-zoom. |
 | `editor-sidebar.js` | Namespace tree + entity list + filter |
 | `editor-expansion.js` | spec→state→preview machine for ancestor row click/hover |
 | `editor-ui.js` | Selection + navigation controls + the shared `previewDebounceTimer` |
-| `editor-cytoscape.js` | Cytoscape initialization, rendering, theme/zoom |
+| `editor-graph-model.js` | The graph itself — two Maps (`nodes`, `edges`) plus a RAF position tween. No library: this is all cytoscape had been reduced to. Exposes `window.graph` for browser tests. |
+| `editor-viewport.js` | Pan / zoom, and the gestures that change them (wheel zooms about the cursor, background drag pans, one finger pans, two pinch). A press inside `#graph-layer` belongs to a card or an edge and never pans. |
+| `editor-graph-view.js` | `gv` — the seam every other module reads the graph through. Element shape is `id()/data()/position()/width()/height()`; `fnNodes()` / `argNodes()` / `placeholderNodes()` replace cytoscape selectors. |
+| `editor-edges-svg.js` | SVG edge layer inside `#graph-layer`. One visible path + one fat transparent one per edge, so the path IS its hit-zone and `elementsFromPoint` returns every edge under the cursor (overlapping vertical runs included). Stroke widths ride the groups, not the paths. |
+| `editor-render.js` | Turns a backend layout into the graph: diff, add/remove, measured-height reflow, tween. `fitInVisibleArea` fits to the area the sidebar doesn't cover. |
 | `editor-main.js` | Entry point, init |
 
-**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → graphden-popover (web/runtime) → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → literal-types → graphden-forms (web/runtime) → value-form → widget-rating → tooltips → icons → runtime → actions-builtin → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → secrets → grants-admin → users-admin → packages → sidebar → expansion → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → graph-model → viewport → graph-view → graphden-popover (web/runtime) → busy → prefs → auth → branches → branch-diff → create → create-type → data → layout → edges-svg → literal-types → graphden-forms (web/runtime) → value-form → widget-rating → tooltips → icons → runtime → actions-builtin → row-actions → drag → fn-picker → namespace-picker → edit-validation → edit-modes → edit-reparent → execute-result → execute-history → execute → fn-versions → service-popover → mismatch-explainer → effect-explainer → overlay-type-expand → provenance-popover → overlay-arg → overlay-edge-label → overlay-fn → overlay-strips → overlay-manager → secrets → grants-admin → users-admin → packages → sidebar → expansion → ui → render → main
 
 ### Browser Test Tool
 
@@ -526,21 +533,42 @@ src/graphden/
 │   └── fields/
 ├── storage/            # Protocol, postgres
 │   ├── protocol/
-│   └── postgres/
+│   ├── postgres/
+│   └── remote/         # RemoteStorage (read-only HTTP leaf) + SSE source — BYO
 ├── versioning/         # Storage decorator, merge protection
 │   ├── storage/
 │   └── merge/
 ├── layout/             # Graph-editor layout pipeline (Stages 1–7)
 ├── services/           # Service registry — reconciler + supervisor
+├── fleet/              # Dynamic fleet (docs/FLEET_RFC.md) — placement table +
+│                       #   forward-hop router, cell load/evict metrics, LPT
+│                       #   packer, churn-min rebalancer, control-loop (sustained
+│                       #   hysteresis), directed cell-command transport,
+│                       #   DNS-SRV discovery. Driven by :exec/fleet-controller.
 ├── tenancy/            # Multi-tenant router, users, grants, RLS
 ├── auth/               # Pluggable auth-provider seam
 ├── clients/            # External clients (vault / OpenBao)
+├── util/               # Small shared helpers (backoff — reconnect policy)
 ├── system/             # Integrant lifecycle management
 │   ├── interface.clj   # start!, stop!, read-config
 │   ├── config.clj      # Aero config loading
+│   ├── sse.clj         # SSE invalidation relay (BYO freshness, per-org fan-out)
 │   └── core.clj        # ig/init-key implementations
-└── executor_runtime/   # Main entry point
-    └── core.clj        # -main, shutdown hooks
+├── executor_runtime/   # Main entry point
+│   └── core.clj        # -main, shutdown hooks
+├── byo.clj             # BYO executor assembly (RemoteStorage + SSE source +
+│                       #   direct http-server); `-main` for a customer-hosted
+│                       #   executor. See docs/SCALING.md § External / BYO.
+└── crac.clj            # CRaC checkpoint integration — quiesce!/resume! the pool
+                        #   + LISTEN + advisory-lock + services around a
+                        #   checkpoint; `-main` for the restore image. See
+                        #   development/crac/README.md.
+
+resources/graphden/tenancy/  # Addon config fragments (spliced via
+                             #   GRAPHDEN_ADDON_CONFIGS): addon.edn (org-scoped
+                             #   storage + RLS + request-scope) and faas.edn
+                             #   (app-router + :org schema → FaaS app-routing +
+                             #   the fleet forward-hop). See docs/PLATFORM_PLAN.md.
 
 resources/packages/     # First-party package definitions (EDN + Clojure impls)
 ├── core/               # Core primitives (arithmetic, logic, HOF, etc.)

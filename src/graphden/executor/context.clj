@@ -163,9 +163,21 @@
    - :execute-guard  Optional per-namespace execute guard (§4.2) — a fn
                 `(fn [ctx fn-id] …)` `compile-runtime/execute` consults once
                 per top-level execute; throws `:authz/forbidden` on a denied
-                tenant execute. Absent → no execute authorization."
+                tenant execute. Absent → no execute authorization.
+   - :executor-orgs  Optional membership predicate over org-ids — usually a
+                set, or a fn for a hash-sharded fleet that doesn't enumerate
+                its tenants. The compiled registry then holds only those
+                orgs' fns plus the un-owned platform rows, instead of every
+                tenant's. nil (the default, and the only value single-tenant
+                ever uses) compiles the whole graph. Admit the public org
+                explicitly — core doesn't know its name.
+   - :byo-executor?  When true, this pod is a customer's OWN executor — it may
+                serve the `:byo` orgs in its shard. A HOSTED pod (default,
+                false) refuses any `:byo` org with a 421. See
+                `tenancy.context/byo-org?`."
   [{:keys [storage base-fns clock allowed-effects auth-provider request-scope
-           execute-guard app-router set-org-handler verify-domain user-ops]}]
+           execute-guard app-router set-org-handler verify-domain user-ops
+           executor-orgs byo-executor? fleet-forward fleet-command]}]
   (validate-context-options! storage)
   (-> (->ExecutionContext storage
                           (or base-fns (registry/get-default-registry))
@@ -184,6 +196,11 @@
       ;; monitor pins its carrier (JDK 21) — see
       ;; `compile-runtime/call-with-invalidation-lock`.
       (assoc :invalidation-lock (java.util.concurrent.locks.ReentrantLock.))
+      ;; Fleet placement bookkeeping (docs/FLEET_RFC.md §6.2): the set of cell
+      ;; ROOTS this executor has loaded via `compile-runtime/load-cell!`. Lets
+      ;; `evict-cell!` reference-count shared fns. Empty + unused on a
+      ;; non-fleet ctx (which loads its whole shard via `rebuild!`).
+      (assoc :loaded-roots (atom #{}))
       ;; Effect sandbox — nil = unrestricted. Read on the hot path by
       ;; `compile-runtime/execute`, which binds `*allowed-effects*` for
       ;; the execution so `record-effect!` can gate.
@@ -211,7 +228,28 @@
       ;; User-model seam (§4.1) — `{:create-user … :login …}` the
       ;; `:invoke-create-user` / `:invoke-login` base-fns call. Login mints a
       ;; session `:token`; the storage-token-provider resolves it. Addon-only.
-      (cond-> user-ops (assoc :user-ops user-ops))))
+      (cond-> user-ops (assoc :user-ops user-ops))
+      ;; Executor shard — which orgs' fns this pod compiles. Read by
+      ;; `compile-runtime/read-graph`. nil ⇒ the whole graph. A collection
+      ;; becomes a set (which is itself the membership predicate); a fn is
+      ;; taken as the predicate directly.
+      (cond-> executor-orgs
+        (assoc :executor-orgs (if (fn? executor-orgs)
+                                executor-orgs
+                                (set executor-orgs))))
+      ;; Pod role — a BYO executor may serve the `:byo` orgs in its shard;
+      ;; a hosted pod (default) 421s them.
+      (cond-> byo-executor? (assoc :byo-executor? true))
+      ;; Fleet forward-hop seam (docs/FLEET_RFC.md §6.1, T2.6): a
+      ;; `(fn [request org entry-fn-id] → response-or-nil)` the app-router
+      ;; consults BEFORE 421'ing — forwards to the executor that holds the cell
+      ;; (per `:placement`). Absent (single-tenant / no fleet identity) → 421 as
+      ;; before.
+      (cond-> fleet-forward (assoc :fleet-forward fleet-forward))
+      ;; Fleet control-plane command seam (docs/FLEET_RFC.md §6.3) — the
+      ;; `branch-router/dispatch` consults it for `POST /internal/fleet/cell/…`.
+      ;; Absent (single-tenant / no fleet identity) → no internal endpoint.
+      (cond-> fleet-command (assoc :fleet-command fleet-command))))
 
 
 (defn current-time-ms

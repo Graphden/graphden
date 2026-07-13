@@ -1,0 +1,23 @@
+{{/*
+Headless Service — clusterIP None. StatefulSet pods get stable DNS
+(<pod>.<headless>.<ns>.svc.cluster.local) AND the named port publishes an SRV
+record the placement controller resolves for live membership (GRAPHDEN_FLEET_DNS).
+publishNotReadyAddresses is false so only READY pods appear — the controller must
+not place onto a pod still booting.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "graphden.headlessName" . }}
+  labels:
+    {{- include "graphden.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: false
+  selector:
+    {{- include "graphden.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.port }}
+      targetPort: http
+      protocol: TCP

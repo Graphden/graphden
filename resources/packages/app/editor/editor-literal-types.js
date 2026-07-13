@@ -4,7 +4,7 @@
 // graphden.types.core, plus a few presentation helpers.
 //
 // Globals consumed: `lookups` (editor-data.js), `richTypes` (set by
-// editor-cytoscape.js after fetching /api/types). Loaded into the
+// editor-main.js after fetching /api/types). Loaded into the
 // concatenated bundle BEFORE editor-tooltips.js.
 
 // === Session-level cache for /api/types/compatible ============================
@@ -18,9 +18,10 @@
 // open in the same session. The cache stores the bare boolean — the
 // network savings are 5–15 ms per cached pair (median).
 //
-// Invalidate via `clearTypesCompatibleCache()` after edits that could
-// change types (currently called from editor-cytoscape.js on rebuild,
-// see `applyGraphDataRefresh`).
+// Invalidated via `clearTypesCompatibleCache()` whenever the type registry
+// (re)loads — `editor-main.js` calls it after re-fetching `/api/types` in both
+// `initGraph` (fn-rename path) and `loadGraphData` (post-mutation refresh), so
+// a create / rename / retype drops the stale `(expected, candidate)` verdicts.
 const _typesCompatibleCache = new Map();
 
 function _typesCompatibleKey(expected, candidate) {

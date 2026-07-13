@@ -21,9 +21,9 @@ const {assert, newContext} = require('./edit-test-helpers');
     // blocked for cloud/tenant graphs.)
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#web-server');
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+      () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
 
@@ -66,9 +66,9 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#health');
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+      () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
     const healthProbe = await page.evaluate(() => {
@@ -102,9 +102,9 @@ const {assert, newContext} = require('./edit-test-helpers');
     await page.goto('about:blank');
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/#add');
     await page.waitForFunction(
-      () => typeof cy !== 'undefined' && cy && cy.nodes().length > 0
+      () => graphReady()
             && !!document.querySelector('button.more-actions-trigger')
-            && !cy.animated(),
+            && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
     const pureProbe = await page.evaluate(() => {

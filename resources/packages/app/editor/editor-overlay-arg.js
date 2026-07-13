@@ -225,7 +225,7 @@ function createArgSourceLink(node) {
 
 // Wire the inline-expand click handler onto a chip rendered on an
 // arg-value-overlay (mirrors the edge-label hookup). Stable path is
-// keyed by the cy node-id so the open/closed state survives layout
+// keyed by the graph node-id so the open/closed state survives layout
 // rebuilds and hover-preview redraws.
 function attachArgChipExpand(chipEl, arg, nodeId, opts) {
   if (typeof attachInlineExpand !== 'function') return;

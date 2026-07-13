@@ -316,8 +316,61 @@ async function waitFor(predicate, timeoutMs) {
 function isTransientNetworkError(err) {
   const msg = String(err && err.message || err);
   if (/socket hang up|ECONNRESET|ECONNREFUSED|fetch failed/i.test(msg)) return true;
-  const code = err && err.cause && err.cause.code;
+  // `cause.code` is where undici stashes it; `code` is where node:http does.
+  const code = (err && err.cause && err.cause.code) || (err && err.code);
   return code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'UND_ERR_SOCKET';
+}
+
+
+// Minimal `fetch`-shaped request over node's CORE http client.
+//
+// We cannot use the global `fetch`: node's bundled undici crashes with an
+// uncatchable `AssertionError: assert(!this.paused)` (Parser.finish) whenever
+// a `Connection: close` response is big enough to trigger read backpressure.
+// Reproduced on node 22.23.1 against `/api/graph/entities` (~6 MB) with a
+// six-line script; `/health` (46 B) is fine, and keep-alive is fine. The
+// assertion fires on the socket-end tick, outside any promise, so it takes
+// the whole process down — which is why one bad GET killed entire test files
+// before they reached their first browser assertion.
+//
+// Dropping `Connection: close` is not an option (see the http-kit AsyncChannel
+// leak note on `nodeApi`). node's core client parses close-delimited bodies
+// correctly, and `agent: false` gives every request its own socket and emits
+// the close header for us.
+//
+// Returns only the surface `nodeApi`'s two callers use: ok / status / text /
+// json. Bodies are buffered — the largest response in the suite is ~6 MB.
+function coreHttpRequest(method, url, headers, body, signal) {
+  const u = new URL(url);
+  const mod = u.protocol === 'https:' ? require('node:https') : require('node:http');
+  return new Promise((resolve, reject) => {
+    const req = mod.request({
+      protocol: u.protocol,
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'https:' ? 443 : 80),
+      path: u.pathname + u.search,
+      method,
+      headers,
+      agent: false,
+      signal,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('error', reject);
+      res.on('end', () => {
+        const txt = Buffer.concat(chunks).toString('utf8');
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          text: async () => txt,
+          json: async () => JSON.parse(txt),
+        });
+      });
+    });
+    req.on('error', reject);
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
 }
 
 
@@ -332,36 +385,36 @@ async function nodeApi(method, path, body) {
   // application-level cache. Forcing connection-close releases the
   // channel immediately after the response is sent; no accumulation,
   // no OOM cascade.
-  const opts = {
-    method,
-    headers: { 'Authorization': 'Bearer ' + AUTH, 'Connection': 'close' },
-  };
+  const headers = { 'Authorization': 'Bearer ' + AUTH, 'Connection': 'close' };
+  let payload;
   if (body !== undefined) {
     if (typeof body === 'string') {
-      opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
-      opts.body = body;
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      payload = body;
     } else {
-      opts.headers['Content-Type'] = 'application/json';
-      opts.body = JSON.stringify(body);
+      headers['Content-Type'] = 'application/json';
+      payload = JSON.stringify(body);
     }
+    headers['Content-Length'] = Buffer.byteLength(payload);
   }
   const idempotent = method === 'GET' || method === 'DELETE';
   const maxAttempts = idempotent ? 4 : 1;
   let lastErr = null;
   for (let i = 0; i < maxAttempts; i++) {
-    // Per-attempt 60s wall cap. Without this, a fetch against a
+    // Per-attempt 60s wall cap. Without this, a request against a
     // server that's queued up requests but not responding (e.g. mid-
-    // GC pause or starved scheduler) waits indefinitely — node's
-    // default `fetch` has no timeout and inherits the kernel socket
-    // wait. One stuck request can blow past the per-test 5-min cap
-    // (verified empirically — edit-inheritance-regression makes
-    // ~15 sequential layout calls; under memory pressure a single
-    // stuck POST drowned out the whole test). 60s lets a genuinely-
-    // slow JVM finish; anything past that is a hang.
+    // GC pause or starved scheduler) waits indefinitely — neither
+    // node's `fetch` nor its core client has a default timeout, and
+    // both inherit the kernel socket wait. One stuck request can blow
+    // past the per-test 5-min cap (verified empirically —
+    // edit-inheritance-regression makes ~15 sequential layout calls;
+    // under memory pressure a single stuck POST drowned out the whole
+    // test). 60s lets a genuinely-slow JVM finish; anything past that
+    // is a hang.
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 60000);
     try {
-      return await fetch(BASE + path, { ...opts, signal: ctrl.signal });
+      return await coreHttpRequest(method, BASE + path, headers, payload, ctrl.signal);
     } catch (err) {
       lastErr = err;
       const aborted = err?.name === 'AbortError';
@@ -403,29 +456,65 @@ async function deleteFnByName(_page, name) {
   // post-test call.
   const ents = await nodeApiJson('GET', '/api/graph/entities');
   const matches = ents.fns.filter(f => f.name === name);
+  const secretLeaf = ents.fns.find(f => f.name === 'secret-leaf');
   for (const fn of matches) {
+    // A secret fn-def can ONLY be removed through the secrets endpoint, which
+    // also cleans up its OpenBao entry. The generic CRUD route answers 409 and
+    // says so. This helper used to ignore the status, so cleanup "succeeded"
+    // silently — but only AFTER it had already deleted the `:in` binding that
+    // holds the vault path, leaving a half-deleted secret behind. That is how
+    // the demo DB accumulated probe secrets with `path: null`.
+    if (isSecretFnRow(fn, secretLeaf)) {
+      await deleteOrThrow('/api/secrets/' + fn.id, name);
+      continue;
+    }
+
     const bindings = (ents.bindings || []).filter(b => b['fn-id'] === fn.id);
     const bindingIds = new Set(bindings.map(b => b.id));
     const items = (ents['list-items'] || []).filter(i => bindingIds.has(i['binding-id']));
     for (const it of items) {
-      await nodeApi('DELETE', '/api/entities/binding-list-item/' + it.id);
+      await deleteOrThrow('/api/entities/binding-list-item/' + it.id, name);
     }
     for (const b of bindings) {
-      await nodeApi('DELETE', '/api/entities/binding/' + b.id);
+      await deleteOrThrow('/api/entities/binding/' + b.id, name);
     }
     const ownFnSlots = (ents['fn-slots'] || []).filter(fs => fs['fn-id'] === fn.id);
     for (const fs of ownFnSlots) {
       // fn-slot rows have a composite PK; the API treats them as
       // entities keyed by `id` (set on creation); fall through if
       // the row predates id-bearing rows.
-      if (fs.id) await nodeApi('DELETE', '/api/entities/fn-slot/' + fs.id);
+      if (fs.id) await deleteOrThrow('/api/entities/fn-slot/' + fs.id, name);
     }
     const ownSlotIds = ownFnSlots.map(fs => fs['slot-id']);
     for (const sid of ownSlotIds) {
-      await nodeApi('DELETE', '/api/entities/slot/' + sid);
+      await deleteOrThrow('/api/entities/slot/' + sid, name);
     }
-    await nodeApi('DELETE', '/api/entities/fn/' + fn.id);
+    await deleteOrThrow('/api/entities/fn/' + fn.id, name);
   }
+}
+
+
+// A secret is a fn-def whose parents are exactly `[secret-leaf]` — the same
+// "pure secret" test the secrets panel uses (`isSecretFn` in editor-secrets.js).
+function isSecretFnRow(fn, secretLeaf) {
+  if (!secretLeaf) return false;
+  const parents = fn['parent-ids'] || [];
+  return parents.length === 1 && parents[0] === secretLeaf.id;
+}
+
+
+// DELETE that refuses to fail silently. 404 is fine — cleanup runs before the
+// test too, when there is nothing to remove. Anything else means the entity
+// survived, and a test that leaks entities poisons every later run against the
+// same DB, so make it loud.
+async function deleteOrThrow(path, name) {
+  const r = await nodeApi('DELETE', path);
+  if (r.ok || r.status === 404) return;
+  const body = (await r.text()).slice(0, 200);
+  const msg = 'cleanup of "' + name + '" failed: DELETE ' + path
+              + ' → HTTP ' + r.status + ' ' + body;
+  process.stderr.write('  ! ' + msg + '\n');
+  throw new Error(msg);
 }
 
 

@@ -1,0 +1,47 @@
+# Scale-to-zero graphden as a Knative Service (docs/FLEET_RFC.md T5.3).
+# Demonstrates the substrate: idle → 0 pods; a request → the activator holds it
+# while a pod cold-starts. graphden's cold boot is ~140s, so scale-to-zero is
+# only PRACTICAL once CRaC restore (~178ms, development/crac/) fronts the boot —
+# this manifest proves the Knative half; wiring the CRaC restore image into the
+# ksvc is the remaining step (T5.3).
+#
+# Prereqs on the kind cluster:
+#   - Knative Serving + a networking layer (kourier), config-network
+#     ingress-class=kourier, config-domain set.
+#   - config-deployment registries-skipping-tag-resolving includes `kind.local`
+#     (so the registry-less local image isn't resolved against docker.io).
+#   - the image loaded as `kind.local/graphden-executor:latest`
+#     (docker tag … && kind load docker-image kind.local/graphden-executor:latest).
+#   - an in-cluster Postgres reachable at the JDBC_URL below.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: graphden-app
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/min-scale: "0"   # scale to ZERO when idle
+        autoscaling.knative.dev/max-scale: "1"
+        autoscaling.knative.dev/target: "10"
+    spec:
+      timeoutSeconds: 300                          # activator holds a cold-start request up to here
+      containerConcurrency: 0
+      containers:
+        - image: kind.local/graphden-executor:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - {name: JDBC_URL, value: "jdbc:postgresql://postgres.default.svc.cluster.local:5432/graphden"}
+            - {name: DB_USERNAME, value: graphden}
+            - {name: DB_PASSWORD, value: graphden}
+            - {name: AUTH_TOKEN, value: testauth}
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+            periodSeconds: 5
+            failureThreshold: 60                   # 60*5 = 300s cold-boot budget
+          resources:
+            requests: {cpu: 250m, memory: 640Mi}
+            limits: {memory: 1300Mi}

@@ -209,6 +209,20 @@
    :return-type [:map :keyword :uuid]
    :effects #{:db}}
 
+  ;; --- :service-blocking-free-args — the service-ability PROJECTION of
+  ;; :free-arg-slot-map. Same graph-traversal primitive (§3.3 carve-out),
+  ;; but drops the fn's own top-level CALLBACK-slot subtrees: an
+  ;; `:http-server` handler / `:schedule` body is invoked by the deferred
+  ;; invoker per request/tick, so its free args are per-invocation and don't
+  ;; block STARTING the service. Only `:_create-service-free-args-rej` uses
+  ;; it, so a whole-app listener (all free args below its `:handler` HOF
+  ;; slot) isn't falsely rejected while a genuinely unstartable fn still is.
+  {:name :service-blocking-free-args
+   :description "Map of `arg-name → slot-id` for only the free args that would prevent `fn-id` from being STARTED as a service (drops callback subtrees the deferred invoker supplies per-invocation). `{}` when fn-id is nil."
+   :args {:fn-id {:type :nullable-uuid :description "Target fn-id; nil short-circuits to empty map."}}
+   :return-type [:map :keyword :uuid]
+   :effects #{:db}}
+
   {:name :list-all-graph-entities
    :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. With `scope :index`, drops `:slots / :fn-slots / :bindings / :list-items` for a ~95% smaller response (sidebar-only use). With `scope :subtree` + `root-id`, returns only the transitive closure reachable from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids (~98% smaller — typical per-fn editor view)."
    :args {:scope {:type :nullable-keyword
@@ -962,8 +976,7 @@
                     :_update-record-type-fields-empty?  :_err-fields-required
                     :_update-record-type-fn-not-found?  :_update-record-type-err-not-found
                     {:value true}                       {:value nil}]
-          :parsed :_update-record-type-parsed}
-   :effects #{:db}}
+          :parsed :_update-record-type-parsed}}
 
   ;; --- Stage 3 of update-record-type — journalled txn split for graph.
   ;; Was one 141-line Clojure defn; now a `:try` (core.system) over an
@@ -1340,8 +1353,8 @@
                    {:parent :some? :args {:value :_create-svc-fn-id}}]}}
 
   {:name :_create-svc-free-args
-   :description "`{name → slot-id}` of the target fn's free args. `{}` when fn-id missing."
-   :parent :free-arg-slot-map
+   :description "`{name → slot-id}` of the target fn's free args that would BLOCK starting it as a service. Uses `:service-blocking-free-args` (not the full `:free-arg-slot-map`), so a listener/whole-app fn whose free args are all per-request callback args isn't falsely rejected, while a genuinely unstartable fn still is."
+   :parent :service-blocking-free-args
    :args {:fn-id :_create-svc-fn-id}}
 
   {:name :_create-svc-free-keys
@@ -3939,11 +3952,17 @@
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}
 
   ;; --- :parse-service-from-form. Same fragment-merge shape as the
-  ;; other parsers. 3 fields:
+  ;; other parsers. 5 fields:
   ;;   :fn-id          UUID  — required (the fn this service runs)
   ;;   :enabled?       bool  — "true"/"false" → bool via `:equal? "true"`
   ;;   :restart-policy enum  — :always / :on-failure / :never via
   ;;                           `:str-to-keyword` on the raw form value
+  ;;   :cardinality    enum  — :singleton / :per-pod, same coercion
+  ;;   :branch-id      UUID  — optional, scopes the run to a branch
+  ;;
+  ;; The fragment list is CLOSED: a field absent from it is silently
+  ;; dropped by the merge, so every new `:service` column needs its
+  ;; fragment here or the entity API can't write it.
   ;;
   ;; Wired into `:_create-entity-data-by-type` so `POST /api/entities/
   ;; service` reaches the regular validation chain (free-args guard,
@@ -3991,6 +4010,34 @@
                                                        :default nil}}}}]}}
           :else {:value {}}}}
 
+  {:name :_parse-svc-form-cardinality-fragment
+   :description "Optional `:cardinality` form-field — `:singleton` (advisory-lock-gated, one pod cluster-wide), `:per-pod` (every pod runs its own copy; what an `:http-server` listener needs), or `:pool` (up to `:pool-size` pods, coordinated by N advisory-lock slots). Absent ⇒ the column stays nil, which the reconciler reads as `:singleton`. Same `:str-to-keyword` coercion as `:restart-policy`."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :cardinality}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :cardinality}]
+                        :vals [{:parent :str-to-keyword
+                                :args {:string {:parent :get
+                                                :args {:coll {:as :form-data}
+                                                       :key {:value :cardinality}
+                                                       :default nil}}}}]}}
+          :else {:value {}}}}
+
+  {:name :_parse-svc-form-pool-size-fragment
+   :description "Optional `:pool-size` form-field (int) — how many pods a `:pool` service runs on. Parsed via `:parse-int`; ignored by the reconciler for non-`:pool` cardinalities. Absent / blank ⇒ the column stays nil (a `:pool` row with nil size degrades to a singleton)."
+   :parent :if
+   :args {:test {:parent :contains?
+                 :args {:coll {:as :form-data} :key {:value :pool-size}}}
+          :then {:parent :zipmap
+                 :args {:keys [{:value :pool-size}]
+                        :vals [{:parent :parse-int
+                                :args {:s {:parent :get
+                                           :args {:coll {:as :form-data}
+                                                  :key {:value :pool-size}
+                                                  :default nil}}}}]}}
+          :else {:value {}}}}
+
   {:name :_parse-svc-form-branch-id-fragment
    :description "Optional `:branch-id` form-field. When the admin picks a branch in the editor's service popover, the value lands here as a UUID string; `:parse-uuid` collapses empty / malformed input to nil so the row falls back to the no-branch-id behavior in the reconciler."
    :parent :if
@@ -4006,12 +4053,14 @@
           :else {:value {}}}}
 
   {:name :parse-service-from-form
-   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
+   :description "Extract a `:service` entity's field map. `:fn-id` (UUID) names the fn the supervisor must run; `:enabled?` (bool, encoded `\"true\"`/`\"false\"` in form-data) toggles reconciliation; `:restart-policy` (`:always` / `:on-failure` / `:never`) selects the supervisor strategy; `:cardinality` (`:singleton` / `:per-pod` / `:pool`, optional) says how many pods run it at once; `:pool-size` (int, optional) is the pod count for `:pool`; `:branch-id` (UUID, optional) scopes the run to a specific branch's ExecutionContext. Empty form values clear the corresponding column."
    :parent :merge
    :args {:maps [{:value {}}
                  :_parse-svc-form-fn-id-fragment
                  :_parse-svc-form-enabled-fragment
                  :_parse-svc-form-restart-policy-fragment
+                 :_parse-svc-form-cardinality-fragment
+                 :_parse-svc-form-pool-size-fragment
                  :_parse-svc-form-branch-id-fragment]
           :form-data {:type :_form-data-shape
                       :description "Parsed form-data map; each per-field fragment looks up its key here."}}}

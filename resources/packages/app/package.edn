@@ -6,8 +6,13 @@
  ;; `:pg-query` + `:decode-row` primitives from the `storage/pg` module.
  :dependencies ["core" "web" "storage"]
  :modules ["common" "lookups" "routes-method" "editor" "layout" "forms" "execution" "branches" "secrets" "page" "contact-demo" "registry" "routes" "routes-auth" "route-groups" "server"]
+ ;; `:per-pod` — every executor pod must bind its own HTTP port. A
+ ;; `:singleton` listener would leave every pod but the advisory-lock
+ ;; winner without a listener, so a load balancer would see one healthy
+ ;; backend no matter how many pods run.
  :services [{:name :default
              :fn-name :web-server
              :enabled? true
              :restart-policy :always
+             :cardinality :per-pod
              :description "Default HTTP listener — package-seeded service for the editor/API."}]}

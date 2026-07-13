@@ -93,7 +93,7 @@ function ensureRowActionsPopover() {
 //
 // If there's not enough room on the right, fall back to LEFT-of-card.
 //
-// The popover scales with the cytoscape zoom so it matches the
+// The popover scales with the viewport zoom so it matches the
 // scaled-up card chrome — the in-card icons all live inside an
 // overlay that gets `transform: scale(zoom)` applied (see
 // editor-overlays.js positionOverlays). Without this match the
@@ -122,8 +122,7 @@ function positionRowActionsPopover(el, anchor) {
     fadeOutPopover();
     return;
   }
-  const zoom = (typeof cy !== 'undefined' && cy && typeof cy.zoom === 'function')
-               ? cy.zoom() : 1;
+  const zoom = (typeof gv !== 'undefined' && gv.ready()) ? gv.zoom() : 1;
   // Reset transform so offsetWidth measures the un-scaled size.
   el.style.transform = '';
   el.style.transformOrigin = 'top left';
@@ -620,7 +619,7 @@ registerActionHandler('delete-fn', (btn, e, host) => {
 });
 
 
-// Cytoscape zoom/pan re-position — when the canvas zooms or pans
+// Viewport zoom/pan re-position — when the graph zooms or pans
 // while a popover is open, the anchor's bounding rect moves AND
 // changes scale, so the popover would otherwise stick to its old
 // (now-wrong) position and size. Re-run positionRowActionsPopover
@@ -630,12 +629,12 @@ registerActionHandler('delete-fn', (btn, e, host) => {
 let rowActionsCyHandlersBound = false;
 function ensureRowActionsCyHandlers() {
   if (rowActionsCyHandlersBound) return;
-  if (typeof cy === 'undefined' || !cy || typeof cy.on !== 'function') return;
-  rowActionsCyHandlersBound = true;
   const reposition = () => {
     if (!rowActionsPopoverEl || rowActionsPopoverEl.style.display === 'none') return;
     if (!rowActionsPopoverAnchor || !document.contains(rowActionsPopoverAnchor)) return;
     positionRowActionsPopover(rowActionsPopoverEl, rowActionsPopoverAnchor);
   };
-  cy.on('zoom pan', reposition);
+  // The popover is anchored to the document, not the graph layer, so it has to
+  // re-anchor itself whenever the viewport moves under it.
+  rowActionsCyHandlersBound = gv.onViewportChange(reposition);
 }

@@ -1,11 +1,11 @@
 // Editor Drag - Drag handle for any overlay (allows manual node positioning).
-// Depends on: editor-state.js (cy, isGrabbing, userMovedNodes,
-// updateOverlayPositions).
+// Depends on: editor-graph-view.js (gv), editor-state.js (isGrabbing,
+// userMovedNodes), editor-overlay-manager.js (updateOverlayPositions).
 
 /**
- * Create drag handle for any overlay
+ * Create drag handle for any overlay. `graphNode` is a `gv` element.
  */
-function createDragHandle(overlay, cyNode) {
+function createDragHandle(overlay, graphNode) {
   const dragHandle = document.createElement('div');
   dragHandle.className = 'drag-handle';
   dragHandle.style.height = '12px';
@@ -19,44 +19,44 @@ function createDragHandle(overlay, cyNode) {
 
   // Shared drag logic for mouse and touch
   const startDrag = (startX, startY, moveEvent, endEvent, getXY, isTouch) => {
-    if (!cyNode.length) return;
+    if (!graphNode) return;
 
     isGrabbing = true;
     dragHandle.style.cursor = 'grabbing';
-    userMovedNodes.add(cyNode.id());
+    userMovedNodes.add(graphNode.id());
 
-    // Disable Cytoscape's own user-panning while we own the gesture.
-    // Without this, on touch the finger drag also pans the viewport,
-    // doubling the visual movement and pulling the node away from the
-    // finger. Restored in onEnd.
-    const prevUserPanning = cy.userPanningEnabled();
-    cy.userPanningEnabled(false);
+    // Disable background panning while we own the gesture. Without this, on
+    // touch the finger drag also pans the viewport, doubling the visual
+    // movement and pulling the node away from the finger. Restored in onEnd.
+    const prevUserPanning = gv.userPanningEnabled();
+    gv.userPanningEnabled(false);
 
     let lastX = startX;
     let lastY = startY;
 
     const onMove = (moveE) => {
       // Touch: prevent browser scroll/zoom AND stop the move from reaching
-      // Cytoscape's own touch handlers in case they listen on document.
+      // the viewport's own touch handlers, so a node drag doesn't also pan.
       if (isTouch) {
         if (moveE.cancelable) moveE.preventDefault();
         moveE.stopPropagation();
       }
       const [mx, my] = getXY(moveE);
-      const dx = (mx - lastX) / cy.zoom();
-      const dy = (my - lastY) / cy.zoom();
+      const zoom = gv.zoom();
+      const dx = (mx - lastX) / zoom;
+      const dy = (my - lastY) / zoom;
       lastX = mx;
       lastY = my;
 
-      const pos = cyNode.position();
-      cyNode.position({ x: pos.x + dx, y: pos.y + dy });
+      const pos = graphNode.position();
+      graphNode.position({ x: pos.x + dx, y: pos.y + dy });
       updateOverlayPositions();
     };
 
     const onEnd = () => {
       document.removeEventListener(moveEvent, onMove, { capture: true });
       document.removeEventListener(endEvent, onEnd, { capture: true });
-      cy.userPanningEnabled(prevUserPanning);
+      gv.userPanningEnabled(prevUserPanning);
       isGrabbing = false;
       dragHandle.style.cursor = 'grab';
     };

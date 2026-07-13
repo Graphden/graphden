@@ -1,0 +1,28 @@
+# gitleaks configuration for graphden.
+#
+# `[extend] useDefault` keeps every rule from gitleaks' built-in config; the
+# rules below are the ones we learned we needed.
+
+[extend]
+useDefault = true
+
+# A real AUTH_TOKEN for the dev instance was committed as the `||` fallback of
+# an env lookup in five browser tests, and shipped in git history. The built-in
+# rules don't fire on it: the value is a short opaque word with no vendor
+# prefix, no entropy signature, no `key =` shape.
+#
+# The convention is that the fallback is a documented placeholder (see
+# `tools/browser-test/edit-test-helpers.js`, which uses `test123`). Anything
+# else in that position is a real credential until proven otherwise.
+[[rules]]
+id = "graphden-env-token-literal-fallback"
+description = "Literal fallback for a credential env var — use the documented placeholder, not a live token"
+regex = '''\b(?:process\.env\.)?(?:AUTH_TOKEN|API_KEY|API_TOKEN|ACCESS_TOKEN|SECRET_KEY|VAULT_TOKEN)\b\s*\|\|\s*['"][^'"\n]{4,}['"]'''
+tags = ["graphden", "credential", "fallback"]
+
+  [rules.allowlist]
+  description = "Documented placeholders that are not credentials."
+  regexTarget = "match"
+  regexes = [
+    '''\|\|\s*['"](?:test123|changeme|placeholder|dummy|example|localhost)['"]''',
+  ]

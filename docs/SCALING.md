@@ -312,10 +312,20 @@ See SERVICES.md § Roadmap.
 
 ## Still open
 
-Only the genuinely-external remains: a real BYO executor on a **second
-physical machine** end-to-end (this dev environment can't spin one — but the
-whole loop is proven in one JVM by `storage.remote.e2e-test` and the assembly
-by `byo-test`). The boundaries above are intentional scope, not gaps.
+Nothing about CORRECTNESS. The multi-node software topology — separate JVMs,
+real TCP between them, a BYO executor that reaches the graph over HTTP
+(`RemoteStorage`) instead of touching Postgres directly — needs no special
+hardware: it's separate processes + a config boundary, reproducible with
+containers, VMs, or even two ports on one host. That loop is already proven two
+ways: `storage.remote.e2e-test` runs it over REAL http-kit servers (bootstrap +
+SSE live-refresh + reconnect), and the fleet half was run on a real two-pod kind
+cluster (forward-hop, leader election, cross-pod transport, DNS-SRV — 2026-07).
+
+What remains is purely OPERATIONAL and not a test: a live demonstration of a
+customer running a BYO executor on their own infrastructure (their hardware /
+another cloud / another region). That's a deployment showcase — reproducible with
+a second cloud VM or container, never literally a second physical machine — not a
+correctness gap. The boundaries above are intentional scope.
 
 ## Rolling upgrade note
 

@@ -463,7 +463,15 @@ cmd_gc() {
   while IFS= read -r img; do
     name="${img%-executor:latest}"
     case "$name" in
-      graphden) continue ;;                      # the canonical image — keep
+      graphden)     continue ;;   # the canonical image — keep
+      graphden-wt-*) continue ;;  # ours, and ALREADY handled by the sweep above,
+                                  # which strips the prefix before checking the
+                                  # worktree. Falling through to here would test
+                                  # $WTQ_ROOT/graphden-wt-<name> — a path that
+                                  # never exists — so the "is it still live?"
+                                  # guard silently passes and a working agent's
+                                  # image is deleted out from under it. That is
+                                  # exactly what happened to sidebar-filters.
     esac
     [ -d "$WTQ_ROOT/$name" ] && continue         # a live worktree's own build
     docker image rm "$img" >/dev/null 2>&1 && ok "  removed legacy $img"

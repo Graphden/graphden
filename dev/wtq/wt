@@ -272,18 +272,69 @@ EOF
 # kickoff prompt handed to an autonomous agent session for <name>
 kickoff_text() {
   local name="$1"
+  local path="$WTQ_ROOT/$name" branch="feature/$name"
+
   cat <<EOF
 You are an autonomous feature agent for '$name', working in an ISOLATED git
-worktree on branch feature/$name. Other agents may be working in parallel
+worktree on branch $branch. Other agents may be working in parallel
 worktrees — never assume repo-global state, and never touch develop or other
 worktrees directly.
 
 First read your operating contract at dev/wtq/AGENT.md, then your task spec at
-$TASKS_DIR/$name.md. Execute the task end to end: implement in small commits,
-keep 'bb ci' green as your fast loop, and when the feature is complete run the
-landing gate yourself with 'bb wt merge' (in the BACKGROUND — it can take an
-hour) to merge into develop, handling any conflict or gate failure it reports.
-Report back when it lands, or ask me if you hit a real decision you can't make.
+$TASKS_DIR/$name.md.
+EOF
+
+  # A session can die — killed, crashed, /clear'd — and the agent that replaces
+  # it is handed this same prompt. Told only "execute the task", it starts over
+  # and redoes work that is already committed. The work survives on disk; only
+  # the agent's memory of it does not. So when the branch already carries
+  # commits, hand the replacement its bearings instead of a blank slate.
+  local commits; commits="$(git -C "$path" rev-list --count "$TARGET..$branch" 2>/dev/null || echo 0)"
+  if [ "${commits:-0}" -eq 0 ]; then
+    cat <<EOF
+Execute the task end to end: implement in small commits, keep 'bb ci' green as
+your fast loop, and when the feature is complete PROPOSE landing it — on the
+user's OK run the gate with 'bb wt merge' (in the BACKGROUND — it takes ~40
+min), handling any conflict or gate failure it reports. Report back when it
+lands, or ask if you hit a real decision you can't make.
+EOF
+    return 0
+  fi
+
+  local dirty=""; [ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ] && dirty=" (working tree DIRTY — uncommitted changes)"
+  local result="—"
+  [ -f "$RESULT_DIR/$name" ] && result="$(cut -f1 "$RESULT_DIR/$name")"
+  local drift; drift="$(governance_drift "$name" "$branch")"
+
+  cat <<EOF
+
+You are RESUMING work already in progress — a previous session ended without
+finishing. Nothing is lost: the branch, the worktree and the task spec are on
+disk. Do NOT start over. Get your bearings first:
+
+  $commits commit(s) on $branch beyond $TARGET$dirty
+  last landing-gate result: $result
+
+  git log --oneline $TARGET..HEAD     # what you already did
+  git status                          # anything left uncommitted
+  bb wt log $name                     # your last gate run, if any
+EOF
+
+  if [ -n "$drift" ]; then
+    cat <<EOF
+
+  WARNING — $TARGET has changed the rules you work under since you started:
+$(printf '%s\n' "$drift" | sed 's/^/      /')
+  Run 'bb wt ack' to see the diff. The gate will refuse to land until you have.
+EOF
+  fi
+
+  cat <<EOF
+
+Then finish the job: keep 'bb ci' green, and when the feature is complete
+PROPOSE landing it — on the user's OK run 'bb wt merge' (in the BACKGROUND —
+it takes ~40 min), handling any conflict or gate failure it reports. Ask if you
+hit a real decision you can't make.
 EOF
 }
 

@@ -23,11 +23,28 @@ You were started in one of two ways:
 1. **Stay in your worktree.** Never `cd` into another worktree, never edit
    `develop` directly, never touch another agent's branch. Other agents change
    unrelated files in parallel — your view of the repo is your branch only.
-2. **Never run the heavy tools by hand.** Do **not** run `bb rebuild`,
+2. **Never drive the SHARED stack by hand.** Do **not** run `bb rebuild`,
    `bb deploy`, `bb test-integration`, `bb test-e2e`, `bb coverage`, or push to
-   `origin`. The landing gate (`bb wt merge`) owns all of that, serialized
-   behind a lock. Running them by hand fights the queue and clobbers the shared
-   Docker stack.
+   `origin`. Those address the canonical instance (`graphden-executor` on
+   :9002) and the canonical image tag — the one `bb test-e2e` boots. Driving
+   them from a worktree fights the queue, steals the demo, and overwrites the
+   tag other agents' suites run against. The landing gate (`bb wt merge`) owns
+   all of it, serialized behind a lock. (`bb rebuild` / `bb deploy` now refuse
+   to run in a worktree rather than let you find this out the hard way.)
+
+   **You get your own instance instead** — isolated containers, volumes, image
+   and ports, on a port block reserved for your branch:
+
+   ```bash
+   bb wt up      # build THIS branch + run it; prints http://localhost:<your-port>
+   bb wt down    # stop it (keeps the DB volume)
+   ```
+
+   Use it whenever you need to see your change actually running — a UI change
+   especially (see the `graphden-ui` skill: prove it in a real browser). It
+   ends in `bb verify`, which compares the running build's `/version` against
+   your tree, so a green `wt up` is proof the instance is running **your** code
+   and not somebody else's. `bb wt drop` reclaims all of it.
 3. **Follow the repo's rules** — `CLAUDE.md` and the relevant skills
    (`graphden-code-quality`, `graphden-packages-quality`, `graphden-ui`, …).
    Write it clean the first time.

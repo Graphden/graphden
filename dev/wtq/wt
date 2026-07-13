@@ -29,7 +29,12 @@
 #   wt start <name>        launch an autonomous agent inside an existing worktree
 #   wt task  <name>        print the feature's task spec
 #   wt list                show every worktree, branch, ahead/behind, dirty, result
-#   wt merge [--no-e2e]    (run inside a worktree) queue + gate + land on develop
+#   wt merge [--no-e2e] [--deploy]  (inside a worktree) queue + gate + land on develop
+#                          --deploy: also reset the develop DB schema on landing
+#   wt up                  (inside a worktree) build + run THIS branch on its own
+#                          ports — your private instance; never touches the demo
+#   wt down                (inside a worktree) stop it (keeps the DB volume)
+#   wt gc                  reclaim superseded / orphaned executor images
 #   wt status              show queue lock holder + recent gate logs
 #   wt drop <name> [-f]    remove a worktree + its branch (must be merged; -f overrides)
 #   wt log <name>          tail the most recent gate log for a feature
@@ -76,6 +81,14 @@ die()  { printf '%s%s%s\n' "$RED" "$*" "$RST" >&2; exit 1; }
 
 branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
 
+# Newest-first gate logs. `find -printf` rather than `ls -t` so a filename is
+# never re-parsed by the shell: usage `newest_logs <n> [feature]`.
+newest_logs() {
+  local n="$1" name="${2:-}"
+  find "$LOG_DIR" -maxdepth 1 -type f -name "${name:+$name-}*.log" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn | head -"$n" | cut -d' ' -f2-
+}
+
 # node_modules/ is gitignored, so a fresh worktree gets every package.json but
 # none of the installed deps. The damage is worse than a missing linter:
 #   - stylelint cannot resolve stylelint-config-standard and fails outright;
@@ -102,6 +115,74 @@ bootstrap_node_modules() {
     [ -e "$dst" ] && continue
     cp -al "$src" "$dst" 2>/dev/null || cp -a "$src" "$dst"
   done < <(git -C "$MAIN_WT" ls-files '*package.json' | xargs -r -n1 dirname | sort -u)
+}
+
+# --- per-worktree docker instance -------------------------------------------
+# docker-compose.yml is parameterised by GD_*; with none set it raises the
+# CANONICAL stack (graphden-executor on :9002, image graphden-executor:latest).
+# That stack belongs to develop and to the gate. An agent that wants to click
+# through its own changes gets a private one instead: own containers, own
+# volumes, own image tag, own ports.
+PORTS_DIR="$WTQ_DIR/ports"
+PORT_BASE=9100     # canonical stack owns 9002/9081/9099/5435/5436/8200
+PORT_STRIDE=6      # HTTP, HISTORY, NREPL, PG, USERPG, BAO
+mkdir -p "$PORTS_DIR"
+
+# Hand each instance a contiguous block of host ports, recorded under the shared
+# .git so it survives across sessions and is visible to every worktree. Taken
+# under a lock: two agents claiming at the same moment must not get the same
+# block. Freed by `wt drop`.
+alloc_port_base() {
+  local name="$1" slot=0 base
+  local f="$PORTS_DIR/$name"
+  exec 8>"$PORTS_DIR/.lock"
+  flock -x 8
+  if [ ! -f "$f" ]; then
+    while :; do
+      base=$((PORT_BASE + slot * PORT_STRIDE))
+      grep -qxF "$base" "$PORTS_DIR"/* 2>/dev/null || break
+      slot=$((slot + 1))
+      [ "$slot" -lt 100 ] || die "no free port block below $((PORT_BASE + 100 * PORT_STRIDE))"
+    done
+    printf '%s\n' "$base" > "$f"
+  fi
+  flock -u 8
+  cat "$f"
+}
+
+# Export the GD_* the compose file reads. Sourced by every instance command so
+# they all address the SAME stack for a given worktree.
+instance_env() {
+  local name="$1" base; base="$(alloc_port_base "$name")"
+  export GD_INSTANCE="gdwt-$name"
+  export GD_IMAGE="graphden-wt-$name-executor:latest"
+  export COMPOSE_PROJECT_NAME="gdwt-$name"
+  export GD_PORT_HTTP=$base
+  export GD_PORT_HISTORY=$((base + 1))
+  export GD_PORT_NREPL=$((base + 2))
+  export GD_PORT_PG=$((base + 3))
+  export GD_PORT_USERPG=$((base + 4))
+  export GD_PORT_BAO=$((base + 5))
+}
+
+# Name of the worktree we are standing in — every instance command is scoped to
+# it, so an agent can never address another agent's stack.
+this_worktree() {
+  local wt; wt="$(git rev-parse --show-toplevel)"
+  [ "$wt" != "$MAIN_WT" ] || die "this command is for a feature worktree; the main checkout drives the canonical instance with 'bb rebuild'."
+  basename "$wt"
+}
+
+# Tear an instance down completely: containers, volumes, image, port block.
+teardown_instance() {
+  local name="$1"
+  local path="$WTQ_ROOT/$name"
+  ( instance_env "$name"
+    if [ -d "$path" ]; then
+      ( cd "$path" && docker-compose down -v --remove-orphans ) >/dev/null 2>&1 || true
+    fi
+    docker image rm -f "$GD_IMAGE" >/dev/null 2>&1 || true )
+  rm -f "$PORTS_DIR/$name"
 }
 
 # bootstrap prompt for a NAMELESS agent (discussion phase, before it self-claims)
@@ -144,6 +225,68 @@ landing gate yourself with 'bb wt merge' (in the BACKGROUND — it can take an
 hour) to merge into develop, handling any conflict or gate failure it reports.
 Report back when it lands, or ask me if you hit a real decision you can't make.
 EOF
+}
+
+# =====================================================================
+# up / down / gc — the agent's own instance
+# =====================================================================
+cmd_up() {
+  local name; name="$(this_worktree)"
+  local path="$WTQ_ROOT/$name"
+  instance_env "$name"
+
+  info "Instance $GD_INSTANCE  ->  http://localhost:$GD_PORT_HTTP   (image $GD_IMAGE)"
+  say  "  postgres :$GD_PORT_PG · user-postgres :$GD_PORT_USERPG · openbao :$GD_PORT_BAO · nrepl :$GD_PORT_NREPL"
+  echo
+  # bb rebuild = uberjar + image + up + health + `bb verify` + `bb smoke`. With
+  # GD_* exported it targets THIS worktree's stack, so `bb verify` compares the
+  # running build against THIS branch's tree — the agent sees its own code.
+  ( cd "$path" && bb rebuild ) || die "instance build failed — see the output above"
+
+  echo
+  ok "✓ '$name' is live at http://localhost:$GD_PORT_HTTP"
+  say "  stop it:   ${BLD}bb wt down${RST}      (keeps the DB volume)"
+  say "  remove it: ${BLD}bb wt drop $name${RST}  (containers + volumes + image + ports)"
+}
+
+cmd_down() {
+  local name; name="$(this_worktree)"
+  local path="$WTQ_ROOT/$name"
+  instance_env "$name"
+  info "Stopping $GD_INSTANCE ..."
+  ( cd "$path" && docker-compose down --remove-orphans ) || die "docker-compose down failed"
+  ok "✓ stopped (DB volume kept — 'bb wt drop $name' removes it)"
+}
+
+cmd_gc() {
+  info "Reclaiming superseded executor layers (label graphden.image=executor) ..."
+  docker image prune -f --filter label=graphden.image=executor || true
+
+  info "Removing agent images whose worktree is gone ..."
+  local img name
+  while IFS= read -r img; do
+    name="${img#graphden-wt-}"; name="${name%-executor:latest}"
+    if [ ! -d "$WTQ_ROOT/$name" ]; then
+      docker image rm "$img" >/dev/null 2>&1 && ok "  removed $img (no worktree '$name')"
+    fi
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^graphden-wt-.+-executor:latest$' || true)
+
+  # Tags from the OLD directory-derived naming (`<worktree>-executor:latest`),
+  # left behind by worktrees that predate the explicit GD_IMAGE tag. Never -f:
+  # docker refuses to drop an image a container still uses, which is exactly the
+  # protection we want against a false positive on someone else's image.
+  info "Removing legacy directory-derived executor images ..."
+  while IFS= read -r img; do
+    name="${img%-executor:latest}"
+    case "$name" in
+      graphden) continue ;;                      # the canonical image — keep
+    esac
+    [ -d "$WTQ_ROOT/$name" ] && continue         # a live worktree's own build
+    docker image rm "$img" >/dev/null 2>&1 && ok "  removed legacy $img"
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^[a-z0-9._-]+-executor:latest$' || true)
+
+  echo
+  docker system df | head -5
 }
 
 # =====================================================================
@@ -288,11 +431,11 @@ cmd_status() {
   cmd_list
   echo
   printf '%sRecent gate runs:%s\n' "$BLD" "$RST"
-  ls -1t "$LOG_DIR" 2>/dev/null | head -5 | sed 's/^/  /' || say "  (none)"
+  newest_logs 5 | xargs -r -n1 basename | sed 's|^|  |' || say "  (none)"
 }
 cmd_log() {
   local name="${1:-}"; [ -n "$name" ] || die "usage: wt log <name>"
-  local f; f="$(ls -1t "$LOG_DIR/$name-"*.log 2>/dev/null | head -1 || true)"
+  local f; f="$(newest_logs 1 "$name")"
   [ -n "$f" ] || die "no gate log for '$name'"
   info "== $f =="; tail -n 120 "$f"
 }
@@ -316,9 +459,19 @@ cmd_drop() {
     [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ] || die "worktree is dirty — commit/stash, or use -f"
   fi
 
+  # Before the worktree goes: its docker instance, volumes, image and port block.
+  # This is the only place they can be reclaimed — once the path is gone, the
+  # compose file that names them is gone too.
+  info "Tearing down the '$name' instance (containers, volumes, image, ports) ..."
+  teardown_instance "$name"
+
   info "Removing worktree $path ..."
   git -C "$MAIN_WT" worktree remove ${force:+--force} "$path"
-  git -C "$MAIN_WT" branch -D "$branch" 2>/dev/null && ok "✓ deleted $branch" || warn "branch $branch kept"
+  if git -C "$MAIN_WT" branch -D "$branch" 2>/dev/null; then
+    ok "✓ deleted $branch"
+  else
+    warn "branch $branch kept"
+  fi
   ok "✓ dropped $name"
 }
 
@@ -326,7 +479,7 @@ cmd_drop() {
 # merge — the gated, flock-serialized landing
 # =====================================================================
 run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
-  local wt="$1" no_e2e="$2"
+  local wt="$1" no_e2e="$2" deploy="$3"
   local branch; branch="$(branch_of "$wt")"
   local ts; ts="$(date +%Y%m%d-%H%M%S)"
   local name; name="$(basename "$wt")"
@@ -354,8 +507,16 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     step "bb ci (lint + unit, on merged result)"
     ( cd "$wt" && bb ci ) || { echo "FAIL: bb ci"; return 1; }
 
-    step "bb rebuild (bake merged code into graphden-executor:latest)"
-    ( cd "$wt" && bb rebuild ) || { echo "FAIL: bb rebuild"; return 1; }
+    step "build the canonical image from the merged tree"
+    # BUILD ONLY — deliberately no `up`. Two reasons:
+    #   1. the demo instance must never run un-landed code (a red gate used to
+    #      leave it serving the failed branch);
+    #   2. `compose up` from a worktree collides with the canonical containers.
+    # The tag is fixed by docker-compose.yml (GD_IMAGE default) rather than
+    # derived from the directory, so it IS the tag `bb test-e2e` boots — the
+    # suite therefore tests THIS merged code and not whatever was built last.
+    ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
+    ( cd "$wt" && docker-compose build executor ) || { echo "FAIL: docker build"; return 1; }
 
     step "bb test-integration"
     ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
@@ -380,6 +541,23 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push it yourself)"
     fi
 
+    # The instance is advanced AFTER the fast-forward, from the MAIN checkout,
+    # still holding the queue lock — so it can only ever serve landed code, and
+    # two gates can never race to redeploy it. The image is already built (above),
+    # so this costs no second uberjar. `bb instance-up` ends in `bb verify`, which
+    # compares /version against the freshly-landed tree: proof the demo really is
+    # running what just landed.
+    step "advance the $TARGET instance onto the landed image"
+    if [ "$deploy" = 1 ]; then
+      echo "(--deploy: dropping the $TARGET schema first — the branch changes it)"
+      ( cd "$MAIN_WT" && bb instance-reset ) || { echo "FAIL: instance-reset (LANDED, but the demo is stale)"; return 1; }
+    else
+      ( cd "$MAIN_WT" && bb instance-up ) || { echo "FAIL: instance-up (LANDED, but the demo is stale)"; return 1; }
+    fi
+
+    step "gc: reclaim the executor layers this build superseded"
+    docker image prune -f --filter label=graphden.image=executor || true
+
     echo; echo "=== GREEN: $branch landed on $TARGET ==="
     return 0
   } 2>&1 | tee "$log"
@@ -389,8 +567,14 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 }
 
 cmd_merge() {
-  local no_e2e=0
-  [ "${1:-}" = "--no-e2e" ] && no_e2e=1
+  local no_e2e=0 deploy=0
+  for a in "$@"; do
+    case "$a" in
+      --no-e2e) no_e2e=1 ;;
+      --deploy) deploy=1 ;;   # branch changes the schema: reset the target DB on landing
+      *) die "unknown flag '$a' (wt merge [--no-e2e] [--deploy])" ;;
+    esac
+  done
   local wt; wt="$(git rev-parse --show-toplevel)"
   local branch; branch="$(branch_of "$wt")"
   [ "$branch" != "$TARGET" ] || die "you are on $TARGET — run 'wt merge' from inside a feature worktree."
@@ -406,7 +590,7 @@ cmd_merge() {
   ok "Acquired queue lock — running gate."
 
   local rc=0
-  run_gate "$wt" "$no_e2e" || rc=$?
+  run_gate "$wt" "$no_e2e" "$deploy" || rc=$?
   : > "$HOLDER"
   flock -u 9 || true      # release for the next in line
 
@@ -436,6 +620,9 @@ main() {
     kickoff) cmd_kickoff "$@" ;;
     list|ls) cmd_list  "$@" ;;
     merge|land) cmd_merge "$@" ;;
+    up)     cmd_up     "$@" ;;
+    down)   cmd_down   "$@" ;;
+    gc)     cmd_gc     "$@" ;;
     status) cmd_status "$@" ;;
     log)    cmd_log    "$@" ;;
     drop|rm) cmd_drop  "$@" ;;

@@ -25,7 +25,7 @@ often violated after a context loss:
 |------|----------------|
 | **Claim before you edit** — `bb wt claim <name> "<summary>"`, then `cd` to the printed WORKTREE and work only there | Editing the main checkout on `develop` corrupts the shared baseline every other agent branches from |
 | **Stay in your worktree** — never `cd` into another agent's worktree, never edit `develop`, never touch another agent's branch | Agents change unrelated files in parallel; your view of the repo is your branch only |
-| **`bb ci` is your ONLY local test command** | `bb rebuild` / `bb deploy` / `bb test-integration` / `bb test-e2e` / `bb coverage` belong to the landing gate, serialized behind a lock. Running them by hand fights the queue and clobbers the shared Docker stack |
+| **`bb ci` is your only local *test* command; `bb wt up` is your only live *instance*** | `bb rebuild` / `bb deploy` / `bb test-integration` / `bb test-e2e` / `bb coverage` drive the SHARED stack (`graphden-executor` on :9002) and the shared image tag that `bb test-e2e` boots — from a worktree they steal the demo and make another agent's suite test your binary. They belong to the landing gate, behind its lock. `bb wt up` gives you an isolated stack (own containers, volumes, image, ports) to see your change run |
 | **Pause and ask before landing (`bb wt merge`) and before cleanup (`bb wt drop`)** | These two steps are outward-facing; everything between them is autonomous |
 
 **Recovering the contract and your place in it** — the branch, the worktree and

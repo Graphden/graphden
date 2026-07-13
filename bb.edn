@@ -57,6 +57,23 @@
               (println "  The canonical build happens in the landing gate, under the queue lock.")
               (System/exit 1)))
 
+          (defn assert-gate-only!
+            "The heavy suites boot the CANONICAL `graphden-executor:latest`. Run by
+             hand from a worktree they do two bad things at once: they test whatever
+             binary was built last — somebody else's code, reported green — and they
+             saturate the box while a gate is trying to run, timing its checks out.
+             They belong to the gate, which holds the queue lock and sets WTQ_GATE=1.
+             The main checkout is unaffected."
+            [task]
+            (when (and (linked-worktree?) (not= "1" (System/getenv "WTQ_GATE")))
+              (println (str red "✗ " task " boots the shared image tag (graphden-executor:latest)"
+                            " and saturates the machine." reset))
+              (println "  From a worktree it would test whatever was built last — not your branch —")
+              (println "  and starve any gate that is running. It belongs to the landing gate:")
+              (println (str yellow "      bb wt merge" reset "   # queue -> gate -> land (runs this suite for you)"))
+              (println (str "  To see your own code run, use " yellow "bb wt up" reset " (isolated instance)."))
+              (System/exit 1)))
+
           (defn await-healthy-then-verify!
             "Block until the instance's /health answers, then confirm the running
              build IS the local tree (`bb verify`) and that it serves (`bb smoke`).
@@ -418,16 +435,19 @@
 
   test-integration
   {:doc "Integration tests only (focus ^:integration; real PG via testcontainers). ~10-12 min."
-   :task (clojure "-M:dev:test -m kaocha.runner :integration")}
+   :task (do (assert-gate-only! "bb test-integration")
+             (clojure "-M:dev:test -m kaocha.runner :integration"))}
 
   test-e2e
   {:doc "Playwright browser-test suite against an ISOLATED ephemeral stack via Testcontainers (postgres + user-postgres + openbao + `graphden-executor:latest`, dynamic host ports, Ryuk reaps everything on JVM exit). Demo on :9002 stays untouched. Requires `bb rebuild` (or `bb deploy`) first so `graphden-executor:latest` is present. ~30-60s for the stack to come healthy + ~15-25 min for the suite itself. See `graphden.dev.e2e-stack`."
-   :task (p/shell "clojure" "-M:dev" "-m" "graphden.dev.e2e-stack"
-                  "tools/browser-test/run-edit-tests.sh")}
+   :task (do (assert-gate-only! "bb test-e2e")
+             (p/shell "clojure" "-M:dev" "-m" "graphden.dev.e2e-stack"
+                      "tools/browser-test/run-edit-tests.sh"))}
 
   test-fleet-e2e
   {:doc "Two-container fleet e2e (kaocha :container-e2e) — boots `graphden-executor:latest` TWICE as a real two-pod fleet over a shared Postgres (testcontainers) and drives the cross-container control plane over real HTTP: /health, token-gated /internal/fleet/{status,cell/load}, shared graph, agreed placement view. Requires `bb rebuild` first so the image is present. ~4 min (two cold boots). Ryuk reaps the containers on JVM exit."
-   :task (clojure "-M:dev:test -m kaocha.runner :container-e2e")}
+   :task (do (assert-gate-only! "bb test-fleet-e2e")
+             (clojure "-M:dev:test -m kaocha.runner :container-e2e"))}
 
   test-all
   {:doc "Run ALL tests (unit + integration + e2e), sequential. ~30-35 min wall. e2e requires `bb rebuild` first + AUTH_TOKEN."
@@ -437,7 +457,8 @@
 
   test-unit-coverage
   {:doc "Unit tests with cloverage instrumentation. ~15-19 min on a dev host — the full-graph tests (packages.registry / packages.export / executor.effect-gating) recompile the whole graph under instrumentation (~50× amplification); that's also where their real coverage of the loader/compiler comes from. Same as `bb coverage`. Use this for the coverage report; `bb test-unit` for fast feedback without instrumentation."
-   :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
+   :task (do (assert-gate-only! "bb coverage")
+             (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit"))}
 
   test-all-coverage
   {:doc "Unit-with-coverage + integration + e2e. ~30-35 min. Coverage covers unit only; integration / e2e run un-instrumented (see `bb coverage` docstring for why instrumenting integration adds zero useful per-NS signal). e2e runs in a separate Node process so cloverage can't reach it anyway."
@@ -540,7 +561,8 @@
    Why unit-only: the integration suite (cron / services / secrets / storage / executor-runtime / branch-router / per-handler graph tests) doesn't add useful per-NS attribution under cloverage. Empirical 2026-06-23 finding: every CRUD NS that integration would exercise (`crud.entities`, `crud.fn-execution.*`, `crud.branches`, etc.) reports 0% form/line anyway — `cr/execute`'s pre-compiled closure cache (built by `cr/rebuild!`) holds already-resolved fn objects and never re-derefs through the instrumented vars. Confirmed identical under BOTH kaocha-cloverage AND a 2h32m sequential direct `clj -M:cloverage` audit (per-NS 0% identical). So adding integration to the cloverage pass costs ~30 min wall for ~0% useful per-NS signal; it ran via `bb test` / `bb test-integration` un-instrumented anyway. See `[[feedback_coverage_measurement]]` for the full reasoning.
 
    What the unit-only number tells you: 'do we need more UNIT tests?'. Low coverage for NSes like `system.demo-branches` (2.98%), `system.branch-router` (5.29%), `versioning.merge.core` (3.36%) here is BY DESIGN — those code paths get their gap-filling from integration tests, which we trust based on their pass/fail signal rather than cloverage attribution. See `docs/E2E_SCENARIO_COVERAGE.md` for the e2e side of the audit."
-   :task (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit")}
+   :task (do (assert-gate-only! "bb coverage")
+             (clojure "-M:dev:test -m kaocha.runner --config-file tests-coverage.edn :unit"))}
 
   ;; === FULL CHECK ===
 

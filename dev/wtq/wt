@@ -494,6 +494,10 @@ cmd_drop() {
 # =====================================================================
 run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
   local wt="$1" no_e2e="$2" deploy="$3"
+  # The heavy suites refuse to run in a worktree unless this is set: they boot
+  # the canonical image and saturate the machine, so only the gate — which holds
+  # the queue lock — may start them. We are the gate.
+  export WTQ_GATE=1
   local branch; branch="$(branch_of "$wt")"
   local ts; ts="$(date +%Y%m%d-%H%M%S)"
   local name; name="$(basename "$wt")"

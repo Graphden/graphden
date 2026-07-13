@@ -31,27 +31,79 @@ function mountAdminSection(list, section) {
   if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
 }
 
-// "Only services" filter — when true, sidebar tree is pruned to
-// only fns that are :service targets. The fn-id Set is lazy-loaded
-// the first time the user flips the checkbox on (and refreshed on
-// every flip-on after that so newly-declared services show up).
-let onlyServicesFilter = false;
-let serviceFnIds = new Set();
+// ── Per-kind visibility ────────────────────────────────────────────────
+// Every entity is classified into EXACTLY ONE kind by priority
+// secrets > types > services > fn (a service is structurally a normal
+// fn and a secret is a fn too, so the priority makes each show under a
+// single toggle). Each kind has an eye toggle in #kind-filters; hiding a
+// kind drops those entities plus any namespace left with nothing
+// visible. State persists in localStorage.
+const TYPE_ROLES = new Set(['refinement', 'list', 'union', 'variant',
+                            'record', 'fn-type', 'primitive']);
+const KIND_PREFS_STORAGE = 'graphden.sidebarKinds';
 
+function loadKindPrefs() {
+  const def = { fn: true, types: true, secrets: true, services: true };
+  try {
+    const raw = localStorage.getItem(KIND_PREFS_STORAGE);
+    if (raw) return { ...def, ...JSON.parse(raw) };
+  } catch (_) { /* private-mode / corrupt → defaults */ }
+  return def;
+}
+let kindVisible = loadKindPrefs();
 
-// Drop everything except fns whose id is in `keepIds`. Mirrors the
-// shape filterNsNode returns (children Map + fns array). Empty
-// branches are pruned recursively so the user never sees an empty
-// namespace row when nothing inside it survives the filter.
-function filterToFnIds(node, keepIds) {
-  const filteredChildren = new Map();
-  for (const [childName, childNode] of node.children) {
-    const filtered = filterToFnIds(childNode, keepIds);
-    if (filtered) filteredChildren.set(childName, filtered);
+function saveKindPrefs() {
+  try { localStorage.setItem(KIND_PREFS_STORAGE, JSON.stringify(kindVisible)); }
+  catch (_) { /* best-effort */ }
+}
+
+// Classify a fn-row into one visibility bucket (priority order above).
+function classifyFnKind(fn) {
+  if (typeof isSecretFn === 'function' && isSecretFn(fn)) return 'secrets';
+  const role = (fn.role || '').replace(/^:/, '');
+  if (TYPE_ROLES.has(role)) return 'types';
+  if (typeof getServiceForFnId === 'function' && getServiceForFnId(fn.id)) return 'services';
+  return 'fn';
+}
+function fnKindVisible(fn) { return kindVisible[classifyFnKind(fn)] !== false; }
+
+// A namespace node is shown iff it has ≥1 currently-visible entity
+// (recursively) OR an active inline-create rooted at it / a descendant
+// (so an in-progress create row is never hidden out from under the user).
+function nodeHasVisibleContent(node) {
+  if (node.fns.some(fnKindVisible)) return true;
+  for (const child of node.children.values()) {
+    if (nodeHasVisibleContent(child)) return true;
   }
-  const filteredFns = node.fns.filter((fn) => keepIds.has(fn.id));
-  if (filteredChildren.size === 0 && filteredFns.length === 0) return null;
-  return {children: filteredChildren, fns: filteredFns};
+  return false;
+}
+function nodeHasActiveCreate(node) {
+  if (node.nsId && typeof window.hasActiveCreateIn === 'function'
+      && window.hasActiveCreateIn(node.nsId)) return true;
+  for (const child of node.children.values()) {
+    if (nodeHasActiveCreate(child)) return true;
+  }
+  return false;
+}
+function nodeShouldShow(node) {
+  return nodeHasVisibleContent(node) || nodeHasActiveCreate(node);
+}
+
+// Classification reads two caches via sync helpers (getServiceForFnId,
+// isSecretFn/secret paths). Prime them once per graph load and re-render
+// so the first paint is accurate.
+let _serviceCachePrimed = false;
+function primeServiceCacheOnce() {
+  if (_serviceCachePrimed || typeof loadAllServiceFnIds !== 'function') return;
+  _serviceCachePrimed = true;
+  loadAllServiceFnIds().then(() => updateEntityList(graphData));
+}
+let _secretsPrimedGraph = null;
+function primeSecretsOnce() {
+  if (typeof isAuthenticated !== 'function' || !isAuthenticated()) return;
+  if (_secretsPrimedGraph === graphData || typeof loadSecrets !== 'function') return;
+  _secretsPrimedGraph = graphData;
+  loadSecrets().then(() => updateEntityList(graphData));
 }
 
 /**
@@ -160,16 +212,15 @@ function buildFnItem(fn) {
   const item = document.createElement('div');
   item.className = 'entity-item';
   if (fn.id === selectedFnId) item.className += ' selected';
-  if (typeof isSecretFn === 'function' && isSecretFn(fn)) {
-    item.className += ' entity-secret';
-  }
+  const isSecret = typeof isSecretFn === 'function' && isSecretFn(fn);
+  if (isSecret) item.className += ' entity-secret';
   item.dataset.fnId = fn.id;
 
-  if (typeof isSecretFn === 'function' && isSecretFn(fn)) {
+  if (isSecret) {
     const lock = document.createElement('span');
     lock.className = 'secret-lock-icon';
-    lock.textContent = '🔒'; // 🔒
-    lock.title = 'Secret — managed via the Secrets sidebar section';
+    lock.textContent = '🔒';
+    lock.title = 'Secret — value lives in the vault, never in the graph DB';
     item.appendChild(lock);
   }
 
@@ -177,6 +228,18 @@ function buildFnItem(fn) {
   nameSpan.className = 'name';
   nameSpan.textContent = fn.displayName;
   item.appendChild(nameSpan);
+
+  // Secret rows show their vault path (parity with the old Secrets
+  // section). `secretRecordForFn` reads the primed /api/secrets list.
+  if (isSecret && typeof secretRecordForFn === 'function') {
+    const rec = secretRecordForFn(fn.id);
+    if (rec && rec.path) {
+      const pathSpan = document.createElement('span');
+      pathSpan.className = 'secret-path';
+      pathSpan.textContent = rec.path;
+      item.appendChild(pathSpan);
+    }
+  }
 
   // Right-edge action group — same shape as `.ns-row-actions`. Order:
   // ✎ rename (hover-only), ↗ open-in-new-tab (hover-only), `i`
@@ -206,6 +269,11 @@ function buildFnItem(fn) {
     entityId: fn.id
   });
   if (desc) actions.appendChild(desc);
+  // Secret rows get Rotate + Delete — the CRUD that used to live in the
+  // separate Secrets section. Auth-gated inside the helper.
+  if (isSecret && typeof buildSecretRowActions === 'function') {
+    buildSecretRowActions(actions, fn);
+  }
   if (actions.children.length > 0) item.appendChild(actions);
 
   item.onclick = () => selectFn(fn.id);
@@ -277,38 +345,16 @@ function renderNsNode(container, name, node, path) {
 
   const sortedChildren = [...node.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   for (const [childName, childNode] of sortedChildren) {
+    if (!nodeShouldShow(childNode)) continue;
     renderNsNode(childGroup, childName, childNode, nsPath);
   }
 
-  // Fn items — split into "Types" and "Functions" sub-sections so
-  // refinements / records / unions / variants / lists / primitives
-  // don't clutter the function browse. The backend ships a `:role`
-  // per fn (see crud/impls.clj compute-fn-role) so the sidebar
-  // doesn't have to re-derive it.
-  const sortedFns = [...node.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
-  const TYPE_ROLES = new Set(['refinement', 'list', 'union', 'variant',
-                              'record', 'fn-type', 'primitive']);
-  const typeFns = [];
-  const functionFns = [];
-  for (const fn of sortedFns) {
-    const role = (fn.role || '').replace(/^:/, '');
-    if (TYPE_ROLES.has(role)) typeFns.push(fn);
-    else functionFns.push(fn);
-  }
-  const renderSection = (label, fns) => {
-    if (!fns.length) return;
-    // Header only when BOTH sections have entries — for a namespace
-    // with only fns or only types, the label adds noise.
-    if (typeFns.length && functionFns.length) {
-      const head = document.createElement('div');
-      head.className = 'ns-section-label';
-      head.textContent = label;
-      childGroup.appendChild(head);
-    }
-    for (const fn of fns) childGroup.appendChild(buildFnItem(fn));
-  };
-  renderSection('Types', typeFns);
-  renderSection('Functions', functionFns);
+  // Fn items — filtered by the kind toggles, rendered flat. Kind is now
+  // a top-level filter (fn / types / secrets / services), not an
+  // in-namespace Types/Functions grouping.
+  const visibleFns = [...node.fns].filter(fnKindVisible)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  for (const fn of visibleFns) childGroup.appendChild(buildFnItem(fn));
 
   // If the user has an active inline-create rooted at THIS namespace,
   // append the input row inside `childGroup` so it sits where the new
@@ -337,16 +383,69 @@ function clearSearch() {
 }
 
 
-// "Only services" filter toggle handler — wired from the
-// checkbox in #search-bar. Lazy-loads the fn-id set on first
-// flip-on (and refreshes on every flip-on after so newly-added
-// services appear without page reload).
-async function setOnlyServicesFilter(checked) {
-  onlyServicesFilter = !!checked;
-  if (onlyServicesFilter && typeof loadAllServiceFnIds === 'function') {
-    serviceFnIds = await loadAllServiceFnIds();
-  }
+// Eye-toggle click (from the #kind-filters buttons). Flips the kind's
+// visibility, persists it, re-renders.
+function toggleKind(kind, btn) {
+  const next = !btn || btn.getAttribute('aria-pressed') !== 'true';
+  if (btn) btn.setAttribute('aria-pressed', String(next));
+  setKindVisible(kind, next);
+}
+function setKindVisible(kind, visible) {
+  kindVisible[kind] = !!visible;
+  saveKindPrefs();
   updateEntityList(graphData);
+}
+
+// Sync the static eye buttons to the persisted state + gate the "+ New
+// secret" button on auth. Cheap (≤5 nodes); runs on every render.
+function syncKindFilterBar() {
+  document.querySelectorAll('#kind-filters .kind-toggle').forEach((btn) => {
+    btn.setAttribute('aria-pressed', String(kindVisible[btn.dataset.kind] !== false));
+  });
+  const addBtn = document.getElementById('secret-add-btn');
+  if (addBtn) addBtn.hidden = !(typeof isAuthenticated === 'function' && isAuthenticated());
+}
+
+// Collapsible "(root)" node for namespace-less entities — the primitive
+// type-rows seeded at boot (any, bool, int, …) plus the occasional
+// top-level user fn. Filtered by the kind toggles; hidden entirely when
+// nothing inside is visible. Reuses the expandedNamespaces machinery via
+// a synthesised path key.
+function renderRootNode(list, rootFns) {
+  const visible = [...rootFns].filter(fnKindVisible)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  if (visible.length === 0) return;
+
+  const groupPath = '__root__';
+  const isOpen = expandedNamespaces.has(groupPath);
+  const header = document.createElement('div');
+  header.className = 'ns-header ns-header-pseudo';
+  const arrow = document.createElement('span');
+  arrow.className = 'ns-arrow' + (isOpen ? '' : ' collapsed');
+  arrow.textContent = isOpen ? '▼' : '▶';
+  header.appendChild(arrow);
+  const label = document.createElement('span');
+  label.className = 'ns-label';
+  label.textContent = '(root)';
+  header.appendChild(label);
+  const count = document.createElement('span');
+  count.className = 'ns-count';
+  count.textContent = visible.length;
+  header.appendChild(count);
+  header.onclick = (e) => {
+    e.stopPropagation();
+    if (isOpen) expandedNamespaces.delete(groupPath);
+    else expandedNamespaces.add(groupPath);
+    updateEntityList(graphData);
+  };
+  list.appendChild(header);
+
+  if (isOpen) {
+    const childGroup = document.createElement('div');
+    childGroup.className = 'ns-children';
+    for (const fn of visible) childGroup.appendChild(buildFnItem(fn));
+    list.appendChild(childGroup);
+  }
 }
 
 /**
@@ -356,86 +455,43 @@ function updateEntityList(data) {
   const list = document.getElementById('entity-list');
   list.innerHTML = '';
 
+  // Keep the eye buttons + secret-add in sync with persisted state, and
+  // prime the caches classification depends on (service cache + secrets).
+  syncKindFilterBar();
+  primeServiceCacheOnce();
+  primeSecretsOnce();
+
   let tree = buildNsTree(data);
 
-  // Apply "only services" filter first — fn-id set match, no text.
-  // Order with search filter: services first, then text — the result
-  // is "services whose name contains the text" when both are active.
-  if (onlyServicesFilter) {
-    tree = filterToFnIds(tree, serviceFnIds) || {children: new Map(), fns: []};
-  }
-  // Apply search filter
+  // Text filter (name match). Composes with the kind toggles, which are
+  // applied at render time (fnKindVisible / nodeShouldShow) below.
   if (searchFilter) {
     tree = filterNsNode(tree, searchFilter, null) || { children: new Map(), fns: [] };
   }
 
-  // Secrets section — collapsible block ABOVE the namespace tree.
-  // Self-loading: when the user expands it the first time, it kicks
-  // off `loadSecrets()` + a re-render. Skipped while a filter is
-  // active so the section doesn't get pruned visually.
-  if (!searchFilter && !onlyServicesFilter && typeof buildSecretsSection === 'function') {
-    list.appendChild(buildSecretsSection());
-  }
-  // Org-admin Grants section (§6) — returns null unless authed + addon active.
-  if (!searchFilter && !onlyServicesFilter && typeof buildGrantsAdminSection === 'function') {
+  // Admin sections (Grants / Users / Packages) — unchanged; hidden while
+  // a text filter narrows the view. Each returns null unless applicable.
+  if (!searchFilter && typeof buildGrantsAdminSection === 'function') {
     mountAdminSection(list, buildGrantsAdminSection());
   }
-  // Users-admin section (§4.1) — same gating (authed + addon active).
-  if (!searchFilter && !onlyServicesFilter && typeof buildUsersAdminSection === 'function') {
+  if (!searchFilter && typeof buildUsersAdminSection === 'function') {
     mountAdminSection(list, buildUsersAdminSection());
   }
-  // Packages section (3e) — installed packages on the current branch. Authed
-  // only; NOT tenancy-gated (packages exist single-tenant too).
-  if (!searchFilter && !onlyServicesFilter && typeof buildPackagesSection === 'function') {
+  if (!searchFilter && typeof buildPackagesSection === 'function') {
     mountAdminSection(list, buildPackagesSection());
   }
 
-  // Render top-level namespaces (sorted)
+  // Top-level namespaces (sorted) — skip any with nothing visible under
+  // the current toggles (unless an inline-create is rooted inside).
   const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   for (const [name, node] of sortedNs) {
+    if (!nodeShouldShow(node)) continue;
     renderNsNode(list, name, node, '');
   }
 
-  // Top-level fns without a namespace — usually the primitive type-
-  // rows seeded at boot (any, bool, int, …) plus the occasional
-  // user-created top-level fn. Wrap them in a collapsible `_types`
-  // group (default collapsed) so they don't dwarf the namespace
-  // tree visually. The expandedNamespaces machinery from
-  // `renderNsNode` is reused via a synthesised path.
-  const sortedFns = [...tree.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
-  if (sortedFns.length > 0) {
-    const groupPath = '_types';
-    const isOpen = expandedNamespaces.has(groupPath);
-    const header = document.createElement('div');
-    header.className = 'ns-header ns-header-pseudo';
-    const arrow = document.createElement('span');
-    arrow.className = 'ns-arrow' + (isOpen ? '' : ' collapsed');
-    arrow.textContent = isOpen ? '▼' : '▶';
-    header.appendChild(arrow);
-    const label = document.createElement('span');
-    label.className = 'ns-label';
-    label.textContent = 'types';
-    header.appendChild(label);
-    const count = document.createElement('span');
-    count.className = 'ns-count';
-    count.textContent = sortedFns.length;
-    header.appendChild(count);
-    header.onclick = (e) => {
-      e.stopPropagation();
-      if (isOpen) expandedNamespaces.delete(groupPath);
-      else expandedNamespaces.add(groupPath);
-      updateEntityList(graphData);
-    };
-    list.appendChild(header);
-    if (isOpen) {
-      const childGroup = document.createElement('div');
-      childGroup.className = 'ns-children';
-      for (const fn of sortedFns) {
-        childGroup.appendChild(buildFnItem(fn));
-      }
-      list.appendChild(childGroup);
-    }
-  }
+  // Namespace-less entities (primitive type-rows any/int/bool + top-level
+  // fns) in a single collapsible "(root)" node, subject to the toggles.
+  renderRootNode(list, tree.fns);
 
   if (list.children.length === 0) {
     list.innerHTML = '<div class="loading">No matches</div>';

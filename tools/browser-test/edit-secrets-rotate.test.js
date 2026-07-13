@@ -4,7 +4,7 @@
 // Coverage:
 //   • Seed a secret via POST /api/secrets (creates the fn-def + writes
 //     the initial value to Vault).
-//   • Open the sidebar Secrets section, find the row, click ↻ rotate.
+//   • Expand the "(root)" node, find the secret row, click ↻ rotate.
 //   • Fill the new value, click "Rotate".
 //   • Verify PUT /api/secrets/:fn-id/value returns 200 + popover
 //     closes.
@@ -100,20 +100,14 @@ async function cleanup(page) {
         updateEntityList(graphData);
       }
     });
-    // Wait for the secrets section to render in the sidebar.
-    await page.waitForSelector('.sidebar-secrets .ns-header',
-                               {timeout: 10000});
-    // Expand the secrets section if collapsed (sidebar-secrets wraps
-    // a ns-header-pseudo; arrow ▶ means collapsed, ▼ open). The
-    // click triggers `expandedNamespaces.add(...)` + a sidebar
-    // re-render; force one explicitly afterwards so the dependent
-    // poll doesn't race.
+    // Expand every namespace + the "(root)" node so the secret row is
+    // visible wherever it was placed, then re-render. The subsequent
+    // waitForFunction on the row is the real timing signal.
     await page.evaluate(() => {
-      const header = document.querySelector('.sidebar-secrets .ns-header');
-      const arrow = header?.querySelector('.ns-arrow');
-      if (arrow && arrow.classList.contains('collapsed')) {
-        header.click();
+      if (typeof lookups !== 'undefined' && lookups?.nsPathMap) {
+        for (const p of lookups.nsPathMap.values()) expandedNamespaces.add(p);
       }
+      expandedNamespaces.add('__root__');
       if (typeof updateEntityList === 'function'
           && typeof graphData !== 'undefined') {
         updateEntityList(graphData);

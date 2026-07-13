@@ -12,7 +12,7 @@
 //   • Seed a secret via POST /api/secrets (skips gracefully if
 //     Vault isn't reachable — see edit-secrets-rotate.test.js for
 //     the same fallback pattern).
-//   • Navigate to /, expand the Secrets sidebar section.
+//   • Navigate to /, expand namespaces, find the secret in the tree.
 //   • Assert the seeded secret appears as an `.entity-secret` row
 //     with the right name + path within 5 s.
 //   • Assert one `GET /api/secrets` network request completed under
@@ -114,14 +114,14 @@ async function cleanup(page) {
            + fetchMs + 'ms (regression budget — historical hang was 30 s+)');
 
     // ===================================================================
-    // Expand the Secrets section + locate the seeded row.
+    // Expand every namespace + the "(root)" node so the seeded secret is
+    // visible wherever it was placed, then locate the row.
     // ===================================================================
     await page.evaluate(() => {
-      const header = document.querySelector('.sidebar-secrets .ns-header');
-      const arrow = header?.querySelector('.ns-arrow');
-      if (arrow && arrow.classList.contains('collapsed')) {
-        header.click();
+      if (typeof lookups !== 'undefined' && lookups?.nsPathMap) {
+        for (const p of lookups.nsPathMap.values()) expandedNamespaces.add(p);
       }
+      expandedNamespaces.add('__root__');
       if (typeof updateEntityList === 'function'
           && typeof graphData !== 'undefined') {
         updateEntityList(graphData);

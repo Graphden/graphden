@@ -492,3 +492,8 @@ window.buildFnRowButtons = buildFnRowButtons;
 window.buildActiveCreateRow = buildActiveCreateRow;
 window.buildRootCreateRow = buildRootCreateRow;
 window.buildRootCreateButton = buildRootCreateButton;
+
+// True when an inline-create input is currently rooted at `nsId`. The
+// sidebar's "hide empty namespaces" rule keeps such a namespace visible
+// so the in-progress create row isn't hidden out from under the user.
+window.hasActiveCreateIn = (nsId) => !!activeCreate && activeCreate.parentNsId === nsId;

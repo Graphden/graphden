@@ -137,11 +137,60 @@
                        :aria-label "Filter functions"
                        :oninput "onSearchInput(this.value)"}]
               [:button {:id "search-clear" :onclick "clearSearch()" :aria-label "Clear filter"} "\u00D7"]
-              [:label {:id "only-services-label" :class "filter-toggle-label"
-                       :title "Hide fns that are not declared as :service rows"}
-               [:input {:id "only-services-toggle" :type "checkbox"
-                        :onchange "setOnlyServicesFilter(this.checked)"}]
-               " Only services"]]
+              ;; Entity-kind visibility toggles. Each is an eye that dims +
+              ;; gets a slash when its kind is hidden; state persists in
+              ;; localStorage and is synced onto these buttons at load
+              ;; (syncKindFilterBar in editor-sidebar.js). The trailing
+              ;; `+` opens the New-secret form (shown only when authed).
+              ;; NOTE: this is EDN (literal hiccup), so no let/fn — the
+              ;; four eye buttons are spelled out; the SVG eye is shared
+              ;; by class .kind-eye (slashed via CSS on aria-pressed=false).
+              [:div {:id "kind-filters" :role "group"
+                     :aria-label "Show or hide entity kinds"}
+               [:button {:type "button" :class "kind-toggle" :data-kind "fn"
+                         :aria-pressed "true" :onclick "toggleKind('fn', this)"
+                         :title "Show / hide fn"}
+                [:span {:class "kind-eye" :aria-hidden "true"}
+                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
+                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
+                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
+                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
+                            :stroke "currentColor" :stroke-width "1.2"}]]]
+                [:span {:class "kind-label"} "fn"]]
+               [:button {:type "button" :class "kind-toggle" :data-kind "types"
+                         :aria-pressed "true" :onclick "toggleKind('types', this)"
+                         :title "Show / hide types"}
+                [:span {:class "kind-eye" :aria-hidden "true"}
+                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
+                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
+                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
+                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
+                            :stroke "currentColor" :stroke-width "1.2"}]]]
+                [:span {:class "kind-label"} "types"]]
+               [:button {:type "button" :class "kind-toggle" :data-kind "secrets"
+                         :aria-pressed "true" :onclick "toggleKind('secrets', this)"
+                         :title "Show / hide secrets"}
+                [:span {:class "kind-eye" :aria-hidden "true"}
+                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
+                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
+                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
+                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
+                            :stroke "currentColor" :stroke-width "1.2"}]]]
+                [:span {:class "kind-label"} "secrets"]]
+               [:button {:type "button" :class "kind-toggle" :data-kind "services"
+                         :aria-pressed "true" :onclick "toggleKind('services', this)"
+                         :title "Show / hide services"}
+                [:span {:class "kind-eye" :aria-hidden "true"}
+                 [:svg {:viewBox "0 0 16 16" :width "14" :height "14"}
+                  [:path {:d "M1 8s2.5-4.5 7-4.5 7 4.5 7 4.5-2.5 4.5-7 4.5S1 8 1 8Z"
+                          :fill "none" :stroke "currentColor" :stroke-width "1.2"}]
+                  [:circle {:cx "8" :cy "8" :r "2" :fill "none"
+                            :stroke "currentColor" :stroke-width "1.2"}]]]
+                [:span {:class "kind-label"} "services"]]
+               [:button {:id "secret-add-btn" :type "button" :class "kind-add"
+                         :hidden "hidden" :title "New secret"
+                         :aria-label "New secret"
+                         :onclick "openCreateSecretForm(this)"} "+"]]]
              [:nav {:id "entity-list" :aria-label "Namespace tree"}]]
             ;; Graph container \u2014 <main> landmark
             ;; `#graph-surface` is a `group`, not an `img`: it hosts the

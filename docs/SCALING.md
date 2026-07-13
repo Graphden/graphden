@@ -317,8 +317,8 @@ real TCP between them, a BYO executor that reaches the graph over HTTP
 (`RemoteStorage`) instead of touching Postgres directly — needs no special
 hardware: it's separate processes + a config boundary, reproducible with
 containers, VMs, or even two ports on one host. That loop is proven three ways:
-`storage.remote.e2e-test` runs the BYO half over REAL http-kit servers (bootstrap
-+ SSE live-refresh + reconnect); `fleet.two-container-e2e-test` boots the executor
+`storage.remote.e2e-test` runs the BYO half over REAL http-kit servers
+(bootstrap, SSE live-refresh, reconnect); `fleet.two-container-e2e-test` boots the executor
 image TWICE as a real two-pod fleet over a shared Postgres (testcontainers) and
 drives the token-gated `/internal/fleet/*` control plane over real HTTP
 (`bb test-fleet-e2e`); and the fleet was also run on a real two-pod kind cluster

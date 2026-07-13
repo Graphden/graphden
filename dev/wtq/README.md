@@ -35,10 +35,19 @@ moments an agent pauses for you are landing and cleanup (Rule 5 in `AGENT.md`).
 
 - **Fast loop is parallel.** `bb ci` takes a *per-checkout* flock, so N agents
   run it simultaneously without stepping on each other.
-- **Heavy checks are serialized.** `integration` + `e2e` + `coverage` need
-  `bb rebuild` (the global `graphden-executor:latest` + shared Docker stack), so
-  exactly one may run at a time. `bb wt merge` enforces that with a
-  machine-wide `flock` — the lock *is* the queue; agents wait their turn.
+- **Heavy checks are serialized.** `integration` + `e2e` + `coverage` run
+  against the canonical `graphden-executor:latest`, so exactly one may build it
+  at a time. `bb wt merge` enforces that with a machine-wide `flock` — the lock
+  *is* the queue; agents wait their turn.
+- **Every agent gets its own instance.** `bb wt up` raises a private stack
+  (own containers, volumes, image tag, and a reserved port block), so agents can
+  click through their own changes in a browser in parallel without touching the
+  demo or each other. The shared stack belongs to `develop` and to the gate;
+  `bb rebuild` / `bb deploy` refuse to run in a worktree.
+- **The demo only ever serves landed code.** The gate *builds* the image from
+  the merged tree, tests it, fast-forwards `develop`, and only THEN advances the
+  instance — still holding the lock, so two gates cannot race to redeploy it,
+  and a red gate can no longer leave the demo running an unmerged branch.
 - **`develop` can't go red from a merge.** The gate merges the *latest*
   `develop` into the feature and tests the *merged* result before advancing
   `develop` (the merge-train invariant — two branches green in isolation can
@@ -58,8 +67,12 @@ bb wt claim <name> [task...]    # (agent-invoked) register feature/<name> + work
 bb wt list                      # every worktree: branch, ahead/behind develop, dirty, last RESULT
 bb wt status                    # queue lock holder + recent gate logs
 bb wt log <name>                # tail the latest gate log for a feature
-bb wt merge [--no-e2e]          # (agent, inside a worktree) queue -> gate -> land on develop
-bb wt drop <name> [-f]          # remove a worktree + branch (must be merged; -f discards)
+bb wt merge [--no-e2e] [--deploy]  # (agent, inside a worktree) queue -> gate -> land on develop
+                                #   --deploy also resets the develop DB schema on landing
+bb wt up                        # (agent, inside a worktree) build + run THIS branch on its own ports
+bb wt down                      # (agent, inside a worktree) stop it (keeps the DB volume)
+bb wt drop <name> [-f]          # remove a worktree + branch + its instance, volumes, image, ports
+bb wt gc                        # reclaim superseded / orphaned executor images
 
 # Manual escape hatch (you name it yourself, no agent):
 bb wt new <name> [task...] [--start]   # create the worktree; --start also launches an agent
@@ -83,6 +96,12 @@ bb wt start <name>                     # launch an agent inside an existing work
   committed.
 - `--no-e2e` is an escape hatch for changes with no runtime surface (docs,
   comments); it still runs lint + unit + integration + coverage.
+- `--deploy` is for a branch that **changes the DB schema**: on landing, the
+  develop instance's schema is dropped and re-seeded. The default keeps the
+  data, so demo branches / secrets / executions survive an ordinary merge.
+- **Disk.** Each `bb wt up` costs one ~350 MB executor image plus its volumes.
+  `bb wt drop` reclaims them; the gate prunes the layers each build supersedes;
+  `bb wt gc` sweeps whatever a hard-killed agent left behind.
 
 ## Files
 

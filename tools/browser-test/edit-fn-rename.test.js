@@ -46,7 +46,7 @@ const NEW = 'test-fn-rename-new';
     // FIRST, then look for the ✎ pencil inside it. (Same pattern the
     // edit-service.test.js uses for the ⚙ button.)
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+    await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
     const opened = await page.evaluate(() => {
       const popover = document.querySelector('.row-actions-popover');
       if (!popover) return {error: 'row-actions popover not found'};

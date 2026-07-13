@@ -23,18 +23,59 @@ You were started in one of two ways:
 1. **Stay in your worktree.** Never `cd` into another worktree, never edit
    `develop` directly, never touch another agent's branch. Other agents change
    unrelated files in parallel — your view of the repo is your branch only.
-2. **Never run the heavy tools by hand.** Do **not** run `bb rebuild`,
+2. **Never drive the SHARED stack by hand.** Do **not** run `bb rebuild`,
    `bb deploy`, `bb test-integration`, `bb test-e2e`, `bb coverage`, or push to
-   `origin`. The landing gate (`bb wt merge`) owns all of that, serialized
-   behind a lock. Running them by hand fights the queue and clobbers the shared
-   Docker stack.
+   `origin`. Those address the canonical instance (`graphden-executor` on
+   :9002) and the canonical image tag — the one `bb test-e2e` boots. Driving
+   them from a worktree fights the queue, steals the demo, and overwrites the
+   tag other agents' suites run against. The landing gate (`bb wt merge`) owns
+   all of it, serialized behind a lock. (`bb rebuild` / `bb deploy` now refuse
+   to run in a worktree rather than let you find this out the hard way.)
+
+   **You get your own instance instead** — isolated containers, volumes, image
+   and ports, on a port block reserved for your branch:
+
+   ```bash
+   bb wt up      # build THIS branch + run it; prints http://localhost:<your-port>
+   bb wt down    # stop it (keeps the DB volume)
+   ```
+
+   Use it whenever you need to see your change actually running — a UI change
+   especially (see the `graphden-ui` skill: prove it in a real browser). It
+   ends in `bb verify`, which compares the running build's `/version` against
+   your tree, so a green `wt up` is proof the instance is running **your** code
+   and not somebody else's. `bb wt drop` reclaims all of it.
 3. **Follow the repo's rules** — `CLAUDE.md` and the relevant skills
    (`graphden-code-quality`, `graphden-packages-quality`, `graphden-ui`, …).
    Write it clean the first time.
+
+   **Those rules can change while you work.** They reached you once — `CLAUDE.md`
+   when your session started, this file in your first minutes — and nothing
+   re-reads them. Meanwhile `develop` moves. So the gate checks: if `develop`
+   has changed any path in [`dev/wtq/GOVERNANCE`](GOVERNANCE) since you last
+   looked, it **refuses to land** and sends you back. Landing work done under
+   rules that no longer exist is not a thing you can do by accident.
+
+   ```bash
+   bb wt ack     # prints the diff of what changed, records that you have seen it
+   ```
+
+   It prints the actual diff, not a summary — the point is that the new rules
+   pass through your context on the way to being acknowledged. Read them, decide
+   whether they change what you are doing, then re-run the gate.
 4. **Commit as you go** — conventional-commit format, English messages.
-5. **Propose the outward-facing steps; act only on the user's OK.** Landing on
-   `develop` and removing yourself from the pool are the two moments you pause
-   and ask first (see the loop). Everything in between you do autonomously.
+5. **Land it yourself. Don't ask permission to finish.** When the feature is
+   complete and `bb ci` is green, run the gate (`bb wt merge`) — then, once it
+   is green, clean up (`bb wt drop`). Report what happened. You do not pause for
+   a sign-off at either step: the gate cannot advance `develop` on a red result,
+   and `wt drop` refuses a branch that is not merged, so neither step can lose
+   work. Asking "shall I merge now?" of a finished, green feature is ceremony,
+   and it stalls a serialized queue for as long as it takes a human to answer.
+
+   **Do** stop and ask when a real decision is yours to make and the answer
+   changes what you build: an ambiguous requirement, a trade-off with no obvious
+   default, a change of scope you discovered mid-task. That is judgement, not
+   ceremony.
 
 ## Loop
 
@@ -44,24 +85,24 @@ You were started in one of two ways:
 2. **Implement** in small commits, inside your worktree.
 3. **Fast feedback:** run `bb ci` (linters + unit) — parallel-safe across
    worktrees. Iterate until green. This is your only local test command.
-4. **Land** — when the feature is complete and `bb ci` is green, **propose to
-   the user that you enter the merge queue.** On their OK, run the gate:
+4. **Land** — when the feature is complete and `bb ci` is green, run the gate.
+   No sign-off needed (Rule 5):
 
-   `bb wt merge` takes **40–60 min** (merge develop → ci → rebuild →
-   integration → e2e → coverage → fast-forward develop) — longer than a
+   `bb wt merge` takes **~30–40 min** (merge develop → ci → build image →
+   integration → e2e → fast-forward develop → advance the demo instance) —
+   longer than a
    foreground command may run, so **launch it with `run_in_background: true`**
    and wait to be re-invoked when it exits. Then check the outcome:
    - **`✓ landed`** (exit 0, `bb wt list` RESULT `GREEN`) → feature is on
      `develop`. Go to step 5.
    - **CONFLICT** (merging develop into your branch) → resolve in your worktree,
      commit, re-run `bb wt merge` (background).
-   - **gate FAIL** (ci/integration/e2e/coverage on the merged result) → read
+   - **gate FAIL** (ci/integration/e2e on the merged result) → read
      `bb wt log <name>`, fix on your branch, keep `bb ci` green, re-run the gate.
      Iterate until green. Never weaken a test or skip a check to go green.
    - If the queue is busy the gate blocks waiting its turn — expected; let the
      background run wait.
-5. **Clean up** — once landed and you have nothing left to do, **propose to the
-   user that you remove yourself from the pool.** On their OK: `cd` back to the
+5. **Clean up** — once landed and you have nothing left to do: `cd` back to the
    main checkout first (you cannot delete the worktree you are standing in),
    then `bb wt drop <name>`. Report done.
 

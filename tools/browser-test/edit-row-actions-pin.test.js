@@ -73,7 +73,7 @@ async function popoverVisible(page) {
     // Phase A: click ⋯ → popover opens, anchor aria-expanded=true.
     // ===================================================================
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+    await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
     assert(await popoverVisible(page),
            'popover visible after first ⋯ click');
     const ariaA = await page.evaluate(() =>
@@ -107,7 +107,7 @@ async function popoverVisible(page) {
     // Phase C: outside-click dismiss.
     // ===================================================================
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+    await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
     assert(await popoverVisible(page),
            'popover visible after Phase C re-open');
     // Click body somewhere safe — top-left corner avoids any overlay
@@ -130,7 +130,7 @@ async function popoverVisible(page) {
     // Phase D: Escape dismiss.
     // ===================================================================
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+    await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
     assert(await popoverVisible(page),
            'popover visible after Phase D re-open');
     await page.keyboard.press('Escape');

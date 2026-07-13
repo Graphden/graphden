@@ -80,7 +80,7 @@ async function openServicePopover(page, fnHash) {
     null,
     {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+  await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
   await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');
     const gear = Array.from(popover?.querySelectorAll('button') || [])

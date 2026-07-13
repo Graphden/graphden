@@ -1,9 +1,21 @@
+# Every externally-visible name here is parameterised by GD_INSTANCE so the
+# same file can raise SEVERAL independent stacks on one host: the canonical
+# `graphden` one (the demo on :9002) and one per agent worktree (`bb wt up`).
+#
+# With no GD_* set, every default below reproduces the historical single-stack
+# layout exactly — the main checkout notices nothing.
+#
+# GD_IMAGE is the one that matters most: without an explicit `image:` the tag
+# compose builds is derived from the DIRECTORY name, so `bb rebuild` in a
+# worktree produced `<worktree>-executor:latest` while the e2e stack booted the
+# hardcoded `graphden-executor:latest` — the suite silently tested somebody
+# else's binary. Naming the tag here makes the built artefact explicit.
 services:
   # PostgreSQL database
   # Uses plain PostgreSQL with recursive CTE for graph resolution
   postgres:
     image: postgres:16-alpine
-    container_name: graphden-postgres
+    container_name: ${GD_INSTANCE:-graphden}-postgres
     # Survive host/daemon restarts — the executor (unless-stopped) crash-
     # loops on `UnknownHostException: postgres` if this stays down.
     restart: unless-stopped
@@ -14,7 +26,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5435:5432"  # Exposed for the postgres MCP server / host-side dev tooling
+      - "${GD_PORT_PG:-5435}:5432"  # Exposed for the postgres MCP server / host-side dev tooling
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U graphden -d graphden"]
       interval: 5s
@@ -29,7 +41,7 @@ services:
   # can't accidentally touch graphden's own schema.
   user-postgres:
     image: postgres:16-alpine
-    container_name: graphden-user-postgres
+    container_name: ${GD_INSTANCE:-graphden}-user-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: userdb
@@ -38,7 +50,7 @@ services:
     volumes:
       - user_postgres_data:/var/lib/postgresql/data
     ports:
-      - "5436:5432"  # Exposed for host-side inspection (psql -h localhost -p 5436 -U userapp userdb)
+      - "${GD_PORT_USERPG:-5436}:5432"  # Exposed for host-side inspection (psql -h localhost -p 5436 -U userapp userdb)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U userapp -d userdb"]
       interval: 5s
@@ -53,7 +65,7 @@ services:
   # key holds the (infra-only) root token. No user-visible :env reads.
   openbao:
     image: quay.io/openbao/openbao:latest
-    container_name: graphden-openbao
+    container_name: ${GD_INSTANCE:-graphden}-openbao
     # Comes back after a host restart so the executor can reconnect. NOTE:
     # dev-mode is in-memory, so it returns BLANK — secrets need a re-seed
     # (the one-shot `openbao-seed` only runs on `docker compose up`).
@@ -65,7 +77,7 @@ services:
       BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
     command: server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200
     ports:
-      - "8200:8200"
+      - "${GD_PORT_BAO:-8200}:8200"
     healthcheck:
       # /v1/sys/health returns 200 only when unsealed AND initialised.
       # Dev mode satisfies both immediately on listener bind.
@@ -81,7 +93,7 @@ services:
   # the openbao image's surface area.
   openbao-seed:
     image: curlimages/curl:8.11.1
-    container_name: graphden-openbao-seed
+    container_name: ${GD_INSTANCE:-graphden}-openbao-seed
     depends_on:
       openbao:
         condition: service_healthy
@@ -108,7 +120,8 @@ services:
 
   executor:
     build: .
-    container_name: graphden-executor
+    image: ${GD_IMAGE:-graphden-executor:latest}
+    container_name: ${GD_INSTANCE:-graphden}-executor
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,13 +154,20 @@ services:
       # the start-server call entirely. Set in `.env` for dev debug.
       GRAPHDEN_NREPL_PORT: ${GRAPHDEN_NREPL_PORT:-}
     ports:
-      - "9002:8080"
-      - "9081:8081"  # Tutorial: user-built history endpoint runs here
-      - "9099:7888"  # Opt-in nREPL — only listens when GRAPHDEN_NREPL_PORT=7888
+      - "${GD_PORT_HTTP:-9002}:8080"
+      - "${GD_PORT_HISTORY:-9081}:8081"  # Tutorial: user-built history endpoint runs here
+      - "${GD_PORT_NREPL:-9099}:7888"  # Opt-in nREPL — only listens when GRAPHDEN_NREPL_PORT=7888
+    # The JVM runs with -XX:+UseContainerSupport -XX:MaxRAMPercentage=75, so it
+    # sizes its heap against the CONTAINER's limit — and with no limit set, that
+    # is the whole host. One executor got away with it; N of them (one per agent
+    # instance) each believe they may take 75% of the box, and it thrashes.
+    # 0 = unlimited, preserving the canonical stack's historical behaviour;
+    # `wt up` pins a modest ceiling for the throwaway agent instances.
+    mem_limit: ${GD_MEM_LIMIT:-0}
     restart: unless-stopped
 
 volumes:
   postgres_data:
-    name: graphden-postgres-data
+    name: ${GD_INSTANCE:-graphden}-postgres-data
   user_postgres_data:
-    name: graphden-user-postgres-data
+    name: ${GD_INSTANCE:-graphden}-user-postgres-data

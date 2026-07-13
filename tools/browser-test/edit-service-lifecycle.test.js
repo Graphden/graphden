@@ -80,7 +80,17 @@ async function openServicePopover(page) {
     null,
     {timeout: 20000, polling: 100});
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+  // Wait for the popover's CONTENT, not its shell. `.row-actions-popover` is an
+  // empty div the moment JS creates it; its body is server-rendered and arrives
+  // over a separate `GET /partials/row-actions`. Waiting on the container
+  // returned instantly, and the `⚙` lookup below then ran against an empty div
+  // — `gear MISSING, buttons: ""`. That is the whole flake: it passed only when
+  // the partial happened to land inside the same tick.
+  //
+  // Anchoring on a rendered button ties the wait to the round-trip that
+  // actually has to finish. Timeout raised to match the sibling
+  // waitForFunction gates: it now covers a network fetch, not a DOM insert.
+  await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
   const clicked = await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');
     const gear = Array.from(popover?.querySelectorAll('button') || [])

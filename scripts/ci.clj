@@ -1,12 +1,14 @@
 (ns ci
   "CI runner with live progress display.
 
-   Concurrency contract: AT MOST ONE bb ci runs at a time per checkout.
-   We acquire an exclusive flock on `/tmp/graphden-ci-<checkout-hash>.lock`
-   at start; a second `bb ci` exits immediately with a pointer to the
-   PID that holds the lock. This avoids the testcontainer dogpile where
-   two parallel CIs each tried to `GenericContainer.start` a Postgres
-   and ended up wedged on Docker daemon throughput.
+   Concurrency contract: AT MOST ONE bb ci runs at a time PER HOST.
+   We take an exclusive lock on `/tmp/graphden-ci.lock` at start; a second
+   `bb ci` — from any checkout or worktree — waits its turn rather than
+   running alongside. This avoids the testcontainer dogpile (two CIs each
+   starting a Postgres and wedging on Docker daemon throughput) and, just
+   as importantly, the CPU dogpile: the timeouts below are ceilings
+   measured on an idle box, so concurrent runs time each other out instead
+   of finishing sooner.
 
    Hang containment: every check has a hard timeout (see `check-timeout`
    below). A wedged check (Docker stall, kaocha deadlock, network hiccup
@@ -139,12 +141,21 @@
 ;; ===========================================================================
 
 (defn- lock-path
-  "Path to the exclusion lockfile, keyed off the checkout dir hash so
-   distinct working copies on the same host don't shadow each other."
+  "Path to the exclusion lockfile. MACHINE-WIDE, not per-checkout.
+
+   It used to be keyed off the checkout dir hash, on the theory that
+   distinct working copies are independent. They are not: a `bb ci` run
+   saturates the host (10 linters in parallel, then the unit suite), and
+   the per-check timeouts here are ceilings measured on an idle box. Two
+   agents in two worktrees running `bb ci` at once therefore do not merely
+   run slower — they time each other out. Observed on an 8-core host: two
+   concurrent runs, 9 of 17 checks lost to TIMEOUT at load average 75,
+   with nothing wrong in either branch.
+
+   One lock per machine turns that into a queue: editing stays parallel
+   across worktrees, `bb ci` takes its turn, and a green run means green."
   []
-  (let [cwd (System/getProperty "user.dir")
-        hex (-> cwd .hashCode (Math/abs) (Integer/toHexString))]
-    (Paths/get "/tmp" (into-array String [(str "graphden-ci-" hex ".lock")]))))
+  (Paths/get "/tmp" (into-array String ["graphden-ci.lock"])))
 
 
 (defn- read-lockfile-pid
@@ -157,10 +168,14 @@
 
 
 (defn- acquire-lock!
-  "Returns `[channel lock]` on success. On contention prints a clear
-   message naming the conflicting PID and `System/exit`s 2 — distinct
-   from CI failure (1) so wrappers can distinguish a busy-lock from a
-   real test break."
+  "Returns `[channel lock]`, WAITING for the machine-wide lock if another
+   run holds it.
+
+   Contention is now the normal case, not an error: several agents share
+   one host and each checkpoints with `bb ci`. Failing fast on a busy lock
+   would be worse than useless — the landing gate runs `bb ci` too, so any
+   agent's routine run would bounce the gate as a red FAIL. Block instead,
+   announce who we are waiting for, and take our turn."
   []
   (let [path (lock-path)
         channel (FileChannel/open path
@@ -168,27 +183,27 @@
                                               [StandardOpenOption/CREATE
                                                StandardOpenOption/WRITE
                                                StandardOpenOption/READ]))
-        lock (.tryLock channel)]
-    (if (nil? lock)
-      (do (println (str red "✗ bb ci is already running" reset
-                        " (PID " (read-lockfile-pid path) ", lock " path ")"))
-          (println (str yellow "  Wait for it to finish, or"
-                        " stop it with: kill <PID>" reset))
-          (.close channel)
-          (System/exit 2))
-      (do
-        (.truncate channel 0)
-        (let [pid (.pid (java.lang.ProcessHandle/current))
-              buf (java.nio.ByteBuffer/wrap (.getBytes (str pid "\n") "UTF-8"))]
-          (.write channel buf))
-        [channel lock]))))
+        lock (or (.tryLock channel)
+                 (do (println (str yellow "⏳ another bb ci holds the machine-wide lock"
+                                   reset " (PID " (read-lockfile-pid path) ") — waiting our turn ..."))
+                     (println (str "   (one CI at a time per host: concurrent runs time"
+                                   " each other out, they do not go faster)"))
+                     (.lock channel)))]
+    (.truncate channel 0)
+    (let [pid (.pid (java.lang.ProcessHandle/current))
+          buf (java.nio.ByteBuffer/wrap (.getBytes (str pid "\n") "UTF-8"))]
+      (.write channel buf))
+    [channel lock]))
 
 
 (defn- release-lock!
+  "Release and close — but do NOT unlink the lockfile. A waiter already holds
+   an open channel on this inode; deleting it lets the next run CREATE a fresh
+   file and lock that instead, so two runs would believe they hold the lock.
+   The empty file is 0 bytes and costs nothing to keep."
   [[channel lock]]
   (try (.release lock) (catch Exception _ nil))
-  (try (.close channel) (catch Exception _ nil))
-  (try (-> (lock-path) .toFile .delete) (catch Exception _ nil)))
+  (try (.close channel) (catch Exception _ nil)))
 
 
 ;; ===========================================================================

@@ -9,7 +9,7 @@
 # When a feature is ready, `wt merge` (run FROM INSIDE that worktree)
 # enters a machine-wide flock queue: at most one merge runs at a time.
 # The gate merges the latest develop into the feature, runs the HEAVY
-# suite (rebuild + integration + e2e + coverage) on the MERGED result,
+# suite (image build + integration + e2e) on the MERGED result,
 # and only then fast-forwards develop. Green -> develop advances; red ->
 # the branch bounces back to you with the log, develop untouched.
 #
@@ -19,7 +19,8 @@
 # Two ways to start an agent:
 #   A) hands-off:  wt agent   -> a NAMELESS discussion session. You describe the
 #      task; the agent picks its own branch name, self-registers with `wt claim`,
-#      works, then proposes to land and to clean up. You never invent a name.
+#      works, lands it through the gate and cleans up after itself. You never
+#      invent a name, and you are not asked to sign off on a finished feature.
 #   B) manual:     wt new <name> [task...] [--start]  -> you pick the name.
 #
 # Commands:
@@ -29,7 +30,14 @@
 #   wt start <name>        launch an autonomous agent inside an existing worktree
 #   wt task  <name>        print the feature's task spec
 #   wt list                show every worktree, branch, ahead/behind, dirty, result
-#   wt merge [--no-e2e]    (run inside a worktree) queue + gate + land on develop
+#   wt merge [--no-e2e] [--deploy]  (inside a worktree) queue + gate + land on develop
+#                          --deploy: also reset the develop DB schema on landing
+#   wt up                  (inside a worktree) build + run THIS branch on its own
+#                          ports — your private instance; never touches the demo
+#   wt down                (inside a worktree) stop it (keeps the DB volume)
+#   wt gc                  reclaim superseded / orphaned executor images
+#   wt ack                 (inside a worktree) print what develop changed in the
+#                          rules you work under, and record that you have read it
 #   wt status              show queue lock holder + recent gate logs
 #   wt drop <name> [-f]    remove a worktree + its branch (must be merged; -f overrides)
 #   wt log <name>          tail the most recent gate log for a feature
@@ -76,6 +84,212 @@ die()  { printf '%s%s%s\n' "$RED" "$*" "$RST" >&2; exit 1; }
 
 branch_of() { git -C "$1" rev-parse --abbrev-ref HEAD; }
 
+# Newest-first gate logs. `find -printf` rather than `ls -t` so a filename is
+# never re-parsed by the shell: usage `newest_logs <n> [feature]`.
+newest_logs() {
+  local n="$1" name="${2:-}"
+  find "$LOG_DIR" -maxdepth 1 -type f -name "${name:+$name-}*.log" -printf '%T@ %p\n' 2>/dev/null \
+    | sort -rn | head -"$n" | cut -d' ' -f2-
+}
+
+# node_modules/ is gitignored, so a fresh worktree gets every package.json but
+# none of the installed deps. The damage is worse than a missing linter:
+#   - stylelint cannot resolve stylelint-config-standard and fails outright;
+#   - license-checker exits 0 on "No packages found", so the licence audit
+#     silently passes while auditing nothing;
+#   - the e2e suite has no playwright.
+# So `bb ci` is red — or, worse, green and hollow — before the agent has
+# written a line, while AGENT.md declares it the loop to iterate until green.
+#
+# Hardlink the main checkout's trees rather than symlinking them: the copy must
+# be a real directory, because license-checker refuses to walk a symlinked
+# node_modules (the very silent-pass this guards against). Hardlinks make that
+# nearly free — the files share inodes, so a 200 MB tree costs ~0 extra disk
+# and ~0.1 s, and the linters only ever read it.
+bootstrap_node_modules() {
+  local path="$1" dir src dst
+  while IFS= read -r dir; do
+    src="$MAIN_WT/$dir/node_modules"
+    dst="$path/$dir/node_modules"
+    if [ ! -d "$src" ]; then
+      warn "no node_modules in $MAIN_WT/$dir — run 'npm ci' there, or bb ci cannot pass in a worktree"
+      continue
+    fi
+    # A SYMLINK here is actively harmful, not merely different: git records a
+    # symlink as a file, so the `node_modules/` ignore rule (trailing slash =
+    # directories only) does not match it. It shows up as untracked, and the
+    # gate's first act is to refuse a worktree that `git status` calls dirty —
+    # so a symlinked tree cannot land at all. Replace it with the real thing.
+    if [ -L "$dst" ]; then
+      warn "$dir/node_modules is a symlink — git leaves it untracked, which blocks the gate. Replacing with a hardlink copy."
+      rm -f "$dst"
+    fi
+    [ -e "$dst" ] && continue
+    cp -al "$src" "$dst" 2>/dev/null || cp -a "$src" "$dst"
+  done < <(git -C "$MAIN_WT" ls-files '*package.json' | xargs -r -n1 dirname | sort -u)
+}
+
+# --- governance drift -------------------------------------------------------
+# The rules an agent works under reach it ONCE: CLAUDE.md at session start,
+# AGENT.md in its first minutes. Nothing re-reads them. An agent that has been
+# working for hours may therefore be operating under rules develop has since
+# replaced — and it would land that work without ever noticing.
+#
+# So: record the target SHA whose governance the agent has seen, and refuse to
+# land while develop has moved any governed path past it.
+ACK_DIR="$WTQ_DIR/ack"
+mkdir -p "$ACK_DIR"
+
+# The governed paths, from the explicit list. A heuristic over the diff would
+# have to guess "rule, or just a doc?" — which is how a rule change slips past.
+# Fills the GOV_PATHS array. An array, not a bare $(...) splat: pathspecs go
+# straight to git without the shell re-splitting them on whitespace.
+GOV_PATHS=()
+governance_paths() {
+  [ "${#GOV_PATHS[@]}" -gt 0 ] && return 0
+  mapfile -t GOV_PATHS < <(grep -vE '^[[:space:]]*(#|$)' "$SCRIPT_DIR/GOVERNANCE")
+}
+
+ack_file() { printf '%s/%s' "$ACK_DIR" "$1"; }
+
+# The SHA whose governance this agent has seen. A worktree with no record — one
+# created before this existed — is credited with its fork point: that IS the
+# state of the rules when it read them.
+acked_sha() {
+  local name="$1" branch="$2"
+  local f; f="$(ack_file "$name")"
+  if [ ! -s "$f" ]; then
+    git -C "$MAIN_WT" merge-base "$branch" "$TARGET" > "$f" 2>/dev/null || true
+  fi
+  cat "$f" 2>/dev/null
+}
+
+# Governed paths that $TARGET moved since the agent last acknowledged them.
+governance_drift() {
+  local name="$1" branch="$2" acked
+  acked="$(acked_sha "$name" "$branch")"
+  [ -n "$acked" ] || return 0
+  governance_paths
+  git -C "$MAIN_WT" diff --name-only "$acked..$TARGET" -- "${GOV_PATHS[@]}" 2>/dev/null
+}
+
+# --- what a change actually needs -------------------------------------------
+# The queue is serialized, so a minute spent in the gate is a minute charged to
+# every branch waiting behind it. A docs-only branch should not pay 25 minutes
+# of browser tests.
+#
+# But a WRONG skip costs far more than a slow gate: it lands untested code under
+# a green tick, and green-but-hollow is the failure mode this whole tool has
+# been fighting. So:
+#
+#   - the table is FAIL-SAFE: anything it does not recognise runs EVERYTHING;
+#   - whatever is skipped is PRINTED, because a silent skip reads as "checked";
+#   - `bb ci` always runs, whatever changed. It is 5 minutes, and it is what
+#     catches a broken lint, unit test or commit message.
+#
+#   *.md, docs/**                    no runtime surface     -> nothing heavy
+#   dev/**                           this queue's own tooling; not on any
+#                                    classpath, not bundled -> nothing heavy
+#   tools/browser-test/**            the e2e suite itself   -> e2e
+#   packages' .js/.css/.html/.svg    browser-only surface   -> e2e
+#   everything else                  src, .clj/.edn, deps.edn, bb.edn, scripts/,
+#                                    Dockerfile*, compose,  -> integration + e2e
+#                                    CI config, unknown
+#
+# On dev/**: it holds only `wt` and its docs. `bb ci` shellchecks the script,
+# and the gate is itself the script executing — that IS its test. Putting app
+# code there would mean adding it to a classpath, i.e. touching deps.edn or
+# build.clj, which lands in "everything else" and runs the lot.
+classify_changes() {   # <worktree> -> sets NEED_INTEGRATION / NEED_E2E / CHANGED_N
+  local wt="$1" f
+  NEED_INTEGRATION=0; NEED_E2E=0; CHANGED_N=0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    CHANGED_N=$((CHANGED_N + 1))
+    case "$f" in
+      *.md|docs/*|dev/*)              : ;;
+      tools/browser-test/*)           NEED_E2E=1 ;;
+      resources/packages/*.js|resources/packages/*.css|\
+      resources/packages/*.html|resources/packages/*.svg)
+                                      NEED_E2E=1 ;;
+      *)                              NEED_INTEGRATION=1; NEED_E2E=1 ;;
+    esac
+  done < <(git -C "$wt" diff --name-only "$TARGET..HEAD")
+}
+
+# --- per-worktree docker instance -------------------------------------------
+# docker-compose.yml is parameterised by GD_*; with none set it raises the
+# CANONICAL stack (graphden-executor on :9002, image graphden-executor:latest).
+# That stack belongs to develop and to the gate. An agent that wants to click
+# through its own changes gets a private one instead: own containers, own
+# volumes, own image tag, own ports.
+PORTS_DIR="$WTQ_DIR/ports"
+PORT_BASE=9100     # canonical stack owns 9002/9081/9099/5435/5436/8200
+PORT_STRIDE=6      # HTTP, HISTORY, NREPL, PG, USERPG, BAO
+mkdir -p "$PORTS_DIR"
+
+# Hand each instance a contiguous block of host ports, recorded under the shared
+# .git so it survives across sessions and is visible to every worktree. Taken
+# under a lock: two agents claiming at the same moment must not get the same
+# block. Freed by `wt drop`.
+alloc_port_base() {
+  local name="$1" slot=0 base
+  local f="$PORTS_DIR/$name"
+  exec 8>"$PORTS_DIR/.lock"
+  flock -x 8
+  if [ ! -f "$f" ]; then
+    while :; do
+      base=$((PORT_BASE + slot * PORT_STRIDE))
+      grep -qxF "$base" "$PORTS_DIR"/* 2>/dev/null || break
+      slot=$((slot + 1))
+      [ "$slot" -lt 100 ] || die "no free port block below $((PORT_BASE + 100 * PORT_STRIDE))"
+    done
+    printf '%s\n' "$base" > "$f"
+  fi
+  flock -u 8
+  cat "$f"
+}
+
+# Export the GD_* the compose file reads. Sourced by every instance command so
+# they all address the SAME stack for a given worktree.
+instance_env() {
+  local name="$1" base; base="$(alloc_port_base "$name")"
+  export GD_INSTANCE="gdwt-$name"
+  export GD_IMAGE="graphden-wt-$name-executor:latest"
+  export COMPOSE_PROJECT_NAME="gdwt-$name"
+  export GD_PORT_HTTP=$base
+  export GD_PORT_HISTORY=$((base + 1))
+  export GD_PORT_NREPL=$((base + 2))
+  export GD_PORT_PG=$((base + 3))
+  export GD_PORT_USERPG=$((base + 4))
+  export GD_PORT_BAO=$((base + 5))
+  # Bound the throwaway instance. Without a container limit the JVM's
+  # MaxRAMPercentage=75 measures against the HOST, so every agent instance
+  # would size its heap for 75% of the whole box and they would fight. The
+  # executor boots and serves in well under 1 GB.
+  export GD_MEM_LIMIT="${GD_MEM_LIMIT:-2g}"
+}
+
+# Name of the worktree we are standing in — every instance command is scoped to
+# it, so an agent can never address another agent's stack.
+this_worktree() {
+  local wt; wt="$(git rev-parse --show-toplevel)"
+  [ "$wt" != "$MAIN_WT" ] || die "this command is for a feature worktree; the main checkout drives the canonical instance with 'bb rebuild'."
+  basename "$wt"
+}
+
+# Tear an instance down completely: containers, volumes, image, port block.
+teardown_instance() {
+  local name="$1"
+  local path="$WTQ_ROOT/$name"
+  ( instance_env "$name"
+    if [ -d "$path" ]; then
+      ( cd "$path" && docker-compose down -v --remove-orphans ) >/dev/null 2>&1 || true
+    fi
+    docker image rm -f "$GD_IMAGE" >/dev/null 2>&1 || true )
+  rm -f "$PORTS_DIR/$name"
+}
+
 # bootstrap prompt for a NAMELESS agent (discussion phase, before it self-claims)
 bootstrap_kickoff() {
   cat <<'EOF'
@@ -91,10 +305,12 @@ isolated workspace.
    This creates feature/<name> + an isolated worktree and registers you in the
    pool. cd into the printed WORKTREE path and do ALL work there.
 3. Implement, keeping `bb ci` green.
-4. When the code is ready, PROPOSE to land it; only on my OK run the gate
-   (`bb wt merge` in the BACKGROUND — it can take ~1h).
-5. When the feature is fully landed and you're done, PROPOSE to clean up; only on
-   my OK, cd back to the main checkout and run `bb wt drop <name>`.
+4. When the code is ready and `bb ci` is green, LAND IT YOURSELF — run the gate
+   (`bb wt merge` in the BACKGROUND). Don't ask permission to finish: the gate
+   cannot advance develop on a red result. Handle any conflict or failure it
+   reports, and iterate until it is green.
+5. Once landed, clean up yourself: cd back to the main checkout and run
+   `bb wt drop <name>`. Then report what happened.
 
 Read dev/wtq/AGENT.md now for the full contract, then ask me what to build.
 EOF
@@ -103,19 +319,158 @@ EOF
 # kickoff prompt handed to an autonomous agent session for <name>
 kickoff_text() {
   local name="$1"
+  local path="$WTQ_ROOT/$name" branch="feature/$name"
+
   cat <<EOF
 You are an autonomous feature agent for '$name', working in an ISOLATED git
-worktree on branch feature/$name. Other agents may be working in parallel
+worktree on branch $branch. Other agents may be working in parallel
 worktrees — never assume repo-global state, and never touch develop or other
 worktrees directly.
 
 First read your operating contract at dev/wtq/AGENT.md, then your task spec at
-$TASKS_DIR/$name.md. Execute the task end to end: implement in small commits,
-keep 'bb ci' green as your fast loop, and when the feature is complete run the
-landing gate yourself with 'bb wt merge' (in the BACKGROUND — it can take an
-hour) to merge into develop, handling any conflict or gate failure it reports.
-Report back when it lands, or ask me if you hit a real decision you can't make.
+$TASKS_DIR/$name.md.
 EOF
+
+  # A session can die — killed, crashed, /clear'd — and the agent that replaces
+  # it is handed this same prompt. Told only "execute the task", it starts over
+  # and redoes work that is already committed. The work survives on disk; only
+  # the agent's memory of it does not. So when the branch already carries
+  # commits, hand the replacement its bearings instead of a blank slate.
+  local commits; commits="$(git -C "$path" rev-list --count "$TARGET..$branch" 2>/dev/null || echo 0)"
+  if [ "${commits:-0}" -eq 0 ]; then
+    cat <<EOF
+Execute the task end to end: implement in small commits, keep 'bb ci' green as
+your fast loop, and when the feature is complete LAND IT YOURSELF — run the gate
+with 'bb wt merge' (in the BACKGROUND — it takes ~40 min), handling any conflict
+or failure it reports, then clean up with 'bb wt drop'. Do not ask permission to
+finish. Report what happened, and ask only if you hit a real decision you can't
+make.
+EOF
+    return 0
+  fi
+
+  local dirty=""; [ -n "$(git -C "$path" status --porcelain 2>/dev/null)" ] && dirty=" (working tree DIRTY — uncommitted changes)"
+  local result="—"
+  [ -f "$RESULT_DIR/$name" ] && result="$(cut -f1 "$RESULT_DIR/$name")"
+  local drift; drift="$(governance_drift "$name" "$branch")"
+
+  cat <<EOF
+
+You are RESUMING work already in progress — a previous session ended without
+finishing. Nothing is lost: the branch, the worktree and the task spec are on
+disk. Do NOT start over. Get your bearings first:
+
+  $commits commit(s) on $branch beyond $TARGET$dirty
+  last landing-gate result: $result
+
+  git log --oneline $TARGET..HEAD     # what you already did
+  git status                          # anything left uncommitted
+  bb wt log $name                     # your last gate run, if any
+EOF
+
+  if [ -n "$drift" ]; then
+    cat <<EOF
+
+  WARNING — $TARGET has changed the rules you work under since you started:
+$(printf '%s\n' "$drift" | sed 's/^/      /')
+  Run 'bb wt ack' to see the diff. The gate will refuse to land until you have.
+EOF
+  fi
+
+  cat <<EOF
+
+Then finish the job: keep 'bb ci' green, and when the feature is complete land it
+yourself — 'bb wt merge' (in the BACKGROUND — it takes ~40 min), handling any
+conflict or failure it reports, then 'bb wt drop'. Do not ask permission to
+finish. Ask only if you hit a real decision you can't make.
+EOF
+}
+
+# =====================================================================
+# up / down / gc — the agent's own instance
+# =====================================================================
+cmd_up() {
+  local name; name="$(this_worktree)"
+  local path="$WTQ_ROOT/$name"
+  instance_env "$name"
+
+  info "Instance $GD_INSTANCE  ->  http://localhost:$GD_PORT_HTTP   (image $GD_IMAGE)"
+  say  "  postgres :$GD_PORT_PG · user-postgres :$GD_PORT_USERPG · openbao :$GD_PORT_BAO · nrepl :$GD_PORT_NREPL"
+  echo
+  # bb rebuild = uberjar + image + up + health + `bb verify` + `bb smoke`. With
+  # GD_* exported it targets THIS worktree's stack, so `bb verify` compares the
+  # running build against THIS branch's tree — the agent sees its own code.
+  ( cd "$path" && bb rebuild ) || die "instance build failed — see the output above"
+
+  echo
+  ok "✓ '$name' is live at http://localhost:$GD_PORT_HTTP"
+  say "  stop it:   ${BLD}bb wt down${RST}      (keeps the DB volume)"
+  say "  remove it: ${BLD}bb wt drop $name${RST}  (containers + volumes + image + ports)"
+}
+
+cmd_down() {
+  local name; name="$(this_worktree)"
+  local path="$WTQ_ROOT/$name"
+  instance_env "$name"
+  info "Stopping $GD_INSTANCE ..."
+  ( cd "$path" && docker-compose down --remove-orphans ) || die "docker-compose down failed"
+  ok "✓ stopped (DB volume kept — 'bb wt drop $name' removes it)"
+}
+
+cmd_ack() {
+  local name; name="$(this_worktree)"
+  local branch="feature/$name"
+  local drift; drift="$(governance_drift "$name" "$branch")"
+  local tip; tip="$(git -C "$MAIN_WT" rev-parse "$TARGET")"
+
+  if [ -z "$drift" ]; then
+    ok "✓ already current — $TARGET has not moved any governed path since you last looked."
+    printf '%s\n' "$tip" > "$(ack_file "$name")"
+    return 0
+  fi
+
+  # Print the diff, not a summary. The point is not to tick a box: it is that
+  # the new rules pass through the agent's context on their way to being
+  # acknowledged. A one-line "3 files changed" would defeat that entirely.
+  info "== $TARGET changed the rules you work under. Read this. =="
+  echo
+  governance_paths
+  git -C "$MAIN_WT" diff "$(acked_sha "$name" "$branch")..$TARGET" -- "${GOV_PATHS[@]}"
+  echo
+  printf '%s\n' "$tip" > "$(ack_file "$name")"
+  ok "✓ acknowledged $TARGET@${tip:0:8}"
+  say "  Re-read anything above that changes what you are doing, then: ${BLD}bb wt merge${RST}"
+}
+
+cmd_gc() {
+  info "Reclaiming superseded executor layers (label graphden.image=executor) ..."
+  docker image prune -f --filter label=graphden.image=executor || true
+
+  info "Removing agent images whose worktree is gone ..."
+  local img name
+  while IFS= read -r img; do
+    name="${img#graphden-wt-}"; name="${name%-executor:latest}"
+    if [ ! -d "$WTQ_ROOT/$name" ]; then
+      docker image rm "$img" >/dev/null 2>&1 && ok "  removed $img (no worktree '$name')"
+    fi
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^graphden-wt-.+-executor:latest$' || true)
+
+  # Tags from the OLD directory-derived naming (`<worktree>-executor:latest`),
+  # left behind by worktrees that predate the explicit GD_IMAGE tag. Never -f:
+  # docker refuses to drop an image a container still uses, which is exactly the
+  # protection we want against a false positive on someone else's image.
+  info "Removing legacy directory-derived executor images ..."
+  while IFS= read -r img; do
+    name="${img%-executor:latest}"
+    case "$name" in
+      graphden) continue ;;                      # the canonical image — keep
+    esac
+    [ -d "$WTQ_ROOT/$name" ] && continue         # a live worktree's own build
+    docker image rm "$img" >/dev/null 2>&1 && ok "  removed legacy $img"
+  done < <(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^[a-z0-9._-]+-executor:latest$' || true)
+
+  echo
+  docker system df | head -5
 }
 
 # =====================================================================
@@ -145,6 +500,10 @@ cmd_new() {
   mkdir -p "$WTQ_ROOT"
   info "Creating $branch off $TARGET at $path ..."
   git -C "$MAIN_WT" worktree add -b "$branch" "$path" "$TARGET" >/dev/null
+  bootstrap_node_modules "$path"
+  # The agent is about to read the contract as it stands right now — record
+  # that, so only LATER changes to it count as drift.
+  git -C "$MAIN_WT" rev-parse "$TARGET" > "$(ack_file "$name")"
 
   if [ -n "$task" ]; then
     printf '# Task for feature/%s\n\n%s\n' "$name" "$task" > "$TASKS_DIR/$name.md"
@@ -202,6 +561,7 @@ cmd_start() {
   local path="$WTQ_ROOT/$name"
   [ -d "$path" ] || die "no worktree '$name' — run 'wt new $name \"<task>\"' first"
   [ -f "$TASKS_DIR/$name.md" ] || warn "no task spec at $TASKS_DIR/$name.md (agent will need direction)"
+  bootstrap_node_modules "$path"   # heals worktrees created before this existed
   local kick; kick="$(kickoff_text "$name")"
 
   if command -v claude >/dev/null && [ -t 1 ]; then
@@ -258,11 +618,11 @@ cmd_status() {
   cmd_list
   echo
   printf '%sRecent gate runs:%s\n' "$BLD" "$RST"
-  ls -1t "$LOG_DIR" 2>/dev/null | head -5 | sed 's/^/  /' || say "  (none)"
+  newest_logs 5 | xargs -r -n1 basename | sed 's|^|  |' || say "  (none)"
 }
 cmd_log() {
   local name="${1:-}"; [ -n "$name" ] || die "usage: wt log <name>"
-  local f; f="$(ls -1t "$LOG_DIR/$name-"*.log 2>/dev/null | head -1 || true)"
+  local f; f="$(newest_logs 1 "$name")"
   [ -n "$f" ] || die "no gate log for '$name'"
   info "== $f =="; tail -n 120 "$f"
 }
@@ -286,9 +646,20 @@ cmd_drop() {
     [ -z "$(git -C "$path" status --porcelain 2>/dev/null)" ] || die "worktree is dirty — commit/stash, or use -f"
   fi
 
+  # Before the worktree goes: its docker instance, volumes, image and port block.
+  # This is the only place they can be reclaimed — once the path is gone, the
+  # compose file that names them is gone too.
+  info "Tearing down the '$name' instance (containers, volumes, image, ports) ..."
+  teardown_instance "$name"
+  rm -f "$(ack_file "$name")"
+
   info "Removing worktree $path ..."
   git -C "$MAIN_WT" worktree remove ${force:+--force} "$path"
-  git -C "$MAIN_WT" branch -D "$branch" 2>/dev/null && ok "✓ deleted $branch" || warn "branch $branch kept"
+  if git -C "$MAIN_WT" branch -D "$branch" 2>/dev/null; then
+    ok "✓ deleted $branch"
+  else
+    warn "branch $branch kept"
+  fi
   ok "✓ dropped $name"
 }
 
@@ -296,7 +667,11 @@ cmd_drop() {
 # merge — the gated, flock-serialized landing
 # =====================================================================
 run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
-  local wt="$1" no_e2e="$2"
+  local wt="$1" no_e2e="$2" deploy="$3"
+  # The heavy suites refuse to run in a worktree unless this is set: they boot
+  # the canonical image and saturate the machine, so only the gate — which holds
+  # the queue lock — may start them. We are the gate.
+  export WTQ_GATE=1
   local branch; branch="$(branch_of "$wt")"
   local ts; ts="$(date +%Y%m%d-%H%M%S)"
   local name; name="$(basename "$wt")"
@@ -309,10 +684,46 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 
     [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: worktree dirty — commit first."; return 3; }
 
+    # Preflight. The e2e suite needs playwright to be resolvable from
+    # tools/browser-test; a broken install there does not surface until the
+    # suite runs — 40 minutes into the gate — as a wall of
+    # "Cannot find module 'playwright'". Cost of asking now: ~50 ms.
+    step "preflight: e2e runner dependencies"
+    if [ "$no_e2e" != "1" ] && ! ( cd "$wt/tools/browser-test" && node -e "require.resolve('playwright')" ) 2>/dev/null; then
+      echo "ABORT: cannot resolve 'playwright' from $wt/tools/browser-test."
+      echo "  The e2e suite would fail an hour from now with MODULE_NOT_FOUND."
+      echo "  Fix the SOURCE tree (worktrees are hardlinked from it), then retry:"
+      echo "      (cd $MAIN_WT/tools/browser-test && npm ci)"
+      return 3
+    fi
+    echo "ok"
+
     step "fetch + refresh $TARGET"
     git -C "$MAIN_WT" fetch origin || echo "(fetch failed — using local $TARGET)"
     git -C "$MAIN_WT" merge --ff-only "origin/$TARGET" 2>/dev/null || true
     [ -z "$(git -C "$MAIN_WT" status --porcelain --untracked-files=no)" ] || { echo "ABORT: main worktree ($MAIN_WT) has uncommitted TRACKED changes — it must stay clean on $TARGET."; return 3; }
+
+    # Before any of the expensive work, and before we merge develop in: is this
+    # agent still operating under the rules that develop now enforces? Its
+    # contract arrived once, as a launch message. If develop has rewritten
+    # CLAUDE.md / AGENT.md / a skill since, the agent has been working to rules
+    # that no longer exist — and nothing would have told it.
+    step "governance: are you working under the current rules?"
+    local drift; drift="$(governance_drift "$name" "$branch")"
+    if [ -n "$drift" ]; then
+      echo "ABORT: $TARGET changed the rules you operate under, and you have not seen them."
+      echo
+      printf '%s\n' "$drift" | sed 's/^/    /'
+      echo
+      echo "  These govern how you must WORK — they are not ordinary docs, and"
+      echo "  nothing re-reads them into a running agent's context."
+      echo
+      echo "  Read them, then confirm and retry:"
+      echo "      bb wt ack        # prints the diff, records that you have seen it"
+      echo "      bb wt merge"
+      return 3
+    fi
+    echo "ok"
 
     step "merge $TARGET -> $branch"
     if ! git -C "$wt" merge --no-edit "$TARGET"; then
@@ -321,24 +732,60 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       return 2
     fi
 
+    step "scope: what this change needs"
+    classify_changes "$wt"
+    [ "$no_e2e" = "1" ] && NEED_E2E=0     # explicit override still wins
+    echo "  $CHANGED_N file(s) changed vs $TARGET"
+    if [ "$NEED_INTEGRATION" = 1 ]; then echo "  integration: RUN"
+    else echo "  integration: SKIPPED — nothing outside docs / browser-only assets changed"; fi
+    if [ "$no_e2e" = "1" ]; then echo "  e2e:         SKIPPED — --no-e2e"
+    elif [ "$NEED_E2E" = 1 ]; then echo "  e2e:         RUN"
+    else echo "  e2e:         SKIPPED — docs only, no runtime surface"; fi
+    echo "  (bb ci always runs. Anything unrecognised runs everything.)"
+
     step "bb ci (lint + unit, on merged result)"
     ( cd "$wt" && bb ci ) || { echo "FAIL: bb ci"; return 1; }
 
-    step "bb rebuild (bake merged code into graphden-executor:latest)"
-    ( cd "$wt" && bb rebuild ) || { echo "FAIL: bb rebuild"; return 1; }
+    if [ "$NEED_INTEGRATION" = 0 ] && [ "$NEED_E2E" = 0 ]; then
+      step "no runtime surface changed — skipping image build + suites"
+      echo "ok"
+    else
 
-    step "bb test-integration"
-    ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
+    step "build the canonical image from the merged tree"
+    # BUILD ONLY — deliberately no `up`. Two reasons:
+    #   1. the demo instance must never run un-landed code (a red gate used to
+    #      leave it serving the failed branch);
+    #   2. `compose up` from a worktree collides with the canonical containers.
+    # The tag is fixed by docker-compose.yml (GD_IMAGE default) rather than
+    # derived from the directory, so it IS the tag `bb test-e2e` boots — the
+    # suite therefore tests THIS merged code and not whatever was built last.
+    ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
+    ( cd "$wt" && docker-compose build executor ) || { echo "FAIL: docker build"; return 1; }
 
-    if [ "$no_e2e" = "1" ]; then
-      echo; echo "(skipping e2e per --no-e2e)"
+    if [ "$NEED_INTEGRATION" = 1 ]; then
+      step "bb test-integration"
+      ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
+    fi
+
+    if [ "$NEED_E2E" = 0 ]; then
+      echo; echo "(e2e skipped — see the scope step above)"
     else
       step "bb test-e2e"
       ( cd "$wt" && bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
     fi
 
-    step "bb coverage"
-    ( cd "$wt" && bb coverage ) || { echo "FAIL: coverage"; return 1; }
+    fi   # end: a runtime surface changed
+
+    # NO coverage step. It cost 15-19 minutes of every landing — a third of the
+    # gate — and gated nothing:
+    #   - tests-coverage.edn sets no fail-threshold, so a coverage REGRESSION
+    #     cannot fail the gate;
+    #   - it re-runs the very unit suite `bb ci` already ran above, only under
+    #     cloverage instrumentation. It can therefore only fail where bb ci has
+    #     already failed.
+    # So every merge paid ~18 minutes to compute a number nobody reads at merge
+    # time. Coverage is a thing you measure when you want to look at it:
+    # `bb coverage` from the main checkout, or on a schedule.
 
     step "land: fast-forward $TARGET -> $branch"
     # feature now contains $TARGET as ancestor (we just merged it in) and
@@ -350,6 +797,23 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push it yourself)"
     fi
 
+    # The instance is advanced AFTER the fast-forward, from the MAIN checkout,
+    # still holding the queue lock — so it can only ever serve landed code, and
+    # two gates can never race to redeploy it. The image is already built (above),
+    # so this costs no second uberjar. `bb instance-up` ends in `bb verify`, which
+    # compares /version against the freshly-landed tree: proof the demo really is
+    # running what just landed.
+    step "advance the $TARGET instance onto the landed image"
+    if [ "$deploy" = 1 ]; then
+      echo "(--deploy: dropping the $TARGET schema first — the branch changes it)"
+      ( cd "$MAIN_WT" && bb instance-reset ) || { echo "FAIL: instance-reset (LANDED, but the demo is stale)"; return 1; }
+    else
+      ( cd "$MAIN_WT" && bb instance-up ) || { echo "FAIL: instance-up (LANDED, but the demo is stale)"; return 1; }
+    fi
+
+    step "gc: reclaim the executor layers this build superseded"
+    docker image prune -f --filter label=graphden.image=executor || true
+
     echo; echo "=== GREEN: $branch landed on $TARGET ==="
     return 0
   } 2>&1 | tee "$log"
@@ -359,12 +823,19 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 }
 
 cmd_merge() {
-  local no_e2e=0
-  [ "${1:-}" = "--no-e2e" ] && no_e2e=1
+  local no_e2e=0 deploy=0
+  for a in "$@"; do
+    case "$a" in
+      --no-e2e) no_e2e=1 ;;
+      --deploy) deploy=1 ;;   # branch changes the schema: reset the target DB on landing
+      *) die "unknown flag '$a' (wt merge [--no-e2e] [--deploy])" ;;
+    esac
+  done
   local wt; wt="$(git rev-parse --show-toplevel)"
   local branch; branch="$(branch_of "$wt")"
   [ "$branch" != "$TARGET" ] || die "you are on $TARGET — run 'wt merge' from inside a feature worktree."
   [ "$wt" != "$MAIN_WT" ]    || die "run 'wt merge' from a feature worktree, not the main checkout."
+  bootstrap_node_modules "$wt"     # the gate runs bb ci in here — it needs the deps
 
   exec 9>"$LOCK"
   if ! flock -n -x 9; then
@@ -375,7 +846,7 @@ cmd_merge() {
   ok "Acquired queue lock — running gate."
 
   local rc=0
-  run_gate "$wt" "$no_e2e" || rc=$?
+  run_gate "$wt" "$no_e2e" "$deploy" || rc=$?
   : > "$HOLDER"
   flock -u 9 || true      # release for the next in line
 
@@ -405,6 +876,10 @@ main() {
     kickoff) cmd_kickoff "$@" ;;
     list|ls) cmd_list  "$@" ;;
     merge|land) cmd_merge "$@" ;;
+    up)     cmd_up     "$@" ;;
+    down)   cmd_down   "$@" ;;
+    gc)     cmd_gc     "$@" ;;
+    ack)    cmd_ack    "$@" ;;
     status) cmd_status "$@" ;;
     log)    cmd_log    "$@" ;;
     drop|rm) cmd_drop  "$@" ;;

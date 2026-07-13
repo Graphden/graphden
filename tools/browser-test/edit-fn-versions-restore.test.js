@@ -104,7 +104,7 @@ async function putDescription(page, fnId, desc) {
       return fns.some(f => f.name === name);
     }, FN_NAME, {timeout: 5000, polling: 100});
     await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-    await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+    await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
     // Row-actions popover is HTMX-loaded — the element appears
     // immediately but its button content swaps in async. Wait for the
     // ⌛ history button before dispatching the click.

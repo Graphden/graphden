@@ -27,7 +27,7 @@ async function openExecutePopoverFor(page, fnNameHash) {
   // click) — Playwright's .click() doesn't dispatch mousedown by
   // itself, so use page.dispatchEvent.
   await page.dispatchEvent('button.more-actions-trigger', 'mousedown');
-  await page.waitForSelector('.row-actions-popover', {timeout: 5000});
+  await page.waitForSelector('.row-actions-popover button', {timeout: 20000});
   // Find ▶ in the surfaced row-actions popover and click.
   const opened = await page.evaluate(() => {
     const popover = document.querySelector('.row-actions-popover');

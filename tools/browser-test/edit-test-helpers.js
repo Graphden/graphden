@@ -102,6 +102,15 @@ async function newContext(chromium) {
   page.setDefaultNavigationTimeout(90000);
   page.on('pageerror', e => console.log('  [pageerror]', e.message));
   page.on('crash', () => console.log('  [page crash] renderer crashed'));
+  // A failed fetch reaches the page as a bare `TypeError: Failed to fetch` —
+  // the same string for a reset connection, an abort, a DNS miss and a CORS
+  // rejection. Chromium knows which it was; nobody was asking. Print the
+  // net::ERR_* so a network failure is diagnosable from the log alone.
+  page.on('requestfailed', (req) => {
+    const failure = req.failure();
+    console.log('  [requestfailed]', req.method(), req.url(),
+                '—', (failure && failure.errorText) || 'unknown');
+  });
   // Block until /health is 200 BEFORE the initial goto. Without
   // this, a test that starts during a JVM OOM-restart window has
   // its initial page.goto fire editor's initGraph against a dead

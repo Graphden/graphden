@@ -576,6 +576,7 @@ body.sidebar-collapsed .sidebar-expand-floating {
   display: flex; flex-direction: column; gap: 2px;
   padding: 4px 6px; border-radius: 3px;
   background: var(--hover-bg);
+  cursor: pointer;
 }
 .fn-versions-row-top {
   display: flex; align-items: baseline; gap: 8px;
@@ -606,7 +607,6 @@ body.sidebar-collapsed .sidebar-expand-floating {
   font-family: var(--mono);
   overflow-wrap: anywhere;
 }
-.fn-versions-row { cursor: pointer; }
 .fn-versions-row-expanded { background: var(--bg); }
 .fn-versions-runs {
   font-size: 10px; color: var(--muted-fg);
@@ -3112,6 +3112,9 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   .arg-value-edit-btn,
   .description-tooltip-btn {
     min-width: 0;
+    min-height: var(--touch-target);
+    padding: 6px 14px;
+    font-size: 13px;
   }
 
   /* Sidebar overlays the graph on narrow viewports rather than
@@ -3167,12 +3170,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
   /* Save / Cancel buttons in popovers need the Apple-HIG target
      too — applies to every button created by openInlineEditPopover
      plus the description tooltip's Save/Cancel pair. */
-  .arg-value-edit-btn,
-  .description-tooltip-btn {
-    min-height: var(--touch-target);
-    padding: 6px 14px;
-    font-size: 13px;
-  }
 }
 
 /* =========================================================================

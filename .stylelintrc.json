@@ -30,7 +30,7 @@
     "selector-id-pattern": null,
     "keyframes-name-pattern": null,
     "custom-property-pattern": null,
-    "no-duplicate-selectors": null,
+    "no-duplicate-selectors": true,
     "alpha-value-notation": "number",
     "color-function-notation": null,
     "color-function-alias-notation": null,

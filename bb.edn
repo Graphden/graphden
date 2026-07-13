@@ -241,13 +241,29 @@
                       "--summary" "--onlyAllow" allow)))}
 
   commitlint
-  {:doc "Lint the most recent commit messages against the conventional-commits rules in commitlint.config.cjs. Pass a commit range as `bb commitlint HEAD~5..HEAD` to lint a larger window; default is the last 20."
-   :task (let [range (or (first *command-line-args*) "HEAD~20..HEAD")
+  {:doc "Lint the commit messages THIS branch adds on top of develop (merge-base..HEAD) against the conventional-commits rules in commitlint.config.cjs. Already-merged history is deliberately out of scope: its messages cannot be fixed without rewriting shared history, so linting them would produce a red CI nobody can act on — and would block every feature branch in the merge queue. On develop the range is empty and the check trivially passes. Pass an explicit range as `bb commitlint HEAD~5..HEAD` to audit a wider window by hand."
+   :task (let [default-range
+               (let [{:keys [exit out]} (p/shell {:out :string :err :string :continue true}
+                                                 "git" "merge-base" "HEAD" "develop")]
+                 (if (zero? exit)
+                   (str (str/trim out) "..HEAD")
+                   "HEAD~20..HEAD"))   ; no develop ref (shallow clone / fresh repo)
+               range (or (first *command-line-args*) default-range)
                splitter (re-pattern "\\.\\.")
-               parts (str/split range splitter)]
+               parts (str/split range splitter)
+               from (first parts)
+               to (or (second parts) "HEAD")
+               ;; commitlint 21 rejects --from X --to X ("point to the same
+               ;; commit", exit 9), so an empty range is an error to it, not a
+               ;; no-op. That is exactly the range on develop and in a freshly
+               ;; claimed worktree — guard instead of handing it over.
+               n-commits (-> (p/shell {:out :string :err :string :continue true}
+                                      "git" "rev-list" "--count" (str from ".." to))
+                             :out str/trim)]
            (println (str "▶ commitlint " range))
-           (p/shell "npx" "commitlint" "--from" (first parts)
-                    "--to" (or (second parts) "HEAD")))}
+           (if (= "0" n-commits)
+             (println "  no commits in range — nothing to lint")
+             (p/shell "npx" "commitlint" "--from" from "--to" to)))}
 
   visual
   {:doc "Run Playwright visual-regression tests against running editor (default http://localhost:9002). Reads AUTH_TOKEN from env or .env. Use `bb visual-update` after intentional UI changes."

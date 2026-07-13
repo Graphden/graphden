@@ -286,6 +286,9 @@ jobs:
       - name: Lint Dockerfile.build
         run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile.build
 
+      - name: Lint Dockerfile.crac
+        run: docker run --rm -i hadolint/hadolint:v2.12.0-debian < Dockerfile.crac
+
   gitleaks:
     name: gitleaks (secrets)
     runs-on: ubuntu-latest

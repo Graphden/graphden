@@ -128,9 +128,9 @@
                   ".claude/hooks/remind-packages-quality-on-impls-edit.sh")}
 
   hadolint
-  {:doc "Lint Dockerfile + Dockerfile.build via Docker hadolint/hadolint:v2.12.0-debian."
+  {:doc "Lint Dockerfile + Dockerfile.build + Dockerfile.crac via Docker hadolint/hadolint:v2.12.0-debian."
    :task (do
-           (doseq [df ["Dockerfile" "Dockerfile.build"]]
+           (doseq [df ["Dockerfile" "Dockerfile.build" "Dockerfile.crac"]]
              (println (str "▶ hadolint " df))
              (let [proc (p/shell {:in (slurp df)}
                                  "docker" "run" "--rm" "-i"

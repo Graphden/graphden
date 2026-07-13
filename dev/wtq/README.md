@@ -22,8 +22,9 @@ Then, in that session:
    isolated worktree and joining the pool. It cannot edit code before this.
 3. **It implements**, keeping `bb ci` (lint + unit) green — its fast loop.
 4. **It proposes to land.** On your OK it runs the gate (`bb wt merge`) in the
-   background: merge develop → ci → rebuild → integration → e2e → coverage →
-   fast-forward develop. Red/conflict bounces back and it fixes; green lands.
+   background: merge develop → ci → build image → integration → e2e →
+   fast-forward develop → advance the demo instance. Red/conflict bounces back
+   and it fixes; green lands.
 5. **It proposes to clean up.** On your OK it removes its own worktree +
    branch (`bb wt drop <name>`).
 
@@ -35,7 +36,7 @@ moments an agent pauses for you are landing and cleanup (Rule 5 in `AGENT.md`).
 
 - **Fast loop is parallel.** `bb ci` takes a *per-checkout* flock, so N agents
   run it simultaneously without stepping on each other.
-- **Heavy checks are serialized.** `integration` + `e2e` + `coverage` run
+- **Heavy checks are serialized.** `integration` + `e2e` run
   against the canonical `graphden-executor:latest`, so exactly one may build it
   at a time. `bb wt merge` enforces that with a machine-wide `flock` — the lock
   *is* the queue; agents wait their turn.
@@ -82,7 +83,7 @@ bb wt start <name>                     # launch an agent inside an existing work
 ## Requirements
 
 - `flock` (util-linux) — present on Linux.
-- The gate **inherits your shell env**, so `export` whatever `e2e` / `coverage`
+- The gate **inherits your shell env**, so `export` whatever `e2e`
   / the `origin` push need (`AUTH_TOKEN`, `GITHUB_TOKEN`, and an `ssh-agent`
   with your key) before an agent lands anything. Without ssh, the gate still
   runs and advances `develop` **locally**, but the final `git push` is skipped
@@ -95,7 +96,11 @@ bb wt start <name>                     # launch an agent inside an existing work
   `$(git rev-parse --git-common-dir)/wtq/` — shared across all worktrees, never
   committed.
 - `--no-e2e` is an escape hatch for changes with no runtime surface (docs,
-  comments); it still runs lint + unit + integration + coverage.
+  comments); it still runs lint + unit + integration.
+- **Coverage is NOT in the gate.** It has no fail-threshold and re-runs the unit
+  suite `bb ci` already ran, so it could only fail where `bb ci` already had —
+  ~18 minutes per landing for a number nobody reads at merge time. Measure it
+  when you want to look at it: `bb coverage` from the main checkout.
 - `--deploy` is for a branch that **changes the DB schema**: on landing, the
   develop instance's schema is dropped and re-seeded. The default keeps the
   data, so demo branches / secrets / executions survive an ordinary merge.

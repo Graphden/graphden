@@ -64,15 +64,16 @@ You were started in one of two ways:
 4. **Land** — when the feature is complete and `bb ci` is green, **propose to
    the user that you enter the merge queue.** On their OK, run the gate:
 
-   `bb wt merge` takes **40–60 min** (merge develop → ci → rebuild →
-   integration → e2e → coverage → fast-forward develop) — longer than a
+   `bb wt merge` takes **~30–40 min** (merge develop → ci → build image →
+   integration → e2e → fast-forward develop → advance the demo instance) —
+   longer than a
    foreground command may run, so **launch it with `run_in_background: true`**
    and wait to be re-invoked when it exits. Then check the outcome:
    - **`✓ landed`** (exit 0, `bb wt list` RESULT `GREEN`) → feature is on
      `develop`. Go to step 5.
    - **CONFLICT** (merging develop into your branch) → resolve in your worktree,
      commit, re-run `bb wt merge` (background).
-   - **gate FAIL** (ci/integration/e2e/coverage on the merged result) → read
+   - **gate FAIL** (ci/integration/e2e on the merged result) → read
      `bb wt log <name>`, fix on your branch, keep `bb ci` green, re-run the gate.
      Iterate until green. Never weaken a test or skip a check to go green.
    - If the queue is busy the gate blocks waiting its turn — expected; let the

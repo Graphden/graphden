@@ -9,7 +9,7 @@
 # When a feature is ready, `wt merge` (run FROM INSIDE that worktree)
 # enters a machine-wide flock queue: at most one merge runs at a time.
 # The gate merges the latest develop into the feature, runs the HEAVY
-# suite (rebuild + integration + e2e + coverage) on the MERGED result,
+# suite (image build + integration + e2e) on the MERGED result,
 # and only then fast-forwards develop. Green -> develop advances; red ->
 # the branch bounces back to you with the log, develop untouched.
 #
@@ -560,8 +560,16 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       ( cd "$wt" && bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
     fi
 
-    step "bb coverage"
-    ( cd "$wt" && bb coverage ) || { echo "FAIL: coverage"; return 1; }
+    # NO coverage step. It cost 15-19 minutes of every landing — a third of the
+    # gate — and gated nothing:
+    #   - tests-coverage.edn sets no fail-threshold, so a coverage REGRESSION
+    #     cannot fail the gate;
+    #   - it re-runs the very unit suite `bb ci` already ran above, only under
+    #     cloverage instrumentation. It can therefore only fail where bb ci has
+    #     already failed.
+    # So every merge paid ~18 minutes to compute a number nobody reads at merge
+    # time. Coverage is a thing you measure when you want to look at it:
+    # `bb coverage` from the main checkout, or on a schedule.
 
     step "land: fast-forward $TARGET -> $branch"
     # feature now contains $TARGET as ancestor (we just merged it in) and

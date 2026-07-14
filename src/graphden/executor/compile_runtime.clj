@@ -243,6 +243,23 @@
                      " — " reason)))))
 
 
+(defn- storage-root
+  "Walk a storage's decorator chain to the handle underneath.
+
+   Used to ask one question: does `:compile-storage` read the same rows as
+   `(:storage ctx)`? Object identity cannot answer it — both are distinct
+   `VersionedStorage` instances even in single-tenant — but the chain can.
+
+   `VersionedStorage` exposes its inner handle as `:base-storage`, so the walk
+   goes through it. `OrgScopedStorage` (tenancy) names its inner handle `:base`,
+   so the walk STOPS there — which is precisely the answer we want: a ctx whose
+   reads are org-scoped does not see the graph the registry is compiled from, and
+   its cache must not be used to compile one."
+  [s]
+  (loop [x s]
+    (if-let [b (:base-storage x)] (recur b) x)))
+
+
 (defn- compile-storage
   "Storage for STRUCTURAL (compile-time) reads of the fn-graph — the privileged
    org-agnostic storage when wired (§4 Design B: the registry holds every org's
@@ -439,7 +456,27 @@
 
       :else
       (let [storage (compile-storage ctx)
-            graph (read-graph storage (:executor-orgs ctx))
+            ;; The graph we need is, in the common case, already in hand:
+            ;; `invalidate-graph-cache!` splices `:graph-cache` immediately before
+            ;; calling us, and that cache holds exactly this shape
+            ;; (`{:fns :slots :fn-slots :bindings :list-items}`). Re-reading all of
+            ;; it out of Postgres to recompile a handful of fns is the single most
+            ;; expensive thing on the write path: measured at 4137 fns, a `:fn`
+            ;; create spent 477 ms of its 918 ms right here, and its blast radius
+            ;; was one fn.
+            ;;
+            ;; Only when the two graphs are the SAME graph, though. `read-graph`
+            ;; shards by `:executor-orgs`, and `compile-storage` is the privileged
+            ;; org-agnostic handle when tenancy is wired — while the cache is
+            ;; filled from the request's (org-scoped) storage. Taking the cache
+            ;; there would compile one tenant's fns and drop every other's. In
+            ;; single-tenant the two handles are the same object and no shard
+            ;; filter exists, which is exactly what these two checks say.
+            cached (when (and (nil? (:executor-orgs ctx))
+                              (identical? (storage-root storage)
+                                          (storage-root (:storage ctx))))
+                     (some-> (:graph-cache ctx) deref))
+            graph (or cached (read-graph storage (:executor-orgs ctx)))
             _ (register-type-aliases-from-db! graph)
             base-fns (:base-fns ctx)
             fns-map (if (map? (:fns graph))

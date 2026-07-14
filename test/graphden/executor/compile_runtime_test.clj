@@ -12,6 +12,7 @@
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.compile.bindings]
     [graphden.executor.compile.lookups]
+    [graphden.executor.context :as ectx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
@@ -460,3 +461,44 @@
           (is (= 3 (count translated))
               "one name key + two slot-id keys"))
         (finally (sp/close storage))))))
+
+
+;; ── delta-recompile reuses the graph cache instead of re-reading Postgres ────
+;;
+;; `invalidate-graph-cache!` splices `:graph-cache` immediately before calling
+;; `delta-recompile!`, and that cache is the same shape delta-recompile needs.
+;; Re-reading the whole graph out of storage to recompile a handful of fns was
+;; the single most expensive thing on the write path: measured at 4137 fns, a
+;; `:fn` create spent 477 ms of its 918 ms in that one read, for a blast radius
+;; of one. This pins the reuse: with a warm, equivalent cache, delta-recompile
+;; must not call `read-graph` at all — and must still produce the right closure.
+(deftest delta-recompile-reuses-graph-cache-test
+  (let [storage (setup/create-test-storage)]
+    (try
+      (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
+      (let [base-fn (setup/create-base-fn! storage "add" :int)
+            slot-a (setup/create-slot! storage "a" :int)
+            slot-b (setup/create-slot! storage "b" :int)
+            _ (setup/attach-slot! storage (:id base-fn) (:id slot-a) 0)
+            _ (setup/attach-slot! storage (:id base-fn) (:id slot-b) 1)
+            child-id (:id (setup/create-composed-fn! storage "cache-child" (:id base-fn)))
+            ctx (exec/create-context {:storage storage})
+            _ (cr/rebuild! ctx)
+            ;; Warm the cache with exactly what read-graph would have returned —
+            ;; the same handle, no shard filter, so the reuse guard admits it.
+            _ (ectx/fill-graph-cache! ctx (#'graphden.executor.compile-runtime/read-graph storage))
+            reads (atom 0)
+            orig @#'graphden.executor.compile-runtime/read-graph]
+        (testing "a warm, equivalent cache means zero storage reads"
+          (with-redefs [graphden.executor.compile-runtime/read-graph
+                        (fn [& args] (swap! reads inc) (apply orig args))]
+            (#'graphden.executor.compile-runtime/delta-recompile! ctx #{child-id}))
+          (is (zero? @reads)
+              "delta-recompile re-read the whole graph despite a warm cache"))
+
+        (testing "and the recompiled closure is still correct"
+          (is (contains? @(:compiled-registry ctx) child-id)
+              "the child fn is compiled into the registry")
+          (is (= 7 (exec/execute ctx child-id {:a 3 :b 4}))
+              "the closure compiled from the cache computes the same result")))
+      (finally (sp/close storage)))))

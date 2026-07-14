@@ -29,7 +29,7 @@
 // Exit code 0 = PASS, 1 = FAIL.
 
 const {chromium} = require('playwright');
-const {assert, newContext, nodeApiJson} = require('./edit-test-helpers');
+const {assert, newContext, nodeApi, nodeApiJson} = require('./edit-test-helpers');
 
 
 // Per-run unique package name so reruns against a shared stack stay
@@ -91,7 +91,18 @@ async function deleteFnsCreatedSince(beforeIds) {
   // worked against a warm local graph where the package's fns happened to have
   // no cross-references, and left 34 of them behind in the gate. The suite's
   // leak detector caught that too, which is the entire point of it.
-  const del = async (path) => { await nodeApiJson('DELETE', path); };
+  // DELETE answers with an empty body / HTML, not JSON. Routing it through
+  // nodeApiJson made JSON.parse throw ("Unexpected end of JSON input") on the
+  // FIRST delete of the cascade, the catch below swallowed it, and the fn was
+  // never removed — a cleanup that reported failure for the wrong reason and
+  // left 34 fns behind. `nodeApi` is the raw call; ok or 404 is success.
+  const del = async (path) => {
+    const r = await nodeApi('DELETE', path);
+    if (!r.ok && r.status !== 404) {
+      throw new Error('DELETE ' + path + ' -> HTTP ' + r.status
+                      + ' ' + (await r.text()).slice(0, 120));
+    }
+  };
   let lastError = null;
 
   for (let pass = 0; pass < 12; pass++) {

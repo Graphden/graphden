@@ -36,6 +36,75 @@
 ;;   recompile callers that bypass invalidate-graph-cache!.
 
 
+(defn- splice-graph-cache!
+  "Update the cached graph IN PLACE for the fns that just changed, instead of
+   throwing the whole thing away.
+
+   The compiled registry has had delta invalidation for a while; `:graph-cache`
+   never did — every CRUD write nil'd it, and the next reader reloaded the whole
+   graph (fn + slot + fn-slot + binding + list-item, thousands of rows) out of
+   Postgres. That is fine when writes are rare. Under a write STREAM — which is
+   exactly what the e2e suite is — the cache is never warm, so every read pays a
+   full reload: /api/types/candidates went from 0.147 s to 1.29 s under a
+   60-write loop, and to 45 s under the real suite. Both of the suite's standing
+   flakes are 30-second waits on exactly such a read.
+
+   Correctness rests on two properties of the model:
+
+   - `changed-fn-ids` names every fn whose OWN rows moved; a binding write
+     carries its owning fn-id. So re-reading those fns' fn-slots / bindings /
+     list-items is sufficient — nothing else can have changed.
+   - a `slot` is an immutable global identity (CLAUDE.md: atomic
+     `(name, type-fn-id)`, immutable post-create) and is SHARED across fns. So
+     slots may only be ADDED here, never removed: another fn may still point at
+     one this fn just dropped.
+
+   A fn that was deleted simply does not come back from storage, and its rows
+   are filtered out. On a cold cache this is a no-op — the next read loads
+   everything, as before."
+  [ctx changed-fn-ids]
+  (let [cache (:graph-cache ctx)
+        cached (some-> cache deref)
+        storage (:storage ctx)]
+    (when (and cached storage (seq changed-fn-ids))
+      (let [ids (set changed-fn-ids)
+            of-changed? (fn [row] (contains? ids (:fn-id row)))
+            ;; Deleted fns don't come back — that IS their removal.
+            fresh-fns (vec (vals (sp/read-entities storage :fn (vec ids))))
+            fresh-fn-slots (into [] (mapcat #(sp/query-entities storage :fn-slot {:fn-id %})) ids)
+            fresh-bindings (into [] (mapcat #(sp/query-entities storage :binding {:fn-id %})) ids)
+            fresh-binding-ids (into #{} (map :id) fresh-bindings)
+            fresh-items (into []
+                              (mapcat #(sp/query-entities storage :binding-list-item
+                                                          {:binding-id %}))
+                              fresh-binding-ids)
+            ;; Items keyed off bindings the changed fns USED to own must go too,
+            ;; even when the binding itself is gone now.
+            stale-binding-ids (into #{}
+                                    (comp (filter of-changed?) (map :id))
+                                    (:bindings cached))
+            ;; Slots: add-only. Immutable identities, shared across fns.
+            known-slots (into #{} (map :id) (:slots cached))
+            missing-slot-ids (into [] (comp (map :slot-id) (remove known-slots) (distinct))
+                                   fresh-fn-slots)
+            extra-slots (if (seq missing-slot-ids)
+                          (vec (vals (sp/read-entities storage :slot missing-slot-ids)))
+                          [])]
+        (reset! cache
+                {:fns (into (filterv #(not (contains? ids (:id %))) (:fns cached))
+                            fresh-fns)
+                 :slots (into (:slots cached) extra-slots)
+                 :fn-slots (into (filterv (complement of-changed?) (:fn-slots cached))
+                                 fresh-fn-slots)
+                 :bindings (into (filterv (complement of-changed?) (:bindings cached))
+                                 fresh-bindings)
+                 :list-items (into (filterv #(not (contains? stale-binding-ids
+                                                             (:binding-id %)))
+                                            (:list-items cached))
+                                   fresh-items)})
+        true))))
+
+
 (defn invalidate-graph-cache!
   "Drop derived caches on `ctx` and refresh type-aliases from storage.
 
@@ -70,8 +139,12 @@
    ;; without the lock falls through with no synchronization (no
    ;; concurrency to worry about anyway).
    (let [body (fn []
-                (when-let [c (:graph-cache ctx)]
-                  (reset! c nil))
+                ;; Splice when we know what changed; drop wholesale only when we
+                ;; don't. The full drop is what made every write cost the next
+                ;; reader a complete graph reload from Postgres.
+                (when-not (splice-graph-cache! ctx changed-fn-ids)
+                  (when-let [c (:graph-cache ctx)]
+                    (reset! c nil)))
                 ;; The per-execute free-arg-slot-map memo is a pure
                 ;; function of graph state; any mutation may change a
                 ;; fn's free-arg surface, so drop it here. Full drop

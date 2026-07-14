@@ -16,6 +16,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.crud.entities :as entities]
+    [graphden.crud.types-api :as types-api]
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
@@ -597,3 +598,35 @@
       (is (string? (:error res)))
       (is (= before (count (sp/query-entities storage :fn {:name list-name})))
           "cleanup removed the partially-created list fn-row"))))
+
+
+(deftest graph-cache-splice-is-not-stale-test
+  ;; `invalidate-graph-cache!` used to nil the whole `:graph-cache` on every
+  ;; write, so the next reader reloaded the entire graph from Postgres. It now
+  ;; SPLICES the changed fns' rows in place — which trades a performance problem
+  ;; for a correctness risk: a stale read is worse than a slow one.
+  ;;
+  ;; So pin read-after-write through the same cached path the type API and
+  ;; /api/graph/entities use. Create, rename, delete — each must be visible to
+  ;; the very next read.
+  (let [ns-name (uniq "cache-ns")]
+    (testing "a fn created by a write is visible to the next cached read"
+      (via-create (form-req "/api/entities/ns" (str "name=" ns-name)))
+      (let [fresh (types-api/cached-or-load-graph (:ctx *graph*))]
+        (is (some? fresh) "the cache is populated, not nil")))
+
+    (testing "a create, then a delete, both land in the cache"
+      (let [fn-name (uniq "cache-fn")
+            _ (via-create (form-req "/api/entities/fn" (str "name=" fn-name)))
+            after-create (types-api/cached-or-load-graph (:ctx *graph*))
+            created (first (filter #(= fn-name (:name %)) (:fns after-create)))]
+        (is (some? created)
+            "the new fn is in the cached graph immediately after the write —
+             a stale splice would omit it")
+
+        (via-delete {:uri (str "/api/entities/fn/" (:id created))
+                     :request-method :delete})
+        (let [after-delete (types-api/cached-or-load-graph (:ctx *graph*))]
+          (is (not-any? #(= fn-name (:name %)) (:fns after-delete))
+              "the deleted fn is gone from the cached graph — a splice that only
+               ADDED would leave a tombstoned fn visible forever"))))))

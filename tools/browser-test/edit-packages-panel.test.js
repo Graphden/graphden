@@ -84,18 +84,47 @@ async function panelState(page) {
 // at it (the server answers 409), and the install builds a tree. Repeat until a
 // pass deletes nothing, then report whatever is stuck rather than swallowing it.
 async function deleteFnsCreatedSince(beforeIds) {
+  // Deleting an fn is a CASCADE, not one call. The server refuses while anything
+  // still points at it — a live child (parent-ids) OR a binding that references
+  // it — so its own bindings, list-items, fn-slots and slots have to go first.
+  // My first version issued a bare DELETE on the fn and called it done; it
+  // worked against a warm local graph where the package's fns happened to have
+  // no cross-references, and left 34 of them behind in the gate. The suite's
+  // leak detector caught that too, which is the entire point of it.
+  const del = async (path) => { await nodeApiJson('DELETE', path); };
+  let lastError = null;
+
   for (let pass = 0; pass < 12; pass++) {
     const ents = await nodeApiJson('GET', '/api/graph/entities');
     const extras = (ents.fns || []).filter((f) => !beforeIds.has(f.id));
     if (extras.length === 0) return [];
+
     let deleted = 0;
-    for (const f of extras) {
+    for (const fn of extras) {
       try {
-        await nodeApiJson('DELETE', '/api/entities/fn/' + f.id);
+        const bindings = (ents.bindings || []).filter((b) => b['fn-id'] === fn.id);
+        const bindingIds = new Set(bindings.map((b) => b.id));
+        for (const it of (ents['list-items'] || [])
+                          .filter((i) => bindingIds.has(i['binding-id']))) {
+          await del('/api/entities/binding-list-item/' + it.id);
+        }
+        for (const b of bindings) await del('/api/entities/binding/' + b.id);
+
+        const ownFnSlots = (ents['fn-slots'] || []).filter((fs) => fs['fn-id'] === fn.id);
+        for (const fs of ownFnSlots) if (fs.id) await del('/api/entities/fn-slot/' + fs.id);
+        for (const fs of ownFnSlots) await del('/api/entities/slot/' + fs['slot-id']);
+
+        await del('/api/entities/fn/' + fn.id);
         deleted++;
-      } catch (_) { /* has a live dependent — next pass, once it is gone */ }
+      } catch (e) {
+        // Keep the LAST reason so a stuck cleanup can say why, instead of just
+        // announcing a number. Swallowing this is how the leak stayed invisible.
+        lastError = (e && e.message) || String(e);
+      }
     }
+    // No progress in a whole pass: whatever is left is genuinely stuck. Say so.
     if (deleted === 0) {
+      if (lastError) console.error('  cleanup blocked by: ' + lastError.slice(0, 200));
       return extras.map((f) => f.name || ('<anon ' + f.id.slice(0, 8) + '>'));
     }
   }

@@ -102,6 +102,7 @@ ns_count() {
        2>/dev/null || echo 0
 }
 LEAKS=""
+FLAKED=""
 
 WORST=0
 PASS=0
@@ -170,7 +171,16 @@ for f in $FILES; do
     sleep 10
     if wait_for_server && timeout -k 5 "${PER_TEST_TIMEOUT:-300}" node "$f"; then
       PASS=$((PASS+1))
-      echo "  (retry succeeded — flake)" >&2
+      # A test that fails and then passes is NOT a pass. Every root cause found in
+      # this suite so far — the dead type picker, the empty Run form — first showed
+      # up as exactly this: one failure, swallowed by a retry, the run still green.
+      # Twice the "fix" was to raise the timeout the retry was hiding. So the retry
+      # stays (it tells a transient apart from a hard break) but it no longer buys
+      # a green run: the suite goes red and names the file.
+      FLAKED="$FLAKED $f"
+      WORST=1
+      FAILED_NAMES="$FAILED_NAMES $f(flaked-passed-on-retry)"
+      echo "  (retry succeeded — FLAKE, and a flake fails this run)" >&2
     else
       rc2=$?
       WORST=1
@@ -221,6 +231,9 @@ fi
 
 echo "============================================================"
 echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"
+if [ -n "$FLAKED" ]; then
+  echo "  FLAKED (failed once, passed on retry — counted as FAILURES):$FLAKED" >&2
+fi
 if [ "$FAIL" != "0" ]; then
   echo "  failed:$FAILED_NAMES" >&2
 fi

@@ -89,6 +89,35 @@ async function openExecutePopover(page, fnName) {
     // Fill the :ms input via Playwright's `fill` so the keystrokes
     // are actual input events (more reliable than direct DOM
     // mutation, which can race with the form's value tracking).
+    // Regression: the Run form inside the graph-refresh window.
+    // The free-args are derived from fn-slots / bindings / slots, and those arrive
+    // in the per-view SUBTREE payload — `initGraph()` rebuilds `lookups` from
+    // `?scope=index`, which carries none of them. Open the popover in that window
+    // and the form used to report "No free arguments" for an fn that takes one: a
+    // Run button with nothing to pass to it. Under load the suite hit this for
+    // real, and it surfaced as a 45 s `page.fill` timeout on an input that was
+    // never going to exist.
+    //
+    // Hold the subtree back so the window is wide, wait until it is genuinely open
+    // (`lookups.slotMap` empty), and re-open the popover there. The number field
+    // must still be built.
+    await page.route('**/api/graph/entities?scope=subtree*', async (route) => {
+      await new Promise((r) => setTimeout(r, 3000));
+      await route.continue();
+    });
+    await page.evaluate(() => {
+      document.querySelector('.execute-popover')?.remove();
+      initGraph();                      // deliberately NOT awaited
+    });
+    await page.waitForFunction(() => (lookups?.slotMap?.size ?? 1) === 0,
+                               null, {timeout: 20000, polling: 20});
+    const reopened = await openExecutePopover(page, TARGET_FN);
+    assert(reopened, '▶ popover re-opens during a graph refresh');
+    await page.waitForSelector('.execute-popover input[data-field-kind="number"]',
+                               {timeout: 20000});
+    console.log('  ✓ Run form still builds its args when opened during a refresh');
+    await page.unroute('**/api/graph/entities?scope=subtree*');
+
     await page.fill('.execute-popover input[data-field-kind="number"]',
                     String(SLEEP_MS));
     await page.check('.execute-popover .execute-confirm-checkbox');

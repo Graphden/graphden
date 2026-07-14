@@ -441,6 +441,22 @@ async function showExecutePopover(fnEntity, anchorEl) {
   const body = document.createElement('div');
   body.className = 'execute-popover-body';
   el.appendChild(body);
+  // The free-args are derived from fn-slots, bindings and slots — and those live
+  // in the per-view SUBTREE payload, not in the `?scope=index` one that
+  // `initGraph()` rebuilds `lookups` from. Open this popover before the subtree
+  // lands and `freeArgsOf` sees empty maps, reports no free args at all, and the
+  // popover renders "No free arguments — click Run to invoke." for an fn that in
+  // fact takes some. The user gets a Run button and no way to pass anything to it.
+  //
+  // Same shape as the arg-type picker's dead <select>: a not-loaded-yet read of
+  // `lookups` mistaken for an answer. Wait for the payload that carries the slots.
+  // `ensureSubtreeFor` is idempotent and hands back the in-flight fetch, so this is
+  // free once the view has settled.
+  if (typeof ensureSubtreeFor === 'function') {
+    try {
+      await ensureSubtreeFor(selectedFnId || fnEntity?.id);
+    } catch (_) { /* fall through — the empty-args note below is then the truth */ }
+  }
   const frees = freeArgsOf(fnEntity);
   if (frees.length === 0) {
     const note = document.createElement('div');

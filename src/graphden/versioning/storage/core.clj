@@ -567,10 +567,40 @@
 
   (query-ref-many-owners
     [_ entity-name field-name target-id]
-    ;; Junction tables are NOT versioned (the model versions :parent-ids
-    ;; only via fn re-creation, not a separate junction-version table).
-    ;; Pass straight through to the base storage.
-    (sp/query-ref-many-owners base-storage entity-name field-name target-id))
+    ;; Junction tables are NOT versioned (the model versions :parent-ids only via
+    ;; fn re-creation, not a separate junction-version table), so the base query
+    ;; has to answer from the junction rows — and those name every owner that
+    ;; EVER pointed here, including owners this branch has since deleted.
+    ;;
+    ;; Deletion is a TOMBSTONE, not a row removal. Passing the base answer
+    ;; through therefore reported dead children as live dependents, and the
+    ;; delete guard built on this ("Graph is a parent of N other graph(s) —
+    ;; remove the dependents first") refused forever:
+    ;;
+    ;;     DELETE child  -> 200
+    ;;     DELETE parent -> 409   "is a parent of 1 other graph"
+    ;;
+    ;; A fn that ever had a child could not be deleted again, by anyone — the
+    ;; user in the editor, or a test cleaning up after itself. The e2e suite hit
+    ;; it every run: the leaked parents stayed in the graph and the NEXT test
+    ;; file failed on them, which is where the "flaky e2e" investigations all
+    ;; went, and why they never found anything.
+    ;;
+    ;; The junction is the right place to ask WHO pointed here. It is not the
+    ;; place to ask WHO STILL EXISTS. Resolve the owners against this branch and
+    ;; keep the living.
+    (let [owner-ids (sp/query-ref-many-owners base-storage entity-name
+                                              field-name target-id)]
+      (if (or (empty? owner-ids) (not (res/versioned-entity? entity-name)))
+        owner-ids
+        (let [identity-records (vals (sp/read-entities base-storage entity-name
+                                                       (vec owner-ids)))
+              alive (into #{}
+                          (map :id)
+                          (vals (res/resolve-entities-batch
+                                  base-storage entity-name
+                                  identity-records branch-id)))]
+          (filterv alive owner-ids)))))
 
 
   sp/GraphConstraints

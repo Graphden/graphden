@@ -1068,3 +1068,84 @@
             (is (empty? conflicts)
                 "feature's own post-fork edit must not conflict with unchanged main"))))
       (finally (sp/close base)))))
+
+
+;; ============================================================================
+;; query-ref-many-owners — the reverse index must not resurrect the dead
+;; ============================================================================
+
+(deftest ref-many-owners-excludes-deleted-owners-test
+  ;; A deletion here is a TOMBSTONE, not a row removal, and the junction table
+  ;; that answers "who points at me" is not versioned. `query-ref-many-owners`
+  ;; used to pass the base storage's answer straight through, so a child this
+  ;; branch had already deleted still counted as an owner.
+  ;;
+  ;; Everything built on that reverse index inherited the lie. The delete guard
+  ;; ("Graph is a parent of N other graph(s) — remove the dependents first")
+  ;; refused forever:
+  ;;
+  ;;     DELETE child  -> 200
+  ;;     DELETE parent -> 409  "is a parent of 1 other graph"
+  ;;
+  ;; A fn that ever had a child could not be deleted again — not by a user in
+  ;; the editor, and not by an e2e test cleaning up after itself. The leaked
+  ;; parents piled up in the graph and the NEXT test file tripped over them.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [parent (sp/create-entity v :fn {:name "rmo-parent" :parent-ids []
+                                            :description "h"})
+            child  (sp/create-entity v :fn {:name "rmo-child"
+                                            :parent-ids [(:id parent)]
+                                            :description "h"})]
+
+        (testing "a LIVE child is reported as an owner — the guard must still bite"
+          (is (= [(:id child)]
+                 (vec (sp/query-ref-many-owners v :fn :parent-ids (:id parent))))
+              "the reverse index finds the living child"))
+
+        ;; Bind the var the user-facing CRUD delete binds. Default is FALSE —
+        ;; a HARD delete of this branch's version rows, the declarative-sync
+        ;; path. The bug lived on the tombstone path, which is what a user in
+        ;; the editor and an e2e test cleaning up after itself both take.
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity v :fn (:id child)))
+
+        (testing "a DELETED child is no longer an owner"
+          (is (empty? (sp/query-ref-many-owners v :fn :parent-ids (:id parent)))
+              "the tombstoned child must not count as a dependent — this is what
+               made a once-parented fn undeletable forever"))
+
+        (testing "the parent itself is now deletable"
+          (binding [vs/*tombstone-delete?* true]
+            (sp/delete-entity v :fn (:id parent)))
+          (is (empty? (sp/query-ref-many-owners v :fn :parent-ids (:id parent)))
+              "with no live dependents left, the parent deletes cleanly")))
+      (finally (sp/close base)))))
+
+
+(deftest ref-many-owners-is-branch-scoped-test
+  ;; The living/dead question is answered per BRANCH: a child deleted on a
+  ;; feature branch is still alive on main, and main's guard must still see it.
+  (let [base (base-storage)
+        v    (vs/wrap-with-versioning base)]
+    (try
+      (let [parent  (sp/create-entity v :fn {:name "rmo-br-parent" :parent-ids []
+                                             :description "h"})
+            child   (sp/create-entity v :fn {:name "rmo-br-child"
+                                             :parent-ids [(:id parent)]
+                                             :description "h"})
+            feature (vs/create-branch! v "rmo-feature")
+            vf      (vs/switch-branch v (:id feature))]
+
+        (binding [vs/*tombstone-delete?* true]
+          (sp/delete-entity vf :fn (:id child)))
+
+        (testing "on the branch that deleted it, the child is gone"
+          (is (empty? (sp/query-ref-many-owners vf :fn :parent-ids (:id parent)))))
+
+        (testing "on main it is still alive, and still an owner"
+          (is (= [(:id child)]
+                 (vec (sp/query-ref-many-owners v :fn :parent-ids (:id parent))))
+              "a delete on a feature branch must not make main's guard blind")))
+      (finally (sp/close base)))))

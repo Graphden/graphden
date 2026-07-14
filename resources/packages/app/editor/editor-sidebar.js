@@ -25,9 +25,35 @@ let searchFilter = '';
 // the document — processing a detached node marks it processed but never fires
 // load. So the section builders return an unprocessed node and we process here,
 // after appendChild. `section` may be null (builder gated it out) → no-op.
-function mountAdminSection(list, section) {
-  if (!section) return;
+// Built once, re-attached thereafter.
+//
+// renderSidebar wipes the list (`list.innerHTML = ''`) and rebuilt these
+// sections from scratch on EVERY render. Each rebuild threw away a panel that
+// had already loaded, put "Loading…" back, and made htmx re-fetch the partial —
+// three times on a cold page load, measured. Besides the wasted round-trips it
+// left a window where the panel showed "Loading…" although it had loaded
+// moments earlier, which is exactly the window edit-packages-panel kept landing
+// in. The test was right and the sidebar was wrong.
+//
+// So build each section once and re-attach the SAME node afterwards. htmx's
+// `hx-trigger="load"` fires from `process()`, which we then call only on the
+// first mount — a re-attached node keeps its loaded content and issues no
+// request. The cache lives as long as the page: login, logout and branch
+// switches all reload (editor-auth / switchToBranch), which is what clears it.
+const _adminSections = new Map();
+
+function mountAdminSection(list, key, build) {
+  let section = _adminSections.get(key);
+  if (section) {
+    list.appendChild(section);   // already loaded — no rebuild, no refetch
+    return;
+  }
+  section = build();
+  if (!section) return;          // not applicable (not an admin, etc.)
+  _adminSections.set(key, section);
   list.appendChild(section);
+  // Only now — process() is what fires hx-trigger="load", and it must fire on a
+  // CONNECTED node, so this has to come after appendChild.
   if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(section);
 }
 
@@ -511,13 +537,13 @@ function updateEntityList(data) {
   // Admin sections (Grants / Users / Packages) — unchanged; hidden while
   // a text filter narrows the view. Each returns null unless applicable.
   if (!searchFilter && typeof buildGrantsAdminSection === 'function') {
-    mountAdminSection(list, buildGrantsAdminSection());
+    mountAdminSection(list, 'grants', buildGrantsAdminSection);
   }
   if (!searchFilter && typeof buildUsersAdminSection === 'function') {
-    mountAdminSection(list, buildUsersAdminSection());
+    mountAdminSection(list, 'users', buildUsersAdminSection);
   }
   if (!searchFilter && typeof buildPackagesSection === 'function') {
-    mountAdminSection(list, buildPackagesSection());
+    mountAdminSection(list, 'packages', buildPackagesSection);
   }
 
   // Top-level namespaces (sorted) — skip any with nothing visible under

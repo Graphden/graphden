@@ -282,15 +282,47 @@ body.sidebar-collapsed .sidebar-expand-floating {
 #search-bar { display: flex; padding: 6px 8px;
   border-bottom: 1px solid var(--light-border); gap: 4px;
   flex-wrap: wrap; }
-.filter-toggle-label {
+/* Entity-kind visibility toggles (fn / types / secrets / services) — each
+   an eye that dims + gets a slash when its kind is hidden. Button state is
+   synced from localStorage by syncKindFilterBar (aria-pressed). */
+#kind-filters {
   flex: 1 1 100%;
-  display: flex; align-items: center;
-  font-size: 11px; color: var(--muted-fg);
-  padding: 2px 0;
-  cursor: pointer;
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 2px 8px; padding: 2px 0;
 }
-.filter-toggle-label input { margin-right: 4px; }
-.filter-toggle-label:hover { color: var(--fg); }
+.kind-toggle {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: transparent; border: 0; border-radius: 3px;
+  padding: 1px 3px; font: inherit; font-size: 11px;
+  color: var(--fg); cursor: pointer;
+}
+.kind-toggle:hover { background: var(--hover-bg); }
+.kind-eye {
+  position: relative; display: inline-flex;
+  width: 14px; height: 14px; color: var(--fg);
+}
+.kind-eye svg { width: 14px; height: 14px; display: block; }
+.kind-label { user-select: none; }
+/* Hidden kind: dim the whole toggle + strike the eye with a slash. */
+.kind-toggle[aria-pressed="false"] { color: var(--muted-fg); }
+.kind-toggle[aria-pressed="false"] .kind-eye { color: var(--muted-fg); }
+.kind-toggle[aria-pressed="false"] .kind-eye::after {
+  content: ""; position: absolute; left: -1px; top: 6px;
+  width: 16px; height: 1.5px; background: currentColor;
+  transform: rotate(-45deg); transform-origin: center;
+}
+/* "+ New secret" — trailing button in the filter bar. Auth-gated: the
+   `hidden` attr (set by syncKindFilterBar) must beat the flex display. */
+.kind-add {
+  margin-left: auto; flex-shrink: 0;
+  width: 20px; height: 18px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--muted-fg);
+  border: 1px solid var(--input-border); border-radius: 3px;
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.kind-add:hover { background: var(--hover-bg); color: var(--fg); }
+.kind-add[hidden] { display: none; }
 #search-input {
   flex: 1; min-width: 0; padding: 4px 8px;
   border: 1px solid var(--input-border); border-radius: 3px;
@@ -316,21 +348,9 @@ body.sidebar-collapsed .sidebar-expand-floating {
    a left accent. No-op without the addon — the class is only added when the
    X-Graphden-Workspace header lists the namespace. */
 .ns-header.ns-in-workspace { border-left: 2px solid var(--accent); padding-left: 6px; }
-/* Section label inside a namespace: separates "Types" from
-   "Functions" when both are present. Hidden when a namespace has
-   only one kind so single-purpose folders don't grow extra chrome. */
-.ns-section-label {
-  padding: 2px 8px 1px 24px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-fg);
-  user-select: none;
-}
 .ns-arrow { width: 16px; font-size: 10px; color: var(--muted-fg); flex-shrink: 0; text-align: center; }
 .ns-label { font-size: 13px; font-weight: 600; color: var(--fg); }
-/* Item-count chip on the pseudo `_types` group header. Italic +
+/* Item-count chip on the pseudo "(root)" group header. Italic +
    muted so it reads as metadata not a name. */
 .ns-count {
   margin-left: 6px;
@@ -3743,13 +3763,6 @@ body.editor-busy .fn-action-toolbar { cursor: progress; }
 /* =========================================================================
    SECRETS — sidebar section + 🔒 indicator + create / rotate popover.
    ========================================================================= */
-
-.sidebar-secrets { display: block; }
-/* Server-rendered partial always emits the full section (header + children);
-   JS toggles .collapsed on the wrapper, CSS hides the children group + rotates
-   the arrow glyph. Matches the namespace-tree collapse behaviour visually. */
-.sidebar-secrets.collapsed .ns-children { display: none; }
-.sidebar-secrets.collapsed .ns-arrow { transform: rotate(-90deg); }
 
 #entity-list .entity-secret { display: flex; align-items: center; gap: 4px; }
 #entity-list .entity-secret .name { flex: 0 0 auto; }

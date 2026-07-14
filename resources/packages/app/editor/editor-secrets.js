@@ -64,7 +64,6 @@ function isSecretFn(fn) {
 
 let _secretsList = [];
 let _secretsLoaded = false;
-const secretsExpandedKey = '__secrets__';
 
 async function loadSecrets() {
   if (!isAuthenticated()) {
@@ -99,149 +98,58 @@ async function loadSecrets() {
 
 
 // ============================================================================
-// SIDEBAR SECTION
+// TREE ROW INTEGRATION
 // ============================================================================
-
-// Build the "Secrets" sidebar section — a collapsible block above the
-// namespace tree. Rows are rendered SYNCHRONOUSLY from the `_secretsList`
-// cache (populated by `loadSecrets`), so a row appears the instant the
-// data is in hand — no second fetch in the render path. This list is
+// Secrets no longer get a separate sidebar section — they render inside
+// the namespace tree (lock-badged by `isSecretFn`, filtered by the
+// "secrets" eye toggle). These helpers give a tree secret-row its vault
+// path + Rotate / Delete actions — the CRUD that used to live in the
+// section. "+ New secret" is the `#secret-add-btn` in the filter bar,
+// wired straight to `openCreateSecretForm`.
+//
+// `_secretsList` (from `loadSecrets`, primed by the sidebar) is
 // query-backed + latency-sensitive (the version-resolution scan behind
-// `GET /api/secrets` is O(fn-slots)); a server-rendered partial would
-// need a fetch on the render critical path, which is the graph-ui §6.1
-// exception. The create / rotate FORM popovers ARE graph partials
-// (static markup) — see `openCreateSecretForm` / `openRotateSecretForm`.
-function buildSecretsSection() {
-  const wrap = document.createElement('div');
-  wrap.className = 'sidebar-secrets';
+// `GET /api/secrets` is O(fn-slots)); the create / rotate FORM popovers
+// ARE graph partials (static markup) — see `openCreateSecretForm` /
+// `openRotateSecretForm`.
 
-  const isOpen = expandedNamespaces.has(secretsExpandedKey);
-
-  const header = document.createElement('div');
-  header.className = 'ns-header ns-header-pseudo';
-  const arrow = document.createElement('span');
-  arrow.className = 'ns-arrow' + (isOpen ? '' : ' collapsed');
-  arrow.textContent = isOpen ? '▼' : '▶';
-  header.appendChild(arrow);
-  const label = document.createElement('span');
-  label.className = 'ns-label';
-  label.textContent = 'Secrets';
-  header.appendChild(label);
-  const count = document.createElement('span');
-  count.className = 'ns-count';
-  count.textContent = _secretsList.length;
-  header.appendChild(count);
-
-  if (isAuthenticated()) {
-    const actions = document.createElement('span');
-    actions.className = 'ns-row-actions';
-    const addBtn = document.createElement('button');
-    addBtn.type = 'button';
-    addBtn.className = 'sidebar-action sidebar-action-add';
-    addBtn.textContent = '+';
-    addBtn.title = 'New secret';
-    addBtn.onclick = (e) => {
-      e.stopPropagation();
-      openCreateSecretForm(addBtn);
-    };
-    actions.appendChild(addBtn);
-    header.appendChild(actions);
-  }
-
-  header.onclick = (e) => {
-    e.stopPropagation();
-    if (isOpen) expandedNamespaces.delete(secretsExpandedKey);
-    else expandedNamespaces.add(secretsExpandedKey);
-    updateEntityList(graphData);
-  };
-  wrap.appendChild(header);
-
-  if (!isOpen) return wrap;
-
-  const childGroup = document.createElement('div');
-  childGroup.className = 'ns-children';
-
-  if (!_secretsLoaded) {
-    const loading = document.createElement('div');
-    loading.className = 'loading';
-    loading.textContent = 'Loading…';
-    childGroup.appendChild(loading);
-    // Kick off the load — re-render once it lands.
-    loadSecrets().then(() => updateEntityList(graphData));
-  } else if (_secretsList.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'loading';
-    empty.textContent = isAuthenticated()
-      ? 'No secrets — click + to add one'
-      : 'Sign in to manage secrets';
-    childGroup.appendChild(empty);
-  } else {
-    const sorted = [..._secretsList].sort((a, b) =>
-      (a.name || '').localeCompare(b.name || ''));
-    for (const s of sorted) childGroup.appendChild(buildSecretItem(s));
-  }
-
-  wrap.appendChild(childGroup);
-  return wrap;
+// Map a secret fn-id to its /api/secrets record (name + path). Falls back
+// to a path-less stub when the list isn't primed yet.
+function secretRecordForFn(fnId) {
+  const rec = _secretsList.find((s) => s.id === fnId);
+  if (rec) return rec;
+  const fn = (typeof lookups !== 'undefined') ? lookups?.fnMap?.get(fnId) : null;
+  return { id: fnId, name: fn?.name || '', path: '' };
 }
 
-function buildSecretItem(secret) {
-  const item = document.createElement('div');
-  item.className = 'entity-item entity-secret';
-  item.dataset.fnId = secret.id;
+// Append Rotate (↻) + Delete (×) buttons for a secret row into an
+// existing `.ns-row-actions` group. Auth-gated — anonymous visitors get
+// no mutating affordances.
+function buildSecretRowActions(actionsEl, fn) {
+  if (!isAuthenticated()) return;
+  const secret = secretRecordForFn(fn.id);
 
-  const lock = document.createElement('span');
-  lock.className = 'secret-lock-icon';
-  lock.textContent = '🔒';
-  item.appendChild(lock);
-
-  const nameSpan = document.createElement('span');
-  nameSpan.className = 'name';
-  nameSpan.textContent = secret.name || '(unnamed)';
-  item.appendChild(nameSpan);
-
-  const pathSpan = document.createElement('span');
-  pathSpan.className = 'secret-path';
-  pathSpan.textContent = secret.path || '';
-  item.appendChild(pathSpan);
-
-  if (isAuthenticated()) {
-    const actions = document.createElement('span');
-    actions.className = 'ns-row-actions';
-
-    const rotateBtn = document.createElement('button');
-    rotateBtn.type = 'button';
-    rotateBtn.className = 'sidebar-action';
-    rotateBtn.textContent = '↻';
-    rotateBtn.title = 'Rotate value';
-    rotateBtn.onclick = (e) => {
-      e.stopPropagation();
-      openRotateSecretForm(rotateBtn, secret);
-    };
-    actions.appendChild(rotateBtn);
-
-    const delBtn = document.createElement('button');
-    delBtn.type = 'button';
-    delBtn.className = 'sidebar-action sidebar-action-delete';
-    delBtn.textContent = '×';
-    delBtn.title = 'Delete secret';
-    delBtn.onclick = (e) => {
-      e.stopPropagation();
-      deleteSecretConfirm(secret);
-    };
-    actions.appendChild(delBtn);
-
-    item.appendChild(actions);
-  }
-
-  // Click on row → navigate to the secret's fn-def in the graph (the
-  // same fn-def appears in the namespace tree too, lock-badged by
-  // `isSecretFn`).
-  item.onclick = () => {
-    if (typeof selectFn === 'function') selectFn(secret.id);
+  const rotateBtn = document.createElement('button');
+  rotateBtn.type = 'button';
+  rotateBtn.className = 'sidebar-action';
+  rotateBtn.textContent = '↻';
+  rotateBtn.title = 'Rotate value';
+  rotateBtn.onclick = (e) => {
+    e.stopPropagation();
+    openRotateSecretForm(rotateBtn, secret);
   };
+  actionsEl.appendChild(rotateBtn);
 
-  return item;
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'sidebar-action sidebar-action-delete';
+  delBtn.textContent = '×';
+  delBtn.title = 'Delete secret';
+  delBtn.onclick = (e) => {
+    e.stopPropagation();
+    deleteSecretConfirm(secret);
+  };
+  actionsEl.appendChild(delBtn);
 }
 
 

@@ -4,8 +4,8 @@
 // wired, so actual `POST /api/secrets` returns
 // `{:type :vault/not-configured}`. The test verifies:
 //
-//   • Sidebar Secrets section renders at the top of the namespace
-//     tree with a header `+` button (auth-gated).
+//   • The "+ New secret" button (#secret-add-btn) renders in the
+//     filter bar (auth-gated).
 //   • Clicking + opens the `.secrets-popover` create form with
 //     name / namespace-picker / path / value / description / Cancel
 //     / Create buttons.
@@ -55,34 +55,30 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
 
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')+'/');
-    await page.waitForSelector('.sidebar-secrets', {timeout: 15000});
 
     // ===================================================================
-    // Phase A: section renders with `+` button (we're authed via
-    // newContext's localStorage seed).
+    // Phase A: secrets no longer get their own sidebar section — the
+    // "+ New secret" affordance is #secret-add-btn in the filter bar,
+    // auth-gated (visible because newContext seeds an admin token).
     // ===================================================================
-    const sectionState = await page.evaluate(() => {
-      const sec = document.querySelector('.sidebar-secrets');
-      const header = sec?.querySelector('.ns-header');
-      const label = header?.querySelector('.ns-label');
-      const addBtn = header?.querySelector('.sidebar-action-add');
-      return {
-        present: !!sec,
-        labelText: label?.textContent?.trim(),
-        hasAddBtn: !!addBtn,
-      };
+    await page.waitForFunction(() => {
+      const b = document.getElementById('secret-add-btn');
+      return b && !b.hidden;
+    }, null, {timeout: 15000});
+    const addState = await page.evaluate(() => {
+      const b = document.getElementById('secret-add-btn');
+      return {present: !!b, visible: !!b && !b.hidden, title: b?.title};
     });
-    assert(sectionState.present, '.sidebar-secrets section rendered');
-    assert(sectionState.labelText === 'Secrets',
-           'header label is "Secrets": ' + sectionState.labelText);
-    assert(sectionState.hasAddBtn,
-           '+ add button visible (admin authed)');
+    assert(addState.present && addState.visible,
+           '#secret-add-btn visible in the filter bar (admin authed)');
+    assert(addState.title === 'New secret',
+           'add button title is "New secret": ' + addState.title);
 
     // ===================================================================
     // Phase B: click + → create form popover.
     // ===================================================================
     await page.evaluate(() => {
-      document.querySelector('.sidebar-secrets .sidebar-action-add')?.click();
+      document.getElementById('secret-add-btn')?.click();
     });
     await page.waitForSelector('.secrets-popover', {timeout: 5000});
     const formState = await page.evaluate(() => {
@@ -158,7 +154,7 @@ const EXPECTED_PATH = ('auto/fill/probe/name' + RUN_ID).replace(/-/g, '/');
     const popoverClosed = await page.evaluate(
       () => !document.querySelector('.secrets-popover'));
     if (popoverClosed) {
-      await page.click('.sidebar-secrets .sidebar-action-add');
+      await page.click('#secret-add-btn');
       await page.waitForSelector('.secrets-popover', {timeout: 5000});
       await page.fill('.secrets-popover input[name="name"]', PROBE_NAME);
       await page.fill('.secrets-popover input[name="value"]', 'secret-value');

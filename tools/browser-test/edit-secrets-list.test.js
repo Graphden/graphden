@@ -12,7 +12,7 @@
 //   • Seed a secret via POST /api/secrets (skips gracefully if
 //     Vault isn't reachable — see edit-secrets-rotate.test.js for
 //     the same fallback pattern).
-//   • Navigate to /, expand the Secrets sidebar section.
+//   • Navigate to /, expand namespaces, find the secret in the tree.
 //   • Assert the seeded secret appears as an `.entity-secret` row
 //     with the right name + path within 5 s.
 //   • Assert one `GET /api/secrets` network request completed under
@@ -114,14 +114,23 @@ async function cleanup(page) {
            + fetchMs + 'ms (regression budget — historical hang was 30 s+)');
 
     // ===================================================================
-    // Expand the Secrets section + locate the seeded row.
+    // Refresh the graph, then expand every namespace + the "(root)" node
+    // so the seeded secret is visible wherever it was placed.
+    //
+    // The graph refresh is load-bearing. A secret renders as a row of the
+    // namespace tree, and that tree is built from `graphData` — so the
+    // seeded fn-def has to be IN `graphData` to show up. We seeded it
+    // through the API, behind the editor's back, and the navigation above
+    // only changes the hash (same document, no reload), so the page is
+    // still holding the graph it fetched before the seed. `loadGraphData`
+    // is exactly what the New-secret form calls after a successful POST.
     // ===================================================================
-    await page.evaluate(() => {
-      const header = document.querySelector('.sidebar-secrets .ns-header');
-      const arrow = header?.querySelector('.ns-arrow');
-      if (arrow && arrow.classList.contains('collapsed')) {
-        header.click();
+    await page.evaluate(async () => {
+      if (typeof loadGraphData === 'function') await loadGraphData();
+      if (typeof lookups !== 'undefined' && lookups?.nsPathMap) {
+        for (const p of lookups.nsPathMap.values()) expandedNamespaces.add(p);
       }
+      expandedNamespaces.add('__root__');
       if (typeof updateEntityList === 'function'
           && typeof graphData !== 'undefined') {
         updateEntityList(graphData);

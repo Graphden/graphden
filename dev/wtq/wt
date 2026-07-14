@@ -891,12 +891,17 @@ cmd_merge() {
   printf '%s\t%s\t%s\n' "$verdict" "$rc" "$branch" > "$RESULT_DIR/$nm"   # agents/`wt status` read this
 
   echo
+  # Exit with the gate's own status, never 0 on a non-landing. A CONFLICT or a
+  # PRECOND (dirty tree, stale governance) used to return 0 to the caller, so
+  # anything scripting the gate — an agent that launches it in the background and
+  # reads its exit code — was told "landed" when develop had not moved an inch.
   case "$rc" in
     0) ok   "✓ landed. You can now:  bb wt drop $nm" ;;
     2) warn "↩ merge conflict — resolve, commit, re-run 'bb wt merge'." ;;
-    3) warn "↩ precondition failed (dirty tree) — see log above." ;;
-    *) die  "✗ gate failed — fix on this branch, then re-run 'bb wt merge'. Log: bb wt log $nm" ;;
+    3) warn "↩ precondition failed (dirty tree / unacknowledged rule change) — see log above." ;;
+    *) warn "✗ gate failed — fix on this branch, then re-run 'bb wt merge'. Log: bb wt log $nm" ;;
   esac
+  return "$rc"
 }
 
 # =====================================================================

@@ -64,9 +64,30 @@
                  (entities/affected-fn-ids storage :binding-list-item
                                            {:binding-id (:id b)})))))
 
-      (testing ":slot / :ns are cross-cutting → nil (caller does a full clear)"
-        (is (nil? (entities/affected-fn-ids storage :slot {:id (random-uuid)})))
-        (is (nil? (entities/affected-fn-ids storage :ns {:id (random-uuid)}))))
+      ;; These two used to answer `nil` — "I don't know" — and `nil` makes the
+      ;; caller drop the whole compiled registry, so the next request rebuilt
+      ;; every fn in the graph. Measured at 4137 fns: one namespace create cost
+      ;; the next request 49.6 s, one slot create 49.8 s.
+      ;;
+      ;; They are not unknown. They are EMPTY: neither write can reach a compiled
+      ;; closure. `nil` still means unknown, and still full-clears, for the
+      ;; callers that genuinely are.
+      (testing ":ns reaches no compiled closure → #{} (nothing to invalidate)"
+        (is (= #{} (entities/affected-fn-ids storage :ns {:id (random-uuid)}))))
+
+      (testing ":slot seeds the fns that already EXPOSE it — none, on a create"
+        (let [slot (setup/create-slot! storage "afi-orphan" :int)]
+          (is (= #{} (entities/affected-fn-ids storage :slot {:id (:id slot)}))
+              "nothing points at a slot until an fn-slot does"))
+
+        (testing "and the owners, once an fn-slot does point at it"
+          (let [f (setup/create-base-fn! storage "afi-slot-owner")
+                slot (setup/create-slot! storage "afi-owned" :int)]
+            (sp/create-entity storage :fn-slot
+                              {:fn-id (:id f) :slot-id (:id slot) :position 0})
+            (is (= #{(:id f)}
+                   (entities/affected-fn-ids storage :slot {:id (:id slot)}))
+                "an in-place slot edit is seeded, not silently skipped"))))
       (finally (sp/close storage)))))
 
 
@@ -107,11 +128,26 @@
             (is (= [{:kind :fn :op :invalidate :id (str (:id f))}] @events)
                 "owner fn-id derived from the pre-read binding")))
 
-        (testing "a cross-cutting :slot write falls through to the empty-id full-clear"
+        ;; A pod receives its OWN notify, and an empty-id event means "full clear"
+        ;; to the listener — so emitting one here undid the local delta and
+        ;; rebuilt the whole graph on the next request. This was what kept the
+        ;; 50-second slot write alive after the local path had already been fixed.
+        (testing "a :slot write nothing exposes emits NOTHING — it changed no closure"
           (clear!)
-          (entities/notify-after-write! emit-ctx storage :slot :delete {:id (random-uuid)})
-          (is (= [{:kind :fn :op :invalidate :id ""}] @events)
-              "nil seeds ⇒ full-clear signal"))
+          (let [slot (setup/create-slot! storage "naw-orphan" :int)]
+            (entities/notify-after-write! emit-ctx storage :slot :write {:id (:id slot)})
+            (is (= [] @events)
+                "an empty-id event would tell every pod to drop its registry")))
+
+        (testing "a :slot write DOES seed the fns that expose it"
+          (clear!)
+          (let [f (setup/create-base-fn! storage "naw-slot-owner")
+                slot (setup/create-slot! storage "naw-owned" :int)]
+            (sp/create-entity storage :fn-slot
+                              {:fn-id (:id f) :slot-id (:id slot) :position 0})
+            (clear!)
+            (entities/notify-after-write! emit-ctx storage :slot :write {:id (:id slot)})
+            (is (= [{:kind :fn :op :invalidate :id (str (:id f))}] @events))))
 
         (testing ":service writes emit a distinct :service event, not a fn-invalidate"
           (clear!)

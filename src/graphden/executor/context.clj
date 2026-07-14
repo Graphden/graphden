@@ -120,11 +120,22 @@
      fn-ids that just mutated; the `:compile-deps` reverse-index
      determines the blast radius (the changed fns + everything that
      transitively depends on them) and ONLY those entries get
-     recompiled. The rest of the registry stays warm. `:graph-cache`
-     is still cleared because callers expect a fresh read on the
-     next access. Falls back to a full rebuild when the reverse-
-     index isn't yet populated (cold start) or when `changed-fn-ids`
-     is empty.
+     recompiled. The rest of the registry stays warm. Falls back to a
+     full rebuild when the reverse-index isn't yet populated (cold
+     start).
+
+     `changed-fn-ids` distinguishes three answers, and the last two are
+     NOT the same thing:
+
+     - a non-empty set — delta-recompile these and their dependents;
+     - `#{}` — the caller knows the write reached no compiled closure
+       (a `:slot` nothing exposes yet, a `:ns` no closure can reach).
+       Do nothing at all;
+     - `nil` — unknown shape. Full clear.
+
+     `#{}` used to fall into the full clear, and the full clear drops
+     the compiled registry — so the next request rebuilt the whole
+     graph. At 4137 fns that cost 49.8 s, against 14 ms either side.
 
    Both paths re-register type-aliases from storage so newly-created
    types are resolvable to the type-checker without a server
@@ -170,7 +181,40 @@
                   (do
                     (reset! (:compiled-registry ctx) nil)
                     (cr/refresh-type-registries-from-storage! ctx))))]
-     (cr/call-with-invalidation-lock ctx body))))
+     ;; An EMPTY (but non-nil) seed set is an ANSWER, not a shrug: the caller
+     ;; knows this write cannot have changed any compiled closure — a `:slot`
+     ;; nothing exposes yet, a `:ns` no closure can reach (see
+     ;; `crud.entities/affected-fn-ids`). `nil` still means "I don't know", and
+     ;; still full-clears.
+     ;;
+     ;; The distinction is worth its own branch because the full clear drops the
+     ;; compiled registry, and then the NEXT request rebuilds the entire graph.
+     ;; Measured at 4137 fns: create one slot, and the next request took 49.8 s;
+     ;; one namespace, 49.6 s. Reads either side of it, 14 ms. Both of those
+     ;; writes used to land here, and every type-editing test creates slots.
+     (when-not (and (some? changed-fn-ids) (empty? changed-fn-ids))
+       (cr/call-with-invalidation-lock ctx body)))))
+
+
+(defn refresh-slot-in-graph-cache!
+  "Keep the graph cache's `:slots` honest across a `:slot` write, without touching
+   the compiled registry.
+
+   A slot write cannot change any compiled closure — an fn reaches its slots
+   through `fn-slot` rows, which are written separately and seed the delta path
+   themselves. But the cache DOES hold slot rows, and a reader of the whole graph
+   would otherwise not see a slot until something attached it to an fn. So splice
+   the one row: re-read it, and either replace it or (if it is gone) drop it.
+
+   O(slots) on a vector, against a full clear that cost the next request a rebuild
+   of every fn in the graph."
+  [ctx slot-id]
+  (when-let [c (:graph-cache ctx)]
+    (when-let [cached @c]
+      (when-let [storage (:storage ctx)]
+        (let [fresh (sp/read-entity storage :slot slot-id)
+              others (filterv #(not= slot-id (:id %)) (:slots cached))]
+          (reset! c (assoc cached :slots (cond-> others fresh (conj fresh)))))))))
 
 
 (defn cached-graph

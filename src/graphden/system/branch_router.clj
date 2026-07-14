@@ -413,9 +413,16 @@
               :when (some #(= written-branch-id %)
                           (vres/collect-branch-chain base-storage branch-id))]
         (try
-          (if (seq seeds)
-            (ctx/invalidate-graph-cache! branch-ctx seeds)
-            (ctx/invalidate-graph-cache! branch-ctx))
+          ;; Same three-way answer as `crud.entities/affected-fn-ids`: a non-empty
+          ;; set delta-recompiles; `nil` means "unknown shape" and full-clears;
+          ;; `#{}` means the write reached no compiled closure at all, so a sibling
+          ;; has nothing to recompile either. `#{}` used to fall into the full
+          ;; clear here, costing every cached sibling branch a whole-graph rebuild
+          ;; on its next request.
+          (cond
+            (seq seeds) (ctx/invalidate-graph-cache! branch-ctx seeds)
+            (nil? seeds) (ctx/invalidate-graph-cache! branch-ctx)
+            :else nil)
           (catch Exception e
             ;; Best-effort: a stale sibling ctx is worse than a slow one,
             ;; but a throw here would fail the user's CRUD write. Drop the

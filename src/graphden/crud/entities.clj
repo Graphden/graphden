@@ -44,9 +44,23 @@
 ;; reverse-deps walk in `delta-recompile!` — no need to expand them here.
 
 (defn affected-fn-ids
-  "Returns the seed set of fn-ids whose closure may be invalidated by a
-   write to `entity-type` carrying `entity-data`. nil ⇒ caller must
-   invoke 1-arity `invalidate-graph-cache!` (full clear)."
+  "Returns the seed set of fn-ids whose compiled closure may be invalidated by a
+   write to `entity-type` carrying `entity-data`.
+
+   Three answers, and the difference between the last two is the whole point:
+
+   - a non-empty set ⇒ delta-recompile exactly these and their dependents;
+   - `#{}` ⇒ the write cannot have changed ANY compiled closure. Leave the
+     registry alone;
+   - `nil` ⇒ *unknown* shape. The caller must full-clear.
+
+   `:ns` and `:slot` used to answer `nil` — under a comment that said, of the
+   namespace, that it \"doesn't touch closures\". Both therefore dropped the
+   compiled registry, and the NEXT request rebuilt every fn in the graph.
+   Measured on the e2e graph (4137 fns): create one namespace, and the next
+   request took 49.6 s; create one slot, 49.8 s. Reads either side of it: 14 ms.
+   Every type-editing test in the suite creates slots, which is why three of them
+   cost 165 s, 115 s and 114 s while the median file costs 8 s."
   [storage entity-type entity-data]
   (case entity-type
     :fn
@@ -63,8 +77,22 @@
     (when-let [bid (:binding-id entity-data)]
       (some-> (sp/read-entity storage :binding bid) :fn-id hash-set))
 
-    ;; :slot is shared across many fns; :ns doesn't touch closures —
-    ;; both fall through to a full clear.
+    ;; A namespace is a label. No compiled closure reaches one, and the graph
+    ;; cache does not hold one either.
+    :ns #{}
+
+    ;; A slot is an immutable global identity, and an fn reaches its slots
+    ;; through `fn-slot` junction rows — which are written separately and carry
+    ;; their own `:fn-id`, so they take the delta path above. So the fns whose
+    ;; closure a slot write can touch are exactly the fns that already EXPOSE it:
+    ;; none, on a create (nothing points at it yet), and none on a delete (the
+    ;; guard refuses while an fn-slot still does). The query is here rather than
+    ;; an assumed `#{}` so that any future in-place slot edit is seeded correctly
+    ;; instead of silently skipped.
+    :slot
+    (when-let [id (:id entity-data)]
+      (into #{} (keep :fn-id) (sp/query-entities storage :fn-slot {:slot-id id})))
+
     nil))
 
 
@@ -100,6 +128,12 @@
     ;; the BASE storage handle; unwrap before invalidating.
     (let [base (or (:base-storage storage) storage)]
       (branch-local/invalidate! base)))
+  ;; The cache holds slot rows, and a `:slot` write now invalidates nothing
+  ;; (see `affected-fn-ids`) — so splice the single row rather than let a reader
+  ;; of the whole graph miss it.
+  (when (= entity-type :slot)
+    (when-let [id (:id entity-data)]
+      (exec-ctx/refresh-slot-in-graph-cache! ctx id)))
   (let [seeds (affected-fn-ids storage entity-type entity-data)]
     (if seeds
       (exec-ctx/invalidate-graph-cache! ctx seeds)
@@ -175,13 +209,24 @@
                     (cond-> {:kind :fn :op :invalidate :id id}
                       branch-id (assoc :branch-id branch-id)
                       org-id (assoc :org-id org-id)))]
-        (if (seq seeds)
-          (doseq [seed seeds]
-            (emit (event (str seed))))
-          ;; nil seeds from `affected-fn-ids` ≡ "full clear" —
-          ;; mirror the local fallback `(invalidate-graph-cache!
-          ;; ctx)` (no seed set).
-          (emit (event "")))))))
+        ;; The same three-way answer the local path takes, because a pod receives
+        ;; its OWN notify: an empty-id event means "full clear" to the listener,
+        ;; so emitting one for a write that changed no closure would undo the
+        ;; local delta and rebuild the whole graph on the next request — which is
+        ;; exactly what a `:slot` write did, from here, even after the local path
+        ;; was fixed.
+        ;;
+        ;; A bare slot that nothing exposes is invisible to every compiled
+        ;; closure, on this pod and on its siblings. The moment an fn DOES expose
+        ;; it, that `:fn-slot` write emits a seeded event, and the sibling's
+        ;; splice reads the slot row in with it.
+        (cond
+          (seq seeds) (doseq [seed seeds]
+                        (emit (event (str seed))))
+          ;; nil ≡ "unknown shape" — mirror the local `(invalidate-graph-cache!
+          ;; ctx)` full clear.
+          (nil? seeds) (emit (event ""))
+          :else nil)))))
 
 
 (defn html-error-response

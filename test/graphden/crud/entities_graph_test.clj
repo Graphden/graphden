@@ -630,3 +630,67 @@
           (is (not-any? #(= fn-name (:name %)) (:fns after-delete))
               "the deleted fn is gone from the cached graph — a splice that only
                ADDED would leave a tombstoned fn visible forever"))))))
+
+
+(deftest seedless-writes-do-not-drop-the-compiled-registry-test
+  ;; A write answers the question "which compiled closures can this have changed?"
+  ;; — and for a `:ns` or a `:slot` the honest answer is "none". Both used to
+  ;; answer `nil` instead, which the invalidator reads as "I don't know" and
+  ;; handles by dropping the WHOLE compiled registry. The next request then
+  ;; rebuilt every fn in the graph.
+  ;;
+  ;; Measured against the e2e graph (4137 fns) before the fix:
+  ;;
+  ;;   POST /api/entities/ns    390 ms  ->  next request  49.6 s
+  ;;   POST /api/entities/slot  361 ms  ->  next request  49.8 s
+  ;;   (a seeded :fn or :binding write   ->  next request    12 ms)
+  ;;
+  ;; Reads either side of it cost 14 ms. Every type-editing test in the e2e suite
+  ;; creates slots, which is why three of those files cost 165 s, 115 s and 114 s
+  ;; against a median of 8 s for the rest. A registry left cold here is not a slow
+  ;; test — it is a fifty-second stall for whoever asks next, in the editor as
+  ;; much as in CI.
+  (let [ctx (:ctx *graph*)
+        registry (:compiled-registry ctx)
+        warm-count (fn [] (count @registry))]
+
+    (testing ":ns — a namespace reaches no compiled closure"
+      (via-create (form-req "/api/entities/ns" (str "name=" (uniq "seedless-ns"))))
+      (let [n (warm-count)]
+        (is (some? @registry)
+            "creating a namespace must not drop the compiled registry")
+        (via-create (form-req "/api/entities/ns" (str "name=" (uniq "seedless-ns"))))
+        (is (some? @registry) "still warm after a second namespace")
+        (is (= n (warm-count))
+            "and no fn was recompiled — a namespace changes no closure")))
+
+    (testing ":slot — nothing exposes a slot until an fn-slot says so"
+      (let [storage (:storage *graph*)
+            int-id (:id (first (sp/query-entities storage :fn {:name "int"})))
+            slot-name (uniq "seedless-slot")
+            n (warm-count)]
+        (via-create (form-req "/api/entities/slot"
+                              (str "name=" slot-name "&type-fn-id=" int-id)))
+        (is (some? @registry)
+            "creating a slot must not drop the compiled registry")
+        (is (= n (warm-count))
+            "and no fn was recompiled — nothing exposes the slot yet")
+
+        (testing "and the cache still learns about the slot"
+          ;; The registry is untouched, but the graph cache DOES hold slot rows —
+          ;; a reader of the whole graph must not miss one just because nothing
+          ;; has attached it to an fn yet.
+          (let [g (types-api/cached-or-load-graph ctx)]
+            (is (some #(= slot-name (:name %)) (:slots g))
+                "the new slot is visible to the next cached read")))))
+
+    (testing ":fn — a seeded write still keeps the registry warm"
+      ;; The delta path recompiles the blast radius rather than dropping
+      ;; everything. What must NOT happen is the wholesale clear: the fns already
+      ;; compiled stay compiled, and the next request pays for the edit, not for
+      ;; the graph.
+      (let [n (warm-count)]
+        (via-create (form-req "/api/entities/fn" (str "name=" (uniq "seeded-fn"))))
+        (is (some? @registry) "the registry stays warm on the delta path too")
+        (is (>= (warm-count) n)
+            "and keeps every closure it had already compiled")))))

@@ -47,6 +47,27 @@ wait_for_server() {
   done
 }
 
+# --- instrumentation --------------------------------------------------------
+# This suite takes ~46 minutes for 55 files and nobody could say why, because
+# the runner reported pass/fail and nothing else. Worse, the retry below carries
+# a note that "suite-tail tests flake under JVM GC pressure when heap passes
+# ~85%" — a diagnosis nobody ever measured, only worked around with a retry.
+#
+# So measure both series, per file: wall time, and the executor's memory after
+# it. "Time is spread evenly" and "three files eat ten minutes" are different
+# problems. "Heap is flat" and "heap climbs to the cap by test 30" are different
+# problems. We were guessing between them.
+executor_mem() {
+  local id
+  id="$(docker ps --filter "ancestor=${GD_IMAGE:-graphden-executor:latest}" \
+                  --format '{{.ID}}' 2>/dev/null | head -1)"
+  [ -n "$id" ] || { printf '?'; return; }
+  docker stats --no-stream --format '{{.MemUsage}}' "$id" 2>/dev/null \
+    | awk '{print $1}' | head -1
+}
+TIMINGS=""          # "<seconds>\t<mem>\t<file>" per line, for the summary
+SUITE_START=$SECONDS
+
 WORST=0
 PASS=0
 FAIL=0
@@ -69,6 +90,7 @@ for f in $FILES; do
     continue
   fi
   echo "─── $f ───"
+  FILE_START=$SECONDS
   if ! wait_for_server; then
     WORST=1
     FAIL=$((FAIL+1))
@@ -123,6 +145,11 @@ for f in $FILES; do
       fi
     fi
   fi
+  FILE_SECS=$((SECONDS - FILE_START))
+  FILE_MEM="$(executor_mem)"
+  printf '  [%3ds  executor=%s]\n' "$FILE_SECS" "$FILE_MEM"
+  TIMINGS="$TIMINGS$FILE_SECS	$FILE_MEM	$f
+"
   echo
   if [ "$SWEEP_DELAY" != "0" ]; then sleep "$SWEEP_DELAY"; fi
 done
@@ -142,5 +169,25 @@ echo "edit suite: $PASS pass / $FAIL fail / $((PASS+FAIL)) total"
 if [ "$FAIL" != "0" ]; then
   echo "  failed:$FAILED_NAMES" >&2
 fi
+
+# The profile. Read it before optimising anything: the suite's 45 minutes were
+# a single number for its whole life, and every theory about where they went —
+# browser startup, page loads, GC pauses — was a guess.
+echo
+echo "── where the time went ──"
+printf '%s' "$TIMINGS" | sort -rn | head -12 \
+  | awk -F'\t' '{printf "  %4ds  %-10s %s\n", $1, $2, $3}'
+TOTAL_SECS=$((SECONDS - SUITE_START))
+FILE_COUNT=$((PASS + FAIL))
+[ "$FILE_COUNT" -gt 0 ] && echo "  ---" \
+  && printf '  %4ds  TOTAL (%d files, %ds median-ish avg)\n' \
+       "$TOTAL_SECS" "$FILE_COUNT" "$((TOTAL_SECS / FILE_COUNT))"
+
+# The executor's memory, first file vs last. The retry above blames "JVM GC
+# pressure when heap passes ~85%" for the suite-tail flakes. Nobody had checked.
+echo
+echo "── executor memory, first file -> last ──"
+printf '%s' "$TIMINGS" | awk -F'\t' 'NR==1{first=$2} {last=$2} END{
+  printf "  %s  ->  %s   (climbing = the tail-flake theory has legs)\n", first, last}'
 echo "============================================================"
 exit "$WORST"

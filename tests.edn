@@ -51,4 +51,14 @@
  ;; - shared-container: singleton PG container + per-NS logical-DB lifecycle
  :plugins [:kaocha.plugin/profiling
            :kaocha.plugin/parallel
-           :kaocha.plugin/shared-container]}
+           :kaocha.plugin/shared-container]
+
+ ;; Show the slowest 25, not the default 3. The integration suite takes ~12
+ ;; minutes and the default report says only which THREE namespaces were worst —
+ ;; enough to know something is slow, never enough to know whether it is one
+ ;; outlier or an even tax across all 62. The spread is the whole question: the
+ ;; per-NS numbers we do have show ~51 s of fixture against ~0.14 s of
+ ;; assertions, i.e. the suite spends its life rebuilding state, not testing. If
+ ;; that holds across the list, the fixture is the target and no amount of
+ ;; per-test tuning matters.
+ :kaocha.plugin.profiling/count 25}

@@ -36,6 +36,9 @@
 #                          ports — your private instance; never touches the demo
 #   wt down                (inside a worktree) stop it (keeps the DB volume)
 #   wt gc                  reclaim superseded / orphaned executor images
+#   wt doctor              report stray test JVMs / testcontainers + host state
+#                          (a killed run leaves its JVM holding GBs; the next
+#                           run then flakes on a machine nobody looked at)
 #   wt ack                 (inside a worktree) print what develop changed in the
 #                          rules you work under, and record that you have read it
 #   wt status              show queue lock holder + recent gate logs
@@ -442,6 +445,45 @@ cmd_ack() {
   say "  Re-read anything above that changes what you are doing, then: ${BLD}bb wt merge${RST}"
 }
 
+# What is on this machine that should not be? A killed test run leaves its JVM
+# alive — Ctrl-C, a tool timeout, an OOM-killed parent — and that JVM keeps its
+# heap (2.5 GB, measured) and its testcontainers. The next run then starts on a
+# machine that is already half-consumed, flakes, and by the time anyone looks the
+# orphan has finally exited and the host reads as healthy. That is how an
+# environment problem gets mistaken for a code problem, repeatedly.
+#
+# REPORTS, never kills: other agents run their own suites on this host, and a
+# pattern-match kill cannot tell their live work from my dead work.
+cmd_doctor() {
+  info "Stray test JVMs (a killed run leaves these behind) ..."
+  local found=0 pid rss age
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    found=1
+    rss="$(awk '/^VmRSS:/{printf "%d", $2/1024}' "/proc/$pid/status" 2>/dev/null)"
+    age="$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
+    printf '  pid=%-8s up=%-10s rss=%sMB\n' "$pid" "${age:-?}" "${rss:-?}"
+  done < <(pgrep -f 'kaocha|cloverage' 2>/dev/null || true)
+  [ "$found" = 0 ] && ok "  none"
+
+  echo
+  info "Testcontainers still up (Ryuk reaps these when the JVM exits cleanly) ..."
+  found=0
+  while IFS= read -r line; do found=1; say "  $line"; done < <(
+    docker ps --filter "label=org.testcontainers=true" \
+              --format '{{.Names}}  {{.Image}}  up {{.RunningFor}}' 2>/dev/null)
+  [ "$found" = 0 ] && ok "  none"
+
+  echo
+  info "Host ..."
+  free -m | awk '/^Mem:/{printf "  memory: %s MB used, %s MB available\n",$3,$7}
+                 /^Swap:/{printf "  swap:   %s MB used of %s MB\n",$3,$2}'
+  awk '{printf "  load:   %s (%s cores)\n", $1, ENVIRON["NPROC"]}' /proc/loadavg
+  echo
+  say "  Nothing above is killed for you: another agent's suite looks identical"
+  say "  to your leftovers. Check the pid, then kill it yourself."
+}
+
 cmd_gc() {
   info "Reclaiming superseded executor layers (label graphden.image=executor) ..."
   docker image prune -f --filter label=graphden.image=executor || true
@@ -682,6 +724,41 @@ cmd_drop() {
 CANONICAL_IMAGE="graphden-executor:latest"
 CANDIDATE_IMAGE="graphden-executor:candidate"
 
+# Sample the machine while the gate runs, into a CSV beside the gate log.
+#
+# Every intermittent failure in this repo has been diagnosed the same way: it
+# happens, the run dies, and someone inspects the host minutes later — by which
+# time it has recovered and there is nothing to see. So the theory gets built out
+# of a stack trace and a guess, a "fix" lands, and the flake comes back.
+#
+# A failure with a resource timeline attached is a different object. If memory
+# was at zero and swap thrashing when the StackOverflow hit, that is the answer
+# and no amount of reading the trace would have produced it.
+start_sampler() {
+  local out="$1"
+  {
+    echo "time,load1,mem_used_mb,mem_avail_mb,swap_used_mb,containers,java_procs"
+    while :; do
+      local load mem swap ctr jvm
+      read -r load _ < /proc/loadavg
+      mem="$(free -m | awk '/^Mem:/{printf "%s,%s",$3,$7}')"
+      swap="$(free -m | awk '/^Swap:/{print $3}')"
+      ctr="$(docker ps -q 2>/dev/null | wc -l)"
+      jvm="$(pgrep -c java 2>/dev/null || echo 0)"
+      printf '%s,%s,%s,%s,%s,%s\n' "$(date +%H:%M:%S)" "$load" "$mem" "$swap" "$ctr" "$jvm"
+      sleep 5
+    done
+  } > "$out" 2>/dev/null &
+  SAMPLER_PID=$!
+}
+
+stop_sampler() {
+  [ -n "${SAMPLER_PID:-}" ] || return 0
+  kill "$SAMPLER_PID" 2>/dev/null || true
+  wait "$SAMPLER_PID" 2>/dev/null || true
+  SAMPLER_PID=""
+}
+
 run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
   local wt="$1" no_e2e="$2" deploy="$3"
   local built_candidate=0
@@ -693,6 +770,8 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
   local ts; ts="$(date +%Y%m%d-%H%M%S)"
   local name; name="$(basename "$wt")"
   local log="$LOG_DIR/$name-$ts.log"
+  local resources="$LOG_DIR/$name-$ts.resources.csv"
+  start_sampler "$resources"
   printf '%s (pid %s) since %s' "$branch" "$$" "$ts" > "$HOLDER"
 
   {
@@ -853,9 +932,14 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
     echo; echo "=== GREEN: $branch landed on $TARGET ==="
     return 0
   } 2>&1 | tee "$log"
+  local rc="${PIPESTATUS[0]}"
+
+  stop_sampler
+  # Point at it explicitly. A CSV nobody knows exists is not instrumentation.
+  printf '\nresource timeline: %s\n' "$resources" | tee -a "$log"
 
   # propagate the gate's status, not tee's
-  return "${PIPESTATUS[0]}"
+  return "$rc"
 }
 
 cmd_merge() {
@@ -920,6 +1004,7 @@ main() {
     up)     cmd_up     "$@" ;;
     down)   cmd_down   "$@" ;;
     gc)     cmd_gc     "$@" ;;
+    doctor) NPROC="$(nproc)" cmd_doctor "$@" ;;
     ack)    cmd_ack    "$@" ;;
     status) cmd_status "$@" ;;
     log)    cmd_log    "$@" ;;

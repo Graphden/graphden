@@ -714,7 +714,30 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
 // which finish in well under a second on the local dev box.
 async function populateCompatibleTypes(arg, select, cur, loadingOpt) {
   if (typeof expectedSlotType !== 'function') return;
-  const expected = expectedSlotType(arg);
+  let expected = expectedSlotType(arg);
+  // A null `expected` does NOT mean "nothing is compatible" — most of the time it
+  // means the slots simply have not arrived yet. `initGraph()` rebuilds `lookups`
+  // from `?scope=index`, which carries fns and namespaces and NO slots; the slot /
+  // binding rows land later, per view, through `ensureSubtreeFor()`. Open this
+  // popover inside that window — the chip on screen is still the previous render's
+  // — and `lookups.slotMap` is empty, so the slot is unknown and the picker used to
+  // quietly drop its "loading…" placeholder and offer the current type alone.
+  // Nothing re-ran it when the subtree landed, so the user was left with a type
+  // picker that could not change the type, with no error to explain it.
+  //
+  // Measured, at the moment of the call rather than after the fact:
+  //   {slotMapSize: 0, slotKnown: false, result: null}   <- the click
+  //   {slotMapSize: 1, slotKnown: true,  result: "any"}  <- re-renders, too late
+  //
+  // So wait for the payload that carries slots, then ask again. `ensureSubtreeFor`
+  // is idempotent and hands back the in-flight fetch, so this costs nothing when
+  // the subtree is already there.
+  if (!expected && typeof ensureSubtreeFor === 'function') {
+    try {
+      await ensureSubtreeFor(selectedFnId || arg?.['fn-id']);
+    } catch (_) { /* fall through — reported as "no compatible types" below */ }
+    expected = expectedSlotType(arg);
+  }
   if (!expected) {
     if (loadingOpt) loadingOpt.remove();
     return;

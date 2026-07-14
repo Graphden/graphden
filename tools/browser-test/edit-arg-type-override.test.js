@@ -109,14 +109,16 @@ async function cleanup(page) {
            '<select> pre-fills with "any": '
            + JSON.stringify(popoverState.currentValue));
 
-    // Wait for compatible types to populate. This is a `POST
-    // /api/types/candidates` round-trip, and the endpoint scores every fn in
-    // the registry. Under the e2e stack's 3 GB heap cap the JVM spends whole
-    // seconds in GC — the health heartbeat logs `/health FAIL after 5005ms`
-    // during the sweep — and a 10 s budget was the only test in the suite that
-    // could not absorb it. Give the server the same 30 s other cross-request
-    // waits in this suite allow; the assertion is about the response, not its
-    // latency.
+    // Wait for the compatible types to populate: one `POST /api/types/compatible`
+    // per candidate name (~14), because the subtype predicate is alias-aware and
+    // has no JS analogue.
+    //
+    // This wait used to carry a story about `/api/types/candidates` scoring every
+    // fn in the registry and the JVM stalling in GC under the 3 GB cap — which is
+    // why its budget had been raised 10 s -> 30 s. None of it was true: the editor
+    // never calls that endpoint, and when the wait failed, NO request had been sent
+    // at all. The picker had given up before asking, because the slots had not
+    // loaded yet (see Phase B2). Measured after the fix: ~400-600 ms.
     await page.waitForFunction(
       () => {
         const sel = document.querySelector(
@@ -126,6 +128,68 @@ async function cleanup(page) {
       },
       null,
       {timeout: 30000});
+
+    // ===================================================================
+    // Phase B2 (regression): the picker inside the graph-refresh window.
+    // ===================================================================
+    // `initGraph()` rebuilds `lookups` from `?scope=index` — fns and namespaces,
+    // and NO slots. The slot rows arrive afterwards, per view, via
+    // `ensureSubtreeFor()`. Open the type popover inside that window — the chip on
+    // screen is still the previous render's — and the slot is unknown, which the
+    // picker used to read as "nothing is compatible": it dropped its "loading…"
+    // placeholder, offered the current type alone, and nothing ever re-ran it when
+    // the subtree landed. A type picker that cannot change the type, with no error
+    // to explain it.
+    //
+    // The suite hit this window for real whenever the host was busy — 5 failures in
+    // 8 concurrent runs — and it had been "fixed" twice by raising the timeout it
+    // was waiting on, for options that were never coming.
+    //
+    // Hold the subtree fetch back so the window is wide and this is a proof rather
+    // than a race, then open the picker inside it. It must still fill.
+    await page.route('**/api/graph/entities?scope=subtree*', async (route) => {
+      await new Promise((r) => setTimeout(r, 3000));
+      await route.continue();
+    });
+    await page.evaluate(() => {
+      document.querySelector('.arg-value-edit-popover')?.remove();
+      initGraph();                      // deliberately NOT awaited
+    });
+    // Wait for the window to actually OPEN — `lookups` rebuilt from the index
+    // payload, so the slot map is empty — otherwise the click lands before the
+    // rebuild, the old slots are still there, and the test proves nothing. (It
+    // passed against the un-fixed build until this wait was added.)
+    await page.waitForFunction(() => (lookups?.slotMap?.size ?? 1) === 0,
+                               null, {timeout: 20000, polling: 20});
+    await page.evaluate(() => document.querySelector('.arg-type-chip')?.click());
+    await page.waitForSelector('.arg-value-edit-popover select.arg-value-edit-input',
+                               {timeout: 10000});
+    await page.waitForFunction(
+      () => {
+        const sel = document.querySelector(
+          '.arg-value-edit-popover select.arg-value-edit-input');
+        return Array.from(sel?.options || []).some((o) => o.value === 'int');
+      },
+      null,
+      {timeout: 20000});
+    console.log('  ✓ picker still fills when opened during a graph refresh');
+    await page.unroute('**/api/graph/entities?scope=subtree*');
+
+    // Re-open on a settled graph for Phase C.
+    await page.evaluate(() => document.querySelector('.arg-value-edit-popover')?.remove());
+    await page.waitForFunction(() => (lookups?.slotMap?.size ?? 0) > 0,
+                               null, {timeout: 20000});
+    await page.evaluate(() => document.querySelector('.arg-type-chip')?.click());
+    await page.waitForSelector('.arg-value-edit-popover select.arg-value-edit-input',
+                               {timeout: 10000});
+    await page.waitForFunction(
+      () => {
+        const sel = document.querySelector(
+          '.arg-value-edit-popover select.arg-value-edit-input');
+        return Array.from(sel?.options || []).some((o) => o.value === 'int');
+      },
+      null,
+      {timeout: 20000});
 
     // ===================================================================
     // Phase C: pick "int" → save → binding gets :type-override-fn-id.

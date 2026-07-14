@@ -68,6 +68,25 @@ executor_mem() {
 TIMINGS=""          # "<seconds>\t<mem>\t<file>" per line, for the summary
 SUITE_START=$SECONDS
 
+# Count the fns in the graph. A test that leaves entities behind does not fail —
+# it makes the NEXT file fail, on a graph it never created. That is why the
+# flakes here always turned up somewhere innocent, got "fixed" there with a
+# longer timeout or a retry, and came back.
+#
+# Measured: edit-inheritance-regression deleted parents and children in one
+# parallel batch, the parent DELETEs 409'd ("Graph is a parent of 1 other
+# graph"), the errors were swallowed, and 8 fns stayed in the graph. Run it, then
+# run edit-arg-type-override, and that one times out. Run it alone and it passes
+# 3/3. Nobody could see the connection because nothing was counting.
+#
+# So count, per file, and name the file that leaked in the run that leaked.
+fn_count() {
+  curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
+       "$URL/api/graph/entities?scope=index" 2>/dev/null \
+    | grep -o '"name"' | wc -l
+}
+LEAKS=""
+
 WORST=0
 PASS=0
 FAIL=0
@@ -91,6 +110,7 @@ for f in $FILES; do
   fi
   echo "─── $f ───"
   FILE_START=$SECONDS
+  FN_BEFORE="$(fn_count)"
   if ! wait_for_server; then
     WORST=1
     FAIL=$((FAIL+1))
@@ -147,7 +167,24 @@ for f in $FILES; do
   fi
   FILE_SECS=$((SECONDS - FILE_START))
   FILE_MEM="$(executor_mem)"
-  printf '  [%3ds  executor=%s]\n' "$FILE_SECS" "$FILE_MEM"
+  FN_AFTER="$(fn_count)"
+  FN_LEAKED=$((FN_AFTER - FN_BEFORE))
+  if [ "$FN_LEAKED" -gt 0 ] 2>/dev/null; then
+    printf '  [%3ds  executor=%s]  \033[31mLEAKED %d fn(s) into the graph\033[0m\n' \
+      "$FILE_SECS" "$FILE_MEM" "$FN_LEAKED"
+    LEAKS="$LEAKS$FN_LEAKED	$f
+"
+    # A leak FAILS the suite. It is not a warning: the entities stay, and the
+    # next file runs against a graph it did not create — which is how a cleanup
+    # bug in one test surfaces as a "flake" in another, gets a longer timeout
+    # bolted on there, and comes back. 37 of the 55 files swallow their cleanup
+    # errors with `.catch(() => {})`; patching each one invites a 38th. The
+    # invariant belongs here, once: a test leaves the graph as it found it.
+    WORST=1
+    FAILED_NAMES="$FAILED_NAMES $f(leaked-$FN_LEAKED-fns)"
+  else
+    printf '  [%3ds  executor=%s]\n' "$FILE_SECS" "$FILE_MEM"
+  fi
   TIMINGS="$TIMINGS$FILE_SECS	$FILE_MEM	$f
 "
   echo
@@ -185,6 +222,16 @@ FILE_COUNT=$((PASS + FAIL))
 
 # The executor's memory, first file vs last. The retry above blames "JVM GC
 # pressure when heap passes ~85%" for the suite-tail flakes. Nobody had checked.
+echo
+echo "── entities leaked into the graph ──"
+if [ -n "$LEAKS" ]; then
+  printf '%b' "$LEAKS" | sort -rn | awk -F'\t' '{printf "  %3d  %s\n", $1, $2}'
+  echo "  ^ each of these poisons every file that runs after it. Fix the leaker,"
+  echo "    not the file that trips over the mess."
+else
+  echo "  none — every file left the graph as it found it"
+fi
+
 echo
 echo "── executor memory, first file -> last ──"
 printf '%s' "$TIMINGS" | awk -F'\t' 'NR==1{first=$2} {last=$2} END{

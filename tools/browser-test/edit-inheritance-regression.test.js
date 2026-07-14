@@ -58,20 +58,48 @@ const D_PARENT = 'test-inh-d-parent' + RUN_ID;
 const D_CHILD  = 'test-inh-d-child' + RUN_ID;
 
 async function cleanupAll(page) {
-  // Parallel cleanup — 8 sequential DELETEs under e2e memory
-  // pressure used to take 4+ minutes and trip the per-test 5-min
-  // wrapper cap (the test's actual assertions finish quickly; the
-  // cap was killing the finally block). Promise.allSettled keeps
-  // failures from poisoning the other branches.
-  await Promise.allSettled(
-    [A_CHILD, A_PARENT, B_CHILD, B_PARENT, C_CHILD, C_PARENT,
-     D_CHILD, D_PARENT].map((n) => deleteFnByName(page, n).catch(() => {})));
+  // CHILDREN FIRST, THEN PARENTS. The previous version deleted all eight names
+  // in a single Promise.allSettled — parents racing their own children. When a
+  // parent's DELETE landed first the server answered 409 ("Graph is a parent of
+  // 1 other graph"), `.catch(() => {})` swallowed it, and the parent stayed in
+  // the database for good.
+  //
+  // The damage lands on somebody else. Those orphans sit in the graph, and a
+  // LATER file in the sweep fails on them — reproduced deterministically: run
+  // this file (it leaks 8 fns, exit 0, "passed"), then run
+  // edit-arg-type-override, and it times out; run that file alone against a
+  // clean graph and it passes 3 for 3. The retry in run-edit-tests.sh had been
+  // papering over it, and every investigation went looking at the victim.
+  //
+  // Two phases keep the speed that motivated the parallel version — two round
+  // trips instead of eight, not the 4+ minutes the original sequential loop
+  // cost — while respecting the dependency the graph actually enforces.
+  const failures = [];
+  for (const batch of [[A_CHILD, B_CHILD, C_CHILD, D_CHILD],
+                       [A_PARENT, B_PARENT, C_PARENT, D_PARENT]]) {
+    const results = await Promise.allSettled(
+      batch.map((n) => deleteFnByName(page, n)));
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        failures.push(batch[i] + ': ' + (r.reason && r.reason.message || r.reason));
+      }
+    });
+  }
+  // Never swallow. A cleanup that fails quietly is how one test's mess becomes
+  // another test's flake — and the flake is then "fixed" in the wrong file.
+  if (failures.length) {
+    console.log('  ✗ CLEANUP LEAKED ' + failures.length
+                + ' fn(s) — later tests will run against them:');
+    failures.forEach((f) => console.log('      ' + f));
+  }
+  return failures.length;
 }
 
 (async () => {
   const {browser, page} = await newContext(chromium);
   console.log('inheritance-regression — parent/child binding propagation');
   let failed = 0;
+  let leaked = 0;
   function tryStep(name, fn) {
     return fn().catch(e => {
       console.error('  ✗ ' + name + ' threw: ' + e.message);
@@ -299,10 +327,17 @@ async function cleanupAll(page) {
     // 5+ minutes during slow-server windows and trip the per-test
     // timeout.
     await browser.close().catch(() => {});
-    await cleanupAll(page).catch(() => {});
+    // A leak is a failure of THIS test, even when every assertion passed. It is
+    // not this run that pays for it — it is the next file in the sweep, which
+    // then gets diagnosed and "fixed" in the wrong place. Count it.
+    leaked = await cleanupAll(page).catch(() => 0);
   }
-  if (failed === 0) {
+  if (failed === 0 && leaked === 0) {
     console.log('inheritance-regression — PASS');
+  } else if (failed === 0) {
+    console.error('inheritance-regression — FAIL (assertions passed, but cleanup '
+                  + 'leaked ' + leaked + ' fn(s) into the graph)');
+    process.exit(1);
   } else {
     console.error('inheritance-regression — FAIL (' + failed + ')');
     process.exit(1);

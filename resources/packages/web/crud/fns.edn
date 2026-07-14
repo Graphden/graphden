@@ -593,11 +593,22 @@
                            :prefix {:as :name-prefix}}}]}}
 
   {:name :_types-candidates-row-ok?
+   :description "CHEAP FILTERS FIRST. `:and` short-circuits, so the order here is
+                 the query plan. `:_types-candidates-subtype-ok?` is a recursive
+                 walk of the type hierarchy (refinement / list / union / record /
+                 fn-shape); the other three are a map lookup and two string /
+                 set comparisons. Running the expensive one first meant every fn
+                 in the registry was type-checked before the prefix the user had
+                 already typed threw it away — the endpoint's cost was O(whole
+                 graph) even when the answer was a single fn. Measured: identical
+                 ~0.11 s whether the prefix matched 57 candidates or 1, and 45 s
+                 under concurrent load, which is what timed out the e2e type
+                 tests and got written off as GC pauses."
    :parent :and
    :args {:values [:_types-candidates-not-type-row?
-                   :_types-candidates-subtype-ok?
+                   :_types-candidates-name-prefix-ok?
                    :_types-candidates-effects-ok?
-                   :_types-candidates-name-prefix-ok?]}}
+                   :_types-candidates-subtype-ok?]}}
 
   ;; --- Per-row candidate shape (when matched) ---
   {:name :_types-candidates-effects-vec
@@ -620,11 +631,31 @@
           :then :_types-candidates-row
           :else {:value nil}}}
 
+  ;; --- Narrow the SCAN, not just the result ---
+  {:name :_types-candidates-names
+   :description "The name list the scan actually walks, prefix-filtered FIRST.
+
+                 The prefix predicate needs only the name — not the snapshot,
+                 not the type — so it can run before any per-fn work at all.
+                 Previously it ran INSIDE the per-row callback, so every fn in
+                 the registry was looked up, reshaped and type-checked before a
+                 string comparison threw it away. The endpoint cost O(whole
+                 graph) even when the user had typed a prefix that matched one
+                 fn — and the picker in the editor almost always has one.
+
+                 With this, the common path is O(matching names). The no-prefix
+                 path (picker opened cold) is unchanged and still walks the
+                 registry: that one wants an index, which is a separate change."
+   :parent :filter
+   :args {:pred :_types-candidates-name-prefix-ok?
+          :coll :_types-candidates-fn-names
+          :name-prefix :_types-candidates-apply-name-prefix}}
+
   ;; --- Map + filter-nil + sort + envelope ---
   {:name :_types-candidates-mapped
    :parent :map
    :args {:func :_types-candidates-row-or-nil
-          :coll :_types-candidates-fn-names
+          :coll :_types-candidates-names
           :snapshot :_types-candidates-snapshot
           :expected :_types-candidates-apply-expected
           :allowed-effects :_types-candidates-apply-allowed-effects

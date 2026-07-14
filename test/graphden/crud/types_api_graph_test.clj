@@ -18,6 +18,7 @@
    in `bb test`."
   (:require
     [cheshire.core :as cheshire]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
@@ -87,6 +88,46 @@
       (is (true? (:ok pure-result)))
       (is (<= (:count pure-result) (:count all-result))
           "pure subset ≤ all"))))
+
+
+(deftest types-candidates-name-prefix-narrows-result-test
+  ;; The name-prefix filter had NO test, which is how it came to be applied in
+  ;; the wrong place: inside the per-row callback, AFTER every fn in the registry
+  ;; had already been looked up, reshaped and recursively type-checked. The
+  ;; endpoint therefore cost O(whole graph) even when the caller had narrowed the
+  ;; answer to one fn — and the editor's type-picker almost always has. Measured
+  ;; at 3945 fns: identical ~0.11 s whether the prefix matched 57 candidates or
+  ;; 1, and 45 s under concurrent load, which is what timed out the type e2e
+  ;; tests and got written off as GC pauses.
+  ;;
+  ;; The scan is now narrowed by prefix BEFORE the map. This test pins the
+  ;; BEHAVIOUR that reordering must not change.
+  (testing "name-prefix returns only fns whose name starts with it"
+    (let [all-result (post-via :types-candidates-handler {:expected "any"})
+          prefixed   (post-via :types-candidates-handler
+                               {:expected "any" :name-prefix "str-"})]
+      (is (true? (:ok prefixed)))
+      (is (pos? (:count prefixed))
+          "the seed graph has str-* fns; an empty result means the filter now
+           runs against something other than the fn name")
+      (is (< (:count prefixed) (:count all-result))
+          "a prefix must narrow, not pass everything through")
+      (is (every? #(str/starts-with? (name (:name %)) "str-")
+                  (:candidates prefixed))
+          "every returned candidate matches the prefix")))
+
+  (testing "a prefix matching nothing returns an empty candidate set, not an error"
+    (let [none (post-via :types-candidates-handler
+                         {:expected "any"
+                          :name-prefix "zzz-no-such-fn-prefix"})]
+      (is (true? (:ok none)))
+      (is (zero? (:count none)))
+      (is (= [] (:candidates none)))))
+
+  (testing "no prefix still enumerates the whole registry"
+    (let [all-result (post-via :types-candidates-handler {:expected "any"})]
+      (is (pos? (:count all-result))
+          "omitting name-prefix must mean 'no filter', not 'match nothing'"))))
 
 
 ;; =============================================================================

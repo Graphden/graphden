@@ -60,7 +60,7 @@
    internal endpoint), explicit membership + shared internal token. Network alias
    = `alias` so a peer can dial it. Waits for /health (240s cold-boot budget)."
   [^Network network alias peers]
-  (doto (GenericContainer. "graphden-executor:latest")
+  (doto (GenericContainer. ^String (or (System/getenv "GD_IMAGE") "graphden-executor:latest"))
     (GenericContainer/.withEnv "PORT" "8080")
     (GenericContainer/.withEnv "GRAPHDEN_PORT" "8080")
     (GenericContainer/.withEnv "STORAGE_TYPE" "postgres")

@@ -163,6 +163,20 @@
       (vault/put-secret client path value))))
 
 
+(def ^:private executor-image
+  "The image this stack boots.
+
+   Defaults to `graphden-executor:latest`, which is what a local `bb rebuild`
+   produces. The landing gate overrides it with `GD_IMAGE`, because it must test
+   a CANDIDATE build — the one it just made from the merged tree — without
+   touching the canonical tag. That tag names the last SUCCESSFULLY LANDED
+   build: the demo instance is deployed from it, so a gate that failed must not
+   be able to leave its code sitting there. (It could, and it did: a red gate
+   left its image tagged `:latest`, and the next gate's deploy served that
+   un-landed code to the demo. `bb verify` caught it.)"
+  (or (System/getenv "GD_IMAGE") "graphden-executor:latest"))
+
+
 (defn- apply-restart-and-memory!
   "Docker-side recovery + safety belt + stable host-port pinning.
    Installed via `withCreateContainerCmdModifier` so it lands on the
@@ -222,9 +236,8 @@
 
 
 (defn- start-executor!
-  "Graphden executor — reuses the `graphden-executor:latest` image
-   the demo build produced (so this stack picks up the latest code
-   without a second build step). All `JDBC_URL` / `VAULT_ADDR` /
+  "Graphden executor — boots `executor-image` (see above): the canonical
+   `graphden-executor:latest` locally, or the gate's candidate build via GD_IMAGE. All `JDBC_URL` / `VAULT_ADDR` /
    `:user-postgres` references use the network aliases set above.
 
    `withLogConsumer` ships container stdout/stderr to SLF4J live, so
@@ -234,7 +247,7 @@
    + memory cap + pinned host port (see `apply-restart-and-memory!`).
    `host-port` is pre-picked by the caller and survives restart."
   [^Network network auth-token host-port]
-  (doto (GenericContainer. "graphden-executor:latest")
+  (doto (GenericContainer. ^String executor-image)
     (GenericContainer/.withEnv "PORT" "8080")
     (GenericContainer/.withEnv "STORAGE_TYPE" "postgres")
     (GenericContainer/.withEnv "JDBC_URL"
@@ -392,7 +405,7 @@
   [containers]
   (doseq [^GenericContainer c containers]
     (try
-      (when (= "graphden-executor:latest"
+      (when (= executor-image
                (GenericContainer/.getDockerImageName c))
         ;; Heap dump extraction (best-effort, before logs)
         (try

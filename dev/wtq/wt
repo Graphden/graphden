@@ -674,8 +674,17 @@ cmd_drop() {
 # =====================================================================
 # merge — the gated, flock-serialized landing
 # =====================================================================
+# The canonical tag names the last SUCCESSFULLY LANDED build — the demo instance
+# is deployed from it, and `bb rebuild` / `bb test-e2e` default to it. The gate
+# builds into the candidate tag instead, tests THAT, and only promotes it once
+# the fast-forward has succeeded. A red gate therefore leaves the canonical tag
+# untouched, which is the whole point.
+CANONICAL_IMAGE="graphden-executor:latest"
+CANDIDATE_IMAGE="graphden-executor:candidate"
+
 run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
   local wt="$1" no_e2e="$2" deploy="$3"
+  local built_candidate=0
   # The heavy suites refuse to run in a worktree unless this is set: they boot
   # the canonical image and saturate the machine, so only the gate — which holds
   # the queue lock — may start them. We are the gate.
@@ -759,28 +768,35 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       echo "ok"
     else
 
-    step "build the canonical image from the merged tree"
-    # BUILD ONLY — deliberately no `up`. Two reasons:
-    #   1. the demo instance must never run un-landed code (a red gate used to
-    #      leave it serving the failed branch);
-    #   2. `compose up` from a worktree collides with the canonical containers.
-    # The tag is fixed by docker-compose.yml (GD_IMAGE default) rather than
-    # derived from the directory, so it IS the tag `bb test-e2e` boots — the
-    # suite therefore tests THIS merged code and not whatever was built last.
+    step "build the CANDIDATE image from the merged tree"
+    # A candidate tag, never the canonical one. `graphden-executor:latest` names
+    # the last SUCCESSFULLY LANDED build, and the demo instance is deployed from
+    # it — so a gate that goes red must not be able to leave its code sitting
+    # there. It could, and it did: a failed gate left its build tagged `:latest`,
+    # and the next gate's deploy served that un-landed code to the demo.
+    # `bb verify` caught it, which is the only reason it was a scare and not an
+    # incident.
+    #
+    # Build only, no `up` — `compose up` from a worktree collides with the
+    # canonical containers anyway. The suites below boot GD_IMAGE, so they test
+    # exactly this candidate and nothing else.
     ( cd "$wt" && clojure -T:build uber ) || { echo "FAIL: uberjar"; return 1; }
-    ( cd "$wt" && docker-compose build executor ) || { echo "FAIL: docker build"; return 1; }
+    ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" docker-compose build executor ) \
+      || { echo "FAIL: docker build"; return 1; }
 
     if [ "$NEED_INTEGRATION" = 1 ]; then
       step "bb test-integration"
-      ( cd "$wt" && bb test-integration ) || { echo "FAIL: integration"; return 1; }
+      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-integration ) || { echo "FAIL: integration"; return 1; }
     fi
 
     if [ "$NEED_E2E" = 0 ]; then
       echo; echo "(e2e skipped — see the scope step above)"
     else
       step "bb test-e2e"
-      ( cd "$wt" && bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
+      ( cd "$wt" && GD_IMAGE="$CANDIDATE_IMAGE" bb test-e2e ) || { echo "FAIL: e2e"; return 1; }
     fi
+
+    built_candidate=1
 
     fi   # end: a runtime surface changed
 
@@ -805,12 +821,24 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
       git -C "$MAIN_WT" push origin "$TARGET" || echo "(push failed — $TARGET advanced locally; push it yourself)"
     fi
 
+    # ONLY NOW does the candidate become canonical. Everything above could still
+    # have gone red; `graphden-executor:latest` must never name a build that did
+    # not land. If this branch changed no runtime surface we never built a
+    # candidate — and the canonical tag is already the right one, because it is
+    # by construction the last landed build.
+    if [ "${built_candidate:-0}" = 1 ]; then
+      step "promote the candidate to $CANONICAL_IMAGE"
+      docker tag "$CANDIDATE_IMAGE" "$CANONICAL_IMAGE" \
+        || { echo "FAIL: could not promote the candidate image"; return 1; }
+      echo "ok"
+    fi
+
     # The instance is advanced AFTER the fast-forward, from the MAIN checkout,
     # still holding the queue lock — so it can only ever serve landed code, and
-    # two gates can never race to redeploy it. The image is already built (above),
-    # so this costs no second uberjar. `bb instance-up` ends in `bb verify`, which
+    # two gates can never race to redeploy it. The image is already built, so
+    # this costs no second uberjar. `bb instance-up` ends in `bb verify`, which
     # compares /version against the freshly-landed tree: proof the demo really is
-    # running what just landed.
+    # running what just landed. That check is what caught this whole class of bug.
     step "advance the $TARGET instance onto the landed image"
     if [ "$deploy" = 1 ]; then
       echo "(--deploy: dropping the $TARGET schema first — the branch changes it)"

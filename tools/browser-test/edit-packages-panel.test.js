@@ -74,12 +74,47 @@ async function panelState(page) {
   await nodeApiJson('POST', '/api/packages/publish',
     {name: PKG, version: '1.1.0', 'ns-root': 'app.contact-demo'});
 
+// Installing a package MATERIALISES its fns into the graph — 36 of them here.
+// Uninstalling does not take them back out: by design, uninstall drops the pin
+// only (copy-on-write; see docs/PACKAGE_DISTRIBUTION.md). So this test created
+// 36 fns and never removed them, every run, while every assertion passed. The
+// suite's leak detector caught it the first time it ran.
+//
+// Peel them off in layers: a parent cannot be deleted while a live child points
+// at it (the server answers 409), and the install builds a tree. Repeat until a
+// pass deletes nothing, then report whatever is stuck rather than swallowing it.
+async function deleteFnsCreatedSince(beforeIds) {
+  for (let pass = 0; pass < 12; pass++) {
+    const ents = await nodeApiJson('GET', '/api/graph/entities');
+    const extras = (ents.fns || []).filter((f) => !beforeIds.has(f.id));
+    if (extras.length === 0) return [];
+    let deleted = 0;
+    for (const f of extras) {
+      try {
+        await nodeApiJson('DELETE', '/api/entities/fn/' + f.id);
+        deleted++;
+      } catch (_) { /* has a live dependent — next pass, once it is gone */ }
+    }
+    if (deleted === 0) {
+      return extras.map((f) => f.name || ('<anon ' + f.id.slice(0, 8) + '>'));
+    }
+  }
+  const left = (await nodeApiJson('GET', '/api/graph/entities')).fns
+    .filter((f) => !beforeIds.has(f.id));
+  return left.map((f) => f.name || ('<anon ' + f.id.slice(0, 8) + '>'));
+}
+
   const {browser, page} = await newContext(chromium);
   page.on('dialog', (d) => { console.log('  [dialog]:', d.message().slice(0, 120)); d.accept(); });
   page.on('console', (m) => {
     if (m.type() === 'error') console.log('  (console.error: ' + m.text().slice(0, 160) + ')');
   });
   console.log('edit-packages-panel — install / update / uninstall lifecycle');
+
+  // Snapshot the graph BEFORE anything is installed, so cleanup can be exact:
+  // delete what this test added, and nothing else.
+  const beforeIds = new Set(
+    ((await nodeApiJson('GET', '/api/graph/entities')).fns || []).map((f) => f.id));
 
   try {
     await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002') + '/');
@@ -209,5 +244,12 @@ async function panelState(page) {
     console.error('✗ test failed:', err.message);
   } finally {
     await browser.close();
+    const stuck = await deleteFnsCreatedSince(beforeIds);
+    if (stuck.length) {
+      process.exitCode = 1;
+      console.error('✗ CLEANUP LEAKED ' + stuck.length
+                    + ' fn(s) into the graph — later tests will run against them:');
+      stuck.slice(0, 10).forEach((n) => console.error('      ' + n));
+    }
   }
 })();

@@ -776,7 +776,37 @@ run_gate() {   # runs INSIDE the flock; cwd = the feature worktree
 
   {
     echo "=== gate: $branch @ $ts ==="
-    step() { echo; echo ">>> $*"; }
+    # Phases are timed, because "how long does integration take?" had no answer
+    # in this log — only kaocha's own number, which sums across four parallel
+    # threads and is not wall-clock. A gate that reports pass/fail and nothing
+    # else makes every performance question a guess, and we have paid for that
+    # guess more than once.
+    GATE_T0=$SECONDS
+    _ph_name=""
+    _ph_t0=$SECONDS
+    _ph_rows=""
+    step() {
+      [ -n "$_ph_name" ] && _ph_rows="${_ph_rows}$((SECONDS - _ph_t0))	${_ph_name}
+"
+      _ph_name="$*"
+      _ph_t0=$SECONDS
+      echo; echo ">>> $*  [t+$((SECONDS - GATE_T0))s]"
+    }
+    # shellcheck disable=SC2329  # invoked indirectly, by the EXIT trap below
+    phase_summary() {
+      [ -n "$_ph_name" ] && _ph_rows="${_ph_rows}$((SECONDS - _ph_t0))	${_ph_name}
+"
+      _ph_name=""
+      echo
+      echo "── where the gate spent its time ──"
+      printf '%b' "$_ph_rows" | sort -rn \
+        | awk -F'\t' 'NF==2 {printf "  %5ds  %s\n", $1, $2}'
+      printf '  ------\n  %5ds  TOTAL\n' "$((SECONDS - GATE_T0))"
+    }
+    # The block below is a subshell (it is piped into tee) and leaves through any
+    # of a dozen `return`s. An EXIT trap is the only place that sees them all —
+    # so the timings survive a red gate, which is exactly when they are wanted.
+    trap phase_summary EXIT
 
     [ -z "$(git -C "$wt" status --porcelain)" ] || { echo "ABORT: worktree dirty — commit first."; return 3; }
 

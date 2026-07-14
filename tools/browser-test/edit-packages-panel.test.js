@@ -37,6 +37,21 @@ const {assert, newContext, nodeApi, nodeApiJson} = require('./edit-test-helpers'
 // keeps `node edit-packages-panel.test.js` against the dev demo safe too).
 const RUN_ID = process.pid.toString(36) + Date.now().toString(36);
 const PKG = 'panel-e2e-' + RUN_ID;
+// This test INSTALLS a package, and installing copies the package's fns into the
+// graph and creates a namespace per version. Uninstall only drops the pin — the
+// copies stay. So it used to clean up by hand, and that cascade was the single
+// most expensive thing in the suite: 21 s of browser work, then 203 s of deletes,
+// which is what kept tripping the 300 s per-test cap and leaving fns behind when
+// it was killed mid-way.
+//
+// None of that is necessary. Package pins are BRANCH-SCOPED by design
+// (docs/PACKAGE_DISTRIBUTION.md), so the test does its whole lifecycle on a
+// throwaway branch — the editor takes `?branch=` from the URL, node-side calls
+// send `X-Graphden-Branch` — and cleanup is one DELETE of the branch. The default
+// branch never sees the copies at all, so there is nothing to leak and nothing to
+// peel: no amount of load can make a single DELETE take five minutes.
+const BRANCH = 'pkg-e2e-' + RUN_ID;
+const BH = {'X-Graphden-Branch': BRANCH};
 
 
 // Poll the panel for a stable end-state, riding out the transient
@@ -69,10 +84,12 @@ async function panelState(page) {
 
 (async () => {
   // ---- setup: publish two versions BEFORE the browser loads the panel
+  await nodeApiJson('POST', '/api/branches', {name: BRANCH});
+  // Publish onto the branch too, so the :package-version rows go with it.
   await nodeApiJson('POST', '/api/packages/publish',
-    {name: PKG, version: '1.0.0', 'ns-root': 'app.contact-demo'});
+    {name: PKG, version: '1.0.0', 'ns-root': 'app.contact-demo'}, BH);
   await nodeApiJson('POST', '/api/packages/publish',
-    {name: PKG, version: '1.1.0', 'ns-root': 'app.contact-demo'});
+    {name: PKG, version: '1.1.0', 'ns-root': 'app.contact-demo'}, BH);
 
 // Installing a package MATERIALISES its fns into the graph — 36 of them here.
 // Uninstalling does not take them back out: by design, uninstall drops the pin
@@ -83,66 +100,6 @@ async function panelState(page) {
 // Peel them off in layers: a parent cannot be deleted while a live child points
 // at it (the server answers 409), and the install builds a tree. Repeat until a
 // pass deletes nothing, then report whatever is stuck rather than swallowing it.
-async function deleteFnsCreatedSince(beforeIds) {
-  // Deleting an fn is a CASCADE, not one call. The server refuses while anything
-  // still points at it — a live child (parent-ids) OR a binding that references
-  // it — so its own bindings, list-items, fn-slots and slots have to go first.
-  // My first version issued a bare DELETE on the fn and called it done; it
-  // worked against a warm local graph where the package's fns happened to have
-  // no cross-references, and left 34 of them behind in the gate. The suite's
-  // leak detector caught that too, which is the entire point of it.
-  // DELETE answers with an empty body / HTML, not JSON. Routing it through
-  // nodeApiJson made JSON.parse throw ("Unexpected end of JSON input") on the
-  // FIRST delete of the cascade, the catch below swallowed it, and the fn was
-  // never removed — a cleanup that reported failure for the wrong reason and
-  // left 34 fns behind. `nodeApi` is the raw call; ok or 404 is success.
-  const del = async (path) => {
-    const r = await nodeApi('DELETE', path);
-    if (!r.ok && r.status !== 404) {
-      throw new Error('DELETE ' + path + ' -> HTTP ' + r.status
-                      + ' ' + (await r.text()).slice(0, 120));
-    }
-  };
-  let lastError = null;
-
-  for (let pass = 0; pass < 12; pass++) {
-    const ents = await nodeApiJson('GET', '/api/graph/entities');
-    const extras = (ents.fns || []).filter((f) => !beforeIds.has(f.id));
-    if (extras.length === 0) return [];
-
-    let deleted = 0;
-    for (const fn of extras) {
-      try {
-        const bindings = (ents.bindings || []).filter((b) => b['fn-id'] === fn.id);
-        const bindingIds = new Set(bindings.map((b) => b.id));
-        for (const it of (ents['list-items'] || [])
-                          .filter((i) => bindingIds.has(i['binding-id']))) {
-          await del('/api/entities/binding-list-item/' + it.id);
-        }
-        for (const b of bindings) await del('/api/entities/binding/' + b.id);
-
-        const ownFnSlots = (ents['fn-slots'] || []).filter((fs) => fs['fn-id'] === fn.id);
-        for (const fs of ownFnSlots) if (fs.id) await del('/api/entities/fn-slot/' + fs.id);
-        for (const fs of ownFnSlots) await del('/api/entities/slot/' + fs['slot-id']);
-
-        await del('/api/entities/fn/' + fn.id);
-        deleted++;
-      } catch (e) {
-        // Keep the LAST reason so a stuck cleanup can say why, instead of just
-        // announcing a number. Swallowing this is how the leak stayed invisible.
-        lastError = (e && e.message) || String(e);
-      }
-    }
-    // No progress in a whole pass: whatever is left is genuinely stuck. Say so.
-    if (deleted === 0) {
-      if (lastError) console.error('  cleanup blocked by: ' + lastError.slice(0, 200));
-      return extras.map((f) => f.name || ('<anon ' + f.id.slice(0, 8) + '>'));
-    }
-  }
-  const left = (await nodeApiJson('GET', '/api/graph/entities')).fns
-    .filter((f) => !beforeIds.has(f.id));
-  return left.map((f) => f.name || ('<anon ' + f.id.slice(0, 8) + '>'));
-}
 
   const {browser, page} = await newContext(chromium);
   page.on('dialog', (d) => { console.log('  [dialog]:', d.message().slice(0, 120)); d.accept(); });
@@ -151,13 +108,41 @@ async function deleteFnsCreatedSince(beforeIds) {
   });
   console.log('edit-packages-panel — install / update / uninstall lifecycle');
 
+  // The invariant: whatever the panel does on its branch, the DEFAULT branch —
+  // the one every other file in the suite runs against — is left exactly as found.
+  const defaultFnIds = new Set(
+    ((await nodeApiJson('GET', '/api/graph/entities?scope=index')).fns || [])
+      .map((f) => f.id));
+  // A NAMESPACE is not versioned (like :service), so a package install creates one
+  // per version GLOBALLY — the throwaway branch does not carry them off with it,
+  // and no editor affordance deletes a namespace. They are empty once the branch is
+  // gone, so the test removes them through the CRUD type — which is `ns`, not
+  // `namespace` (that is not a type at all, and answers 400).
+  const defaultNsIds = new Set(
+    ((await nodeApiJson('GET', '/api/graph/entities?scope=index')).namespaces || [])
+      .map((n) => n.id));
+
   // Snapshot the graph BEFORE anything is installed, so cleanup can be exact:
   // delete what this test added, and nothing else.
   const beforeIds = new Set(
     ((await nodeApiJson('GET', '/api/graph/entities')).fns || []).map((f) => f.id));
+  // Installing a package also creates a NAMESPACE per version (app.contact-demo@1-0-0,
+  // @1-1-0). They are not fns, so the fn cascade never touched them, and they stayed
+  // in the sidebar tree of every file that ran after this one.
+  const beforeNs = new Set(
+    ((await nodeApiJson('GET', '/api/graph/entities?scope=index')).namespaces || [])
+      .map((n) => n.id));
+  // The suite's 300 s per-test cap kills this file in the gate, so time the phases
+  // rather than the whole: a slow install and a slow cleanup are different bugs.
+  let phaseStart = Date.now();
+  const phase = (label) => {
+    console.log('  ⏱ ' + label + ': ' + Math.round((Date.now() - phaseStart) / 1000) + 's');
+    phaseStart = Date.now();
+  };
 
   try {
-    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002') + '/');
+    await page.goto((process.env.GRAPHDEN_URL || 'http://localhost:9002')
+                    + '/?branch=' + encodeURIComponent(BRANCH));
     // Un-collapse the sidebar in case a stale pref persisted (a fresh
     // e2e context won't have it, but keep the dev-demo run robust).
     await page.evaluate(() => document.body.classList.remove('sidebar-collapsed'));
@@ -219,11 +204,12 @@ async function deleteFnsCreatedSince(beforeIds) {
       const t = root && root.querySelector(':scope > .packages-panel-table');
       return t && [...t.querySelectorAll('tbody tr td:first-child')]
         .some((td) => td.textContent === pkg);
-    }, PKG, {timeout: 30000, polling: 250});
+    }, PKG, {timeout: 60000, polling: 250});
     const c = await panelState(page);
     const cRow = c.installedRows.find((r) => r.name === PKG);
     assert(cRow && cRow.version === '1.0.0',
       'installed table shows ' + PKG + ' @ 1.0.0 after Install: ' + JSON.stringify(cRow));
+    phase('install');
 
     // ===================================================================
     // Phase D: Update 1.0.0 → 1.1.0 via the version input + ↑.
@@ -246,11 +232,12 @@ async function deleteFnsCreatedSince(beforeIds) {
         const td = [...tr.querySelectorAll('td')];
         return td[0]?.textContent === pkg && td[1]?.textContent === '1.1.0';
       });
-    }, PKG, {timeout: 30000, polling: 250});
+    }, PKG, {timeout: 60000, polling: 250});
     const d = await panelState(page);
     const dRow = d.installedRows.find((r) => r.name === PKG);
     assert(dRow && dRow.version === '1.1.0',
       'installed row updated to 1.1.0 after ↑: ' + JSON.stringify(dRow));
+    phase('update (ref-rewrite)');
 
     // ===================================================================
     // Phase E: Uninstall (× → confirm) → back to empty-state.
@@ -271,12 +258,13 @@ async function deleteFnsCreatedSince(beforeIds) {
       const stillThere = t && [...t.querySelectorAll('tbody tr td:first-child')]
         .some((td) => td.textContent === pkg);
       return !stillThere;
-    }, PKG, {timeout: 30000, polling: 250});
+    }, PKG, {timeout: 60000, polling: 250});
     const e = await panelState(page);
     assert(!e.installedRows.some((r) => r.name === PKG),
       'installed table no longer lists ' + PKG + ' after uninstall');
     assert(e.emptyNotice,
       'the sole pin gone → empty-state notice returns');
+    phase('uninstall');
 
     console.log('✓ packages panel verified — render / browse / install / update / uninstall');
   } catch (err) {
@@ -284,12 +272,29 @@ async function deleteFnsCreatedSince(beforeIds) {
     console.error('✗ test failed:', err.message);
   } finally {
     await browser.close();
-    const stuck = await deleteFnsCreatedSince(beforeIds);
-    if (stuck.length) {
+    phase('browser work (render/browse/install/update/uninstall)');
+    const r = await nodeApi('DELETE', '/api/branches/' + encodeURIComponent(BRANCH));
+    if (!r.ok && r.status !== 404) {
       process.exitCode = 1;
-      console.error('✗ CLEANUP LEAKED ' + stuck.length
-                    + ' fn(s) into the graph — later tests will run against them:');
-      stuck.slice(0, 10).forEach((n) => console.error('      ' + n));
+      console.error('✗ CLEANUP could not drop branch ' + BRANCH + ' — HTTP ' + r.status);
+    }
+    for (const ns of ((await nodeApiJson('GET', '/api/graph/entities?scope=index'))
+                        .namespaces || []).filter((n) => !defaultNsIds.has(n.id))) {
+      const nr = await nodeApi('DELETE', '/api/entities/ns/' + ns.id);
+      if (!nr.ok && nr.status !== 404) {
+        process.exitCode = 1;
+        console.error('✗ CLEANUP left namespace ' + (ns.name || ns.id)
+                      + ' — HTTP ' + nr.status);
+      }
+    }
+    phase('cleanup (branch delete + empty namespaces)');
+    // Prove it: the copies never reached the branch every other test runs on.
+    const leaked = ((await nodeApiJson('GET', '/api/graph/entities?scope=index')).fns || [])
+      .filter((f) => !defaultFnIds.has(f.id));
+    if (leaked.length) {
+      process.exitCode = 1;
+      console.error('✗ CLEANUP LEAKED ' + leaked.length + ' fn(s) onto the default branch:');
+      leaked.slice(0, 10).forEach((f) => console.error('      ' + (f.name || f.id)));
     }
   }
 })();

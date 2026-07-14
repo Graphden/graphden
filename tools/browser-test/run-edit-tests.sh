@@ -80,10 +80,26 @@ SUITE_START=$SECONDS
 # 3/3. Nobody could see the connection because nothing was counting.
 #
 # So count, per file, and name the file that leaked in the run that leaked.
+#
+# Count the FNS, not the string `"name"`. The payload is `{fns, namespaces}` and
+# both carry a name, so the naive grep reported a package install's two leftover
+# NAMESPACES as "LEAKED 2 fn(s)" and sent me looking for a cascade bug that was
+# not there. An instrument that misnames what it measures is worse than none: it
+# spends the time you gave it to save.
 fn_count() {
   curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
        "$URL/api/graph/entities?scope=index" 2>/dev/null \
-    | grep -o '"name"' | wc -l
+    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get("fns") or []))' \
+       2>/dev/null || echo 0
+}
+# Namespaces leak too — a package install creates one per version — and they show
+# up in the sidebar tree of every file that runs after. Counted separately so the
+# report says which kind of row was left behind.
+ns_count() {
+  curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" \
+       "$URL/api/graph/entities?scope=index" 2>/dev/null \
+    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get("namespaces") or []))' \
+       2>/dev/null || echo 0
 }
 LEAKS=""
 
@@ -111,6 +127,7 @@ for f in $FILES; do
   echo "─── $f ───"
   FILE_START=$SECONDS
   FN_BEFORE="$(fn_count)"
+  NS_BEFORE="$(ns_count)"
   if ! wait_for_server; then
     WORST=1
     FAIL=$((FAIL+1))
@@ -168,9 +185,10 @@ for f in $FILES; do
   FILE_SECS=$((SECONDS - FILE_START))
   FILE_MEM="$(executor_mem)"
   FN_AFTER="$(fn_count)"
-  FN_LEAKED=$((FN_AFTER - FN_BEFORE))
+  NS_AFTER="$(ns_count)"
+  FN_LEAKED=$(( (FN_AFTER - FN_BEFORE) + (NS_AFTER - NS_BEFORE) ))
   if [ "$FN_LEAKED" -gt 0 ] 2>/dev/null; then
-    printf '  [%3ds  executor=%s]  \033[31mLEAKED %d fn(s) into the graph\033[0m\n' \
+    printf '  [%3ds  executor=%s]  \033[31mLEAKED %d entities into the graph\033[0m\n' \
       "$FILE_SECS" "$FILE_MEM" "$FN_LEAKED"
     LEAKS="$LEAKS$FN_LEAKED	$f
 "
@@ -181,7 +199,7 @@ for f in $FILES; do
     # errors with `.catch(() => {})`; patching each one invites a 38th. The
     # invariant belongs here, once: a test leaves the graph as it found it.
     WORST=1
-    FAILED_NAMES="$FAILED_NAMES $f(leaked-$FN_LEAKED-fns)"
+    FAILED_NAMES="$FAILED_NAMES $f(leaked-$FN_LEAKED)"
   else
     printf '  [%3ds  executor=%s]\n' "$FILE_SECS" "$FILE_MEM"
   fi

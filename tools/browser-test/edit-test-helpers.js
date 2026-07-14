@@ -383,7 +383,7 @@ function coreHttpRequest(method, url, headers, body, signal) {
 }
 
 
-async function nodeApi(method, path, body) {
+async function nodeApi(method, path, body, extraHeaders) {
   // `Connection: close` is THE fix for the 1.8 GB http-kit AsyncChannel
   // retention leak (heap dump 2026-06-21). With the default HTTP/1.1
   // keep-alive, every fetch leaves the channel + the response's byte
@@ -394,7 +394,10 @@ async function nodeApi(method, path, body) {
   // application-level cache. Forcing connection-close releases the
   // channel immediately after the response is sent; no accumulation,
   // no OOM cascade.
-  const headers = { 'Authorization': 'Bearer ' + AUTH, 'Connection': 'close' };
+  // `extraHeaders` carries `X-Graphden-Branch` for a test that works on a
+  // throwaway branch — the same header the editor's branch-aware fetch sends.
+  const headers = { 'Authorization': 'Bearer ' + AUTH, 'Connection': 'close',
+                    ...(extraHeaders || {}) };
   let payload;
   if (body !== undefined) {
     if (typeof body === 'string') {
@@ -443,8 +446,8 @@ async function nodeApi(method, path, body) {
 }
 
 
-async function nodeApiJson(method, path, body) {
-  const r = await nodeApi(method, path, body);
+async function nodeApiJson(method, path, body, extraHeaders) {
+  const r = await nodeApi(method, path, body, extraHeaders);
   if (!r.ok) {
     throw new Error('nodeApi ' + method + ' ' + path + ': HTTP ' + r.status);
   }

@@ -497,10 +497,3 @@ window.buildRootCreateButton = buildRootCreateButton;
 // sidebar's "hide empty namespaces" rule keeps such a namespace visible
 // so the in-progress create row isn't hidden out from under the user.
 window.hasActiveCreateIn = (nsId) => !!activeCreate && activeCreate.parentNsId === nsId;
-
-// True while ANY inline-create row is open. The row is user-owned,
-// transient state — the typed name and the server's rejection message
-// live only in that DOM node, so a background re-render of the tree
-// would silently wipe them. Callers that re-render on their own
-// schedule (rather than in response to the user) must check this first.
-window.hasActiveCreate = () => !!activeCreate;

@@ -137,6 +137,29 @@ window.graphdenTenancyActive = graphdenTenancyActive;
   };
 })();
 
+// HTMX does NOT go through `window.fetch` — 2.x issues XMLHttpRequests, so the
+// wrapper above never sees them and `editor-auth.js` had to bridge the Authorization
+// header separately. The branch header was never bridged with it, and every
+// htmx-driven MUTATION therefore wrote to the default branch no matter which branch
+// the user was standing on: install a package from the Packages panel while on
+// `feature-x` and its fns, its namespaces and its pin all landed on `main` — the
+// exact opposite of the branch-scoped pins the panel is built around. Same for
+// uninstall / update / fork / publish, and for the partial GETs, which showed
+// `main`'s pins while the branch chip said otherwise.
+//
+// Found by moving the packages e2e onto a throwaway branch: the copies kept turning
+// up on the default branch after the branch was deleted.
+//
+// Same rules as the fetch wrapper — internal paths only, nothing to say on `main`.
+document.body.addEventListener('htmx:configRequest', (evt) => {
+  const path = evt.detail?.path || '';
+  const isInternal = path.startsWith('/api/') || path.startsWith('/partials/'); // api-url-drift-allow: prefix discriminator, not a URL we fetch
+  const branch = getCurrentBranchName();
+  if (isInternal && branch !== DEFAULT_BRANCH) {
+    evt.detail.headers[BRANCH_HEADER] = branch;
+  }
+});
+
 // ============================================================================
 // UI — top-bar branch chip + branch CRUD popover
 // ============================================================================

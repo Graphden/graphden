@@ -27,6 +27,7 @@
     [graphden.storage.protocol.core :as sp]
     [graphden.system.tenancy-router :as tr]
     [graphden.versioning.storage.core :as vs]
+    [graphden.versioning.storage.merge :as vmerge]
     [graphden.versioning.storage.resolution :as vres]))
 
 
@@ -219,25 +220,14 @@
         (apply [_ _] (java.util.concurrent.locks.ReentrantLock.))))))
 
 
-(defn- branch-has-own-content?
-  "True iff `branch-id` has at least one own version row OR is the
-   target of at least one branch-merge. When neither is the case the
-   branch's resolved view is identical to its base, so we can skip
-   the full compile and reuse the base ctx's templates.
-
-   Each probe runs with `:limit 1` so the version tables don't
-   marshal thousands of rows back to Clojure just to check
-   existence — `or` short-circuits on the first hit anyway, but
-   without the limit a single hit on `:fn-version` for a branch
-   with 10k own version rows would return all 10k."
+(defn- branch-is-merge-target?
+  "True iff `branch-id` is the target of at least one branch-merge — the half of
+   the old `branch-has-own-content?` a delta compile can't cheaply seed (the
+   merged fns own their version rows on the SOURCE branch), so a merge-target
+   branch takes the full-rebuild path."
   [base-storage branch-id]
-  (let [any-row? (fn [entity where]
-                   (boolean (seq (sp/query-entities base-storage entity where {:limit 1}))))]
-    (or (any-row? :fn-version {:branch-id branch-id})
-        (any-row? :fn-slot-version {:branch-id branch-id})
-        (any-row? :binding-version {:branch-id branch-id})
-        (any-row? :binding-list-item-version {:branch-id branch-id})
-        (any-row? :branch-merge {:target-branch-id branch-id}))))
+  (boolean (seq (sp/query-entities base-storage :branch-merge
+                                   {:target-branch-id branch-id} {:limit 1}))))
 
 
 (defn- build-actual-entry!
@@ -252,12 +242,37 @@
   [{:keys [base-ctx handler-fn-id]} branch-id]
   (let [branch-ctx (build-branch-ctx base-ctx branch-id)
         base-storage (vs/unwrap (:storage base-ctx))
-        own-content? (branch-has-own-content? base-storage branch-id)
+        merge-target? (branch-is-merge-target? base-storage branch-id)
+        own-fn-ids (when-not merge-target?
+                     (vmerge/merge-affected-fn-ids base-storage branch-id))
         base-registry (some-> (:compiled-registry base-ctx) deref)]
-    (if (and (not own-content?) base-registry)
-      ;; Fast path: graph identical → reuse base registry.
+    (cond
+      ;; 1. Identical to base → reuse the base registry directly.
+      (and base-registry (not merge-target?) (empty? own-fn-ids))
       (cr/instantiate-from-templates! base-ctx branch-ctx)
-      ;; Slow path: branch differs from base → full compile.
+
+      ;; 2. Divergent only by own version rows → delta-compile on top of base.
+      ;;    A branch differs from its base by a handful of fns; a full rebuild of
+      ;;    the whole ~3700-fn graph for that was measured at ~57s and BLOCKS the
+      ;;    executor (a divergent branch whose ctx was evicted from the LRU pays it
+      ;;    on next access — the `compile-all` cache is keyed by graph shape, so a
+      ;;    branch edit changes the shape and misses). Reuse the base's closures
+      ;;    for every unchanged fn; recompile only the fns this branch overrides
+      ;;    (+ their reverse-dep closure) against the branch's view.
+      (and base-registry (not merge-target?) (seq own-fn-ids))
+      (do
+        ;; Seed the branch registry + reverse-dep index from the base, but NOT the
+        ;; base graph-cache — leave it empty so `delta-recompile!` reads the
+        ;; BRANCH's resolved graph and compiles the overrides against it.
+        (reset! (:compiled-registry branch-ctx) base-registry)
+        (when-let [src-deps (some-> (:compile-deps base-ctx) deref)]
+          (when-let [holder (:compile-deps branch-ctx)]
+            (reset! holder src-deps)))
+        (cr/delta-recompile! branch-ctx (set own-fn-ids)))
+
+      ;; 3. Merge target (merged fns own their rows on the source, not cheaply
+      ;;    seedable here), or cold start with no base registry → full compile.
+      :else
       (cr/rebuild! branch-ctx))
     {:ctx branch-ctx
      :handler (ring-callable-for-ctx branch-ctx handler-fn-id)

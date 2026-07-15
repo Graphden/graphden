@@ -497,3 +497,59 @@
       (finally (sp/close storage)))
     (testing "test cleanup: ensure noop-fn was created (sanity for the fixture)"
       (is (some? noop-fn)))))
+
+
+(declare branch-delta-build-executes-overrides-impl!)
+
+
+(deftest ^:integration branch-delta-build-executes-overrides-test
+  ;; Isolated registry + rich-types: this test registers `:add` and compiles a
+  ;; composed fn, which would otherwise leave that fn's rich-type in the process-
+  ;; global registry and corrupt a sibling NS (`branches-graph-test`) that compiles
+  ;; its OWN `:add` — surfaced as a resolve-arg NPE only under the parallel gate.
+  (exec/with-clean-registry
+    (fn []
+      (exec/with-isolated-rich-types
+        (fn []
+          (branch-delta-build-executes-overrides-impl!))))))
+
+
+(defn- branch-delta-build-executes-overrides-impl!
+  []
+  ;; A branch that DIVERGES from its base (own version rows) used to rebuild the
+  ;; whole compiled graph on its first ctx build — ~57s, executor-blocking, hit
+  ;; whenever the branch's ctx had been evicted from the LRU. The build now
+  ;; delta-compiles: it reuses the base's closures for every unchanged fn and
+  ;; recompiles ONLY the fns this branch overrides.
+  ;;
+  ;; The risk of a delta is CORRECTNESS: the branch must run ITS overridden
+  ;; definition, not the base closure it copied. So bind the composed `add` to
+  ;; 1+2 on main, override it to 10+2 on a feature branch, force the branch ctx to
+  ;; build through the delta path, and assert each side computes its own value.
+  (let [storage (create-versioned-storage!)
+        _ (exec/register-base-fn! :noop-handler (fn [_args _ctx] {:status 200}))
+        _ (sp/create-entity storage :fn {:name "noop-handler" :parent-ids []})
+        {:keys [composed-fn slot-a slot-b]} (setup/setup-add-function! storage)
+        cid (:id composed-fn)
+        a-binding (setup/bind-value! storage cid (:id slot-a) 1)
+        _ (setup/bind-value! storage cid (:id slot-b) 2)
+        base-ctx (ctx/create-context {:storage storage
+                                      :base-fns (exec/get-default-registry)})]
+    (try
+      (testing "main computes 1 + 2 = 3 (and warms the base registry)"
+        (is (= 3 (exec/execute base-ctx cid {}))))
+      (let [feat (vs/create-branch! storage "delta-feat")
+            branch-storage (vs/->VersionedStorage (vs/unwrap storage) (:id feat))
+            ;; Override slot-a to 10 on the feature branch — a binding-version row
+            ;; on `feat`, which makes the branch diverge (own content).
+            _ (sp/update-entity branch-storage :binding (:id a-binding)
+                                {:value 10 :value-present true})
+            router (br/create-router base-ctx "noop-handler")
+            feat-ctx (br/ctx-for router (:id feat))]
+        (testing "the branch ctx delta-built (base registry was warm, branch had own fns)"
+          (is (contains? @(:handlers router) (:id feat))))
+        (testing "the branch runs ITS override: 10 + 2 = 12"
+          (is (= 12 (exec/execute feat-ctx cid {}))))
+        (testing "and main still computes 3 — the delta did not corrupt the base"
+          (is (= 3 (exec/execute base-ctx cid {})))))
+      (finally (sp/close storage)))))

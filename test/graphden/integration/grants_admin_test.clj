@@ -41,6 +41,10 @@
              ;; `tenancy-admin` carries the grants route now (route-collection
              ;; seam); type-check ON so the addon package's fn-defs are swept
              ;; too. The schema has NO `:grant` entity, so the panel degrades.
+             ;; NOT `bootstrap-with-cached-sweep!`: this is the only sweep of the
+             ;; `tenancy-admin` set (faas_app bootstraps it with type-check OFF),
+             ;; so a cached snapshot would have no sibling to amortize against —
+             ;; it'd pay an extra golden-clone + sweep for nothing. Sweep inline.
              _ (sys/bootstrap-from-packages! storage ["core" "web" "app" "tenancy-admin"]
                                              {:skip-type-check? false})
              ctx (exec/create-context

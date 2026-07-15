@@ -9,8 +9,8 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
-    [graphden.system.core :as sys]
     [graphden.system.demo-branches :as db]
+    [graphden.test-infra.shared-bootstrap :as sb]
     [graphden.versioning.storage.core :as vs]))
 
 
@@ -23,8 +23,7 @@
   (fn [t]
     (exec/with-clean-registry
       #(let [storage (setup/create-versioned-test-storage)]
-         (sys/bootstrap-from-packages! storage ["core" "web" "app"]
-                                       {:skip-type-check? false})
+         (sb/bootstrap-with-cached-sweep! storage ["core" "web" "app"])
          (try
            (binding [*storage* storage] (t))
            (finally (sp/close storage)))))))

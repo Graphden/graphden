@@ -29,7 +29,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
-    [graphden.system.core :as sys]))
+    [graphden.test-infra.shared-bootstrap :as sb]))
 
 
 (def ^:dynamic *router* nil)
@@ -44,8 +44,7 @@
   (fn [t]
     (exec/with-clean-registry
       #(let [storage (setup/create-versioned-test-storage)
-             _ (sys/bootstrap-from-packages! storage ["core" "web" "app"]
-                                             {:skip-type-check? false})
+             _ (sb/bootstrap-with-cached-sweep! storage ["core" "web" "app"])
              ;; Auth seam (§3.0): inject a single-token provider with the
              ;; test token instead of the old `:env`-override trick — auth
              ;; now reads `(:auth-provider ctx)`, captured at construction.

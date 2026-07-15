@@ -26,7 +26,7 @@
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
     [graphden.system.branch-router :as br]
-    [graphden.system.core :as sys]))
+    [graphden.test-infra.shared-bootstrap :as sb]))
 
 
 (def ^:dynamic *router* nil)
@@ -54,8 +54,7 @@
              ;; `:update-in` then classcast on the wrapped
              ;; callable. Production never skips the sweep, so
              ;; this test mirrors production.
-             _ (sys/bootstrap-from-packages! storage ["core" "web" "app"]
-                                             {:skip-type-check? false})
+             _ (sb/bootstrap-with-cached-sweep! storage ["core" "web" "app"])
              ;; Auth seam (§3.0): inject a single-token provider with the
              ;; test token. Auth now reads `(:auth-provider ctx)` (captured
              ;; at construction), so the old `:env`-override trick is gone.

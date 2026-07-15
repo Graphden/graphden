@@ -31,6 +31,7 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.registry :as registry]
+    [graphden.executor.registry.core :as registry-core]
     [graphden.packages.records :as records]
     [graphden.schema.executions.schema :as es]
     [graphden.schema.graph.schema :as gds]
@@ -159,6 +160,75 @@
         ns-config (sc/ensure-ns-database! ns-ident db-name)]
     {:db-config ns-config
      :bootstrap bootstrap}))
+
+
+(def ^:private swept-state
+  "{pkg-vec → rich-types-map}. The topological type-check sweep inside
+   `bootstrap-from-packages!` is the single most expensive fixture step
+   (~40 s vs ~14 s for the storage-sync + seed passes), and — like the
+   golden bootstrap — it is *pure on its inputs*: the same package set
+   yields the same computed rich-types. So a full-system NS need not
+   re-run it; we run it ONCE per JVM × package-set and cache the
+   resulting map here."
+  (atom {}))
+
+
+(defn ensure-swept-rich-types!
+  "Idempotent: return the rich-types map a full type-check sweep of
+   `packages` produces. First caller per JVM × package-set pays the
+   ~40 s sweep on a throwaway golden clone; the rest read the cache.
+
+   The map is a snapshot of `*rich-types-override*` AFTER the sweep —
+   the global-registry seed PLUS every composed fn-def's computed
+   return / effects. Seed a fresh isolated override with it (see
+   `bootstrap-with-cached-sweep!`) and the compile that follows sees
+   the identical types running the sweep inline would have produced.
+
+   Sweeping in a bound `*rich-types-override*` keeps the capture off
+   the process-global registry, so it can't leak into a sibling NS."
+  [packages]
+  (let [k (vec packages)]
+    (or (get @swept-state k)
+        (locking lock
+          (or (get @swept-state k)
+              (let [{:keys [db-config]} (ensure-ns-database-from-golden!
+                                          "swept-rich-types-capture" packages)
+                    storage (pg/create-storage db-config)]
+                (try
+                  (let [versioned (vs/wrap-with-versioning storage "main")
+                        captured (binding [registry-core/*rich-types-override*
+                                           (atom (registry-core/snapshot-for-isolation))]
+                                   ;; Golden clone is already synced; this re-sync is
+                                   ;; idempotent — we run it only to reach the sweep,
+                                   ;; which populates the bound override.
+                                   (sys/bootstrap-from-packages! versioned packages
+                                                                 {:skip-type-check? false})
+                                   @registry-core/*rich-types-override*)]
+                    (swap! swept-state assoc k captured)
+                    captured)
+                  (finally
+                    (sp/close storage)))))))))
+
+
+(defn bootstrap-with-cached-sweep!
+  "Drop-in for `(bootstrap-from-packages! storage packages
+   {:skip-type-check? false})` inside a `with-isolated-rich-types`
+   fixture: runs the storage-sync + seed passes but SKIPS the ~40 s
+   topological sweep, then overwrites the ambient isolated
+   `*rich-types-override*` with the cached swept snapshot for
+   `packages` (`ensure-swept-rich-types!`). The compile that follows
+   sees the same computed types the inline sweep would have produced,
+   for ~40 s less per NS after the first.
+
+   MUST run inside a bound `*rich-types-override*` (the isolation
+   fixture) — it `reset!`s that atom, and would otherwise clobber the
+   process-global registry."
+  [storage packages]
+  (assert (some? registry-core/*rich-types-override*)
+          "bootstrap-with-cached-sweep! must run inside with-isolated-rich-types")
+  (sys/bootstrap-from-packages! storage packages {:skip-type-check? true})
+  (reset! registry-core/*rich-types-override* (ensure-swept-rich-types! packages))
+  nil)
 
 
 (defn drop-all-golden-databases!

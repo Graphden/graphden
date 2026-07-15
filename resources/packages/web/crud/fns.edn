@@ -2429,11 +2429,13 @@
   ;; builds a human-readable message with plurality, returns nil when
   ;; the ns is empty (or when target isn't a :ns at all).
   ;;
-  ;; `:ns` is NON-versioned (immutable parent-id), so the child-ns
-  ;; lookup goes via `:pg-query` directly. `:fn` IS versioned —
-  ;; `:resolve-fn-rows` over `:storage-query-identities :where {:namespace-id …}`
-  ;; (push the identity filter into SQL since `:namespace-id` is on
-  ;; the identity row).
+  ;; Both child lookups are CROSS-BRANCH, because a namespace delete is
+  ;; global (the `ns` row is non-versioned). The child-`:ns` lookup is a
+  ;; raw `:pg-query` on the (non-versioned) `ns` table. The child-`:fn`
+  ;; lookup asks "is any fn in this ns live on ANY branch?" via a
+  ;; per-(fn,branch)-latest `DISTINCT ON` over `fn-version` (see
+  ;; `:_delete-ns-child-fns` below); a current-branch-only resolve would
+  ;; miss fns live on a sibling/child branch and orphan them.
   {:name :_delete-ns-non-empty-reason
    :description "Compute the human-readable reason when a namespace delete is rejected for being non-empty; nil otherwise."
    :parent :if
@@ -2506,22 +2508,91 @@
    :return-type :ns-row-shape
    :args {:row {:as :item} :entity-type {:value "ns"}}}
 
-  ;; `:fn` rows: versioned, push `:namespace-id` filter into the
-  ;; identity SQL (identity field), then resolve the version overlay.
+  ;; `:fn` rows — CROSS-BRANCH liveness. A namespace delete is GLOBAL
+  ;; (the `ns` row is NON-versioned) and columnar `:ref` fields carry no
+  ;; DB-level FK, so a fn that is live on ANY branch — not only the
+  ;; current one — would be orphaned (dangling `:namespace-id`) by the
+  ;; delete. Resolving over `:current-branch-chain` alone (the old path)
+  ;; missed fns live on a sibling/child branch and let the delete through.
+  ;;
+  ;; Property that collapses "live on some branch?" to a single query:
+  ;; every branch carrying a version row is a valid tip of its own chain,
+  ;; and resolution over a tip's chain takes that branch's OWN latest
+  ;; version first. So a fn is live-somewhere iff SOME branch's latest
+  ;; (by `created-at`) version of it is not a tombstone. `DISTINCT ON
+  ;; (fn-id, branch-id) … ORDER BY … created-at DESC` yields that
+  ;; per-(fn,branch) latest; keep the live ones (nil `:deleted-at`),
+  ;; dedupe by fn-id. The candidate fn-id set is scoped in SQL by a
+  ;; `namespace-id` subquery over the (global) `:fn` identity table, so
+  ;; an empty namespace issues an empty `IN (…)` and blocks nothing.
   {:name :_delete-ns-child-fns
-   :parent :resolve-fn-rows
-   :args {:identities :_delete-ns-child-fn-identities
-          :branch-chain :current-branch-chain}}
+   :description "Distinct ids of fns in the target namespace that are live on at least one branch. Non-empty ⇒ deleting the (global, non-versioned) namespace would orphan a live fn on some branch."
+   :parent :distinct
+   :args {:coll :_delete-ns-live-fn-ids}}
 
-  {:name :_delete-ns-child-fn-identities
-   :parent :storage-query-identities
-   :args {:entity-type {:value "fn"}
-          :where :_delete-ns-child-fn-where}}
+  {:name :_delete-ns-live-fn-ids
+   :parent :map
+   :args {:func :_delete-ns-fn-version-fn-id
+          :coll :_delete-ns-live-fn-versions}}
 
-  {:name :_delete-ns-child-fn-where
-   :parent :zipmap
-   :args {:keys [{:value :namespace-id}]
-          :vals [:_delete-target-id]}}
+  {:name :_delete-ns-fn-version-fn-id
+   :description "HOF map-fn: the `:fn-id` of a per-(fn,branch) latest version row."
+   :parent :get
+   :args {:coll {:as :item} :key {:value :fn-id} :default nil}}
+
+  {:name :_delete-ns-live-fn-versions
+   :description "Per-(fn,branch) latest versions filtered to the live (non-tombstone) ones."
+   :parent :filter
+   :args {:pred :_delete-ns-fn-version-live?
+          :coll :_delete-ns-latest-fn-versions}}
+
+  {:name :_delete-ns-fn-version-live?
+   :description "HOF filter-pred: true when the version row is live (nil `:deleted-at`)."
+   :parent :nil?
+   :args {:value :_delete-ns-fn-version-deleted-at}}
+
+  {:name :_delete-ns-fn-version-deleted-at
+   :parent :get
+   :args {:coll {:as :item} :key {:value :deleted-at} :default nil}}
+
+  {:name :_delete-ns-latest-fn-versions
+   :parent :map
+   :args {:func :_delete-ns-fn-version-decode
+          :coll :_delete-ns-latest-fn-versions-raw}}
+
+  {:name :_delete-ns-fn-version-decode
+   :parent :decode-row
+   :return-type :fn-version-row-shape
+   :args {:row {:as :item} :entity-type {:value "fn-version"}}}
+
+  {:name :_delete-ns-latest-fn-versions-raw
+   :parent :pg-query
+   :args {:hsql :_delete-ns-latest-fn-versions-hsql}}
+
+  ;; DISTINCT ON (fn-id, branch-id) * FROM fn-version
+  ;;   WHERE fn-id IN (SELECT id FROM fn WHERE namespace-id = <target>)
+  ;;   ORDER BY fn-id, branch-id, created-at DESC
+  {:name :_delete-ns-latest-fn-versions-hsql
+   :parent :assoc
+   :args {:map {:value {:select-distinct-on [[:fn-id :branch-id] :*]
+                        :from :fn-version
+                        :order-by [:fn-id :branch-id [:created-at :desc]]}}
+          :key {:value :where}
+          :value :_delete-ns-latest-fn-versions-where}}
+
+  {:name :_delete-ns-latest-fn-versions-where
+   :parent :vec
+   :args {:coll [{:value :in} {:value :fn-id} :_delete-ns-child-fn-id-subquery]}}
+
+  {:name :_delete-ns-child-fn-id-subquery
+   :parent :assoc
+   :args {:map {:value {:select [:id] :from :fn}}
+          :key {:value :where}
+          :value :_delete-ns-child-fn-id-subquery-where}}
+
+  {:name :_delete-ns-child-fn-id-subquery-where
+   :parent :vec
+   :args {:coll [{:value :=} {:value :namespace-id} :_delete-target-id]}}
 
   ;; Message build. Mirrors the original:
   ;;   "Namespace contains <ns-clause><and><fns-clause> — remove the contents first."

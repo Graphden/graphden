@@ -1,0 +1,757 @@
+;; Developer code-tour — source of truth. Generate with `bb devtour`.
+;; See docs/devtour/README.md for the format and how to add a block.
+;;
+;; Each step anchors on {:ns <namespace> :defn <symbol>} — NEVER a line number.
+;; Variants: {:file "resources/packages/.../impls.clj" :defn <sym>} for package
+;; impls outside src/, and {:defn ig/init-key :dispatch <val>} for a defmethod.
+;; The generator bakes the anchored form's real source into index.html; CI
+;; (`bb devtour-check`) fails if an anchor stops resolving or the HTML drifts.
+{:title "Graphden — developer tour"
+ :intro
+ "Welcome. This is a guided read of the graphden codebase for someone who
+  just joined and needs to find their feet in the whole system — not the
+  user tutorial (that lives in `docs/tutorial/` and is about *using* the
+  editor), but the host code that makes it run.
+
+  The system splits into a handful of relatively independent **blocks**
+  (left). Read them roughly top-to-bottom: each block's `after:` line names
+  what it assumes you have already seen. Start with the **Executor** — it is
+  the spine everything else hangs off — then follow the dependency order:
+  Storage, then Branches, Types, CRUD, Packages, Web, Services, and
+  Multi-tenancy.
+
+  Every step shows you the **actual source** of one function, pulled straight
+  from the file it lives in. When a step points you at code in another block,
+  use the *see also* chips — **Back** always returns you along the path you
+  actually walked."
+
+ :blocks
+ [{:id :executor
+   :title "Executor — how a fn runs"
+   :status :toured
+   :summary "The spine: turn a graph 'description of a computation' into a value."
+   :paths ["src/graphden/executor/"]
+   :after []
+   :steps
+   [{:ns graphden.executor.interface :defn execute
+     :say "**Start here.** `execute` is the public front door of the whole
+           system. A caller hands it an execution *context*, a `fn-id` — the id
+           of a row in the graph that *describes* a computation — and a map of
+           free args. This ns is a thin, validating façade: it checks the args
+           shape and delegates to the real machinery in `compile-runtime`.
+           Everything below is how that graph *description* becomes a value."
+     :see [[:executor "create-context"]]}
+
+    {:ns graphden.executor.compile-runtime :defn execute
+     :say "The dispatch heart of the hot path. It checks the cancellation /
+           effect / execute-guard gates, pulls the **compiled registry** out of
+           the context, looks up the closure for this `fn-id` (or throws
+           fn-not-found), translates the caller's name-keyed args into the dual
+           slot-id+name shape the compiled code expects, and finally calls
+           `(closure translated ctx)`. This is the moment *execute a fn* becomes
+           *call a precompiled closure*."
+     :see [[:executor "registry"]]}
+
+    {:ns graphden.executor.context :defn create-context
+     :say "Builds the `ExecutionContext` the previous step reads from. It
+           carries the storage handle, the `:base-fns` impl registry
+           (snapshotted from the global default), a lazily-filled
+           `:compiled-registry` holder, the graph/deps caches, and the
+           authz/effect seams. Because scoping (e.g. which branch) lives here,
+           the *same* `fn-id` run in two contexts can resolve to different
+           code — this is where that happens."}
+
+    {:ns graphden.executor.compile-runtime :defn registry
+     :say "Returns the `{fn-id -> closure}` map from the context holder. On a
+           cold holder it rebuilds on demand under an invalidation lock, with a
+           double-checked read so concurrent callers coalesce onto one rebuild
+           instead of stampeding. This is the lazy **compile-once, reuse-forever**
+           registry the executor actually runs against."
+     :see [[:executor "rebuild!"]]}
+
+    {:ns graphden.executor.compile-runtime :defn rebuild!
+     :say "The compile-at-startup pipeline in one form: `read-graph` from
+           storage, then `build-lookups`, then `compile-all`; finally it primes
+           the graph/deps caches and resets the registry holder. This is the
+           seam where **code = graph in DB** turns into runnable Clojure
+           closures. The next few steps open up each stage it calls."
+     :see [[:executor "build-lookups"] [:executor "compile-all"]]}
+
+    {:ns graphden.executor.composition.core :defn sync-fns-to-storage!
+     :say "The opposite direction — and the reason there is a graph to read at
+           all. Authored fn-defs (from packages) are reconciled into fn / slot /
+           binding rows in storage here. So the graph that `rebuild!` reads was
+           itself *written* by this composition layer from source fn-defs. Read
+           it to see how declarations become persisted graph entities."}
+
+    {:ns graphden.executor.compile.lookups :defn build-lookups
+     :say "Indexes the raw graph rows — fns, slots, fn-slots, bindings,
+           list-items — into the O(1) maps every compile helper consumes
+           (`:fn-map`, `:slot-map`, `:bindings-by-fn`, the inheritance-chain
+           cache, …). This is the in-memory materialization of the DB graph that
+           the whole compile pass walks over."}
+
+    {:ns graphden.executor.compile.lookups :defn root-fn
+     :say "Walks a composed fn's `parent-ids` inheritance chain up to the
+           parentless **root** that owns the slots and carries a registered
+           impl. This is the base-fn resolution step: how an arbitrary composed
+           `fn-id` maps to the primitive whose Clojure impl will actually run."}
+
+    {:ns graphden.executor.compile.bindings :defn collect-bindings
+     :say "Classifies each of a fn's root slots (via `classify-slot`) into a
+           `:value` / `:free` / `:ref` / `:seq` / `:secret-value` entry,
+           memoised on the lookups. This classification is the pivot the code
+           generator switches on next — the *shape* of every argument is decided
+           here, once, at compile time rather than per execution."
+     :see [[:executor "arg-builder"]]}
+
+    {:ns graphden.executor.compile-eager :defn compile-all
+     :say "Topologically orders every impl-backed fn and compiles each in
+           dependency order into `{fn-id -> (fn [fa ctx])}`, cached process-wide
+           by (graph-shape × base-fn set). Dependency order matters: by the time
+           a parent compiles, its children's callables already exist to be
+           wired in."
+     :see [[:executor "compile-fn"]]}
+
+    {:ns graphden.executor.compile-eager :defn compile-fn
+     :say "Produces one fn's runtime closure `(fn [fa ctx])`. It turns each
+           classified binding into a *builder*, wires env-bindings and
+           rename-aliases, and at call time assembles the args map and invokes
+           `(impl args ctx)`. This is the concrete anatomy of a single compiled
+           graph node."
+     :see [[:executor "arg-builder"] [:executor "resolve-impl"]]}
+
+    {:ns graphden.executor.compile-eager :defn arg-builder
+     :say "Emits the per-binding `(fn [fa ctx])`: `:value` becomes a constant,
+           `:free` reads the slot-id (with a name fallback), `:ref` becomes a
+           `thunk`/delay that **defers** the child call, `:seq` becomes a lazy
+           seq. This is the origin of graphden's laziness — refs are *wrapped,
+           not evaluated*, so native Clojure `if`/`and`/`or` short-circuit for
+           free without the executor knowing their names."
+     :see [[:executor "resolve-arg"]]}
+
+    {:ns graphden.executor.compile-eager :defn resolve-impl
+     :say "Looks the base-fn's Clojure impl out of `lookups[:base-fns]` by the
+           root fn's name, throwing `:compile/missing-impl` on a gap. This is the
+           concrete join between a graph node and the actual code that computes
+           it — the point where the graph description meets a real function."
+     :see [[:executor "defbase"]]}
+
+    {:ns graphden.executor.defbase :defn defbase
+     :say "The macro base-fn authors use. It rewrites a body that names its args
+           as bare symbols into `(defn name [__args ctx] …)`, where each symbol
+           reads through `resolve-arg`. This explains why the impls that
+           `resolve-impl` finds look like ordinary Clojure even though their
+           arguments arrive as a compiled map."
+     :see [[:executor "resolve-arg"]]}
+
+    {:ns graphden.executor.runtime :defn resolve-arg
+     :say "The read-side of laziness. Inside an impl this forces a `thunk`
+           (calling it once), derefs an `IDeref`/`delay`, or returns a plain
+           value untouched. This is where a deferred `:ref` argument actually
+           gets evaluated — at the moment, and only if, the impl reads it. Pair
+           it with `arg-builder`, which created the thunk."
+     :see [[:executor "arg-builder"]]}
+
+    {:ns graphden.executor.compile-eager :defn call-with-cache
+     :say "Closes the loop. Child-callable invocations are memoised for the
+           duration of one top-level `execute`, keyed by `[ref-id
+           projected-free-args]` in a per-call map (with a `::nil` sentinel and a
+           size cap). This is how the lazy graph avoids recomputing the same
+           sub-result and delivers a single cached value back up to the caller —
+           the DRY principle, enforced at runtime."}]}
+
+  {:id :storage
+   :title "Storage & the graph"
+   :status :toured
+   :summary "How the graph is stored and traversed — Postgres, recursive CTEs,
+             the StorageCRUD / ExecutionGraph protocols."
+   :paths ["src/graphden/storage/" "src/graphden/schema/"]
+   :after [:executor]
+   :steps
+   [{:ns graphden.storage.protocol.core :defn Storage
+     :say "The storage layer starts with three protocols; this is the first.
+           `Storage` is the lifecycle contract (`initialize` / `close`) every
+           backend implements, binding a concrete store to a `DataSchema`
+           before any graph can be read or written."}
+    {:ns graphden.storage.protocol.core :defn StorageCRUD
+     :say "The row-level contract: `read-entity`, `query-entities`,
+           `create-entity`, and friends. Every graph read the executor does
+           bottoms out in these calls — learn this shape and you know how the
+           whole system touches the database."}
+    {:ns graphden.storage.protocol.core :defn ExecutionGraph
+     :say "One method: `resolve-execution-graph` — given a root fn-id, return
+           its entire reachable subgraph in a single shot. This is the seam the
+           executor's `rebuild!` reads through, and it is implemented twice
+           below: a backend-agnostic version and a Postgres-optimized one."
+     :see [[:executor "rebuild!"]]}
+    {:ns graphden.schema.protocol.protocol :defn DataSchema
+     :say "What a schema exposes: the entities, their fields, and the field
+           types (`:ref`, `:enum`, `:union`). Rows are shaped by this vocabulary
+           before storage ever sees them — so read it before the row-storage
+           code below."}
+    {:ns graphden.schema.graph.schema :defn extend-builder
+     :say "Where the graph model is actually declared: the `ns` / `fn` / `slot`
+           / `binding` / `binding-list-item` entities and the `:ref` edges
+           between them. This is the concrete table + foreign-key layout that
+           every traversal walks."}
+    {:ns graphden.schema.malli.schema :defn make-entity-schema
+     :say "Turns a field map into a closed malli `:map` (nullable field →
+           optional key). The concrete link between a schema's field-spec and
+           the validated shape of a stored row."}
+    {:ns graphden.storage.protocol.graph :defn ExecutionGraphResult
+     :say "The record every resolver returns: the entity collections plus
+           by-fn / by-binding indexes. Know this shape first and the two
+           resolvers below read easily — they all just fill it in."}
+    {:ns graphden.storage.protocol.graph :defn ->execution-graph
+     :say "Builds that record and its O(1) convenience indexes — the shared
+           `assemble the result` step both backends funnel into."}
+    {:ns graphden.storage.protocol.graph :defn process-fn-node
+     :say "Expands one fn during traversal, extracting its outgoing edges:
+           parent-ids, base / element / return-type, and binding + list-item
+           `ref-fn-id`s. This function IS the authoritative definition of what
+           counts as a graph edge."}
+    {:ns graphden.storage.protocol.graph :defn resolve-execution-graph-bfs
+     :say "The backend-agnostic BFS driver: keep calling `process-fn-node`
+           until the reachable closure is exhausted. This is the reference
+           algorithm the Postgres recursive CTE mirrors."}
+    {:ns graphden.storage.protocol.generic-graph :defn resolve-execution-graph
+     :say "The default `ExecutionGraph` implementation — it wires the
+           `StorageCRUD` loaders into the BFS. Correct on any backend, but it
+           costs ~4N round-trips, which is exactly what motivates the Postgres
+           specialization next."
+     :see [[:storage "StorageCRUD"]]}
+    {:ns graphden.storage.postgres.core :defn PostgresStorage
+     :say "The concrete Postgres backend. Its `ExecutionGraph` extension
+           delegates to the Postgres resolver instead of the generic BFS —
+           showing how a backend overrides the default path when it can do
+           better."}
+    {:ns graphden.storage.postgres.graph :defn reachable-fns-sql
+     :say "The `WITH RECURSIVE` CTE that walks every outgoing edge from the
+           seed fn in one statement and returns the reachable `fn.id` set. This
+           is the heart of the recursive-CTE traversal, mirroring in SQL exactly
+           the edge list that `process-fn-node` computes in Clojure."
+     :see [[:storage "process-fn-node"]]}
+    {:ns graphden.storage.postgres.graph :defn resolve-execution-graph
+     :say "The optimized resolver: run the CTE to get reachable ids, enforce
+           the graph-size cap, bulk-load fn / slot / binding rows with five
+           `IN`-clause queries, and hand off to `->execution-graph`. O(1)
+           round-trips versus the generic O(N) — the payoff of the whole
+           protocol split."
+     :see [[:storage "->execution-graph"]]}]}
+
+  {:id :versioning
+   :title "Branches & versioning"
+   :status :toured
+   :summary "The VersionedStorage decorator, per-branch resolution, diff/merge
+             and branch-local? propagation."
+   :paths ["src/graphden/versioning/" "src/graphden/system/branch_router.clj"]
+   :after [:storage]
+   :steps
+   [{:ns graphden.versioning.storage.core :defn wrap-with-versioning
+     :say "The entry point: take any base storage, ensure a `main` branch
+           exists, and return a `VersionedStorage` bound to it. Start here to
+           see how the entire versioning layer is bolted onto the plain storage
+           from the previous block."}
+    {:ns graphden.versioning.storage.core :defn VersionedStorage
+     :say "The decorator record itself. It implements every storage protocol,
+           delegating non-versioned entities straight to the base storage and
+           intercepting versioned ones — reads resolve to a branch view, writes
+           append version rows. Grasp this structure before anything else here."}
+    {:ns graphden.versioning.storage.resolution :defn entity-config
+     :say "The authoritative map of WHICH entities are versioned (fn / fn-slot
+           / binding / binding-list-item) and how each splits across two tables:
+           `version-data-fields` live in the version table, identity fields stay
+           on the base row. Everything downstream keys off this config."}
+    {:ns graphden.versioning.storage.resolution :defn resolve-version
+     :say "The public per-branch read: for one entity, load its version chain,
+           merge in a single batched pass, and return the winning version (nil
+           on a tombstone). This is how a plain read becomes branch-aware."}
+    {:ns graphden.versioning.storage.resolution :defn collect-branch-chain
+     :say "The branch-chain walk: `[branch → parent → … → root]` via
+           `:base-branch-id`, memoised process-wide. This inheritance backbone
+           is what every resolve and cache-invalidation consults to know which
+           branches a read can see."}
+    {:ns graphden.versioning.storage.resolution :defn resolve-version-from-cache
+     :say "The in-memory chain walk the resolver actually runs: at each branch
+           level combine own-latest with merge candidates, pick the greatest
+           `effective-ts`, and recurse to the parent. One tested algorithm shared
+           by both single-entity and whole-graph reads."}
+    {:ns graphden.versioning.branch-local :defn effective-branch-local?
+     :say "Monotonic-OR over the `:parent-ids` closure: a fn (or ANY ancestor)
+           marked `:branch-local? true` is local forever. The resolver's merge
+           filter calls this so runtime-config fns — web-server port, vault
+           path, cron schedule — never leak across branches on merge."}
+    {:ns graphden.versioning.storage.core :defn check-list-item-position-collisions!
+     :say "The list-item position-collision guard. A cross-branch base index on
+           `(binding-id, position)` would wrongly block divergence, so per-branch
+           uniqueness is enforced here in the resolved view instead — a subtle
+           invariant the write path defends with an advisory lock."}
+    {:ns graphden.versioning.storage.merge :defn diff-branches
+     :say "The branch-symmetric resolved-view diff: gather every entity touched
+           on either side's visibility set, resolve both, and report
+           added/modified. The simplest read-only comparison — it precedes the
+           conflict-oriented framing below."}
+    {:ns graphden.versioning.storage.merge :defn detect-conflicts
+     :say "Finds entities modified on BOTH branches after the computed fork
+           point (skipping branch-local fns). This introduces fork-point
+           reasoning and defines exactly what a merge must resolve before it can
+           proceed."}
+    {:ns graphden.versioning.storage.merge :defn merge-branch!
+     :say "The merge itself: assert conflicts are resolved, then atomically
+           write ONE `branch-merge` record — which makes the source's versions
+           visible through resolution, copying no rows — plus any resolution
+           overrides. The payoff step tying resolution and conflict detection
+           together."}
+    {:ns graphden.system.branch-router :defn build-branch-ctx
+     :say "Builds a fresh live `ExecutionContext` whose storage is a
+           `VersionedStorage` rewrapped at the requested branch, with its own
+           compiled-registry and graph-cache atoms. This is how a branch gets
+           its own executor without re-sharding the graph."
+     :see [[:executor "create-context"]]}
+    {:ns graphden.system.branch-router :defn dispatch
+     :say "The top-level Ring middleware: extract the branch ref (header or
+           query), resolve it to a branch-id, and route the request to that
+           branch's lazily-built handler (400 on an unknown branch). Where a
+           live request finally lands in the correct per-branch context."}]}
+
+  {:id :types
+   :title "Type system"
+   :status :toured
+   :summary "Subtyping, unification, narrowing, refinements, the sweep-at-zero
+             checker, and the :secret information-flow marker."
+   :paths ["src/graphden/types/"]
+   :after [:executor]
+   :steps
+   [{:ns graphden.types.core.shapes :defn primitives
+     :say "Start with the leaf vocabulary. This is the flat enum of primitive
+           value-kinds plus the special `:any` (top) and `:never` (bottom). Every
+           type in the system is built from these, so nothing structural makes
+           sense until you have them."}
+    {:ns graphden.types.core.shapes :defn child-types
+     :say "The type grammar in one function: every compound arm — record maps,
+           `[:list]`, `[:map]`, `[:tuple]`, `[:refine]`, `[:secret]`, `[:union]`,
+           `[:fn]` — and how each recurses. This doubles as the map of how
+           records / unions / variants / fn-types are represented."}
+    {:ns graphden.types.core :defn well-formed?
+     :say "The syntactic validity guard at the boundary between user input
+           (fns.edn / the API) and the rest of the module. Reading it cements the
+           exact shape of each type kind: fn args-map, effects set, refine base,
+           secret inner."}
+    {:ns graphden.types.core :defn make-union
+     :say "The smart constructor for `[:union …]`: flatten, dedupe, absorb
+           `:never`, and drop any member subsumed by another. This canonical
+           union shape is what the rest of the system relies on — and your
+           introduction to sum types."}
+    {:ns graphden.types.core :defn desugar-variant
+     :say "Rewrites `[:variant tag T …]` into a structural union of tag-pinned
+           records. Shows how the higher-level variant sugar reduces to the union
+           + refinement machinery you just met — no new runtime concept needed."}
+    {:ns graphden.types.core :defn subtype?
+     :say "The heart of assignability: reflexive / transitive subtyping across
+           primitives, `:jsonb` sinks, records, lists, maps, tuples, refinements,
+           unions, secrets, and fn-types. Every checker decision — is `actual`
+           a subtype of `expected`? — bottoms out here."}
+    {:ns graphden.types.core :defn constraint-implies?
+     :say "Decides when one refinement constraint entails another (numeric
+           bounds, `:in` / `:=` / `:not=`, `:and` / `:or`). This is exactly how
+           `subtype?` compares refinement types like `:positive-int` ⊆
+           `:non-negative-int`, so read it right after."
+     :see [[:types "subtype?"]]}
+    {:ns graphden.types.core :defn unify
+     :say "Robinson unification with occurs-check and subtype-aware leniency,
+           plus a union fallback. This is how polymorphic type variables get
+           bound during checking — the two-way complement to the one-way
+           `subtype?` test."}
+    {:ns graphden.types.core :defn strip-null
+     :say "The single source of truth for nullability narrowing: remove `:null`
+           from a top-level union (bare `:null` → `:never`) while NEVER stripping
+           a `:secret`. The canonical example of type narrowing, shared by
+           control-flow refinement and the `:coalesce` rule."}
+    {:ns graphden.types.core.shapes :defn taint-with-secret-if-tainted
+     :say "The `:return-type-rule` propagator that wraps a fn's return in
+           `[:secret …]` when any argument carries a secret anywhere. This is how
+           the information-flow marker flows through composition — the payoff of
+           the secret arm you saw in `subtype?`."
+     :see [[:types "subtype?"]]}
+    {:ns graphden.types.check.literals :defn classify-literal
+     :say "Infers a structural type from a literal Clojure value (records,
+           header maps, `[:list T]`, primitives). This is where concrete argument
+           values enter the checker as types — the input side of every binding
+           check."}
+    {:ns graphden.types.check :defn check-binding!
+     :say "Verifies one binding's `actual` ⊆ `expected`, running `unify` when
+           type-vars are present and handling the `:any` / `:never` /
+           refinement-on-literal escape hatches. The atomic unit of
+           type-checking, tying together `subtype?`, `unify`, and
+           `classify-literal`."}
+    {:ns graphden.types.check :defn check-fn-def!
+     :say "Type-checks a single fn-def against its (single or multiple-
+           inheritance) parents: resolve parent slots, run the monotonicity /
+           unknown-slot / effect guards, unify bindings, compute the return via
+           type-rules, propagate effects, and snapshot the rich-type into the
+           registry. The per-node checker the sweep repeats."}
+    {:ns graphden.types.check :defn check-all-defs!
+     :say "The whole-graph sweep entry point: fold `check-fn-def!` over
+           topologically-ordered fn-defs so each def's computed rich-type is
+           registered before its dependents read it. This is how the entire graph
+           is checked end to end."}]}
+
+  {:id :crud
+   :title "CRUD & the write path"
+   :status :toured
+   :summary "Entity/branch/secret writes, request parsing, type-check on write,
+             fn-execution lookup + persist."
+   :paths ["src/graphden/crud/"]
+   :after [:storage :types]
+   :steps
+   [{:ns graphden.crud.request :defn extract-entity-params
+     :say "The HTTP boundary where a mutation first becomes structured data:
+           pull `type` / `id` out of a write request, preferring reitit
+           `:path-params` and falling back to raw-URI parsing."}
+    {:ns graphden.crud.request :defn read-json-body
+     :say "Normalizes the Ring body (string / InputStream / already-parsed) into
+           a keyword-keyed Clojure map — the payload every entity write is built
+           from."}
+    {:ns graphden.crud.branches :defn resolve-branch-ref
+     :say "Resolves the target branch (by UUID or name) so a write lands on the
+           right versioned storage. The branch dimension enters here, before any
+           row is touched."
+     :see [[:versioning "wrap-with-versioning"]]}
+    {:ns graphden.crud.entities :defn create-entity
+     :say "The generic single-row write entry point, and the best first stop for
+           the whole write path: it sequences every stage — capability gate,
+           `write-rej` validation, `sp/create-entity`, then invalidate + notify."}
+    {:ns graphden.crud.validation :defn write-rej
+     :say "The pre-write rejection gate that `create-entity` / `update-entity`
+           consult. It centralizes the cycle / MI-collision / terminal /
+           list-closed / secret-path checks that can veto a mutation before it
+           ever persists."}
+    {:ns graphden.crud.entities :defn apply-create-record-type-body
+     :say "A multi-row atomic write unit: fn-row + N slot-rows + N fn-slot
+           junctions, appending each success to a shared `journal` atom. Shows
+           how one logical create fans out into many graph rows."}
+    {:ns graphden.crud.entities :defn apply-create-rollback
+     :say "The `:try` on-throw partner: replay the `journal` in reverse,
+           best-effort deleting each row. This is how atomicity is achieved here
+           WITHOUT a DB transaction — the compensating half of the body above."}
+    {:ns graphden.crud.entities :defn apply-create-core
+     :say "The atomic core for generic creates: create-or-humanise-error, a
+           post-create whole-fn type-check, conditional rollback, and the
+           rename-slot side-effect. The invariant-bearing heart of the apply
+           flow."}
+    {:ns graphden.crud.type-check :defn type-check-fn-after-mutation!
+     :say "Reconstructs the touched fn-def and runs `check-fn-def!` after a
+           mutation, returning a `{:reason …}` that drives reject + rollback.
+           This is the type-check-on-write that `apply-create-core` relies on —
+           the graph is never allowed to persist ill-typed."
+     :see [[:types "check-fn-def!"]]}
+    {:ns graphden.crud.entities :defn notify-after-write!
+     :say "The post-persist step: invalidate caches and broadcast a NOTIFY delta
+           so sibling pods rebuild the affected fns. How a committed write becomes
+           visible fleet-wide."}
+    {:ns graphden.crud.fn-execution.lookup :defn resolve-fn
+     :say "Translates the `/api/execute` `{:fn-id | :fn-name}` request into the
+           full `:fn` row in one round-trip — the lookup that begins the
+           execution + persist path."}
+    {:ns graphden.crud.fn-execution :defn apply-execute
+     :say "The `/api/execute` orchestrator: resolve fn + version + free-arg
+           slots, acquire a concurrency slot, submit the future, and dispatch on
+           succeeded / pending / failed. The spine of the execute write path —
+           and where it hands off to the executor from the first block."}
+    {:ns graphden.crud.fn-execution.persist :defn create-pending-with-args!
+     :say "Atomically writes the `:fn-execution` row plus its per-arg
+           (`:fn-execution-arg` / `-item`) rows — the concrete `an execution
+           becomes persisted graph rows` step."}
+    {:ns graphden.crud.fn-execution.persist :defn write-finished!
+     :say "Updates the execution row with the future's terminal outcome (result
+           / error / cancelled, with taint redaction). Closes the loop so a
+           polled execution reflects final persisted state."}]}
+
+  {:id :packages
+   :title "Packages — the graph's content"
+   :status :toured
+   :summary "How fns.edn + impls.clj become base-fns and fn-defs; the loader,
+             load order, and the first-party package tree."
+   :paths ["src/graphden/packages/" "resources/packages/"]
+   :after [:executor]
+   :steps
+   [{:ns graphden.packages.loader :defn load-default-packages
+     :say "The newcomer's entry point: it just calls `load-packages [core web
+           app]`, naming the default package set and showing where the whole
+           disk-to-graph pipeline is kicked off at boot."}
+    {:ns graphden.packages.loader :defn load-packages
+     :say "The top-level orchestrator: resolve dependency order, load each
+           package, and fold every module's results into the combined
+           `{:base-fn-defs … :fn-defs … :namespaces …}` map that seeds the graph.
+           The hub the rest of this block drills into."}
+    {:ns graphden.packages.loader :defn resolve-dependencies
+     :say "A DFS topological sort over each `package.edn`'s `:dependencies`,
+           pulling transitive deps so primitives load before their consumers.
+           This is the dependency-driven load order."}
+    {:ns graphden.packages.loader :defn validate-dep-constraints!
+     :say "Runs after ordering to check declared semver constraints against the
+           classpath, failing fast at boot with `:packages/version-conflict`
+           instead of a cryptic `Unknown parent` later. The version machinery
+           guarding load order."}
+    {:ns graphden.packages.loader :defn load-single-package
+     :say "For one package: read its `package.edn` metadata and reduce over its
+           `:modules`, merging each module's base-fn-defs and fn-defs. The bridge
+           from `a package` down to `its modules`."}
+    {:ns graphden.packages.loader :defn process-module
+     :say "The heart of one module: load its `fns.edn` and `impls.clj`, then
+           `group-by` splits the entries into base-fns (which need impls) versus
+           fn-defs (compositions / type-rows). Where fns.edn and impls.clj first
+           meet."}
+    {:ns graphden.packages.loader :defn base-fn?
+     :say "The classifier `process-module` groups on: an entry is a base-fn only
+           if it has no `:parent` / `:parents` and is not a type-row. This is the
+           fundamental base-fn versus fn-def distinction a newcomer must
+           internalize."}
+    {:ns graphden.packages.loader :defn load-module-fns
+     :say "Reads a module's `fns.edn` (pure EDN data) via a source-position
+           reader, attaching `:source-file` / `:source-line` to every fn-def so
+           later type errors point at `file:line`. How the on-disk declarations
+           enter memory."}
+    {:ns graphden.packages.loader :defn load-impls-via-eval
+     :say "The counterpart to fns.edn: slurp `impls.clj`, `eval` each form in a
+           fresh namespace, and return that namespace's `impls` var — the
+           `{fn-name → impl-fn}` map. How Clojure code on disk becomes live
+           functions."}
+    {:ns graphden.packages.loader :defn fn-def->base-fn-def
+     :say "The glue: marry an fns.edn entry (args, return-type, effects, tags)
+           with its impl-map value into the registry-shaped
+           `{:args … :return-type … :impl fn …}`. Literally where fns.edn and
+           impls.clj fuse into a base-fn."
+     :see [[:executor "resolve-impl"]]}
+    {:file "resources/packages/core/arithmetic/impls.clj" :defn add
+     :say "A concrete `defbase` base-fn impl — `(defbase add [nums] (safe-arith
+           + nums :add))`. This is the value `load-impls-via-eval` collects and
+           `fn-def->base-fn-def` pairs with the `:add` entry in fns.edn. Grounds
+           the abstract loader in a real arithmetic primitive."
+     :see [[:executor "defbase"]]}
+    {:ns graphden.packages.loader :defn sync-namespaces!
+     :say "Closes the loop into storage: take the collected namespace paths,
+           build the `core` → `core.arithmetic` parent-child `:ns` entity
+           hierarchy, and return `{ns-path → id}` that the fn-def sync hangs the
+           live fn rows under."
+     :see [[:executor "sync-fns-to-storage!"]]}]}
+
+  {:id :web
+   :title "Web & the editor"
+   :status :toured
+   :summary "HTTP routing, the graph-native page/partial runtime, and the
+             editor frontend."
+   :paths ["resources/packages/web/" "resources/packages/app/editor/"]
+   :after [:packages]
+   :steps
+   [{:file "resources/packages/web/http/impls.clj" :defn http-server
+     :say "The http-kit wrapper base-fn: `run-server` spins the listener thread
+           and binds the composed Ring handler to a port, recording `:network` /
+           `:process` effects. Where a request first enters the web layer, so the
+           natural first stop. Note it is a tiny primitive — everything else is
+           composed from small base-fns in `web/http/fns.edn`."}
+    {:file "resources/packages/web/http/impls.clj" :defn realize-request-body
+     :say "Fully realizes the incoming request body so downstream graph handlers
+           see plain data instead of a one-shot stream — the very next thing that
+           happens to a raw request after it lands."}
+    {:file "resources/packages/web/reitit/impls.clj" :defn ring-handler-fn
+     :say "Composes the compiled reitit router with the default handler into the
+           single Ring callable http-kit actually invokes per request. The seam
+           between the server socket and routing."}
+    {:file "resources/packages/web/reitit/impls.clj" :defn ring-router-fn
+     :say "Builds the bare `reitit.ring/router` from route data — which is itself
+           graph-composed vectors and keywords. This is the routing table the
+           handler consults to match a path to a handler."}
+    {:file "resources/packages/web/reitit/impls.clj" :defn ring-create-default-handler-fn
+     :say "Constructs the fallback handler reitit uses when nothing matches,
+           wrapping the graph-composed 404 / 405 / 406 response maps. The `no
+           route` branch."}
+    {:file "resources/packages/web/reitit/impls.clj" :defn middleware
+     :say "The middleware factory: turn a graph `body` (with `:request` and
+           `:next-handler` free args) into a reitit `{:name :wrap}` spec folded
+           around each route handler. How cross-cutting logic — like the
+           branch-routing wrap next — is expressed as a graph fn."}
+    {:file "resources/packages/web/branch-router/impls.clj" :defn current-branch-router
+     :say "Reads the currently-installed per-branch router from a global atom
+           (nil before boot installs it). The branch-routing wrap needs this
+           router first."}
+    {:file "resources/packages/web/branch-router/impls.clj" :defn dispatch-to-branch
+     :say "The branch-routing wrap: delegate the Ring request to the correct
+           per-branch handler resolved from the router above. This is how ONE
+           server multiplexes requests across branch-scoped graphs — the package
+           side of the versioning block's `dispatch`."
+     :see [[:versioning "dispatch"]]}
+    {:file "resources/packages/web/ring-adapter/impls.clj" :defn authenticate-request
+     :say "The auth gate applied to a request inside the handler chain before a
+           page or action runs. Sits between routing/dispatch and the handler
+           body that will build a response."}
+    {:file "resources/packages/web/html/impls.clj" :defn hiccup-element
+     :say "The generic `[tag attrs children]` constructor behind the graph-native
+           page runtime. User-composed pages are fn-defs (`:html-page`,
+           components) that emit hiccup through this primitive — including the
+           `data-action` attrs that the editor's JavaScript runtime
+           (`resources/packages/app/editor/*.js`) binds on click. Where a user's
+           page becomes a concrete hiccup tree."}
+    {:file "resources/packages/web/html/impls.clj" :defn h-raw
+     :say "Wraps a string in a hiccup `RawString` so inline script / style bodies
+           (like the editor's bundled JS / CSS) render verbatim instead of being
+           HTML-escaped. The escape hatch that lets a composed page embed the JS
+           frontend without mangling it."}
+    {:file "resources/packages/web/html/impls.clj" :defn render-hiccup
+     :say "Serializes the assembled hiccup tree into an HTML string, with a
+           taint-propagation rule so rendered secrets stay redacted. The point
+           where a graph-composed page turns into the response body."}
+    {:file "resources/packages/web/http/impls.clj" :defn process-response
+     :say "The outbound finalizer: stringify headers, force connection close, and
+           gzip / brotli-encode the body based on the request's Accept-Encoding.
+           The last stop as the rendered page leaves the web layer back through
+           http-kit."}]}
+
+  {:id :services
+   :title "Services & the fleet"
+   :status :toured
+   :summary "Desired-state service registry, the reconciler/supervisor, and the
+             dynamic multi-executor fleet controller."
+   :paths ["src/graphden/services/" "src/graphden/fleet/"]
+   :after [:executor]
+   :steps
+   [{:ns graphden.schema.services.schema :defn extend-builder
+     :say "Start with what a service ROW is: this registers the `:service`
+           entity plus the `:restart-policy` / `:cardinality` enums. A service is
+           a desired-state `keep this fn-id running` declaration — not versioned,
+           no args table — the thing everything downstream reconciles toward."}
+    {:ns graphden.schema.services.schema :defn effective-pool-size
+     :say "Resolves a row's cardinality into an advisory-lock slot count:
+           `:per-pod` → no lock, `:singleton` → 1, `:pool` → N. You need this
+           singleton-vs-per-pod-vs-pool model before the reconciler's lock gating
+           makes sense."}
+    {:ns graphden.services.reconciler :defn diff-desired
+     :say "The pure policy core: given the enabled DB rows (desired) and the
+           in-process `running` set (actual), return `{:to-start :to-stop}`. It
+           isolates the reconcile DECISION from side effects — the cleanest first
+           look at the loop."}
+    {:ns graphden.services.reconciler :defn reconcile-once!
+     :say "One reconcile pass: read enabled rows, apply `diff-desired`, detect
+           config drift, and race advisory-lock slots. This is BOTH the
+           edge-triggered handler (fired by `:service` CRUD / NOTIFY) and the
+           level-triggered periodic tick — the placeholder it recomputes each
+           pass is exactly what heals a crashed lock-owner on the next tick."}
+    {:ns graphden.services.reconciler :defn start-service!
+     :say "The supervisor that actually keeps a fn running: invoke the target fn
+           via the executor and, on a startup failure, sleep + retry up to N
+           times per the row's `:restart-policy`, stamping `:start-failed-at` when
+           exhausted so reconcile will not busy-loop. The `how a service stays up`
+           answer that closes out the services half."}
+    {:ns graphden.fleet.placement :defn placement-for
+     :say "Opens the fleet half with its shared source of truth: the
+           `:placement` row mapping `(org, entry-fn-id)` → the executor holding
+           that cell, highest-epoch wins. Every fleet component reads or writes
+           this map, so it is the right foundation before routing and packing."}
+    {:ns graphden.fleet.router :defn forward-or-nil
+     :say "The internal forward-hop: when a request lands on a pod that does not
+           hold the target cell, look up the holder in the placement map and
+           HTTP-forward there instead of returning `421`. How the placement map
+           becomes live cross-fleet routing."}
+    {:ns graphden.fleet.metrics :defn cell-weight
+     :say "Folds a cell's structural cost (forward-closure fn-count) and live
+           load (the org's in-flight executions) into the single scalar the
+           packer and rebalancer order by. The load signal that drives every
+           placement decision below."}
+    {:ns graphden.fleet.packer :defn pack
+     :say "The LPT (longest-processing-time-first) greedy packer: sort cells
+           heaviest-first and drop each on the least-loaded executor — the classic
+           makespan 2-approximation. It answers `what SHOULD the placement be` for
+           a from-scratch layout."}
+    {:ns graphden.fleet.rebalance :defn rebalance
+     :say "The churn-minimising planner: rather than diff against a fresh pack,
+           do steepest-descent (move one cell busiest → lightest while it strictly
+           reduces spread) with a `:min-improvement` hysteresis floor, emitting
+           the FEWEST moves. How a running fleet is nudged toward balance without
+           thrashing."}
+    {:ns graphden.fleet.control-loop :defn plan-tick
+     :say "The pure brain of one control pass: always emit initial placements for
+           unheld cells, but gate rebalance moves behind `:sustain-ticks` so
+           imbalance must PERSIST (not just spike) before cells move. Composes the
+           packer + rebalancer into the actual control policy."}
+    {:ns graphden.fleet.control-loop :defn run-tick!
+     :say "The side-effecting driver the leader-locked component runs each tick:
+           read live cells + current placement, call `plan-tick`, then realise
+           each initial placement and sustained move through the `move-fn` seam.
+           The loop that ties the whole fleet together."}
+    {:ns graphden.fleet.controller :defn move-cell!
+     :say "Executes a single relocation as `run-tick!`'s `move-fn`: the load →
+           flip-epoch → evict dance that keeps the cell continuously served
+           (target compiles first, placement epoch bumps to reroute, source evicts
+           last). How an abstract `move` decision safely becomes a live cell
+           migration across pods."}]}
+
+  {:id :tenancy
+   :title "Multi-tenancy"
+   :status :toured
+   :summary "Orgs, RLS, grants, the two-layer effect gate, and per-request
+             tenant routing."
+   :paths ["src/graphden/tenancy/" "src/graphden/auth/"]
+   :after [:crud]
+   :steps
+   [{:ns graphden.tenancy.app-router :defn make-app-router
+     :say "The opening stop — literally where a tenant request arrives. This
+           builds the `:app-router` seam the branch-router consults first:
+           resolve the tenant org from the request Host, look up that org's
+           handler fn, and run it org-scoped, sandboxed, and time-bounded."}
+    {:ns graphden.auth.provider :defn AuthProvider
+     :say "The pluggable identification protocol: Ring request → principal map
+           (`:authenticated?`, plus `:user` / `:org`). This injectable seam is how
+           core's single-token check is swapped for a tenant-aware one."}
+    {:ns graphden.tenancy.auth :defn token-map-provider
+     :say "The addon's `AuthProvider` that resolves a bearer token to
+           `{:user :org}` (hash-matched). The piece that adds the `:org`, turning
+           the addon from a safe no-op into real multi-tenancy."}
+    {:ns graphden.tenancy.context :defn org-from-principal
+     :say "Extracts the org id from the authenticated principal and feeds the
+           `*current-org*` thread-local that all scoping reads. Exactly how `who
+           you are` becomes `which org's data you see`."}
+    {:ns graphden.tenancy.addon :defn ig/init-key :dispatch :tenancy/request-scope
+     :say "The central orchestrator wiring every other piece together:
+           authenticate, bind the org, reject cross-org / wrong-pod, gate effects,
+           enforce grants, then run the handler. The heart of the tour — read the
+           steps below as expansions of what this one calls."}
+    {:ns graphden.tenancy.storage :defn OrgScopedStorage
+     :say "Isolation layer one: a storage decorator that stamps `:org-id` on
+           writes and filters reads to `{current-org, public}`. The concrete
+           answer to `how is one org's data kept apart`, once the org is bound."}
+    {:ns graphden.tenancy.rls :defn enable-rls!
+     :say "Isolation layer two: install own+public-read / own-write Postgres RLS
+           policies on every org-scoped table at boot. Belt-and-suspenders — a raw
+           SQL path cannot bypass it the way it could bypass the decorator above."}
+    {:ns graphden.tenancy.rls :defn org-aware-datasource
+     :say "Wraps the pool so every borrowed connection sets the
+           `graphden.current_org` GUC from `*current-org*`, making RLS enforce per
+           request. The runtime half of RLS, and why the session variable is
+           reset on each borrow."}
+    {:ns graphden.tenancy.grant :defn can?
+     :say "The pure grant decision: does a subject hold a capability in a
+           namespace (subject × capability × namespace, with `:admin` / `:write`
+           subsumption and dot-path coverage). The authorization primitive every
+           gate below calls into."}
+    {:ns graphden.tenancy.authz :defn authorize-writer
+     :say "Builds the per-namespace write guard `OrgScopedStorage` runs: resolve
+           the target `:namespace-id` and deny (403) a write the principal lacks
+           the capability for. Where coarse org-scoping sharpens into per-namespace
+           write enforcement."}
+    {:ns graphden.tenancy.authz :defn authorize-executor
+     :say "Builds the `:execute-guard` seam the executor consults once per
+           top-level call, throwing `:authz/forbidden` when the principal lacks
+           `:execute` on the fn's namespace. The admission seam for RUNNING a fn —
+           the execute-side mirror of the write guard."}
+    {:ns graphden.executor.compile-runtime :defn cloud-request-allowed-effects
+     :say "Effect gate, layer one: the `*allowed-effects*` a tenant HTTP request
+           runs under — blocks env / io / network / process, but keeps `:raw-sql`
+           so the trusted handler can read storage on the tenant's behalf. Bound
+           by `request-scope`."
+     :see [[:tenancy "request-scope"]]}
+    {:ns graphden.executor.compile-runtime :defn default-cloud-allowed-effects
+     :say "Effect gate, layer two: the stricter set (`#{:db :state :time
+           :random}`, no `:raw-sql`) placed on the exec ctx when a tenant's OWN
+           submitted graph runs. Closes the tour — even code a tenant authors
+           cannot reach the raw-SQL escape hatch or the outside world."}]}]}

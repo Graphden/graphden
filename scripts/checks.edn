@@ -27,6 +27,7 @@
  {:name "markdownlint"  :bb "markdownlint"  :timeout  60000 :group :docs}
  {:name "lychee"        :bb "lychee"        :timeout  60000 :group :docs}
  {:name "typos"         :bb "typos"         :timeout  60000 :group :docs}
+ {:name "devtour"       :bb "devtour-check" :timeout  60000 :group :docs}
  {:name "gitleaks"      :bb "gitleaks"      :timeout 300000 :group :sec}
  {:name "trivy"         :bb "trivy"         :timeout 300000 :group :sec}
  {:name "license-check" :bb "license-check" :timeout 120000 :group :sec}

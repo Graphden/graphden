@@ -135,6 +135,16 @@ function openFnPicker(opts) {
       data = await r.json();
     } catch (_) { return; }
     if (!data?.ok || !Array.isArray(data.candidates)) return;
+    const compatNames = new Set(
+      data.candidates
+        .filter(c => c?.name && !c.name.startsWith('_anon-'))
+        .map(c => c.name));
+    // The server's verdict is authoritative — upgrade any loaded candidate
+    // it confirms compatible (beats the client's primitive-only
+    // `clientSubtype` approximation, which can mis-rule structural types).
+    for (const c of candidates) {
+      if (compatNames.has(c.name)) c.compatible = true;
+    }
     const have = new Set(candidates.map(c => c.name));
     const extra = data.candidates
       .filter(c => c?.name && !c.name.startsWith('_anon-') && !have.has(c.name))
@@ -149,7 +159,8 @@ function openFnPicker(opts) {
         compatible: true,               // the server already type-checked it
         kind: null,
       }));
-    if (extra.length) { candidates = candidates.concat(extra); render(); }
+    candidates = candidates.concat(extra);
+    render();
   }
 
   // Build the popup.

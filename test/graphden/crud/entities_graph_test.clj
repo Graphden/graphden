@@ -702,3 +702,59 @@
         (is (some? @registry) "the registry stays warm on the delta path too")
         (is (>= (warm-count) n)
             "and keeps every closure it had already compiled")))))
+
+
+;; ============================================================================
+;; /api/graph/entities scopes — HTTP handler integration
+;; ============================================================================
+
+(defn- via-entities
+  "Invoke the /api/graph/entities handler with the given query params and
+   parse its JSON body (keywordized)."
+  [params]
+  (let [resp (setup/via-graph *graph* :all-entities-handler
+                              {:request-method :get
+                               :uri "/api/graph/entities"
+                               :query-params params})]
+    (cheshire/parse-string (:body resp) true)))
+
+
+(deftest all-entities-handler-scopes-test
+  (testing "scope=tree — namespaces + counts, NO fn rows"
+    (let [body (via-entities {"scope" "tree"})]
+      (is (contains? body :namespaces))
+      (is (contains? body :counts))
+      (is (not (contains? body :fns)) "the tree payload carries no fn rows")
+      (is (seq (:counts body)))
+      (is (every? #(contains? % :namespace-id) (:counts body)))
+      (is (every? #(and (contains? % :count) (pos-int? (:count %))) (:counts body)))))
+
+  (testing "scope=namespace — light fn rows for one namespace"
+    (let [tree (via-entities {"scope" "tree"})
+          nid  (->> (:counts tree)
+                    (filter #(and (:namespace-id %) (pos? (:count %))))
+                    first :namespace-id)
+          body (via-entities {"scope" "namespace" "namespace-id" nid})]
+      (is (some? nid) "the bootstrap graph has a populated, named namespace")
+      (is (seq (:fns body)))
+      (is (every? #(= nid (:namespace-id %)) (:fns body))
+          "every returned fn belongs to the requested namespace")
+      (is (every? :name (:fns body)) "anonymous fns are excluded")
+      (is (not (contains? body :slots)) "light payload — no heavy relational tables")
+      (is (every? #(contains? % :role) (:fns body)) "light rows carry :role")))
+
+  (testing "scope=search — capped, case-insensitive name matches"
+    (let [body (via-entities {"scope" "search" "q" "add"})]
+      (is (seq (:fns body)) "at least the base-fn `add` matches")
+      (is (every? #(str/includes? (str/lower-case (:name %)) "add") (:fns body))
+          "every match contains the needle")
+      (is (contains? body :truncated?))))
+
+  (testing "scope=search with a blank q — no matches"
+    (is (empty? (:fns (via-entities {"scope" "search" "q" "   "})))))
+
+  (testing "scope=index still returns the full-fns shape (backward compat)"
+    (let [body (via-entities {"scope" "index"})]
+      (is (contains? body :fns))
+      (is (contains? body :namespaces))
+      (is (seq (:fns body))))))

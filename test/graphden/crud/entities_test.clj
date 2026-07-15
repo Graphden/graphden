@@ -75,6 +75,14 @@
       (testing ":ns reaches no compiled closure → #{} (nothing to invalidate)"
         (is (= #{} (entities/affected-fn-ids storage :ns {:id (random-uuid)}))))
 
+      (testing ":service is desired-state metadata → #{} (no closure moves)"
+        ;; A `:service` write used to answer nil (the fallthrough) → full clear →
+        ;; the whole registry dropped, and the next request recompiled the entire
+        ;; graph (~48s, executor-blocking). A service row changes no fn definition;
+        ;; the reconciler reacts through its own NOTIFY listener, not this path.
+        (is (= #{} (entities/affected-fn-ids storage :service {:id (random-uuid)
+                                                               :fn-id (random-uuid)}))))
+
       (testing ":slot seeds the fns that already EXPOSE it — none, on a create"
         (let [slot (setup/create-slot! storage "afi-orphan" :int)]
           (is (= #{} (entities/affected-fn-ids storage :slot {:id (:id slot)}))

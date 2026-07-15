@@ -93,6 +93,18 @@
     (when-let [id (:id entity-data)]
       (into #{} (keep :fn-id) (sp/query-entities storage :fn-slot {:slot-id id})))
 
+    ;; A `:service` row is desired-state metadata — "keep THIS fn running". It
+    ;; changes no fn's DEFINITION, so no compiled closure moves. It used to answer
+    ;; nil (the fallthrough), which the invalidator reads as "unknown shape" and
+    ;; handles by dropping the whole compiled registry — so every service
+    ;; create / enable / disable / delete full-cleared the registry, and the next
+    ;; request (often the reconcile's own execute) recompiled the entire graph.
+    ;; Measured: the service-lifecycle flow full-cleared 12 times and each blocked
+    ;; the executor on a ~48s recompile. The reconciler reacts to service writes
+    ;; through its own NOTIFY listener (`service:<op>` events), never through this
+    ;; fn-graph invalidation.
+    :service #{}
+
     nil))
 
 

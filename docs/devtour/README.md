@@ -1,0 +1,78 @@
+# Developer code-tour (`devtour`)
+
+A guided, navigable read of the **graphden host codebase** for a developer
+who just joined and needs to find their feet in the whole system.
+
+This is the counterpart to [`docs/tutorial/`](../tutorial/README.md): the
+tutorial teaches a *user* how to drive the editor; this tour walks a
+*contributor* through the Clojure that makes it run — organized into the
+system's relatively independent **blocks**, code-first, with real navigation
+(a block map, next/prev along a spine, a see-also cross-link, and a Back stack
+that returns you along the path you actually took).
+
+## How to read it
+
+Open the generated page in any browser — no running instance, no build:
+
+```text
+docs/devtour/index.html
+```
+
+Blocks are listed left, roughly in reading order; each block's `after:` line
+names what it assumes you have already seen. Only the **Executor** block is
+fully toured today (it is the spine everything else hangs off); the rest are
+stubs that name where their code lives. Blocks get toured one at a time, the
+same way the tutorial grows lesson by lesson.
+
+## How it works
+
+- **Source of truth:** [`tour.edn`](tour.edn) — a list of `:blocks`, each with
+  ordered `:steps`.
+- Every step anchors on a **symbol**, never a line number:
+
+  ```clojure
+  {:ns graphden.executor.interface :defn execute
+   :say "prose (markdown: `code`, **bold**, [links](…))"
+   :see [[:executor "create-context"]]}   ; optional cross-links
+  ```
+
+- `bb devtour` reads `tour.edn`, pulls the anchored form's **actual source**
+  out of the file at generate time, and bakes everything into the single
+  self-contained `index.html`.
+- `bb devtour-check` (wired into `bb ci`, `:docs` group) fails if any anchor
+  no longer resolves to exactly one form, or if `index.html` has drifted from a
+  fresh regeneration. So the tour cannot silently point at code that was
+  renamed, moved, or deleted — a stale tour turns CI red until someone re-runs
+  `bb devtour` and commits.
+
+Anchors resolve by Clojure namespace munging (`graphden.executor.interface` →
+`src/graphden/executor/interface.clj`) and match any top-level `def`-form
+(`defn`, `defn-`, `def`, `defbase`, `defmethod`, …) whose name symbol equals
+`:defn`. An ambiguous name (same symbol twice in one file) is a hard error —
+split or rename.
+
+## Adding to the tour
+
+Two kinds of change:
+
+- **Add steps to an existing block** — append `:steps` entries and, if the
+  block is still a stub, flip its `:status` to `:toured`.
+- **Add a new block** — a new `:blocks` entry with an `:id`, `:title`,
+  `:summary`, `:paths`, and an `:after` list of prerequisite block ids.
+
+Then regenerate and verify:
+
+```bash
+bb devtour        # rewrite index.html
+bb devtour-check  # what CI runs
+```
+
+Keep a step's `:say` to a few sentences: what this form does and **why it is
+the right next stop** in the narrative — what a newcomer learns here. Point at
+deeper reference material (e.g. [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md))
+with a link rather than restating it. Do not tour a form that only exists to
+satisfy the machinery unless it genuinely carries the story.
+
+A block should only be flipped to `:toured` once its steps read as a coherent
+walkthrough on their own — like the tutorial, an incomplete block stays a stub
+rather than shipping half a narrative.

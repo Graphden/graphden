@@ -69,8 +69,29 @@
     (when (and cached storage (seq changed-fn-ids))
       (let [ids (set changed-fn-ids)
             of-changed? (fn [row] (contains? ids (:fn-id row)))
-            ;; Deleted fns don't come back — that IS their removal.
-            fresh-fns (vec (vals (sp/read-entities storage :fn (vec ids))))
+            ;; Read fns the SAME way the canonical full load does — through
+            ;; `query-entities` (as the fn-slot / binding / list-item reads below
+            ;; already do) — NOT `read-entities`.
+            ;;
+            ;; The two resolve differently on a versioned store, and the gap is a
+            ;; correctness one. `read-entities` runs `resolve-entities-batch`,
+            ;; which returns an entity whenever its IDENTITY row exists — and a
+            ;; `:branch-local?` fn's identity is visible on every branch, while its
+            ;; version data is not (docs/VERSIONING.md § branch-local). So after a
+            ;; merge, splicing a branch-local fn by id put it into the TARGET
+            ;; branch's cache, where it must not resolve. `query-entities` runs
+            ;; `resolve-all-entities`, which returns only entities with a version
+            ;; actually visible on this branch — so the branch-local fn is dropped,
+            ;; and a deleted fn still "doesn't come back", which is the removal
+            ;; this splice already relies on. The `{:id #{…}}` where filters after
+            ;; resolution, so it is one batch resolve for all changed ids, not one
+            ;; per id.
+            ;;
+            ;; It was invisible until delta-recompile stopped re-priming the cache
+            ;; from a fresh `read-graph` (which uses `query-entities` and silently
+            ;; corrected the leak within the same call). `smoke-pass-test [7]`
+            ;; pins it end to end.
+            fresh-fns (vec (sp/query-entities storage :fn {:id (vec ids)}))
             fresh-fn-slots (into [] (mapcat #(sp/query-entities storage :fn-slot {:fn-id %})) ids)
             fresh-bindings (into [] (mapcat #(sp/query-entities storage :binding {:fn-id %})) ids)
             fresh-binding-ids (into #{} (map :id) fresh-bindings)

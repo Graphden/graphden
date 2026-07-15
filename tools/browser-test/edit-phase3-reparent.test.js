@@ -58,6 +58,14 @@ const TEST_NAME = 'test-edit-phase3';
             && !graph.animating,
       null,
       {timeout: 20000, polling: 100});
+    // The fn loads lazily now — wait until its subtree is actually in
+    // lookups.fnMap before driving removeParentInline against it (which
+    // no-ops on an undefined fn / one whose parent-ids aren't loaded).
+    await page.waitForFunction(
+      (id) => typeof lookups !== 'undefined'
+              && (lookups?.fnMap?.get(id)?.['parent-ids'] || []).length > 0,
+      created.id,
+      {timeout: 20000, polling: 100});
 
     // 3. Remove parent `add` via the depth-1 row's row-actions popover.
     //    The editor exposes `removeParentInline(fn, parentId)` as the

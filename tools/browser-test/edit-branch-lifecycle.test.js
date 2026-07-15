@@ -205,20 +205,37 @@ async function openBranchPopover(page) {
 
     // ===================================================================
     // Phase E: Escape dismisses the popover.
-    // (Delete in Phase D didn't auto-close — the toggle on the chip
-    // would just close the still-open popover. Ensure it's closed
-    // first, then open fresh.)
+    //
+    // Phase D left the popover OPEN, and the × delete kicks off an async
+    // re-render of the branch list — so at this point the popover is
+    // `hidden:false` but its `.branch-popover-list` flickers absent while
+    // it rebuilds. Reopening on top of that ambiguous state is what
+    // flaked: a blind chip toggle closes the still-open popover, and a
+    // skip-if-open guard misreads the list-less frame as "closed" and
+    // toggles it shut. So DON'T fight the transient — close it, WAIT for
+    // the close to actually land (the Escape handler can lag under load),
+    // then open a clean, fully re-rendered popover.
     // ===================================================================
     await page.keyboard.press('Escape');
-    // (escape dispatched; the following assertion gates the next step)
+    await page.waitForFunction(
+      () => {
+        const p = document.getElementById('branch-popover');
+        return !p || p.classList.contains('hidden');
+      },
+      null,
+      {timeout: 5000}).catch(() => {});
     opened = await openBranchPopover(page);
     assert(opened, 'popover re-opens for dismiss test');
+    // The actual assertion: Escape hides the popover. Wait for the hide to
+    // land rather than reading synchronously — same lag as above.
     await page.keyboard.press('Escape');
-    // (escape dispatched; the following assertion gates the next step)
-    const dismissed = await page.evaluate(() => {
-      const p = document.getElementById('branch-popover');
-      return p.classList.contains('hidden');
-    });
+    const dismissed = await page.waitForFunction(
+      () => {
+        const p = document.getElementById('branch-popover');
+        return p.classList.contains('hidden');
+      },
+      null,
+      {timeout: 5000}).then(() => true).catch(() => false);
     assert(dismissed, 'popover dismisses on Escape');
 
     console.log('✓ branch lifecycle verified — create / switch / delete / dismiss');

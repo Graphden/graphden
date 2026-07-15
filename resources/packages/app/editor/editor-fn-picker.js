@@ -115,6 +115,43 @@ function openFnPicker(opts) {
   }
   let candidates = buildCandidates();
 
+  // When a type is expected, pull the WHOLE-GRAPH type-compatible set from
+  // the server (/api/types/candidates) so the picker isn't limited to the
+  // loaded cache — this is the server-side type filter (SCALING §6.1). The
+  // rows carry name / return / effects but no id (resolved on pick);
+  // anonymous locals are dropped (not referenceable from another fn). Names
+  // already present in the loaded candidates are skipped so we don't
+  // double-list (and keep the richer, id-bearing local row).
+  async function loadTypedCandidates() {
+    if (!expected || typeof authFetch !== 'function' || !API?.api_types_candidates) return;
+    let data;
+    try {
+      const r = await authFetch(API.api_types_candidates, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected }),
+      });
+      if (!r.ok) return;
+      data = await r.json();
+    } catch (_) { return; }
+    if (!data?.ok || !Array.isArray(data.candidates)) return;
+    const have = new Set(candidates.map(c => c.name));
+    const extra = data.candidates
+      .filter(c => c?.name && !c.name.startsWith('_anon-') && !have.has(c.name))
+      .map(c => ({
+        id: null,                       // resolved by name on pick
+        name: c.name,
+        qualified: c.name,
+        sameNs: false,
+        flatReturn: c.return || null,
+        richReturn: c.return || null,
+        effects: Array.isArray(c.effects) ? c.effects : [],
+        compatible: true,               // the server already type-checked it
+        kind: null,
+      }));
+    if (extra.length) { candidates = candidates.concat(extra); render(); }
+  }
+
   // Build the popup.
   const el = document.createElement('div');
   el.className = 'fn-picker-popover';
@@ -191,8 +228,14 @@ function openFnPicker(opts) {
 
   // -------- Pick / explainer wiring --------
 
-  function pickFn(c) {
-    const fn = (graphData.fns || []).find(f => f.id === c.id);
+  async function pickFn(c) {
+    let fn = c.id ? (graphData.fns || []).find(f => f.id === c.id) : null;
+    // A server-sourced typed candidate carries a name but no id yet
+    // (it may be outside the loaded set) — resolve it by name on pick.
+    if (!fn && !c.id && c.name && typeof resolveFnByName === 'function') {
+      const simple = c.name.includes('.') ? c.name.slice(c.name.lastIndexOf('.') + 1) : c.name;
+      try { fn = await resolveFnByName(simple); } catch (_) { /* fall through */ }
+    }
     closeFnPicker();
     if (typeof opts.onPick === 'function') {
       opts.onPick(fn || { id: c.id, name: c.name });
@@ -425,6 +468,9 @@ function openFnPicker(opts) {
     otherList.style.display = otherExpanded ? 'block' : 'none';
   }
   render();
+  // Fire-and-forget: augment the loaded candidates with the whole-graph
+  // type-compatible set (no-op unless an expected type was supplied).
+  loadTypedCandidates();
 
   // Instant client-side filter over the loaded candidates, PLUS a debounced
   // server search so a fn outside the loaded set becomes pickable by typing

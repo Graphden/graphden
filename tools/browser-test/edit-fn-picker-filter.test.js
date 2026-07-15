@@ -82,12 +82,15 @@ const TEST_NAME = 'test-fn-picker-filter';
       return {clicked: true};
     });
     assert(!refClicked.error, refClicked.error || 'fn-ref button clicked');
-    // fn-picker mounts after the click — wait for the popover with
-    // at least one row before probing.
+    // fn-picker mounts after the click. The type-compatible candidate set
+    // now arrives from the server (/api/types/candidates) so the picker
+    // isn't limited to the lazily-loaded cache — wait for a compat row
+    // (with its ✓ glyph) to render, not just any row.
     await page.waitForFunction(
-      () => !!document.querySelector('.fn-picker-popover .fn-picker-row'),
+      () => !!document.querySelector(
+        '.fn-picker-popover .fn-picker-row-compat .fn-picker-row-ok'),
       null,
-      {timeout: 5000, polling: 50});
+      {timeout: 8000, polling: 50});
 
     // Picker should now be open with expectedType = 'text' (the
     // :string slot's resolved type via :str-len's primary). Different

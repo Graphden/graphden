@@ -34,10 +34,15 @@ const {assert, newContext} = require('./edit-test-helpers');
       null,
       {timeout: 20000, polling: 100});
     await page.evaluate(() => initGraph && initGraph());
+    // The sidebar loads lazily now (scope=tree + per-namespace + subtree),
+    // so `graphData.fns` is the ACCUMULATING cache — the selected fn's
+    // subtree, not the whole graph. Wait for the picker to be callable with
+    // a populated cache; more candidates arrive from the server as you type.
     await page.waitForFunction(
       () => typeof openFnPicker === 'function'
             && typeof graphData !== 'undefined'
-            && graphData?.fns?.length > 50,
+            && graphData?.fns?.length > 0
+            && Array.isArray(graphData?.bindings),
       null,
       {timeout: 15000});
 

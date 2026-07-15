@@ -20,7 +20,8 @@
     [graphden.executor.context :as ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 ;; ============================================================================
@@ -357,6 +358,59 @@
                               :request-method :delete})]
         (is (= 200 (:status resp)))
         (is (nil? (sp/read-entity storage :fn (:id free))))))))
+
+
+(deftest process-delete-entity-ns-cross-branch-test
+  ;; A namespace delete is GLOBAL (the `ns` row is non-versioned) and
+  ;; there is no DB-level FK on `fn.namespace-id`, so the emptiness guard
+  ;; must reject a namespace that still holds a fn live on ANY branch,
+  ;; not only the current one — otherwise the delete orphans that fn's
+  ;; `:namespace-id` on the other branch. `*graph*` is bound to `main`,
+  ;; so `via-delete` runs with `main` as the current branch.
+  (let [main-storage (:storage *graph*)
+        any-ret (get setup/primitive-fn-ids :any)
+        mk-fn! (fn [storage ns-id]
+                 (sp/create-entity storage :fn
+                                   {:name (uniq "xbr-fn")
+                                    :parent-ids nil
+                                    :namespace-id ns-id
+                                    :return-type-fn-id any-ret}))]
+
+    (testing "ns holding a fn live only on a CHILD branch → 409 (would orphan it)"
+      (let [ns-row (entities/create-entity "ns" {:name (uniq "xbr-ns")} (entity-ctx))
+            branch (vs/create-branch! main-storage (uniq "xbr-branch"))
+            b-storage (vs/switch-branch main-storage (:id branch))
+            ;; Create the fn ONLY on branch B, in ns X. On `main` it does
+            ;; not resolve, so the old current-branch-only guard let the
+            ;; delete through; the cross-branch guard blocks it.
+            _fn-on-b (mk-fn! b-storage (:id ns-row))
+            resp (via-delete {:uri (str "/api/entities/ns/" (:id ns-row))
+                              :request-method :delete})]
+        (is (= 409 (:status resp)))
+        (is (str/includes? (or (:body resp) "") "remove the contents first"))
+        (testing "the namespace row survives the rejected delete"
+          (is (some? (entities/get-entity "ns" (:id ns-row) (entity-ctx)))))))
+
+    (testing "regression: a fn created then tombstoned on ALL branches leaves the ns deletable"
+      (let [ns-row (entities/create-entity "ns" {:name (uniq "xbr-empty-ns")} (entity-ctx))
+            f (mk-fn! main-storage (:id ns-row))
+            ;; Tombstone the fn on `main` (the only branch it lives on).
+            del-fn (via-delete {:uri (str "/api/entities/fn/" (:id f))
+                                :request-method :delete})
+            del-ns (via-delete {:uri (str "/api/entities/ns/" (:id ns-row))
+                                :request-method :delete})]
+        (is (= 200 (:status del-fn)))
+        (is (= 200 (:status del-ns))
+            "an ns whose only fn was deleted everywhere is empty and deletable")
+        (is (nil? (entities/get-entity "ns" (:id ns-row) (entity-ctx))))))
+
+    (testing "a fn live on the CURRENT branch still blocks the delete (unchanged)"
+      (let [ns-row (entities/create-entity "ns" {:name (uniq "xbr-cur-ns")} (entity-ctx))
+            _f (mk-fn! main-storage (:id ns-row))
+            resp (via-delete {:uri (str "/api/entities/ns/" (:id ns-row))
+                              :request-method :delete})]
+        (is (= 409 (:status resp)))
+        (is (str/includes? (or (:body resp) "") "remove the contents first"))))))
 
 
 ;; ============================================================================

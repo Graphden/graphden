@@ -497,6 +497,15 @@
                 env (ProcessBuilder/.environment pb)]
             (java.util.Map/.put env "GRAPHDEN_URL" url)
             (java.util.Map/.put env "AUTH_TOKEN" auth-token)
+            ;; run-edit-tests.sh sleeps SWEEP_DELAY (default 2s) between files so the
+            ;; DEMO container (:9002, restart:unless-stopped) can GC before its
+            ;; restart policy bounces it mid-sweep. This ISOLATED stack has its own
+            ;; 3 GB executor with restart:on-failure — it doesn't bounce, and two
+            ;; full 55-file runs at 0 were clean (536s / 540s, vs ~640s with 2s),
+            ;; so drop the ~110s of dead sleep here. An explicit SWEEP_DELAY still
+            ;; wins (it flows through inheritIO), for chasing a load-related flake.
+            (when-not (System/getenv "SWEEP_DELAY")
+              (java.util.Map/.put env "SWEEP_DELAY" "0"))
             (ProcessBuilder/.inheritIO pb)
             (let [proc (ProcessBuilder/.start pb)]
               (Process/.waitFor proc)))

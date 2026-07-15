@@ -14,9 +14,11 @@
 # is empirically enough breathing room — sub-second still flakes,
 # 5+ is needlessly slow.
 #
-# Override with SWEEP_DELAY=N if you want a different pace; set to
-# 0 only when chasing a load-related flake that needs the bulk
-# pressure to reproduce.
+# Override with SWEEP_DELAY=N if you want a different pace. The
+# isolated e2e stack (graphden.dev.e2e-stack, what the gate runs)
+# sets SWEEP_DELAY=0 itself — its executor has restart:on-failure
+# and doesn't bounce, so the delay is dead sleep there. This 2s
+# default is for a run against the DEMO (:9002).
 
 set -u
 cd "$(dirname "$0")" || exit 1

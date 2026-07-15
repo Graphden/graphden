@@ -53,87 +53,140 @@
   (try (z/sexpr zloc) (catch Exception _ nil)))
 
 
-(defn- form-name
-  "Name symbol of a top-level list zloc if its head is a def-form, else nil."
+(defn- form-signature
+  "For a top-level def-form list zloc, return {:name <sym> :dispatch <val>},
+   else nil. `:dispatch` is the defmethod dispatch value (3rd token) or ::none
+   for ordinary def-forms — so a defmethod can be anchored by (name, dispatch)."
   [zloc]
   (when (= :list (z/tag zloc))
     (let [head (some-> zloc z/down)
           head-sym (safe-sexpr head)]
       (when (contains? def-heads head-sym)
-        (let [name-node (safe-sexpr (z/right head))]
-          (when (symbol? name-node) name-node))))))
+        (let [nm (safe-sexpr (z/right head))]
+          (when (symbol? nm)
+            (if (= 'defmethod head-sym)
+              {:name nm :dispatch (safe-sexpr (-> head z/right z/right))}
+              {:name nm :dispatch ::none})))))))
 
 
 (defn- find-form
-  "Locate the def-form named `sym` among the top-level forms of `src`.
-   Returns {:code <string> :start-line <int>} or throws on 0 / >1 matches."
-  [src sym file]
+  "Locate the def-form named `sym` (and, for a defmethod, dispatching on
+   `dispatch`) among the top-level forms of `src`. Returns {:code :line} or
+   throws on 0 / >1 matches. A nil `dispatch` matches on name alone."
+  [src sym dispatch file]
   (loop [zloc (z/of-string src {:track-position? true})
          hits []]
     (if (or (nil? zloc) (z/end? zloc))
       (case (count hits)
         1 (first hits)
-        0 (throw (ex-info (str "anchor not found: " sym " in " file)
+        0 (throw (ex-info (str "anchor not found: " sym
+                               (when dispatch (str " / " dispatch)) " in " file)
                           {:sym sym :file file}))
-        (throw (ex-info (str "anchor ambiguous: " sym " appears "
+        (throw (ex-info (str "anchor ambiguous: " sym
+                             (when dispatch (str " / " dispatch)) " appears "
                              (count hits) "x in " file
-                             " — split the form or rename")
+                             " — add :dispatch, split the form, or rename")
                         {:sym sym :file file :count (count hits)})))
-      (let [hit (when (= sym (form-name zloc))
+      (let [sig (form-signature zloc)
+            hit (when (and sig
+                           (= sym (:name sig))
+                           (or (nil? dispatch) (= dispatch (:dispatch sig))))
                   {:code (z/string zloc)
                    :line (first (z/position zloc))})]
         (recur (z/right zloc) (cond-> hits hit (conj hit)))))))
 
 
 (defn- resolve-anchor
-  "Resolve one step's {:ns :defn} anchor to baked source, or throw."
-  [{ns-sym :ns sym :defn}]
-  (when-not (and ns-sym sym)
-    (throw (ex-info "step needs both :ns and :defn" {:ns ns-sym :defn sym})))
-  (let [file (ns->path ns-sym)]
-    (when-not (fs/exists? file)
-      (throw (ex-info (str "anchor file missing: " file) {:ns ns-sym})))
-    (-> (find-form (slurp file) sym file)
-        (assoc :file file :ns (str ns-sym) :defn (str sym)))))
+  "Resolve one step's anchor to baked source, or throw. The anchor is
+   {:defn sym} plus EITHER :ns (a src/ namespace, munged to a path) OR :file
+   (an explicit repo-relative .clj path — used for package impls under
+   resources/packages/, which have namespaces but do not live under src/).
+   For a defmethod, set :defn to the method symbol and :dispatch to its
+   dispatch value; the step is then labelled by the dispatch's name."
+  [{ns-sym :ns sym :defn file :file dispatch :dispatch}]
+  (when-not sym
+    (throw (ex-info "step needs :defn" {:ns ns-sym :file file})))
+  (let [path (or file (some-> ns-sym ns->path))
+        label (cond
+                (nil? dispatch) (str sym)
+                (keyword? dispatch) (name dispatch)
+                :else (str dispatch))]
+    (when-not path
+      (throw (ex-info "step needs :ns or :file" {:defn sym})))
+    (when-not (fs/exists? path)
+      (throw (ex-info (str "anchor file missing: " path) {:defn sym})))
+    (-> (find-form (slurp path) sym dispatch path)
+        (assoc :file path :ns (str (or ns-sym path)) :defn label))))
 
 
 ;; --- model -----------------------------------------------------------------
 
 (defn- resolve-step
-  [step]
+  "Anchor + prose for one step. `:gi` (global spine index) and `:n` (1-based
+   position within the block) are assigned by the caller; `:see` is resolved
+   in a second pass once every step's `:gi` is known."
+  [block-id step]
   (-> (resolve-anchor step)
-      (assoc :say (:say step))
-      (cond-> (:see step) (assoc :see (mapv #(mapv str %) (:see step))))))
+      (assoc :say (:say step) :block (str block-id))
+      (cond-> (:see step) (assoc :raw-see (:see step)))))
 
 
 (defn- build-model
-  "Resolve every toured block's anchors; validate stubs + :after edges.
-   Throws with block/step context on the first bad anchor."
+  "Resolve every toured block's anchors; validate stubs + :after edges; assign
+   each toured step a stable global index and resolve its see-also links to
+   those indices. Steps are identified by index, NOT by (block, defn) — a block
+   may legitimately tour two forms of the same name (e.g. the executor's two
+   `execute`s). Throws with block/step context on any bad anchor, and on a
+   see-also target that is missing or ambiguous."
   [tour]
   (let [blocks (:blocks tour)
         ids (set (map :id blocks))]
     (doseq [b blocks, a (:after b)]
       (when-not (ids a)
         (throw (ex-info (str "block " (:id b) " :after unknown block " a) {}))))
-    {:title (:title tour)
-     :intro (:intro tour)
-     :blocks
-     (vec (for [b blocks]
-            (cond-> {:id (str (:id b))
-                     :title (:title b)
-                     :status (name (:status b :stub))
-                     :summary (:summary b)
-                     :paths (:paths b)
-                     :after (mapv str (:after b))}
-              (= :toured (:status b))
-              (assoc :steps
-                     (vec (for [[i step] (map-indexed vector (:steps b))]
-                            (try (resolve-step step)
-                                 (catch Exception e
-                                   (throw (ex-info
-                                            (str "block " (:id b) " step " i ": "
-                                                 (ex-message e))
-                                            (ex-data e) e))))))))))}))
+    (let [gi (atom -1)
+          base (vec (for [b blocks]
+                      (cond-> {:id (str (:id b))
+                               :title (:title b)
+                               :status (name (:status b :stub))
+                               :summary (:summary b)
+                               :paths (:paths b)
+                               :after (mapv str (:after b))}
+                        (= :toured (:status b))
+                        (assoc :steps
+                               (vec (for [[i step] (map-indexed vector (:steps b))]
+                                      (try (assoc (resolve-step (:id b) step)
+                                                  :gi (swap! gi inc) :n (inc i))
+                                           (catch Exception e
+                                             (throw (ex-info
+                                                      (str "block " (:id b) " step " i ": "
+                                                           (ex-message e))
+                                                      (ex-data e) e))))))))))
+          spine (mapcat #(or (:steps %) []) base)
+          by-key (reduce (fn [m s] (update m [(:block s) (:defn s)] (fnil conj []) (:gi s)))
+                         {} spine)
+          resolve-see
+          (fn [owner raw]
+            (mapv (fn [pair]
+                    (let [k (mapv str pair)
+                          hits (get by-key k)]
+                      (when-not hits
+                        (throw (ex-info (str "see-also target not found: " k
+                                             " (from " owner ")") {})))
+                      (when (> (count hits) 1)
+                        (throw (ex-info (str "see-also ambiguous: " k " (from " owner
+                                             ") — target appears " (count hits) "x") {})))
+                      {:gi (first hits) :label (second k)}))
+                  raw))
+          finalize (fn [s]
+                     (-> s
+                         (cond-> (:raw-see s)
+                           (assoc :see (resolve-see (:defn s) (:raw-see s))))
+                         (dissoc :raw-see :block)))]
+      {:title (:title tour)
+       :intro (:intro tour)
+       :blocks (mapv (fn [b] (cond-> b (:steps b) (update :steps #(mapv finalize %))))
+                     base)})))
 
 
 ;; --- HTML render -----------------------------------------------------------
@@ -245,13 +298,9 @@ border-radius:4px;padding:0 5px;font-size:11px}
 (def ^:private js
   "
 const MODEL = JSON.parse(document.getElementById('tour-data').textContent);
-// flatten toured steps into a single ordered spine
+// flatten toured steps into a single ordered spine — index === step.gi
 const SPINE = [];
-MODEL.blocks.forEach(b => (b.steps||[]).forEach((s,i) =>
-  SPINE.push({block:b, step:s, sidx:i})));
-const keyOf = (bid, defn) => bid+'\\u0000'+defn;
-const INDEX = new Map();
-SPINE.forEach((e,gi) => INDEX.set(keyOf(e.block.id, e.step.defn), gi));
+MODEL.blocks.forEach(b => (b.steps||[]).forEach(s => SPINE.push({block:b, step:s})));
 
 let cur = 0;            // current global step index into SPINE (or -1 = intro)
 const hist = [];        // back-stack of previously-viewed indices
@@ -301,11 +350,8 @@ function codeBlock(step){
 
 function seeBlock(step){
   if(!step.see||!step.see.length) return '';
-  const chips = step.see.map(([bid,defn])=>{
-    const gi = INDEX.get(keyOf(bid,defn));
-    return gi==null ? '' :
-      '<a data-gi=\"'+gi+'\">'+esc(defn)+'</a>';
-  }).join('');
+  const chips = step.see.map(x=>
+    '<a data-gi=\"'+x.gi+'\">'+esc(x.label)+'</a>').join('');
   return '<div class=see><span class=lbl>see also</span>'+chips+'</div>';
 }
 
@@ -338,8 +384,8 @@ function go(gi, push){
   cur = gi;
   const {block, step} = SPINE[gi];
   document.getElementById('crumb').innerHTML =
-    '<b>'+esc(block.title)+'</b> › step '+(SPINE.filter(e=>e.block===block)
-      .indexOf(SPINE[gi])+1)+' — <code class=inl>'+esc(step.defn)+'</code>';
+    '<b>'+esc(block.title)+'</b> › step '+step.n+' / '+(block.steps||[]).length+
+    ' — <code class=inl>'+esc(step.defn)+'</code>';
   document.getElementById('stage').innerHTML =
     '<div class=say>'+md(step.say)+'</div>'+seeBlock(step)+codeBlock(step);
   document.getElementById('stage').scrollTop=0;
@@ -366,10 +412,8 @@ function buildMap(){
     if(b.after&&b.after.length)
       html+='<div class=after>after: '+b.after.map(esc).join(', ')+'</div>';
     if(b.status==='toured'){
-      html+='<ul class=steps>'+ (b.steps||[]).map(s=>{
-        const gi=INDEX.get(keyOf(b.id,s.defn));
-        return '<li data-gi=\"'+gi+'\">'+esc(s.defn)+'</li>';
-      }).join('') +'</ul>';
+      html+='<ul class=steps>'+ (b.steps||[]).map(s=>
+        '<li data-gi=\"'+s.gi+'\">'+esc(s.defn)+'</li>').join('') +'</ul>';
     }
     wrap.innerHTML=html;
     if(b.status!=='toured')

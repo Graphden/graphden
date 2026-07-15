@@ -19,10 +19,9 @@ docs/devtour/index.html
 ```
 
 Blocks are listed left, roughly in reading order; each block's `after:` line
-names what it assumes you have already seen. Only the **Executor** block is
-fully toured today (it is the spine everything else hangs off); the rest are
-stubs that name where their code lives. Blocks get toured one at a time, the
-same way the tutorial grows lesson by lesson.
+names what it assumes you have already seen. Start with the **Executor** (the
+spine everything else hangs off), then follow the dependency order: Storage,
+Branches, Types, CRUD, Packages, Web, Services, Multi-tenancy.
 
 ## How it works
 
@@ -47,9 +46,21 @@ same way the tutorial grows lesson by lesson.
 
 Anchors resolve by Clojure namespace munging (`graphden.executor.interface` →
 `src/graphden/executor/interface.clj`) and match any top-level `def`-form
-(`defn`, `defn-`, `def`, `defbase`, `defmethod`, …) whose name symbol equals
-`:defn`. An ambiguous name (same symbol twice in one file) is a hard error —
-split or rename.
+(`defn`, `defn-`, `def`, `defbase`, `defprotocol`, `defrecord`, …) whose name
+symbol equals `:defn`. Two variants:
+
+- **`:file`** instead of `:ns` — an explicit repo-relative path, for package
+  impls under `resources/packages/` (they have namespaces but do not live under
+  `src/`): `{:file "resources/packages/web/http/impls.clj" :defn http-server …}`.
+- **`:dispatch`** — anchor a `defmethod` by its dispatch value; the step is
+  then labelled by the dispatch's name:
+  `{:ns graphden.tenancy.addon :defn ig/init-key :dispatch :tenancy/request-scope …}`.
+
+An anchor that matches no form, or more than one (an ambiguous name / dispatch),
+is a hard error — add `:dispatch`, split, or rename. Steps are identified
+internally by position, so a block may legitimately tour two forms of the same
+name (e.g. the executor's two `execute`s, or storage's two
+`resolve-execution-graph`s).
 
 ## Adding to the tour
 

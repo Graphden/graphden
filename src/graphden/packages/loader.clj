@@ -259,7 +259,7 @@
    loader simply hands impl-fn through."
   [fn-def impl-entry]
   (let [{:keys [impl return-type-rule slot-types-rule nav-types-rule
-                lazy-seq-args]}
+                lazy-seq-args compile-time-value?]}
         (impl-entry->parts impl-entry)]
     (cond-> {:args (normalize-args (:args fn-def))
              :return-type (:return-type fn-def)
@@ -280,6 +280,10 @@
       ;; `:lazy-seq-args` — seq slots whose ITEMS arrive as delays
       ;; (consumer steps past unforced items, see :cond).
       lazy-seq-args         (assoc :lazy-seq-args lazy-seq-args)
+      ;; `:compile-time-value?` — evaluate this base-fn ONCE at compile
+      ;; time and bake `(constantly result)` into the closure (see
+      ;; compile_eager). Used by `:cell` for a registry-persistent atom.
+      compile-time-value?   (assoc :compile-time-value? true)
       ;; `:tags` — declarative capability / shape markers; consumed by
       ;; policy callers (e.g. admin-only-vault gate) via
       ;; `registry/fn-names-with-tag`. See `record-rich-types!`.

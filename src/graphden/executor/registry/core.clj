@@ -377,6 +377,12 @@
                   ;; native `if`/`and`/`or` short-circuit on un-read args.
                   (:lazy-seq-args fn-def)    (assoc :lazy-seq-args
                                                     (:lazy-seq-args fn-def))
+                  ;; `:compile-time-value?` — base-fn is evaluated ONCE at
+                  ;; compile time and its result baked as `(constantly …)`
+                  ;; into the closure (compile_eager reads this via the
+                  ;; root base-fn's rich-type). Backs `:cell`'s persistent
+                  ;; atom.
+                  (:compile-time-value? fn-def) (assoc :compile-time-value? true)
                   ;; `:source-file` / `:source-line` — origin of the EDN entry
                   ;; (tools.reader meta). Stored alongside the rich-type so
                   ;; type-error messages can point at the fn that introduced

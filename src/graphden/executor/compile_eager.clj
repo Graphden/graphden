@@ -356,35 +356,23 @@
    classified `enriched` bindings and its assembled runtime closure
    `run`:
 
-   - Every binding a literal (`:value`) → the value is a compile-time
+   - EVERY binding a literal (`:value`) → the value is a compile-time
      constant: evaluate `run` ONCE now and bake `(fn [_ _] result)` so
      every invocation, across every `execute` this compiled registry
      serves, hands back the SAME instance (that's `:cell`'s persistent
      atom). Empty `fa` + bare `ctx`: `:value` builders are
      `(constantly v)` and the impl is effect-free by contract.
-   - Any binding a runtime value (`:ref` / `:seq` / `:secret-value`) →
-     you pinned a computed value into a compile-time slot, which can't
-     be baked. Reject with a clear `:type` rather than silently
-     evaluating against an empty `fa`.
-   - Otherwise the value slot is still FREE (the bare base-fn template,
-     or a derivative that leaves `:initial-value` unbound) → there is
-     nothing to bake; compile normally, so it behaves like a per-call
-     `:atom`. Persistence requires a pinned literal."
-  [fn-id enriched run]
-  (cond
-    (and (seq enriched) (every? #(= :value (:kind %)) enriched))
+   - Otherwise (a `:ref` / `:seq` / `:free` binding — a runtime or
+     unbound value) → there is no compile-time constant to bake, so
+     compile NORMALLY; the fn then behaves like a per-call `:atom`
+     (a fresh instance each `execute`). Persistence requires a pinned
+     literal — degrade gracefully rather than throw, since a single
+     non-literal `:cell` must not fail the whole-registry compile-all."
+  [_fn-id enriched run]
+  (if (and (seq enriched) (every? #(= :value (:kind %)) enriched))
     (let [baked (run {} {})]
       (fn [_fa _ctx] baked))
-
-    (some #(#{:ref :seq :secret-value} (:kind %)) enriched)
-    (throw (ex-info "compile-eager: :compile-time-value? fn must bind only literals"
-                    {:type :compile/compile-time-value-needs-literals
-                     :fn-id fn-id
-                     :offending-kinds (into #{} (comp (map :kind)
-                                                      (remove #{:value}))
-                                            enriched)}))
-
-    :else run))
+    run))
 
 
 (def ^:private vault-get-secret

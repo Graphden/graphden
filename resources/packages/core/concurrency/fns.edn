@@ -222,9 +222,9 @@
    :return-type :any}
 
   {:name :cell
-   :description "Create a PERSISTENT `clojure.core/atom` holding `:initial-value`. Unlike `:atom`, the instance is allocated ONCE per compiled registry and baked into the closure (like a `:const` literal), so it survives across `execute`s — `:cell` + `:swap` + `:deref` composes an in-process cache. Scope is the compiling registry (per-JVM for the server handler); NOT shared across executor instances. Re-allocated on recompile = cache reset. `:initial-value` MUST be a literal (compile-time constant)."
+   :description "Create a PERSISTENT `clojure.core/atom` holding `:initial-value`. Unlike `:atom`, the instance is allocated ONCE per compiled registry and baked into the closure (like a `:const` literal), so it survives across `execute`s — `:cell` + `:swap` + `:deref` composes an in-process cache. Scope is the compiling registry (per-JVM for the server handler); NOT shared across executor instances. Re-allocated on recompile = cache reset. Persistence requires `:initial-value` to be a LITERAL (compile-time constant); bound to a fn-ref instead, a `:cell` degrades to per-call `:atom` semantics (a fresh instance each call)."
    :args {:initial-value {:type :any
-                          :description "Literal value the cell starts holding (compile-time constant — no fn-refs)."}}
+                          :description "Literal value the cell starts holding. A fn-ref works but forfeits persistence (per-call, like `:atom`)."}}
    :return-type :any}
 
   {:name :swap

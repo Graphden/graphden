@@ -16,8 +16,9 @@
       calls — the atom is baked once per compiled registry, not
       re-allocated per call (an `:atom` would return 1 every time).
 
-   3. `:cell`'s `:compile-time-value?` guard rejects a non-literal
-      `:initial-value` at compile time with a clear `:type`.
+   3. a `:cell` with a non-literal (fn-ref) `:initial-value` compiles
+      fine but degrades to per-call `:atom` semantics — a single such
+      cell must never fail the whole-registry compile.
 
    Setup mirrors `recursion-test`: full integrant `:dev` system on the
    test container so the executor sees a VersionedStorage-wrapped
@@ -122,17 +123,21 @@
 
 
 ;; ============================================================================
-;; 3. :cell guard — non-literal :initial-value rejected at compile time
-;;    (kept LAST: a rejected bake poisons the shared registry)
+;; 3. :cell with a non-literal :initial-value degrades to per-call `:atom`
+;;    (graceful — a fn-ref can't be baked, but must NOT fail compile-all)
 ;; ============================================================================
 
-(deftest cell-guard-rejects-non-literal-initial-value
-  (testing "a `:ref` `:initial-value` throws :compile/compile-time-value-needs-literals"
-    (let [thrown (try
-                   (sync! [{:name :t-bad-cell :parent :cell
-                            :args {:initial-value :current-time-ms}}])
-                   (exec/execute *context* (fn-id "t-bad-cell") {})
-                   ::no-throw
-                   (catch clojure.lang.ExceptionInfo e (:type (ex-data e))))]
-      (is (= :compile/compile-time-value-needs-literals thrown)
-          "compile-time value must bind only literals"))))
+(deftest cell-with-ref-initial-value-degrades-to-per-call
+  (testing "a `:cell` whose `:initial-value` is a fn-ref compiles fine but is NOT persistent"
+    (sync!
+      [{:name :_t-seed-vec :parent :const :args {:value {:value []}}}
+       {:name :t-ref-cell :parent :cell :args {:initial-value :_t-seed-vec}}
+       {:name :t-rc-push :parent :swap-conj :args {:a :t-ref-cell :value {:value 1}}}
+       {:name :t-rc-read :parent :deref :args {:a :t-ref-cell}}
+       {:name :t-rc-run :parent :do :args {:steps [:t-rc-push :t-rc-read]}}])
+    (let [id (fn-id "t-rc-run")]
+      ;; No compile error (graceful degradation — the ref can't be baked),
+      ;; and a fresh atom each call, exactly like `:atom`.
+      (is (= [1] (exec/execute *context* id {})) "call 1 → [1]")
+      (is (= [1] (exec/execute *context* id {}))
+          "call 2 → still [1]: a ref initial-value forfeits persistence"))))

@@ -1,10 +1,12 @@
-(ns ^:integration ^:serial graphden.integration.grants-admin-test
+(ns ^:integration graphden.integration.grants-admin-test
   "GET /partials/grants-admin via the route-collection seam (PLATFORM_PLAN §6).
 
    The grants panel lives in the addon-only `tenancy-admin` package, compiled
    into `:tenancy-router` and installed into the tenancy-routing singleton
    (`graphden.system.tenancy-router/active-router`); `br/dispatch` consults it
-   INSIDE its request-scope. This NS is `^:serial` because it mutates that
+   INSIDE its request-scope. Runs in PARALLEL: it mutates the tenancy-router
+   singleton, but the parallel plugin isolates `*active-router-override*` (and
+   rich-types) per thread, so a sibling never sees that
    process-wide singleton — the parallel-safe routing-logic checks live in
    `graphden.integration.faas-app-test` (which drives the router directly).
 

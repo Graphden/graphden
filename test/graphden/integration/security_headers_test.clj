@@ -1,4 +1,4 @@
-(ns ^:integration ^:serial graphden.integration.security-headers-test
+(ns ^:integration graphden.integration.security-headers-test
   "The branch/tenancy dispatch layer (`graphden.system.branch-router/dispatch`)
    emits responses — unknown-branch 400, control-plane admin HTML, tenant
    app-router — that never flow through the main `:_router`, so
@@ -9,7 +9,9 @@
 
    This drives an unknown-branch request through `:_app-secured` — the same
    node http-kit mounts — and asserts the dispatch-layer 400 carries the
-   headers. `^:serial` because it installs the process branch-router
+   headers. Runs in PARALLEL: it installs a branch-router, but the parallel
+     plugin isolates `*active-router-override*` per thread, so a sibling never
+     sees this NS's router
    singleton that `:_branch-routed-handler` reads."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]

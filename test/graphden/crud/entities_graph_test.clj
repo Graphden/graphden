@@ -396,9 +396,17 @@
         _    (setup/attach-slot! storage (:id host) (:id slot) 0)
         ;; `find-sequence-binding` reads the in-memory graph-cache —
         ;; production CRUD writes invalidate it, but our direct
-        ;; `sp/create-entity` setup bypasses that path. Force a refresh
-        ;; so the cache picks up the just-attached sequence slot.
-        _ (ctx/invalidate-graph-cache! (:ctx *graph*))
+        ;; `sp/create-entity` setup bypasses that path. Refresh the cache so it
+        ;; picks up the just-attached sequence slot.
+        ;;
+        ;; SEED with the host fn-id — do NOT use the 1-arity full clear. The full
+        ;; clear nils the compiled registry, and because the CRUD handlers are
+        ;; themselves graph fns executed THROUGH that registry, the next
+        ;; `via-seq-append` rebuilt all ~2600 golden fns before it could run: 52 s,
+        ;; measured, for a single append (kaocha attributed the whole cost to this
+        ;; one test). The seed splices just the host's rows into the graph-cache
+        ;; and recompiles just the host, leaving the registry warm.
+        _ (ctx/invalidate-graph-cache! (:ctx *graph*) #{(:id host)})
         append-uri (str "/api/sequence/append/" (:id host))]
     (testing "append to a fn with a sequence slot → 200, item persisted"
       (let [resp (via-seq-append (json-req append-uri {:value 42}))]

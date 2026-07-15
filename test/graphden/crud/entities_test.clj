@@ -338,7 +338,8 @@
   "The exact whitelist `:tree` / `:namespace` / `:search` project each fn
    down to (nils dropped). Mirrors `entities/light-fn-fields`."
   #{:id :name :namespace-id :role :description :constraint
-    :parent-ids :return-type-fn-id})
+    :parent-ids :return-type-fn-id
+    :used-as-parent-count :used-as-ref-count})
 
 
 (deftest list-all-graph-entities-scoped-test
@@ -350,7 +351,8 @@
         a2 (java.util.UUID/randomUUID)
         b1 (java.util.UUID/randomUUID)
         anon (java.util.UUID/randomUUID)
-        r1 (java.util.UUID/randomUUID)]
+        r1 (java.util.UUID/randomUUID)
+        child (java.util.UUID/randomUUID)]
     (sp/create-entity storage :ns {:id ns-a :name "alpha"})
     (sp/create-entity storage :ns {:id ns-b :name "beta"})
     ;; two named fns in ns-a, one in ns-b, one ANONYMOUS in ns-a (must be
@@ -360,6 +362,14 @@
     (sp/create-entity storage :fn {:id b1 :name "beta-widget" :namespace-id ns-b :parent-ids []})
     (sp/create-entity storage :fn {:id anon :name nil :namespace-id ns-a :parent-ids []})
     (sp/create-entity storage :fn {:id r1 :name "root-thing" :parent-ids []})
+    ;; A root-bucket child that DEPENDS on ns-a's fns — parents a1, and a
+    ;; ref binding pointing at a2 — so the reverse-ref counts on a1/a2 are
+    ;; non-zero. Kept in the root bucket so ns-a / ns-b counts stay clean.
+    (sp/create-entity storage :fn {:id child :name "child-of-a1" :parent-ids [a1]})
+    (let [slot (setup/create-slot! storage "sfi-ref-slot" :int)]
+      (sp/create-entity storage :binding
+                        {:fn-id child :slot-id (:id slot)
+                         :ref-fn-id a2 :override-kind :fixed}))
     ;; sp/create-entity bypasses the graph-cache invalidation the real
     ;; write path runs — drop the cache so the loader sees these writes.
     (ctx/invalidate-graph-cache! c)
@@ -379,13 +389,22 @@
             (is (pos? (get count-by nil))))))
       (testing "scope :namespace — one namespace's light named fns"
         (let [dump (entities/list-all-graph-entities c :namespace nil ns-a nil)
-              ids  (into #{} (map :id) (:fns dump))]
+              ids  (into #{} (map :id) (:fns dump))
+              by-id (into {} (map (juxt :id identity)) (:fns dump))]
           (is (= #{a1 a2} ids)
               "only ns-a's named fns; anonymous excluded, other ns excluded")
           (is (= #{:fns} (set (keys dump))) "no heavy tables (:slots etc.)")
           (is (every? #(contains? % :role) (:fns dump)) "light rows carry :role")
           (is (every? #(every? light-fn-keys (keys %)) (:fns dump))
-              "light rows are projected to the whitelist — nothing extra")))
+              "light rows are projected to the whitelist — nothing extra")
+          (testing "carry whole-graph reverse-ref counts (delete/edit gate)"
+            (is (= 1 (:used-as-parent-count (by-id a1)))
+                "a1 is parented by the root-bucket child")
+            (is (= 1 (:used-as-ref-count (by-id a2)))
+                "a2 is ref'd by the child's binding")
+            (is (not (contains? (by-id a1) :used-as-ref-count))
+                "zero counts are omitted (→ 0 client-side)")
+            (is (not (contains? (by-id a2) :used-as-parent-count))))))
       (testing "scope :namespace with nil namespace-id — the (root) bucket"
         (let [ids (into #{} (map :id) (:fns (entities/list-all-graph-entities c :namespace nil nil nil)))]
           (is (contains? ids r1)

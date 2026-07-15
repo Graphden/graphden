@@ -453,17 +453,57 @@
    actually read. Every other column (slots, bindings, and the bulk of
    the scalar fn columns) is fetched on demand via `:subtree` when a fn
    is opened. Keep this in sync with the fields consumed in
-   `editor-sidebar.js` / `editor-fn-picker.js` / `editor-data.js`."
+   `editor-sidebar.js` / `editor-fn-picker.js` / `editor-data.js`.
+
+   `:used-as-parent-count` / `:used-as-ref-count` are server-computed
+   reverse-reference counts over the WHOLE graph (see `reverse-ref-index`),
+   so the editor's delete/edit gate stays correct once it no longer holds
+   a full-fns mirror to count against. Both are omitted (→ 0 client-side)
+   when zero."
   [:id :name :namespace-id :role :description :constraint
-   :parent-ids :return-type-fn-id])
+   :parent-ids :return-type-fn-id
+   :used-as-parent-count :used-as-ref-count])
+
+
+(defn- reverse-ref-index
+  "Reverse-reference tallies over the ENTIRE graph, so a caller holding
+   only a slice can still answer \"how many fns depend on X\":
+
+   - `:as-parent` — fn-id → #fns listing it in their `parent-ids`.
+   - `:as-ref`    — fn-id → #bindings + #list-items whose `ref-fn-id`
+     points at it.
+
+   These are exactly the two dependency kinds the delete guard blocks on
+   (`web/crud` `:_delete-fn-*`), so the editor's up-front gate matches the
+   server's 409 instead of drifting from it. `type-override-fn-id` /
+   `slot.type-fn-id` are intentionally NOT counted — the delete guard
+   doesn't block on them either."
+  [graph]
+  {:as-parent (reduce (fn [m f] (reduce (fn [m pid] (update m pid (fnil inc 0))) m (:parent-ids f)))
+                      {} (:fns graph))
+   :as-ref (as-> {} m
+                 (reduce (fn [m b] (if-let [r (:ref-fn-id b)] (update m r (fnil inc 0)) m)) m (:bindings graph))
+                 (reduce (fn [m it] (if-let [r (:ref-fn-id it)] (update m r (fnil inc 0)) m)) m (:list-items graph)))})
+
+
+(defn- with-ref-counts
+  "Annotate a fn row with its reverse-reference counts from `rev`, omitting
+   either count when zero (an absent key reads as 0 client-side)."
+  [rev f]
+  (let [ap (get (:as-parent rev) (:id f) 0)
+        ar (get (:as-ref rev) (:id f) 0)]
+    (cond-> f
+      (pos? ap) (assoc :used-as-parent-count ap)
+      (pos? ar) (assoc :used-as-ref-count ar))))
 
 
 (defn- light-fn-row
-  "Project a (roled) fn row down to `light-fn-fields`, dropping nils so
-   the wire payload carries no `\"x\":null` churn (an absent key reads as
-   `undefined` client-side, identical to the editor's truthy checks)."
-  [f]
-  (into {} (remove (comp nil? val)) (select-keys f light-fn-fields)))
+  "Project a (roled) fn row — annotated with reverse-ref counts from `rev`
+   — down to `light-fn-fields`, dropping nils so the wire payload carries
+   no `\"x\":null` churn (an absent key reads as `undefined` client-side,
+   identical to the editor's truthy checks)."
+  [rev f]
+  (into {} (remove (comp nil? val)) (select-keys (with-ref-counts rev f) light-fn-fields)))
 
 
 (def ^:private default-search-limit
@@ -537,6 +577,9 @@
                             (boolean (seq (get fn-slots-by-fn (:id f))))
                             @rich-snapshot)))
          roled-fns (delay (mapv role-of (:fns base)))
+         ;; Whole-graph reverse-ref tallies — realised only for the scopes
+         ;; that project fn rows (`:namespace` / `:search` / `:subtree`).
+         rev-index (delay (reverse-ref-index base))
          namespaces (delay (vec (sp/query-entities storage :ns {})))]
      (cond
        (= scope :tree)
@@ -558,7 +601,7 @@
        ;; `(root)` node — since `nil = (:namespace-id f)` matches them.
        {:fns (into []
                    (comp (filter #(and (:name %) (= namespace-id (:namespace-id %))))
-                         (map (comp light-fn-row role-of)))
+                         (map (comp (partial light-fn-row @rev-index) role-of)))
                    (:fns base))}
 
        (= scope :search)
@@ -573,7 +616,7 @@
                                            (str/includes? (str/lower-case (:name %)) needle)))
                              (:fns base)))
              limited (into [] (take default-search-limit) matches)]
-         {:fns (mapv (comp light-fn-row role-of) limited)
+         {:fns (mapv (comp (partial light-fn-row @rev-index) role-of) limited)
           :truncated? (boolean (and needle (> (count matches) default-search-limit)))})
 
        (= scope :index)
@@ -594,7 +637,11 @@
        (let [closure (subtree-fn-id-closure base root-id)
              roled-by-id (into {} (map (juxt :id identity)) @roled-fns)
              sub (filter-graph-to-fn-ids base closure)
-             sub-roled-fns (mapv #(or (get roled-by-id (:id %)) %) (:fns sub))
+             ;; Annotate with whole-graph reverse-ref counts so the
+             ;; graph-view delete/edit gate reads them off the fn row
+             ;; instead of counting over the (now sliced) client mirror.
+             sub-roled-fns (mapv #(with-ref-counts @rev-index (or (get roled-by-id (:id %)) %))
+                                 (:fns sub))
              ;; Include each fn's namespace AND its parent chain so
              ;; the sidebar can render the full path (e.g. `web.crud
              ;; .branches` needs `web` + `web.crud` + `web.crud

@@ -166,6 +166,7 @@ chain can be queried/indexed independently of scalar bindings.
 | [docs/EDITOR_HTMX_MIGRATION_PLAN.md](docs/EDITOR_HTMX_MIGRATION_PLAN.md) | As-shipped reference for the row-actions partial: per-context (`col-header` / `cell` / `use-site-arg` / `root-row`) query-param matrix + JS dispatcher contract. Documents what shipped in Phase A (8 commits) and why Phase B/C/edge-label were deferred (server has no data the client doesn't). | When extending the row-actions partial OR considering another graphData-backed popover for migration |
 | [docs/PACKAGE_DISTRIBUTION.md](docs/PACKAGE_DISTRIBUTION.md) | Distributing packages: the three module kinds (Type-1 fns-only / Type-2 impl+fns / Type-3 core-swap), the in-graph registry (publish / reference-install + pin / update-rollback ref-rewrite / fork), external Type-2 packages via `resources/executor-packages.edn` + a git coord, whole-graph export (`GET /api/export/graph`), the swap-seam matrix, and § 15.1 **as-built repo map** (what stays in the monorepo vs `graphden-{mathx,examples,cloud}`) | When touching `app/registry`, `packages/{loader,export}`, `executor-packages.edn`, `external-packages/`, or deciding whether something belongs in its own repo |
 | [docs/PLATFORM_PLAN.md](docs/PLATFORM_PLAN.md) | Multi-tenant platform ADR — orgs / RLS / grants, the **two-layer tenant effect gate** (§5: `cloud-request-allowed-effects` at the request, `default-cloud-allowed-effects` on the exec ctx), the `:execute-guard` admission seam, monetisation via packages | When touching `tenancy/`, the effect gate, or an admission/quota policy |
+| [docs/devtour/README.md](docs/devtour/README.md) | The **developer code-tour** — a navigable, symbol-anchored read of the *host codebase* by block (executor → storage → versioning → types → crud → packages → web → services → tenancy); how `tour.edn` + `bb devtour` bake real source into `docs/devtour/index.html`, the `:ns` / `:file` / `:dispatch` anchor forms, and the `bb devtour-check` drift guard. See **Developer Tour Maintenance** below | When onboarding to the codebase, or when you rename / move / delete a top-level form a tour step anchors (CI goes red) or add a subsystem worth a step |
 
 ## Common Commands
 
@@ -192,6 +193,8 @@ bb stylelint    # Lint editor CSS — enforces design tokens for color/backgroun
 bb stylelint-fix # Apply safe stylelint autofixes
 bb visual       # Playwright visual-regression diff against committed baselines
 bb visual-update # Refresh visual baselines after intentional UI changes
+bb devtour      # Regenerate the developer code-tour docs/devtour/index.html from tour.edn
+bb devtour-check # (in bb ci) fail if a tour anchor broke or index.html drifted
 
 # Build & Deploy (Docker)
 bb rebuild      # Rebuild jar + docker + restart (ALWAYS use this after code changes!)
@@ -746,6 +749,46 @@ If a lesson would document a feature that **partially** landed, do
 NOT write the lesson yet — keep it ⏳ planned, propose again when the
 feature is complete enough that the lesson can be paste-into-the-editor
 correct.
+
+## Developer Tour Maintenance
+
+The **developer code-tour** lives in [docs/devtour/](docs/devtour/README.md) —
+a navigable, symbol-anchored walkthrough of the *host codebase* for a new
+contributor, organised by block (executor, storage, versioning, types, crud,
+packages, web, services, tenancy). It is the developer-facing counterpart to
+the user tutorial above: `docs/tutorial/` teaches *using* the editor; the tour
+teaches *the code that runs it*.
+
+Source of truth is [docs/devtour/tour.edn](docs/devtour/tour.edn) (blocks →
+ordered steps, each anchored on a `{:ns :defn}` **symbol**, never a line
+number). `bb devtour` bakes each anchored form's real source into the
+self-contained `docs/devtour/index.html`.
+
+**Two obligations when your change touches toured code:**
+
+1. **Mechanical (CI-enforced).** `bb devtour-check` (in `bb ci`, `:docs` group)
+   fails if any anchor stops resolving to a unique form, or if `index.html` has
+   drifted from a fresh regeneration. So if your change edits the body of — or
+   renames / moves / deletes — a form a step anchors on:
+   - run `bb devtour` and commit the regenerated `index.html`, and
+   - if you renamed / moved / removed the form, fix its step in `tour.edn`
+     (re-point the anchor, or drop the step) so it resolves again.
+
+   You cannot land red: the guard forces the tour to stay in sync with the
+   code it points at.
+
+2. **Editorial (judgement).** When a change introduces a significant new
+   entry-point, subsystem, or concept in a toured block — or a whole new
+   block-worthy subsystem — add a step (or block) so the tour still reads as a
+   complete walkthrough; removing a subsystem removes its step. Keep each
+   `:say` to the "what this form does + why it's the right next stop" style.
+   See [docs/devtour/README.md](docs/devtour/README.md) for the anchor forms
+   (`:ns` / `:file` / `:dispatch`) and how to add a block.
+
+Unlike the user tutorial (propose lessons, get sign-off), developer-tour edits
+are part of the change itself — no separate sign-off. Do **not** add a step for
+an internal refactor that changes no entry-point, a bug fix, or perf work,
+unless it changes what a newcomer should read.
 
 ## CI Workflow
 

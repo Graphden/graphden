@@ -251,6 +251,13 @@
    :parent :swap
    :args {:func :_conj-into}}
 
+  {:name :reset
+   :description "`(reset! :a :v)` — install `:v` as the atom's value, ignoring the current one (`clojure.core/reset!`). Returns `:v`. No read-modify-write, so unlike `:swap` it is NOT atomic against concurrent writers — use only where a lost write is harmless (an idempotent cache). Composes deref → transform → reset without capturing the new value in a `:swap` callback (which a HOF-blind layout walker can't trace)."
+   :args {:a {:type :any :description "Atom (from `:atom` or `:cell`)."}
+          :v {:type :any :description "New value to install."}}
+   :return-type :any
+   :effects #{:state}}
+
   {:name :deref
    :description "`@:a` — read the current value of an atom (`clojure.core/deref`). Works on both `:atom` and `:cell`."
    :args {:a {:type :any :description "Atom to read."}}

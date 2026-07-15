@@ -213,9 +213,9 @@
 ;; helper here. It is composed in `web/http/fns.edn` from the generic
 ;; state primitives: a `:cell` (`:response-cache-cell`) holds the map,
 ;; `:response-cache-get` is `(get (deref cell) key)`, and the store +
-;; capacity-eviction is a `:swap` over an in-graph `:assoc` / `:if` /
-;; `:count`. Nothing about the cache lives in Clojure any more — a user
-;; can build the same cache for their own graph.
+;; capacity-eviction is a `:reset` over an in-graph `:deref` / `:assoc`
+;; / `:if` / `:count`. Nothing about the cache lives in Clojure any
+;; more — a user can build the same cache for their own graph.
 ;; ---------------------------------------------------------------
 
 (defbase realize-request-body

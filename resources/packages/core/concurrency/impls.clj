@@ -219,6 +219,18 @@
   (swap! a func))
 
 
+(defbase reset-fn
+  "`(reset! a v)` — install `v` as the atom's value regardless of the
+   current one (`clojure.core/reset!`). Returns `v`. Unlike `:swap` it
+   takes no function and does NOT read-modify-write atomically, so use
+   it only where a lost concurrent write is harmless (an idempotent
+   cache: the same key always maps to the same value, so a dropped
+   store just recomputes next time). Records `:state`."
+  [a v]
+  (cr/record-effect! :state)
+  (reset! a v))
+
+
 (defbase deref-fn
   "`@a` — read the current value of an atom (`clojure.core/deref`).
    Returns whatever the atom currently holds."
@@ -237,4 +249,5 @@
    :atom atom-fn
    :cell {:impl cell-fn :compile-time-value? true}
    :swap swap-fn
+   :reset reset-fn
    :deref deref-fn})

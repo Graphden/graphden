@@ -448,6 +448,32 @@
      :list-items kept-items}))
 
 
+(def ^:private light-fn-fields
+  "The per-fn columns the editor's sidebar / picker / search views
+   actually read. Every other column (slots, bindings, and the bulk of
+   the scalar fn columns) is fetched on demand via `:subtree` when a fn
+   is opened. Keep this in sync with the fields consumed in
+   `editor-sidebar.js` / `editor-fn-picker.js` / `editor-data.js`."
+  [:id :name :namespace-id :role :description :constraint
+   :parent-ids :return-type-fn-id])
+
+
+(defn- light-fn-row
+  "Project a (roled) fn row down to `light-fn-fields`, dropping nils so
+   the wire payload carries no `\"x\":null` churn (an absent key reads as
+   `undefined` client-side, identical to the editor's truthy checks)."
+  [f]
+  (into {} (remove (comp nil? val)) (select-keys f light-fn-fields)))
+
+
+(def ^:private default-search-limit
+  "Cap on `:search` results. The sidebar filter / fn-picker only render a
+   bounded list; an unbounded match on a huge graph would defeat the
+   whole point of moving the filter server-side. `:truncated?` in the
+   response tells the client more matched than were returned."
+  200)
+
+
 (defn list-all-graph-entities
   "Dump every storage row the editor needs to render the graph. Routes
    through the shared graph-cache (populated by layout / compile-
@@ -465,12 +491,26 @@
      Response is ~4.5 MB on a 3000-fn graph; appropriate for the
      editor's initial \"give me everything\" load.
 
+   - `:tree` — `{:namespaces :counts}` ONLY, no fn rows. `:counts` is a
+     vector of `{:namespace-id :count}` (named fns per namespace). This
+     is the O(namespaces) sidebar-init payload: the editor renders a
+     collapsed tree from it and pulls each namespace's fns lazily via
+     `:namespace` on expand. Replaces `:index` on the editor hot path.
+
+   - `:namespace` with `namespace-id` — light rows (`light-fn-fields`)
+     for the named fns of that one namespace. The lazy-expand payload.
+
+   - `:search` with `q` — light rows for named fns whose raw name
+     contains `q` (case-insensitive), capped at `default-search-limit`
+     with a `:truncated?` flag. The server-side replacement for the
+     editor's client-side filter box + the fn / namespace / MI-reparent
+     pickers + name→id resolution.
+
    - `:index` — only `{:fns :namespaces}` plus enough metadata for
      the sidebar tree (every fn's role + namespace-id + name). Drops
      `:slots`, `:fn-slots`, `:bindings`, `:list-items` entirely.
-     ~95% size reduction (~250 KB on the same graph). Use when the
-     caller only needs the sidebar / picker view and will fetch
-     per-fn detail on demand.
+     Still O(all-fns); retained for CLI / batch / backward-compat
+     callers. The editor no longer uses it (see `:tree`).
 
    - `:subtree` with `root-id` — only the fns transitively reachable
      from `root-id` via inheritance + binding refs + type overrides +
@@ -478,22 +518,64 @@
      / bindings / list-items they own. Typically 30-60 fns / ~50 KB
      for a single editor fn-view. Falls back to `:full` shape if
      `root-id` is nil or doesn't resolve to a fn-row."
-  ([ctx] (list-all-graph-entities ctx nil nil))
-  ([ctx scope] (list-all-graph-entities ctx scope nil))
-  ([ctx scope root-id]
+  ([ctx] (list-all-graph-entities ctx nil nil nil nil))
+  ([ctx scope] (list-all-graph-entities ctx scope nil nil nil))
+  ([ctx scope root-id] (list-all-graph-entities ctx scope root-id nil nil))
+  ([ctx scope root-id namespace-id q]
    (let [storage (request/require-storage ctx)
          base (types-api/cached-or-load-graph ctx)
          fn-slots-by-fn (group-by :fn-id (:fn-slots base))
-         rich-snapshot (registry/rich-types-snapshot)
-         roled-fns (mapv (fn [f]
-                           (assoc f :role
-                                  (types-api/compute-fn-role
-                                    f
-                                    (boolean (seq (get fn-slots-by-fn (:id f))))
-                                    rich-snapshot)))
-                         (:fns base))
-         namespaces (vec (sp/query-entities storage :ns {}))]
+         ;; `roled-fns` / `namespaces` are only realised by the branches
+         ;; that need them — the O(namespaces) `:tree` scope skips role
+         ;; computation over every fn entirely, `:namespace` / `:search`
+         ;; role only the projected subset (via `role-of`).
+         rich-snapshot (delay (registry/rich-types-snapshot))
+         role-of (fn [f]
+                   (assoc f :role
+                          (types-api/compute-fn-role
+                            f
+                            (boolean (seq (get fn-slots-by-fn (:id f))))
+                            @rich-snapshot)))
+         roled-fns (delay (mapv role-of (:fns base)))
+         namespaces (delay (vec (sp/query-entities storage :ns {})))]
      (cond
+       (= scope :tree)
+       ;; Sidebar init: the namespace list + a per-namespace count of
+       ;; NAMED fns (anonymous fns are never shown as leaves). No fn rows
+       ;; at all — leaves load lazily via `:namespace`. This is the
+       ;; O(namespaces) replacement for the O(all-fns) `:index` pull that
+       ;; the editor fetched on every init AND every post-mutation refresh.
+       {:namespaces @namespaces
+        :counts (->> (:fns base)
+                     (filter :name)
+                     (group-by :namespace-id)
+                     (mapv (fn [[nid fns]] {:namespace-id nid :count (count fns)})))}
+
+       (= scope :namespace)
+       ;; Lazy per-namespace expand: light rows for one namespace's named
+       ;; fns. A `nil` `namespace-id` intentionally selects the "(root)"
+       ;; bucket — the namespace-less fns the sidebar renders under its
+       ;; `(root)` node — since `nil = (:namespace-id f)` matches them.
+       {:fns (into []
+                   (comp (filter #(and (:name %) (= namespace-id (:namespace-id %))))
+                         (map (comp light-fn-row role-of)))
+                   (:fns base))}
+
+       (= scope :search)
+       ;; Server-side filter: case-insensitive substring on the raw fn
+       ;; name, capped at `default-search-limit`. Replaces the client-side
+       ;; scan over the (former) full-fns mirror in the sidebar filter box,
+       ;; the fn / namespace / MI-reparent pickers, and name→id resolution.
+       (let [needle (some-> q str/lower-case str/trim not-empty)
+             matches (when needle
+                       (into []
+                             (filter #(and (:name %)
+                                           (str/includes? (str/lower-case (:name %)) needle)))
+                             (:fns base)))
+             limited (into [] (take default-search-limit) matches)]
+         {:fns (mapv (comp light-fn-row role-of) limited)
+          :truncated? (boolean (and needle (> (count matches) default-search-limit)))})
+
        (= scope :index)
        ;; Drop nil-valued fields from each fn row. This is a sidebar /
        ;; picker payload fetched fresh on every editor refresh (~3900 fns),
@@ -505,12 +587,12 @@
        ;; the editor's truthy checks exactly like `null`, so no data is
        ;; lost; the per-fn detail (with all fields) still comes from the
        ;; `:subtree` fetch on select.
-       {:fns (mapv (fn [f] (into {} (remove (comp nil? val)) f)) roled-fns)
-        :namespaces namespaces}
+       {:fns (mapv (fn [f] (into {} (remove (comp nil? val)) f)) @roled-fns)
+        :namespaces @namespaces}
 
        (and (= scope :subtree) root-id)
        (let [closure (subtree-fn-id-closure base root-id)
-             roled-by-id (into {} (map (juxt :id identity)) roled-fns)
+             roled-by-id (into {} (map (juxt :id identity)) @roled-fns)
              sub (filter-graph-to-fn-ids base closure)
              sub-roled-fns (mapv #(or (get roled-by-id (:id %)) %) (:fns sub))
              ;; Include each fn's namespace AND its parent chain so
@@ -518,7 +600,7 @@
              ;; .branches` needs `web` + `web.crud` + `web.crud
              ;; .branches`). Without the parent walk a leaf-only ns
              ;; slice has no recoverable label tree.
-             ns-by-id (into {} (map (juxt :id identity)) namespaces)
+             ns-by-id (into {} (map (juxt :id identity)) @namespaces)
              ns-ids (loop [acc #{} pending (into #{} (keep :namespace-id) sub-roled-fns)]
                       (if-let [nid (first pending)]
                         (if (contains? acc nid)
@@ -530,13 +612,13 @@
                                      (and p (not (contains? acc p)))
                                      (conj p)))))
                         acc))
-             sub-namespaces (filterv #(contains? ns-ids (:id %)) namespaces)]
+             sub-namespaces (filterv #(contains? ns-ids (:id %)) @namespaces)]
          (assoc sub :fns sub-roled-fns :namespaces sub-namespaces))
 
        :else
        (-> base
-           (assoc :fns roled-fns)
-           (assoc :namespaces namespaces))))))
+           (assoc :fns @roled-fns)
+           (assoc :namespaces @namespaces))))))
 
 
 ;; === Compound type-row create / update ======================================

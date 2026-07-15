@@ -334,6 +334,88 @@
       (finally (sp/close storage)))))
 
 
+(def ^:private light-fn-keys
+  "The exact whitelist `:tree` / `:namespace` / `:search` project each fn
+   down to (nils dropped). Mirrors `entities/light-fn-fields`."
+  #{:id :name :namespace-id :role :description :constraint
+    :parent-ids :return-type-fn-id})
+
+
+(deftest list-all-graph-entities-scoped-test
+  (let [storage (setup/create-test-storage)
+        c (test-ctx storage)
+        ns-a (java.util.UUID/randomUUID)
+        ns-b (java.util.UUID/randomUUID)
+        a1 (java.util.UUID/randomUUID)
+        a2 (java.util.UUID/randomUUID)
+        b1 (java.util.UUID/randomUUID)
+        anon (java.util.UUID/randomUUID)
+        r1 (java.util.UUID/randomUUID)]
+    (sp/create-entity storage :ns {:id ns-a :name "alpha"})
+    (sp/create-entity storage :ns {:id ns-b :name "beta"})
+    ;; two named fns in ns-a, one in ns-b, one ANONYMOUS in ns-a (must be
+    ;; excluded everywhere), one named fn in the root bucket (nil ns).
+    (sp/create-entity storage :fn {:id a1 :name "alpha-widget" :namespace-id ns-a :parent-ids []})
+    (sp/create-entity storage :fn {:id a2 :name "alpha-gadget" :namespace-id ns-a :parent-ids []})
+    (sp/create-entity storage :fn {:id b1 :name "beta-widget" :namespace-id ns-b :parent-ids []})
+    (sp/create-entity storage :fn {:id anon :name nil :namespace-id ns-a :parent-ids []})
+    (sp/create-entity storage :fn {:id r1 :name "root-thing" :parent-ids []})
+    ;; sp/create-entity bypasses the graph-cache invalidation the real
+    ;; write path runs — drop the cache so the loader sees these writes.
+    (ctx/invalidate-graph-cache! c)
+    (try
+      (testing "scope :tree — {:namespaces :counts} only, NO fn rows"
+        (let [dump (entities/list-all-graph-entities c :tree)]
+          (is (= #{:namespaces :counts} (set (keys dump)))
+              ":tree payload is exactly {:namespaces :counts}")
+          (let [count-by (into {} (map (juxt :namespace-id :count)) (:counts dump))]
+            (is (= 2 (get count-by ns-a))
+                "ns-a counts its 2 NAMED fns; the anonymous one is excluded")
+            (is (= 1 (get count-by ns-b)))
+            ;; The nil bucket also holds the 14 seeded primitive fn-rows, so
+            ;; assert presence + that r1 lifted the count, not an exact value.
+            (is (contains? count-by nil)
+                "the namespace-less bucket is present in :counts")
+            (is (pos? (get count-by nil))))))
+      (testing "scope :namespace — one namespace's light named fns"
+        (let [dump (entities/list-all-graph-entities c :namespace nil ns-a nil)
+              ids  (into #{} (map :id) (:fns dump))]
+          (is (= #{a1 a2} ids)
+              "only ns-a's named fns; anonymous excluded, other ns excluded")
+          (is (= #{:fns} (set (keys dump))) "no heavy tables (:slots etc.)")
+          (is (every? #(contains? % :role) (:fns dump)) "light rows carry :role")
+          (is (every? #(every? light-fn-keys (keys %)) (:fns dump))
+              "light rows are projected to the whitelist — nothing extra")))
+      (testing "scope :namespace with nil namespace-id — the (root) bucket"
+        (let [ids (into #{} (map :id) (:fns (entities/list-all-graph-entities c :namespace nil nil nil)))]
+          (is (contains? ids r1)
+              "the namespace-less named fn is addressable as the root bucket")
+          (is (not (contains? ids a1)) "namespaced fns are not in the root bucket")
+          (is (not (contains? ids anon)) "the anonymous fn is excluded")))
+      (testing "scope :search — capped, case-insensitive name-substring"
+        (let [dump (entities/list-all-graph-entities c :search nil nil "widget")]
+          (is (= #{a1 b1} (into #{} (map :id) (:fns dump)))
+              "both *-widget fns match across namespaces")
+          (is (false? (:truncated? dump)) "well under the cap")
+          (is (every? #(every? light-fn-keys (keys %)) (:fns dump))
+              "search rows share the light projection")))
+      (testing "scope :search is case-insensitive and matches raw name"
+        (is (= #{a1 a2}
+               (into #{} (map :id)
+                     (:fns (entities/list-all-graph-entities c :search nil nil "ALPHA"))))))
+      (testing "scope :search with blank / nil q — no matches, not truncated"
+        (let [dump (entities/list-all-graph-entities c :search nil nil "   ")]
+          (is (empty? (:fns dump)))
+          (is (false? (:truncated? dump)))))
+      (testing "scope :search caps at the limit and flags :truncated?"
+        ;; Rebind the private cap low rather than seed 200+ rows.
+        (with-redefs [entities/default-search-limit 1]
+          (let [dump (entities/list-all-graph-entities c :search nil nil "widget")]
+            (is (= 1 (count (:fns dump))) "result capped at the limit")
+            (is (true? (:truncated? dump)) "more matched than were returned"))))
+      (finally (sp/close storage)))))
+
+
 ;; ============================================================================
 ;; resolve-sequence-payload
 ;; ============================================================================

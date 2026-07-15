@@ -224,13 +224,19 @@
    :effects #{:db}}
 
   {:name :list-all-graph-entities
-   :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. With `scope :index`, drops `:slots / :fn-slots / :bindings / :list-items` for a ~95% smaller response (sidebar-only use). With `scope :subtree` + `root-id`, returns only the transitive closure reachable from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids (~98% smaller — typical per-fn editor view)."
+   :description "Dump every fn, arg, and namespace currently in storage — the payload behind `/api/graph/entities`. `scope :tree` returns `{:namespaces :counts}` (O(namespaces) sidebar init). `scope :namespace` + `namespace-id` returns one namespace's light fn rows (lazy expand). `scope :search` + `q` returns capped name-substring matches (filter box / pickers / name resolution). `scope :index` returns `{:fns :namespaces}` (legacy full-fns pull). `scope :subtree` + `root-id` returns only the transitive closure reachable from `root-id` via parent-ids + binding-refs + type-overrides + list-item-refs + own-slot type-fn-ids (~98% smaller — typical per-fn editor view)."
    :args {:scope {:type :nullable-keyword
                   :value nil
-                  :description "`:index` returns `{:fns :namespaces}` only — for the editor's lightweight sidebar load. `:subtree` requires `root-id` and returns only the subgraph reachable from it. `nil` / `:full` (default) returns the complete graph dump."}
+                  :description "`:tree` → `{:namespaces :counts}` only (sidebar init). `:namespace` (+ `namespace-id`) → one namespace's light fns. `:search` (+ `q`) → capped name matches. `:index` → `{:fns :namespaces}` full pull. `:subtree` (+ `root-id`) → subgraph reachable from it. `nil` / `:full` (default) → complete dump."}
           :root-id {:type :nullable-uuid
                     :value nil
-                    :description "Required when `:scope :subtree`. Ignored otherwise. Anchor for the BFS closure."}}
+                    :description "Required when `:scope :subtree`. Ignored otherwise. Anchor for the BFS closure."}
+          :namespace-id {:type :nullable-uuid
+                         :value nil
+                         :description "Required when `:scope :namespace`. Ignored otherwise. Selects the namespace whose fns to return."}
+          :q {:type :nullable-text
+              :value nil
+              :description "Required when `:scope :search`. Ignored otherwise. Case-insensitive substring matched against each fn's raw name."}}
    :return-type :keyword-map
    :effects #{:db}}
 
@@ -4138,12 +4144,27 @@
                    :args {:request {:as :request}
                           :param-name {:value "root-id"}}}}}
 
+  {:name :_all-entities-namespace-id
+   :description "Pull `namespace-id` query param off the Ring request and parse to UUID. Anchor for `?scope=namespace` (lazy per-namespace expand). `nil` when absent or malformed."
+   :parent :parse-uuid
+   :args {:string {:parent :query-param
+                   :args {:request {:as :request}
+                          :param-name {:value "namespace-id"}}}}}
+
+  {:name :_all-entities-q
+   :description "Pull the `q` query param (raw search string) off the Ring request. Needle for `?scope=search`. `nil` when absent."
+   :parent :query-param
+   :args {:request {:as :request}
+          :param-name {:value "q"}}}
+
   {:name :all-entities-handler
-   :description "Ring handler that returns the graph dump as JSON. With `?scope=index`, returns only `{:fns :namespaces}` (~95% size reduction for sidebar). With `?scope=subtree&root-id=X`, returns only the subgraph reachable from X (~98% reduction, per-fn editor view). Bound by `app.routes.api-entities`."
+   :description "Ring handler that returns the graph dump as JSON. `?scope=tree` → `{:namespaces :counts}` (sidebar init). `?scope=namespace&namespace-id=X` → one namespace's light fns (lazy expand). `?scope=search&q=…` → capped name matches (filter / pickers). `?scope=index` → `{:fns :namespaces}` full pull. `?scope=subtree&root-id=X` → subgraph reachable from X. Bound by `app.routes.api-entities`."
    :parent :json-handler
    :args {:data {:parent :list-all-graph-entities
                  :args {:scope :_all-entities-scope
-                        :root-id :_all-entities-root-id}}}}
+                        :root-id :_all-entities-root-id
+                        :namespace-id :_all-entities-namespace-id
+                        :q :_all-entities-q}}}}
 
   {:name :all-rich-types-handler
    :description "Ring handler for `GET /api/types` — returns the rich-type registry as JSON. Editor / external tools use it to know each slot's expected type without having to re-derive from EDN."

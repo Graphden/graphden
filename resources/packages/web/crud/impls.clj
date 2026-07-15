@@ -216,22 +216,23 @@
 
 
 (defbase list-all-graph-entities
-  [scope root-id]
+  [scope root-id namespace-id q]
   ;; Storage read (via `cached-or-load-graph` + an explicit `query-entities`
   ;; for namespaces). Without the record-effect! the runtime
   ;; `:runtime-effects` list returned by `/api/execute` would silently
   ;; drop `:db` for this call — the declared `:effects #{:db}` in fns.edn
   ;; says the effect IS there, the runtime audit must match.
   ;;
-  ;; `scope :index` — only `{:fns :namespaces}`. Editor sidebar uses
-  ;; this on initial load.
+  ;; `scope :tree` — `{:namespaces :counts}`, the O(namespaces) sidebar
+  ;; init. `scope :namespace` + `namespace-id` — one namespace's light fn
+  ;; rows (lazy expand). `scope :search` + `q` — name-substring matches,
+  ;; capped (filter box + pickers + name resolution).
   ;;
-  ;; `scope :subtree` + `root-id` — only the subgraph reachable from
-  ;; `root-id`. ~50 KB typical for a per-fn editor view.
-  ;;
+  ;; `scope :index` — `{:fns :namespaces}` (legacy full-fns sidebar pull).
+  ;; `scope :subtree` + `root-id` — the subgraph reachable from `root-id`.
   ;; Anything else (nil / :full) yields the unchanged full payload.
   (cr/record-effect! :db)
-  (entities/list-all-graph-entities ctx scope root-id))
+  (entities/list-all-graph-entities ctx scope root-id namespace-id q))
 
 
 (defbase all-rich-types

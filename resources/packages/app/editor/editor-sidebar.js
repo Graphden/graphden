@@ -408,7 +408,10 @@ function renderNsNode(container, name, node, path, searchMode) {
     loading.className = 'loading';
     loading.textContent = 'Loading…';
     childGroup.appendChild(loading);
-    if (typeof loadNamespaceFns === 'function') {
+    // Trigger the fetch (with its re-render) only if one isn't already in
+    // flight — re-rendering while it loads must not attach another `.then`.
+    if (typeof loadNamespaceFns === 'function'
+        && !(typeof isNamespaceLoading === 'function' && isNamespaceLoading(node.nsId))) {
       loadNamespaceFns(node.nsId)
         .then(() => updateEntityList(graphData))
         .catch((err) => { console.error('loadNamespaceFns failed', err); });
@@ -548,7 +551,8 @@ function renderRootNode(list, rootFns, searchMode) {
       loading.className = 'loading';
       loading.textContent = 'Loading…';
       childGroup.appendChild(loading);
-      if (typeof loadNamespaceFns === 'function') {
+      if (typeof loadNamespaceFns === 'function'
+          && !(typeof isNamespaceLoading === 'function' && isNamespaceLoading(null))) {
         loadNamespaceFns(null)
           .then(() => updateEntityList(graphData))
           .catch((err) => { console.error('loadNamespaceFns(root) failed', err); });

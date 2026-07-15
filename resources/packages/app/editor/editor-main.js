@@ -55,6 +55,16 @@ function isNamespaceLoaded(nsId) {
 }
 window.isNamespaceLoaded = isNamespaceLoaded;
 
+// True while a namespace's fetch is in flight. The sidebar checks this so it
+// triggers loadNamespaceFns (with its re-render `.then`) exactly ONCE per
+// load — re-rendering while a fetch is pending (e.g. many namespaces
+// expanded at once) must not keep attaching fresh `.then` callbacks, which
+// would fan out into a re-render storm when the promise finally resolves.
+function isNamespaceLoading(nsId) {
+  return _nsFetchInFlight.has(nsId || '');
+}
+window.isNamespaceLoading = isNamespaceLoading;
+
 // Fetch one namespace's fn leaves (light rows) and merge them. `nsId` may be
 // null for the "(root)" bucket (namespace-less fns). Caches per-ns so a
 // re-expand doesn't refetch; loadGraphData() clears the set on mutation. An

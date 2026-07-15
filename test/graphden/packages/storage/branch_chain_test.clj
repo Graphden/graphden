@@ -10,7 +10,6 @@
    `:fn-cycle-detect?` / `:fn-mi-compat?` in later phases."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.context :as exec-ctx]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
@@ -51,7 +50,13 @@
                                           {:base-branch-id root-id}))
           leaf    (:id (vs/create-branch! *storage* "leaf-branch"
                                           {:base-branch-id mid}))]
-      (exec-ctx/invalidate-graph-cache! *context*)
+      ;; No invalidation needed: the `:branch-chain` fn reads branch rows from
+      ;; storage at execute time, and creating a branch changes no fn's compiled
+      ;; closure. The 1-arity full clear that used to sit here nil'd the registry
+      ;; the fixture had just precompiled, so the first `execute` below rebuilt all
+      ;; ~2600 golden fns — ~45 s, for nothing. The branch-chain cache is keyed by
+      ;; branch-id, and brand-new branches add fresh keys, never stale ones. The
+      ;; assertions confirm the walk is correct without it.
 
       (testing "leaf → mid → root (3-deep)"
         (is (= [leaf mid root-id]

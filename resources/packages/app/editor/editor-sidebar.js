@@ -16,8 +16,16 @@
 // By default all namespaces are collapsed; only explicitly opened ones are expanded.
 const expandedNamespaces = new Set();
 
-// Current search/filter text (lowercase)
+// Current search/filter text (raw; server search is case-insensitive).
 let searchFilter = '';
+// Server-side search state. The sidebar no longer holds a full-fns mirror
+// to filter client-side; typing in the box hits ?scope=search. `_searchResults`
+// is null while a query is in flight (or no query active), else the matched
+// light fn rows; `_searchSeq` drops stale responses that arrive out of order.
+let _searchResults = null;
+let _searchTruncated = false;
+let _searchSeq = 0;
+let _searchDebounce = null;
 
 // Append a lazy-loading admin section (Grants / Users / Packages) and process
 // it with HTMX. The section's `.ns-children` carries hx-get + hx-trigger="load";
@@ -121,12 +129,20 @@ function nodeEntityCount(node) {
 // pre-creates a node for every declared namespace so a just-created one
 // appears immediately, and hiding it would make it impossible to put the
 // first entity into it — you would create a namespace and watch it vanish.
-function nodeShouldShow(node) {
+function nodeShouldShow(node, searchMode) {
+  // In search mode the tree is built from the server's matches only, so a
+  // node shows iff it (or a descendant) actually holds a match. The
+  // "empty → keep visible" rule below would otherwise surface every
+  // namespace during a search.
+  if (searchMode) return nodeEntityCount(node) > 0;
   if (node.fns.some(fnKindVisible)) return true;
   for (const child of node.children.values()) {
-    if (nodeShouldShow(child)) return true;
+    if (nodeShouldShow(child, searchMode)) return true;
   }
   if (nodeHasActiveCreate(node)) return true;
+  // Genuinely empty (nothing loaded here) → keep visible: this covers both
+  // a just-created empty namespace AND a collapsed namespace whose leaves
+  // haven't been lazily fetched yet (they load on expand).
   return nodeEntityCount(node) === 0;
 }
 
@@ -237,40 +253,6 @@ function buildNsTree(data) {
 }
 
 /**
- * Filter a tree node, keeping only branches that contain matches.
- * A fn matches if its displayName contains the filter.
- * A ns matches if its name contains the filter OR any descendant matches.
- * When a ns name itself matches, all its descendants are included.
- * Returns null if nothing matches.
- */
-function filterNsNode(node, filter, nsName) {
-  const nsMatches = nsName?.toLowerCase().includes(filter);
-
-  // If the namespace name matches, include the entire subtree unfiltered
-  if (nsMatches) return node;
-
-  // Filter children recursively
-  const filteredChildren = new Map();
-  for (const [childName, childNode] of node.children) {
-    const filtered = filterNsNode(childNode, filter, childName);
-    if (filtered) filteredChildren.set(childName, filtered);
-  }
-
-  // Filter fns — match against BOTH the display label and the raw
-  // name so users can find a private fn by typing either `_router` or
-  // `router`.
-  const filteredFns = node.fns.filter(fn => {
-    const f = filter.toLowerCase();
-    return fn.displayName.toLowerCase().includes(f)
-        || (fn.rawName?.toLowerCase().includes(f));
-  });
-
-  if (filteredChildren.size === 0 && filteredFns.length === 0) return null;
-
-  return { children: filteredChildren, fns: filteredFns };
-}
-
-/**
  * Render a namespace tree node recursively into the container.
  */
 function buildFnItem(fn) {
@@ -346,9 +328,11 @@ function buildFnItem(fn) {
 }
 
 
-function renderNsNode(container, name, node, path) {
+function renderNsNode(container, name, node, path, searchMode) {
   const nsPath = path ? path + '.' + name : name;
-  const isCollapsed = !expandedNamespaces.has(nsPath);
+  // Search mode force-expands every matched branch so results are visible
+  // without the user drilling in.
+  const isCollapsed = searchMode ? false : !expandedNamespaces.has(nsPath);
 
   // Namespace header
   const header = document.createElement('div');
@@ -404,22 +388,39 @@ function renderNsNode(container, name, node, path) {
 
   if (isCollapsed) return;
 
-  // Child namespaces (sorted)
+  // Child namespaces (sorted). These render independently of this node's
+  // own leaves — a child loads its own fns when IT expands.
   const childGroup = document.createElement('div');
   childGroup.className = 'ns-children';
 
   const sortedChildren = [...node.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   for (const [childName, childNode] of sortedChildren) {
-    if (!nodeShouldShow(childNode)) continue;
-    renderNsNode(childGroup, childName, childNode, nsPath);
+    if (!nodeShouldShow(childNode, searchMode)) continue;
+    renderNsNode(childGroup, childName, childNode, nsPath, searchMode);
   }
 
-  // Fn items — filtered by the kind toggles, rendered flat. Kind is now
-  // a top-level filter (fn / types / secrets / services), not an
-  // in-namespace Types/Functions grouping.
-  const visibleFns = [...node.fns].filter(fnKindVisible)
-    .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  for (const fn of visibleFns) childGroup.appendChild(buildFnItem(fn));
+  // Own fn leaves. Outside search mode they load lazily the first time this
+  // namespace is expanded — show a placeholder, fetch, re-render. In search
+  // mode the leaves are the server's matches and are already in `node.fns`.
+  if (!searchMode && node.nsId != null
+      && typeof isNamespaceLoaded === 'function' && !isNamespaceLoaded(node.nsId)) {
+    const loading = document.createElement('div');
+    loading.className = 'loading';
+    loading.textContent = 'Loading…';
+    childGroup.appendChild(loading);
+    if (typeof loadNamespaceFns === 'function') {
+      loadNamespaceFns(node.nsId)
+        .then(() => updateEntityList(graphData))
+        .catch((err) => { console.error('loadNamespaceFns failed', err); });
+    }
+  } else {
+    // Fn items — filtered by the kind toggles, rendered flat. Kind is a
+    // top-level filter (fn / types / secrets / services), not an
+    // in-namespace Types/Functions grouping.
+    const visibleFns = [...node.fns].filter(fnKindVisible)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+    for (const fn of visibleFns) childGroup.appendChild(buildFnItem(fn));
+  }
 
   // If the user has an active inline-create rooted at THIS namespace,
   // append the input row inside `childGroup` so it sits where the new
@@ -433,15 +434,39 @@ function renderNsNode(container, name, node, path) {
 }
 
 /**
- * Search input handler
+ * Search input handler — debounced server-side search (?scope=search),
+ * since the sidebar no longer holds every fn to filter client-side.
  */
 function onSearchInput(value) {
-  searchFilter = value.trim().toLowerCase();
+  searchFilter = value.trim();
+  if (!searchFilter) {
+    _searchResults = null;
+    _searchTruncated = false;
+    _searchSeq++;              // cancel any in-flight query
+    updateEntityList(graphData);
+    return;
+  }
+  const seq = ++_searchSeq;
+  clearTimeout(_searchDebounce);
+  _searchDebounce = setTimeout(() => {
+    if (typeof searchFns !== 'function') return;
+    searchFns(searchFilter).then(({ fns, truncated }) => {
+      if (seq !== _searchSeq) return;   // a newer keystroke superseded this
+      _searchResults = fns;
+      _searchTruncated = truncated;
+      updateEntityList(graphData);
+    }).catch((err) => { console.error('sidebar search failed', err); });
+  }, 180);
+  // Repaint immediately so the box shows a "Searching…" state without
+  // waiting for the debounce + round-trip.
   updateEntityList(graphData);
 }
 
 function clearSearch() {
   searchFilter = '';
+  _searchResults = null;
+  _searchTruncated = false;
+  _searchSeq++;
   const input = document.getElementById('search-input');
   if (input) input.value = '';
   updateEntityList(graphData);
@@ -476,13 +501,23 @@ function syncKindFilterBar() {
 // top-level user fn. Filtered by the kind toggles; hidden entirely when
 // nothing inside is visible. Reuses the expandedNamespaces machinery via
 // a synthesised path key.
-function renderRootNode(list, rootFns) {
+function renderRootNode(list, rootFns, searchMode) {
   const visible = [...rootFns].filter(fnKindVisible)
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  if (visible.length === 0) return;
+  // The root bucket's leaves (primitive type-rows + top-level fns) load
+  // lazily like any namespace. Its total named-fn count comes from the
+  // `:tree` `:counts` payload (nsHasChildFn keyed by the null bucket), so
+  // the node still appears before its leaves are fetched.
+  const loaded = searchMode
+    || (typeof isNamespaceLoaded === 'function' && isNamespaceLoaded(null));
+  const rootCount = (lookups?.nsHasChildFn?.get(null)) || 0;
+  // In search mode show only when there are matched root fns; otherwise show
+  // when it holds anything (loaded-visible, or count says so while unloaded).
+  if (searchMode) { if (visible.length === 0) return; }
+  else if (visible.length === 0 && !(rootCount > 0 && !loaded)) return;
 
   const groupPath = '__root__';
-  const isOpen = expandedNamespaces.has(groupPath);
+  const isOpen = searchMode || expandedNamespaces.has(groupPath);
   const header = document.createElement('div');
   header.className = 'ns-header ns-header-pseudo';
   const arrow = document.createElement('span');
@@ -495,7 +530,7 @@ function renderRootNode(list, rootFns) {
   header.appendChild(label);
   const count = document.createElement('span');
   count.className = 'ns-count';
-  count.textContent = visible.length;
+  count.textContent = loaded ? visible.length : rootCount;
   header.appendChild(count);
   header.onclick = (e) => {
     e.stopPropagation();
@@ -508,7 +543,19 @@ function renderRootNode(list, rootFns) {
   if (isOpen) {
     const childGroup = document.createElement('div');
     childGroup.className = 'ns-children';
-    for (const fn of visible) childGroup.appendChild(buildFnItem(fn));
+    if (!loaded) {
+      const loading = document.createElement('div');
+      loading.className = 'loading';
+      loading.textContent = 'Loading…';
+      childGroup.appendChild(loading);
+      if (typeof loadNamespaceFns === 'function') {
+        loadNamespaceFns(null)
+          .then(() => updateEntityList(graphData))
+          .catch((err) => { console.error('loadNamespaceFns(root) failed', err); });
+      }
+    } else {
+      for (const fn of visible) childGroup.appendChild(buildFnItem(fn));
+    }
     list.appendChild(childGroup);
   }
 }
@@ -526,23 +573,30 @@ function updateEntityList(data) {
   primeServiceCacheOnce();
   primeSecretsOnce();
 
-  let tree = buildNsTree(data);
+  const searchMode = !!searchFilter;
 
-  // Text filter (name match). Composes with the kind toggles, which are
-  // applied at render time (fnKindVisible / nodeShouldShow) below.
-  if (searchFilter) {
-    tree = filterNsNode(tree, searchFilter, null) || { children: new Map(), fns: [] };
+  // While a search query is in flight (debounce + round-trip) there are no
+  // results yet — show a transient state rather than a misleading empty tree.
+  if (searchMode && _searchResults === null) {
+    list.innerHTML = '<div class="loading">Searching…</div>';
+    return;
   }
 
-  // Admin sections (Grants / Users / Packages) — unchanged; hidden while
-  // a text filter narrows the view. Each returns null unless applicable.
-  if (!searchFilter && typeof buildGrantsAdminSection === 'function') {
+  // In search mode the tree is built from the server's matches only; the
+  // normal (lazy) tree is built from whatever fn leaves have been loaded.
+  const tree = searchMode
+    ? buildNsTree({ namespaces: data.namespaces, fns: _searchResults || [] })
+    : buildNsTree(data);
+
+  // Admin sections (Grants / Users / Packages) — hidden while searching.
+  // Each returns null unless applicable.
+  if (!searchMode && typeof buildGrantsAdminSection === 'function') {
     mountAdminSection(list, 'grants', buildGrantsAdminSection);
   }
-  if (!searchFilter && typeof buildUsersAdminSection === 'function') {
+  if (!searchMode && typeof buildUsersAdminSection === 'function') {
     mountAdminSection(list, 'users', buildUsersAdminSection);
   }
-  if (!searchFilter && typeof buildPackagesSection === 'function') {
+  if (!searchMode && typeof buildPackagesSection === 'function') {
     mountAdminSection(list, 'packages', buildPackagesSection);
   }
 
@@ -550,13 +604,22 @@ function updateEntityList(data) {
   // the current toggles (unless an inline-create is rooted inside).
   const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   for (const [name, node] of sortedNs) {
-    if (!nodeShouldShow(node)) continue;
-    renderNsNode(list, name, node, '');
+    if (!nodeShouldShow(node, searchMode)) continue;
+    renderNsNode(list, name, node, '', searchMode);
   }
 
   // Namespace-less entities (primitive type-rows any/int/bool + top-level
   // fns) in a single collapsible "(root)" node, subject to the toggles.
-  renderRootNode(list, tree.fns);
+  renderRootNode(list, tree.fns, searchMode);
+
+  // A truncated search result (server-side cap) — tell the user to refine
+  // rather than silently hiding matches.
+  if (searchMode && _searchTruncated) {
+    const note = document.createElement('div');
+    note.className = 'loading';
+    note.textContent = 'Showing the first matches — refine to narrow.';
+    list.appendChild(note);
+  }
 
   if (list.children.length === 0) {
     list.innerHTML = '<div class="loading">No matches</div>';

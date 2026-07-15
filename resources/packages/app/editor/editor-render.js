@@ -92,10 +92,10 @@ function createGraph(nodes, edges, layout, shouldFit) {
  * Fetches nodes, edges, and layout from the backend in a single request.
  */
 async function renderGraph(shouldFit = true) {
-  // `initGraph` only loaded the scope=index sidebar payload. Fetch the subtree
-  // for the selected fn so overlays / edges read real slots / bindings / items
-  // out of `lookups`. ensureSubtreeFor short-circuits when the cache already
-  // matches selectedFnId.
+  // `initGraph` only loaded the scope=tree sidebar payload (namespaces +
+  // counts, no fn detail). Fetch the subtree for the selected fn so overlays /
+  // edges read real slots / bindings / items out of `lookups`. ensureSubtreeFor
+  // short-circuits when the cache already matches selectedFnId.
   if (selectedFnId && typeof ensureSubtreeFor === 'function') {
     try { await ensureSubtreeFor(selectedFnId); }
     catch (err) {

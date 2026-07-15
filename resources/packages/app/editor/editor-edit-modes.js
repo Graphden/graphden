@@ -717,7 +717,7 @@ async function populateCompatibleTypes(arg, select, cur, loadingOpt) {
   let expected = expectedSlotType(arg);
   // A null `expected` does NOT mean "nothing is compatible" — most of the time it
   // means the slots simply have not arrived yet. `initGraph()` rebuilds `lookups`
-  // from `?scope=index`, which carries fns and namespaces and NO slots; the slot /
+  // from `?scope=tree`, which carries namespaces + counts and NO slots; the slot /
   // binding rows land later, per view, through `ensureSubtreeFor()`. Open this
   // popover inside that window — the chip on screen is still the previous render's
   // — and `lookups.slotMap` is empty, so the slot is unknown and the picker used to
@@ -842,11 +842,17 @@ function enterArgTypeEditMode(arg, anchorEl) {
       // filter (`!base-fn-id && !element-fn-id`) rejected
       // refinements which the picker happily listed, leaving the
       // user staring at a silent 400 from `writeBindingFields`.
-      const overrideFnId = (() => {
+      const overrideFnId = await (async () => {
         if (!newType || !graphData) return '';
-        const fn = (graphData.fns || []).find(f =>
-          f.name === newType
-          && (!f['parent-ids'] || f['parent-ids'].length === 0));
+        const parentLess = f => !f['parent-ids'] || f['parent-ids'].length === 0;
+        // Fast path: an already-loaded parent-less type-fn.
+        let fn = (graphData.fns || []).find(f => f.name === newType && parentLess(f));
+        // Slow path: the type-fn (primitive / refinement) may not be loaded —
+        // it lives in the root bucket. Resolve it by name via the server.
+        if (!fn && typeof resolveFnByName === 'function') {
+          const resolved = await resolveFnByName(newType);
+          if (resolved && parentLess(resolved)) fn = resolved;
+        }
         return fn ? fn.id : '';
       })();
       if (!(await writeBindingFields(arg, {

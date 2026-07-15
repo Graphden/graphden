@@ -76,40 +76,44 @@ function openFnPicker(opts) {
   const wantNs = opts.fnNamespaceId || null;
   const expected = opts.expectedType || null;
 
-  // Only globally-named fns are eligible — anonymous locals can't be
-  // referenced by id from a different fn's binding-graph anyway.
-  const candidates = graphData.fns
-    .filter(f => f?.name && !excludeSet.has(f.id))
-    .map(f => {
-      const info = fnRichInfo(f);
-      // Compatibility check: clientSubtype is the fast local
-      // primitive-only fallback; structural cases (records, fn-types,
-      // refinements) defer to the row-tap explainer that calls
-      // /api/types/compatible. For the initial render we treat
-      // unknown-structural as "compatible" (best-effort) — a stricter
-      // fetch refines the answer if the user asks why.
-      const compatible = expected && info.return
-        ? (typeof clientSubtype === 'function' ? clientSubtype(info.return, expected) : true)
-        : null;   // null = no expectedType supplied; section headers hide
-      return {
-        id: f.id,
-        name: f.name,
-        qualified: (typeof getQualifiedFnName === 'function')
-                   ? getQualifiedFnName(f) : f.name,
-        sameNs: wantNs && f['namespace-id'] === wantNs,
-        flatReturn: f['return-type'] || null,
-        richReturn: info.return,
-        effects: info.effects,
-        compatible: compatible,
-        // Surface the type-row kind so the row can carry a small
-        // annotation ("refinement", "record", …). For "composed"
-        // fns we leave it null — the return-type chip already says
-        // what a regular fn returns; the kind tag is redundant.
-        kind: f.role && f.role !== 'composed'
-              ? String(f.role).replace(/^:/, '')
-              : null,
-      };
-    });
+  // Map a fn row to a picker candidate. Compatibility check: clientSubtype
+  // is the fast local primitive-only fallback; structural cases (records,
+  // fn-types, refinements) defer to the row-tap explainer that calls
+  // /api/types/compatible. Unknown-structural is treated as "compatible"
+  // (best-effort) on the initial render; a stricter fetch refines it.
+  function toCandidate(f) {
+    const info = fnRichInfo(f);
+    const compatible = expected && info.return
+      ? (typeof clientSubtype === 'function' ? clientSubtype(info.return, expected) : true)
+      : null;   // null = no expectedType supplied; section headers hide
+    return {
+      id: f.id,
+      name: f.name,
+      qualified: (typeof getQualifiedFnName === 'function')
+                 ? getQualifiedFnName(f) : f.name,
+      sameNs: wantNs && f['namespace-id'] === wantNs,
+      flatReturn: f['return-type'] || null,
+      richReturn: info.return,
+      effects: info.effects,
+      compatible: compatible,
+      // Surface the type-row kind so the row can carry a small annotation
+      // ("refinement", "record", …). "composed" fns leave it null — the
+      // return-type chip already says what a regular fn returns.
+      kind: f.role && f.role !== 'composed' ? String(f.role).replace(/^:/, '') : null,
+    };
+  }
+
+  // Candidates come from the loaded fn cache (current subtree + expanded
+  // namespaces + prior searches). Only globally-named fns are eligible —
+  // anonymous locals can't be referenced by id from another fn's binding
+  // graph anyway. Typing in the filter box fetches more via the server
+  // (searchFns) and rebuilds this list — see the input handler below.
+  function buildCandidates() {
+    return (graphData.fns || [])
+      .filter(f => f?.name && !excludeSet.has(f.id))
+      .map(toCandidate);
+  }
+  let candidates = buildCandidates();
 
   // Build the popup.
   const el = document.createElement('div');
@@ -422,7 +426,26 @@ function openFnPicker(opts) {
   }
   render();
 
-  search.addEventListener('input', () => { activeIdx = 0; render(); });
+  // Instant client-side filter over the loaded candidates, PLUS a debounced
+  // server search so a fn outside the loaded set becomes pickable by typing
+  // its name. searchFns merges matches into the cache; rebuild + re-render.
+  let _pickerSearchSeq = 0;
+  let _pickerSearchTimer = null;
+  search.addEventListener('input', () => {
+    activeIdx = 0;
+    render();
+    const q = search.value.trim();
+    if (!q || typeof searchFns !== 'function') return;
+    const seq = ++_pickerSearchSeq;
+    clearTimeout(_pickerSearchTimer);
+    _pickerSearchTimer = setTimeout(() => {
+      searchFns(q).then(() => {
+        if (seq !== _pickerSearchSeq) return;   // superseded by a later keystroke
+        candidates = buildCandidates();
+        render();
+      }).catch((err) => { console.error('fn-picker search failed', err); });
+    }, 180);
+  });
   search.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();

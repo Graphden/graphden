@@ -2,25 +2,102 @@
 // Depends on: editor-state.js, editor-data.js, editor-ui.js, editor-render.js
 
 // ============================================================================
-// SUBTREE-AWARE GRAPH LOADER
+// LAZY, SUBTREE-AWARE GRAPH LOADER
 // ============================================================================
-
-// `initGraph` fetches `?scope=index` — just fns + namespaces (sidebar
-// payload, ~1.6 MB on a 3000-fn graph vs 4.5 MB full). Slots /
-// bindings / fn-slots / list-items load PER-FN-VIEW via
-// `?scope=subtree&root-id=X` (~1.5 KB - 50 KB typical, ~4.2 MB worst
-// case at the app's root fn).
 //
-// `selectFn` triggers `renderGraph` which awaits `ensureSubtreeFor
-// (selectedFnId)` — fetches the subtree for the newly-selected fn,
-// MERGES it into `graphData` (sidebar fns + namespaces from index +
-// subtree slots/bindings/items), rebuilds `lookups`.
+// The editor no longer pulls every fn on load. The client holds only what
+// it is showing, and asks the server scoped questions:
 //
-// The cache key is the subtree's root fn-id. Navigating to a new fn
-// triggers a fresh fetch + lookups rebuild. Mutations
-// (`loadGraphData`) clear the cache so the next render re-fetches.
+//   initGraph()     -> GET ?scope=tree   — namespaces + per-namespace
+//                      named-fn counts. O(namespaces). The sidebar paints a
+//                      collapsed tree from this; NO fn leaves are loaded yet.
+//   expand a ns     -> loadNamespaceFns(nsId) -> ?scope=namespace — that
+//                      namespace's light fn rows (the sidebar drives this).
+//   filter box      -> searchFns(q) -> ?scope=search — capped name matches.
+//   select a fn     -> ensureSubtreeFor(fnId) -> ?scope=subtree — the fn's
+//                      slots/bindings/items + its transitive fn closure.
+//   resolve a name  -> resolveFnByName(name) -> cache, else ?scope=search.
+//
+// `graphData.fns` is an ACCUMULATING cache (`_knownFns`), seeded lazily by
+// all of the above — never the whole graph at once. BY-ID lookups
+// (`lookups.fnMap`) stay correct for anything the user has actually loaded;
+// a selected fn's subtree always includes every fn it references, so its
+// view renders completely.
+let _knownFns = new Map();            // fn-id -> fn row (light or full), merged
+let _loadedNamespaceIds = new Set();  // namespaces whose fn leaves are loaded
 let _subtreeRootId = null;
 let _subtreeFetchPromise = null;
+
+// Merge freshly-fetched fn rows into the accumulating cache. Full (subtree)
+// rows and light (tree/namespace/search) rows coexist: a later light row
+// spreads over an earlier full row, keeping the full row's extra columns and
+// refreshing the shared ones (role, ref-counts, name, namespace-id).
+function mergeKnownFns(rows) {
+  for (const f of (rows || [])) {
+    if (!f?.id) continue;
+    const prev = _knownFns.get(f.id);
+    _knownFns.set(f.id, prev ? { ...prev, ...f } : f);
+  }
+}
+
+// Point graphData.fns at the current cache snapshot + rebuild lookups.
+function syncKnownFnsIntoGraph() {
+  if (!graphData) return;
+  graphData.fns = Array.from(_knownFns.values());
+  lookups = buildLookups(graphData);
+}
+window.syncKnownFnsIntoGraph = syncKnownFnsIntoGraph;
+
+// True once a namespace's fn leaves have been fetched. The sidebar uses
+// this to decide whether an expanded node can render leaves or must load.
+function isNamespaceLoaded(nsId) {
+  return _loadedNamespaceIds.has(nsId || '');
+}
+window.isNamespaceLoaded = isNamespaceLoaded;
+
+// Fetch one namespace's fn leaves (light rows) and merge them. `nsId` may be
+// null for the "(root)" bucket (namespace-less fns). Caches per-ns so a
+// re-expand doesn't refetch; loadGraphData() clears the set on mutation.
+async function loadNamespaceFns(nsId) {
+  const key = nsId || '';
+  if (_loadedNamespaceIds.has(key)) return;
+  const url = API.api_graph_entities + '?scope=namespace'
+    + (nsId ? '&namespace-id=' + encodeURIComponent(nsId) : '');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('loadNamespaceFns HTTP ' + r.status);
+  const payload = await r.json();
+  mergeKnownFns(payload.fns);
+  _loadedNamespaceIds.add(key);
+  syncKnownFnsIntoGraph();
+}
+window.loadNamespaceFns = loadNamespaceFns;
+
+// Server-side name search (filter box + pickers). Returns the matching light
+// fn rows (also merged into the cache so BY-ID reads see them).
+async function searchFns(q) {
+  const needle = (q || '').trim();
+  if (!needle) return { fns: [], truncated: false };
+  const r = await fetch(API.api_graph_entities + '?scope=search&q=' + encodeURIComponent(needle));
+  if (!r.ok) throw new Error('searchFns HTTP ' + r.status);
+  const payload = await r.json();
+  mergeKnownFns(payload.fns);
+  syncKnownFnsIntoGraph();
+  return { fns: payload.fns || [], truncated: !!payload['truncated?'] };
+}
+window.searchFns = searchFns;
+
+// Resolve a fn by its (globally-unique) name to its row. Fast path: the
+// accumulating cache; slow path: an exact-match server search. Used by
+// deep-link nav, type-override resolution, base-fn links, secret-leaf, etc.
+async function resolveFnByName(name) {
+  if (!name) return null;
+  for (const f of _knownFns.values()) {
+    if (f.name === name) return f;
+  }
+  const { fns } = await searchFns(name);
+  return fns.find(f => f.name === name) || null;
+}
+window.resolveFnByName = resolveFnByName;
 
 async function ensureSubtreeFor(fnId) {
   if (!fnId) return;
@@ -32,18 +109,16 @@ async function ensureSubtreeFor(fnId) {
         API.api_graph_entities + '?scope=subtree&root-id=' + encodeURIComponent(fnId));
       if (!r.ok) throw new Error('ensureSubtreeFor HTTP ' + r.status);
       const sub = await r.json();
-      // Merge: keep the full sidebar fns + namespaces from initGraph's
-      // scope=index, overlay the subtree's slots/bindings/items.
-      graphData = {
-        fns: graphData?.fns || sub.fns,
-        namespaces: graphData?.namespaces || sub.namespaces,
-        slots: sub.slots,
-        'fn-slots': sub['fn-slots'],
-        bindings: sub.bindings,
-        'list-items': sub['list-items'],
-      };
+      // Merge the subtree's fns (the selected fn + its full transitive
+      // closure) into the cache, and overlay its heavy relational rows.
+      // Namespaces / counts stay from the :tree load.
+      mergeKnownFns(sub.fns);
+      graphData.slots = sub.slots;
+      graphData['fn-slots'] = sub['fn-slots'];
+      graphData.bindings = sub.bindings;
+      graphData['list-items'] = sub['list-items'];
       _subtreeRootId = fnId;
-      lookups = buildLookups(graphData);
+      syncKnownFnsIntoGraph();
     } catch (err) {
       _subtreeFetchPromise = null;
       throw err;
@@ -55,6 +130,17 @@ async function ensureSubtreeFor(fnId) {
 }
 window.ensureSubtreeFor = ensureSubtreeFor;
 
+// Fresh empty graph shell seeded from a `:tree` payload. Slots/bindings are
+// filled per-fn by ensureSubtreeFor; fns accumulate via the cache.
+function graphShellFromTree(tree) {
+  return {
+    fns: [],
+    namespaces: tree.namespaces || [],
+    counts: tree.counts || [],
+    slots: [], 'fn-slots': [], bindings: [], 'list-items': [],
+  };
+}
+
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
@@ -63,29 +149,29 @@ window.ensureSubtreeFor = ensureSubtreeFor;
  * Initialize the graph editor
  */
 async function initGraph() {
-  // Load entities + the rich-type registry in parallel. Types feed
-  // the in-place edit popovers' "Expected: <type>" hints, so they
-  // need to be ready before the user opens any editor.
+  // Load the namespace tree + the rich-type registry in parallel. Types feed
+  // the in-place edit popovers' "Expected: <type>" hints, so they need to be
+  // ready before the user opens any editor.
   //
   // /api/services is loaded eagerly too — auth-required, so anonymous
-  // visitors see no service badges (loadServicesEager swallows the
-  // 401 silently). Cheap (<30B per row) and primed before the first
-  // overlay render so the badge has data on first paint.
+  // visitors see no service badges (loadServicesEager swallows the 401
+  // silently). Cheap and primed before the first overlay render.
   //
-  // `?scope=index` — fns + namespaces only. The heavy slot /
-  // binding / fn-slot / list-item rows fetch per-fn-view via
-  // `ensureSubtreeFor()` from `renderGraph`.
+  // `?scope=tree` — namespaces + counts only. Fn leaves load lazily per
+  // expanded namespace; per-fn slots/bindings load via ensureSubtreeFor().
   _subtreeRootId = null;
   _subtreeFetchPromise = null;
+  _knownFns = new Map();
+  _loadedNamespaceIds = new Set();
   const [entResp, typeResp, vkResp] = await Promise.all([
-    fetch(API.api_graph_entities + '?scope=index'),
+    fetch(API.api_graph_entities + '?scope=tree'),
     fetch(API.api_types).catch(() => null),
     fetch(API.api_value_kinds).catch(() => null),
     (typeof loadServicesEager === 'function')
       ? loadServicesEager().catch(() => null)
       : null,
   ]);
-  graphData = await entResp.json();
+  graphData = graphShellFromTree(await entResp.json());
   lookups = buildLookups(graphData);
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); } catch (err) {
@@ -105,6 +191,9 @@ async function initGraph() {
       VALUE_KINDS = [];
     }
   }
+  // Resolve the secret-leaf base-fn id once so isSecretFn() stays
+  // synchronous without a full-fns mirror to scan.
+  if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
   updateEntityList(graphData);
   // First-load hash navigation: `#fn-name` in the URL (bookmark,
   // shared link, page reload) must select the fn — `hashchange` /
@@ -121,35 +210,32 @@ async function initGraph() {
 
 
 // Re-fetch the graph state after a mutation (e.g. crud.secrets/create
-// → new fn-def + binding appear in `/api/graph/entities`). Callable
-// from editor-secrets.js etc. so the ns-tree / graph pick up
-// the new entries without a full page reload. Kept as a separate
-// fn from `init()` so it doesn't also re-fire the auth / hash
-// navigation work.
+// → new fn-def + binding appear in the graph). Callable from
+// editor-secrets.js etc. so the ns-tree / graph pick up the new entries
+// without a full page reload. Kept as a separate fn from `init()` so it
+// doesn't also re-fire the auth / hash navigation work.
 async function loadGraphData() {
-  // Post-mutation refresh: re-fetch the sidebar index AND the
-  // current subtree (if any) so both reflect the write. Splitting
-  // the two fetches is still less data than the legacy 4.5 MB full
-  // pull, except when the selected fn is the app root (rare).
-  //
-  // Invalidate the subtree cache so `renderGraph`'s next
-  // `ensureSubtreeFor` re-fetches even when the selected fn hasn't
-  // changed.
+  // Post-mutation refresh: re-fetch the namespace tree (counts can shift on
+  // create/delete/rename) AND re-prime the current subtree. The accumulating
+  // fn cache + per-ns load flags are reset so stale / renamed / deleted rows
+  // don't linger; the sidebar re-fetches leaves for still-expanded
+  // namespaces on its next render, and ensureSubtreeFor re-primes the
+  // selected fn below.
   const prevRoot = _subtreeRootId;
   _subtreeRootId = null;
   _subtreeFetchPromise = null;
-  let r;
+  _knownFns = new Map();
+  _loadedNamespaceIds = new Set();
+  let treeResp;
   let typeResp;
   try {
-    // Refresh the rich-type registry alongside the index: a mutation can
+    // Refresh the rich-type registry alongside the tree: a mutation can
     // change a fn's INFERRED type (literal narrowing, type-override,
-    // structural edits), and `richTypes` feeds every type-chip. Without
-    // this a post-mutation `loadGraphData` would leave chips stale — the
-    // reason callers historically fell back to the heavier `initGraph`.
-    // value-kinds / services are NOT re-fetched (they only change on
-    // type-create / service edits, which keep using `initGraph`).
-    [r, typeResp] = await Promise.all([
-      fetch(API.api_graph_entities + '?scope=index'),
+    // structural edits), and `richTypes` feeds every type-chip. value-kinds
+    // / services are NOT re-fetched (they only change on type-create /
+    // service edits, which keep using `initGraph`).
+    [treeResp, typeResp] = await Promise.all([
+      fetch(API.api_graph_entities + '?scope=tree'),
       fetch(API.api_types).catch(() => null),
     ]);
   } catch (err) {
@@ -159,22 +245,22 @@ async function loadGraphData() {
     console.error('loadGraphData fetch threw', err);
     return;
   }
-  if (!r.ok) {
+  if (!treeResp.ok) {
     // eslint-disable-next-line no-console
-    console.error('loadGraphData HTTP', r.status, r.statusText);
+    console.error('loadGraphData HTTP', treeResp.status, treeResp.statusText);
     return;
   }
-  graphData = await r.json();
+  graphData = graphShellFromTree(await treeResp.json());
   lookups = buildLookups(graphData);
   if (typeResp?.ok) {
     try { richTypes = await typeResp.json(); }
     catch (_) { /* keep prior richTypes rather than blanking chips */ }
     // A mutation may have added / renamed / retyped a fn-def, changing the
     // type registry — drop the cached `/api/types/compatible` verdicts so the
-    // next type-picker / mismatch check re-asks the server. This is the
-    // invalidation the (never-defined) `applyGraphDataRefresh` was meant to do.
+    // next type-picker / mismatch check re-asks the server.
     if (typeof clearTypesCompatibleCache === 'function') clearTypesCompatibleCache();
   }
+  if (typeof primeSecretLeafId === 'function') primeSecretLeafId();
   // Re-fetch subtree for the previously-rendered fn so overlays /
   // type-chips reflect the mutation. `renderGraph` would do this
   // anyway, but a fresh prime here keeps any synchronous reads of

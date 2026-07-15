@@ -22,27 +22,45 @@
 // SHAPE DETECTION
 // ============================================================================
 
-// Cache the secret-leaf base-fn id once per graph load — UUIDs are
-// content-addressed and stable across branches.
-let _cachedSecretLeafId = null;
-let _cachedSecretLeafIdGraph = null;
+// The secret-leaf base-fn id. UUIDs are content-addressed and stable across
+// branches, so once resolved it's cached for the page. The sidebar no longer
+// holds a full-fns mirror to scan, so it's resolved by name via the server
+// (primeSecretLeafId, called from initGraph / loadGraphData) — keeping
+// isSecretFn() synchronous for per-row classification.
+let _primedSecretLeafId = null;
+
+async function primeSecretLeafId() {
+  if (_primedSecretLeafId) return _primedSecretLeafId;
+  if (typeof resolveFnByName !== 'function') return null;
+  try {
+    const fn = await resolveFnByName('secret-leaf');
+    if (fn?.id) {
+      _primedSecretLeafId = fn.id;
+      // Repaint so 🔒 badges / secret classification appear now that the
+      // id is known (the first paint may have run before this resolved).
+      if (typeof updateEntityList === 'function' && graphData) updateEntityList(graphData);
+    }
+    return _primedSecretLeafId;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('primeSecretLeafId failed', err);
+    return null;
+  }
+}
+window.primeSecretLeafId = primeSecretLeafId;
 
 function getSecretLeafFnId() {
-  if (_cachedSecretLeafIdGraph === graphData && _cachedSecretLeafId !== null) {
-    return _cachedSecretLeafId;
-  }
-  _cachedSecretLeafIdGraph = graphData;
-  _cachedSecretLeafId = null;
+  if (_primedSecretLeafId) return _primedSecretLeafId;
+  // Fallback: scan whatever fns are currently loaded (covers the window
+  // where the root bucket was expanded before priming resolved).
   if (!graphData?.fns) return null;
   for (const fn of graphData.fns) {
-    const parents = fn['parent-ids'] || [];
-    if (parents.length !== 0) continue;
-    if (fn.name === 'secret-leaf') {
-      _cachedSecretLeafId = fn.id;
-      break;
+    if ((fn['parent-ids'] || []).length === 0 && fn.name === 'secret-leaf') {
+      _primedSecretLeafId = fn.id;
+      return _primedSecretLeafId;
     }
   }
-  return _cachedSecretLeafId;
+  return null;
 }
 
 // `fn` is a secret-shaped fn-def iff its parents are exactly

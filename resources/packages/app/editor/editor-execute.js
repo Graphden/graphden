@@ -442,7 +442,7 @@ async function showExecutePopover(fnEntity, anchorEl) {
   body.className = 'execute-popover-body';
   el.appendChild(body);
   // The free-args are derived from fn-slots, bindings and slots — and those live
-  // in the per-view SUBTREE payload, not in the `?scope=index` one that
+  // in the per-view SUBTREE payload, not in the `?scope=tree` one that
   // `initGraph()` rebuilds `lookups` from. Open this popover before the subtree
   // lands and `freeArgsOf` sees empty maps, reports no free args at all, and the
   // popover renders "No free arguments — click Run to invoke." for an fn that in

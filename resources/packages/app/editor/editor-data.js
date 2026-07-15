@@ -292,7 +292,17 @@ function buildLookups(data) {
     nsPathMap.set(id, parts.join('.'));
   });
 
-  // Deletability sets.
+  // Deletability sets. The sidebar no longer holds a full-fns mirror to
+  // count against, so the whole-graph reverse-ref tallies come from the
+  // SERVER instead of a client scan:
+  //   - fnUsedAsParent / fnUsedAsRef: read off each fn row's
+  //     `:used-as-parent-count` / `:used-as-ref-count`, which the
+  //     `:namespace` / `:search` / `:subtree` payloads compute over the
+  //     whole graph (see crud/entities `reverse-ref-index`). Keyed by the
+  //     REFERENCED fn's id — exactly what `fnDeleteBlockReason` looks up.
+  //   - nsHasChildFn: from the `:tree` `:counts` payload (named fns per
+  //     namespace), authoritative even though the leaves load lazily.
+  //   - nsHasChildNs: still derived from the (complete) namespace list.
   const fnUsedAsParent = new Map();
   const fnUsedAsRef    = new Map();
   const nsHasChildNs   = new Map();
@@ -300,15 +310,14 @@ function buildLookups(data) {
   const bump = (m, k) => { if (k) m.set(k, (m.get(k) || 0) + 1); };
 
   (data.fns || []).forEach(f => {
-    (f['parent-ids'] || []).forEach(pid => bump(fnUsedAsParent, pid));
-    bump(nsHasChildFn, f['namespace-id']);
+    const ap = f['used-as-parent-count'];
+    const ar = f['used-as-ref-count'];
+    if (ap) fnUsedAsParent.set(f.id, ap);
+    if (ar) fnUsedAsRef.set(f.id, ar);
   });
-  // fnUsedAsRef counts ref-fn-id from bindings + list-items. Synth
-  // `:args` rows mirror the same ref-fn-ids, so counting them too
-  // would double-bump and falsely block fn-deletes that are actually
-  // safe.
-  (data.bindings || []).forEach(b => bump(fnUsedAsRef, b['ref-fn-id']));
-  (data['list-items'] || []).forEach(it => bump(fnUsedAsRef, it['ref-fn-id']));
+  (data.counts || []).forEach(c => {
+    if (c.count) nsHasChildFn.set(c['namespace-id'], c.count);
+  });
   (data.namespaces || []).forEach(ns => bump(nsHasChildNs, ns['parent-id']));
 
   // Per-lookups cache for getInheritanceLevels — auto-invalidated

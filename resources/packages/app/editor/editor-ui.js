@@ -58,14 +58,28 @@ function selectFn(fnId, updateHistory = true) {
 }
 
 /**
- * Select a function by name
+ * Select a function by name (simple `add` or qualified `core.arithmetic.add`).
+ * Resolves against the loaded fn cache first, then — for a deep-link /
+ * bookmark to a fn outside the loaded set — via the server (names are
+ * globally unique). Async because that resolution may hit the network.
  */
-function selectFnByName(name, updateHistory = true) {
-  // Try exact simple name match first
+async function selectFnByName(name, updateHistory = true) {
+  // Fast path: already-loaded fn (simple or qualified name).
   let fn = (graphData.fns || []).find(f => f.name === name);
-  // Try qualified name match (e.g. "core.arithmetic.add")
   if (!fn && lookups) {
     fn = (graphData.fns || []).find(f => getQualifiedFnName(f) === name);
+  }
+  // Slow path: resolve by name via the server. A qualified name resolves on
+  // its last segment (the globally-unique fn name).
+  if (!fn && typeof resolveFnByName === 'function') {
+    const simple = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : name;
+    try {
+      const resolved = await resolveFnByName(simple);
+      if (resolved) fn = resolved;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('selectFnByName resolution failed', err);
+    }
   }
   if (fn) selectFn(fn.id, updateHistory);
 }

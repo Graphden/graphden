@@ -195,16 +195,17 @@ async function putDescriptionOn(page, fnId, branch, desc) {
     // storage. Under e2e suite load that rebuild + JS bundle parse
     // can exceed the 15s budget; bump to 30s.
     await page.waitForSelector('#branch-chip-btn', {timeout: 30000});
-    // Wait for graphData to repopulate after the reload's initGraph,
-    // so the subsequent direct fetch reads through a warm cache. This
-    // waits on the SAME post-merge rebuild as the branch-chip wait
-    // above (cache invalidated → first `/api/graph/entities` rebuilds
-    // from raw storage), so it needs the same 30s budget — 5s tripped
-    // under suite load while the rebuild was still in flight.
-    await page.waitForFunction((id) => {
-      const fns = (typeof graphData !== 'undefined' && graphData?.fns) || [];
-      return fns.some(f => f.id === id);
-    }, fnId, {timeout: 30000, polling: 100});
+    // Wait for the reload's initGraph to finish before the direct fetch.
+    // The sidebar loads lazily now (?scope=tree), so `graphData.fns` is
+    // NOT the whole graph after init — it's empty until a fn is selected.
+    // Gate on the namespace tree being populated instead (same post-merge
+    // rebuild: cache invalidated → the first `/api/graph/entities` call
+    // rebuilds from raw storage, so keep the 30s budget).
+    await page.waitForFunction(() => {
+      return typeof graphData !== 'undefined'
+        && Array.isArray(graphData?.namespaces)
+        && graphData.namespaces.length > 0;
+    }, null, {timeout: 30000, polling: 100});
 
     const finalDescription = await page.evaluate(async (id) => {
       const r = await window.authFetch('/api/graph/entities');

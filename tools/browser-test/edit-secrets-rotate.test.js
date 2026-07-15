@@ -110,10 +110,12 @@ async function cleanup(page) {
     // the New-secret form itself calls after a successful POST.
     await page.evaluate(async () => {
       if (typeof loadGraphData === 'function') await loadGraphData();
-      if (typeof lookups !== 'undefined' && lookups?.nsPathMap) {
-        for (const p of lookups.nsPathMap.values()) expandedNamespaces.add(p);
-      }
+      // Secrets live in the root bucket (no namespace). Expand and
+      // deterministically load it, rather than expanding every namespace —
+      // that floods the lazy loader's connection pool and can leave the
+      // root fetch queued past the wait below.
       expandedNamespaces.add('__root__');
+      if (typeof loadNamespaceFns === 'function') await loadNamespaceFns(null);
       if (typeof updateEntityList === 'function'
           && typeof graphData !== 'undefined') {
         updateEntityList(graphData);

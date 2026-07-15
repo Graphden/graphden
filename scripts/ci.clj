@@ -16,6 +16,7 @@
    and the suite continues so the user always gets a result line."
   (:require
     [babashka.process :as p]
+    [clojure.edn :as edn]
     [clojure.string :as str])
   (:import
     (java.nio.channels
@@ -58,52 +59,31 @@
 
 
 ;; ===========================================================================
-;; Per-check timeouts. Each value is a CEILING — a healthy run finishes well
-;; below it. The numbers are sized off observed local + CI durations × 2 to
-;; absorb cold-cache + slow-disk variance without hiding a real hang.
+;; Per-check timeouts live in the registry (`scripts/checks.edn`) alongside each
+;; check's bb task + group — one source of truth, read below. Each value is a
+;; CEILING: a healthy run finishes well below it; a true hang (docker stall,
+;; kaocha deadlock, antq network hiccup) is killed at the deadline and reported.
 ;; ===========================================================================
 
-(def ^:private check-timeout-ms
-  {"clj-kondo" 120000
-   "splint"    120000
-   "cljstyle"  120000
-   "biome"      60000
-   "stylelint" 120000
-   ;; The blocking test gate is `bb test-unit` — UNIT tests WITHOUT cloverage
-   ;; (skip `^:integration`). Measured ~3 min (parallel ×8 + shared container).
-   ;; Coverage is decoupled (`bb test-unit-coverage`, ~24 min, run separately)
-   ;; because 21 of those 24 min are instrumentation overhead, not test signal.
-   ;; Ceiling 10 min: generous headroom over ~3 min (CI parallel load + the
-   ;; full-graph recompile tests) while a true hang (deadlock, unbounded) still
-   ;; surfaces. Integration + e2e live at `bb test-integration` / `bb test-e2e`
-   ;; and run outside CI on demand — budgets (~10-12 / ~15-25 min) in `bb.edn`.
-   "tests-unit" 600000
-   "outdated"  120000
-   "security"  180000
-   ;; Docker-based linters get extra headroom for first-run image
-   ;; pulls (~30-60 s for a 1-3 MB hadolint / shellcheck image,
-   ;; up to 90 s for gitleaks). Subsequent runs are sub-second
-   ;; from the local image cache.
-   "shellcheck" 120000
-   "hadolint"   120000
-   "gitleaks"   300000
-   "typos"       60000
-   "markdownlint" 60000
-   ;; Newer cross-cutting linters; same docker-pull headroom as
-   ;; above for the first run.
-   "actionlint"   60000
-   "lychee"       60000
-   "trivy"       300000
-   "license-check" 120000
-   "commitlint"    60000})
+(def ^:private registry
+  "The check registry — a vector of `{:name :bb :timeout :group}`, from
+   `scripts/checks.edn`. `:bb` is the task that actually runs the check, so the
+   command is defined ONCE (in bb.edn) and this runner delegates to it."
+  (edn/read-string (slurp "scripts/checks.edn")))
 
 
-(def ^:private default-check-timeout-ms 60000)
-
-
-(defn native-cmd?
-  [cmd]
-  (= 0 (:exit (p/shell {:out :string :err :string :continue true} (str "which " cmd)))))
+(defn- select-checks
+  "The checks to run for `args`. `--groups a,b` restricts to those groups; with
+   no `--groups` the whole registry runs (lint + test + info). Each selected
+   entry gets its `:cmd` — `bb <task>`, the single command source."
+  [args]
+  (let [groups-arg (second (drop-while #(not= "--groups" %) args))
+        wanted (when groups-arg
+                 (into #{} (map (comp keyword str/trim)) (str/split groups-arg #",")))]
+    (into []
+          (comp (filter (fn [c] (or (nil? wanted) (contains? wanted (:group c)))))
+                (map (fn [c] (assoc c :cmd ["bb" (:bb c)]))))
+          registry)))
 
 
 (defn has-warnings?
@@ -133,6 +113,7 @@
     :failed (str red "✗" reset)
     :timeout (str red "⏱" reset)
     :warning (str yellow "⚠" reset)
+    :skipped (str yellow "⊘" reset)
     "?"))
 
 
@@ -232,7 +213,7 @@
   [c status results failed]
   (let [check-name (:name c)
         cmd (:cmd c)
-        timeout-ms (get check-timeout-ms check-name default-check-timeout-ms)
+        timeout-ms (:timeout c)
         proc (p/process {:cmd cmd :out :string :err :string})
         _ (swap! live-procs conj proc)
         result (deref proc timeout-ms ::timeout)]
@@ -254,128 +235,44 @@
             warnings? (has-warnings? check-name output)]
         (swap! results assoc check-name
                {:exit exit :output output :warnings warnings?})
-        (cond
-          (not= 0 exit)
-          (do (swap! status assoc check-name :failed)
-              (reset! failed true))
+        ;; `:info` checks (e.g. `outdated` — a dependency has an upgrade
+        ;; available) are advisory: they surface a status but NEVER fail the run
+        ;; or gate the unit suite. Everything else is blocking.
+        (let [info? (= :info (:group c))
+              block! (fn [] (when-not info? (reset! failed true)))]
+          (cond
+            (not= 0 exit)
+            (do (swap! status assoc check-name (if info? :warning :failed))
+                (block!))
 
-          warnings?
-          (do (swap! status assoc check-name :warning)
-              (reset! failed true))
+            warnings?
+            (do (swap! status assoc check-name :warning)
+                (block!))
 
-          :else
-          (swap! status assoc check-name :passed))))))
+            :else
+            (swap! status assoc check-name :passed)))))))
 
 
 (defn run-ci
   []
-  (let [lock-handle (acquire-lock!)]
+  (let [;; The check set + its metadata (bb task, timeout, group) come from the
+        ;; registry in `scripts/checks.edn`; `--groups a,b` narrows it.
+        checks (select-checks *command-line-args*)
+        ;; The host-wide lock exists to keep two testcontainer stacks off one
+        ;; Docker daemon — so it is only needed when the unit suite runs. A
+        ;; lint-only run (`bb lint`, `bb lint-clj`) skips it and never waits on a
+        ;; gate's `bb ci`.
+        needs-lock? (some #(= :test (:group %)) checks)
+        lock-handle (when needs-lock? (acquire-lock!))]
     (.addShutdownHook
       (Runtime/getRuntime)
       (Thread.
         ^Runnable
         (fn []
           (kill-live-procs!)
-          (release-lock! lock-handle))))
+          (when lock-handle (release-lock! lock-handle)))))
     (try
-      (let [;; Build commands
-            ;; Lint paths match `bb check`'s all-paths: src + test + the
-            ;; package impls.clj files (previously un-linted, see
-            ;; .clj-kondo/config.edn for the namespace-name-mismatch
-            ;; carve-out).
-            lint-paths ["src" "test" "resources/packages"]
-            kondo-cmd (concat (if (native-cmd? "clj-kondo")
-                                ["clj-kondo" "--lint"]
-                                ["clojure" "-M:kondo" "--lint"])
-                              lint-paths)
-            cljstyle-cmd (concat (if (native-cmd? "cljstyle")
-                                   ["cljstyle" "check"]
-                                   ["clojure" "-M:cljstyle" "check"])
-                                 lint-paths)
-            splint-cmd (concat ["clojure" "-M:splint"] lint-paths)
-            ;; bb ci runs UNIT tests WITHOUT cloverage instrumentation — the
-            ;; blocking gate is pass/fail, and that's ~3 min. Measured 2026-07:
-            ;; the same suite UNDER cloverage is ~24 min (~3 min tests + ~21 min
-            ;; instrumentation — cloverage instruments every `graphden.*` form
-            ;; and the handful of full-graph recompile tests fire all of them,
-            ;; ~50×). Coupling a 3-min pass/fail signal to 21 min of coverage
-            ;; measurement was the wrong trade, so coverage is DECOUPLED: run
-            ;; `bb test-unit-coverage` separately (on demand / nightly), not in
-            ;; the per-push ci gate.
-            ;;
-            ;; Integration + e2e live at `bb test-integration` and
-            ;; `bb test-e2e` — manual runs before merging changes that
-            ;; touch storage / system / routes (integration) or the
-            ;; editor UI (e2e). Rationale: integration is ~10-12 min,
-            ;; e2e is ~15-25 min; a unit-level regression (lint /
-            ;; type-check / pure-fn test) shouldn't gate on them.
-            ;; Combined `bb test` (unit + integration) and `bb test-all`
-            ;; (everything) stay available for the manual full passes.
-            test-cmd ["bb" "test-unit"]
-            outdated-cmd ["clojure" "-M:outdated"]
-            biome-cmd ["npx" "biome" "check" "resources/packages/app/editor"]
-            stylelint-cmd ["npx" "stylelint" "resources/packages/app/editor/**/*.css"]
-            ;; Cross-cutting linters introduced as a single batch
-            ;; alongside the existing kondo/splint/cljstyle. Each is
-            ;; either docker-based (no host install) or pulls the
-            ;; binary into `.tools/` on first run — see bb.edn task
-            ;; docs for the install story per tool.
-            pwd (System/getenv "PWD")
-            shellcheck-cmd ["docker" "run" "--rm"
-                            "-v" (str pwd ":/src") "-w" "/src"
-                            "koalaman/shellcheck:stable"
-                            "tools/browser-test/run-edit-tests.sh"
-                            ".claude/hooks/check-ui-on-stop.sh"
-                            ".claude/hooks/remind-packages-quality-on-impls-edit.sh"]
-            ;; hadolint reads Dockerfile from stdin — wrap it through
-            ;; `bb hadolint` which iterates Dockerfile + Dockerfile.build.
-            hadolint-cmd ["bb" "hadolint"]
-            gitleaks-cmd ["docker" "run" "--rm"
-                          "-v" (str pwd ":/repo") "-w" "/repo"
-                          "zricethezav/gitleaks:latest"
-                          "detect" "--no-banner" "--no-git"]
-            typos-cmd ["bb" "typos"]
-            markdownlint-cmd ["npx" "markdownlint-cli2"]
-            actionlint-cmd ["docker" "run" "--rm"
-                            "-v" (str pwd ":/repo") "-w" "/repo"
-                            "rhysd/actionlint:1.7.7" "-color"]
-            lychee-cmd ["docker" "run" "--rm"
-                        "-v" (str pwd ":/data") "-w" "/data"
-                        "lycheeverse/lychee:sha-467197f-alpine"
-                        "--offline" "--no-progress"
-                        "--exclude-path" "node_modules"
-                        "--exclude-path" "target"
-                        "--exclude-path" ".tools"
-                        "--exclude-path" ".playwright-mcp"
-                        "**/*.md"]
-            trivy-cmd ["bb" "trivy"]
-            license-check-cmd ["bb" "license-check"]
-            commitlint-cmd ["bb" "commitlint"]
-
-            ;; Define checks. security check disabled — requires NVD API
-            ;; key, run manually with `bb security`. The `tests-unit` check
-            ;; is the blocking test gate: kaocha :unit, NO cloverage (~3 min).
-            ;; Coverage is decoupled — `bb test-unit-coverage` / `bb coverage`,
-            ;; run separately.
-            checks [{:name "clj-kondo" :cmd kondo-cmd}
-                    {:name "splint" :cmd splint-cmd}
-                    {:name "cljstyle" :cmd cljstyle-cmd}
-                    {:name "biome" :cmd biome-cmd}
-                    {:name "stylelint" :cmd stylelint-cmd}
-                    {:name "shellcheck" :cmd shellcheck-cmd}
-                    {:name "hadolint" :cmd hadolint-cmd}
-                    {:name "gitleaks" :cmd gitleaks-cmd}
-                    {:name "typos" :cmd typos-cmd}
-                    {:name "markdownlint" :cmd markdownlint-cmd}
-                    {:name "actionlint" :cmd actionlint-cmd}
-                    {:name "lychee" :cmd lychee-cmd}
-                    {:name "trivy" :cmd trivy-cmd}
-                    {:name "license-check" :cmd license-check-cmd}
-                    {:name "commitlint" :cmd commitlint-cmd}
-                    {:name "tests-unit" :cmd test-cmd}
-                    {:name "outdated" :cmd outdated-cmd}]
-
-            ;; Status tracking
+      (let [;; Status tracking
             status (atom (into {} (map (fn [c] [(:name c) :running]) checks)))
             results (atom {})
             failed (atom false)
@@ -455,11 +352,17 @@
                                 (print-status)
                                 (Thread/sleep 200)))]
 
-        ;; Run all checks in parallel, each with its own timeout.
-        (let [futures (mapv (fn [c] (future (run-check c status results failed))) checks)]
-
-          ;; Wait for all to complete
-          (doseq [f futures] @f)
+        ;; Two waves, fail-fast: the lint/commit/info checks run in parallel
+        ;; first (~1 min); the unit suite (:test, ~3 min) runs ONLY if they all
+        ;; pass. A formatting slip should not cost the unit suite — the exact
+        ;; waste that prompted this. When `--groups` selects no :test check (e.g.
+        ;; `bb lint`), wave 2 is empty and this is just a one-wave lint run.
+        (let [wave (fn [cs] (doseq [f (mapv (fn [c] (future (run-check c status results failed))) cs)] @f))
+              {test-checks true pre-checks false} (group-by #(= :test (:group %)) checks)]
+          (wave pre-checks)
+          (if @failed
+            (doseq [c test-checks] (swap! status assoc (:name c) :skipped))
+            (wave test-checks))
 
           ;; Stop progress display
           (reset! progress-running false)
@@ -484,6 +387,7 @@
                             :failed (str " " red "FAILED" reset)
                             :timeout (str " " red "TIMED OUT" reset)
                             :warning (str " " yellow "WARNINGS" reset)
+                            :skipped (str " " yellow "SKIPPED" reset " (lint failed first)")
                             "")))
 
             ;; Show output for failures/warnings/timeouts
@@ -498,7 +402,10 @@
         ;; Final summary
         (let [elapsed (/ (- (System/currentTimeMillis) start-time) 1000.0)
               passed-count (count (filter (fn [c] (= :passed (get @status (:name c)))) checks))
-              total-count (count checks)]
+              ;; Skipped (unit suite gated off by a lint failure) is not "failed"
+              ;; per-se, but it wasn't run — exclude it from the denominator so
+              ;; the count reflects what actually executed.
+              total-count (count (remove (fn [c] (= :skipped (get @status (:name c)))) checks))]
           (println)
           (if @failed
             (do
@@ -510,7 +417,7 @@
                           " (" total-count "/" total-count
                           " checks passed in " (format "%.1fs" elapsed) ")")))))
       (finally
-        (release-lock! lock-handle)))))
+        (when lock-handle (release-lock! lock-handle))))))
 
 
 (run-ci)

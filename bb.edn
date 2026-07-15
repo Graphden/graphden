@@ -566,58 +566,48 @@
 
   ;; === FULL CHECK ===
 
+  ;; CI check hierarchy — every task below delegates to the ONE runner
+  ;; (scripts/ci.clj) over the ONE registry (scripts/checks.edn); no command is
+  ;; duplicated. `--groups` selects which registry groups run.
+  ;;
+  ;;   individual:  bb kondo · bb cljstyle · bb biome · …   (each check's own task)
+  ;;   sub-group:   bb lint-clj / lint-web / lint-infra / lint-docs / lint-sec
+  ;;   group:       bb lint   = every linter (no unit tests) — fast pre-gate check
+  ;;   group^2:     bb ci     = lint (fail-fast) -> unit tests
+  ;;   the gate calls `bb ci`, so a stage runs at most once.
   ci
-  {:doc "Run ALL checks with live progress display"
+  {:doc "Full CI: lint (fail-fast) then unit tests, over scripts/checks.edn. ~4 min."
    :task (load-file "scripts/ci.clj")}
 
+  lint
+  {:doc "Every linter, parallel, NO unit tests — the fast pre-gate check (~1 min)."
+   :task (binding [*command-line-args* ["--groups" "clj,web,infra,docs,sec,commit"]]
+           (load-file "scripts/ci.clj"))}
+
   check
-  {:doc "Run linters only (parallel) — Clojure (kondo/splint/cljstyle), JS (biome), CSS (stylelint), shell (shellcheck), Dockerfile (hadolint), secrets (gitleaks), spelling (typos), markdown (markdownlint)."
-   :task (let [kondo-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which clj-kondo")))
-                           (str "clj-kondo --lint " all-paths)
-                           (str "clojure -M:kondo --lint " all-paths))
-               cljstyle-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which cljstyle")))
-                              (str "cljstyle check " all-paths)
-                              (str "clojure -M:cljstyle check " all-paths))
-               splint-cmd (str "clojure -M:splint " all-paths)
-               biome-cmd "npx biome check resources/packages/app/editor"
-               stylelint-cmd "npx stylelint resources/packages/app/editor/**/*.css"
-               shellcheck-cmd (str "docker run --rm -v " (System/getenv "PWD")
-                                   ":/src -w /src koalaman/shellcheck:stable"
-                                   " dev/wtq/wt"
-                                   " tools/browser-test/run-edit-tests.sh"
-                                   " .claude/hooks/check-ui-on-stop.sh"
-                                   " .claude/hooks/remind-packages-quality-on-impls-edit.sh")
-               gitleaks-cmd (str "docker run --rm -v " (System/getenv "PWD")
-                                 ":/repo -w /repo zricethezav/gitleaks:latest"
-                                 " detect --no-banner --no-git"
-                                 " --config /repo/.gitleaks.toml")
-               markdownlint-cmd "npx markdownlint-cli2"
-               actionlint-cmd (str "docker run --rm -v " (System/getenv "PWD")
-                                   ":/repo -w /repo"
-                                   " rhysd/actionlint:1.7.7 -color")
-               lychee-cmd (str "docker run --rm -v " (System/getenv "PWD")
-                               ":/data -w /data"
-                               " lycheeverse/lychee:sha-467197f-alpine"
-                               " --offline --no-progress"
-                               " --exclude-path node_modules"
-                               " --exclude-path target"
-                               " --exclude-path .tools"
-                               " --exclude-path .playwright-mcp"
-                               " **/*.md")]
-           ;; hadolint requires stdin redirection, typos downloads its
-           ;; binary on first run, trivy + license-check + commitlint
-           ;; chain multiple commands — all run sequentially after the
-           ;; parallel batch.
-           (run-parallel [kondo-cmd splint-cmd cljstyle-cmd
-                          biome-cmd stylelint-cmd
-                          shellcheck-cmd gitleaks-cmd markdownlint-cmd
-                          actionlint-cmd lychee-cmd])
-           (p/shell "bb" "hadolint")
-           (p/shell "bb" "typos")
-           (p/shell "bb" "trivy")
-           (p/shell "bb" "license-check")
-           (p/shell "bb" "commitlint")
-           (println (str green "✓ All linters passed" reset)))}
+  {:doc "Alias for `bb lint` (kept for muscle memory / docs)."
+   :task (binding [*command-line-args* ["--groups" "clj,web,infra,docs,sec,commit"]]
+           (load-file "scripts/ci.clj"))}
+
+  lint-clj
+  {:doc "Clojure linters (kondo/splint/cljstyle) — after editing .clj."
+   :task (binding [*command-line-args* ["--groups" "clj"]] (load-file "scripts/ci.clj"))}
+
+  lint-web
+  {:doc "Editor JS/CSS linters (biome/stylelint) — after editing the editor UI."
+   :task (binding [*command-line-args* ["--groups" "web"]] (load-file "scripts/ci.clj"))}
+
+  lint-infra
+  {:doc "Script/Dockerfile/workflow linters (shellcheck/hadolint/actionlint)."
+   :task (binding [*command-line-args* ["--groups" "infra"]] (load-file "scripts/ci.clj"))}
+
+  lint-docs
+  {:doc "Docs linters (markdownlint/lychee/typos) — after editing docs."
+   :task (binding [*command-line-args* ["--groups" "docs"]] (load-file "scripts/ci.clj"))}
+
+  lint-sec
+  {:doc "Security linters (gitleaks/trivy/license-check)."
+   :task (binding [*command-line-args* ["--groups" "sec"]] (load-file "scripts/ci.clj"))}
 
   wt
   {:doc "Parallel feature dev + merge queue (dev/wtq/README.md). Usage: bb wt <new|start|task|list|merge|status|log|drop|help> ..."

@@ -171,11 +171,21 @@ chain can be queried/indexed independently of scalar bindings.
 
 ```bash
 bb repl         # Start REPL with dev profile
-bb ci           # Full CI: clj linters + biome + tests + coverage (parallel, live progress)
+
+# CI check hierarchy — one runner (scripts/ci.clj) over one registry
+# (scripts/checks.edn); every task below delegates, no command is duplicated.
+bb ci           # Full CI: lint (fail-fast) THEN unit tests. A lint slip skips the suite.
+bb lint         # Every linter, NO tests — the fast pre-gate check (~1 min)
+bb check        #   alias for `bb lint`
+bb lint-clj     # Clojure only (kondo/splint/cljstyle) — after editing .clj
+bb lint-web     # Editor JS/CSS (biome/stylelint)
+bb lint-infra   # Scripts/Dockerfile/workflows (shellcheck/hadolint/actionlint)
+bb lint-docs    # Docs (markdownlint/lychee/typos)
+bb lint-sec     # Security (gitleaks/trivy/license-check)
+bb kondo / bb cljstyle / bb biome / …   # any single check on its own
+bb fix          # Auto-fix Clojure formatting (cljstyle)
 bb test         # Run all tests
 bb coverage     # Tests with coverage report (open target/coverage/index.html)
-bb check        # Clojure linters only (clj-kondo, splint, cljstyle in parallel)
-bb fix          # Auto-fix Clojure formatting (cljstyle)
 bb biome        # Lint editor JS (resources/packages/app/editor/**/*.js)
 bb biome-fix    # Apply safe biome autofixes
 bb stylelint    # Lint editor CSS — enforces design tokens for color/background/fill/stroke

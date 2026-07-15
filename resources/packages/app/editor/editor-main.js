@@ -57,18 +57,27 @@ window.isNamespaceLoaded = isNamespaceLoaded;
 
 // Fetch one namespace's fn leaves (light rows) and merge them. `nsId` may be
 // null for the "(root)" bucket (namespace-less fns). Caches per-ns so a
-// re-expand doesn't refetch; loadGraphData() clears the set on mutation.
+// re-expand doesn't refetch; loadGraphData() clears the set on mutation. An
+// in-flight map dedupes concurrent calls for the same namespace — the sidebar
+// re-renders (and re-invokes this) many times while a fetch is pending, e.g.
+// when several namespaces are expanded at once.
+const _nsFetchInFlight = new Map();
 async function loadNamespaceFns(nsId) {
   const key = nsId || '';
   if (_loadedNamespaceIds.has(key)) return;
-  const url = API.api_graph_entities + '?scope=namespace'
-    + (nsId ? '&namespace-id=' + encodeURIComponent(nsId) : '');
-  const r = await fetch(url);
-  if (!r.ok) throw new Error('loadNamespaceFns HTTP ' + r.status);
-  const payload = await r.json();
-  mergeKnownFns(payload.fns);
-  _loadedNamespaceIds.add(key);
-  syncKnownFnsIntoGraph();
+  if (_nsFetchInFlight.has(key)) return _nsFetchInFlight.get(key);
+  const p = (async () => {
+    const url = API.api_graph_entities + '?scope=namespace'
+      + (nsId ? '&namespace-id=' + encodeURIComponent(nsId) : '');
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('loadNamespaceFns HTTP ' + r.status);
+    const payload = await r.json();
+    mergeKnownFns(payload.fns);
+    _loadedNamespaceIds.add(key);
+    syncKnownFnsIntoGraph();
+  })();
+  _nsFetchInFlight.set(key, p);
+  try { await p; } finally { _nsFetchInFlight.delete(key); }
 }
 window.loadNamespaceFns = loadNamespaceFns;
 

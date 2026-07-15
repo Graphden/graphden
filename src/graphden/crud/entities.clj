@@ -416,6 +416,15 @@
           (java.util.HashSet/.add seen fid)
           (when-let [fn-row (get fns-by-id fid)]
             (doseq [pid (:parent-ids fn-row)] (push! pid))
+            ;; The fn's own type-fn / impl references — so a fn's subtree is
+            ;; self-contained for by-id type resolution once the editor no
+            ;; longer holds a full-fns mirror. `base-fn-id` (composed → its
+            ;; base), `return-type-fn-id` (base-fn's declared return type),
+            ;; `element-fn-id` (a list type-row's element type). Each resolves
+            ;; to a small base-fn / type-row.
+            (push! (:base-fn-id fn-row))
+            (push! (:return-type-fn-id fn-row))
+            (push! (:element-fn-id fn-row))
             (doseq [b (get bindings-by-fn fid)]
               (push! (:ref-fn-id b))
               (push! (:type-override-fn-id b))

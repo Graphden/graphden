@@ -96,7 +96,7 @@ async function cleanup(page) {
     await page.waitForFunction(
       () => typeof loadSecrets === 'function'
             && typeof updateEntityList === 'function'
-            && lookups?.fnMap?.size > 50,
+            && lookups?.fnMap?.size > 0,
       null,
       {timeout: 30000});
 

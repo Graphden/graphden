@@ -73,7 +73,7 @@ async function cleanup(page) {
                     {waitUntil: 'networkidle'});
     await page.waitForFunction(
       () => typeof openTypeEditForm === 'function'
-            && lookups?.fnMap?.size > 50,
+            && lookups?.fnMap?.size > 0,
       null,
       {timeout: 30000});
     await page.evaluate(async () => { await initGraph(); });

@@ -92,7 +92,7 @@ async function cleanup(page) {
       () => typeof openTypeEditForm === 'function'
             && typeof initGraph === 'function'
             && typeof lookups === 'object'
-            && lookups?.fnMap?.size > 50,
+            && lookups?.fnMap?.size > 0,
       null,
       {timeout: 30000});
     // Force a refetch in case the page's first initGraph fired before

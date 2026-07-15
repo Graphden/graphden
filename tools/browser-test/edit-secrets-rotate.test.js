@@ -88,7 +88,7 @@ async function cleanup(page) {
                     {waitUntil: 'networkidle'});
     await page.waitForFunction(
       () => typeof loadSecrets === 'function'
-            && lookups?.fnMap?.size > 50,
+            && lookups?.fnMap?.size > 0,
       null,
       {timeout: 30000});
     // The secrets panel is its own collapsible; force a reload of

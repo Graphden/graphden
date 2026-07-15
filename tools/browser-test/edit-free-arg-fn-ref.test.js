@@ -97,6 +97,14 @@ async function cleanup(page) {
       btn?.click();
     });
     await page.waitForSelector('.fn-picker-popover', {timeout: 5000});
+    // The type-compatible candidate set now loads from the server
+    // (/api/types/candidates) async — wait for it to populate before
+    // probing the row count.
+    await page.waitForFunction(
+      () => (document.querySelector('.fn-picker-popover')
+        ?.querySelectorAll('.fn-picker-list > *').length || 0) > 5,
+      null,
+      {timeout: 8000, polling: 50});
     const pickerState = await page.evaluate(() => {
       const p = document.querySelector('.fn-picker-popover');
       return {

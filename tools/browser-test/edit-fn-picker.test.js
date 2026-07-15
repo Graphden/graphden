@@ -46,6 +46,18 @@ const {assert, newContext} = require('./edit-test-helpers');
       null,
       {timeout: 15000});
 
+    // A plain picker (no expectedType) draws candidates from the lazily-
+    // loaded cache — the current view's subtree, not the whole graph. Seed
+    // the cache with a broad server search first (a legit lazy op) so the
+    // picker deterministically lists many; typing then narrows it in Phase B.
+    await page.evaluate(async () => {
+      if (typeof searchFns === 'function') await searchFns('e');
+    });
+    await page.waitForFunction(
+      () => (typeof graphData !== 'undefined' && graphData?.fns?.length) > 15,
+      null,
+      {timeout: 8000, polling: 100});
+
     // ===================================================================
     // Phase A: open the picker with onPick stub. Anchor doesn't matter
     // for popover positioning — use the body.

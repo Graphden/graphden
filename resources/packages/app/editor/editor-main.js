@@ -219,11 +219,12 @@ async function initGraph() {
   // `popstate` only fire on AFTER-load changes, not the initial
   // load. Without this, opening /#app.server.web-server (or any
   // hashed URL) leaves the canvas blank until the user clicks the
-  // sidebar. Mirrors the same hash-handling that `loadGraphData()`
-  // does after a graph refresh.
+  // sidebar. Awaited so `await initGraph()` returns with the hashed
+  // fn's subtree loaded (its slots/bindings/closure), not still in
+  // flight — callers read `lookups.fnMap` right after.
   const hash = window.location.hash.slice(1);
   if (hash) {
-    selectFnByName(decodeURIComponent(hash), false);
+    await selectFnByName(decodeURIComponent(hash), false);
   }
 }
 
@@ -300,7 +301,7 @@ async function loadGraphData() {
   // subtree re-fetch on every mutation.
   const hash = window.location.hash.slice(1);
   if (hash && typeof selectFnByName === 'function') {
-    selectFnByName(decodeURIComponent(hash), false);
+    await selectFnByName(decodeURIComponent(hash), false);
   } else if (typeof renderGraph === 'function') {
     renderGraph(true);
   }

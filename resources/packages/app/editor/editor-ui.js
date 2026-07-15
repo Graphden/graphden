@@ -81,7 +81,21 @@ async function selectFnByName(name, updateHistory = true) {
       console.error('selectFnByName resolution failed', err);
     }
   }
-  if (fn) selectFn(fn.id, updateHistory);
+  if (fn) {
+    selectFn(fn.id, updateHistory);
+    // selectFn kicks renderGraph → ensureSubtreeFor but doesn't await it.
+    // Await the subtree here (idempotent — cached by root) so callers that
+    // `await selectFnByName(...)` — notably initGraph's hash nav — return
+    // with the fn's slots/bindings + closure actually loaded, not still
+    // in flight.
+    if (typeof ensureSubtreeFor === 'function') {
+      try { await ensureSubtreeFor(fn.id); }
+      catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('selectFnByName subtree load failed', err);
+      }
+    }
+  }
 }
 
 

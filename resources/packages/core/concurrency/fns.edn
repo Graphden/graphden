@@ -230,8 +230,8 @@
   {:name :swap
    :description "`(swap! :a :func)` — atomically apply the 1-arg `:func` to the atom's current value and install the result (`clojure.core/swap!`). Returns the new value. `:func` is `:fn`-typed; fold extra data in by closure-capturing it in the callback (see `:swap-conj`). `:func` must be pure so a CAS retry is safe."
    :args {:a {:type :any :description "Atom (from `:atom` or `:cell`)."}
-          :func {:type [:fn {:current :any} :any #{}]
-                 :description "Pure 1-arg callable — receives the current value, returns the next. Extra inputs are closure-captured."}}
+          :func {:type [:fn {:current a} a #{}]
+                 :description "Pure 1-arg callable `a → a` — receives the current value, returns the next of the same type. Type var `a` lets the callback narrow the value type (e.g. a map for a keyed cache) without an `:any`-param contravariance clash. Extra inputs are closure-captured."}}
    :return-type :any
    :effects #{:state}}
 

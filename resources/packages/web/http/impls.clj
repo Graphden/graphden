@@ -3,9 +3,12 @@
 
    `http-server` is the minimal http-kit wrapper — it just runs the
    supplied handler. Everything else (body realisation, response
-   encoding, cache lookup + store) is exposed as small base-fns and
-   composed in `web/http/fns.edn` via fn-defs, mirroring the
-   `:branch-routing-wrap` pattern in `web.branch-router`.
+   encoding, the immutable-response predicate) is exposed as small
+   base-fns and composed in `web/http/fns.edn` via fn-defs, mirroring
+   the `:branch-routing-wrap` pattern in `web.branch-router`. The
+   response cache itself is composed entirely in the graph from the
+   generic `:cell` / `:swap` / `:deref` state primitives — no bespoke
+   atom or eviction helper lives here.
 
    Private Clojure helpers (`realize-body`, `stringify-headers`,
    `maybe-encode-response`) stay inline as the library-adapter
@@ -204,24 +207,15 @@
 
 
 ;; ---------------------------------------------------------------
-;; Cache state — accessed by the public `:response-cache-get` /
-;; `:response-cache-put-if!` base-fns. The composition that decides
-;; WHEN to look up and WHEN to store lives in graph fn-defs (see
-;; `:response-cache-wrap` in `web/http/fns.edn`).
-;; ---------------------------------------------------------------
-
-(def ^:private response-cache-capacity 64)
-(def ^:private response-cache (atom {}))
-
-
-(defn- cache-put
-  [m k v]
-  (let [m' (if (>= (count m) response-cache-capacity) {} m)]
-    (assoc m' k v)))
-
-
-;; ---------------------------------------------------------------
 ;; PUBLIC BASE-FNS — the seams the graph composes against.
+;;
+;; The immutable-response cache is NO LONGER a bespoke atom + eviction
+;; helper here. It is composed in `web/http/fns.edn` from the generic
+;; state primitives: a `:cell` (`:response-cache-cell`) holds the map,
+;; `:response-cache-get` is `(get (deref cell) key)`, and the store +
+;; capacity-eviction is a `:swap` over an in-graph `:assoc` / `:if` /
+;; `:count`. Nothing about the cache lives in Clojure any more — a user
+;; can build the same cache for their own graph.
 ;; ---------------------------------------------------------------
 
 (defbase realize-request-body
@@ -232,19 +226,6 @@
 (defbase process-response
   [request response]
   (maybe-encode request (force-close-connection (stringify-headers response))))
-
-
-(defbase response-cache-get
-  [key]
-  (get @response-cache key))
-
-
-(defbase response-cache-put-if!
-  [key value when?]
-  (cr/record-effect! :state)
-  (when when?
-    (swap! response-cache cache-put key value))
-  value)
 
 
 (defbase response-immutable?
@@ -274,6 +255,4 @@
    :http-stop http-stop
    :realize-request-body realize-request-body
    :process-response process-response
-   :response-cache-get response-cache-get
-   :response-cache-put-if! response-cache-put-if!
    :response-immutable? response-immutable?})

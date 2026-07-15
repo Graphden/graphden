@@ -56,22 +56,99 @@
                      :description "Raw response from the inner handler — keyword header keys, String body."}}
    :return-type :ring-response-shape}
 
+  ;; =============================================================================
+  ;; IMMUTABLE-RESPONSE CACHE — composed entirely from the generic state
+  ;; primitives (`:cell` / `:swap` / `:deref`), NOT a bespoke impl.
+  ;;
+  ;;   store = (swap! cell (fn [m] (assoc (bounded m) key value)))
+  ;;   get   = (get (deref cell) key)
+  ;;
+  ;; The capacity-eviction (flush-all at 64) is a graph `:if`/`:count`,
+  ;; the store is a `:swap`, the read a `:deref` + `:get`. Nothing lives
+  ;; in Clojure — a user can build the same cache for their own graph.
+  ;;
+  ;; ORG-SAFETY: only `Cache-Control: immutable` responses are ever
+  ;; stored (see `:response-cache-wrap`'s `:_fresh-immutable?` gate), and
+  ;; those are exclusively the content-hash-versioned static asset
+  ;; bundles — byte-identical for every org, carrying no tenant data. So
+  ;; a single shared cell across the platform handler leaks nothing.
+  ;; =============================================================================
+
+  {:name :response-cache-cell
+   :description "Persistent per-registry map `{key → cached-response}`. A `:cell`, so the SAME atom backs every request this compiled registry serves (per-JVM for the server handler); NOT shared across executor instances. Only immutable static-asset responses are ever stored here (org-agnostic — no tenant data)."
+   :parent :cell
+   :args {:initial-value {:value {}}}}
+
+  {:name :_response-cache-current
+   :description "Current cache-map snapshot for this request — `(deref cell)`."
+   :parent :deref
+   :args {:a :response-cache-cell}}
+
   {:name :response-cache-get
-   :description "Lookup the per-JVM immutable-response cache. Returns the stored Ring response (already post-process) or nil on miss."
-   :args {:key {:type [:list :any]
-                :description "Cache key tuple (typically `[uri method accept-encoding]`)."}}
+   :description "Lookup the per-registry immutable-response cache — `(get (deref cell) key)`. Returns the stored Ring response (already post-process) or nil on miss."
+   :parent :get
+   :args {:coll :_response-cache-current
+          :key {:as :key :type [:list :any]}
+          :default {:value nil}}
    :return-type [:union :null :ring-response-shape]}
 
+  ;; --- store: (swap! cell (fn [m] (assoc (if over-cap? {} m) key value))) ---
+  ;; The swap callback is 1-arg (`:current` = the cache map); `:key` /
+  ;; `:value` are closure-captured. The eviction (`:if`) picks between
+  ;; two ASSOC results — both concrete maps — rather than assoc-ing into
+  ;; `(if over-cap {} current)`, which would union `:empty-map` with the
+  ;; `:current` var and fail `:assoc`'s `[:map …]` slot type-check.
+  ;; `:current` is map-typed via `:assoc`'s / `:count`'s slots, so the
+  ;; `:swap` func's `a` var binds to a map at the store site.
+
+  {:name :_cache-current-count
+   :description "Number of entries in the current cache map."
+   :parent :count
+   :args {:coll {:as :current}}}
+
+  {:name :_cache-over-capacity?
+   :description "True once the cache holds ≥ 64 entries — the flush-all trigger (matches the old capacity constant)."
+   :parent :gte
+   :args {:nums [:_cache-current-count {:value 64}]}}
+
+  {:name :_cache-store-into-current
+   :description "`(assoc current key value)` — the normal path, below capacity."
+   :parent :assoc
+   :args {:map {:as :current}
+          :key {:as :key :type [:list :any]}
+          :value {:as :value :type :ring-response-shape}}}
+
+  {:name :_cache-store-fresh
+   :description "`(assoc {} key value)` — the flush-all path: start from an empty map when at capacity."
+   :parent :assoc-empty
+   :args {:key {:as :key :type [:list :any]}
+          :value {:as :value :type :ring-response-shape}}}
+
+  {:name :_cache-store-fn
+   :description "1-arg `:swap` callback — flush-all-then-assoc at capacity, else assoc into the current map. `:current` supplied per-swap; `:key` / `:value` closure-captured."
+   :parent :if
+   :args {:test :_cache-over-capacity?
+          :then :_cache-store-fresh
+          :else :_cache-store-into-current}}
+
+  {:name :_response-cache-store
+   :description "Atomically store the fresh response under its key in the cell."
+   :parent :swap
+   :args {:a :response-cache-cell
+          :func :_cache-store-fn}}
+
+  {:name :_response-cache-store-then-value
+   :description "Store (side-effect) then return the response — the `then` branch of the conditional put. `:do` forces the store, then yields `:value`."
+   :parent :do
+   :args {:steps [:_response-cache-store {:as :value}]}}
+
   {:name :response-cache-put-if!
-   :description "If `when?` is truthy, store `value` in the immutable-response cache under `key`. Always returns `value` — the conditional is in the `when?` arg so callers compose this in a single graph step."
-   :args {:key   {:type [:list :any]
-                  :description "Cache key tuple."}
-          :value {:type :ring-response-shape
-                  :description "Fully-processed response to cache."}
-          :when? {:type :nullable-bool
-                  :description "Truthy → store; nil/false → no-op."}}
-   :return-type :ring-response-shape
-   :effects #{:state}}
+   :description "If `:when?` is truthy, store `:value` under `:key` in the immutable-response cell; always return `:value`. The eviction + assoc are graph-visible (`:swap` over `:if`/`:count`/`:assoc`), not a bespoke impl."
+   :parent :if
+   :args {:test {:as :when? :type :nullable-bool}
+          :then :_response-cache-store-then-value
+          :else {:as :value :type :ring-response-shape}}
+   :return-type :ring-response-shape}
 
   {:name :response-immutable?
    :description "Predicate — does the response carry `Cache-Control: ... immutable ...`? Trigger for the response cache to remember the URL."

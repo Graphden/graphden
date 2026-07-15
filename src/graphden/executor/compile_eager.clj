@@ -657,21 +657,21 @@
                        ctx
                        (assoc ctx ::call-cache (java.util.HashMap.)))
                  fa (r/apply-rename-aliases fa rename-aliases)
-             ;; The `fa-ref` volatile ONLY exists so env-binding delays can
-             ;; read the post-merge map at force time (forward references
-             ;; between env-bindings). Fns with no env-bindings — the common
-             ;; case — never read it, so skip the per-call allocation entirely.
-             fa' (if (zero? env-n)
-                   fa
-                   (let [fa-ref (volatile! fa)
-                         merged (loop [m fa, i 0]
-                                  (if (< i env-n)
-                                    (recur (assoc m (nth env-names i)
-                                                  ((nth env-builders i) fa-ref ctx))
-                                           (inc i))
-                                    m))]
-                     (vreset! fa-ref merged)
-                     merged))]
+                 ;; The `fa-ref` volatile ONLY exists so env-binding delays can
+                 ;; read the post-merge map at force time (forward references
+                 ;; between env-bindings). Fns with no env-bindings — the common
+                 ;; case — never read it, so skip the per-call allocation entirely.
+                 fa' (if (zero? env-n)
+                       fa
+                       (let [fa-ref (volatile! fa)
+                             merged (loop [m fa, i 0]
+                                      (if (< i env-n)
+                                        (recur (assoc m (nth env-names i)
+                                                      ((nth env-builders i) fa-ref ctx))
+                                               (inc i))
+                                        m))]
+                         (vreset! fa-ref merged)
+                         merged))]
              (impl (persistent!
                      (loop [acc (transient {}), i 0]
                        (if (< i n)

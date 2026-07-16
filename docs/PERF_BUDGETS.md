@@ -110,6 +110,40 @@ A scenario must also **assert that its operation succeeded**. One that quietly
 400s does no work, measures zero queries, and sails under any budget — a perf
 suite reporting "free" for a broken endpoint is worse than none.
 
+## The trend — wall-clock that survives leaving the machine
+
+`bb perf` also prints a `trend` section, and it **never fails the run**.
+
+`docs/PERF_NOTES.md` lists `?scope=tree` at ~15 ms. That number cannot be a
+baseline: it describes the box it was measured on. So `graphden.perf.calibrate`
+measures a **reference workload in the same run, against the same pool** — one
+empty `SELECT 1` round trip — and reports each scenario as a ratio to it. "This
+endpoint costs 22 round trips" is a statement about the code; a slow box slows the
+reference too.
+
+There are two references, not one. Normalising a database-bound operation by a
+CPU loop would measure the ratio of the host's disk to its ALU — a fact about the
+machine. The API scenarios are round-trip-bound, so `:db-units` is the honest
+one; `:cpu-units` exists for anything that isn't.
+
+Read together with the counts, this says things neither can say alone:
+
+| Scenario | Queries | Round-trip-equivalents of time |
+|----------|---------|-------------------------------|
+| `graph-entities-tree` | 3 | **22** |
+| `create-fn` | 18 | **4065** |
+
+Creating one `:fn` issues 18 queries and costs four thousand round trips' worth
+of time. The time is not in the SQL — it is in the compile, exactly as PERF_NOTES
+describes ("477 ms of its 918 ms"). The count says the database is fine; the
+trend says the work is elsewhere.
+
+**The honest limit:** normalisation narrows the noise, it does not remove it. It
+cannot see a neighbour that steals the CPU during the scenario but not during the
+calibration. The band is 2x, and that is not conservatism — inside it, the number
+means nothing. Expect this to catch "twice as slow", never "10% slower". That is
+why it reports and the counts gate.
+
 ## Where the time went
 
 `kaocha.plugin/perf` measures nothing itself. `:kaocha.plugin/profiling` already

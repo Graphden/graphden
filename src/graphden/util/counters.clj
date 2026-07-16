@@ -50,6 +50,12 @@
   (atom {}))
 
 
+(def ^:private gauges
+  "{event-keyword → number}. Observations, not events — see the Gauges section
+   below for why they do not share the counters map."
+  (atom {}))
+
+
 (defn count!
   "Record `n` (default 1) occurrences of `event`. Thread-safe; returns nil so
    it can never be mistaken for a value-producing call in a threading form."
@@ -84,4 +90,30 @@
    would corrupt that sibling's delta. Prefer `snapshot` + `delta-since`."
   []
   (reset! counters {})
+  (reset! gauges {})
   nil)
+
+
+;; === Gauges =================================================================
+;;
+;; A gauge is an OBSERVATION, not an event: a measured duration, a calibration
+;; reference, a ratio. Kept in its own atom rather than folded into the counts
+;; above, because the two carry opposite guarantees and only one of them may be
+;; gated. A count is exact and machine-independent — `perf/budgets.edn` asserts
+;; on it. A gauge is a reading off this host at this moment, and asserting on one
+;; would import every property of the box into the build. Sharing a map would
+;; make it a keyword's-worth of care away from doing exactly that.
+
+
+(defn observe!
+  "Record `value` for `event`, last write wins. Doubles welcome — unlike a count,
+   a measurement is not an integer."
+  [event value]
+  (swap! gauges assoc event value)
+  nil)
+
+
+(defn gauges-snapshot
+  "Every observation so far. Reported by `kaocha.plugin/perf`; never gated."
+  []
+  @gauges)

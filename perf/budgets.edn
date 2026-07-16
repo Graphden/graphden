@@ -47,4 +47,18 @@
        :create-fn
        {:max 18,
         :why
-        "Creating one :fn costs 18 round trips, steady-state. A jump means the write path started re-reading what it already had: this operation once spent 477 ms of its 918 ms re-reading the whole graph to recompile a closure whose blast radius was one fn (9c1b882a spliced the cache instead)."}}}
+        "Creating one :fn costs 18 round trips, steady-state. A jump means the write path started re-reading what it already had: this operation once spent 477 ms of its 918 ms re-reading the whole graph to recompile a closure whose blast radius was one fn (9c1b882a spliced the cache instead)."}}
+
+ ;; ADVISORY — normalised wall-clock, reported by `bb perf`, never failing it.
+ ;; :units is "how many empty DB round trips would take this long", measured in
+ ;; the same run against the same pool (graphden.perf.calibrate), so a slow box
+ ;; slows the reference too. :band is the factor outside which the run says
+ ;; something; inside it, the number means nothing.
+ :trend
+ {:trend/graph-entities-tree
+  {:units 22.48 :band 2.0
+   :why "The sidebar's first paint got materially slower relative to a round trip. Note this endpoint issues only 3 queries, so a jump here is compile/serialisation work, not the database."}
+
+  :trend/create-fn
+  {:units 4064.56 :band 2.0
+   :why "Creating one :fn costs ~4000 round trips' worth of time against only 18 actual queries — the time is in the compile, not the SQL, exactly as PERF_NOTES describes (477 ms of 918 ms re-reading the graph). A jump here means the compile path regressed."}}}

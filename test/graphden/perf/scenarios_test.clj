@@ -20,11 +20,15 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
+    [graphden.perf.calibrate :as cal]
     [graphden.perf.sql :as psql]
     [graphden.storage.protocol.core :as sp]))
 
 
 (def ^:dynamic *graph* nil)
+
+
+(declare datasource-of)
 
 
 (defn- graph-fixture
@@ -33,6 +37,10 @@
     #(let [graph (setup/bootstrap-crud-graph-from-golden!)]
        (try
          (binding [*graph* graph]
+           ;; Calibrate once, here, against the same pool the scenarios use — a
+           ;; reference measured on a different connection or at a different
+           ;; moment would normalise against a machine this run never saw.
+           (cal/record! (datasource-of (:storage graph)))
            (t))
          (finally (sp/close (:storage graph)))))))
 

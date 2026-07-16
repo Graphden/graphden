@@ -89,6 +89,10 @@
      ;; `pre-run` eagerly bootstraps the golden and would land on the wrong side
      ;; of a `pre-run` snapshot taken here.
      :counters (counters/snapshot)
+     ;; Observations — normalised durations, calibration references. Reported so
+     ;; a human can read the trend; deliberately in their own key so nothing can
+     ;; mistake them for the gateable counts above.
+     :gauges (counters/gauges-snapshot)
      :namespaces nses}))
 
 
@@ -115,6 +119,14 @@
     (println "\nStructural counts — these are what perf/budgets.edn gates on")
     (doseq [[event n] (sort-by key counters)]
       (println (format "  %-32s %d" (str event) n)))))
+
+
+(defn- print-gauges!
+  [gauges]
+  (when (seq gauges)
+    (println "\nObservations — reported, never gated (this host, this moment)")
+    (doseq [[event v] (sort-by key gauges)]
+      (println (format "  %-32s %s" (str event) v)))))
 
 
 ;; `defplugin` builds its hook names into `defmethod`s, so clj-kondo sees the
@@ -144,6 +156,7 @@
       (try
         (write-report! report path)
         (print-summary! report)
+        (print-gauges! (:gauges report))
         (println (str "\nperf: report written to " path))
         (catch Exception e
           ;; A reporting plugin must never be the reason a green suite reports

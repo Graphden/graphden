@@ -29,6 +29,7 @@
    mechanism the fixture counters use — so the kaocha perf plugin persists them
    and `perf/budgets.edn` gates them with no separate machinery."
   (:require
+    [graphden.perf.calibrate :as cal]
     [graphden.util.counters :as counters]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
@@ -97,22 +98,32 @@
   (ensure-extension! ds)
   (f)
   (reset-stats! ds)
-  (let [result (f)
+  (let [t0 (System/nanoTime)
+        result (f)
+        elapsed-ns (- (System/nanoTime) t0)
+        ;; Read the stats AFTER stopping the clock — `read-stats` is itself a
+        ;; round trip, and billing our own instrument to the code under test is
+        ;; the classic way a measurement lies about the thing it measures.
         statements (read-stats ds)]
     {:result result
+     :elapsed-ns elapsed-ns
      :queries (reduce + 0 (map :calls statements))
      :rows (reduce + 0 (map :rows statements))
      :statements statements}))
 
 
 (defn record!
-  "Measure `f` and record its query count under `event` for `perf/budgets.edn`.
+  "Measure `f`; record its query count under `event` as a COUNT (gated by
+   `perf/budgets.edn`) and its normalised duration as a GAUGE (reported only).
 
-   Returns the full measurement so a caller can assert on the breakdown too.
-   Records the COUNT, not the duration: a budget of `{:max 3}` on a scenario
-   means three round trips, and it means that identically on every machine that
-   will ever run it."
+   The split is the point. `{:max 3}` on the count means three round trips, on
+   every machine that will ever run it. The duration next to it means three round
+   trips' worth of TIME on this box today — useful to read, impossible to assert.
+   They go to different places so they cannot be confused for each other."
   [event ds f]
-  (let [{:keys [queries] :as m} (measure ds f)]
+  (let [{:keys [queries elapsed-ns] :as m} (measure ds f)
+        db-ref (get (counters/gauges-snapshot) :calibration/db-ref-ns)]
     (counters/count! event queries)
+    (when-let [u (cal/units elapsed-ns db-ref)]
+      (counters/observe! (keyword "trend" (name event)) u))
     m))

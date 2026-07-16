@@ -81,6 +81,14 @@
 (def ^:private reset "[0m")
 
 
+(def ^:private trend-key
+  "Not a suite. `:trend` holds ADVISORY normalised durations, keyed alongside the
+   suites in the same file so there is one reference set rather than two — but it
+   must be lifted out before anything treats it as a suite with a report to
+   demand or a budget to fail on."
+  :trend)
+
+
 (defn- read-edn
   [path]
   (when (fs/exists? path)
@@ -128,13 +136,40 @@
                     (str/join ", " (map name extra)) reset)))))
 
 
+(defn- print-trend!
+  "Normalised durations against their reference. NEVER fails the run — see the
+   ns docstring: this narrows the noise, it does not remove it, and a wall-clock
+   gate on this host would fail on its neighbours rather than on regressions.
+   The band is wide (2x by default) for the same reason: inside it, the number
+   means nothing; outside it, something real happened."
+  [trend gauges]
+  (when (and (seq trend) (seq gauges))
+    (println (str "\n" bold "trend" reset dim
+                  "  (normalised to one DB round trip — advisory, never fails)"
+                  reset))
+    (doseq [[event {:keys [units band why]}] (sort-by key trend)
+            :let [now (get gauges event)
+                  band (or band 2.0)]]
+      (if (nil? now)
+        (println (str "  " dim "· " (format "%-30s" (name event))
+                      "not measured in this run" reset))
+        (let [ratio (if (pos? units) (/ now (double units)) 1.0)
+              out? (or (> ratio band) (< ratio (/ 1.0 band)))]
+          (println (str "  " (if out? (str yellow "!" reset) (str dim "·" reset))
+                        " " (format "%-30s" (name event))
+                        (format "%9.1f" (double now)) " vs " (format "%.1f" (double units))
+                        (format "  (%.2fx)" ratio)))
+          (when out?
+            (println (str "      " yellow why reset))))))))
+
+
 (defn- update-budgets!
   "Rewrite every budgeted `:max` to what this run observed, keeping `:why`.
    Deliberately loud about raises: lowering a budget is a win being recorded,
    raising one is a regression being accepted, and the two must not look alike
    in a terminal. `tools/visual-tests/README.md` makes the same point about
    baselines — if it moved and you don't know why, that IS the finding."
-  [budgets reports]
+  [budgets reports gauges]
   (let [updated
         (reduce
           (fn [acc [suite counters]]
@@ -152,7 +187,16 @@
               acc
               (get budgets suite)))
           budgets
-          reports)]
+          reports)
+        ;; The trend reference is refreshed silently: it is advisory, so a moved
+        ;; number is not an accepted regression, it is just a newer reading off a
+        ;; box that was never the same box twice.
+        updated (reduce (fn [acc [event spec]]
+                          (if-let [now (get gauges event)]
+                            (assoc-in acc [trend-key event :units] now)
+                            acc))
+                        updated
+                        (get budgets trend-key))]
     (spit budgets-path (str budgets-header (with-out-str (pp/pprint updated))))
     (println (str "\n" green "✓ wrote " budgets-path reset
                   " — review the diff before committing it."))))
@@ -162,10 +206,18 @@
   [& args]
   (let [update? (some #{"--update"} args)
         budgets (or (read-edn budgets-path) {})
-        reports (into {} (for [p (run-paths)
-                               :let [r (read-edn p)]
-                               :when r]
-                           [(suite-of p) (:counters r)]))]
+        ;; `:trend` sits in the same file for one-reference-set tidiness but is
+        ;; NOT a suite: nothing may demand a report for it or fail on it.
+        suites (dissoc budgets trend-key)
+        raw (into {} (for [p (run-paths)
+                           :let [r (read-edn p)]
+                           :when r]
+                       [(suite-of p) r]))
+        reports (update-vals raw :counters)
+        ;; Gauges are merged across reports: the calibration and the normalised
+        ;; durations come from the :perf run, and the trend section reads them
+        ;; regardless of which file carried them.
+        gauges (reduce merge {} (map :gauges (vals raw)))]
     (cond
       (empty? reports)
       (do (println (str red "✗ no run reports under perf/runs/" reset))
@@ -174,7 +226,7 @@
           (System/exit 2))
 
       update?
-      (update-budgets! budgets reports)
+      (update-budgets! budgets reports gauges)
 
       (empty? budgets)
       (do (println (str red "✗ no " budgets-path reset))
@@ -187,8 +239,8 @@
       ;; gate for a suite it did not read. A budget with no measurement behind it
       ;; is the one outcome worse than a failing one, because it looks like
       ;; success. `bb perf` after `bb lint` is the obvious way to hit this.
-      (seq (remove (set (keys reports)) (keys budgets)))
-      (let [missing (remove (set (keys reports)) (keys budgets))]
+      (seq (remove (set (keys reports)) (keys suites)))
+      (let [missing (remove (set (keys reports)) (keys suites))]
         (println (str red "✗ no run report for budgeted suite(s): "
                       (str/join ", " (map name missing)) reset))
         (doseq [s missing]
@@ -201,11 +253,13 @@
         (System/exit 2))
 
       :else
-      (let [results (for [[suite budget] (sort-by key budgets)
-                          :let [counters (get reports suite)]]
-                      (let [checked (check-suite suite budget counters)]
-                        (print-suite! checked counters)
-                        checked))
+      (let [results (doall
+                      (for [[suite budget] (sort-by key suites)
+                            :let [counters (get reports suite)]]
+                        (let [checked (check-suite suite budget counters)]
+                          (print-suite! checked counters)
+                          checked)))
+            _ (print-trend! (get budgets trend-key) gauges)
             failures (mapcat #(remove :ok? (:rows %)) results)]
         (if (seq failures)
           (do (println (str "\n" red bold "✗ perf FAILED" reset " — "

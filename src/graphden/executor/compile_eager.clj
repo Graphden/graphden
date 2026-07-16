@@ -23,7 +23,8 @@
     [graphden.executor.compile.bindings :as b]
     [graphden.executor.compile.lookups :as l]
     [graphden.executor.compile.renames :as r]
-    [graphden.executor.runtime :as rt]))
+    [graphden.executor.runtime :as rt]
+    [graphden.util.counters :as counters]))
 
 
 ;; =============================================================================
@@ -804,19 +805,59 @@
    base-fn name set — sister callers (test ns's that bootstrap the
    same package set, sibling branches with identical graph views)
    skip the compile pass entirely and just retrieve the
-   ctx-independent closure map."
+   ctx-independent closure map.
+
+   The cache holds DELAYS, not values, and that is what makes the
+   cache work for CONCURRENT sister callers rather than only
+   sequential ones. It used to read the atom, miss, compile, then
+   write — check-then-act. Three namespaces released together from
+   `ensure-golden!`'s lock therefore all missed the same cold key and
+   all compiled the same ~2600-fn graph at once. Measured fingerprint:
+   79.1 s / 77.7 s / 75.7 s of fixture, three different workloads
+   agreeing to within 4% because they were not different workloads at
+   all — they were one compile, run three times, contending.
+
+   With a delay, the `swap!` decides the winner: a loser's swap
+   function re-runs against the winner's value, finds the key present,
+   and returns the vector untouched, so its own unrun delay is
+   discarded. Everyone then derefs the SAME delay — one compile, the
+   rest blocked on it. A global lock would also fix the dogpile but
+   would serialise compiles of genuinely DIFFERENT graphs, which is
+   the case this cache exists to make fast."
   [lookups]
   (let [k (compile-all-cache-key lookups)
-        hit (some (fn [[ck cv]] (when (= ck k) cv)) @compile-all-cache)]
-    (or hit
-        (let [r (compile-all* lookups)]
-          (swap! compile-all-cache
-                 (fn [v]
-                   (let [pruned (filterv (fn [[ck _]] (not= ck k)) v)
-                         capped (vec (take-last (dec compile-all-cache-max-size)
-                                                pruned))]
-                     (conj capped [k r]))))
-          r))))
+        installed? (volatile! false)
+        cache (swap! compile-all-cache
+                     (fn [v]
+                       (if (some (fn [[ck _]] (= ck k)) v)
+                         (do (vreset! installed? false) v)
+                         (do (vreset! installed? true)
+                             (conj (vec (take-last (dec compile-all-cache-max-size) v))
+                                   [k (delay (compile-all* lookups))])))))
+        d (some (fn [[ck cv]] (when (= ck k) cv)) cache)]
+    ;; Counted here, not at `rebuild!`, because `rebuild!` is the ASK and this is
+    ;; the WORK. Three namespaces each calling `rebuild!` is three asks and — if
+    ;; this cache is doing its job — one compile. A counter on the ask cannot
+    ;; tell those apart, which is exactly how the dogpile went unseen: the
+    ;; suite's 107 rebuilds looked identical before and after it was fixed.
+    ;;
+    ;; The `volatile!` reads oddly next to a `swap!` whose function must be pure.
+    ;; It is: `swap!` may retry and re-run the fn, and each run overwrites the
+    ;; flag, so the LAST run — the one whose value was actually installed — is
+    ;; the one that decides. That is precisely the answer we want.
+    (counters/count! (if @installed? :compile/all-miss :compile/all-hit))
+    (try
+      @d
+      (catch Exception t
+        ;; A delay memoises its exception, so a transient failure would be
+        ;; served to every later caller of this key forever. Evict, and let the
+        ;; next one compile again — the old code could not cache a failure at
+        ;; all (it wrote only after a successful compile), and that property is
+        ;; worth keeping. `Exception`, not `Throwable`: an Error here means the
+        ;; JVM is already going down, and a poisoned cache entry is not the
+        ;; problem worth solving on the way.
+        (swap! compile-all-cache (fn [v] (filterv (fn [[ck _]] (not= ck k)) v)))
+        (throw t)))))
 
 
 (defn reset-compile-all-cache!

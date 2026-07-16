@@ -20,9 +20,19 @@
    :parent :json-ok-response
    :args {:body :_health-json-body}}
 
+  ;; Structural counters alongside the JVM snapshot — same assoc-chain shape
+  ;; `:jvm-info` is built with. They answer what memory and thread counts
+  ;; cannot: not "how loaded is this executor" but "what did it just DO" — a
+  ;; registry full-clear, a delta that silently fell back to a full rebuild.
+  ;; Those are the events that make some LATER request slow, and until now they
+  ;; left nothing behind to read.
+  {:name :_metrics-with-counters
+   :parent :assoc
+   :args {:map :jvm-info :key "counters" :value :counters-snapshot}}
+
   {:name :_metrics-json-body
    :parent :to-json-string
-   :args {:data :jvm-info}}
+   :args {:data :_metrics-with-counters}}
 
   {:name :_metrics-handler
    :parent :json-ok-response

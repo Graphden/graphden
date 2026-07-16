@@ -12,7 +12,8 @@
     [clojure.string :as str]
     [graphden.executor.compile-runtime :as cr]
     [graphden.executor.defbase :refer [defbase]]
-    [graphden.types.core :as types])
+    [graphden.types.core :as types]
+    [graphden.util.counters :as counters])
   (:import
     (java.lang.management
       ManagementFactory
@@ -83,6 +84,11 @@
      :arch (OperatingSystemMXBean/.getArch os-bean)
      :processors (OperatingSystemMXBean/.getAvailableProcessors os-bean)
      :load-average (OperatingSystemMXBean/.getSystemLoadAverage os-bean)}))
+
+
+(defbase counters-snapshot []
+  (cr/record-effect! :io)
+  (counters/snapshot))
 
 
 (defbase current-time-ms []
@@ -240,6 +246,7 @@
    :heap-memory heap-memory
    :thread-count thread-count
    :os-info os-info
+   :counters-snapshot counters-snapshot
    :current-time-ms current-time-ms
    :env env-fn
    :ex-info {:impl ex-info-fn :return-type-rule (types/wrap-with-taint nil)}

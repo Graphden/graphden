@@ -26,7 +26,7 @@
    :expects-effects #{:time}}                 ; only wall-clock; no DB / env / IO
 
   {:name :metrics
-   :description "GET /metrics — JVM info (heap, threads, uptime) as JSON."
+   :description "GET /metrics — JVM info (heap, threads, uptime) plus the structural counters under `counters` (registry full-clears, delta-recompiles, compiles) as JSON."
    :parent :get-route
    :args {:path "/metrics" :handler :_metrics-handler}
    :expects-effects #{:io :env}}              ; reads JVM state (heap / threads / os) + env (hostname / user)

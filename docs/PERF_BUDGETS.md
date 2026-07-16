@@ -194,6 +194,59 @@ grades it when its report exists and **says out loud** when it skips — a budge
 silently skipped for want of a report reads as a pass, and that is the failure
 mode this whole file exists to avoid.
 
+## Asking a running executor what it just did
+
+`/metrics` carries the counters under `counters`, next to the JVM snapshot:
+
+```json
+{"jvm": {…}, "memory": {…}, "counters": {"registry/rebuild": 1, "compile/all-miss": 1}}
+```
+
+Memory and thread counts say how *loaded* an executor is. These say what it
+*did* — a registry full-clear, a delta that silently became a rebuild. Those are
+the events that make some **later** request slow, and they used to leave nothing
+behind to read, which is why diagnosing one always started from a stack trace and
+a guess, minutes after the fact.
+
+`run-edit-tests.sh` samples them around each e2e file and prints the delta:
+
+```
+[ 13s  executor=998.1MiB]  registry/delta-recompile=8
+```
+
+### What that measurement settled
+
+The e2e suite flakes in **8 of 14** gate runs — always "failed once, passed on
+retry", always a different innocent file (`edit-execute` ×3, `edit-fn-picker`,
+`edit-type-edit-variant`, `edit-branch-lifecycle`, `edit-fn-create`,
+`edit-edge-rename`). `scoped-fn-index` needed six gate runs to land. Every
+landing is a coin flip at ~40 minutes a throw.
+
+The obvious suspect was a compiled-registry full-clear: it makes the next request
+rebuild the whole graph (49.8 s at 4137 fns), which would time a test out at 10 s
+and let the retry through ten seconds later. That is the exact shape of the
+symptom.
+
+**It is wrong.** Across all 56 files: `registry/invalidate-full` = **0**,
+`registry/delta-fell-back-to-rebuild` = **0**. There are no full-clears in this
+suite at all — the delta-invalidation fixes hold — so no flake here can be
+explained by one. The suite also ran **clean** (0 flakes, 0 leaks) on an isolated
+stack under low load.
+
+Two other suspects die cheaply, from logs that already existed:
+
+- **Not restarts or OOM.** The `OutOfMemory` hit in every flaked gate log is the
+  string `-XX:+ExitOnOutOfMemoryError` in the Dockerfile, and it appears in the
+  *clean* runs too.
+- **Not entity leakage.** The `LEAKED` detector is clean in all eight flaked
+  runs. That class was found and closed already, and its comment in
+  `run-edit-tests.sh` is worth reading — it describes this exact trap.
+
+What is left is host load: the gate runs e2e immediately after a 17-minute
+integration suite on the same box, while the clean run had the machine to itself.
+That is one observation, not a finding. It is recorded so the next person starts
+from the three already eliminated instead of re-running them.
+
 ## The trend — wall-clock that survives leaving the machine
 
 `bb perf` also prints a `trend` section, and it **never fails the run**.

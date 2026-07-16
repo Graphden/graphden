@@ -133,6 +133,12 @@
    :return-type :os-info-shape
    :effects #{:io}}                 ; system-property read
 
+  {:name :counters-snapshot
+   :description "Process-global structural counters (`graphden.util.counters`) — compiled-registry full-clears, delta-recompiles, compiles. Counts of RARE structural events, not per-request metrics. Surfaced on /metrics so a running executor can be asked what it just did, instead of having it inferred from a stack trace minutes after the fact."
+   :args {}
+   :return-type :jsonb
+   :effects #{:io}}                 ; process-global mutable state — varies per call
+
   ;; jvm-info composed from atomic base-fns via assoc chain
   {:name :jvm-info
    :description "Aggregate JVM/system snapshot — version, heap, threads, OS."

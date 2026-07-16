@@ -123,6 +123,38 @@ ns_count() {
     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d.get("namespaces") or []))' \
        2>/dev/null || echo 0
 }
+# What did the executor DO while this file ran?
+#
+# The leak counters above answer "did it leave rows behind", and they come back
+# clean in every flaked run to date — so the remaining flake is not that. These
+# answer a different question. A compiled-registry full-clear makes the NEXT
+# request rebuild the whole graph; at 4137 fns that was measured at 49.8 s. A
+# test that lands in that window times out at 10s and sails through the retry
+# ten seconds later. That is the exact shape of every flake in this suite — a
+# different innocent file each run, always green on retry — and nothing could
+# ever see it, because the event leaves no trace in a log or a stack trace.
+#
+# /metrics carries `counters` now. Sample it around each file and print the
+# delta, so a full-clear sitting next to a failure becomes a fact instead of a
+# theory. Costs one HTTP GET per file.
+executor_counters() {
+  curl -fsS -H "Authorization: Bearer ${AUTH_TOKEN:-}" "$URL/metrics" 2>/dev/null \
+    | python3 -c 'import sys,json; print(json.dumps((json.load(sys.stdin) or {}).get("counters") or {}, sort_keys=True))' \
+       2>/dev/null || echo '{}'
+}
+
+# `after` minus `before`, omitting whatever did not move. Empty output means the
+# executor did no structural work at all while the file ran.
+counters_delta() {
+  python3 -c '
+import sys, json
+b = json.loads(sys.argv[1] or "{}")
+a = json.loads(sys.argv[2] or "{}")
+d = {k: a[k] - b.get(k, 0) for k in a if a[k] - b.get(k, 0) > 0}
+print(" ".join(f"{k}={v}" for k, v in sorted(d.items())))
+' "$1" "$2" 2>/dev/null || true
+}
+
 LEAKS=""
 FLAKED=""
 
@@ -151,6 +183,7 @@ for f in $FILES; do
   FILE_START=$SECONDS
   FN_BEFORE="$(fn_count)"
   NS_BEFORE="$(ns_count)"
+  CTR_BEFORE="$(executor_counters)"
   if ! wait_for_server; then
     WORST=1
     FAIL=$((FAIL+1))
@@ -218,10 +251,11 @@ for f in $FILES; do
   FILE_MEM="$(executor_mem)"
   FN_AFTER="$(fn_count)"
   NS_AFTER="$(ns_count)"
+  CTR_DELTA="$(counters_delta "$CTR_BEFORE" "$(executor_counters)")"
   FN_LEAKED=$(( (FN_AFTER - FN_BEFORE) + (NS_AFTER - NS_BEFORE) ))
   if [ "$FN_LEAKED" -gt 0 ] 2>/dev/null; then
-    printf '  [%3ds  executor=%s]  \033[31mLEAKED %d entities into the graph\033[0m\n' \
-      "$FILE_SECS" "$FILE_MEM" "$FN_LEAKED"
+    printf '  [%3ds  executor=%s]%s  \033[31mLEAKED %d entities into the graph\033[0m\n' \
+      "$FILE_SECS" "$FILE_MEM" "${CTR_DELTA:+  $CTR_DELTA}" "$FN_LEAKED"
     LEAKS="$LEAKS$FN_LEAKED	$f
 "
     # A leak FAILS the suite. It is not a warning: the entities stay, and the
@@ -233,7 +267,8 @@ for f in $FILES; do
     WORST=1
     FAILED_NAMES="$FAILED_NAMES $f(leaked-$FN_LEAKED)"
   else
-    printf '  [%3ds  executor=%s]\n' "$FILE_SECS" "$FILE_MEM"
+    printf '  [%3ds  executor=%s]%s\n' "$FILE_SECS" "$FILE_MEM" \
+      "${CTR_DELTA:+  $CTR_DELTA}"
   fi
   TIMINGS="$TIMINGS$FILE_SECS	$FILE_MEM	$f
 "

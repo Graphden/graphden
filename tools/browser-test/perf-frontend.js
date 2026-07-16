@@ -35,6 +35,20 @@ const kb = (bytes) => Math.round(bytes / 1024);
 // counts through a warm HTTP cache or a populated localStorage.
 async function measure(name, drive) {
   const { browser, page } = await newContext(chromium);
+  // `newContext` ends with `page.goto(BASE + '/')` and a 300ms wait, so the
+  // editor is ALREADY booting by the time we hold the page. Park on about:blank
+  // before counting, so a scenario's `goto` is a real document load and not a
+  // same-document hash change onto a half-booted editor.
+  //
+  // Leaving this out is not a small error — it is a different measurement. It
+  // read 7 requests where a first paint makes 10: the boot calls (?scope=tree,
+  // /api/types, /api/value-kinds, /api/services, ?q=secret-leaf) had already
+  // fired before the listener existed. Worse, it DOUBLED ?q=web-server and
+  // /api/graph/layout, because the hashchange landed while initGraph was still
+  // in flight, so its hash-read and `_onHashNav` both resolved the same name.
+  // That doubling was briefly recorded as an editor defect. It was this
+  // harness's, and the budget built on it was a budget on an artefact.
+  await page.goto('about:blank');
   const apiCalls = [];
   let bytes = 0;
 

@@ -478,8 +478,21 @@
    ;; With the flag: 20/1, twice, reproducibly. A budget on an irreproducible
    ;; count is a flake with a rationale.
    ;;
-   ;; The flag lives here because the `:kaocha/randomize? false` config key in
-   ;; tests.edn was tried and measurably did not take effect.
+   ;; A flag rather than a config key, because kaocha has no per-suite randomize
+   ;; toggle at all. `kaocha.plugin.randomize` reads
+   ;; `:kaocha.plugin.randomize/randomize?` (or the `:randomize?` shorthand that
+   ;; `kaocha.config/normalize` expands into it) from the ROOT of the config:
+   ;; `normalize-test-suite` never renames it onto a suite map, and `post-load`
+   ;; recurses the test-plan without consulting any per-testable key. The only
+   ;; config-shaped answer would therefore disable randomisation for EVERY suite
+   ;; — and only `:perf` needs determinism.
+   ;;
+   ;; (The first attempt put `:kaocha/randomize? false` on the suite. That is not
+   ;; a kaocha key at any level — zero occurrences in the jar — so it rode along
+   ;; as an inert entry, unread and unrejected: `s/keys` is open and no spec
+   ;; claims it. The default `true` stood, the seed re-randomised per run, and
+   ;; the counts kept flipping. Wrong name AND wrong level; either alone would
+   ;; have been enough.)
    :task (clojure {:extra-env {"GRAPHDEN_PERF_REPORT" "perf/runs/perf.edn"}}
                   "-M:dev:test -m kaocha.runner :perf --no-randomize")}
 

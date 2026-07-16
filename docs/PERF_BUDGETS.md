@@ -112,10 +112,20 @@ flip rather than by reasoning:
   work (21), redistributed by whoever went first. Warm-up cannot fix that: it
   absorbs a scenario's own cold start, not its neighbour's edit.
 
-  Note the `:kaocha/randomize? false` **config key does not take effect here** —
-  it was tried, and the counts kept flipping. The CLI flag does. That is why the
-  flag lives in the bb task and no dead key sits in `tests.edn` claiming
-  otherwise.
+  A flag rather than config, because **kaocha has no per-suite randomize
+  toggle**. `kaocha.plugin.randomize` reads `:kaocha.plugin.randomize/randomize?`
+  (or the `:randomize?` shorthand `kaocha.config/normalize` expands) from the
+  config **root** — `normalize-test-suite` never renames it onto a suite map, and
+  `post-load` recurses the test-plan without reading any per-testable key. So the
+  only config-shaped answer would kill randomisation for every suite, and only
+  `:perf` needs determinism.
+
+  The first attempt set `:kaocha/randomize? false` on the suite. That is not a
+  kaocha key at any level — zero occurrences in the jar — so it rode along as an
+  inert map entry: unread, and unrejected, because `s/keys` is open and no spec
+  claims it. Wrong name *and* wrong level; either alone would have been enough,
+  and neither produced a warning. Worth knowing generally: a typo'd kaocha config
+  key fails silently and looks exactly like a key that didn't work.
 
 A budget on an irreproducible count is a flake with a rationale, so nothing gets
 gated until it has been measured identical twice in a row.
@@ -146,8 +156,8 @@ Current reading:
 
 | Scenario | API calls | KB | DOM nodes |
 |----------|-----------|-----|-----------|
-| `load-web-server` | 7 | 5334 | 718 |
-| `sidebar-expand-namespace` | 9 | 5338 | 1072 |
+| `load-web-server` | 10 | 7809 | 718 |
+| `sidebar-expand-namespace` | 12 | 7813 | 1072 |
 
 Expanding one namespace costs exactly **two** extra `?scope=namespace` requests
 and ~4 KB. That difference *is* the lazy fn-index. If the tree ever goes back to
@@ -155,9 +165,28 @@ shipping every fn up front, the expand count collapses toward the load count and
 the load payload follows it up — a regression no other check in this repo would
 notice.
 
-The first paint also fires `?scope=search` **twice** and `/api/graph/layout`
-**twice**. Recorded, not fixed: the budget of 7 is what it costs today, and the
-duplicate is now a visible number rather than a thing nobody had counted.
+Where the 7.6 MB goes — two responses carry all of it:
+
+| Response | KB |
+|----------|-----|
+| `?scope=subtree&root-id=<web-server>` | 5325 |
+| **`/api/types`** | **2454** |
+| the other eight, together | ~30 |
+
+The subtree read is known and roughly expected — PERF_NOTES sizes it at up to
+4.2 MB for a root like `web-server`. **`/api/types` returning 2.4 MB on every
+page load is not**: it appears in no PERF_NOTES table, and nothing has ever
+measured it. That is a lead, not a fix.
+
+> **A caution, learned here.** This scenario first reported *7* calls with
+> `?scope=search` and `/api/graph/layout` duplicated, and that duplicate was
+> briefly written up as an editor defect. It was not. `newContext` ends with
+> `page.goto(BASE + '/')`, so the harness was navigating **by hash onto an
+> already-booting editor**: the boot's five calls happened before the listener
+> attached, and the hashchange raced `initGraph`'s own hash-read so both resolved
+> the same name. The fix is one `page.goto('about:blank')`. A measurement harness
+> is code, and it gets its facts wrong the same way any other code does — the
+> only reason this was caught is that an independent probe disagreed with it.
 
 **This one is not in GitHub Actions**, for the same reason `bb visual` isn't: it
 needs a built, running editor. It is declared in `:optional-suites`, so `bb perf`
@@ -225,8 +254,45 @@ First full reading of the unit suite (158 namespaces):
   which means it is attackable.
 - `:registry/rebuild` fires **107 times**, against one golden bootstrap.
 
-None of that is fixed here. Recording it is the point: those are the first
-per-namespace fixture numbers this suite has ever kept.
+Recording it is the point: those are the first per-namespace fixture numbers this
+suite has ever kept. What came of chasing them is worth writing down too, because
+half of it was wrong.
+
+**Confirmed and fixed — but for correctness, not speed.** The three expensive
+namespaces all shared **one database**. `bootstrap-crud-graph-from-golden!`'s
+0-arity read `(ns-name *ns*)` inside the fixture body, which kaocha runs on a
+worker thread where `*ns*` is `user` — measured, not inferred:
+
+```
+at-load        = graphden.scratch.ns-probe-test
+at-fixture-run = user
+```
+
+All 26 callers asked for a database named `user`, and the idempotency guard
+handed every one of them the first caller's database. That is `registry-test`
+writing fn rows `export-test` reads, under 8-way parallelism, in randomised
+order — a race held off by luck. Fixed by capturing the namespace at
+macroexpansion (`test_setup.clj`), and by making the template part of a
+database's identity (`shared_container.clj`), since "empty database for this NS"
+and "clone of this golden for this NS" are two different databases that were
+colliding on one name. `:fixture/ns-db-clone` went 1 → 3, which is the proof.
+
+**Not confirmed: that any of this was the ~232 s.** The theory was a compile
+dogpile — three threads missing one cold cache key and each compiling the same
+~2600-fn graph, with 79.1/77.7/75.7 s "converging to within 4%" as the
+fingerprint. `compile-all` really was check-then-act and now coalesces via a
+cached delay. It changed nothing measurable: the three read 77.2/74.6/74.5 s
+afterwards, and suite fixture totals across four runs went 237 / 245 / 258 /
+231 s — one band, no signal. **The prediction of ~150 s saved did not happen,
+and the convergence was suggestive, not evidence.**
+
+What the instrument did find, by counting the work instead of the ask:
+`:compile/all-miss` **103** against `:compile/all-hit` **8** — a 7% hit rate on
+a cache whose whole job is to be hit. `compile-all-cache-max-size` is **2**,
+against 8 parallel threads compiling different graphs. That, not the dogpile,
+is the next thing to look at — and note it is only visible because the counter
+sits on the compile rather than on `rebuild!`, whose 107 reads identically
+before and after every change described here.
 
 ## Adding a scenario
 

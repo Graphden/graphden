@@ -57,9 +57,10 @@
   ;; rather than reading as a broken test, and so the suites stay about
   ;; behaviour. `clojure -M:dev:test -m kaocha.runner :perf`.
   ;; Runs with `--no-randomize`, and that is load-bearing — see the `test-perf`
-  ;; task in bb.edn, which owns the flag. (The `:kaocha/randomize? false` config
-  ;; key was tried here first and measurably did NOT take effect; the flag does.
-  ;; Hence the flag, and hence no dead key sitting here claiming otherwise.)
+  ;; task in bb.edn, which owns the flag and explains why. Short version: kaocha
+  ;; has NO per-suite randomize toggle (the plugin reads its key from the config
+  ;; root only), so there is nothing to put here; a config-shaped answer would
+  ;; have to disable randomisation for every suite.
   {:id :perf
    :test-paths ["test"]
    :focus-meta [:perf]}]
@@ -76,12 +77,24 @@
            :kaocha.plugin/shared-container
            :kaocha.plugin/perf]
 
- ;; Show the slowest 25, not the default 3. The integration suite takes ~12
- ;; minutes and the default report says only which THREE namespaces were worst —
- ;; enough to know something is slow, never enough to know whether it is one
- ;; outlier or an even tax across all 62. The spread is the whole question: the
- ;; per-NS numbers we do have show ~51 s of fixture against ~0.14 s of
- ;; assertions, i.e. the suite spends its life rebuilding state, not testing. If
- ;; that holds across the list, the fixture is the target and no amount of
- ;; per-test tuning matters.
+ ;; Show the slowest 25, not the default 3 — enough of the list to tell one
+ ;; outlier from an even tax.
+ ;;
+ ;; This note used to say "~51 s of fixture against ~0.14 s of assertions" and
+ ;; ask whether that 360:1 held across the suite. `kaocha.plugin/perf` now
+ ;; answers it on every run, and the answer is: no, and it matters which suite
+ ;; you ask about.
+ ;;
+ ;;   integration   3210 s fixture vs  335 s assertions across 69 NSes   ~10:1
+ ;;   unit           237 s fixture vs  306 s assertions across 158 NSes   ~1:1
+ ;;
+ ;; So the old conclusion — the fixture is the target, per-test tuning is noise —
+ ;; holds for INTEGRATION and is wrong for UNIT, which is not fixture-dominated
+ ;; at all. The 360:1 was one namespace's numbers generalised to a suite. Such
+ ;; namespaces are real (grants-admin-test 292 s/0.5 s, auth-middleware-test
+ ;; 144 s/0.2 s, effect-gating-test 79 s/0.1 s) — the cost is concentrated in a
+ ;; handful, not smeared, which is precisely why the top-25 is worth printing.
+ ;;
+ ;; Numbers here are per-thread and overlap under `:kaocha/parallelism`; they
+ ;; rank namespaces, they do not sum to wall-clock. See docs/PERF_BUDGETS.md.
  :kaocha.plugin.profiling/count 25}

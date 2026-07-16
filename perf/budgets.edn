@@ -62,23 +62,23 @@
  :optional-suites #{:frontend},
  :frontend
  #:frontend{:load-web-server-requests
-            {:max 7,
+            {:max 10,
              :why
-             "The first paint started making more API calls. Two of these seven are already duplicates (scope=search and /api/graph/layout each fire twice) — if this grows, check for a third."},
+             "The first paint started making more API calls. The ten are: ?scope=tree, /api/types, /api/value-kinds, /api/services, ?q=secret-leaf, ?q=web-server, two ?scope=namespace, ?scope=subtree, /api/graph/layout — each exactly once. (An earlier budget of 7 here was a measurement artefact, not the editor: the harness navigated by hash onto an already-booting page. See perf-frontend.js.)"},
             :load-web-server-kb
-            {:max 5334,
+            {:max 7809,
              :why
-             "The first paint's payload grew. Nearly all of it is one ?scope=subtree read, which PERF_NOTES sizes at up to 4.2 MB for a root like web-server. A jump means the subtree scoping is leaking rows the editor does not paint."},
+             "The first paint's payload grew. It is two responses: ?scope=subtree ~5325 KB (PERF_NOTES sizes this at up to 4.2 MB for a root like web-server) and /api/types ~2454 KB. Everything else together is ~30 KB. So a jump is one of those two — check /api/types first: it is 2.4 MB on every page load, it is not in PERF_NOTES, and nobody has ever looked at it."},
             :load-web-server-dom-nodes
             {:max 718,
              :why
              "The editor is building more DOM than the graph needs. Overlays are one div per card per strip; a jump usually means something renders per-fn that should render per-view."},
             :sidebar-expand-namespace-requests
-            {:max 9,
+            {:max 12,
              :why
-             "Expanding one namespace costs exactly 2 requests beyond the 7 of first paint — that IS the lazy fn-index. If this collapses toward 7, the tree went back to shipping every fn up front and the load payload will follow it up."},
+             "Expanding one namespace costs exactly 2 requests beyond the 10 of first paint — that IS the lazy fn-index. If this collapses toward 10, the tree went back to shipping every fn up front and the load payload will follow it up."},
             :sidebar-expand-namespace-kb
-            {:max 5338,
+            {:max 7813,
              :why
              "See load-web-server-kb. Expanding a leaf namespace should add ~4 KB, not a graph."},
             :sidebar-expand-namespace-dom-nodes
